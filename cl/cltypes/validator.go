@@ -132,18 +132,18 @@ type SignedVoluntaryExit struct {
 }
 
 func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, e.VoluntaryExit, e.Signature[:])
+	return encodeSigned(dst, e.VoluntaryExit, e.Signature[:])
 }
 
 func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte, version int) error {
 	e.VoluntaryExit = new(VoluntaryExit)
-	return ssz2.UnmarshalSSZ(buf, version, e.VoluntaryExit, e.Signature[:])
+	return decodeSigned(buf, version, e.VoluntaryExit, e.Signature[:])
 }
 
 func (e *SignedVoluntaryExit) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(e.VoluntaryExit, e.Signature[:])
+	return hashSigned(e.VoluntaryExit, e.Signature[:])
 }
 
 func (e *SignedVoluntaryExit) EncodingSizeSSZ() int {
-	return 96 + e.VoluntaryExit.EncodingSizeSSZ()
+	return sizeSigned(e.VoluntaryExit)
 }

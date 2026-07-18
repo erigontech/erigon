@@ -67,7 +67,7 @@ type SignedContributionAndProof struct {
 }
 
 func (a *SignedContributionAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, a.Message, a.Signature[:])
+	return encodeSigned(dst, a.Message, a.Signature[:])
 }
 
 func (a *SignedContributionAndProof) DecodeSSZ(buf []byte, version int) error {
@@ -77,16 +77,15 @@ func (a *SignedContributionAndProof) DecodeSSZ(buf []byte, version int) error {
 	if a.Message.Contribution == nil {
 		a.Message.Contribution = new(Contribution)
 	}
-	return ssz2.UnmarshalSSZ(buf, version, a.Message, a.Signature[:])
+	return decodeSigned(buf, version, a.Message, a.Signature[:])
 }
 
 func (a *SignedContributionAndProof) EncodingSizeSSZ() int {
-	return length.Bytes96 + a.Message.EncodingSizeSSZ()
-	// return 100 + a.Message.EncodingSizeSSZ()
+	return sizeSigned(a.Message)
 }
 
 func (a *SignedContributionAndProof) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(a.Message, a.Signature[:])
+	return hashSigned(a.Message, a.Signature[:])
 }
 
 // DefaultSyncCommitteeAggregationBitsSize is the mainnet default: 512/4/8 = 16 bytes.
