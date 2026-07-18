@@ -1125,6 +1125,58 @@ func TestChainTomlV2ToCanonicalItems_FiltersPendingReplacement(t *testing.T) {
 		"PendingReplacement domain entry must not reach the canonical-promotion surface")
 }
 
+// TestChainTomlV2ToCanonicalItems_JaggedSupersededByAligned covers the
+// A.2 transition scenario: a jagged-step block file marked
+// PendingReplacement=true coexists with its superseding aligned file
+// during the retire→merge window. The canonical-promotion surface
+// must expose the aligned entry alone; the pending one stays in
+// ChainTomlV2ToItems (download planning still needs it) but never
+// reaches quorum.
+func TestChainTomlV2ToCanonicalItems_JaggedSupersededByAligned(t *testing.T) {
+	t.Parallel()
+	m := &ChainTomlV2{
+		Version: ChainTomlV2Version,
+		Blocks: []BlockFileEntry{
+			{Name: "v1.0-000500-000713-headers.seg", Hash: "aa", PendingReplacement: true},
+			{Name: "v1.0-000500-001000-headers.seg", Hash: "bb"},
+		},
+	}
+
+	all := ChainTomlV2ToItems(m)
+	require.Len(t, all, 2, "download planning includes both entries")
+
+	canon := ChainTomlV2ToCanonicalItems(m)
+	names := make([]string, len(canon))
+	for i, it := range canon {
+		names[i] = it.Name
+	}
+	require.NotContains(t, names, "v1.0-000500-000713-headers.seg",
+		"jagged pending entry must be filtered from canonical view")
+	require.Contains(t, names, "v1.0-000500-001000-headers.seg",
+		"aligned superseding entry must reach canonical view")
+}
+
+// TestChainTomlV2ToCanonicalItems_JaggedAloneStillFiltered covers the
+// pre-supersession state: a PendingReplacement=true jagged entry
+// exists ALONE in the manifest (retire produced it but the aligned
+// successor hasn't landed yet). Canonical view must be empty for that
+// range — quorum cannot promote a transitional shape.
+func TestChainTomlV2ToCanonicalItems_JaggedAloneStillFiltered(t *testing.T) {
+	t.Parallel()
+	m := &ChainTomlV2{
+		Version: ChainTomlV2Version,
+		Blocks: []BlockFileEntry{
+			{Name: "v1.0-000500-000713-headers.seg", Hash: "aa", PendingReplacement: true},
+		},
+	}
+
+	canon := ChainTomlV2ToCanonicalItems(m)
+	for _, it := range canon {
+		require.NotEqual(t, "v1.0-000500-000713-headers.seg", it.Name,
+			"pending jagged entry must never reach canonical view, even alone")
+	}
+}
+
 // TestRoundTrip_TypedBlocks confirms that a typed manifest survives
 // Marshal → Parse without drift on Range / Trust / ProofRoot.
 func TestRoundTrip_TypedBlocks(t *testing.T) {
