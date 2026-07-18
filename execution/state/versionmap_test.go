@@ -320,6 +320,35 @@ func TestMVHashMapBasics(t *testing.T) {
 // true, AddressPath is NOT bypassed — a new MVReadResultDone entry on
 // AddressPath means a real state change (e.g. account creation) from a
 // concurrent worker, and the read must be invalidated.
+// TestReadSelfDestruct_FastPath covers the hasSelfDestruct short-circuit: a nil
+// receiver and a map with no self-destruct both return the miss result (matching
+// readFloor), and a real self-destruct is still observed once written.
+func TestReadSelfDestruct_FastPath(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0x5d})
+
+	// nil receiver must not panic (matches readFloor's vm==nil handling).
+	var nilVM *VersionMap
+	_, res, ok := nilVM.ReadSelfDestruct(addr, 5)
+	require.False(t, ok)
+	require.Equal(t, MVReadResultNone, res.Status())
+
+	// Fresh map, no self-destruct written: flag is false, fast-path miss.
+	vm := NewVersionMap(nil)
+	require.False(t, vm.hasSelfDestruct.Load())
+	_, res, ok = vm.ReadSelfDestruct(addr, 5)
+	require.False(t, ok)
+	require.Equal(t, MVReadResultNone, res.Status())
+
+	// After a self-destruct write the flag flips and the value is observed.
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
+	require.True(t, vm.hasSelfDestruct.Load())
+	destructed, res, ok := vm.ReadSelfDestruct(addr, 5)
+	require.True(t, ok)
+	require.True(t, destructed)
+	require.Equal(t, MVReadResultDone, res.Status())
+}
+
 func TestValidateRead_HasBAL_NoBypassForAddressPath(t *testing.T) {
 	t.Parallel()
 

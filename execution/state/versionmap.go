@@ -363,7 +363,9 @@ func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (*accounts.A
 }
 
 func (vm *VersionMap) ReadSelfDestruct(addr accounts.Address, txIdx int) (bool, ReadResult, bool) {
-	if !vm.hasSelfDestruct.Load() {
+	// vm == nil matches readFloor's nil handling; the flag fast-path preserves
+	// the miss result readFloor would return when no SelfDestruct cell exists.
+	if vm == nil || !vm.hasSelfDestruct.Load() {
 		return false, ReadResult{depIdx: UnknownDep, incarnation: -1}, false
 	}
 	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[bool]] { return e.SelfDestruct })
