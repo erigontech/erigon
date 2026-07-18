@@ -255,6 +255,34 @@ func TestForkAuthorityCascade_ForkedFromCapMissingRejects(t *testing.T) {
 		"a non-fork authority UCAN must reject at the forked-from extraction step")
 }
 
+// TestForkAuthorityCascade_MalformedForkedFromRejects covers layer-6
+// (E.5): a UCAN carries a `fork:from:` prefix but the payload is
+// malformed (non-hex or wrong-length pubkey). ExtractForkedFromCapability
+// silently skips such entries; if no other well-formed forked-from is
+// present the cascade rejects at the extraction step.
+func TestForkAuthorityCascade_MalformedForkedFromRejects(t *testing.T) {
+	f := mintForkFixture(t)
+
+	malformed := []string{
+		CapForkedFromPrefix + "not-hex!!",
+		CapForkedFromPrefix + "0102030405060708090a0b0c0d0e0f10", // 16 bytes, wrong length
+		CapForkedFromPrefix,
+	}
+	for _, cap := range malformed {
+		d, err := New(&f.trustRoot.PublicKey, &f.operator.PublicKey,
+			[]string{string(CapAdvertise), string(CapServe), string(CapDelegate), cap},
+			f.notBefore, f.expires, 16, nil)
+		require.NoError(t, err)
+		require.NoError(t, d.Sign(f.trustRoot))
+		encoded, err := d.Encode()
+		require.NoError(t, err)
+
+		_, err = runFullCascade(t, f, encoded)
+		require.ErrorIs(t, err, errForkedFromMissing,
+			"malformed fork:from cap %q must be skipped and cascade rejects at extraction", cap)
+	}
+}
+
 // === Layer 7: accept-set check ===
 
 // TestForkAuthorityCascade_ParentNotInAcceptSetRejects covers a
@@ -272,6 +300,34 @@ func TestForkAuthorityCascade_ParentNotInAcceptSetRejects(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, errParentNotInAcceptSet,
 		"forked-from not in accept-set must reject at the accept-set step")
+}
+
+// TestForkAuthorityCascade_ParentRotationDoesNotWidenAcceptSet pins
+// the immutability rule (D-5): a fork's ValidParentTrustRoots is
+// captured at fork-from time and does NOT drift as the parent chain
+// rotates its own trust roots. A UCAN minted under a rotated parent
+// root (rotatedParent) that isn't in the fork's original accept-set
+// must reject at the accept-set step — the fork's cascade uses only
+// the LOCAL config's captured set, never a set derived from the peer
+// manifest or from the parent's current roots.
+func TestForkAuthorityCascade_ParentRotationDoesNotWidenAcceptSet(t *testing.T) {
+	f := mintForkFixture(t)
+
+	// Fork was created with accept-set = [f.parentPub] (the original
+	// parent trust root). Mint a UCAN under a DIFFERENT parent root
+	// simulating the parent chain rotating its root post-fork-creation.
+	rotatedParentPub := compressed(t, newKey(t))
+	encoded, err := MintForkAuthorityUCAN(f.trustRoot, &f.operator.PublicKey, rotatedParentPub, f.notBefore, f.expires, nil)
+	require.NoError(t, err)
+
+	_, err = runFullCascade(t, f, encoded)
+	require.ErrorIs(t, err, errParentNotInAcceptSet,
+		"rotated-parent UCAN must reject; accept-set is immutable")
+
+	// The original-parent UCAN still verifies under the same fixture —
+	// existing fork lineage stays valid after parent rotation.
+	_, err = runFullCascade(t, f, f.encoded)
+	require.NoError(t, err, "original-parent UCAN continues to verify")
 }
 
 // TestForkAuthorityCascade_EmptyAcceptSetRejectsEverything is the

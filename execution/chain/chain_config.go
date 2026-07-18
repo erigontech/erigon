@@ -152,6 +152,13 @@ type Config struct {
 	// the UCAN. See memory/fork-trust-root-model-2026-05-24 for the
 	// design rule; only populated for fork configs (Parent != "").
 	ValidParentTrustRoots []ParentTrustRoot `json:"validParentTrustRoots,omitempty"`
+
+	// MinForkUnwindBlock is the absolute block-number floor a setHead
+	// target must be >= on this fork chain. Only meaningful when
+	// Parent != "". Zero is interpreted as CutBlock — the fork can be
+	// unwound within [CutBlock, head] but not below. Set to a lower
+	// value to allow unwind past cut into parent territory.
+	MinForkUnwindBlock uint64 `json:"minForkUnwindBlock,omitempty"`
 }
 
 // ParentTrustRoot is plain-data describing a single trust root a fork

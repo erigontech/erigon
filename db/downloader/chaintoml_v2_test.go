@@ -870,6 +870,57 @@ func TestParentSection_ValidParentTrustRootsRoundTrip(t *testing.T) {
 		"non-DID kinds carry no DID")
 }
 
+// TestParentSection_MinForkUnwindBlockRoundTrip pins the
+// min_fork_unwind_block TOML field. A fork whose operator wants to
+// permit unwind past cut sets a positive value here; the manifest
+// carries it so followers see the same floor.
+func TestParentSection_MinForkUnwindBlockRoundTrip(t *testing.T) {
+	original := &ChainTomlV2{
+		Version: 2,
+		Parent: &ParentSection{
+			Chain:              "mainnet",
+			ManifestHash:       "1234567890abcdef1234567890abcdef12345678",
+			CutBlock:           23760000,
+			CutBlockHash:       "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+			NetworkID:          23760000,
+			MinForkUnwindBlock: 20000000,
+		},
+	}
+	data, err := MarshalV2(original)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "min_fork_unwind_block = 20000000")
+
+	parsed, err := ParseV2(data)
+	require.NoError(t, err)
+	require.NotNil(t, parsed.Parent)
+	require.Equal(t, uint64(20000000), parsed.Parent.MinForkUnwindBlock)
+}
+
+// TestParentSection_MinForkUnwindBlockOmittedWhenZero confirms the
+// zero-value (which the runtime interprets as CutBlock — "unwind
+// within own fork only") emits nothing on the wire, so unconfigured
+// forks stay minimal.
+func TestParentSection_MinForkUnwindBlockOmittedWhenZero(t *testing.T) {
+	original := &ChainTomlV2{
+		Version: 2,
+		Parent: &ParentSection{
+			Chain:        "mainnet",
+			ManifestHash: "1234567890abcdef1234567890abcdef12345678",
+			CutBlock:     23760000,
+			CutBlockHash: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+			NetworkID:    23760000,
+		},
+	}
+	data, err := MarshalV2(original)
+	require.NoError(t, err)
+	require.NotContains(t, string(data), "min_fork_unwind_block")
+
+	parsed, err := ParseV2(data)
+	require.NoError(t, err)
+	require.NotNil(t, parsed.Parent)
+	require.Zero(t, parsed.Parent.MinForkUnwindBlock)
+}
+
 // TestParentSection_ValidParentTrustRootsOmittedWhenEmpty confirms
 // that a fork manifest with no operator-pinned accept-set emits no
 // `valid_parent_trust_roots` field (back-compat for fork-from

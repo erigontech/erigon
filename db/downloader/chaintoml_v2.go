@@ -288,6 +288,13 @@ type ParentSection struct {
 	// cryptographic enforcement; this field is the auditable record.
 	// See memory/fork-trust-root-model-2026-05-24.
 	ValidParentTrustRoots []ParentTrustRootEntry `toml:"valid_parent_trust_roots,omitempty"`
+
+	// MinForkUnwindBlock mirrors chain.Config.MinForkUnwindBlock on the
+	// wire so a fork-follower reads the setHead floor directly from the
+	// V2 manifest. Zero is interpreted as CutBlock (only-current-fork
+	// unwind); a positive value below CutBlock permits deeper unwinds
+	// down to the given block, requiring explicit operator configuration.
+	MinForkUnwindBlock uint64 `toml:"min_fork_unwind_block,omitempty"`
 }
 
 // ParentTrustRootEntry is a single entry in ParentSection's

@@ -92,3 +92,40 @@ func TestConfig_ValidParentTrustRoots_OmittedOnRootChain(t *testing.T) {
 	require.NotContains(t, string(data), "validParentTrustRoots",
 		"root chains omit the optional field")
 }
+
+func TestConfig_MinForkUnwindBlock_JSONRoundTrip(t *testing.T) {
+	original := &Config{
+		ChainName:          "mainnet-fork-20000000",
+		ChainID:            uint256.NewInt(1),
+		Parent:             "mainnet",
+		CutBlock:           20_000_000,
+		MinForkUnwindBlock: 15_000_000,
+	}
+	data, err := json.Marshal(original)
+	require.NoError(t, err)
+	require.Contains(t, string(data), `"minForkUnwindBlock":15000000`)
+
+	var decoded Config
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	require.Equal(t, uint64(15_000_000), decoded.MinForkUnwindBlock)
+}
+
+func TestConfig_MinForkUnwindBlock_OmittedWhenZero(t *testing.T) {
+	// Zero-value MinForkUnwindBlock is dropped by omitempty and
+	// interpreted at read-time as CutBlock (fork-local unwind only).
+	// Verifies unconfigured forks stay minimal on the wire.
+	fork := &Config{
+		ChainName: "mainnet-fork-20000000",
+		ChainID:   uint256.NewInt(1),
+		Parent:    "mainnet",
+		CutBlock:  20_000_000,
+	}
+	data, err := json.Marshal(fork)
+	require.NoError(t, err)
+	require.NotContains(t, string(data), "minForkUnwindBlock",
+		"zero-value omitted; runtime interprets absence as CutBlock")
+
+	var decoded Config
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	require.Zero(t, decoded.MinForkUnwindBlock)
+}
