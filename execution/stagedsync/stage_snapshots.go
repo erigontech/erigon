@@ -219,7 +219,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
-		"remaining snapshots",
+		"snapshots",
 		false, /*headerChain=*/
 		cfg.blobs,
 		cfg.caplinState,

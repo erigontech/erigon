@@ -1502,8 +1502,8 @@ func (d *Downloader) logSyncStats(startTime time.Time, stats AggStats, target st
 	}
 
 	addCtx(
-		"time-left", calculateTime(remainingBytes, stats.CompletionRate),
-		"time-elapsed", time.Since(startTime).Truncate(time.Second).String(),
+		"eta", calculateTime(remainingBytes, stats.CompletionRate),
+		"elapsed", time.Since(startTime).Truncate(time.Second).String(),
 	)
 
 	d.logStatsInner(log.LvlInfo, stats, fmt.Sprintf("Syncing %v", target), logCtx, true)
@@ -1534,7 +1534,7 @@ func (d *Downloader) logStatsInner(
 		}
 	}
 	addCtx(
-		"file-metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.NumTorrents),
+		"metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.NumTorrents),
 		"files", fmt.Sprintf(
 			"%d/%d",
 			// For now it's 1:1 files:torrents.
@@ -1544,7 +1544,7 @@ func (d *Downloader) logStatsInner(
 		"data", func() string {
 			if haveAllMetadata {
 				return fmt.Sprintf(
-					"%.2f%% - %s/%s",
+					"%.2f%%,%s/%s",
 					percentDone,
 					common.ByteCount(bytesDone),
 					common.ByteCount(stats.BytesTotal),
