@@ -1974,9 +1974,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
 	} else if chain != networkname.Dev && chain != networkname.BorDevnet {
-		spec, err := chainspec.ChainSpecByName(chain)
+		spec, err := chainspec.ChainSpecByNameOrForkDatadir(chain, nodeConfig.Dirs.DataDir)
 		if err != nil {
-			Fatalf("chain name is not recognized: %s", chain)
+			Fatalf("chain name is not recognized: %s (%v)", chain, err)
 			return
 		}
 		// Use custom NetworkID from spec if set, otherwise use ChainID
