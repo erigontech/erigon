@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
@@ -150,10 +151,15 @@ func markCellFlag[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag s
 }
 
 type VersionMap struct {
-	mu     sync.RWMutex
-	s      map[accounts.Address]*AddressEntry
-	trace  bool
-	HasBAL bool // When true, all significant writes are pre-populated from BAL
+	mu sync.RWMutex
+	s  map[accounts.Address]*AddressEntry
+	// hasSelfDestruct is set once any SelfDestruct cell is written and never
+	// cleared. While false, no self-destruct exists anywhere, so ReadSelfDestruct
+	// can return the miss result without taking mu — every versioned read
+	// consults it, and self-destructs are rare (EIP-6780).
+	hasSelfDestruct atomic.Bool
+	trace           bool
+	HasBAL          bool // When true, all significant writes are pre-populated from BAL
 }
 
 func NewVersionMap(changes []*types.AccountChanges) *VersionMap {
@@ -223,6 +229,7 @@ func (vm *VersionMap) WriteAddress(addr accounts.Address, v Version, value *acco
 }
 
 func (vm *VersionMap) WriteSelfDestruct(addr accounts.Address, v Version, value bool, complete bool) {
+	vm.hasSelfDestruct.Store(true)
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
@@ -356,6 +363,9 @@ func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (*accounts.A
 }
 
 func (vm *VersionMap) ReadSelfDestruct(addr accounts.Address, txIdx int) (bool, ReadResult, bool) {
+	if !vm.hasSelfDestruct.Load() {
+		return false, ReadResult{depIdx: UnknownDep, incarnation: -1}, false
+	}
 	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[bool]] { return e.SelfDestruct })
 }
 
@@ -544,6 +554,9 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, trac
 	for addr, vw := range writes.address {
 		e := vm.entryOrCreate(addr)
 		e.Address = putCell(e.Address, addr, AddressPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellAccount)
+	}
+	if len(writes.selfDestruct) > 0 {
+		vm.hasSelfDestruct.Store(true)
 	}
 	for addr, vw := range writes.selfDestruct {
 		e := vm.entryOrCreate(addr)
