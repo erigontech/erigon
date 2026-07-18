@@ -58,7 +58,7 @@ func TestStateLogger(t *testing.T) {
 						} else {
 							expectedPrev = uint256.NewInt(2)
 						}
-						if !reflect.DeepEqual(&e.value, expectedPrev) {
+						if !e.value.Eq(expectedPrev) {
 							t.Errorf("Incorrect BalanceInc in journal for  %s expectedBalance: %s, got:%s", accounts.ZeroAddress, expectedPrev, &e.value)
 						}
 					case kindCreateObject:

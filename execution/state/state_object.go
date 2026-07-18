@@ -236,7 +236,7 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 	// callback is never called and commited stays at its zero-value (false).
 	// In both cases there is no versioned write for this key in the current
 	// transaction, so this IS the first write — commited must be true so
-	// that storageChange.revert deletes the versioned write instead of
+	// that the storage-change revert deletes the versioned write instead of
 	// updating it to the prevalue.
 	if source != WriteSetRead && source != UnknownSource && source != StorageRead {
 		commited = true
