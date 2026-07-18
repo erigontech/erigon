@@ -23,6 +23,7 @@ package eth
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -758,6 +759,25 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		// state files.
 		if chainConfig.Parent != "" && chainConfig.CutBlock > 0 {
 			backend.components.Downloader.Downloader.SetForkCutBlock(chainConfig.CutBlock, nil)
+
+			// ParentSection stamped on every emitted manifest.
+			// EL fields from chain.Config; ParentForks derived from the
+			// local chainspec entry for the parent chain — approximate
+			// under F.4 (parent forwards-compat).
+			parentSection := &downloader.ParentSection{
+				Chain:             chainConfig.Parent,
+				ManifestHash:      hex.EncodeToString(chainConfig.ParentManifestHash[:]),
+				CutBlock:          chainConfig.CutBlock,
+				ParentGenesisHash: hex.EncodeToString(chainConfig.ParentGenesisHash[:]),
+			}
+			if parentSpec, err := chainspec.ChainSpecByName(chainConfig.Parent); err == nil && parentSpec.Config != nil {
+				parentGenesisTime := uint64(0)
+				if parentSpec.Genesis != nil {
+					parentGenesisTime = parentSpec.Genesis.Timestamp
+				}
+				_, parentSection.ParentForks = downloader.BuildChainIdentity(parentSpec.Config, parentSpec.GenesisHash, parentGenesisTime)
+			}
+			backend.components.Downloader.Downloader.SetParentSection(parentSection)
 		}
 	}
 
