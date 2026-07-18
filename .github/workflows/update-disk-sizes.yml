@@ -89,9 +89,12 @@ jobs:
             # Map the producing workflow → the mode it measured:
             #   "QA - Sync from scratch (minimal node)" → minimal
             #   "QA - Sync from scratch (full node)"    → full
+            #   "QA - Sync from scratch"                → full (legacy/unqualified name)
             if [[ "$WORKFLOW_RUN_NAME" == *"minimal"* ]]; then
               MODE=minimal
             elif [[ "$WORKFLOW_RUN_NAME" == *"full node"* ]]; then
+              MODE=full
+            elif [[ "$WORKFLOW_RUN_NAME" == "QA - Sync from scratch" ]]; then
               MODE=full
             else
               echo "::error::Unexpected producing workflow: $WORKFLOW_RUN_NAME"
