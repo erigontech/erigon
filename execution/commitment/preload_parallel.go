@@ -157,6 +157,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 	if stepBudgetBytes <= 0 {
 		return 0, len(p.frontier) == 0, nil
 	}
+	defer p.releaseScratch()
 
 	stepCap := p.usedBytes + stepBudgetBytes
 	chunkPinned := 0
