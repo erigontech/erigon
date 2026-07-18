@@ -284,25 +284,80 @@ if [[ -z "$DEPTHS" ]]; then
     echo "  regime-depths output (attempt $RD_ATTEMPT):"
     grep -E '^regime=|^DEPTHS=' "$RD_OUT" | sed 's/^/    /'
     DEPTHS="$(grep -E '^DEPTHS=' "$RD_OUT" | tail -1 | sed 's/^DEPTHS=//')"
-    rm -f "$RD_OUT"
-    if [[ -z "$DEPTHS" ]]; then
-        echo "FAIL: regime-depths did not emit DEPTHS= line"
-        exit 1
-    fi
-    # If ITER exceeds the 4-regime depth count, cycle the pattern so
-    # every iter still targets a distinct regime (r1,r2,r3,r4,r1,...).
-    BASE_DEPTHS="$DEPTHS"
-    BASE_COUNT=$(echo "$BASE_DEPTHS" | tr ',' '\n' | wc -l)
-    if [[ $ITER -gt $BASE_COUNT ]]; then
-        DEPTHS=""
+
+    if [[ "${RANDOMIZE_DEPTHS:-false}" == "true" ]]; then
+        # Randomized soak: shuffle regime order + pick random block within
+        # each regime's [lo, hi] range. Non-aligned targets surface bugs
+        # that only fire when writable-shadow-fill doesn't align with step
+        # boundaries (see [[2026-06-20-88-gas-diff-root-cause]]).
+        RANDOM_SEED="${RANDOM_SEED:-$(openssl rand -hex 16)}"
+        echo "  RANDOMIZE_DEPTHS=true RANDOM_SEED=$RANDOM_SEED"
+        declare -A R_LO R_HI
+        while read -r line; do
+            r=$(echo "$line" | grep -oE 'regime=[0-9]+' | cut -d= -f2)
+            lo=$(echo "$line" | grep -oE ' lo=[0-9]+' | cut -d= -f2)
+            hi=$(echo "$line" | grep -oE ' hi=[0-9]+' | cut -d= -f2)
+            if [[ -n "$r" && -n "$lo" && -n "$hi" ]]; then
+                R_LO[$r]=$lo
+                R_HI[$r]=$hi
+            fi
+        done < <(grep -E '^regime=' "$RD_OUT")
+        if [[ -z "${R_LO[1]:-}" || -z "${R_LO[2]:-}" || -z "${R_LO[3]:-}" || -z "${R_LO[4]:-}" ]]; then
+            echo "FAIL: regime-depths did not emit lo/hi for all 4 regimes"
+            cat "$RD_OUT"
+            rm -f "$RD_OUT"
+            exit 1
+        fi
+        head_hex=$(eth_block_number)
+        HEAD_NOW=$(hex_to_dec "$head_hex")
+        # Build cyclic regime list (r1,r2,r3,r4,r1,...) then shuffle with
+        # seed. Distinct regimes-per-iter across ITER preserved.
+        REGIME_SEQ=""
         for ((_i=0; _i<ITER; _i++)); do
-            _idx=$((_i % BASE_COUNT + 1))
-            _d=$(echo "$BASE_DEPTHS" | cut -d, -f$_idx)
-            DEPTHS="${DEPTHS:+$DEPTHS,}$_d"
+            REGIME_SEQ="${REGIME_SEQ}$((_i % 4 + 1))\n"
         done
-        echo "  cycled $BASE_COUNT depths to fill ITER=$ITER"
+        SHUFFLED=$(printf '%b' "$REGIME_SEQ" \
+            | shuf --random-source=<(openssl enc -aes-256-ctr -pass "pass:$RANDOM_SEED-order" -nosalt < /dev/zero 2>/dev/null))
+        DEPTHS=""
+        _iter=0
+        while read -r regime; do
+            [[ -z "$regime" ]] && continue
+            _iter=$((_iter + 1))
+            lo=${R_LO[$regime]}
+            hi=${R_HI[$regime]}
+            target=$(shuf -i "$lo-$hi" -n 1 \
+                --random-source=<(openssl enc -aes-256-ctr -pass "pass:$RANDOM_SEED-depth-$_iter" -nosalt < /dev/zero 2>/dev/null))
+            depth=$((HEAD_NOW - target))
+            DEPTHS="${DEPTHS:+$DEPTHS,}$depth"
+            echo "    iter=$_iter regime=$regime lo=$lo hi=$hi target=$target depth=$depth"
+        done <<< "$SHUFFLED"
+        rm -f "$RD_OUT"
+        if [[ -z "$DEPTHS" ]]; then
+            echo "FAIL: randomized DEPTHS is empty"
+            exit 1
+        fi
+        echo "  DEPTHS=$DEPTHS (randomized, seed=$RANDOM_SEED)"
+    else
+        rm -f "$RD_OUT"
+        if [[ -z "$DEPTHS" ]]; then
+            echo "FAIL: regime-depths did not emit DEPTHS= line"
+            exit 1
+        fi
+        # If ITER exceeds the 4-regime depth count, cycle the pattern so
+        # every iter still targets a distinct regime (r1,r2,r3,r4,r1,...).
+        BASE_DEPTHS="$DEPTHS"
+        BASE_COUNT=$(echo "$BASE_DEPTHS" | tr ',' '\n' | wc -l)
+        if [[ $ITER -gt $BASE_COUNT ]]; then
+            DEPTHS=""
+            for ((_i=0; _i<ITER; _i++)); do
+                _idx=$((_i % BASE_COUNT + 1))
+                _d=$(echo "$BASE_DEPTHS" | cut -d, -f$_idx)
+                DEPTHS="${DEPTHS:+$DEPTHS,}$_d"
+            done
+            echo "  cycled $BASE_COUNT depths to fill ITER=$ITER"
+        fi
+        echo "  DEPTHS=$DEPTHS"
     fi
-    echo "  DEPTHS=$DEPTHS"
 fi
 
 # Phase 4: soak.

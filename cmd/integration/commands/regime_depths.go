@@ -214,14 +214,14 @@ with silent regime-coverage loss.`,
 			}
 		}
 
-		emit := func(regime int, target uint64, in string) {
-			fmt.Printf("regime=%d depth=%d target=%d in=%s\n",
-				regime, headBlock-target, target, in)
+		emit := func(regime int, target, lo, hi uint64, in string) {
+			fmt.Printf("regime=%d depth=%d target=%d in=%s lo=%d hi=%d\n",
+				regime, headBlock-target, target, in, lo, hi)
 		}
-		emit(1, r1Target, "changeset")
-		emit(2, r2Target, "mdbx")
-		emit(3, r3Target, "per-step:"+perStepFile.name)
-		emit(4, r4Target, "multi-step:"+multiStepFile.name)
+		emit(1, r1Target, changesetFloor+1, headBlock-1, "changeset")
+		emit(2, r2Target, blockMaxStep+1, changesetFloor-1, "mdbx")
+		emit(3, r3Target, r3Lo+1, r3Hi, "per-step:"+perStepFile.name)
+		emit(4, r4Target, r4Lo+1, r4Hi, "multi-step:"+multiStepFile.name)
 
 		fmt.Printf("DEPTHS=%d,%d,%d,%d\n",
 			headBlock-r1Target,

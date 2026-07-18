@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -287,7 +288,7 @@ func TestSeedLeftoverBlocks_WritesHeadersBodiesTxsSenders(t *testing.T) {
 		seedFrom = uint64(2_000_005)
 		seedTo   = uint64(2_000_007)
 	)
-	require.NoError(t, seedLeftoverBlocks(ctx, rwTx, snapDir, hFI, bFI, tFI, seedFrom, seedTo))
+	require.NoError(t, seedLeftoverBlocks(ctx, rwTx, snapDir, hFI, bFI, &tFI, seedFrom, seedTo))
 
 	// kv.Headers populated for seeded range; NOT for blocks below seedFrom.
 	for n := seedFrom; n <= seedTo; n++ {
@@ -365,6 +366,91 @@ func TestSeedLeftoverBlocks_WritesHeadersBodiesTxsSenders(t *testing.T) {
 		got, err := rwTx.GetOne(kv.Senders, key)
 		require.NoError(t, err)
 		require.Equal(t, 40, len(got), "block %d senders entry must be 40 bytes (2 txs × 20 sender bytes)", n)
+	}
+}
+
+// TestSeedLeftoverBlocks_MissingTxStraddle_SeedsHeadersBodiesOnly pins
+// the prune=minimal-compatible path: when headers+bodies straddles are
+// present but transactions .seg was intentionally not stored for the
+// historical range, seedLeftoverBlocks writes kv.Headers,
+// kv.HeaderNumber and kv.BlockBody and leaves kv.EthTx / kv.Senders
+// unpopulated. Reproduces the iter-7 mode_b non-aligned failure
+// (target=3,095,646, tx.seg absent for 003000-003100 range) that this
+// change fixes; without the relaxation the seed hard-errors.
+func TestSeedLeftoverBlocks_MissingTxStraddle_SeedsHeadersBodiesOnly(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	snapDir := t.TempDir()
+	tmpDir := t.TempDir()
+
+	const (
+		fromBlock = uint64(2_000_000)
+		toBlock   = uint64(2_000_010)
+		baseTxn   = uint64(1_000)
+		txPer     = uint32(4)
+	)
+	hFI, bFI, _ := makeBlockSnapshotTriple(t, ctx, snapDir, tmpDir, fromBlock, toBlock, baseTxn, txPer)
+	// Delete every *-transactions.seg the fixture produced to simulate
+	// --prune.mode=minimal (headers+bodies present, transactions absent).
+	entries, err := os.ReadDir(snapDir)
+	require.NoError(t, err)
+	for _, e := range entries {
+		name := e.Name()
+		if len(name) >= len("-transactions.seg") && name[len(name)-len("-transactions.seg"):] == "-transactions.seg" {
+			require.NoError(t, os.Remove(filepath.Join(snapDir, name)))
+		}
+	}
+
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	hashAt := func(n uint64) common.Hash {
+		var h common.Hash
+		binary.BigEndian.PutUint64(h[:8], n)
+		copy(h[24:], "canonical-test")
+		return h
+	}
+	for n := fromBlock; n < toBlock; n++ {
+		require.NoError(t, rawdb.WriteCanonicalHash(rwTx, hashAt(n), n))
+	}
+
+	const (
+		seedFrom = uint64(2_000_005)
+		seedTo   = uint64(2_000_007)
+	)
+	require.NoError(t, seedLeftoverBlocks(ctx, rwTx, snapDir, hFI, bFI, nil, seedFrom, seedTo))
+
+	for n := seedFrom; n <= seedTo; n++ {
+		key := make([]byte, 8+32)
+		binary.BigEndian.PutUint64(key[:8], n)
+		copy(key[8:], func() []byte { h := hashAt(n); return h[:] }())
+		got, err := rwTx.GetOne(kv.Headers, key)
+		require.NoError(t, err)
+		require.NotEmpty(t, got, "block %d must have kv.Headers seeded", n)
+
+		body, err := rwTx.GetOne(kv.BlockBody, key)
+		require.NoError(t, err)
+		require.NotEmpty(t, body, "block %d must have kv.BlockBody seeded", n)
+	}
+
+	// kv.EthTx / kv.Senders must be entirely absent for the seeded range
+	// (no tx source; nothing to write).
+	for _, txnID := range []uint64{1020, 1021, 1022, 1023, 1024, 1025, 1026, 1027, 1028, 1029, 1030, 1031} {
+		var keyBytes [8]byte
+		binary.BigEndian.PutUint64(keyBytes[:], txnID)
+		got, gerr := rwTx.GetOne(kv.EthTx, keyBytes[:])
+		require.NoError(t, gerr)
+		require.Empty(t, got, "txnID %d must NOT be seeded (no tx.seg source)", txnID)
+	}
+	for n := seedFrom; n <= seedTo; n++ {
+		key := make([]byte, 8+32)
+		binary.BigEndian.PutUint64(key[:8], n)
+		copy(key[8:], func() []byte { h := hashAt(n); return h[:] }())
+		got, err := rwTx.GetOne(kv.Senders, key)
+		require.NoError(t, err)
+		require.Empty(t, got, "block %d must NOT have kv.Senders (no tx.seg source)", n)
 	}
 }
 

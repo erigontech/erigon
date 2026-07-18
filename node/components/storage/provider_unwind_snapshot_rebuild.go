@@ -224,39 +224,27 @@ func (p *Provider) rebuildBlockStraddles(ctx context.Context, tx kv.RwTx, toBloc
 	}
 
 	// Non-aligned-cut leftover seed. When toBlock+1 isn't a 1000-
-	// multiple, newToBlock = chunkAlignedToBlock(toBlock) < toBlock+1.
-	// The rebuilt block-snapshot files cover [oldFI.From, newToBlock);
-	// blocks in [newToBlock, toBlock] have NO snapshot source after
-	// FinalizeUnwind deletes the old straddle files. seedLeftoverBlocks
-	// walks the OLD files (still on disk; deletion is staged for
-	// post-commit) and writes the leftover headers / bodies / tx data
-	// + senders into the writable DB so canonical reads for those
-	// blocks resolve via the DB path.
+	// multiple, blocks [newToBlock, toBlock] need seeding into the
+	// writable DB so canonical reads resolve after FinalizeUnwind
+	// deletes the old straddle files.
 	//
-	// Requires all three straddle types (headers + bodies + transactions)
-	// to be present in the inventory at the same range — otherwise
-	// the tx file's per-block tx-range cannot be reconstructed in
-	// lockstep. In practice block snapshots are produced as a
-	// matching triple by RetireBlocks; an asymmetric inventory is a
-	// hard-error.
+	// Headers + bodies straddles are required. Transactions is
+	// optional: --prune.mode=minimal drops historical tx.seg while
+	// keeping headers+bodies; RPC access to historic transactions
+	// isn't expected under that mode. Missing tx.seg + present
+	// headers+bodies is a legitimate state, not an inventory bug.
 	if newToBlock < toBlock+1 && len(toRemoveStraddles) > 0 {
-		// At least one block-snapshot straddle was rebuilt. The
-		// non-aligned leftover [newToBlock, toBlock] now has no
-		// snapshot source for those types. Seed them into the
-		// writable DB.
-		//
-		// Require the full triple (headers + bodies + tx) because
-		// the tx file's per-block tx-range is reconstructed in
-		// lockstep with the bodies file at the same range. Block
-		// snapshots are produced as a matching triple by
-		// RetireBlocks; an asymmetric inventory is a hard-error.
 		hFI := straddles[snaptype2.Enums.Headers]
 		bFI := straddles[snaptype2.Enums.Bodies]
 		tFI := straddles[snaptype2.Enums.Transactions]
-		if hFI == nil || bFI == nil || tFI == nil {
-			return nil, nil, fmt.Errorf("mode-B non-aligned cut at toBlock=%d: leftover seed requires headers + bodies + transactions straddle triple; got headers=%v bodies=%v transactions=%v", toBlock, hFI != nil, bFI != nil, tFI != nil)
+		if hFI == nil || bFI == nil {
+			return nil, nil, fmt.Errorf("mode-B non-aligned cut at toBlock=%d: leftover seed requires headers + bodies straddle pair; got headers=%v bodies=%v", toBlock, hFI != nil, bFI != nil)
 		}
-		if err := seedLeftoverBlocks(ctx, tx, p.snapDir, *hFI, *bFI, *tFI, newToBlock, toBlock); err != nil {
+		if tFI == nil && p.logger != nil {
+			p.logger.Warn("[storage] Provider.Unwind: leftover-seed skipping transactions (no straddle .seg for this range — prune=minimal or asymmetric preverified)",
+				"toBlock", toBlock, "newToBlock", newToBlock, "headersRange", fmt.Sprintf("[%d,%d)", hFI.From, hFI.To))
+		}
+		if err := seedLeftoverBlocks(ctx, tx, p.snapDir, *hFI, *bFI, tFI, newToBlock, toBlock); err != nil {
 			return nil, nil, fmt.Errorf("seedLeftoverBlocks([%d, %d]): %w", newToBlock, toBlock, err)
 		}
 	}
@@ -279,29 +267,20 @@ type storageSnapshotFileRef struct {
 // blocks in [chunkAlignedToBlock(toBlock), toBlock] must live in the
 // writable DB instead.
 //
-// Walks the THREE old files (headers + bodies + transactions) in
-// lockstep:
-//   - Skip the first (fromBlock - oldFI.From) entries in headers + bodies
-//   - From `fromBlock` onward, for each block N ≤ toBlockInclusive:
-//   - Header: write the raw header RLP to kv.Headers + kv.HeaderNumber
-//     (via rawdb.WriteHeaderRaw)
-//   - Body: decode BodyForStorage, write to kv.BlockBody
-//     (via rawdb.WriteBodyForStorage)
-//   - Transactions: for each tx in [BaseTxnID, BaseTxnID + TxCount),
-//     extract sender + tx_rlp from the tx file entry, write tx_rlp
-//     to kv.EthTx and accumulate sender bytes for the block's
-//     kv.Senders entry
+// Walks the old files (headers + bodies, and transactions if present)
+// in lockstep. oldTxFI is optional: when nil (--prune.mode=minimal
+// dropped the historical tx.seg), the tx-related writes are skipped
+// and only kv.Headers / kv.HeaderNumber / kv.BlockBody are populated.
 //
 // Pre-condition: the OLD straddle files must still be on disk when
 // this runs. The caller (rebuildBlockStraddles) calls seedLeftoverBlocks
-// AFTER the rebuild has written new files (which have different
-// names — straddle was 002910-002920, rebuilt is 002910-002912) but
-// BEFORE FinalizeUnwind deletes the old files. Same-tx writes ensure
-// atomicity with the rest of mode-B.
+// AFTER the rebuild has written new files but BEFORE FinalizeUnwind
+// deletes the old files. Same-tx writes ensure atomicity with the rest
+// of mode-B.
 //
 // fromBlock + toBlockInclusive must lie within the headers straddle
 // file's range [oldHeadersFI.From, oldHeadersFI.To). Caller validates.
-func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHeadersFI, oldBodiesFI, oldTxFI snaptype.FileInfo, fromBlock, toBlockInclusive uint64) error {
+func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHeadersFI, oldBodiesFI snaptype.FileInfo, oldTxFI *snaptype.FileInfo, fromBlock, toBlockInclusive uint64) error {
 	if fromBlock > toBlockInclusive {
 		return nil
 	}
@@ -311,7 +290,7 @@ func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHead
 	if oldBodiesFI.From != oldHeadersFI.From || oldBodiesFI.To != oldHeadersFI.To {
 		return fmt.Errorf("seedLeftoverBlocks: bodies range [%d, %d) does not match headers [%d, %d)", oldBodiesFI.From, oldBodiesFI.To, oldHeadersFI.From, oldHeadersFI.To)
 	}
-	if oldTxFI.From != oldHeadersFI.From || oldTxFI.To != oldHeadersFI.To {
+	if oldTxFI != nil && (oldTxFI.From != oldHeadersFI.From || oldTxFI.To != oldHeadersFI.To) {
 		return fmt.Errorf("seedLeftoverBlocks: tx range [%d, %d) does not match headers [%d, %d)", oldTxFI.From, oldTxFI.To, oldHeadersFI.From, oldHeadersFI.To)
 	}
 
@@ -329,16 +308,19 @@ func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHead
 	}
 	defer bdec.Close()
 
-	tPath := filepath.Join(snapDir, oldTxFI.Name())
-	tdec, err := seg.NewDecompressor(tPath)
-	if err != nil {
-		return fmt.Errorf("open old tx %s: %w", tPath, err)
+	var tg *seg.Getter
+	if oldTxFI != nil {
+		tPath := filepath.Join(snapDir, oldTxFI.Name())
+		tdec, terr := seg.NewDecompressor(tPath)
+		if terr != nil {
+			return fmt.Errorf("open old tx %s: %w", tPath, terr)
+		}
+		defer tdec.Close()
+		tg = tdec.MakeGetter()
 	}
-	defer tdec.Close()
 
 	hg := hdec.MakeGetter()
 	bg := bdec.MakeGetter()
-	tg := tdec.MakeGetter()
 
 	// Walk headers + bodies sequentially from oldHeadersFI.From. We
 	// must iterate over EVERY entry in [oldHeadersFI.From, fromBlock)
@@ -410,7 +392,14 @@ func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHead
 		// entries inside the [1, txCount-1) user range.
 		//
 		// Even when !writeThisBlock we MUST advance the tx getter to
-		// keep the lockstep position in sync.
+		// keep the lockstep position in sync. When tg is nil (tx.seg
+		// intentionally absent under prune=minimal), no tx walk is
+		// performed and kv.EthTx / kv.Senders are left unpopulated —
+		// RPC access to historical transactions isn't expected under
+		// that mode anyway.
+		if tg == nil {
+			continue
+		}
 		txCount := uint64(body.TxCount)
 		var sendersBuf []byte
 		if writeThisBlock && txCount > 2 {
