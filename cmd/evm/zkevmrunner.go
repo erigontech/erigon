@@ -150,14 +150,12 @@ func runZkevmTestsParallel(root string, files []string, re *regexp.Regexp, tm *t
 	close(fileCh)
 
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for item := range fileCh {
 				r, err := runZkevmTestFile(root, item.fname, re, tm)
 				resultCh <- fileResult{index: item.index, results: r, err: err}
 			}
-		}()
+		})
 	}
 	go func() {
 		wg.Wait()

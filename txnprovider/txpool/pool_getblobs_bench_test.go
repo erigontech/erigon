@@ -55,9 +55,7 @@ func BenchmarkGetBlobs(b *testing.B) {
 		var writerCounter uint64
 		writers := max(2, runtime.GOMAXPROCS(0)-1)
 		for range writers {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				for {
 					select {
 					case <-stop:
@@ -71,7 +69,7 @@ func BenchmarkGetBlobs(b *testing.B) {
 					pool.lock.Unlock()
 					startedOnce.Do(func() { close(started) })
 				}
-			}()
+			})
 		}
 
 		// Wait until a writer has actually contended on pool.lock before measuring: at -benchtime=1x

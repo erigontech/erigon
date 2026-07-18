@@ -194,11 +194,9 @@ func TestFeedOfUnsubscribeSentChan(t *testing.T) {
 	)
 	defer sub2.Unsubscribe()
 
-	wg.Add(1)
-	go func() {
+	wg.Go(func() {
 		feed.Send(0)
-		wg.Done()
-	}()
+	})
 
 	// Wait for the value on ch1.
 	<-ch1
@@ -211,11 +209,9 @@ func TestFeedOfUnsubscribeSentChan(t *testing.T) {
 
 	// Send again. This should send to ch2 only, so the wait group will unblock
 	// as soon as a value is received on ch2.
-	wg.Add(1)
-	go func() {
+	wg.Go(func() {
 		feed.Send(0)
-		wg.Done()
-	}()
+	})
 	<-ch2
 	wg.Wait()
 }

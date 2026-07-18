@@ -89,11 +89,6 @@ linters:
           rules: rules.go
         underef:
           skipRecvDeref: true
-    modernize:
-      disable: # each disabled analyzer has an existing backlog; enable it once its findings are cleared
-        - waitgroupgo
-        - waitgroup
-        - fmtappendf
     govet:
       enable:
         - nilness

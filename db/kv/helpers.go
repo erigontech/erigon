@@ -194,9 +194,7 @@ func ReadAheadDeprecated(ctx context.Context, db RoDB, progress *atomic.Bool, ta
 		cancel()
 		wg.Wait()
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer progress.Store(false)
 		_ = db.View(ctx, func(tx Tx) error {
 			c, err := tx.Cursor(table)
@@ -221,7 +219,7 @@ func ReadAheadDeprecated(ctx context.Context, db RoDB, progress *atomic.Bool, ta
 			}
 			return nil
 		})
-	}()
+	})
 	return clean
 }
 

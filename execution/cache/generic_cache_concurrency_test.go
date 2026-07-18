@@ -43,16 +43,15 @@ func TestGenericCache_ConcurrentPutAcrossGrow(t *testing.T) {
 	const perWorker = 20_000
 	var wg sync.WaitGroup
 	for w := range workers {
-		wg.Add(1)
-		go func(base int) {
-			defer wg.Done()
+		base := w
+		wg.Go(func() {
 			key := make([]byte, 8)
 			for i := range perWorker {
 				binary.BigEndian.PutUint64(key, uint64(base*perWorker+i))
 				c.Put(key, []byte{byte(i)}, uint64(i))
 				c.Get(key)
 			}
-		}(w)
+		})
 	}
 	wg.Wait()
 }
@@ -158,9 +157,7 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 		var candidates [][]byte
 		stop := make(chan struct{})
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for j := 0; ; j++ {
 				select {
 				case <-stop:
@@ -176,7 +173,7 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 
 		binary.BigEndian.PutUint64(key, 0)
 		c.Put(key, []byte{1}, 1) // insert at the lowered cap → triggers the grow
@@ -411,9 +408,7 @@ func TestGenericCache_StatsResetAtomicWithDelete_NoPhantomEvictions(t *testing.T
 	key := []byte("metrics-key")
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -423,7 +418,7 @@ func TestGenericCache_StatsResetAtomicWithDelete_NoPhantomEvictions(t *testing.T
 			c.Put(key, []byte{1}, 1)
 			c.Delete(key)
 		}
-	}()
+	})
 	total := uint64(0)
 	for range 1_000_000 {
 		total += c.evictions.Swap(0)

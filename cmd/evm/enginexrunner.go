@@ -177,13 +177,11 @@ func engineXTestCmd(ctx context.Context, cliCtx *cli.Command) error {
 	timeIt := cliCtx.Bool(TimeFlag.Name)
 	var wg sync.WaitGroup
 	for w := uint64(0); w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for key := range groupCh {
 				runEngineXGroup(ctx, runner, key, groups[key], timeIt, resultCh)
 			}
-		}()
+		})
 	}
 
 	go func() {

@@ -387,13 +387,11 @@ func TestExecutionPayloadServicePendingQueueCapConcurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for i := range 100 {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			blockRoot := common.Hash{byte(idx), byte(idx >> 8)}
-			envelope := newTestSignedEnvelope(100, blockRoot, uint64(10000+idx))
+		wg.Go(func() {
+			blockRoot := common.Hash{byte(i), byte(i >> 8)}
+			envelope := newTestSignedEnvelope(100, blockRoot, uint64(10000+i))
 			impl.queuePendingEnvelope(blockRoot, envelope)
-		}(i)
+		})
 	}
 	wg.Wait()
 

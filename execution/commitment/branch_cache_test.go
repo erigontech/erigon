@@ -349,16 +349,14 @@ func TestBranchCache_ConcurrentTailGrow(t *testing.T) {
 	)
 	var wg sync.WaitGroup
 	for w := range workers {
-		wg.Add(1)
-		go func(w int) {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range perWorker {
 				// odd flag (0x10) + 3 bytes → 7 nibbles → tail; unique per (w,i).
 				key := []byte{0x10, byte(w), byte(i), byte(i >> 8)}
 				c.Put(key, []byte{byte(i)}, 0, 100)
 				c.Get(key)
 			}
-		}(w)
+		})
 	}
 	wg.Wait()
 }

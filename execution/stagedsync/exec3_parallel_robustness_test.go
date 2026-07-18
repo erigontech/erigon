@@ -409,10 +409,7 @@ func TestExecLoopExitCheckConcurrentReads(t *testing.T) {
 	var stop atomic.Bool
 	var wg sync.WaitGroup
 
-	// Mutator: add and remove blocks under pe's lock.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for !stop.Load() {
 			pe.Lock()
 			pe.blockExecutors[42] = &blockExecutor{}
@@ -421,16 +418,13 @@ func TestExecLoopExitCheckConcurrentReads(t *testing.T) {
 			delete(pe.blockExecutors, 42)
 			pe.Unlock()
 		}
-	}()
+	})
 
-	// Reader: continually call execLoopExitCheck.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for !stop.Load() {
 			_ = pe.execLoopExitCheck(context.Background(), "concurrent")
 		}
-	}()
+	})
 
 	time.Sleep(50 * time.Millisecond)
 	stop.Store(true)
