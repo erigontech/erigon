@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 // RecentReceipts re-exports the type from execution/notifications.
@@ -45,6 +46,7 @@ type Events struct {
 	headerSubscriptions         map[int]chan [][]byte
 	overlaySubscriptions        map[int]chan *execctx.SharedDomains
 	newSnapshotSubscription     map[int]chan struct{}
+	syncStateSubscriptions      map[int]chan *remoteproto.SyncingReply
 	retirementStartSubscription map[int]chan bool
 	retirementDoneSubscription  map[int]chan struct{}
 	pendingLogsSubscriptions    map[int]PendingLogsSubscription
@@ -71,6 +73,7 @@ func NewEvents() *Events {
 		pendingTxsSubscriptions:     map[int]PendingTxsSubscription{},
 		logsSubscriptions:           map[int]chan []*notifications.LogNotification{},
 		newSnapshotSubscription:     map[int]chan struct{}{},
+		syncStateSubscriptions:      map[int]chan *remoteproto.SyncingReply{},
 		retirementStartSubscription: map[int]chan bool{},
 		retirementDoneSubscription:  map[int]chan struct{}{},
 	}
@@ -130,6 +133,29 @@ func (e *Events) AddNewSnapshotSubscription() (chan struct{}, func()) {
 		defer e.lock.Unlock()
 		delete(e.newSnapshotSubscription, id)
 		close(ch)
+	}
+}
+
+func (e *Events) AddSyncStateSubscription() (chan *remoteproto.SyncingReply, func()) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	ch := make(chan *remoteproto.SyncingReply, 8)
+	e.id++
+	id := e.id
+	e.syncStateSubscriptions[id] = ch
+	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
+		delete(e.syncStateSubscriptions, id)
+		close(ch)
+	}
+}
+
+func (e *Events) OnNewSyncState(reply *remoteproto.SyncingReply) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for _, ch := range e.syncStateSubscriptions {
+		common.PrioritizedSend(ch, reply)
 	}
 }
 

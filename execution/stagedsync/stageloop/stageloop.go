@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -43,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
@@ -55,6 +58,10 @@ type NotificationSender interface {
 	Dispatch(ctx context.Context, tx kv.Tx, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64) error
 }
 
+type FrozenBlocksReader interface {
+	FrozenBlocks() uint64
+}
+
 type Hook struct {
 	ctx                                 context.Context
 	notifications                       *shards.Notifications
@@ -65,8 +72,10 @@ type Hook struct {
 	updateHead                          func(ctx context.Context)
 	statusDataGetter                    sentry_multi_client.StatusGetter
 	blockRangePublisher                 *execp2p.Publisher
+	frozenBlocksReader                  FrozenBlocksReader
 	lastAnnouncedBlockRangeLatestNumber uint64
 	lastAnnouncedBlockRangeTime         time.Time
+	lastSyncState                       *remoteproto.SyncingReply
 }
 
 func NewHook(
@@ -79,6 +88,7 @@ func NewHook(
 	updateHead func(ctx context.Context),
 	statusDataGetter sentry_multi_client.StatusGetter,
 	blockRangePublisher *execp2p.Publisher,
+	frozenBlocksReader FrozenBlocksReader,
 ) *Hook {
 	return &Hook{
 		ctx:                 ctx,
@@ -90,6 +100,7 @@ func NewHook(
 		updateHead:          updateHead,
 		statusDataGetter:    statusDataGetter,
 		blockRangePublisher: blockRangePublisher,
+		frozenBlocksReader:  frozenBlocksReader,
 	}
 }
 
@@ -162,7 +173,30 @@ func (h *Hook) UpdateHead(tx kv.Tx, finishProgressBefore uint64, isSynced bool) 
 		return err
 	}
 	h.maybeAnnounceBlockRange(finishProgressBefore, finishStageAfterSync, isSynced)
+	h.notifySyncStateIfChanged(tx)
 	return nil
+}
+
+// notifySyncStateIfChanged publishes the sync status on the event bus at the
+// end of each sync cycle.
+func (h *Hook) notifySyncStateIfChanged(tx kv.Tx) {
+	if h.notifications == nil || h.notifications.Events == nil || h.frozenBlocksReader == nil {
+		return
+	}
+	reply, err := h.notifications.BuildSyncingReply(tx, h.frozenBlocksReader.FrozenBlocks())
+	if err != nil {
+		h.logger.Warn("[hook] sync state notification skipped", "err", err)
+		return
+	}
+	// Once synced, block numbers keep advancing on every cycle but subscribers
+	// only care about the flag flipping back — comparing full replies here
+	// would republish on every block forever.
+	stillSynced := h.lastSyncState != nil && !h.lastSyncState.Syncing && !reply.Syncing
+	if stillSynced || proto.Equal(h.lastSyncState, reply) {
+		return
+	}
+	h.lastSyncState = reply
+	h.notifications.Events.OnNewSyncState(reply)
 }
 
 func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSync uint64, isSynced bool) {
