@@ -91,12 +91,12 @@ func packBits(bytes []byte) [][32]byte {
 }
 
 // packBitsInto packs bytes into 32-byte chunks, reusing dst's backing array.
-// It leaves spare capacity beyond the packed length so MerkleizeVector's
-// odd-length padding append reuses the backing array instead of reallocating.
+// The spare element beyond the packed length keeps MerkleizeVector's odd-length
+// padding append in-cap: n+1 is the longest layer its reduction produces.
 func packBitsInto(dst [][32]byte, bytes []byte) [][32]byte {
 	n := (len(bytes) + 31) / 32
 	if cap(dst) < n+1 {
-		dst = make([][32]byte, n, 2*n+2)
+		dst = make([][32]byte, n, n+1)
 	} else {
 		dst = dst[:n]
 	}
