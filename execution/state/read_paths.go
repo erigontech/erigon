@@ -583,8 +583,11 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			}
 		}
 
-		// StoragePath: zero out unwritten slots when prior tx wrote Incarnation.
-		if path == StoragePath {
+		// A prior tx that bumped Incarnation cleared the old incarnation's storage
+		// and code; read them as empty when no newer cell exists. A revival writes
+		// its own CodePath/StoragePath cell, which the version-map read above returns
+		// before reaching here, so reaching here means the field is genuinely cleared.
+		if path == StoragePath || path == CodePath || path == CodeSizePath {
 			if inc, incRes, incOK := s.versionMap.ReadIncarnation(addr, s.txIndex); incOK && incRes.Status() == MVReadResultDone {
 				hdr.Source = StorageRead
 				s.versionedReads.SetHeader(addr, path, key, hdr)
