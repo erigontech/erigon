@@ -316,10 +316,6 @@ func TestMVHashMapBasics(t *testing.T) {
 	require.Equal(t, valueFor(AddressPath, 10, 2), resVal)
 }
 
-// TestValidateRead_HasBAL_NoBypassForAddressPath verifies that when HasBAL is
-// true, AddressPath is NOT bypassed — a new MVReadResultDone entry on
-// AddressPath means a real state change (e.g. account creation) from a
-// concurrent worker, and the read must be invalidated.
 // TestReadSelfDestruct_FastPath covers the hasSelfDestruct short-circuit: a nil
 // receiver and a map with no self-destruct both return the miss result (matching
 // readFloor), and a real self-destruct is still observed once written.
@@ -349,6 +345,10 @@ func TestReadSelfDestruct_FastPath(t *testing.T) {
 	require.Equal(t, MVReadResultDone, res.Status())
 }
 
+// TestValidateRead_HasBAL_NoBypassForAddressPath verifies that when HasBAL is
+// true, AddressPath is NOT bypassed — a new MVReadResultDone entry on
+// AddressPath means a real state change (e.g. account creation) from a
+// concurrent worker, and the read must be invalidated.
 func TestValidateRead_HasBAL_NoBypassForAddressPath(t *testing.T) {
 	t.Parallel()
 
