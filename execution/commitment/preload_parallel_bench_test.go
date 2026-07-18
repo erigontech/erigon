@@ -22,7 +22,6 @@ func buildFullTree(hash []byte, leafDepth int) syntheticTree {
 			return
 		}
 		tree[string(path)] = 0xFFFF
-		for n := 0; n < 16; n++ {
 			child := make([]byte, len(path)+1)
 			copy(child, path)
 			child[len(path)] = byte(n)
