@@ -64,6 +64,34 @@ func TestLoadForkChainSpec_LoadsFromDatadirAndInheritsParentGenesis(t *testing.T
 	require.Equal(t, spec.Name, byName.Name)
 }
 
+func TestLoadForkChainSpec_NetworkIDFallsBackToChainID(t *testing.T) {
+	cfg := &chain.Config{
+		ChainName: "mainnet-fork-networkid-fallback",
+		ChainID:   uint256.NewInt(1),
+		Parent:    "mainnet",
+		CutBlock:  20_000_000,
+		// NetworkID intentionally left zero
+	}
+	datadir := writeChainJSON(t, cfg)
+	spec, err := LoadForkChainSpec(cfg.ChainName, datadir)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), spec.NetworkID, "zero NetworkID falls back to ChainID")
+}
+
+func TestLoadForkChainSpec_NetworkIDDistinctIsHonored(t *testing.T) {
+	cfg := &chain.Config{
+		ChainName: "mainnet-fork-distinct-netid",
+		ChainID:   uint256.NewInt(1),
+		Parent:    "mainnet",
+		CutBlock:  20_000_000,
+		NetworkID: 23_760_000,
+	}
+	datadir := writeChainJSON(t, cfg)
+	spec, err := LoadForkChainSpec(cfg.ChainName, datadir)
+	require.NoError(t, err)
+	require.Equal(t, uint64(23_760_000), spec.NetworkID, "distinct NetworkID honored")
+}
+
 func TestLoadForkChainSpec_MissingChainJSONErrors(t *testing.T) {
 	_, err := LoadForkChainSpec("some-fork", t.TempDir())
 	require.Error(t, err)

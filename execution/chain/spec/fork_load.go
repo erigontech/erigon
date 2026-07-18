@@ -77,6 +77,10 @@ func LoadForkChainSpec(chainName, datadir string) (Spec, error) {
 	if err != nil {
 		return Spec{}, fmt.Errorf("parent chain %q not in registry: %w", cfg.Parent, err)
 	}
+	networkID := cfg.NetworkID
+	if networkID == 0 {
+		networkID = cfg.ChainID.Uint64()
+	}
 	spec := Spec{
 		Name:             chainName,
 		GenesisHash:      parentSpec.GenesisHash,
@@ -84,7 +88,7 @@ func LoadForkChainSpec(chainName, datadir string) (Spec, error) {
 		Genesis:          parentSpec.Genesis,
 		Config:           cfg,
 		Bootnodes:        nil, // fork-specific — populated separately when Phase 2c-CL / operator wiring supplies them
-		NetworkID:        cfg.ChainID.Uint64(),
+		NetworkID:        networkID,
 	}
 	RegisterChainSpec(chainName, spec)
 	return spec, nil

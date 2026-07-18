@@ -165,6 +165,13 @@ type Config struct {
 	// against the locally-known genesis for the declared Parent chain
 	// as an early integrity gate on the fork's lineage claim.
 	ParentGenesisHash common.Hash `json:"parentGenesisHash,omitempty"`
+
+	// NetworkID is the fork's p2p network identity. Distinct from
+	// ChainID (which stays = parent for EL replay protection) so the
+	// fork's discv5 network is separable from the parent's. Zero
+	// falls back to ChainID at spec-resolution time — matches the
+	// non-fork default. Only meaningful when Parent != "".
+	NetworkID uint64 `json:"networkID,omitempty"`
 }
 
 // ParentTrustRoot is plain-data describing a single trust root a fork

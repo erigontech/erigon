@@ -1985,6 +1985,29 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		} else {
 			cfg.NetworkID = spec.Config.ChainID.Uint64()
 		}
+		// Fork-chain CL artefacts auto-wire: if the loaded spec is a
+		// fork (Config.Parent != "") and the operator didn't pass
+		// --caplin.custom-config / --caplin.custom-genesis explicitly,
+		// pick them up from the fork datadir. Enables the standard
+		// operator flow: `snapshots fork-from` emits cl-config.yaml +
+		// genesis.ssz alongside chain.json; erigon at boot finds them
+		// without additional flags.
+		if spec.Config != nil && spec.Config.Parent != "" {
+			maybeSet := func(current *string, path string, label string) {
+				if *current != "" {
+					log.Info("[fork] CL artefact path preserved from flag", "label", label, "path", *current)
+					return
+				}
+				if fi, statErr := os.Stat(path); statErr == nil && !fi.IsDir() {
+					*current = path
+					log.Info("[fork] CL artefact auto-wired", "label", label, "path", path)
+				} else {
+					log.Info("[fork] CL artefact not present in datadir", "label", label, "checked", path, "err", statErr)
+				}
+			}
+			maybeSet(&cfg.CaplinConfig.CustomConfigPath, filepath.Join(nodeConfig.Dirs.DataDir, "cl-config.yaml"), "cl-config.yaml")
+			maybeSet(&cfg.CaplinConfig.CustomGenesisStatePath, filepath.Join(nodeConfig.Dirs.DataDir, "genesis.ssz"), "genesis.ssz")
+		}
 	}
 
 	cfg.Dirs = nodeConfig.Dirs
