@@ -47,12 +47,11 @@ func (g *ClosingWaitGroup) Wait() { g.wg.Wait() }
 // goroutine, or returns false without running it once BeginClose has latched.
 func (g *ClosingWaitGroup) TryGo(f func()) bool {
 	g.mu.Lock()
+	defer g.mu.Unlock()
 	if g.closing {
-		g.mu.Unlock()
 		return false
 	}
 	g.wg.Go(f)
-	g.mu.Unlock()
 	return true
 }
 

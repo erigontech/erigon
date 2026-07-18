@@ -456,6 +456,7 @@ func ApplyDeferredBranchUpdates(
 	errs := make([]error, numWorkers)
 	var wg sync.WaitGroup
 	for w := 0; w < numWorkers; w++ {
+		w := w
 		lo := w * chunk
 		hi := min(lo+chunk, len(deferred))
 		if lo >= hi {
