@@ -205,6 +205,11 @@ type Downloader struct {
 	// SetRetentionFloor; zero is the full-history default.
 	retentionFloor uint64
 
+	// parentSection is the manifest [parent] section a fork publisher
+	// stamps onto every emitted manifest. Nil on root chains. Set once
+	// at startup via SetParentSection.
+	parentSection *ParentSection
+
 	// v2PublishGate{Enabled,Open} implement the chain.v2 first-publish
 	// gate — see EnableV2PublishGate. Default: both false → ungated.
 	v2PublishGateEnabled atomic.Bool
@@ -663,6 +668,16 @@ func (d *Downloader) SetRetentionFloor(floor uint64) {
 	d.retentionFloor = floor
 }
 
+// SetParentSection installs the manifest [parent] section a fork
+// publisher stamps onto every emitted manifest. Wired from backend.go
+// at startup when chain.Config.Parent != "". Nil clears (root chain
+// default).
+func (d *Downloader) SetParentSection(section *ParentSection) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.parentSection = section
+}
+
 // SetSelfIP records this node's externally-advertised IP. Production
 // wiring keeps it fresh from the discv5 ENR. Passing nil clears it.
 // Also forwards to the TorrentPeerManager so the same-host loopback
@@ -939,6 +954,7 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	forkCutBlock := d.forkCutBlock
 	forkStepToBlock := d.forkStepToBlock
 	retentionFloor := d.retentionFloor
+	parentSection := d.parentSection
 	d.lock.RUnlock()
 	if selfCheck != nil {
 		pub.SetSelfCheck(selfCheck)
@@ -957,6 +973,9 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	}
 	if retentionFloor > 0 {
 		pub.SetRetentionFloor(retentionFloor)
+	}
+	if parentSection != nil {
+		pub.SetParentSection(parentSection)
 	}
 	// Re-seed the generations a fresh publisher recovered from disk
 	// (see RollingV2Publisher.ResumeSeeding), once.

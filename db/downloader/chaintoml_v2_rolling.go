@@ -285,6 +285,10 @@ type RollingV2Publisher struct {
 	forkCutBlock    uint64
 	forkStepToBlock StepToBlock
 
+	// parentSection is stamped onto every published manifest for a fork
+	// chain. Nil on root-chain publishers. Set via SetParentSection.
+	parentSection *ParentSection
+
 	// retentionFloor is the step-unit floor below which state-domain
 	// files are dropped from the advertisement. Set by a minimal-mode
 	// publisher via SetRetentionFloor so the manifest never claims
@@ -410,6 +414,15 @@ func (r *RollingV2Publisher) SetRetentionFloor(floor uint64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.retentionFloor = floor
+}
+
+// SetParentSection installs the ParentSection stamped onto every
+// published manifest. Fork publishers call this at startup with the
+// section built by ParentSectionFromCut. Nil clears (root-chain).
+func (r *RollingV2Publisher) SetParentSection(section *ParentSection) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.parentSection = section
 }
 
 // resolveENRFP returns the ENR fingerprint for filename construction:
@@ -596,6 +609,10 @@ func (r *RollingV2Publisher) Publish(
 	// directly.
 	manifest.GenesisFork = r.chainIdentityGenesisFork
 	manifest.Forks = r.chainIdentityForks
+	if r.parentSection != nil {
+		sectionCopy := *r.parentSection
+		manifest.Parent = &sectionCopy
+	}
 
 	// Producer self-check: fail loud if this manifest disagrees with
 	// canonical for any known-canonical name. The check happens BEFORE

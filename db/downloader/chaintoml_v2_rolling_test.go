@@ -76,6 +76,64 @@ func listV2Generations(t *testing.T, snapDir string) []string {
 	return genIDs
 }
 
+// TestRollingV2Publisher_ForkStampsParentSection pins F-1/3: a fork
+// publisher configured via SetParentSection emits every published
+// manifest with the [parent] section populated.
+func TestRollingV2Publisher_ForkStampsParentSection(t *testing.T) {
+	snapDir := t.TempDir()
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
+	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
+
+	section := &ParentSection{
+		Chain:             "mainnet",
+		ManifestHash:      "1234567890abcdef1234567890abcdef12345678",
+		CutBlock:          20_000_000,
+		CutBlockHash:      "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+		NetworkID:         23_760_000,
+		ParentGenesisHash: "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
+		ParentForks: []ForkActivation{
+			{Name: "Byzantium", Block: 4_370_000},
+		},
+	}
+	pub.SetParentSection(section)
+
+	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x60), 0, nil)
+	require.NoError(t, err)
+
+	genIDs := pub.History()
+	require.Len(t, genIDs, 1)
+	body, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, genIDs[0])))
+	require.NoError(t, err)
+	parsed, err := ParseV2(body)
+	require.NoError(t, err)
+	require.NotNil(t, parsed.Parent, "fork manifest must carry [parent] section")
+	require.Equal(t, section.Chain, parsed.Parent.Chain)
+	require.Equal(t, section.CutBlock, parsed.Parent.CutBlock)
+	require.Equal(t, section.ParentGenesisHash, parsed.Parent.ParentGenesisHash)
+	require.Equal(t, section.ParentForks, parsed.Parent.ParentForks)
+}
+
+// TestRollingV2Publisher_RootChainOmitsParentSection: without
+// SetParentSection, no [parent] block is emitted.
+func TestRollingV2Publisher_RootChainOmitsParentSection(t *testing.T) {
+	snapDir := t.TempDir()
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
+	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
+
+	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x61), 0, nil)
+	require.NoError(t, err)
+
+	genIDs := pub.History()
+	require.Len(t, genIDs, 1)
+	body, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, genIDs[0])))
+	require.NoError(t, err)
+	parsed, err := ParseV2(body)
+	require.NoError(t, err)
+	require.Nil(t, parsed.Parent, "root chain manifest must NOT carry [parent] section")
+}
+
 // TestRollingV2Publisher_GenerationsAdvance covers the basic shape:
 // repeated Publish calls produce sequentially-numbered files and
 // distinct infohashes (since the metainfo Name field changes each
