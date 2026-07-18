@@ -110,6 +110,28 @@ func TestConfig_MinForkUnwindBlock_JSONRoundTrip(t *testing.T) {
 	require.Equal(t, uint64(15_000_000), decoded.MinForkUnwindBlock)
 }
 
+func TestConfig_ParentGenesisHash_JSONRoundTrip(t *testing.T) {
+	original := &Config{
+		ChainName: "mainnet-fork-20000000",
+		ChainID:   uint256.NewInt(1),
+		Parent:    "mainnet",
+		CutBlock:  20_000_000,
+		ParentGenesisHash: [32]byte{
+			0xd4, 0xe5, 0x67, 0x40, 0xf8, 0x76, 0xae, 0xf8,
+			0xc0, 0x10, 0xb8, 0x6a, 0x40, 0xd5, 0xf5, 0x67,
+			0x45, 0xa1, 0x18, 0xd0, 0x90, 0x6a, 0x34, 0xe6,
+			0x9a, 0xec, 0x8c, 0x0d, 0xb1, 0xcb, 0x8f, 0xa3,
+		},
+	}
+	data, err := json.Marshal(original)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "parentGenesisHash")
+
+	var decoded Config
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	require.Equal(t, original.ParentGenesisHash, decoded.ParentGenesisHash)
+}
+
 func TestConfig_MinForkUnwindBlock_OmittedWhenZero(t *testing.T) {
 	// Zero-value MinForkUnwindBlock is dropped by omitempty and
 	// interpreted at read-time as CutBlock (fork-local unwind only).

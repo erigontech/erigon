@@ -896,6 +896,58 @@ func TestParentSection_MinForkUnwindBlockRoundTrip(t *testing.T) {
 	require.Equal(t, uint64(20000000), parsed.Parent.MinForkUnwindBlock)
 }
 
+// TestParentSection_ParentGenesisAndForksRoundTrip pins the E.2
+// schema additions: parent_genesis_hash + parent_forks round-trip
+// through TOML unchanged.
+func TestParentSection_ParentGenesisAndForksRoundTrip(t *testing.T) {
+	original := &ChainTomlV2{
+		Version: 2,
+		Parent: &ParentSection{
+			Chain:             "mainnet",
+			ManifestHash:      "1234567890abcdef1234567890abcdef12345678",
+			CutBlock:          20_000_000,
+			CutBlockHash:      "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+			NetworkID:         20_000_000,
+			ParentGenesisHash: "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
+			ParentForks: []ForkActivation{
+				{Name: "Byzantium", Block: 4_370_000},
+				{Name: "ShanghaiTime", Time: 1_681_338_455},
+			},
+		},
+	}
+	data, err := MarshalV2(original)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "parent_genesis_hash")
+	require.Contains(t, string(data), "[[parent.parent_forks]]")
+
+	parsed, err := ParseV2(data)
+	require.NoError(t, err)
+	require.NotNil(t, parsed.Parent)
+	require.Equal(t, original.Parent.ParentGenesisHash, parsed.Parent.ParentGenesisHash)
+	require.Equal(t, original.Parent.ParentForks, parsed.Parent.ParentForks)
+}
+
+// TestParentSection_ParentGenesisAndForksOmittedWhenEmpty confirms
+// early manifests that don't populate the E.2 fields stay minimal on
+// the wire (permissive back-compat for the fork-from CLI predating
+// E.2 hardening).
+func TestParentSection_ParentGenesisAndForksOmittedWhenEmpty(t *testing.T) {
+	original := &ChainTomlV2{
+		Version: 2,
+		Parent: &ParentSection{
+			Chain:        "mainnet",
+			ManifestHash: "1234567890abcdef1234567890abcdef12345678",
+			CutBlock:     20_000_000,
+			CutBlockHash: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+			NetworkID:    20_000_000,
+		},
+	}
+	data, err := MarshalV2(original)
+	require.NoError(t, err)
+	require.NotContains(t, string(data), "parent_genesis_hash")
+	require.NotContains(t, string(data), "parent_forks")
+}
+
 // TestParentSection_MinForkUnwindBlockOmittedWhenZero confirms the
 // zero-value (which the runtime interprets as CutBlock — "unwind
 // within own fork only") emits nothing on the wire, so unconfigured

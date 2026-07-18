@@ -295,6 +295,23 @@ type ParentSection struct {
 	// unwind); a positive value below CutBlock permits deeper unwinds
 	// down to the given block, requiring explicit operator configuration.
 	MinForkUnwindBlock uint64 `toml:"min_fork_unwind_block,omitempty"`
+
+	// ParentGenesisHash is hex(32-byte) of the parent chain's genesis
+	// block hash, captured at fork-from time. Cross-checked by a
+	// fork-follower against the locally-known genesis hash for the
+	// declared parent chain — a mismatch rejects the fork's lineage
+	// claim before any UCAN work is done.
+	ParentGenesisHash string `toml:"parent_genesis_hash,omitempty"`
+
+	// ParentForks is the parent chain's activated continuous fork
+	// schedule at cut time. Immutable snapshot: parent's later hard
+	// forks don't retroactively invalidate this fork's lineage anchor
+	// (F.4). A fork-follower recomputes the parent's EIP-2124 ForkID
+	// from ParentGenesisHash + ParentForks + CutBlock and cross-checks
+	// it against the ForkID derived from the local registry's
+	// snapshot of the parent's schedule — a mismatch rejects the
+	// manifest.
+	ParentForks []ForkActivation `toml:"parent_forks,omitempty"`
 }
 
 // ParentTrustRootEntry is a single entry in ParentSection's
