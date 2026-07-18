@@ -2,8 +2,24 @@
 
 **Companion to**: [`20260630-fork-testing-scenarios.md`](20260630-fork-testing-scenarios.md).
 
-Records the 5 design decisions taken in the 2026-07-18 planning conversation so
+Records the design decisions taken in the 2026-07-18 planning conversation so
 downstream test authors and implementers don't need to re-open the questions.
+
+## F-0 progress (2026-07-18)
+
+| Scenario | Status | Landed as |
+|---|---|---|
+| Schema — MinForkUnwindBlock | ✓ | `chain.Config.MinForkUnwindBlock` + `ParentSection.MinForkUnwindBlock` |
+| E.2 — genesis + fork-ID cross-checks | ✓ | `ParentSection.ParentGenesisHash` + `ParentSection.ParentForks` + `ValidateParentIdentity` |
+| A.4 — UCAN binding-at-fork-from picker | ✓ | `snapshotauth.PickIssuerFromAcceptSet` |
+| B.4 — parent-trust-root-rotation-immutable | ✓ | `TestForkAuthorityCascade_ParentRotationDoesNotWidenAcceptSet` |
+| E.5 — malformed forked-from at cascade | ✓ | `TestForkAuthorityCascade_MalformedForkedFromRejects` |
+| E.1 — consumer-side pre-cut filter | ✓ | Already covered in `parentcut_validate_postcut_test.go` (plan doc's ✗ was stale) |
+| A.2 — jagged-cut PendingReplacement supersession | ⏸ | Needs jagged-name parser support (`PopulateFromName` extension) |
+| E.3 — UCAN wrong-root integration | ⏸ | Needs multi-process harness |
+| C.4 — arbitrary depth cascade walker | ⏸ | Needs cascade-walker code (recursion + circularity) |
+
+All landed items are additive-only — no code paths shared with the running unwind soak. The branch `mh/fork-testing-f0` isolates them until the soak signs off.
 
 ## D-1 — B.3 fallback: hard fail
 
