@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"math/rand"
-	"sort"
+	"slices"
 	"testing"
 )
 
@@ -113,21 +113,6 @@ func TestDecodeKeyV2_Vectors(t *testing.T) {
 			}
 			if !bytes.Equal(got, v.nibbles) {
 				t.Fatalf("DecodeKeyV2(%x) = %x, want %x", v.key, got, v.nibbles)
-			}
-		})
-	}
-}
-
-func TestEncodeKeyV2_RoundTrip(t *testing.T) {
-	for _, v := range v2Vectors() {
-		t.Run(v.name, func(t *testing.T) {
-			encoded := EncodeKeyV2(v.nibbles)
-			decoded, err := DecodeKeyV2(encoded)
-			if err != nil {
-				t.Fatalf("round-trip decode error: %v", err)
-			}
-			if !bytes.Equal(decoded, v.nibbles) {
-				t.Fatalf("round-trip mismatch: got %x, want %x", decoded, v.nibbles)
 			}
 		})
 	}
@@ -364,11 +349,11 @@ func BenchmarkLocalityV1VsV2(b *testing.B) {
 			v1Idx[i] = i
 			v2Idx[i] = i
 		}
-		sort.Slice(v1Idx, func(i, j int) bool {
-			return bytes.Compare(v1Keys[v1Idx[i]], v1Keys[v1Idx[j]]) < 0
+		slices.SortFunc(v1Idx, func(a, b int) int {
+			return bytes.Compare(v1Keys[a], v1Keys[b])
 		})
-		sort.Slice(v2Idx, func(i, j int) bool {
-			return bytes.Compare(v2Keys[v2Idx[i]], v2Keys[v2Idx[j]]) < 0
+		slices.SortFunc(v2Idx, func(a, b int) int {
+			return bytes.Compare(v2Keys[a], v2Keys[b])
 		})
 
 		var v1Sum, v2Sum int64

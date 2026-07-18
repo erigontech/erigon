@@ -98,7 +98,7 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.GetHashFn == nil {
 		cfg.GetHashFn = func(n uint64) (common.Hash, error) {
-			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
+			return crypto.Keccak256Hash([]byte(new(big.Int).SetUint64(n).String())), nil
 		}
 	}
 }
@@ -204,7 +204,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil, nil)
 
 	// Call the code with the given configuration.
-	code, address, leftOverGas, _, err := vmenv.Create(
+	code, address, leftOverGas, _, _, err := vmenv.Create(
 		sender,
 		input,
 		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),

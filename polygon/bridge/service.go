@@ -178,7 +178,7 @@ func (s *Service) Run(ctx context.Context) error {
 		orderedAndNoGaps := true
 		knownEventID := lastFetchedEventId
 
-		for i := 0; i < len(events); i++ {
+		for i := range events {
 			if events[i].ID == knownEventID+1 {
 				knownEventID = events[i].ID
 				continue

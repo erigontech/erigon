@@ -19,11 +19,9 @@ package direct
 import (
 	"context"
 	"fmt"
-	"io"
 	"sync"
 
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -230,86 +228,28 @@ func (c *SentryClientDirect) PeerById(ctx context.Context, in *sentryproto.PeerB
 	return c.server.PeerById(ctx, in)
 }
 
-// -- start Messages
-
 func (c *SentryClientDirect) Messages(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
 	allProtocols := append([]sentryproto.Protocol{c.protocol}, c.sideProtocols...)
 	in = &sentryproto.MessagesRequest{
 		Ids: filterIds(in.Ids, allProtocols),
 	}
-	ch := make(chan *inboundMessageReply, libsentry.MessagesQueueSize)
-	streamServer := &SentryMessagesStreamS{ch: ch, ctx: ctx}
+	ch := make(chan libsentry.StreamReply[*sentryproto.InboundMessage], libsentry.MessagesQueueSize)
+	streamServer := &libsentry.SentryStreamS[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}
 	go func() {
 		defer close(ch)
 		streamServer.Err(c.server.Messages(in, streamServer))
 	}()
-	return &SentryMessagesStreamC{ch: ch, ctx: ctx}, nil
+	return &libsentry.SentryStreamC[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}, nil
 }
-
-type inboundMessageReply struct {
-	r   *sentryproto.InboundMessage
-	err error
-}
-
-// SentryMessagesStreamS implements proto_sentryproto.Sentry_ReceiveMessagesServer
-type SentryMessagesStreamS struct {
-	ch  chan *inboundMessageReply
-	ctx context.Context
-	grpc.ServerStream
-}
-
-func (s *SentryMessagesStreamS) Send(m *sentryproto.InboundMessage) error {
-	s.ch <- &inboundMessageReply{r: m}
-	libsentry.EvictOldestIfHalfFull(s.ch)
-	return nil
-}
-
-func (s *SentryMessagesStreamS) Context() context.Context { return s.ctx }
-
-func (s *SentryMessagesStreamS) Err(err error) {
-	if err == nil {
-		return
-	}
-	s.ch <- &inboundMessageReply{err: err}
-}
-
-type SentryMessagesStreamC struct {
-	ch  chan *inboundMessageReply
-	ctx context.Context
-	grpc.ClientStream
-}
-
-func (c *SentryMessagesStreamC) Recv() (*sentryproto.InboundMessage, error) {
-	m, ok := <-c.ch
-	if !ok || m == nil {
-		return nil, io.EOF
-	}
-	return m.r, m.err
-}
-
-func (c *SentryMessagesStreamC) Context() context.Context { return c.ctx }
-
-func (c *SentryMessagesStreamC) RecvMsg(anyMessage any) error {
-	m, err := c.Recv()
-	if err != nil {
-		return err
-	}
-	outMessage := anyMessage.(*sentryproto.InboundMessage)
-	proto.Merge(outMessage, m)
-	return nil
-}
-
-// -- end Messages
-// -- start Peers
 
 func (c *SentryClientDirect) PeerEvents(ctx context.Context, in *sentryproto.PeerEventsRequest, opts ...grpc.CallOption) (sentryproto.Sentry_PeerEventsClient, error) {
-	ch := make(chan *peersReply, libsentry.MessagesQueueSize)
-	streamServer := &SentryPeersStreamS{ch: ch, ctx: ctx}
+	ch := make(chan libsentry.StreamReply[*sentryproto.PeerEvent], libsentry.MessagesQueueSize)
+	streamServer := &libsentry.SentryStreamS[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}
 	go func() {
 		defer close(ch)
 		streamServer.Err(c.server.PeerEvents(in, streamServer))
 	}()
-	return &SentryPeersStreamC{ch: ch, ctx: ctx}, nil
+	return &libsentry.SentryStreamC[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}, nil
 }
 
 func (c *SentryClientDirect) AddPeer(ctx context.Context, in *sentryproto.AddPeerRequest, opts ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {
@@ -327,61 +267,6 @@ func (c *SentryClientDirect) AddTrustedPeer(ctx context.Context, in *sentryproto
 func (c *SentryClientDirect) RemoveTrustedPeer(ctx context.Context, in *sentryproto.RemovePeerRequest, opts ...grpc.CallOption) (*sentryproto.RemovePeerReply, error) {
 	return c.server.RemoveTrustedPeer(ctx, in)
 }
-
-type peersReply struct {
-	r   *sentryproto.PeerEvent
-	err error
-}
-
-// SentryPeersStreamS - implements proto_sentryproto.Sentry_ReceivePeersServer
-type SentryPeersStreamS struct {
-	ch  chan *peersReply
-	ctx context.Context
-	grpc.ServerStream
-}
-
-func (s *SentryPeersStreamS) Send(m *sentryproto.PeerEvent) error {
-	s.ch <- &peersReply{r: m}
-	libsentry.EvictOldestIfHalfFull(s.ch)
-	return nil
-}
-
-func (s *SentryPeersStreamS) Context() context.Context { return s.ctx }
-
-func (s *SentryPeersStreamS) Err(err error) {
-	if err == nil {
-		return
-	}
-	s.ch <- &peersReply{err: err}
-}
-
-type SentryPeersStreamC struct {
-	ch  chan *peersReply
-	ctx context.Context
-	grpc.ClientStream
-}
-
-func (c *SentryPeersStreamC) Recv() (*sentryproto.PeerEvent, error) {
-	m, ok := <-c.ch
-	if !ok || m == nil {
-		return nil, io.EOF
-	}
-	return m.r, m.err
-}
-
-func (c *SentryPeersStreamC) Context() context.Context { return c.ctx }
-
-func (c *SentryPeersStreamC) RecvMsg(anyMessage any) error {
-	m, err := c.Recv()
-	if err != nil {
-		return err
-	}
-	outMessage := anyMessage.(*sentryproto.PeerEvent)
-	proto.Merge(outMessage, m)
-	return nil
-}
-
-// -- end Peers
 
 func (c *SentryClientDirect) NodeInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.NodeInfoReply, error) {
 	return c.server.NodeInfo(ctx, in)

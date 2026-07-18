@@ -330,7 +330,7 @@ func TestCheckWitnessKeysComplete(t *testing.T) {
 	})
 	t.Run("large missing list truncated, total preserved", func(t *testing.T) {
 		used := make(map[common.Address]struct{})
-		for i := 0; i < 50; i++ {
+		for i := range 50 {
 			var a common.Address
 			a[19] = byte(i)
 			used[a] = struct{}{}

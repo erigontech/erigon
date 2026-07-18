@@ -77,7 +77,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 	keys := make([][]byte, keyCount)
 
 	bk, bv := make([]byte, keySize), make([]byte, valueSize)
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		n, err := rnd.Read(bk)
 		require.Equal(tb, keySize, n)
 		require.NoError(tb, err)
@@ -122,7 +122,7 @@ func testDbAndAggregatorForLargeData(tb testing.TB, aggStep uint64, persistentDi
 	agg := testAgg(tb, db, dirs, aggStep, logger)
 	err := agg.OpenFolder()
 	require.NoError(tb, err)
-	tdb, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(tb, err)
 	tb.Cleanup(tdb.Close)
 	return tdb, agg, dirs
@@ -138,7 +138,7 @@ func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.TemporalRwDB, *sta
 	agg := testAgg(tb, db, dirs, aggStep, logger)
 	err := agg.OpenFolder()
 	require.NoError(tb, err)
-	tdb, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(tb, err)
 	tb.Cleanup(tdb.Close)
 	return tdb, agg
@@ -155,7 +155,7 @@ func testAgg(tb testing.TB, db kv.RwDB, dirs datadir.Dirs, aggStep uint64, logge
 func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig) (kv.TemporalRwDB, *state.Aggregator) {
 	tb.Helper()
 	db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, !cfg.disableCommitmentBranchTransform)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, !cfg.disableCommitmentBranchTransform)
 
 	ctx := tb.Context()
 
@@ -174,10 +174,10 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 	tb.Logf("keys %d vals %d\n", len(keys), len(vals))
 
 	var txNum, blockNum uint64
-	for i := 0; i < len(vals); i++ {
+	for i := range vals {
 		txNum = uint64(i)
 
-		for j := 0; j < len(keys); j++ {
+		for j := range keys {
 			acc := accounts.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i * 100_000)),
@@ -230,7 +230,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	domains.Close()
 
 	// now do the squeeze
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 	err = state.SqueezeCommitmentFiles(t.Context(), state.AggTx(rwTx), log.New())
 	require.NoError(t, err)
 
@@ -374,7 +374,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	}
 
 	agg = testAgg(t, db, agg.Dirs(), agg.StepSize(), log.New())
-	db, err := temporal.New(db, agg)
+	db, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -451,7 +451,7 @@ func makeCodeValue(idx uint64) []byte {
 	binary.BigEndian.PutUint64(buf[1:], idx)
 	h := sha256.Sum256(buf[:])
 	// Fill code with hash-derived bytes, repeating as needed
-	for i := 0; i < size; i++ {
+	for i := range size {
 		code[i] = h[i%len(h)]
 	}
 	return code
@@ -460,13 +460,13 @@ func makeCodeValue(idx uint64) []byte {
 func TestMakeAccountAddr_NibbleDistribution(t *testing.T) {
 	nibbles := make(map[byte]int, 16)
 	const count = 1000
-	for i := uint64(0); i < count; i++ {
+	for i := range uint64(count) {
 		addr := makeAccountAddr(i)
 		firstNibble := addr[0] >> 4
 		nibbles[firstNibble]++
 	}
 	// All 16 nibble values must be present
-	for n := byte(0); n < 16; n++ {
+	for n := range byte(16) {
 		require.Positive(t, nibbles[n], "missing first nibble %x in %d generated keys", n, count)
 	}
 	t.Logf("nibble distribution over %d keys: %v", count, nibbles)
@@ -581,7 +581,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	defer anotherAgg.Close()
 	require.NoError(t, anotherAgg.OpenFolder())
 
-	db, err = temporal.New(db, anotherAgg) // to set aggregator in the db
+	db, err = temporal.New(db, anotherAgg, nil) // to set aggregator in the db
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -673,7 +673,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 	t.Logf("Keys: accounts=%d storage=%d code=%d total=%d", numAccounts, totalStorage, totalCode, totalKeys)
 
 	db, agg, dirs := testDbAndAggregatorForLargeData(t, stepSize, persistentDir)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 
 	ctx := t.Context()
 
@@ -710,7 +710,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 		lastRoot    []byte
 	)
 
-	for txNum := uint64(0); txNum < totalTxs; txNum++ {
+	for txNum := range totalTxs {
 		// Write accounts batch
 		for i := uint64(0); i < accPerTx && accIdx < numAccounts; i++ {
 			addr := makeAccountAddr(accIdx)
@@ -749,7 +749,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 			require.NoError(t, err)
 
 			// Update account with real code hash
-			codeHash := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(code)))
+			codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 			acc := accounts.Account{
 				Nonce:       txNum,
 				Balance:     *uint256.NewInt(txNum * 1000),

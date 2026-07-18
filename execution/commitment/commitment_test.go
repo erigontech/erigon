@@ -22,7 +22,7 @@ import (
 	"encoding/binary"
 	"math/bits"
 	"math/rand"
-	"sort"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -109,7 +109,7 @@ func gatedCtxFactory(entered, release chan struct{}) TrieContextFactory {
 // (0x00-0x0F), with the index encoded in the trailing nibbles so keys are distinct.
 func genNibbleKeys(n, keyLen int) [][]byte {
 	keys := make([][]byte, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		k := make([]byte, keyLen)
 		v := i
 		for j := keyLen - 1; j >= 0; j-- {
@@ -131,20 +131,15 @@ func TestHashSort_WarmupArenaNoRace(t *testing.T) {
 
 	forEachMode(t, func(t *testing.T, mode Mode) {
 		ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+		forceDirectSpill(ut) // these tests pin the arena/etl path
 		for _, k := range genNibbleKeys(numKeys, keyLen) {
 			ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 		}
 		require.EqualValues(t, numKeys, ut.Size())
 
 		ctx := context.Background()
-		warmuper := NewWarmuper(ctx, WarmupConfig{
-			Enabled: true,
-			// Large per-level stall keeps the straggler in-flight across the arena reset.
-			CtxFactory: slowCtxFactory(2 * time.Millisecond),
-			NumWorkers: 4,
-			MaxDepth:   64,
-			LogPrefix:  "test",
-		})
+		// Large per-level stall keeps the straggler in-flight across the arena reset.
+		warmuper := testWarmuper(ctx, slowCtxFactory(2*time.Millisecond), 4)
 		warmuper.Start()
 
 		visited := 0
@@ -168,6 +163,7 @@ func TestHashSort_NilWarmuper(t *testing.T) {
 
 	forEachMode(t, func(t *testing.T, mode Mode) {
 		ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+		forceDirectSpill(ut) // these tests pin the arena/etl path
 		for _, k := range genNibbleKeys(numKeys, keyLen) {
 			ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 		}
@@ -194,19 +190,14 @@ func TestHashSort_WarmupLap(t *testing.T) {
 
 	forEachMode(t, func(t *testing.T, mode Mode) {
 		ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+		forceDirectSpill(ut) // these tests pin the arena/etl path
 		for _, k := range genNibbleKeys(numKeys, keyLen) {
 			ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 		}
 		require.EqualValues(t, numKeys, ut.Size())
 
 		ctx := context.Background()
-		warmuper := NewWarmuper(ctx, WarmupConfig{
-			Enabled:    true,
-			CtxFactory: slowCtxFactory(2 * time.Millisecond),
-			NumWorkers: 4,
-			MaxDepth:   64,
-			LogPrefix:  "test",
-		})
+		warmuper := testWarmuper(ctx, slowCtxFactory(2*time.Millisecond), 4)
 		warmuper.Start()
 
 		visited := 0
@@ -247,6 +238,7 @@ func TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant(t *testing.T) {
 
 	forEachMode(t, func(t *testing.T, mode Mode) {
 		ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+		forceDirectSpill(ut) // these tests pin the arena/etl path
 		for _, k := range genNibbleKeys(numKeys, keyLen) {
 			ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 		}
@@ -255,13 +247,7 @@ func TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant(t *testing.T) {
 		defer cancel()
 		entered := make(chan struct{}, 1)
 		release := make(chan struct{})
-		warmuper := NewWarmuper(ctx, WarmupConfig{
-			Enabled:    true,
-			CtxFactory: gatedStragglerFactory(entered, release),
-			NumWorkers: 4,
-			MaxDepth:   64,
-			LogPrefix:  "test",
-		})
+		warmuper := testWarmuper(ctx, gatedStragglerFactory(entered, release), 4)
 		warmuper.Start()
 		defer warmuper.CloseAndWait()
 		defer close(release)
@@ -337,13 +323,7 @@ func TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone(t *testing.T) {
 
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	warmuper := NewWarmuper(context.Background(), WarmupConfig{
-		Enabled:    true,
-		CtxFactory: gatedCtxFactory(entered, release),
-		NumWorkers: 1,
-		MaxDepth:   64,
-		LogPrefix:  "test",
-	})
+	warmuper := testWarmuper(context.Background(), gatedCtxFactory(entered, release), 1)
 	warmuper.Start()
 	defer func() { require.NoError(t, warmuper.Wait()) }()
 
@@ -381,13 +361,7 @@ func TestWarmuper_WaitBufferFree_UnblocksOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	warmuper := NewWarmuper(ctx, WarmupConfig{
-		Enabled:    true,
-		CtxFactory: gatedCtxFactory(entered, release),
-		NumWorkers: 1,
-		MaxDepth:   64,
-		LogPrefix:  "test",
-	})
+	warmuper := testWarmuper(ctx, gatedCtxFactory(entered, release), 1)
 	warmuper.Start()
 	defer warmuper.CloseAndWait()
 	defer close(release)
@@ -420,13 +394,7 @@ func TestWarmuper_WaitBufferFree_UnblocksOnCancel(t *testing.T) {
 func TestWarmuper_WaitBufferFree_FastPath(t *testing.T) {
 	t.Parallel()
 
-	warmuper := NewWarmuper(context.Background(), WarmupConfig{
-		Enabled:    true,
-		CtxFactory: noopCtxFactory,
-		NumWorkers: 1,
-		MaxDepth:   64,
-		LogPrefix:  "test",
-	})
+	warmuper := testWarmuper(context.Background(), noopCtxFactory, 1)
 	warmuper.Start()
 	defer func() { require.NoError(t, warmuper.Wait()) }()
 
@@ -445,13 +413,7 @@ func TestWarmuper_WaitBufferFree_FastPath(t *testing.T) {
 
 func TestBranchData_MergeHexBranches2(t *testing.T) {
 	t.Parallel()
-	row, bm := generateCellRow(t, 16)
-
-	be := NewBranchEncoder(1024)
-	cellData := generateCellEncodeDataRow(t, row, bm)
-	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
-
-	require.NoError(t, err)
+	row, bm, enc := encodeCellRow(t, 16)
 	require.NotEmpty(t, enc)
 	t.Logf("enc [%d] %x\n", len(enc), enc)
 
@@ -488,11 +450,7 @@ func TestBranchData_ChildCount(t *testing.T) {
 	require.Equal(t, 0, BranchData{0xff, 0xff, 0x00}.ChildCount(), "buffer shorter than 4 bytes has no afterMap")
 
 	for _, size := range []int{1, 2, 5, 16} {
-		row, bm := generateCellRow(t, size)
-		cellData := generateCellEncodeDataRow(t, row, bm)
-		be := NewBranchEncoder(1024)
-		enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
-		require.NoError(t, err)
+		_, bm, enc := encodeCellRow(t, size)
 		require.Equal(t, size, bits.OnesCount16(bm))
 		require.Equal(t, size, enc.ChildCount(), "ChildCount must equal the number of afterMap children")
 	}
@@ -528,7 +486,7 @@ func TestBranchData_MergeHexBranchesEmptyBranches(t *testing.T) {
 func TestDecodeBranchWithLeafHashes(t *testing.T) {
 	row, bm := generateCellRow(t, 16)
 
-	for i := 0; i < len(row); i++ {
+	for i := range row {
 		if row[i].accountAddrLen > 0 {
 			rand.Read(row[i].stateHash[:])
 			row[i].stateHashLen = 32
@@ -545,12 +503,7 @@ func TestDecodeBranchWithLeafHashes(t *testing.T) {
 func TestBranchData_ReplacePlainKeys(t *testing.T) {
 	t.Parallel()
 
-	row, bm := generateCellRow(t, 16)
-
-	be := NewBranchEncoder(1024)
-	cellData := generateCellEncodeDataRow(t, row, bm)
-	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
-	require.NoError(t, err)
+	_, _, enc := encodeCellRow(t, 16)
 
 	original := common.Copy(enc)
 
@@ -591,12 +544,7 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 	t.Parallel()
 
-	row, bm := generateCellRow(t, 16)
-
-	be := NewBranchEncoder(1024)
-	cellData := generateCellEncodeDataRow(t, row, bm)
-	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
-	require.NoError(t, err)
+	_, _, enc := encodeCellRow(t, 16)
 
 	original := common.Copy(enc)
 
@@ -639,11 +587,7 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 func TestBranchData_ReplacePlainKeys_PartialChange(t *testing.T) {
 	t.Parallel()
 
-	row, bm := generateCellRow(t, 16)
-	be := NewBranchEncoder(1024)
-	cellData := generateCellEncodeDataRow(t, row, bm)
-	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
-	require.NoError(t, err)
+	_, _, enc := encodeCellRow(t, 16)
 
 	original := common.Copy(enc)
 
@@ -732,21 +676,21 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 		{common.FromHex("97c780315e7820752006b7a918ce7ec023df263a87a715b64d5ab445e1782a760a974aaaaaaa1f81dfb7f1425f7d8358332af195"), []byte("value1")},
 		{common.FromHex("97c780315e7820752006b7a918ce7ec023df263a87a715b64d5ab445e1782a760a974f8810551f81dfb7f1425f7d835838888885"), []byte("value1")},
 	}
-	for i := 0; i < len(upds); i++ {
+	for i := range upds {
 		utUpdate.TouchPlainKey(string(upds[i].key), upds[i].val, utUpdate.TouchStorage)
 		utDirect.TouchPlainKey(string(upds[i].key), upds[i].val, utDirect.TouchStorage)
 	}
 
 	uniqUpds := make(map[string]tc)
-	for i := 0; i < len(upds); i++ {
+	for i := range upds {
 		uniqUpds[string(upds[i].key)] = upds[i]
 	}
 	sortedUniqUpds := make([]tc, 0, len(uniqUpds))
 	for _, v := range uniqUpds {
 		sortedUniqUpds = append(sortedUniqUpds, v)
 	}
-	sort.Slice(sortedUniqUpds, func(i, j int) bool {
-		return bytes.Compare(sortedUniqUpds[i].key, sortedUniqUpds[j].key) < 0
+	slices.SortFunc(sortedUniqUpds, func(a, b tc) int {
+		return bytes.Compare(a.key, b.key)
 	})
 
 	sz := utUpdate.Size()
@@ -756,14 +700,7 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.EqualValues(t, len(uniqUpds), sz)
 
 	ctx := context.Background()
-	cfg := WarmupConfig{
-		Enabled:    true,
-		CtxFactory: noopCtxFactory,
-		NumWorkers: 2,
-		MaxDepth:   64,
-		LogPrefix:  "test",
-	}
-	warmuper := NewWarmuper(ctx, cfg)
+	warmuper := testWarmuper(ctx, noopCtxFactory, 2)
 	warmuper.Start()
 
 	i := 0
@@ -781,14 +718,7 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a new warmuper for the second test
-	cfg2 := WarmupConfig{
-		Enabled:    true,
-		CtxFactory: noopCtxFactory,
-		NumWorkers: 2,
-		MaxDepth:   64,
-		LogPrefix:  "test",
-	}
-	warmuper2 := NewWarmuper(ctx, cfg2)
+	warmuper2 := testWarmuper(ctx, noopCtxFactory, 2)
 	warmuper2.Start()
 
 	i = 0

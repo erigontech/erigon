@@ -323,14 +323,13 @@ func (srv *Server) Self() (ln *enode.Node) {
 // It blocks until all active connections have been closed.
 func (srv *Server) Stop() {
 	srv.lock.Lock()
-	if !srv.running.Load() {
+	if !srv.running.CompareAndSwap(true, false) {
 		if srv.nodedb != nil {
 			srv.nodedb.Close()
 		}
 		srv.lock.Unlock()
 		return
 	}
-	srv.running.Store(false)
 	srv.quitFunc()
 	if srv.listener != nil {
 		// this unblocks listener Accept
@@ -575,9 +574,9 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 		}
 		var err error
 		if sconn != nil {
-			srv.discv5, err = discover.ListenV5(sconn, srv.localnode, cfg)
+			srv.discv5, err = discover.ListenV5(ctx, sconn, srv.localnode, cfg)
 		} else {
-			srv.discv5, err = discover.ListenV5(conn, srv.localnode, cfg)
+			srv.discv5, err = discover.ListenV5(ctx, conn, srv.localnode, cfg)
 		}
 		if err != nil {
 			// Clean up v4 if v5 setup fails.

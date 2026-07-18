@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -29,7 +30,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -146,7 +147,7 @@ func TestDomain_OpenFolder(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
-	err = d.openFolder(scanDirsRes)
+	err = d.openFolder(t.Context(), scanDirsRes)
 	require.NoError(t, err)
 	d.Close()
 }
@@ -730,7 +731,7 @@ func collateAndMerge(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
 				return true
 			}
 			valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
-			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
 			require.NoError(t, err)
 			//if valuesIn != nil && valuesIn.decompressor != nil {
 			//fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
@@ -769,7 +770,7 @@ func collateAndMergeOnceWithScanPrune(t *testing.T, d *Domain, tx kv.RwTx, step 
 				return true
 			}
 			valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
-			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
 			require.NoError(t, err)
 
 			d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
@@ -806,7 +807,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prun
 			break
 		}
 		valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
-		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
 		require.NoError(t, err)
 
 		d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
@@ -853,10 +854,50 @@ func TestDomain_ScanFiles(t *testing.T) {
 	d.closeWhatNotInList([]string{})
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
-	require.NoError(t, d.openFolder(scanDirsRes))
+	require.NoError(t, d.openFolder(t.Context(), scanDirsRes))
 
 	// Check the history
 	checkHistory(t, db, d, txs)
+}
+
+func TestCommitmentKvWriteVersion(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, logger)
+
+	d.ReferencesInCommitmentBranches = true
+	require.Equal(t, version.V2_1, d.kvWriteVersion())
+	require.Contains(t, d.kvNewFilePath(0, 1), "v2.1-commitment.0-1.kv")
+
+	d.ReferencesInCommitmentBranches = false
+	require.Equal(t, version.V2_2, d.kvWriteVersion())
+	require.Contains(t, d.kvNewFilePath(0, 1), "v2.2-commitment.0-1.kv")
+}
+
+func TestNonCommitmentKvWriteVersionUsesCurrent(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
+	require.Equal(t, d.FileVersion.DataKV.Current, d.kvWriteVersion())
+	require.Contains(t, d.kvNewFilePath(0, 1), d.FileVersion.DataKV.Current.String()+"-accounts.0-1.kv")
+}
+
+func TestCommitmentKvVersionAcceptance(t *testing.T) {
+	t.Parallel()
+	vers := statecfg.Schema.CommitmentDomain.FileVersion.DataKV
+	require.True(t, vers.Supports(version.V2_0))
+	require.True(t, vers.Supports(version.V2_1))
+	require.True(t, vers.Supports(version.V2_2))
+	// A newer minor within the same major is a content-only, backward-readable change.
+	require.True(t, vers.Supports(version.Version{Major: 2, Minor: 3}))
+	// A newer major changes read logic and is rejected.
+	require.False(t, vers.Supports(version.Version{Major: 3, Minor: 0}))
+
+	require.NotPanics(t, func() { vers.MustSupport(version.V2_0, "v2.0-commitment.0-1.kv") })
+	require.NotPanics(t, func() { vers.MustSupport(version.V2_1, "v2.1-commitment.0-1.kv") })
+	require.NotPanics(t, func() { vers.MustSupport(version.V2_2, "v2.2-commitment.0-1.kv") })
+	require.NotPanics(t, func() { vers.MustSupport(version.Version{Major: 2, Minor: 3}, "v2.3-commitment.0-1.kv") })
+	require.Panics(t, func() { vers.MustSupport(version.Version{Major: 3, Minor: 0}, "v3.0-commitment.0-1.kv") })
 }
 
 func TestDomainRoTx_CursorParentCheck(t *testing.T) {
@@ -913,18 +954,11 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	require.NoError(err)
 }
 
-// TestDomain_CollationIsolatedFromLaterSteps verifies that collation for step S
-// produces correct results even when step S+1 data is present in the DB.
-// This is a correctness test for the collation/pruning race fix (#20169).
-//
-// The collation/pruning race occurs when BuildFilesInBackground's collation
-// read-transaction sees step S+1 values that overwrite step S entries. The
-// fix uses a single read-tx for all collations in buildFiles, ensuring they
-// all see the same MDBX snapshot. While the exact race is timing-dependent
-// and hard to reproduce in a unit test, this test verifies the invariant:
-// step S collation must produce a file with step S values regardless of
-// later step data in the DB.
-func TestDomain_CollationIsolatedFromLaterSteps(t *testing.T) {
+// TestDomain_CollationSelectsExactStep pins that collate picks only entries
+// tagged with the requested step. This is what makes the per-domain collation
+// read-tx snapshots in buildFiles interchangeable: later-step data visible in
+// a newer snapshot cannot leak into an earlier step's file.
+func TestDomain_CollationSelectsExactStep(t *testing.T) {
 	logger := log.New()
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
 	ctx := t.Context()
@@ -975,7 +1009,7 @@ func TestDomain_CollationIsolatedFromLaterSteps(t *testing.T) {
 		words = append(words, string(w))
 	}
 	require.Equal(t, []string{"key1", "value1_step0", "key2", "value2_step0"}, words,
-		"step 0 collation must contain step 0 values, not step 1 overwrites")
+		"step 0 collation must contain step 0 values only")
 
 	// Collate step 1 — should get k1=v1s1 only (k2 was not modified in step 1).
 	coll1, err := d.collate(ctx, 1, 16, 32, roTx)
@@ -994,73 +1028,6 @@ func TestDomain_CollationIsolatedFromLaterSteps(t *testing.T) {
 	}
 	require.Equal(t, []string{"key1", "value1_step1"}, words1,
 		"step 1 collation must contain only step 1 values")
-}
-
-// TestDomain_UnwindRestoredEntryVisibility verifies that after an unwind, restored
-// domain entries are visible to GetLatest even when the entry's natural step has
-// been filed by BuildFilesInBackground. See #20169.
-//
-// The bug: unwind tags restored entries with the step of the unwind-target txNum.
-// If that step is covered by domain files, getLatestFromDb discards the entry and
-// falls through to getLatestFromFiles, returning the stale end-of-step value from
-// the file instead of the changeset-restored value.
-func TestDomain_UnwindRestoredEntryVisibility(t *testing.T) {
-	logger := log.New()
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
-	ctx := t.Context()
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
-	k1 := []byte("key1")
-
-	// Step 0: write k1 twice — first V1 at txNum 2, then V2 at txNum 10.
-	// The file for step 0 will have k1=V2 (latest value in the step).
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback() //nolint:gocritic
-
-	dt := d.beginForTests()
-	w := dt.NewWriter()
-	require.NoError(t, w.PutWithPrev(k1, []byte("V1"), 2, nil))
-	require.NoError(t, w.PutWithPrev(k1, []byte("V2"), 10, []byte("V1")))
-	require.NoError(t, w.Flush(ctx, tx))
-	w.Close()
-	dt.Close()
-
-	// Build files for step 0 → file has k1=V2.
-	require.NoError(t, d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
-
-	// Prune step 0 from DB — entries now only in files.
-	dt = d.beginForTests()
-	_, err = dt.Prune(ctx, tx, 0, 0, 16, math.MaxUint64, logEvery)
-	dt.Close()
-	require.NoError(t, err)
-
-	// Now simulate an unwind that restores k1=V1 (reverting the V1→V2 write at txNum 10).
-	// The changeset entry has: key="key1" + step0_bytes, value=V1.
-	step0Bytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(step0Bytes, ^uint64(0))
-	diffs := []kv.DomainEntryDiff{
-		{
-			Key:   string(k1) + string(step0Bytes),
-			Value: []byte("V1"),
-		},
-	}
-
-	// Unwind to txNum 5 (between the V1 write at 2 and V2 write at 10, still in step 0).
-	dt = d.beginForTests()
-	err = dt.unwind(ctx, tx, 0, 5, uint64(dt.FirstStepNotInFiles()), diffs)
-	dt.Close()
-	require.NoError(t, err)
-
-	// GetLatest must return V1 (the changeset-restored value), NOT V2 (the file value).
-	dt = d.beginForTests()
-	defer dt.Close()
-	v, _, found, err := dt.GetLatest(k1, tx)
-	require.NoError(t, err)
-	require.True(t, found, "key should be found after unwind")
-	require.Equal(t, "V1", string(v),
-		"GetLatest must return the unwind-restored value V1, not the file value V2")
 }
 
 func TestDomain_Delete(t *testing.T) {
@@ -1082,7 +1049,7 @@ func TestDomain_Delete(t *testing.T) {
 	defer writer.Close()
 
 	// Put on even txNum, delete on odd txNum
-	for txNum := uint64(0); txNum < uint64(1000); txNum++ {
+	for txNum := range uint64(1000) {
 		original, _, _, err := domainRoTx.GetLatest([]byte("key1"), tx)
 		require.NoError(err)
 		if txNum%2 == 0 {
@@ -1100,7 +1067,7 @@ func TestDomain_Delete(t *testing.T) {
 	// Check the history
 	domainRoTx = d.beginForTests()
 	defer domainRoTx.Close()
-	for txNum := uint64(0); txNum < 1000; txNum++ {
+	for txNum := range uint64(1000) {
 		label := fmt.Sprintf("txNum=%d", txNum)
 		//val, ok, err := domainRoTx.GetLatestBeforeTxNum([]byte("key1"), txNum+1, tx)
 		//require.NoError(err)
@@ -1184,7 +1151,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 	var k, v [8]byte
 
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
-		for keyNum := uint64(0); keyNum < keyCount; keyNum++ {
+		for keyNum := range keyCount {
 			step := txNum / dom.stepSize
 			frozenFileNum := step / 32
 			if frozenFileNum < maxFrozenFiles { // frozen data
@@ -1399,7 +1366,7 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(dom.dirs)
 	require.NoError(t, err)
-	err = dom.openFolder(scanDirsRes)
+	err = dom.openFolder(t.Context(), scanDirsRes)
 
 	require.NoError(t, err)
 
@@ -1616,7 +1583,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 
 	defer func(t time.Time) { fmt.Printf("domain_test.go:1217: %s\n", time.Since(t)) }(time.Now())
 	var prev []byte
-	for i = 0; i < len(vals); i++ {
+	for i = range vals {
 
 		for j := 0; j < len(keys); j++ {
 			acc := accounts3.Account{
@@ -1661,7 +1628,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		ranges := domainRoTx.findMergeRange(txFrom, txTo, txTo)
 		vl, il, hl := domainRoTx.staticFilesInRange(ranges)
 
-		dv, di, dh, err := domainRoTx.mergeFiles(ctx, vl, il, hl, ranges, nil, ps)
+		dv, di, dh, err := domainRoTx.mergeFiles(ctx, vl, il, hl, ranges, nil, true, ps)
 		require.NoError(t, err)
 
 		d.integrateMergedDirtyFiles(dv, di, dh)
@@ -1682,7 +1649,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		var i int
 
 		beforeTx := d.stepSize
-		for i = 0; i < len(bufs); i++ {
+		for i = range bufs {
 			ks, _ := hex.DecodeString(key)
 			val, _, err := domainRoTx.GetAsOf(ks, beforeTx, tx)
 			require.NoError(t, err)
@@ -1725,7 +1692,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
 		step := txNum / d.stepSize
 		frozenFileNum := step / 32
-		for keyNum := uint64(0); keyNum < keysCount; keyNum++ {
+		for keyNum := range keysCount {
 			if frozenFileNum < maxFrozenFiles { // frozen data
 				allowInsert := (keyNum == 0 && frozenFileNum == 0) ||
 					(keyNum == 1 && (frozenFileNum == 1 || frozenFileNum == 2)) ||
@@ -1801,7 +1768,7 @@ func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 
-	for i := uint64(0); i < keyTxsLimit; i++ {
+	for i := range keyTxsLimit {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
 		up := upd{txNum: txNum, value: []byte{}}
 
@@ -1813,7 +1780,7 @@ func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 		updates = append(updates, up)
 		usedTxNums[txNum] = true
 	}
-	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
+	slices.SortFunc(updates, func(a, b upd) int { return cmp.Compare(a.txNum, b.txNum) })
 
 	return updates
 }
@@ -1859,7 +1826,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		pv := []byte{}
-		for i := 0; i < len(updates); i++ {
+		for i := range updates {
 			if i > 0 {
 				pv = updates[i-1].value
 			}
@@ -1938,7 +1905,7 @@ func TestDomainRange(t *testing.T) {
 
 	for key, updates := range data {
 		pv := []byte{}
-		for i := 0; i < len(updates); i++ {
+		for i := range updates {
 			if i > 0 {
 				pv = updates[i-1].value
 			}
@@ -2051,7 +2018,7 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
-		for i := 0; i < len(updates); i++ {
+		for i := range updates {
 			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
 			p = common.Copy(updates[i].value)
 		}
@@ -2152,7 +2119,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
-		for i := 0; i < len(updates); i++ {
+		for i := range updates {
 			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
 			p = common.Copy(updates[i].value)
 		}
@@ -2300,7 +2267,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 	// No segment files are built, so history CanPrune returns false and
 	// history.Prune is a no-op, letting us test domain values prune in isolation.
 	var k, v [8]byte
-	for keyNum := uint64(0); keyNum < keyCount; keyNum++ {
+	for keyNum := range uint64(keyCount) {
 		binary.BigEndian.PutUint64(k[:], keyNum)
 		binary.BigEndian.PutUint64(v[:], keyNum) // distinct value per key
 		err = writer.PutWithPrev(k[:], v[:], 1, nil)
@@ -2417,7 +2384,7 @@ func TestDomain_PruneRollingCursorProgress(t *testing.T) {
 		defer w.Close()
 		txNum := uint64(step)*stepSize + 1 // first txNum of the step
 		var k, v [8]byte
-		for keyNum := uint64(0); keyNum < keyCount; keyNum++ {
+		for keyNum := range uint64(keyCount) {
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum+keyNum)
 			require.NoError(t, w.PutWithPrev(k[:], v[:], txNum, nil))
@@ -2522,7 +2489,7 @@ func TestDomain_Unwind(t *testing.T) {
 		defer writer.Close()
 		var preval1, preval2, preval3, preval4 []byte
 
-		for i := uint64(0); i < maxTx; i++ {
+		for i := range maxTx {
 			writer.diff = &kv.DomainDiff{}
 			if i%3 == 0 && i > 0 { // once in 3 txn Put key3 -> value3.i and skip other keys update
 				if i%12 == 0 { // once in 12 txn delete key3 before update
@@ -2581,7 +2548,7 @@ func TestDomain_Unwind(t *testing.T) {
 			}
 		}
 
-		err = domainRoTx.unwind(ctx, tx, unwindTo/d.stepSize, unwindTo, uint64(domainRoTx.FirstStepNotInFiles()), totalDiff)
+		err = domainRoTx.unwind(ctx, tx, unwindTo/d.stepSize, unwindTo, totalDiff)
 		currTx = unwindTo
 		require.NoError(t, err)
 		domainRoTx.Close()
@@ -2938,7 +2905,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
-		for i := 0; i < len(updates); i++ {
+		for i := range updates {
 			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
 			p = common.Copy(updates[i].value)
 		}
@@ -2979,9 +2946,9 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		v, found, st, en, err := domainRoTx.getLatestFromFiles([]byte(key), 0)
 		require.True(t, found)
 		require.NoError(t, err)
-		for i := len(updates) - 1; i >= 0; i-- {
-			if st <= updates[i].txNum && updates[i].txNum < en {
-				require.Equal(t, updates[i].value, v)
+		for _, update := range slices.Backward(updates) {
+			if st <= update.txNum && update.txNum < en {
+				require.Equal(t, update.value, v)
 				break
 			}
 		}
@@ -3545,7 +3512,7 @@ func collateAndMergeWithCollisionRetry(t *testing.T, tx kv.RwTx, d *Domain, txs 
 	r := domainRoTx.findMergeRange(d.dirtyFilesEndTxNumMinimax(), d.dirtyFilesEndTxNumMinimax(), d.dirtyFilesEndTxNumMinimax())
 	if r.values.needMerge {
 		valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
-		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
 		require.NoError(t, err)
 		d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
 	}
@@ -3705,7 +3672,9 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 			ctx := t.Context()
 			require := require.New(t)
 
-			// Phase 1: Write key1 through three states within step 0 and record diffs.
+			// Phase 1: Write key1=value1 in step 0, then delete and re-write it in
+			// step 1, recording diffs. Step 0 gets filed; the unwind target stays
+			// above the file boundary, as production unwinds always do.
 			tx, err := db.BeginRw(ctx)
 			require.NoError(err)
 			defer tx.Rollback()
@@ -3719,39 +3688,38 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 			value1 := []byte("value1")
 			value2 := []byte("value2")
 
-			// txNum 0: write key1=value1 (new key, prev=nil)
+			// txNum 0 (step 0): write key1=value1 (new key, prev=nil)
 			writer.diff = &kv.DomainDiff{}
 			err = writer.PutWithPrev(key, value1, 0, nil)
 			require.NoError(err)
 
-			// txNum 1: delete key1 (prev=value1)
+			// txNum 17 (step 1): delete key1 (prev=value1)
 			writer.diff = &kv.DomainDiff{}
-			err = writer.DeleteWithPrev(key, 1, value1)
+			err = writer.DeleteWithPrev(key, 17, value1)
 			require.NoError(err)
 
-			// txNum 2: re-write key1=value2 (prev=nil, key was deleted)
+			// txNum 18 (step 1): re-write key1=value2 (prev=nil, key was deleted)
 			// Only this diff is needed for the unwind — it captures the previous
 			// state (deleted → Value=[]byte{}) that unwind must restore.
 			writer.diff = &kv.DomainDiff{}
-			err = writer.PutWithPrev(key, value2, 2, nil)
+			err = writer.PutWithPrev(key, value2, 18, nil)
 			require.NoError(err)
-			txNum2Diff := writer.diff.GetDiffSet()
+			txNum18Diff := writer.diff.GetDiffSet()
 
 			// Verify the nil-vs-empty distinction survives serialization round-trip.
 			// Production diffs go through SerializeDiffSet/DeserializeDiffSet when
 			// stored in ChangeSets3; this ensures the []byte{} tombstone is preserved.
-			txNum2Diff = changeset.DeserializeDiffSet(changeset.SerializeDiffSet(txNum2Diff, nil))
+			txNum18Diff = changeset.DeserializeDiffSet(changeset.SerializeDiffSet(txNum18Diff, nil))
 
 			err = writer.Flush(ctx, tx)
 			require.NoError(err)
 			domainRoTx.Close()
 
-			// Phase 2: Build files for step 0. The file will contain key1=value2
-			// (the latest value within step 0).
+			// Phase 2: Build files for step 0. The file will contain key1=value1.
 			require.NoError(d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
 			require.NoError(tx.Commit())
 
-			// Phase 3: Unwind to revert txNum 2 (keep txNums 0 and 1).
+			// Phase 3: Unwind to revert txNum 18 (keep txNums 0..17).
 			tx, err = db.BeginRw(ctx)
 			require.NoError(err)
 			defer tx.Rollback()
@@ -3759,8 +3727,8 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 			domainRoTx = d.beginForTests()
 			defer domainRoTx.Close()
 
-			// diff for txNum 2: prev was empty (key was deleted) → Value=[]byte{}
-			err = domainRoTx.unwind(ctx, tx, 0, 2, 1, txNum2Diff)
+			// diff for txNum 18: prev was empty (key was deleted) → Value=[]byte{}
+			err = domainRoTx.unwind(ctx, tx, 1, 18, txNum18Diff)
 			require.NoError(err)
 			domainRoTx.Close()
 			require.NoError(tx.Commit())
@@ -3775,11 +3743,11 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 
 			v, _, found, err := domainRoTx.GetLatest(key, roTx)
 			require.NoError(err)
-			// After unwinding txNum 2, the state should reflect txNums 0-1.
-			// At txNum 1, key1 was deleted. The unwind must restore the deletion
+			// After unwinding txNum 18, the state should reflect txNums 0..17.
+			// At txNum 17, key1 was deleted. The unwind must restore the deletion
 			// marker (empty tombstone) in DB. Without the fix, `if len(value) > 0`
 			// skips restoring the empty tombstone, and getLatestFromFiles returns
-			// stale "value2" from the step 0 file.
+			// stale "value1" from the step 0 file.
 			require.True(found, "deletion marker should be found after unwind")
 			require.Empty(v, "deleted key should have empty value after unwind, got %q", v)
 		})

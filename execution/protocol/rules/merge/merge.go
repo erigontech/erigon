@@ -192,7 +192,11 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 
 	var rs types.FlatRequests
 	if config.IsPrague(header.Time) && !skipReceiptsEval {
-		rs = make(types.FlatRequests, 0, 3) // deposit, withdrawal, consolidation
+		reqCap := 3
+		if config.IsAmsterdam(header.Time) {
+			reqCap = 5
+		}
+		rs = make(types.FlatRequests, 0, reqCap) // deposit, withdrawal, consolidation, plus builder_deposit, builder_exit if Amsterdam is active
 
 		// Try to reuse buffer, fall back to allocation if concurrent access
 		var allLogs types.Logs
@@ -237,6 +241,26 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		}
 		if consolidations != nil {
 			rs = append(rs, *consolidations)
+		}
+
+		if config.IsAmsterdam(header.Time) {
+			// EIP-8282
+			builderDepositReq, err := misc.DequeueBuilderDepositRequests(syscall, state, config.GetBuilderDepositContract())
+			if err != nil {
+				return nil, err
+			}
+			if builderDepositReq != nil {
+				rs = append(rs, *builderDepositReq)
+			}
+
+			// EIP-8282
+			builderExitReq, err := misc.DequeueBuilderExitRequests(syscall, state, config.GetBuilderExitContract())
+			if err != nil {
+				return nil, err
+			}
+			if builderExitReq != nil {
+				rs = append(rs, *builderExitReq)
+			}
 		}
 		if header.RequestsHash != nil {
 			rh := rs.Hash()
@@ -464,7 +488,7 @@ func (s *Merge) GetTransferFunc() evmtypes.TransferFunc {
 }
 
 func (s *Merge) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
-	return misc.LogSelfDestructedAccounts // EIP-7708
+	return s.eth1Engine.GetPostApplyMessageFunc()
 }
 
 func (s *Merge) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,

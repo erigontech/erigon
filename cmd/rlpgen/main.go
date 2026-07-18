@@ -214,12 +214,11 @@ func findType(scope *types.Scope, typename string) (*types.Named, error) {
 func addEncodeLogic(b1, b2, b3 *bytes.Buffer, named *types.Named) error {
 
 	if _struct, ok := named.Underlying().(*types.Struct); ok {
-		for i := 0; i < _struct.NumFields(); i++ {
-
-			strTyp := matchTypeToString(_struct.Field(i).Type(), "")
+		for field := range _struct.Fields() {
+			strTyp := matchTypeToString(field.Type(), "")
 			// fmt.Println("-+-", strTyp)
 
-			matchStrTypeToFunc(strTyp)(b1, b2, b3, _struct.Field(i).Type(), _struct.Field(i).Name())
+			matchStrTypeToFunc(strTyp)(b1, b2, b3, field.Type(), field.Name())
 		}
 	}
 	// else {
@@ -276,9 +275,9 @@ func handleType(t types.Type, caller types.Type, depth int, ptr bool) {
 		//			return
 
 		// else -> top level call
-		for i := 0; i < e.NumFields(); i++ {
+		for field := range e.Fields() {
 			// this should panic and fail generating everything in case of error
-			handleType(e.Field(i).Type(), e, depth+1, false)
+			handleType(field.Type(), e, depth+1, false)
 		}
 	default:
 		panic("unhandled")

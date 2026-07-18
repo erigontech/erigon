@@ -49,7 +49,6 @@ type Dirs struct {
 	SnapDomain       string
 	SnapAccessors    string
 	SnapCaplin       string
-	SnapForkable     string
 	Downloader       string
 	TxPool           string
 	Nodes            string
@@ -75,7 +74,6 @@ func New(datadir string) Dirs {
 		dirs.SnapDomain,
 		dirs.SnapAccessors,
 		dirs.SnapCaplin,
-		//dirs.SnapForkable,
 		dirs.Downloader,
 		dirs.TxPool,
 		dirs.Nodes,
@@ -119,7 +117,6 @@ func Open(datadir string) Dirs {
 		SnapDomain:       filepath.Join(datadir, SnapDir, "domain"),
 		SnapAccessors:    filepath.Join(datadir, SnapDir, "accessor"),
 		SnapCaplin:       filepath.Join(datadir, SnapDir, "caplin"),
-		SnapForkable:     filepath.Join(datadir, SnapDir, "forkable"),
 		Downloader:       filepath.Join(datadir, "downloader"),
 		TxPool:           filepath.Join(datadir, "txpool"),
 		Nodes:            filepath.Join(datadir, "nodes"),

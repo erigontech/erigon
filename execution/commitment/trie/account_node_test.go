@@ -67,13 +67,7 @@ func TestGetAccount(t *testing.T) {
 }
 
 func TestAddSomeValuesToAccountAndCheckDeepHashForThem(t *testing.T) {
-	acc := &accounts.Account{
-		Nonce:       2,
-		Incarnation: 2,
-		Balance:     u256.U64(200),
-		Root:        EmptyRoot,
-		CodeHash:    accounts.InternCodeHash(emptyState),
-	}
+	acc := testAccount(2, u256.U64(200), withIncarnation(2))
 
 	_, _, addrHash, err := generateAcc()
 	if err != nil {
@@ -115,31 +109,19 @@ func TestAddSomeValuesToAccountAndCheckDeepHashForThem(t *testing.T) {
 }
 
 func TestHash(t *testing.T) {
+	storageRoot := common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+	codeHash := common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")
+
 	addr1 := common.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b")
-	acc1 := &accounts.Account{
-		Nonce:    1,
-		Balance:  u256.U64(209488),
-		Root:     common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
-		CodeHash: accounts.InternCodeHash(common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")),
-	}
+	acc1 := testAccount(1, u256.U64(209488), withRoot(storageRoot), withCodeHash(codeHash))
 
 	addr2 := common.HexToAddress("0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b")
-	acc2 := &accounts.Account{
-		Nonce:    0,
-		Balance:  uint256.Int{},
-		Root:     common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
-		CodeHash: accounts.InternCodeHash(common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")),
-	}
+	acc2 := testAccount(0, uint256.Int{}, withRoot(storageRoot), withCodeHash(codeHash))
 
 	addr3 := common.HexToAddress("0xc94f5374fce5edbc8e2a8697c15331677e6ebf0b")
-	acc3 := &accounts.Account{
-		Nonce:    0,
-		Balance:  u256.U64(1010),
-		Root:     common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
-		CodeHash: accounts.InternCodeHash(common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")),
-	}
+	acc3 := testAccount(0, u256.U64(1010), withRoot(storageRoot), withCodeHash(codeHash))
 
-	trie := New(common.Hash{})
+	trie := newEmpty()
 	trie2 := NewTestRLPTrie(common.Hash{})
 
 	trie.UpdateAccount(addr1[:], acc1)
@@ -168,9 +150,6 @@ func generateAcc() (*ecdsa.PrivateKey, common.Address, common.Hash, error) {
 	}
 
 	addr := crypto.PubkeyToAddress(key.PublicKey)
-	hash, err := common.HashData(addr[:])
-	if err != nil {
-		return nil, common.Address{}, common.Hash{}, err
-	}
+	hash := crypto.Keccak256Hash(addr[:])
 	return key, addr, hash, nil
 }

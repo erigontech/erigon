@@ -38,6 +38,9 @@ const DefaultStepsInFrozenFile = LegacyStepsInFrozenFile * 4 // 256
 // this value can be used to restore it.
 const UnboundedDomainMerge uint64 = math.MaxUint64
 
+// DefaultReferencesInCommitmentBranches is the default when erigondb.toml omits it.
+const DefaultReferencesInCommitmentBranches = false
+
 const EnableHistoryV4InTest = true
 
 // DefaultPruneDistance is the retention window used by full and blocks prune

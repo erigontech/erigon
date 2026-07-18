@@ -26,6 +26,8 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/wit"
 )
 
+const noProtocol sentryproto.Protocol = -1
+
 var (
 	UintToProtocolMap = map[uint]sentryproto.Protocol{
 		eth.ETH68: sentryproto.Protocol_ETH68,
@@ -74,7 +76,7 @@ func MinProtocol(m sentryproto.MessageId) sentryproto.Protocol {
 		}
 	}
 
-	return -1
+	return noProtocol
 }
 
 var ProtoIds = func() map[sentryproto.Protocol]map[sentryproto.MessageId]struct{} {

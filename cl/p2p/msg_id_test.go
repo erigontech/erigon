@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common/crypto"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
@@ -47,7 +48,7 @@ func TestMsgID(t *testing.T) {
 	combinedObj := append(n.MessageDomainInvalidSnappy[:], topicLenBytes...)
 	combinedObj = append(combinedObj, tpc...)
 	combinedObj = append(combinedObj, pMsg.Data...)
-	hashedData := utils.Sha256(combinedObj)
+	hashedData := crypto.Sha256(combinedObj)
 	msgID := string(hashedData[:20])
 	require.Equal(t, msgID, s.msgId(pMsg), "Got incorrect msg id")
 
@@ -58,7 +59,7 @@ func TestMsgID(t *testing.T) {
 	combinedObj = append(n.MessageDomainValidSnappy[:], topicLenBytes...)
 	combinedObj = append(combinedObj, tpc...)
 	combinedObj = append(combinedObj, validObj[:]...)
-	hashedData = utils.Sha256(combinedObj)
+	hashedData = crypto.Sha256(combinedObj)
 	msgID = string(hashedData[:20])
 	require.Equal(t, msgID, s.msgId(nMsg), "Got incorrect msg id")
 }

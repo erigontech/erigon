@@ -21,7 +21,7 @@ import (
 	"context"
 	_ "embed"
 	"math"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -63,9 +63,8 @@ var diffBlockd4Enc []byte
 var diffAttEnc []byte
 
 // buildExAnteStore reconstructs the ex-ante fork-choice scenario with an
-// attestation processed. f.latestMessages is populated; the index is left cold
-// (maintenance is GLOAS-gated and the fixtures are pre-GLOAS), and
-// headWeightStore seeds it from latestMessages on first use.
+// attestation processed. f.latestMessages is populated and the GLOAS weight
+// tree can seed itself from that latest-message snapshot on first use.
 func buildExAnteStore(tb testing.TB) *ForkChoiceStore {
 	tb.Helper()
 	ctx := context.Background()
@@ -87,7 +86,7 @@ func buildExAnteStore(tb testing.TB) *ForkChoiceStore {
 	clk := eth_clock.NewEthereumClock(gs.GenesisTime(), gs.GenesisValidatorsRoot(), cfg)
 	bs := blob_storage.NewBlobStore(memdb.NewTestDB(tb, dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, cfg, clk)
 	store, err := NewForkChoiceStore(clk, anchor, nil, pool.NewOperationsPool(cfg),
-		fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, em),
+		fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}),
 		em, sd, bs, public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil)
 	require.NoError(tb, err)
 	store.OnTick(0)
@@ -104,13 +103,10 @@ func buildExAnteStore(tb testing.TB) *ForkChoiceStore {
 	return store
 }
 
-// TestIndexedWeightStoreMatchesFullScan asserts the incremental indexedWeightStore
-// returns the same attestation score and weight as the trusted full-scan weightStore
-// for every node in the filtered block tree, given the same checkpoint state.
-func TestIndexedWeightStoreMatchesFullScan(t *testing.T) {
+// TestGloasWeightTreeMatchesFullScan asserts the maintained delta tree returns
+// the same attestation score and weight as the trusted full-scan weightStore.
+func TestGloasWeightTreeMatchesFullScan(t *testing.T) {
 	f := buildExAnteStore(t)
-	require.Empty(t, f.indexedWeightStore.directVotes,
-		"index must start cold (maintenance is GLOAS-gated); the seed is what fills it")
 
 	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 	cs, err := f.getCheckpointState(justified)
@@ -118,13 +114,12 @@ func TestIndexedWeightStoreMatchesFullScan(t *testing.T) {
 	require.NotNil(t, cs)
 
 	// Mirror the production contract: getCheckpointState runs outside the lock,
-	// the scoring pass (headWeightStore + queries) holds f.mu.
+	// the scoring pass (prepare + queries) holds f.mu.
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	full := NewWeightStore(f)    // trusted O(V) full-scan oracle
-	idx := f.headWeightStore(cs) // seeds the cold index from latestMessages
-	require.NotEmpty(t, f.indexedWeightStore.directVotes, "headWeightStore must seed the index")
+	full := NewWeightStore(f)
+	tree := f.gloasWeightTree.prepare(justified, cs)
 
 	blocks := f.getFilteredBlockTree(justified.Root, justified)
 	require.NotEmpty(t, blocks)
@@ -134,8 +129,8 @@ func TestIndexedWeightStoreMatchesFullScan(t *testing.T) {
 		node := ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}
 		wantScore := full.GetAttestationScore(node)
 		wantWeight := full.GetWeight(node)
-		require.Equalf(t, wantScore, idx.GetAttestationScore(node), "attestation score mismatch at %x", root)
-		require.Equalf(t, wantWeight, idx.GetWeight(node), "weight mismatch at %x", root)
+		require.Equalf(t, wantScore, tree.GetAttestationScore(node), "attestation score mismatch at %x", root)
+		require.Equalf(t, wantWeight, tree.GetWeight(node), "weight mismatch at %x", root)
 		if wantWeight > 0 {
 			sawNonZero = true
 		}
@@ -143,10 +138,9 @@ func TestIndexedWeightStoreMatchesFullScan(t *testing.T) {
 	require.True(t, sawNonZero, "differential check is vacuous: no node carried weight")
 }
 
-// BenchmarkHeadWeight_IndexedVsFullScan compares the indexed store against the
-// full-scan store on the same scenario. The indexed store traverses only the
-// votes in the subtree; the full-scan store iterates every validator per query.
-func BenchmarkHeadWeight_IndexedVsFullScan(b *testing.B) {
+// BenchmarkHeadWeight_DeltaTreeVsFullScan compares the maintained tree against
+// the full-scan store on the same scenario.
+func BenchmarkHeadWeight_DeltaTreeVsFullScan(b *testing.B) {
 	f := buildExAnteStore(b)
 	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 	cs, err := f.getCheckpointState(justified)
@@ -154,13 +148,13 @@ func BenchmarkHeadWeight_IndexedVsFullScan(b *testing.B) {
 	require.NotNil(b, cs)
 	node := ForkChoiceNode{Root: justified.Root, PayloadStatus: cltypes.PayloadStatusPending}
 
-	b.Run("indexed", func(b *testing.B) {
+	b.Run("delta-tree", func(b *testing.B) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		idx := f.headWeightStore(cs)
+		tree := f.gloasWeightTree.prepare(justified, cs)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_ = idx.GetAttestationScore(node)
+			_ = tree.GetAttestationScore(node)
 		}
 	})
 	b.Run("fullscan", func(b *testing.B) {
@@ -174,12 +168,67 @@ func BenchmarkHeadWeight_IndexedVsFullScan(b *testing.B) {
 	})
 }
 
-// TestIndexedWeightStoreIncrementalMatchesFullScan drives vote reassignments
-// through the production maintenance path (setLatestMessage -> RemoveVote +
-// IndexVote) on top of a seeded index, then asserts the incrementally
-// maintained index still matches the full-scan oracle for every node under each
-// of the PENDING/EMPTY/FULL payload-status views.
-func TestIndexedWeightStoreIncrementalMatchesFullScan(t *testing.T) {
+func BenchmarkGloasWeightTreePrepare(b *testing.B) {
+	f := buildExAnteStore(b)
+	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	cs, err := f.getCheckpointState(justified)
+	require.NoError(b, err)
+	require.NotNil(b, cs)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.gloasWeightTree.prepare(justified, cs)
+
+	dirtyOne := uint64(0)
+	dirtyTenPercent := make([]uint64, 0, cs.validatorSetSize/10)
+	dirtyAll := make([]uint64, 0, cs.validatorSetSize)
+	for i := 0; i < cs.validatorSetSize; i++ {
+		vi := uint64(i)
+		if len(dirtyTenPercent) < cs.validatorSetSize/10 {
+			dirtyTenPercent = append(dirtyTenPercent, vi)
+		}
+		dirtyAll = append(dirtyAll, vi)
+	}
+
+	b.Run("clean", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			f.gloasWeightTree.prepare(justified, cs)
+		}
+	})
+	b.Run("dirty-one", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			f.gloasWeightTree.markDirty(dirtyOne)
+			f.gloasWeightTree.prepare(justified, cs)
+		}
+	})
+	b.Run("dirty-10pct", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			for _, vi := range dirtyTenPercent {
+				f.gloasWeightTree.markDirty(vi)
+			}
+			f.gloasWeightTree.prepare(justified, cs)
+		}
+	})
+	b.Run("dirty-all", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			for _, vi := range dirtyAll {
+				f.gloasWeightTree.markDirty(vi)
+			}
+			f.gloasWeightTree.prepare(justified, cs)
+		}
+	})
+	b.Run("full-rebuild", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			f.gloasWeightTree.markAllDirty()
+			f.gloasWeightTree.prepare(justified, cs)
+		}
+	})
+}
+
+// TestGloasWeightTreeDeltaMatchesFullScan drives vote reassignments through
+// the production dirty-validator path, then asserts the delta tree still
+// matches the full-scan oracle under each payload-status view.
+func TestGloasWeightTreeDeltaMatchesFullScan(t *testing.T) {
 	f := buildExAnteStore(t)
 	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 	cs, err := f.getCheckpointState(justified)
@@ -190,7 +239,7 @@ func TestIndexedWeightStoreIncrementalMatchesFullScan(t *testing.T) {
 	defer f.mu.Unlock()
 
 	full := NewWeightStore(f)
-	idx := f.headWeightStore(cs) // seed the cold index from the fixture's latestMessages
+	tree := f.gloasWeightTree.prepare(justified, cs)
 
 	voters := make([]uint64, 0)
 	for i := 0; i < f.latestMessages.latestMessagesCount(); i++ {
@@ -206,11 +255,8 @@ func TestIndexedWeightStoreIncrementalMatchesFullScan(t *testing.T) {
 		roots = append(roots, r)
 	}
 	require.GreaterOrEqual(t, len(roots), 2)
-	sort.Slice(roots, func(i, j int) bool { return bytes.Compare(roots[i][:], roots[j][:]) < 0 })
+	slices.SortFunc(roots, func(a, b common.Hash) int { return bytes.Compare(a[:], b[:]) })
 
-	// Spread each voter onto a different target and toggle payload_present so
-	// getSupportedNode hits its post-reveal EMPTY/FULL branches; every call
-	// removes the validator's seeded vote and re-indexes the new one.
 	for n, vi := range voters {
 		target := roots[n%len(roots)]
 		hdr, ok := f.forkGraph.GetHeader(target)
@@ -219,8 +265,9 @@ func TestIndexedWeightStoreIncrementalMatchesFullScan(t *testing.T) {
 			Root:           target,
 			Slot:           hdr.Slot + 1,
 			PayloadPresent: n%2 == 0,
-		}, true)
+		})
 	}
+	tree = f.gloasWeightTree.prepare(justified, cs)
 
 	sawNonZero := false
 	for _, root := range roots {
@@ -231,9 +278,9 @@ func TestIndexedWeightStoreIncrementalMatchesFullScan(t *testing.T) {
 		} {
 			node := ForkChoiceNode{Root: root, PayloadStatus: ps}
 			want := full.GetAttestationScore(node)
-			require.Equalf(t, want, idx.GetAttestationScore(node),
+			require.Equalf(t, want, tree.GetAttestationScore(node),
 				"attestation score mismatch at %x (payload status %d)", root, ps)
-			require.Equalf(t, full.GetWeight(node), idx.GetWeight(node),
+			require.Equalf(t, full.GetWeight(node), tree.GetWeight(node),
 				"weight mismatch at %x (payload status %d)", root, ps)
 			if want > 0 {
 				sawNonZero = true
