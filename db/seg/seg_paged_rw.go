@@ -306,11 +306,16 @@ func (c *PagedWriter) initWorkers() {
 	c.eg, c.egCtx = errgroup.WithContext(c.ctx)
 
 	var workerWg sync.WaitGroup
-	workerWg.Add(c.numWorkers)
 	for range c.numWorkers {
 		c.eg.Go(func() error {
-			defer workerWg.Done()
-			return c.compressionWorker(c.egCtx)
+			var err error
+			done := make(chan struct{})
+			workerWg.Go(func() {
+				defer close(done)
+				err = c.compressionWorker(c.egCtx)
+			})
+			<-done
+			return err
 		})
 	}
 	go func() { workerWg.Wait(); close(c.resultCh) }()

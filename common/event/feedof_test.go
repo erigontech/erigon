@@ -124,12 +124,10 @@ func TestFeedOfSubscribeBlockedPost(t *testing.T) {
 	defer wg.Wait()
 
 	feed.Subscribe(ch1)
-	wg.Add(nsends)
 	for range nsends {
-		go func() {
+		wg.Go(func() {
 			feed.Send(99)
-			wg.Done()
-		}()
+		})
 	}
 
 	sub2 := feed.Subscribe(ch2)
@@ -161,12 +159,10 @@ func TestFeedOfUnsubscribeBlockedPost(t *testing.T) {
 	}
 
 	// Queue up some Sends. None of these can make progress while bchan isn't read.
-	wg.Add(nsends)
 	for range nsends {
-		go func() {
+		wg.Go(func() {
 			feed.Send(99)
-			wg.Done()
-		}()
+		})
 	}
 	// Subscribe the other channels.
 	for i, ch := range chans {

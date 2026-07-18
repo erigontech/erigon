@@ -966,7 +966,6 @@ func (r *HistoricalStatesReader) computeRelevantEpochs(slot uint64) (uint64, uin
 
 func (r *HistoricalStatesReader) tryCachingEpochsInParallell(tx kv.Tx, kvGetter state_accessors.GetValFn, activeIdxs [][]uint64, epochs []uint64) error {
 	var wg sync.WaitGroup
-	wg.Add(len(epochs))
 	for i, epoch := range epochs {
 		mixPosition := (epoch + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
 		mix, err := r.ReadRandaoMixBySlotAndIndex(tx, kvGetter, epochs[0]*r.cfg.SlotsPerEpoch, mixPosition)
@@ -974,11 +973,10 @@ func (r *HistoricalStatesReader) tryCachingEpochsInParallell(tx kv.Tx, kvGetter 
 			return err
 		}
 
-		go func(mix common.Hash, epoch uint64, idxs []uint64) {
-			defer wg.Done()
-
+		idxs := activeIdxs[i]
+		wg.Go(func() {
 			_, _ = r.ComputeCommittee(mix, idxs, epoch*r.cfg.SlotsPerEpoch, r.cfg.TargetCommitteeSize, 0)
-		}(mix, epoch, activeIdxs[i])
+		})
 	}
 	wg.Wait()
 	return nil

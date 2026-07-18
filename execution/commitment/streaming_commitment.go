@@ -398,9 +398,8 @@ func (sc *StreamingCommitter) StartScheduler(ctx context.Context) error {
 	sc.dirtyCh = make(chan byte, 256)
 	sc.started.Store(true)
 
-	sc.wg.Add(sc.numWorkers)
 	for range sc.numWorkers {
-		go sc.scheduleWorker()
+		sc.wg.Go(sc.scheduleWorker)
 	}
 	return nil
 }
@@ -416,7 +415,6 @@ func (sc *StreamingCommitter) Stop() {
 }
 
 func (sc *StreamingCommitter) scheduleWorker() {
-	defer sc.wg.Done()
 	for {
 		select {
 		case <-sc.quit:

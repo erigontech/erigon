@@ -45,12 +45,10 @@ func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
 
 	const workers = 64
 	var wg sync.WaitGroup
-	wg.Add(workers)
 	for range workers {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			cc.PutWithCodeHash(addr, code, codeHash, 1)
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -102,14 +100,13 @@ func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 
 	const workers = 128
 	var wg sync.WaitGroup
-	wg.Add(workers)
 	for i := range workers {
-		go func(n int) {
-			defer wg.Done()
+		idx := i
+		wg.Go(func() {
 			code := make([]byte, 256)
-			code[0], code[1] = byte(n), byte(n>>8) // distinct code per worker
+			code[0], code[1] = byte(idx), byte(idx>>8) // distinct code per worker
 			cc.PutWithCodeHash(nil, code, crypto.Keccak256(code), 1)
-		}(i)
+		})
 	}
 	wg.Wait()
 
@@ -133,9 +130,8 @@ func TestCodeCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 	for round := range 20000 {
 		binary.BigEndian.PutUint64(addr[1:], uint64(round))
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); cc.Put(addr, fresh, 20) }()
-		go func() { defer wg.Done(); cc.PutIfAbsent(addr, stale, 10) }()
+		wg.Go(func() { cc.Put(addr, fresh, 20) })
+		wg.Go(func() { cc.PutIfAbsent(addr, stale, 10) })
 		wg.Wait()
 		v, ok := cc.Get(addr)
 		require.True(t, ok)

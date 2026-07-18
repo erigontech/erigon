@@ -159,19 +159,16 @@ func TestReferencesInCommitmentBranchesConcurrent(t *testing.T) {
 
 	const iters = 2000
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range iters {
 			agg.applyReferencesInCommitmentBranches(i%2 == 0)
 		}
-	}()
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		for range iters {
 			_ = agg.referencesInCommitmentBranches()
 		}
-	}()
+	})
 	wg.Wait()
 }
 
@@ -184,9 +181,7 @@ func TestFilesAmountConcurrent(t *testing.T) {
 	d := agg.d[kv.AccountsDomain]
 	const iters = 2000
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range iters {
 			item := &FilesItem{startTxNum: uint64(i), endTxNum: uint64(i + 1)}
 			agg.dirtyFilesLock.Lock()
@@ -196,13 +191,12 @@ func TestFilesAmountConcurrent(t *testing.T) {
 			d.dirtyFiles.Delete(item)
 			agg.dirtyFilesLock.Unlock()
 		}
-	}()
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		for range iters {
 			_ = agg.FilesAmount()
 		}
-	}()
+	})
 	wg.Wait()
 }
 

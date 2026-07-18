@@ -76,9 +76,7 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 		stop := make(chan struct{})
 		var regressed atomic.Bool
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for n := uint64(1); ; n++ {
 				select {
 				case <-stop:
@@ -93,9 +91,8 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 					}
 				}
 			}
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			last := uint64(0)
 			for {
 				select {
@@ -112,7 +109,7 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 					}
 				}
 			}
-		}()
+		})
 
 		// Cross the grow threshold so maybeGrow swaps the generation while the
 		// hot-key writer runs.
@@ -215,9 +212,8 @@ func TestGenericCache_ModeNoOpAdmissionAtomicWithUpdate(t *testing.T) {
 	c.Put(a, v, 1)
 	for round := range 200000 {
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); c.Put(a, v, 2) }()
-		go func() { defer wg.Done(); c.Put(b, v, 1) }()
+		wg.Go(func() { c.Put(a, v, 2) })
+		wg.Go(func() { c.Put(b, v, 1) })
 		wg.Wait()
 		if _, ok := c.Get(b); ok {
 			t.Fatalf("round %d: ModeNoOp admitted a key past a full budget (SizeBytes=%d, capacityB=%d)",
@@ -298,9 +294,8 @@ func TestGenericCache_CapacityEvictionAtomicWithPut_NoSizeDrift(t *testing.T) {
 	for range 100000 {
 		c.Put(b, v, 10)
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); c.Put(a, v, 10) }() // insert → evicts b (cap 1)
-		go func() { defer wg.Done(); c.Put(b, v, 20) }() // same-key update path
+		wg.Go(func() { c.Put(a, v, 10) }) // insert → evicts b (cap 1)
+		wg.Go(func() { c.Put(b, v, 20) }) // same-key update path
 		wg.Wait()
 	}
 	c.Delete(a)
@@ -329,10 +324,9 @@ func TestGenericCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	mu.Lock()
 
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); c.Clear() }()
+	wg.Go(func() { c.Clear() })
 	time.Sleep(5 * time.Millisecond)
-	go func() { defer wg.Done(); c.Put(key, []byte("dead-fork-value"), 200) }()
+	wg.Go(func() { c.Put(key, []byte("dead-fork-value"), 200) })
 	time.Sleep(5 * time.Millisecond)
 	mu.Unlock()
 	wg.Wait()
@@ -370,10 +364,8 @@ func TestGenericCache_ClearRacingGet_DeadEntryStaysDead(t *testing.T) {
 		c.Unwind(150) // the entry is dead-fork state; it must never be served again
 		var served atomic.Bool
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); c.Clear() }()
-		go func() {
-			defer wg.Done()
+		wg.Go(func() { c.Clear() })
+		wg.Go(func() {
 			mu := &c.putStripes[putStripeCount-1]
 			for range 1 << 16 {
 				if mu.TryLock() {
@@ -388,7 +380,7 @@ func TestGenericCache_ClearRacingGet_DeadEntryStaysDead(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 		wg.Wait()
 		require.False(t, served.Load(),
 			"round %d: Clear revalidated an unwind-invalidated entry for a concurrent reader", round)
