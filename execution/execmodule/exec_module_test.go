@@ -2767,6 +2767,67 @@ func TestBALFoldAheadFiresOnTipValidateChain(t *testing.T) {
 		"tip newPayload (ValidateChain) must fold its commitment from the BAL")
 }
 
+// TestBALFoldTipStorageClearValidateChain folds a single Amsterdam block whose tx
+// CLEARS a genesis-preset storage slot (SSTORE existing non-zero slot → 0) on an
+// account that also receives value (balance change). This is the storage-delete /
+// subtree-collapse case that a non-zero write does not exercise, and it is what
+// exposed a wrong folded root: the fold runs ahead of exec, so its as-of reader
+// returned pre-block state (slot still present) during the collapse. Mirrors the
+// EEST blockchain_test_from_state_test shape (one block on genesis).
+func TestBALFoldTipStorageClearValidateChain(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	contractAddr := common.HexToAddress("0x00000000000000000000000000000000c0de5501")
+	otherAddr := common.HexToAddress("0x00000000000000000000000000000000c0de5502")
+	m := execmoduletester.New(t,
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.AllProtocolChanges,
+			Alloc: types.GenesisAlloc{
+				senderAddr: {Balance: big.NewInt(1 * common.Ether)},
+				// Pre-set slot 0, then have the tx SSTORE(0,0) to CLEAR it (and send
+				// value, so the account leaf recomputes against the collapsed storage).
+				contractAddr: {
+					Balance: big.NewInt(0),
+					Code:    []byte{0x60, 0x00, 0x60, 0x00, 0x55, 0x00}, // SSTORE(0,0); STOP
+					Storage: map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(3))},
+				},
+				// A second storage-bearing account so the account trie has siblings.
+				otherAddr: {
+					Balance: big.NewInt(1),
+					Storage: map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(7))},
+				},
+			},
+		}),
+		execmoduletester.WithExperimentalBAL(),
+		execmoduletester.WithAlwaysGenerateChangesets(false),
+	)
+	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1,
+		func(i int, b *blockgen.BlockGen) {
+			tx, txErr := types.SignTx(
+				types.NewTransaction(0, contractAddr, uint256.NewInt(1_000), 100000, uint256.NewInt(10_000_000_000), nil),
+				*types.LatestSignerForChainID(nil), privKey,
+			)
+			require.NoError(t, txErr)
+			b.AddTx(tx)
+		}, m.PublishedSD())
+	require.NoError(t, err)
+
+	require.NotEmpty(t, canonical.BlockAccessLists[0], "block must carry a BAL")
+	stagedsync.ResetFoldsAheadForTest()
+	// Insert + FCU in one step (no intervening ValidateChain), matching the EEST
+	// blockchain-test path: the fold runs during the FCU's execution and a wrong
+	// folded root surfaces as a BadBlock here.
+	require.NoError(t, m.InsertChain(canonical))
+	require.Positive(t, stagedsync.FoldsAheadPerformedForTest(), "block must fold from its BAL")
+}
+
 // A forkchoice head at height 0 that is not the genesis (e.g. a block carrying a
 // corrupted number) must be rejected, not treated as a genesis reset.
 func TestUpdateForkChoiceToNonGenesisBlockAtHeightZero(t *testing.T) {

@@ -628,6 +628,11 @@ func (cc *commitmentCalculator) foldBALToRoot(ctx context.Context, req *blockReq
 		balUpdates.SetMode(commitment.ModeUpdate)
 	}
 	balState.FlushToUpdates(balUpdates)
+	// Overlay the fold's post-block state onto the reader for the commitment
+	// compute (set only now, so balState's own lazy-loads above read the pre-block
+	// baseline). This makes reader-sourced trie reads reflect POST-block state,
+	// matching the incremental path and fixing wrong roots on storage clears.
+	reader.postState = balState
 	return cc.computeRootFromUpdates(ctx, t, balUpdates, reader)
 }
 
@@ -952,6 +957,11 @@ type asOfStateReader struct {
 	// a concurrent trie-warmup worker doesn't write the shared main accumulator
 	// (a race) or take the global metrics lock. Nil on the main reader.
 	workerCtx context.Context
+	// postState, when set, overlays this block's post-values for the account/storage
+	// keys it changed, so the fold's commitment reads reflect POST-block state. The
+	// fold runs ahead of execution, so a plain as-of read returns pre-block state,
+	// which produces a wrong root when a cleared slot forces a storage collapse.
+	postState *calcState
 }
 
 func (r *asOfStateReader) WithHistory() bool { return false }
@@ -969,6 +979,17 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 			enc, step, err = r.sd.GetLatest(d, r.roTx, plainKey)
 		}
 	} else {
+		// Post-block overlay: for a key the block changed, return its post-block
+		// value so the fold (running ahead of exec) sees the same state the
+		// incremental path reads after exec's flush.
+		if r.postState != nil {
+			if v, hit := r.postState.postValue(d, plainKey); hit {
+				if stepSize > 0 {
+					step = kv.Step(r.txNum / stepSize)
+				}
+				return v, step, nil
+			}
+		}
 		// Account/storage/code: use GetAsOf to avoid reading future state.
 		// Check sd.mem first (in-memory data from current batch), then
 		// fall through to DB files for data not in the batch.
@@ -995,7 +1016,7 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 }
 
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum}
+	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, postState: r.postState}
 }
 
 // CloneForWorker meters the worker's CommitmentDomain reads into the per-worker
@@ -1003,7 +1024,7 @@ func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
 // reader during block assembly, where trie-warmup runs concurrently — so it
 // must not write the shared main accumulator).
 func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx}
+	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx, postState: r.postState}
 }
 
 // asOfStorageEnumerator lists the persisted storage slots under an address via
