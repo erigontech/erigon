@@ -682,7 +682,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						checkBloom := !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
 						checkReceipts := checkBloom && pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum)
 
-						b, err := pe.cfg.blockReader.BlockByHash(ctx, rwTx, applyResult.BlockHash)
+						b, _, err := pe.cfg.blockReader.BlockWithSenders(ctx, rwTx, applyResult.BlockHash, applyResult.BlockNum)
 
 						if err != nil {
 							failInfra(fmt.Errorf("can't retrieve block %d: for post validation: %w", applyResult.BlockNum, err))
