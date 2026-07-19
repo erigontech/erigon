@@ -99,8 +99,20 @@ type calcState struct {
 	// baseline. Surface via LazyLoadErr().
 	lazyLoadErr error
 
+	dbgSDs        uint64
+	dbgWipedSlots uint64
+
 	logger    log.Logger
 	logPrefix string
+}
+
+// DebugStats reports the accumulator's live size — it is never pruned within a
+// calculator's lifetime, so a self-destruct-heavy workload grows it without bound.
+func (cs *calcState) DebugStats() (accounts, storageAddrs, slots, sds, wipedSlots uint64) {
+	for _, m := range cs.storageState {
+		slots += uint64(len(m))
+	}
+	return uint64(len(cs.accounts)), uint64(len(cs.storageState)), slots, cs.dbgSDs, cs.dbgWipedSlots
 }
 
 // LazyLoadErr returns the first error encountered during ensureAccount
@@ -265,10 +277,12 @@ func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
 	if cs.storageEnum == nil {
 		return
 	}
+	cs.dbgSDs++
 	if err := cs.storageEnum.EachStorageSlot(addr, func(key accounts.StorageKey) error {
 		if _, ok := slots[key]; !ok {
 			slots[key] = uint256.Int{}
 			dirty[key] = true
+			cs.dbgWipedSlots++
 		}
 		return nil
 	}); err != nil {

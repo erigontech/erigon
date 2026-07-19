@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -453,7 +455,25 @@ func (tx *asyncClone) Commit() error {
 func (tx *asyncClone) Rollback() {
 }
 
+// dbgRetainWarnAt is the retained-iterator count at which retain starts
+// reporting. Chosen well above any legitimate per-tx iterator count.
+const dbgRetainWarnAt = 1 << 14
+
+// retain adds it to the tx-lifetime close list. The list is append-only —
+// an explicit it.Close() does not remove it — so a caller opening iterators in
+// a loop under one long tx grows it without bound. The debug log reports that
+// shape at power-of-two milestones with the stack of the opener.
+func (tx *tx) retain(it kv.Closer) {
+	tx.retain(it)
+	if n := len(tx.resourcesToClose); n >= dbgRetainWarnAt && n&(n-1) == 0 {
+		log.Warn("[dbg] temporal tx: retained iterators growing", "count", n, "stack", dbg.Stack())
+	}
+}
+
 func (tx *tx) autoClose() {
+	if n := len(tx.resourcesToClose); n >= dbgRetainWarnAt {
+		log.Warn("[dbg] temporal tx: closing tx with many retained iterators", "count", n)
+	}
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
@@ -481,7 +501,7 @@ func (tx *tx) rangeAsOf(name kv.Domain, rtx kv.Tx, fromKey, toKey []byte, asOfTs
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
+	tx.retain(it)
 	return it, nil
 }
 
@@ -573,7 +593,7 @@ func (tx *tx) indexRange(name kv.InvertedIdx, dbTx kv.Tx, k []byte, fromTs, toTs
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, timestamps)
+	tx.retain(timestamps)
 	return timestamps, nil
 }
 
@@ -590,7 +610,7 @@ func (tx *tx) historyRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int, asc ord
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
+	tx.retain(it)
 	return it, nil
 }
 
@@ -607,7 +627,7 @@ func (tx *tx) historyKeyTxNumRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int,
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
+	tx.retain(it)
 	return it, nil
 }
 

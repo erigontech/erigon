@@ -726,6 +726,12 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 			err: fmt.Errorf("commitmentCalculator: %slazy-load failed: %w", m.label, err)})
 		return
 	}
+	if t.blockNum%1000 == 0 {
+		accs, storageAddrs, slots, sds, wiped := cc.state.DebugStats()
+		log.Warn("["+cc.logPrefix+"] [dbg] calcState size", "block", t.blockNum,
+			"accounts", accs, "storageAddrs", storageAddrs, "slots", slots,
+			"selfDestructs", sds, "wipedSlots", wiped)
+	}
 	cc.state.FlushToUpdates(cc.updates)
 	if !m.midBlock {
 		cc.state.ResetBlockFlags()
@@ -989,6 +995,9 @@ func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempor
 // is the parallel path's equivalent of serial's per-slot delete touches.
 type asOfStorageEnumerator struct {
 	reader *asOfStateReader
+
+	dbgCalls uint64
+	dbgSlots uint64
 }
 
 func (e *asOfStorageEnumerator) EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error {
@@ -999,6 +1008,10 @@ func (e *asOfStorageEnumerator) EachStorageSlot(addr accounts.Address, fn func(k
 		return err
 	}
 	defer it.Close()
+	e.dbgCalls++
+	if e.dbgCalls&(e.dbgCalls-1) == 0 {
+		log.Warn("[dbg] SD storage enumeration", "calls", e.dbgCalls, "slots", e.dbgSlots, "addr", addr, "txNum", e.reader.txNum)
+	}
 	for it.HasNext() {
 		k, v, err := it.Next()
 		if err != nil {
@@ -1009,6 +1022,7 @@ func (e *asOfStorageEnumerator) EachStorageSlot(addr accounts.Address, fn func(k
 		}
 		var h common.Hash
 		copy(h[:], k[20:])
+		e.dbgSlots++
 		if err := fn(accounts.InternKey(h)); err != nil {
 			return err
 		}
