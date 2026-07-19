@@ -491,6 +491,7 @@ func TestCreateAccount_FundedThenCreated_SyntheticReadKeepsPreTxBalance(t *testi
 	t.Parallel()
 
 	ibs := New(&minimalStateReader{})
+	defer ibs.Release(false)
 	ibs.SetVersionMap(NewVersionMap(nil))
 	ibs.SetTxContext(1, 0)
 	ibs.SetVersion(0)
@@ -520,6 +521,7 @@ func TestCreateAccount_InternalBalanceReadPromotedOnCreate_NoSpuriousBalanceChan
 	reader.accounts[addr].Balance = *uint256.NewInt(7)
 
 	ibs := New(reader)
+	defer ibs.Release(false)
 	ibs.SetVersionMap(NewVersionMap(nil))
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)
@@ -663,6 +665,7 @@ func TestVersionedIO_RemovedDependencyFallsThroughToStorage(t *testing.T) {
 	acct := accounts.NewAccount()
 	sr := &fallthroughStateReader{acct: &acct, storageKey: key, storageVal: storageVal}
 	ibs := NewWithVersionMap(sr, NewVersionMap(nil))
+	defer ibs.Release(false)
 	ibs.SetTxContext(2, 0)
 
 	ibs.versionedReads = ReadSet{}
@@ -686,6 +689,7 @@ func TestIBSVersionedWrites_SelfdestructRetainsMetadataDropsResetPaths(t *testin
 
 	addr := accounts.InternAddress(common.HexToAddress("0xdead"))
 	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 0)
 
 	require.NoError(t, ibs.CreateAccount(addr, true))
@@ -1032,6 +1036,7 @@ func TestApplyVersionedWrites_BalanceWriteGeneratesBalanceRead(t *testing.T) {
 	reader := newAccountStateReader(addr)
 	vm := NewVersionMap(nil)
 	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader))
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 0)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -1056,6 +1061,7 @@ func TestApplyVersionedWrites_StorageWriteGeneratesBalanceRead(t *testing.T) {
 	reader := newAccountStateReader(addr)
 	vm := NewVersionMap(nil)
 	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader))
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 0)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -1081,6 +1087,7 @@ func TestApplyVersionedWrites_NonceWriteGeneratesBalanceRead(t *testing.T) {
 	reader := newAccountStateReader(addr)
 	vm := NewVersionMap(nil)
 	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader))
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 0)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -1107,6 +1114,7 @@ func TestApplyVersionedWrites_MultipleAccountsAllGetBalanceReads(t *testing.T) {
 	reader := newAccountStateReader(addrA, addrB, addrC)
 	vm := NewVersionMap(nil)
 	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader))
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 0)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -1136,6 +1144,7 @@ func TestApplyVersionedWrites_NewAccountNoBalanceRead(t *testing.T) {
 	vm := NewVersionMap(nil)
 	// Use minimalStateReader — returns nil for all accounts.
 	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, &minimalStateReader{}))
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 0)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -1156,6 +1165,7 @@ func TestApplyVersionedWrites_SelfDestructDominatesCreateContract(t *testing.T) 
 	addr := accounts.InternAddress(common.HexToAddress("0xF600"))
 	vm := NewVersionMap(nil)
 	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, &minimalStateReader{}))
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 0)
 	ibs.SetVersionMap(vm)
 
@@ -1207,6 +1217,7 @@ func TestAccountRead_BalancePathPromotion_DoesNotInvalidate(t *testing.T) {
 		postWithdrawalBalance, true)
 
 	ibs := New(NewVersionedStateReader(1, ReadSet{}, vm, reader))
+	defer ibs.Release(false)
 	ibs.SetTxContext(0, 1)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -1258,6 +1269,7 @@ func TestCreateAccount_SyntheticIncarnationStamp_DoesNotInvalidate(t *testing.T)
 		postWithdrawalBalance, true)
 
 	ibs := New(NewVersionedStateReader(1, ReadSet{}, vm, reader))
+	defer ibs.Release(false)
 	ibs.SetTxContext(0, 1)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -1310,6 +1322,7 @@ func TestGetVersionedAccount_PriorTxSelfDestruct_ReturnsNil(t *testing.T) {
 	// the SD case. Only getVersionedAccount's versionMap check should convert
 	// that to nil.
 	ibs := New(reader)
+	defer ibs.Release(false)
 	ibs.SetTxContext(0, 4)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -1355,6 +1368,7 @@ func TestGetVersionedAccount_SameTxMetamorphicRecreate_ReturnsAccount(t *testing
 	// same-TxIdx Balance/Nonce/CodeHash; the AddressPath >= destructTxIndex
 	// branch is what surfaces the re-created account.
 	ibs := New(NewVersionedStateReader(4, ReadSet{}, vm, reader))
+	defer ibs.Release(false)
 	ibs.SetTxContext(0, 4)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -1387,6 +1401,7 @@ func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T)
 		reader := newAccountStateReader()
 		vm := NewVersionMap(nil)
 		tx3 := New(reader)
+		defer tx3.Release(false)
 		tx3.SetTxContext(0, 3)
 		tx3.SetVersion(0)
 		tx3.SetVersionMap(vm)
@@ -1408,6 +1423,7 @@ func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T)
 	}
 
 	ibs := newIBS(true)
+	defer ibs.Release(false)
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	require.Equal(t, preserved, bal, "EIP-8246: SD'd account keeps its balance for a concurrent reader")
@@ -1422,6 +1438,7 @@ func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T)
 	require.Equal(t, accounts.EmptyCodeHash, ch, "EIP-8246: SD removes code, so the codehash reads as empty (not the pre-SD hash, not nil)")
 
 	pre := newIBS(false)
+	defer pre.Release(false)
 	preBal, err := pre.GetBalance(addr)
 	require.NoError(t, err)
 	require.True(t, preBal.IsZero(), "pre-EIP-8246: SD burns the balance for a concurrent reader")

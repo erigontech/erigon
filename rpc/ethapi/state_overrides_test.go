@@ -36,6 +36,7 @@ func TestStateOverrides_MovePrecompileDeterministicError(t *testing.T) {
 
 	for i := range 500 {
 		ibs := state.New(state.NewNoopReader())
+		defer ibs.Release(false)
 		err := so.Override(ibs, vm.PrecompiledContracts{}, &chain.Rules{})
 		require.EqualError(t, err, want, "iteration %d: error must be deterministic", i)
 	}
@@ -55,6 +56,7 @@ func TestStateOverrides_MovePrecompileSuccess(t *testing.T) {
 
 	precompiles := vm.PrecompiledContracts{src: stub}
 	ibs := state.New(state.NewNoopReader())
+	defer ibs.Release(false)
 	err := so.Override(ibs, precompiles, &chain.Rules{})
 	require.NoError(t, err)
 

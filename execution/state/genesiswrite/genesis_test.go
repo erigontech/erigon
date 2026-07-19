@@ -171,6 +171,7 @@ func TestAllocConstructor(t *testing.T) {
 	reader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(err)
 	state := state.New(reader)
+	defer state.Release(false)
 	balance, err := state.GetBalance(address)
 	require.NoError(err)
 	assert.Equal(funds, balance.ToBig())

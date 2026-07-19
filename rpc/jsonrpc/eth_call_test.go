@@ -841,6 +841,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 	stateReader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st := state.New(stateReader)
+	defer st.Release(false)
 	exist, err := st.Exist(accounts.InternAddress(contractAddr))
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #1")
@@ -848,6 +849,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 	stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, 2, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st = state.New(stateReader)
+	defer st.Release(false)
 	exist, err = st.Exist(accounts.InternAddress(contractAddr))
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
@@ -858,6 +860,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 	stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, 6, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st = state.New(stateReader)
+	defer st.Release(false)
 	createdFillers := 0
 	for _, pk := range fillerPublicKeys {
 		exist, err := st.Exist(accounts.InternAddress(crypto.PubkeyToAddress(*pk)))
