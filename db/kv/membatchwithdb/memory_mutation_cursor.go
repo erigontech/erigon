@@ -330,8 +330,8 @@ func (m *memoryMutationCursor) DeleteCurrentDuplicates() error {
 }
 
 // DeleteCurrentMultiValBefore walks the merged dups of the current key and
-// tombstones those below v: the overlay sits on an immutable read-only tx, so it
-// has no B-tree to cut the way the mdbx backends do.
+// tombstones those below v (see MemoryMutation.DeleteRange for why the overlay
+// deletes via tombstones).
 func (m *memoryMutationCursor) DeleteCurrentMultiValBefore(v []byte) (uint64, error) {
 	k, _, err := m.Current()
 	if err != nil {
