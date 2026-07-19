@@ -27,7 +27,13 @@ func BenchmarkJournalStorageChange(b *testing.B) {
 	key := accounts.InternKey(common.HexToHash("0x01"))
 	prev := uint256.NewInt(42)
 
+	for range 1 << 16 {
+		j.storageChange(addr, key, *prev, false)
+	}
+	j.Reset()
+
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		j.storageChange(addr, key, *prev, false)
 		if len(j.entries) == 1<<16 {
