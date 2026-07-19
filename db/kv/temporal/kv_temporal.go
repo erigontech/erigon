@@ -464,7 +464,7 @@ const dbgRetainWarnAt = 1 << 14
 // a loop under one long tx grows it without bound. The debug log reports that
 // shape at power-of-two milestones with the stack of the opener.
 func (tx *tx) retain(it kv.Closer) {
-	tx.retain(it)
+	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	if n := len(tx.resourcesToClose); n >= dbgRetainWarnAt && n&(n-1) == 0 {
 		log.Warn("[dbg] temporal tx: retained iterators growing", "count", n, "stack", dbg.Stack())
 	}
