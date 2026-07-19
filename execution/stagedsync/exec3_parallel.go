@@ -3017,6 +3017,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			pe.RUnlock()
 
 			ibs := state.New(reader)
+			defer ibs.Release(false)
 			ibs.SetVersion(finalVersion.Incarnation)
 			localVersionMap := state.NewVersionMap(nil)
 			ibs.SetVersionMap(localVersionMap)
