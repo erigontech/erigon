@@ -299,13 +299,13 @@ func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error)
 }
 
 func (tx *tx) Rollback() {
-	tx.closeFilesRo()
+	tx.closeFilesView()
 }
 func (tx *Tx) Rollback() {
 	if tx == nil {
 		return
 	}
-	tx.closeFilesRo()
+	tx.closeFilesView()
 	if tx.Tx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
@@ -413,7 +413,7 @@ func (tx *RwTx) Rollback() {
 	if tx == nil {
 		return
 	}
-	tx.closeFilesRo()
+	tx.closeFilesView()
 	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
@@ -451,7 +451,7 @@ func (tx *asyncClone) Commit() error {
 func (tx *asyncClone) Rollback() {
 }
 
-func (tx *tx) closeFilesRo() {
+func (tx *tx) closeFilesView() {
 	tx.aggtx.Close()
 	tx.aggtx = nil
 	tx.blocktx.Close()
@@ -462,7 +462,7 @@ func (tx *RwTx) Commit() error {
 	if tx == nil {
 		return nil
 	}
-	tx.closeFilesRo()
+	tx.closeFilesView()
 	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return nil
 	}
