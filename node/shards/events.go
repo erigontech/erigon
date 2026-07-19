@@ -327,6 +327,9 @@ type Notifications struct {
 	StateChangesConsumer StateChangeConsumer
 	RecentReceipts       *RecentReceipts
 	LastNewBlockSeen     atomic.Uint64 // This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
+
+	syncStateLock sync.Mutex
+	lastSyncState *remoteproto.SyncingReply
 }
 
 func (n *Notifications) NewLastBlockSeen(blockNum uint64) {

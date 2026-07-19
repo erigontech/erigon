@@ -76,3 +76,46 @@ func TestBuildSyncingReplyFrozenBlocksRaiseHighestBlock(t *testing.T) {
 	require.Equal(t, uint64(500), reply.LastNewBlockSeen)
 	require.Equal(t, uint64(500), reply.FrozenBlocks)
 }
+
+func drainSyncStateEvents(ch chan *remoteproto.SyncingReply) []*remoteproto.SyncingReply {
+	var got []*remoteproto.SyncingReply
+	for {
+		select {
+		case reply := <-ch:
+			got = append(got, reply)
+		default:
+			return got
+		}
+	}
+}
+
+// PublishSyncState builds and publishes atomically and is the single dedup
+// point for every sync-state producer, so two producers observing the same
+// state must yield one notification.
+func TestPublishSyncStateDedupsAcrossPublishers(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	n := NewNotifications(nil)
+	ch, unsubscribe := n.Events.AddSyncStateSubscription()
+	defer unsubscribe()
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 100))
+	n.NewLastBlockSeen(100)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+	require.NoError(t, n.PublishSyncState(tx, 0))
+	require.Len(t, drainSyncStateEvents(ch), 1, "identical state published twice must notify once")
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 105))
+	n.NewLastBlockSeen(105)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+	require.Empty(t, drainSyncStateEvents(ch), "block progress while synced must not notify")
+
+	n.NewLastBlockSeen(500)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+	got := drainSyncStateEvents(ch)
+	require.Len(t, got, 1)
+	require.True(t, got[0].Syncing)
+}

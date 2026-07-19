@@ -231,6 +231,14 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 		}
 	}()
 	_ = subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_NEW_SNAPSHOT})
+	// A fresh stream missed any SYNCING event published before it connected,
+	// and an unchanged state is never re-published — seed it with the current
+	// state so a transition during a connection gap is not lost forever.
+	if syncReply, err := s.Syncing(s.ctx, nil); err == nil {
+		if data, err := proto.Marshal(syncReply); err == nil {
+			_ = subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_SYNCING, Data: data})
+		}
+	}
 	for {
 		select {
 		case <-s.ctx.Done():

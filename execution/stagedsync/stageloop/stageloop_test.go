@@ -125,11 +125,92 @@ func TestHookUpdateHeadDoesNotReEmitWhileSynced(t *testing.T) {
 	}
 	require.Empty(t, drainSyncState(ch), "block progress while synced must not re-emit sync state")
 
+	notifications.NewLastBlockSeen(209)
+	require.NoError(t, hook.UpdateHead(tx, 0, true))
+	require.Empty(t, drainSyncState(ch), "falling behind by less than the reorg range must not flip back to syncing")
+
 	notifications.NewLastBlockSeen(500)
 	require.NoError(t, hook.UpdateHead(tx, 0, false))
 	emitted := drainSyncState(ch)
 	require.Len(t, emitted, 1, "falling behind again must re-emit")
 	require.True(t, emitted[0].Syncing)
+}
+
+// Two Hook instances share the same Notifications in production (pipeline and
+// stage-loop paths), so the dedup must hold across both.
+func TestTwoHooksSharingNotificationsEmitOnce(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 199))
+
+	notifications := shards.NewNotifications(nil)
+	notifications.NewLastBlockSeen(200)
+	ch, unsubscribe := notifications.Events.AddSyncStateSubscription()
+	defer unsubscribe()
+
+	hookA := NewHook(t.Context(), notifications, nil, nil, log.New(), nil, nil, nil, nil, frozenBlocksStub(0))
+	hookB := NewHook(t.Context(), notifications, nil, nil, log.New(), nil, nil, nil, nil, frozenBlocksStub(0))
+
+	require.NoError(t, hookA.UpdateHead(tx, 0, true))
+	require.NoError(t, hookB.UpdateHead(tx, 0, true))
+	require.Len(t, drainSyncState(ch), 1, "the same synced state must be notified once across hooks")
+}
+
+// BeforeRun evaluates the sync state at cycle start, so a node that fell
+// behind notifies syncing=true when the catch-up cycle begins rather than
+// staying silent until (and if) a cycle ends while still behind.
+func TestHookBeforeRunEmitsWhenBehind(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 199))
+
+	notifications := shards.NewNotifications(nil)
+	notifications.NewLastBlockSeen(200)
+	ch, unsubscribe := notifications.Events.AddSyncStateSubscription()
+	defer unsubscribe()
+
+	hook := NewHook(t.Context(), notifications, nil, nil, log.New(), nil, nil, nil, nil, frozenBlocksStub(0))
+
+	require.NoError(t, hook.UpdateHead(tx, 0, true))
+	require.Len(t, drainSyncState(ch), 1)
+
+	notifications.NewLastBlockSeen(500)
+	require.NoError(t, hook.BeforeRun(tx, false))
+	emitted := drainSyncState(ch)
+	require.Len(t, emitted, 1, "cycle start with the node behind must notify")
+	require.True(t, emitted[0].Syncing)
+}
+
+// NotifySyncState is the per-batch emission point used while executing frozen
+// blocks, where UpdateHead only runs once at the very end.
+func TestHookNotifySyncStateEmitsBatchProgress(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	notifications := shards.NewNotifications(nil)
+	notifications.NewLastBlockSeen(10_000)
+	ch, unsubscribe := notifications.Events.AddSyncStateSubscription()
+	defer unsubscribe()
+
+	hook := NewHook(t.Context(), notifications, nil, nil, log.New(), nil, nil, nil, nil, frozenBlocksStub(10_000))
+
+	for progress := uint64(1000); progress <= 3000; progress += 1000 {
+		require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, progress))
+		hook.NotifySyncState(tx)
+	}
+	emitted := drainSyncState(ch)
+	require.Len(t, emitted, 3, "each executed batch must notify its progress")
+	require.EqualValues(t, 1000, emitted[0].CurrentBlock)
+	require.EqualValues(t, 3000, emitted[2].CurrentBlock)
+
+	var nilHook *Hook
+	nilHook.NotifySyncState(tx)
 }
 
 func TestHookUpdateHeadNilSafe(t *testing.T) {

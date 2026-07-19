@@ -17,6 +17,8 @@
 package shards
 
 import (
+	"google.golang.org/protobuf/proto"
+
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -26,6 +28,28 @@ import (
 // the node is considered synced: closer than a reorg's depth means there is
 // no meaningful catching-up left to report.
 const syncedReorgRange = 8
+
+// PublishSyncState builds the current sync status and notifies subscribers if
+// it changed. Building under the same lock as the compare-and-publish keeps
+// events ordered by construction time, so a state built from an older tx can
+// never overwrite a fresher one. Once synced, block numbers keep advancing on
+// every cycle but subscribers only care about the flag flipping back —
+// comparing full replies would republish on every block forever.
+func (n *Notifications) PublishSyncState(tx kv.Getter, frozenBlocks uint64) error {
+	n.syncStateLock.Lock()
+	defer n.syncStateLock.Unlock()
+	reply, err := n.BuildSyncingReply(tx, frozenBlocks)
+	if err != nil {
+		return err
+	}
+	stillSynced := n.lastSyncState != nil && !n.lastSyncState.Syncing && !reply.Syncing
+	if stillSynced || proto.Equal(n.lastSyncState, reply) {
+		return nil
+	}
+	n.lastSyncState = reply
+	n.Events.OnNewSyncState(reply)
+	return nil
+}
 
 // BuildSyncingReply computes the sync status served by eth_syncing and
 // published on the SYNCING event stream. While the highest block is still
@@ -50,12 +74,7 @@ func (n *Notifications) BuildSyncingReply(tx kv.Getter, frozenBlocks uint64) (*r
 		return reply, nil
 	}
 
-	var distance uint64
-	if highestBlock > currentBlock {
-		distance = highestBlock - currentBlock
-	} else {
-		distance = currentBlock - highestBlock
-	}
+	distance := max(highestBlock, currentBlock) - min(highestBlock, currentBlock)
 	if distance < syncedReorgRange {
 		reply.Syncing = false
 		return reply, nil
