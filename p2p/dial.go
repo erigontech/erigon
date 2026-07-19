@@ -199,9 +199,8 @@ func newDialScheduler(config dialConfig, it enode.Iterator, setupFunc dialSetupF
 	}
 
 	d.ctx, d.cancel = context.WithCancel(context.Background())
-	d.wg.Add(2)
-	go d.readNodes(it)
-	go d.loop(it)
+	d.wg.Go(func() { d.readNodes(it) })
+	d.wg.Go(func() { d.loop(it) })
 	return d
 }
 
@@ -385,14 +384,12 @@ loop:
 	for range d.dialing {
 		<-d.doneCh
 	}
-	d.wg.Done()
 }
 
 // readNodes runs in its own goroutine and delivers nodes from
 // the input iterator to the nodesIn channel.
 func (d *dialScheduler) readNodes(it enode.Iterator) {
 	defer dbg.LogPanic()
-	defer d.wg.Done()
 
 	for it.Next() {
 		select {

@@ -427,8 +427,7 @@ func (srv *Server) Start(ctx context.Context, logger log.Logger) (err error) {
 	srv.setupDialScheduler()
 	srv.startListenLoop(srv.quitCtx)
 
-	srv.loopWG.Add(1)
-	go srv.run()
+	srv.loopWG.Go(srv.run)
 	return nil
 }
 
@@ -482,19 +481,15 @@ func (srv *Server) setupLocalNode() error {
 			},
 			logger: srv.logger,
 		}
-		srv.loopWG.Add(1)
-		go func() {
+		srv.loopWG.Go(func() {
 			defer dbg.LogPanic()
-			defer srv.loopWG.Done()
 			tracker.run(srv.quit, externalIPRefreshInterval)
-		}()
+		})
 	default:
 		// Ask the router about the IP. This takes a while and blocks startup,
 		// do it in the background.
-		srv.loopWG.Add(1)
-		go func() {
+		srv.loopWG.Go(func() {
 			defer dbg.LogPanic()
-			defer srv.loopWG.Done()
 			if ip, err := srv.NAT.ExternalIP(); err == nil {
 				srv.logger.Info("NAT ExternalIP resolved", "ip", ip)
 				srv.localnode.SetStaticIP(ip)
@@ -502,7 +497,7 @@ func (srv *Server) setupLocalNode() error {
 			} else {
 				srv.logger.Warn("NAT ExternalIP resolution has failed, try to pass a different --nat option", "err", err)
 			}
-		}()
+		})
 	}
 	return nil
 }
@@ -539,12 +534,10 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 	srv.logger.Trace("UDP listener up", "addr", realaddr)
 	if srv.NAT != nil {
 		if !realaddr.IP.IsLoopback() && srv.NAT.SupportsMapping() {
-			srv.loopWG.Add(1)
-			go func() {
+			srv.loopWG.Go(func() {
 				defer dbg.LogPanic()
-				defer srv.loopWG.Done()
 				nat.Map(srv.NAT, srv.quit, "udp", realaddr.Port, realaddr.Port, "ethereum discovery", srv.logger)
-			}()
+			})
 		}
 	}
 	srv.localnode.SetFallbackUDP(realaddr.Port)
@@ -676,12 +669,10 @@ func (srv *Server) setupListening(ctx context.Context) error {
 		srv.updateLocalNodeStaticAddrCache()
 
 		if !tcp.IP.IsLoopback() && (srv.NAT != nil) && srv.NAT.SupportsMapping() {
-			srv.loopWG.Add(1)
-			go func() {
+			srv.loopWG.Go(func() {
 				defer dbg.LogPanic()
-				defer srv.loopWG.Done()
 				nat.Map(srv.NAT, srv.quit, "tcp", tcp.Port, tcp.Port, "ethereum p2p", srv.logger)
-			}()
+			})
 		}
 	}
 	return nil
@@ -691,12 +682,10 @@ func (srv *Server) startListenLoop(ctx context.Context) {
 	if srv.listener == nil {
 		return
 	}
-	srv.loopWG.Add(1)
-	go func() {
+	srv.loopWG.Go(func() {
 		defer dbg.LogPanic()
-		defer srv.loopWG.Done()
 		srv.listenLoop(ctx)
-	}()
+	})
 }
 
 // doPeerOp runs fn on the main loop.
@@ -714,7 +703,6 @@ func (srv *Server) run() {
 	if len(srv.Config.Protocols) > 0 {
 		srv.logger.Info("Started P2P networking", "version", srv.Config.Protocols[0].Version, "self", *srv.localnodeAddrCache.Load(), "name", srv.Name)
 	}
-	defer srv.loopWG.Done()
 	defer srv.nodedb.Close()
 	defer srv.discmix.Close()
 	defer srv.dialsched.stop()
