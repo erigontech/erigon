@@ -166,6 +166,16 @@ func (p *Provider) unwindDBPastBlock(ctx context.Context, tx kv.TemporalRwTx, to
 		return fmt.Errorf("WriteHeadHeaderHash(%x): %w", targetHash, err)
 	}
 	rawdb.WriteForkchoiceHead(tx, targetHash)
+	// Clear the persisted finalized/safe hashes — they point at pre-unwind
+	// blocks that are no longer canonical. Leaving them alone wedges the
+	// next FCU: forkchoice.go's finalized-canonical check rejects the FCU
+	// as InvalidForkchoice because the stored hash resolves to a block
+	// number the walk-back can't reconcile with the new canonical tip.
+	// Caplin's post-restart FCU supplies fresh finalized/safe values;
+	// clearing here removes the stale ones so the fresh ones take effect
+	// cleanly.
+	rawdb.WriteForkchoiceFinalized(tx, common.Hash{})
+	rawdb.WriteForkchoiceSafe(tx, common.Hash{})
 
 	// Bump PlainStateVersion so external observers (the RPC
 	// kv.PlainStateVersion stream and any cache that keys
