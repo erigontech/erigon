@@ -354,7 +354,7 @@ func (sdb *IntraBlockState) Reset() {
 	clear(sdb.stateObjects)
 	clear(sdb.stateObjectsDirty)
 	for i := range sdb.logs {
-		clear(sdb.logs[i]) // free p¬ointers
+		clear(sdb.logs[i]) // free pointers
 		sdb.logs[i] = sdb.logs[i][:0]
 	}
 	clear(sdb.balanceInc)
