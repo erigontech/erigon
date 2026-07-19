@@ -2786,6 +2786,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 					merged := MergeVersionedWrites(existingWrites, addWrites)
 					be.blockIO.RecordWrites(txVersion, merged)
+					// Merge clones into a fresh set unless it hands back an
+					// input verbatim, so the displaced set is only dead when
+					// it is not the one just recorded.
+					if merged != existingWrites {
+						existingWrites.ReleaseAndReset()
+					}
 
 					// Flush the merged writes (including fee calc changes)
 					// to the version map so that subsequent per-tx
