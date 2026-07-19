@@ -1099,6 +1099,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 								return nil
 							}
 							pe.Lock()
+							if be, ok := pe.blockExecutors[blockResult.BlockNum]; ok {
+								be.versionMap.Release()
+							}
 							delete(pe.blockExecutors, blockResult.BlockNum)
 							pe.Unlock()
 							pe.scheduleNextPending(ctx)
@@ -1228,6 +1231,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				}
 
 				pe.Lock()
+				if be, ok := pe.blockExecutors[blockResult.BlockNum]; ok {
+					be.versionMap.Release()
+				}
 				delete(pe.blockExecutors, blockResult.BlockNum)
 				pe.Unlock()
 
