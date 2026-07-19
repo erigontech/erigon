@@ -2,11 +2,12 @@ package types
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -184,8 +185,8 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 
 func (ac *AccountChanges) Normalize() {
 	if len(ac.StorageChanges) > 1 {
-		sort.Slice(ac.StorageChanges, func(i, j int) bool {
-			return ac.StorageChanges[i].Slot.Cmp(ac.StorageChanges[j].Slot) < 0
+		slices.SortFunc(ac.StorageChanges, func(a, b *SlotChanges) int {
+			return a.Slot.Cmp(b.Slot)
 		})
 	}
 
@@ -455,20 +456,20 @@ func dedupByEquality[T comparable](items []T) []T {
 }
 
 func sortByIndex[T interface{ GetIndex() uint32 }](changes []T) {
-	sort.Slice(changes, func(i, j int) bool {
-		return changes[i].GetIndex() < changes[j].GetIndex()
+	slices.SortFunc(changes, func(a, b T) int {
+		return cmp.Compare(a.GetIndex(), b.GetIndex())
 	})
 }
 
 func sortByBytes[T interface{ GetBytes() []byte }](items []T) {
-	sort.Slice(items, func(i, j int) bool {
-		return bytes.Compare(items[i].GetBytes(), items[j].GetBytes()) < 0
+	slices.SortFunc(items, func(a, b T) int {
+		return bytes.Compare(a.GetBytes(), b.GetBytes())
 	})
 }
 
 func sortHashes(hashes []accounts.StorageKey) {
-	sort.Slice(hashes, func(i, j int) bool {
-		return hashes[i].Cmp(hashes[j]) < 0
+	slices.SortFunc(hashes, func(a, b accounts.StorageKey) int {
+		return a.Cmp(b)
 	})
 }
 

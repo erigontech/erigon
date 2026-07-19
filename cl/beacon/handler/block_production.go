@@ -18,6 +18,7 @@ package handler
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,7 +27,6 @@ import (
 	"math/big"
 	"net/http"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -2195,9 +2195,8 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 				})
 			}
 
-			// Sort in descending order by bit count
-			sort.SliceStable(cands, func(i, j int) bool {
-				return cands[i].count > cands[j].count
+			slices.SortStableFunc(cands, func(a, b candSort) int {
+				return cmp.Compare(b.count, a.count)
 			})
 
 			// Create new slice with sorted attestations
@@ -2399,8 +2398,8 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 			})
 		}
 	}
-	sort.Slice(attestationCandidates, func(i, j int) bool {
-		return attestationCandidates[i].reward > attestationCandidates[j].reward
+	slices.SortFunc(attestationCandidates, func(a, b attestationCandidate) int {
+		return cmp.Compare(b.reward, a.reward)
 	})
 
 	// decide the max attestation length based on the version

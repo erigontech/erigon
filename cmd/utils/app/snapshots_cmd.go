@@ -19,6 +19,7 @@ package app
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1211,14 +1212,14 @@ func DeleteBlockSnapshots(args DeleteBlockSnapshotsArgs) error {
 	}
 
 	// Sort by (From desc, To desc, name asc) for display: newest ranges first.
-	sort.Slice(allFiles, func(i, j int) bool {
-		if allFiles[i].From != allFiles[j].From {
-			return allFiles[i].From > allFiles[j].From
+	slices.SortFunc(allFiles, func(a, b snaptype.FileInfo) int {
+		if a.From != b.From {
+			return cmp.Compare(b.From, a.From)
 		}
-		if allFiles[i].To != allFiles[j].To {
-			return allFiles[i].To > allFiles[j].To
+		if a.To != b.To {
+			return cmp.Compare(b.To, a.To)
 		}
-		return allFiles[i].Name() < allFiles[j].Name()
+		return cmp.Compare(a.Name(), b.Name())
 	})
 
 	fmt.Printf("\nDatadir: %s\n", dirs.DataDir)
@@ -2312,8 +2313,11 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 		return err
 	}
 
-	sort.Slice(accFiles, func(i, j int) bool {
-		return (accFiles[i].From < accFiles[j].From) || (accFiles[i].From == accFiles[j].From && accFiles[i].To < accFiles[j].To)
+	slices.SortFunc(accFiles, func(a, b snaptype.FileInfo) int {
+		if a.From != b.From {
+			return cmp.Compare(a.From, b.From)
+		}
+		return cmp.Compare(a.To, b.To)
 	})
 	if len(accFiles) == 0 {
 		return fmt.Errorf("%w (.kv) in %s", ErrSnapNoAccountFiles, dirs.SnapDomain)
@@ -2422,8 +2426,11 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 		return err
 	}
 
-	sort.Slice(accFiles, func(i, j int) bool {
-		return (accFiles[i].From < accFiles[j].From) || (accFiles[i].From == accFiles[j].From && accFiles[i].To < accFiles[j].To)
+	slices.SortFunc(accFiles, func(a, b snaptype.FileInfo) int {
+		if a.From != b.From {
+			return cmp.Compare(a.From, b.From)
+		}
+		return cmp.Compare(a.To, b.To)
 	})
 	if len(accFiles) == 0 {
 		return fmt.Errorf("%w (.ef) in %s", ErrSnapNoAccountFiles, dirs.SnapIdx)
@@ -2534,8 +2541,8 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	}); err != nil {
 		return err
 	}
-	sort.Slice(intervals, func(i, j int) bool {
-		return intervals[i].from < intervals[j].from
+	slices.SortFunc(intervals, func(a, b interval) int {
+		return cmp.Compare(a.from, b.from)
 	})
 	if len(intervals) == 0 {
 		return fmt.Errorf("no snapshot files found in %s for type: %s", snapDir, snapType)
@@ -4139,11 +4146,11 @@ func duFormatHuman(w io.Writer, result duResult, verbose bool) {
 	for cat, stat := range result.Categories {
 		entries = append(entries, catEntry{cat, stat})
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].stat.Bytes != entries[j].stat.Bytes {
-			return entries[i].stat.Bytes > entries[j].stat.Bytes
+	slices.SortFunc(entries, func(a, b catEntry) int {
+		if a.stat.Bytes != b.stat.Bytes {
+			return cmp.Compare(b.stat.Bytes, a.stat.Bytes)
 		}
-		return entries[i].name < entries[j].name
+		return cmp.Compare(a.name, b.name)
 	})
 
 	fmt.Fprintln(w, "── Breakdown ──────────────────────────────────────────────────")
@@ -4167,11 +4174,11 @@ func duFormatHuman(w io.Writer, result duResult, verbose bool) {
 				for sub, stat := range subs {
 					subEntries = append(subEntries, catEntry{sub, stat})
 				}
-				sort.Slice(subEntries, func(i, j int) bool {
-					if subEntries[i].stat.Bytes != subEntries[j].stat.Bytes {
-						return subEntries[i].stat.Bytes > subEntries[j].stat.Bytes
+				slices.SortFunc(subEntries, func(a, b catEntry) int {
+					if a.stat.Bytes != b.stat.Bytes {
+						return cmp.Compare(b.stat.Bytes, a.stat.Bytes)
 					}
-					return subEntries[i].name < subEntries[j].name
+					return cmp.Compare(a.name, b.name)
 				})
 				for j, sub := range subEntries {
 					subPct := float64(0)

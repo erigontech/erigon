@@ -23,7 +23,7 @@ import (
 	"math/bits"
 	"math/rand"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1445,8 +1445,8 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 		ku[i] = &KeyUpdate{plainKey: string(pk), hashedKey: KeyToHexNibbleHash(pk), update: &updates[i]}
 	}
 
-	sort.Slice(ku, func(i, j int) bool {
-		return bytes.Compare(ku[i].hashedKey, ku[j].hashedKey) < 0
+	slices.SortFunc(ku, func(a, b *KeyUpdate) int {
+		return bytes.Compare(a.hashedKey, b.hashedKey)
 	})
 
 	pks := make([][]byte, len(ku))
