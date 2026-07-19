@@ -1630,7 +1630,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 			destructed, _, _, err := refreshSelfDestruct(sdb, addr)
 
 			if destructed || err != nil {
-				so := stateObjectPool.Get().(*stateObject)
+				so := getStateObject()
 				so.db = sdb
 				so.address = addr
 				so.selfdestructed = destructed
@@ -1670,7 +1670,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 				}
 			}
 			if !localResurrected {
-				so := stateObjectPool.Get().(*stateObject)
+				so := getStateObject()
 				so.db = sdb
 				so.address = addr
 				so.selfdestructed = true
