@@ -51,14 +51,12 @@ func DescriptiveErrors(packageName string, descriptive bool) {
 func ParseDescriptiveErrors(values []string) {
 
 	for _, value := range values {
-		parts := strings.Split(value, ":")
-
-		if len(parts) > 1 {
-			switch strings.ToLower(parts[1]) {
+		if pkg, desc, ok := strings.Cut(value, ":"); ok {
+			switch strings.ToLower(desc) {
 			case "true":
-				DescriptiveErrors(parts[0], true)
+				DescriptiveErrors(pkg, true)
 			case "false":
-				DescriptiveErrors(parts[0], false)
+				DescriptiveErrors(pkg, false)
 			}
 		}
 	}

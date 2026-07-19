@@ -159,9 +159,10 @@ func TestNextKey(t *testing.T) {
 		"000000FF->00000100",
 		"FEFFFFFF->FF000000",
 	} {
-		parts := strings.Split(tc, "->")
-		input := decodeHex(parts[0])
-		expectedOutput := decodeHex(parts[1])
+		inputStr, expectedStr, ok := strings.Cut(tc, "->")
+		require.True(t, ok)
+		input := decodeHex(inputStr)
+		expectedOutput := decodeHex(expectedStr)
 		actualOutput, err := NextKey(input)
 		require.NoError(t, err)
 		assert.Equal(t, expectedOutput, actualOutput)

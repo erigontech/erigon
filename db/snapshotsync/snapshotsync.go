@@ -282,10 +282,20 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 		versionString, _, _ := strings.Cut(name, "-")
 		name = strings.TrimPrefix(name, versionString)
 
-		rangeString := strings.Split(name, ".")[1]
-		rangeNums := strings.Split(rangeString, "-")
+		_, rest, ok := strings.Cut(name, ".")
+		if !ok {
+			continue
+		}
+		rangeString, _, ok := strings.Cut(rest, ".")
+		if !ok {
+			continue
+		}
+		_, toStr, ok := strings.Cut(rangeString, "-")
+		if !ok {
+			continue
+		}
 		// convert the range to uint64
-		to, err := strconv.ParseUint(rangeNums[1], 10, 64)
+		to, err := strconv.ParseUint(toStr, 10, 64)
 		if err != nil {
 			return 0, err
 		}

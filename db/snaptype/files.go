@@ -143,11 +143,11 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 		return res, false, false
 	}
 
-	partsVersion := strings.SplitN(fileName, "-", 2)
-	if len(partsVersion) != 2 {
+	_, remainingPart, ok := strings.Cut(fileName, "-")
+	if !ok {
 		return res, false, false
 	}
-	croppedFileName, ok := strings.CutSuffix(partsVersion[1], res.Ext)
+	croppedFileName, ok := strings.CutSuffix(remainingPart, res.Ext)
 	if !ok {
 		return res, false, false
 	}
@@ -227,12 +227,11 @@ func ParseFileNameOld(dir, fileName string) (res FileInfo, isE3Seedable bool, ok
 		parts := strings.Split(fileName, ".")
 		partsLen := len(parts)
 		if partsLen == 3 || partsLen == 4 {
-			fsteps := strings.Split(parts[partsLen-2], "-")
-			if len(fsteps) == 2 {
-				if from, err := strconv.ParseUint(fsteps[0], 10, 64); err == nil {
+			if fromStr, toStr, ok := strings.Cut(parts[partsLen-2], "-"); ok && !strings.Contains(toStr, "-") {
+				if from, err := strconv.ParseUint(fromStr, 10, 64); err == nil {
 					res.From = from
 				}
-				if to, err := strconv.ParseUint(fsteps[1], 10, 64); err == nil {
+				if to, err := strconv.ParseUint(toStr, 10, 64); err == nil {
 					res.To = to
 				}
 			}
@@ -287,8 +286,11 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	}
 
 	var err error
-	verParts := strings.SplitN(parts[0], string(filepath.Separator), 2)
-	res.Version, err = version.ParseVersion(verParts[len(verParts)-1])
+	verPart := parts[0]
+	if _, after, ok := strings.Cut(parts[0], string(filepath.Separator)); ok {
+		verPart = after
+	}
+	res.Version, err = version.ParseVersion(verPart)
 	if err != nil {
 		return res, false
 	}
