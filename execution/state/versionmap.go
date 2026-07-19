@@ -1209,7 +1209,9 @@ func (mvr ReadResult) Status() int {
 // only recycled by Delete/DeleteAll, so a version map that reaches the end of
 // its block normally strands all of them.
 //
-// The map is unusable afterwards and must be discarded.
+// The map is unusable afterwards: entries are dropped rather than cleared,
+// so a write after Release panics instead of silently starting a new block
+// on stale state.
 func (vm *VersionMap) Release() {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
@@ -1227,7 +1229,7 @@ func (vm *VersionMap) Release() {
 			releaseCells(cells, releaseCellStorage)
 		}
 	}
-	clear(vm.s)
+	vm.s = nil
 }
 
 func releaseCells[T any](cells *btree.Map[int, *WriteCell[T]], release func(*WriteCell[T])) {
