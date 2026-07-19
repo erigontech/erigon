@@ -1985,7 +1985,7 @@ func (result *execResult) calcFees(
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance ||
 		(coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero())
 
-	addWrites := &state.WriteSet{}
+	addWrites := state.NewWriteSet()
 	if emitCoinbase {
 		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
 			result.Coinbase, coinbaseAcc, newCoinbaseBalance,
@@ -3286,7 +3286,7 @@ func MergeVersionedWrites(prev, next *state.WriteSet) *state.WriteSet {
 var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
 
 func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool, eip8246 bool) *state.WriteSet {
-	filtered := &state.WriteSet{}
+	filtered := state.NewWriteSet()
 	if writes == nil {
 		return filtered
 	}

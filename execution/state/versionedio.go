@@ -7,13 +7,16 @@ import (
 	"fmt"
 	"iter"
 	"maps"
+	"runtime"
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"github.com/heimdalr/dag"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -615,6 +618,46 @@ type WriteSet struct {
 	codeHash       map[accounts.Address]*VersionedWrite[accounts.CodeHash]
 	codeSize       map[accounts.Address]*VersionedWrite[int]
 	storage        map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int]
+
+	allocPCs []uintptr // ERIGON_ASSERT only: construction-site PCs, for leak reporting
+}
+
+var (
+	leakedWriteSets       atomic.Int64
+	reportedWSLeakOrigins sync.Map
+)
+
+// newWriteSet builds a WriteSet, arming a leak check under ERIGON_ASSERT.
+// The per-path maps are checked out of pools lazily, so a WriteSet dropped
+// without ReleaseAndReset strands every map it acquired.
+func NewWriteSet() *WriteSet {
+	s := &WriteSet{}
+	if dbg.AssertEnabled {
+		s.allocPCs = make([]uintptr, leakStackDepth)
+		s.allocPCs = s.allocPCs[:runtime.Callers(2, s.allocPCs)]
+		runtime.SetFinalizer(s, reportLeakedWriteSet)
+	}
+	return s
+}
+
+// holdsPooledMaps reports whether any per-path map was ever checked out. Length
+// is the wrong test: a map emptied by Del* still owns its pooled container.
+func (s *WriteSet) holdsPooledMaps() bool {
+	return s.address != nil || s.balance != nil || s.nonce != nil ||
+		s.incarnation != nil || s.selfDestruct != nil || s.createContract != nil ||
+		s.code != nil || s.codeHash != nil || s.codeSize != nil || s.storage != nil
+}
+
+func reportLeakedWriteSet(s *WriteSet) {
+	if !s.holdsPooledMaps() {
+		return // never touched a pool; dropping it strands nothing
+	}
+	total := leakedWriteSets.Add(1)
+	origin := formatLeakOrigin(s.allocPCs)
+	if _, seen := reportedWSLeakOrigins.LoadOrStore(origin, struct{}{}); seen {
+		return
+	}
+	log.Warn("[assert] WriteSet dropped without ReleaseAndReset", "leaked", total, "origin", origin)
 }
 
 // vwMapPool[T] pools the per-path map[Address]*VersionedWrite[T] containers
@@ -755,7 +798,7 @@ func (s *WriteSet) Filter(keep func(WriteHeader) bool) *WriteSet {
 	if s == nil {
 		return nil
 	}
-	out := &WriteSet{}
+	out := NewWriteSet()
 	for a, vw := range s.address {
 		if keep(vw.WriteHeader) {
 			out.SetAddress(a, vw)
@@ -1168,6 +1211,9 @@ func (s *WriteSet) ReleaseAndReset() {
 		wsPutStorageInner(inner)
 	}
 	wsPutStorageOuter(s.storage)
+	if dbg.AssertEnabled {
+		runtime.SetFinalizer(s, nil)
+	}
 	*s = WriteSet{}
 }
 
@@ -1870,7 +1916,7 @@ func (prev *WriteSet) Merge(next *WriteSet) *WriteSet {
 	if next.IsEmpty() {
 		return prev
 	}
-	out := &WriteSet{}
+	out := NewWriteSet()
 	out.copyFrom(prev)
 	out.copyFrom(next)
 	return out
@@ -1947,7 +1993,7 @@ func (writes *WriteSet) StripBalanceWrite(addr accounts.Address, readSet ReadSet
 // this address are stripped and a SelfDestructPath entry is emitted instead.
 func (writes *WriteSet) SetAccountBalanceOrDelete(addr accounts.Address, acc *accounts.Account, val uint256.Int, reason tracing.BalanceChangeReason, emptyRemoval bool) *WriteSet {
 	if writes == nil {
-		writes = &WriteSet{}
+		writes = NewWriteSet()
 	}
 	if acc == nil {
 		a := accounts.NewAccount()

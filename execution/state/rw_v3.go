@@ -578,7 +578,7 @@ type versionedWriteCollector struct {
 // NewVersionedWriteCollector creates a versionedWriteCollector that collects
 // StateWriter calls into a VersionedWrites slice and maintains rs.accounts.
 func NewVersionedWriteCollector(rs *StateV3Buffered) *versionedWriteCollector {
-	return &versionedWriteCollector{rs: rs, writes: &WriteSet{}}
+	return &versionedWriteCollector{rs: rs, writes: NewWriteSet()}
 }
 
 // Writes returns the collected write set for domain apply.
@@ -710,13 +710,13 @@ type LightCollector struct {
 }
 
 func NewLightCollector() *LightCollector {
-	return &LightCollector{writes: &WriteSet{}}
+	return &LightCollector{writes: NewWriteSet()}
 }
 
 // TakeWrites returns the accumulated writes and resets the collector.
 func (c *LightCollector) TakeWrites() *WriteSet {
 	writes := c.writes
-	c.writes = &WriteSet{}
+	c.writes = NewWriteSet()
 	return writes
 }
 

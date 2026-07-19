@@ -2865,7 +2865,7 @@ func (sdb *IntraBlockState) ResetVersionedReads() {
 // creation marker); Nonce/Code/CodeHash/CodeSize/Address are dropped.
 func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) *WriteSet {
 	src := &sdb.versionedWrites
-	out := &WriteSet{}
+	out := NewWriteSet()
 
 	addrs := make(map[accounts.Address]struct{})
 	for h := range src.AllHeaders() {

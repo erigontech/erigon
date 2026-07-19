@@ -320,7 +320,7 @@ func (cs *calcState) LoadFromBAL(bal types.BlockAccessList, emptyRemoval bool, i
 // remainder — the BAL carries every change's tx index, so no re-execution is
 // needed. maxTxIndex == math.MaxUint32 is the whole block (== LoadFromBAL).
 func (cs *calcState) LoadFromBALUpTo(bal types.BlockAccessList, maxTxIndex uint32, emptyRemoval bool, isAura bool, eip8246 bool) {
-	writes := &state.WriteSet{}
+	writes := state.NewWriteSet()
 	for _, ac := range bal {
 		addr := ac.Address
 		if bc, ok := finalChangeUpTo(ac.BalanceChanges, maxTxIndex); ok {
