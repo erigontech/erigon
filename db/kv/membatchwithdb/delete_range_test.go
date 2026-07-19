@@ -216,6 +216,15 @@ func TestMemoryMutationCursorDeleteCurrentMultiValBeforeAll(t *testing.T) {
 	require.Nil(t, k) // not BBBB: the cursor must not have advanced to the next key
 	require.Nil(t, v)
 
+	// Point reads consult deletedEntries, not the per-dup tombstones, so the
+	// emptied key needs the whole-key tombstone or GetOne/Has resurrect it.
+	got, err := batch.GetOne(kv.TblAccountIdx, []byte("AAAA"))
+	require.NoError(t, err)
+	require.Nil(t, got)
+	ok, err := batch.Has(kv.TblAccountIdx, []byte("AAAA"))
+	require.NoError(t, err)
+	require.False(t, ok)
+
 	// BBBB itself is untouched
 	k, _, err = c.SeekExact([]byte("BBBB"))
 	require.NoError(t, err)

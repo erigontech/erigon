@@ -1243,9 +1243,8 @@ func (tx *MdbxTx) DeleteRange(table string, from, to []byte) (uint64, error) {
 	return begin.DeleteRange(end, endIncluding)
 }
 
-// DeleteBefore removes every key < to (to==nil clears the whole table) using
-// mdbx's native bunch-delete, which cuts whole pages and branches out of the
-// B-tree at once. Returns the number of entries removed.
+// DeleteBefore removes every key < to (to==nil clears the whole table) via the
+// same native bunch-delete as DeleteRange. Returns the number of entries removed.
 func (tx *MdbxTx) DeleteBefore(table string, to []byte) (uint64, error) {
 	c, err := tx.RwCursor(table)
 	if err != nil {
@@ -1273,9 +1272,8 @@ func (tx *MdbxTx) DeleteBefore(table string, to []byte) (uint64, error) {
 	return rawCursor(c).RangeDel(mdbx.DeleteBeforeIncluding)
 }
 
-// DeleteAfter removes every key >= from (from==nil clears the whole table) using
-// mdbx's native bunch-delete, which cuts whole pages and branches out of the
-// B-tree at once. Returns the number of entries removed.
+// DeleteAfter removes every key >= from (from==nil clears the whole table) via the
+// same native bunch-delete as DeleteRange. Returns the number of entries removed.
 func (tx *MdbxTx) DeleteAfter(table string, from []byte) (uint64, error) {
 	c, err := tx.RwCursor(table)
 	if err != nil {
@@ -1803,23 +1801,11 @@ func (c *MdbxCursorPseudoDupSort) DeleteCurrentDuplicates() error {
 }
 
 func (c *MdbxCursorPseudoDupSort) DeleteCurrentMultiValBefore(v []byte) (uint64, error) {
-	k, cur, err := c.Current()
-	if err != nil || cur == nil {
-		return 0, err
-	}
-	if v != nil && bytes.Compare(cur, v) >= 0 {
-		return 0, nil
-	}
-	k = bytes.Clone(k)
-	if err := c.DeleteCurrent(); err != nil {
+	n, err := (&kv.RwCursorPseudoDupSort{RwCursor: c.MdbxCursor}).DeleteCurrentMultiValBefore(v)
+	if err != nil {
 		return 0, fmt.Errorf("label: %s,in DeleteCurrentMultiValBefore: %w", c.label, err)
 	}
-	// The key held its only value, so it is gone and the cursor owes the caller an
-	// unpositioned state; DeleteCurrent instead leaves it on the next record.
-	if _, _, err := c.SeekExact(k); err != nil {
-		return 0, fmt.Errorf("label: %s,in DeleteCurrentMultiValBefore: %w", c.label, err)
-	}
-	return 1, nil
+	return n, nil
 }
 
 // CountDuplicates returns the number of duplicates for the current key. See mdb_cursor_count
@@ -1993,7 +1979,8 @@ func (c *MdbxDupSortCursor) DeleteCurrentMultiValBefore(v []byte) (uint64, error
 	if k == nil {
 		return 0, nil
 	}
-	k = bytes.Clone(k) // seeking below may invalidate the page k points into
+	// k stays valid through the seeks below: mdbx invalidates returned values only
+	// on update operations, and the first update here is the final RangeDel.
 
 	if v != nil {
 		vv, err := c.SeekBothRange(k, v) // smallest value >= v within the key
