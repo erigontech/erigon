@@ -819,7 +819,7 @@ func (sdb *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHas
 	// recompute the hash from it, matching the materialized path's resident object.
 	if hash == accounts.EmptyCodeHash && sdb.hasWrite(addr, SelfDestructPath, accounts.NilKey) {
 		if cw, ok := sdb.versionedWrites.GetCode(addr); ok && len(cw.Val.Bytes) > 0 {
-			return accounts.InternCodeHash(crypto.HashData(cw.Val.Bytes)), nil
+			return accounts.InternCodeHash(crypto.Keccak256Hash(cw.Val.Bytes)), nil
 		}
 	}
 	if sdb.eip8246 && hash == accounts.NilCodeHash {
@@ -1976,7 +1976,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		// optimisation in SetCode to incorrectly delete code writes when
 		// clearing a delegation that was set by a prior transaction in the
 		// same block.
-		codeHash := accounts.InternCodeHash(crypto.HashData(code))
+		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 		obj.code = accounts.Code{Hash: codeHash, Bytes: code}
 		if codeHash != obj.data.CodeHash {
 			obj.data.CodeHash = codeHash
@@ -3164,7 +3164,7 @@ func (sdb *IntraBlockState) reconstructCellFlags(obj *stateObject, addr accounts
 	if err != nil || code == nil {
 		return
 	}
-	codeHash := accounts.InternCodeHash(crypto.HashData(code))
+	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 	obj.code = accounts.Code{Hash: codeHash, Bytes: code}
 	obj.data.CodeHash = codeHash
 	obj.original.CodeHash = codeHash

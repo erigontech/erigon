@@ -521,7 +521,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 		if b.BlockAccessList == nil || b.BlockAccessList.EncodingSizeSSZ() == 0 {
 			*blockAccessListHash = empty.BlockAccessListHash
 		} else {
-			*blockAccessListHash = crypto.HashData(b.BlockAccessList.Bytes())
+			*blockAccessListHash = crypto.Keccak256Hash(b.BlockAccessList.Bytes())
 		}
 		header.BlockAccessListHash = blockAccessListHash
 		slotNumber := b.SlotNumber

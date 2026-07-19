@@ -155,7 +155,7 @@ func (e *EngineServer) Start(
 			return nil
 		})
 	}
-	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engine, httpConfig.Dirs, nil, httpConfig.BlockRangeLimit, httpConfig.GetLogsMaxResults, httpConfig.LogQueryLimit)
+	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, engine, nil, jsonrpc.NewBaseApiConfig(httpConfig))
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, jsonrpc.NewEthApiConfig(httpConfig), e.logger)
 
 	apiList := []rpc.API{
@@ -380,7 +380,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			}
 			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("undecodable blockAccessList: %v", err)}
 		}
-		hash := crypto.HashData(bal)
+		hash := crypto.Keccak256Hash(bal)
 		header.BlockAccessListHash = &hash
 		blockAccessListBytes = bal
 		if req.SlotNumber != nil {

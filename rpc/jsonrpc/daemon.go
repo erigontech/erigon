@@ -29,6 +29,20 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
+func NewBaseApiConfig(cfg *httpcfg.HttpCfg) *BaseApiConfig {
+	if cfg == nil {
+		return &BaseApiConfig{}
+	}
+	return &BaseApiConfig{
+		SingleNodeMode:    cfg.WithDatadir,
+		EvmCallTimeout:    cfg.EvmCallTimeout,
+		Dirs:              cfg.Dirs,
+		BlockRangeLimit:   cfg.BlockRangeLimit,
+		GetLogsMaxResults: cfg.GetLogsMaxResults,
+		LogQueryLimit:     cfg.LogQueryLimit,
+	}
+}
+
 func NewEthApiConfig(cfg *httpcfg.HttpCfg) *EthApiConfig {
 	return &EthApiConfig{
 		GasCap:                      cfg.Gascap,
@@ -49,7 +63,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 	logger log.Logger, bridgeReader bridgeReader, spanProducersReader spanProducersReader,
 	testingEntry *rpc.API,
 ) (list []rpc.API) {
-	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.BlockRangeLimit, cfg.GetLogsMaxResults, cfg.LogQueryLimit)
+	base := NewBaseApi(filters, stateCache, blockReader, engine, bridgeReader, NewBaseApiConfig(cfg))
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, NewEthApiConfig(cfg), logger)
 	erigonImpl := NewErigonAPI(base, db, eth)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)

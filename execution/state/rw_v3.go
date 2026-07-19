@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -983,11 +984,18 @@ func (w *Writer) CreateContract(address accounts.Address) error {
 	return nil
 }
 
+// ReaderV3 is not thread-safe.
 type ReaderV3 struct {
 	txNum       uint64
 	trace       bool
 	tracePrefix string
 	getter      kv.TemporalGetter
+
+	// addr and composite are reused key buffers: as non-pointer fields of the
+	// heap-allocated reader, the key slices they back reach the interface getter
+	// with no per-call heap allocation.
+	addr      common.Address                  // reused account/code lookup key
+	composite [length.Addr + length.Hash]byte // reused storage lookup key (addr||slot)
 }
 
 func NewReaderV3(getter kv.TemporalGetter) *ReaderV3 {
@@ -1446,16 +1454,13 @@ func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accoun
 }
 
 func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
-	var value common.Address
-	if !address.IsNil() {
-		value = address.Value()
-	}
+	r.addr = address.Value()
 	// this is an optimization, but also checks the account is checked in the domain
 	// for being deleted on unwind before we try to access the storage
-	if enc, _, err := r.getter.GetLatest(kv.AccountsDomain, value[:]); len(enc) == 0 {
+	if enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:]); len(enc) == 0 {
 		return false, err
 	}
-	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, value[:])
+	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, r.addr[:])
 	return hasStorage, err
 }
 
@@ -1465,11 +1470,8 @@ func (r *ReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account,
 }
 
 func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.Account, error) {
-	var value common.Address
-	if !address.IsNil() {
-		value = address.Value()
-	}
-	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, value[:])
+	r.addr = address.Value()
+	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:])
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1495,18 +1497,11 @@ func (r *ReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.
 }
 
 func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
-	var composite [20 + 32]byte
-	var addressValue common.Address
-	if !address.IsNil() {
-		addressValue = address.Value()
-	}
-	var keyValue common.Hash
-	if !key.IsNil() {
-		keyValue = key.Value()
-	}
-	copy(composite[0:20], addressValue[0:20])
-	copy(composite[20:], keyValue[:])
-	enc, _, err := r.getter.GetLatest(kv.StorageDomain, composite[:])
+	addressValue := address.Value()
+	keyValue := key.Value()
+	copy(r.composite[:length.Addr], addressValue[:])
+	copy(r.composite[length.Addr:], keyValue[:])
+	enc, _, err := r.getter.GetLatest(kv.StorageDomain, r.composite[:])
 	if err != nil {
 		return uint256.Int{}, false, err
 	}
@@ -1518,21 +1513,26 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	}
 
 	if r.trace {
-		if enc == nil {
-			fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d, stack: %s\n", r.tracePrefix, address, key, r.txNum, dbg.Stack())
-		} else {
-			fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d, stack: %s\n", r.tracePrefix, address, key, &res, r.txNum, dbg.Stack())
-		}
+		r.traceReadAccountStorage(address, key, enc, res)
 	}
 
 	return res, ok, err
 }
 
-func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
-	var addressValue common.Address
-	if !address.IsNil() {
-		addressValue = address.Value()
+// traceReadAccountStorage is split out (and takes res by value) so the &res it
+// needs for %x formatting does not force res to the heap on every read.
+//
+//go:noinline
+func (r *ReaderV3) traceReadAccountStorage(address accounts.Address, key accounts.StorageKey, enc []byte, res uint256.Int) {
+	if enc == nil {
+		fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d, stack: %s\n", r.tracePrefix, address, key, r.txNum, dbg.Stack())
+	} else {
+		fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d, stack: %s\n", r.tracePrefix, address, key, &res, r.txNum, dbg.Stack())
 	}
+}
+
+func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	r.addr = address.Value()
 	// Pure read: prefer the content-addressed fast path (addr → codeHash →
 	// cached bytes, no per-address CodeDomain read) when the getter offers it.
 	// This is a getter, never a setter — it must not feed a DomainPut prevVal,
@@ -1540,9 +1540,9 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	var enc []byte
 	var err error
 	if cg, ok := r.getter.(codeGetter); ok {
-		enc, _, err = cg.GetCode(addressValue[:], r.txNum)
+		enc, _, err = cg.GetCode(r.addr[:], r.txNum)
 	} else {
-		enc, _, err = r.getter.GetLatest(kv.CodeDomain, addressValue[:])
+		enc, _, err = r.getter.GetLatest(kv.CodeDomain, r.addr[:])
 	}
 	if err != nil {
 		return nil, err
@@ -1570,27 +1570,24 @@ type codeSizeGetter interface {
 }
 
 func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
-	var addressValue common.Address
-	if !address.IsNil() {
-		addressValue = address.Value()
-	}
+	r.addr = address.Value()
 	if sg, ok := r.getter.(codeSizeGetter); ok {
-		size, _, err := sg.GetCodeSize(addressValue[:], r.txNum)
+		size, _, err := sg.GetCodeSize(r.addr[:], r.txNum)
 		if err != nil {
 			return 0, err
 		}
 		if r.trace {
-			fmt.Printf("%sReadAccountCodeSize (sz) [%x] => [%d], txNum: %d\n", r.tracePrefix, addressValue, size, r.txNum)
+			fmt.Printf("%sReadAccountCodeSize (sz) [%x] => [%d], txNum: %d\n", r.tracePrefix, r.addr, size, r.txNum)
 		}
 		return size, nil
 	}
-	enc, _, err := r.getter.GetLatest(kv.CodeDomain, addressValue[:])
+	enc, _, err := r.getter.GetLatest(kv.CodeDomain, r.addr[:])
 	if err != nil {
 		return 0, err
 	}
 	size := len(enc)
 	if r.trace {
-		fmt.Printf("%sReadAccountCodeSize [%x] => [%d], txNum: %d\n", r.tracePrefix, addressValue, size, r.txNum)
+		fmt.Printf("%sReadAccountCodeSize [%x] => [%d], txNum: %d\n", r.tracePrefix, r.addr, size, r.txNum)
 	}
 	return size, nil
 }
