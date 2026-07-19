@@ -51,16 +51,26 @@ func (n *Notifications) PublishSyncState(tx kv.Getter, frozenBlocks uint64) erro
 	return nil
 }
 
-// SubscribeSyncState registers a sync-state subscription and returns the last
-// published state as seed (nil before the first publish). Registering under
-// the publish lock totally orders the seed against the event stream: a state
-// published before subscribing is in the seed, one published after arrives on
-// the channel.
-func (n *Notifications) SubscribeSyncState() (chan *remoteproto.SyncingReply, *remoteproto.SyncingReply, func()) {
+// SubscribeSyncState registers a sync-state subscription and returns a seed:
+// the last published state, or one built from tx before the first publish.
+// Registering and seeding under the publish lock totally orders the seed
+// against the event stream: a state published before subscribing is in the
+// seed, one published after arrives on the channel. The built seed does not
+// become the dedup baseline — other subscribers never saw it as an event.
+func (n *Notifications) SubscribeSyncState(tx kv.Getter, frozenBlocks uint64) (chan *remoteproto.SyncingReply, *remoteproto.SyncingReply, func(), error) {
 	n.syncStateLock.Lock()
 	defer n.syncStateLock.Unlock()
 	ch, clean := n.Events.AddSyncStateSubscription()
-	return ch, n.lastSyncState, clean
+	seed := n.lastSyncState
+	if seed == nil {
+		var err error
+		seed, err = n.BuildSyncingReply(tx, frozenBlocks)
+		if err != nil {
+			clean()
+			return nil, nil, nil, err
+		}
+	}
+	return ch, seed, clean, nil
 }
 
 // BuildSyncingReply computes the sync status served by eth_syncing and

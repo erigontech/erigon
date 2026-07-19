@@ -221,7 +221,16 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 	defer clean()
 	newSnCh, newSnClean := s.notifications.Events.AddNewSnapshotSubscription()
 	defer newSnClean()
-	syncStateCh, syncSeed, syncStateClean := s.notifications.SubscribeSyncState()
+	seedTx, err := s.db.BeginRo(subscribeServer.Context())
+	if err != nil {
+		return err
+	}
+	defer seedTx.Rollback()
+	syncStateCh, syncSeed, syncStateClean, err := s.notifications.SubscribeSyncState(seedTx, s.blockReader.FrozenBlocks())
+	seedTx.Rollback()
+	if err != nil {
+		return err
+	}
 	defer syncStateClean()
 	defer func() {
 		if err != nil {
@@ -232,17 +241,15 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 	}()
 	_ = subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_NEW_SNAPSHOT})
 	// A fresh stream missed any SYNCING event published before it connected,
-	// and an unchanged state is never re-published — seed it with the last
-	// published state so a transition during a connection gap is not lost
-	// forever. The seed is ordered against syncStateCh by construction; before
-	// the first publish fall back to a direct read, when no event can precede.
-	if syncSeed == nil {
-		syncSeed, _ = s.Syncing(s.ctx, nil)
+	// and an unchanged state is never re-published — send the seed so a
+	// transition during a connection gap is not lost forever. The seed is
+	// ordered against syncStateCh by construction.
+	seedData, err := proto.Marshal(syncSeed)
+	if err != nil {
+		return err
 	}
-	if syncSeed != nil {
-		if data, err := proto.Marshal(syncSeed); err == nil {
-			_ = subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_SYNCING, Data: data})
-		}
+	if err = subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_SYNCING, Data: seedData}); err != nil {
+		return err
 	}
 	for {
 		select {

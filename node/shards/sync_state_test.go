@@ -134,12 +134,14 @@ func TestSubscribeSyncStateSeedsWithLastPublishedState(t *testing.T) {
 	n.NewLastBlockSeen(500)
 	require.NoError(t, n.PublishSyncState(tx, 0))
 
-	ch, seed, unsubscribe := n.SubscribeSyncState()
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 105))
+	ch, seed, unsubscribe, err := n.SubscribeSyncState(tx, 0)
+	require.NoError(t, err)
 	defer unsubscribe()
 
 	require.NotNil(t, seed)
 	require.True(t, seed.Syncing)
-	require.Equal(t, uint64(100), seed.CurrentBlock)
+	require.Equal(t, uint64(100), seed.CurrentBlock, "the published state is the seed, not a fresh build")
 	require.Empty(t, drainSyncStateEvents(ch), "the state published before subscribing is the seed, not an event")
 
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 498))
@@ -150,11 +152,29 @@ func TestSubscribeSyncStateSeedsWithLastPublishedState(t *testing.T) {
 	require.False(t, got[0].Syncing)
 }
 
-func TestSubscribeSyncStateBeforeFirstPublishHasNoSeed(t *testing.T) {
+// Before the first publish there is no last state to seed from, so the seed
+// is built from the tx inside the same critical section that registers the
+// subscription: any publish is then ordered entirely before (impossible, none
+// happened) or entirely after it, and lands on the channel.
+func TestSubscribeSyncStateBeforeFirstPublishBuildsSeed(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
 	n := NewNotifications(nil)
-	ch, seed, unsubscribe := n.SubscribeSyncState()
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 100))
+	n.NewLastBlockSeen(500)
+
+	ch, seed, unsubscribe, err := n.SubscribeSyncState(tx, 0)
+	require.NoError(t, err)
 	defer unsubscribe()
 
-	require.Nil(t, seed)
+	require.NotNil(t, seed)
+	require.True(t, seed.Syncing)
+	require.Equal(t, uint64(100), seed.CurrentBlock)
 	require.Empty(t, drainSyncStateEvents(ch))
+
+	require.NoError(t, n.PublishSyncState(tx, 0))
+	require.Len(t, drainSyncStateEvents(ch), 1, "a publish after subscribing must arrive as an event even when it equals the built seed")
 }
