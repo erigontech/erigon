@@ -342,6 +342,19 @@ func (m *memoryMutationCursor) DeleteCurrentMultiValBefore(v []byte) (uint64, er
 	}
 	key := common.Copy(k)
 
+	// Not purely dupsort: one value per key, tracked via deletedEntries like
+	// DeleteCurrent does.
+	if !m.pureDupSort {
+		if cur := m.currentPair.value; v != nil && bytes.Compare(cur, v) >= 0 {
+			return 0, nil
+		}
+		if err := m.mutation.Delete(m.table, key); err != nil {
+			return 0, err
+		}
+		m.currentPair, m.currentDbEntry, m.currentMemEntry = cursorEntry{}, cursorEntry{}, cursorEntry{}
+		return 1, nil
+	}
+
 	var doomed [][]byte
 	dv, err := m.SeekBothRange(key, nil)
 	if err != nil {
@@ -369,6 +382,11 @@ func (m *memoryMutationCursor) DeleteCurrentMultiValBefore(v []byte) (uint64, er
 	// and the cursor must end up unpositioned — SeekExact can't express that, since
 	// it seeks via Seek and would land on the next key.
 	if dv == nil {
+		// Per-dup tombstones only hide values from cursors; GetOne/Has consult
+		// deletedEntries, so an emptied key needs the whole-key tombstone too.
+		if err := m.mutation.Delete(m.table, key); err != nil {
+			return 0, err
+		}
 		m.currentPair, m.currentDbEntry, m.currentMemEntry = cursorEntry{}, cursorEntry{}, cursorEntry{}
 		return uint64(len(doomed)), nil
 	}
