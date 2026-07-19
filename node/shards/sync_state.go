@@ -51,6 +51,18 @@ func (n *Notifications) PublishSyncState(tx kv.Getter, frozenBlocks uint64) erro
 	return nil
 }
 
+// SubscribeSyncState registers a sync-state subscription and returns the last
+// published state as seed (nil before the first publish). Registering under
+// the publish lock totally orders the seed against the event stream: a state
+// published before subscribing is in the seed, one published after arrives on
+// the channel.
+func (n *Notifications) SubscribeSyncState() (chan *remoteproto.SyncingReply, *remoteproto.SyncingReply, func()) {
+	n.syncStateLock.Lock()
+	defer n.syncStateLock.Unlock()
+	ch, clean := n.Events.AddSyncStateSubscription()
+	return ch, n.lastSyncState, clean
+}
+
 // BuildSyncingReply computes the sync status served by eth_syncing and
 // published on the SYNCING event stream. While the highest block is still
 // unknown (e.g. snapshots are downloading) it reports syncing with no stage

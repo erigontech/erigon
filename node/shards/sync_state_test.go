@@ -119,3 +119,42 @@ func TestPublishSyncStateDedupsAcrossPublishers(t *testing.T) {
 	require.Len(t, got, 1)
 	require.True(t, got[0].Syncing)
 }
+
+// The seed and the events come from the same lock-ordered sequence: a state
+// published before the subscription is the seed, one published after arrives
+// on the channel — never both, never neither.
+func TestSubscribeSyncStateSeedsWithLastPublishedState(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	n := NewNotifications(nil)
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 100))
+	n.NewLastBlockSeen(500)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	ch, seed, unsubscribe := n.SubscribeSyncState()
+	defer unsubscribe()
+
+	require.NotNil(t, seed)
+	require.True(t, seed.Syncing)
+	require.Equal(t, uint64(100), seed.CurrentBlock)
+	require.Empty(t, drainSyncStateEvents(ch), "the state published before subscribing is the seed, not an event")
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 498))
+	n.NewLastBlockSeen(498)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+	got := drainSyncStateEvents(ch)
+	require.Len(t, got, 1)
+	require.False(t, got[0].Syncing)
+}
+
+func TestSubscribeSyncStateBeforeFirstPublishHasNoSeed(t *testing.T) {
+	n := NewNotifications(nil)
+	ch, seed, unsubscribe := n.SubscribeSyncState()
+	defer unsubscribe()
+
+	require.Nil(t, seed)
+	require.Empty(t, drainSyncStateEvents(ch))
+}
