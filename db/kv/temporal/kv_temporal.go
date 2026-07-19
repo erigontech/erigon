@@ -299,13 +299,13 @@ func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error)
 }
 
 func (tx *tx) Rollback() {
-	tx.autoClose()
+	tx.closeFilesRo()
 }
 func (tx *Tx) Rollback() {
 	if tx == nil {
 		return
 	}
-	tx.autoClose()
+	tx.closeFilesRo()
 	if tx.Tx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
@@ -413,7 +413,7 @@ func (tx *RwTx) Rollback() {
 	if tx == nil {
 		return
 	}
-	tx.autoClose()
+	tx.closeFilesRo()
 	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
@@ -451,24 +451,18 @@ func (tx *asyncClone) Commit() error {
 func (tx *asyncClone) Rollback() {
 }
 
-// autoClose releases the tx's file views. Iterators handed to callers are not
-// tracked here: every cursor they hold comes from the mdbx tx, which closes
-// them itself, and their file readers belong to aggtx's visible files.
-func (tx *tx) autoClose() {
+func (tx *tx) closeFilesRo() {
 	tx.aggtx.Close()
-	if tx.blocktx != nil {
-		tx.blocktx.Close()
-		// Rollback is re-entrant by design, so a closed view must not stay
-		// reachable: BlockFilesRoTx would hand out a released one.
-		tx.blocktx = nil
-	}
+	tx.aggtx = nil
+	tx.blocktx.Close()
+	tx.blocktx = nil
 }
 
 func (tx *RwTx) Commit() error {
 	if tx == nil {
 		return nil
 	}
-	tx.autoClose()
+	tx.closeFilesRo()
 	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return nil
 	}
