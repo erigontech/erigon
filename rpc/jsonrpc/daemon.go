@@ -112,6 +112,11 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 				Public:    true,
 				Service:   EthAPI(ethImpl),
 				Version:   "1.0",
+			}, rpc.API{
+				Namespace: "eth",
+				Public:    true,
+				Service:   NewEthSyncingSubscriptionAPI(filters, logger),
+				Version:   "1.0",
 			})
 		case "debug":
 			list = append(list, rpc.API{

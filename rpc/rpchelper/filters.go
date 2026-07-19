@@ -30,6 +30,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/concurrent"
@@ -54,6 +55,7 @@ const (
 	FilterTypeLogs       FilterType = "logs"
 	FilterTypeHeads      FilterType = "heads"
 	FilterTypePendingTxs FilterType = "pendingTxs"
+	FilterTypeSyncing    FilterType = "syncing"
 )
 
 // trackedSub indexes a pollable subscription for O(1) id lookup: polls resolve the
@@ -72,9 +74,15 @@ type Filters struct {
 
 	pendingBlock *types.Block
 
-	headsSubs             *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
-	pendingLogsSubs       *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
-	pendingBlockSubs      *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
+	headsSubs        *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
+	pendingLogsSubs  *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
+	pendingBlockSubs *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
+	syncingSubs      *concurrent.SyncMap[SyncingSubID, *chan_sub[*remoteproto.SyncingReply]]
+	// syncingLock orders subscriber registration+seed against event delivery:
+	// every stream event lands either in the seed or on the channel, never
+	// reordered across the two.
+	syncingLock           sync.Mutex
+	lastSyncing           *remoteproto.SyncingReply
 	pendingTxsSubs        *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
 	logsSubs              *LogsFilterAggregator
 	logsRequestor         atomic.Value
@@ -111,6 +119,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		pendingTxsSubs:     concurrent.NewSyncMap[PendingTxsSubID, Sub[[]types.Transaction]](),
 		pendingLogsSubs:    concurrent.NewSyncMap[PendingLogsSubID, Sub[types.Logs]](),
 		pendingBlockSubs:   concurrent.NewSyncMap[PendingBlockSubID, Sub[*types.Block]](),
+		syncingSubs:        concurrent.NewSyncMap[SyncingSubID, *chan_sub[*remoteproto.SyncingReply]](),
 		receiptsSubs:       NewReceiptsFilterAggregator(),
 		logsSubs:           NewLogsFilterAggregator(),
 		onNewSnapshot:      onNewSnapshot,
@@ -367,6 +376,8 @@ func (ff *Filters) evictStaleSubscriptions(timeout time.Duration) {
 			removed = ff.unsubscribeHeadsInternal(HeadsSubID(v.id))
 		case FilterTypePendingTxs:
 			removed = ff.unsubscribePendingTxsInternal(PendingTxsSubID(v.id))
+		case FilterTypeSyncing:
+			removed = ff.unsubscribeSyncingInternal(SyncingSubID(v.id))
 		case FilterTypeLogs:
 			removed = ff.removeLogsSubscription(LogsSubID(v.id), false)
 			logsEvicted = logsEvicted || removed
@@ -615,6 +626,52 @@ func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) bool {
 	return true
 }
 
+// SubscribeSyncing subscribes to sync status changes and returns a channel to receive
+// the updates and a subscription ID to manage the subscription. The last state seen
+// on the event stream, if any, is delivered on the channel as first message.
+func (ff *Filters) SubscribeSyncing(size int, protocol SubProtocol) (<-chan *remoteproto.SyncingReply, SyncingSubID) {
+	id := SyncingSubID(generateSubscriptionID())
+	sub := newChanSub[*remoteproto.SyncingReply](size, protocol)
+	ff.syncingLock.Lock()
+	defer ff.syncingLock.Unlock()
+	ff.syncingSubs.Put(id, sub)
+	ff.registerSubscription(SubscriptionID(id), FilterTypeSyncing, sub)
+	if ff.lastSyncing != nil {
+		sub.SendLatest(ff.lastSyncing)
+	}
+	return sub.ch, id
+}
+
+// UnsubscribeSyncing unsubscribes from sync status changes using the given subscription ID.
+// It returns true if the unsubscription was successful, otherwise false.
+func (ff *Filters) UnsubscribeSyncing(id SyncingSubID) bool {
+	sub, ok := ff.syncingSubs.Get(id)
+	if !ok {
+		ff.logger.Debug("[rpc] [filters] unsubscribe syncing filter not found", "id", id)
+		return false
+	}
+	protocol := sub.Protocol()
+	if !ff.unsubscribeSyncingInternal(id) {
+		return false
+	}
+	ff.logger.Debug("[rpc] [filters] unsubscribed syncing filter", "id", id, "protocol", protocol)
+	ff.decrementMetrics(FilterTypeSyncing, protocol)
+	return true
+}
+
+func (ff *Filters) unsubscribeSyncingInternal(id SyncingSubID) bool {
+	sub, ok := ff.syncingSubs.Get(id)
+	if !ok {
+		return false
+	}
+	sub.Close()
+	if _, ok = ff.syncingSubs.Delete(id); !ok {
+		return false
+	}
+	ff.trackedSubs.Delete(SubscriptionID(id))
+	return true
+}
+
 // SubscribePendingTxs subscribes to pending transactions and returns a channel to receive the transactions
 // and a subscription ID to manage the subscription.
 func (ff *Filters) SubscribePendingTxs(size int, protocol SubProtocol) (<-chan []types.Transaction, PendingTxsSubID) {
@@ -858,9 +915,26 @@ func (ff *Filters) onNewEvent(event *remoteproto.SubscribeReply) error {
 		return ff.onPendingLog(event)
 	case remoteproto.Event_PENDING_BLOCK:
 		return ff.onPendingBlock(event)
+	case remoteproto.Event_SYNCING:
+		return ff.onSyncing(event)
 	default:
 		return errors.New("unsupported event type")
 	}
+}
+
+// onSyncing handles a sync status event from the remote and notifies subscribers.
+func (ff *Filters) onSyncing(event *remoteproto.SubscribeReply) error {
+	var reply remoteproto.SyncingReply
+	if err := proto.Unmarshal(event.Data, &reply); err != nil {
+		return fmt.Errorf("unprocessable payload: %w", err)
+	}
+	ff.syncingLock.Lock()
+	defer ff.syncingLock.Unlock()
+	ff.lastSyncing = &reply
+	return ff.syncingSubs.Range(func(k SyncingSubID, v *chan_sub[*remoteproto.SyncingReply]) error {
+		v.SendLatest(&reply)
+		return nil
+	})
 }
 
 // TODO: implement?
