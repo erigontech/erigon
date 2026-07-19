@@ -347,24 +347,24 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
 func (sdb *IntraBlockState) Reset() {
-	sdb.nilAccounts = map[accounts.Address]struct{}{}
+	clear(sdb.nilAccounts)
 	for _, so := range sdb.stateObjects {
 		so.release()
 	}
-	sdb.stateObjects = map[accounts.Address]*stateObject{}
-	sdb.stateObjectsDirty = map[accounts.Address]struct{}{}
+	clear(sdb.stateObjects)
+	clear(sdb.stateObjectsDirty)
 	for i := range sdb.logs {
 		clear(sdb.logs[i]) // free p¬ointers
 		sdb.logs[i] = sdb.logs[i][:0]
 	}
-	sdb.balanceInc = map[accounts.Address]*BalanceIncrease{}
+	clear(sdb.balanceInc)
 	sdb.journal.Reset()
 	sdb.revisions = sdb.revisions.put()
 	sdb.refund = uint64(0)
 	sdb.txIndex = 0
 	sdb.logSize = 0
 	sdb.accessList.Reset()
-	sdb.transientStorage = newTransientStorage()
+	clear(sdb.transientStorage)
 	sdb.versionMap = nil
 	// Read side rebinds to a fresh empty set: VersionedReads() at end of
 	// tx hands the per-path maps to result.TxIn, so rebinding leaves the
