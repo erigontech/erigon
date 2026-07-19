@@ -1901,10 +1901,11 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 
 	newObj := sdb.createObject(addr, previous)
 	if previous != nil && previous.selfdestructed {
-		// resetObjectChange.dirtied() returns false, so without this the
-		// parallel worker's MakeWriteSet drops the resurrect write. Confined to
-		// CreateAccount — the GetOrNewStateObject AddBalance path must NOT mark
-		// dirty here.
+		// The reset-object journal entry already marks addr dirty, but that
+		// mark is dropped if the entry is reverted; this un-journalled
+		// increment keeps a resurrected address in journal.dirties across an
+		// intra-tx revert. Confined to CreateAccount — the GetOrNewStateObject
+		// AddBalance path must NOT mark dirty here.
 		sdb.journal.dirty(addr)
 	}
 	if previous != nil && !previous.selfdestructed {
