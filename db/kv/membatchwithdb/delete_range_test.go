@@ -150,3 +150,83 @@ func TestMemoryMutationDeleteRangeDupSortIteration(t *testing.T) {
 	}))
 	require.Equal(t, []string{"BBBB/v1"}, seen) // AAAA must be gone from iteration too
 }
+
+// The overlay has no B-tree to cut, so its dup-range delete must still agree
+// with the mdbx cursors: values below the bound go, the bound itself stays, and
+// overlay-only values are cut alongside ones from the underlying tx.
+func TestMemoryMutationCursorDeleteCurrentMultiValBefore(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	for _, v := range []string{"v1", "v2", "v3"} {
+		require.NoError(t, rwTx.Put(kv.TblAccountIdx, []byte("AAAA"), []byte(v)))
+	}
+	require.NoError(t, rwTx.Put(kv.TblAccountIdx, []byte("BBBB"), []byte("v1")))
+
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	t.Cleanup(batch.Close)
+	require.NoError(t, batch.Put(kv.TblAccountIdx, []byte("AAAA"), []byte("v0"))) // overlay-only, below the bound
+
+	c, err := batch.RwCursorDupSort(kv.TblAccountIdx)
+	require.NoError(t, err)
+	defer c.Close()
+
+	k, _, err := c.SeekExact([]byte("AAAA"))
+	require.NoError(t, err)
+	require.NotNil(t, k)
+
+	n, err := c.DeleteCurrentMultiValBefore([]byte("v3"))
+	require.NoError(t, err)
+	require.EqualValues(t, 3, n) // v0 (overlay) + v1, v2 (underlying)
+
+	var survived []string
+	require.NoError(t, batch.ForEach(kv.TblAccountIdx, []byte("AAAA"), func(k, v []byte) error {
+		survived = append(survived, string(k)+"/"+string(v))
+		return nil
+	}))
+	require.Equal(t, []string{"AAAA/v3", "BBBB/v1"}, survived)
+}
+
+// Removing every value removes the key, so the cursor must end up unpositioned.
+// SeekExact can't express that: it seeks via Seek, which lands on the next key.
+func TestMemoryMutationCursorDeleteCurrentMultiValBeforeAll(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	for _, v := range []string{"v1", "v2"} {
+		require.NoError(t, rwTx.Put(kv.TblAccountIdx, []byte("AAAA"), []byte(v)))
+	}
+	require.NoError(t, rwTx.Put(kv.TblAccountIdx, []byte("BBBB"), []byte("v1")))
+
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	t.Cleanup(batch.Close)
+
+	c, err := batch.RwCursorDupSort(kv.TblAccountIdx)
+	require.NoError(t, err)
+	defer c.Close()
+
+	k, _, err := c.SeekExact([]byte("AAAA"))
+	require.NoError(t, err)
+	require.NotNil(t, k)
+
+	n, err := c.DeleteCurrentMultiValBefore(nil) // every value of AAAA
+	require.NoError(t, err)
+	require.EqualValues(t, 2, n)
+
+	k, v, err := c.Current()
+	require.NoError(t, err)
+	require.Nil(t, k) // not BBBB: the cursor must not have advanced to the next key
+	require.Nil(t, v)
+
+	// Point reads consult deletedEntries, not the per-dup tombstones, so the
+	// emptied key needs the whole-key tombstone or GetOne/Has resurrect it.
+	got, err := batch.GetOne(kv.TblAccountIdx, []byte("AAAA"))
+	require.NoError(t, err)
+	require.Nil(t, got)
+	ok, err := batch.Has(kv.TblAccountIdx, []byte("AAAA"))
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	// BBBB itself is untouched
+	k, _, err = c.SeekExact([]byte("BBBB"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("BBBB"), k)
+}

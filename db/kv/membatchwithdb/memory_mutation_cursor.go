@@ -329,6 +329,73 @@ func (m *memoryMutationCursor) DeleteCurrentDuplicates() error {
 	return nil
 }
 
+// DeleteCurrentMultiValBefore walks the merged dups of the current key and
+// tombstones those below v (see MemoryMutation.DeleteRange for why the overlay
+// deletes via tombstones).
+func (m *memoryMutationCursor) DeleteCurrentMultiValBefore(v []byte) (uint64, error) {
+	k, _, err := m.Current()
+	if err != nil {
+		return 0, err
+	}
+	if k == nil {
+		return 0, nil
+	}
+	key := common.Copy(k)
+
+	// Not purely dupsort: one value per key, tracked via deletedEntries like
+	// DeleteCurrent does.
+	if !m.pureDupSort {
+		if cur := m.currentPair.value; v != nil && bytes.Compare(cur, v) >= 0 {
+			return 0, nil
+		}
+		if err := m.mutation.Delete(m.table, key); err != nil {
+			return 0, err
+		}
+		m.currentPair, m.currentDbEntry, m.currentMemEntry = cursorEntry{}, cursorEntry{}, cursorEntry{}
+		return 1, nil
+	}
+
+	var doomed [][]byte
+	dv, err := m.SeekBothRange(key, nil)
+	if err != nil {
+		return 0, err
+	}
+	for dv != nil {
+		if v != nil && bytes.Compare(dv, v) >= 0 {
+			break
+		}
+		doomed = append(doomed, common.Copy(dv))
+		if _, dv, err = m.NextDup(); err != nil {
+			return 0, err
+		}
+	}
+
+	for _, val := range doomed {
+		// A tombstone only hides the underlying tx's copy; a value written into the
+		// overlay has to be dropped from it as well.
+		m.mutation.deleteDup(m.table, key, val)
+		if err := m.memCursor.DeleteExact(key, val); err != nil {
+			return 0, err
+		}
+	}
+	// dv is the first value the scan left alive. Without survivors the key is gone
+	// and the cursor must end up unpositioned — SeekExact can't express that, since
+	// it seeks via Seek and would land on the next key.
+	if dv == nil {
+		// Per-dup tombstones only hide values from cursors; GetOne/Has consult
+		// deletedEntries, so an emptied key needs the whole-key tombstone too.
+		if err := m.mutation.Delete(m.table, key); err != nil {
+			return 0, err
+		}
+		m.currentPair, m.currentDbEntry, m.currentMemEntry = cursorEntry{}, cursorEntry{}, cursorEntry{}
+		return uint64(len(doomed)), nil
+	}
+	if _, _, err := m.SeekExact(key); err != nil {
+		return 0, err
+	}
+	return uint64(len(doomed)), nil
+}
+
 // Seek move pointer to a key at a certain position.
 func (m *memoryMutationCursor) SeekBothRange(key, value []byte) ([]byte, error) {
 	if m.isTableCleared() {

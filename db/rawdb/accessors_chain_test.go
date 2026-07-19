@@ -1355,3 +1355,32 @@ func TestRawTransactionsRangeExcludesForeignTxns(t *testing.T) {
 	require.NoError(err)
 	require.Equal([][]byte{txCanon}, txs)
 }
+
+// A body whose header is gone (e.g. an invalidated side chain purged via
+// DeleteHeader) must still get its kv.EthTx span deleted: the bulk range cut
+// removes the body row — the only record of its BaseTxnID — so a missed span
+// would leave those EthTx rows orphaned forever.
+func TestPruneBlocksDeletesTxnsOfHeaderlessBodies(t *testing.T) {
+	t.Parallel()
+	_, tx := memdb.NewTestTx(t)
+	require := require.New(t)
+
+	withHeader := &types.Header{Number: *uint256.NewInt(1), Extra: []byte("with header")}
+	require.NoError(rawdb.WriteHeader(tx, withHeader))
+	_, err := rawdb.WriteRawBody(tx, withHeader.Hash(), 1, &types.RawBody{Transactions: [][]byte{{0x01}, {0x02}}})
+	require.NoError(err)
+
+	_, err = rawdb.WriteRawBody(tx, common.Hash{0xaa}, 1, &types.RawBody{Transactions: [][]byte{{0x03}}})
+	require.NoError(err)
+
+	deleted, err := rawdb.PruneBlocks(tx, 2, 10)
+	require.NoError(err)
+	require.Equal(1, deleted)
+
+	bodies, err := tx.Count(kv.BlockBody)
+	require.NoError(err)
+	require.Zero(bodies)
+	ethTxs, err := tx.Count(kv.EthTx)
+	require.NoError(err)
+	require.Zero(ethTxs) // both bodies' spans, including the header-less one
+}

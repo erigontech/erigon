@@ -520,3 +520,55 @@ func BenchmarkTableScanningPrune(b *testing.B) {
 		cur.Close()
 	}
 }
+
+// encodePrefixVal builds a PrefixVal dup value: txNum||val, so dups of a key
+// sort ascending by txNum.
+func encodePrefixVal(txNum uint64, val byte) []byte {
+	b := make([]byte, 8, 9)
+	binary.BigEndian.PutUint64(b, txNum)
+	return append(b, val)
+}
+
+// TestDupSortPrune_PrefixValPartialOverlap: a key whose dups straddle txTo, with
+// nothing below txFrom. Everything below txTo goes, the rest stays, and the stats
+// must describe exactly what was deleted — MaxTxNum is the newest dup actually
+// removed, not the txTo bound.
+func TestDupSortPrune_PrefixValPartialOverlap(t *testing.T) {
+	db := openTestDupSortDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	txNums := []uint64{10, 20, 30, 40, 50}
+	for i, tn := range txNums {
+		require.NoError(t, tx.Put(testDupSortTable, userKey(0), encodePrefixVal(tn, byte(i))))
+	}
+	// a second key untouched by the prune range, to catch an over-broad cut
+	require.NoError(t, tx.Put(testDupSortTable, userKey(1), encodePrefixVal(90, 9)))
+
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+	cur := openDupSortPseudoCursor(t, tx)
+	defer cur.Close()
+
+	// [0, 35) → removes 10, 20, 30; keeps 40, 50
+	stat, err := prune.TableScanningPrune(
+		t.Context(), "test", "dup",
+		0, 35, 16, logEvery, log.New(),
+		nil, cur, false, &prune.Stat{}, prune.PrefixValStorageMode,
+	)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat.ValueProgress)
+	require.EqualValues(t, 3, stat.PruneCountValues)
+	require.EqualValues(t, 10, stat.MinTxNum)
+	require.EqualValues(t, 30, stat.MaxTxNum, "newest dup actually deleted, not the txTo bound")
+
+	var survived []uint64
+	require.NoError(t, tx.ForEach(testDupSortTable, nil, func(_, v []byte) error {
+		survived = append(survived, binary.BigEndian.Uint64(v))
+		return nil
+	}))
+	require.Equal(t, []uint64{40, 50, 90}, survived)
+}

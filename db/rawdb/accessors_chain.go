@@ -867,47 +867,81 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 	blockFrom := binary.BigEndian.Uint64(firstK)
 	stopAtBlock := min(blockTo, blockFrom+uint64(blocksDeleteLimit))
 
-	var b *types.BodyForStorage
-
-	// EthTx is keyed by txnID, not block number, so it can't be cut as a block
-	// range like the tables below: delete its per-block spans while scanning.
 	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return deleted, err
 		}
-
-		n := binary.BigEndian.Uint64(k)
-		if n >= stopAtBlock { // [from, to)
+		if binary.BigEndian.Uint64(k) >= stopAtBlock { // [from, to)
 			break
-		}
-
-		b, err = ReadBodyForStorageByKey(tx, k)
-		if err != nil {
-			return deleted, err
-		}
-		if b == nil {
-			log.Debug("PruneBlocks: block body not found", "height", n)
-		} else {
-			txIDBytes := make([]byte, 8)
-			for txID := b.BaseTxnID.U64(); txID <= b.BaseTxnID.LastSystemTx(b.TxCount); txID++ {
-				binary.BigEndian.PutUint64(txIDBytes, txID)
-				if err = tx.Delete(kv.EthTx, txIDBytes); err != nil {
-					return deleted, err
-				}
-			}
 		}
 		deleted++
 	}
 	c.Close() // release the read cursor before range-deleting the same table
 
-	from, to := hexutil.EncodeTs(blockFrom), hexutil.EncodeTs(stopAtBlock)
-	for _, table := range []string{kv.Senders, kv.BlockBody, kv.BlockAccessList, kv.Headers} {
-		if _, err = kv.DeleteRange(tx, table, from, to); err != nil {
-			return deleted, err
+	if err := deleteBlocksRange(context.Background(), tx, blockFrom, hexutil.EncodeTs(stopAtBlock), "PruneBlocks"); err != nil {
+		return deleted, err
+	}
+	return deleted, nil
+}
+
+// blockNumberKeyedTables hold one entry per (block number, hash) key and can be
+// cut as a block-number range.
+var blockNumberKeyedTables = []string{kv.Senders, kv.BlockBody, kv.BlockAccessList, kv.Headers}
+
+// deleteBlocksRange removes blockNumberKeyedTables rows in [blockFrom, to) (nil
+// to = end of table) together with each body's kv.EthTx span. EthTx is keyed by
+// txnID, not block number, so the spans are deleted while scanning kv.BlockBody;
+// scanning the body table itself (rather than kv.Headers) guarantees a body
+// whose header is gone still gets its span deleted before the body row —
+// the only record of its BaseTxnID — is cut.
+func deleteBlocksRange(ctx context.Context, tx kv.RwTx, blockFrom uint64, to []byte, logPrefix string) error {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	c, err := tx.Cursor(kv.BlockBody)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	txIDFrom, txIDTo := make([]byte, 8), make([]byte, 8)
+	for k, v, err := c.Seek(hexutil.EncodeTs(blockFrom)); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		n := binary.BigEndian.Uint64(k)
+		if to != nil && n >= binary.BigEndian.Uint64(to) { // [from, to)
+			break
+		}
+		var b types.BodyForStorage
+		if err := rlp.DecodeBytes(v, &b); err != nil {
+			return err
+		}
+		if b.TxCount > 0 {
+			binary.BigEndian.PutUint64(txIDFrom, b.BaseTxnID.U64())
+			binary.BigEndian.PutUint64(txIDTo, b.BaseTxnID.LastSystemTx(b.TxCount)+1)
+			if _, err := kv.DeleteRange(tx, kv.EthTx, txIDFrom, txIDTo); err != nil {
+				return err
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			log.Info(logPrefix, "block", n)
+		default:
 		}
 	}
+	c.Close() // release the read cursor before range-deleting the same table
 
-	return deleted, nil
+	from := hexutil.EncodeTs(blockFrom)
+	for _, table := range blockNumberKeyedTables {
+		if _, err := kv.DeleteRange(tx, table, from, to); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func TruncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error {
@@ -919,47 +953,10 @@ func TruncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error 
 // does decrement sequences of kv.EthTx
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
 	if blockFrom < 1 { //protect genesis
 		blockFrom = 1
 	}
-	// EthTx is keyed by txnID, not block number, so it can't be cut as a block
-	// range like the tables below: delete its per-block spans while scanning.
-	if err := tx.ForEach(kv.Headers, hexutil.EncodeTs(blockFrom), func(k, v []byte) error {
-		b, err := ReadBodyForStorageByKey(tx, k)
-		if err != nil {
-			return err
-		}
-		if b != nil {
-			txIDBytes := make([]byte, 8)
-			for txID := b.BaseTxnID.U64(); txID <= b.BaseTxnID.LastSystemTx(b.TxCount); txID++ {
-				binary.BigEndian.PutUint64(txIDBytes, txID)
-				if err = tx.Delete(kv.EthTx, txIDBytes); err != nil {
-					return err
-				}
-			}
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			log.Info("TruncateBlocks", "block", binary.BigEndian.Uint64(k))
-		default:
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	from := hexutil.EncodeTs(blockFrom)
-	for _, table := range []string{kv.Senders, kv.BlockBody, kv.BlockAccessList, kv.Headers} {
-		if _, err := kv.DeleteRange(tx, table, from, nil); err != nil {
-			return err
-		}
-	}
-	return nil
+	return deleteBlocksRange(ctx, tx, blockFrom, nil, "TruncateBlocks")
 }
 
 func ReadHeaderByNumber(db kv.Getter, number uint64) *types.Header {
