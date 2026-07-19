@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -289,8 +290,7 @@ func TableScanningPrune(
 	// keep walking dups one by one.
 	var dupBound []byte
 	if mode == PrefixValStorageMode {
-		dupBound = make([]byte, 8)
-		binary.BigEndian.PutUint64(dupBound, txTo)
+		dupBound = hexutil.EncodeTs(txTo)
 	}
 
 	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, dupBound, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
@@ -325,6 +325,12 @@ func tableScanningPrune(
 	valueProgress Progress,
 	lastPrunedValue []byte,
 ) (interrupted []byte, err error) {
+	// The dupBound bunch-delete needs a real dupsort cursor to position on values.
+	dupCursor, ok := valDelCursor.(kv.CursorDupSort)
+	if !ok {
+		dupBound = nil
+	}
+
 	var val, txNumBytes []byte
 	switch valueProgress {
 	case InProgress:
@@ -398,40 +404,38 @@ func tableScanningPrune(
 		// older dups to preserve, and modes whose dups aren't sorted by txNum, fall
 		// through to the scan below.
 		if dupBound != nil && firstIsOldest && minTxNum >= txFrom {
-			if dupCursor, ok := valDelCursor.(kv.CursorDupSort); ok {
-				firstSurvivor, err := dupCursor.SeekBothRange(val, dupBound)
+			firstSurvivor, err := dupCursor.SeekBothRange(val, dupBound)
+			if err != nil {
+				return nil, fmt.Errorf("seek prune bound %s: %w", filenameBase, err)
+			}
+			// maxTxNum >= txTo, so a survivor exists and the dup before it is the
+			// newest one actually deleted — read it now to keep the stats exact.
+			if firstSurvivor != nil {
+				_, lastDoomed, err := dupCursor.PrevDup()
 				if err != nil {
-					return nil, fmt.Errorf("seek prune bound %s: %w", filenameBase, err)
+					return nil, fmt.Errorf("PrevDup %s: %w", filenameBase, err)
 				}
-				// maxTxNum >= txTo, so a survivor exists and the dup before it is the
-				// newest one actually deleted — read it now to keep the stats exact.
-				if firstSurvivor != nil {
-					_, lastDoomed, err := dupCursor.PrevDup()
+				if lastDoomed != nil {
+					maxDeleted := txNumGetter(val, lastDoomed)
+					deleted, err := valDelCursor.DeleteCurrentMultiValBefore(dupBound)
 					if err != nil {
-						return nil, fmt.Errorf("PrevDup %s: %w", filenameBase, err)
+						return nil, fmt.Errorf("cut dups below txTo %s: %w", filenameBase, err)
 					}
-					if lastDoomed != nil {
-						maxDeleted := txNumGetter(val, lastDoomed)
-						deleted, err := valDelCursor.DeleteCurrentMultiValBefore(dupBound)
-						if err != nil {
-							return nil, fmt.Errorf("cut dups below txTo %s: %w", filenameBase, err)
-						}
-						stat.MinTxNum = min(stat.MinTxNum, minTxNum)
-						stat.MaxTxNum = max(stat.MaxTxNum, maxDeleted)
-						stat.PruneCountValues += deleted
-						if deleted > 1 {
-							stat.DupsDeleted += deleted
-						}
-						if throttling != nil {
-							time.Sleep(*throttling)
-						}
-						if ctx.Err() != nil {
-							stat.LastPrunedValue = common.Copy(val)
-							stat.ValueProgress = InProgress
-							return common.Copy(val), nil
-						}
-						goto nextKey
+					stat.MinTxNum = min(stat.MinTxNum, minTxNum)
+					stat.MaxTxNum = max(stat.MaxTxNum, maxDeleted)
+					stat.PruneCountValues += deleted
+					if deleted > 1 {
+						stat.DupsDeleted += deleted
 					}
+					if throttling != nil {
+						time.Sleep(*throttling)
+					}
+					if ctx.Err() != nil {
+						stat.LastPrunedValue = common.Copy(val)
+						stat.ValueProgress = InProgress
+						return common.Copy(val), nil
+					}
+					goto nextKey
 				}
 			}
 		}
