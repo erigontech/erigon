@@ -466,7 +466,6 @@ func TraceTx(blockNum uint64, txIndex int) bool {
 
 	return true
 }
-
 func TraceAccount(addr unique.Handle[common.Address]) bool {
 	traceInit.Do(initTraceMaps)
 	if len(tracedAccounts) != 0 {

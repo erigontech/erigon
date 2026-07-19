@@ -1864,6 +1864,7 @@ func (result *execResult) finalizeSystemTx(
 	// TXs completed — cached reads would return pre-block values instead
 	// of the post-block state needed by syscalls (withdrawal/consolidation).
 	ibs := state.New(state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader))
+	defer ibs.Release(false)
 	ibs.SetTxContext(blockNum, txIndex)
 	ibs.SetVersion(txIncarnation)
 	// Use the block's versionMap so the IBS's versionedRead (used by
