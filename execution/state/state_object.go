@@ -25,8 +25,10 @@ import (
 	"io"
 	"maps"
 	"math/big"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -34,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -47,6 +50,35 @@ var stateObjectPool = sync.Pool{
 			dirtyStorage:       make(Storage),
 		}
 	},
+}
+
+var (
+	leakedStateObjects  atomic.Int64
+	reportedLeakOrigins sync.Map
+)
+
+// getStateObject takes an object from the pool, arming a leak check under
+// ERIGON_ASSERT. A pool miss shows up in a heap profile, but the profile names
+// the Get site rather than the caller that failed to return the object; the
+// finalizer reports the latter.
+func getStateObject() *stateObject {
+	so := stateObjectPool.Get().(*stateObject)
+	if dbg.AssertEnabled {
+		so.allocStack = dbg.Stack()
+		runtime.SetFinalizer(so, reportLeakedStateObject)
+	}
+	return so
+}
+
+// reportLeakedStateObject runs when a stateObject is collected without having
+// been released, i.e. its IntraBlockState was dropped without Release or Reset.
+// Origins are deduplicated so a leaking call site logs once, not once per object.
+func reportLeakedStateObject(so *stateObject) {
+	total := leakedStateObjects.Add(1)
+	if _, seen := reportedLeakOrigins.LoadOrStore(so.allocStack, struct{}{}); seen {
+		return
+	}
+	log.Warn("[assert] stateObject never returned to pool", "leaked", total, "origin", so.allocStack)
 }
 
 type Storage map[accounts.StorageKey]uint256.Int
@@ -95,11 +127,13 @@ type stateObject struct {
 	deleted         bool // true if account was deleted during the lifetime of this object
 	newlyCreated    bool // true if this object was created in the current transaction
 	createdContract bool // true if this object represents a newly created contract
+
+	allocStack string // ERIGON_ASSERT only: origin of the Get, for leak reporting
 }
 
 // newObject creates a state object from the pool.
 func newObject(db *IntraBlockState, address accounts.Address, data, original *accounts.Account) *stateObject {
-	so := stateObjectPool.Get().(*stateObject)
+	so := getStateObject()
 	so.db = db
 	so.address = address
 	so.data.Copy(data)
@@ -130,6 +164,10 @@ func (so *stateObject) release() {
 	so.deleted = false
 	so.newlyCreated = false
 	so.createdContract = false
+	if dbg.AssertEnabled {
+		runtime.SetFinalizer(so, nil)
+		so.allocStack = ""
+	}
 	stateObjectPool.Put(so)
 }
 
