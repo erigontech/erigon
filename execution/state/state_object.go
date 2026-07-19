@@ -57,14 +57,24 @@ var (
 	reportedLeakOrigins sync.Map
 )
 
+const leakStackDepth = 24
+
 // getStateObject takes an object from the pool, arming a leak check under
 // ERIGON_ASSERT. A pool miss shows up in a heap profile, but the profile names
 // the Get site rather than the caller that failed to return the object; the
 // finalizer reports the latter.
+//
+// Only raw PCs are captured here, into a buffer that survives pool cycles, so
+// arming costs no allocation; symbolisation happens once per reported leak.
+// Formatting the stack eagerly would dominate the heap profile of the very run
+// being diagnosed.
 func getStateObject() *stateObject {
 	so := stateObjectPool.Get().(*stateObject)
 	if dbg.AssertEnabled {
-		so.allocStack = dbg.Stack()
+		if so.allocPCs == nil {
+			so.allocPCs = make([]uintptr, leakStackDepth)
+		}
+		so.allocPCs = so.allocPCs[:runtime.Callers(2, so.allocPCs[:leakStackDepth])]
 		runtime.SetFinalizer(so, reportLeakedStateObject)
 	}
 	return so
@@ -75,10 +85,27 @@ func getStateObject() *stateObject {
 // Origins are deduplicated so a leaking call site logs once, not once per object.
 func reportLeakedStateObject(so *stateObject) {
 	total := leakedStateObjects.Add(1)
-	if _, seen := reportedLeakOrigins.LoadOrStore(so.allocStack, struct{}{}); seen {
+	origin := formatLeakOrigin(so.allocPCs)
+	if _, seen := reportedLeakOrigins.LoadOrStore(origin, struct{}{}); seen {
 		return
 	}
-	log.Warn("[assert] stateObject never returned to pool", "leaked", total, "origin", so.allocStack)
+	log.Warn("[assert] stateObject never returned to pool", "leaked", total, "origin", origin)
+}
+
+func formatLeakOrigin(pcs []uintptr) string {
+	if len(pcs) == 0 {
+		return "<no stack>"
+	}
+	var b strings.Builder
+	frames := runtime.CallersFrames(pcs)
+	for {
+		frame, more := frames.Next()
+		fmt.Fprintf(&b, "%s:%d ", frame.Function, frame.Line)
+		if !more {
+			break
+		}
+	}
+	return b.String()
 }
 
 type Storage map[accounts.StorageKey]uint256.Int
@@ -128,7 +155,7 @@ type stateObject struct {
 	newlyCreated    bool // true if this object was created in the current transaction
 	createdContract bool // true if this object represents a newly created contract
 
-	allocStack string // ERIGON_ASSERT only: origin of the Get, for leak reporting
+	allocPCs []uintptr // ERIGON_ASSERT only: Get-site PCs, reused across pool cycles
 }
 
 // newObject creates a state object from the pool.
@@ -166,7 +193,6 @@ func (so *stateObject) release() {
 	so.createdContract = false
 	if dbg.AssertEnabled {
 		runtime.SetFinalizer(so, nil)
-		so.allocStack = ""
 	}
 	stateObjectPool.Put(so)
 }
