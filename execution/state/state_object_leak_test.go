@@ -140,3 +140,14 @@ func TestEmptyWriteSetIsNotReported(t *testing.T) {
 		t.Fatalf("empty WriteSet was reported as leaked: %d -> %d", base, got)
 	}
 }
+
+// A WriteSet embedded as a value field is an interior pointer; SetFinalizer on
+// one is a fatal error, so ReleaseAndReset must disarm only what it armed.
+func TestEmbeddedWriteSetReleaseDoesNotPanic(t *testing.T) {
+	enableAssert(t)
+
+	type holder struct{ ws WriteSet }
+	h := &holder{}
+	h.ws.SetBalance(accounts.NilAddress, &VersionedWrite[uint256.Int]{})
+	h.ws.ReleaseAndReset()
+}

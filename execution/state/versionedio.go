@@ -1211,7 +1211,10 @@ func (s *WriteSet) ReleaseAndReset() {
 		wsPutStorageInner(inner)
 	}
 	wsPutStorageOuter(s.storage)
-	if dbg.AssertEnabled {
+	// Only disarm what NewWriteSet armed. Embedded WriteSet fields (e.g.
+	// IntraBlockState.versionedWrites) are interior pointers, and SetFinalizer
+	// on one is a fatal error, not an error return.
+	if s.allocPCs != nil {
 		runtime.SetFinalizer(s, nil)
 	}
 	*s = WriteSet{}
