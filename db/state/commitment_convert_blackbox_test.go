@@ -486,11 +486,11 @@ func computeCommitmentRoot(t *testing.T, db kv.TemporalRwDB) []byte {
 // version prefix on accessor files may differ from the .kv prefix.
 func swapVersionExt(kviPath string) string {
 	dirPart, base := filepath.Split(kviPath)
-	idx := strings.Index(base, "-commitment.")
-	if idx < 0 {
+	_, after, ok := strings.Cut(base, "-commitment.")
+	if !ok {
 		return kviPath
 	}
-	pattern := filepath.Join(dirPart, "*"+base[idx:])
+	pattern := filepath.Join(dirPart, "*-commitment."+after)
 	matches, err := filepath.Glob(pattern)
 	if err != nil || len(matches) == 0 {
 		return kviPath

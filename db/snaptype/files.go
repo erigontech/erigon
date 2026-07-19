@@ -159,16 +159,14 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 	isStateFile := IsStateFileV2(croppedFileName)
 
 	if isStateFile { // accounts.24-28
-		idxDot := strings.Index(croppedFileName, ".")
-		idxDash := strings.Index(croppedFileName, "-")
-
-		if idxDot <= 0 || idxDash <= idxDot+1 || idxDash == len(croppedFileName)-1 {
+		typeString, rest, ok := strings.Cut(croppedFileName, ".")
+		if !ok || typeString == "" {
 			return res, false, false
 		}
-
-		typeString := croppedFileName[:idxDot]
-		fromStr := croppedFileName[idxDot+1 : idxDash]
-		toStr := croppedFileName[idxDash+1:]
+		fromStr, toStr, ok := strings.Cut(rest, "-")
+		if !ok || fromStr == "" || toStr == "" {
+			return res, false, false
+		}
 
 		from, err := strconv.Atoi(fromStr)
 		if err != nil {
@@ -185,23 +183,14 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 			res.CaplinTypeString = res.Type.Name()
 		}
 	} else { // 1-2-bodies
-		firstDash := strings.Index(croppedFileName, "-")
-		if firstDash <= 0 || firstDash == len(croppedFileName)-1 {
+		fromStr, rest, ok := strings.Cut(croppedFileName, "-")
+		if !ok || fromStr == "" {
 			return res, false, false
 		}
-		secondDash := strings.Index(croppedFileName[firstDash+1:], "-")
-		if secondDash < 0 {
+		toStr, typeString, ok := strings.Cut(rest, "-")
+		if !ok || toStr == "" || typeString == "" {
 			return res, false, false
 		}
-
-		secondDash += firstDash + 1
-		if secondDash == len(croppedFileName)-1 {
-			return res, false, false
-		}
-
-		fromStr := croppedFileName[:firstDash]
-		toStr := croppedFileName[firstDash+1 : secondDash]
-		typeString := croppedFileName[secondDash+1:]
 
 		from, err := strconv.Atoi(fromStr)
 		if err != nil {
