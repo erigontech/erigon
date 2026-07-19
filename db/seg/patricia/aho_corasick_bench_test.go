@@ -17,8 +17,9 @@
 package patricia
 
 import (
+	"bytes"
 	"math/rand"
-	"sort"
+	"slices"
 	"testing"
 )
 
@@ -70,7 +71,7 @@ func makeCorpus(numPatterns, patMin, patMax, numWords, wordLen int, sorted bool)
 		total += len(w)
 	}
 	if sorted {
-		sort.Slice(words, func(i, j int) bool { return string(words[i]) < string(words[j]) })
+		slices.SortFunc(words, bytes.Compare)
 	}
 	return &benchCorpus{ac: ac, words: words, bytes: total}
 }

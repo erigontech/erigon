@@ -58,18 +58,11 @@ func wideStart(child int32) int32 { return -child - 2 }
 // pattern dictionary, then share it read-only across any number of ACMatcher
 // instances (one per goroutine).
 type AhoCorasick struct {
-	// build-time trie
+	// build-time trie, freed after Build compiles the packed nodes
 	children []map[byte]int32
 	depth    []int32
 	val      []any
 	hasVal   []bool
-
-	// build-time CSR scaffolding, freed after Build compiles the packed nodes
-	firstEdge []int32
-	edgeByte  []byte
-	edgeChild []int32
-	fail      []int32
-	matchLen  []int32
 
 	// compiled automaton
 	rootNext  [256]int32 // dense transitions from root (-1 = none)
@@ -128,25 +121,25 @@ func (ac *AhoCorasick) Build() {
 		return
 	}
 	n := len(ac.children)
-	ac.fail = make([]int32, n)
-	ac.matchLen = make([]int32, n)
+	fail := make([]int32, n)
+	matchLen := make([]int32, n)
 	ac.matchVal = make([]any, n)
 	for i := range ac.rootNext {
 		ac.rootNext[i] = -1
 	}
 
 	// CSR edge arrays: prefix-sum offsets, then sorted labels + children
-	ac.firstEdge = make([]int32, n+1)
+	firstEdge := make([]int32, n+1)
 	totalEdges := 0
 	for _, m := range ac.children {
 		totalEdges += len(m)
 	}
-	ac.edgeByte = make([]byte, totalEdges)
-	ac.edgeChild = make([]int32, totalEdges)
+	edgeByte := make([]byte, totalEdges)
+	edgeChild := make([]int32, totalEdges)
 	off := int32(0)
 	var bs []byte
 	for node, m := range ac.children {
-		ac.firstEdge[node] = off
+		firstEdge[node] = off
 		if len(m) == 0 {
 			continue
 		}
@@ -156,19 +149,27 @@ func (ac *AhoCorasick) Build() {
 		}
 		slices.Sort(bs)
 		for _, b := range bs {
-			ac.edgeByte[off] = b
-			ac.edgeChild[off] = m[b]
+			edgeByte[off] = b
+			edgeChild[off] = m[b]
 			off++
 		}
 	}
-	ac.firstEdge[n] = off
+	firstEdge[n] = off
+
+	// next returns the child of node on byte b, or -1
+	next := func(node int32, b byte) int32 {
+		if node == 0 {
+			return ac.rootNext[b]
+		}
+		return bsearchEdge(edgeByte, edgeChild, firstEdge[node], firstEdge[node+1], b)
+	}
 
 	// BFS fail links
 	queue := make([]int32, 0, n)
-	for e := ac.firstEdge[0]; e < ac.firstEdge[1]; e++ {
-		child := ac.edgeChild[e]
-		ac.rootNext[ac.edgeByte[e]] = child
-		ac.fail[child] = 0
+	for e := firstEdge[0]; e < firstEdge[1]; e++ {
+		child := edgeChild[e]
+		ac.rootNext[edgeByte[e]] = child
+		fail[child] = 0
 		queue = append(queue, child)
 	}
 	for qi := 0; qi < len(queue); qi++ {
@@ -176,56 +177,62 @@ func (ac *AhoCorasick) Build() {
 		// longest pattern ending at this state: own pattern wins (it is the
 		// full path, longer than any proper suffix from the fail chain)
 		if ac.hasVal[node] {
-			ac.matchLen[node] = ac.depth[node]
+			matchLen[node] = ac.depth[node]
 			ac.matchVal[node] = ac.val[node]
 		} else {
-			f := ac.fail[node]
-			ac.matchLen[node] = ac.matchLen[f]
+			f := fail[node]
+			matchLen[node] = matchLen[f]
 			ac.matchVal[node] = ac.matchVal[f]
 		}
-		for e := ac.firstEdge[node]; e < ac.firstEdge[node+1]; e++ {
-			b := ac.edgeByte[e]
-			child := ac.edgeChild[e]
-			f := ac.fail[node]
+		for e := firstEdge[node]; e < firstEdge[node+1]; e++ {
+			b := edgeByte[e]
+			child := edgeChild[e]
+			f := fail[node]
 			for {
-				if nxt := ac.next(f, b); nxt >= 0 {
-					ac.fail[child] = nxt
+				if nxt := next(f, b); nxt >= 0 {
+					fail[child] = nxt
 					break
 				}
 				if f == 0 {
-					ac.fail[child] = 0
+					fail[child] = 0
 					break
 				}
-				f = ac.fail[f]
+				f = fail[f]
 			}
 			queue = append(queue, child)
 		}
 	}
 
-	ac.compile(n)
+	ac.compile(n, firstEdge, edgeByte, edgeChild, fail, matchLen)
 	ac.children = nil
-	ac.firstEdge, ac.edgeByte, ac.edgeChild = nil, nil, nil
-	ac.fail, ac.matchLen = nil, nil
 	ac.depth, ac.val, ac.hasVal = nil, nil, nil
 	ac.built = true
 }
 
 // compile packs the CSR scaffolding into the runtime node array, spilling the
 // rare fanout>=2 states into wideByte/wideChild.
-func (ac *AhoCorasick) compile(n int) {
+func (ac *AhoCorasick) compile(n int, firstEdge []int32, edgeByte []byte, edgeChild, fail, matchLen []int32) {
 	ac.nodes = make([]acNode, n)
+	wide := int32(0)
 	for node := range n {
-		start, end := ac.firstEdge[node], ac.firstEdge[node+1]
-		nd := acNode{fail: ac.fail[node], matchLen: ac.matchLen[node], child: noEdge}
+		if d := firstEdge[node+1] - firstEdge[node]; d >= 2 {
+			wide += d
+		}
+	}
+	ac.wideByte = make([]byte, 0, wide)
+	ac.wideChild = make([]int32, 0, wide)
+	for node := range n {
+		start, end := firstEdge[node], firstEdge[node+1]
+		nd := acNode{fail: fail[node], matchLen: matchLen[node], child: noEdge}
 		switch end - start {
 		case 0: // no edge
 		case 1: // single edge
-			nd.child = ac.edgeChild[start]
-			nd.label = int32(ac.edgeByte[start])
+			nd.child = edgeChild[start]
+			nd.label = int32(edgeByte[start])
 		default: // fanout >= 2: spill to the wide arrays
 			ws := int32(len(ac.wideByte))
-			ac.wideByte = append(ac.wideByte, ac.edgeByte[start:end]...)
-			ac.wideChild = append(ac.wideChild, ac.edgeChild[start:end]...)
+			ac.wideByte = append(ac.wideByte, edgeByte[start:end]...)
+			ac.wideChild = append(ac.wideChild, edgeChild[start:end]...)
 			nd.child = wideTag(ws)
 			nd.label = int32(len(ac.wideByte))
 		}
@@ -238,7 +245,7 @@ func (ac *AhoCorasick) compile(n int) {
 func bsearchEdge(labels []byte, children []int32, lo, hi int32, b byte) int32 {
 	end := hi
 	for lo < hi {
-		mid := (lo + hi) >> 1
+		mid := lo + (hi-lo)>>1
 		if labels[mid] < b {
 			lo = mid + 1
 		} else {
@@ -251,22 +258,8 @@ func bsearchEdge(labels []byte, children []int32, lo, hi int32, b byte) int32 {
 	return -1
 }
 
-// next returns the child of node on byte b, or -1. Used only during Build, over
-// the CSR scaffolding.
-func (ac *AhoCorasick) next(node int32, b byte) int32 {
-	if node == 0 {
-		return ac.rootNext[b]
-	}
-	return bsearchEdge(ac.edgeByte, ac.edgeChild, ac.firstEdge[node], ac.firstEdge[node+1], b)
-}
-
-// wideNext binary-searches a fanout>=2 state's edges. Out-of-line and rarely
-// taken, so it stays off the hot single-edge path.
-//
-//go:noinline
-func (ac *AhoCorasick) wideNext(start, end int32, b byte) int32 {
-	return bsearchEdge(ac.wideByte, ac.wideChild, start, end, b)
-}
+// linear scan beats binary search over a wide state's edges up to this fanout
+const wideLinearScanMax = 16
 
 // ACMatcher is a per-goroutine matcher over a shared AhoCorasick automaton.
 // It caches per-position automaton states of the previous word: the state
@@ -297,7 +290,7 @@ func (m *ACMatcher) FindLongestMatches(data []byte) []Match {
 	}
 	if cap(m.states) < n {
 		states := make([]int32, n+64)
-		copy(states, m.states[:len(m.states)])
+		copy(states, m.states[:k])
 		m.states = states[:n]
 	} else {
 		m.states = m.states[:n]
@@ -312,17 +305,13 @@ func (m *ACMatcher) FindLongestMatches(data []byte) []Match {
 	out := m.matches[:0]
 
 	// Match emission is fused into the scan below rather than run as a second
-	// pass over states: reusing the just-loaded nodes[cur] line and skipping a
-	// re-read of states is worth ~5-9%. The prefix region [0,k) has no fresh scan
-	// (states carried over from the previous word) so it emits on its own here.
-	for j := 0; j < k; j++ {
+	// pass over states: it reuses the just-loaded nodes[cur] line and skips a
+	// re-read of states. The prefix region [0,k) has no fresh scan (states
+	// carried over from the previous word) so it emits on its own here.
+	for j := range k {
 		st := states[j]
 		if ml := nodes[st].matchLen; ml != 0 {
-			start := j + 1 - int(ml)
-			for len(out) > 0 && out[len(out)-1].Start >= start {
-				out = out[:len(out)-1]
-			}
-			out = append(out, Match{Start: start, End: j + 1, Val: matchVal[st]})
+			out = appendLongest(out, j+1-int(ml), j+1, matchVal[st])
 		}
 	}
 
@@ -352,8 +341,8 @@ func (m *ACMatcher) FindLongestMatches(data []byte) []Match {
 			if c < noEdge { // fanout >= 2
 				lo, hi := wideStart(c), nd.label
 				found := int32(-1)
-				if hi-lo > 16 {
-					found = ac.wideNext(lo, hi, b)
+				if hi-lo > wideLinearScanMax {
+					found = bsearchEdge(wideByte, wideChild, lo, hi, b)
 				} else {
 					for i := lo; i < hi; i++ {
 						if wideByte[i] == b {
@@ -374,14 +363,18 @@ func (m *ACMatcher) FindLongestMatches(data []byte) []Match {
 		}
 		states[j] = cur
 		if ml := nodes[cur].matchLen; ml != 0 {
-			start := j + 1 - int(ml)
-			for len(out) > 0 && out[len(out)-1].Start >= start {
-				out = out[:len(out)-1]
-			}
-			out = append(out, Match{Start: start, End: j + 1, Val: matchVal[cur]})
+			out = appendLongest(out, j+1-int(ml), j+1, matchVal[cur])
 		}
 	}
 	m.prev = append(m.prev[:0], data...)
 	m.matches = out
 	return out
+}
+
+// appendLongest drops previous matches contained in [start, end) and appends it.
+func appendLongest(out Matches, start, end int, val any) Matches {
+	for len(out) > 0 && out[len(out)-1].Start >= start {
+		out = out[:len(out)-1]
+	}
+	return append(out, Match{Start: start, End: end, Val: val})
 }
