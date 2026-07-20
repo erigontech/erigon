@@ -194,6 +194,16 @@ func (st *TxnExecutor) to() accounts.Address {
 	return st.msg.To()
 }
 
+//go:noinline
+func errBlobGasOverflow(blobGasVal uint256.Int) error {
+	return fmt.Errorf("%w: overflow converting blob gas: %v", ErrInsufficientFunds, &blobGasVal)
+}
+
+//go:noinline
+func errInsufficientFundsHaveWant(from accounts.Address, have, want uint256.Int) error {
+	return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, from, &have, &want)
+}
+
 func (st *TxnExecutor) buyGas(gasBailout bool) error {
 	gasVal, overflow := u256.MulOverflow(u256.U64(st.msg.Gas()), *st.gasPrice)
 	if overflow {
@@ -205,7 +215,7 @@ func (st *TxnExecutor) buyGas(gasBailout bool) error {
 	if st.evm.ChainRules().IsCancun {
 		blobGasVal, overflow = u256.MulOverflow(st.evm.Context.BlobBaseFee, u256.U64(st.msg.BlobGas()))
 		if overflow {
-			return fmt.Errorf("%w: overflow converting blob gas: %v", ErrInsufficientFunds, &blobGasVal)
+			return errBlobGasOverflow(blobGasVal)
 		}
 		if err := st.gp.SubBlobGas(st.msg.BlobGas()); err != nil {
 			return err
@@ -239,8 +249,8 @@ func (st *TxnExecutor) buyGas(gasBailout bool) error {
 		if err != nil {
 			return err
 		}
-		if have, want := balance, balanceCheck; have.Cmp(&want) < 0 {
-			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From(), &have, &want)
+		if balance.Cmp(&balanceCheck) < 0 {
+			return errInsufficientFundsHaveWant(st.msg.From(), balance, balanceCheck)
 		}
 		st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy)
 		st.state.SubBalance(st.msg.From(), blobGasVal, tracing.BalanceDecreaseGasBuy)
