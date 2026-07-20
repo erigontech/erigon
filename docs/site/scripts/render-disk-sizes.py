@@ -86,8 +86,8 @@ def main() -> None:
     if not page_path.exists():
         raise SystemExit(f"Error: {page_path} not found")
 
-    data = json.loads(json_path.read_text())
-    original = page_path.read_text()
+    data = json.loads(json_path.read_text(encoding="utf-8"))
+    original = page_path.read_text(encoding="utf-8")
     rendered = render_text(original, data)
 
     if args.check:
@@ -100,7 +100,7 @@ def main() -> None:
         return
 
     if rendered != original:
-        page_path.write_text(rendered)
+        page_path.write_text(rendered, encoding="utf-8")
         print(f"Updated {page_path}")
     else:
         print("No changes — page already matches disk-sizes.json")

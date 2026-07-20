@@ -50,12 +50,22 @@ jobs:
           # Disk sizes must be static text (markers), never a runtime import.
           # A runtime import in a versioned snapshot silently tracks the live
           # file; in the current page it hides a `?? '—'` fallback. Fail closed.
-          if grep -rn --include='*.md' --include='*.mdx' \
+          # Check grep's exit code explicitly: 0=match (fail), 1=no match (ok),
+          # 2+=error (fail) — an `if grep` alone would swallow errors as "no match".
+          set +e
+          matches=$(grep -rn --include='*.md' --include='*.mdx' \
                -e 'diskSizes' -e "src/data/disk-sizes.json" \
-               docs/site/docs docs/site/versioned_docs; then
+               docs/site/docs docs/site/versioned_docs)
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "$matches"
             echo "::error::Found a dynamic disk-sizes reference in a docs page. \
           Disk sizes must be static (see docs/site/scripts/render-disk-sizes.py \
           and the README 'Disk size data flow' section)."
+            exit 1
+          elif [ "$rc" -ne 1 ]; then
+            echo "::error::grep failed (exit $rc) while scanning for disk-size references"
             exit 1
           fi
           echo "OK: no dynamic disk-size references in docs pages"
