@@ -913,7 +913,8 @@ func (tr *TRand) RandReceipt() *Receipt {
 	return tr.randReceiptWithLogs(logs)
 }
 
-// RandReceiptFixed creates a Receipt with fixed log count and sizes for deterministic benchmarking
+// RandReceiptFixed creates a Receipt with fixed log count and sizes: contents
+// stay random, but benchmark timings/allocations are comparable across runs.
 func (tr *TRand) RandReceiptFixed() *Receipt {
 	logs := make(Logs, 3)
 	for i := range logs {
