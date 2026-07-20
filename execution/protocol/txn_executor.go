@@ -261,6 +261,9 @@ func (st *TxnExecutor) buyGas(gasBailout bool) error {
 		if err := st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy); err != nil {
 			return err
 		}
+		if err := st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy); err != nil {
+			return err
+		}
 		if err := st.state.SubBalance(st.msg.From(), blobGasVal, tracing.BalanceDecreaseGasBuy); err != nil {
 			return err
 		}
