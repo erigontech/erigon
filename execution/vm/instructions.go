@@ -1315,8 +1315,12 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		return pc, nil, err
 	}
 
-	ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
-	ibs.Selfdestruct(self, false)
+	if err := ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct); err != nil {
+		return pc, nil, err
+	}
+	if _, err := ibs.Selfdestruct(self, false); err != nil {
+		return pc, nil, err
+	}
 	tracer := evm.Config().Tracer
 	if tracer != nil && tracer.OnEnter != nil {
 		tracer.OnEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
@@ -1350,8 +1354,12 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		// beneficiary (a no-op when it is self); a same-tx-created contract is
 		// still cleared at finalization but keeps any residual balance.
 		if self != beneficiaryAddr {
-			ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct)
-			ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
+			if err := ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct); err != nil {
+				return pc, nil, err
+			}
+			if err := ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct); err != nil {
+				return pc, nil, err
+			}
 		}
 		if newContract {
 			_, err = ibs.Selfdestruct(self, true)
@@ -1360,17 +1368,25 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 			}
 		}
 	} else if newContract { // Contract is new and will actually be deleted.
-		ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct)
+		if err := ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct); err != nil {
+			return pc, nil, err
+		}
 		if self != beneficiaryAddr {
-			ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
+			if err := ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct); err != nil {
+				return pc, nil, err
+			}
 		}
 		_, err = ibs.Selfdestruct(self, false)
 		if err != nil {
 			return pc, nil, err
 		}
 	} else if self != beneficiaryAddr { // Contract already exists, only do transfer if beneficiary is not self.
-		ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct)
-		ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
+		if err := ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct); err != nil {
+			return pc, nil, err
+		}
+		if err := ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct); err != nil {
+			return pc, nil, err
+		}
 	}
 	if rules.IsAmsterdam && !rules.IsEIPDisabled(7708) && !balance.IsZero() && self != beneficiaryAddr { // EIP-7708
 		ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
