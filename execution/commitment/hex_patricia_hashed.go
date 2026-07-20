@@ -142,6 +142,8 @@ type HexPatriciaHashed struct {
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
 	cellHashBuf   common.Hash   // shared scratch buffer for hashKey calls (avoids per-cell allocation)
 	leafHashBuf   [33]byte      // shared scratch for leaf hash prefixing (avoids per-leaf escape)
+	leafRlpBuf    [80]byte      // shared scratch for a leaf's RLP list prefix + compact key: `9 + 1 + 65 = 75`
+	rlpPrefixBuf  [8]byte       // shared scratch for RlpSerializable length prefixes
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
 	branchEncoder *BranchEncoder
 
@@ -721,9 +723,7 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) 
 func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable, singleton bool) ([]byte, error) {
 	// Compute the total length of binary representation
 	var kp, kl int
-	var keyPrefix [1]byte
 	if compactLen > 1 {
-		keyPrefix[0] = 0x80 + byte(compactLen)
 		kp = 1
 		kl = compactLen
 	} else {
@@ -731,8 +731,23 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 	}
 
 	totalLen := kp + kl + val.DoubleRLPLen()
-	var lenPrefix [4]byte
-	pl := rlp.EncodeListPrefixToBuf(totalLen, lenPrefix[:])
+	// The header (list prefix, key prefix, compact key) is assembled into one scratch
+	// buffer: passing per-write stack arrays to the io.Writer interface heap-allocates them.
+	header := hph.leafRlpBuf[:]
+	pl := rlp.EncodeListPrefixToBuf(totalLen, header)
+	n := pl
+	if kp > 0 {
+		header[n] = 0x80 + byte(compactLen)
+		n++
+	}
+	header[n] = compact0
+	n++
+	for i := 1; i < compactLen; i++ {
+		header[n] = key[ni]*16 + key[ni+1]
+		n++
+		ni += 2
+	}
+
 	canEmbed := !singleton && totalLen+pl < length.Hash
 	var writer io.Writer
 	if canEmbed {
@@ -743,25 +758,10 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 		hph.keccak.Reset()
 		writer = hph.witness.leafWriter(hph.keccak)
 	}
-	if _, err := writer.Write(lenPrefix[:pl]); err != nil {
+	if _, err := writer.Write(header[:n]); err != nil {
 		return nil, err
 	}
-	if _, err := writer.Write(keyPrefix[:kp]); err != nil {
-		return nil, err
-	}
-	b := [1]byte{compact0}
-	if _, err := writer.Write(b[:]); err != nil {
-		return nil, err
-	}
-	for i := 1; i < compactLen; i++ {
-		b[0] = key[ni]*16 + key[ni+1]
-		if _, err := writer.Write(b[:]); err != nil {
-			return nil, err
-		}
-		ni += 2
-	}
-	var prefixBuf [8]byte
-	if err := val.ToDoubleRLP(writer, prefixBuf[:]); err != nil {
+	if err := val.ToDoubleRLP(writer, hph.rlpPrefixBuf[:]); err != nil {
 		return nil, err
 	}
 	if canEmbed {
