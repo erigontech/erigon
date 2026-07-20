@@ -951,47 +951,47 @@ func (s *Stream) MoreDataInList() bool {
 	return listLimit > 0
 }
 
-// readFixedScratch decodes an RLP string of exactly n bytes (n <= len(uintbuf))
-// into the stream's scratch buffer and returns a view of it, valid until the
-// next Stream call. Reading via the scratch keeps the caller's destination from
-// escaping to the heap, unlike ReadBytes.
-func (s *Stream) readFixedScratch(n uint64) ([]byte, error) {
+// Addr decodes an RLP string of exactly 20 bytes as an address. It reads
+// through the stream's scratch buffer, so unlike ReadBytes it never forces
+// the destination to escape to the heap.
+func (s *Stream) Addr() (a common.Address, err error) {
 	kind, size, err := s.Kind()
 	switch {
 	case err != nil:
-		return nil, err
+		return a, err
 	case kind == List:
-		return nil, ErrExpectedString
+		return a, ErrExpectedString
 	case kind == Byte:
-		return nil, fmt.Errorf("input value has wrong size 1, want %d", n)
-	case size != n:
-		return nil, fmt.Errorf("input value has wrong size %d, want %d", size, n)
+		return a, fmt.Errorf("input value has wrong size 1, want %d", len(a))
+	case size != uint64(len(a)):
+		return a, fmt.Errorf("input value has wrong size %d, want %d", size, len(a))
 	}
-	if err := s.readFull(s.uintbuf[:n]); err != nil {
-		return nil, err
-	}
-	return s.uintbuf[:n], nil
-}
-
-// Addr decodes an RLP string of exactly 20 bytes as an address, without
-// forcing the destination to escape to the heap.
-func (s *Stream) Addr() (a common.Address, err error) {
-	buf, err := s.readFixedScratch(uint64(len(a)))
-	if err != nil {
+	if err = s.readFull(s.uintbuf[:len(a)]); err != nil {
 		return a, err
 	}
-	copy(a[:], buf)
+	copy(a[:], s.uintbuf[:len(a)])
 	return a, nil
 }
 
-// ReadHash decodes an RLP string of exactly 32 bytes as a hash, without
-// forcing the destination to escape to the heap.
+// ReadHash decodes an RLP string of exactly 32 bytes as a hash. Like Addr, it
+// reads through the stream's scratch buffer and never forces the destination
+// to escape to the heap.
 func (s *Stream) ReadHash() (h common.Hash, err error) {
-	buf, err := s.readFixedScratch(uint64(len(h)))
-	if err != nil {
+	kind, size, err := s.Kind()
+	switch {
+	case err != nil:
+		return h, err
+	case kind == List:
+		return h, ErrExpectedString
+	case kind == Byte:
+		return h, fmt.Errorf("input value has wrong size 1, want %d", len(h))
+	case size != uint64(len(h)):
+		return h, fmt.Errorf("input value has wrong size %d, want %d", size, len(h))
+	}
+	if err = s.readFull(s.uintbuf[:len(h)]); err != nil {
 		return h, err
 	}
-	copy(h[:], buf)
+	copy(h[:], s.uintbuf[:len(h)])
 	return h, nil
 }
 
