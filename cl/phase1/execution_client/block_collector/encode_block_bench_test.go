@@ -58,11 +58,13 @@ func BenchmarkDecodeBlock(b *testing.B) {
 		bb := makeBeaconBlock(b, 1, 'a', common.Hash{}, txs...)
 
 		c := &PersistentBlockCollector{beaconChainCfg: &clparams.MainnetBeaconConfig}
-		c.mu.Lock()
-		encoded, err := c.encodeBlock(bb.Body.ExecutionPayload, bb.ParentRoot, nil)
-		require.NoError(b, err)
-		encoded = common.Copy(encoded)
-		c.mu.Unlock()
+		encoded := func() []byte {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			encoded, err := c.encodeBlock(bb.Body.ExecutionPayload, bb.ParentRoot, nil)
+			require.NoError(b, err)
+			return common.Copy(encoded)
+		}()
 
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
