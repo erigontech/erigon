@@ -661,16 +661,14 @@ func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []cltyp
 	wg := sync.WaitGroup{}
 	for i := 0; i < len(blocks); i += batchBlcokSize {
 		blocks := blocks[i:min(i+batchBlcokSize, len(blocks))]
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			req, err := initializeDownloadRequest(blocks, d.beaconConfig, d.columnStorage, custodyColumns)
 			if err != nil {
 				log.Warn("failed to initialize download request", "err", err)
 				return
 			}
 			d.runDownload(ctx, req, false)
-		}()
+		})
 	}
 	wg.Wait()
 	return nil
@@ -719,16 +717,14 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []c
 	wg := sync.WaitGroup{}
 	for i := 0; i < len(blocksToProcess); i += batchBlcokSize {
 		blocks := blocksToProcess[i:min(i+batchBlcokSize, len(blocksToProcess))]
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			req, err := initializeDownloadRequest(blocks, d.beaconConfig, d.columnStorage, allColumns)
 			if err != nil {
 				log.Warn("failed to initialize download request", "err", err)
 				return
 			}
 			d.runDownload(ctx, req, true)
-		}()
+		})
 	}
 	wg.Wait()
 	return nil
@@ -760,9 +756,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 			case <-stopChan:
 				break loop
 			case <-ticker.C:
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 					defer cancel()
 					ids := req.requestData()
@@ -785,7 +779,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 					default:
 						// just drop it if the channel is full
 					}
-				}()
+				})
 			}
 		}
 		wg.Wait()
@@ -835,11 +829,9 @@ mainloop:
 				continue
 			}
 			log.Debug("received column sidecars", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars))
-			wg := sync.WaitGroup{}
+			var wg sync.WaitGroup
 			for _, sidecar := range result.sidecars {
-				wg.Add(1)
-				go func(sidecar *cltypes.DataColumnSidecar) {
-					defer wg.Done()
+				wg.Go(func() {
 					// [Modified in Gloas:EIP7732] Get slot first, then use epoch-based version detection
 					var slot uint64
 					if sidecar.SignedBlockHeader != nil && sidecar.SignedBlockHeader.Header != nil {
@@ -933,7 +925,7 @@ mainloop:
 					}
 					// done. remove the column from the download table
 					req.removeColumn(slot, blockRoot, columnIndex)
-				}(sidecar)
+				})
 			}
 			wg.Wait()
 			// check if there are any remaining requests and send again if there are

@@ -304,9 +304,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 	var errAtomic atomic.Value
 	var wg sync.WaitGroup
 	for _, sds := range storableSidecars {
-		wg.Add(1)
-		go func(sds *sidecarsPayload) {
-			defer wg.Done()
+		wg.Go(func() {
 			blobs := make([]*goethkzg.Blob, len(sds.sidecars))
 			for i, sidecar := range sds.sidecars {
 				blobs[i] = (*goethkzg.Blob)(&sidecar.Blob)
@@ -329,7 +327,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 				inserted.Add(uint64(len(sds.sidecars)))
 			}
 
-		}(sds)
+		})
 	}
 	wg.Wait()
 	if err := errAtomic.Load(); err != nil {

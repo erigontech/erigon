@@ -383,8 +383,8 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 			}
 			if produce.LogTopic {
 				for _, lg := range result.Logs {
-					for _, topic := range lg.Topics {
-						if err := doms.IndexAdd(kv.LogTopicIdx, topic[:], txTask.TxNum); err != nil {
+					for i := range lg.Topics {
+						if err := doms.IndexAdd(kv.LogTopicIdx, lg.Topics[i][:], txTask.TxNum); err != nil {
 							return err
 						}
 					}

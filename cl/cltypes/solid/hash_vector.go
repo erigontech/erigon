@@ -19,10 +19,10 @@ package solid
 import (
 	"encoding/json"
 
-	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -34,7 +34,7 @@ func NewHashVector(s int) HashVectorSSZ {
 	return &hashVector{
 		u: &hashList{
 			u: make([]byte, s*length.Hash),
-			c: int(merkle_tree.NextPowerOfTwo(uint64(s))),
+			c: int(math.NextPowerOfTwo(uint64(s))),
 			l: s,
 		},
 	}
