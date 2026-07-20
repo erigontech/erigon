@@ -17,7 +17,6 @@
 package types
 
 import (
-	"fmt"
 	"io"
 
 	"github.com/erigontech/erigon/common"
@@ -37,24 +36,21 @@ func EncodeOptionalAddress(addr *common.Address, w io.Writer, buffer []byte) err
 	return err
 }
 
-// DecodeOptionalAddress decodes an optional 20-byte address from the RLP stream.
+// DecodeOptionalAddress decodes an optional 20-byte address from the RLP
+// stream; an empty string decodes as nil (contract creation).
 func DecodeOptionalAddress(dst **common.Address, s *rlp.Stream) error {
 	kind, size, err := s.Kind()
 	if err != nil {
 		return err
 	}
-	switch {
-	case kind == rlp.String && size == 0:
+	if kind == rlp.String && size == 0 {
 		*dst = nil
 		return s.ReadBytes(nil)
-	case kind == rlp.String && size == 20:
-		*dst = &common.Address{}
-		return s.ReadBytes((*dst)[:])
-	case kind == rlp.List:
-		return fmt.Errorf("expected string for address, got list")
-	case kind == rlp.Byte:
-		return fmt.Errorf("wrong size for address: 1")
-	default:
-		return fmt.Errorf("wrong size for address: %d", size)
 	}
+	a, err := s.Addr()
+	if err != nil {
+		return err
+	}
+	*dst = &a
+	return nil
 }
