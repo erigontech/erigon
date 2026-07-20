@@ -296,3 +296,25 @@ func TestPreCheckErrorOrdering_GasBeforeFeeCap(t *testing.T) {
 		require.NoError(t, CheckBlockGasInclusion(gp, 50_000, 80_000))
 	})
 }
+
+// nilBlobFeeMsg is a Message whose MaxFeePerBlobGas is nil, as returned by
+// call-style messages (e.g. the simulated backend's callMsg).
+type nilBlobFeeMsg struct{ *types.Message }
+
+func (nilBlobFeeMsg) MaxFeePerBlobGas() *uint256.Int { return nil }
+
+// TestBuyGas_NilMaxFeePerBlobGas verifies buyGas does not dereference a nil
+// MaxFeePerBlobGas for a non-blob transaction on Cancun.
+func TestBuyGas_NilMaxFeePerBlobGas(t *testing.T) {
+	t.Parallel()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	ibs := state.New(state.NewNoopReader())
+	evm := newTestEVM(ibs, chain.TestChainOsakaConfig, 30_000_000)
+	msg := nilBlobFeeMsg{newSimpleTransferMsg(sender, recipient, 100_000, false)}
+	st := NewTxnExecutor(evm, msg, new(GasPool).AddGas(30_000_000))
+
+	require.NotPanics(t, func() { _ = st.buyGas(false) })
+}
