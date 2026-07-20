@@ -92,8 +92,10 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) err
 	repeatedPattern = append(repeatedPattern, repeatedPatternEntry{prevVal, count})
 	var temp [12]byte
 	binary.BigEndian.PutUint32(temp[:4], uint32(len(repeatedPattern)))
-	if _, err := w.Write(temp[:4]); err != nil {
+	if n, err := w.Write(temp[:4]); err != nil {
 		return err
+	} else if n != 4 {
+		return io.ErrShortWrite
 	}
 
 	// Write the repeated pattern
