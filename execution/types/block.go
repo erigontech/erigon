@@ -1160,9 +1160,9 @@ func NewBlockFromStorageWithBinaryTxs(hash common.Hash, header *Header, txs []Tr
 	return b
 }
 
-// NewBlockFromBinaryTxs creates a Block whose transactions were never decoded.
-// Transactions() and Body() are empty on such a block; it is only usable by
-// consumers that go through Header() and RawBody().
+// NewBlockFromBinaryTxs creates a Block whose transactions were never decoded:
+// Transactions() is nil and Body() carries no transactions. Only consumers that
+// go through Header() and RawBody() may use such a block.
 func NewBlockFromBinaryTxs(hash common.Hash, header *Header, binaryTxs BinaryTransactions, uncles []*Header, withdrawals []*Withdrawal) *Block {
 	header.hash.Store(&hash)
 	return &Block{header: header, binaryTransactions: binaryTxs, uncles: uncles, withdrawals: withdrawals}
