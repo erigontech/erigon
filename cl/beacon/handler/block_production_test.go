@@ -19,6 +19,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"math/big"
 	"net/http"
@@ -28,9 +29,12 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
+	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -84,6 +88,172 @@ func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
 	_, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), cltypes.ErrGloasCannotBlind.Error())
+}
+
+func TestPublishBlindedBlocksAcceptsEmptyFuluBuilderResponse(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
+	builderClient.EXPECT().SubmitBlindedBlocks(gomock.Any(), gomock.Any()).Return(nil, nil, nil, nil)
+	h := &ApiHandler{
+		beaconChainCfg: &clparams.MainnetBeaconConfig,
+		builderClient:  builderClient,
+	}
+	block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
+
+	resp, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+}
+
+func TestPublishBlindedBlocksRejectsMissingPreFuluPayload(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
+	builderClient.EXPECT().SubmitBlindedBlocks(gomock.Any(), gomock.Any()).Return(nil, nil, nil, nil)
+	h := &ApiHandler{
+		beaconChainCfg: &clparams.MainnetBeaconConfig,
+		builderClient:  builderClient,
+	}
+	block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.ElectraVersion)
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.ElectraVersion.String())
+
+	_, err = h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+	require.ErrorContains(t, err, "builder returned nil execution payload")
+}
+
+func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mutate  func(*cltypes.SignedBlindedBeaconBlock)
+		wantErr string
+	}{
+		{
+			name: "missing block",
+			mutate: func(block *cltypes.SignedBlindedBeaconBlock) {
+				block.Block = nil
+			},
+			wantErr: "missing block",
+		},
+		{
+			name: "missing body",
+			mutate: func(block *cltypes.SignedBlindedBeaconBlock) {
+				block.Block.Body = nil
+			},
+			wantErr: "missing block body",
+		},
+		{
+			name: "missing execution payload header",
+			mutate: func(block *cltypes.SignedBlindedBeaconBlock) {
+				block.Block.Body.ExecutionPayload = nil
+			},
+			wantErr: "missing execution payload header",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			builderClient := builder_mock.NewMockBuilderClient(ctrl)
+			h := &ApiHandler{
+				beaconChainCfg: &clparams.MainnetBeaconConfig,
+				builderClient:  builderClient,
+			}
+			block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+			tc.mutate(block)
+			body, err := json.Marshal(block)
+			require.NoError(t, err)
+			if tc.name == "missing execution payload header" {
+				body = bytes.Replace(body, []byte(`"body":{`), []byte(`"body":{"execution_payload_header":null,`), 1)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
+
+			_, err = h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
+
+func TestValidateBuilderPayload(t *testing.T) {
+	validPayload := func(version clparams.StateVersion) *cltypes.Eth1Block {
+		payload := cltypes.NewEth1Block(version, &clparams.MainnetBeaconConfig)
+		payload.Extra = solid.NewExtraData()
+		payload.Transactions = &solid.TransactionsSSZ{}
+		if version.AfterOrEqual(clparams.CapellaVersion) {
+			payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
+		}
+		return payload
+	}
+	validBellatrix := validPayload(clparams.BellatrixVersion)
+	require.NoError(t, validateBuilderPayload(validBellatrix, nil, clparams.BellatrixVersion))
+
+	for _, tc := range []struct {
+		name    string
+		payload *cltypes.Eth1Block
+		version clparams.StateVersion
+		wantErr string
+	}{
+		{name: "missing payload", version: clparams.BellatrixVersion, wantErr: "nil execution payload"},
+		{
+			name: "missing extra data",
+			payload: func() *cltypes.Eth1Block {
+				payload := validPayload(clparams.BellatrixVersion)
+				payload.Extra = nil
+				return payload
+			}(),
+			version: clparams.BellatrixVersion,
+			wantErr: "missing extra data",
+		},
+		{
+			name: "missing transactions",
+			payload: func() *cltypes.Eth1Block {
+				payload := validPayload(clparams.BellatrixVersion)
+				payload.Transactions = nil
+				return payload
+			}(),
+			version: clparams.BellatrixVersion,
+			wantErr: "missing transactions",
+		},
+		{
+			name: "missing withdrawals",
+			payload: func() *cltypes.Eth1Block {
+				payload := validPayload(clparams.CapellaVersion)
+				payload.Withdrawals = nil
+				return payload
+			}(),
+			version: clparams.CapellaVersion,
+			wantErr: "missing withdrawals",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.ErrorContains(t, validateBuilderPayload(tc.payload, nil, tc.version), tc.wantErr)
+		})
+	}
+}
+
+func TestValidateBuilderPayloadRejectsOlderResponseVersion(t *testing.T) {
+	payload := cltypes.NewEth1Block(clparams.BellatrixVersion, &clparams.MainnetBeaconConfig)
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = &solid.TransactionsSSZ{}
+
+	require.ErrorContains(t, validateBuilderPayload(payload, nil, clparams.ElectraVersion), "version mismatch")
+}
+
+func TestValidateBuilderPayloadRejectsMissingElectraExecutionRequests(t *testing.T) {
+	payload := cltypes.NewEth1Block(clparams.ElectraVersion, &clparams.MainnetBeaconConfig)
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = &solid.TransactionsSSZ{}
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
+
+	require.ErrorContains(t, validateBuilderPayload(payload, nil, clparams.ElectraVersion), "missing execution requests")
+	require.NoError(t, validateBuilderPayload(payload, cltypes.NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, clparams.ElectraVersion), clparams.ElectraVersion))
 }
 
 func TestBlockBuilderWindowLateStartKeepsPublicationMargin(t *testing.T) {
