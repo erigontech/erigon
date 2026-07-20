@@ -116,7 +116,13 @@ func authorizationsSize(authorizations []Authorization) (totalSize int) {
 	return
 }
 
-func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
+func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) (retErr error) {
+	n0 := len(*auths)
+	defer func() {
+		if retErr != nil {
+			*auths = (*auths)[:n0]
+		}
+	}()
 	_, err := s.List()
 	if err != nil {
 		return fmt.Errorf("open authorizations: %w", err)
@@ -132,7 +138,7 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 
 		// address
 		if auth.Address, err = s.Addr(); err != nil {
-			return err
+			return fmt.Errorf("read Address: %w", err)
 		}
 
 		// nonce
