@@ -264,13 +264,14 @@ func (test *snapshotTest) run(t *testing.T) bool {
 	// that is equivalent to fresh state with all actions up the snapshot applied.
 	for sindex--; sindex >= 0; sindex-- {
 		checkstate := New(NewReaderV3(tx))
-		defer checkstate.Release(false)
 		for _, action := range test.actions[:test.snapshots[sindex]] {
 			action.fn(action, checkstate)
 		}
 		state.RevertToSnapshot(snapshotRevs[sindex], nil)
 		state.PopSnapshot(snapshotRevs[sindex])
-		if err := test.checkEqual(state, checkstate); err != nil {
+		err := test.checkEqual(state, checkstate)
+		checkstate.Release(false)
+		if err != nil {
 			test.err = fmt.Errorf("state mismatch after revert to snapshot %d\n%w", sindex, err)
 			return false
 		}
