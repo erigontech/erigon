@@ -33,6 +33,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp/internal/rlpstruct"
 )
 
@@ -948,6 +949,28 @@ func (s *Stream) ListEnd() error {
 func (s *Stream) MoreDataInList() bool {
 	_, listLimit := s.listLimit()
 	return listLimit > 0
+}
+
+// Addr decodes an RLP string of exactly 20 bytes as an address. It reads
+// through the stream's scratch buffer, so unlike ReadBytes it never forces
+// the destination to escape to the heap.
+func (s *Stream) Addr() (a common.Address, err error) {
+	kind, size, err := s.Kind()
+	switch {
+	case err != nil:
+		return a, err
+	case kind == List:
+		return a, ErrExpectedString
+	case kind == Byte:
+		return a, fmt.Errorf("input value has wrong size 1, want %d", len(a))
+	case size != uint64(len(a)):
+		return a, fmt.Errorf("input value has wrong size %d, want %d", size, len(a))
+	}
+	if err = s.readFull(s.uintbuf[:len(a)]); err != nil {
+		return a, err
+	}
+	copy(a[:], s.uintbuf[:len(a)])
+	return a, nil
 }
 
 // ReadUint256 decodes the next value as a uint256.
