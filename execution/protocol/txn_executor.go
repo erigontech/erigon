@@ -225,7 +225,13 @@ func (st *TxnExecutor) buyGas(gasBailout bool) error {
 				return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From())
 			}
 			if st.evm.ChainRules().IsCancun && st.msg.BlobGas() > 0 {
-				maxBlobFee, overflow := u256.MulOverflow(*st.msg.MaxFeePerBlobGas(), u256.U64(st.msg.BlobGas()))
+				// Call-style messages may leave this unset; types.NewMessage
+				// stores zero for a nil argument, so treat nil the same way.
+				var maxFeePerBlobGas uint256.Int
+				if f := st.msg.MaxFeePerBlobGas(); f != nil {
+					maxFeePerBlobGas = *f
+				}
+				maxBlobFee, overflow := u256.MulOverflow(maxFeePerBlobGas, u256.U64(st.msg.BlobGas()))
 				if overflow {
 					return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From())
 				}

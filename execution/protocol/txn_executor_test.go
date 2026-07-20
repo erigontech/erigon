@@ -318,3 +318,22 @@ func TestBuyGas_NilMaxFeePerBlobGas(t *testing.T) {
 
 	require.NotPanics(t, func() { _ = st.buyGas(false) })
 }
+
+// TestBuyGas_NilMaxFeePerBlobGasWithBlobs covers the same nil max fee on a
+// message that does carry blobs, so the blob-fee branch is actually entered.
+func TestBuyGas_NilMaxFeePerBlobGasWithBlobs(t *testing.T) {
+	t.Parallel()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	inner := newSimpleTransferMsg(sender, recipient, 100_000, false)
+	inner.SetBlobVersionedHashes([]common.Hash{{0x01}})
+
+	ibs := state.New(state.NewNoopReader())
+	evm := newTestEVM(ibs, chain.TestChainOsakaConfig, 30_000_000)
+	gp := new(GasPool).AddGas(30_000_000).AddBlobGas(params.GasPerBlob)
+	st := NewTxnExecutor(evm, nilBlobFeeMsg{inner}, gp)
+
+	require.NotPanics(t, func() { _ = st.buyGas(false) })
+}
