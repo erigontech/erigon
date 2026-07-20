@@ -890,6 +890,11 @@ func TestBlockRawBodyFromBinaryTxsOnly(t *testing.T) {
 	reference := NewBlockFromStorage(common.Hash{}, &Header{}, txns, nil, nil)
 
 	require.Equal(t, reference.RawBody().Transactions, binaryOnly.RawBody().Transactions)
+
+	// A cache that does not cover every decoded transaction is not usable: the
+	// decoded transactions win rather than the raw body losing transactions.
+	partial := &Block{header: &Header{}, transactions: txns, binaryTransactions: binaryTxs[:1]}
+	require.Equal(t, reference.RawBody().Transactions, partial.RawBody().Transactions)
 }
 
 // TestBodyDecodeRejectsEmptyStringTx pins that an empty-string element

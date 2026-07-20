@@ -1417,10 +1417,12 @@ func rlpFromBinaryTxn(binaryTxn []byte) []byte {
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
 	br := &RawBody{Uncles: b.uncles, Withdrawals: b.withdrawals}
-	// The cached binary encodings are authoritative when present: re-wrapping them
-	// into their rlp.EncodeToBytes form is cheaper than a per-tx struct re-encode,
-	// and a block built by NewBlockFromBinaryTxs has no decoded transactions at all.
-	if b.binaryTransactions != nil {
+	// Re-wrapping the cached encodings into their rlp.EncodeToBytes form is cheaper
+	// than a per-tx struct re-encode, and a NewBlockFromBinaryTxs block has no
+	// decoded transactions to fall back on.
+	binaryTxsCoverBlock := b.binaryTransactions != nil &&
+		(b.transactions == nil || len(b.binaryTransactions) == len(b.transactions))
+	if binaryTxsCoverBlock {
 		br.Transactions = make([][]byte, len(b.binaryTransactions))
 		for i, binaryTxn := range b.binaryTransactions {
 			br.Transactions[i] = rlpFromBinaryTxn(binaryTxn)
