@@ -402,8 +402,17 @@ func TestHashOrNumberEncodeRLPPointerIsAllocFree(t *testing.T) {
 		t.Fatalf("value=%x pointer=%x", byValue.Bytes(), byPointer.Bytes())
 	}
 
-	valueAllocs := testing.AllocsPerRun(200, func() { _ = rlp.Encode(io.Discard, hn.Hash) })
-	pointerAllocs := testing.AllocsPerRun(200, func() { _ = rlp.Encode(io.Discard, &hn.Hash) })
+	// Panic rather than drop the error: a failing Encode would otherwise report a
+	// misleadingly low allocation count. The panic path never runs when it succeeds.
+	mustEncode := func(val any) func() {
+		return func() {
+			if err := rlp.Encode(io.Discard, val); err != nil {
+				panic(err)
+			}
+		}
+	}
+	valueAllocs := testing.AllocsPerRun(200, mustEncode(hn.Hash))
+	pointerAllocs := testing.AllocsPerRun(200, mustEncode(&hn.Hash))
 	t.Logf("allocs/op: byValue=%v byPointer=%v", valueAllocs, pointerAllocs)
 	if pointerAllocs >= valueAllocs {
 		t.Errorf("pointer form should allocate less: value=%v pointer=%v", valueAllocs, pointerAllocs)
