@@ -177,7 +177,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			err = state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceChangeUnspecified)
 		}
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("applying reward kind %d to %x: %w", r.Kind, r.Beneficiary, err)
 		}
 	}
 
@@ -190,7 +190,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			for _, w := range withdrawals {
 				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(common.GWei))
 				if err := state.AddBalance(accounts.InternAddress(w.Address), *amountInWei, tracing.BalanceIncreaseWithdrawal); err != nil {
-					return nil, err
+					return nil, fmt.Errorf("crediting withdrawal %d to %x: %w", w.Index, w.Address, err)
 				}
 			}
 		}
