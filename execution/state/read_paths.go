@@ -354,7 +354,10 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	switch res.Status() {
 	case MVReadResultDone:
 		hdr.Source = MapRead
-		if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok {
+		// A provisional prior read is this same load's nil probe: a cell flushed
+		// in between was never consumed, so adopt it below and let the load's
+		// reconciliation re-record the read.
+		if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok && prHeader.Source != ProvisionalRead {
 			if prHeader.Version == hdr.Version {
 				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d (%d.%d) RD (%s:%s) %x %s\n",
@@ -641,7 +644,9 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		// outcomeReturnDefault from the skipStorage branch may carry
 		// recordVR=true.  The AddressPath defaultV is nil.
 		if r.recordVR {
-			s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: r.hdr})
+			hdr := r.hdr
+			hdr.Source = ProvisionalRead
+			s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: hdr})
 		}
 		return nil, r.source, r.version, nil
 	default:
@@ -1235,7 +1240,9 @@ func refreshAccount(s *IntraBlockState, addr accounts.Address) (*accounts.Accoun
 	case outcomeReturnZero, outcomeReturnDefault:
 		if r.recordVR {
 			// AddressPath defaultV is nil.
-			s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: r.hdr})
+			hdr := r.hdr
+			hdr.Source = ProvisionalRead
+			s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: hdr})
 		}
 		return nil, r.source, r.version, nil
 	default:

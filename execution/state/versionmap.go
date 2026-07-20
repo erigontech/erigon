@@ -1058,7 +1058,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			if valid == VersionInvalid {
 				invReason = "fold-addr"
 			}
-		} else if source != StorageRead {
+		} else if source != StorageRead && source != ProvisionalRead {
 			valid = VersionInvalid
 			invReason = "none-notstorage"
 		} else {

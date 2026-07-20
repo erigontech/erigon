@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -50,15 +49,16 @@ type BALRequest struct {
 // BALFetcher fetches EIP-7928 block access lists over eth/71 (EIP-8159). Results
 // are best-effort: a block whose BAL no peer holds is simply absent from the map.
 type BALFetcher interface {
-	// Fetch queries peerId and fallbackPeers concurrently (up to balFetchParallelism at
-	// a time), taking the first BAL per block that validates against its header
-	// commitment; misses are absent. A hash mismatch or protocol violation penalises
-	// that peer.
-	Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, timeout time.Duration) map[common.Hash][]byte
+	// Fetch queries peerId and fallbackPeers (up to balFetchParallelism concurrently,
+	// disjoint shards per round), taking the first BAL per block that validates
+	// against its header commitment; misses are absent. A hash mismatch or protocol
+	// violation penalises that peer. batchTimeout bounds the whole call across all
+	// rounds; requestTimeout bounds each single request.
+	Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, batchTimeout time.Duration, requestTimeout time.Duration) map[common.Hash][]byte
 }
 
 // balFetchParallelism bounds how many peers Fetch queries concurrently for a batch's BALs.
-const balFetchParallelism = 4
+const balFetchParallelism = 8
 
 func NewBALFetcher(logger log.Logger, ml *MessageListener, ms *MessageSender, penalizer *PeerPenalizer) BALFetcher {
 	return &balFetcher{
@@ -76,15 +76,14 @@ type balFetcher struct {
 	peerPenalizer   *PeerPenalizer
 }
 
-func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, timeout time.Duration) map[common.Hash][]byte {
+func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, batchTimeout time.Duration, requestTimeout time.Duration) map[common.Hash][]byte {
 	if len(reqs) == 0 {
 		return nil
 	}
-	// Bound the whole fetch to one timeout.
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, batchTimeout)
 	defer cancel()
 	fetch := func(ctx context.Context, rs []BALRequest, p *PeerId) map[common.Hash][]byte {
-		got, err := f.fetchFromPeer(ctx, rs, p, timeout)
+		got, err := f.fetchFromPeer(ctx, rs, p, requestTimeout)
 		if err != nil {
 			f.logger.Debug("[p2p.bal] peer did not serve BALs", "peerId", p, "err", err)
 			return nil
@@ -99,20 +98,36 @@ func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerI
 // unit-testable without the network.
 type peerFetchFunc func(ctx context.Context, reqs []BALRequest, peerId *PeerId) map[common.Hash][]byte
 
-// fetchAcrossPeers fetches reqs from up to maxParallel peers concurrently and
-// merges their validated results, keeping the first correct BAL per block.
-// Peers truncate responses to the eth softResponseLimit, so a single request
-// for a large batch only ever covers a prefix — after each peer sweep the
-// uncovered remainder is re-requested until everything is covered or a full
-// sweep makes no progress.
+// fetchAcrossPeers fetches reqs by partitioning the uncovered remainder into
+// disjoint per-peer shards each round: peers truncate responses to the eth
+// softResponseLimit, so racing every peer on identical requests serializes on
+// duplicate prefixes. Shard-to-peer assignment rotates between rounds; the
+// loop stops once covered or after a full rotation without progress.
 func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, maxParallel int, fetch peerFetchFunc) map[common.Hash][]byte {
 	out := make(map[common.Hash][]byte, len(reqs))
+	if len(peerIds) == 0 {
+		return out
+	}
 	remaining := reqs
-	for len(remaining) > 0 && ctx.Err() == nil {
-		got := sweepPeersForBALs(ctx, remaining, peerIds, maxParallel, fetch)
-		for hash, bal := range got {
-			if _, ok := out[hash]; !ok {
-				out[hash] = bal
+	var noProgress int
+	for round := 0; len(remaining) > 0 && ctx.Err() == nil; round++ {
+		shards := min(len(peerIds), maxParallel, len(remaining))
+		results := make([]map[common.Hash][]byte, shards)
+		var eg errgroup.Group
+		for i := 0; i < shards; i++ {
+			slice := remaining[i*len(remaining)/shards : (i+1)*len(remaining)/shards]
+			peerId := peerIds[(i+round)%len(peerIds)]
+			eg.Go(func() error {
+				results[i] = fetch(ctx, slice, &peerId)
+				return nil
+			})
+		}
+		_ = eg.Wait()
+		for _, got := range results {
+			for hash, bal := range got {
+				if _, ok := out[hash]; !ok {
+					out[hash] = bal
+				}
 			}
 		}
 		next := make([]BALRequest, 0, len(remaining))
@@ -122,49 +137,15 @@ func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, 
 			}
 		}
 		if len(next) == len(remaining) {
-			break
+			noProgress++
+			if noProgress*shards >= len(peerIds) {
+				break
+			}
+		} else {
+			noProgress = 0
 		}
 		remaining = next
 	}
-	return out
-}
-
-// sweepPeersForBALs queries up to maxParallel peers concurrently for reqs and
-// merges first-valid-wins, cancelling the rest once every req is covered.
-func sweepPeersForBALs(ctx context.Context, reqs []BALRequest, peerIds []PeerId, maxParallel int, fetch peerFetchFunc) map[common.Hash][]byte {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var (
-		mu  sync.Mutex
-		out = make(map[common.Hash][]byte, len(reqs))
-	)
-	var eg errgroup.Group
-	eg.SetLimit(maxParallel)
-	for i := range peerIds {
-		peerId := &peerIds[i]
-		eg.Go(func() error {
-			if ctx.Err() != nil {
-				return nil
-			}
-			got := fetch(ctx, reqs, peerId)
-			if len(got) == 0 {
-				return nil
-			}
-			mu.Lock()
-			for hash, bal := range got {
-				if _, ok := out[hash]; !ok {
-					out[hash] = bal
-				}
-			}
-			covered := len(out) == len(reqs)
-			mu.Unlock()
-			if covered {
-				cancel()
-			}
-			return nil
-		})
-	}
-	_ = eg.Wait()
 	return out
 }
 

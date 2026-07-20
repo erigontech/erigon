@@ -12,6 +12,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -888,6 +889,191 @@ func TestGetVersionedAccount_SynthesizesCreatedFromBAL(t *testing.T) {
 	require.True(t, ok)
 	require.NotNil(t, rd.Val)
 	require.NotNil(t, rd.Val.Account())
+}
+
+// A reader racing the creator's first flush must be shielded by the BAL feed:
+// the pre-populated cells resolve the account before the creator's own writes
+// land, so the recorded read is non-nil and survives both validation and the
+// mid-execution dependency re-check once the creator flushes.
+func TestBALFedReaderDoesNotRaceCreatorFlush(t *testing.T) {
+	balFedChanges := func(addr accounts.Address) []*types.AccountChanges {
+		return []*types.AccountChanges{{
+			Address: addr,
+			BalanceChanges: []*types.BalanceChange{{
+				Index: 1,
+				Value: *uint256.NewInt(53771),
+			}},
+		}}
+	}
+	contractFedChanges := func(addr accounts.Address) []*types.AccountChanges {
+		return []*types.AccountChanges{{
+			Address: addr,
+			NonceChanges: []*types.NonceChange{{
+				Index: 1,
+				Value: 1,
+			}},
+			CodeChanges: []*types.CodeChange{{
+				Index:    1,
+				Bytecode: []byte{0x60, 0x00},
+			}},
+		}}
+	}
+	creatorFlush := func(vm *VersionMap, addr accounts.Address, balance uint64, nonce uint64) {
+		ws := &WriteSet{}
+		ws.SetAddress(addr, &VersionedWrite[*accounts.Account]{
+			WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 0}},
+			Val:         &accounts.Account{CodeHash: accounts.EmptyCodeHash},
+		})
+		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{
+			WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}},
+			Val:         *uint256.NewInt(balance),
+		})
+		ws.SetNonce(addr, &VersionedWrite[uint64]{
+			WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0}},
+			Val:         nonce,
+		})
+		vm.FlushVersionedWrites(ws, true, "")
+	}
+	type readFn struct {
+		name string
+		read func(t *testing.T, ibs *IntraBlockState, addr accounts.Address)
+	}
+	reads := []readFn{
+		{"exist-then-balance", func(t *testing.T, ibs *IntraBlockState, addr accounts.Address) {
+			exists, err := ibs.Exist(addr)
+			require.NoError(t, err)
+			require.True(t, exists)
+			_, err = ibs.GetBalance(addr)
+			require.NoError(t, err)
+		}},
+		{"empty-check", func(t *testing.T, ibs *IntraBlockState, addr accounts.Address) {
+			empty, err := ibs.Empty(addr)
+			require.NoError(t, err)
+			require.False(t, empty)
+		}},
+		{"touch", func(t *testing.T, ibs *IntraBlockState, addr accounts.Address) {
+			require.NoError(t, ibs.TouchAccount(addr))
+		}},
+		{"record-first-then-exist", func(t *testing.T, ibs *IntraBlockState, addr accounts.Address) {
+			_, _, _, err := ibs.getVersionedAccount(addr, false)
+			require.NoError(t, err)
+			so, err := ibs.getStateObject(addr, true)
+			require.NoError(t, err)
+			require.NotNil(t, so)
+		}},
+	}
+	feeds := []struct {
+		name    string
+		changes func(accounts.Address) []*types.AccountChanges
+		balance uint64
+		nonce   uint64
+	}{
+		{"eoa-balance-fed", balFedChanges, 53771, 0},
+		{"contract-nonce-code-fed", contractFedChanges, 0, 1},
+	}
+	for _, feed := range feeds {
+		for _, rd := range reads {
+			t.Run(feed.name+"/"+rd.name, func(t *testing.T) {
+				addr := accounts.InternAddress([20]byte{0xfe, byte(len(rd.name))})
+				vm := NewVersionMap(feed.changes(addr))
+				ibs := NewWithVersionMap(&minimalStateReader{}, vm)
+				ibs.txIndex = 1
+				rd.read(t, ibs, addr)
+				tr, ok := ibs.versionedReads.GetAddress(addr)
+				require.True(t, ok)
+				require.NotNil(t, tr.Val)
+				require.NotNil(t, tr.Val.Account())
+				creatorFlush(vm, addr, feed.balance, feed.nonce)
+				io := NewVersionedIO(2)
+				io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.versionedReads)
+				valid := vm.ValidateVersion(1, io, validateEqualVersion, true, false, "")
+				require.Equal(t, VersionValid, valid)
+				require.NotPanics(t, func() {
+					_, err := ibs.GetBalance(addr)
+					require.NoError(t, err)
+				})
+			})
+		}
+	}
+}
+
+// The provisional marker must not outlive its load: once a load concludes
+// "absent" (no cells, no DB record — the no-BAL shape) the EVM has consumed
+// that answer, so a later load in the same tx that finds the creator's flush
+// must abort as a dependency, not silently adopt the new cell.
+func TestAbsentConclusionThenCreatorFlushAborts(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xfc, 0x02})
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
+	ibs.txIndex = 9
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+	ws := &WriteSet{}
+	ws.SetAddress(addr, &VersionedWrite[*accounts.Account]{
+		WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 0}},
+		Val:         &accounts.Account{CodeHash: accounts.EmptyCodeHash},
+	})
+	ws.SetNonce(addr, &VersionedWrite[uint64]{
+		WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0}},
+		Val:         1,
+	})
+	vm.FlushVersionedWrites(ws, true, "")
+	require.PanicsWithValue(t, ErrDependency, func() {
+		_, _ = ibs.Exist(addr)
+	})
+}
+
+// A creator flush landing between a load's provisional nil record-probe and
+// its re-probe must not abort the loader: the nil was never exposed to the
+// EVM, so the load re-reads the fresh cells and reconciles the record.
+func TestBALFedReaderSurvivesCreatorFlushMidLoad(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xfd, 0x01})
+	vm := NewVersionMap([]*types.AccountChanges{{
+		Address: addr,
+		NonceChanges: []*types.NonceChange{{
+			Index: 1,
+			Value: 1,
+		}},
+		CodeChanges: []*types.CodeChange{{
+			Index:    1,
+			Bytecode: []byte{0x60, 0x00},
+		}},
+	}})
+	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
+	ibs.txIndex = 9
+	_, _, _, err := ibs.getVersionedAccount(addr, false)
+	require.NoError(t, err)
+	ws := &WriteSet{}
+	ws.SetAddress(addr, &VersionedWrite[*accounts.Account]{
+		WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 0}},
+		Val:         &accounts.Account{CodeHash: accounts.EmptyCodeHash},
+	})
+	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}},
+		Val:         uint256.Int{},
+	})
+	ws.SetNonce(addr, &VersionedWrite[uint64]{
+		WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0}},
+		Val:         1,
+	})
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
+		WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 0}},
+		Val:         false,
+	})
+	vm.FlushVersionedWrites(ws, true, "")
+	require.NotPanics(t, func() {
+		so, err := ibs.getStateObject(addr, true)
+		require.NoError(t, err)
+		require.NotNil(t, so)
+		require.EqualValues(t, 1, so.data.Nonce)
+	})
+	tr, ok := ibs.versionedReads.GetAddress(addr)
+	require.True(t, ok)
+	require.NotNil(t, tr.Val)
+	io := NewVersionedIO(10)
+	io.RecordReads(Version{TxIndex: 9, Incarnation: 0}, ibs.versionedReads)
+	require.Equal(t, VersionValid, vm.ValidateVersion(9, io, validateEqualVersion, true, false, ""))
 }
 
 // A DB-present account resolved after an AddressPath map-miss must reconcile

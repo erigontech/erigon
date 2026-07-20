@@ -1022,6 +1022,17 @@ func (sdb *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) 
 	return acc, true
 }
 
+// finalizeProvisionalAddressRead demotes a load's in-flight nil record probe
+// to a definitive storage read once the load concludes the account is absent:
+// the EVM is about to consume that answer, so a later flush must conflict with
+// it instead of being silently adopted.
+func (sdb *IntraBlockState) finalizeProvisionalAddressRead(addr accounts.Address) {
+	if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source == ProvisionalRead {
+		tr.Source = StorageRead
+		sdb.versionedReads.SetAddress(addr, tr)
+	}
+}
+
 func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
 	if sdb.versionMap == nil {
 		return nil, UnknownSource, UnknownVersion, nil
@@ -1057,6 +1068,9 @@ func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 					sdb.accountRead(addr, synth, MapRead, UnknownVersion)
 					return sdb.refreshVersionedAccount(addr, synth, StorageRead, UnknownVersion)
 				}
+			}
+			if readStorage {
+				sdb.finalizeProvisionalAddressRead(addr)
 			}
 			return nil, StorageRead, UnknownVersion, err
 		}
@@ -1614,6 +1628,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 					}
 				}
 				if readAccount == nil {
+					sdb.finalizeProvisionalAddressRead(addr)
 					return nil, err
 				}
 			} else {
@@ -1622,6 +1637,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 				// would record a racing SD read the BAL cannot resolve.
 				destructed, _, _, err := refreshSelfDestruct(sdb, addr)
 				if destructed || err != nil {
+					sdb.finalizeProvisionalAddressRead(addr)
 					so := stateObjectPool.Get().(*stateObject)
 					so.db = sdb
 					so.address = addr
