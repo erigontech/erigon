@@ -613,8 +613,17 @@ func TestEncodeValueAndPointerAgree(t *testing.T) {
 func TestEncodePointerAvoidsByteArrayCopies(t *testing.T) {
 	v := ptrTestOuter{Inners: []*ptrTestInner{{}}, Payload: make([]byte, 64)}
 
-	byValue := testing.AllocsPerRun(200, func() { _ = Encode(io.Discard, v) })
-	byPointer := testing.AllocsPerRun(200, func() { _ = Encode(io.Discard, &v) })
+	// Panic rather than drop the error: a failing Encode would otherwise report a
+	// misleadingly low allocation count. The panic path never runs when it succeeds.
+	mustEncode := func(val any) func() {
+		return func() {
+			if err := Encode(io.Discard, val); err != nil {
+				panic(err)
+			}
+		}
+	}
+	byValue := testing.AllocsPerRun(200, mustEncode(v))
+	byPointer := testing.AllocsPerRun(200, mustEncode(&v))
 	t.Logf("allocs/op: byValue=%v byPointer=%v", byValue, byPointer)
 
 	if byValue <= byPointer {
