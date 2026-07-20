@@ -382,7 +382,7 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	vm.WriteBalance(addr, ver, uint256.Int{}, true)
 
 	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, false)
+	normalized, _ := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, false)
 	// SD-aware filtering: only SelfDestructPath survives in the normalized
 	// writeset for the SD'd address. The raw IncarnationPath/BalancePath
 	// writes are dropped, and the completion loop skips this address.
@@ -490,7 +490,7 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 		build()
 
 	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, false)
+	normalized, _ := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, false)
 	// Sanity: Normalize should have appended one StoragePath=0
 	// entry per slot in vm.StorageKeys(addr) — this is the load-bearing
 	// emit. If it's gone, the assertions below will still catch the
@@ -620,7 +620,7 @@ func TestNormalizeWriteSet_GenesisBypassRetainsEmptyAccount(t *testing.T) {
 	vm.WriteNonce(zeroAddr, ver, uint64(0), true)
 	vm.WriteCodeHash(zeroAddr, ver, accounts.EmptyCodeHash, true)
 
-	normalized := rawWrites.Normalize(vm, 0, 0, nil, nil, false, false, false)
+	normalized, _ := rawWrites.Normalize(vm, 0, 0, nil, nil, false, false, false)
 	for h := range normalized.AllHeaders() {
 		assert.NotEqual(t, state.SelfDestructPath, h.Path,
 			"emptyRemoval=false must suppress SelfDestructPath emission for empty accounts")
@@ -658,7 +658,7 @@ func TestNormalizeWriteSet_PostGenesisEmptyAccountTriggersEIP161(t *testing.T) {
 	vm.WriteNonce(addr, ver, uint64(0), true)
 	vm.WriteCodeHash(addr, ver, accounts.EmptyCodeHash, true)
 
-	normalized := rawWrites.Normalize(vm, 0, 0, nil, nil, true, false, false)
+	normalized, _ := rawWrites.Normalize(vm, 0, 0, nil, nil, true, false, false)
 	sdSeen := false
 	if w, ok := normalized.GetSelfDestruct(addr); ok {
 		sdSeen = w.Val
@@ -721,7 +721,7 @@ func buildSDWithPostBalance(t *testing.T, addr accounts.Address, postSDBalance u
 	vm.WriteBalance(addr, ver, postSDBalance, true)
 
 	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, eip8246)
+	normalized, _ := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, eip8246)
 
 	cs := newTestCalcState()
 	cs.ApplyWrites(normalized, eip8246)
@@ -842,7 +842,7 @@ func applySDToDomains(t *testing.T, postSDBalance uint256.Int, useBlockCache boo
 	vm.WriteSelfDestruct(addr, ver, true, true)
 	vm.WriteBalance(addr, ver, postSDBalance, true)
 	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, true)
+	normalized, _ := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, true)
 	rs := state.NewStateV3(domains, false, log.New())
 	var blockCache *state.BlockStateCache
 	if useBlockCache {

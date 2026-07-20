@@ -260,9 +260,12 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 			if ws == nil || ws.IsEmpty() {
 				continue
 			}
-			normalized := ws.Normalize(ibs.VersionMap(), i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, blockRules.IsAmsterdam)
+			normalized, normErr := ws.Normalize(ibs.VersionMap(), i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, blockRules.IsAmsterdam)
 			if domainKeysErr != nil {
 				return fmt.Errorf("iterate storage prefix for block write normalization: %w", domainKeysErr)
+			}
+			if normErr != nil {
+				return fmt.Errorf("normalize block writes: %w", normErr)
 			}
 			if err := normalized.Apply(sd, tx, blockHeight, txNum, nil, blockRules, nil, false); err != nil {
 				return fmt.Errorf("apply versioned block writes: %w", err)

@@ -660,9 +660,12 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 					if ws == nil || ws.IsEmpty() {
 						continue
 					}
-					normalized := ws.Normalize(b.versionMap, i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, config.IsAmsterdam(b.header.Time))
+					normalized, normErr := ws.Normalize(b.versionMap, i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, config.IsAmsterdam(b.header.Time))
 					if domainKeysErr != nil {
 						return nil, nil, nil, fmt.Errorf("iterate storage prefix for block write normalization: %w", domainKeysErr)
+					}
+					if normErr != nil {
+						return nil, nil, nil, fmt.Errorf("normalize block writes: %w", normErr)
 					}
 					if err := normalized.Apply(domains, tx, blockNum, txNum, nil, blockRules, nil, false); err != nil {
 						return nil, nil, nil, fmt.Errorf("apply versioned block writes: %w", err)

@@ -57,10 +57,10 @@ import (
 // isn't silent.
 var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
 
-func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool, eip8246 bool) *WriteSet {
+func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool, eip8246 bool) (*WriteSet, error) {
 	filtered := &WriteSet{}
 	if writes == nil {
-		return filtered
+		return filtered, nil
 	}
 
 	// sdStorageSlots returns the union of vm.StorageKeys (this batch) and
@@ -189,13 +189,14 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 					}
 				} else {
 					preVal, found, err := stateReader.ReadAccountStorage(h.Address, h.Key)
-					if err == nil {
-						if !found && writeVal.IsZero() {
-							continue
-						}
-						if found && writeVal.Eq(&preVal) {
-							continue
-						}
+					if err != nil {
+						return nil, err
+					}
+					if !found && writeVal.IsZero() {
+						continue
+					}
+					if found && writeVal.Eq(&preVal) {
+						continue
 					}
 				}
 			}
@@ -336,6 +337,12 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			hasCreateContract = true
 		}
 
+		// The stateReader fallback for every missing field reads the same
+		// account, so read (and decode) it at most once per address rather than
+		// per missing field (a storage-only dirty address misses all four).
+		var fallbackAcc *accounts.Account
+		fallbackLoaded := false
+
 		// For each missing field, try versionMap then stateReader.
 		for _, path := range []AccountPath{BalancePath, NoncePath, IncarnationPath, CodeHashPath} {
 			if fields != nil && fields[path] {
@@ -350,13 +357,18 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			}
 			// Fall back to stateReader for pre-block account
 			if stateReader != nil {
-				acc, err := stateReader.ReadAccountData(addr)
-				if err == nil {
-					// New account (acc == nil) — doesn't exist in domain yet.
-					// SetAccountFieldFromAccount emits default values so the
-					// commitment sees a full account (not a delete).
-					SetAccountFieldFromAccount(filtered, addr, path, ver, acc)
+				if !fallbackLoaded {
+					acc, err := stateReader.ReadAccountData(addr)
+					if err != nil {
+						return nil, err
+					}
+					fallbackAcc = acc
+					fallbackLoaded = true
 				}
+				// New account (fallbackAcc == nil) — doesn't exist in domain yet.
+				// SetAccountFieldFromAccount emits default values so the
+				// commitment sees a full account (not a delete).
+				SetAccountFieldFromAccount(filtered, addr, path, ver, fallbackAcc)
 			}
 		}
 	}
@@ -392,9 +404,11 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			code = c.Bytes
 		}
 		if len(code) == 0 && stateReader != nil {
-			if c, err := stateReader.ReadAccountCode(addr); err == nil {
-				code = c
+			c, err := stateReader.ReadAccountCode(addr)
+			if err != nil {
+				return nil, err
 			}
+			code = c
 		}
 		// Gate recovery to 7702 designators: that SetCode short-circuit is the only
 		// one that leaves uncommitted code without a CodePath. A regular deploy
@@ -495,5 +509,5 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		})
 	}
 
-	return filtered
+	return filtered, nil
 }
