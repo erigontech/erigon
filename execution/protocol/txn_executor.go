@@ -215,7 +215,7 @@ func (st *TxnExecutor) buyGas(gasBailout bool) error {
 	if st.evm.ChainRules().IsCancun {
 		blobGasVal, overflow = u256.MulOverflow(st.evm.Context.BlobBaseFee, u256.U64(st.msg.BlobGas()))
 		if overflow {
-			return errBlobGasOverflow(blobGasVal)
+			return fmt.Errorf("%w: overflow converting blob gas: %s", ErrInsufficientFunds, blobGasVal.String())
 		}
 		if err := st.gp.SubBlobGas(st.msg.BlobGas()); err != nil {
 			return err
@@ -256,10 +256,7 @@ func (st *TxnExecutor) buyGas(gasBailout bool) error {
 			return err
 		}
 		if balance.Cmp(&balanceCheck) < 0 {
-			return errInsufficientFundsHaveWant(st.msg.From(), balance, balanceCheck)
-		}
-		if err := st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy); err != nil {
-			return err
+			return fmt.Errorf("%w: address %v have %s want %s", ErrInsufficientFunds, st.msg.From(), balance.String(), balanceCheck.String())
 		}
 		if err := st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy); err != nil {
 			return err
