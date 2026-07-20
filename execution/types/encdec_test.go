@@ -1008,6 +1008,25 @@ func TestReceiptForStorageRoundTrip(t *testing.T) {
 	}
 }
 
+func BenchmarkDeriveFieldsV4ForCachedReceipt(b *testing.B) {
+	tr := NewTRand()
+	receipt := tr.RandReceiptFixed()
+	blockHash, txnHash := tr.RandHash(), tr.RandHash()
+
+	b.Run(`bloom`, func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			receipt.DeriveFieldsV4ForCachedReceipt(blockHash, 123456, txnHash, true)
+		}
+	})
+	b.Run(`no-bloom`, func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			receipt.DeriveFieldsV4ForCachedReceipt(blockHash, 123456, txnHash, false)
+		}
+	})
+}
+
 func BenchmarkReceiptRLP(b *testing.B) {
 	tr := NewTRand()
 	receipt := tr.RandReceiptFixed()
