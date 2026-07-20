@@ -1686,8 +1686,8 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 // from DomainPut.
 func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	if dbg.TraceTouchKey {
-		fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%d nonce=%d codeHash=%x\n",
-			key, update.Flags, &update.Balance, update.Nonce, update.CodeHash)
+		fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%s nonce=%d codeHash=%x\n",
+			key, update.Flags, update.Balance.String(), update.Nonce, update.CodeHash)
 	}
 	switch t.mode {
 	case ModeUpdate:
