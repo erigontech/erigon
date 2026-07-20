@@ -1066,11 +1066,14 @@ func (s *Stream) Decode(val any) error {
 		return err
 	}
 
-	err = decoder(s, rval.Elem())
-	var decErr *decodeError
-	if errors.As(err, &decErr) && len(decErr.ctx) > 0 {
-		// Add decode target type to error so context has more meaning.
-		decErr.ctx = append(decErr.ctx, fmt.Sprint("(", rtyp.Elem(), ")"))
+	if err = decoder(s, rval.Elem()); err != nil {
+		// Declared in the error branch only: errors.As takes the target's address,
+		// which heap-allocates it on every call otherwise.
+		var decErr *decodeError
+		if errors.As(err, &decErr) && len(decErr.ctx) > 0 {
+			// Add decode target type to error so context has more meaning.
+			decErr.ctx = append(decErr.ctx, fmt.Sprint("(", rtyp.Elem(), ")"))
+		}
 	}
 	return err
 }
