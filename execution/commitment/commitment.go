@@ -1680,14 +1680,19 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	}
 }
 
+//go:noinline
+func traceTouchDirect(key string, update Update) {
+	fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%d nonce=%d codeHash=%x\n",
+		key, update.Flags, &update.Balance, update.Nonce, update.CodeHash)
+}
+
 // TouchPlainKeyDirect applies a pre-built Update to the key without
 // serialization/deserialization. Used by the commitment calculator which
 // receives aggregated state changes via channel instead of serialized bytes
 // from DomainPut.
 func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	if dbg.TraceTouchKey {
-		fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%d nonce=%d codeHash=%x\n",
-			key, update.Flags, &update.Balance, update.Nonce, update.CodeHash)
+		traceTouchDirect(key, *update)
 	}
 	switch t.mode {
 	case ModeUpdate:

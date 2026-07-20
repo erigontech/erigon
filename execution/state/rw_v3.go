@@ -250,7 +250,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					acc.CodeHash = accounts.NewCode(d.code).Hash
 				}
 				if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
-					fmt.Printf("%d apply:put account: %x balance:%d,nonce:%d,codehash:%x\n", blockNum, addr, &acc.Balance, acc.Nonce, acc.CodeHash)
+					traceApplyAccount(blockNum, addr, acc)
 				}
 				enc := accounts.SerialiseV3(&acc)
 				if blockCache != nil {
@@ -307,7 +307,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					}
 				} else {
 					if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
-						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, addr, item.key, &item.value)
+						traceApplyStorage(blockNum, addr, item)
 					}
 					if blockCache != nil {
 						blockCache.WriteStorage(addr, item.key, v, txNum)
@@ -513,6 +513,16 @@ func (rs *StateV3) SizeEstimateAfterCommitment() uint64 {
 type storageItem struct {
 	key   accounts.StorageKey
 	value uint256.Int
+}
+
+//go:noinline
+func traceApplyAccount(blockNum uint64, addr accounts.Address, acc accounts.Account) {
+	fmt.Printf("%d apply:put account: %x balance:%d,nonce:%d,codehash:%x\n", blockNum, addr, &acc.Balance, acc.Nonce, acc.CodeHash)
+}
+
+//go:noinline
+func traceApplyStorage(blockNum uint64, addr accounts.Address, item storageItem) {
+	fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, addr, item.key, &item.value)
 }
 
 var deleted accounts.Account
