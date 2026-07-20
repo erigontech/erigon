@@ -20,7 +20,7 @@ import (
 	"errors"
 	"math"
 
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 // MerkleizeProgressive computes the progressive Merkle tree root specified by
@@ -74,5 +74,5 @@ func merkleizeProgressive(chunks [][32]byte, numLeaves uint64) ([32]byte, error)
 		return [32]byte{}, err
 	}
 
-	return utils.Sha256(left[:], right[:]), nil
+	return crypto.Sha256(left[:], right[:]), nil
 }

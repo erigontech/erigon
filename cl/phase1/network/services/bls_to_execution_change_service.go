@@ -22,6 +22,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -32,8 +34,8 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // SignedBLSToExecutionChangeForGossip type represents SignedBLSToExecutionChange with the gossip data where it's coming from.
@@ -126,7 +128,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	// assert validator.withdrawal_credentials[1:] == hash(address_change.from_bls_pubkey)[1:]
 	// Perform full validation if requested.
 	// Check the validator's withdrawal credentials against the provided message.
-	hashedFrom := utils.Sha256(change.From[:])
+	hashedFrom := crypto.Sha256(change.From[:])
 	if !bytes.Equal(hashedFrom[1:], wc[1:]) {
 		return errors.New("invalid withdrawal credentials hash")
 	}

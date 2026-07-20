@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 const txsPerBlock = 100
@@ -94,8 +93,7 @@ func BenchmarkSuggestTipCap(b *testing.B) {
 	m := newTestBackendN(b, numBlocks)
 	defer m.Close()
 
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
-		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, nil, &jsonrpc.BaseApiConfig{Dirs: m.Dirs})
 
 	cases := []struct {
 		name        string
@@ -158,8 +156,7 @@ func BenchmarkFeeHistory(b *testing.B) {
 	m := newTestBackendN(b, numBlocks)
 	defer m.Close()
 
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
-		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, nil, &jsonrpc.BaseApiConfig{Dirs: m.Dirs})
 
 	gasCache := jsonrpc.NewGasPriceCache()
 

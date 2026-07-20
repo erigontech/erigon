@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	math2 "github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -1180,19 +1181,15 @@ func (c *Bor) GetRootHash(ctx context.Context, tx kv.Tx, start, end uint64) (str
 }
 
 func ComputeHeadersRootHash(blockHeaders []*types.Header) ([]byte, error) {
-	headers := make([][32]byte, NextPowerOfTwo(uint64(len(blockHeaders))))
+	headers := make([][32]byte, math2.NextPowerOfTwo(uint64(len(blockHeaders))))
 	for i := range blockHeaders {
 		blockHeader := blockHeaders[i]
-		header := crypto.Keccak256(AppendBytes32(
+		headers[i] = crypto.Keccak256Hash(AppendBytes32(
 			blockHeader.Number.Bytes(),
 			new(big.Int).SetUint64(blockHeader.Time).Bytes(),
 			blockHeader.TxHash[:],
 			blockHeader.ReceiptHash[:],
 		))
-
-		var arr [32]byte
-		copy(arr[:], header)
-		headers[i] = arr
 	}
 	tree := merkle.NewTreeWithOpts(merkle.TreeOptions{EnableHashSorting: false, DisableHashLeaves: true})
 	if err := tree.Generate(Convert(headers), keccak.NewFastKeccak()); err != nil {
