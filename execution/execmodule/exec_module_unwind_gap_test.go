@@ -65,12 +65,7 @@ func TestUpdateForkChoiceBadBlockMidBatchThenRecovery(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(
-		t,
-		execmoduletester.WithGenesisSpec(genesis),
-		execmoduletester.WithKey(privKey),
-		execmoduletester.WithAmsterdamBuilderContracts(),
-	)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	const chainLen = 13
 	const committedTo = 10
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen, func(i int, b *blockgen.BlockGen) {
@@ -186,12 +181,7 @@ func TestUpdateForkChoiceBadBlockAtLongBatchTailThenRecovery(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(
-		t,
-		execmoduletester.WithGenesisSpec(genesis),
-		execmoduletester.WithKey(privKey),
-		execmoduletester.WithAmsterdamBuilderContracts(),
-	)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	const chainLen = 35
 	const committedTo = 26
 	const badHeight = 35 // tail of the never-validated segment (index badHeight-1)

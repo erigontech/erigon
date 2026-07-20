@@ -77,7 +77,6 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithStepSize(stepSize),
-		execmoduletester.WithAmsterdamBuilderContracts(),
 	)
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
@@ -144,12 +143,7 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 			senderAddr2: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(
-		t,
-		execmoduletester.WithGenesisSpec(genesis),
-		execmoduletester.WithKey(privKey),
-		execmoduletester.WithAmsterdamBuilderContracts(),
-	)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	longerFork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -211,12 +205,7 @@ func TestValidateForkPayloadOffNonTipCanonicalBlockWithCache(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(
-		t,
-		execmoduletester.WithGenesisSpec(genesis),
-		execmoduletester.WithKey(privKey),
-		execmoduletester.WithAmsterdamBuilderContracts(),
-	)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	to := common.Address{0xaa}
 	baseFee := m.Genesis.BaseFee().Uint64()
 	mkTx := func(nonce, amount uint64) types.Transaction {
@@ -285,12 +274,7 @@ func TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(
-		t,
-		execmoduletester.WithGenesisSpec(genesis),
-		execmoduletester.WithKey(privKey),
-		execmoduletester.WithAmsterdamBuilderContracts(),
-	)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -375,12 +359,7 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(
-		t,
-		execmoduletester.WithGenesisSpec(genesis),
-		execmoduletester.WithKey(privKey),
-		execmoduletester.WithAmsterdamBuilderContracts(),
-	)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -466,10 +445,7 @@ func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
 		{name: "bg-commit", opt: execmoduletester.WithFcuBackgroundCommit()},
 	}
 	for _, mode := range modes {
-		opts := []execmoduletester.Option{
-			execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges}),
-			execmoduletester.WithAmsterdamBuilderContracts(),
-		}
+		opts := []execmoduletester.Option{execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges})}
 		if mode.opt != nil {
 			opts = append(opts, mode.opt)
 		}
@@ -943,12 +919,10 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(
-		t,
+	m := execmoduletester.New(t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithTxPool(),
-		execmoduletester.WithAmsterdamBuilderContracts(),
 	)
 	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
@@ -1258,12 +1232,10 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		Ethash:                        new(chain.EthashConfig),
 	}
 
-	m := execmoduletester.New(
-		t,
+	m := execmoduletester.New(t,
 		execmoduletester.WithTxPool(),
 		execmoduletester.WithChainConfig(cfg),
 		execmoduletester.WithExperimentalBAL(),
-		execmoduletester.WithAmsterdamBuilderContracts(),
 	)
 	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
@@ -1380,12 +1352,7 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(
-		t,
-		execmoduletester.WithGenesisSpec(genesis),
-		execmoduletester.WithKey(privKey),
-		execmoduletester.WithAmsterdamBuilderContracts(),
-	)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
@@ -1452,12 +1419,7 @@ func TestGetPayloadBodiesNonCanonicalBlockAccessList(t *testing.T) {
 			addrB: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(
-		t,
-		execmoduletester.WithGenesisSpec(genesis),
-		execmoduletester.WithKey(privKeyA),
-		execmoduletester.WithAmsterdamBuilderContracts(),
-	)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKeyA))
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
 	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
@@ -1628,12 +1590,10 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 		},
 	}
 
-	m := execmoduletester.New(
-		t,
+	m := execmoduletester.New(t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithTxPool(),
-		execmoduletester.WithAmsterdamBuilderContracts(),
 	)
 	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
@@ -1721,12 +1681,10 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 		},
 	}
 
-	m := execmoduletester.New(
-		t,
+	m := execmoduletester.New(t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithTxPool(),
-		execmoduletester.WithAmsterdamBuilderContracts(),
 	)
 	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
@@ -1869,12 +1827,10 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 		Alloc:    alloc,
 	}
 
-	m := execmoduletester.New(
-		t,
+	m := execmoduletester.New(t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(keys[0]),
 		execmoduletester.WithTxPool(),
-		execmoduletester.WithAmsterdamBuilderContracts(),
 	)
 	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
@@ -1973,12 +1929,10 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 		Alloc:    alloc,
 	}
 
-	m := execmoduletester.New(
-		t,
+	m := execmoduletester.New(t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(keys[0]),
 		execmoduletester.WithTxPool(),
-		execmoduletester.WithAmsterdamBuilderContracts(),
 	)
 	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
@@ -2081,11 +2035,9 @@ func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(
-		t,
+	m := execmoduletester.New(t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
-		execmoduletester.WithAmsterdamBuilderContracts(),
 	)
 
 	baseFee := m.Genesis.BaseFee().Uint64()
@@ -2162,12 +2114,7 @@ func TestInsertBlocksWithBatchedFCU(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(
-		t,
-		execmoduletester.WithGenesisSpec(genesis),
-		execmoduletester.WithKey(privKey),
-		execmoduletester.WithAmsterdamBuilderContracts(),
-	)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 
 	const totalBlocks = 30
 	const batchSize = 10
@@ -2240,7 +2187,6 @@ func runBatchedFCUBadBlockRecovery(t *testing.T, bgCommit bool) {
 	opts := []execmoduletester.Option{
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
-		execmoduletester.WithAmsterdamBuilderContracts(),
 	}
 	if bgCommit {
 		opts = append(opts, execmoduletester.WithFcuBackgroundCommit())
@@ -2568,8 +2514,7 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	m := execmoduletester.New(
-		t,
+	m := execmoduletester.New(t,
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithGenesisSpec(&types.Genesis{
 			Config: chain.AllProtocolChanges, // Amsterdam-at-0 → every block carries a BAL
@@ -2578,7 +2523,6 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 		execmoduletester.WithExperimentalBAL(),
 		execmoduletester.WithAlwaysGenerateChangesets(false),
 		execmoduletester.WithMaxReorgDepth(maxReorgDepth),
-		execmoduletester.WithAmsterdamBuilderContracts(),
 	)
 
 	// AllProtocolChanges is post-London, so txs need a fee cap above the base fee
