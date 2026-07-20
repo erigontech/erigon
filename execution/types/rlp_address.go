@@ -37,7 +37,7 @@ func EncodeOptionalAddress(addr *common.Address, w io.Writer, buffer []byte) err
 }
 
 // DecodeOptionalAddress decodes an optional 20-byte address from the RLP
-// stream; an empty string decodes as nil (contract creation).
+// stream; an empty string decodes as nil.
 func DecodeOptionalAddress(dst **common.Address, s *rlp.Stream) error {
 	kind, size, err := s.Kind()
 	if err != nil {
