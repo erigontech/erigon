@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -413,7 +414,13 @@ func (ii *InvertedIndex) beginForTests() *InvertedIndexRoTx {
 }
 
 func (ii *InvertedIndex) beginFilesRo(iv *iiVisible) *InvertedIndexRoTx {
-	return &InvertedIndexRoTx{
+	iit := &InvertedIndexRoTx{}
+	ii.initFilesRo(iit, iv)
+	return iit
+}
+
+func (ii *InvertedIndex) initFilesRo(iit *InvertedIndexRoTx, iv *iiVisible) {
+	*iit = InvertedIndexRoTx{
 		ii:                ii,
 		visible:           iv,
 		files:             iv.files,
@@ -472,13 +479,9 @@ type InvertedIndexRoTx struct {
 
 	seekInFilesCache *IISeekInFilesCache
 
-	// TODO: retrofit recent optimization in main and reenable the next line
-	// ef *multiencseq.SequenceBuilder // re-usable
 	salt              *uint32
 	stepSize          uint64
 	stepsInFrozenFile uint64
-
-	reUsableSeq multiencseq.SequenceReader // re-usable instance, to reduce allocations
 }
 
 // hashKey - change of salt will require re-gen of indices
@@ -522,6 +525,8 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		return false, 0, nil
 	}
 
+	var seq multiencseq.SequenceReader
+
 	hi, lo := iit.hashKey(key)
 	if iit.seekInFilesCache == nil {
 		iit.seekInFilesCache = iit.visible.newSeekInFilesCache()
@@ -558,8 +563,8 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		}
 		encodedSeq, _ := g.Next(nil)
 
-		iit.reUsableSeq.Reset(iit.files[i].startTxNum, encodedSeq)
-		equalOrHigherTxNum, _, found = iit.reUsableSeq.Seek(txNum)
+		seq.Reset(iit.files[i].startTxNum, encodedSeq)
+		equalOrHigherTxNum, _, found = seq.Seek(txNum)
 		if !found {
 			continue
 		}
@@ -670,18 +675,18 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 		ii:          iit,
 	}
 	if asc {
-		for i := len(iit.files) - 1; i >= 0; i-- {
+		for _, f := range slices.Backward(iit.files) {
 			// [from,to) && from < to
-			if endTxNum >= 0 && int(iit.files[i].startTxNum) >= endTxNum {
+			if endTxNum >= 0 && int(f.startTxNum) >= endTxNum {
 				continue
 			}
-			if startTxNum >= 0 && iit.files[i].endTxNum <= uint64(startTxNum) {
+			if startTxNum >= 0 && f.endTxNum <= uint64(startTxNum) {
 				break
 			}
-			if iit.files[i].src.index.KeyCount() == 0 {
+			if f.src.index.KeyCount() == 0 {
 				continue
 			}
-			it.stack = append(it.stack, iit.files[i])
+			it.stack = append(it.stack, f)
 			it.stack[len(it.stack)-1].getter = it.stack[len(it.stack)-1].src.decompressor.MakeGetter()
 			it.stack[len(it.stack)-1].reader = it.stack[len(it.stack)-1].src.index.Reader()
 			it.hasNext = true

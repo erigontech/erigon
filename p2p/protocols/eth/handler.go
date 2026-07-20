@@ -65,6 +65,11 @@ const (
 	// enforces; this cap limits the number of disk lookups even when
 	// individual BALs are small.
 	MaxBlockAccessListsServe = 1024
+
+	// MaxBlockAccessListsRegenerate caps the number of BAL regenerations (full
+	// block re-executions) a single GetBlockAccessLists request can trigger;
+	// the response is truncated at the budget and the peer re-requests the rest.
+	MaxBlockAccessListsRegenerate = 32
 )
 
 // NodeInfo represents a short summary of the `eth` sub-protocol metadata

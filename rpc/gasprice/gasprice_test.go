@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 func newTestBackend(t *testing.T) *execmoduletester.ExecModuleTester {
@@ -88,7 +87,7 @@ func TestSuggestPrice(t *testing.T) {
 	}
 
 	m := newTestBackend(t) //, big.NewInt(16), c.pending)
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, nil, &jsonrpc.BaseApiConfig{Dirs: m.Dirs})
 
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
@@ -117,7 +116,7 @@ const (
 
 func generateUint256Slice(n int) []*uint256.Int {
 	out := make([]*uint256.Int, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		out[i] = uint256.NewInt(uint64(rand.Int63()))
 	}
 	return out
@@ -154,7 +153,7 @@ func heapPercentile(values []*uint256.Int, percentile int) *uint256.Int {
 	h := sortingHeap(values)
 	heap.Init(&h)
 	pos := (h.Len() - 1) * percentile / 100
-	for i := 0; i < pos; i++ {
+	for range pos {
 		heap.Pop(&h)
 	}
 	return h[0]
@@ -191,7 +190,7 @@ func findKthUint256(values []*uint256.Int, k int) *uint256.Int {
 }
 
 func TestKthAlgorithmCorrectness(t *testing.T) {
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		original := generateUint256Slice(sliceSizeSmall)
 
 		// Create independent copies
@@ -219,12 +218,12 @@ func TestKthAlgorithmCorrectness(t *testing.T) {
 
 func BenchmarkHeapPercentile_N20(b *testing.B) {
 	testData := make([][]*uint256.Int, iterations)
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		testData[i] = generateUint256Slice(sliceSizeSmall)
 	}
 
 	for b.Loop() {
-		for j := 0; j < iterations; j++ {
+		for j := range iterations {
 			values := copyUint256Slice(testData[j])
 			_ = heapPercentile(values, percentile)
 		}
@@ -233,12 +232,12 @@ func BenchmarkHeapPercentile_N20(b *testing.B) {
 
 func BenchmarkKthPercentile_N20(b *testing.B) {
 	testData := make([][]*uint256.Int, iterations)
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		testData[i] = generateUint256Slice(sliceSizeSmall)
 	}
 
 	for b.Loop() {
-		for j := 0; j < iterations; j++ {
+		for j := range iterations {
 			values := copyUint256Slice(testData[j])
 			index := (len(values) - 1) * percentile / 100
 			_ = findKthUint256(values, index)
@@ -393,8 +392,7 @@ func TestSuggestTipCap_SparseBlocks(t *testing.T) {
 		Percentile: 60,
 		Default:    uint256.NewInt(common.GWei),
 	}
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
-		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, nil, &jsonrpc.BaseApiConfig{Dirs: m.Dirs})
 
 	dbTx, txErr := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, txErr)
@@ -431,8 +429,7 @@ func TestSuggestTipCap_AllEmptyBlocks(t *testing.T) {
 		Percentile: 60,
 		Default:    uint256.NewInt(common.GWei),
 	}
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
-		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, nil, &jsonrpc.BaseApiConfig{Dirs: m.Dirs})
 
 	dbTx, txErr := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, txErr)

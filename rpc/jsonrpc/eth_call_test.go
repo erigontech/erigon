@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"math/big"
@@ -309,6 +310,16 @@ func TestGetProof(t *testing.T) {
 		expectedErr string
 	}{
 		{
+			name:     "genesisBlockEOA",
+			addr:     bankAddr,
+			blockNum: 0,
+		},
+		{
+			name:     "genesisBlockNoAccount",
+			addr:     common.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
+			blockNum: 0,
+		},
+		{
 			name:     "currentBlockNoState",
 			addr:     contractAddr,
 			blockNum: 6,
@@ -429,6 +440,36 @@ func TestGetProof(t *testing.T) {
 	}
 }
 
+func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
+	statecfg.EnableHistoricalCommitment()
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+
+	ctx := context.Background()
+	tx, err := m.DB.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	pruneTo, err := m.BlockReader.TxnumReader().Min(ctx, tx, 3)
+	require.NoError(t, err)
+	c, err := tx.RwCursorDupSort(kv.TblCommitmentHistoryKeys)
+	require.NoError(t, err)
+	defer c.Close()
+	for {
+		k, _, err := c.First()
+		require.NoError(t, err)
+		if k == nil || binary.BigEndian.Uint64(k) >= pruneTo {
+			break
+		}
+		require.NoError(t, c.DeleteCurrentDuplicates())
+	}
+	c.Close()
+	require.NoError(t, tx.Commit())
+
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(0)))
+	require.ErrorIs(t, err, state.PrunedError)
+	require.Nil(t, proof)
+}
+
 func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
@@ -449,7 +490,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Header().Time), false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Time()), false)
 	require.NoError(t, err)
 
 	require.Equal(t, response["timestamp"], block["timestamp"])
@@ -477,7 +518,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(oldestBlock.Header().Time), false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(oldestBlock.Time()), false)
 	require.NoError(t, err)
 
 	require.Equal(t, response["timestamp"], block["timestamp"])
@@ -505,7 +546,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Header().Time+999999999999), false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Time()+999999999999), false)
 	require.NoError(t, err)
 
 	require.Equal(t, response["timestamp"], block["timestamp"])
@@ -539,7 +580,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(middleBlock.Header().Time), false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(middleBlock.Time()), false)
 	require.NoError(t, err)
 	require.Equal(t, response["timestamp"], block["timestamp"])
 	require.Equal(t, response["hash"], block["hash"])
@@ -567,7 +608,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(pickedBlock.Header().Time), false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(pickedBlock.Time()), false)
 	require.NoError(t, err)
 
 	require.Equal(t, response["timestamp"], block["timestamp"])
@@ -654,7 +695,7 @@ func generatePseudoRandomECDSAKeyPairs(rand io.Reader, n int) ([]*ecdsa.PrivateK
 	privateKeys := make([]*ecdsa.PrivateKey, n)
 	publicKeys := make([]*ecdsa.PublicKey, n)
 	var err error
-	for i := 0; i < n; i++ {
+	for i := range n {
 		privateKeys[i], err = generatePseudoRandomECDSAKey(rand)
 		if err != nil {
 			return nil, nil, err

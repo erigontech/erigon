@@ -22,13 +22,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A worker tx opened via BeginFilesRoFrom must pin the SAME visible-file
-// generation as its source tx, even after a newer generation is published — so
-// parallel-commitment workers spawned from one commitment tx never read a domain
-// from a file generation inconsistent with the in-memory overlay that tx was
-// built against (the torn Accounts-vs-Code read that fails the code-hash assert).
-// A plain BeginFilesRo, by contrast, pins whatever generation is current when it
-// runs, which is the source of that inconsistency.
+// A tx opened from a pin (src.Pin() then pin.BeginFilesRo()) must observe the
+// SAME visible-file generation as the source tx, even after a newer generation
+// is published — this keeps parallel-commitment workers on the generation their
+// commitment tx was built against. A plain BeginFilesRo, by contrast, pins
+// whatever generation is current when it runs.
 func TestFilesPin_PinsSourceGeneration(t *testing.T) {
 	stepSize := uint64(10)
 	_, agg := testDbAndAggregatorv3(t, stepSize)
@@ -48,8 +46,9 @@ func TestFilesPin_PinsSourceGeneration(t *testing.T) {
 	genV1 := src.visible
 	require.Same(t, agg.visible.Load(), genV1, "src pins the current generation")
 
-	// Publish a newer generation while src stays open.
-	gen([]testFileRange{{0, 1}, {1, 2}})
+	// Publish a newer generation while src stays open — only add the {1,2} step;
+	// rewriting {0,1} would rename over the file src holds open, which Windows denies.
+	gen([]testFileRange{{1, 2}})
 	genV2 := agg.visible.Load()
 	require.NotSame(t, genV1, genV2, "OpenFolder must publish a newer visible generation")
 

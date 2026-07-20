@@ -42,7 +42,7 @@ func TestIsPacketTooBig(t *testing.T) {
 
 	sendN := 1800
 	recvN := 300
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		go func() {
 			buf := make([]byte, sendN)
 			for i := range buf {

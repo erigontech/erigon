@@ -19,6 +19,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -98,9 +99,7 @@ func flattenConfig(m map[string]any, prefix string) map[string]any {
 			key = prefix + "." + k
 		}
 		if nested, ok := v.(map[string]any); ok {
-			for fk, fv := range flattenConfig(nested, key) {
-				result[fk] = fv
-			}
+			maps.Copy(result, flattenConfig(nested, key))
 		} else {
 			result[key] = v
 		}

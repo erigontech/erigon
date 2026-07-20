@@ -18,13 +18,14 @@ package handler
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
-	"sort"
+	"slices"
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -404,22 +405,31 @@ func aggregatePayloadAttestationMessages(
 		})
 	}
 
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].weight != candidates[j].weight {
-			return candidates[i].weight > candidates[j].weight
+	slices.SortFunc(candidates, func(a, b candidate) int {
+		if a.weight != b.weight {
+			return cmp.Compare(b.weight, a.weight)
 		}
-		left := candidates[i].attestation.Data
-		right := candidates[j].attestation.Data
+		left := a.attestation.Data
+		right := b.attestation.Data
 		if left.Slot != right.Slot {
-			return left.Slot < right.Slot
+			return cmp.Compare(left.Slot, right.Slot)
 		}
-		if cmp := bytes.Compare(left.BeaconBlockRoot[:], right.BeaconBlockRoot[:]); cmp != 0 {
-			return cmp < 0
+		if c := bytes.Compare(left.BeaconBlockRoot[:], right.BeaconBlockRoot[:]); c != 0 {
+			return c
 		}
 		if left.PayloadPresent != right.PayloadPresent {
-			return left.PayloadPresent
+			if left.PayloadPresent {
+				return -1
+			}
+			return 1
 		}
-		return left.BlobDataAvailable && !right.BlobDataAvailable
+		if left.BlobDataAvailable != right.BlobDataAvailable {
+			if left.BlobDataAvailable {
+				return -1
+			}
+			return 1
+		}
+		return 0
 	})
 	for i := 0; i < len(candidates) && result.Len() < int(cfg.MaxPayloadAttestations); i++ {
 		result.Append(candidates[i].attestation)
@@ -481,7 +491,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 		}
 		count := len(octets) / msgSize
 		req = make([]*cltypes.PayloadAttestationMessage, 0, count)
-		for i := 0; i < count; i++ {
+		for i := range count {
 			msg := &cltypes.PayloadAttestationMessage{}
 			if err := msg.DecodeSSZ(octets[i*msgSize:(i+1)*msgSize], int(clparams.GloasVersion)); err != nil {
 				beaconhttp.NewEndpointError(http.StatusBadRequest,

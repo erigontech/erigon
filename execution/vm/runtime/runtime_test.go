@@ -167,7 +167,7 @@ func BenchmarkCall(b *testing.B) {
 	tmpdir := b.TempDir()
 
 	for b.Loop() {
-		for j := 0; j < 400; j++ {
+		for range 400 {
 			_, _, _ = Execute(code, cpurchase, cfg, tmpdir)
 			_, _, _ = Execute(code, creceived, cfg, tmpdir)
 			_, _, _ = Execute(code, refund, cfg, tmpdir)
@@ -685,7 +685,7 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 			byte(vm.PUSH0), // PUSH0
 			byte(vm.PUSH0), // PUSH0
 		}
-		for i := uint64(0); i < n; i++ {
+		for range n {
 			contract = append(contract, byte(vm.SWAP1))
 		}
 		return contract
@@ -731,7 +731,7 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 	// Compute the CREATE2 target address: keccak256(0xff ++ factory ++ salt ++ keccak256(initcode))[12:]
 	salt := uint256.NewInt(0)
 	factoryAddr := common.HexToAddress("0xfac0")
-	create2Addr := types.CreateAddress2(factoryAddr, salt.Bytes32(), accounts.InternCodeHash(crypto.HashData(initcode)))
+	create2Addr := types.CreateAddress2(factoryAddr, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initcode)))
 	delegatedAddr := accounts.InternAddress(create2Addr)
 
 	// Set an EIP-7702 delegation on the target address (points to some arbitrary empty account).

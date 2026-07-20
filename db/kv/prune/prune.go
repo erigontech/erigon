@@ -435,7 +435,7 @@ func tableScanningPrune(
 
 		select {
 		case <-logEvery.C:
-			args := []interface{}{"name", filenameBase, "pruned values", stat.PruneCountValues}
+			args := []any{"name", filenameBase, "pruned values", stat.PruneCountValues}
 			if keysCursor != nil {
 				args = append(args, "pruned tx", stat.PruneCountTx)
 			}

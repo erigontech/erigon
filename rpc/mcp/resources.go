@@ -165,7 +165,7 @@ func (e *ErigonMCPServer) handleResourceRecentBlocks(ctx context.Context, req mc
 	}
 
 	blocks := make([]any, 0, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		blockNum := currentBlock - hexutil.Uint64(i)
 		block, err := e.ethAPI.GetBlockByNumber(ctx, rpc.BlockNumber(blockNum), false)
 		if err != nil || block == nil {

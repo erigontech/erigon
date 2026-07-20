@@ -23,7 +23,7 @@ import (
 	"math/bits"
 	"math/rand"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -469,16 +469,16 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	s.RootTouched = true
 	s.RootChecked = true
 
-	for i := 0; i < len(s.Depths); i++ {
+	for i := range len(s.Depths) {
 		s.Depths[i] = int16(rnd.Intn(256))
 	}
-	for i := 0; i < len(s.TouchMap); i++ {
+	for i := range len(s.TouchMap) {
 		s.TouchMap[i] = uint16(rnd.Intn(1<<16 - 1))
 	}
-	for i := 0; i < len(s.AfterMap); i++ {
+	for i := range len(s.AfterMap) {
 		s.AfterMap[i] = uint16(rnd.Intn(1<<16 - 1))
 	}
-	for i := 0; i < len(s.BranchBefore); i++ {
+	for i := range len(s.BranchBefore) {
 		if rnd.Intn(100) > 49 {
 			s.BranchBefore[i] = true
 		}
@@ -1147,7 +1147,7 @@ func TestCell_fillFromFields(t *testing.T) {
 	require.Equal(t, bm, am)
 	require.Equal(t, bm, tm)
 
-	for i := 0; i < len(decRow); i++ {
+	for i := range len(decRow) {
 		t.Logf("cell %d\n", i)
 		first, second := row[i], decRow[i]
 		// after decoding extension == hashedExtension, dhk will be derived from extension
@@ -1230,7 +1230,7 @@ func Test_HexPatriciaHashed_hashRow(t *testing.T) {
 	}
 
 	// Verify cellEncodeData for absent nibbles are zero-valued
-	for nibble := 0; nibble < 16; nibble++ {
+	for nibble := range 16 {
 		if nibble == 1 || nibble == 5 || nibble == 10 {
 			continue
 		}
@@ -1258,7 +1258,7 @@ func Test_HexPatriciaHashed_hashRow_allEmpty(t *testing.T) {
 	require.NoError(t, err)
 
 	// All cellEncodeData should be zero
-	for nibble := 0; nibble < 16; nibble++ {
+	for nibble := range 16 {
 		require.Equal(t, int16(0), cellData[nibble].hashLen)
 	}
 
@@ -1445,8 +1445,8 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 		ku[i] = &KeyUpdate{plainKey: string(pk), hashedKey: KeyToHexNibbleHash(pk), update: &updates[i]}
 	}
 
-	sort.Slice(ku, func(i, j int) bool {
-		return bytes.Compare(ku[i].hashedKey, ku[j].hashedKey) < 0
+	slices.SortFunc(ku, func(a, b *KeyUpdate) int {
+		return bytes.Compare(a.hashedKey, b.hashedKey)
 	})
 
 	pks := make([][]byte, len(ku))

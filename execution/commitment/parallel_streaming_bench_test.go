@@ -154,7 +154,7 @@ func buildClusteredStorageCorpus(b testing.TB, numAccounts, slotsPerAccount int)
 	b.Helper()
 	rnd := rand.New(rand.NewSource(99001))
 	ub := NewUpdateBuilder()
-	for i := 0; i < numAccounts; i++ {
+	for i := range numAccounts {
 		addNibbleAccount(ub, rnd, i%16, i, slotsPerAccount)
 	}
 	return ub.Build()
@@ -196,7 +196,7 @@ func buildWhaleStorageGroups(slots, groups int) []storageGroup {
 		ubs[i] = NewUpdateBuilder()
 		ubs[i].Balance(a, rnd.Uint64()+1)
 	}
-	for i := 0; i < slots; i++ {
+	for i := range slots {
 		addRandomSlot(ubs[i%groups], rnd, a)
 	}
 
@@ -280,7 +280,6 @@ func Benchmark_StorageConcurrency(b *testing.B) {
 						b.StartTimer()
 						var eg errgroup.Group
 						for _, r := range rs {
-							r := r
 							eg.Go(r.process)
 						}
 						require.NoError(b, eg.Wait())

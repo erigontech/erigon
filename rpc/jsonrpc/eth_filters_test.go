@@ -37,12 +37,11 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func newBaseApiWithFiltersForTest(f *rpchelper.Filters, stateCache *kvcache.Coherent, m *execmoduletester.ExecModuleTester) *BaseAPI {
-	return NewBaseApi(f, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	return NewBaseApi(f, stateCache, m.BlockReader, m.Engine, nil, &BaseApiConfig{Dirs: m.Dirs})
 }
 
 func TestSubscriptionsRequireFiltersAndNotifier(t *testing.T) {
@@ -117,7 +116,7 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 
 	// generate some random topics
 	topics := make([][]common.Hash, 0)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		bytes := make([]byte, length.Hash)
 		rand.Read(bytes)
 		toAdd := []common.Hash{common.BytesToHash(bytes)}
@@ -126,7 +125,7 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 
 	// generate some addresses
 	addresses := make([]common.Address, 0)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		bytes := make([]byte, length.Addr)
 		rand.Read(bytes)
 		addresses = append(addresses, common.BytesToAddress(bytes))
@@ -141,7 +140,7 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 
 	// make a lot of subscriptions
 	wg := sync.WaitGroup{}
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		wg.Add(1)
 		go func(idx int) {
 			_, id, _ := ff.SubscribeLogs(32, crit, "")
