@@ -255,8 +255,8 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 			return fmt.Errorf("open Topics: %w", err)
 		}
 		for s.MoreDataInList() {
-			var topic common.Hash
-			if err = s.ReadBytes(topic[:]); err != nil {
+			topic, err := s.ReadHash()
+			if err != nil {
 				return fmt.Errorf("read Topic: %w", err)
 			}
 			log.Topics = append(log.Topics, topic)

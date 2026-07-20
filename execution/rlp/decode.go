@@ -973,6 +973,28 @@ func (s *Stream) Addr() (a common.Address, err error) {
 	return a, nil
 }
 
+// ReadHash decodes an RLP string of exactly 32 bytes as a hash. Like Addr, it
+// reads through the stream's scratch buffer and never forces the destination
+// to escape to the heap.
+func (s *Stream) ReadHash() (h common.Hash, err error) {
+	kind, size, err := s.Kind()
+	switch {
+	case err != nil:
+		return h, err
+	case kind == List:
+		return h, ErrExpectedString
+	case kind == Byte:
+		return h, fmt.Errorf("input value has wrong size 1, want %d", len(h))
+	case size != uint64(len(h)):
+		return h, fmt.Errorf("input value has wrong size %d, want %d", size, len(h))
+	}
+	if err = s.readFull(s.uintbuf[:len(h)]); err != nil {
+		return h, err
+	}
+	copy(h[:], s.uintbuf[:len(h)])
+	return h, nil
+}
+
 // ReadUint256 decodes the next value as a uint256.
 func (s *Stream) ReadUint256(dst *uint256.Int) error {
 	var buffer []byte

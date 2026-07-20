@@ -285,8 +285,8 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 			return fmt.Errorf("open StorageKeys: %w", err)
 		}
 		for s.MoreDataInList() {
-			var key common.Hash
-			if err = s.ReadBytes(key[:]); err != nil {
+			key, err := s.ReadHash()
+			if err != nil {
 				return fmt.Errorf("read StorageKey: %w", err)
 			}
 			tuple.StorageKeys = append(tuple.StorageKeys, key)
