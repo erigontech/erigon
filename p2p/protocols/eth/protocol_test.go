@@ -21,11 +21,13 @@ package eth
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
@@ -357,5 +359,58 @@ func TestEth71ProtocolRegistration(t *testing.T) {
 	}
 	if got := rev[sentryproto.MessageId_BLOCK_ACCESS_LISTS_71]; got != BlockAccessListsMsg {
 		t.Errorf("FromProto[ETH71][BLOCK_ACCESS_LISTS_71] = %v, want BlockAccessListsMsg", got)
+	}
+}
+
+// BenchmarkHashOrNumberEncodeRLP pins why the hash branch encodes through a pointer:
+// a common.Hash boxed by value is not addressable, so the reflection encoder copies
+// it with reflect.New before it can take a byte slice of it.
+func BenchmarkHashOrNumberEncodeRLP(b *testing.B) {
+	hn := &HashOrNumber{Hash: common.Hash{1, 2, 3}}
+
+	b.Run("byValue", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			if err := rlp.Encode(io.Discard, hn.Hash); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("byPointer", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			if err := rlp.Encode(io.Discard, &hn.Hash); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+// TestHashOrNumberEncodeRLPPointerIsAllocFree pins the allocation win the pointer
+// form gives, and that both forms still produce identical bytes.
+func TestHashOrNumberEncodeRLPPointerIsAllocFree(t *testing.T) {
+	hn := &HashOrNumber{Hash: common.Hash{1, 2, 3}}
+
+	var byValue, byPointer bytes.Buffer
+	if err := rlp.Encode(&byValue, hn.Hash); err != nil {
+		t.Fatal(err)
+	}
+	if err := rlp.Encode(&byPointer, &hn.Hash); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(byValue.Bytes(), byPointer.Bytes()) {
+		t.Fatalf("value=%x pointer=%x", byValue.Bytes(), byPointer.Bytes())
+	}
+
+	valueAllocs := testing.AllocsPerRun(200, func() { _ = rlp.Encode(io.Discard, hn.Hash) })
+	pointerAllocs := testing.AllocsPerRun(200, func() { _ = rlp.Encode(io.Discard, &hn.Hash) })
+	t.Logf("allocs/op: byValue=%v byPointer=%v", valueAllocs, pointerAllocs)
+	if pointerAllocs >= valueAllocs {
+		t.Errorf("pointer form should allocate less: value=%v pointer=%v", valueAllocs, pointerAllocs)
+	}
+	// encBuffer is pooled, and sync.Pool drops values under the race detector.
+	//goland:noinspection GoBoolExpressions
+	if !race.Enabled && pointerAllocs != 0 {
+		t.Errorf("pointer form should not allocate, got %v", pointerAllocs)
 	}
 }
