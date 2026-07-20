@@ -24,10 +24,12 @@ import (
 	"math/big"
 	"math/rand"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -908,6 +910,19 @@ func (tr *TRand) RandReceipt() *Receipt {
 	for i := range numLogs {
 		logs[i] = tr.RandLog()
 	}
+	return tr.randReceiptWithLogs(logs)
+}
+
+// RandReceiptFixed creates a Receipt with fixed log count and sizes for deterministic benchmarking
+func (tr *TRand) RandReceiptFixed() *Receipt {
+	logs := make(Logs, 3)
+	for i := range logs {
+		logs[i] = tr.RandLogFixed()
+	}
+	return tr.randReceiptWithLogs(logs)
+}
+
+func (tr *TRand) randReceiptWithLogs(logs Logs) *Receipt {
 	return &Receipt{
 		Type:              LegacyTxType,
 		PostState:         tr.RandBytes(32),
@@ -924,7 +939,7 @@ func (tr *TRand) RandReceipt() *Receipt {
 
 func BenchmarkLogRLP(b *testing.B) {
 	tr := NewTRand()
-	log := tr.RandLog()
+	log := tr.RandLogFixed()
 	var buf bytes.Buffer
 
 	b.Run(`Encode`, func(b *testing.B) {
@@ -948,9 +963,53 @@ func BenchmarkLogRLP(b *testing.B) {
 	})
 }
 
+func TestReceiptForStorageRoundTrip(t *testing.T) {
+	tr := NewTRand()
+
+	failed := tr.RandReceipt()
+	failed.PostState = nil
+	failed.Status = ReceiptStatusFailed
+
+	success := tr.RandReceipt()
+	success.PostState = nil
+	success.Status = ReceiptStatusSuccessful
+
+	noLogs := tr.RandReceipt()
+	noLogs.Logs = Logs{}
+	noLogs.FirstLogIndexWithinBlock = 7
+
+	emptyLog := tr.RandReceipt()
+	emptyLog.Logs = Logs{{Address: tr.RandAddress()}}
+
+	for i, r := range []*Receipt{tr.RandReceipt(), failed, success, noLogs, emptyLog} {
+		t.Run(fmt.Sprintf("case%d", i), func(t *testing.T) {
+			var buf bytes.Buffer
+			require.NoError(t, (*ReceiptForStorage)(r).EncodeRLP(&buf))
+
+			var dec ReceiptForStorage
+			require.NoError(t, rlp.DecodeBytes(buf.Bytes(), &dec))
+
+			require.Equal(t, r.Type, dec.Type)
+			require.Equal(t, r.PostState, dec.PostState)
+			require.Equal(t, r.Status, dec.Status)
+			require.Equal(t, r.CumulativeGasUsed, dec.CumulativeGasUsed)
+			require.Equal(t, r.FirstLogIndexWithinBlock, dec.FirstLogIndexWithinBlock)
+			require.Equal(t, r.TransactionIndex, dec.TransactionIndex)
+			require.Equal(t, r.ContractAddress, dec.ContractAddress)
+			require.Equal(t, r.GasUsed, dec.GasUsed)
+			require.Equal(t, len(r.Logs), len(dec.Logs))
+			for j := range r.Logs {
+				require.Equal(t, r.Logs[j].Address, dec.Logs[j].Address)
+				require.True(t, slices.Equal(r.Logs[j].Topics, dec.Logs[j].Topics), "topics mismatch: log %d: %x != %x", j, r.Logs[j].Topics, dec.Logs[j].Topics)
+				require.True(t, bytes.Equal(r.Logs[j].Data, dec.Logs[j].Data), "data mismatch: log %d: %x != %x", j, r.Logs[j].Data, dec.Logs[j].Data)
+			}
+		})
+	}
+}
+
 func BenchmarkReceiptRLP(b *testing.B) {
 	tr := NewTRand()
-	receipt := tr.RandReceipt()
+	receipt := tr.RandReceiptFixed()
 	var buf bytes.Buffer
 
 	b.Run(`Encode`, func(b *testing.B) {
@@ -968,110 +1027,6 @@ func BenchmarkReceiptRLP(b *testing.B) {
 		receiptStorage := (*ReceiptForStorage)(receipt)
 		receiptStorage.EncodeRLP(&buf)
 		var decoded ReceiptForStorage
-		for b.Loop() {
-			rlp.DecodeBytes(buf.Bytes(), &decoded)
-		}
-	})
-}
-
-// Comparison: Custom vs Generated Code
-func BenchmarkLogCustomVsGenerated(b *testing.B) {
-	tr := NewTRand()
-	logData := tr.RandLog()
-	var buf bytes.Buffer
-
-	b.Run(`Custom/Encode`, func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			buf.Reset()
-			logStorage := (*LogForStorage)(logData)
-			logStorage.EncodeRLP(&buf)
-		}
-	})
-
-	b.Run(`Custom/Decode`, func(b *testing.B) {
-		b.ReportAllocs()
-		buf.Reset()
-		logStorage := (*LogForStorage)(logData)
-		logStorage.EncodeRLP(&buf)
-		var decoded LogForStorage
-		for b.Loop() {
-			rlp.DecodeBytes(buf.Bytes(), &decoded)
-		}
-	})
-
-	// Generated code comparison
-	genLog := &LogForStorageGen{
-		Address: logData.Address,
-		Topics:  logData.Topics,
-		Data:    logData.Data,
-	}
-
-	b.Run(`Generated/Encode`, func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			buf.Reset()
-			genLog.EncodeRLP(&buf)
-		}
-	})
-
-	b.Run(`Generated/Decode`, func(b *testing.B) {
-		b.ReportAllocs()
-		buf.Reset()
-		genLog.EncodeRLP(&buf)
-		var decoded LogForStorageGen
-		for b.Loop() {
-			rlp.DecodeBytes(buf.Bytes(), &decoded)
-		}
-	})
-}
-
-// BenchmarkLogCustomVsGeneratedFixed uses fixed data for deterministic results
-func BenchmarkLogCustomVsGeneratedFixed(b *testing.B) {
-	tr := NewTRand()
-	logData := tr.RandLogFixed() // Fixed: 3 topics, 32 bytes data
-	var buf bytes.Buffer
-
-	b.Run(`Custom/Encode`, func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			buf.Reset()
-			logStorage := (*LogForStorage)(logData)
-			logStorage.EncodeRLP(&buf)
-		}
-	})
-
-	b.Run(`Custom/Decode`, func(b *testing.B) {
-		b.ReportAllocs()
-		buf.Reset()
-		logStorage := (*LogForStorage)(logData)
-		logStorage.EncodeRLP(&buf)
-		var decoded LogForStorage
-		for b.Loop() {
-			rlp.DecodeBytes(buf.Bytes(), &decoded)
-		}
-	})
-
-	// Generated code comparison
-	genLog := &LogForStorageGen{
-		Address: logData.Address,
-		Topics:  logData.Topics,
-		Data:    logData.Data,
-	}
-
-	b.Run(`Generated/Encode`, func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			buf.Reset()
-			genLog.EncodeRLP(&buf)
-		}
-	})
-
-	b.Run(`Generated/Decode`, func(b *testing.B) {
-		b.ReportAllocs()
-		buf.Reset()
-		genLog.EncodeRLP(&buf)
-		var decoded LogForStorageGen
 		for b.Loop() {
 			rlp.DecodeBytes(buf.Bytes(), &decoded)
 		}
