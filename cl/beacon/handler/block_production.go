@@ -614,8 +614,7 @@ func (a *ApiHandler) produceBlock(
 	randaoReveal common.Bytes96,
 	graffiti common.Hash,
 ) (*cltypes.BlindOrExecutionBeaconBlock, error) {
-	wg := sync.WaitGroup{}
-	wg.Add(2)
+	var wg sync.WaitGroup
 	// produce beacon body
 	var (
 		beaconBody     *cltypes.BeaconBody
@@ -624,12 +623,11 @@ func (a *ApiHandler) produceBlock(
 		blobs          []*cltypes.Blob
 		kzgProofs      []common.Bytes48
 	)
-	go func() {
+	wg.Go(func() {
 		start := time.Now()
 		defer func() {
 			a.logger.Debug("Produced BeaconBody", "slot", targetSlot, "duration", time.Since(start))
 		}()
-		defer wg.Done()
 		beaconBody, localExecValue, localErr = a.produceBeaconBody(ctx, 3, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
 		// collect blobs
 		if beaconBody != nil {
@@ -657,26 +655,25 @@ func (a *ApiHandler) produceBlock(
 				kzgProofs = append(kzgProofs, blobBundle.KzgProofs...)
 			}
 		}
-	}()
+	})
 
 	// get the builder payload
 	var (
 		builderHeader *builder.ExecutionHeader
 		builderErr    error
 	)
-	go func() {
+	wg.Go(func() {
 		start := time.Now()
 		defer func() {
 			a.logger.Debug("MevBoost", "slot", targetSlot, "duration", time.Since(start))
 		}()
-		defer wg.Done()
 		if a.routerCfg.Builder && a.builderClient != nil {
 			builderHeader, builderErr = a.getBuilderPayload(ctx, baseState, targetSlot)
 			if builderErr != nil && builderErr != errBuilderNotEnabled {
 				log.Warn("Failed to get builder payload", "err", builderErr)
 			}
 		}
-	}()
+	})
 	// wait for both tasks to finish
 	wg.Wait()
 
@@ -969,9 +966,7 @@ func (a *ApiHandler) produceBeaconBody(
 
 	blockRoot := baseBlockRoot
 	// Process the execution data in a thread.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		start := time.Now()
 		defer func() {
 			log.Info("BlockProduction: ForkChoiceUpdate&GetPayload took", "duration", time.Since(start))
@@ -1210,11 +1205,9 @@ func (a *ApiHandler) produceBeaconBody(
 		// Cache the block body so the beacon API can return transactions
 		// immediately, before the EL commits to its database.
 		a.cacheExecutionBody(payload)
-	}()
+	})
 	// process the sync aggregate in parallel
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		start := time.Now()
 		defer func() {
 			log.Info("BlockProduction: GetSyncAggregate took", "duration", time.Since(start))
@@ -1223,11 +1216,9 @@ func (a *ApiHandler) produceBeaconBody(
 		if err != nil {
 			log.Error("BlockProduction: Failed to get sync aggregate", "err", err)
 		}
-	}()
+	})
 	// Process operations all in parallel with each other.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		start := time.Now()
 		defer func() {
 			poolSize := len(a.operationsPool.AttestationsPool.Raw())
@@ -1242,15 +1233,13 @@ func (a *ApiHandler) produceBeaconBody(
 			targetSlot,
 		)
 		beaconBody.Attestations = a.findBestAttestationsForBlockProduction(baseState)
-	}()
+	})
 	// [New in Gloas:EIP7732] Aggregate PTC votes into PayloadAttestations.
 	// The spec requires data.slot + 1 == state.slot, so we collect PTC votes
 	// for slot targetSlot-1 (= state.slot - 1), NOT baseBlockSlot. When slots
 	// are skipped the two differ and using baseBlockSlot produces invalid blocks.
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			start := time.Now()
 			defer func() {
 				paCount := 0
@@ -1260,7 +1249,7 @@ func (a *ApiHandler) produceBeaconBody(
 				log.Debug("BlockProduction: aggregatePayloadAttestations took", "duration", time.Since(start), "selectedPAs", paCount)
 			}()
 			beaconBody.PayloadAttestations = a.aggregatePayloadAttestations(baseState, targetSlot-1, baseBlockRoot)
-		}()
+		})
 	}
 	wg.Wait()
 	if executionErr != nil {

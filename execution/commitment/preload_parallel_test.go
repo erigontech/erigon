@@ -726,6 +726,57 @@ func TestContractTrunkPreloadParallel_NilResolverError(t *testing.T) {
 	}
 }
 
+// The reusable partition scratch must not keep the last wave's keys and values
+// reachable once Run returns — a drained ~1M-entry frontier would otherwise stay
+// pinned until the next Run. Only the capacity survives.
+func TestContractTrunkPreloadParallel_RunReleasesScratch(t *testing.T) {
+	hash, tree, allPaths := buildSyntheticTree(t)
+	root := hexNibbles(hash)
+	const valSz = 100
+	// Shadow every node but the root, so the deepest wave partitions into dbHits
+	// (non-empty at return) and the first wave into fileMiss.
+	dbBranches := map[string][]byte{}
+	for _, p := range allPaths {
+		if bytes.Equal(p, root) {
+			continue
+		}
+		dbBranches[string(nibbles.HexToCompact(p))] = branchVal(tree[string(p)], valSz)
+	}
+
+	p, err := NewContractTrunkPreloadParallel(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := NewBranchCache(64)
+	n, queueEmpty, err := p.Run(1<<20, dbBranches, fakeResolver(tree, nil, valSz, ""), c, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !queueEmpty || n != len(tree) {
+		t.Fatalf("pinned %d (queueEmpty=%v), want the whole %d-node tree drained", n, queueEmpty, len(tree))
+	}
+
+	if cap(p.scratchDbHits) == 0 || cap(p.scratchDbVals) == 0 || cap(p.scratchFileMiss) == 0 {
+		t.Fatalf("scratch capacity not retained for reuse: dbHits=%d dbVals=%d fileMiss=%d",
+			cap(p.scratchDbHits), cap(p.scratchDbVals), cap(p.scratchFileMiss))
+	}
+	for i, pk := range p.scratchDbHits[:cap(p.scratchDbHits)] {
+		if pk.key != nil || pk.path != nil {
+			t.Fatalf("scratchDbHits[%d] still references wave data after Run", i)
+		}
+	}
+	for i, v := range p.scratchDbVals[:cap(p.scratchDbVals)] {
+		if v != nil {
+			t.Fatalf("scratchDbVals[%d] still references a dbBranches value after Run", i)
+		}
+	}
+	for i, pk := range p.scratchFileMiss[:cap(p.scratchFileMiss)] {
+		if pk.key != nil || pk.path != nil {
+			t.Fatalf("scratchFileMiss[%d] still references wave data after Run", i)
+		}
+	}
+}
+
 func TestContractTrunkPreloadParallel_BadHashLengthError(t *testing.T) {
 	if _, err := NewContractTrunkPreloadParallel(make([]byte, 31)); err == nil {
 		t.Fatal("expected error for 31-byte hash")
