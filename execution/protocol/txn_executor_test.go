@@ -296,3 +296,48 @@ func TestPreCheckErrorOrdering_GasBeforeFeeCap(t *testing.T) {
 		require.NoError(t, CheckBlockGasInclusion(gp, 50_000, 80_000))
 	})
 }
+
+// nilBlobFeeMsg is a Message whose MaxFeePerBlobGas is nil, as returned by
+// call-style messages (e.g. the simulated backend's callMsg).
+type nilBlobFeeMsg struct{ *types.Message }
+
+func (nilBlobFeeMsg) MaxFeePerBlobGas() *uint256.Int { return nil }
+
+// TestBuyGas_NilMaxFeePerBlobGas verifies buyGas does not dereference a nil
+// MaxFeePerBlobGas for a non-blob transaction on Cancun.
+func TestBuyGas_NilMaxFeePerBlobGas(t *testing.T) {
+	t.Parallel()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	ibs := state.New(state.NewNoopReader())
+	evm := newTestEVM(ibs, chain.TestChainOsakaConfig, 30_000_000)
+	msg := nilBlobFeeMsg{newSimpleTransferMsg(sender, recipient, 100_000, false)}
+	st := NewTxnExecutor(evm, msg, new(GasPool).AddGas(30_000_000))
+
+	var err error
+	require.NotPanics(t, func() { err = st.buyGas(false) })
+	require.NoError(t, err)
+}
+
+// TestBuyGas_NilMaxFeePerBlobGasWithBlobs covers the same nil max fee on a
+// message that does carry blobs, so the blob-fee branch is actually entered.
+func TestBuyGas_NilMaxFeePerBlobGasWithBlobs(t *testing.T) {
+	t.Parallel()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	inner := newSimpleTransferMsg(sender, recipient, 100_000, false)
+	inner.SetBlobVersionedHashes([]common.Hash{{0x01}})
+
+	ibs := state.New(state.NewNoopReader())
+	evm := newTestEVM(ibs, chain.TestChainOsakaConfig, 30_000_000)
+	gp := new(GasPool).AddGas(30_000_000).AddBlobGas(params.GasPerBlob)
+	st := NewTxnExecutor(evm, nilBlobFeeMsg{inner}, gp)
+
+	var err error
+	require.NotPanics(t, func() { err = st.buyGas(false) })
+	require.NoError(t, err)
+}
