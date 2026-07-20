@@ -101,3 +101,37 @@ func BenchmarkDecodeBytes_Tiny(b *testing.B) {
 		_ = dst
 	}
 }
+
+type benchCap struct {
+	Name    string
+	Version uint
+}
+
+type benchHandshake struct {
+	Version    uint64
+	Name       string
+	Caps       []benchCap
+	ListenPort uint64
+	ID         []byte
+}
+
+func BenchmarkDecodeStringFields(b *testing.B) {
+	encoded, err := EncodeToBytes(&benchHandshake{
+		Version:    5,
+		Name:       "erigon/v3.6.0-dev/linux-amd64/go1.25.0",
+		Caps:       []benchCap{{"eth", 68}, {"eth", 69}, {"snap", 1}, {"wit", 0}},
+		ListenPort: 30303,
+		ID:         bytes.Repeat([]byte{0xab}, 64),
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var dst benchHandshake
+		if err := DecodeBytes(encoded, &dst); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
