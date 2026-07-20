@@ -91,6 +91,8 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		return nil, err
 	}
 	defer tx.Rollback()
+	// Everything here is a block-table read, so one overlay view keeps the
+	// head, the search bounds, and the lookups consistent.
 	overlayTx := api.filters.WithOverlay(tx)
 
 	uintTimestamp := timeStamp.TurnIntoUint64()
