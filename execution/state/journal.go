@@ -129,6 +129,11 @@ type (
 		preserveBalance bool
 		hadIncarnation  bool
 		prevIncarnation uint64
+		// Pre-destruct versioned balance write, captured before the self-destruct
+		// clears the balance cell, so a revert restores it instead of deleting a
+		// balance write that may predate the snapshot.
+		hadBalance           bool
+		prevBalanceVersioned uint256.Int
 	}
 
 	// Changes to individual accounts.
@@ -280,15 +285,20 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 	}
 	if s.versionMap != nil {
 		if ch.wasCommited {
-			s.versionedWrites.DelBalance(ch.account)
 			s.versionedWrites.DelSelfDestruct(ch.account)
 		} else {
 			if _, ok := s.versionedWrites.GetSelfDestruct(ch.account); ok {
 				s.versionedWrites.updateSelfDestruct(ch.account, ch.prev)
 			}
-			if _, ok := s.versionedWrites.GetBalance(ch.account); ok {
-				s.versionedWrites.updateBalance(ch.account, ch.prevbalance)
-			}
+		}
+		// The self-destruct records BalancePath=0; restore the pre-destruct
+		// versioned balance write, or drop the cell if the self-destruct created
+		// it. Gating this on wasCommited (which describes SelfDestructPath, not
+		// BalancePath) deleted balance writes that predated the snapshot.
+		if ch.hadBalance {
+			s.versionedWrites.updateBalance(ch.account, ch.prevBalanceVersioned)
+		} else {
+			s.versionedWrites.DelBalance(ch.account)
 		}
 		// selfdestructVersioned clears the incarnation cell on both paths. Restore
 		// it to its pre-destruct versioned value, or drop the write if the

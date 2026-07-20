@@ -1754,6 +1754,12 @@ func (sdb *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 	if vw, ok := sdb.versionedWrites.GetIncarnation(addr); ok {
 		sd.hadIncarnation, sd.prevIncarnation = true, vw.Val
 	}
+	// Same for the balance write: the self-destruct records BalancePath=0 below,
+	// so a revert must restore the pre-destruct write (which may predate the
+	// snapshot) rather than delete the cell.
+	if vw, ok := sdb.versionedWrites.GetBalance(addr); ok {
+		sd.hadBalance, sd.prevBalanceVersioned = true, vw.Val
+	}
 	sdb.journal.append(sd)
 
 	if !preserveBalance && sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
