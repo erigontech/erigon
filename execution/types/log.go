@@ -375,9 +375,42 @@ type rlpStorageLog struct {
 	//Index uint
 }
 
+// consensusPayloadSize returns the length of the log's consensus RLP payload (without the list prefix).
+func (l *Log) consensusPayloadSize() int {
+	topicsLen := 33 * len(l.Topics)
+	return 21 + rlp.ListPrefixLen(topicsLen) + topicsLen + rlp.StringLen(l.Data)
+}
+
+// encodeConsensus writes the log's consensus RLP encoding, using b as scratch space.
+func (l *Log) encodeConsensus(w io.Writer, b []byte) error {
+	if err := rlp.EncodeListPrefix(l.consensusPayloadSize(), w, b); err != nil {
+		return err
+	}
+	b[0] = rlp.EmptyStringCode + 20
+	copy(b[1:], l.Address[:])
+	if _, err := w.Write(b[:21]); err != nil {
+		return err
+	}
+	if err := rlp.EncodeListPrefix(33*len(l.Topics), w, b); err != nil {
+		return err
+	}
+	b[0] = rlp.EmptyStringCode + 32
+	for i := range l.Topics {
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write(l.Topics[i][:]); err != nil {
+			return err
+		}
+	}
+	return rlp.EncodeString(l.Data, w, b)
+}
+
 // EncodeRLP implements rlp.Encoder.
 func (l *Log) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, rlpLog{Address: l.Address, Topics: l.Topics, Data: l.Data})
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
+	return l.encodeConsensus(w, b[:])
 }
 
 // DecodeRLP implements rlp.Decoder.

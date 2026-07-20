@@ -449,40 +449,71 @@ func (rs Receipts) Copy() Receipts {
 	return rsCopy
 }
 
+// bloomRlpLen is the encoded size of a Bloom: a 3-byte long-string prefix plus 256 bytes.
+const bloomRlpLen = 3 + BloomByteLength
+
+// consensusPayloadSize returns the length of the receipt's consensus RLP payload
+// (without the list prefix and without the typed-receipt envelope byte), along with
+// the content length of its logs list.
+func (r *Receipt) consensusPayloadSize() (payloadSize, logsLen int) {
+	for _, l := range r.Logs {
+		logsLen += rlp.ListLen(l.consensusPayloadSize())
+	}
+	payloadSize = rlp.StringLen(r.statusEncoding()) +
+		rlp.U64Len(r.CumulativeGasUsed) +
+		bloomRlpLen +
+		rlp.ListLen(logsLen)
+	return payloadSize, logsLen
+}
+
+func (r *Receipt) encodeConsensus(w io.Writer, b []byte, payloadSize, logsLen int) error {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeString(r.statusEncoding(), w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeU64(r.CumulativeGasUsed, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeStringPrefix(BloomByteLength, w, b); err != nil {
+		return err
+	}
+	if _, err := w.Write(r.Bloom[:]); err != nil {
+		return err
+	}
+	if err := rlp.EncodeListPrefix(logsLen, w, b); err != nil {
+		return err
+	}
+	for _, l := range r.Logs {
+		if err := l.encodeConsensus(w, b); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // EncodeIndex encodes the i'th receipt to w.
 func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 	r := rs[i]
-	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
 	switch r.Type {
 	case LegacyTxType:
-		if err := rlp.Encode(w, data); err != nil {
-			panic(err)
-		}
-	case AccessListTxType:
-		//nolint:errcheck
-		w.WriteByte(AccessListTxType)
-		if err := rlp.Encode(w, data); err != nil {
-			panic(err)
-		}
-	case DynamicFeeTxType:
-		w.WriteByte(DynamicFeeTxType)
-		if err := rlp.Encode(w, data); err != nil {
-			panic(err)
-		}
-	case BlobTxType:
-		w.WriteByte(BlobTxType)
-		if err := rlp.Encode(w, data); err != nil {
-			panic(err)
-		}
-	case SetCodeTxType:
-		w.WriteByte(SetCodeTxType)
-		if err := rlp.Encode(w, data); err != nil {
-			panic(err)
-		}
+	case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType:
+		w.WriteByte(r.Type)
 	default:
 		// For unsupported types, write nothing. Since this is for
 		// DeriveSha, the error will be caught matching the derived hash
 		// to the block.
+		return
+	}
+
+	payloadSize, logsLen := r.consensusPayloadSize()
+	w.Grow(rlp.ListLen(payloadSize))
+
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
+	if err := r.encodeConsensus(w, b[:], payloadSize, logsLen); err != nil {
+		panic(err)
 	}
 }
 
