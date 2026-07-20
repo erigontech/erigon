@@ -316,7 +316,9 @@ func TestBuyGas_NilMaxFeePerBlobGas(t *testing.T) {
 	msg := nilBlobFeeMsg{newSimpleTransferMsg(sender, recipient, 100_000, false)}
 	st := NewTxnExecutor(evm, msg, new(GasPool).AddGas(30_000_000))
 
-	require.NotPanics(t, func() { _ = st.buyGas(false) })
+	var err error
+	require.NotPanics(t, func() { err = st.buyGas(false) })
+	require.NoError(t, err)
 }
 
 // TestBuyGas_NilMaxFeePerBlobGasWithBlobs covers the same nil max fee on a
@@ -335,5 +337,7 @@ func TestBuyGas_NilMaxFeePerBlobGasWithBlobs(t *testing.T) {
 	gp := new(GasPool).AddGas(30_000_000).AddBlobGas(params.GasPerBlob)
 	st := NewTxnExecutor(evm, nilBlobFeeMsg{inner}, gp)
 
-	require.NotPanics(t, func() { _ = st.buyGas(false) })
+	var err error
+	require.NotPanics(t, func() { err = st.buyGas(false) })
+	require.NoError(t, err)
 }
