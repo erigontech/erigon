@@ -1181,3 +1181,102 @@ func unhex(str string) []byte {
 	}
 	return b
 }
+
+// TestStreamResetAfterBytesStream pins that Reset to a different reader fully
+// detaches a stream from its NewBytesStream buffer: reads must come from the new
+// reader, not leftover slice bytes.
+func TestStreamResetAfterBytesStream(t *testing.T) {
+	valA1 := bytes.Repeat([]byte{0x11}, 32)
+	valA2 := bytes.Repeat([]byte{0x22}, 32)
+	valB := bytes.Repeat([]byte{0xbb}, 32)
+
+	encode := func(v []byte) []byte {
+		enc, err := EncodeToBytes(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return enc
+	}
+	encB := encode(valB)
+
+	s := NewBytesStream(append(encode(valA1), encode(valA2)...))
+	defer PutStream(s)
+	if got, err := s.Bytes(); err != nil || !bytes.Equal(got, valA1) {
+		t.Fatalf("got %x err=%v, want %x", got, err, valA1)
+	}
+
+	s.Reset(bytes.NewReader(encB), uint64(len(encB)))
+	got, err := s.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, valB) {
+		t.Fatalf("got %x, want %x: read served from stale bytes-stream buffer", got, valB)
+	}
+}
+
+// TestStreamResetSliceRdrCoherency pins the invariant readFull's fast path
+// relies on: after any Reset, sliceRdr is non-nil if and only if s.r points at
+// it, so the field and the reader can never be different cursors.
+func TestStreamResetSliceRdrCoherency(t *testing.T) {
+	data := []byte{0x82, 0xaa, 0xbb}
+	check := func(t *testing.T, s *Stream, wantSlice bool) {
+		t.Helper()
+		if wantSlice {
+			if s.sliceRdr == nil {
+				t.Fatal("sliceRdr not set")
+			}
+			if s.r != &s.sliceRdr {
+				t.Fatal("s.r does not point at s.sliceRdr")
+			}
+		} else {
+			if s.sliceRdr != nil {
+				t.Fatal("stale sliceRdr")
+			}
+			if _, ok := s.r.(*sliceReader); ok {
+				t.Fatal("s.r is a sliceReader but sliceRdr is nil")
+			}
+		}
+	}
+
+	t.Run("bytes-stream", func(t *testing.T) {
+		s := NewBytesStream(data)
+		defer PutStream(s)
+		check(t, s, true)
+	})
+
+	t.Run("bytes-stream-rearm", func(t *testing.T) {
+		s := NewBytesStream(data)
+		defer PutStream(s)
+		if _, err := s.Bytes(); err != nil {
+			t.Fatal(err)
+		}
+		s.sliceRdr = data
+		s.Reset(&s.sliceRdr, uint64(len(data)))
+		check(t, s, true)
+	})
+
+	t.Run("foreign-slice-reader-adopted", func(t *testing.T) {
+		s := NewStream(bytes.NewReader(data), uint64(len(data)))
+		foreign := sliceReader(data)
+		s.Reset(&foreign, uint64(len(data)))
+		check(t, s, true)
+		if got, err := s.Bytes(); err != nil || !bytes.Equal(got, data[1:]) {
+			t.Fatalf("got %x err=%v, want %x", got, err, data[1:])
+		}
+	})
+
+	t.Run("byte-reader", func(t *testing.T) {
+		s := NewBytesStream(data)
+		defer PutStream(s)
+		s.Reset(bytes.NewReader(data), uint64(len(data)))
+		check(t, s, false)
+	})
+
+	t.Run("plain-reader-wrapped", func(t *testing.T) {
+		s := NewBytesStream(data)
+		defer PutStream(s)
+		s.Reset(struct{ io.Reader }{bytes.NewReader(data)}, uint64(len(data)))
+		check(t, s, false)
+	})
+}
