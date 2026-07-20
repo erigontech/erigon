@@ -254,17 +254,11 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
-	tx.To = &common.Address{}
-	if kind, size, err := s.Kind(); err != nil {
-		return err
-	} else if kind == rlp.Byte {
-		return fmt.Errorf("wrong size for To: 1")
-	} else if size != 20 {
-		return fmt.Errorf("wrong size for To: %d", size)
+	to, err := s.Addr()
+	if err != nil {
+		return fmt.Errorf("read To: %w", err)
 	}
-	if err = s.ReadBytes(tx.To[:]); err != nil {
-		return err
-	}
+	tx.To = &to
 	if err = s.ReadUint256(&tx.Value); err != nil {
 		return err
 	}

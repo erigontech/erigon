@@ -369,17 +369,11 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if stx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
-	stx.To = &common.Address{}
-	if kind, size, err := s.Kind(); err != nil {
-		return err
-	} else if kind == rlp.Byte {
-		return fmt.Errorf("wrong size for To: 1")
-	} else if size != 20 {
-		return fmt.Errorf("wrong size for To: %d", size)
+	to, err := s.Addr()
+	if err != nil {
+		return fmt.Errorf("read To: %w", err)
 	}
-	if err = s.ReadBytes(stx.To[:]); err != nil {
-		return err
-	}
+	stx.To = &to
 	if err = s.ReadUint256(&stx.Value); err != nil {
 		return err
 	}
