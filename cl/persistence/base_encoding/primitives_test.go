@@ -125,10 +125,10 @@ func TestAppendEffectiveBalances(t *testing.T) {
 
 func TestDiffValidators(t *testing.T) {
 	vals := 3
-	old := make([]byte, vals*121)
-	new := make([]byte, 121*(vals+1))
+	old := make([]byte, vals*validatorSSZSize)
+	new := make([]byte, validatorSSZSize*(vals+1))
 	inc := 1
-	for i := 0; i < vals*121; i++ {
+	for i := 0; i < vals*validatorSSZSize; i++ {
 		if i%9 == 0 {
 			inc++
 		}
