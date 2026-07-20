@@ -396,9 +396,8 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode BlobVersionedHashes
-	stx.BlobVersionedHashes = []common.Hash{}
-	if err = decodeBlobVersionedHashes(&stx.BlobVersionedHashes, s); err != nil {
-		return err
+	if stx.BlobVersionedHashes, err = decodeHashList(s); err != nil {
+		return fmt.Errorf("read BlobVersionedHashes: %w", err)
 	}
 	if len(stx.BlobVersionedHashes) == 0 {
 		return errors.New("a blob stx must contain at least one blob")
@@ -414,22 +413,4 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	return s.ListEnd()
-}
-
-func decodeBlobVersionedHashes(hashes *[]common.Hash, s *rlp.Stream) error {
-	_, err := s.List()
-	if err != nil {
-		return fmt.Errorf("open BlobVersionedHashes: %w", err)
-	}
-	for s.MoreDataInList() {
-		var h common.Hash
-		if err = s.ReadBytes(h[:]); err != nil {
-			return fmt.Errorf("read blobVersionedHash: %w", err)
-		}
-		*hashes = append(*hashes, h)
-	}
-	if err = s.ListEnd(); err != nil {
-		return fmt.Errorf("close BlobVersionedHashes: %w", err)
-	}
-	return nil
 }

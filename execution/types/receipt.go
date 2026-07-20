@@ -251,19 +251,8 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 		if err = s.ReadBytes(log.Address[:]); err != nil {
 			return fmt.Errorf("read Address: %w", err)
 		}
-		if _, err = s.List(); err != nil {
-			return fmt.Errorf("open Topics: %w", err)
-		}
-		for s.MoreDataInList() {
-			topic, err := s.ReadHash()
-			if err != nil {
-				return fmt.Errorf("read Topic: %w", err)
-			}
-			log.Topics = append(log.Topics, topic)
-		}
-		// end of Topics list
-		if err = s.ListEnd(); err != nil {
-			return fmt.Errorf("close Topics: %w", err)
+		if log.Topics, err = decodeHashList(s); err != nil {
+			return fmt.Errorf("read Topics: %w", err)
 		}
 		if log.Data, err = s.Bytes(); err != nil {
 			return fmt.Errorf("read Data: %w", err)
@@ -414,7 +403,7 @@ func decodeLogsForStorage(s *rlp.Stream) (Logs, error) {
 		return Logs{}, s.ListEnd()
 	}
 	const typicalLogSize = 128                    // estimate only, append grows past it
-	preAlloc := int(min(128, l/typicalLogSize+1)) // hard cap: l is attacker-controlled, see decodeTopics2
+	preAlloc := int(min(128, l/typicalLogSize+1)) // hard cap: l is attacker-controlled, see decodeHashList
 	logs := make(Logs, 0, preAlloc)
 	for s.MoreDataInList() {
 		log := &Log{}
