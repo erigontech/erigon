@@ -276,24 +276,13 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 	i := 0
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		// decode tuple
-		*al = append(*al, AccessTuple{StorageKeys: []common.Hash{}})
+		*al = append(*al, AccessTuple{})
 		tuple := &(*al)[len(*al)-1]
 		if tuple.Address, err = s.Addr(); err != nil {
 			return fmt.Errorf("read Address: %w", err)
 		}
-		if _, err = s.List(); err != nil {
-			return fmt.Errorf("open StorageKeys: %w", err)
-		}
-		for s.MoreDataInList() {
-			key, err := s.ReadHash()
-			if err != nil {
-				return fmt.Errorf("read StorageKey: %w", err)
-			}
-			tuple.StorageKeys = append(tuple.StorageKeys, key)
-		}
-		// end of StorageKeys list
-		if err = s.ListEnd(); err != nil {
-			return fmt.Errorf("close StorageKeys: %w", err)
+		if tuple.StorageKeys, err = decodeHashList(s); err != nil {
+			return fmt.Errorf("read StorageKeys: %w", err)
 		}
 		// end of tuple
 		if err = s.ListEnd(); err != nil {

@@ -421,7 +421,7 @@ func (l *LogForStorage) EncodeRLP(w io.Writer) error {
 	})
 }
 
-func decodeTopics2(s *rlp.Stream) (list []common.Hash, err error) {
+func decodeHashList(s *rlp.Stream) (list []common.Hash, err error) {
 	l, err := s.List()
 	if err != nil {
 		return nil, err
@@ -453,7 +453,7 @@ func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 	if l.Address, err = s.Addr(); err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
-	l.Topics, err = decodeTopics2(s)
+	l.Topics, err = decodeHashList(s)
 	if err != nil {
 		return err
 	}
