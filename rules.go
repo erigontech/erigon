@@ -163,13 +163,14 @@ func osCreateBlankAssign(m dsl.Matcher) {
 }
 
 func rlpEncodeStructByValue(m dsl.Matcher) {
-	// A struct or array boxed into rlp.Encode's `any` parameter is not addressable, so the
-	// reflection encoder cannot take a byte slice of any [N]byte field and pays a
-	// reflect.New copy per field. Passing a pointer avoids the boxing and the copies.
+	// Boxing a struct or array into rlp.Encode's `any` parameter copies it to the heap and
+	// leaves it non-addressable, so the reflection encoder cannot take a byte slice of any
+	// [N]byte it holds and pays a further reflect.New copy for each. Boxing a pointer copies
+	// nothing and keeps the pointee addressable.
 	m.Match(
 		`rlp.Encode($w, $v)`,
 		`rlp.EncodeToBytes($v)`,
 	).
 		Where(m["v"].Type.Underlying().Is(`struct{$*_}`) || m["v"].Type.Underlying().Is(`[$_]$_`)).
-		Report(`Pass a pointer ("&$v"): encoding a struct or array by value boxes it, forcing a reflect.New copy of every [N]byte field`)
+		Report(`Encode a pointer rather than the value: boxing "$v" copies it to the heap, and every [N]byte it holds then costs a further reflect.New copy. Take its address, or assign to a local first if "$v" is not addressable`)
 }

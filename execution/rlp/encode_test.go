@@ -596,7 +596,7 @@ func TestEncodeValueAndPointerAgree(t *testing.T) {
 		if err := Encode(&byValue, c); err != nil {
 			t.Fatalf("case %d: encode value: %v", i, err)
 		}
-		// Re-box through a pointer to the same underlying value.
+		// pointerTo yields a pointer to a copy, which must still encode identically.
 		pv := pointerTo(c)
 		if err := Encode(&byPointer, pv); err != nil {
 			t.Fatalf("case %d: encode pointer: %v", i, err)
