@@ -198,9 +198,7 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 	var allTasks sync.WaitGroup
 
 	// Reader task: repeatedly call GrpcServer.All() and catch the panic("unknown")
-	allTasks.Add(1)
-	go func() {
-		defer allTasks.Done()
+	allTasks.Go(func() {
 		for !panicObserved.Load() {
 			func() {
 				defer func() {
@@ -225,12 +223,10 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 				time.Sleep(50 * time.Microsecond)
 			}
 		}
-	}()
+	})
 
 	// Mutator task: alternate between replacement and mined-removal cycles
-	allTasks.Add(1)
-	go func() {
-		defer allTasks.Done()
+	allTasks.Go(func() {
 		for !panicObserved.Load() {
 			// Replacement path: add B to replace A (or vice versa)
 			var r TxnSlots
@@ -260,13 +256,11 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 				time.Sleep(50 * time.Microsecond)
 			}
 		}
-	}()
+	})
 
 	// BaseFee churn task: alternates base fee above/below thresholds to force demotions/promotions across sub-pools
 	// while sender mapping remains.
-	allTasks.Add(1)
-	go func() {
-		defer allTasks.Done()
+	allTasks.Go(func() {
 		flip := false
 		for !panicObserved.Load() {
 			var bf uint64
@@ -291,7 +285,7 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 				time.Sleep(75 * time.Microsecond)
 			}
 		}
-	}()
+	})
 
 	// Wait for all tasks to finish
 	allTasks.Wait()

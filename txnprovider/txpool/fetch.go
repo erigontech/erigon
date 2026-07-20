@@ -251,22 +251,18 @@ func (f *Fetch) threadSafeParseStateChangeTxn(cb func(*TxnParseContext) error) e
 // ConnectSentries initialises connection to the sentry
 func (f *Fetch) ConnectSentries() {
 	for i := range f.sentryClients {
-		f.connectWg.Add(2)
-		go func(i int) {
-			defer f.connectWg.Done()
-			f.receiveMessageLoop(f.sentryClients[i])
-		}(i)
-		go func(i int) {
-			defer f.connectWg.Done()
-			f.receivePeerLoop(f.sentryClients[i])
-		}(i)
+		client := f.sentryClients[i]
+		f.connectWg.Go(func() {
+			f.receiveMessageLoop(client)
+		})
+		f.connectWg.Go(func() {
+			f.receivePeerLoop(client)
+		})
 	}
 }
 
 func (f *Fetch) ConnectCore() {
-	f.connectWg.Add(1)
-	go func() {
-		defer f.connectWg.Done()
+	f.connectWg.Go(func() {
 		for {
 			select {
 			case <-f.ctx.Done():
@@ -285,7 +281,7 @@ func (f *Fetch) ConnectCore() {
 				f.logger.Warn("[txpool.handleStateChanges]", "err", err)
 			}
 		}
-	}()
+	})
 }
 
 // Wait blocks until all goroutines spawned by ConnectCore and ConnectSentries have exited.

@@ -162,12 +162,10 @@ func TestStreamHandlerNoContention(t *testing.T) {
 
 		start := time.Now()
 		var wg sync.WaitGroup
-		wg.Add(goroutines)
 		for range goroutines {
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				lg.Info("msg")
-			}()
+			})
 		}
 		wg.Wait()
 

@@ -620,12 +620,9 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 
 	// Producer: single goroutine iterating commitment keys sequentially.
 	// producerErr is written before return, which triggers defer close(ch).
-	// We wait on producerWg before closing decompressors to avoid use-after-close.
 	var producerErr error
 	var producerWg sync.WaitGroup
-	producerWg.Add(1)
-	go func() {
-		defer producerWg.Done()
+	producerWg.Go(func() {
 		defer close(ch)
 		commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
 		branchKeyBuf := make([]byte, 0, 128)
@@ -658,7 +655,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				return
 			}
 		}
-	}()
+	})
 
 	// Progress reporter
 	var processed atomic.Uint64

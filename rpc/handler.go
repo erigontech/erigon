@@ -207,12 +207,10 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		boundedConcurrency := make(chan struct{}, h.maxBatchConcurrency)
 		defer close(boundedConcurrency)
 		wg := sync.WaitGroup{}
-		wg.Add(len(calls))
 		for i := range calls {
 			boundedConcurrency <- struct{}{}
-			go func(i int) {
+			wg.Go(func() {
 				defer func() {
-					wg.Done()
 					<-boundedConcurrency
 				}()
 
@@ -235,7 +233,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				if buf.Len() > 0 {
 					answersWithNils[i] = buf.Bytes()
 				}
-			}(i)
+			})
 		}
 		wg.Wait()
 		h.addSubscriptions(cp.notifiers)
@@ -432,13 +430,11 @@ func (h *handler) cancelServerSubscriptions(err error) {
 
 // startCallProc runs fn in a new goroutine and starts tracking it in the h.calls wait group.
 func (h *handler) startCallProc(fn func(*callProc)) {
-	h.callWG.Add(1)
-	go func() {
+	h.callWG.Go(func() {
 		ctx, cancel := context.WithCancel(h.rootCtx)
-		defer h.callWG.Done()
 		defer cancel()
 		fn(&callProc{ctx: ctx})
-	}()
+	})
 }
 
 // handleImmediate executes non-call messages. It returns false if the message is a

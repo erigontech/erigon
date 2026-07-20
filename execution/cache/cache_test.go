@@ -881,9 +881,8 @@ func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 		// makeAddr would truncate it to a byte.
 		binary.BigEndian.PutUint64(addr[1:], uint64(round))
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); c.Put(addr, fresh, 20) }()
-		go func() { defer wg.Done(); c.PutIfAbsent(addr, stale, 10) }()
+		wg.Go(func() { c.Put(addr, fresh, 20) })
+		wg.Go(func() { c.PutIfAbsent(addr, stale, 10) })
 		wg.Wait()
 		v, ok := c.Get(addr)
 		require.True(t, ok)
@@ -903,9 +902,8 @@ func TestDomainCache_DeleteAtomicWithPut_NoSizeDrift(t *testing.T) {
 	for round := range 20000 {
 		c.Put(addr, v1, 10)
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); c.Put(addr, v2, 20) }()
-		go func() { defer wg.Done(); c.Delete(addr) }()
+		wg.Go(func() { c.Put(addr, v2, 20) })
+		wg.Go(func() { c.Delete(addr) })
 		wg.Wait()
 		c.Delete(addr)
 		require.Zero(t, c.SizeBytes(), "round %d: size accounting drifted", round)
@@ -926,9 +924,8 @@ func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
 		c.Put(addr, v1, 10)
 		c.Unwind(5)
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); c.Put(addr, v2, 20) }()
-		go func() { defer wg.Done(); c.Get(addr) }()
+		wg.Go(func() { c.Put(addr, v2, 20) })
+		wg.Go(func() { c.Get(addr) })
 		wg.Wait()
 		require.Equal(t, wantSize, c.SizeBytes(), "round %d: size accounting drifted", round)
 	}
@@ -945,9 +942,8 @@ func TestDomainCache_ClearAtomicWithPut_NoSizeDrift(t *testing.T) {
 	entrySize := int64(len(addr) + len(v1) + 24)
 	for round := range 20000 {
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); c.Put(addr, v1, 10) }()
-		go func() { defer wg.Done(); c.Clear() }()
+		wg.Go(func() { c.Put(addr, v1, 10) })
+		wg.Go(func() { c.Clear() })
 		wg.Wait()
 		wantSize := int64(0)
 		if _, ok := c.Get(addr); ok {

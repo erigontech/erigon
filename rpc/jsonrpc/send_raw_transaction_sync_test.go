@@ -61,12 +61,10 @@ func TestSendRawTransactionSync(t *testing.T) {
 	var receipt *types.Receipt
 	var errSend error
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		timeoutMillis := uint64(3600000) // 1hr
 		receipt, errSend = eat.RpcApiClient.SendRawTransactionSync(tx, &timeoutMillis)
-	}()
+	})
 
 	// Wait for the transaction to show up in pending transactions (i.e. arrived at the mempool)
 	select {

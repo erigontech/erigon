@@ -35,13 +35,11 @@ func (wp *ParallelExecutor) Execute() error {
 		defer close(ch)
 	}
 	for _, job := range wp.jobs {
-		wp.wg.Add(1)
-		go func(job func() error) {
-			defer wp.wg.Done()
+		wp.wg.Go(func() {
 			if err := job(); err != nil {
 				once.Do(func() { errOut = err })
 			}
-		}(job)
+		})
 	}
 	wp.wg.Wait()
 	return errOut

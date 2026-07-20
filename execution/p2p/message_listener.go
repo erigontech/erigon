@@ -104,12 +104,10 @@ func (ml *MessageListener) Run(ctx context.Context) error {
 		ml.listenPeerEventsBackground,
 	}
 
-	ml.stopWg.Add(len(backgroundLoops))
 	for _, loop := range backgroundLoops {
-		go func() {
-			defer ml.stopWg.Done()
+		ml.stopWg.Go(func() {
 			loop(ctx)
-		}()
+		})
 	}
 
 	<-ctx.Done()

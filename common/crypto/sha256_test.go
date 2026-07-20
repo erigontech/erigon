@@ -78,9 +78,7 @@ func TestSha256Concurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 500 {
 				if got := crypto.Sha256(small, smallExtra); got != wantSmall {
 					t.Errorf("stack path = %x, want %x", got, wantSmall)
@@ -91,7 +89,7 @@ func TestSha256Concurrent(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

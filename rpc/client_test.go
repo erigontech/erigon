@@ -318,7 +318,6 @@ func runCancelCallers(t *testing.T, client *Client, maxContextCancelTimeout time
 		ncallers = 10
 	)
 	caller := func(index int) {
-		defer wg.Done()
 		for range nreqs {
 			var (
 				ctx     context.Context
@@ -342,9 +341,10 @@ func runCancelCallers(t *testing.T, client *Client, maxContextCancelTimeout time
 			cancel()
 		}
 	}
-	wg.Add(ncallers)
 	for i := range ncallers {
-		go caller(i)
+		wg.Go(func() {
+			caller(i)
+		})
 	}
 	wg.Wait()
 }

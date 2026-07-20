@@ -92,11 +92,9 @@ func (o *Observers[TEvent]) NotifySync(event TEvent) {
 
 	var wg sync.WaitGroup
 	for _, observer := range observers {
-		wg.Add(1)
-		go func(observer Observer[TEvent]) {
-			defer wg.Done()
+		wg.Go(func() {
 			observer(event)
-		}(observer)
+		})
 	}
 
 	wg.Wait()

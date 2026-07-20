@@ -1353,11 +1353,9 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 	for range numWorkers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			recsplitBucketWorker(ctx, taskCh, resultCh, freeScratchCh)
-		}()
+		})
 	}
 	go func() {
 		defer close(resultCh)

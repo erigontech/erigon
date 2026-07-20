@@ -421,8 +421,7 @@ func TestEncodeToReaderReturnToPool(t *testing.T) {
 	buf := make([]byte, 50)
 	wg := new(sync.WaitGroup)
 	for range 5 {
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			for range 1000 {
 				_, r, _ := EncodeToReader("foo")
 				io.ReadAll(r)
@@ -431,8 +430,7 @@ func TestEncodeToReaderReturnToPool(t *testing.T) {
 				r.Read(buf)
 				r.Read(buf)
 			}
-			wg.Done()
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -537,10 +535,7 @@ func BenchmarkEncodeConcurrentInterface(b *testing.B) {
 
 	var wg sync.WaitGroup
 	for cpu := 0; cpu < runtime.NumCPU(); cpu++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			var buffer bytes.Buffer
 			for i := 0; i < b.N; i++ {
 				buffer.Reset()
@@ -549,7 +544,7 @@ func BenchmarkEncodeConcurrentInterface(b *testing.B) {
 					panic(err)
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

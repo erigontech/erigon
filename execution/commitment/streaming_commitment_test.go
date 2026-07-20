@@ -198,13 +198,11 @@ func TestStreaming_SchedulerConcurrentParity(t *testing.T) {
 		const goroutines = 4
 		var wg sync.WaitGroup
 		for g := range goroutines {
-			wg.Add(1)
-			go func(start int) {
-				defer wg.Done()
-				for i := start; i < len(keys); i += goroutines {
+			wg.Go(func() {
+				for i := g; i < len(keys); i += goroutines {
 					sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
 				}
-			}(g)
+			})
 		}
 		wg.Wait()
 
