@@ -44,6 +44,10 @@ var (
 	ErrInvalidTxType        = errors.New("transaction type not valid in this context")
 	ErrTxTypeNotSupported   = errors.New("transaction type not supported")
 	errTrailingBytes        = errors.New("trailing bytes after rlp encoded transaction")
+	// errShortTxnRLP is the sentinel form of the "short input" that
+	// UnmarshalTransactionFromBinary reports: well-formed RLP that is too small to
+	// hold a transaction. Neither package has an error for it.
+	errShortTxnRLP = errors.New("short rlp encoded transaction")
 )
 
 // Transaction types.
@@ -273,6 +277,66 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		return nil, errTrailingBytes
 	}
 	return t, nil
+}
+
+// txnTypeKnown reports whether b is an envelope type byte UnmarshalTransactionFromBinary
+// builds a transaction for. The built-in types are matched before the registry lookup, so
+// the types seen in practice stay off its lock.
+func txnTypeKnown(b byte) bool {
+	switch b {
+	case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType, AccountAbstractionTxType:
+		return true
+	}
+	_, ok := registeredTxType(b)
+	return ok
+}
+
+// TxnHashFromRLP returns the hash of a transaction stored by
+// rawdb.WriteTransactions, without decoding it.
+//
+// A transaction hashes its canonical (EIP-2718) form, which the stored RLP
+// already contains verbatim: legacy transactions are stored as the canonical
+// list itself, typed ones as that canonical form wrapped in an RLP string.
+// Framing and the envelope type byte are checked as DecodeTransaction checks them.
+// The payload is not, so a well-framed transaction carrying a malformed body hashes
+// here where the decode would turn it down.
+func TxnHashFromRLP(txnRlp []byte) (common.Hash, error) {
+	if len(txnRlp) == 0 {
+		return common.Hash{}, io.EOF
+	}
+	kind, content, rest, err := rlp.Split(txnRlp)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if len(rest) != 0 {
+		return common.Hash{}, errTrailingBytes
+	}
+	// Turn down RLP that is well formed but cannot hold a transaction, which the
+	// decode this replaces also rejected. Hashing it would index a hash of data
+	// that is not a transaction.
+	switch kind {
+	case rlp.List:
+		if len(content) == 0 { // a legacy txn carries nine fields, not none
+			return common.Hash{}, errShortTxnRLP
+		}
+		return libcrypto.Keccak256Hash(txnRlp), nil
+	case rlp.String:
+		if len(content) <= 1 { // an envelope with no type prefix, or none past it
+			return common.Hash{}, errShortTxnRLP
+		}
+		if content[0] >= rlp.SingleByteThreshold {
+			return common.Hash{}, ErrInvalidTxType
+		}
+		if !txnTypeKnown(content[0]) {
+			return common.Hash{}, ErrTxTypeNotSupported
+		}
+		return libcrypto.Keccak256Hash(content), nil
+	case rlp.Byte:
+		// A bare byte holds neither a legacy list nor a type prefix plus payload.
+		return common.Hash{}, errShortTxnRLP
+	default:
+		return common.Hash{}, rlp.ErrExpectedString
+	}
 }
 
 // Removes everything but the payload body from blob tx and prepends 0x3 at the beginning - no copy
