@@ -120,6 +120,7 @@ import (
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/mcp"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter"
@@ -769,7 +770,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.polygonBridge,
 		jsonrpc.NewBaseApiConfig(&httpRpcCfg),
 	)
-	ethApiConfig := &jsonrpc.EthApiConfig{
+	ethApiConfig := &rpccfg.EthApiConfig{
 		GasCap:                      httpRpcCfg.Gascap,
 		FeeCap:                      httpRpcCfg.Feecap,
 		ReturnDataLimit:             httpRpcCfg.ReturnDataLimit,
