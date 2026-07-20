@@ -57,20 +57,21 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.Comma
 			return cli.Exit("", 1) // Exit with error code but no additional output
 		}
 
-		// handle case: config flag
-		configFilePath := cmd.String(utils.ConfigFlag.Name)
-		if configFilePath != "" {
-			if err := cli2.SetFlagsFromConfigFile(cmd, configFilePath); err != nil {
-				log.Error("failed setting config flags from yaml/toml file", "err", err)
-				return err
-			}
-		}
-
-		// run default action
 		return action(ctx, cmd)
 	}
 
 	app.Before = func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+		// Must run here, not in Action: urfave/cli/v3 skips a parent command's
+		// Action once it dispatches to a subcommand, but Before runs for every
+		// command in the chain, including the root.
+		configFilePath := cmd.String(utils.ConfigFlag.Name)
+		if configFilePath != "" {
+			if err := cli2.SetFlagsFromConfigFile(cmd, configFilePath); err != nil {
+				log.Error("failed setting config flags from yaml/toml file", "err", err)
+				return ctx, err
+			}
+		}
+
 		ctx, cancel := context.WithCancel(ctx)
 		go debug.ListenSignals(cancel, log.Root())
 		return ctx, nil

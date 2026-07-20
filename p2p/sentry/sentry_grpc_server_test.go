@@ -241,20 +241,16 @@ func TestHandShake69_ETH69ToETH69(t *testing.T) {
 	var reply69_1 *eth.StatusPacket69
 	var peerErr1 *p2p.PeerError
 	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		reply69_1, peerErr1 = handShake[eth.StatusPacket69](ctx, sentry1Status, sentry1RW, direct.ETH69, direct.ETH69, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
-	}()
+	})
 
 	// Run ETH69 handshake for Sentry 2 in a goroutine
 	var reply69_2 *eth.StatusPacket69
 	var peerErr2 *p2p.PeerError
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		reply69_2, peerErr2 = handShake[eth.StatusPacket69](ctx, sentry2Status, sentry2RW, direct.ETH69, direct.ETH69, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
-	}()
+	})
 
 	wg.Wait()
 
@@ -328,19 +324,16 @@ func TestHandShake69_ETH69ToETH68(t *testing.T) {
 
 	// Run ETH69/ETH68 handshakes on both sides
 	wg := sync.WaitGroup{}
-	wg.Add(2)
 	var peerErr1 *p2p.PeerError
 	var peerErr2 *p2p.PeerError
 
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, peerErr1 = handShake[eth.StatusPacket69](ctx, sentry1Status, sentry1RW, direct.ETH69, direct.ETH68, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
-	}()
+	})
 
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, peerErr2 = handShake[eth.StatusPacket](ctx, sentry2Status, sentry2RW, direct.ETH68, direct.ETH68, encodeStatusPacket, compatStatusPacket, handshakeTimeout)
-	}()
+	})
 
 	wg.Wait()
 
@@ -429,21 +422,18 @@ func TestHandShake69_ETH69ToETH69_WithRLP(t *testing.T) {
 
 	// Simulate the connection: Sentry1 writes to Sentry2's read channel, and vice versa
 	var wg sync.WaitGroup
-	wg.Add(2)
 
 	var reply1 *eth.StatusPacket69
 	var peerErr1 *p2p.PeerError
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		reply1, peerErr1 = handShake[eth.StatusPacket69](ctx, sentry1Status, sentry1RW, direct.ETH69, direct.ETH69, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
-	}()
+	})
 
 	var reply2 *eth.StatusPacket69
 	var peerErr2 *p2p.PeerError
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		reply2, peerErr2 = handShake[eth.StatusPacket69](ctx, sentry2Status, sentry2RW, direct.ETH69, direct.ETH69, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
-	}()
+	})
 
 	// Exchange messages between the two RLPReadWriters
 	// This simulates the underlying network communication
@@ -499,19 +489,16 @@ func TestHandShake_ETH69ToETH68_WithRLP(t *testing.T) {
 	)
 
 	var wg sync.WaitGroup
-	wg.Add(2)
 	var peerErr1 *p2p.PeerError
 	var peerErr2 *p2p.PeerError
 
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, peerErr1 = handShake[eth.StatusPacket69](ctx, sentry1Status, sentry1RW, direct.ETH69, direct.ETH68, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
-	}()
+	})
 
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, peerErr2 = handShake[eth.StatusPacket](ctx, sentry2Status, sentry2RW, direct.ETH68, direct.ETH68, encodeStatusPacket, compatStatusPacket, handshakeTimeout)
-	}()
+	})
 
 	// Exchange messages between the two RLPReadWriters
 	go func() {
@@ -1416,8 +1403,7 @@ func TestGrpcServer_FindPeerByMinBlock_FiltersVersion(t *testing.T) {
 // replay pass inside PeerEvents only emits Connect events for peers
 // whose negotiated eth version matches this sentry's ethVersion.
 func TestGrpcServer_PeerEvents_ReplayFiltersByVersion(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	ss := &GrpcServer{
 		ctx:          ctx,

@@ -625,6 +625,8 @@ jobs:
         client-id: ${{ vars.RELEASE_BOT_APP_ID }}
         private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
         repositories: "erigon"
+        permission-contents: write
+        permission-workflows: write
 
     - name: Download linux/arm64 artifact
       uses: actions/download-artifact@v8
@@ -791,6 +793,8 @@ jobs:
           client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
           repositories: "erigon"
+          permission-contents: write
+          permission-workflows: write
 
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
         # Token must persist: the next step deletes the release tag with it.
