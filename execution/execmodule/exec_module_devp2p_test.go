@@ -72,7 +72,6 @@ func TestGetBlockReceiptsFrozenBlocks(t *testing.T) {
 		}),
 		execmoduletester.WithKey(devp2pTestKey),
 		execmoduletester.WithSentryProtocol(direct.ETH70),
-		execmoduletester.WithAmsterdamBuilderContracts(),
 	)
 	signer := types.LatestSignerForChainID(nil)
 	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, frozenChainLength, func(i int, block *blockgen.BlockGen) {
@@ -266,7 +265,6 @@ func TestGetBlockAccessListsResponseMatrix(t *testing.T) {
 		}),
 		execmoduletester.WithKey(keyA),
 		execmoduletester.WithSentryProtocol(direct.ETH71),
-		execmoduletester.WithAmsterdamBuilderContracts(),
 	)
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
