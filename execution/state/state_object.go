@@ -135,7 +135,7 @@ func (so *stateObject) release() {
 
 // EncodeRLP implements rlp.Encoder.
 func (so *stateObject) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, so.data)
+	return rlp.Encode(w, &so.data)
 }
 
 func (so *stateObject) markSelfdestructed() {

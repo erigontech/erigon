@@ -623,7 +623,7 @@ func (s *ValidatorSafeContract) signalEpochEnd(firstInEpoch bool, header *types.
 		   });
 		   return ::engines::EpochChange::Yes(::engines::Proof::WithState(state_proof as Arc<_>));
 		*/
-		return rlp.EncodeToBytes(FirstValidatorSetProof{Header: header, ContractAddress: s.contractAddress})
+		return rlp.EncodeToBytes(&FirstValidatorSetProof{Header: header, ContractAddress: s.contractAddress})
 	}
 
 	// otherwise, we're checking for logs.
@@ -645,7 +645,7 @@ func (s *ValidatorSafeContract) signalEpochEnd(firstInEpoch bool, header *types.
 			receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 		}
 	}
-	proof, err := rlp.EncodeToBytes(ValidatorSetProof{Header: header, Receipts: r})
+	proof, err := rlp.EncodeToBytes(&ValidatorSetProof{Header: header, Receipts: r})
 	if err != nil {
 		return nil, err
 	}
@@ -839,7 +839,7 @@ func (s *ValidatorContract) signalEpochEnd(firstInEpoch bool, header *types.Head
 }
 
 func proveInitial(s *ValidatorSafeContract, contractAddr common.Address, header *types.Header, caller rules.SystemCall) ([]byte, error) {
-	return rlp.EncodeToBytes(FirstValidatorSetProof{Header: header, ContractAddress: s.contractAddress})
+	return rlp.EncodeToBytes(&FirstValidatorSetProof{Header: header, ContractAddress: s.contractAddress})
 	//list, err := s.getList(caller)
 	//fmt.Printf("aaa: %x,%t\n", list, err)
 

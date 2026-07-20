@@ -161,3 +161,15 @@ func osCreateBlankAssign(m dsl.Matcher) {
 		Report(`os.Create/OpenFile result assigned to _ leaks a file descriptor. Assign to a variable and close it.
 			Rules are in ./rules.go file.`)
 }
+
+func rlpEncodeStructByValue(m dsl.Matcher) {
+	// A struct or array boxed into rlp.Encode's `any` parameter is not addressable, so the
+	// reflection encoder cannot take a byte slice of any [N]byte field and pays a
+	// reflect.New copy per field. Passing a pointer avoids the boxing and the copies.
+	m.Match(
+		`rlp.Encode($w, $v)`,
+		`rlp.EncodeToBytes($v)`,
+	).
+		Where(m["v"].Type.Underlying().Is(`struct{$*_}`) || m["v"].Type.Underlying().Is(`[$_]$_`)).
+		Report(`Pass a pointer ("&$v"): encoding a struct or array by value boxes it, forcing a reflect.New copy of every [N]byte field`)
+}

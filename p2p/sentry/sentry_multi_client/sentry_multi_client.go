@@ -652,7 +652,7 @@ func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *sentryproto
 					},
 				}
 
-				data, err := rlp.EncodeToBytes(getWitnessReq)
+				data, err := rlp.EncodeToBytes(&getWitnessReq)
 				if err != nil {
 					cs.logger.Warn("failed to encode GetWitnessMsg for missing pages", "err", err, "hash", witnessHash)
 					continue

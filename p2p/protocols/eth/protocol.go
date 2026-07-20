@@ -269,7 +269,7 @@ func (hn *HashOrNumber) EncodeRLP(w io.Writer) error {
 	if hn.Number != 0 {
 		return fmt.Errorf("both origin hash (%x) and number (%d) provided", hn.Hash, hn.Number)
 	}
-	return rlp.Encode(w, hn.Hash)
+	return rlp.Encode(w, &hn.Hash)
 }
 
 // DecodeRLP is a specialized decoder for HashOrNumber to decode the contents
