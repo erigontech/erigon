@@ -38,11 +38,9 @@ type testPool struct {
 }
 
 func (p *testPool) Exec(task func()) {
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
+	p.wg.Go(func() {
 		task()
-	}()
+	})
 }
 
 func (p *testPool) PoolSize() int  { return 4 }

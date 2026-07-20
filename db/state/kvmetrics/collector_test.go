@@ -20,9 +20,7 @@ func TestCollectorConcurrentSendAndDrain(t *testing.T) {
 	const perProducer = 500
 	var pwg sync.WaitGroup
 	for p := range producers {
-		pwg.Add(1)
-		go func(p int) {
-			defer pwg.Done()
+		pwg.Go(func() {
 			src := Source(p % int(sourceCount))
 			for range perProducer {
 				m := NewDomainMetrics()
@@ -30,17 +28,15 @@ func TestCollectorConcurrentSendAndDrain(t *testing.T) {
 				m.UpdateDbReads(kv.StorageDomain, time.Now())
 				c.Send(src, m)
 			}
-		}(p)
+		})
 	}
 	// Concurrent snapshots while producers run.
 	var swg sync.WaitGroup
-	swg.Add(1)
-	go func() {
-		defer swg.Done()
+	swg.Go(func() {
 		for range 50 {
 			_ = c.Snapshot()
 		}
-	}()
+	})
 
 	pwg.Wait()
 	swg.Wait()

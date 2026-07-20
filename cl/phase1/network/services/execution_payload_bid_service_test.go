@@ -750,12 +750,10 @@ func TestExecutionPayloadBidServicePendingQueueCapConcurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for i := range 100 {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			msg := newTestSignedExecutionPayloadBid(uint64(10000+idx), uint64(idx), 1000)
+		wg.Go(func() {
+			msg := newTestSignedExecutionPayloadBid(uint64(10000+i), uint64(i), 1000)
 			service.queuePendingBid(msg)
-		}(i)
+		})
 	}
 	wg.Wait()
 
