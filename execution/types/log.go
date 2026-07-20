@@ -433,10 +433,11 @@ func decodeTopics2(s *rlp.Stream) (list []common.Hash, err error) {
 	preAlloc := int(min(128, listLen)) // attacker may craft rlp prefix - which will trigger huge pre-alloc. so, add hard-limit
 	list = make([]common.Hash, 0, preAlloc)
 	for s.MoreDataInList() {
-		list = append(list, common.Hash{})
-		if err = s.ReadBytes(list[len(list)-1][:]); err != nil {
+		h, err := s.ReadHash()
+		if err != nil {
 			return nil, err
 		}
+		list = append(list, h)
 	}
 	return list, s.ListEnd()
 }
