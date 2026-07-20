@@ -6,7 +6,6 @@ sidebar_position: 2
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
-import diskSizes from '@site/src/data/disk-sizes.json';
 
 # Hardware Requirements
 
@@ -31,17 +30,21 @@ The amount of disk space recommended and RAM you need depends on the [pruning mo
 <TabItem value="ethereum-mainnet" label="Ethereum mainnet">
 | Pruning Mode | Current Disk Usage | Disk Size (Recommended) | RAM (Required) | RAM (Recommended) |
 | --- | --- | --- | --- | --- |
-| Archive | {diskSizes?.networks?.['mainnet']?.['archive']?.display ?? '—'} | 4 TB | 32 GB | 64 GB |
-| Full (Default) | {diskSizes?.networks?.['mainnet']?.['full']?.display ?? '—'} | 2 TB | 16 GB | 32 GB |
-| Minimal | {diskSizes?.networks?.['mainnet']?.['minimal']?.display ?? '—'} | 1 TB | 16 GB | 64 GB |
+| Archive | {/* ds:mainnet:archive */}1.77 TB{/* ds:end */} | 4 TB | 32 GB | 64 GB |
+| Full (Default) | {/* ds:mainnet:full */}920 GB{/* ds:end */} | 2 TB | 16 GB | 32 GB |
+| Minimal | {/* ds:mainnet:minimal */}350 GB{/* ds:end */} | 1 TB | 16 GB | 64 GB |
+
+_Current Disk Usage measured as of {/* ds-date:mainnet */}2025-09-01{/* ds:end */}; usage grows over time as the chain grows._
 
 </TabItem>
 <TabItem value="gnosis-chain" label="Gnosis Chain">
 | **Pruning Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
 | -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
-| Archive        | {diskSizes?.networks?.['gnosis']?.['archive']?.display ?? '—'} | 1 TB                        | 16 GB              | 32 GB                 |
-| Full (Default) | {diskSizes?.networks?.['gnosis']?.['full']?.display ?? '—'}    | 1 TB                        | 8 GB               | 16 GB                 |
-| Minimal        | {diskSizes?.networks?.['gnosis']?.['minimal']?.display ?? '—'} | 500 GB                      | 8 GB               | 16 GB                 |
+| Archive        | {/* ds:gnosis:archive */}539 GB{/* ds:end */} | 1 TB                        | 16 GB              | 32 GB                 |
+| Full (Default) | {/* ds:gnosis:full */}462 GB{/* ds:end */}    | 1 TB                        | 8 GB               | 16 GB                 |
+| Minimal        | {/* ds:gnosis:minimal */}128 GB{/* ds:end */} | 500 GB                      | 8 GB               | 16 GB                 |
+
+_Current Disk Usage measured as of {/* ds-date:gnosis */}2025-09-01{/* ds:end */}; usage grows over time as the chain grows._
 </TabItem>
 <TabItem value="polygon" label="Polygon">
 :::warning

@@ -40,6 +40,26 @@ jobs:
           python3 docs/site/scripts/generate-llms.py --check
           python3 -m unittest discover docs/site/scripts -v
 
+      - name: Verify disk-size markers are in sync
+        if: steps.guard.outputs.present == 'true'
+        run: python3 docs/site/scripts/render-disk-sizes.py --check
+
+      - name: Guard against dynamic disk-size references in docs pages
+        if: steps.guard.outputs.present == 'true'
+        run: |
+          # Disk sizes must be static text (markers), never a runtime import.
+          # A runtime import in a versioned snapshot silently tracks the live
+          # file; in the current page it hides a `?? '—'` fallback. Fail closed.
+          if grep -rn --include='*.md' --include='*.mdx' \
+               -e 'diskSizes' -e "src/data/disk-sizes.json" \
+               docs/site/docs docs/site/versioned_docs; then
+            echo "::error::Found a dynamic disk-sizes reference in a docs page. \
+          Disk sizes must be static (see docs/site/scripts/render-disk-sizes.py \
+          and the README 'Disk size data flow' section)."
+            exit 1
+          fi
+          echo "OK: no dynamic disk-size references in docs pages"
+
       - uses: actions/setup-node@v6
         if: steps.guard.outputs.present == 'true'
         with:

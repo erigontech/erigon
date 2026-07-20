@@ -147,17 +147,21 @@ jobs:
             ./artifacts \
             docs/site/src/data/disk-sizes.json \
             "$PRUNE_MODE"
+          # Project the updated JSON onto the static markers in the
+          # hardware-requirements page (see README "Disk size data flow").
+          python3 docs/site/scripts/render-disk-sizes.py
 
       - name: Check for changes
         id: diff
         run: |
           set -euo pipefail
-          if git diff --quiet docs/site/src/data/disk-sizes.json; then
+          TARGETS="docs/site/src/data/disk-sizes.json docs/site/docs/get-started/hardware-requirements.mdx"
+          if git diff --quiet -- $TARGETS; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No changes to disk-sizes.json"
+            echo "No changes to disk sizes"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            git diff docs/site/src/data/disk-sizes.json
+            git diff -- $TARGETS
           fi
 
       - name: Configure git
@@ -176,7 +180,7 @@ jobs:
         run: |
           set -euo pipefail
           BRANCH="docs/auto/disk-sizes-${BASE_BRANCH//\//-}"
-          git add docs/site/src/data/disk-sizes.json
+          git add docs/site/src/data/disk-sizes.json docs/site/docs/get-started/hardware-requirements.mdx
           git commit -m "chore(docs): auto-update measured disk sizes [$(date +%Y-%m-%d)]"
           git push origin "$BRANCH"
 
