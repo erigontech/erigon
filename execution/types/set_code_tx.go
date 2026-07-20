@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -254,9 +255,16 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
+	if kind, size, err := s.Kind(); err != nil {
+		return err
+	} else if kind == rlp.Byte {
+		return errors.New("wrong size for To: 1")
+	} else if size != length.Addr {
+		return fmt.Errorf("wrong size for To: %d", size)
+	}
 	to, err := s.Addr()
 	if err != nil {
-		return fmt.Errorf("read To: %w", err)
+		return err
 	}
 	tx.To = &to
 	if err = s.ReadUint256(&tx.Value); err != nil {
