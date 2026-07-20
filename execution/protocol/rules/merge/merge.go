@@ -167,13 +167,17 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		return nil, err
 	}
 	for _, r := range rewards {
+		var err error
 		switch r.Kind {
 		case rules.RewardAuthor:
-			state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock)
+			err = state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock)
 		case rules.RewardUncle:
-			state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineUncle)
+			err = state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineUncle)
 		default:
-			state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceChangeUnspecified)
+			err = state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceChangeUnspecified)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("applying reward kind %d to %x: %w", r.Kind, r.Beneficiary, err)
 		}
 	}
 
@@ -185,7 +189,9 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		} else {
 			for _, w := range withdrawals {
 				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(common.GWei))
-				state.AddBalance(accounts.InternAddress(w.Address), *amountInWei, tracing.BalanceIncreaseWithdrawal)
+				if err := state.AddBalance(accounts.InternAddress(w.Address), *amountInWei, tracing.BalanceIncreaseWithdrawal); err != nil {
+					return nil, fmt.Errorf("crediting withdrawal %d to %x: %w", w.Index, w.Address, err)
+				}
 			}
 		}
 	}

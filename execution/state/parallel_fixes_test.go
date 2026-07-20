@@ -136,6 +136,7 @@ func TestVersionedWriteVersion(t *testing.T) {
 // TX executions on the same worker.
 func TestAccessListResetInIBSReset(t *testing.T) {
 	ibs := New(nil)
+	defer ibs.Release(false)
 
 	// Add an address to the access list
 	testAddr := accounts.InternAddress([20]byte{0x42})
@@ -157,6 +158,7 @@ func TestAccessListResetInIBSReset(t *testing.T) {
 // its own block's access list as phantom entries.
 func TestAddressAccessResetInIBSReset(t *testing.T) {
 	ibs := New(nil)
+	defer ibs.Release(false)
 	sender := accounts.InternAddress([20]byte{0x01})
 	coinbase := accounts.InternAddress([20]byte{0x02})
 	leaked := accounts.InternAddress([20]byte{0x42})
@@ -173,6 +175,7 @@ func TestAddressAccessResetInIBSReset(t *testing.T) {
 // transient storage (EIP-1153).
 func TestTransientStorageResetInIBSReset(t *testing.T) {
 	ibs := New(nil)
+	defer ibs.Release(false)
 
 	testAddr := accounts.InternAddress([20]byte{0x42})
 	testKey := accounts.InternKey([32]byte{0x01})
@@ -446,6 +449,7 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	vm := NewVersionMap(nil)
 
 	ibs := New(&emptyReader{})
+	defer ibs.Release(false)
 	ibs.SetVersionMap(vm)
 	ibs.SetTxContext(100, 0)
 	ibs.SetVersion(0)

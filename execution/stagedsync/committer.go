@@ -253,8 +253,9 @@ func newCommitmentCalculator(
 }
 
 func (cc *commitmentCalculator) Start(ctx context.Context) {
-	cc.wg.Add(1)
-	go cc.loop(ctx)
+	cc.wg.Go(func() {
+		cc.loop(ctx)
+	})
 }
 
 func (cc *commitmentCalculator) Stop() {
@@ -267,7 +268,6 @@ func (cc *commitmentCalculator) Stop() {
 
 func (cc *commitmentCalculator) loop(ctx context.Context) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "calculator")))
-	defer cc.wg.Done()
 	defer close(cc.out) // Signal apply loop that no more results will come.
 
 	// The calculator exits ONLY when cc.in is closed (by the exec loop).

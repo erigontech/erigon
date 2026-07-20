@@ -381,17 +381,17 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
 func (sdb *IntraBlockState) Reset() {
-	sdb.nilAccounts = map[accounts.Address]struct{}{}
+	clear(sdb.nilAccounts)
 	for _, so := range sdb.stateObjects {
 		so.release()
 	}
-	sdb.stateObjects = map[accounts.Address]*stateObject{}
-	sdb.stateObjectsDirty = map[accounts.Address]struct{}{}
+	clear(sdb.stateObjects)
+	clear(sdb.stateObjectsDirty)
 	for i := range sdb.logs {
-		clear(sdb.logs[i]) // free p¬ointers
+		clear(sdb.logs[i]) // free pointers
 		sdb.logs[i] = sdb.logs[i][:0]
 	}
-	sdb.balanceInc = map[accounts.Address]*BalanceIncrease{}
+	clear(sdb.balanceInc)
 	sdb.journal.Reset()
 	sdb.revisions = sdb.revisions.put()
 	sdb.refund = uint64(0)
@@ -399,7 +399,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.sdProbeEpoch++
 	sdb.logSize = 0
 	sdb.accessList.Reset()
-	sdb.transientStorage = newTransientStorage()
+	clear(sdb.transientStorage)
 	sdb.versionMap = nil
 	// noMaterialize is meaningful only alongside a versionMap; clear it with the
 	// map so a reused IBS can't run unversioned with the stateObject cache still
@@ -2739,7 +2739,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 		}
 	}
 	// Reset transient storage at the beginning of transaction execution
-	sdb.transientStorage = newTransientStorage()
+	clear(sdb.transientStorage)
 	sdb.versionedReads.access = nil
 	sdb.recordAccess = true
 
