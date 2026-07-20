@@ -319,7 +319,7 @@ func TestStreamAddr(t *testing.T) {
 
 	t.Run("no-allocs", func(t *testing.T) {
 		rdr := bytes.NewReader(enc)
-		s := NewStream(rdr, uint64(len(enc)))
+		s := NewStreamFromPool(rdr, uint64(len(enc)))
 		defer PutStream(s)
 		got := testing.AllocsPerRun(100, func() {
 			rdr.Reset(enc)
