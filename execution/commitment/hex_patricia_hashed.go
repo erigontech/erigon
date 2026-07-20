@@ -518,7 +518,11 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 	if lowCell.hashLen > 0 {
 		copy(cell.hash[:], lowCell.hash[:lowCell.hashLen])
 	}
-	cell.loaded = lowCell.loaded
+	if lowDepth > 64 {
+		cell.loaded = cell.loaded.addFlag(lowCell.loaded)
+	} else {
+		cell.loaded = lowCell.loaded
+	}
 }
 
 func (cell *cell) deriveHashedKeys(depth int16, keccak keccak.KeccakState, accountKeyLen int16, hashBuf []byte) error {
