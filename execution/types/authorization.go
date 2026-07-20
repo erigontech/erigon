@@ -123,14 +123,15 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 	}
 	i := 0
 	for _, err = s.List(); err == nil; _, err = s.List() {
-		auth := Authorization{}
+		*auths = append(*auths, Authorization{})
+		auth := &(*auths)[len(*auths)-1]
 
 		if err = s.ReadUint256(&auth.ChainID); err != nil {
 			return err
 		}
 
 		// address
-		if err = s.ReadBytes(auth.Address[:]); err != nil {
+		if auth.Address, err = s.Addr(); err != nil {
 			return err
 		}
 
@@ -159,7 +160,6 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 			return err
 		}
 
-		*auths = append(*auths, auth)
 		// end of authorization
 		if err = s.ListEnd(); err != nil {
 			return fmt.Errorf("close Authorization: %w", err)
