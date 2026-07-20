@@ -130,8 +130,8 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 		}
 
 		// address
-		if err = s.ReadBytes(auth.Address[:]); err != nil {
-			return err
+		if auth.Address, err = s.Addr(); err != nil {
+			return fmt.Errorf("read Address: %w", err)
 		}
 
 		// nonce
