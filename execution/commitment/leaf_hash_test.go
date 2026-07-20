@@ -102,8 +102,9 @@ func TestCompleteLeafHashMatchesPerByteHeader(t *testing.T) {
 				val = rlp.RlpEncodedBytes(accountVal)
 				got, err = hph.accountLeafHashWithKey(nil, tc.key, val)
 			} else {
-				val = rlp.RlpSerializableBytes(storageVal)
-				got, err = hph.leafHashWithKeyVal(nil, tc.key, rlp.RlpSerializableBytes(storageVal), tc.singleton)
+				storage := rlp.RlpSerializableBytes(storageVal)
+				val = storage
+				got, err = hph.leafHashWithKeyVal(nil, tc.key, storage, tc.singleton)
 			}
 			require.NoError(t, err)
 

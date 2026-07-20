@@ -139,12 +139,12 @@ type HexPatriciaHashed struct {
 	rootPresent   bool
 	traceW        io.Writer // nil = disabled, non-nil = write trace output
 	ctx           PatriciaContext
-	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
-	cellHashBuf   common.Hash   // shared scratch buffer for hashKey calls (avoids per-cell allocation)
-	leafHashBuf   [33]byte      // shared scratch for leaf hash prefixing (avoids per-leaf escape)
-	leafRlpBuf    [80]byte      // shared scratch for a leaf's RLP list prefix + compact key: `9 + 1 + 65 = 75`
-	rlpPrefixBuf  [8]byte       // shared scratch for RlpSerializable length prefixes
-	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
+	hashAuxBuffer [128]byte           // buffer to compute cell hash or write hash-related things
+	cellHashBuf   common.Hash         // shared scratch buffer for hashKey calls (avoids per-cell allocation)
+	leafHashBuf   [33]byte            // shared scratch for leaf hash prefixing (avoids per-leaf escape)
+	leafRlpBuf    [maxLeafRlpLen]byte // shared scratch for a leaf's RLP list prefix + compact key
+	rlpPrefixBuf  [8]byte             // shared scratch for RlpSerializable length prefixes
+	auxBuffer     *bytes.Buffer       // auxiliary buffer used during branch updates encoding
 	branchEncoder *BranchEncoder
 
 	mounted    bool  // true if this trie is mounted to some root trie
@@ -321,6 +321,12 @@ const (
 	cellLoadAccount = loadFlags(1)
 	cellLoadStorage = loadFlags(2)
 )
+
+// maxLeafRlpLen bounds a leaf's assembled RLP header: list prefix (tag plus up to
+// 8 length bytes), key prefix byte, then the compact key. Derived from the nibble
+// array rather than from the shorter keys today's depth arithmetic yields, so a
+// caller slicing deeper cannot overflow the buffer.
+const maxLeafRlpLen = 9 + 1 + (len(cell{}.hashedExtension)/2 + 1)
 
 func (f loadFlags) String() string {
 	var b strings.Builder
