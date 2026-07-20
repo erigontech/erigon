@@ -36,13 +36,17 @@ func BenchmarkIntraBlockStateReset(b *testing.B) {
 				addrs[i] = accounts.InternAddress(common.BytesToAddress([]byte{byte(i), byte(i >> 8), 0x5a}))
 			}
 			ibs := New(nil)
+			var one uint256.Int
+			one.SetUint64(1)
+
 			b.ReportAllocs()
+			b.ResetTimer()
 			for b.Loop() {
 				for _, a := range addrs {
 					ibs.nilAccounts[a] = struct{}{}
 					ibs.stateObjectsDirty[a] = struct{}{}
-					ibs.balanceInc[a] = &BalanceIncrease{}
-					ibs.transientStorage.Set(a, accounts.NilKey, *uint256.NewInt(1))
+					ibs.balanceInc[a] = nil
+					ibs.transientStorage.Set(a, accounts.NilKey, one)
 				}
 				ibs.Reset()
 			}
