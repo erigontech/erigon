@@ -68,6 +68,15 @@ func TestCompleteLeafHashMatchesPerByteHeader(t *testing.T) {
 	}
 	maxKey[64] = terminatorHexByte
 
+	// accountLeafHashWithKey takes its longer compactLen (len/2+1 rather than
+	// (len-1)/2+1) when the key carries no terminator, so that is the branch the
+	// header buffer must be sized for.
+	noTermOddKey := make([]byte, 65)
+	for i := range noTermOddKey {
+		noTermOddKey[i] = byte(i % 16)
+	}
+	noTermEvenKey := maxKey[:64]
+
 	shortKey := []byte{0x1, 0x2, terminatorHexByte}
 
 	storageVal := make([]byte, 32)
@@ -87,8 +96,11 @@ func TestCompleteLeafHashMatchesPerByteHeader(t *testing.T) {
 	}{
 		{"storage max-length key, singleton", maxKey, true, false},
 		{"storage max-length key, embeddable", maxKey, false, false},
+		{"storage even-length key", noTermEvenKey, false, false},
 		{"storage short key", shortKey, false, false},
 		{"account max-length key", maxKey, true, true},
+		{"account max-length key, no terminator", noTermOddKey, true, true},
+		{"account even-length key, no terminator", noTermEvenKey, true, true},
 		{"account short key", shortKey, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
