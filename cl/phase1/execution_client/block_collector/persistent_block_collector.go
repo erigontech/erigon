@@ -458,10 +458,6 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, []byte, 
 	}
 
 	body := executionPayload.Body()
-	txs, err := types.DecodeTransactions(body.Transactions)
-	if err != nil {
-		return nil, nil, err
-	}
 
 	// Skip genesis block
 	if executionPayload.BlockNumber == 0 {
@@ -480,7 +476,7 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, []byte, 
 		bal = executionPayload.BlockAccessList.Bytes()
 	}
 
-	return types.NewBlockFromStorageWithBinaryTxs(executionPayload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals), bal, nil
+	return types.NewBlockFromBinaryTxs(executionPayload.BlockHash, header, body.Transactions, nil, body.Withdrawals), bal, nil
 }
 
 func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch []*types.Block, balByHash map[common.Hash][]byte, inserted *uint64, lastInserted **types.Block) error {

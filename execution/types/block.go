@@ -1160,6 +1160,14 @@ func NewBlockFromStorageWithBinaryTxs(hash common.Hash, header *Header, txs []Tr
 	return b
 }
 
+// NewBlockFromBinaryTxs creates a Block whose transactions were never decoded.
+// Transactions() and Body() are empty on such a block; it is only usable by
+// consumers that go through Header() and RawBody().
+func NewBlockFromBinaryTxs(hash common.Hash, header *Header, binaryTxs BinaryTransactions, uncles []*Header, withdrawals []*Withdrawal) *Block {
+	header.hash.Store(&hash)
+	return &Block{header: header, binaryTransactions: binaryTxs, uncles: uncles, withdrawals: withdrawals}
+}
+
 // NewBlockWithHeader creates a block with the given header data. The
 // header data is copied, changes to header and to the field values
 // will not affect the block.
@@ -1408,15 +1416,18 @@ func rlpFromBinaryTxn(binaryTxn []byte) []byte {
 // RawBody creates a RawBody based on the block. It is not very efficient, so
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
-	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals}
-	// Re-wrap the cached binary encodings into their rlp.EncodeToBytes form —
-	// cheaper than a full per-tx struct re-encode.
-	if len(b.binaryTransactions) == len(b.transactions) {
+	br := &RawBody{Uncles: b.uncles, Withdrawals: b.withdrawals}
+	// The cached binary encodings are authoritative when present: re-wrapping them
+	// into their rlp.EncodeToBytes form is cheaper than a per-tx struct re-encode,
+	// and a block built by NewBlockFromBinaryTxs has no decoded transactions at all.
+	if b.binaryTransactions != nil {
+		br.Transactions = make([][]byte, len(b.binaryTransactions))
 		for i, binaryTxn := range b.binaryTransactions {
 			br.Transactions[i] = rlpFromBinaryTxn(binaryTxn)
 		}
 		return br
 	}
+	br.Transactions = make([][]byte, len(b.transactions))
 	for i, txn := range b.transactions {
 		var err error
 		br.Transactions[i], err = rlp.EncodeToBytes(txn)

@@ -20,6 +20,8 @@ import (
 	"math/rand/v2"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
@@ -37,6 +39,40 @@ func benchPayload(txCount, txSize int) *cltypes.Eth1Block {
 	}
 	body := &types.RawBody{Transactions: txs, Withdrawals: []*types.Withdrawal{}}
 	return cltypes.NewEth1BlockFromHeaderAndBody(makeTestHeader(12345, common.Hash{}, nil), body, &clparams.MainnetBeaconConfig)
+}
+
+func BenchmarkDecodeBlock(b *testing.B) {
+	for _, tc := range []struct {
+		name    string
+		txCount int
+		txSize  int
+	}{
+		{"empty", 0, 0},
+		{"100KB", 200, 500},
+		{"1MB", 500, 2048},
+	} {
+		txs := make([]types.Transaction, tc.txCount)
+		for i := range txs {
+			txs[i] = signedTestTx(b, uint64(i), make([]byte, tc.txSize)...)
+		}
+		bb := makeBeaconBlock(b, 1, 'a', common.Hash{}, txs...)
+
+		c := &PersistentBlockCollector{beaconChainCfg: &clparams.MainnetBeaconConfig}
+		c.mu.Lock()
+		encoded, err := c.encodeBlock(bb.Body.ExecutionPayload, bb.ParentRoot, nil)
+		require.NoError(b, err)
+		encoded = common.Copy(encoded)
+		c.mu.Unlock()
+
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, _, err := c.decodeBlock(encoded); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }
 
 func BenchmarkEncodeBlock(b *testing.B) {

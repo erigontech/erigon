@@ -864,6 +864,34 @@ func TestBlockRawBodyFromBinaryTxsMatchesEncoded(t *testing.T) {
 	}
 }
 
+// A Block built from binary tx bytes alone — without ever RLP-decoding them —
+// must produce the same RawBody() as one that carries the decoded transactions.
+func TestBlockRawBodyFromBinaryTxsOnly(t *testing.T) {
+	t.Parallel()
+	tr := NewTRand()
+
+	binaryTxs := make(BinaryTransactions, 4)
+	txns := make([]Transaction, len(binaryTxs))
+	for i := range binaryTxs {
+		for attempt := 0; txns[i] == nil && attempt < 1000; attempt++ {
+			var buf bytes.Buffer
+			if tr.RandTransaction(DynamicFeeTxType).MarshalBinary(&buf) != nil {
+				continue
+			}
+			binaryTxn := common.Copy(buf.Bytes())
+			if decoded, err := DecodeTransaction(binaryTxn); err == nil {
+				binaryTxs[i], txns[i] = binaryTxn, decoded
+			}
+		}
+		require.NotNil(t, txns[i], "could not generate a decodable transaction")
+	}
+
+	binaryOnly := NewBlockFromBinaryTxs(common.Hash{}, &Header{}, binaryTxs, nil, nil)
+	reference := NewBlockFromStorage(common.Hash{}, &Header{}, txns, nil, nil)
+
+	require.Equal(t, reference.RawBody().Transactions, binaryOnly.RawBody().Transactions)
+}
+
 // TestBodyDecodeRejectsEmptyStringTx pins that an empty-string element
 // (0x80) in the transactions list is rejected, not dropped as if it were
 // the list terminator.

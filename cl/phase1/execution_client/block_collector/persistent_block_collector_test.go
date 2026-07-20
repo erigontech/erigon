@@ -60,7 +60,7 @@ func makeTestHeader(number uint64, parent common.Hash, extra []byte) *types.Head
 // makeBeaconBlock builds a Deneb BeaconBlock whose ExecutionPayload carries the
 // given block number chained onto parent. forkTag seeds header.Extra so two blocks
 // at the same number produce distinct SSZ roots — mimicking competing beacon variants.
-func makeBeaconBlock(t *testing.T, number uint64, forkTag byte, parent common.Hash, txs ...types.Transaction) *cltypes.BeaconBlock {
+func makeBeaconBlock(t testing.TB, number uint64, forkTag byte, parent common.Hash, txs ...types.Transaction) *cltypes.BeaconBlock {
 	t.Helper()
 	block := types.NewBlock(makeTestHeader(number, parent, []byte{forkTag}), txs, nil, nil, []*types.Withdrawal{})
 
@@ -311,6 +311,39 @@ func TestFlushDropsRowsBelowFrozen(t *testing.T) {
 
 	require.Equal(t, []uint64{3}, h.insertedNumbers())
 	require.Equal(t, 0, countRowsAtOrAbove(t, h.collector.db, 0))
+}
+
+// makeBeaconBlockWithRawTxs is makeBeaconBlock for transaction payloads that are
+// not decodable as transactions. The header's TxHash is derived from the raw
+// bytes, exactly as RlpHeader derives it on the way back out.
+func makeBeaconBlockWithRawTxs(t *testing.T, number uint64, parent common.Hash, txs [][]byte) *cltypes.BeaconBlock {
+	t.Helper()
+	body := &types.RawBody{Transactions: txs, Withdrawals: []*types.Withdrawal{}}
+	header := types.NewBlock(makeTestHeader(number, parent, nil), nil, nil, nil, body.Withdrawals).Header()
+	header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))
+
+	bb := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	bb.Body.ExecutionPayload = cltypes.NewEth1BlockFromHeaderAndBody(header, body, &clparams.MainnetBeaconConfig)
+	return bb
+}
+
+// TestFlushKeepsOpaqueTransactionBytes pins that Flush hands the stored
+// transaction bytes to the engine verbatim. The payload's own block hash already
+// commits to them, so bytes the collector cannot interpret as transactions must
+// still reach the engine rather than being dropped as an undecodable block —
+// which would make the following block look like a chain gap.
+func TestFlushKeepsOpaqueTransactionBytes(t *testing.T) {
+	h := newFlushTestHarness(t, 0)
+
+	// RLP lists with too few fields to be legacy transactions. The leading byte
+	// is >= 0x80, so RawBody() passes them through without re-wrapping.
+	opaqueTxs := [][]byte{{0xc1, 0x01}, {0xc2, 0x02, 0x03}}
+	require.NoError(t, h.collector.AddBlock(makeBeaconBlockWithRawTxs(t, 1, common.Hash{}, opaqueTxs)))
+
+	require.NoError(t, h.collector.Flush(t.Context()))
+
+	require.Equal(t, []uint64{1}, h.insertedNumbers())
+	require.Equal(t, opaqueTxs, h.inserted[0].RawBody().Transactions)
 }
 
 // plantMarker writes a sentinel file into the collector's persistDir; it

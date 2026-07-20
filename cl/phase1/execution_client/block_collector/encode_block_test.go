@@ -29,12 +29,12 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func signedTestTx(t *testing.T, nonce uint64) types.Transaction {
+func signedTestTx(t testing.TB, nonce uint64, data ...byte) types.Transaction {
 	t.Helper()
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	to := common.HexToAddress("0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed")
-	txn, err := types.SignTx(types.NewTransaction(nonce, to, uint256.NewInt(1000), 21000, uint256.NewInt(1), nil), *types.LatestSignerForChainID(uint256.NewInt(1)), key)
+	txn, err := types.SignTx(types.NewTransaction(nonce, to, uint256.NewInt(1000), 21000, uint256.NewInt(1), data), *types.LatestSignerForChainID(uint256.NewInt(1)), key)
 	require.NoError(t, err)
 	return txn
 }
@@ -69,9 +69,12 @@ func TestEncodeDecodeBlockRoundTrip(t *testing.T) {
 		require.Equal(t, payload.BlockHash, decoded.Hash())
 		require.Equal(t, payload.BlockNumber, decoded.NumberU64())
 		require.Equal(t, payload.ParentHash, decoded.ParentHash())
-		require.Len(t, decoded.Transactions(), len(tc.txs))
+		// decodeBlock leaves transactions undecoded, so check the raw body bytes.
+		decodedTxs, err := types.DecodeTransactions(decoded.RawBody().Transactions)
+		require.NoError(t, err)
+		require.Len(t, decodedTxs, len(tc.txs))
 		for i, txn := range tc.txs {
-			require.Equal(t, txn.Hash(), decoded.Transactions()[i].Hash())
+			require.Equal(t, txn.Hash(), decodedTxs[i].Hash())
 		}
 	}
 }
