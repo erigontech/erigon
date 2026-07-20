@@ -1553,6 +1553,64 @@ func Test_ModeUpdate_SiblingConsistency(t *testing.T) {
 		"block 2 roots should match — sibling accounts must be encoded consistently")
 }
 
+func TestModeUpdatePreservesAccountAcrossStorageFold(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	const (
+		addr     = "e390386722994b2b0b4d22aca0f60ab725207af3"
+		codeHash = "5ea78a5e3cec82b66117982ea93e22a8e0018a9a8adac0ef093ca1aca0e78466"
+		slot1    = "8d56aaa3f8153b18d2051dbe2fb504a6cb6ad6d1fa0c3f7cacc6e8b0314efca5"
+		slot2    = "ddc76c7d8a51f777547c6e6b30b61a2f91369abf0fbc1d4ac88b37884a191729"
+		slot3    = "87a1af2e2e457e4b8094ae29d68ea79d1896262a9497ff66bf5f6881218d977b"
+		slot4    = "4d03654e216aeb92002608c996e5a8b824a212c6ad779032214386a0116a246a"
+	)
+
+	initialKeys, initialUpdates := NewUpdateBuilder().
+		Balance(addr, 3780308219182304040).
+		Nonce(addr, 1).
+		CodeHash(addr, codeHash).
+		Storage(addr, slot1, "01").
+		Storage(addr, slot2, "02").
+		Storage(addr, slot3, "03").
+		Build()
+	changedKeys, changedUpdates := NewUpdateBuilder().
+		Balance(addr, 3782876712332991840).
+		Nonce(addr, 1).
+		CodeHash(addr, codeHash).
+		Storage(addr, slot4, "6a578720").
+		DeleteStorage(addr, slot1).
+		DeleteStorage(addr, slot2).
+		DeleteStorage(addr, slot3).
+		Build()
+
+	newPreStateTrie := func() (*MockState, *HexPatriciaHashed) {
+		state := NewMockState(t)
+		trie := NewHexPatriciaHashed(length.Addr, state, DefaultTrieConfig())
+		require.NoError(t, state.applyPlainUpdates(initialKeys, initialUpdates))
+		updates := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, initialKeys, initialUpdates)
+		_, err := trie.Process(ctx, updates, "", nil, WarmupConfig{})
+		updates.Close()
+		require.NoError(t, err)
+		return state, trie
+	}
+
+	directState, directTrie := newPreStateTrie()
+	require.NoError(t, directState.applyPlainUpdates(changedKeys, changedUpdates))
+	directUpdates := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, changedKeys, changedUpdates)
+	expected, err := directTrie.Process(ctx, directUpdates, "", nil, WarmupConfig{})
+	directUpdates.Close()
+	require.NoError(t, err)
+
+	staleState, updateTrie := newPreStateTrie()
+	updateTrie.ResetContext(staleState)
+	updateUpdates := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, changedKeys, changedUpdates)
+	actual, err := updateTrie.Process(ctx, updateUpdates, "", nil, WarmupConfig{})
+	updateUpdates.Close()
+	require.NoError(t, err)
+
+	require.Equal(t, expected, actual)
+}
+
 func TestSetTraceWriter_NilWriterSafe(t *testing.T) {
 	t.Parallel()
 
