@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -375,26 +376,45 @@ type rlpStorageLog struct {
 	//Index uint
 }
 
+const (
+	addrRlpLen  = 1 + length.Addr
+	topicRlpLen = 1 + length.Hash
+)
+
 // consensusPayloadSize returns the length of the log's consensus RLP payload (without the list prefix).
 func (l *Log) consensusPayloadSize() int {
-	topicsLen := 33 * len(l.Topics)
-	return 21 + rlp.ListPrefixLen(topicsLen) + topicsLen + rlp.StringLen(l.Data)
+	topicsLen := topicRlpLen * len(l.Topics)
+	return addrRlpLen + rlp.ListLen(topicsLen) + rlp.StringLen(l.Data)
+}
+
+// consensusRlpLen returns the log's full encoded length. A nil log encodes as an
+// empty list, matching what the reflect-based encoder emits for a nil *Log.
+func (l *Log) consensusRlpLen() int {
+	if l == nil {
+		return 1
+	}
+	return rlp.ListLen(l.consensusPayloadSize())
 }
 
 // encodeConsensus writes the log's consensus RLP encoding, using b as scratch space.
 func (l *Log) encodeConsensus(w io.Writer, b []byte) error {
+	if l == nil {
+		b[0] = rlp.EmptyListCode
+		_, err := w.Write(b[:1])
+		return err
+	}
 	if err := rlp.EncodeListPrefix(l.consensusPayloadSize(), w, b); err != nil {
 		return err
 	}
-	b[0] = rlp.EmptyStringCode + 20
+	b[0] = rlp.EmptyStringCode + length.Addr
 	copy(b[1:], l.Address[:])
-	if _, err := w.Write(b[:21]); err != nil {
+	if _, err := w.Write(b[:addrRlpLen]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeListPrefix(33*len(l.Topics), w, b); err != nil {
+	if err := rlp.EncodeListPrefix(topicRlpLen*len(l.Topics), w, b); err != nil {
 		return err
 	}
-	b[0] = rlp.EmptyStringCode + 32
+	b[0] = rlp.EmptyStringCode + length.Hash
 	for i := range l.Topics {
 		if _, err := w.Write(b[:1]); err != nil {
 			return err

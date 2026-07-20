@@ -449,24 +449,22 @@ func (rs Receipts) Copy() Receipts {
 	return rsCopy
 }
 
-// bloomRlpLen is the encoded size of a Bloom: a 3-byte long-string prefix plus 256 bytes.
-const bloomRlpLen = 3 + BloomByteLength
-
 // consensusPayloadSize returns the length of the receipt's consensus RLP payload
 // (without the list prefix and without the typed-receipt envelope byte), along with
 // the content length of its logs list.
 func (r *Receipt) consensusPayloadSize() (payloadSize, logsLen int) {
 	for _, l := range r.Logs {
-		logsLen += rlp.ListLen(l.consensusPayloadSize())
+		logsLen += l.consensusRlpLen()
 	}
 	payloadSize = rlp.StringLen(r.statusEncoding()) +
 		rlp.U64Len(r.CumulativeGasUsed) +
-		bloomRlpLen +
+		rlp.StringLen(r.Bloom[:]) +
 		rlp.ListLen(logsLen)
 	return payloadSize, logsLen
 }
 
-func (r *Receipt) encodeConsensus(w io.Writer, b []byte, payloadSize, logsLen int) error {
+func (r *Receipt) encodeConsensus(w io.Writer, b []byte) error {
+	payloadSize, logsLen := r.consensusPayloadSize()
 	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
@@ -507,12 +505,9 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 		return
 	}
 
-	payloadSize, logsLen := r.consensusPayloadSize()
-	w.Grow(rlp.ListLen(payloadSize))
-
 	b := rlp.NewEncodingBuf()
 	defer b.Release()
-	if err := r.encodeConsensus(w, b[:], payloadSize, logsLen); err != nil {
+	if err := r.encodeConsensus(w, b[:]); err != nil {
 		panic(err)
 	}
 }
