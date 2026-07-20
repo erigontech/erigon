@@ -405,17 +405,17 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 	})
 }
 
-func decodeLogsForStorage(s *rlp.Stream) ([]*Log, error) {
+func decodeLogsForStorage(s *rlp.Stream) (Logs, error) {
 	l, err := s.List()
 	if err != nil {
 		return nil, err
 	}
 	if l == 0 {
-		return []*Log{}, s.ListEnd()
+		return Logs{}, s.ListEnd()
 	}
 	const typicalLogSize = 128                    // estimate only, append grows past it
 	preAlloc := int(min(128, l/typicalLogSize+1)) // hard cap: l is attacker-controlled, see decodeTopics2
-	logs := make([]*Log, 0, preAlloc)
+	logs := make(Logs, 0, preAlloc)
 	for s.MoreDataInList() {
 		log := &Log{}
 		if err := (*LogForStorage)(log).DecodeRLP(s); err != nil {
