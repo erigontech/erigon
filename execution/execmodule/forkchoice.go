@@ -522,7 +522,16 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// TODO: rename initialCycle → atTip (inverted polarity) across stage/prune APIs.
 	const smallBlockJumpThreshold = 16
 	headNum := fcuHeader.Number.Uint64()
-	initialCycle := headNum > finishProgressBefore && headNum-finishProgressBefore > smallBlockJumpThreshold
+	// initialCycle is the historical-catchup mode — full staged-sync
+	// pipeline including OtterSync. Gate on finishProgress < frozen
+	// tip: above frozen tip is chain-tip territory (FCU-driven
+	// Execution-only), and initialCycle's OtterSync would hold the
+	// semaphore for its 2-min P2P manifest wait while chain-tip
+	// inserts contend for the same lock.
+	frozenBlocks := e.blockReader.FrozenBlocks()
+	initialCycle := finishProgressBefore < frozenBlocks &&
+		headNum > finishProgressBefore &&
+		headNum-finishProgressBefore > smallBlockJumpThreshold
 
 	// Snapshot reconciliation: when the prior mode-B unwind trimmed
 	// snapshot files, signal this cycle as the FirstCycle so OtterSync
