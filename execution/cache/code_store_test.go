@@ -54,7 +54,7 @@ func TestCodeStore_TwoTierAndEvict(t *testing.T) {
 
 	// Evict prunes the backing when over the table cap.
 	small := NewCodeStore(1<<20, 128)
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		c := []byte{byte(i), byte(i >> 8), 0xaa, 0xbb}
 		require.NoError(t, small.PutByHash(tx, crypto.Keccak256(c), c))
 	}

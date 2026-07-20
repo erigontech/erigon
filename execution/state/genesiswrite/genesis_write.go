@@ -364,7 +364,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	}
 	defer agg.Close()
 
-	tdb, err := temporal.New(genesisTmpDB, agg)
+	tdb, err := temporal.New(genesisTmpDB, agg, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -555,7 +555,7 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 	}
 
-	// these fields need to be overriden for Bor running in a kurtosis devnet
+	// these fields need to be overridden for Bor running in a kurtosis devnet
 	if g.Config != nil && g.Config.Bor != nil && g.Config.ChainID.Uint64() == polygonchain.BorKurtosisDevnetChainId {
 		withdrawals = []*types.Withdrawal{}
 		head.BlobGasUsed = new(uint64)

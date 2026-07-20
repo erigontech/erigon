@@ -40,7 +40,7 @@ type RoSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to] semantic
 func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *RoSnapshots {
-	return &RoSnapshots{*snapshotsync.NewBaseRoSnapshots(cfg, snapDir, SnapshotTypes(), false, logger)}
+	return &RoSnapshots{*snapshotsync.NewBaseRoSnapshots(cfg, snapDir, SnapshotTypes(), Spans, false, logger)}
 }
 
 func (s *RoSnapshots) Ranges(align bool) []snapshotsync.Range {
@@ -54,8 +54,7 @@ type View struct {
 }
 
 func (s *RoSnapshots) View() *View {
-	v := &View{base: s.BaseRoSnapshots.View().WithBaseSegType(Spans)}
-	return v
+	return &View{base: s.BaseRoSnapshots.View()}
 }
 
 func (v *View) Close() {

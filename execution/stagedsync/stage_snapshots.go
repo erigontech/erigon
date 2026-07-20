@@ -26,13 +26,12 @@ import (
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
@@ -50,9 +49,9 @@ type SnapshotsCfg struct {
 	db                 kv.TemporalRwDB
 	chainConfig        *chain.Config
 	dirs               datadir.Dirs
-	blockRetire        services.BlockRetire
-	snapshotDownloader downloader.Client
-	blockReader        services.FullBlockReader
+	blockRetire        dbservices.BlockRetire
+	snapshotDownloader dbservices.DownloaderClient
+	blockReader        dbservices.FullBlockReader
 	notifier           *shards.Notifications
 	caplin             bool
 	blobs              bool
@@ -67,9 +66,9 @@ type SnapshotsCfg struct {
 }
 
 // Returns a seeder client for block management, a noop implementation if no downloader is attached.
-func (me *SnapshotsCfg) getSeederClient() downloader.SeederClient {
+func (me *SnapshotsCfg) getSeederClient() dbservices.SeederClient {
 	if me.snapshotDownloader == nil {
-		return downloader.NoopSeederClient{}
+		return dbservices.NoopSeederClient{}
 	}
 	return me.snapshotDownloader
 }
@@ -78,9 +77,9 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	chainConfig *chain.Config,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
-	blockRetire services.BlockRetire,
-	snapshotDownloader downloader.Client,
-	blockReader services.FullBlockReader,
+	blockRetire dbservices.BlockRetire,
+	snapshotDownloader dbservices.DownloaderClient,
+	blockReader dbservices.FullBlockReader,
 	notifier *shards.Notifications,
 	caplin bool,
 	blobs bool,
@@ -220,7 +219,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
-		"remaining snapshots",
+		"snapshots",
 		false, /*headerChain=*/
 		cfg.blobs,
 		cfg.caplinState,
@@ -388,7 +387,7 @@ func buildOrDeferE3Accessors(ctx context.Context, s *StageState, cfg SnapshotsCf
 	return nil
 }
 
-func firstNonGenesisCheck(tx kv.RwTx, snapshots services.BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
+func firstNonGenesisCheck(tx kv.RwTx, snapshots dbservices.BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
 	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
 	if err != nil {
 		return err
@@ -403,7 +402,7 @@ func firstNonGenesisCheck(tx kv.RwTx, snapshots services.BlockSnapshots, logPref
 	return nil
 }
 
-func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services.FullBlockReader) error {
+func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader dbservices.FullBlockReader) error {
 	pruneThreshold := rawdbreset.GetPruneMarkerSafeThreshold(blockReader)
 	if pruneThreshold == 0 {
 		return nil

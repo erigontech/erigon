@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -267,7 +268,7 @@ func isValidDepositSignatureForDomain(cfg *clparams.BeaconChainConfig, domainTyp
 	if err != nil {
 		return false, err
 	}
-	signedRoot := utils.Sha256(depositMessageRoot[:], domain)
+	signedRoot := crypto.Sha256(depositMessageRoot[:], domain)
 	valid, err := bls.Verify(signature[:], signedRoot[:], pubkey[:])
 	if err != nil {
 		return false, err

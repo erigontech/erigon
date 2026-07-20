@@ -24,7 +24,6 @@ import (
 	"math"
 	"os"
 	"slices"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -297,7 +296,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		var vi int
 		for i := 0; i < len(keyWords); i++ {
 			ints := intArrs[i]
-			for j := 0; j < len(ints); j++ {
+			for j := range ints {
 				var txKey [8]byte
 				binary.BigEndian.PutUint64(txKey[:], ints[j])
 				offset, ok := r.Lookup2(txKey[:], []byte(keyWords[i]))
@@ -597,7 +596,7 @@ func TestHistoryCanPrune(t *testing.T) {
 			maxTxInSnaps := hc.files.EndTxNum()
 			require.Equal(t, (stepsTotal-stepKeepInDB)*16, maxTxInSnaps)
 
-			for i := uint64(0); i < stepsTotal; i++ {
+			for i := range stepsTotal {
 				cp, untilTx := hc.canPruneUntil(rwTx, h.stepSize*(i+1))
 				require.GreaterOrEqual(t, h.stepSize*(stepsTotal-stepKeepInDB), untilTx)
 				if i >= stepsTotal-stepKeepInDB {
@@ -633,7 +632,7 @@ func TestHistoryCanPrune(t *testing.T) {
 		hc := h.beginForTests()
 		defer hc.Close()
 
-		for i := uint64(0); i < stepsTotal; i++ {
+		for i := range stepsTotal {
 			t.Logf("step %d, until %d", i, (i+1)*h.stepSize)
 
 			cp, untilTx := hc.canPruneUntil(rwTx, (i+1)*h.stepSize)
@@ -848,7 +847,7 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 		var flusher flusher
 		var keyFlushCount = 0
 		for key, upds := range values {
-			for i := 0; i < len(upds); i++ {
+			for i := range upds {
 				err := writer.AddPrevValue([]byte(key), upds[i].txNum, upds[i].value)
 				require.NoError(tb, err)
 			}
@@ -1860,9 +1859,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 			//vals = append(vals, fmt.Sprintf("%x", v))
 		}
 
-		sort.Slice(writtenKeys, func(i, j int) bool {
-			return bytes.Compare(writtenKeys[i], writtenKeys[j]) < 0
-		})
+		slices.SortFunc(writtenKeys, bytes.Compare)
 
 		require.Equal(fmt.Sprintf("%#x", writtenKeys[0]), fmt.Sprintf("%#x", keys[0]))
 		require.Len(keys, len(writtenKeys))

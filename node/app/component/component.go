@@ -170,7 +170,7 @@ func (c relations) Add(r relation) relations {
 	}
 
 	var i = l
-	for index := 0; index < l; index++ {
+	for index := range l {
 		if cmp(c[index], component) && (index == l-1 || !cmp(c[index+1], component)) {
 			i = index
 			break
@@ -251,7 +251,7 @@ func (c relations) Contains(r relation) bool {
 	}
 
 	var i = l
-	for index := 0; index < l; index++ {
+	for index := range l {
 		if cmp(c[index], component) && (index == l-1 || !cmp(c[index+1], component)) {
 			i = index + 1
 			break
@@ -682,7 +682,7 @@ func (c *component) Name() string {
 		if c.provider != nil {
 			return fmt.Sprintf("%T(%p)", c, c)
 		}
-		return reflect.TypeOf(c).String()
+		return reflect.TypeFor[*component]().String()
 	}
 
 	return c.id.String()

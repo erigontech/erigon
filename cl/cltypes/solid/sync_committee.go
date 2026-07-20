@@ -159,7 +159,7 @@ func (s *SyncCommittee) HashSSZ() ([32]byte, error) {
 	s.ensureData()
 	size := s.CommitteeSize()
 	syncCommitteeLayer := make([]byte, size*32)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		root, err := merkle_tree.BytesRoot(s.data[i*48 : (i*48)+48])
 		if err != nil {
 			return [32]byte{}, err

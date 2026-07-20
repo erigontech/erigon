@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -48,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -139,8 +139,8 @@ type ExecModuleTester struct {
 	HistoryV3      bool
 	cfg            ethconfig.Config
 	BlockSnapshots *blocksnapshots.RoSnapshots
-	blockRetire    services.BlockRetire
-	BlockReader    services.FullBlockReader
+	blockRetire    dbservices.BlockRetire
+	BlockReader    dbservices.FullBlockReader
 	ReceiptsReader *receipts.Generator
 	posStagedSync  *stagedsync.Sync
 	bgComponentsEg errgroup.Group
@@ -507,7 +507,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
-	allSnapshots := blocksnapshots.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
+	allSnapshots := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
 	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
 
 	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
@@ -592,7 +592,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			ctx,
 			poolCfg,
 			mock.DB,
-			kvcache.NewSimple(),
+			kvcache.NewLatestBatchCache(),
 			sentries,
 			stateChangesClient,
 			func() {}, /* builderNotifyNewTxns */
@@ -813,7 +813,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	return mock
 }
 
-func mockDownloader(ctrl *gomock.Controller, snapRoot string) downloader.Client {
+func mockDownloader(ctrl *gomock.Controller, snapRoot string) dbservices.DownloaderClient {
 	snapDownloader := downloaderproto.NewMockDownloaderClient(ctrl)
 
 	snapDownloader.EXPECT().
@@ -936,7 +936,7 @@ func (emt *ExecModuleTester) NewStateReader(tx kv.TemporalGetter) state.StateRea
 	return state.NewReaderV3(tx)
 }
 
-func (emt *ExecModuleTester) BlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
+func (emt *ExecModuleTester) BlocksIO() (dbservices.FullBlockReader, *blockio.BlockWriter) {
 	return emt.BlockReader, blockio.NewBlockWriter()
 }
 

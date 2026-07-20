@@ -19,21 +19,22 @@ package sync_contribution_pool
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 var testHash = common.Hash{0x01, 0x02, 0x03, 0x04}
 
 func getTestCommitteesMessages(n int) (privateKeys [][]byte, messages []cltypes.SyncCommitteeMessage, s *state.CachingBeaconState) {
 	s = state.New(&clparams.MainnetBeaconConfig)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		privateKey, err := bls.GenerateKey()
 		if err != nil {
 			panic(err)
@@ -43,7 +44,7 @@ func getTestCommitteesMessages(n int) (privateKeys [][]byte, messages []cltypes.
 		if err != nil {
 			panic(err)
 		}
-		msg := utils.Sha256(testHash[:], domain)
+		msg := crypto.Sha256(testHash[:], domain)
 		sig := privateKey.Sign(msg[:])
 		message := cltypes.SyncCommitteeMessage{
 			BeaconBlockRoot: testHash,

@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"fmt"
 	"math"
+	"slices"
 
 	"github.com/holiman/uint256"
 
@@ -158,7 +159,7 @@ func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
 // recreate) revives it by clearing Deleted. A zero field write does not revive
 // a self-destructed address; for a non-self-destructed address any field write
 // — even zero — means it is alive (clears Deleted).
-func (cs *calcState) ApplyWrites(writes *state.WriteSet) {
+func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	sdThisCall := make(map[accounts.Address]bool)
 	for addr, vw := range writes.SelfDestructs() {
 		sdThisCall[addr] = vw.Val
@@ -233,7 +234,9 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet) {
 	// though IBS emits the pre-SD IncarnationPath/BalancePath values.
 	for addr := range sdThisCall {
 		if acc, ok := cs.accounts[addr]; ok && acc.Deleted {
-			acc.Balance = uint256.Int{}
+			if !eip8246 {
+				acc.Balance = uint256.Int{}
+			}
 			acc.Nonce = 0
 			acc.CodeHash = empty.CodeHash
 			acc.Incarnation = 0
@@ -291,9 +294,9 @@ type hasTxIndex interface{ GetIndex() uint32 }
 // a reverse scan stops at the first in-range element. maxTxIndex == MaxUint32
 // selects the block-end value (the whole block).
 func finalChangeUpTo[T hasTxIndex](changes []T, maxTxIndex uint32) (T, bool) {
-	for i := len(changes) - 1; i >= 0; i-- {
-		if changes[i].GetIndex() <= maxTxIndex {
-			return changes[i], true
+	for _, change := range slices.Backward(changes) {
+		if change.GetIndex() <= maxTxIndex {
+			return change, true
 		}
 	}
 	var zero T
@@ -307,8 +310,8 @@ func finalChangeUpTo[T hasTxIndex](changes []T, maxTxIndex uint32) (T, bool) {
 // delete here: after the field changes and lazy-loaded pre-block fields are
 // merged, a touched all-zero account is marked Deleted so FlushToUpdates removes
 // its leaf instead of writing a zero-valued one. Storage reads are ignored.
-func (cs *calcState) LoadFromBAL(bal types.BlockAccessList, emptyRemoval, isAura bool) {
-	cs.LoadFromBALUpTo(bal, math.MaxUint32, emptyRemoval, isAura)
+func (cs *calcState) LoadFromBAL(bal types.BlockAccessList, emptyRemoval bool, isAura bool, eip8246 bool) {
+	cs.LoadFromBALUpTo(bal, math.MaxUint32, emptyRemoval, isAura, eip8246)
 }
 
 // LoadFromBALUpTo is LoadFromBAL restricted to changes at tx index ≤ maxTxIndex,
@@ -316,7 +319,7 @@ func (cs *calcState) LoadFromBAL(bal types.BlockAccessList, emptyRemoval, isAura
 // mid-block step boundary (checkpoint) from the same per-tx BAL, then fold the
 // remainder — the BAL carries every change's tx index, so no re-execution is
 // needed. maxTxIndex == math.MaxUint32 is the whole block (== LoadFromBAL).
-func (cs *calcState) LoadFromBALUpTo(bal types.BlockAccessList, maxTxIndex uint32, emptyRemoval, isAura bool) {
+func (cs *calcState) LoadFromBALUpTo(bal types.BlockAccessList, maxTxIndex uint32, emptyRemoval bool, isAura bool, eip8246 bool) {
 	writes := &state.WriteSet{}
 	for _, ac := range bal {
 		addr := ac.Address
@@ -343,7 +346,7 @@ func (cs *calcState) LoadFromBALUpTo(bal types.BlockAccessList, maxTxIndex uint3
 			}
 		}
 	}
-	cs.ApplyWrites(writes)
+	cs.ApplyWrites(writes, eip8246)
 
 	// EIP-161: a touched account whose merged block-end state is empty is
 	// removed from the trie. The BAL carries no deletion marker, so reconstruct

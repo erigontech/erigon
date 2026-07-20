@@ -231,6 +231,7 @@ URL: https://docs.erigon.tech/get-started/installation
   'install-source':   'linuxmacos',
   'install-native':   'windows',
   'install-wsl':      'windows',
+  'install-arm':      'ethereum-on-arm',
 };
 
   if (e) e.preventDefault();
@@ -292,6 +293,7 @@ To install Erigon, begin by choosing an installation method suited to your opera
 Pre-built Binaries — Fastest way to get started. Download and run a pre-compiled binary for your architecture.
 Docker — Run Erigon in an isolated container. Recommended for most users.
 Build from Source — Full control over the build. Requires Go, C++ compiler, and CLI experience.
+Ethereum on ARM — Community image and APT repository for ARM single-board computers (Raspberry Pi, Rock 5B, Orange Pi 5).
 
 Docker — Run Erigon in an isolated container. The recommended method on macOS.
 Build from Source — Compile directly on your Mac. Requires Go, Clang/GCC, and CLI experience.
@@ -721,6 +723,24 @@ The choice of data location directly impacts how you must configure the RPC Daem
 Be aware that the default WSL2 environment uses its own internal IP address, which is distinct from the IP address of your Windows host machine.
 
 If you need to connect to Erigon from an external network (e.g., opening a port on your home router for peering on port `30303`), you must account for this separate WSL2 IP address when configuring NAT on your router. Alternatively consider [Mirrored mode networking](https://learn.microsoft.com/en-us/windows/wsl/networking#mirrored-mode-networking).
+
+### Ethereum on ARM
+
+Install with APT on ARM boards
+
+[Ethereum on ARM](https://ethereum-on-arm-documentation.readthedocs.io/) is a community project that provides a custom Linux image for ARM single-board computers (such as Raspberry Pi, Rock 5B, and Orange Pi 5) with an APT repository preconfigured to install and update Ethereum clients — including Erigon — as native system packages.
+
+Once the image is installed, Erigon can be installed and kept up to date with your system's package manager:
+
+```sh
+sudo apt update && sudo apt install erigon
+```
+
+For the full image, supported boards, and setup instructions, see the [Ethereum on ARM documentation](https://ethereum-on-arm-documentation.readthedocs.io/) and the [project on GitHub](https://github.com/diglos/ethereum-on-arm).
+
+:::info
+Ethereum on ARM is maintained independently by the community and is not an official Erigon distribution channel. The Erigon version available through its APT repository may lag behind the latest [GitHub release](https://github.com/erigontech/erigon/releases).
+:::
 
 Once you have Erigon installed, you can see [Basic Usage](/fundamentals/basic-usage) to configure your node and confirm it is syncing.
 
@@ -1607,7 +1627,7 @@ Deleting `chaindata/` is **recoverable but not free**: it discards the latest mu
 
 - **`--batchSize`** — size of the Execution stage's in-memory buffer before it is flushed to MDBX. Default: `512M`. Raising it (for example `--batchSize 1G` or higher) can speed up execution-heavy sync at the cost of more RAM.
 - **`--db.size.limit`** — caps the MDBX file size. Useful when running multiple Erigon instances on one disk to prevent one from starving the others.
-- **`--db.read.concurrency`** — number of concurrent MDBX read transactions. Increase when you run a high-throughput RPC Daemon against the same datadir.
+- **`--db.read.concurrency`** — maximum number of concurrent open MDBX read transactions (the read-tx semaphore). Raise it for nodes serving heavy parallel RPC (for example a high-throughput RPC daemon against the same datadir); low values are fine for low-read-concurrency nodes such as validators.
 - **Symlinks for tiered storage.** Place `chaindata/` and `snapshots/domain/` on fast NVMe, leave `snapshots/idx/` and `snapshots/history/` on cheaper SATA. See [Optimizing Storage](optimizing-storage) for the recipe.
 
 ## Safe-to-delete subdirectories
@@ -1954,7 +1974,7 @@ These flags control database performance and memory usage. See [Database](/funda
   * Default: `1TB`
 * `--db.writemap`: Enables `WRITE_MAP` for fast database writes.
   * Default: `true`
-* `--db.read.concurrency value`: Ceiling on concurrent open database read transactions (the MDBX read-transaction semaphore); when it is full, extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response instead. Low values are fine for low read-concurrency nodes (for example, validators); raise it for nodes serving heavy parallel RPC.
+* `--db.read.concurrency value`: Maximum number of concurrent open database read transactions (the MDBX read-transaction semaphore); when it is full, extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response instead. Low values are fine for low read-concurrency nodes (for example, validators); raise it for nodes serving heavy parallel RPC.
   * Default: scales with the host as `min(max(10, GOMAXPROCS * 64), 9000)` — kept well above the CPU count because reads are I/O-bound, and capped below Go's roughly 10,000 OS-thread limit.
 * `--database.verbosity value`: Enables internal database logs.
   * Default: `2`
@@ -1969,6 +1989,8 @@ These flags control database performance and memory usage. See [Database](/funda
 * `--erigondb.domain.steps-in-frozen-file value`: Overrides the `steps_in_frozen_file` setting from `erigondb.toml` for the domain merge cap only (history and inverted-index merges are unaffected). Pass a positive integer to set an explicit cap, or `Inf` to leave the domain merge unbounded.
   * Default: unset (uses the value from `erigondb.toml`)
   * Use with care — an incorrect value may affect database structure.
+* `--commitment.plainValues` *(New in v3.6)*: On the first start of a fresh datadir, write commitment values in plain form (no shortened key references). This is a one-time, per-datadir choice — it is ignored once `erigondb.toml` exists.
+  * Default: `false`
 
 ### Pruning and Snapshots
 
@@ -2321,6 +2343,13 @@ Flags for configuring the parallel block execution engine.
   * Default: `true`
 * `--exec.state-cache`: Enable the executor's domain-shared read cache. Equivalent to `USE_STATE_CACHE=true`. Disable for cold-read performance measurements.
   * Default: `true`
+
+**Commitment-trie construction.** The following flags change how the commitment (state-root) trie is computed during execution. Both default off and are intended for comparing root hashes against a sequential sync before enabling broadly.
+
+* `--experimental.parallel-commitment` *(New in v3.6)* (experimental): Compute the commitment trie with the fully parallel `ParallelPatriciaHashed` implementation. Equivalent to the `COMMITMENT_PARALLEL=true` environment variable.
+  * Default: `false`
+* `--experimental.streaming-commitment` *(New in v3.6)* (experimental): Compute the commitment trie with the `StreamingCommitter`, which overlaps trie folding with block execution. If set, takes precedence over `--experimental.parallel-commitment`. No environment-variable equivalent.
+  * Default: `false`
 
 ### Caplin (Consensus Layer)
 
@@ -4013,7 +4042,7 @@ When running RPC Daemon in Local or Remote deployment mode, use this command to 
 ./build/bin/rpcdaemon --help
 ```
 
-The `--help` flag listing is reproduced below for your convenience.
+A summary of the available flags is shown below. It is not a verbatim dump — run `rpcdaemon --help` on your build for the authoritative, up-to-date listing (some defaults are host-dependent).
 
 ```text
 rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access
@@ -4023,7 +4052,7 @@ Usage:
 
 Flags:
       --datadir string                              path to Erigon working directory
-      --db.read.concurrency int                     Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU) (default 1408)
+      --db.read.concurrency int                     Maximum number of concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot, though RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000)
       --diagnostics.disabled                        Disable diagnostics
       --diagnostics.endpoint.addr string            Diagnostics HTTP server listening interface (default "127.0.0.1")
       --diagnostics.endpoint.port uint              Diagnostics HTTP server listening port (default 6062)

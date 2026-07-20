@@ -49,7 +49,7 @@ import (
 //
 // It's done by `renew` method: after `renew` call reader will see all changes committed after last `renew` call.
 //
-// Erigon has much Historical data - which is immutable: reading of historical data for hours still gives you consistant data.
+// Erigon has much Historical data - which is immutable: reading of historical data for hours still gives you consistent data.
 const MaxTxTTL = 60 * time.Second
 
 // KvServiceAPIVersion - use it to track changes in API
