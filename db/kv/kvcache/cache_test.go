@@ -194,9 +194,8 @@ func TestAPI(t *testing.T) {
 
 	get := func(key [20]byte, expectTxnID uint64) (res [1]chan []byte) {
 		wg := sync.WaitGroup{}
-		for i := range len(res) {
-			res[i] = make(chan []byte, 1) // Buffered channel to prevent deadlock
-			out := res[i]
+		for idx := range len(res) {
+			res[idx] = make(chan []byte, 1) // Buffered channel to prevent deadlock
 			wg.Go(func() {
 				err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 					if expectTxnID != tx.ViewID() {
@@ -213,7 +212,7 @@ func TestAPI(t *testing.T) {
 					}
 
 					select {
-					case out <- common.Copy(v):
+					case res[idx] <- common.Copy(v):
 					case <-ctx.Done():
 						panic("Context done while sending result")
 					}
