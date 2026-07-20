@@ -124,44 +124,103 @@ func TestCompleteLeafHashMatchesPerByteHeader(t *testing.T) {
 			}
 			require.NoError(t, err)
 
-			compactLen, compact0, ni := compactKeyParams(tc.key, tc.account)
-			kp := 0
-			kl := 1
-			if compactLen > 1 {
-				kp, kl = 1, compactLen
-			}
-			totalLen := kp + kl + val.DoubleRLPLen()
-
 			ref := NewHexPatriciaHashed(length.Addr, nil, TrieConfig{})
 			defer ref.Release()
-			singleton := tc.singleton || tc.account
-			canEmbed := !singleton && totalLen+rlp.ListPrefixLen(totalLen) < length.Hash
-
-			var writer io.Writer
-			if canEmbed {
-				ref.auxBuffer.Reset()
-				writer = ref.auxBuffer
-			} else {
-				ref.keccak.Reset()
-				writer = ref.keccak
-			}
-			require.NoError(t, writeLeafHeaderPerByte(writer, totalLen, compactLen, tc.key, compact0, ni))
-			var prefixBuf [8]byte
-			require.NoError(t, val.ToDoubleRLP(writer, prefixBuf[:]))
-
-			var want []byte
-			if canEmbed {
-				want = ref.auxBuffer.Bytes()
-			} else {
-				var hashBuf [33]byte
-				hashBuf[0] = 0x80 + length.Hash
-				_, err := ref.keccak.Read(hashBuf[1:])
-				require.NoError(t, err)
-				want = hashBuf[:]
-			}
+			want, err := referenceLeafHash(ref, tc.key, val, tc.account, tc.singleton || tc.account)
+			require.NoError(t, err)
 			require.Equal(t, want, got)
 		})
 	}
+}
+
+// The table above pins named shapes; this sweeps every key length the nibble
+// arrays permit, so an undersized leafRlpBuf cannot pass by staying below the
+// longest key the buffer is sized for.
+func TestCompleteLeafHashAllKeyLengths(t *testing.T) {
+	t.Parallel()
+
+	storageVal := make([]byte, 32)
+	for i := range storageVal {
+		storageVal[i] = byte(0xa0 + i)
+	}
+	accountVal := make([]byte, 110)
+	for i := range accountVal {
+		accountVal[i] = byte(i)
+	}
+
+	for keyLen := 1; keyLen <= len(cell{}.hashedExtension); keyLen++ {
+		for _, terminated := range []bool{false, true} {
+			for _, account := range []bool{false, true} {
+				key := make([]byte, keyLen)
+				for i := range key {
+					key[i] = byte(i % 16)
+				}
+				if terminated {
+					key[keyLen-1] = terminatorHexByte
+				}
+
+				hph := NewHexPatriciaHashed(length.Addr, nil, TrieConfig{})
+				var got []byte
+				var err error
+				var val rlp.RlpSerializable
+				if account {
+					val = rlp.RlpEncodedBytes(accountVal)
+					got, err = hph.accountLeafHashWithKey(nil, key, val)
+				} else {
+					storage := rlp.RlpSerializableBytes(storageVal)
+					val = storage
+					got, err = hph.leafHashWithKeyVal(nil, key, storage, true)
+				}
+				require.NoError(t, err, "keyLen=%d terminated=%v account=%v", keyLen, terminated, account)
+
+				ref := NewHexPatriciaHashed(length.Addr, nil, TrieConfig{})
+				want, err := referenceLeafHash(ref, key, val, account, true)
+				require.NoError(t, err)
+				require.Equal(t, want, got, "keyLen=%d terminated=%v account=%v", keyLen, terminated, account)
+
+				ref.Release()
+				hph.Release()
+			}
+		}
+	}
+}
+
+// referenceLeafHash reproduces completeLeafHash as it behaved before the header was
+// assembled in one buffer. It writes through the same witness wrapper production uses,
+// so enabling witness tracing cannot make the reference and the real path diverge.
+func referenceLeafHash(ref *HexPatriciaHashed, key []byte, val rlp.RlpSerializable, account, singleton bool) ([]byte, error) {
+	compactLen, compact0, ni := compactKeyParams(key, account)
+	kp, kl := 0, 1
+	if compactLen > 1 {
+		kp, kl = 1, compactLen
+	}
+	totalLen := kp + kl + val.DoubleRLPLen()
+	canEmbed := !singleton && totalLen+rlp.ListPrefixLen(totalLen) < length.Hash
+
+	var writer io.Writer
+	if canEmbed {
+		ref.auxBuffer.Reset()
+		writer = ref.auxBuffer
+	} else {
+		ref.keccak.Reset()
+		writer = ref.witness.leafWriter(ref.keccak)
+	}
+	if err := writeLeafHeaderPerByte(writer, totalLen, compactLen, key, compact0, ni); err != nil {
+		return nil, err
+	}
+	var prefixBuf [8]byte
+	if err := val.ToDoubleRLP(writer, prefixBuf[:]); err != nil {
+		return nil, err
+	}
+	if canEmbed {
+		return ref.auxBuffer.Bytes(), nil
+	}
+	hashBuf := make([]byte, 33)
+	hashBuf[0] = 0x80 + length.Hash
+	if _, err := ref.keccak.Read(hashBuf[1:]); err != nil {
+		return nil, err
+	}
+	return hashBuf, nil
 }
 
 // compactKeyParams mirrors the compact-encoding decisions leafHashWithKeyVal and
