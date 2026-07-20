@@ -427,9 +427,7 @@ func decodeLogsForStorage(s *rlp.Stream) ([]*Log, error) {
 }
 
 // DecodeRLP implements rlp.Decoder, and loads both consensus and implementation
-// fields of a receipt from an RLP stream. Hand-written (must mirror
-// storedReceiptRLP field order) to avoid reflection on the hot receipt-read path.
-// Decodes into a local first so r stays untouched on error.
+// fields of a receipt from an RLP stream
 func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 	var dec ReceiptForStorage
 	_, err := s.List()
