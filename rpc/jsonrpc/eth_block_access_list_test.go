@@ -50,12 +50,7 @@ func TestGetBlockAccessListRegeneratesPrunedBAL(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(
-		t,
-		execmoduletester.WithGenesisSpec(genesis),
-		execmoduletester.WithKey(privKey),
-		execmoduletester.WithAmsterdamBuilderContracts(),
-	)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {

@@ -338,9 +338,9 @@ func WithChainConfig(cfg *chain.Config) Option {
 	}
 }
 
-func WithAmsterdamBuilderContracts() Option {
+func WithoutAmsterdamBuilderContracts() Option {
 	return func(opts *options) {
-		opts.amsterdamBuilderContracts = true
+		opts.skipAmsterdamBuilderContracts = true
 	}
 }
 
@@ -382,21 +382,21 @@ func WithSentryProtocol(protocol uint) Option {
 }
 
 type options struct {
-	stepSize                  *uint64
-	experimentalBAL           bool
-	genesis                   *types.Genesis
-	chainConfig               *chain.Config
-	key                       *ecdsa.PrivateKey
-	engine                    rules.Engine
-	pruneMode                 *prune.Mode
-	withTxPool                bool
-	enableDomains             []kv.Domain
-	fcuBackgroundCommit       bool
-	fcuBackgroundPrune        bool
-	alwaysGenerateChangesets  *bool
-	maxReorgDepth             *uint64
-	sentryProtocol            uint
-	amsterdamBuilderContracts bool
+	stepSize                      *uint64
+	experimentalBAL               bool
+	genesis                       *types.Genesis
+	chainConfig                   *chain.Config
+	key                           *ecdsa.PrivateKey
+	engine                        rules.Engine
+	pruneMode                     *prune.Mode
+	withTxPool                    bool
+	enableDomains                 []kv.Domain
+	fcuBackgroundCommit           bool
+	fcuBackgroundPrune            bool
+	alwaysGenerateChangesets      *bool
+	maxReorgDepth                 *uint64
+	sentryProtocol                uint
+	skipAmsterdamBuilderContracts bool
 }
 
 func applyOptions(opts []Option) options {
@@ -421,11 +421,8 @@ func applyOptions(opts []Option) options {
 				address: {Balance: big.NewInt(1 * common.Ether)},
 			},
 		}
-		if opt.genesis.Config.IsAmsterdam(opt.genesis.Timestamp) {
-			addAmsterdamBuilderContracts(opt.genesis)
-		}
 	}
-	if opt.amsterdamBuilderContracts {
+	if !opt.skipAmsterdamBuilderContracts {
 		addAmsterdamBuilderContracts(opt.genesis)
 	}
 	// engine depends on genesis
@@ -449,8 +446,16 @@ func addAmsterdamBuilderContracts(genesis *types.Genesis) {
 	if genesis.Alloc == nil {
 		genesis.Alloc = types.GenesisAlloc{}
 	}
-	genesis.Alloc[genesis.Config.GetBuilderDepositContract().Value()] = types.GenesisAccount{Balance: new(big.Int), Code: misc.BuilderDepositRequestCode, Nonce: 1}
-	genesis.Alloc[genesis.Config.GetBuilderExitContract().Value()] = types.GenesisAccount{Balance: new(big.Int), Code: misc.BuilderExitRequestCode, Nonce: 1}
+	genesis.Alloc[genesis.Config.GetBuilderDepositContract().Value()] = types.GenesisAccount{
+		Balance: new(big.Int),
+		Code:    misc.BuilderDepositRequestCode,
+		Nonce:   1,
+	}
+	genesis.Alloc[genesis.Config.GetBuilderExitContract().Value()] = types.GenesisAccount{
+		Balance: new(big.Int),
+		Code:    misc.BuilderExitRequestCode,
+		Nonce:   1,
+	}
 }
 
 // New creates an ExecModuleTester. When called with no options, it uses

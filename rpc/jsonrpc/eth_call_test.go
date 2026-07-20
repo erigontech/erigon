@@ -693,12 +693,7 @@ func fundedBankGenesis(t *testing.T, cfg *chain.Config) (m *execmoduletester.Exe
 		gspec.GasLimit = 60_000_000
 	}
 
-	m = execmoduletester.New(
-		t,
-		execmoduletester.WithGenesisSpec(gspec),
-		execmoduletester.WithKey(bankKey),
-		execmoduletester.WithAmsterdamBuilderContracts(),
-	)
+	m = execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
 	return m, bankKey, bankAddress
 }
 
