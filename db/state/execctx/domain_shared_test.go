@@ -1743,7 +1743,13 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 	}
 }
 
-// Deleting an already-absent key must not record a redundant empty->empty history entry.
+// Deleting an already-absent key must not record a redundant empty->empty
+// history entry, for every prevVal shape an absent key can take:
+//   - nil (same batch, resolved via sd.mem GetLatest)
+//   - []byte{} (explicit — the EIP-161 0x04 path, rw_v3.go:356)
+//   - []byte{} from a flushed DB tombstone (fresh SharedDomains, getLatestFromDb)
+//
+// Covers all three domains DomainDel handles: Accounts, Storage, Code.
 func TestSharedDomain_DeleteAbsentKeyIsNoop(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -1751,6 +1757,7 @@ func TestSharedDomain_DeleteAbsentKeyIsNoop(t *testing.T) {
 	t.Parallel()
 
 	addr := common.HexToAddress("0x0000000000000000000000000000000000000004")
+	slot := common.HexToHash("0x5ac7102aad1a639901bc2657323aaed9e90e40c550747c49170f1c82fd664e4f")
 
 	acc := accounts3.Account{Nonce: 1, Balance: *uint256.NewInt(1000)}
 	cases := []struct {
@@ -1761,6 +1768,7 @@ func TestSharedDomain_DeleteAbsentKeyIsNoop(t *testing.T) {
 		value  []byte
 	}{
 		{"accounts", kv.AccountsDomain, kv.AccountsHistoryIdx, addr[:], accounts3.SerialiseV3(&acc)},
+		{"storage", kv.StorageDomain, kv.StorageHistoryIdx, composite(addr[:], slot[:]), []byte{0x01, 0x02, 0x03, 0x04}},
 		{"code", kv.CodeDomain, kv.CodeHistoryIdx, addr[:], []byte{0x60, 0x00, 0x60, 0x00}},
 	}
 
@@ -1775,7 +1783,6 @@ func TestSharedDomain_DeleteAbsentKeyIsNoop(t *testing.T) {
 
 			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 			require.NoError(t, err)
-			defer domains.Close()
 
 			const createTxNum, deleteTxNum uint64 = 1, 2
 
@@ -1785,13 +1792,27 @@ func TestSharedDomain_DeleteAbsentKeyIsNoop(t *testing.T) {
 			domains.SetTxNum(deleteTxNum)
 			require.NoError(t, domains.DomainDel(tc.domain, rwTx, tc.key, deleteTxNum, nil))
 
-			// Redundant deletes of the now-absent key (prevVal resolves to nil via GetLatest).
+			// Same-batch redundant deletes: nil, then an explicit empty slice.
 			domains.SetTxNum(3)
 			require.NoError(t, domains.DomainDel(tc.domain, rwTx, tc.key, 3, nil))
 			domains.SetTxNum(4)
-			require.NoError(t, domains.DomainDel(tc.domain, rwTx, tc.key, 4, nil))
+			require.NoError(t, domains.DomainDel(tc.domain, rwTx, tc.key, 4, []byte{}))
 
+			// Flush the tombstone to the tx, then a fresh SharedDomains: GetLatest
+			// now resolves prevVal from getLatestFromDb, which returns []byte{}
+			// (non-nil) for a tombstone — the shape that slipped past == nil.
 			require.NoError(t, domains.Flush(ctx, rwTx))
+			domains.Close()
+
+			domains2, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer domains2.Close()
+
+			domains2.SetTxNum(5)
+			require.NoError(t, domains2.DomainDel(tc.domain, rwTx, tc.key, 5, nil))
+			domains2.SetTxNum(6)
+			require.NoError(t, domains2.DomainDel(tc.domain, rwTx, tc.key, 6, []byte{}))
+			require.NoError(t, domains2.Flush(ctx, rwTx))
 
 			it, err := rwTx.IndexRange(tc.idx, tc.key, 0, -1, order.Asc, -1)
 			require.NoError(t, err)
@@ -1799,7 +1820,7 @@ func TestSharedDomain_DeleteAbsentKeyIsNoop(t *testing.T) {
 			require.NoError(t, err)
 
 			require.Equal(t, []uint64{createTxNum, deleteTxNum}, txNums,
-				"only the create and the real delete must be recorded; redundant deletes of an absent key must be no-ops")
+				"only the create and the real delete must be recorded; every redundant delete (same-batch nil, explicit []byte{}, and post-flush DB tombstone) must be a no-op")
 		})
 	}
 }
