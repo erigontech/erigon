@@ -265,7 +265,7 @@ func decodeBool(s *Stream, val reflect.Value) error {
 }
 
 func decodeString(s *Stream, val reflect.Value) error {
-	b, err := s.ViewBytes() // SetString copies, so the view never outlives the stream
+	b, err := s.ViewBytes() // the string(b) conversion below copies, so the view never outlives the stream
 	if err != nil {
 		return wrapStreamError(err, val.Type())
 	}
