@@ -26,8 +26,10 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// BenchmarkIntraBlockStateReset measures the per-tx Reset the executor runs
-// between transactions, at a few realistic touched-account counts.
+// BenchmarkIntraBlockStateReset measures the touch-then-Reset cycle the executor
+// runs per tx, at a few realistic touched-account counts. The touch phase stays
+// inside the timer on purpose: reusing a map's buckets saves the regrow cost on
+// the next fill, which timing Reset alone would hide.
 func BenchmarkIntraBlockStateReset(b *testing.B) {
 	for _, n := range []int{8, 64, 512} {
 		b.Run(fmt.Sprintf("accounts=%d", n), func(b *testing.B) {
