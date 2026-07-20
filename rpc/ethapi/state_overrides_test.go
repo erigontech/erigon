@@ -35,10 +35,12 @@ func TestStateOverrides_MovePrecompileDeterministicError(t *testing.T) {
 	want := fmt.Sprintf("account %s is not a precompile", addr1)
 
 	for i := range 500 {
-		ibs := state.New(state.NewNoopReader())
-		defer ibs.Release(false)
-		err := so.Override(ibs, vm.PrecompiledContracts{}, &chain.Rules{})
-		require.EqualError(t, err, want, "iteration %d: error must be deterministic", i)
+		func(i int) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Release(false)
+			err := so.Override(ibs, vm.PrecompiledContracts{}, &chain.Rules{})
+			require.EqualError(t, err, want, "iteration %d: error must be deterministic", i)
+		}(i)
 	}
 }
 
