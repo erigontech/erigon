@@ -573,9 +573,11 @@ type ptrTestOuter struct {
 	Payload []byte
 }
 
-// TestEncodeValueAndPointerAgree pins the invariant that callers rely on when they
-// switch rlp.Encode(w, x) to rlp.Encode(w, &x) to avoid boxing: a pointer encodes
-// exactly as the value it points at.
+// TestEncodeValueAndPointerAgree pins the invariant callers rely on when switching
+// rlp.Encode(w, x) to rlp.Encode(w, &x): a pointer encodes exactly as the value it
+// points at. Both forms box into `any`; the pointer form is cheaper because boxing a
+// pointer copies nothing and leaves the pointee addressable, sparing the encoder a
+// reflect.New copy of each [N]byte it holds.
 func TestEncodeValueAndPointerAgree(t *testing.T) {
 	inner := &ptrTestInner{
 		Address: ptrTestAddr{1, 2, 3},
