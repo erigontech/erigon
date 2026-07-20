@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"math/big"
@@ -309,6 +310,16 @@ func TestGetProof(t *testing.T) {
 		expectedErr string
 	}{
 		{
+			name:     "genesisBlockEOA",
+			addr:     bankAddr,
+			blockNum: 0,
+		},
+		{
+			name:     "genesisBlockNoAccount",
+			addr:     common.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
+			blockNum: 0,
+		},
+		{
 			name:     "currentBlockNoState",
 			addr:     contractAddr,
 			blockNum: 6,
@@ -427,6 +438,36 @@ func TestGetProof(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
+	statecfg.EnableHistoricalCommitment()
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+
+	ctx := context.Background()
+	tx, err := m.DB.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	pruneTo, err := m.BlockReader.TxnumReader().Min(ctx, tx, 3)
+	require.NoError(t, err)
+	c, err := tx.RwCursorDupSort(kv.TblCommitmentHistoryKeys)
+	require.NoError(t, err)
+	defer c.Close()
+	for {
+		k, _, err := c.First()
+		require.NoError(t, err)
+		if k == nil || binary.BigEndian.Uint64(k) >= pruneTo {
+			break
+		}
+		require.NoError(t, c.DeleteCurrentDuplicates())
+	}
+	c.Close()
+	require.NoError(t, tx.Commit())
+
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(0)))
+	require.ErrorIs(t, err, state.PrunedError)
+	require.Nil(t, proof)
 }
 
 func TestGetBlockByTimestampLatestTime(t *testing.T) {
@@ -841,6 +882,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 	stateReader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st := state.New(stateReader)
+	defer st.Release(false)
 	exist, err := st.Exist(accounts.InternAddress(contractAddr))
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #1")
@@ -848,6 +890,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 	stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, 2, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st = state.New(stateReader)
+	defer st.Release(false)
 	exist, err = st.Exist(accounts.InternAddress(contractAddr))
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
@@ -858,6 +901,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 	stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, 6, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st = state.New(stateReader)
+	defer st.Release(false)
 	createdFillers := 0
 	for _, pk := range fillerPublicKeys {
 		exist, err := st.Exist(accounts.InternAddress(crypto.PubkeyToAddress(*pk)))

@@ -205,7 +205,7 @@ func (st *TxnExecutor) buyGas(gasBailout bool) error {
 	if st.evm.ChainRules().IsCancun {
 		blobGasVal, overflow = u256.MulOverflow(st.evm.Context.BlobBaseFee, u256.U64(st.msg.BlobGas()))
 		if overflow {
-			return fmt.Errorf("%w: overflow converting blob gas: %v", ErrInsufficientFunds, &blobGasVal)
+			return fmt.Errorf("%w: overflow converting blob gas: %s", ErrInsufficientFunds, blobGasVal.String())
 		}
 		if err := st.gp.SubBlobGas(st.msg.BlobGas()); err != nil {
 			return err
@@ -224,8 +224,14 @@ func (st *TxnExecutor) buyGas(gasBailout bool) error {
 			if overflow {
 				return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From())
 			}
-			if st.evm.ChainRules().IsCancun {
-				maxBlobFee, overflow := u256.MulOverflow(*st.msg.MaxFeePerBlobGas(), u256.U64(st.msg.BlobGas()))
+			if st.evm.ChainRules().IsCancun && st.msg.BlobGas() > 0 {
+				// Call-style messages may leave this unset; types.NewMessage
+				// stores zero for a nil argument, so treat nil the same way.
+				var maxFeePerBlobGas uint256.Int
+				if f := st.msg.MaxFeePerBlobGas(); f != nil {
+					maxFeePerBlobGas = *f
+				}
+				maxBlobFee, overflow := u256.MulOverflow(maxFeePerBlobGas, u256.U64(st.msg.BlobGas()))
 				if overflow {
 					return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From())
 				}
@@ -239,11 +245,15 @@ func (st *TxnExecutor) buyGas(gasBailout bool) error {
 		if err != nil {
 			return err
 		}
-		if have, want := balance, balanceCheck; have.Cmp(&want) < 0 {
-			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From(), &have, &want)
+		if balance.Cmp(&balanceCheck) < 0 {
+			return fmt.Errorf("%w: address %v have %s want %s", ErrInsufficientFunds, st.msg.From(), balance.String(), balanceCheck.String())
 		}
-		st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy)
-		st.state.SubBalance(st.msg.From(), blobGasVal, tracing.BalanceDecreaseGasBuy)
+		if err := st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy); err != nil {
+			return err
+		}
+		if err := st.state.SubBalance(st.msg.From(), blobGasVal, tracing.BalanceDecreaseGasBuy); err != nil {
+			return err
+		}
 	}
 
 	if st.evm.Config().Tracer != nil && st.evm.Config().Tracer.OnGasChange != nil {
