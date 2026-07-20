@@ -243,8 +243,8 @@ func decodeRecord(s *rlp.Stream) (dec Record, raw []byte, err error) {
 		return dec, raw, err
 	}
 	// The rest of the record contains sorted k/v pairs.
-	pairsLen := rs.Remaining() / (1 + 1)           // shortest pair: 1-byte key + 1-byte value
-	dec.pairs = make([]pair, 0, min(16, pairsLen)) // crafted records can claim many tiny pairs. so, add hard-limit
+	pairsLen := rs.Remaining() / (1 + 1)                // shortest pair: 1-byte key + 1-byte value
+	dec.pairs = make([]pair, 0, int(min(16, pairsLen))) // records of many tiny pairs would over-reserve. so, cap the prealloc
 	var prevkey string
 	for i := 0; ; i++ {
 		key, err := rs.ViewBytes()
