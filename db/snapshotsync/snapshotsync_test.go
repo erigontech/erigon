@@ -509,3 +509,30 @@ func TestReceiptsSegmentRetentionCutoff(t *testing.T) {
 
 	assert.Equal(t, blocksRetentionCutoff(prune.MinimalMode, nil, head), receiptsSegmentRetentionCutoff(prune.MinimalMode, nil, head, rcacheSeg))
 }
+
+func TestGetMaxStepRangeInSnapshots(t *testing.T) {
+	t.Run("valid domain entries", func(t *testing.T) {
+		preverified := snapcfg.Preverified{
+			Items: []snapcfg.PreverifiedItem{
+				{Name: "domain/v1.0-accounts.0-10.kv"},
+				{Name: "domain/v1.0-accounts.10-50.kv"},
+				{Name: "domain/v1.0-storage.0-20.kv"},
+			},
+		}
+		maxTo, err := getMaxStepRangeInSnapshots(preverified)
+		assert.NoError(t, err)
+		assert.Equal(t, uint64(50), maxTo)
+	})
+
+	t.Run("malformed domain entry fails fast", func(t *testing.T) {
+		preverified := snapcfg.Preverified{
+			Items: []snapcfg.PreverifiedItem{
+				{Name: "domain/v1.0-accounts.0-10.kv"},
+				{Name: "domain/malformed-entry"},
+			},
+		}
+		_, err := getMaxStepRangeInSnapshots(preverified)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid domain snapshot filename")
+	})
+}

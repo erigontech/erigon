@@ -305,18 +305,17 @@ func (c *PagedWriter) initWorkers() {
 	c.pendingResults = make(map[int]*pageResult, queueDepth)
 	c.eg, c.egCtx = errgroup.WithContext(c.ctx)
 
-	var workerWg sync.WaitGroup
+	workerEg, workerCtx := errgroup.WithContext(c.egCtx)
 	for range c.numWorkers {
-		done := make(chan struct{})
-		workerWg.Go(func() {
-			c.eg.Go(func() error {
-				defer close(done)
-				return c.compressionWorker(c.egCtx)
-			})
-			<-done
+		workerEg.Go(func() error {
+			return c.compressionWorker(workerCtx)
 		})
 	}
-	go func() { workerWg.Wait(); close(c.resultCh) }()
+	c.eg.Go(func() error {
+		err := workerEg.Wait()
+		close(c.resultCh)
+		return err
+	})
 	c.eg.Go(c.reducer)
 }
 
