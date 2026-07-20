@@ -68,6 +68,10 @@ func TestCompleteLeafHashMatchesPerByteHeader(t *testing.T) {
 	}
 	maxKey[64] = terminatorHexByte
 
+	// Storage keys reach an even length by starting deeper, never by dropping the
+	// terminator, which the call sites always append.
+	evenKey := maxKey[1:]
+
 	// accountLeafHashWithKey takes its longer compactLen (len/2+1 rather than
 	// (len-1)/2+1) when the key carries no terminator, so that is the branch the
 	// header buffer must be sized for.
@@ -96,7 +100,7 @@ func TestCompleteLeafHashMatchesPerByteHeader(t *testing.T) {
 	}{
 		{"storage max-length key, singleton", maxKey, true, false},
 		{"storage max-length key, embeddable", maxKey, false, false},
-		{"storage even-length key", noTermEvenKey, false, false},
+		{"storage even-length key", evenKey, false, false},
 		{"storage short key", shortKey, false, false},
 		{"account max-length key", maxKey, true, true},
 		{"account max-length key, no terminator", noTermOddKey, true, true},
