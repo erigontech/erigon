@@ -105,6 +105,7 @@ func BenchmarkVersionedExecReads(b *testing.B) {
 
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 
 	b.ReportAllocs()
 	b.ResetTimer()

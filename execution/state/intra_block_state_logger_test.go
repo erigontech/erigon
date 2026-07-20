@@ -110,6 +110,7 @@ func TestStateLogger(t *testing.T) {
 			defer mockCtl.Finish()
 			mt := mockTracer{}
 			state := New(NewReaderV3(tx))
+			defer state.Release(false)
 			state.SetHooks(mt.Hooks())
 
 			tt.run(state)

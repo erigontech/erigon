@@ -30,6 +30,7 @@ func TestEIP8246_PreservedSD_ReadsAsEmptyCodeAccountInLaterTx(t *testing.T) {
 	vm := NewVersionMap(nil)
 	reader := newAccountStateReader()
 	tx0 := New(reader)
+	defer tx0.Release(false)
 	tx0.SetTxContext(0, 0)
 	tx0.SetVersion(0)
 	tx0.SetVersionMap(vm)
@@ -42,6 +43,7 @@ func TestEIP8246_PreservedSD_ReadsAsEmptyCodeAccountInLaterTx(t *testing.T) {
 	require.NoError(t, tx0.MakeWriteSet(&chain.Rules{IsAmsterdam: true}, NewNoopWriter()))
 	vm.FlushVersionedWrites(tx0.VersionedWrites(false), true, "")
 	tx1 := New(reader)
+	defer tx1.Release(false)
 	tx1.SetTxContext(0, 1)
 	tx1.SetVersion(0)
 	tx1.SetVersionMap(vm)
@@ -72,6 +74,7 @@ func TestEIP8246_FinalizeTx_PreservedBalanceCarriesToLaterTxCreate(t *testing.T)
 
 	rules := &chain.Rules{IsAmsterdam: true}
 	ibs := New(reader)
+	defer ibs.Release(false)
 
 	ibs.SetTxContext(1, 0)
 	_, err := ibs.Selfdestruct(addr, true /* preserveBalance */)
@@ -104,6 +107,7 @@ func TestEIP8246_VersionedAccount_LaterBalanceWriteDoesNotSkipReconstruction(t *
 	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(2), true)
 
 	ibs := New(reader)
+	defer ibs.Release(false)
 	ibs.SetTxContext(0, 2)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -133,6 +137,7 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		reader := newAccountStateReader()
 		vm := NewVersionMap(nil)
 		tx0 := New(reader)
+		defer tx0.Release(false)
 		tx0.SetTxContext(0, 0)
 		tx0.SetVersion(0)
 		tx0.SetVersionMap(vm)
@@ -144,6 +149,7 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		require.NoError(t, tx0.MakeWriteSet(rules, NewNoopWriter()))
 		vm.FlushVersionedWrites(tx0.VersionedWrites(false), true, "")
 		tx1 := New(reader)
+		defer tx1.Release(false)
 		tx1.SetTxContext(0, 1)
 		tx1.SetVersion(0)
 		tx1.SetVersionMap(vm)
@@ -163,6 +169,7 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		t.Parallel()
 		reader := newAccountStateReader()
 		ibs := New(reader)
+		defer ibs.Release(false)
 		ibs.eip8246 = true
 		ibs.SetTxContext(1, 0)
 		require.NoError(t, ibs.CreateAccount(addr, true))
@@ -200,6 +207,7 @@ func TestEIP8246_PreservedAccount_OverlaysLaterFieldWrites(t *testing.T) {
 	vm.WriteNonce(addr, laterVer, 7, true)
 	vm.WriteCodeHash(addr, laterVer, laterCodeHash, true)
 	ibs := New(reader)
+	defer ibs.Release(false)
 	ibs.SetTxContext(0, 2)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)

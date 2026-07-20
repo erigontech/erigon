@@ -77,6 +77,7 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 
 	t.Run("rejected tx preserves gas pool", func(t *testing.T) {
 		ibs := state.New(state.NewNoopReader())
+		defer ibs.Release(false)
 		evm := newTestEVM(ibs, cfg, blockGasLimit)
 		msg := newSimpleTransferMsg(sender, recipient, params.MaxTxnGasLimit+1, true)
 		gp := new(GasPool).AddGas(blockGasLimit)
@@ -91,6 +92,7 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 
 	t.Run("valid tx debits gas pool normally", func(t *testing.T) {
 		ibs := state.New(state.NewNoopReader())
+		defer ibs.Release(false)
 		evm := newTestEVM(ibs, cfg, blockGasLimit)
 		msg := newSimpleTransferMsg(sender, recipient, params.MaxTxnGasLimit, true)
 		gp := new(GasPool).AddGas(blockGasLimit)
@@ -108,6 +110,7 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 		// Simulate the original bug scenario: a rejected tx should not prevent
 		// a subsequent valid tx from succeeding due to pool exhaustion.
 		ibs := state.New(state.NewNoopReader())
+		defer ibs.Release(false)
 		gp := new(GasPool).AddGas(blockGasLimit)
 
 		// First: a tx that exceeds the cap — must be rejected without touching pool.
@@ -151,6 +154,7 @@ func TestEIP8037_GasPoolTracksRegularAndStateIndependently(t *testing.T) {
 	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
 
 	ibs := state.New(state.NewNoopReader())
+	defer ibs.Release(false)
 	gp := NewGasPool(blockGasLimit, 0)
 	blockCtx := evmtypes.BlockContext{
 		CanTransfer: CanTransfer,
@@ -239,6 +243,7 @@ func TestPreCheckErrorOrdering_GasBeforeFeeCap(t *testing.T) {
 
 	t.Run("tx-gas > block-gas-limit AND fee-cap < baseFee returns ErrGasLimitReached", func(t *testing.T) {
 		ibs := state.New(state.NewNoopReader())
+		defer ibs.Release(false)
 		blockCtx := evmtypes.BlockContext{
 			CanTransfer: CanTransfer,
 			Transfer:    misc.Transfer,
