@@ -133,5 +133,6 @@ func BenchmarkDecodeStringFields(b *testing.B) {
 		if err := DecodeBytes(encoded, &dst); err != nil {
 			b.Fatal(err)
 		}
+		_ = dst
 	}
 }
