@@ -45,10 +45,10 @@ class RenderTextTests(unittest.TestCase):
         self.assertIn("{/* ds:mainnet:minimal */}360 GB{/* ds:end */}", out)
         self.assertIn("{/* ds:gnosis:archive */}605 GB{/* ds:end */}", out)
 
-    def test_date_uses_latest_measured_at(self):
+    def test_date_uses_oldest_measured_at(self):
         out = r.render_text(PAGE, DATA)
-        # max of 2026-06-02 / 2026-06-02 / 2026-05-01 = 2026-06-02
-        self.assertIn("{/* ds-date:mainnet */}2026-06-02{/* ds:end */}", out)
+        # min of 2026-06-02 / 2026-06-02 / 2026-05-01 = 2026-05-01 (honest "as of")
+        self.assertIn("{/* ds-date:mainnet */}2026-05-01{/* ds:end */}", out)
 
     def test_preserves_surrounding_table_text(self):
         out = r.render_text(PAGE, DATA)
@@ -61,20 +61,77 @@ class RenderTextTests(unittest.TestCase):
         twice = r.render_text(once, DATA)
         self.assertEqual(once, twice)
 
-    def test_markers_with_no_data_change_is_noop_on_matching_page(self):
-        rendered = r.render_text(PAGE, DATA)
-        # re-rendering the already-correct page yields no further change
-        self.assertEqual(rendered, r.render_text(rendered, DATA))
+    # --- fail-closed: missing data ---
 
     def test_missing_value_fails_closed(self):
         page = "| X | {/* ds:mainnet:nope */}?{/* ds:end */} |\n"
         with self.assertRaises(SystemExit):
             r.render_text(page, DATA)
 
-    def test_missing_network_date_fails_closed(self):
-        page = "_as of {/* ds-date:polygon */}?{/* ds:end */}._\n"
+    def test_no_value_markers_fails_closed(self):
+        page = "_as of {/* ds-date:mainnet */}?{/* ds:end */}._\n"
         with self.assertRaises(SystemExit):
             r.render_text(page, DATA)
+
+    def test_empty_networks_fails_closed(self):
+        with self.assertRaises(SystemExit):
+            r.render_text(PAGE, {"networks": {}})
+
+    # --- fail-closed: malformed markers (the silent-stale hazard) ---
+
+    def test_spacing_typo_marker_fails_closed(self):
+        # missing spaces around ds: — must NOT be silently skipped
+        page = "| X | {/*ds:mainnet:archive*/}1.77 TB{/*ds:end*/} |\n"
+        with self.assertRaises(SystemExit):
+            r.render_text(page, DATA)
+
+    def test_newline_wrapped_marker_fails_closed(self):
+        page = "| X | {/* ds:mainnet:archive */}\n1.77 TB\n{/* ds:end */} |\n"
+        with self.assertRaises(SystemExit):
+            r.render_text(page, DATA)
+
+    def test_dangling_closer_fails_closed(self):
+        page = (
+            "| A | {/* ds:mainnet:archive */}1.77 TB{/* ds:end */} |\n"
+            "| stray {/* ds:end */} |\n"
+        )
+        with self.assertRaises(SystemExit):
+            r.render_text(page, DATA)
+
+    def test_nested_marker_fails_closed(self):
+        page = (
+            "{/* ds:mainnet:archive */}{/* ds:mainnet:full */}x{/* ds:end */}\n"
+        )
+        with self.assertRaises(SystemExit):
+            r.render_text(page, DATA)
+
+    # --- fail-closed: bad data values ---
+
+    def test_non_iso_date_fails_closed(self):
+        data = {"networks": {"mainnet": {
+            "archive": {"display": "2.03 TB", "measured_at": "2026-6-2"},
+        }}}
+        page = "{/* ds:mainnet:archive */}x{/* ds:end */} {/* ds-date:mainnet */}y{/* ds:end */}\n"
+        with self.assertRaises(SystemExit):
+            r.render_text(page, data)
+
+    def test_display_with_braces_fails_closed(self):
+        data = {"networks": {"mainnet": {"archive": {"display": "1 {x} TB"}}}}
+        page = "{/* ds:mainnet:archive */}x{/* ds:end */}\n"
+        with self.assertRaises(SystemExit):
+            r.render_text(page, data)
+
+    def test_empty_display_fails_closed(self):
+        data = {"networks": {"mainnet": {"archive": {"display": ""}}}}
+        page = "{/* ds:mainnet:archive */}x{/* ds:end */}\n"
+        with self.assertRaises(SystemExit):
+            r.render_text(page, data)
+
+    def test_non_dict_mode_with_date_marker_fails_cleanly(self):
+        data = {"networks": {"mainnet": {"archive": "1.77 TB"}}}
+        page = "{/* ds:mainnet:archive */}x{/* ds:end */} {/* ds-date:mainnet */}y{/* ds:end */}\n"
+        with self.assertRaises(SystemExit):
+            r.render_text(page, data)
 
 
 if __name__ == "__main__":

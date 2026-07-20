@@ -15,6 +15,11 @@ This script projects that JSON onto the page's markers:
 
 Run it after editing the JSON; run with --check in CI to fail if they drift.
 
+The renderer is deliberately fail-closed: a marker that does not match the exact
+grammar (spacing typo, wrapped across a newline, nested, unpaired) is a hard
+error rather than a silent skip — otherwise `--check` could stay green while a
+cell quietly went stale, defeating the whole point of the static-marker scheme.
+
 Usage:
     python3 render-disk-sizes.py            # rewrite the page in place
     python3 render-disk-sizes.py --check    # exit 1 if the page is out of sync
@@ -22,22 +27,89 @@ Usage:
 import argparse
 import json
 import re
+from datetime import date
 from pathlib import Path
 
+# Exact, single-line marker grammar. `val` cannot span newlines so a wrapped
+# marker fails the completeness check below instead of being silently skipped.
 VALUE_RE = re.compile(
-    r"\{/\* ds:(?P<net>[a-z0-9]+):(?P<mode>[a-z]+) \*/\}(?P<val>.*?)\{/\* ds:end \*/\}"
+    r"\{/\* ds:(?P<net>[a-z0-9]+):(?P<mode>[a-z]+) \*/\}(?P<val>[^\n\r]*?)\{/\* ds:end \*/\}"
 )
 DATE_RE = re.compile(
-    r"\{/\* ds-date:(?P<net>[a-z0-9]+) \*/\}(?P<val>.*?)\{/\* ds:end \*/\}"
+    r"\{/\* ds-date:(?P<net>[a-z0-9]+) \*/\}(?P<val>[^\n\r]*?)\{/\* ds:end \*/\}"
 )
+# Any MDX comment, used to find *all* disk-size marker tokens (even malformed
+# ones) so unpaired/typo'd markers can be detected rather than ignored.
+COMMENT_RE = re.compile(r"\{/\*(?P<body>.*?)\*/\}", re.DOTALL)
+
+
+def _is_ds_token(body: str) -> bool:
+    b = body.strip()
+    return b.startswith("ds:") or b.startswith("ds-date:")
+
+
+def _validate_display(net: str, mode: str, display) -> str:
+    if not isinstance(display, str) or not display.strip():
+        raise SystemExit(
+            f"Error: networks.{net}.{mode}.display must be a non-empty string"
+        )
+    if any(c in display for c in "{}\n\r"):
+        raise SystemExit(
+            f"Error: networks.{net}.{mode}.display contains disallowed "
+            f"characters (no braces or newlines): {display!r}"
+        )
+    return display
+
+
+def _validate_date(net: str, mode: str, value) -> str:
+    if not isinstance(value, str):
+        raise SystemExit(f"Error: networks.{net}.{mode}.measured_at must be a string")
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        raise SystemExit(
+            f"Error: networks.{net}.{mode}.measured_at is not valid "
+            f"YYYY-MM-DD: {value!r}"
+        )
+    if value != parsed.isoformat():
+        raise SystemExit(
+            f"Error: networks.{net}.{mode}.measured_at must be zero-padded "
+            f"YYYY-MM-DD: {value!r}"
+        )
+    return value
 
 
 def render_text(text: str, data: dict) -> str:
     """Return `text` with every disk-size marker set from `data`.
 
-    Raises SystemExit if a marker references data missing from the JSON —
-    fail-closed rather than silently leaving a stale value."""
-    networks = data.get("networks", {})
+    Fail-closed: raises SystemExit on missing data, malformed/unpaired markers,
+    or unsafe values, so a broken page can never silently pass `--check`."""
+    networks = data.get("networks")
+    if not isinstance(networks, dict) or not networks:
+        raise SystemExit("Error: disk-sizes.json has no non-empty 'networks' object")
+
+    value_spans = list(VALUE_RE.finditer(text))
+    date_spans = list(DATE_RE.finditer(text))
+
+    # Completeness guard: every disk-size marker comment must belong to a
+    # well-formed value/date pair. Each pair uses exactly two comment tokens
+    # (opener + `ds:end` closer), so any surplus token means a malformed or
+    # unpaired marker (spacing typo, newline-wrapped, nested, dangling closer).
+    ds_tokens = [m for m in COMMENT_RE.finditer(text) if _is_ds_token(m.group("body"))]
+    if not value_spans:
+        raise SystemExit("Error: no disk-size value markers found in the page")
+    expected_tokens = 2 * (len(value_spans) + len(date_spans))
+    if len(ds_tokens) != expected_tokens:
+        raise SystemExit(
+            "Error: malformed or unpaired disk-size marker(s) in the page — "
+            f"found {len(ds_tokens)} marker comment(s) but only "
+            f"{len(value_spans) + len(date_spans)} well-formed pair(s). Check for "
+            "spacing typos, markers wrapped across a newline, or a stray "
+            "{/* ds:end */}."
+        )
+    for m in value_spans + date_spans:
+        if "{/*" in m.group("val"):
+            raise SystemExit("Error: a nested disk-size marker was detected")
 
     def value_repl(m: re.Match) -> str:
         net, mode = m.group("net"), m.group("mode")
@@ -48,20 +120,27 @@ def render_text(text: str, data: dict) -> str:
                 f"Error: disk-sizes.json has no display value for "
                 f"networks.{net}.{mode} (referenced by a marker in the page)"
             )
+        display = _validate_display(net, mode, display)
         return "{/* ds:" + net + ":" + mode + " */}" + display + "{/* ds:end */}"
 
     def date_repl(m: re.Match) -> str:
         net = m.group("net")
         modes = networks.get(net)
-        if not modes:
+        if not isinstance(modes, dict) or not modes:
             raise SystemExit(
                 f"Error: disk-sizes.json has no network '{net}' "
                 f"(referenced by a date marker in the page)"
             )
-        dates = [v.get("measured_at") for v in modes.values() if v.get("measured_at")]
+        dates = [
+            _validate_date(net, mode, v["measured_at"])
+            for mode, v in modes.items()
+            if isinstance(v, dict) and v.get("measured_at")
+        ]
         if not dates:
             raise SystemExit(f"Error: no measured_at for any '{net}' mode")
-        return "{/* ds-date:" + net + " */}" + max(dates) + "{/* ds:end */}"
+        # Use the OLDEST date: the caption covers every mode in the table, so
+        # "measured as of <oldest>" is honest — max() would overstate freshness.
+        return "{/* ds-date:" + net + " */}" + min(dates) + "{/* ds:end */}"
 
     text = VALUE_RE.sub(value_repl, text)
     text = DATE_RE.sub(date_repl, text)
@@ -86,7 +165,10 @@ def main() -> None:
     if not page_path.exists():
         raise SystemExit(f"Error: {page_path} not found")
 
-    data = json.loads(json_path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"Error: malformed {json_path}: {e}") from None
     original = page_path.read_text(encoding="utf-8")
     rendered = render_text(original, data)
 
