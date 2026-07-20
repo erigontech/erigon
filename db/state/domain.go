@@ -489,13 +489,20 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
 	}
+	isCommit := w.valsTable == kv.TblCommitmentVals
+	hStart := time.Now()
 	if err := w.h.Flush(ctx, tx); err != nil {
 		return err
 	}
+	histNs := time.Since(hStart).Nanoseconds()
+	domStart := time.Now()
 
 	if w.largeVals {
 		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
+		}
+		if isCommit {
+			addCommitInExecFlush(time.Since(domStart).Nanoseconds(), histNs)
 		}
 		w.Close()
 		return nil
@@ -517,6 +524,9 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return valuesCursor.PutCurrent(k, v) // DeleteCurrent+Put
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
+	}
+	if isCommit {
+		addCommitInExecFlush(time.Since(domStart).Nanoseconds(), histNs)
 	}
 	w.Close()
 
@@ -822,10 +832,21 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 	started := time.Now()
 	defer mxCollateTook.ObserveDuration(started)
 
+	var histCollateNs int64
+	if d.FilenameBase == kv.CommitmentDomain.String() {
+		defer func() {
+			if err == nil {
+				addCommitFileBuild(time.Since(started).Nanoseconds()-histCollateNs, histCollateNs)
+			}
+		}()
+	}
+
+	hCollateStart := time.Now()
 	coll.HistoryCollation, err = d.History.collate(ctx, step, txFrom, txTo, roTx)
 	if err != nil {
 		return Collation{}, err
 	}
+	histCollateNs = time.Since(hCollateStart).Nanoseconds()
 
 	closeCollation := true
 	defer func() {
@@ -1038,10 +1059,12 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 		mxBuildTook.ObserveDuration(start)
 	}()
 
+	hBuildStart := time.Now()
 	hStaticFiles, err := d.History.buildFiles(ctx, step, collation.HistoryCollation, ps)
 	if err != nil {
 		return StaticFiles{}, err
 	}
+	histBuildNs := time.Since(hBuildStart).Nanoseconds()
 	valuesComp := collation.valuesComp
 
 	var (
@@ -1115,6 +1138,10 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 		}
 	}
 	closeComp = false
+	if d.FilenameBase == kv.CommitmentDomain.String() {
+		addCommitFileBuild(time.Since(start).Nanoseconds()-histBuildNs, histBuildNs)
+		logCommitMetrics(d.logger, fmt.Sprintf("buildFiles step=%d", step))
+	}
 	return StaticFiles{
 		HistoryFiles:    hStaticFiles,
 		valuesDecomp:    valuesDecomp,

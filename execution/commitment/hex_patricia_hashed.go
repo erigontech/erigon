@@ -149,6 +149,11 @@ type HexPatriciaHashed struct {
 	mountWall  int16 // depth the mounted subtree folds down to (split depth + 1); foldMounted stops here
 
 	memoizationOff bool // if true, do not rely on memoized hashes
+
+	// deembed selects the deembedded branch persistence layout: each branch's
+	// leaf children are stored under their own key rather than inlined in the
+	// branch value. Root hash is identical to the embedded layout.
+	deembed bool
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
@@ -203,6 +208,14 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext, cfg TrieConf
 // applyConfig stores the config and applies its fields to the trie.
 func (hph *HexPatriciaHashed) applyConfig(cfg TrieConfig) {
 	hph.cfg = cfg
+	hph.deembed = cfg.Variant == VariantDeembeddedHexPatricia
+	if hph.deembed {
+		// The deembed collect/decode path is custom and does not go through the
+		// deferred branch-encoder queue. Warmup is supported via a deembed-aware
+		// branch walk (see Warmuper.warmupKey).
+		cfg.DeferBranchUpdates = false
+		hph.cfg = cfg
+	}
 	hph.branchEncoder.setDeferUpdates(cfg.DeferBranchUpdates)
 	hph.branchEncoder.maxDeferredUpdates = DefaultMaxDeferredUpdates
 	hph.leaveDeferredForCaller = cfg.LeaveDeferredForCaller
@@ -1465,6 +1478,9 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 // into grid[row], records its touch/after maps, and derives hashed keys for present cells
 // at depth. The on-disk read and its flush/metrics handling stay with each caller.
 func (hph *HexPatriciaHashed) decodeBranchIntoRow(row int, depth int16, branch []byte, deleted bool) error {
+	if hph.deembed {
+		return hph.decodeDeembedBranchIntoRow(row, depth, branch, deleted)
+	}
 	maps, err := DecodeBranchInto(branch, deleted, &hph.grid[row])
 	if err != nil {
 		return err
@@ -1674,7 +1690,11 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 		return err
 	}
 
-	if hph.branchEncoder.DeferUpdatesEnabled() {
+	if hph.deembed {
+		if err := hph.collectDeembedBranch(updateKey, row, hph.touchMap[row], hph.afterMap[row]); err != nil {
+			return fmt.Errorf("failed to collect deembed branch update: %w", err)
+		}
+	} else if hph.branchEncoder.DeferUpdatesEnabled() {
 		if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData, !hph.branchBefore[row]); err != nil {
 			return fmt.Errorf("failed to collect deferred branch update: %w", err)
 		}
@@ -1958,6 +1978,12 @@ func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell 
 // If evictCache is true, it also evicts the branch from the cache.
 func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int, evictCache bool) error {
 	if hph.branchBefore[row] {
+		if hph.deembed {
+			if err := hph.deleteDeembedBranch(updateKey, hph.touchMap[row]); err != nil {
+				return fmt.Errorf("failed to encode deembed branch deletion: %w", err)
+			}
+			return nil
+		}
 		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil, false); err != nil {
 			return fmt.Errorf("failed to encode leaf node update: %w", err)
 		}
@@ -2504,7 +2530,10 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	defer func() { logEvery.Stop() }()
 
-	// Setup warmup if configured
+	// Setup warmup if configured. The warmuper walks the branch layout to
+	// prefetch pages along each key path; it uses a deembed-aware walk when the
+	// trie stores branch children under separate keys.
+	warmup.Deembed = hph.deembed
 	var warmuper *Warmuper
 	if warmup.Enabled {
 		warmuper = NewWarmuper(ctx, warmup)

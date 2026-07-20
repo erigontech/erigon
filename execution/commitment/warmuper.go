@@ -42,6 +42,7 @@ type WarmupConfig struct {
 	NumWorkers int
 	MaxDepth   int
 	LogPrefix  string
+	Deembed    bool // walk the deembedded branch layout (children under separate keys)
 }
 
 const WarmupMaxDepth = 128 // covers full key paths for both account keys (64 nibbles) and storage keys (128 nibbles)
@@ -60,6 +61,7 @@ type Warmuper struct {
 	maxDepth   int
 	numWorkers int
 	logPrefix  string
+	deembed    bool
 
 	// Work channel for incoming keys
 	work chan warmupWorkItem
@@ -97,6 +99,7 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 		maxDepth:   cfg.MaxDepth,
 		numWorkers: cfg.NumWorkers,
 		logPrefix:  cfg.LogPrefix,
+		deembed:    cfg.Deembed,
 	}
 	w.cond = sync.NewCond(&w.mu)
 	return w
@@ -172,9 +175,17 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		nextNibble := int(hashedKey[depth])
 
 		branchData = branchData[2:] // skip touch map
+		childBit := uint16(1) << nextNibble
+
+		if w.deembed {
+			if advance, cont := w.warmupDeembedStep(trieCtx, branchData, hashedKey, depth, nextNibble, childBit); cont {
+				depth += advance
+				continue
+			}
+			break
+		}
 
 		bitmap := binary.BigEndian.Uint16(branchData[0:2])
-		childBit := uint16(1) << nextNibble
 
 		if bitmap&childBit == 0 {
 			break
@@ -218,6 +229,57 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 
 		depth++
 	}
+}
+
+// warmupDeembedStep advances one branch level in the deembedded layout.
+// branchData has the leading touch map stripped: [afterMap 2][leafMap 2][body].
+// The body holds, per present child ascending, sub-branch cells
+// [hashLen 1][hash][extLen 1][ext]; leaf children contribute nothing (their
+// data is at compact(prefix||nibble)). Returns (nibbles to advance, keepGoing).
+func (w *Warmuper) warmupDeembedStep(trieCtx PatriciaContext, branchData, hashedKey []byte, depth, nextNibble int, childBit uint16) (int, bool) {
+	if len(branchData) < 4 {
+		return 0, false
+	}
+	afterMap := binary.BigEndian.Uint16(branchData[0:2])
+	if afterMap&childBit == 0 {
+		return 0, false
+	}
+	leafMap := binary.BigEndian.Uint16(branchData[2:4])
+	if leafMap&childBit != 0 {
+		// Leaf child: warm its standalone record, then the path terminates.
+		childNib := make([]byte, depth+1)
+		copy(childNib, hashedKey[:depth])
+		childNib[depth] = byte(nextNibble)
+		if _, _, err := trieCtx.Branch(nibbles.HexToCompact(childNib)); err != nil {
+			log.Debug(fmt.Sprintf("[%s][warmup] deembed leaf child", w.logPrefix), "error", err)
+		}
+		return 0, false
+	}
+	// Sub-branch child: walk the body up to nextNibble to read its extension.
+	pos := 4
+	childExt := 0
+	for n := 0; n <= nextNibble; n++ {
+		bit := uint16(1) << uint(n)
+		if afterMap&bit == 0 || leafMap&bit != 0 {
+			continue // absent, or leaf (no body bytes)
+		}
+		if pos >= len(branchData) {
+			break
+		}
+		hashLen := int(branchData[pos])
+		pos++
+		pos += hashLen
+		if pos >= len(branchData) {
+			break
+		}
+		extLen := int(branchData[pos])
+		pos++
+		if n == nextNibble {
+			childExt = extLen
+		}
+		pos += extLen
+	}
+	return 1 + childExt, true
 }
 
 // WarmKey submits a hashed key for warming. Call Start() first.
