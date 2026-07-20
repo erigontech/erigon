@@ -456,14 +456,13 @@ func ApplyDeferredBranchUpdates(
 	errs := make([]error, numWorkers)
 	var wg sync.WaitGroup
 	for w := 0; w < numWorkers; w++ {
+		w := w
 		lo := w * chunk
 		hi := min(lo+chunk, len(deferred))
 		if lo >= hi {
 			break
 		}
-		wg.Add(1)
-		go func(w, lo, hi int) {
-			defer wg.Done()
+		wg.Go(func() {
 			merger := workerMergerPool.Get().(*BranchMerger)
 			defer workerMergerPool.Put(merger)
 			for i := lo; i < hi; i++ {
@@ -472,7 +471,7 @@ func ApplyDeferredBranchUpdates(
 					return
 				}
 			}
-		}(w, lo, hi)
+		})
 	}
 	wg.Wait()
 	for _, err := range errs {

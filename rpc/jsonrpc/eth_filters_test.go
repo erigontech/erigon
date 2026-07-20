@@ -141,16 +141,15 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 	// make a lot of subscriptions
 	wg := sync.WaitGroup{}
 	for i := range 1000 {
-		wg.Add(1)
-		go func(idx int) {
+		idx := i
+		wg.Go(func() {
 			_, id, _ := ff.SubscribeLogs(32, crit, "")
 			defer func() {
 				time.Sleep(100 * time.Nanosecond)
 				ff.UnsubscribeLogs(id)
-				wg.Done()
 			}()
 			ids[idx] = id
-		}(i)
+		})
 	}
 	wg.Wait()
 }
