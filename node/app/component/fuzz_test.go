@@ -105,9 +105,7 @@ func TestFuzzLifecycleConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	opsPerWorker := numOps / numWorkers
 	for w := range numWorkers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			start := w * opsPerWorker
 			end := start + opsPerWorker
 			if w == numWorkers-1 {
@@ -133,7 +131,7 @@ func TestFuzzLifecycleConcurrent(t *testing.T) {
 					}
 				}()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -263,9 +261,7 @@ func TestFuzzAddRemoveConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	opsPerWorker := numOps / numWorkers
 	for w := range numWorkers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			start := w * opsPerWorker
 			end := start + opsPerWorker
 			if w == numWorkers-1 {
@@ -299,7 +295,7 @@ func TestFuzzAddRemoveConcurrent(t *testing.T) {
 					}
 				}()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

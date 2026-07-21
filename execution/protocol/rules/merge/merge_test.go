@@ -17,10 +17,12 @@
 package merge
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -135,4 +137,48 @@ func TestNullParentBeaconBlockRootDoesNotPanic(t *testing.T) {
 	mergeEngine := New(eth1Engine)
 	err := mergeEngine.Initialize(chainConfig, chainReader, header, &intraBlockState, systemCallCustom, logger, &tracer)
 	assert.NoError(t, err)
+}
+
+// withdrawalErrReader fails the account read for one address, standing in for a
+// domain read failure on a cold withdrawal recipient.
+type withdrawalErrReader struct {
+	state.StateReader
+	fail accounts.Address
+	err  error
+}
+
+func (r withdrawalErrReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if addr == r.fail {
+		return nil, r.err
+	}
+	return r.StateReader.ReadAccountData(addr)
+}
+
+// TestFinalizeWithdrawalStateErrorPropagates verifies a state failure while
+// crediting a withdrawal aborts Finalize instead of silently skipping it.
+func TestFinalizeWithdrawalStateErrorPropagates(t *testing.T) {
+	chainConfig := chainspec.Mainnet.Config
+	header := &types.Header{
+		Difficulty: *ProofOfStakeDifficulty,
+		Time:       *chainConfig.CancunTime + 1,
+	}
+	recipient := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	boom := errors.New("domain read failed")
+	ibs := state.New(withdrawalErrReader{
+		StateReader: state.NewNoopReader(),
+		fail:        accounts.InternAddress(recipient),
+		err:         boom,
+	})
+
+	logger := log.New()
+	var eth1Engine rules.Engine
+	mergeEngine := New(eth1Engine)
+	withdrawals := []*types.Withdrawal{{Index: 7, Address: recipient, Amount: 1_000}}
+	syscall := func(accounts.Address, []byte) ([]byte, error) { return nil, nil }
+
+	_, err := mergeEngine.Finalize(chainConfig, header, ibs, nil, nil, withdrawals,
+		consensuschain.NewReader(chainConfig, nil, nil, logger), syscall, false, logger)
+
+	require.ErrorIs(t, err, boom)
+	require.Contains(t, err.Error(), "withdrawal 7")
 }

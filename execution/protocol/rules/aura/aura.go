@@ -726,7 +726,9 @@ func (c *AuRa) applyRewards(header *types.Header, state *state.IntraBlockState, 
 		return err
 	}
 	for _, r := range rewards {
-		state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock)
+		if err := state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock); err != nil {
+			return err
+		}
 	}
 	return nil
 }

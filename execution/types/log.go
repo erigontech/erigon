@@ -429,18 +429,16 @@ func decodeTopics2(s *rlp.Stream) (list []common.Hash, err error) {
 	if l == 0 {
 		return []common.Hash{}, s.ListEnd()
 	}
-	listLen := int(l / (1 + 32))  // rlpLenPrefix+32bytes
-	preAlloc := min(128, listLen) // attacker may craft rlp prefix - which will trigger hube pre-alloc. so, add hard-limit
+	listLen := l / (1 + 32)            // rlpLenPrefix+32bytes
+	preAlloc := int(min(128, listLen)) // attacker may craft rlp prefix - which will trigger huge pre-alloc. so, add hard-limit
 	list = make([]common.Hash, 0, preAlloc)
-	var i int
-	var b common.Hash
-	for ; s.MoreDataInList(); i++ {
-		if err = s.ReadBytes(b[:]); err != nil {
+	for s.MoreDataInList() {
+		list = append(list, common.Hash{})
+		if err = s.ReadBytes(list[len(list)-1][:]); err != nil {
 			return nil, err
 		}
-		list = append(list, b)
 	}
-	return list[:i], s.ListEnd()
+	return list, s.ListEnd()
 }
 
 // DecodeRLP implements rlp.Decoder.
@@ -451,8 +449,7 @@ func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	err = s.ReadBytes(l.Address[:])
-	if err != nil {
+	if l.Address, err = s.Addr(); err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
 	l.Topics, err = decodeTopics2(s)
