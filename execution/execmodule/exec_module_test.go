@@ -635,12 +635,6 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 		exhausted: make(chan struct{}),
 		txns:      []types.Transaction{builderTx},
 	}
-	defer func() {
-		select {
-		case provider.release <- struct{}{}:
-		default:
-		}
-	}()
 	parentBeaconBlockRoot := randomHash()
 	payloadID, err := assembleBlock(ctx, m.ExecModule, &builder.Parameters{
 		ParentHash:            parent.Hash(),
@@ -652,6 +646,13 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 		CustomTxnProvider:     provider,
 	})
 	require.NoError(t, err)
+	defer func() {
+		select {
+		case provider.release <- struct{}{}:
+		default:
+		}
+		_, _ = getAssembledBlock(context.Background(), m.ExecModule, payloadID)
+	}()
 	select {
 	case <-provider.ready:
 	case <-time.After(10 * time.Second):
