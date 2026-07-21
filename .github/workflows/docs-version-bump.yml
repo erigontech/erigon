@@ -43,9 +43,12 @@ jobs:
 
       - name: Validate inputs
         working-directory: ${{ github.workspace }}
+        env:
+          ARCHIVE_VERSION: ${{ inputs.archive_version }}
+          NEW_LABEL: ${{ inputs.new_label }}
         run: |
           test -d docs/site || { echo "::error::docs/site not found — run this on a branch that has the Docusaurus site"; exit 1; }
-          a='${{ inputs.archive_version }}'; n='${{ inputs.new_label }}'
+          a="$ARCHIVE_VERSION"; n="$NEW_LABEL"
           for v in "$a" "$n"; do
             printf '%s' "$v" | grep -qE '^v[0-9]+\.[0-9]+$' \
               || { echo "::error::Version '$v' must look like vMAJOR.MINOR (e.g. v3.6)"; exit 1; }
@@ -69,12 +72,16 @@ jobs:
         run: npm ci
 
       - name: Snapshot current docs as ${{ inputs.archive_version }}
-        run: npx docusaurus docs:version "${{ inputs.archive_version }}"
+        env:
+          ARCHIVE_VERSION: ${{ inputs.archive_version }}
+        run: npx docusaurus docs:version "$ARCHIVE_VERSION"
 
       - name: Bump current version label to ${{ inputs.new_label }}
+        env:
+          NEW_LABEL: ${{ inputs.new_label }}
         run: |
-          sed -i -E "s/label: 'v[0-9]+\.[0-9]+'/label: '${{ inputs.new_label }}'/" docusaurus.config.ts
-          grep -q "label: '${{ inputs.new_label }}'" docusaurus.config.ts \
+          sed -i -E "s/label: 'v[0-9]+\.[0-9]+'/label: '$NEW_LABEL'/" docusaurus.config.ts
+          grep -q "label: '$NEW_LABEL'" docusaurus.config.ts \
             || { echo "::error::failed to update current version label"; exit 1; }
 
       - name: Enforce 3-archived-version cap (prune oldest)
@@ -101,23 +108,26 @@ jobs:
       - name: Open pull request
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCHIVE_VERSION: ${{ inputs.archive_version }}
+          NEW_LABEL: ${{ inputs.new_label }}
+          BASE_REF: ${{ github.ref_name }}
         working-directory: ${{ github.workspace }}
         run: |
-          branch="docs/version-bump-${{ inputs.new_label }}"
+          branch="docs/version-bump-$NEW_LABEL"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
           git add -A
-          git commit -m "docs(site): archive ${{ inputs.archive_version }}, bump current to ${{ inputs.new_label }}"
+          git commit -m "docs(site): archive $ARCHIVE_VERSION, bump current to $NEW_LABEL"
           git push -u origin "$branch"
           gh pr create \
-            --base "${{ github.ref_name }}" \
+            --base "$BASE_REF" \
             --head "$branch" \
-            --title "docs(site): archive ${{ inputs.archive_version }}, publish ${{ inputs.new_label }}" \
+            --title "docs(site): archive $ARCHIVE_VERSION, publish $NEW_LABEL" \
             --body "Automated docs version bump (\`docs-version-bump.yml\`).
 
-          - Snapshotted the current docs as **${{ inputs.archive_version }}** (\`versioned_docs/version-${{ inputs.archive_version }}\`).
-          - Bumped the current version label to **${{ inputs.new_label }}**.
+          - Snapshotted the current docs as **$ARCHIVE_VERSION** (\`versioned_docs/version-$ARCHIVE_VERSION\`).
+          - Bumped the current version label to **$NEW_LABEL**.
           - Enforced the 3-archived-version cap and regenerated llms.txt artifacts.
           - \`npm run build\` passed in CI before this PR was opened.
 
