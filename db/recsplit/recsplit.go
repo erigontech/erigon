@@ -986,11 +986,15 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	}
 
 	if dbg.AssertEnabled {
-		_ = rs.indexW.Flush()
-		rs.indexF.Seek(0, 0)
-		b, _ := io.ReadAll(rs.indexF)
-		if len(b) != 9+int(rs.keysAdded)*rs.scratch.bytesPerRec {
-			panic(fmt.Errorf("expected: %d, got: %d; rs.keysAdded=%d, rs.bytesPerRec=%d, %s", 9+int(rs.keysAdded)*rs.scratch.bytesPerRec, len(b), rs.keysAdded, rs.scratch.bytesPerRec, rs.filePath))
+		if err = rs.indexW.Flush(); err != nil {
+			return err
+		}
+		fi, err := rs.indexF.Stat()
+		if err != nil {
+			return err
+		}
+		if want := int64(17 + int(rs.keysAdded)*rs.scratch.bytesPerRec); fi.Size() != want {
+			panic(fmt.Errorf("expected: %d, got: %d; rs.keysAdded=%d, rs.bytesPerRec=%d, %s", want, fi.Size(), rs.keysAdded, rs.scratch.bytesPerRec, rs.filePath))
 		}
 	}
 	if rs.lvl < log.LvlTrace {
