@@ -421,7 +421,7 @@ func (l *LogForStorage) EncodeRLP(w io.Writer) error {
 	})
 }
 
-func decodeTopics2(s *rlp.Stream) (list []common.Hash, err error) {
+func decodeHashList(s *rlp.Stream) (list []common.Hash, err error) {
 	l, err := s.List()
 	if err != nil {
 		return nil, err
@@ -433,10 +433,11 @@ func decodeTopics2(s *rlp.Stream) (list []common.Hash, err error) {
 	preAlloc := int(min(128, listLen)) // attacker may craft rlp prefix - which will trigger huge pre-alloc. so, add hard-limit
 	list = make([]common.Hash, 0, preAlloc)
 	for s.MoreDataInList() {
-		list = append(list, common.Hash{})
-		if err = s.ReadBytes(list[len(list)-1][:]); err != nil {
+		h, err := s.ReadHash()
+		if err != nil {
 			return nil, err
 		}
+		list = append(list, h)
 	}
 	return list, s.ListEnd()
 }
@@ -452,7 +453,7 @@ func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 	if l.Address, err = s.Addr(); err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
-	l.Topics, err = decodeTopics2(s)
+	l.Topics, err = decodeHashList(s)
 	if err != nil {
 		return err
 	}
