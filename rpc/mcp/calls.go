@@ -53,7 +53,7 @@ type toolCall struct {
 }
 
 func (c *toolCall) tool() mcp.Tool {
-	opts := []mcp.ToolOption{mcp.WithDescription(c.desc)}
+	opts := []mcp.ToolOption{mcp.WithDescription(c.desc), mcp.WithReadOnlyHintAnnotation(true)}
 	for _, p := range c.params {
 		popts := []mcp.PropertyOption{mcp.Description(p.desc)}
 		if p.required {

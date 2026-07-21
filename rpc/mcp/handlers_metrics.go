@@ -15,12 +15,14 @@ const metricsUnavailableMsg = "Metrics are not available in this mode. Use the e
 func registerMetricsTools(e *ErigonMCPServer) {
 	e.mcpServer.AddTool(
 		mcp.NewTool("metrics_list",
+			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDescription("List all available metric names"),
 		),
 		e.handleMetricsList,
 	)
 	e.mcpServer.AddTool(
 		mcp.NewTool("metrics_get",
+			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDescription("Get metrics with optional filtering by pattern (supports wildcards like 'db_*', '*_size', etc.)"),
 			mcp.WithString("pattern", mcp.Description("Metric name pattern (optional, empty = all metrics)")),
 		),
