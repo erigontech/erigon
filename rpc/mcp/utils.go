@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"github.com/erigontech/erigon/rpc"
 )
 
 // toJSONText converts a value to pretty-printed JSON string
@@ -20,13 +18,17 @@ func toJSONText(v any) string {
 	return string(formatted)
 }
 
-func parseBlockNumber(s string) (rpc.BlockNumber, error) {
-	var blockNum rpc.BlockNumber
-	b, err := json.Marshal(s)
-	if err != nil {
-		return blockNum, err
+// toJSONIndent pretty-prints raw JSON bytes.
+func toJSONIndent(raw json.RawMessage) string {
+	var parsed any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return string(raw)
 	}
-	return blockNum, blockNum.UnmarshalJSON(b)
+	formatted, err := json.MarshalIndent(parsed, "", "  ")
+	if err != nil {
+		return string(raw)
+	}
+	return string(formatted)
 }
 
 // extractURIParam extracts a path parameter from an MCP resource template URI.

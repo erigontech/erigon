@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -140,7 +141,7 @@ Examples:
 				logger.Info("[MCP] Connected to Erigon", "url", url, "block", blockNum)
 			}
 
-			srv := mcpserver.NewStandaloneMCPServer(client, logDir)
+			srv := mcpserver.NewErigonMCPServer(client, logDir, false)
 			return serve(ctx, srv, transport, sseAddr, logger)
 		},
 	}
@@ -174,7 +175,7 @@ Examples:
 }
 
 // serve starts the MCP server in the chosen transport mode.
-func serve(ctx context.Context, srv mcpserver.MCPTransport, transport, sseAddr string, logger log.Logger) error {
+func serve(ctx context.Context, srv *mcpserver.ErigonMCPServer, transport, sseAddr string, logger log.Logger) error {
 	switch transport {
 	case "stdio":
 		logger.Info("[MCP] Starting stdio transport")
@@ -252,30 +253,20 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 		defer heimdallReader.Close()
 	}
 
-	// Create the typed JSON-RPC APIs — same path as rpcdaemon.
+	// Create the JSON-RPC APIs and serve them over an in-process connection —
+	// same path as rpcdaemon.
 	apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, heimdallReader, nil)
-
-	// Extract the EthAPI, ErigonAPI, OtterscanAPI from the API list.
-	var (
-		ethAPI    jsonrpc.EthAPI
-		erigonAPI jsonrpc.ErigonAPI
-		otsAPI    jsonrpc.OtterscanAPI
-	)
+	rpcSrv := rpc.NewServer(2, false, false, false, logger, 0)
 	for _, api := range apiList {
-		switch s := api.Service.(type) {
-		case jsonrpc.EthAPI:
-			ethAPI = s
-		case jsonrpc.ErigonAPI:
-			erigonAPI = s
-		case jsonrpc.OtterscanAPI:
-			otsAPI = s
+		if err := rpcSrv.RegisterName(api.Namespace, api.Service); err != nil {
+			return fmt.Errorf("failed to register %s API: %w", api.Namespace, err)
 		}
 	}
+	// NonBlockingAcquire so BeginRo fails fast instead of blocking MCP
+	// handlers when all DB read slots are held.
+	client := rpc.DialInProcWithContext(kv.WithNonBlockingAcquire(ctx), rpcSrv, logger)
+	defer client.Close()
 
-	if ethAPI == nil || erigonAPI == nil {
-		return fmt.Errorf("failed to initialize required APIs from datadir")
-	}
-
-	srv := mcpserver.NewErigonMCPServer(ethAPI, erigonAPI, otsAPI, logDir)
+	srv := mcpserver.NewErigonMCPServer(client, logDir, false)
 	return serve(ctx, srv, transport, sseAddr, logger)
 }
