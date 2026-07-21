@@ -112,6 +112,7 @@ func TestGenerateChain(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
+	defer st.Release(false)
 
 	if m.Current(tx).NumberU64() != 5 {
 		t.Errorf("wrong block number: %d", m.Current(tx).Number())

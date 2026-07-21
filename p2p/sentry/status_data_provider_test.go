@@ -94,8 +94,7 @@ func TestGetStatusData_CacheInvalidatedByHeaderNotification(t *testing.T) {
 	seedTestHeader(t, db, 42, 100)
 	p := newTestProvider(t, db)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// First call populates cache.
 	sd1, err := p.GetStatusData(ctx)
