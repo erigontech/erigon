@@ -204,6 +204,9 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 				// FULL block: update forkchoice with the envelope (updates eth2Roots, persists to disk).
 				if fceErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, false); fceErr != nil {
 					logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Block.Slot, "err", fceErr)
+					if shouldContinueAfterEnvelopeError(block.Block.Slot, cfg.forkChoice.FinalizedSlot(), fceErr) {
+						continue
+					}
 					if errors.Is(fceErr, forkchoice.ErrInvalidExecutionPayloadEnvelope) {
 						return progressAfterInvalidEnvelope(acceptedBeforeBlock, fceErr)
 					}
@@ -279,6 +282,10 @@ func forwardSyncProgress(chainTipSlot, currentSlot, prevProgress uint64, secsPer
 
 func progressAfterInvalidEnvelope(accepted uint64, cause error) (uint64, error) {
 	return accepted, fmt.Errorf("%w: %w", network2.ErrInvalidPeerChain, cause)
+}
+
+func shouldContinueAfterEnvelopeError(blockSlot, finalizedSlot uint64, cause error) bool {
+	return blockSlot <= finalizedSlot && errors.Is(cause, forkchoice.ErrIgnore)
 }
 
 func progressAfterNotFinalizedDescendant(initial, accepted uint64, cause error) (uint64, error) {

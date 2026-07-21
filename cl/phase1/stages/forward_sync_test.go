@@ -18,6 +18,7 @@ package stages
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -91,4 +92,22 @@ func TestProgressAfterInvalidEnvelope(t *testing.T) {
 	require.Equal(t, uint64(1_217), progress)
 	require.True(t, errors.Is(err, network2.ErrInvalidPeerChain))
 	require.True(t, errors.Is(err, cause))
+}
+
+func TestShouldContinueAfterEnvelopeError(t *testing.T) {
+	t.Run("queued anchor envelope", func(t *testing.T) {
+		require.True(t, shouldContinueAfterEnvelopeError(15_680, 15_680, fmt.Errorf("queued: %w", forkchoice.ErrIgnore)))
+	})
+
+	t.Run("queued envelope after finalized slot", func(t *testing.T) {
+		require.False(t, shouldContinueAfterEnvelopeError(15_681, 15_680, fmt.Errorf("queued: %w", forkchoice.ErrIgnore)))
+	})
+
+	t.Run("invalid envelope", func(t *testing.T) {
+		require.False(t, shouldContinueAfterEnvelopeError(15_680, 15_680, forkchoice.ErrInvalidExecutionPayloadEnvelope))
+	})
+
+	t.Run("unexpected error", func(t *testing.T) {
+		require.False(t, shouldContinueAfterEnvelopeError(15_680, 15_680, errors.New("unexpected")))
+	})
 }
