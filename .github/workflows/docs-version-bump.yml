@@ -1,4 +1,5 @@
 name: Docs Version Bump
+run-name: "Docs Version Bump — archive ${{ inputs.archive_version }}, publish ${{ inputs.new_label }}"
 
 # One-click docs versioning for a new major/minor release.
 #
