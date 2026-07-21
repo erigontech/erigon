@@ -788,10 +788,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	if config.MCPAddress != "" {
 		go func() {
-			logger.Info("serve MCP on", "addr", config.MCPAddress)
-			mcpErr := mcpServer.ServeSSE(ctx, config.MCPAddress)
+			logger.Info("serve MCP on", "addr", config.MCPAddress, "endpoints", "/mcp (streamable HTTP), /sse (SSE)")
+			mcpErr := mcpServer.ListenAndServe(ctx, config.MCPAddress)
 			if mcpErr != nil {
-				logger.Error("mcpServer.ServeSSE", "err", mcpErr)
+				logger.Error("mcpServer.ListenAndServe", "err", mcpErr)
 				return
 			}
 		}()

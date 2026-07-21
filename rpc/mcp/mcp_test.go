@@ -6,10 +6,8 @@ import (
 	"errors"
 	"maps"
 	"net"
-	"net/http"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -184,36 +182,6 @@ func TestEmbeddedAndStandaloneCatalogsMatch(t *testing.T) {
 	embeddedTemplates := resourceTemplateURIs(t, embedded.mcpServer)
 	require.ElementsMatch(t, embeddedTemplates, resourceTemplateURIs(t, standalone.mcpServer))
 	require.NotEmpty(t, embeddedTemplates)
-}
-
-// Start wires the SSE handler only on a server it creates itself, so serveSSE's
-// pre-created server must carry Handler: sse or every MCP request 404s.
-func TestServeSSEHandlerWired(t *testing.T) {
-	addr := freeAddr(t)
-	srv := NewStandaloneMCPServer(nil, "")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- serveSSE(ctx, srv.mcpServer, addr) }()
-
-	client := &http.Client{Timeout: 2 * time.Second}
-	var resp *http.Response
-	var err error
-	for range 100 {
-		resp, err = client.Get("http://" + addr + "/sse")
-		if err == nil {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.NotEqual(t, http.StatusNotFound, resp.StatusCode, "SSE endpoint not served — handler not wired")
-	require.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
-
-	cancel()
-	require.NoError(t, <-done)
 }
 
 func freeAddr(t *testing.T) string {

@@ -1112,8 +1112,9 @@ func (s *StandaloneMCPServer) ServeContext(ctx context.Context) error {
 	return stdio.Listen(ctx, os.Stdin, os.Stdout)
 }
 
-// ServeSSE starts the MCP server with SSE transport on the given address,
-// shutting it down when ctx is cancelled.
-func (s *StandaloneMCPServer) ServeSSE(ctx context.Context, addr string) error {
-	return serveSSE(ctx, s.mcpServer, addr)
+// ListenAndServe starts the MCP HTTP endpoint (streamable HTTP at /mcp, SSE
+// at /sse + /message) on the given address, shutting it down when ctx is
+// cancelled.
+func (s *StandaloneMCPServer) ListenAndServe(ctx context.Context, addr string) error {
+	return serveHTTP(ctx, s.mcpServer, addr, nil)
 }

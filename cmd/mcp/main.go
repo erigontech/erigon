@@ -81,7 +81,8 @@ Three connection modes (in priority order):
 
 Transports:
   --transport stdio   (default) Read/write MCP protocol on stdin/stdout.
-  --transport sse     Serve over HTTP with Server-Sent Events.
+  --transport http    Serve over HTTP: streamable HTTP at /mcp, SSE at /sse.
+  --transport sse     Deprecated alias of http.
 
 Examples:
   # Claude Desktop config (stdio, auto-discovery):
@@ -93,8 +94,8 @@ Examples:
   # Direct DB access (offline):
   mcp --datadir /data/erigon --private.api.addr 127.0.0.1:9090
 
-  # SSE transport:
-  mcp --port 8545 --transport sse --sse.addr 127.0.0.1:8553`,
+  # HTTP transport (streamable HTTP + SSE):
+  mcp --port 8545 --transport http --sse.addr 127.0.0.1:8553`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			logger := debug.SetupCobra(cmd, "mcp")
 
@@ -152,8 +153,8 @@ Examples:
 	rootCmd.Flags().UintVar(&port, "port", 0, "Erigon JSON-RPC port (shorthand for --rpc.url=http://127.0.0.1:{port})")
 	rootCmd.Flags().StringVar(&dataDir, "datadir", "", "Erigon data directory (enables direct DB access mode)")
 	rootCmd.Flags().StringVar(&privAPI, "private.api.addr", "127.0.0.1:9090", "Erigon gRPC private API address (used with --datadir)")
-	rootCmd.Flags().StringVar(&transport, "transport", "stdio", "MCP transport: 'stdio' or 'sse'")
-	rootCmd.Flags().StringVar(&sseAddr, "sse.addr", "127.0.0.1:8553", "SSE server listen address (when transport=sse)")
+	rootCmd.Flags().StringVar(&transport, "transport", "stdio", "MCP transport: 'stdio' or 'http' ('sse' is a deprecated alias of 'http')")
+	rootCmd.Flags().StringVar(&sseAddr, "sse.addr", "127.0.0.1:8553", "HTTP listen address (when transport=http)")
 	rootCmd.Flags().StringVar(&logDir, "log.dir", "", "Erigon log directory (overrides datadir-based detection)")
 
 	rootCtx, rootCancel := context.WithCancel(context.Background())
@@ -178,11 +179,11 @@ func serve(ctx context.Context, srv mcpserver.MCPTransport, transport, sseAddr s
 	case "stdio":
 		logger.Info("[MCP] Starting stdio transport")
 		return srv.ServeContext(ctx)
-	case "sse":
-		logger.Info("[MCP] Starting SSE transport", "addr", sseAddr)
-		return srv.ServeSSE(ctx, sseAddr)
+	case "http", "sse":
+		logger.Info("[MCP] Starting HTTP transport", "addr", sseAddr, "endpoints", "/mcp (streamable HTTP), /sse (SSE)")
+		return srv.ListenAndServe(ctx, sseAddr)
 	default:
-		return fmt.Errorf("unknown transport: %s (use 'stdio' or 'sse')", transport)
+		return fmt.Errorf("unknown transport: %s (use 'stdio' or 'http')", transport)
 	}
 }
 

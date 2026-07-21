@@ -31,7 +31,7 @@ const Version = "0.0.2"
 type MCPTransport interface {
 	Serve() error
 	ServeContext(ctx context.Context) error
-	ServeSSE(ctx context.Context, addr string) error
+	ListenAndServe(ctx context.Context, addr string) error
 }
 
 // ErigonMCPServer wraps Erigon APIs with MCP server capabilities.
@@ -956,42 +956,54 @@ func (e *ErigonMCPServer) ServeContext(ctx context.Context) error {
 	return s.Listen(ctx, os.Stdin, os.Stdout)
 }
 
-// ServeSSE starts MCP server with SSE transport, shutting it down when ctx is cancelled.
-func (e *ErigonMCPServer) ServeSSE(ctx context.Context, addr string) error {
+// ListenAndServe starts the MCP HTTP endpoint, shutting it down when ctx is
+// cancelled. Streamable HTTP is served at /mcp, the legacy SSE pair at
+// /sse + /message.
+func (e *ErigonMCPServer) ListenAndServe(ctx context.Context, addr string) error {
 	// Apply NonBlockingAcquire so BeginRo fails fast (ErrServerOverloaded)
-	// instead of blocking the SSE handler goroutine indefinitely when all DB
+	// instead of blocking the handler goroutine indefinitely when all DB
 	// read slots are held by a concurrent write/ETL transaction. The HTTP RPC
 	// layer sets the same flag in node/rpcstack.go.
-	return serveSSE(ctx, e.mcpServer, addr,
-		server.WithSSEContextFunc(func(ctx context.Context, _ *http.Request) context.Context {
-			return kv.WithNonBlockingAcquire(ctx)
-		}),
-	)
+	return serveHTTP(ctx, e.mcpServer, addr, kv.WithNonBlockingAcquire)
 }
 
-// serveSSE runs the SSE server until ctx is cancelled. The http.Server is
-// pre-created so a Shutdown racing ahead of Start targets it instead of leaking
-// Start in Accept; it must carry Handler: sse because Start wires the handler
-// only on a server it creates itself.
-func serveSSE(ctx context.Context, mcpServer *server.MCPServer, addr string, opts ...server.SSEOption) error {
-	sse := server.NewSSEServer(mcpServer, opts...)
-	server.WithHTTPServer(&http.Server{Addr: addr, Handler: sse})(sse)
+// serveHTTP runs both MCP HTTP transports on one listener until ctx is
+// cancelled. contextFn, when non-nil, wraps every request context.
+func serveHTTP(ctx context.Context, mcpServer *server.MCPServer, addr string, contextFn func(context.Context) context.Context) error {
+	var sseOpts []server.SSEOption
+	streamableOpts := []server.StreamableHTTPOption{server.WithEndpointPath("/mcp")}
+	if contextFn != nil {
+		sseOpts = append(sseOpts, server.WithSSEContextFunc(func(ctx context.Context, _ *http.Request) context.Context {
+			return contextFn(ctx)
+		}))
+		streamableOpts = append(streamableOpts, server.WithHTTPContextFunc(func(ctx context.Context, _ *http.Request) context.Context {
+			return contextFn(ctx)
+		}))
+	}
+
+	sse := server.NewSSEServer(mcpServer, sseOpts...)
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", server.NewStreamableHTTPServer(mcpServer, streamableOpts...))
+	mux.Handle("/", sse)
+	httpServer := &http.Server{Addr: addr, Handler: mux}
+
 	errCh := make(chan error, 1)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				log.Error("[MCP] recovered from panic", "panic", r)
-				errCh <- fmt.Errorf("mcp sse server panicked: %v", r)
+				errCh <- fmt.Errorf("mcp http server panicked: %v", r)
 			}
 		}()
-		errCh <- sse.Start(addr)
+		errCh <- httpServer.ListenAndServe()
 	}()
 
 	select {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return sse.Shutdown(shutdownCtx)
+		sse.CloseSessions()
+		return httpServer.Shutdown(shutdownCtx)
 	case err := <-errCh:
 		return err
 	}
