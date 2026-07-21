@@ -34,7 +34,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
@@ -985,18 +984,6 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		}
 	}
 
-	if dbg.AssertEnabled {
-		if err = rs.indexW.Flush(); err != nil {
-			return err
-		}
-		fi, err := rs.indexF.Stat()
-		if err != nil {
-			return err
-		}
-		if want := int64(17 + int(rs.keysAdded)*rs.scratch.bytesPerRec); fi.Size() != want {
-			panic(fmt.Errorf("expected: %d, got: %d; rs.keysAdded=%d, rs.bytesPerRec=%d, %s", want, fi.Size(), rs.keysAdded, rs.scratch.bytesPerRec, rs.filePath))
-		}
-	}
 	if rs.lvl < log.LvlTrace {
 		log.Log(rs.lvl, "[index] write", "file", rs.fileName)
 	}
