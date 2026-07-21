@@ -45,6 +45,7 @@ func NewErigonMCPServer(client rpcCaller, logDir string, metricsEnabled bool) *E
 		server.WithResourceCapabilities(true, true),
 		server.WithToolCapabilities(true),
 		server.WithPromptCapabilities(true),
+		server.WithInputSchemaValidation(),
 		server.WithLogging(),
 		server.WithRecovery(),
 	)

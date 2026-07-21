@@ -22,11 +22,12 @@ type rpcCaller interface {
 type paramKind int
 
 const (
-	pString paramKind = iota // string, passed through
-	pBool                    // boolean
-	pInt                     // integer, passed as a JSON number
-	pHexInt                  // integer, passed as a 0x-prefixed hex string
-	pJSON                    // string containing JSON, passed as a raw JSON value
+	pString   paramKind = iota // string, passed through
+	pBool                      // boolean
+	pInt                       // integer, passed as a JSON number
+	pHexInt                    // integer, passed as a 0x-prefixed hex string
+	pJSON                      // string containing JSON, passed as a raw JSON value
+	pBlockNum                  // block number or tag; plain decimal is converted to hex
 )
 
 type param struct {
@@ -86,6 +87,9 @@ func (c *toolCall) buildArgs(req mcp.CallToolRequest) ([]any, error) {
 		case pJSON:
 			s := req.GetString(p.name, p.def)
 			if s == "" {
+				s = p.def
+			}
+			if s == "" {
 				if p.omit {
 					continue
 				}
@@ -96,6 +100,12 @@ func (c *toolCall) buildArgs(req mcp.CallToolRequest) ([]any, error) {
 				return nil, err
 			}
 			args = append(args, raw)
+		case pBlockNum:
+			v := req.GetString(p.name, p.def)
+			if v == "" && p.omit {
+				continue
+			}
+			args = append(args, normalizeBlockRef(v))
 		default:
 			v := req.GetString(p.name, p.def)
 			if v == "" && p.omit {
@@ -107,12 +117,25 @@ func (c *toolCall) buildArgs(req mcp.CallToolRequest) ([]any, error) {
 	return args, nil
 }
 
-func (c *toolCall) render(req mcp.CallToolRequest, raw json.RawMessage) string {
-	if c.format != nil {
-		return c.format(req, raw)
+// normalizeBlockRef converts a plain decimal block number to 0x-hex; tags,
+// hex quantities and hashes pass through. Erigon's BlockNumber decoders
+// accept decimal only as an unquoted JSON number, never as a quoted string.
+func normalizeBlockRef(s string) string {
+	if s == "" || strings.HasPrefix(s, "0x") {
+		return s
 	}
+	if n, ok := new(big.Int).SetString(s, 10); ok && n.Sign() >= 0 {
+		return "0x" + n.Text(16)
+	}
+	return s
+}
+
+func (c *toolCall) render(req mcp.CallToolRequest, raw json.RawMessage) string {
 	if c.empty != "" && isNullResult(raw) {
 		return c.empty
+	}
+	if c.format != nil {
+		return c.format(req, raw)
 	}
 	return toJSONIndent(raw)
 }
@@ -155,10 +178,10 @@ func isEmptyResult(raw json.RawMessage) bool {
 func buildLogFilter(req mcp.CallToolRequest) ([]any, error) {
 	filter := map[string]any{}
 	if v := req.GetString("fromBlock", ""); v != "" {
-		filter["fromBlock"] = v
+		filter["fromBlock"] = normalizeBlockRef(v)
 	}
 	if v := req.GetString("toBlock", ""); v != "" {
-		filter["toBlock"] = v
+		filter["toBlock"] = normalizeBlockRef(v)
 	}
 	if v := req.GetString("address", ""); v != "" {
 		if strings.HasPrefix(v, "[") {
@@ -193,7 +216,7 @@ func buildTxArgs(withBlock bool) func(req mcp.CallToolRequest) ([]any, error) {
 			}
 		}
 		if withBlock {
-			return []any{callObj, req.GetString("blockNumber", "latest")}, nil
+			return []any{callObj, normalizeBlockRef(req.GetString("blockNumber", "latest"))}, nil
 		}
 		return []any{callObj}, nil
 	}
@@ -204,7 +227,7 @@ func buildStorageValues(req mcp.CallToolRequest) ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []any{requests, req.GetString("blockNumber", "latest")}, nil
+	return []any{requests, normalizeBlockRef(req.GetString("blockNumber", "latest"))}, nil
 }
 
 // ===== RESULT FORMATTERS =====
@@ -354,8 +377,8 @@ func fmtTxHashResult(_ mcp.CallToolRequest, raw json.RawMessage) string {
 // rpcToolCalls lists every JSON-RPC-backed MCP tool. Local tools (logs_*,
 // metrics_*) are registered separately in NewErigonMCPServer.
 func rpcToolCalls() []toolCall {
-	blockNumberParam := param{name: "blockNumber", desc: "Block number or tag", kind: pString, required: true, def: "latest"}
-	optBlockNumberParam := param{name: "blockNumber", desc: "Block number (default: latest)", kind: pString, def: "latest"}
+	blockNumberParam := param{name: "blockNumber", desc: "Block number or tag (default: latest)", kind: pBlockNum, def: "latest"}
+	optBlockNumberParam := param{name: "blockNumber", desc: "Block number (default: latest)", kind: pBlockNum, def: "latest"}
 	blockHashParam := param{name: "blockHash", desc: "Block hash", kind: pString, required: true}
 	txHashParam := param{name: "txHash", desc: "Transaction hash", kind: pString, required: true}
 	addressParam := param{name: "address", desc: "Address", kind: pString, required: true}
@@ -381,11 +404,13 @@ func rpcToolCalls() []toolCall {
 			name: "eth_getBlockTransactionCountByNumber", desc: "Get transaction count in block by number",
 			params: []param{blockNumberParam},
 			format: fmtQuantity("Transaction count: ", ""),
+			empty:  "Block not found",
 		},
 		{
 			name: "eth_getBlockTransactionCountByHash", desc: "Get transaction count in block by hash",
 			params: []param{blockHashParam},
 			format: fmtQuantity("Transaction count: ", ""),
+			empty:  "Block not found",
 		},
 		{
 			name: "eth_getBalance", desc: "Get address balance",
@@ -414,7 +439,7 @@ func rpcToolCalls() []toolCall {
 		},
 		{
 			name: "eth_getBlockReceipts", desc: "Get all receipts for a block",
-			params: []param{{name: "blockNumberOrHash", desc: "Block number or hash", kind: pString, required: true, def: "latest"}},
+			params: []param{{name: "blockNumberOrHash", desc: "Block number or hash (default: latest)", kind: pBlockNum, def: "latest"}},
 			empty:  "Block receipts not found",
 		},
 		{
@@ -435,7 +460,7 @@ func rpcToolCalls() []toolCall {
 		},
 		{
 			name: "eth_getStorageAt", desc: "Get storage at position",
-			params: []param{addressParam, {name: "position", desc: "Storage position", kind: pString, required: true, def: "0x0"}, optBlockNumberParam},
+			params: []param{addressParam, {name: "position", desc: "Storage position (default: 0x0)", kind: pString, def: "0x0"}, optBlockNumberParam},
 			format: fmtStringResult("Storage: "),
 		},
 		{
@@ -517,11 +542,13 @@ func rpcToolCalls() []toolCall {
 			name: "eth_getUncleCountByBlockNumber", desc: "Get uncle count by block number",
 			params: []param{blockNumberParam},
 			format: fmtQuantity("Uncle count: ", ""),
+			empty:  "Block not found",
 		},
 		{
 			name: "eth_getUncleCountByBlockHash", desc: "Get uncle count by block hash",
 			params: []param{blockHashParam},
 			format: fmtQuantity("Uncle count: ", ""),
+			empty:  "Block not found",
 		},
 		{
 			name: "eth_getStorageValues", desc: "Get multiple storage slot values for multiple accounts in a single request",
@@ -538,7 +565,7 @@ func rpcToolCalls() []toolCall {
 		},
 		{
 			name: "erigon_blockNumber", desc: "Get block number (Erigon)",
-			params: []param{{name: "blockNumber", desc: "Block tag", kind: pString, omit: true}},
+			params: []param{{name: "blockNumber", desc: "Block tag", kind: pBlockNum, omit: true}},
 			format: fmtQuantity("Block number: ", ""),
 		},
 		{
@@ -558,7 +585,7 @@ func rpcToolCalls() []toolCall {
 		},
 		{
 			name: "erigon_getBalanceChangesInBlock", desc: "Get all balance changes in block",
-			params: []param{{name: "blockNumberOrHash", desc: "Block", kind: pString, required: true, def: "latest"}},
+			params: []param{{name: "blockNumberOrHash", desc: "Block (default: latest)", kind: pBlockNum, def: "latest"}},
 		},
 		{
 			name: "erigon_getLogsByHash", desc: "Get logs by block hash",
@@ -626,7 +653,7 @@ func rpcToolCalls() []toolCall {
 		},
 		{
 			name: "ots_hasCode", desc: "Check if an address has code (is a contract)",
-			params: []param{addressParam, {name: "blockNumber", desc: "Block number or tag", kind: pString, def: "latest"}},
+			params: []param{addressParam, {name: "blockNumber", desc: "Block number or tag", kind: pBlockNum, def: "latest"}},
 			format: fmtHasCode,
 		},
 		{

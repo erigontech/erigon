@@ -226,20 +226,25 @@ func (e *ErigonMCPServer) handleResourceAddressSummary(ctx context.Context, req 
 		return nil, fmt.Errorf("missing address parameter in URI: %s", req.Params.URI)
 	}
 
-	var balance string
-	_ = e.client.CallContext(ctx, &balance, "eth_getBalance", address, "latest")
-
-	var nonce string
-	_ = e.client.CallContext(ctx, &nonce, "eth_getTransactionCount", address, "latest")
-
-	var code string
-	_ = e.client.CallContext(ctx, &code, "eth_getCode", address, "latest")
-
+	// Failed lookups become null rather than empty strings, so a client
+	// never mistakes an RPC failure for an empty balance or an EOA.
 	summary := map[string]any{
 		"address":     address,
-		"balance":     balance,
-		"nonce":       nonce,
-		"is_contract": code != "" && code != "0x",
+		"balance":     nil,
+		"nonce":       nil,
+		"is_contract": nil,
+	}
+	var balance string
+	if err := e.client.CallContext(ctx, &balance, "eth_getBalance", address, "latest"); err == nil {
+		summary["balance"] = balance
+	}
+	var nonce string
+	if err := e.client.CallContext(ctx, &nonce, "eth_getTransactionCount", address, "latest"); err == nil {
+		summary["nonce"] = nonce
+	}
+	var code string
+	if err := e.client.CallContext(ctx, &code, "eth_getCode", address, "latest"); err == nil {
+		summary["is_contract"] = code != "" && code != "0x"
 	}
 
 	return []mcp.ResourceContents{

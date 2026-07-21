@@ -127,6 +127,54 @@ func TestToolArgMapping(t *testing.T) {
 			result:   `"0x5208"`,
 			wantArgs: []any{map[string]any{"to": "0xabc"}},
 		},
+		{
+			tool:     "eth_getBlockByNumber",
+			args:     map[string]any{"blockNumber": "22000000"},
+			result:   `{}`,
+			wantArgs: []any{"0x14fb180", false},
+		},
+		{
+			tool:     "eth_getLogs",
+			args:     map[string]any{"fromBlock": "100", "toBlock": "200"},
+			result:   `[]`,
+			wantArgs: []any{map[string]any{"fromBlock": "0x64", "toBlock": "0xc8"}},
+		},
+		{
+			tool:     "eth_getProof",
+			args:     map[string]any{"address": "0xabc", "storageKeys": ""},
+			result:   `{}`,
+			wantArgs: []any{"0xabc", json.RawMessage("[]"), "latest"},
+		},
+		{
+			tool:     "eth_getStorageAt",
+			args:     map[string]any{"address": "0xabc", "position": "0x2"},
+			result:   `"0x0"`,
+			wantArgs: []any{"0xabc", "0x2", "latest"},
+		},
+		{
+			tool:     "ots_getBlockTransactions",
+			args:     map[string]any{"blockNumber": "0x10", "pageNumber": 2, "pageSize": 10},
+			result:   `{}`,
+			wantArgs: []any{"0x10", 2, 10},
+		},
+		{
+			tool:     "ots_getTransactionBySenderAndNonce",
+			args:     map[string]any{"address": "0xabc", "nonce": 7},
+			result:   `"0x1"`,
+			wantArgs: []any{"0xabc", 7},
+		},
+		{
+			tool:     "erigon_getBlockByTimestamp",
+			args:     map[string]any{"timestamp": "1700000000", "fullTransactions": true},
+			result:   `{}`,
+			wantArgs: []any{"1700000000", true},
+		},
+		{
+			tool:     "eth_getStorageValues",
+			args:     map[string]any{"requests": `{"0xabc":["0x1"]}`, "blockNumber": "latest"},
+			result:   `{}`,
+			wantArgs: []any{json.RawMessage(`{"0xabc":["0x1"]}`), "latest"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -156,6 +204,14 @@ func TestToolResultFormatting(t *testing.T) {
 		{tool: "eth_gasPrice", result: `"0x3b9aca00"`, want: "Gas price: 1000000000 wei (1.00 Gwei)"},
 		{tool: "ots_hasCode", args: map[string]any{"address": "0xabc"}, result: `true`, want: "has code (is a contract)"},
 		{tool: "ots_getTransactionError", args: map[string]any{"txHash": "0x1"}, result: `"0x"`, want: "Transaction succeeded (no error)"},
+		{tool: "ots_getTransactionError", args: map[string]any{"txHash": "0x1"}, result: `"0x08c379a0"`, want: "Transaction error: 0x08c379a0"},
+		{tool: "eth_getBlockTransactionCountByNumber", args: map[string]any{"blockNumber": "0x999"}, result: `null`, want: "Block not found"},
+		{tool: "eth_getUncleCountByBlockNumber", args: map[string]any{"blockNumber": "0x999"}, result: `null`, want: "Block not found"},
+		{tool: "eth_chainId", result: `"0x27d8"`, want: "Chain ID: 10200 (0x27d8) - chiado"},
+		{tool: "eth_chainId", result: `"0xfffffe"`, want: "Chain ID: 16777214 (0xfffffe)"},
+		{tool: "ots_getTransactionBySenderAndNonce", args: map[string]any{"address": "0xabc", "nonce": 1}, result: `null`, want: "Transaction not found"},
+		{tool: "ots_getTransactionBySenderAndNonce", args: map[string]any{"address": "0xabc", "nonce": 1}, result: `"0xdead"`, want: "Transaction hash: 0xdead"},
+		{tool: "eth_syncing", result: `{"currentBlock":"0x10"}`, want: `"currentBlock": "0x10"`},
 	}
 
 	for _, tt := range tests {
@@ -175,6 +231,20 @@ func TestToolCallError(t *testing.T) {
 	require.Contains(t, got, "boom")
 }
 
+// Schema validation must reject mistyped arguments instead of letting the
+// mcp-go Get* helpers silently substitute defaults (which would issue a
+// valid-looking JSON-RPC call with the wrong arguments).
+func TestInputValidationRejectsMistypedArgs(t *testing.T) {
+	caller := &fakeCaller{result: json.RawMessage(`"0x0"`)}
+	e := NewErigonMCPServer(caller, "", false)
+
+	got := callTool(t, e, "eth_getBalance", map[string]any{"address": "0xabc", "blockNumber": 12345678})
+	require.Empty(t, caller.method, "mistyped argument must not reach the JSON-RPC dispatch, got call %s(%v) — result: %s", caller.method, caller.args, got)
+
+	got = callTool(t, e, "ots_getTransactionBySenderAndNonce", map[string]any{"address": "0xabc", "nonce": "0xa"})
+	require.Empty(t, caller.method, "string nonce must not silently become 0 — result: %s", got)
+}
+
 // Every table entry must be well-formed: unique names, and a param that can be
 // omitted from the call must be the last one (dropping a middle positional
 // argument would shift the ones after it).
@@ -188,6 +258,8 @@ func TestToolCallTable(t *testing.T) {
 			if p.omit {
 				require.Equal(t, len(c.params)-1, i, "tool %s: omittable param %s must be last", c.name, p.name)
 			}
+			require.False(t, p.required && (p.def != "" || p.defInt != 0),
+				"tool %s: param %s is required but has a default — schema-validating clients would reject calls the handler accepts", c.name, p.name)
 		}
 	}
 	require.Contains(t, seen, "eth_blockNumber")

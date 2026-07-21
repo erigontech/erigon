@@ -107,6 +107,22 @@ func TestResourceAddressSummaryExtractsAddress(t *testing.T) {
 	require.Equal(t, true, summary["is_contract"])
 }
 
+func TestResourceAddressSummaryNullsOnRPCFailure(t *testing.T) {
+	caller := &scriptedCaller{responses: map[string]json.RawMessage{
+		"eth_getBalance": json.RawMessage(`"0x2a"`),
+		// eth_getTransactionCount and eth_getCode have no scripted response and error.
+	}}
+	e := NewErigonMCPServer(caller, "", false)
+
+	contents, err := e.handleResourceAddressSummary(context.Background(), readResourceRequest("erigon://address/0xabc/summary"))
+	require.NoError(t, err)
+
+	summary := resourceJSON(t, contents)
+	require.Equal(t, "0x2a", summary["balance"])
+	require.Nil(t, summary["nonce"])
+	require.Nil(t, summary["is_contract"], "a failed eth_getCode must not report a confident EOA verdict")
+}
+
 func TestResourceAddressSummaryMissingAddress(t *testing.T) {
 	e := NewErigonMCPServer(&scriptedCaller{}, "", false)
 
