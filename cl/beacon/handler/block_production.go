@@ -1518,17 +1518,25 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	if version >= clparams.GloasVersion {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, cltypes.ErrGloasCannotBlind)
 	}
+	defer r.Body.Close()
+	contentType, err := requestContentType(r)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err)
+	}
+	if contentType != "application/json" && contentType != "application/octet-stream" {
+		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, fmt.Errorf("unsupported content type: %s", contentType))
+	}
+	isJSON := contentType == "application/json"
 
 	// todo: broadcast_validation
 
 	signedBlindedBlock := cltypes.NewSignedBlindedBeaconBlock(a.beaconChainCfg, version)
 	signedBlindedBlock.Block.SetVersion(version)
 	b, err := io.ReadAll(r.Body)
-	defer r.Body.Close()
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	if r.Header.Get("Content-Type") == "application/json" {
+	if isJSON {
 		signedBlindedBlock.Block.Body.ExecutionPayload = nil
 		if err := json.Unmarshal(b, signedBlindedBlock); err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
@@ -1541,7 +1549,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	if err := validateBlindedBlockRequest(signedBlindedBlock, version); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	if r.Header.Get("Content-Type") == "application/json" {
+	if isJSON {
 		signedBlindedBlock.Block.SetVersion(version)
 	}
 	// submit and unblind the signedBlindedBlock
