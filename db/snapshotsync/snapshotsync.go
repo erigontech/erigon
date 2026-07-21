@@ -436,6 +436,9 @@ func SyncSnapshots(
 			if err != nil {
 				return fmt.Errorf("error opening segments after to block filter deletion: %w", err)
 			}
+			// RetireFilesAbove + OpenSegments changed the on-disk file set; refresh the
+			// tx's pinned view so getMinimumBlocksToDownload below reads the new set.
+			tx.(kv.CanReopenUnderlyingFilesTx).ForceReopenUnderlyingFilesTx()
 		}
 
 		txNumsReader := blockReader.TxnumReader()

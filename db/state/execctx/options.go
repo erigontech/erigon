@@ -19,7 +19,8 @@ package execctx
 import "github.com/erigontech/erigon/execution/commitment"
 
 type sharedDomainOptions struct {
-	trieCfg commitment.TrieConfig
+	trieCfg              commitment.TrieConfig
+	useSharedBranchCache bool
 }
 
 // SharedDomainOption configures NewSharedDomains.
@@ -33,6 +34,11 @@ func WithTrieConfig(cfg commitment.TrieConfig) SharedDomainOption {
 // WithoutDeferredBranchUpdates disables deferred branch updates (read-only / one-shot domains).
 func WithoutDeferredBranchUpdates() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.trieCfg.DeferBranchUpdates = false }
+}
+
+// WithoutSharedBranchCache keeps commitment reads within the transaction snapshot.
+func WithoutSharedBranchCache() SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.useSharedBranchCache = false }
 }
 
 // WithSequentialCommitment forces the sequential HexPatriciaHashed trie regardless
