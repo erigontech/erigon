@@ -116,6 +116,18 @@ func TestToolArgMapping(t *testing.T) {
 			wantArgs: []any{map[string]any{"address": []string{"0xabc", "0xdef"}}},
 		},
 		{
+			tool:     "txpool_status",
+			args:     map[string]any{},
+			result:   `{"pending":"0x0"}`,
+			wantArgs: []any{},
+		},
+		{
+			tool:     "txpool_contentFrom",
+			args:     map[string]any{"address": "0xabc"},
+			result:   `{}`,
+			wantArgs: []any{"0xabc"},
+		},
+		{
 			tool:     "eth_call",
 			args:     map[string]any{"to": "0xabc", "data": "0x01", "from": "0xdef"},
 			result:   `"0x"`,
@@ -271,4 +283,7 @@ func TestToolCallTable(t *testing.T) {
 	require.Contains(t, seen, "eth_blockNumber")
 	require.Contains(t, seen, "ots_getContractCreator")
 	require.Contains(t, seen, "eth_getStorageValues")
+	require.Contains(t, seen, "txpool_status")
+	require.Contains(t, seen, "txpool_content")
+	require.Contains(t, seen, "txpool_contentFrom")
 }

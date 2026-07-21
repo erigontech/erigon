@@ -610,6 +610,18 @@ func rpcToolCalls() []toolCall {
 			name: "erigon_nodeInfo", desc: "Get P2P node info",
 		},
 
+		// ===== TXPOOL TOOLS =====
+		{
+			name: "txpool_status", desc: "Get transaction pool status (pending/basefee/queued counts)",
+		},
+		{
+			name: "txpool_content", desc: "Get full transaction pool content grouped by sender",
+		},
+		{
+			name: "txpool_contentFrom", desc: "Get pending/queued pool transactions of one sender",
+			params: []param{{name: "address", desc: "Sender address", kind: pString, required: true}},
+		},
+
 		// ===== OTTERSCAN TOOLS =====
 		{
 			name: "ots_getApiLevel", desc: "Get Otterscan API level",
