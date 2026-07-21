@@ -1526,6 +1526,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	if r.Header.Get("Content-Type") == "application/json" {
+		signedBlindedBlock.Block.Body.ExecutionPayload = nil
 		if err := json.Unmarshal(b, signedBlindedBlock); err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
@@ -1536,6 +1537,9 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	}
 	if err := validateBlindedBlockRequest(signedBlindedBlock, version); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	if r.Header.Get("Content-Type") == "application/json" {
+		signedBlindedBlock.Block.SetVersion(version)
 	}
 	// submit and unblind the signedBlindedBlock
 	blockPayload, blobsBundle, executionRequests, err := a.builderClient.SubmitBlindedBlocks(r.Context(), signedBlindedBlock)

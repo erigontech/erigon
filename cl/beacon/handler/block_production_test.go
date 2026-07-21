@@ -93,7 +93,12 @@ func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
 func TestPublishBlindedBlocksAcceptsEmptyFuluBuilderResponse(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	builderClient := builder_mock.NewMockBuilderClient(ctrl)
-	builderClient.EXPECT().SubmitBlindedBlocks(gomock.Any(), gomock.Any()).Return(nil, nil, nil, nil)
+	builderClient.EXPECT().SubmitBlindedBlocks(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *cltypes.ExecutionRequests, error) {
+			require.Equal(t, cltypes.NewEth1Header(clparams.FuluVersion).EncodingSizeSSZ(), block.Block.Body.ExecutionPayload.EncodingSizeSSZ())
+			return nil, nil, nil, nil
+		},
+	)
 	h := &ApiHandler{
 		beaconChainCfg: &clparams.MainnetBeaconConfig,
 		builderClient:  builderClient,
@@ -131,9 +136,10 @@ func TestPublishBlindedBlocksRejectsMissingPreFuluPayload(t *testing.T) {
 
 func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		mutate  func(*cltypes.SignedBlindedBeaconBlock)
-		wantErr string
+		name       string
+		mutate     func(*cltypes.SignedBlindedBeaconBlock)
+		mutateJSON func(*testing.T, []byte) []byte
+		wantErr    string
 	}{
 		{
 			name: "missing block",
@@ -150,7 +156,24 @@ func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
 			wantErr: "missing block body",
 		},
 		{
-			name: "missing execution payload header",
+			name: "null execution payload header",
+			mutate: func(block *cltypes.SignedBlindedBeaconBlock) {
+				block.Block.Body.ExecutionPayload = nil
+			},
+			mutateJSON: func(t *testing.T, body []byte) []byte {
+				var request map[string]any
+				require.NoError(t, json.Unmarshal(body, &request))
+				message := request["message"].(map[string]any)
+				blockBody := message["body"].(map[string]any)
+				blockBody["execution_payload_header"] = nil
+				encoded, err := json.Marshal(request)
+				require.NoError(t, err)
+				return encoded
+			},
+			wantErr: "missing execution payload header",
+		},
+		{
+			name: "omitted execution payload header",
 			mutate: func(block *cltypes.SignedBlindedBeaconBlock) {
 				block.Block.Body.ExecutionPayload = nil
 			},
@@ -168,8 +191,8 @@ func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
 			tc.mutate(block)
 			body, err := json.Marshal(block)
 			require.NoError(t, err)
-			if tc.name == "missing execution payload header" {
-				body = bytes.Replace(body, []byte(`"body":{`), []byte(`"body":{"execution_payload_header":null,`), 1)
+			if tc.mutateJSON != nil {
+				body = tc.mutateJSON(t, body)
 			}
 			req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
