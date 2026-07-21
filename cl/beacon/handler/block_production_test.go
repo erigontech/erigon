@@ -90,6 +90,32 @@ func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
 	require.Contains(t, err.Error(), cltypes.ErrGloasCannotBlind.Error())
 }
 
+func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.AltairVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			h := &ApiHandler{
+				beaconChainCfg: &clparams.MainnetBeaconConfig,
+				builderClient:  builder_mock.NewMockBuilderClient(ctrl),
+			}
+			block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, version)
+			body, err := json.Marshal(block)
+			require.NoError(t, err)
+			req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Eth-Consensus-Version", version.String())
+
+			_, err = h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+			require.ErrorContains(t, err, "blinded blocks are unsupported before Bellatrix")
+		})
+	}
+
+	require.NoError(t, validateBlindedBlockRequest(
+		cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.BellatrixVersion),
+		clparams.BellatrixVersion,
+	))
+}
+
 func TestPublishBlindedBlocksAcceptsEmptyFuluBuilderResponse(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	builderClient := builder_mock.NewMockBuilderClient(ctrl)
