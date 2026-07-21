@@ -9,6 +9,7 @@ import (
 	"runtime/pprof"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -46,6 +47,10 @@ type pendingBlock struct {
 // only tests read it (to assert the fold path actually engaged rather than
 // silently degrading to incremental).
 var foldsAheadPerformed atomic.Int64
+
+// logNpPhases emits the per-block additive newPayload phase breakdown
+// (stage/exec/commit/overlap/gap/residual) for perf attribution.
+var logNpPhases = dbg.EnvBool("NEWPAYLOAD_PHASES", false)
 
 // FoldsAheadPerformedForTest reports the number of BAL fold-ahead computations
 // performed so far; ResetFoldsAheadForTest zeroes it. Test-only observability.
@@ -386,6 +391,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// required when changesets must record per-block branch deltas
 		// (reorg support, KeepExecutionProofs). Blocks from the changeset
 		// window (perBlockFrom) onward compute per-block for the same reason.
+		commitStart := time.Now()
 		switch {
 		case cc.foldedAhead[r.BlockNum]:
 			// Folded ahead from its BAL (pre-window: computeIsolated already
@@ -422,6 +428,26 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			// mode now, so the first window block's per-block compute (and
 			// changeset) covers only its own deltas.
 			cc.computeTransition(ctx, r)
+		}
+		if logNpPhases && !r.execStartedAt.IsZero() {
+			commitEnd := time.Now()
+			execActive := r.execEndedAt.Sub(r.execStartedAt)
+			commitActive := commitEnd.Sub(commitStart)
+			stageWall := commitEnd.Sub(r.execStartedAt)
+			// Directly measured overlap/gap between the exec and commit windows;
+			// exactly one is non-zero. stageWall == execActive + commitActive -
+			// overlap + gap by construction, so residual proves full accounting.
+			var overlap, gap time.Duration
+			if d := r.execEndedAt.Sub(commitStart); d > 0 {
+				overlap = d
+			} else {
+				gap = -d
+			}
+			residual := stageWall - execActive - commitActive + overlap - gap
+			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
+				"stage", stageWall, "exec", execActive, "commit", commitActive,
+				"flush", r.flushDur, "execNoFlush", execActive-r.flushDur,
+				"overlap", overlap, "gap", gap, "residual", residual)
 		}
 		// In BatchCommitments mode (without forcePerBlockCompute): just
 		// accumulate — compute only on explicit commitComputeRequest from

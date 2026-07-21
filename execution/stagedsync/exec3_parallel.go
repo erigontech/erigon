@@ -1012,6 +1012,12 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	// folded-ahead frontier before stopping.
 	sizeCutPending := false
 
+	// np-phase exec-loop attribution: wall spent waiting for the next in-order
+	// result vs doing serial per-tx processing (Drain + processResults:
+	// validate + blockStateCache apply + ApplyTxIndexes). Reset per completed block.
+	var npWait, npProc time.Duration
+	var npWaitStart, npProcStart time.Time
+
 	for {
 		err := func() error {
 			pe.Lock()
@@ -1053,6 +1059,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			pendingCh = pe.execRequests
 		}
 
+		if logNpPhases {
+			npWaitStart = time.Now()
+		}
 		select {
 		case exec := <-pendingCh:
 			if err := pe.processRequest(ctx, exec); err != nil {
@@ -1112,6 +1121,10 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			if !ok {
 				return pe.execLoopExitCheck(ctx, "main-select: rws.ResultCh closed")
 			}
+			if logNpPhases {
+				npWait += time.Since(npWaitStart)
+				npProcStart = time.Now()
+			}
 			closed, err := pe.rws.Drain(ctx, nextResult)
 			if err != nil {
 				return err
@@ -1122,6 +1135,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		}
 
 		blockResult, err := pe.processResults(ctx, applyTx)
+		if logNpPhases {
+			npProc += time.Since(npProcStart)
+		}
 
 		if err != nil {
 			return err
@@ -1143,6 +1159,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				if !blockExecutor.execStarted.IsZero() {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
 					pe.blockExecMetrics.BlockCount.Add(1)
+				}
+				if logNpPhases {
+					pe.logger.Info("[np-phase] execloop", "blk", blockResult.BlockNum,
+						"wait", npWait, "process", npProc)
+					npWait, npProc = 0, 0
 				}
 				// Snapshot the just-completed block's changeset BEFORE sending the
 				// blockResult, so that the commitment calculator (which consumes
@@ -1350,7 +1371,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	}
 
 	if scheduleable != nil {
-		pe.blockExecMetrics.BlockCount.Add(1)
 		scheduleable.execStarted = time.Now()
 		scheduleable.scheduleExecution(ctx, pe)
 	}
@@ -1587,7 +1607,6 @@ func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 		// Already running (or scheduled).
 		return
 	}
-	pe.blockExecMetrics.BlockCount.Add(1)
 	next.execStarted = time.Now()
 	next.scheduleExecution(ctx, pe)
 }
@@ -1741,6 +1760,14 @@ type blockResult struct {
 	Header           *types.Header      // for accumulator.StartChange in apply loop
 	Txs              types.Transactions // for accumulator.StartChange in apply loop
 	blockStateCache  *state.BlockStateCache
+
+	// Exec window for additive newPayload wall attribution: stamped when the
+	// block's execution completes (result built). The calculator pairs these
+	// with its own commit-window timestamps to measure exec/commit overlap
+	// directly rather than inferring it.
+	execStartedAt time.Time
+	execEndedAt   time.Time
+	flushDur      time.Duration
 }
 
 type txResult struct {
@@ -3258,9 +3285,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 
 		// Flush block state cache to sd.mem — all writes (per-TX + finalize) are now visible.
+		flushStart := time.Now()
 		if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx); err != nil {
 			return nil, err
 		}
+		flushDur := time.Since(flushStart)
 
 		be.result = &blockResult{
 			BlockNum:         be.blockNum,
@@ -3284,6 +3313,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			Header:           header,
 			Txs:              txs,
 			blockStateCache:  be.blockStateCache,
+			execStartedAt:    be.execStarted,
+			execEndedAt:      time.Now(),
+			flushDur:         flushDur,
 		}
 		if depShapeEnabled && !be.execStarted.IsZero() {
 			logDepShape(pe.logger, be.blockNum, be.blockIO, be.stats, time.Since(be.execStarted), be.serialTiming())

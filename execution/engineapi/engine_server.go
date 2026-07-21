@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -266,9 +267,12 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 }
 
 // EngineNewPayload validates and possibly executes payload
+var logNpPhasesHandler = dbg.EnvBool("NEWPAYLOAD_PHASES", false)
+
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
+	npStart := time.Now()
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	if !s.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
@@ -483,7 +487,16 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals)
+	npBeforeHandle := time.Now()
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes, blockAccessListBytes)
+	if logNpPhasesHandler {
+		npEnd := time.Now()
+		build := npBeforeHandle.Sub(npStart)
+		handle := npEnd.Sub(npBeforeHandle)
+		total := npEnd.Sub(npStart)
+		s.logger.Info("[np-phase] handler", "blk", req.BlockNumber.Uint64(), "txs", len(transactions),
+			"total", total, "build", build, "handle", handle)
+	}
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
