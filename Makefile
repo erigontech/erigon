@@ -464,10 +464,10 @@ check-kurtosis:
 	fi; \
 
 kurtosis-pectra-assertoor:	check-kurtosis
-	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/pectra.io")
+	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/pectra-erigon-mixed-el.io")
 
 kurtosis-regular-assertoor:	check-kurtosis
-	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/regular-assertoor.io")
+	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/regular-erigon-mixed-el.io")
 
 kurtosis-fusaka-assertoor: check-kurtosis
 	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/fusaka.io")
