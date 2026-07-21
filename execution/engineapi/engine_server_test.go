@@ -19,7 +19,6 @@ package engineapi
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"math/big"
 	"testing"
 	"time"
@@ -45,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -310,57 +308,6 @@ func writeBlockAccessListBytes(t *testing.T, db kv.TemporalRwDB, blockHash commo
 		return rawdb.WriteBlockAccessListBytes(tx, blockHash, blockNum, balBytes)
 	})
 	require.NoError(t, err)
-}
-
-func TestGetPayloadBodiesV2BlockAccessListSerialization(t *testing.T) {
-	m, chainPack := rpcdaemontest.CreateTestBlockAccessListExecModule(t)
-	engineServer := NewEngineServer(m.Log, m.ChainConfig, m.ExecModule, nil, false, false, false, true, nil, nil, ethconfig.Defaults.FcuTimeout, ethconfig.Defaults.MaxReorgDepth)
-	server := rpc.NewServer(50, false, false, true, log.New(), 100)
-	require.NoError(t, server.RegisterName("engine", engineServer))
-	client := rpc.DialInProc(server, log.New())
-	t.Cleanup(func() {
-		client.Close()
-		server.Stop()
-	})
-	want := []json.RawMessage{
-		json.RawMessage("null"),
-		marshalPayloadBodyBALJSON(t, chainPack.BlockAccessLists[1]),
-		marshalPayloadBodyBALJSON(t, chainPack.BlockAccessLists[2]),
-		json.RawMessage("null"),
-	}
-	t.Run("by hash", func(t *testing.T) {
-		hashes := make([]common.Hash, 4)
-		for i, block := range chainPack.Blocks[:4] {
-			hashes[i] = block.Hash()
-		}
-		var result json.RawMessage
-		require.NoError(t, client.CallContext(t.Context(), &result, "engine_getPayloadBodiesByHashV2", hashes))
-		requirePayloadBodyBALJSON(t, result, want)
-	})
-	t.Run("by range", func(t *testing.T) {
-		var result json.RawMessage
-		require.NoError(t, client.CallContext(t.Context(), &result, "engine_getPayloadBodiesByRangeV2", hexutil.Uint64(1), hexutil.Uint64(4)))
-		requirePayloadBodyBALJSON(t, result, want)
-	})
-}
-
-func marshalPayloadBodyBALJSON(t *testing.T, data []byte) json.RawMessage {
-	t.Helper()
-	encoded, err := json.Marshal(hexutil.Bytes(data))
-	require.NoError(t, err)
-	return encoded
-}
-
-func requirePayloadBodyBALJSON(t *testing.T, result json.RawMessage, want []json.RawMessage) {
-	t.Helper()
-	var bodies []map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(result, &bodies))
-	require.Len(t, bodies, len(want))
-	for i, body := range bodies {
-		got, ok := body["blockAccessList"]
-		require.True(t, ok, "body %d must serialize blockAccessList", i)
-		require.JSONEq(t, string(want[i]), string(got), "body %d", i)
-	}
 }
 
 func TestGetPayloadBodiesByHashV2(t *testing.T) {

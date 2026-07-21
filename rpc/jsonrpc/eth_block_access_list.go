@@ -24,9 +24,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -38,22 +36,6 @@ func blockAccessListResourceNotFoundError() *rpc.CustomError {
 
 func blockAccessListPrunedHistoryError() *rpc.CustomError {
 	return &rpc.CustomError{Code: 4444, Message: "Pruned history unavailable"}
-}
-
-// GetBlockAccessList returns the block access list for a given block (EIP-7928).
-func (api *APIImpl) GetBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethapi.RPCAccountAccess, error) {
-	data, err := api.blockAccessListBytes(ctx, api.db, numberOrHash)
-	if errors.Is(err, errBlockAccessListNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	bal, err := types.DecodeBlockAccessListBytes(data)
-	if err != nil {
-		return nil, err
-	}
-	return ethapi.MarshalBlockAccessList(bal), nil
 }
 
 func (api *BaseAPI) blockAccessListBytes(ctx context.Context, db kv.TemporalRoDB, numberOrHash rpc.BlockNumberOrHash) ([]byte, error) {

@@ -321,6 +321,22 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	return response, err
 }
 
+// GetBlockAccessList returns the block access list for a given block (EIP-7928).
+func (api *APIImpl) GetBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethapi.RPCAccountAccess, error) {
+	data, err := api.blockAccessListBytes(ctx, api.db, numberOrHash)
+	if errors.Is(err, errBlockAccessListNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	bal, err := types.DecodeBlockAccessListBytes(data)
+	if err != nil {
+		return nil, err
+	}
+	return ethapi.MarshalBlockAccessList(bal), nil
+}
+
 // GetBlockTransactionCountByNumber implements eth_getBlockTransactionCountByNumber. Returns the number of transactions in a block given the block's block number.
 func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)

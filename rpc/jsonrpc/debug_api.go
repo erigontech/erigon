@@ -97,6 +97,15 @@ func NewPrivateDebugAPI(base *BaseAPI, db kv.TemporalRoDB, ethBackend rpchelper.
 	}
 }
 
+// GetRawBlockAccessList returns the RLP-encoded block access list for a given block (EIP-7928).
+func (api *DebugAPIImpl) GetRawBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+	data, err := api.blockAccessListBytes(ctx, api.db, numberOrHash)
+	if errors.Is(err, errBlockAccessListNotFound) {
+		return nil, blockAccessListResourceNotFoundError()
+	}
+	return data, err
+}
+
 // SetHead implements debug_setHead. Rewinds the local chain to the specified block number.
 func (api *DebugAPIImpl) SetHead(ctx context.Context, number hexutil.Uint64) error {
 	blockNum := number.Uint64()
