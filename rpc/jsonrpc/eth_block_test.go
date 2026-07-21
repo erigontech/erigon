@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -82,6 +83,9 @@ func TestGetBlockAccessListRPCSpec(t *testing.T) {
 
 func newBlockAccessListRPCFixture(t *testing.T) (*blockgen.ChainPack, *rpc.Client) {
 	t.Helper()
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
 	m, chainPack := rpcdaemontest.CreateTestBlockAccessListExecModule(t)
 	base := newBaseApiForTest(m)
 	ethAPI := newEthApiForTest(base, m.DB, nil, nil)
