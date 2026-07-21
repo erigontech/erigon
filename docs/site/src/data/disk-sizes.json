@@ -1,43 +1,43 @@
 {
-  "ci_last_updated": "2025-09-01",
+  "ci_last_updated": "2026-07-21",
   "networks": {
     "mainnet": {
       "archive": {
-        "bytes": null,
-        "display": "1.77 TB",
-        "measured_at": "2025-09-01",
+        "bytes": 2032210546379,
+        "display": "2.03 TB",
+        "measured_at": "2026-07-19",
         "source": "manual"
       },
       "full": {
-        "bytes": null,
-        "display": "920 GB",
-        "measured_at": "2025-09-01",
+        "bytes": 419040837312,
+        "display": "419.04 GB",
+        "measured_at": "2026-07-19",
         "source": "manual"
       },
       "minimal": {
-        "bytes": null,
-        "display": "350 GB",
-        "measured_at": "2025-09-01",
+        "bytes": 378972109206,
+        "display": "378.97 GB",
+        "measured_at": "2026-07-19",
         "source": "manual"
       }
     },
     "gnosis": {
       "archive": {
-        "bytes": null,
-        "display": "539 GB",
-        "measured_at": "2025-09-01",
+        "bytes": 673591206484,
+        "display": "673.59 GB",
+        "measured_at": "2026-07-21",
         "source": "manual"
       },
       "full": {
-        "bytes": null,
-        "display": "462 GB",
-        "measured_at": "2025-09-01",
+        "bytes": 220098790979,
+        "display": "220.10 GB",
+        "measured_at": "2026-07-21",
         "source": "manual"
       },
       "minimal": {
-        "bytes": null,
-        "display": "128 GB",
-        "measured_at": "2025-09-01",
+        "bytes": 204449318751,
+        "display": "204.45 GB",
+        "measured_at": "2026-07-21",
         "source": "manual"
       }
     }
