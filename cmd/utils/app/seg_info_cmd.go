@@ -1,12 +1,13 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"slices"
 	"time"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 
@@ -15,7 +16,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 )
 
-func segInfo(cliCtx *cli.Context) error {
+func segInfo(ctx context.Context, cliCtx *cli.Command) error {
 	logger := log.Root()
 
 	// Compression settings

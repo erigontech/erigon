@@ -138,3 +138,4 @@ agentspecs/
 _artifacts
 gocache
 .claude/scheduled_tasks.lock
+test-fixtures-cache

@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/state"
@@ -73,7 +73,7 @@ func (r testResult) String() string {
 }
 
 // report prints the after-test summary.
-func report(ctx *cli.Context, results []testResult) {
+func report(ctx *cli.Command, results []testResult) {
 	if ctx.Bool(JSONOutputFlag.Name) {
 		// Write directly to stdout via encoder to avoid the intermediate
 		// MarshalIndent -> string -> Println allocation chain.

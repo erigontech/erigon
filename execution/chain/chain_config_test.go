@@ -17,8 +17,10 @@
 package chain
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/common"
@@ -225,6 +227,33 @@ func TestBlobParameterInactiveHardfork(t *testing.T) {
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
 }
 
+func TestConfigL2JSONRoundTrip(t *testing.T) {
+	var c Config
+	a := assert.New(t)
+	a.NoError(json.Unmarshal([]byte(`{"chainId":1,"l2":{"name":"testl2","foo":1}}`), &c))
+	a.JSONEq(`{"name":"testl2","foo":1}`, string(c.L2JSON))
+	a.True(c.IsL2())
+
+	var noL2 Config
+	a.NoError(json.Unmarshal([]byte(`{"chainId":1}`), &noL2))
+	a.False(noL2.IsL2())
+
+	var nullL2 Config
+	a.NoError(json.Unmarshal([]byte(`{"chainId":1,"l2":null}`), &nullL2))
+	a.False(nullL2.IsL2())
+
+	resolved := Config{L2: fakeL2{}}
+	a.True(resolved.IsL2())
+
+	var nilCfg *Config
+	a.False(nilCfg.IsL2())
+}
+
+type fakeL2 struct{}
+
+func (fakeL2) Name() string                                                 { return "fake" }
+func (fakeL2) ResolveRules(l2Version, blockNum, blockTime uint64, r *Rules) {}
+
 func TestBlobParameterDencunAndPectraAtGenesis(t *testing.T) {
 	var c Config
 	c.CancunTime = common.NewUint64(0)
@@ -247,4 +276,45 @@ func TestBlobParameterDencunAndPectraAtGenesis(t *testing.T) {
 	assert.Equal(t, uint64(6), c.GetTargetBlobsPerBlock(0))
 	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(0))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(0))
+}
+
+func TestCheckConfigForkOrder(t *testing.T) {
+	t.Parallel()
+	u64 := func(n uint64) *uint64 { return &n }
+	cases := []struct {
+		name    string
+		cfg     Config
+		wantErr bool
+	}{
+		{
+			// EEST TangerineWhistle/SpuriousDragon test genesis: EIP-150 active at
+			// block 0 with the DAO fork scheduled past the test's blocks. The DAO
+			// fork block sits after eip150 but must not be rejected.
+			name:    "dao after eip150",
+			cfg:     Config{ChainID: uint256.NewInt(1), HomesteadBlock: u64(0), DAOForkBlock: u64(2000), TangerineWhistleBlock: u64(0), SpuriousDragonBlock: u64(0)},
+			wantErr: false,
+		},
+		{
+			name:    "dao disabled",
+			cfg:     Config{ChainID: uint256.NewInt(1), HomesteadBlock: u64(0), TangerineWhistleBlock: u64(0), SpuriousDragonBlock: u64(0)},
+			wantErr: false,
+		},
+		{
+			name:    "eip150 after eip155 still rejected",
+			cfg:     Config{ChainID: uint256.NewInt(1), HomesteadBlock: u64(0), TangerineWhistleBlock: u64(10), SpuriousDragonBlock: u64(5)},
+			wantErr: true,
+		},
+	}
+	for i := range cases {
+		tc := &cases[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := tc.cfg.CheckConfigForkOrder()
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }

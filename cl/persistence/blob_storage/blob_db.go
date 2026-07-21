@@ -136,7 +136,7 @@ func (bs *BlobStore) ReadBlobSidecars(ctx context.Context, slot uint64, blockRoo
 	kzgCommitmentsLength := binary.LittleEndian.Uint32(val)
 
 	var blobSidecars []*cltypes.BlobSidecar
-	for i := uint32(0); i < kzgCommitmentsLength; i++ {
+	for i := range kzgCommitmentsLength {
 		_, filePath := blobSidecarFilePath(slot, uint64(i), blockRoot)
 		file, err := bs.fs.Open(filePath)
 		if err != nil {
@@ -226,7 +226,7 @@ func (bs *BlobStore) RemoveBlobSidecars(ctx context.Context, slot uint64, blockR
 		return nil
 	}
 	kzgCommitmentsLength := binary.LittleEndian.Uint32(val)
-	for i := uint32(0); i < kzgCommitmentsLength; i++ {
+	for i := range kzgCommitmentsLength {
 		_, filePath := blobSidecarFilePath(slot, uint64(i), blockRoot)
 		if err := bs.fs.Remove(filePath); err != nil {
 			return err
@@ -304,9 +304,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 	var errAtomic atomic.Value
 	var wg sync.WaitGroup
 	for _, sds := range storableSidecars {
-		wg.Add(1)
-		go func(sds *sidecarsPayload) {
-			defer wg.Done()
+		wg.Go(func() {
 			blobs := make([]*goethkzg.Blob, len(sds.sidecars))
 			for i, sidecar := range sds.sidecars {
 				blobs[i] = (*goethkzg.Blob)(&sidecar.Blob)
@@ -329,7 +327,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 				inserted.Add(uint64(len(sds.sidecars)))
 			}
 
-		}(sds)
+		})
 	}
 	wg.Wait()
 	if err := errAtomic.Load(); err != nil {

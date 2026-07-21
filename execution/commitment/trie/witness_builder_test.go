@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestBlockWitness(t *testing.T) {
-	tr := New(common.Hash{})
+	tr := newEmpty()
 	tr.Update([]byte("ABCD0001"), []byte("val1"))
 	tr.Update([]byte("ABCE0002"), []byte("val2"))
 
@@ -43,7 +42,7 @@ func TestBlockWitness(t *testing.T) {
 }
 
 func TestBlockWitnessAccount(t *testing.T) {
-	tr := New(common.Hash{})
+	tr := newEmpty()
 
 	account := accounts.NewAccount()
 	account.Balance.SetUint64(1 * 1000 * 1000)

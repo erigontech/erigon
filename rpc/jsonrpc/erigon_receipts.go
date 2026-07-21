@@ -20,12 +20,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/RoaringBitmap/roaring/v2"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/exec"
@@ -77,6 +79,37 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 	return logs, nil
 }
 
+// logRangeLatestOnly resolves a filter range where the only negative tag accepted for
+// FromBlock/ToBlock is "latest"; other tags (pending, safe, finalized) are rejected.
+func logRangeLatestOnly(tx kv.Tx, crit filters.FilterCriteria) (begin, end uint64, err error) {
+	latest, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return 0, 0, err
+	}
+	begin, err = resolveLogBound(crit.FromBlock, 0, "FromBlock")
+	if err != nil {
+		return 0, 0, err
+	}
+	end, err = resolveLogBound(crit.ToBlock, latest, "ToBlock")
+	if err != nil {
+		return 0, 0, err
+	}
+	return begin, end, nil
+}
+
+func resolveLogBound(bound *big.Int, def uint64, name string) (uint64, error) {
+	switch {
+	case bound == nil:
+		return def, nil
+	case bound.Sign() >= 0:
+		return bound.Uint64(), nil
+	case bound.IsInt64() && bound.Int64() == int64(rpc.LatestBlockNumber):
+		return def, nil
+	default:
+		return 0, &rpc.CustomError{Message: fmt.Sprintf("negative value for %s: %v", name, bound), Code: rpc.ErrCodeInvalidParams}
+	}
+}
+
 // GetLogs implements erigon_getLogs. Returns an array of logs matching a given filter object.
 func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.ErigonLogs, error) {
 	var begin, end uint64
@@ -97,27 +130,10 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		end = header.Number.Uint64()
 
 	} else {
-		// Convert the RPC block numbers into internal representations
-		latest, err := rpchelper.GetLatestBlockNumber(tx)
+		var err error
+		begin, end, err = logRangeLatestOnly(tx, crit)
 		if err != nil {
 			return nil, err
-		}
-
-		begin = 0
-		if crit.FromBlock != nil {
-			if crit.FromBlock.Sign() >= 0 {
-				begin = crit.FromBlock.Uint64()
-			} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.LatestBlockNumber) {
-				return nil, &rpc.CustomError{Message: fmt.Sprintf("negative value for FromBlock: %v", crit.FromBlock), Code: rpc.ErrCodeInvalidParams}
-			}
-		}
-		end = latest
-		if crit.ToBlock != nil {
-			if crit.ToBlock.Sign() >= 0 {
-				end = crit.ToBlock.Uint64()
-			} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
-				return nil, &rpc.CustomError{Message: fmt.Sprintf("negative value for ToBlock: %v", crit.ToBlock), Code: rpc.ErrCodeInvalidParams}
-			}
 		}
 	}
 
@@ -192,27 +208,9 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		begin = header.Number.Uint64()
 		end = header.Number.Uint64()
 	} else {
-		// Convert the RPC block numbers into internal representations
-		latest, err := rpchelper.GetLatestBlockNumber(tx)
+		begin, end, err = logRangeLatestOnly(tx, crit)
 		if err != nil {
 			return nil, err
-		}
-
-		begin = 0
-		if crit.FromBlock != nil {
-			if crit.FromBlock.Sign() >= 0 {
-				begin = crit.FromBlock.Uint64()
-			} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.LatestBlockNumber) {
-				return nil, &rpc.CustomError{Message: fmt.Sprintf("negative value for FromBlock: %v", crit.FromBlock), Code: rpc.ErrCodeInvalidParams}
-			}
-		}
-		end = latest
-		if crit.ToBlock != nil {
-			if crit.ToBlock.Sign() >= 0 {
-				end = crit.ToBlock.Uint64()
-			} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
-				return nil, &rpc.CustomError{Message: fmt.Sprintf("negative value for ToBlock: %v", crit.ToBlock), Code: rpc.ErrCodeInvalidParams}
-			}
 		}
 	}
 	if end < begin {
@@ -420,7 +418,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := api.getReceipts(ctx, tx, block)
+	receipts, borReceipt, err := api.getReceiptsWithBor(ctx, tx, chainConfig, block)
 	if err != nil {
 		return nil, err
 	}
@@ -431,20 +429,8 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, false))
 	}
 
-	if chainConfig.Bor != nil {
-		events, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
-		if err != nil {
-			return nil, err
-		}
-
-		if len(events) != 0 {
-			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
-			if err != nil {
-				return nil, err
-			}
-
-			result = append(result, ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false, false))
-		}
+	if borReceipt != nil {
+		result = append(result, ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false, false))
 	}
 
 	return result, nil

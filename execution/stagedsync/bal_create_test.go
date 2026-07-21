@@ -22,7 +22,7 @@ func TestCreateBALOrdering(t *testing.T) {
 	io := state.NewVersionedIO(4)
 
 	readSets := map[int]state.ReadSet{}
-	writeSets := map[int]state.VersionedWrites{}
+	writeSets := map[int]*state.WriteSet{}
 
 	// Pre-execution read to ensure addrA appears even without writes.
 	addBalanceRead(readSets, -1, addrA, uint64(5))
@@ -102,51 +102,34 @@ func addStorageRead(readSets map[int]state.ReadSet, txIdx int, addr accounts.Add
 
 func addStorageReadVal(readSets map[int]state.ReadSet, txIdx int, addr accounts.Address, slot accounts.StorageKey, val uint256.Int) {
 	rs := readSets[txIdx]
-	if rs == nil {
-		rs = state.ReadSet{}
-		readSets[txIdx] = rs
-	}
-	rs.Set(state.VersionedRead{
-		Address: addr,
-		Path:    state.StoragePath,
-		Key:     slot,
-		Val:     val,
-	})
+	rs.SetStorage(addr, slot, state.VersionedRead[uint256.Int]{Val: val})
+	readSets[txIdx] = rs
 }
 
 func addBalanceRead(readSets map[int]state.ReadSet, txIdx int, addr accounts.Address, value uint64) {
 	rs := readSets[txIdx]
-	if rs == nil {
-		rs = state.ReadSet{}
-		readSets[txIdx] = rs
+	rs.SetBalance(addr, state.VersionedRead[uint256.Int]{Val: *uint256.NewInt(value)})
+	readSets[txIdx] = rs
+}
+
+func writeSetFor(writeSets map[int]*state.WriteSet, txIdx int) *state.WriteSet {
+	ws := writeSets[txIdx]
+	if ws == nil {
+		ws = &state.WriteSet{}
+		writeSets[txIdx] = ws
 	}
-	rs.Set(state.VersionedRead{
-		Address: addr,
-		Path:    state.BalancePath,
-		Val:     *uint256.NewInt(value),
-	})
+	return ws
 }
 
-func addStorageWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr accounts.Address, slot accounts.StorageKey, value uint64) {
-	writeSets[txIdx] = append(writeSets[txIdx], &state.VersionedWrite{
-		Address: addr,
-		Path:    state.StoragePath,
-		Key:     slot,
-		Version: state.Version{TxIndex: txIdx},
-		Val:     *uint256.NewInt(value),
-	})
+func addStorageWrite(writeSets map[int]*state.WriteSet, txIdx int, addr accounts.Address, slot accounts.StorageKey, value uint64) {
+	writeSetFor(writeSets, txIdx).SetStorage(addr, slot, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: slot, Version: state.Version{TxIndex: txIdx}}, Val: *uint256.NewInt(value)})
 }
 
-func addBalanceWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr accounts.Address, value uint64) {
-	writeSets[txIdx] = append(writeSets[txIdx], &state.VersionedWrite{
-		Address: addr,
-		Path:    state.BalancePath,
-		Version: state.Version{TxIndex: txIdx},
-		Val:     *uint256.NewInt(value),
-	})
+func addBalanceWrite(writeSets map[int]*state.WriteSet, txIdx int, addr accounts.Address, value uint64) {
+	writeSetFor(writeSets, txIdx).SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: state.Version{TxIndex: txIdx}}, Val: *uint256.NewInt(value)})
 }
 
-func recordAll(io *state.VersionedIO, reads map[int]state.ReadSet, writes map[int]state.VersionedWrites) {
+func recordAll(io *state.VersionedIO, reads map[int]state.ReadSet, writes map[int]*state.WriteSet) {
 	for txIdx, rs := range reads {
 		io.RecordReads(state.Version{TxIndex: txIdx}, rs)
 	}
@@ -276,7 +259,7 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 	vio := state.NewVersionedIO(0)
 
 	readSets := map[int]state.ReadSet{}
-	writeSets := map[int]state.VersionedWrites{}
+	writeSets := map[int]*state.WriteSet{}
 
 	// === txIndex=-1: Initialize system calls (EIP-4788, EIP-2935) ===
 
@@ -290,24 +273,12 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 	addBalanceRead(readSets, -1, eip4788Addr, 0)
 	addBalanceWrite(writeSets, -1, eip4788Addr, 0)
 	addStorageWrite(writeSets, -1, eip4788Addr, slot4788Timestamp, val4788Timestamp.Uint64())
-	writeSets[-1] = append(writeSets[-1], &state.VersionedWrite{
-		Address: eip4788Addr,
-		Path:    state.StoragePath,
-		Key:     slot4788Root,
-		Version: state.Version{TxIndex: -1},
-		Val:     *val4788Root,
-	})
+	writeSetFor(writeSets, -1).SetStorage(eip4788Addr, slot4788Root, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: eip4788Addr, Path: state.StoragePath, Key: slot4788Root, Version: state.Version{TxIndex: -1}}, Val: *val4788Root})
 
 	// EIP-2935 contract: balance read+write (no-op), 1 storage write
 	addBalanceRead(readSets, -1, eip2935Addr, 0)
 	addBalanceWrite(writeSets, -1, eip2935Addr, 0)
-	writeSets[-1] = append(writeSets[-1], &state.VersionedWrite{
-		Address: eip2935Addr,
-		Path:    state.StoragePath,
-		Key:     slot2935,
-		Version: state.Version{TxIndex: -1},
-		Val:     *val2935,
-	})
+	writeSetFor(writeSets, -1).SetStorage(eip2935Addr, slot2935, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: eip2935Addr, Path: state.StoragePath, Key: slot2935, Version: state.Version{TxIndex: -1}}, Val: *val2935})
 
 	// === txIndex=0: Finalize system calls (EIP-7002, EIP-7251 dequeue) ===
 	// Empty queue: read slots 0-3, write 0 back to each (net-zero → reads only)

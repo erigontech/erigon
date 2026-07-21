@@ -1,8 +1,8 @@
 package graph
 
 import (
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -15,5 +15,5 @@ type Resolver struct {
 	GraphQLAPI  jsonrpc.GraphQLAPI
 	db          kv.RoDB
 	filters     *rpchelper.Filters
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 }

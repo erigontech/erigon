@@ -40,6 +40,8 @@ const (
 
 var (
 	ErrIgnore                          = errors.New("ignore") // ErrIgnore is used to indicate that the message should be ignored.
+	ErrBidQueued                       = errors.New("bid queued")
+	ErrAttestationQueued               = errors.New("attestation queued")
 	ErrBlockYoungerThanParent          = errors.New("block is younger than parent")
 	ErrInvalidCommitmentsCount         = errors.New("invalid commitments count")
 	ErrCommitmentsInclusionProofFailed = errors.New("commitments inclusion proof failed")

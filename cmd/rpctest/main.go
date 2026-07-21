@@ -530,11 +530,8 @@ func main() {
 		Use:   "benchEthGetLogsRandomBlock",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchEthGetLogsRandomBlock(erigonURL, int(concurentRequests))
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchEthGetLogsRandomBlock(erigonURL, int(concurentRequests))
 		},
 	}
 	with(BenchEthGetLogsRandomBlockCmd, withErigonUrl, withRandBlockNum, withConcurentRequestNum)
@@ -543,11 +540,8 @@ func main() {
 		Use:   "benchEthGetBalanceRandomAccount",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchEthGetBalanceRandomAccount(erigonURL, int(concurentRequests))
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchEthGetBalanceRandomAccount(erigonURL, int(concurentRequests))
 		},
 	}
 	with(BenchEthGetBalanceRandomAccountCmd, withErigonUrl, withRandBlockNum, withConcurentRequestNum)

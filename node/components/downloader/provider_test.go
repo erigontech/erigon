@@ -68,3 +68,23 @@ func TestProviderCloseIdempotent(t *testing.T) {
 	p.Close()
 	p.Close()
 }
+
+// Reproduces the shutdown race where the afterSnapshotDownload callback fires
+// after Close() has nil'd p.Downloader: the call must be a no-op, not a nil
+// pointer dereference.
+func TestProviderAddTorrentsFromDiskAfterClose(t *testing.T) {
+	p := &Provider{}
+	p.Configure(
+		nil,
+		ethconfig.BlocksFreezing{NoDownloader: true},
+		datadir.New(t.TempDir()),
+		log.Root(),
+		nil,
+	)
+	require.NoError(t, p.Initialize(t.Context()))
+	p.Close()
+
+	incomplete, err := p.AddTorrentsFromDisk(t.Context())
+	require.NoError(t, err)
+	require.Zero(t, incomplete)
+}

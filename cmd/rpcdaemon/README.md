@@ -353,6 +353,9 @@ The following table shows the current implementation status of Erigon's RPC daem
 | engine_getBlobsV2                          | Yes     | Added in Fusaka                                       |
 | engine_getBlobsV3                          | Yes     | Added with BPO3                                       |
 |                                            |         |                                                       |
+| testing_buildBlockV1                       | Yes     | Testing environments only, disabled by default        |
+| testing_commitBlockV1                      | Yes     | Testing environments only, disabled by default        |
+|                                            |         |                                                       |
 | debug_accountRange                         | Yes     |                                                       |
 | debug_accountAt                            | Yes     |                                                       |
 | debug_getBadBlocks                         | Yes     |                                                       |

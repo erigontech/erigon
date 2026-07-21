@@ -359,9 +359,17 @@ func (cp *ChainPack) Copy() *ChainPack {
 }
 
 var withdrawalRequestCode = common.Hex2Bytes("3373fffffffffffffffffffffffffffffffffffffffe1460cb5760115f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff146101f457600182026001905f5b5f82111560685781019083028483029004916001019190604d565b909390049250505036603814608857366101f457346101f4575f5260205ff35b34106101f457600154600101600155600354806003026004013381556001015f35815560010160203590553360601b5f5260385f601437604c5fa0600101600355005b6003546002548082038060101160df575060105b5f5b8181146101835782810160030260040181604c02815460601b8152601401816001015481526020019060020154807fffffffffffffffffffffffffffffffff00000000000000000000000000000000168252906010019060401c908160381c81600701538160301c81600601538160281c81600501538160201c81600401538160181c81600301538160101c81600201538160081c81600101535360010160e1565b910180921461019557906002556101a0565b90505f6002555f6003555b5f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff14156101cd57505f5b6001546002828201116101e25750505f6101e8565b01600290035b5f555f600155604c025ff35b5f5ffd")
-var withdrawalRequestCodeHash = accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(withdrawalRequestCode)))
+var withdrawalRequestCodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(withdrawalRequestCode))
 var consolidationRequestCode = common.Hex2Bytes("3373fffffffffffffffffffffffffffffffffffffffe1460d35760115f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff1461019a57600182026001905f5b5f82111560685781019083028483029004916001019190604d565b9093900492505050366060146088573661019a573461019a575f5260205ff35b341061019a57600154600101600155600354806004026004013381556001015f358155600101602035815560010160403590553360601b5f5260605f60143760745fa0600101600355005b6003546002548082038060021160e7575060025b5f5b8181146101295782810160040260040181607402815460601b815260140181600101548152602001816002015481526020019060030154905260010160e9565b910180921461013b5790600255610146565b90505f6002555f6003555b5f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff141561017357505f5b6001546001828201116101885750505f61018e565b01600190035b5f555f6001556074025ff35b5f5ffd")
-var consolidationRequestCodeHash = accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(consolidationRequestCode)))
+var consolidationRequestCodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(consolidationRequestCode))
+
+// EIP-8282 builder deposit contract runtime bytecode
+var builderDepositRequestCode = misc.BuilderDepositRequestCode
+var builderDepositRequestCodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(builderDepositRequestCode))
+
+// EIP-8282 builder exit contract runtime bytecode
+var builderExitRequestCode = misc.BuilderExitRequestCode
+var builderExitRequestCodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(builderExitRequestCode))
 
 func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.Logger) error {
 	ctx := context.Background()
@@ -384,14 +392,77 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 	}
 	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
 
-	stateWriter.UpdateAccountData(withdrawalAddr, &accounts.Account{}, &accounts.Account{
+	err = stateWriter.UpdateAccountData(withdrawalAddr, &accounts.Account{}, &accounts.Account{
 		CodeHash: withdrawalRequestCodeHash,
+		Nonce:    1,
 	})
-	stateWriter.UpdateAccountCode(withdrawalAddr, 0, withdrawalRequestCodeHash, withdrawalRequestCode)
-	stateWriter.UpdateAccountData(consolidationAddr, &accounts.Account{}, &accounts.Account{
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountCode(withdrawalAddr, 0, withdrawalRequestCodeHash, withdrawalRequestCode)
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountData(consolidationAddr, &accounts.Account{}, &accounts.Account{
 		CodeHash: consolidationRequestCodeHash,
+		Nonce:    1,
 	})
-	stateWriter.UpdateAccountCode(consolidationAddr, 0, consolidationRequestCodeHash, consolidationRequestCode)
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountCode(consolidationAddr, 0, consolidationRequestCodeHash, consolidationRequestCode)
+	if err != nil {
+		return err
+	}
+
+	return domains.Commit(ctx, tx)
+}
+
+// InitAmsterdamPreDeploys deploys the EIP-8282 builder deposit and exit
+// system contracts into the state database for test chains with Amsterdam active.
+func InitAmsterdamPreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.Logger) error {
+	ctx := context.Background()
+	builderDepositAddr := config.GetBuilderDepositContract()
+	builderExitAddr := config.GetBuilderExitContract()
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return err
+	}
+	defer domains.Close()
+	latestTxNum, _, err := domains.SeekCommitment(ctx, tx)
+	if err != nil {
+		return err
+	}
+	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
+
+	err = stateWriter.UpdateAccountData(builderDepositAddr, &accounts.Account{}, &accounts.Account{
+		CodeHash: builderDepositRequestCodeHash,
+		Nonce:    1,
+	})
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountCode(builderDepositAddr, 0, builderDepositRequestCodeHash, builderDepositRequestCode)
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountData(builderExitAddr, &accounts.Account{}, &accounts.Account{
+		CodeHash: builderExitRequestCodeHash,
+		Nonce:    1,
+	})
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountCode(builderExitAddr, 0, builderExitRequestCodeHash, builderExitRequestCode)
+	if err != nil {
+		return err
+	}
 
 	return domains.Commit(ctx, tx)
 }
@@ -474,11 +545,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		if chainreader.Config().IsShanghai(parent.Time()) {
 			b.withdrawals = []*types.Withdrawal{}
 		}
-		if chainreader.Config().IsAmsterdam(parent.Time()) && !chainreader.Config().IsEIPDisabled(7928) {
+		b.header = makeHeader(chainreader, parent, ibs, b.engine)
+		if chainreader.Config().IsAmsterdam(b.header.Time) && !chainreader.Config().IsEIPDisabled(7928) {
 			b.blockIO = &state.VersionedIO{}
 		}
-
-		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			if b.header.Number.Uint64() >= *daoBlock && b.header.Number.Uint64() < *daoBlock+misc.DAOForkExtraRange {
@@ -593,15 +663,13 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	}
 
 	blockAccessLists := make([][]byte, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		ibs := state.New(stateReader)
 		if dbg.TraceBlock(uint64(i)) {
 			ibs.SetTrace(true)
-			domains.SetTrace(true, false)
 		}
 		block, receipt, balBytes, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		ibs.SetTrace(false)
-		domains.SetTrace(false, false)
 		if err != nil {
 			return nil, fmt.Errorf("generating block %d: %w", i, err)
 		}

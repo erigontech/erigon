@@ -30,7 +30,7 @@ func TestRateLimiter_AllowRequest(t *testing.T) {
 	proto := communication.BeaconBlocksByRangeProtocolV2
 
 	// First 128 single-token requests should be allowed (burst capacity).
-	for i := 0; i < 128; i++ {
+	for i := range 128 {
 		require.True(t, rl.allowRequest(peer, proto, 1), "request %d should be allowed", i)
 	}
 
@@ -57,7 +57,7 @@ func TestRateLimiter_Concurrency(t *testing.T) {
 	peer := "16Uiu2peer1"
 
 	// Acquire up to the limit.
-	for i := 0; i < maxConcurrentRequestsPerPeer; i++ {
+	for i := range maxConcurrentRequestsPerPeer {
 		require.True(t, rl.acquireConcurrency(peer), "acquire %d should succeed", i)
 	}
 
@@ -89,7 +89,7 @@ func TestRateLimiter_PunishmentBlocksRequests(t *testing.T) {
 func TestRateLimiter_UnknownProtocolAllowed(t *testing.T) {
 	rl := newPeerRateLimiter()
 	// Protocols not in the rate limit map should be allowed (no rate config = no limit).
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		require.True(t, rl.allowRequest("peer1", "/unknown/protocol/v1", 1))
 	}
 }

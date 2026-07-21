@@ -3,12 +3,14 @@ package ethapi
 import (
 	"bytes"
 	"encoding/json"
+	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -45,6 +47,21 @@ func TestNewRPCTransaction_SignedLegacy(t *testing.T) {
 	require.NotNil(t, result.V)
 	require.NotNil(t, result.R)
 	require.NotNil(t, result.S)
+}
+
+func TestNewRPCTransaction_SignedLegacyEIP155(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	from := crypto.PubkeyToAddress(key.PublicKey)
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	chainID := uint256.NewInt(1)
+	tx, err := types.SignTx(types.NewTransaction(1, to, uint256.NewInt(0), 21000, uint256.NewInt(1), nil), *types.LatestSignerForChainID(chainID), key)
+	require.NoError(t, err)
+	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
+	// from is recovered with the chain id derived from the EIP-155 v value.
+	require.Equal(t, from, result.From)
+	require.NotNil(t, result.ChainID)
+	require.Equal(t, chainID.ToBig(), (*big.Int)(result.ChainID))
 }
 
 func TestNewRPCTransaction_EIP1559_YParityZero(t *testing.T) {

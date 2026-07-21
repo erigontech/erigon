@@ -159,7 +159,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 
 	var receiptsField CapabilityField
 	if persistReceipts {
-		// --persist.receipts widens past state-history pruning (receipts are written to
+		// --prune.include-receipts widens past state-history pruning (receipts are written to
 		// RCacheDomain at execution time, not re-derived from state). The remaining bound
 		// is block-body availability: eth_getBlockReceipts walks block.Transactions(), and
 		// getLogsV3 reads log indexes whose snapshots follow prune.Blocks (see
@@ -167,7 +167,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		// blocksOldest with the same DeleteStrategy as blocks.
 		receiptsField = avail(blocksOldest, pruneMode.Blocks)
 	} else {
-		// Without --persist.receipts, receipts are re-executed on demand, requiring both state
+		// Without --prune.include-receipts, receipts are re-executed on demand, requiring both state
 		// history and the block body. Use the more restrictive of the two oldest-block bounds.
 		if blocksOldest > stateOldest {
 			receiptsField = avail(blocksOldest, pruneMode.Blocks)

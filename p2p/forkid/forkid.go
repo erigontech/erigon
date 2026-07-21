@@ -156,7 +156,7 @@ func newFilter(heightForks, timeForks []uint64, genesis common.Hash, headHeight,
 			}
 			// The local and remote nodes are in different forks currently, check if the
 			// remote checksum is a subset of our local forks (rule #2).
-			for j := 0; j < i; j++ {
+			for j := range i {
 				if sums[j] == id.Hash {
 					// Remote checksum is a subset, validate based on the announced next fork
 					if forks[j] != id.Next {

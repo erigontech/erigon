@@ -250,6 +250,22 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	return msg, nil
 }
 
+// overrideBaseFee is a nil-safe wrapper around (*ethapi.BlockOverrides).OverrideBaseFee.
+func overrideBaseFee(traceConfig *config.TraceConfig, baseFee *uint256.Int) (*uint256.Int, error) {
+	if traceConfig == nil {
+		return baseFee, nil
+	}
+	return traceConfig.BlockOverrides.OverrideBaseFee(baseFee)
+}
+
+// overrideBlockContext applies traceConfig's BlockOverrides (if any) to blockCtx.
+func overrideBlockContext(traceConfig *config.TraceConfig, blockCtx *evmtypes.BlockContext) error {
+	if traceConfig == nil {
+		return nil
+	}
+	return traceConfig.BlockOverrides.Override(blockCtx)
+}
+
 func parseOeTracerConfig(traceConfig *config.TraceConfig) (OeTracerConfig, error) {
 	if traceConfig != nil && traceConfig.Tracer != nil && *traceConfig.Tracer != "" {
 		return OeTracerConfig{}, errors.New("trace_* does not support custom tracers; use debug_* (e.g. debug_traceTransaction) for named or JS tracers")
@@ -895,27 +911,12 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	var isBorStateSyncTxn bool
-	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
+	blockNum, txNum, isBorStateSyncTxn, ok, err := api.txnLookupWithBorFallback(ctx, tx, txHash, chainConfig)
 	if err != nil {
 		return nil, err
 	}
-
 	if !ok {
-		if chainConfig.Bor == nil {
-			return nil, nil
-		}
-
-		// otherwise this may be a bor state sync transaction - check
-		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txHash)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, nil
-		}
-
-		isBorStateSyncTxn = true
+		return nil, nil
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
@@ -928,24 +929,13 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum, isBorStateSyncTxn)
 	if err != nil {
 		return nil, err
 	}
 
-	if txNumMin+1 > txNum && !isBorStateSyncTxn {
-		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
-	}
-
-	var txnIndex = int(txNum - txNumMin - 1)
-
-	if isBorStateSyncTxn {
-		txnIndex = -1
-	}
-
-	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
 	// Returns an array of trace arrays, one trace array for each transaction
-	trace, err := api.callTransaction(ctx, tx, header, traceTypes, txnIndex, *gasBailOut, signer, chainConfig, traceConfig)
+	trace, err := api.callTransaction(ctx, tx, header, traceTypes, txnIndex, *gasBailOut, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -1025,9 +1015,8 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		}
 	}
 
-	signer := types.MakeSigner(chainConfig, blockNumber, block.Time())
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, wdiffs, _, err := api.callBlock(ctx, tx, block, traceTypes, *gasBailOut, signer, chainConfig, traceConfig)
+	traces, wdiffs, _, err := api.callBlock(ctx, tx, block, traceTypes, *gasBailOut, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -1154,18 +1143,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	ibs := state.New(stateReader)
 
-	// Setup context so it may be cancelled the call has completed
-	// or, in case of unmetered gas, setup a context with a timeout.
-	var cancel context.CancelFunc
-	if api.evmCallTimeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, api.evmCallTimeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
-
-	// Make sure the context is cancelled when the call has completed
-	// this makes sure resources are cleaned up.
-	defer cancel()
+	_, storeEVM, cleanup := setupEVMTimeout(ctx, api.evmCallTimeout)
+	defer cleanup()
 
 	traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
@@ -1231,9 +1210,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if precompiles != nil {
 		evm.SetPrecompiles(precompiles)
 	}
-
-	stop := context.AfterFunc(ctx, evm.Cancel)
-	defer stop()
+	storeEVM(evm)
 
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
@@ -1348,6 +1325,9 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	if parentHeader.BaseFee != nil {
 		baseFee = parentHeader.BaseFee
 	}
+	if baseFee, err = overrideBaseFee(traceConfig, baseFee); err != nil {
+		return nil, err
+	}
 	msgs := make([]*types.Message, len(callParams))
 	txns := make([]types.Transaction, len(callParams))
 	for i, args := range callParams {
@@ -1441,6 +1421,9 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	}
 
 	blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
+	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+		return nil, nil, err
+	}
 	var tracer *tracers.Tracer
 	var tracingHooks *tracing.Hooks
 
@@ -1659,6 +1642,9 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	}
 
 	blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
+	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+		return nil, err
+	}
 
 	if isHistoricalStateReader {
 		historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
@@ -1853,13 +1839,8 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		return nil, err
 	}
 
-	var cancel context.CancelFunc
-	if api.evmCallTimeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, api.evmCallTimeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
-	defer cancel()
+	_, storeEVM, cleanup := setupEVMTimeout(ctx, api.evmCallTimeout)
+	defer cleanup()
 
 	traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
@@ -1910,9 +1891,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	blockCtx.MaxGasLimit = true
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: ot.Tracer().Hooks})
-
-	stop := context.AfterFunc(ctx, evm.Cancel)
-	defer stop()
+	storeEVM(evm)
 
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult

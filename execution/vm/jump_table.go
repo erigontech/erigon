@@ -99,6 +99,7 @@ func newAmsterdamInstructionSet() JumpTable {
 	enable8024(&instructionSet) // EIP-8024 (DUPN, SWAPN, EXCHANGE)
 	enable7843(&instructionSet) // EIP-7843 (SLOTNUM)
 	enable8037(&instructionSet) // EIP-8037 (State Creation Gas Cost Increase)
+	enable8038(&instructionSet) // EIP-8038 (State-access gas cost update)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

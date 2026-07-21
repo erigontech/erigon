@@ -29,7 +29,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -55,29 +54,116 @@ func NewSentryMultiplexer(clients []sentryproto.SentryClient) *sentryMultiplexer
 	mux := &sentryMultiplexer{}
 	mux.clients = make([]*client, len(clients))
 	for i, c := range clients {
-		mux.clients[i] = &client{sync.RWMutex{}, c, -1}
+		mux.clients[i] = &client{sync.RWMutex{}, c, noProtocol}
 	}
 	return mux
 }
 
-func (m *sentryMultiplexer) SetStatus(ctx context.Context, in *sentryproto.StatusData, opts ...grpc.CallOption) (*sentryproto.SetStatusReply, error) {
+// fanOut calls call concurrently on every client whose negotiated protocol is
+// at least minProtocol (noProtocol admits clients that have not handshaken
+// yet) and feeds each reply to collect (may be nil) under a shared mutex. A
+// non-nil error from call or collect cancels the remaining calls.
+func fanOut[R any](ctx context.Context, clients []*client, minProtocol sentryproto.Protocol, call func(context.Context, *client) (R, error), collect func(clientIndex int, reply R) error) error {
 	g, gctx := errgroup.WithContext(ctx)
+	var mu sync.Mutex
 
-	for _, client := range m.clients {
+	for i, client := range clients {
 
-		client.RLock()
-		protocol := client.protocol
-		client.RUnlock()
+		if minProtocol > noProtocol {
+			client.RLock()
+			protocol := client.protocol
+			client.RUnlock()
 
-		if protocol >= 0 {
-			g.Go(func() error {
-				_, err := client.SetStatus(gctx, in, opts...)
-				return err
-			})
+			if protocol < minProtocol {
+				continue
+			}
 		}
+
+		g.Go(func() error {
+			reply, err := call(gctx, client)
+
+			if err != nil {
+				return err
+			}
+
+			if collect == nil {
+				return nil
+			}
+
+			mu.Lock()
+			defer mu.Unlock()
+
+			return collect(i, reply)
+		})
 	}
 
-	err := g.Wait()
+	return g.Wait()
+}
+
+func fanOutSuccess[R interface{ GetSuccess() bool }](ctx context.Context, clients []*client, call func(context.Context, *client) (R, error)) (bool, error) {
+	var success bool
+
+	err := fanOut(ctx, clients, noProtocol, call, func(_ int, reply R) error {
+		success = success || reply.GetSuccess()
+		return nil
+	})
+
+	return success, err
+}
+
+func streamFanIn[T protoreflect.ProtoMessage, S interface{ Recv() (T, error) }](ctx context.Context, clients []*client, open func(context.Context, *client) (S, error)) *SentryStreamC[T] {
+	g, gctx := errgroup.WithContext(ctx)
+
+	ch := make(chan StreamReply[T], MessagesQueueSize)
+	streamServer := &SentryStreamS[T]{Ch: ch, Ctx: ctx}
+
+	go func() {
+		defer close(ch)
+
+		for _, client := range clients {
+
+			g.Go(func() error {
+				stream, err := open(gctx, client)
+
+				if err != nil {
+					streamServer.Err(err)
+					return err
+				}
+
+				for {
+					message, err := stream.Recv()
+
+					if err != nil {
+						if errors.Is(err, io.EOF) {
+							return nil
+						}
+
+						streamServer.Err(err)
+
+						select {
+						case <-gctx.Done():
+							return gctx.Err()
+						default:
+						}
+
+						return fmt.Errorf("recv: %w", err)
+					}
+
+					streamServer.Send(message)
+				}
+			})
+		}
+
+		g.Wait()
+	}()
+
+	return &SentryStreamC[T]{Ch: ch, Ctx: ctx}
+}
+
+func (m *sentryMultiplexer) SetStatus(ctx context.Context, in *sentryproto.StatusData, opts ...grpc.CallOption) (*sentryproto.SetStatusReply, error) {
+	err := fanOut(ctx, m.clients, 0, func(gctx context.Context, client *client) (*sentryproto.SetStatusReply, error) {
+		return client.SetStatus(gctx, in, opts...)
+	}, nil)
 
 	if err != nil {
 		return nil, err
@@ -87,104 +173,59 @@ func (m *sentryMultiplexer) SetStatus(ctx context.Context, in *sentryproto.Statu
 }
 
 func (m *sentryMultiplexer) PenalizePeer(ctx context.Context, in *sentryproto.PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	g, gctx := errgroup.WithContext(ctx)
-
-	for _, client := range m.clients {
-
-		g.Go(func() error {
-			_, err := client.PenalizePeer(gctx, in, opts...)
-			return err
-		})
-	}
-
-	return &emptypb.Empty{}, g.Wait()
+	return &emptypb.Empty{}, fanOut(ctx, m.clients, noProtocol, func(gctx context.Context, client *client) (*emptypb.Empty, error) {
+		return client.PenalizePeer(gctx, in, opts...)
+	}, nil)
 }
 
 func (m *sentryMultiplexer) SetPeerLatestBlock(ctx context.Context, in *sentryproto.SetPeerLatestBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	g, gctx := errgroup.WithContext(ctx)
-
-	for _, client := range m.clients {
-
-		g.Go(func() error {
-			_, err := client.SetPeerLatestBlock(gctx, in, opts...)
-			return err
-		})
-	}
-
-	return &emptypb.Empty{}, g.Wait()
+	return &emptypb.Empty{}, fanOut(ctx, m.clients, noProtocol, func(gctx context.Context, client *client) (*emptypb.Empty, error) {
+		return client.SetPeerLatestBlock(gctx, in, opts...)
+	}, nil)
 }
 
 func (m *sentryMultiplexer) SetPeerMinimumBlock(ctx context.Context, in *sentryproto.SetPeerMinimumBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	g, gctx := errgroup.WithContext(ctx)
-
-	for _, client := range m.clients {
-
-		g.Go(func() error {
-			_, err := client.SetPeerMinimumBlock(gctx, in, opts...)
-			return err
-		})
-	}
-
-	return &emptypb.Empty{}, g.Wait()
+	return &emptypb.Empty{}, fanOut(ctx, m.clients, noProtocol, func(gctx context.Context, client *client) (*emptypb.Empty, error) {
+		return client.SetPeerMinimumBlock(gctx, in, opts...)
+	}, nil)
 }
 
 func (m *sentryMultiplexer) SetPeerBlockRange(ctx context.Context, in *sentryproto.SetPeerBlockRangeRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	g, gctx := errgroup.WithContext(ctx)
-
-	for _, client := range m.clients {
-
-		g.Go(func() error {
-			_, err := client.SetPeerBlockRange(gctx, in, opts...)
-			return err
-		})
-	}
-
-	return &emptypb.Empty{}, g.Wait()
+	return &emptypb.Empty{}, fanOut(ctx, m.clients, noProtocol, func(gctx context.Context, client *client) (*emptypb.Empty, error) {
+		return client.SetPeerBlockRange(gctx, in, opts...)
+	}, nil)
 }
 
 // HandShake is not performed on the multi-client level
 func (m *sentryMultiplexer) HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.HandShakeReply, error) {
-	g, gctx := errgroup.WithContext(ctx)
-
 	var protocol sentryproto.Protocol
-	var mu sync.Mutex
 
-	for _, client := range m.clients {
-
+	err := fanOut(ctx, m.clients, noProtocol, func(gctx context.Context, client *client) (sentryproto.Protocol, error) {
 		client.RLock()
 		clientProtocol := client.protocol
 		client.RUnlock()
 
 		if clientProtocol >= 0 {
-			mu.Lock()
-			if clientProtocol > protocol {
-				protocol = clientProtocol
-			}
-			mu.Unlock()
-			continue
+			return clientProtocol, nil
 		}
 
-		g.Go(func() error {
-			reply, err := client.HandShake(gctx, &emptypb.Empty{}, grpc.WaitForReady(true))
-			if err != nil {
-				return err
-			}
+		reply, err := client.HandShake(gctx, &emptypb.Empty{}, grpc.WaitForReady(true))
 
-			mu.Lock()
-			if reply.Protocol > protocol {
-				protocol = reply.Protocol
-			}
-			mu.Unlock()
+		if err != nil {
+			return noProtocol, err
+		}
 
-			client.Lock()
-			client.protocol = reply.Protocol
-			client.Unlock()
+		client.Lock()
+		client.protocol = reply.Protocol
+		client.Unlock()
 
-			return nil
-		})
-	}
-
-	err := g.Wait()
+		return reply.Protocol, nil
+	}, func(_ int, clientProtocol sentryproto.Protocol) error {
+		if clientProtocol > protocol {
+			protocol = clientProtocol
+		}
+		return nil
+	})
 
 	if err != nil {
 		return nil, err
@@ -439,150 +480,22 @@ func (m *sentryMultiplexer) SendMessageToAll(ctx context.Context, in *sentryprot
 	return &sentryproto.SentPeers{Peers: allSentPeers}, nil
 }
 
-type StreamReply[T protoreflect.ProtoMessage] struct {
-	R   T
-	Err error
-}
-
-// SentryMessagesStreamS implements proto_sentry.Sentry_ReceiveMessagesServer
-type SentryStreamS[T protoreflect.ProtoMessage] struct {
-	Ch  chan StreamReply[T]
-	Ctx context.Context
-	grpc.ServerStream
-}
-
-func (s *SentryStreamS[T]) Send(m T) error {
-	s.Ch <- StreamReply[T]{R: m}
-	EvictOldestIfHalfFull(s.Ch)
-	return nil
-}
-
-func (s *SentryStreamS[T]) Context() context.Context { return s.Ctx }
-
-func (s *SentryStreamS[T]) Err(err error) {
-	if err == nil {
-		return
-	}
-	s.Ch <- StreamReply[T]{Err: err}
-}
-
-func (s *SentryStreamS[T]) Close() {
-	if s.Ch != nil {
-		ch := s.Ch
-		s.Ch = nil
-		close(ch)
-	}
-}
-
-type SentryStreamC[T protoreflect.ProtoMessage] struct {
-	Ch  chan StreamReply[T]
-	Ctx context.Context
-	grpc.ClientStream
-}
-
-func (c *SentryStreamC[T]) Recv() (T, error) {
-	m, ok := <-c.Ch
-	if !ok {
-		var t T
-		return t, io.EOF
-	}
-	return m.R, m.Err
-}
-
-func (c *SentryStreamC[T]) Context() context.Context { return c.Ctx }
-
-func (c *SentryStreamC[T]) RecvMsg(anyMessage any) error {
-	m, err := c.Recv()
-	if err != nil {
-		return err
-	}
-	outMessage := anyMessage.(T)
-	proto.Merge(outMessage, m)
-	return nil
-}
-
 func (m *sentryMultiplexer) Messages(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
-	g, gctx := errgroup.WithContext(ctx)
-
-	ch := make(chan StreamReply[*sentryproto.InboundMessage], MessagesQueueSize)
-	streamServer := &SentryStreamS[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}
-
-	go func() {
-		defer close(ch)
-
-		for _, client := range m.clients {
-
-			g.Go(func() error {
-				messages, err := client.Messages(gctx, in, opts...)
-
-				if err != nil {
-					streamServer.Err(err)
-					return err
-				}
-
-				for {
-					inboundMessage, err := messages.Recv()
-
-					if err != nil {
-						if errors.Is(err, io.EOF) {
-							return nil
-						}
-
-						streamServer.Err(err)
-
-						select {
-						case <-gctx.Done():
-							return gctx.Err()
-						default:
-						}
-
-						return fmt.Errorf("recv: %w", err)
-					}
-
-					streamServer.Send(inboundMessage)
-				}
-			})
-		}
-
-		g.Wait()
-	}()
-
-	return &SentryStreamC[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}, nil
+	return streamFanIn(ctx, m.clients,
+		func(gctx context.Context, client *client) (sentryproto.Sentry_MessagesClient, error) {
+			return client.Messages(gctx, in, opts...)
+		}), nil
 }
 
 func (m *sentryMultiplexer) peersByClient(ctx context.Context, minProtocol sentryproto.Protocol, opts ...grpc.CallOption) ([]*sentryproto.PeersReply, error) {
-	g, gctx := errgroup.WithContext(ctx)
+	allReplies := make([]*sentryproto.PeersReply, len(m.clients))
 
-	var allReplies = make([]*sentryproto.PeersReply, len(m.clients))
-	var allMutex sync.RWMutex
-
-	for i, client := range m.clients {
-
-		client.RLock()
-		protocol := client.protocol
-		client.RUnlock()
-
-		if protocol < minProtocol {
-			continue
-		}
-
-		g.Go(func() error {
-			sentPeers, err := client.Peers(gctx, &emptypb.Empty{}, opts...)
-
-			if err != nil {
-				return err
-			}
-
-			allMutex.Lock()
-			defer allMutex.Unlock()
-
-			allReplies[i] = sentPeers
-
-			return nil
-		})
-	}
-
-	err := g.Wait()
+	err := fanOut(ctx, m.clients, minProtocol, func(gctx context.Context, client *client) (*sentryproto.PeersReply, error) {
+		return client.Peers(gctx, &emptypb.Empty{}, opts...)
+	}, func(clientIndex int, reply *sentryproto.PeersReply) error {
+		allReplies[clientIndex] = reply
+		return nil
+	})
 
 	if err != nil {
 		return nil, err
@@ -594,7 +507,7 @@ func (m *sentryMultiplexer) peersByClient(ctx context.Context, minProtocol sentr
 func (m *sentryMultiplexer) Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.PeersReply, error) {
 	var allPeers []*typesproto.PeerInfo
 
-	allReplies, err := m.peersByClient(ctx, -1, opts...)
+	allReplies, err := m.peersByClient(ctx, noProtocol, opts...)
 
 	if err != nil {
 		return nil, err
@@ -608,30 +521,14 @@ func (m *sentryMultiplexer) Peers(ctx context.Context, in *emptypb.Empty, opts .
 }
 
 func (m *sentryMultiplexer) PeerCount(ctx context.Context, in *sentryproto.PeerCountRequest, opts ...grpc.CallOption) (*sentryproto.PeerCountReply, error) {
-	g, gctx := errgroup.WithContext(ctx)
-
 	var allCount uint64
-	var allMutex sync.RWMutex
 
-	for _, client := range m.clients {
-
-		g.Go(func() error {
-			peerCount, err := client.PeerCount(gctx, in, opts...)
-
-			if err != nil {
-				return err
-			}
-
-			allMutex.Lock()
-			defer allMutex.Unlock()
-
-			allCount += peerCount.GetCount()
-
-			return nil
-		})
-	}
-
-	err := g.Wait()
+	err := fanOut(ctx, m.clients, noProtocol, func(gctx context.Context, client *client) (*sentryproto.PeerCountReply, error) {
+		return client.PeerCount(gctx, in, opts...)
+	}, func(_ int, reply *sentryproto.PeerCountReply) error {
+		allCount += reply.GetCount()
+		return nil
+	})
 
 	if err != nil {
 		return nil, err
@@ -643,37 +540,21 @@ func (m *sentryMultiplexer) PeerCount(ctx context.Context, in *sentryproto.PeerC
 var errFound = fmt.Errorf("found peer")
 
 func (m *sentryMultiplexer) PeerById(ctx context.Context, in *sentryproto.PeerByIdRequest, opts ...grpc.CallOption) (*sentryproto.PeerByIdReply, error) {
-	g, gctx := errgroup.WithContext(ctx)
-
 	var peer *typesproto.PeerInfo
-	var peerMutex sync.RWMutex
 
-	for _, client := range m.clients {
+	err := fanOut(ctx, m.clients, noProtocol, func(gctx context.Context, client *client) (*sentryproto.PeerByIdReply, error) {
+		return client.PeerById(gctx, in, opts...)
+	}, func(_ int, reply *sentryproto.PeerByIdReply) error {
+		if peer == nil && reply.GetPeer() != nil {
+			peer = reply.GetPeer()
+			// return a success error here to have the
+			// group stop other concurrent requests
+			return errFound
+		}
+		return nil
+	})
 
-		g.Go(func() error {
-			reply, err := client.PeerById(gctx, in, opts...)
-
-			if err != nil {
-				return err
-			}
-
-			peerMutex.Lock()
-			defer peerMutex.Unlock()
-
-			if peer == nil && reply.GetPeer() != nil {
-				peer = reply.GetPeer()
-				// return a success error here to have the
-				// group stop other concurrent requests
-				return errFound
-			}
-
-			return nil
-		})
-	}
-
-	err := g.Wait()
-
-	if err != nil && !errors.Is(errFound, err) {
+	if err != nil && !errors.Is(err, errFound) {
 		return nil, err
 	}
 
@@ -681,82 +562,16 @@ func (m *sentryMultiplexer) PeerById(ctx context.Context, in *sentryproto.PeerBy
 }
 
 func (m *sentryMultiplexer) PeerEvents(ctx context.Context, in *sentryproto.PeerEventsRequest, opts ...grpc.CallOption) (sentryproto.Sentry_PeerEventsClient, error) {
-	g, gctx := errgroup.WithContext(ctx)
-
-	ch := make(chan StreamReply[*sentryproto.PeerEvent], MessagesQueueSize)
-	streamServer := &SentryStreamS[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}
-
-	go func() {
-		defer close(ch)
-
-		for _, client := range m.clients {
-
-			g.Go(func() error {
-				messages, err := client.PeerEvents(gctx, in, opts...)
-
-				if err != nil {
-					streamServer.Err(err)
-					return err
-				}
-
-				for {
-					inboundMessage, err := messages.Recv()
-
-					if err != nil {
-						if errors.Is(err, io.EOF) {
-							return nil
-						}
-
-						streamServer.Err(err)
-
-						select {
-						case <-gctx.Done():
-							return gctx.Err()
-						default:
-						}
-
-						return fmt.Errorf("recv: %w", err)
-					}
-
-					streamServer.Send(inboundMessage)
-				}
-			})
-		}
-
-		g.Wait()
-	}()
-
-	return &SentryStreamC[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}, nil
+	return streamFanIn(ctx, m.clients,
+		func(gctx context.Context, client *client) (sentryproto.Sentry_PeerEventsClient, error) {
+			return client.PeerEvents(gctx, in, opts...)
+		}), nil
 }
 
 func (m *sentryMultiplexer) AddPeer(ctx context.Context, in *sentryproto.AddPeerRequest, opts ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {
-	g, gctx := errgroup.WithContext(ctx)
-
-	var success bool
-	var successMutex sync.RWMutex
-
-	for _, client := range m.clients {
-
-		g.Go(func() error {
-			result, err := client.AddPeer(gctx, in, opts...)
-
-			if err != nil {
-				return err
-			}
-
-			successMutex.Lock()
-			defer successMutex.Unlock()
-
-			// if any client returns success return success
-			if !success && result.GetSuccess() {
-				success = true
-			}
-
-			return nil
-		})
-	}
-
-	err := g.Wait()
+	success, err := fanOutSuccess(ctx, m.clients, func(gctx context.Context, client *client) (*sentryproto.AddPeerReply, error) {
+		return client.AddPeer(gctx, in, opts...)
+	})
 
 	if err != nil {
 		return nil, err
@@ -766,33 +581,9 @@ func (m *sentryMultiplexer) AddPeer(ctx context.Context, in *sentryproto.AddPeer
 }
 
 func (m *sentryMultiplexer) RemovePeer(ctx context.Context, in *sentryproto.RemovePeerRequest, opts ...grpc.CallOption) (*sentryproto.RemovePeerReply, error) {
-	g, gctx := errgroup.WithContext(ctx)
-
-	var success bool
-	var successMutex sync.RWMutex
-
-	for _, client := range m.clients {
-
-		g.Go(func() error {
-			result, err := client.RemovePeer(gctx, in, opts...)
-
-			if err != nil {
-				return err
-			}
-
-			successMutex.Lock()
-			defer successMutex.Unlock()
-
-			// if any client returns success return success
-			if !success && result.GetSuccess() {
-				success = true
-			}
-
-			return nil
-		})
-	}
-
-	err := g.Wait()
+	success, err := fanOutSuccess(ctx, m.clients, func(gctx context.Context, client *client) (*sentryproto.RemovePeerReply, error) {
+		return client.RemovePeer(gctx, in, opts...)
+	})
 
 	if err != nil {
 		return nil, err
@@ -802,33 +593,9 @@ func (m *sentryMultiplexer) RemovePeer(ctx context.Context, in *sentryproto.Remo
 }
 
 func (m *sentryMultiplexer) AddTrustedPeer(ctx context.Context, in *sentryproto.AddPeerRequest, opts ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {
-	g, gctx := errgroup.WithContext(ctx)
-
-	var success bool
-	var successMutex sync.RWMutex
-
-	for _, client := range m.clients {
-
-		g.Go(func() error {
-			result, err := client.AddTrustedPeer(gctx, in, opts...)
-
-			if err != nil {
-				return err
-			}
-
-			successMutex.Lock()
-			defer successMutex.Unlock()
-
-			// if any client returns success return success
-			if !success && result.GetSuccess() {
-				success = true
-			}
-
-			return nil
-		})
-	}
-
-	err := g.Wait()
+	success, err := fanOutSuccess(ctx, m.clients, func(gctx context.Context, client *client) (*sentryproto.AddPeerReply, error) {
+		return client.AddTrustedPeer(gctx, in, opts...)
+	})
 
 	if err != nil {
 		return nil, err
@@ -838,33 +605,9 @@ func (m *sentryMultiplexer) AddTrustedPeer(ctx context.Context, in *sentryproto.
 }
 
 func (m *sentryMultiplexer) RemoveTrustedPeer(ctx context.Context, in *sentryproto.RemovePeerRequest, opts ...grpc.CallOption) (*sentryproto.RemovePeerReply, error) {
-	g, gctx := errgroup.WithContext(ctx)
-
-	var success bool
-	var successMutex sync.RWMutex
-
-	for _, client := range m.clients {
-
-		g.Go(func() error {
-			result, err := client.RemoveTrustedPeer(gctx, in, opts...)
-
-			if err != nil {
-				return err
-			}
-
-			successMutex.Lock()
-			defer successMutex.Unlock()
-
-			// if any client returns success return success
-			if !success && result.GetSuccess() {
-				success = true
-			}
-
-			return nil
-		})
-	}
-
-	err := g.Wait()
+	success, err := fanOutSuccess(ctx, m.clients, func(gctx context.Context, client *client) (*sentryproto.RemovePeerReply, error) {
+		return client.RemoveTrustedPeer(gctx, in, opts...)
+	})
 
 	if err != nil {
 		return nil, err
@@ -878,30 +621,14 @@ func (m *sentryMultiplexer) NodeInfo(ctx context.Context, in *emptypb.Empty, opt
 }
 
 func (m *sentryMultiplexer) NodeInfos(ctx context.Context, opts ...grpc.CallOption) ([]*typesproto.NodeInfoReply, error) {
-	g, gctx := errgroup.WithContext(ctx)
-
 	var allInfos []*typesproto.NodeInfoReply
-	var allMutex sync.RWMutex
 
-	for _, client := range m.clients {
-
-		g.Go(func() error {
-			info, err := client.NodeInfo(gctx, &emptypb.Empty{}, opts...)
-
-			if err != nil {
-				return err
-			}
-
-			allMutex.Lock()
-			defer allMutex.Unlock()
-
-			allInfos = append(allInfos, info)
-
-			return nil
-		})
-	}
-
-	err := g.Wait()
+	err := fanOut(ctx, m.clients, noProtocol, func(gctx context.Context, client *client) (*typesproto.NodeInfoReply, error) {
+		return client.NodeInfo(gctx, &emptypb.Empty{}, opts...)
+	}, func(_ int, info *typesproto.NodeInfoReply) error {
+		allInfos = append(allInfos, info)
+		return nil
+	})
 
 	if err != nil {
 		return nil, err

@@ -2,6 +2,8 @@ package state
 
 import "github.com/erigontech/erigon/db/kv"
 
+const MaxUint64 = ^uint64(0)
+
 /** custom types **/
 type Num = kv.Num
 type RootNum = kv.RootNum

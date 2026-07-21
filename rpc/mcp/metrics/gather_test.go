@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -72,13 +73,7 @@ func TestListMetricNames(t *testing.T) {
 	}
 
 	// Check if our test metric is in the list
-	found := false
-	for _, name := range names {
-		if name == "test_mcp_counter" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(names, "test_mcp_counter")
 
 	if !found {
 		t.Error("test_mcp_counter not found in metric names")

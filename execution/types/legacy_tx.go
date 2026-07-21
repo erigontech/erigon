@@ -404,7 +404,11 @@ func (tx *LegacyTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.I
 }
 
 func (tx *LegacyTx) GetChainID() *uint256.Int {
-	return DeriveChainId(&tx.V)
+	chainID, err := DeriveChainId(&tx.V)
+	if err != nil {
+		return new(uint256.Int)
+	}
+	return chainID
 }
 
 func (tx *LegacyTx) cachedSender() (sender accounts.Address, ok bool) {

@@ -33,11 +33,11 @@ var pic = flag.String("pic", "", "specifies picture to regenerate")
 
 // Generate set of keys for the visualisation
 func generatePrefixGroups() []string {
-	var keys []string
-	for b := byte(0); b < 32; b++ {
+	keys := make([]string, 0, 32)
+	for b := range byte(32) {
 		key := crypto.Keccak256([]byte{b})[:2]
 		quad := make([]byte, len(key)*4)
-		for i := 0; i < len(key); i++ {
+		for i := range key {
 			quad[i*4] = key[i] & 0x3
 			quad[i*4+1] = (key[i] >> 2) & 0x3
 			quad[i*4+2] = (key[i] >> 4) & 0x3

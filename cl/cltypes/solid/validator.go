@@ -158,7 +158,7 @@ func (v Validator) WithdrawableEpoch() uint64 {
 }
 
 func (v Validator) CopyHashBufferTo(o []byte) error {
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		o[i] = 0
 	}
 	copy(o[:64], v[:48])

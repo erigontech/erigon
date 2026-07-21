@@ -29,16 +29,16 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -76,7 +76,7 @@ If only one file is used, import error will result in failure. If several files 
 processing will proceed even if an individual RLP-file import failure occurs.`,
 }
 
-func importChain(cliCtx *cli.Context) error {
+func importChain(ctx context.Context, cliCtx *cli.Command) error {
 	if cliCtx.NArg() < 1 {
 		utils.Fatalf("This command requires an argument.")
 	}
@@ -101,7 +101,7 @@ func importChain(cliCtx *cli.Context) error {
 		}
 	}
 
-	logger, tracer, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, tracer, _, _, err := debug.Setup(ctx, cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -113,14 +113,14 @@ func importChain(cliCtx *cli.Context) error {
 	// p2p has no disable flag; a one-shot import needs no peers.
 	nodeCfg.DisableSentry = true
 
-	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
+	ethCfg := node.NewEthConfigUrfave(ctx, cliCtx, nodeCfg, logger)
 	// Skip the ~2s KZG warmup: Stop waits it out on exit, and kzg.Ctx()
 	// lazy-inits if a block actually needs the trusted setup.
 	ethCfg.WarmupKzgCtxOnInit = false
-	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
+	stack := makeConfigNode(ctx, nodeCfg, logger)
 	defer stack.Close()
 
-	ethereum, err := eth.New(cliCtx.Context, stack, ethCfg, logger, tracer)
+	ethereum, err := eth.New(ctx, stack, ethCfg, logger, tracer)
 	if err != nil {
 		return err
 	}
@@ -260,7 +260,7 @@ func ChainHasBlock(chainDB kv.RwDB, block *types.Block) bool {
 	return chainHasBlock
 }
 
-func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader services.FullBlockReader) []*types.Block {
+func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader dbservices.FullBlockReader) []*types.Block {
 	var headBlock *types.Block
 	chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
 		headBlock, err = blockReader.CurrentBlock(tx)

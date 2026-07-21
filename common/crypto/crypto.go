@@ -24,6 +24,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -67,33 +68,108 @@ type EllipticCurve interface {
 	Unmarshal(data []byte) (x, y *big.Int)
 }
 
-// HashData hashes the provided data and returns a 32 byte hash.
-func HashData(data []byte) common.Hash {
-	return keccak.Sum256(data)
+// joinStackBuf sizes the join buffer for the two 32-byte inputs such calls join;
+// larger joins take joinBufPool.
+const joinStackBuf = 64
+
+// joinBufPool holds scratch buffers for joins too large for the stack buffer.
+var joinBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, 2*joinStackBuf)
+		return &b
+	},
+}
+
+// joinBufKeepCap bounds what a join returns to the pool, so one outsized call
+// does not pin a large buffer per processor for the process lifetime.
+const joinBufKeepCap = 64 * 1024
+
+type HashFunc func(data []byte, extras ...[]byte) common.Hash
+
+// Sha256 returns the SHA-256
+func Sha256(data []byte, extras ...[]byte) common.Hash {
+	if len(extras) == 0 { // fast-path
+		return sha256.Sum256(data)
+	}
+	total := len(data)
+	for _, extra := range extras {
+		total += len(extra)
+	}
+	if total > joinStackBuf { // slow-path: pooled join buffer
+		return sha256Joined(data, extras)
+	}
+	// fast-path stack-allocation
+	var buf [joinStackBuf]byte
+	n := copy(buf[:], data)
+	for _, extra := range extras {
+		n += copy(buf[n:], extra)
+	}
+	return sha256.Sum256(buf[:n])
+}
+
+func sha256Joined(data []byte, extras [][]byte) common.Hash {
+	p := joinBufPool.Get().(*[]byte)
+	buf := append((*p)[:0], data...)
+	for _, extra := range extras {
+		buf = append(buf, extra...)
+	}
+	out := common.Hash(sha256.Sum256(buf))
+	putJoinBuf(p, buf)
+	return out
+}
+
+// putJoinBuf returns a scratch buffer to the pool
+func putJoinBuf(p *[]byte, buf []byte) {
+	if cap(buf) <= joinBufKeepCap {
+		*p = buf
+	}
+	joinBufPool.Put(p)
 }
 
 // Keccak256 calculates and returns the Keccak256 hash of the input data.
+// Prefer Keccak256Hash where a slice is not required: this allocates its result.
 func Keccak256(data ...[]byte) []byte {
+	h := keccak256Hash(data)
 	b := make([]byte, 32)
-	d := NewKeccakState()
-	for _, b := range data {
-		d.Write(b)
-	}
-	d.Read(b) //nolint:errcheck
-	ReturnToPool(d)
+	copy(b, h[:])
 	return b
 }
 
-// Keccak256Hash calculates and returns the Keccak256 hash of the input data,
-// converting it to an internal Hash data structure.
-func Keccak256Hash(data ...[]byte) common.Hash {
-	d := NewKeccakState()
-	for _, b := range data {
-		d.Write(b)
+// Keccak256Hash calc Keccak256
+// Single-argument by design: a variadic signature exceeds the inlining budget.
+func Keccak256Hash(data []byte) common.Hash {
+	return keccak.Sum256(data)
+}
+
+func keccak256Hash(data [][]byte) common.Hash {
+	if len(data) == 1 { // fast-path
+		return keccak.Sum256(data[0])
 	}
-	h := FinalizeHash(d)
-	ReturnToPool(d)
-	return h
+	total := 0
+	for _, b := range data {
+		total += len(b)
+	}
+	if total > joinStackBuf { // slow-path: pooled join buffer
+		return keccak256Joined(data)
+	}
+	// fast-path stack-allocation
+	var buf [joinStackBuf]byte
+	n := 0
+	for _, b := range data {
+		n += copy(buf[n:], b)
+	}
+	return keccak.Sum256(buf[:n])
+}
+
+func keccak256Joined(data [][]byte) common.Hash {
+	p := joinBufPool.Get().(*[]byte)
+	buf := (*p)[:0]
+	for _, b := range data {
+		buf = append(buf, b...)
+	}
+	out := keccak.Sum256(buf)
+	putJoinBuf(p, buf)
+	return out
 }
 
 // Keccak512 calculates and returns the Keccak512 hash of the input data.
@@ -303,20 +379,20 @@ func PubkeyToAddress(p ecdsa.PublicKey) common.Address {
 	return common.BytesToAddress(Keccak256(pubBytes)[12:])
 }
 
-// hasherPool holds LegacyKeccak hashers.
-var hasherPool = sync.Pool{
+var keccakStatePool = sync.Pool{
 	New: func() any {
 		return keccak.NewFastKeccak()
 	},
 }
 
-// NewKeccakState creates a new KeccakState
+// NewKeccakState returns a reset KeccakState from a shared pool.
 func NewKeccakState() keccak.KeccakState {
-	h := hasherPool.Get().(keccak.KeccakState)
-	h.Reset()
-	return h
+	sha := keccakStatePool.Get().(keccak.KeccakState)
+	sha.Reset()
+	return sha
 }
-func ReturnToPool(h keccak.KeccakState) { hasherPool.Put(h) }
+
+func ReturnToPool(sha keccak.KeccakState) { keccakStatePool.Put(sha) }
 
 // FinalizeHash finalizes sha and returns a Keccak-256 digest as a value type,
 // avoiding the heap escape that occurs when passing h[:] to an interface Read method.

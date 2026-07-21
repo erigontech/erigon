@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"math/big"
 	"sync"
 	"testing"
 
@@ -29,10 +30,14 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -284,4 +289,126 @@ func TestFilterAddressIntersection(t *testing.T) {
 		}
 		require.Empty(t, blockNumbersFromTraces(t, stream.Buffer()))
 	})
+}
+
+func TestFilterBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	const tipCap = 2
+	c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+	contractAddr, _, blockNumber, overrideBaseFee := c.setupBaseFeeOverrideCall(t, opGasprice, tipCap)
+	api := c.traceAPI()
+
+	n := rpc.BlockNumber(blockNumber)
+	traceReq := TraceFilterRequest{
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+		ToAddress: []*common.Address{&contractAddr},
+	}
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.Wrap(s)
+	err := api.Filter(context.Background(), traceReq, new(bool), traceConfigWithBaseFeeOverride(overrideBaseFee), stream)
+	require.NoError(t, err)
+
+	expectedGasPrice := new(uint256.Int).AddUint64(overrideBaseFee, tipCap)
+	expectedOutput := hexutil.Bytes(expectedGasPrice.PaddedBytes(32)).String()
+	require.Contains(t, string(stream.Buffer()), expectedOutput)
+}
+
+// TestFilterBlockOverridesOtherFieldsAffectOpcodes checks that filterV3's
+// per-transaction BlockContext picks up BlockOverrides fields other than
+// BaseFeePerGas too.
+func TestFilterBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	for _, tc := range blockOverrideOpcodeCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+			contractAddr := c.deployOpcodeContract(t, tc.opcode)
+			_, blockNumber, _ := c.callWithDynamicFee(t, contractAddr, 2, 1)
+			api := c.traceAPI()
+
+			n := rpc.BlockNumber(blockNumber)
+			traceReq := TraceFilterRequest{
+				FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
+				ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+				ToAddress: []*common.Address{&contractAddr},
+			}
+
+			s := jsoniter.ConfigDefault.BorrowStream(nil)
+			defer jsoniter.ConfigDefault.ReturnStream(s)
+			stream := jsonstream.Wrap(s)
+			err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+				BlockOverrides: tc.override,
+			}, stream)
+			require.NoError(t, err)
+			require.Contains(t, string(stream.Buffer()), hexutil.Bytes(tc.expected).String())
+		})
+	}
+}
+
+// TestFilterRejectedBlockOverrideReturnsError checks that trace_filter
+// reports a rejected BlockOverrides field (here BeaconRoot, which Override
+// always rejects) as a normal RPC error instead of leaving lastRules unset
+// for the block's remaining transactions.
+func TestFilterRejectedBlockOverrideReturnsError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+	api := c.traceAPI()
+
+	n := rpc.BlockNumber(0)
+	traceReq := TraceFilterRequest{
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+	}
+
+	beaconRoot := common.HexToHash("0x01")
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.Wrap(s)
+	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+		BlockOverrides: &ethapi.BlockOverrides{BeaconRoot: &beaconRoot},
+	}, stream)
+	require.Error(t, err)
+}
+
+// TestFilterSignerReflectsBlockOverridesNumber is filterV3's analogue of
+// TestReplayTransactionSignerReflectsBlockOverridesNumber: filterV3 derives
+// fork rules (lastRules) from the overridden BlockContext but must also
+// recompute lastSigner from it, not from the block's real number. filterV3
+// reports per-transaction failures as an "error" field inside the stream
+// rather than as a Go error, so the assertion inspects the stream contents.
+func TestFilterSignerReflectsBlockOverridesNumber(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, delayedSpuriousDragonConfig())
+	c.mineProtectedTxAtBlock3(t)
+	api := c.traceAPI()
+
+	n := rpc.BlockNumber(3)
+	traceReq := TraceFilterRequest{
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+		ToAddress: []*common.Address{&c.bankAddress},
+	}
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.Wrap(s)
+	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.Big)(big.NewInt(1))},
+	}, stream)
+	require.NoError(t, err)
+	require.Contains(t, string(stream.Buffer()), "protected txn is not supported by signer")
 }

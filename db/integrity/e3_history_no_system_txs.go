@@ -27,30 +27,28 @@ import (
 
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
 )
 
 // History - usually don't have anything attributed to 1-st system txs (except genesis)
-func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader) error {
+func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReader dbservices.FullBlockReader) error {
 	defer func(t time.Time) { log.Info("[integrity] HistoryNoSystemTxs done", "took", time.Since(t)) }(time.Now())
 	count := atomic.Uint64{}
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	g := &errgroup.Group{}
+	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(estimate.AlmostAllCPUs())
 
 	skipForPerf := 11
 	prefixesDone, prefixesTotal := atomic.Uint64{}, atomic.Uint64{}
 	txNumsReader := blockReader.TxnumReader()
 
-	for j := 0; j < 256; j++ {
-		j := j
-		for jj := 0; jj < 255; jj++ {
-			jj := jj
+	for j := range 256 {
+		for jj := range 255 {
 			if (j+jj)%skipForPerf != 0 || (j+jj == 0) {
 				continue
 			}

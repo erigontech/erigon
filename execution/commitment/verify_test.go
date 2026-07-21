@@ -233,7 +233,7 @@ func TestVerifyBranchHashes_Storage(t *testing.T) {
 	var hashBuf2 [32]byte
 	keccak.Read(hashBuf2[:])
 	var nib [64]byte
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		nib[i*2] = hashBuf2[i] >> 4
 		nib[i*2+1] = hashBuf2[i] & 0x0f
 	}
@@ -362,7 +362,7 @@ func TestVerifyParallel_AllShapes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			plainKeys, updates := generateBatch(tc.shape, tc.n, tc.seed)
-			root := assertEquivalentRootWorkers(t, plainKeys, updates, 4)
+			root := requireRootParity(t, plainKeys, updates, 4)
 			require.NotEmpty(t, root, "root hash must be non-empty for shape %s", tc.name)
 		})
 	}
@@ -386,7 +386,7 @@ func TestVerifyParallel_RandomBatches(t *testing.T) {
 		}
 		seed := rnd.Int63()
 		plainKeys, updates := generateBatch(shape, n, seed)
-		_ = assertEquivalentRootWorkers(t, plainKeys, updates, 4)
+		_ = requireRootParity(t, plainKeys, updates, 4)
 	}
 }
 
@@ -406,6 +406,6 @@ func FuzzParallelEquivalence(f *testing.F) {
 		}
 		shape := randomBatchShape(int(shapeByte) % 5)
 		plainKeys, updates := generateBatch(shape, int(keysCount), seed)
-		_ = assertEquivalentRootWorkers(t, plainKeys, updates, 2)
+		_ = requireRootParity(t, plainKeys, updates, 2)
 	})
 }

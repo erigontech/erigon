@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -227,7 +228,7 @@ func blobVersionedHashesSize(hashes []common.Hash) int {
 }
 
 func encodeBlobVersionedHashes(hashes []common.Hash, w io.Writer, b []byte) error {
-	for i := 0; i < len(hashes); i++ {
+	for i := range hashes {
 		if err := rlp.EncodeString(hashes[i][:], w, b); err != nil {
 			return err
 		}
@@ -369,17 +370,18 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if stx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
-	stx.To = &common.Address{}
 	if kind, size, err := s.Kind(); err != nil {
 		return err
 	} else if kind == rlp.Byte {
-		return fmt.Errorf("wrong size for To: 1")
-	} else if size != 20 {
+		return errors.New("wrong size for To: 1")
+	} else if size != length.Addr {
 		return fmt.Errorf("wrong size for To: %d", size)
 	}
-	if err = s.ReadBytes(stx.To[:]); err != nil {
+	to, err := s.Addr()
+	if err != nil {
 		return err
 	}
+	stx.To = &to
 	if err = s.ReadUint256(&stx.Value); err != nil {
 		return err
 	}

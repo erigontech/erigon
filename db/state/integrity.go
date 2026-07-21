@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -43,12 +44,12 @@ func (at *AggregatorRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.
 			return err
 		}
 	case kv.StorageHistoryIdx:
-		err := at.d[kv.CodeDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
+		err := at.d[kv.StorageDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
 	case kv.CodeHistoryIdx:
-		err := at.d[kv.StorageDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
+		err := at.d[kv.CodeDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
@@ -79,13 +80,13 @@ func (at *AggregatorRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.
 
 func (dt *DomainRoTx) IntegrityDomainFilesWithKey(k []byte) (res []string, err error) {
 	hi, lo := dt.ht.iit.hashKey(k)
-	for i := len(dt.files) - 1; i >= 0; i-- {
+	for i, f := range slices.Backward(dt.files) {
 		_, ok, _, err := dt.getLatestFromFile(i, k, hi, lo)
 		if err != nil {
 			return res, err
 		}
 		if ok {
-			res = append(res, dt.files[i].src.decompressor.FileName())
+			res = append(res, f.src.decompressor.FileName())
 		}
 	}
 	return res, nil
@@ -158,7 +159,7 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 
 func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.Context, failFast bool, fromStep uint64) error {
 	fromTxNum := fromStep * iit.ii.stepSize
-	g := &errgroup.Group{}
+	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(estimate.AlmostAllCPUs())
 
 	logEvery := time.NewTicker(30 * time.Second)

@@ -39,7 +39,7 @@ var (
 	EmptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 	// emptyState is the known hash of an empty state trie entry.
-	emptyState = crypto.HashData(nil)
+	emptyState = crypto.Keccak256Hash(nil)
 )
 
 // Trie is a Merkle Patricia Trie.
@@ -365,7 +365,7 @@ func (t *Trie) UpdateAccountCode(key []byte, code CodeNode) error {
 		return fmt.Errorf("account not found with key: %x", key)
 	}
 
-	actualCodeHash := crypto.HashData(code)
+	actualCodeHash := crypto.Keccak256Hash(code)
 	if accNode.CodeHash.Value() != actualCodeHash {
 		return fmt.Errorf("inserted code mismatch account hash (acc.CodeHash=%x codeHash=%x)", accNode.CodeHash, actualCodeHash)
 	}
@@ -1320,7 +1320,7 @@ func (t *Trie) RLPEncode() ([][]byte, error) {
 				seen[hash] = struct{}{}
 				nodes = append(nodes, common.Copy(nodeRLP))
 			}
-			for i := 0; i < 17; i++ {
+			for i := range 17 {
 				if n.Children[i] != nil {
 					if err := collect(n.Children[i]); err != nil {
 						return err
@@ -1457,7 +1457,7 @@ func decodeTrieShort(elems []byte) (*ShortNode, error) {
 // decodeTrieFull decodes a full node (branch) for trie reconstruction.
 func decodeTrieFull(elems []byte) (*FullNode, error) {
 	n := &FullNode{}
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		var err error
 		n.Children[i], elems, err = decodeTrieRef(elems)
 		if err != nil {
@@ -1589,7 +1589,7 @@ func resolveHashNodes(node Node, nodeMap map[common.Hash]Node, insideStorageTree
 
 	case *FullNode:
 		newNode := &FullNode{}
-		for i := 0; i < 17; i++ {
+		for i := range 17 {
 			if n.Children[i] != nil {
 				resolved, err := resolveHashNodes(n.Children[i], nodeMap, insideStorageTree)
 				if err != nil {

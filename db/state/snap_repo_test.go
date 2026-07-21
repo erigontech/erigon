@@ -542,15 +542,6 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 15}, {15, 16}}, true, 15, 1, 1)
 }
 
-func TestSegMetadata_Marshal_UM(t *testing.T) {
-	metadata := NumMetadata{First: Num(89), Last: Num(120), Count: 28}
-	data, err := metadata.Marshal()
-	require.NoError(t, err)
-	metadata2 := NumMetadata{}
-	require.NoError(t, metadata2.Unmarshal(data))
-	require.Equal(t, metadata, metadata2)
-}
-
 // /////////////////////////////////////// helpers and utils
 
 func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {

@@ -130,8 +130,8 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 		}
 
 		// address
-		if err = s.ReadBytes(auth.Address[:]); err != nil {
-			return err
+		if auth.Address, err = s.Addr(); err != nil {
+			return fmt.Errorf("read Address: %w", err)
 		}
 
 		// nonce
@@ -176,7 +176,7 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 }
 
 func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte) error {
-	for i := 0; i < len(authorizations); i++ {
+	for i := range authorizations {
 		authLen := authorizationSize(authorizations[i])
 		if err := rlp.EncodeListPrefix(authLen, w, b); err != nil {
 			return err

@@ -25,7 +25,6 @@ fi
 # Disabled tests for Ethereum mainnet
 DISABLED_TEST_LIST=(
    debug_traceBlockByNumber/test_30.json # huge JSON response => slow diff
-   debug_traceBlockByNumber/test_43.json # prestateTracer includes zero-valued storage accounts that Geth excludes
    debug_traceCallMany
    erigon_
    eth_callBundle

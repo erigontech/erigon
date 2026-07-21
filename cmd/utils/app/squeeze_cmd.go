@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/dir"
@@ -49,14 +49,13 @@ var (
 	SqeezeBlocks     Sqeeze = "blocks"
 )
 
-func doSqueeze(cliCtx *cli.Context) error {
+func doSqueeze(ctx context.Context, cliCtx *cli.Command) error {
 	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 	if err != nil {
 		return err
 	}
 	defer l.Unlock()
 	logger := log.Root()
-	ctx := cliCtx.Context
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 

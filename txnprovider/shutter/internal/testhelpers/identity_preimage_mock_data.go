@@ -50,7 +50,7 @@ func TestMustMockIdentityPreimages(t *testing.T, count uint64) shutter.IdentityP
 
 func MockIdentityPreimages(count uint64) (shutter.IdentityPreimages, error) {
 	ips := make([]*shutter.IdentityPreimage, count)
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		var err error
 		ips[i], err = Uint64ToIdentityPreimage(i)
 		if err != nil {

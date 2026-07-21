@@ -151,10 +151,7 @@ func (m *SelectorModel) availableListHeight() int {
 	if m.height == 0 {
 		return 999
 	}
-	avail := m.height - 7
-	if avail < 1 {
-		avail = 1
-	}
+	avail := max(m.height-7, 1)
 	return avail
 }
 
@@ -166,10 +163,7 @@ func (m *SelectorModel) clampViewOffset() {
 	if m.cursorRow >= m.viewOffset+avail {
 		m.viewOffset = m.cursorRow - avail + 1
 	}
-	maxOffset := m.columnLength() - avail
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
+	maxOffset := max(m.columnLength()-avail, 0)
 	if m.viewOffset > maxOffset {
 		m.viewOffset = maxOffset
 	}
@@ -186,10 +180,7 @@ func (m *SelectorModel) View() tea.View {
 	avail := m.availableListHeight()
 	maxRows := max(len(m.domains), len(m.exts))
 	start := m.viewOffset
-	end := start + avail
-	if end > maxRows {
-		end = maxRows
-	}
+	end := min(start+avail, maxRows)
 
 	for i := start; i < end; i++ {
 		left := "   "

@@ -24,6 +24,8 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -39,8 +41,8 @@ import (
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type seenSyncCommitteeContribution struct {
@@ -199,7 +201,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 		}
 
 		modulo := max(1, s.beaconCfg.SyncCommitteeSize/s.beaconCfg.SyncCommitteeSubnetCount/s.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
-		hashSignature := utils.Sha256(selectionProof[:])
+		hashSignature := crypto.Sha256(selectionProof[:])
 		if !s.test && binary.LittleEndian.Uint64(hashSignature[:8])%modulo != 0 {
 			return errors.New("selects the validator as an aggregator")
 		}
@@ -378,7 +380,7 @@ func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState,
 		return nil, nil, nil, err
 	}
 
-	msg := utils.Sha256(contribution.BeaconBlockRoot[:], domain)
+	msg := crypto.Sha256(contribution.BeaconBlockRoot[:], domain)
 	// only use the ones pertaining to the aggregation bits
 	subCommitteePubsKeys := make([][]byte, 0, len(subCommitteeKeys))
 	for i, key := range subCommitteeKeys {

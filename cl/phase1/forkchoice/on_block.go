@@ -17,10 +17,11 @@
 package forkchoice
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -91,6 +92,7 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot, cur
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	f.mu.Lock()
 	unlocked := false
+	defer f.drainQueuedWork()
 	defer func() {
 		if !unlocked {
 			f.mu.Unlock()
@@ -279,7 +281,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// not via a separate execution_payload_state. We still validate that the parent's
 	// payload was received (store.payloads check) via validateParentPayloadPath above.
 
-	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
+	lastProcessedState, status, err := f.addChainSegmentAndQueueLightClientEvents(block, fullValidation)
 	if err != nil {
 		return err
 	}
@@ -449,11 +451,12 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if blockEpoch < currentEpoch {
 		f.updateCheckpoints(postPullupJustified, postPullupFinalized)
 	}
-	f.emitters.State().SendBlock(&beaconevents.BlockData{
+	blockData := &beaconevents.BlockData{
 		Slot:                block.Block.Slot,
 		Block:               blockRoot,
 		ExecutionOptimistic: f.optimisticStore.IsOptimistic(blockRoot),
-	})
+	}
+	f.queueEmit(func() { f.emitters.State().SendBlock(blockData) })
 
 	if !isVerifiedExecutionPayload {
 		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
@@ -470,6 +473,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Release lock (via defer) before writing DB indices for the applied envelope.
 	unlocked = true
 	f.mu.Unlock()
+	f.drainQueuedWork()
 
 	// Write execution payload envelope indices outside f.mu to avoid deadlock
 	// with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).
@@ -483,6 +487,46 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	return nil
+}
+
+func (f *ForkChoiceStore) addChainSegmentAndQueueLightClientEvents(block *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
+	lcUpdateBefore := f.forkGraph.NewestLightClientUpdate()
+	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
+	if err != nil {
+		return nil, status, err
+	}
+	f.queueLightClientEvents(lcUpdateBefore, block.Version().String())
+	return lastProcessedState, status, nil
+}
+
+// queueLightClientEvents emits the light client events for an update stored by
+// AddChainSegment. The fork graph runs under f.mu and must not send events
+// itself, so OnBlock detects a freshly stored update and queues the sends.
+func (f *ForkChoiceStore) queueLightClientEvents(before *cltypes.LightClientUpdate, version string) {
+	lcUpdate := f.forkGraph.NewestLightClientUpdate()
+	if lcUpdate == nil || lcUpdate == before {
+		return
+	}
+	f.queueEmit(func() {
+		f.emitters.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{
+			Version: version,
+			Data: cltypes.LightClientFinalityUpdate{
+				AttestedHeader:  lcUpdate.AttestedHeader,
+				FinalizedHeader: lcUpdate.FinalizedHeader,
+				FinalityBranch:  lcUpdate.FinalityBranch,
+				SyncAggregate:   lcUpdate.SyncAggregate,
+				SignatureSlot:   lcUpdate.SignatureSlot,
+			},
+		})
+		f.emitters.State().SendLightClientOptimisticUpdate(&beaconevents.LightClientOptimisticUpdateData{
+			Version: version,
+			Data: cltypes.LightClientOptimisticUpdate{
+				AttestedHeader: lcUpdate.AttestedHeader,
+				SyncAggregate:  lcUpdate.SyncAggregate,
+				SignatureSlot:  lcUpdate.SignatureSlot,
+			},
+		})
+	})
 }
 
 func (f *ForkChoiceStore) isDataAvailable(ctx context.Context, slot uint64, blockRoot common.Hash, blobKzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) error {
@@ -515,8 +559,8 @@ func (f *ForkChoiceStore) isDataAvailable(ctx context.Context, slot uint64, bloc
 	}
 	if !foundOnDisk {
 		// If we didn't find the sidecars on disk, we should write them to disk now
-		sort.Slice(sidecars, func(i, j int) bool {
-			return sidecars[i].Index < sidecars[j].Index
+		slices.SortFunc(sidecars, func(a, b *cltypes.BlobSidecar) int {
+			return cmp.Compare(a.Index, b.Index)
 		})
 		if err := f.blobStorage.WriteBlobSidecars(ctx, blockRoot, sidecars); err != nil {
 			return fmt.Errorf("failed to write blob sidecars: %v", err)

@@ -21,6 +21,8 @@ package rpccfg
 
 import (
 	"time"
+
+	"github.com/erigontech/erigon/db/datadir"
 )
 
 // HTTPTimeouts represents the configuration params for the HTTP RPC server.
@@ -60,6 +62,27 @@ const DefaultOverlayGetLogsTimeout = 5 * time.Minute
 const DefaultOverlayReplayBlockTimeout = 10 * time.Second
 const DefaultRpcTxSyncDefaultTimeout = 25 * time.Second
 const DefaultRpcTxSyncMaxTimeout = 1 * time.Minute
+
+type BaseApiConfig struct {
+	SingleNodeMode    bool
+	EvmCallTimeout    time.Duration // 0 → DefaultEvmCallTimeout
+	Dirs              datadir.Dirs
+	BlockRangeLimit   int
+	GetLogsMaxResults int
+	LogQueryLimit     int
+}
+
+// EthApiConfig defines the configurable parameters for EthAPI
+type EthApiConfig struct {
+	GasCap                      uint64
+	FeeCap                      float64
+	ReturnDataLimit             int
+	AllowUnprotectedTxs         bool
+	MaxGetProofRewindBlockCount int
+	SubscribeLogsChannelSize    int
+	RpcTxSyncDefaultTimeout     time.Duration
+	RpcTxSyncMaxTimeout         time.Duration
+}
 
 var SlowLogBlackList = []string{
 	"eth_getBlock", "eth_getBlockByNumber", "eth_getBlockByHash", "eth_blockNumber",

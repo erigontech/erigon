@@ -1,10 +1,11 @@
 package commitment
 
 import (
+	"cmp"
 	"encoding/csv"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -270,12 +271,20 @@ func UnmarshallMetricsCsv(filePath string) ([]*Metrics, error) {
 			col++
 			for k := range 5 {
 				depthsPair := row[col]
-				depthsSplit := strings.Split(depthsPair, "/")
-				if len(depthsSplit) != 2 {
+				left, right, ok := strings.Cut(depthsPair, "/")
+				if !ok || strings.Contains(right, "/") {
 					return nil, fmt.Errorf("invalid depths pair: %s", depthsPair)
 				}
-				current.loadDepths[k*2] = mustParseUintCsvCell(depthsSplit, 0, filePath)
-				current.loadDepths[k*2+1] = mustParseUintCsvCell(depthsSplit, 1, filePath)
+				leftVal, err := strconv.ParseUint(left, 10, 64)
+				if err != nil {
+					panic(fmt.Errorf("parsing %q cell at column 0 in %s: %w", left, filePath, err))
+				}
+				rightVal, err := strconv.ParseUint(right, 10, 64)
+				if err != nil {
+					panic(fmt.Errorf("parsing %q cell at column 1 in %s: %w", right, filePath, err))
+				}
+				current.loadDepths[k*2] = leftVal
+				current.loadDepths[k*2+1] = rightVal
 				col++
 			}
 			current.unfolds.Store(mustParseUintCsvCell(row, col, filePath))
@@ -327,7 +336,7 @@ func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
 		ends = append(ends, k)
 	}
 	// sort by file endTxNum
-	sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
+	slices.SortFunc(ends, func(a, b uint64) int { return cmp.Compare(b, a) })
 	for i := 0; i < 5 && i < len(ends); i++ {
 		// get stats for specific file depth
 		v := endTxNumStats[ends[i]]

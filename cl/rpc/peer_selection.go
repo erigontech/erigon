@@ -30,7 +30,7 @@ var (
 	peersCandidateRefreshInterval = time.Second * 15
 	allCustodyIndices             = func() map[uint64]bool {
 		indices := make(map[uint64]bool)
-		for i := uint64(0); i < 128; i++ {
+		for i := range uint64(128) {
 			indices[i] = true
 		}
 		return indices

@@ -87,6 +87,7 @@ jobs:
       - name: Checkout kurtosis .io files
         uses: actions/checkout@v7
         with:
+          persist-credentials: false
           sparse-checkout: .github/workflows/kurtosis
 
       - name: Load image versions from the .io files (single source of truth)
@@ -205,6 +206,8 @@ jobs:
     steps:
       - name: Fast checkout git repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Load image versions from the .io files (single source of truth)
         run: |

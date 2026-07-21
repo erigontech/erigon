@@ -157,7 +157,7 @@ func getUncles(chain rules.ChainReader, header *types.Header) (mapset.Set[common
 	uncles, ancestors := mapset.NewSet[common.Hash](), make(map[common.Hash]*types.Header)
 
 	number, parent := header.Number.Uint64()-1, header.ParentHash
-	for i := 0; i < 7; i++ {
+	for range 7 {
 		ancestorHeader := chain.GetHeader(parent, number)
 		if ancestorHeader == nil {
 			break

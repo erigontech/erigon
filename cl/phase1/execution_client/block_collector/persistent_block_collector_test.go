@@ -19,6 +19,7 @@ package block_collector
 import (
 	"context"
 	"encoding/binary"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -37,27 +38,31 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// makeBeaconBlock builds a Deneb BeaconBlock whose ExecutionPayload carries the
-// given block number chained onto parent. forkTag seeds header.Extra so two blocks
-// at the same number produce distinct SSZ roots — mimicking competing beacon variants.
-func makeBeaconBlock(t *testing.T, number uint64, forkTag byte, parent common.Hash) *cltypes.BeaconBlock {
-	t.Helper()
+// makeTestHeader builds the minimal Deneb header that survives the collector's
+// encode/decode round trip. ParentBeaconBlockRoot must be non-nil: decodeBlock
+// always reconstructs it from the stored 32-byte parentRoot prefix, so leaving
+// the source header's field nil would produce a different header.Hash() and
+// fail RlpHeader's consistency check.
+func makeTestHeader(number uint64, parent common.Hash, extra []byte) *types.Header {
 	var zero uint64
-	// ParentBeaconBlockRoot must be non-nil: decodeBlock always reconstructs it
-	// from the stored 32-byte parentRoot prefix, so leaving the source header's
-	// field nil would produce a different header.Hash() and fail RlpHeader's
-	// consistency check.
 	zeroHash := common.Hash{}
-	header := &types.Header{
+	return &types.Header{
 		ParentHash:            parent,
 		Number:                *uint256.NewInt(number),
 		BaseFee:               uint256.NewInt(1),
-		Extra:                 []byte{forkTag},
+		Extra:                 extra,
 		BlobGasUsed:           &zero,
 		ExcessBlobGas:         &zero,
 		ParentBeaconBlockRoot: &zeroHash,
 	}
-	block := types.NewBlock(header, nil, nil, nil, []*types.Withdrawal{})
+}
+
+// makeBeaconBlock builds a Deneb BeaconBlock whose ExecutionPayload carries the
+// given block number chained onto parent. forkTag seeds header.Extra so two blocks
+// at the same number produce distinct SSZ roots — mimicking competing beacon variants.
+func makeBeaconBlock(t *testing.T, number uint64, forkTag byte, parent common.Hash, txs ...types.Transaction) *cltypes.BeaconBlock {
+	t.Helper()
+	block := types.NewBlock(makeTestHeader(number, parent, []byte{forkTag}), txs, nil, nil, []*types.Withdrawal{})
 
 	bb := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	bb.Body.ExecutionPayload = cltypes.NewEth1BlockFromHeaderAndBody(block.Header(), block.RawBody(), &clparams.MainnetBeaconConfig)
@@ -308,6 +313,67 @@ func TestFlushDropsRowsBelowFrozen(t *testing.T) {
 	require.Equal(t, 0, countRowsAtOrAbove(t, h.collector.db, 0))
 }
 
+// plantMarker writes a sentinel file into the collector's persistDir; it
+// survives Flush only if Flush did not RemoveAll the directory.
+func plantMarker(t *testing.T, h *flushTestHarness) string {
+	t.Helper()
+	marker := filepath.Join(h.collector.persistDir, "marker")
+	require.NoError(t, os.WriteFile(marker, []byte("x"), 0o644))
+	return marker
+}
+
+func TestFlushEmptyDBKeepsDirectory(t *testing.T) {
+	// At chain-tip Flush runs on every block with an empty DB; it must not
+	// drop and recreate the directory each time.
+	h := newFlushTestHarness(t, 0)
+	marker := plantMarker(t, h)
+
+	require.NoError(t, h.collector.Flush(t.Context()))
+
+	require.Empty(t, h.inserted)
+	require.FileExists(t, marker)
+}
+
+func TestFlushSmallDBClearsRowsInPlace(t *testing.T) {
+	h := newFlushTestHarness(t, 0)
+
+	b1 := makeBeaconBlock(t, 1, 'a', common.Hash{})
+	b2 := makeBeaconBlock(t, 2, 'a', blockHash(b1))
+	require.NoError(t, h.collector.AddBlock(b1))
+	require.NoError(t, h.collector.AddBlock(b2))
+	marker := plantMarker(t, h)
+
+	require.NoError(t, h.collector.Flush(t.Context()))
+
+	require.Equal(t, []uint64{1, 2}, h.insertedNumbers())
+	require.Equal(t, 0, countRowsAtOrAbove(t, h.collector.db, 0))
+	require.FileExists(t, marker)
+}
+
+func TestFlushDropsDBOverSizeThreshold(t *testing.T) {
+	origThreshold := dropDBSizeThreshold
+	dropDBSizeThreshold = 0 // any non-empty database exceeds it
+	t.Cleanup(func() { dropDBSizeThreshold = origThreshold })
+
+	h := newFlushTestHarness(t, 0)
+
+	b1 := makeBeaconBlock(t, 1, 'a', common.Hash{})
+	b2 := makeBeaconBlock(t, 2, 'a', blockHash(b1))
+	require.NoError(t, h.collector.AddBlock(b1))
+	require.NoError(t, h.collector.AddBlock(b2))
+	marker := plantMarker(t, h)
+
+	require.NoError(t, h.collector.Flush(t.Context()))
+
+	require.Equal(t, []uint64{1, 2}, h.insertedNumbers())
+	require.NoFileExists(t, marker)
+
+	// The reopened database is functional.
+	b3 := makeBeaconBlock(t, 3, 'a', blockHash(b2))
+	require.NoError(t, h.collector.AddBlock(b3))
+	require.True(t, h.collector.HasBlock(3))
+}
+
 // TestFlushDrivesFCUPerBatch verifies the per-batch FCU pattern: when Flush()
 // is called with more blocks than batchSize, doForkChoiceUpdate is invoked
 // once per completed batch (so the engine can run execution + prune mid-flush
@@ -324,7 +390,7 @@ func TestFlushDrivesFCUPerBatch(t *testing.T) {
 	// (two per-batch + one final after the tail insert).
 	prev := common.Hash{}
 	blocks := make([]*cltypes.BeaconBlock, 7)
-	for i := 0; i < 7; i++ {
+	for i := range 7 {
 		blocks[i] = makeBeaconBlock(t, uint64(i+1), 'a', prev)
 		require.NoError(t, h.collector.AddBlock(blocks[i]))
 		prev = blockHash(blocks[i])
@@ -351,7 +417,7 @@ func TestFlushSingleFCUWhenBelowBatchSize(t *testing.T) {
 
 	prev := common.Hash{}
 	var last *cltypes.BeaconBlock
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		b := makeBeaconBlock(t, uint64(i+1), 'a', prev)
 		require.NoError(t, h.collector.AddBlock(b))
 		prev = blockHash(b)

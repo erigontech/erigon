@@ -5,8 +5,10 @@ import (
 	"crypto/ecdsa"
 	"net"
 	"path/filepath"
+	"strconv"
 	"time"
 
+	"github.com/OffchainLabs/go-bitfield"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -23,7 +25,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/metrics"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/prysmaticlabs/go-bitfield"
+	"github.com/multiformats/go-multiaddr"
 )
 
 type P2PConfig struct {
@@ -115,6 +117,9 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	if err != nil {
 		return nil, err
 	}
+	if port := hostTCPPort(host); port != 0 {
+		cfg.TCPPort = port
+	}
 
 	p := p2pManager{
 		cfg:         cfg,
@@ -155,6 +160,21 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	return &p, nil
 }
 
+func hostTCPPort(h host.Host) uint {
+	for _, addr := range h.Network().ListenAddresses() {
+		v, err := addr.ValueForProtocol(multiaddr.P_TCP)
+		if err != nil {
+			continue
+		}
+		port, err := strconv.ParseUint(v, 10, 16)
+		if err != nil || port == 0 {
+			continue
+		}
+		return uint(port)
+	}
+	return 0
+}
+
 func (p *p2pManager) Pubsub() *pubsub.PubSub {
 	return p.pubsub
 }
@@ -189,7 +209,7 @@ func (p *p2pManager) setupENR() error {
 	if p.cfg.SubscribeAllTopics {
 		// Advertise all 64 attestation subnets and all 4 sync committee subnets
 		// so that peers see us as a useful node and keep us connected.
-		for i := 0; i < 64; i++ {
+		for i := range 64 {
 			initialAttnets.SetBitAt(uint64(i), true)
 		}
 		initialSyncnets = bitfield.Bitvector4{byte(0x0f)}

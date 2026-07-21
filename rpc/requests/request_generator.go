@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/valyala/fastjson"
 
 	"github.com/erigontech/erigon/common"
@@ -234,41 +235,38 @@ func isConnectionError(err error) bool {
 func retryConnects(ctx context.Context, op func(context.Context) error) error {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
-	return retry(ctx, op, isConnectionError, time.Second*1, nil)
-}
 
-func retry(ctx context.Context, op func(context.Context) error, isRecoverableError func(error) bool, delay time.Duration, lastErr error) error {
-	opctx, cancel := context.WithTimeout(ctx, connectionTimeout)
-	defer cancel()
+	var lastDialErr error
+	attempt := func() error {
+		opctx, opCancel := context.WithTimeout(ctx, connectionTimeout)
+		defer opCancel()
 
-	err := op(opctx)
-
-	if err == nil {
-		return nil
-	}
-
-	if !isRecoverableError(err) {
+		err := op(opctx)
+		if err == nil {
+			return nil
+		}
+		if !isConnectionError(err) {
+			return backoff.Permanent(err)
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			if lastDialErr != nil {
+				return backoff.Permanent(lastDialErr)
+			}
+			return err
+		}
+		lastDialErr = err
 		return err
 	}
 
-	if errors.Is(err, context.DeadlineExceeded) {
-		if lastErr != nil {
-			return lastErr
-		}
-
-		err = nil
+	err := backoff.Retry(attempt, backoff.WithContext(backoff.NewConstantBackOff(time.Second), ctx))
+	// backoff.Retry surfaces the overall context's error verbatim when it gives
+	// up; on deadline expiry, report the last dial error it discarded. Compared
+	// by identity so a permanent error that merely wraps DeadlineExceeded (from
+	// backoff.Permanent) is left intact.
+	if lastDialErr != nil && err == context.DeadlineExceeded {
+		return lastDialErr
 	}
-
-	delayTimer := time.NewTimer(delay)
-	select {
-	case <-delayTimer.C:
-		return retry(ctx, op, isRecoverableError, delay, err)
-	case <-ctx.Done():
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return err
-		}
-		return ctx.Err()
-	}
+	return err
 }
 
 type PingResult callResult

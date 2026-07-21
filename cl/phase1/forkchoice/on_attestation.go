@@ -151,20 +151,14 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 	return attestationIndicies, nil
 }
 
-func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage, maintainIndexedVotes bool) {
-	// The indexed weight store is only read by GLOAS get_head; maintaining it on
-	// the pre-GLOAS path is wasted per-vote work under the fork-choice lock.
-	if maintainIndexedVotes && f.indexedWeightStore != nil {
-		if oldMessage, has := f.latestMessages.get(int(index)); has && oldMessage != (LatestMessage{}) {
-			f.indexedWeightStore.RemoveVote(index, oldMessage.Root)
-		}
-	}
-
+func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
 	f.latestMessages.set(int(index), message)
+	f.gloasWeightTree.markDirty(index)
+}
 
-	if maintainIndexedVotes && f.indexedWeightStore != nil {
-		f.indexedWeightStore.IndexVote(index, message)
-	}
+func (f *ForkChoiceStore) trackGloasWeights() bool {
+	currentEpoch := f.computeEpochAtSlot(f.Slot())
+	return f.beaconCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion
 }
 
 func (f *ForkChoiceStore) getLatestMessage(validatorIndex uint64) (LatestMessage, bool) {
@@ -182,25 +176,35 @@ func (f *ForkChoiceStore) isUnequivocating(validatorIndex uint64) bool {
 }
 
 func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
 	index := int(validatorIndex) / 8
 	if index >= len(f.equivocatingIndicies) {
-		if index >= cap(f.equivocatingIndicies) {
-			tmp := make([]byte, index+1, index*2)
-			copy(tmp, f.equivocatingIndicies)
-			f.equivocatingIndicies = tmp
+		if index < cap(f.equivocatingIndicies) {
+			f.equivocatingIndicies = f.equivocatingIndicies[:index+1]
+		} else {
+			nextCap := cap(f.equivocatingIndicies)
+			if nextCap == 0 {
+				nextCap = 1
+			}
+			for nextCap <= index {
+				nextCap *= 2
+			}
+			next := make([]byte, index+1, nextCap)
+			copy(next, f.equivocatingIndicies)
+			f.equivocatingIndicies = next
 		}
-		f.equivocatingIndicies = f.equivocatingIndicies[:index+1]
 	}
 	subIndex := int(validatorIndex) % 8
 	f.equivocatingIndicies[index] |= 1 << uint(subIndex)
+	f.gloasWeightTree.markDirty(validatorIndex)
 }
 
 func (f *ForkChoiceStore) updateLatestMessages(
 	attestation *solid.Attestation,
 	indicies []uint64,
 ) {
-	currentEpoch := f.computeEpochAtSlot(f.Slot())
-	if f.beaconCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion {
+	if f.trackGloasWeights() {
 		f.updateLatestMessagesGloas(attestation, indicies)
 	} else {
 		f.updateLatestMessagesPreGloas(attestation, indicies)
@@ -225,7 +229,7 @@ func (f *ForkChoiceStore) updateLatestMessagesPreGloas(
 				Epoch: target.Epoch,
 				Root:  beaconBlockRoot,
 				Slot:  slot, // Set slot for GLOAS compatibility at fork boundary
-			}, false)
+			})
 		}
 	}
 }
@@ -251,7 +255,7 @@ func (f *ForkChoiceStore) updateLatestMessagesGloas(
 				Slot:           slot,
 				Root:           beaconBlockRoot,
 				PayloadPresent: payloadPresent,
-			}, true)
+			})
 		}
 	}
 }

@@ -254,7 +254,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		// Parse comma-separated topics for multistream protocol negotiation.
 		// The first topic is preferred; libp2p picks the first one the peer supports.
 		var protocolIDs []protocol.ID
-		for _, t := range strings.Split(topic, ",") {
+		for t := range strings.SplitSeq(topic, ",") {
 			if t = strings.TrimSpace(t); t != "" {
 				protocolIDs = append(protocolIDs, protocol.ID(t))
 			}

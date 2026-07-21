@@ -541,23 +541,6 @@ func (s *E3SnapSchema) FileExtensions() (extensions []string) {
 	return
 }
 
-// these are v + vi or bt/kvei residing in same folder `snapshots/forkables`
-func NewForkableSnapSchema(cfg statecfg.ForkableCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
-	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize)
-	b.Data(dirs.SnapForkable, cfg.Name, DataExtensionV, cfg.Compression, version.V1_1_exact)
-	if cfg.Accessors&statecfg.AccessorBTree != 0 {
-		b.BtIndex(version.V1_1_exact)
-	}
-	if cfg.Accessors&statecfg.AccessorHashMap != 0 {
-		b.Accessor(dirs.SnapForkable, version.V1_1_exact)
-	}
-	if cfg.Accessors&statecfg.AccessorExistence != 0 {
-		b.Existence(version.V1_1_exact)
-	}
-
-	return b.Build()
-}
-
 func NewDomainSnapSchema(cfg statecfg.DomainCfg, stepSize uint64, dirs datadir.Dirs) *E3SnapSchema {
 	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
 		Data(dirs.SnapDomain, cfg.Name.String(), DataExtensionKv, cfg.Compression, cfg.FileVersion.DataKV)
@@ -620,7 +603,7 @@ func findFilesWithVersionsByPattern(searchVer version.Version, pattern string, s
 		if !ok {
 			panic(fmt.Sprintf("match %s can't be parsed, shouldn't happen, fail fast", filename))
 		}
-		if info.Version.GreaterOrEqual(supported.MinSupported) && info.Version.LessOrEqual(supported.Current) && maxVersion.Less(info.Version) {
+		if supported.Supports(info.Version) && maxVersion.Less(info.Version) {
 			maxVersion = info.Version
 			maxMatch = match
 			continue

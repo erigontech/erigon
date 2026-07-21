@@ -78,7 +78,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	collector := etl.NewCollector(BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)
 	defer collector.Close()
 
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		key := make([]byte, keySize)
 		n, err := rnd.Read(key)
 		require.Equal(tb, keySize, n)

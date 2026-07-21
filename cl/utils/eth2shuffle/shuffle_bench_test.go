@@ -61,7 +61,7 @@ func BenchmarkIndexComparison(b *testing.B) {
 		b.Run(fmt.Sprintf("Indexwise_ShuffleList_%d", listSize), func(ib *testing.B) {
 			for ib.Loop() {
 				// Simulate a list-shuffle by running permute-index listSize times.
-				for j := uint64(0); j < listSize; j++ {
+				for j := range listSize {
 					eth2shuffle.PermuteIndex(hashFn, rounds, j, listSize, seed)
 				}
 			}
@@ -83,7 +83,7 @@ func BenchmarkShuffleList(b *testing.B) {
 		// list to test
 		testIndices := make([]uint64, listSize, listSize)
 		// fill
-		for i := uint64(0); i < listSize; i++ {
+		for i := range listSize {
 			testIndices[i] = i
 		}
 		// benchmark!

@@ -18,8 +18,9 @@ package downloader
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/pelletier/go-toml/v2"
@@ -119,8 +120,8 @@ func GenerateV2(inv *snapshotinv.Inventory) *ChainTomlV2 {
 		}
 
 		// Sort files by range for deterministic output.
-		sort.Slice(dm.Files, func(i, j int) bool {
-			return dm.Files[i].Range[0] < dm.Files[j].Range[0]
+		slices.SortFunc(dm.Files, func(a, b DomainFileEntry) int {
+			return cmp.Compare(a.Range[0], b.Range[0])
 		})
 
 		// Compute coverage from the published file list (not all local files).

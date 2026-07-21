@@ -36,6 +36,7 @@ import (
 	"github.com/rs/cors"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/rpc"
@@ -182,7 +183,7 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "invalid host specified", http.StatusForbidden)
 }
 
-// gzPoolBufCap is the maximum buffer capacity retained in pools to bound RSS growth.
+// gzPoolBufCap is the maximum dst capacity retained in the pool to bound RSS growth.
 const gzPoolBufCap = 1 << 20
 
 // minGzipBodySize is the minimum response body size to compress. Responses
@@ -191,6 +192,11 @@ const minGzipBodySize = 1024
 
 var gzPool = sync.Pool{
 	New: func() any { w, _ := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed); return w },
+}
+
+func putGzip(gz *gzip.Writer) {
+	gz.Reset(io.Discard)
+	gzPool.Put(gz)
 }
 
 var libdeflateWarnOnce sync.Once
@@ -211,24 +217,8 @@ var gzCompressorPool = sync.Pool{
 	},
 }
 
-var gzBufPool = sync.Pool{
-	New: func() any { return new(bytes.Buffer) },
-}
-
 var gzDstPool = sync.Pool{
 	New: func() any { return make([]byte, 0, 64*1024) },
-}
-
-func getBuf() *bytes.Buffer {
-	buf := gzBufPool.Get().(*bytes.Buffer)
-	buf.Reset()
-	return buf
-}
-
-func putBuf(buf *bytes.Buffer) {
-	if buf.Cap() <= gzPoolBufCap {
-		gzBufPool.Put(buf)
-	}
 }
 
 func putDst(dst []byte) {
@@ -282,7 +272,7 @@ func (w *gzipResponseWriter) Flush() {
 
 func writeStdlibGzip(w http.ResponseWriter, src []byte, status int) {
 	gz := gzPool.Get().(*gzip.Writer)
-	defer gzPool.Put(gz)
+	defer putGzip(gz)
 	gz.Reset(w)
 	w.Header().Set("Content-Encoding", "gzip")
 	w.Header().Del("Content-Length")
@@ -330,10 +320,10 @@ func compressLibdeflate(w http.ResponseWriter, src []byte, status int) bool {
 }
 
 func sendGzipResponse(w http.ResponseWriter, grw *gzipResponseWriter) {
-	defer putBuf(grw.buf)
+	defer pool.PutBuffer(grw.buf)
 
 	if grw.gzw != nil {
-		defer gzPool.Put(grw.gzw)
+		defer putGzip(grw.gzw)
 		defer grw.gzw.Close() //nolint:errcheck
 		return
 	}
@@ -360,7 +350,7 @@ func newGzipHandler(next http.Handler) http.Handler {
 			return
 		}
 
-		grw := &gzipResponseWriter{buf: getBuf(), ResponseWriter: w}
+		grw := &gzipResponseWriter{buf: pool.GetBuffer(), ResponseWriter: w}
 		// The hook activates streaming mode before the first write; absent when gzip
 		// is off so it cannot prematurely commit HTTP headers (e.g. 200 before 503).
 		r = r.WithContext(rpc.WithGzipStreamingHook(r.Context(), grw.Flush))

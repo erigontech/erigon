@@ -66,11 +66,11 @@ func oneBlockStep(mockSentry *execmoduletester.ExecModuleTester, require *requir
 
 func newBaseApiForTest(m *execmoduletester.ExecModuleTester) *jsonrpc.BaseAPI {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	return jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	return jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 }
 
 func newEthApiForTest(base *jsonrpc.BaseAPI, db kv.TemporalRoDB, txPool txpoolproto.TxpoolClient) *jsonrpc.APIImpl {
-	cfg := &jsonrpc.EthApiConfig{
+	cfg := &rpccfg.EthApiConfig{
 		GasCap:                      5000000,
 		FeeCap:                      ethconfig.Defaults.RPCTxFeeCap,
 		ReturnDataLimit:             100_000,

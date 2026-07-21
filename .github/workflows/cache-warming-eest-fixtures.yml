@@ -43,6 +43,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       # Probe for an exact-key hit without downloading the archive. cache-hit is
       # true only on the exact primary key, so a version bump (new key) reports a

@@ -21,6 +21,7 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -70,7 +71,13 @@ func (api *APIImpl) GetBlockAccessList(ctx context.Context, numberOrHash rpc.Blo
 	if err != nil {
 		return nil, err
 	}
-	if data == nil {
+	if len(data) == 0 {
+		data, err = api.balRegenerator.GetBlockAccessListBytes(ctx, chainConfig, tx, blockHash, blockNum)
+		if err != nil && !errors.Is(err, state.PrunedError) {
+			return nil, err
+		}
+	}
+	if len(data) == 0 {
 		return nil, &rpc.CustomError{
 			Code:    4444,
 			Message: "pruned history unavailable",

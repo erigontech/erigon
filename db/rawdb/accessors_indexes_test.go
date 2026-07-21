@@ -28,10 +28,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -124,7 +124,7 @@ func TestLookupStorage(t *testing.T) {
 
 // ReadTransactionByHash retrieves a specific transaction from the database, along with
 // its added positional metadata.
-func readTransactionByHash(db kv.Tx, hash common.Hash, br services.FullBlockReader) (txn types.Transaction, blockHash common.Hash, blockNumber uint64, txNum uint64, txIndex uint64, err error) {
+func readTransactionByHash(db kv.Tx, hash common.Hash, br dbservices.FullBlockReader) (txn types.Transaction, blockHash common.Hash, blockNumber uint64, txNum uint64, txIndex uint64, err error) {
 	blockNumberPtr, txNumPtr, err := rawdb.ReadTxLookupEntry(db, hash)
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, 0, err

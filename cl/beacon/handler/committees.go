@@ -101,7 +101,7 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 				if slotFilter != nil && currSlot != *slotFilter {
 					continue
 				}
-				for committeeIndex := uint64(0); committeeIndex < committeeCount; committeeIndex++ {
+				for committeeIndex := range committeeCount {
 					if index != nil && committeeIndex != *index {
 						continue
 					}
@@ -146,7 +146,7 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 		if slotFilter != nil && currSlot != *slotFilter {
 			continue
 		}
-		for committeeIndex := uint64(0); committeeIndex < committeesPerSlot; committeeIndex++ {
+		for committeeIndex := range committeesPerSlot {
 			if index != nil && committeeIndex != *index {
 				continue
 			}
