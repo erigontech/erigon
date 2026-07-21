@@ -127,13 +127,18 @@ func (e *ErigonMCPServer) handleResourceRecentBlocks(ctx context.Context, req mc
 		return nil, fmt.Errorf("eth_blockNumber: %w", err)
 	}
 
-	currentBlock := new(big.Int)
-	currentBlock.SetString(strings.TrimPrefix(blockNumHex, "0x"), 16)
+	currentBlock, ok := new(big.Int).SetString(strings.TrimPrefix(blockNumHex, "0x"), 16)
+	if !ok {
+		return nil, fmt.Errorf("eth_blockNumber: unexpected result %q", blockNumHex)
+	}
 
 	const recentBlockCount = 10
 	blocks := make([]json.RawMessage, 0, recentBlockCount)
 	for i := range recentBlockCount {
 		blockNum := new(big.Int).Sub(currentBlock, big.NewInt(int64(i)))
+		if blockNum.Sign() < 0 {
+			break
+		}
 		hexNum := fmt.Sprintf("0x%x", blockNum)
 		var block json.RawMessage
 		if err := e.client.CallContext(ctx, &block, "eth_getBlockByNumber", hexNum, false); err != nil {

@@ -224,10 +224,11 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 	dirs := datadir.Open(dataDir)
 
 	cfg := &httpcfg.HttpCfg{
-		Sync:       ethconfig.Defaults.Sync,
-		Enabled:    true,
-		StateCache: kvcache.DefaultCoherentConfig,
-		API:        []string{"eth", "erigon", "ots"}, // APIs needed by MCP tools
+		Sync:                ethconfig.Defaults.Sync,
+		Enabled:             true,
+		StateCache:          kvcache.DefaultCoherentConfig,
+		RpcBatchConcurrency: 2,
+		API:                 []string{"eth", "erigon", "ots"}, // APIs needed by MCP tools
 
 		DataDir:           dataDir,
 		Dirs:              dirs,
@@ -256,7 +257,7 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 	// Create the JSON-RPC APIs and serve them over an in-process connection —
 	// same path as rpcdaemon.
 	apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, heimdallReader, nil)
-	rpcSrv := rpc.NewServer(2, false, false, false, logger, 0)
+	rpcSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
 	for _, api := range apiList {
 		if err := rpcSrv.RegisterName(api.Namespace, api.Service); err != nil {
 			return fmt.Errorf("failed to register %s API: %w", api.Namespace, err)
