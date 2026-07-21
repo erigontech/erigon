@@ -17,7 +17,6 @@
 package jsonrpc
 
 import (
-	"bytes"
 	"context"
 	"errors"
 
@@ -38,15 +37,10 @@ func blockAccessListPrunedHistoryError() *rpc.CustomError {
 	return &rpc.CustomError{Code: 4444, Message: "Pruned history unavailable"}
 }
 
-func (api *BaseAPI) blockAccessListBytes(ctx context.Context, db kv.TemporalRoDB, numberOrHash rpc.BlockNumberOrHash) ([]byte, error) {
+func (api *BaseAPI) blockAccessListBytes(ctx context.Context, tx kv.TemporalTx, numberOrHash rpc.BlockNumberOrHash) ([]byte, error) {
 	if numberOrHash.BlockNumber != nil && *numberOrHash.BlockNumber == rpc.PendingBlockNumber {
 		return nil, errBlockAccessListNotFound
 	}
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
 	blockNum, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
@@ -72,8 +66,6 @@ func (api *BaseAPI) blockAccessListBytes(ctx context.Context, db kv.TemporalRoDB
 	if err != nil {
 		return nil, err
 	}
-	// GetOne returns transaction-scoped mmap memory, but callers consume the BAL after rollback.
-	data = bytes.Clone(data)
 	if len(data) == 0 {
 		data, err = api.balRegenerator.GetBlockAccessListBytes(ctx, chainConfig, tx, blockHash, blockNum)
 		if errors.Is(err, state.PrunedError) {

@@ -323,7 +323,12 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 
 // GetBlockAccessList returns the block access list for a given block (EIP-7928).
 func (api *APIImpl) GetBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethapi.RPCAccountAccess, error) {
-	data, err := api.blockAccessListBytes(ctx, api.db, numberOrHash)
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	data, err := api.blockAccessListBytes(ctx, tx, numberOrHash)
 	if errors.Is(err, errBlockAccessListNotFound) {
 		return nil, nil
 	}

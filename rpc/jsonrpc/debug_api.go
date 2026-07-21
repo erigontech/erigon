@@ -99,11 +99,20 @@ func NewPrivateDebugAPI(base *BaseAPI, db kv.TemporalRoDB, ethBackend rpchelper.
 
 // GetRawBlockAccessList returns the RLP-encoded block access list for a given block (EIP-7928).
 func (api *DebugAPIImpl) GetRawBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
-	data, err := api.blockAccessListBytes(ctx, api.db, numberOrHash)
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	data, err := api.blockAccessListBytes(ctx, tx, numberOrHash)
 	if errors.Is(err, errBlockAccessListNotFound) {
 		return nil, blockAccessListResourceNotFoundError()
 	}
-	return data, err
+	if err != nil {
+		return nil, err
+	}
+	// Stored BALs may reference transaction-scoped mmap memory, so detach before rollback.
+	return bytes.Clone(data), nil
 }
 
 // SetHead implements debug_setHead. Rewinds the local chain to the specified block number.
