@@ -229,10 +229,17 @@ func getMinimumBlocksToDownload(
 ) (minBlockToDownload uint64, minHistoryStep, minCommitmentHistoryStep, minReceiptsStep kv.Step, err error) {
 	started := time.Now()
 	var iterations int64
+	var firstBodyBlock, lastBodyBlock uint64
+	var hitHistoryBoundary bool
 	defer func() {
-		log.Debug("getMinimumBlocksToDownload finished",
+		log.Info("[dbg-snapfilter] getMinimumBlocksToDownload finished",
 			"timeTaken", time.Since(started),
 			"iterations", iterations,
+			"stateHistoryPruneTo", stateHistoryPruneTo,
+			"firstBodyBlock", firstBodyBlock,
+			"lastBodyBlock", lastBodyBlock,
+			"hitHistoryBoundary", hitHistoryBoundary,
+			"minHistoryStep", minHistoryStep,
 			"err", err)
 	}()
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
@@ -247,8 +254,13 @@ func getMinimumBlocksToDownload(
 				return context.Cause(ctx)
 			}
 		}
+		if iterations == 0 {
+			firstBodyBlock = blockNum
+		}
+		lastBodyBlock = blockNum
 		iterations++
 		if blockNum == stateHistoryPruneTo {
+			hitHistoryBoundary = true
 			minHistoryStep = stepAtTxNum(baseTxNum, stepSize)
 		}
 		if blockNum == commitmentHistoryPruneTo {
