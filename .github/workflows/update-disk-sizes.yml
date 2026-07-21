@@ -229,7 +229,7 @@ jobs:
           Opened automatically by the **Docs - Update disk sizes** CI workflow after a successful sync-from-scratch run.
 
           ### What changed
-          `docs/site/src/data/disk-sizes.json` — `full` and/or `minimal` mode disk usage updated from the latest CI measurement. The hardware requirements page consumes this file directly, so merging this PR is all that's needed.
+          `docs/site/src/data/disk-sizes.json` — `full` and/or `minimal` mode disk usage updated from the latest CI measurement. `docs/site/docs/get-started/hardware-requirements.mdx` is regenerated from it (static values between MDX markers), so both files are included and merging this PR is all that's needed.
 
           ### What this does NOT update
           - **Archive** mode: requires manual measurement from always-on snapshot machines.
