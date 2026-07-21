@@ -96,7 +96,7 @@ func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hex
 			return nil, fmt.Errorf("could not begin temporal transaction: %w", err)
 		}
 		defer dbTx.Rollback()
-		sd, err := execctx.NewSharedDomains(ctx, dbTx, t.logger, execctx.WithoutDeferredBranchUpdates())
+		sd, err := execctx.NewSharedDomains(ctx, dbTx, t.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutBranchCache())
 		if err != nil {
 			return nil, fmt.Errorf("NewSharedDomains error: %w", err)
 		}

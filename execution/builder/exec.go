@@ -128,7 +128,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		return err
 	}
 	defer filterMb.Close()
-	filterSd, err := execctx.NewSharedDomains(ctx, filterMb, logger, execctx.WithoutDeferredBranchUpdates())
+	filterSd, err := execctx.NewSharedDomains(ctx, filterMb, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutBranchCache())
 	if err != nil {
 		return err
 	}

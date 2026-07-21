@@ -141,8 +141,9 @@ type SharedDomains struct {
 	// behind sd.mem and sd.parent.mem in the read chain (consulted only after
 	// both miss, before the aggTx files/MDBX read), so writers' in-flight
 	// bytes always mask the cache and cross-SD pollution is impossible.
-	// May be nil for test setups whose AggTx doesn't implement
-	// commitment.BranchCacheProvider.
+	// nil for SDs constructed with WithoutBranchCache (snapshot readers that
+	// must not touch the shared cache) and for test setups whose AggTx
+	// doesn't implement commitment.BranchCacheProvider.
 	branchCache *commitment.BranchCache
 
 	// collector is the process-level KV-read metrics collector (aggregator
@@ -206,21 +207,18 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	// aggregator). The duck-typed BranchCacheProvider lookup avoids
 	// importing db/state directly — db/state already imports execctx, so
 	// the reverse import would create a cycle.
-	var branchCache *commitment.BranchCache
-	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok {
-		branchCache = p.BranchCache()
+	if !o.noBranchCache {
+		if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok {
+			sd.branchCache = p.BranchCache()
+		}
+		if p, ok := tx.AggTx().(commitment.AdaptivePinControllerProvider); ok {
+			sd.adaptivePinController = p.AdaptivePinController()
+		}
 	}
-	sd.branchCache = branchCache
 	if p, ok := tx.AggTx().(kvmetrics.MetricsCollectorProvider); ok {
 		sd.collector = p.MetricsCollector()
 	}
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg)
-
-	// The pin controller is aggregator-scoped (co-located with branchCache) so pin
-	// residency ages by block-access recency across all SharedDomains, not per-SD.
-	if p, ok := tx.AggTx().(commitment.AdaptivePinControllerProvider); ok {
-		sd.adaptivePinController = p.AdaptivePinController()
-	}
 
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
