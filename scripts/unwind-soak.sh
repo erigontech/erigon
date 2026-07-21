@@ -415,10 +415,16 @@ for ((i=1; i<=ITER; i++)); do
     fi
 
     # Scenario 2: past changeset, above frozen-blocks tip. Currently
-    # routes through setHeadModeB but the snapshot-trim subpath
-    # no-ops (no files past toBlock). Exercises the "lite" Mode-B.
+    # routes through setHeadModeB. The snapshot-trim subpath no-ops
+    # (no files past toBlock) but the commitment-recompute step
+    # inside setHead still runs when the pre/target span crosses a
+    # step boundary — mode_a2 can therefore take as long as a genuine
+    # deep Mode-B call. Use the same generous setHead timeout as
+    # scenario 3 instead of the shallow preflight budget, which
+    # caused iter-13 false-fails on runs where the trie recompute
+    # ran the RPC over its 120s limit.
     scenario_test mode_a2 "$i" "$SCENARIO2_DEPTH" \
-        "$SETHEAD_PREFLIGHT_TIMEOUT_SEC" "$PREFLIGHT_RECOVERY_TIMEOUT_SEC" 1
+        "$SETHEAD_CALL_TIMEOUT_SEC" "$PREFLIGHT_RECOVERY_TIMEOUT_SEC" 1
     if [[ $OVERALL_RC -ne 0 ]]; then
         echo "iter $i: ABORTING — scenario 2 (past-changeset, within-DB) regression"
         break
