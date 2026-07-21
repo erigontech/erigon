@@ -170,6 +170,18 @@ func TestToolArgMapping(t *testing.T) {
 			wantArgs: []any{map[string]any{"fromBlock": "0x1", "toAddress": []string{"0xabc"}, "count": 100}},
 		},
 		{
+			tool:     "trace_filter",
+			args:     map[string]any{"toAddress": ` ["0xabc","0xdef"]`},
+			result:   `[]`,
+			wantArgs: []any{map[string]any{"toAddress": []string{"0xabc", "0xdef"}, "count": 100}},
+		},
+		{
+			tool:     "debug_traceTransaction",
+			args:     map[string]any{"txHash": "0x1", "tracer": ""},
+			result:   `{}`,
+			wantArgs: []any{"0x1"},
+		},
+		{
 			tool:     "eth_call",
 			args:     map[string]any{"to": "0xabc", "data": "0x01", "from": "0xdef"},
 			result:   `"0x"`,

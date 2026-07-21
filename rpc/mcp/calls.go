@@ -184,7 +184,7 @@ func buildLogFilter(req mcp.CallToolRequest) ([]any, error) {
 	if v := req.GetString("toBlock", ""); v != "" {
 		filter["toBlock"] = normalizeBlockRef(v)
 	}
-	if v := req.GetString("address", ""); v != "" {
+	if v := strings.TrimSpace(req.GetString("address", "")); v != "" {
 		if strings.HasPrefix(v, "[") {
 			var addrs []string
 			if err := json.Unmarshal([]byte(v), &addrs); err != nil {
@@ -271,7 +271,7 @@ func buildTraceFilter(req mcp.CallToolRequest) ([]any, error) {
 		filter["toBlock"] = v
 	}
 	for _, k := range []string{"fromAddress", "toAddress"} {
-		v := req.GetString(k, "")
+		v := strings.TrimSpace(req.GetString(k, ""))
 		if v == "" {
 			continue
 		}
