@@ -9,7 +9,6 @@ on:
   # zizmor: ignore[dangerous-triggers] no checkout of triggering run's head; BASE_BRANCH is pinned to release/3.5 for workflow_run events
   workflow_run:
     workflows:
-      - "QA - Sync from scratch"
       - "QA - Sync from scratch (minimal node)"
       - "QA - Sync from scratch (full node)"
     types:
@@ -110,6 +109,8 @@ jobs:
           client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
           repositories: "erigon"
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Checkout base branch
         uses: actions/checkout@v7

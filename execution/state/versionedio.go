@@ -8,7 +8,6 @@ import (
 	"iter"
 	"maps"
 	"slices"
-	"sort"
 	"strconv"
 	"sync"
 
@@ -1766,15 +1765,17 @@ func (s *WriteSet) TouchUpdates(updates *commitment.Updates) {
 // processing order; WriteSet map iteration is non-deterministic in Go.
 // The sort relies on the AccountPath enum ordering defined in versionmap.go.
 func sortWriteHeaders(headers []WriteHeader) {
-	sort.Slice(headers, func(i, j int) bool {
-		hi, hj := headers[i], headers[j]
-		if c := hi.Address.Cmp(hj.Address); c != 0 {
-			return c < 0
+	slices.SortFunc(headers, func(a, b WriteHeader) int {
+		if c := a.Address.Cmp(b.Address); c != 0 {
+			return c
 		}
-		if hi.Path != hj.Path {
-			return hi.Path < hj.Path
+		if a.Path != b.Path {
+			if a.Path < b.Path {
+				return -1
+			}
+			return 1
 		}
-		return hi.Key.Cmp(hj.Key) < 0
+		return a.Key.Cmp(b.Key)
 	})
 }
 
@@ -2347,8 +2348,8 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		bal = append(bal, account.changes)
 	}
 
-	sort.Slice(bal, func(i, j int) bool {
-		return bal[i].Address.Cmp(bal[j].Address) < 0
+	slices.SortFunc(bal, func(a, b *types.AccountChanges) int {
+		return a.Address.Cmp(b.Address)
 	})
 
 	return bal

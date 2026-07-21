@@ -17,7 +17,7 @@
 package diaglib
 
 import (
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -214,8 +214,14 @@ func (p *PeerStats) getOldestUpdatedPeersWithSize(size int) []PeerUpdTime {
 		timeArray = append(timeArray, PeerUpdTime{k, v})
 	}
 
-	sort.Slice(timeArray, func(i, j int) bool {
-		return timeArray[i].Time.Before(timeArray[j].Time)
+	slices.SortFunc(timeArray, func(a, b PeerUpdTime) int {
+		if a.Time.Before(b.Time) {
+			return -1
+		}
+		if b.Time.Before(a.Time) {
+			return 1
+		}
+		return 0
 	})
 
 	if len(timeArray) < size {

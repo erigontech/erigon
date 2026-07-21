@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/common/crypto"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -249,7 +250,7 @@ func processRandao(impl BlockProcessor, s abstract.BeaconState, body cltypes.Gen
 		// compute signing root epoch
 		b := make([]byte, 32)
 		binary.LittleEndian.PutUint64(b, epoch)
-		signingRoot := utils.Sha256(b, domain)
+		signingRoot := crypto.Sha256(b, domain)
 
 		pk := proposer.PublicKey()
 		sigs, msgs, pubKeys = append(sigs, randao[:]), append(msgs, signingRoot[:]), append(pubKeys, pk[:])
@@ -358,7 +359,7 @@ func processBlsToExecutionChanges(impl BlockOperationProcessor, s abstract.Beaco
 			}
 
 			// Check the validator's withdrawal credentials against the provided message.
-			hashedFrom := utils.Sha256(change.From[:])
+			hashedFrom := crypto.Sha256(change.From[:])
 			if !bytes.Equal(hashedFrom[1:], wc[1:]) {
 				return errors.New("invalid withdrawal credentials")
 			}

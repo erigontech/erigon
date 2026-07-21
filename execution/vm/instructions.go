@@ -23,10 +23,10 @@ import (
 	"fmt"
 	"math"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -361,17 +361,8 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	offset, size := scope.Stack.pop(), scope.Stack.peek()
 	data := scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 
-	if evm.hasher == nil {
-		evm.hasher = keccak.NewFastKeccak()
-	} else {
-		evm.hasher.Reset()
-	}
-	evm.hasher.Write(data)
-	if _, err := evm.hasher.Read(evm.hasherBuf[:]); err != nil {
-		panic(err)
-	}
-
-	size.SetBytes(evm.hasherBuf[:])
+	hash := crypto.Keccak256Hash(data)
+	size.SetBytes(hash[:])
 	return pc, nil, nil
 }
 
@@ -1324,8 +1315,12 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		return pc, nil, err
 	}
 
-	ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
-	ibs.Selfdestruct(self, false)
+	if err := ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct); err != nil {
+		return pc, nil, err
+	}
+	if _, err := ibs.Selfdestruct(self, false); err != nil {
+		return pc, nil, err
+	}
 	tracer := evm.Config().Tracer
 	if tracer != nil && tracer.OnEnter != nil {
 		tracer.OnEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
@@ -1359,8 +1354,12 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		// beneficiary (a no-op when it is self); a same-tx-created contract is
 		// still cleared at finalization but keeps any residual balance.
 		if self != beneficiaryAddr {
-			ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct)
-			ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
+			if err := ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct); err != nil {
+				return pc, nil, err
+			}
+			if err := ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct); err != nil {
+				return pc, nil, err
+			}
 		}
 		if newContract {
 			_, err = ibs.Selfdestruct(self, true)
@@ -1369,17 +1368,25 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 			}
 		}
 	} else if newContract { // Contract is new and will actually be deleted.
-		ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct)
+		if err := ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct); err != nil {
+			return pc, nil, err
+		}
 		if self != beneficiaryAddr {
-			ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
+			if err := ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct); err != nil {
+				return pc, nil, err
+			}
 		}
 		_, err = ibs.Selfdestruct(self, false)
 		if err != nil {
 			return pc, nil, err
 		}
 	} else if self != beneficiaryAddr { // Contract already exists, only do transfer if beneficiary is not self.
-		ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct)
-		ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
+		if err := ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct); err != nil {
+			return pc, nil, err
+		}
+		if err := ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct); err != nil {
+			return pc, nil, err
+		}
 	}
 	if rules.IsAmsterdam && !rules.IsEIPDisabled(7708) && !balance.IsZero() && self != beneficiaryAddr { // EIP-7708
 		ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))

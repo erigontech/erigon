@@ -74,10 +74,7 @@ func (a *Address) checksumHex() []byte {
 	buf := a.hex()
 
 	// compute checksum
-	sha := keccak.NewFastKeccak()
-	//nolint:errcheck
-	sha.Write(buf[2:])
-	hash := sha.Sum(nil)
+	hash := keccak.Sum256(buf[2:])
 
 	for i := 2; i < len(buf); i++ {
 		hashByte := hash[(i-2)/2]

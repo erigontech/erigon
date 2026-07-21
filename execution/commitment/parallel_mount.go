@@ -1,12 +1,13 @@
 package commitment
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
 	"math/bits"
 	"os"
-	"sort"
+	"slices"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -16,6 +17,22 @@ var cmtTiming = os.Getenv("ERIGON_CMT_TIMING") == "1"
 
 // deepStorageThreshold is the touched-slot count above which an account's storage subtree folds concurrently instead of streaming through its worker.
 const deepStorageThreshold = 1_000
+
+// unfoldRootWall unfolds base at the root until row 0 forms the top-nibble mount wall,
+// consuming at most one nibble per step: a restored root extension sharing the probe's
+// leading nibble would otherwise unfold several levels at once and misplace the wall.
+func unfoldRootWall(ctx context.Context, base *HexPatriciaHashed) error {
+	zero := []byte{0}
+	for u := base.needUnfolding(zero); u > 0; u = base.needUnfolding(zero) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := base.unfold(zero, min(u, 1)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // seedRootBase synthesizes a row-0 wall when the on-disk root has no branch, so foldMounted stops
 // at the mount boundary and returns cells excluding the mount nibble for empty and non-empty bases alike.
@@ -88,14 +105,8 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		tStart = time.Now()
 	}
 
-	zero := []byte{0}
-	for u := base.needUnfolding(zero); u > 0; u = base.needUnfolding(zero) {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if err := base.unfold(zero, u); err != nil {
-			return nil, fmt.Errorf("processMounted: unfold root: %w", err)
-		}
+	if err := unfoldRootWall(ctx, base); err != nil {
+		return nil, fmt.Errorf("processMounted: unfold root: %w", err)
 	}
 	seedRootBase(base)
 	if cmtTiming {
@@ -193,8 +204,6 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			return nil, fmt.Errorf("processMounted: root fold: %w", err)
 		}
 	}
-	// fold() only sets rootPresent on a multi-child root fold, so set it here for the EncodeCurrentState/SetState round-trip.
-	base.rootPresent = !base.root.IsEmpty()
 	if deferred := base.TakeDeferredUpdates(); len(deferred) > 0 {
 		pu.appendDeferred(deferred)
 	}
@@ -229,7 +238,7 @@ func printMountTiming(tStart, tUnfolded, tWorkers time.Time, buildDur, foldDur *
 			maxSum, maxSumNib = sum, nib
 		}
 	}
-	sort.Slice(stats, func(i, j int) bool { return stats[i].sum > stats[j].sum })
+	slices.SortFunc(stats, func(a, b wstat) int { return cmp.Compare(b.sum, a.sum) })
 	fmt.Printf("\n[CMT_TIMING] baseUnfold=%v workerWall=%v rootFold=%v | criticalWorker=nib %x sum=%v (build=%v fold=%v)\n",
 		tUnfolded.Sub(tStart), tWorkers.Sub(tUnfolded), time.Since(tWorkers), maxSumNib, maxSum, stats[0].build, stats[0].fold)
 	fmt.Printf("[CMT_TIMING] sum(maxBuild=%v maxFold=%v) = ideal critical path if build & fold each split perfectly across nibbles\n", maxBuild, maxFold)

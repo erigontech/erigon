@@ -22,9 +22,9 @@ import (
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -145,7 +145,7 @@ func (arr *RawUint64List) HashSSZ() ([32]byte, error) {
 
 	lnRoot := merkle_tree.Uint64Root(uint64(len(arr.u)))
 	if len(arr.u) == 0 {
-		arr.cachedHash = utils.Sha256(merkle_tree.ZeroHashes[depth][:], lnRoot[:])
+		arr.cachedHash = crypto.Sha256(merkle_tree.ZeroHashes[depth][:], lnRoot[:])
 		return arr.cachedHash, nil
 	}
 
@@ -167,7 +167,7 @@ func (arr *RawUint64List) HashSSZ() ([32]byte, error) {
 		elements = elements[:outputLen]
 	}
 
-	arr.cachedHash = utils.Sha256(elements[:32], lnRoot[:])
+	arr.cachedHash = crypto.Sha256(elements[:32], lnRoot[:])
 	return arr.cachedHash, nil
 }
 

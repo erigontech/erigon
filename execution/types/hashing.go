@@ -161,7 +161,7 @@ func intsize(i uint) (size int) {
 }
 
 func RawRlpHash(rawRlpData rlp.RawValue) common.Hash {
-	return crypto.HashData(rawRlpData)
+	return crypto.Keccak256Hash(rawRlpData)
 }
 
 func RlpHash(x any) common.Hash {

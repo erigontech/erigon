@@ -49,6 +49,7 @@ type voluntaryExitTestSuite struct {
 }
 
 func (t *voluntaryExitTestSuite) SetupTest() {
+	saveSignatureGlobals(t.T())
 	computeSigningRoot = func(_ ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 		return [32]byte{}, nil
 	}

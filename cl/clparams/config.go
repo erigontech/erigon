@@ -17,6 +17,7 @@
 package clparams
 
 import (
+	"cmp"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -24,7 +25,6 @@ import (
 	mathrand "math/rand"
 	"os"
 	"slices"
-	"sort"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -832,8 +832,8 @@ func (b *BeaconChainConfig) AttestationDueMs(gloas bool) uint64 {
 func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
 	// sort blob schedule by epoch in ascending order
-	sort.Slice(b.BlobSchedule, func(i, j int) bool {
-		return b.BlobSchedule[i].Epoch < b.BlobSchedule[j].Epoch
+	slices.SortFunc(b.BlobSchedule, func(a, b BlobParameters) int {
+		return cmp.Compare(a.Epoch, b.Epoch)
 	})
 }
 

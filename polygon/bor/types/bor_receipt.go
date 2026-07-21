@@ -39,7 +39,7 @@ func ComputeBorTxHash(blockNumber uint64, blockHash common.Hash) common.Hash {
 	txKeyPlain = append(txKeyPlain, BorTxKeyPrefix...)
 	txKeyPlain = append(txKeyPlain, BorReceiptKey(blockNumber)...)
 	txKeyPlain = append(txKeyPlain, blockHash[:]...)
-	return common.BytesToHash(crypto.Keccak256(txKeyPlain))
+	return crypto.Keccak256Hash(txKeyPlain)
 }
 
 // NewBorTransaction create new bor transaction for bor receipt

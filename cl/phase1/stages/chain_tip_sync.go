@@ -1,12 +1,12 @@
 package stages
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"maps"
 	"slices"
-	"sort"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -135,8 +135,8 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 		return nil, nil
 	}
 
-	sort.Slice(blocks, func(i, j int) bool {
-		return blocks[i].Block.Slot < blocks[j].Block.Slot
+	slices.SortFunc(blocks, func(a, b *cltypes.SignedBeaconBlock) int {
+		return cmp.Compare(a.Block.Slot, b.Block.Slot)
 	})
 
 	// Return the blocks and the peer ID wrapped in a PeeredObject

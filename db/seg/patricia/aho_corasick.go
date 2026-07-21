@@ -17,7 +17,7 @@
 package patricia
 
 import (
-	"sort"
+	"slices"
 )
 
 // Match is a single pattern occurrence: its associated value and the [Start, End)
@@ -115,7 +115,7 @@ func (ac *AhoCorasick) Build() {
 		for b := range m {
 			bs = append(bs, b)
 		}
-		sort.Slice(bs, func(i, j int) bool { return bs[i] < bs[j] })
+		slices.Sort(bs)
 		tos := make([]int32, len(bs))
 		for i, b := range bs {
 			tos[i] = m[b]

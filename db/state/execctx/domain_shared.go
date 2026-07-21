@@ -713,12 +713,15 @@ func (sd *SharedDomains) InitBlockOverlay(tx kv.TemporalTx, tmpDir string) error
 	if err != nil {
 		return fmt.Errorf("init block overlay: %w", err)
 	}
+	overlay.DomainReader = sd
 	sd.blockOverlay.Store(overlay)
 	return nil
 }
+
 func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmentContext {
 	return sd.sdCtx
 }
+
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
 // SetStateCache hands this SD the process-global state cache to manage.
@@ -983,21 +986,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 				return v, uint64(step), len(v) > 0, nil
 			}
 			factory := func() (commitment.BatchBranchResolver, func(), error) {
-				resolve := func(keys [][]byte) ([][]byte, error) {
-					d := ttx.Debug()
-					vals := make([][]byte, len(keys))
-					for i, k := range keys {
-						v, found, _, _, err := d.GetLatestFromFiles(kv.CommitmentDomain, k, 0)
-						if err != nil {
-							return nil, err
-						}
-						if found {
-							vals[i] = common.Copy(v)
-						}
-					}
-					return vals, nil
-				}
-				return resolve, nil, nil
+				return pinBranchResolver(ttx), nil, nil
 			}
 			provider := func(contractHash []byte) map[string][]byte {
 				m := map[string][]byte{}
@@ -1537,6 +1526,10 @@ func (sd *SharedDomains) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []b
 	return sd.mem.GetAsOf(domain, key, ts)
 }
 
+func (sd *SharedDomains) HistorySeek(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return sd.mem.HistorySeek(domain, key, ts)
+}
+
 // DomainPut
 // Optimizations:
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage
@@ -1619,33 +1612,30 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		}
 	}
 
-	switch domain {
-	case kv.AccountsDomain:
+	// Deleting an account cascades to its storage and code — run before the
+	// absent-key skip so leftover storage/code is still wiped even if the
+	// account itself is already gone.
+	if domain == kv.AccountsDomain {
 		if err := sd.DomainDelPrefix(kv.StorageDomain, tx, k, txNum); err != nil {
 			return err
 		}
 		if err := sd.DomainDel(kv.CodeDomain, tx, k, txNum, nil); err != nil {
 			return err
 		}
-		// State cache is refreshed on flush only — see DomainPut. The flush
-		// callback handles the empty-value (delete) case for accounts, code
-		// and the addr→codeHash mapping.
-		// AccountsDomain — apply-side. Serialize against swap window.
-		sd.changesetMu.Lock()
-		defer sd.changesetMu.Unlock()
-		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal)
-	case kv.StorageDomain:
-		// State cache refreshed on flush only — see DomainPut.
-	case kv.CodeDomain:
-		if prevVal == nil {
-			return nil
-		}
-		// State cache refreshed on flush only — see DomainPut.
-	default:
-		//noop
 	}
-	// Serialize against the calculator's swap window for non-commitment
-	// domains; CommitmentDomain skipped — see DomainPut comment.
+
+	// Deleting an already-absent key is a no-op: recording it would append a
+	// redundant empty->empty history row (mirrors domainPut's bytes.Equal
+	// dedup). prevVal is nil when the key was never written, but []byte{} for a
+	// flushed tombstone (getLatestFromDb strips the step prefix) — so test len,
+	// not nil.
+	if len(prevVal) == 0 {
+		return nil
+	}
+
+	// State cache is refreshed on flush only — see DomainPut. Serialize against
+	// the calculator's swap window for non-commitment domains; CommitmentDomain
+	// skipped — see DomainPut comment.
 	if domain != kv.CommitmentDomain {
 		sd.changesetMu.Lock()
 		defer sd.changesetMu.Unlock()

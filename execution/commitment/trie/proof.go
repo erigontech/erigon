@@ -463,7 +463,7 @@ func proofMap(proof []hexutil.Bytes) (map[common.Hash]Node, map[common.Hash]rawP
 	res := map[common.Hash]Node{}
 	raw := map[common.Hash]rawProofElement{}
 	for i, proofB := range proof {
-		hash := crypto.HashData(proofB)
+		hash := crypto.Keccak256Hash(proofB)
 		var err error
 		res[hash], err = decodeNode(proofB)
 		if err != nil {
@@ -531,7 +531,7 @@ func verifyProof(root common.Hash, key []byte, proofs map[common.Hash]Node, used
 }
 
 func VerifyAccountProof(stateRoot common.Hash, proof *accounts.AccProofResult) error {
-	accountKey := crypto.HashData(proof.Address[:])
+	accountKey := crypto.Keccak256Hash(proof.Address[:])
 	return VerifyAccountProofByHash(stateRoot, accountKey, proof)
 }
 
@@ -584,7 +584,7 @@ func VerifyAccountProofByHash(stateRoot common.Hash, accountKey common.Hash, pro
 func VerifyStorageProof(storageRoot common.Hash, proof accounts.StorProofResult) error {
 	keyhash := &common.Hash{}
 	keyhash.SetBytes(hexutil.FromHex(proof.Key))
-	storageKey := crypto.HashData(keyhash[:])
+	storageKey := crypto.Keccak256Hash(keyhash[:])
 	return VerifyStorageProofByHash(storageRoot, storageKey, proof)
 }
 
@@ -647,7 +647,7 @@ type proofNode struct {
 // proofMap creates a map from hash to proof node
 func orderedProofNodes(proof []hexutil.Bytes) (res []proofNode, err error) {
 	for _, proofB := range proof {
-		hash := crypto.HashData(proofB)
+		hash := crypto.Keccak256Hash(proofB)
 		node, err := decodeNode(proofB)
 		if err != nil {
 			return nil, err

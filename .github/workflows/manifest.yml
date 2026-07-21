@@ -39,7 +39,7 @@ jobs:
           minor=$(sed -n 's/^go \([0-9]*\.[0-9]*\).*/\1/p' go.mod)
           echo "version=${minor}.x" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ steps.goversion.outputs.version }}
       - run: make downloader

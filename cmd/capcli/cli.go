@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -1483,7 +1484,7 @@ func (m *MakeDepositArgs) Run(ctx *Context) error {
 		return err
 	}
 
-	messageToSign := utils.Sha256(depositMessageRootForSigning[:], domain)
+	messageToSign := crypto.Sha256(depositMessageRootForSigning[:], domain)
 
 	signature := privateKeyBls.Sign(messageToSign[:])
 	signatureBytes := signature.Bytes()

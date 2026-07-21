@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -30,9 +31,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -100,6 +99,15 @@ func testDbAndDomainOfStep(t *testing.T, domainCfg statecfg.DomainCfg, aggStep u
 	t.Cleanup(d.Close)
 	d.DisableFsync()
 	return db, d
+}
+
+// requireFileNameMatches asserts the file name shape - base, step range and
+// extension - without pinning the schema version, which bumps independently.
+func requireFileNameMatches(t *testing.T, path, mask string) {
+	t.Helper()
+	matched, err := filepath.Match(mask, filepath.Base(path))
+	require.NoError(t, err)
+	require.Truef(t, matched, "%s does not match %s", path, mask)
 }
 
 func TestDomain_CollationBuild(t *testing.T) {
@@ -215,10 +223,9 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		c, err := d.collate(ctx, 0, 0, 16, tx)
 
 		require.NoError(t, err)
-		require.True(t, strings.HasSuffix(c.valuesPath, "v2.0-accounts.0-1.kv"))
+		requireFileNameMatches(t, c.valuesPath, d.kvFileNameMask(0, 1))
 		require.Equal(t, 2, c.valuesCount)
-		require.True(t, strings.HasSuffix(c.historyPath, "v2.0"+
-			"-accounts.0-1.v"))
+		requireFileNameMatches(t, c.historyPath, d.History.vFileNameMask(0, 1))
 
 		require.Equal(t, seg.WordsAmount2PagesAmount(3, d.CompressorCfg.ValuesOnCompressedPage), 1) // 16 valus per page
 		require.Equal(t, 3, c.historyComp.Count())                                                  // no compression on collate
@@ -1511,9 +1518,9 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	c, err := d.collate(ctx, 0, 0, maxTx, tx)
 
 	require.NoError(t, err)
-	require.True(t, strings.HasSuffix(c.valuesPath, "v2.0-accounts.0-1.kv"))
+	requireFileNameMatches(t, c.valuesPath, d.kvFileNameMask(0, 1))
 	require.Equal(t, 3, c.valuesCount)
-	require.True(t, strings.HasSuffix(c.historyPath, "v2.0-accounts.0-1.v"))
+	requireFileNameMatches(t, c.historyPath, d.History.vFileNameMask(0, 1))
 
 	require.Equal(t, seg.WordsAmount2PagesAmount(int(3*maxTx), d.CompressorCfg.ValuesOnCompressedPage), 469) // because 646 values at one page
 	require.Equal(t, int(3*maxTx), c.historyComp.Count())                                                    // no compression on collate
@@ -1780,7 +1787,7 @@ func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 		updates = append(updates, up)
 		usedTxNums[txNum] = true
 	}
-	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
+	slices.SortFunc(updates, func(a, b upd) int { return cmp.Compare(a.txNum, b.txNum) })
 
 	return updates
 }

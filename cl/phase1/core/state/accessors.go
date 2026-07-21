@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/cl/abstract"
@@ -32,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/threading"
 )
 
@@ -52,7 +52,7 @@ func Epoch(b abstract.BeaconStateBasic) uint64 {
 
 func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength, committeeIndex uint64, slotSignature common.Bytes96) bool {
 	modulo := max(1, committeeLength/cfg.TargetAggregatorsPerCommittee)
-	hashSlotSignatue := utils.Sha256(slotSignature[:])
+	hashSlotSignatue := crypto.Sha256(slotSignature[:])
 	return binary.LittleEndian.Uint64(hashSlotSignatue[:8])%modulo == 0
 }
 

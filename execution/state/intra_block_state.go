@@ -347,24 +347,24 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
 func (sdb *IntraBlockState) Reset() {
-	sdb.nilAccounts = map[accounts.Address]struct{}{}
+	clear(sdb.nilAccounts)
 	for _, so := range sdb.stateObjects {
 		so.release()
 	}
-	sdb.stateObjects = map[accounts.Address]*stateObject{}
-	sdb.stateObjectsDirty = map[accounts.Address]struct{}{}
+	clear(sdb.stateObjects)
+	clear(sdb.stateObjectsDirty)
 	for i := range sdb.logs {
-		clear(sdb.logs[i]) // free p¬ointers
+		clear(sdb.logs[i]) // free pointers
 		sdb.logs[i] = sdb.logs[i][:0]
 	}
-	sdb.balanceInc = map[accounts.Address]*BalanceIncrease{}
+	clear(sdb.balanceInc)
 	sdb.journal.Reset()
 	sdb.revisions = sdb.revisions.put()
 	sdb.refund = uint64(0)
 	sdb.txIndex = 0
 	sdb.logSize = 0
 	sdb.accessList.Reset()
-	sdb.transientStorage = newTransientStorage()
+	clear(sdb.transientStorage)
 	sdb.versionMap = nil
 	// Read side rebinds to a fresh empty set: VersionedReads() at end of
 	// tx hands the per-path maps to result.TxIn, so rebinding leaves the
@@ -1699,7 +1699,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		// optimisation in SetCode to incorrectly delete code writes when
 		// clearing a delegation that was set by a prior transaction in the
 		// same block.
-		codeHash := accounts.InternCodeHash(crypto.HashData(code))
+		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 		obj.code = accounts.Code{Hash: codeHash, Bytes: code}
 		if codeHash != obj.data.CodeHash {
 			obj.data.CodeHash = codeHash
@@ -2397,7 +2397,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 		}
 	}
 	// Reset transient storage at the beginning of transaction execution
-	sdb.transientStorage = newTransientStorage()
+	clear(sdb.transientStorage)
 	sdb.addressAccess = make(map[accounts.Address]*accessOptions)
 	sdb.recordAccess = true
 

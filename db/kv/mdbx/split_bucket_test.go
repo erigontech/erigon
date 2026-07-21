@@ -19,7 +19,7 @@ package mdbx
 import (
 	"bytes"
 	"encoding/binary"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -66,9 +66,7 @@ func TestSplitBucketByCount(t *testing.T) {
 		require.Greater(t, len(bounds), 2, "must split clustered keys into many ranges, not one")
 		require.Nil(t, bounds[0])
 		require.Nil(t, bounds[len(bounds)-1])
-		require.True(t, sort.SliceIsSorted(bounds[1:len(bounds)-1], func(a, b int) bool {
-			return bytes.Compare(bounds[1+a], bounds[1+b]) < 0
-		}), "interior boundaries must be strictly increasing")
+		require.True(t, slices.IsSortedFunc(bounds[1:len(bounds)-1], bytes.Compare), "interior boundaries must be strictly increasing")
 
 		per, total := n/(len(bounds)-1), 0
 		for i := 0; i+1 < len(bounds); i++ {
@@ -119,9 +117,7 @@ func TestSplitBucketByCountDupSort(t *testing.T) {
 		require.Greater(t, len(bounds), 2, "must split into many ranges")
 		require.Nil(t, bounds[0])
 		require.Nil(t, bounds[len(bounds)-1])
-		require.True(t, sort.SliceIsSorted(bounds[1:len(bounds)-1], func(a, b int) bool {
-			return bytes.Compare(bounds[1+a], bounds[1+b]) < 0
-		}), "interior boundaries must be strictly increasing")
+		require.True(t, slices.IsSortedFunc(bounds[1:len(bounds)-1], bytes.Compare), "interior boundaries must be strictly increasing")
 
 		seen := 0
 		for i := 0; i+1 < len(bounds); i++ {

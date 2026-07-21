@@ -17,10 +17,11 @@
 package test
 
 import (
+	"cmp"
 	"encoding/binary"
 	randOld "math/rand"
 	"math/rand/v2"
-	"sort"
+	"slices"
 	"testing"
 	"time"
 
@@ -282,7 +283,7 @@ func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 		updates = append(updates, upd{txNum: txNum, value: value})
 		usedTxNums[txNum] = true
 	}
-	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
+	slices.SortFunc(updates, func(a, b upd) int { return cmp.Compare(a.txNum, b.txNum) })
 
 	return updates
 }
@@ -301,7 +302,7 @@ func generateArbitraryValueUpdates(r *rndGen, totalTx, keyTxsLimit, maxSize uint
 		updates = append(updates, upd{txNum: txNum, value: value})
 		usedTxNums[txNum] = true
 	}
-	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
+	slices.SortFunc(updates, func(a, b upd) int { return cmp.Compare(a.txNum, b.txNum) })
 
 	return updates
 }
