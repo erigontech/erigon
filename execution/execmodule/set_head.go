@@ -19,7 +19,6 @@ package execmodule
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -68,11 +67,15 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	// gap between quiescence detection and acquire — re-check under
 	// the semaphore. With it held, no new payloads/FCUs can start; we
 	// only need to wait for any one in flight to drain.
+	//
+	// The caller's ctx bounds how long we're allowed to wait — the
+	// RPC handler carries its own deadline from the client. A slow
+	// forkchoice-commit under memory pressure (observed 10s under
+	// 88 GB sys) legitimately holds the semaphore for longer than a
+	// short arbitrary cap would allow; using ctx directly keeps
+	// caller control without introducing a shorter false-fail cap.
 	for {
-		acquireCtx, acquireCancel := context.WithTimeout(ctx, 5*time.Second)
-		err := e.semaphore.Acquire(acquireCtx, 1)
-		acquireCancel()
-		if err != nil {
+		if err := e.semaphore.Acquire(ctx, 1); err != nil {
 			return fmt.Errorf("execution module is busy: %w", err)
 		}
 		e.lock.RLock()
