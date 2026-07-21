@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -116,6 +117,19 @@ func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {
 	))
 }
 
+func TestPublishBlindedBlocksRejectsUnsupportedContentType(t *testing.T) {
+	h := &ApiHandler{beaconChainCfg: &clparams.MainnetBeaconConfig}
+	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", nil)
+	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
+
+	_, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+	endpointErr, ok := err.(*beaconhttp.EndpointError)
+	require.True(t, ok)
+	require.Equal(t, http.StatusUnsupportedMediaType, endpointErr.Code)
+	require.ErrorContains(t, err, "unsupported content type")
+}
+
 func TestPublishBlindedBlocksAcceptsEmptyFuluBuilderResponse(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	builderClient := builder_mock.NewMockBuilderClient(ctrl)
@@ -133,7 +147,7 @@ func TestPublishBlindedBlocksAcceptsEmptyFuluBuilderResponse(t *testing.T) {
 	body, err := json.Marshal(block)
 	require.NoError(t, err)
 	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
 
 	resp, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
