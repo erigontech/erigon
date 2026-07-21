@@ -272,8 +272,7 @@ func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.ACMatcher, outp
 	return output, patterns, uncovered, cells
 }
 
-func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, ac *patricia.AhoCorasick, inputSize, outputSize *atomic.Uint64, posMap *posCounter) {
-	defer completion.Done()
+func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, ac *patricia.AhoCorasick, inputSize, outputSize *atomic.Uint64, posMap *posCounter) {
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
 	var patterns = make([]int, 0, 256)
@@ -381,8 +380,9 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		for i := 0; i < cfg.Workers; i++ {
 			posMap := &posCounter{}
 			posMaps = append(posMaps, posMap)
-			wg.Add(1)
-			go coverWordsByPatternsWorker(trace, ch, out, &wg, ac, inputSize, outputSize, posMap)
+			wg.Go(func() {
+				coverWordsByPatternsWorker(trace, ch, out, ac, inputSize, outputSize, posMap)
+			})
 		}
 	}
 	t := time.Now()
@@ -964,9 +964,8 @@ var saisBufPool = sync.Pool{New: func() any { return new([]int32) }}
 // into the collector, using lock to mutual exclusion. At the end (when the input channel is closed),
 // it notifies the waitgroup before exiting, so that the caller known when all work is done
 // No error channels for now
-func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uint16, dictCollector *etl.Collector, cfg Cfg, completion *sync.WaitGroup, logger log.Logger) {
+func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uint16, dictCollector *etl.Collector, cfg Cfg, logger log.Logger) {
 	minPatternScore, minPatternLen, maxPatternLen := cfg.MinPatternScore, cfg.MinPatternLen, cfg.MaxPatternLen
-	defer completion.Done()
 	dictVal := make([]byte, 8)
 	dictKey := make([]byte, maxPatternLen)
 	saisBuf := saisBufPool.Get().(*[]int32)

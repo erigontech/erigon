@@ -154,9 +154,8 @@ func ListenV5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config
 		return nil, err
 	}
 	go t.tab.loop()
-	t.wg.Add(2)
-	go t.readLoop()
-	go t.dispatch()
+	t.wg.Go(t.readLoop)
+	t.wg.Go(t.dispatch)
 	go t.closeOnCtxCancel()
 	return t, nil
 }
@@ -581,8 +580,6 @@ func (t *UDPv5) callDone(c *callV5) {
 // When that happens the call is simply re-sent to complete the handshake. We allow one
 // handshake attempt per call.
 func (t *UDPv5) dispatch() {
-	defer t.wg.Done()
-
 	// Arm first read.
 	t.readNextCh <- struct{}{}
 
@@ -725,8 +722,6 @@ func (t *UDPv5) send(toID enode.ID, toAddr netip.AddrPort, packet v5wire.Packet,
 
 // readLoop runs in its own goroutine and reads packets from the network.
 func (t *UDPv5) readLoop() {
-	defer t.wg.Done()
-
 	buf := make([]byte, maxPacketSize)
 	for range t.readNextCh {
 		nbytes, from, err := t.conn.ReadFromUDPAddrPort(buf)

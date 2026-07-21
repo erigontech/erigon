@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 	"strings"
 	"time"
 
@@ -278,19 +277,12 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 		if !strings.HasPrefix(p.Name, "domain") {
 			continue
 		}
-		name := strings.TrimPrefix(p.Name, "domain/")
-		versionString := strings.Split(name, "-")[0]
-		name = strings.TrimPrefix(name, versionString)
-
-		rangeString := strings.Split(name, ".")[1]
-		rangeNums := strings.Split(rangeString, "-")
-		// convert the range to uint64
-		to, err := strconv.ParseUint(rangeNums[1], 10, 64)
-		if err != nil {
-			return 0, err
+		info, _, ok := snaptype.ParseFileName("", p.Name)
+		if !ok {
+			return 0, fmt.Errorf("invalid domain snapshot filename: %s", p.Name)
 		}
-		if to > maxTo {
-			maxTo = to
+		if info.To > maxTo {
+			maxTo = info.To
 		}
 	}
 	return maxTo, nil
