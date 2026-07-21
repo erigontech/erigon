@@ -1150,7 +1150,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		entry := engineapi.NewTestingRPCEntry(s.engineBackendRPC, s.logger, s.chainDB)
 		testingEntry = &entry
 	}
-	mcpNamespaces := []string{"eth", "erigon", "ots", "txpool"}
+	mcpNamespaces := []string{"eth", "erigon", "ots", "txpool", "net", "admin"}
 	apiCfg := httpRpcCfg
 	if config.MCPAddress != "" {
 		apiCfg.API = slices.Clone(httpRpcCfg.API)

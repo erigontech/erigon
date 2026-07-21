@@ -228,7 +228,7 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 		Enabled:             true,
 		StateCache:          kvcache.DefaultCoherentConfig,
 		RpcBatchConcurrency: 2,
-		API:                 []string{"eth", "erigon", "ots", "txpool"}, // APIs needed by MCP tools
+		API:                 []string{"eth", "erigon", "ots", "txpool", "net", "admin"}, // APIs needed by MCP tools
 
 		DataDir:           dataDir,
 		Dirs:              dirs,

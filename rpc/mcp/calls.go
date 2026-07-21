@@ -622,6 +622,29 @@ func rpcToolCalls() []toolCall {
 			params: []param{{name: "address", desc: "Sender address", kind: pString, required: true}},
 		},
 
+		// ===== NET / ADMIN TOOLS =====
+		// Read-only P2P inspection only; mutating admin methods (addPeer,
+		// removePeer, trusted-peer management) are deliberately not exposed.
+		{
+			name: "net_version", desc: "Get network ID",
+			format: fmtStringResult("Network ID: "),
+		},
+		{
+			name: "net_listening", desc: "Check if the node is listening for P2P connections",
+			format: fmtRawResult("Listening: "),
+		},
+		{
+			name: "net_peerCount", desc: "Get number of connected P2P peers",
+			format: fmtQuantity("Peers: ", ""),
+		},
+		{
+			name: "admin_nodeInfo", desc: "Get detailed P2P node info (enode, ports, protocols)",
+		},
+		{
+			name: "admin_peers", desc: "Get details of all connected P2P peers",
+			format: fmtArrayOrMsg("No peers connected"),
+		},
+
 		// ===== OTTERSCAN TOOLS =====
 		{
 			name: "ots_getApiLevel", desc: "Get Otterscan API level",

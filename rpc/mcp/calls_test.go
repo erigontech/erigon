@@ -230,6 +230,9 @@ func TestToolResultFormatting(t *testing.T) {
 		{tool: "ots_getTransactionBySenderAndNonce", args: map[string]any{"address": "0xabc", "nonce": 1}, result: `null`, want: "Transaction not found"},
 		{tool: "ots_getTransactionBySenderAndNonce", args: map[string]any{"address": "0xabc", "nonce": 1}, result: `"0xdead"`, want: "Transaction hash: 0xdead"},
 		{tool: "eth_syncing", result: `{"currentBlock":"0x10"}`, want: `"currentBlock": "0x10"`},
+		{tool: "net_peerCount", result: `"0x19"`, want: "Peers: 25"},
+		{tool: "net_version", result: `"10200"`, want: "Network ID: 10200"},
+		{tool: "admin_peers", result: `[]`, want: "No peers connected"},
 	}
 
 	for _, tt := range tests {
@@ -286,4 +289,11 @@ func TestToolCallTable(t *testing.T) {
 	require.Contains(t, seen, "txpool_status")
 	require.Contains(t, seen, "txpool_content")
 	require.Contains(t, seen, "txpool_contentFrom")
+	require.Contains(t, seen, "net_version")
+	require.Contains(t, seen, "net_listening")
+	require.Contains(t, seen, "net_peerCount")
+	require.Contains(t, seen, "admin_nodeInfo")
+	require.Contains(t, seen, "admin_peers")
+	require.NotContains(t, seen, "admin_addPeer", "mutating admin methods must not be exposed")
+	require.NotContains(t, seen, "admin_removePeer", "mutating admin methods must not be exposed")
 }
