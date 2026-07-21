@@ -839,7 +839,7 @@ func (s *ValidatorContract) signalEpochEnd(firstInEpoch bool, header *types.Head
 }
 
 func proveInitial(s *ValidatorSafeContract, contractAddr common.Address, header *types.Header, caller rules.SystemCall) ([]byte, error) {
-	return rlp.EncodeToBytes(&FirstValidatorSetProof{Header: header, ContractAddress: s.contractAddress})
+	return rlp.EncodeToBytes(&FirstValidatorSetProof{Header: header, ContractAddress: contractAddr})
 	//list, err := s.getList(caller)
 	//fmt.Printf("aaa: %x,%t\n", list, err)
 
