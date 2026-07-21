@@ -1472,13 +1472,16 @@ func (a *ApiHandler) PostEthV2BlindedBlocks(w http.ResponseWriter, r *http.Reque
 }
 
 func validateBlindedBlockRequest(block *cltypes.SignedBlindedBeaconBlock, version clparams.StateVersion) error {
+	if version < clparams.BellatrixVersion {
+		return errors.New("blinded blocks are unsupported before Bellatrix")
+	}
 	if block == nil || block.Block == nil {
 		return errors.New("missing block")
 	}
 	if block.Block.Body == nil {
 		return errors.New("missing block body")
 	}
-	if version.AfterOrEqual(clparams.BellatrixVersion) && block.Block.Body.ExecutionPayload == nil {
+	if block.Block.Body.ExecutionPayload == nil {
 		return errors.New("missing execution payload header")
 	}
 	return nil
