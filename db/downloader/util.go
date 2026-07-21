@@ -176,7 +176,6 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *A
 
 	fPath := filepath.Join(root, fName)
 
-	// TODO: Consider using the auto-piece sizing?
 	info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize, Name: fName}
 	if err := info.BuildFromFilePath(fPath); err != nil {
 		return false, fmt.Errorf("createTorrentFileFromSegment: %w", err)
