@@ -8,10 +8,15 @@ name: Docs Version Bump
 #
 # It snapshots the current docs as an archived version, bumps the "current"
 # version label, enforces the 3-archived-version cap, regenerates the llms.txt
-# artifacts, verifies the build, and opens a PR. When the docs use the
-# versions.json-driven generic version injection (see src/remark/version-replace.js),
-# no per-version config edits are needed; otherwise the new archived version's
-# {ERIGON_VERSION} resolver must be added to docusaurus.config.ts manually.
+# artifacts, verifies the build, and opens a PR.
+#
+# NOTE on {ERIGON_VERSION} injection: the remark plugin
+# (src/remark/version-replace.js) currently special-cases specific archived
+# versions by path (e.g. version-v3.3), rather than resolving generically from
+# versions.json. Until that plugin is made generic, adding a new archived
+# version whose pages contain {ERIGON_VERSION} placeholders may require a
+# matching case in version-replace.js (and/or docusaurus.config.ts) by hand —
+# review the diff this workflow produces before merging.
 #
 # NOTE: this does NOT move the Pages deploy trigger. If the docs deploy still
 # lives on a per-release branch (docs-deploy.yml), update that branch separately.
@@ -40,6 +45,10 @@ jobs:
         working-directory: docs/site
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Don't persist the checkout token in .git/config (artipacked); the
+          # PR-opening step authenticates its push explicitly via GH_TOKEN.
+          persist-credentials: false
 
       - name: Validate inputs
         working-directory: ${{ github.workspace }}
@@ -56,6 +65,9 @@ jobs:
           [ "$a" != "$n" ] || { echo "::error::archive_version and new_label must differ"; exit 1; }
           if grep -q "\"$a\"" docs/site/versions.json; then
             echo "::error::$a is already an archived version"; exit 1
+          fi
+          if grep -q "\"$n\"" docs/site/versions.json; then
+            echo "::error::new_label '$n' collides with an existing archived version — pick an unused label"; exit 1
           fi
 
       - uses: actions/setup-node@v6
@@ -111,15 +123,20 @@ jobs:
           ARCHIVE_VERSION: ${{ inputs.archive_version }}
           NEW_LABEL: ${{ inputs.new_label }}
           BASE_REF: ${{ github.ref_name }}
+          RUN_ID: ${{ github.run_id }}
         working-directory: ${{ github.workspace }}
         run: |
-          branch="docs/version-bump-$NEW_LABEL"
+          # Suffix the run id so re-runs (or a partially-failed prior run) don't
+          # collide with an existing remote branch at git push.
+          branch="docs/version-bump-$NEW_LABEL-$RUN_ID"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
           git add -A
           git commit -m "docs(site): archive $ARCHIVE_VERSION, bump current to $NEW_LABEL"
-          git push -u origin "$branch"
+          # Checkout runs with persist-credentials: false, so authenticate this
+          # one push explicitly with GH_TOKEN instead of a persisted credential.
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$branch"
           gh pr create \
             --base "$BASE_REF" \
             --head "$branch" \
