@@ -108,6 +108,18 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	return cfg
 }
 
+// mustReopenUnderlyingFilesTx refreshes the tx's pinned block-files/aggregator
+// view so files opened earlier in this stage are visible to reads made through
+// this tx. Panics rather than silently skipping: a tx that can't reopen would
+// reintroduce stale-view bugs (e.g. minimal-mode history pruning downloading all files).
+func mustReopenUnderlyingFilesTx(tx kv.RwTx) {
+	reopener, ok := tx.(kv.CanReopenUnderlyingFilesTx)
+	if !ok {
+		panic(fmt.Sprintf("snapshots stage requires a tx that can ForceReopenUnderlyingFilesTx, got %T", tx))
+	}
+	reopener.ForceReopenUnderlyingFilesTx()
+}
+
 func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) (err error) {
 	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, logger); err != nil {
 		return err
@@ -216,6 +228,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
+	mustReopenUnderlyingFilesTx(tx)
+
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
@@ -285,9 +299,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	if temporal, ok := tx.(*temporal.RwTx); ok {
-		temporal.ForceReopenUnderlyingFilesTx() // otherwise next stages will not see just-indexed-files
-	}
+	mustReopenUnderlyingFilesTx(tx) // otherwise next stages will not see just-indexed-files
 
 	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
 	if cfg.notifier.Events != nil {
@@ -306,9 +318,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return fmt.Errorf("FillDBFromSnapshots: %w", err)
 	}
 
-	if temporal, ok := tx.(*temporal.RwTx); ok {
-		temporal.ForceReopenUnderlyingFilesTx() // otherwise next stages will not see just-indexed-files
-	}
+	mustReopenUnderlyingFilesTx(tx) // otherwise next stages will not see just-indexed-files
 
 	// In E3, the post-execution state is in domain files. After FillDBFromSnapshots,
 	// snapshot domain state may be ahead of the Execution stage progress (which is 0
