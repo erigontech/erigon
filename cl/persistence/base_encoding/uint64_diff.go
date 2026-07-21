@@ -71,14 +71,7 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, oldVal, newVal []byt
 	repeatedPattern := *repeatedPatternPtr
 	repeatedPattern = repeatedPattern[:0]
 
-<<<<<<< HEAD
 	delta := func(i int) uint64 {
-		if i+8 > len(old) {
-			return binary.LittleEndian.Uint64(new[i:])
-		}
-		return binary.LittleEndian.Uint64(new[i:i+8]) - binary.LittleEndian.Uint64(old[i:i+8])
-=======
-	for i := 0; i < len(newVal); i += 8 {
 		if i+8 > len(oldVal) {
 			return binary.LittleEndian.Uint64(newVal[i:])
 		}
