@@ -211,10 +211,14 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// Erigon can start on datadir with broken files `transactions.seg` files and Downloader will
 	// fix them, but only if Erigon call `.Add()` for broken files. But `headerchain` feature
 	// calling `.Add()` only for header/body files (not for `transactions.seg`) and `.OpenFolder()` will fail
+	log.Info(fmt.Sprintf("[%s] [dbg-snapfilter] OpenSegments([Headers,Bodies]) before", s.LogPrefix()),
+		"segmentsMax", cfg.blockReader.Snapshots().SegmentsMax())
 	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{snaptype2.Headers, snaptype2.Bodies}, false); err != nil {
 		err = fmt.Errorf("error opening segments after syncing header chain: %w", err)
 		return err
 	}
+	log.Info(fmt.Sprintf("[%s] [dbg-snapfilter] OpenSegments([Headers,Bodies]) after", s.LogPrefix()),
+		"segmentsMax", cfg.blockReader.Snapshots().SegmentsMax())
 
 	// OpenSegments just added bodies to the block-files snapshot, but this tx
 	// pinned its block-files view at begin-time. Refresh it so the state-phase
