@@ -182,6 +182,36 @@ func TestToolArgMapping(t *testing.T) {
 			wantArgs: []any{"0x1"},
 		},
 		{
+			tool:     "debug_traceTransaction",
+			args:     map[string]any{"txHash": "0x1", "tracer": " "},
+			result:   `{}`,
+			wantArgs: []any{"0x1"},
+		},
+		{
+			tool:     "debug_traceBlockByNumber",
+			args:     map[string]any{"blockNumber": "22000000"},
+			result:   `{}`,
+			wantArgs: []any{"0x14fb180", map[string]any{"tracer": "callTracer"}},
+		},
+		{
+			tool:     "debug_getModifiedAccountsByNumber",
+			args:     map[string]any{"startBlock": "100", "endBlock": "200"},
+			result:   `[]`,
+			wantArgs: []any{"0x64", "0xc8"},
+		},
+		{
+			tool:     "trace_filter",
+			args:     map[string]any{"fromBlock": "100", "toAddress": "0xabc"},
+			result:   `[]`,
+			wantArgs: []any{map[string]any{"fromBlock": "0x64", "toAddress": []string{"0xabc"}, "count": 100}},
+		},
+		{
+			tool:     "debug_traceCall",
+			args:     map[string]any{"to": "0xabc", "blockNumber": "22000000"},
+			result:   `{}`,
+			wantArgs: []any{map[string]any{"to": "0xabc"}, "0x14fb180", map[string]any{"tracer": "callTracer"}},
+		},
+		{
 			tool:     "eth_call",
 			args:     map[string]any{"to": "0xabc", "data": "0x01", "from": "0xdef"},
 			result:   `"0x"`,

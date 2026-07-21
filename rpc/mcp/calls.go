@@ -228,7 +228,7 @@ func buildTxArgs(withBlock bool) func(req mcp.CallToolRequest) ([]any, error) {
 // logs are far too large for an MCP client's context; pass tracer="" to get
 // the struct logger anyway.
 func tracerConfig(req mcp.CallToolRequest) (map[string]any, bool) {
-	tracer := req.GetString("tracer", "callTracer")
+	tracer := strings.TrimSpace(req.GetString("tracer", "callTracer"))
 	if tracer == "" {
 		return nil, false
 	}
@@ -239,7 +239,11 @@ func buildTraceArgs(prefix ...param) func(req mcp.CallToolRequest) ([]any, error
 	return func(req mcp.CallToolRequest) ([]any, error) {
 		args := make([]any, 0, len(prefix)+1)
 		for _, p := range prefix {
-			args = append(args, req.GetString(p.name, p.def))
+			v := req.GetString(p.name, p.def)
+			if p.kind == pBlockNum {
+				v = normalizeBlockRef(v)
+			}
+			args = append(args, v)
 		}
 		if cfg, ok := tracerConfig(req); ok {
 			args = append(args, cfg)
@@ -249,13 +253,10 @@ func buildTraceArgs(prefix ...param) func(req mcp.CallToolRequest) ([]any, error
 }
 
 func buildTraceCall(req mcp.CallToolRequest) ([]any, error) {
-	callObj := map[string]any{}
-	for _, k := range []string{"to", "data", "from", "value", "gas"} {
-		if v := req.GetString(k, ""); v != "" {
-			callObj[k] = v
-		}
+	args, err := buildTxArgs(true)(req)
+	if err != nil {
+		return nil, err
 	}
-	args := []any{callObj, req.GetString("blockNumber", "latest")}
 	if cfg, ok := tracerConfig(req); ok {
 		args = append(args, cfg)
 	}
@@ -265,10 +266,10 @@ func buildTraceCall(req mcp.CallToolRequest) ([]any, error) {
 func buildTraceFilter(req mcp.CallToolRequest) ([]any, error) {
 	filter := map[string]any{}
 	if v := req.GetString("fromBlock", ""); v != "" {
-		filter["fromBlock"] = v
+		filter["fromBlock"] = normalizeBlockRef(v)
 	}
 	if v := req.GetString("toBlock", ""); v != "" {
-		filter["toBlock"] = v
+		filter["toBlock"] = normalizeBlockRef(v)
 	}
 	for _, k := range []string{"fromAddress", "toAddress"} {
 		v := strings.TrimSpace(req.GetString(k, ""))
@@ -706,7 +707,7 @@ func rpcToolCalls() []toolCall {
 				blockNumberParam,
 				{name: "tracer", desc: "Tracer name, e.g. callTracer, prestateTracer (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
 			},
-			build: buildTraceArgs(param{name: "blockNumber", def: "latest"}),
+			build: buildTraceArgs(param{name: "blockNumber", def: "latest", kind: pBlockNum}),
 		},
 		{
 			name: "debug_traceCall", desc: "Execute a call and trace it with a tracer (default: callTracer)",
@@ -724,8 +725,8 @@ func rpcToolCalls() []toolCall {
 		{
 			name: "debug_getModifiedAccountsByNumber", desc: "List accounts modified in a block range",
 			params: []param{
-				{name: "startBlock", desc: "Start block number", kind: pString, required: true},
-				{name: "endBlock", desc: "End block number (default: start block)", kind: pString, omit: true},
+				{name: "startBlock", desc: "Start block number", kind: pBlockNum, required: true},
+				{name: "endBlock", desc: "End block number (default: start block)", kind: pBlockNum, omit: true},
 			},
 		},
 		{
