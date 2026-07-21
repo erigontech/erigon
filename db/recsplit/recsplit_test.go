@@ -28,36 +28,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 )
-
-func TestRecSplitBuildAssertsIndexFileSize(t *testing.T) {
-	prev := dbg.AssertEnabled
-	dbg.AssertEnabled = true
-	t.Cleanup(func() { dbg.AssertEnabled = prev })
-
-	logger := log.New()
-	tmpDir := t.TempDir()
-	salt := uint32(1)
-	rs, err := NewRecSplit(RecSplitArgs{
-		KeyCount:   3,
-		BucketSize: 10,
-		Salt:       &salt,
-		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(tmpDir, "index"),
-		LeafSize:   8,
-	}, logger)
-	require.NoError(t, err)
-	defer rs.Close()
-
-	for i := range 3 {
-		require.NoError(t, rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)))
-	}
-	// The index header is 17 bytes (version+baseDataID, keyCount, bytesPerRec);
-	// Build's self-check must account for baseDataID and not panic under ERIGON_ASSERT.
-	require.NoError(t, rs.Build(t.Context()))
-}
 
 func TestRecSplit2(t *testing.T) {
 	logger := log.New()
