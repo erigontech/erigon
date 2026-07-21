@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
@@ -41,13 +42,6 @@ var compressorPool = sync.Pool{
 func putComp(v *zstd.Encoder) {
 	v.Reset(nil)
 	compressorPool.Put(v)
-}
-
-var plainUint64BufferPool = sync.Pool{
-	New: func() any {
-		b := make([]uint64, 1028)
-		return &b
-	},
 }
 
 var repeatedPatternBufferPool = sync.Pool{
@@ -71,125 +65,66 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) err
 	defer putComp(compressor)
 	compressor.Reset(w)
 
-	// Get one plain buffer from the pool
-	plainBufferPtr := plainUint64BufferPool.Get().(*[]uint64)
-	defer plainUint64BufferPool.Put(plainBufferPtr)
-	plainBuffer := *plainBufferPtr
-	plainBuffer = plainBuffer[:0]
-
 	// Get one repeated pattern buffer from the pool
 	repeatedPatternPtr := repeatedPatternBufferPool.Get().(*[]repeatedPatternEntry)
 	defer repeatedPatternBufferPool.Put(repeatedPatternPtr)
 	repeatedPattern := *repeatedPatternPtr
 	repeatedPattern = repeatedPattern[:0]
 
-	for i := 0; i < len(new); i += 8 {
+	delta := func(i int) uint64 {
 		if i+8 > len(old) {
-			// Append the remaining new bytes that were not in the old slice
-			plainBuffer = append(plainBuffer, binary.LittleEndian.Uint64(new[i:]))
-			continue
+			return binary.LittleEndian.Uint64(new[i:])
 		}
-		plainBuffer = append(plainBuffer, binary.LittleEndian.Uint64(new[i:i+8])-binary.LittleEndian.Uint64(old[i:i+8]))
+		return binary.LittleEndian.Uint64(new[i:i+8]) - binary.LittleEndian.Uint64(old[i:i+8])
 	}
-	// Find the repeated pattern
-	prevVal := plainBuffer[0]
+	// Run-length encode the deltas in a single pass
+	prevVal := delta(0)
 	count := uint32(1)
-	for i := 1; i < len(plainBuffer); i++ {
-		if plainBuffer[i] == prevVal {
+	for i := 8; i < len(new); i += 8 {
+		if d := delta(i); d == prevVal {
 			count++
-			continue
+		} else {
+			repeatedPattern = append(repeatedPattern, repeatedPatternEntry{prevVal, count})
+			prevVal = d
+			count = 1
 		}
-		repeatedPattern = append(repeatedPattern, repeatedPatternEntry{prevVal, count})
-		prevVal = plainBuffer[i]
-		count = 1
 	}
 	repeatedPattern = append(repeatedPattern, repeatedPatternEntry{prevVal, count})
-	if err := binary.Write(w, binary.BigEndian, uint32(len(repeatedPattern))); err != nil {
+	var temp [12]byte
+	binary.BigEndian.PutUint32(temp[:4], uint32(len(repeatedPattern)))
+	if n, err := w.Write(temp[:4]); err != nil {
 		return err
+	} else if n != 4 {
+		return io.ErrShortWrite
 	}
-	temp := make([]byte, 8)
 
 	// Write the repeated pattern
 	for _, entry := range repeatedPattern {
 		binary.BigEndian.PutUint32(temp[:4], entry.count)
-		if _, err := compressor.Write(temp[:4]); err != nil {
-			return err
-		}
-		binary.BigEndian.PutUint64(temp, entry.val)
-		if _, err := compressor.Write(temp); err != nil {
+		binary.BigEndian.PutUint64(temp[4:], entry.val)
+		if _, err := compressor.Write(temp[:]); err != nil {
 			return err
 		}
 	}
 	*repeatedPatternPtr = repeatedPattern[:0]
-	*plainBufferPtr = plainBuffer[:0]
 
 	return compressor.Close()
 }
 
-func ComputeCompressedSerializedEffectiveBalancesDiff(w io.Writer, old, new []byte) error {
-	if len(old) > len(new) {
-		return errors.New("old list is longer than new list")
+const (
+	validatorSSZSize       = 121
+	effectiveBalanceOffset = 80
+)
+
+// AppendEffectiveBalances appends each validator's 8-byte effective balance, tightly packed, to dst.
+func AppendEffectiveBalances(dst, validatorSetSSZ []byte) []byte {
+	validators := len(validatorSetSSZ) / validatorSSZSize
+	dst = slices.Grow(dst, validators*8)
+	for i := range validators {
+		off := i*validatorSSZSize + effectiveBalanceOffset
+		dst = append(dst, validatorSetSSZ[off:off+8]...)
 	}
-
-	compressor := compressorPool.Get().(*zstd.Encoder)
-	defer putComp(compressor)
-	compressor.Reset(w)
-
-	// Get one plain buffer from the pool
-	plainBufferPtr := plainUint64BufferPool.Get().(*[]uint64)
-	defer plainUint64BufferPool.Put(plainBufferPtr)
-	plainBuffer := *plainBufferPtr
-	plainBuffer = plainBuffer[:0]
-
-	// Get one repeated pattern buffer from the pool
-	repeatedPatternPtr := repeatedPatternBufferPool.Get().(*[]repeatedPatternEntry)
-	defer repeatedPatternBufferPool.Put(repeatedPatternPtr)
-	repeatedPattern := *repeatedPatternPtr
-	repeatedPattern = repeatedPattern[:0]
-
-	validatorSize := 121
-	for i := 0; i < len(new); i += validatorSize {
-		// 80:88
-		if i+88 > len(old) {
-			// Append the remaining new bytes that were not in the old slice
-			plainBuffer = append(plainBuffer, binary.LittleEndian.Uint64(new[i+80:i+88]))
-			continue
-		}
-		plainBuffer = append(plainBuffer, binary.LittleEndian.Uint64(new[i+80:i+88])-binary.LittleEndian.Uint64(old[i+80:i+88]))
-	}
-	// Find the repeated pattern
-	prevVal := plainBuffer[0]
-	count := uint32(1)
-	for i := 1; i < len(plainBuffer); i++ {
-		if plainBuffer[i] == prevVal {
-			count++
-			continue
-		}
-		repeatedPattern = append(repeatedPattern, repeatedPatternEntry{prevVal, count})
-		prevVal = plainBuffer[i]
-		count = 1
-	}
-	repeatedPattern = append(repeatedPattern, repeatedPatternEntry{prevVal, count})
-	if err := binary.Write(w, binary.BigEndian, uint32(len(repeatedPattern))); err != nil {
-		return err
-	}
-	temp := make([]byte, 8)
-
-	// Write the repeated pattern
-	for _, entry := range repeatedPattern {
-		binary.BigEndian.PutUint32(temp[:4], entry.count)
-		if _, err := compressor.Write(temp[:4]); err != nil {
-			return err
-		}
-		binary.BigEndian.PutUint64(temp, entry.val)
-		if _, err := compressor.Write(temp); err != nil {
-			return err
-		}
-	}
-	*repeatedPatternPtr = repeatedPattern[:0]
-	*plainBufferPtr = plainBuffer[:0]
-
-	return compressor.Close()
+	return dst
 }
 
 func ApplyCompressedSerializedUint64ListDiff(in, out []byte, diff []byte, reverse bool) ([]byte, error) {
@@ -253,7 +188,7 @@ func ComputeCompressedSerializedValidatorSetListDiff(w io.Writer, old, new []byt
 		return errors.New("old list is longer than new list")
 	}
 
-	validatorLength := 121
+	validatorLength := validatorSSZSize
 	if len(old)%validatorLength != 0 {
 		return fmt.Errorf("old list is not a multiple of validator length got %d", len(old))
 	}
@@ -290,7 +225,7 @@ func ApplyCompressedSerializedValidatorListDiff(in, out []byte, diff []byte, rev
 
 	reader := bytes.NewReader(diff)
 
-	currValidator := make([]byte, 121)
+	currValidator := make([]byte, validatorSSZSize)
 
 	for {
 		var index uint32
@@ -310,11 +245,11 @@ func ApplyCompressedSerializedValidatorListDiff(in, out []byte, diff []byte, rev
 		if n == 0 {
 			break
 		}
-		if n != 121 {
-			return nil, fmt.Errorf("read %d bytes, expected 121", n)
+		if n != validatorSSZSize {
+			return nil, fmt.Errorf("read %d bytes, expected %d", n, validatorSSZSize)
 		}
 		// overwrite the validator
-		copy(out[index*121:], currValidator)
+		copy(out[index*validatorSSZSize:], currValidator)
 	}
 	for {
 		n, err := io.ReadFull(reader, currValidator)
@@ -324,8 +259,8 @@ func ApplyCompressedSerializedValidatorListDiff(in, out []byte, diff []byte, rev
 		if n == 0 {
 			break
 		}
-		if n != 121 {
-			return nil, fmt.Errorf("read %d bytes, expected 121", n)
+		if n != validatorSSZSize {
+			return nil, fmt.Errorf("read %d bytes, expected %d", n, validatorSSZSize)
 		}
 		out = append(out, currValidator...)
 	}

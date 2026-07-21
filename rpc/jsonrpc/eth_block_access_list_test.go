@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 // TestGetBlockAccessListRegeneratesPrunedBAL verifies that eth_getBlockAccessList
@@ -75,7 +76,7 @@ func TestGetBlockAccessListRegeneratesPrunedBAL(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, &EthApiConfig{}, log.New())
+	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, &rpccfg.EthApiConfig{}, log.New())
 	for i, block := range chainPack.Blocks {
 		blockNum := rpc.BlockNumber(block.NumberU64())
 		got, err := api.GetBlockAccessList(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
