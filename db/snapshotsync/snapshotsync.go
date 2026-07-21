@@ -121,7 +121,20 @@ func buildBlackListForPruning(
 	receiptsEnabled := minReceiptsStep > 0
 	applyChainHistoryExpiry := pruneMode.Blocks == prune.KeepPostMergeBlocksPruneMode && cc != nil && cc.MergeHeight != nil
 
+	log.Debug("[dbg-snapfilter] buildBlackListForPruning inputs",
+		"historyEnabled", historyEnabled,
+		"blocksEnabled", blocksEnabled,
+		"commitmentHistoryEnabled", commitmentHistoryEnabled,
+		"receiptsEnabled", receiptsEnabled,
+		"applyChainHistoryExpiry", applyChainHistoryExpiry,
+		"historyStepPrune", historyStepPrune,
+		"minCommitmentHistoryStep", minCommitmentHistoryStep,
+		"minReceiptsStep", minReceiptsStep,
+		"blockPrune", blockPrune,
+		"minBlockToDownload", minBlockToDownload)
+
 	if !historyEnabled && !blocksEnabled && !commitmentHistoryEnabled && !receiptsEnabled && !applyChainHistoryExpiry {
+		log.Debug("[dbg-snapfilter] no filtering applies; keeping all prunable files")
 		return blackList, nil
 	}
 
@@ -154,6 +167,12 @@ func buildBlackListForPruning(
 				blackList[name] = struct{}{}
 				continue
 			}
+			log.Debug("[dbg-snapfilter] state-history file",
+				"name", name,
+				"to", res.To,
+				"historyStepPrune", historyStepPrune,
+				"historyEnabled", historyEnabled,
+				"willBlacklist", historyEnabled && historyStepPrune >= kv.Step(res.To))
 			if !historyEnabled {
 				continue
 			}
@@ -492,6 +511,17 @@ func SyncSnapshots(
 			if err != nil {
 				return err
 			}
+
+			log.Info(fmt.Sprintf("[%s] [dbg-snapfilter] prune-filter resolved", logPrefix),
+				"task", task,
+				"pruneMode", prune.String(),
+				"frozenBlocks", frozenBlocks,
+				"maxStateStep", maxStateStep,
+				"historyPruneToBlock", historyPrune,
+				"minHistoryStep", minHistoryStep,
+				"blockPrune", blockPrune,
+				"minBlockToDownload", minBlockToDownload,
+				"blacklisted", len(blackListForPruning))
 		}
 
 		// If we want to get all receipts, we also need to unblack list log indexes (otherwise eth_getLogs won't work).
@@ -558,6 +588,27 @@ func SyncSnapshots(
 		}
 
 		// Only add the preverified hashes until the initial sync completed for the first time.
+
+		var dbgReqHistory, dbgReqDomain, dbgReqBlocks int
+		for _, r := range downloadRequest {
+			switch {
+			case isStateHistory(r.Path):
+				dbgReqHistory++
+			case strings.HasPrefix(r.Path, "domain"):
+				dbgReqDomain++
+			default:
+				dbgReqBlocks++
+			}
+		}
+		log.Info(fmt.Sprintf("[%s] [dbg-snapfilter] download request built", logPrefix),
+			"task", task,
+			"headerchain", headerchain,
+			"totalPreverified", len(preverifiedBlockSnapshots.Items),
+			"totalRequested", len(downloadRequest),
+			"reqStateHistory", dbgReqHistory,
+			"reqDomain", dbgReqDomain,
+			"reqBlocks", dbgReqBlocks,
+			"blacklisted", len(blackListForPruning))
 
 		log.Info(fmt.Sprintf("[%s] Requesting %s from downloader", logPrefix, task))
 		for {
