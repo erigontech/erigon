@@ -612,13 +612,13 @@ func rpcToolCalls() []toolCall {
 
 		// ===== TXPOOL TOOLS =====
 		{
-			name: "txpool_status", desc: "Get transaction pool status (pending/basefee/queued counts)",
+			name: "txpool_status", desc: "Get transaction pool status (pending/baseFee/queued counts)",
 		},
 		{
 			name: "txpool_content", desc: "Get full transaction pool content grouped by sender",
 		},
 		{
-			name: "txpool_contentFrom", desc: "Get pending/queued pool transactions of one sender",
+			name: "txpool_contentFrom", desc: "Get pending/baseFee/queued pool transactions of one sender",
 			params: []param{{name: "address", desc: "Sender address", kind: pString, required: true}},
 		},
 
