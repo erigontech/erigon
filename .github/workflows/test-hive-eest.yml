@@ -126,17 +126,14 @@ jobs:
           path: erigon-full
           persist-credentials: false
 
-      - name: Read pinned Hive EEST checkout
+      - name: Read pinned Hive ref
         id: hive-version
-        run: |
-          versions=erigon-full/.github/workflows/hive-versions.json
-          echo "repository=$(jq -r .hive_eest_repository "$versions")" >> "$GITHUB_OUTPUT"
-          echo "ref=$(jq -r .hive_eest_ref "$versions")" >> "$GITHUB_OUTPUT"
+        run: echo "ref=$(jq -r .hive_ref erigon-full/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout Hive
         uses: actions/checkout@v7
         with:
-          repository: ${{ steps.hive-version.outputs.repository }}
+          repository: ethereum/hive
           ref: ${{ steps.hive-version.outputs.ref }}
           path: hive
           persist-credentials: false
