@@ -232,6 +232,7 @@ func TestToolResultFormatting(t *testing.T) {
 		{tool: "eth_syncing", result: `{"currentBlock":"0x10"}`, want: `"currentBlock": "0x10"`},
 		{tool: "net_peerCount", result: `"0x19"`, want: "Peers: 25"},
 		{tool: "net_version", result: `"10200"`, want: "Network ID: 10200"},
+		{tool: "net_listening", result: `true`, want: "Listening: true"},
 		{tool: "admin_peers", result: `[]`, want: "No peers connected"},
 	}
 
@@ -294,6 +295,7 @@ func TestToolCallTable(t *testing.T) {
 	require.Contains(t, seen, "net_peerCount")
 	require.Contains(t, seen, "admin_nodeInfo")
 	require.Contains(t, seen, "admin_peers")
-	require.NotContains(t, seen, "admin_addPeer", "mutating admin methods must not be exposed")
-	require.NotContains(t, seen, "admin_removePeer", "mutating admin methods must not be exposed")
+	for _, mutating := range []string{"admin_addPeer", "admin_removePeer", "admin_addTrustedPeer", "admin_removeTrustedPeer"} {
+		require.NotContains(t, seen, mutating, "mutating admin methods must not be exposed")
+	}
 }
