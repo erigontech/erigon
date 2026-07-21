@@ -110,6 +110,17 @@ type TxPool struct {
 	_stateCache            kvcache.Cache
 	poolDB                 kv.RwDB
 	lock                   *sync.Mutex
+	// unwindGuard is held read-shared for the lifetime of every
+	// temporal RO tx the pool opens, and write-exclusively by an
+	// external unwind. Provider.Unwind's post-commit FinalizeUnwind
+	// deletes snapshot files and nulls their decompressor pointers;
+	// any tx opened before that swap that still references the file
+	// panics with a nil-decompressor deref when the pool follows a
+	// domain-file link (senders.go:220 → cacheView.Get → GetAsOf →
+	// domain.dataReader). Pause() takes the write lock, waits for
+	// in-flight readers to release, and returns a Resume closure —
+	// SetHead mode-B calls it around Provider.Unwind + FinalizeUnwind.
+	unwindGuard            sync.RWMutex
 	recentlyConnectedPeers *recentlyConnectedPeers // all txns will be propagated to this peers eventually, and clear list
 	senders                *sendersBatch
 	// batch processing of remote transactions
@@ -284,6 +295,8 @@ func (p *TxPool) start(ctx context.Context) error {
 	}
 
 	return p.poolDB.View(ctx, func(tx kv.Tx) error {
+		p.unwindGuard.RLock()
+		defer p.unwindGuard.RUnlock()
 		coreDb, _ := p.chainDB()
 		coreTx, err := coreDb.BeginTemporalRo(ctx)
 		if err != nil {
@@ -307,6 +320,8 @@ func (p *TxPool) start(ctx context.Context) error {
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
 	defer newBlockTimer.ObserveDuration(time.Now())
 
+	p.unwindGuard.RLock()
+	defer p.unwindGuard.RUnlock()
 	coreDB, cache := p.chainDB()
 	cache.OnNewBlock(stateChanges)
 	coreTx, err := coreDB.BeginTemporalRo(ctx)
@@ -474,6 +489,8 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	}
 
 	defer processBatchTxnsTimer.ObserveDuration(time.Now())
+	p.unwindGuard.RLock()
+	defer p.unwindGuard.RUnlock()
 	coreDB, cache := p.chainDB()
 	coreTx, err := coreDB.BeginTemporalRo(ctx)
 	if err != nil {
@@ -700,6 +717,16 @@ func (p *TxPool) AddNewGoodPeer(peerID PeerID) {
 
 func (p *TxPool) Started() bool {
 	return p.started.Load()
+}
+
+// Pause acquires unwindGuard write-exclusively and returns a resume
+// closure. Callers (Provider.Unwind's owner) hold the returned closure
+// via defer until the file-swap window closes. While paused, every
+// entry point that opens a temporal RO tx blocks in its RLock() until
+// resume is called.
+func (p *TxPool) Pause() (resume func()) {
+	p.unwindGuard.Lock()
+	return p.unwindGuard.Unlock
 }
 
 // best returns the highest-priority pending transactions that fit within the given gas and RLP space budgets.
@@ -1422,6 +1449,8 @@ func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns TxnSlots, dis
 }
 
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
+	p.unwindGuard.RLock()
+	defer p.unwindGuard.RUnlock()
 	coreDb, cache := p.chainDB()
 	coreTx, err := coreDb.BeginTemporalRo(ctx)
 	if err != nil {

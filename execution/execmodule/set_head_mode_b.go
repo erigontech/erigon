@@ -64,6 +64,11 @@ func (e *ExecModule) setHeadModeB(ctx context.Context, tx kv.TemporalRwTx, targe
 	e.adminUnwindInProgress.Store(true)
 	defer e.adminUnwindInProgress.Store(false)
 
+	if e.txpoolQuiescer != nil {
+		resume := e.txpoolQuiescer.Pause()
+		defer resume()
+	}
+
 	// Gate state-domain build+merge so file production cannot race the
 	// unwind tx; quiesceRetireIfPastTarget below covers BlockRetire,
 	// not this. Wait covers goroutines already past the entry gate.

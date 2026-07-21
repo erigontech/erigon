@@ -1743,6 +1743,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// line 1547 and is guaranteed non-nil on the production path.
 	backend.execModule.SetBlockRetire(blockRetire)
 
+	if backend.txPool != nil {
+		backend.execModule.SetTxPoolQuiescer(backend.txPool)
+	}
+
 	var executionEngine executionclient.ExecutionEngine
 
 	// Single EngineBlockDownloader shared by both the direct
