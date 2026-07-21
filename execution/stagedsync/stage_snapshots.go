@@ -216,6 +216,16 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
+	// OpenSegments just added bodies to the block-files snapshot, but this tx
+	// pinned its block-files view at begin-time. Refresh it so the state-phase
+	// download filter's IterateFrozenBodies sees the bodies; otherwise the
+	// minimal-mode history prune cutoff resolves to 0 and no history is filtered.
+	if temporal, ok := tx.(*temporal.RwTx); ok {
+		log.Info(fmt.Sprintf("[%s] [dbg-snapfilter] refreshing tx block-files view after header-chain OpenSegments", s.LogPrefix()),
+			"frozenBlocks", cfg.blockReader.Snapshots().SegmentsMax())
+		temporal.ForceReopenUnderlyingFilesTx()
+	}
+
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),

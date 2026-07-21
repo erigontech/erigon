@@ -1346,6 +1346,17 @@ func (r *BlockReader) FirstTxnNumNotInSnapshots(tx kv.Getter) uint64 {
 func (r *BlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxNum, txCount uint64) error) error {
 	view, release := r.view(tx)
 	defer release()
+	bodies := view.Bodies()
+	var firstFrom, lastTo uint64
+	if len(bodies) > 0 {
+		firstFrom = bodies[0].From()
+		lastTo = bodies[len(bodies)-1].To()
+	}
+	log.Info("[dbg-snapfilter] IterateFrozenBodies view",
+		"txPinnedView", txBlockView(tx) != nil,
+		"bodySegments", len(bodies),
+		"firstFrom", firstFrom,
+		"lastTo", lastTo)
 	for _, sn := range view.Bodies() {
 		defer sn.Src().MadvSequential().DisableReadAhead()
 
