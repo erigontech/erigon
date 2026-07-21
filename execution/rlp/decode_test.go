@@ -30,6 +30,8 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
 )
 
 func TestStreamKind(t *testing.T) {
@@ -266,6 +268,71 @@ func TestStreamRaw(t *testing.T) {
 			t.Errorf("test %d: raw mismatch: got %x, want %x", i, raw, want)
 		}
 	}
+}
+
+func TestStreamAddr(t *testing.T) {
+	want := common.HexToAddress("0xdeadbeef00112233445566778899aabbccddeeff")
+	enc, err := EncodeToBytes(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("bytes-stream", func(t *testing.T) {
+		s := NewBytesStream(enc)
+		defer PutStream(s)
+		got, err := s.Addr()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("got %x, want %x", got, want)
+		}
+	})
+
+	t.Run("reader-stream", func(t *testing.T) {
+		s := NewStream(bytes.NewReader(enc), uint64(len(enc)))
+		got, err := s.Addr()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("got %x, want %x", got, want)
+		}
+	})
+
+	t.Run("bad-inputs", func(t *testing.T) {
+		for _, in := range []string{
+			"C0", // empty list
+			"01", // single byte
+			"80", // empty string
+			"93deadbeef00112233445566778899aabbccddee",     // 19 bytes
+			"95deadbeef00112233445566778899aabbccddeeff00", // 21 bytes
+		} {
+			s := NewBytesStream(unhex(in))
+			_, err := s.Addr()
+			PutStream(s)
+			if err == nil {
+				t.Fatalf("expected error for input %s", in)
+			}
+		}
+	})
+
+	t.Run("no-allocs", func(t *testing.T) {
+		rdr := bytes.NewReader(enc)
+		s := NewStreamFromPool(rdr, uint64(len(enc)))
+		defer PutStream(s)
+		got := testing.AllocsPerRun(100, func() {
+			rdr.Reset(enc)
+			s.Reset(rdr, uint64(len(enc)))
+			a, err := s.Addr()
+			if err != nil || a != want {
+				t.Fatalf("a=%x err=%v", a, err)
+			}
+		})
+		if got != 0 {
+			t.Fatalf("Addr allocated %v times/op, want 0", got)
+		}
+	})
 }
 
 // TestStreamViewBytes pins the aliasing contract that separates ViewBytes from

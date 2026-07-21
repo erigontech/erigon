@@ -71,9 +71,7 @@ func TestAllActiveSnapshotsConcurrentWithWrites(t *testing.T) {
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -82,7 +80,7 @@ func TestAllActiveSnapshotsConcurrentWithWrites(t *testing.T) {
 				d.allActiveSnapshots()
 			}
 		}
-	}()
+	})
 	// Stop the reader on every exit path, including a require failure (Goexit).
 	defer func() {
 		close(stop)
@@ -108,9 +106,7 @@ func TestAddNewSeedableFileConcurrentWithAllActiveSnapshots(t *testing.T) {
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -119,7 +115,7 @@ func TestAddNewSeedableFileConcurrentWithAllActiveSnapshots(t *testing.T) {
 				d.allActiveSnapshots()
 			}
 		}
-	}()
+	})
 	defer func() {
 		close(stop)
 		wg.Wait()
