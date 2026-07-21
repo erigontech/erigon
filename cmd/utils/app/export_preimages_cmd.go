@@ -58,6 +58,7 @@ var exportPreimagesCommand = cli.Command{
 	Name:        "export-preimages",
 	Usage:       "Export plain-key state preimages (account addresses + storage slot keys) to a framed binary file",
 	Description: "Writes framed.bin plus a preimages.meta.json sidecar with the block/stateRoot pin to --out. The state root is verified against the canonical header; a mismatch aborts the export.",
+	Hidden:      true,
 	Action:      doExportPreimages,
 	Flags: joinFlags([]cli.Flag{
 		&utils.DataDirFlag,
