@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -983,10 +984,15 @@ func serveHTTP(ctx context.Context, mcpServer *server.MCPServer, addr string, co
 	}
 
 	sse := server.NewSSEServer(mcpServer, sseOpts...)
+	streamable := server.NewStreamableHTTPServer(mcpServer, streamableOpts...)
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", server.NewStreamableHTTPServer(mcpServer, streamableOpts...))
+	mux.Handle("/mcp", streamable)
+	mux.Handle("/mcp/", streamable)
 	mux.Handle("/", sse)
-	httpServer := &http.Server{Addr: addr, Handler: mux}
+	// BaseContext ties every request context to ctx: open event streams (GET
+	// /mcp, /sse) end on cancellation instead of stalling Shutdown until its
+	// deadline.
+	httpServer := &http.Server{Addr: addr, Handler: mux, BaseContext: func(net.Listener) context.Context { return ctx }}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -1004,7 +1010,10 @@ func serveHTTP(ctx context.Context, mcpServer *server.MCPServer, addr string, co
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		sse.CloseSessions()
-		return httpServer.Shutdown(shutdownCtx)
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			_ = httpServer.Close()
+		}
+		return nil
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
