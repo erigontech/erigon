@@ -90,6 +90,30 @@ var debugTraceTransactionNoRefundTests = []struct {
 	{"b6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059", 62899, false, "0x"},
 }
 
+func TestGetRawBlockAccessListRPCSpec(t *testing.T) {
+	chainPack, client := newBlockAccessListRPCFixture(t)
+	availableRaw := marshalHexBytesJSON(t, chainPack.BlockAccessLists[1])
+	emptyRaw := marshalHexBytesJSON(t, chainPack.BlockAccessLists[2])
+	cases := []blockAccessListRPCCase{
+		{name: "available by number", selector: "0x2", want: availableRaw},
+		{name: "available by tag", selector: "safe", want: availableRaw},
+		{name: "available by hash", selector: chainPack.Blocks[1].Hash().Hex(), want: availableRaw},
+		{name: "empty by number", selector: "0x3", want: emptyRaw},
+		{name: "empty by tag", selector: "latest", want: emptyRaw},
+		{name: "empty by hash", selector: chainPack.Blocks[2].Hash().Hex(), want: emptyRaw},
+		{name: "unknown number", selector: "0xff", errCode: -32001, errMessage: "Resource not found"},
+		{name: "unknown hash", selector: common.Hash{}.Hex(), errCode: -32001, errMessage: "Resource not found"},
+		{name: "pending", selector: "pending", errCode: -32001, errMessage: "Resource not found"},
+		{name: "pre-Amsterdam by number", selector: "0x1", errCode: -32001, errMessage: "Resource not found"},
+		{name: "pre-Amsterdam by tag", selector: "earliest", errCode: -32001, errMessage: "Resource not found"},
+		{name: "pre-Amsterdam by hash", selector: chainPack.Blocks[0].Hash().Hex(), errCode: -32001, errMessage: "Resource not found"},
+		{name: "pruned by number", selector: "0x4", errCode: 4444, errMessage: "Pruned history unavailable"},
+		{name: "pruned by tag", selector: "finalized", errCode: 4444, errMessage: "Pruned history unavailable"},
+		{name: "pruned by hash", selector: chainPack.Blocks[3].Hash().Hex(), errCode: 4444, errMessage: "Pruned history unavailable"},
+	}
+	runBlockAccessListRPCCases(t, client, "debug_getRawBlockAccessList", cases)
+}
+
 func TestTraceBlockByNumber(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
