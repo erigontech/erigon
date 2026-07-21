@@ -87,5 +87,5 @@ var defaultBbdRequestConfig = bbdRequestConfig{
 	bodiesBatchFetchTimeout:      time.Minute,
 	bodiesBatchFetchRetries:      1,
 	balsBatchFetchTimeout:        time.Minute,
-	balsRequestTimeout:           30 * time.Second,
+	balsRequestTimeout:           10 * time.Second,
 }

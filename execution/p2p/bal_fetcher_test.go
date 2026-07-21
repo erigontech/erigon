@@ -71,18 +71,29 @@ func TestValidateBALResponse(t *testing.T) {
 		require.Equal(t, []byte{0xc0}, out[h0])
 	})
 
-	t.Run("0xc0 for a non-empty-BAL hash penalises the peer", func(t *testing.T) {
-		reqs := []BALRequest{{Hash: h0, Number: 1, ExpectedHash: balHash}}
-		_, bad, err := validateBALResponse(reqs, []rlp.RawValue{{0xc0}})
+	t.Run("0xc0 for a non-empty-BAL hash penalises but keeps valid entries", func(t *testing.T) {
+		reqs := []BALRequest{
+			{Hash: h0, Number: 1, ExpectedHash: empty.BlockAccessListHash},
+			{Hash: h1, Number: 2, ExpectedHash: balHash},
+		}
+		reqs[0].ExpectedHash = balHash
+		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{{0xc0}, bal})
 		require.Error(t, err)
 		require.True(t, bad)
+		require.NotContains(t, out, h0)
+		require.Equal(t, bal, out[h1])
 	})
 
-	t.Run("hash mismatch penalises the peer", func(t *testing.T) {
-		reqs := []BALRequest{{Hash: h0, Number: 1, ExpectedHash: common.BytesToHash([]byte{0xff})}}
-		_, bad, err := validateBALResponse(reqs, []rlp.RawValue{bal})
+	t.Run("hash mismatch penalises but keeps valid entries", func(t *testing.T) {
+		reqs := []BALRequest{
+			{Hash: h0, Number: 1, ExpectedHash: common.BytesToHash([]byte{0xff})},
+			{Hash: h1, Number: 2, ExpectedHash: balHash},
+		}
+		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{bal, bal})
 		require.Error(t, err)
 		require.True(t, bad)
+		require.NotContains(t, out, h0)
+		require.Equal(t, bal, out[h1])
 	})
 
 	t.Run("over-long response penalises the peer", func(t *testing.T) {
@@ -192,6 +203,34 @@ func TestFetchAcrossPeers(t *testing.T) {
 		for _, h := range hashes {
 			require.Contains(t, out, h)
 		}
+	})
+	t.Run("straggler held by a single peer is found via broadcast", func(t *testing.T) {
+		var many []BALRequest
+		for i := byte(1); i <= 40; i++ {
+			many = append(many, BALRequest{Hash: common.BytesToHash([]byte{i})})
+		}
+		rare := many[37].Hash
+		holder := PeerIdFromUint64(7)
+		fetch := func(_ context.Context, rs []BALRequest, p *PeerId) map[common.Hash][]byte {
+			out := map[common.Hash][]byte{}
+			for _, r := range rs {
+				if r.Hash == rare {
+					if p.Equal(holder) {
+						out[r.Hash] = []byte{0xbb}
+					}
+					continue
+				}
+				out[r.Hash] = []byte{0xaa}
+			}
+			return out
+		}
+		peers := make([]PeerId, 0, 13)
+		for i := uint64(1); i <= 13; i++ {
+			peers = append(peers, *PeerIdFromUint64(i))
+		}
+		out := fetchAcrossPeers(context.Background(), many, peers, 8, fetch)
+		require.Len(t, out, 40)
+		require.Equal(t, []byte{0xbb}, out[rare])
 	})
 	t.Run("stops when no peer makes progress", func(t *testing.T) {
 		var calls atomic.Int32
