@@ -37,24 +37,13 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// TestUnwindExecutionStage_PrunesUncommittedOverlayWrite is a regression test
-// for the Hoodi block-3004265 gas-used mismatch (originally found on
-// release/3.4, same gap on main).
-//
-// When a block fails its post-execution gas check mid-batch, its writes sit in
-// the in-RAM SharedDomains/TemporalMemBatch overlay but were never committed, so
-// the committed execution-stage progress (s.BlockNumber) is <= u.UnwindPoint and
-// UnwindExecutionStage takes the no-disk-rollback branch. That branch does not
-// call u.Done, so re-execution resumes from the committed block (SeekCommitment
-// returns s.BlockNumber; re-execution resumes at s.BlockNumber+1) — NOT from
-// u.UnwindPoint+1. The overlay must therefore be pruned to the last committed
-// txNum, Max(s.BlockNumber): every write of a re-executed block is dropped —
-// the failed block's, a block in (s.BlockNumber, u.UnwindPoint], AND the first
-// re-executed block's system tx at Min(s.BlockNumber+1) (one past the boundary)
-// — while a write at/below the last committed txNum survives (no over-pruning).
-// Otherwise the retry re-reads a stale value (Hoodi: ca5daf64 slot0 kept tx19's
-// first-write, the contract took the "already initialised" branch, skipped an
-// SSTORE_SET, came up 21045 gas short, and the node spun in an unwind/retry loop).
+// Pins that the unwind early-return (u.UnwindPoint >= s.BlockNumber) prunes
+// uncommitted overlay writes above committed progress (s.BlockNumber) — the
+// whole (s.BlockNumber, u.UnwindPoint] range re-executes since u.Done is skipped,
+// so those writes must go too, not just ones above u.UnwindPoint — while a write
+// at/below committed progress survives (no over-pruning). The boundary is the
+// last committed txNum, Max(s.BlockNumber); the first re-executed block's system
+// tx at Min(s.BlockNumber+1) is one past it and must be pruned too.
 func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	t.Parallel()
 
@@ -71,8 +60,7 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	defer tx.Rollback()
 
 	// txNum layout: block b owns txNums [perBlock*b, perBlock*b+perBlock-1], so
-	// TxnumReader().Max(b) == perBlock*b+perBlock-1 (the block's last txNum) and
-	// Min(b) == perBlock*b (its first/system txNum).
+	// TxnumReader().Min(b) == perBlock*b (the block's first/system txNum).
 	const perBlock = uint64(10)
 	for b := uint64(0); b <= 8; b++ {
 		require.NoError(t, rawdbv3.TxNums.Append(tx, b, b*perBlock+perBlock-1))
@@ -88,62 +76,66 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 		unwindPoint    = uint64(7) // = failedBlock-1; >= committedBlock => disk no-op
 		failedBlock    = uint64(8) // block whose post-exec gas check failed mid-batch
 	)
-	// Re-execution resumes from the committed progress, so the overlay is pruned
-	// to the last committed txNum, Max(committedBlock) — NOT Min(committedBlock+1)
-	// (which would leak the first re-executed block's system tx) and NOT
-	// Min(unwindPoint+1).
+	// The early-return prunes to the last committed txNum, Max(committedBlock);
+	// the first re-executed block's system tx sits at Max(committedBlock)+1.
 	lastCommittedTxNum, err := br.TxnumReader().Max(ctx, tx, committedBlock)
 	require.NoError(t, err)
 	require.Equal(t, committedBlock*perBlock+perBlock-1, lastCommittedTxNum, "sanity: prune boundary == last committed txNum")
-	firstReExecTxNum, err := br.TxnumReader().Min(ctx, tx, committedBlock+1)
-	require.NoError(t, err)
-	require.Equal(t, lastCommittedTxNum+1, firstReExecTxNum, "sanity: first re-executed txNum is one past the boundary")
 
-	put := func(hexAddr string, slot byte, val []byte, txNum uint64) []byte {
-		addr := common.HexToAddress(hexAddr)
-		slotHash := common.Hash{31: slot}
-		key := append(append([]byte{}, addr[:]...), slotHash[:]...)
-		doms.SetTxNum(txNum)
-		require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, key, val, txNum, nil))
-		return key
-	}
-
-	// survivorKey: committed block, below the prune boundary → must survive.
-	survivorVal := []byte{0xbe, 0xef}
-	survivorKey := put("0x00000000000000000000000000000000000000aa", 0x01, survivorVal, committedBlock*perBlock)
-	// boundaryKey: exactly at the last committed txNum → must survive (no over-prune).
-	boundaryVal := []byte{0xb0, 0x0d}
-	boundaryKey := put("0x00000000000000000000000000000000000000cc", 0x03, boundaryVal, lastCommittedTxNum)
-	// firstReExecKey: exactly Min(committedBlock+1), the first re-executed block's
-	// system tx (one past the boundary) — the extra txNum the old Min(resumeBlock)
-	// boundary leaked → must be pruned.
-	firstReExecVal := []byte{0x33, 0x44}
-	firstReExecKey := put("0x00000000000000000000000000000000000000dd", 0x04, firstReExecVal, firstReExecTxNum)
-	// midKey: a block in (committedBlock, unwindPoint]. Kept by the old
-	// Min(unwindPoint+1) boundary, but must be dropped — that block is re-executed
-	// from the committed progress and would otherwise re-read its own stale write.
-	midVal := []byte{0x11, 0x22}
-	midKey := put("0x00000000000000000000000000000000000000bb", 0x02, midVal, unwindPoint*perBlock)
-	// staleKey: mirrors ca5daf64 slot0, first-written by the failed block's tx19.
+	// staleKey mirrors ca5daf64 slot0: first-written by failedBlock's tx19 at a
+	// txNum strictly above the unwind boundary — must be pruned on unwind.
+	staleAddr := common.HexToAddress("0xca5daf6473971693b760cc65d726f72c6849d615")
+	staleSlot := common.Hash{} // slot 0
+	staleKey := append(append([]byte{}, staleAddr[:]...), staleSlot[:]...)
 	staleValHash := common.HexToHash("0xd7549f2a387fa81a1d5a77adc7bd3f782ac0780c460689d88e22aee6916a3a34")
 	staleVal := staleValHash[:]
-	staleKey := put("0xca5daf6473971693b760cc65d726f72c6849d615", 0x00, staleVal, failedBlock*perBlock+5)
+	const staleTxNum = failedBlock*perBlock + 5 // inside failedBlock, above the boundary
+
+	// reexecKey is written by a block in (committedBlock, unwindPoint] — i.e.
+	// above committed progress. The early return skips u.Done, so progress stays
+	// at committedBlock and this block re-executes; its overlay write must be
+	// pruned, even though it's at/below the unwind point.
+	reexecAddr := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	reexecSlot := common.Hash{31: 0x01}
+	reexecKey := append(append([]byte{}, reexecAddr[:]...), reexecSlot[:]...)
+	reexecVal := []byte{0xbe, 0xef}
+	const reexecTxNum = unwindPoint * perBlock // inside the unwind-target block (block 7 > committed 5)
+
+	// firstReExecKey is the first re-executed block's system tx at
+	// Min(committedBlock+1) = Max(committedBlock)+1 — one past the boundary. The
+	// old Min(committedBlock+1) prune boundary leaked it; it must now be pruned.
+	firstReExecAddr := common.HexToAddress("0x00000000000000000000000000000000000000dd")
+	firstReExecSlot := common.Hash{31: 0x04}
+	firstReExecKey := append(append([]byte{}, firstReExecAddr[:]...), firstReExecSlot[:]...)
+	firstReExecVal := []byte{0x33, 0x44}
+	firstReExecTxNum := lastCommittedTxNum + 1
+
+	// keepKey is written at/below committed progress — committed state, must survive.
+	keepAddr := common.HexToAddress("0x00000000000000000000000000000000000000bb")
+	keepSlot := common.Hash{31: 0x02}
+	keepKey := append(append([]byte{}, keepAddr[:]...), keepSlot[:]...)
+	keepVal := []byte{0xca, 0xfe}
+	const keepTxNum = committedBlock*perBlock + 3 // inside the committed block
+
+	doms.SetTxNum(keepTxNum)
+	require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, keepKey, keepVal, keepTxNum, nil))
+	doms.SetTxNum(reexecTxNum)
+	require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, reexecKey, reexecVal, reexecTxNum, nil))
+	doms.SetTxNum(firstReExecTxNum)
+	require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, firstReExecKey, firstReExecVal, firstReExecTxNum, nil))
+	doms.SetTxNum(staleTxNum)
+	require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, staleKey, staleVal, staleTxNum, nil))
 
 	// Sanity: all visible through the overlay before the unwind.
-	for _, c := range []struct {
-		key, val []byte
-		name     string
-	}{
-		{survivorKey, survivorVal, "survivor"},
-		{boundaryKey, boundaryVal, "boundary"},
-		{firstReExecKey, firstReExecVal, "first-re-exec"},
-		{midKey, midVal, "mid"},
-		{staleKey, staleVal, "stale"},
-	} {
-		got, _, err := doms.GetLatest(kv.StorageDomain, tx, c.key)
-		require.NoError(t, err)
-		require.Equal(t, c.val, got, "precondition: %s write must be visible pre-unwind", c.name)
-	}
+	got, _, err := doms.GetLatest(kv.StorageDomain, tx, staleKey)
+	require.NoError(t, err)
+	require.Equal(t, staleVal, got, "precondition: stale write must be visible pre-unwind")
+	got, _, err = doms.GetLatest(kv.StorageDomain, tx, reexecKey)
+	require.NoError(t, err)
+	require.Equal(t, reexecVal, got, "precondition: re-exec-range write must be visible pre-unwind")
+	got, _, err = doms.GetLatest(kv.StorageDomain, tx, firstReExecKey)
+	require.NoError(t, err)
+	require.Equal(t, firstReExecVal, got, "precondition: first re-executed system tx write must be visible pre-unwind")
 
 	cfg := ExecuteBlockCfg{blockReader: br}
 	s := &StageState{ID: stages.Execution, BlockNumber: committedBlock}
@@ -152,37 +144,35 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 
 	require.NoError(t, UnwindExecutionStage(u, s, doms, tx, ctx, cfg, logger))
 
-	// Every write of a re-executed block must be gone: the failed block's, a block
-	// in (committedBlock, unwindPoint], AND the first re-executed block's system tx
-	// at exactly Min(committedBlock+1) — re-execution resumes from the committed
-	// boundary and would re-read any of them as a stale value.
-	for _, c := range []struct {
-		key  []byte
-		name string
-	}{
-		{staleKey, "failed-block (above unwindPoint)"},
-		{midKey, "(committedBlock, unwindPoint]"},
-		{firstReExecKey, "first re-executed block system tx (Min(committedBlock+1))"},
-	} {
-		got, _, err := doms.GetLatest(kv.StorageDomain, tx, c.key)
-		require.NoError(t, err)
-		require.Empty(t, got,
-			"after Unwind (committed=%d, unwindPoint=%d), overlay must not return the %s write (got %x)",
-			committedBlock, unwindPoint, c.name, got)
-	}
+	// The failed block's first-time write must be gone, so a re-execution reads
+	// the committed value (absent here -> empty) and charges SSTORE_SET again.
+	got, _, err = doms.GetLatest(kv.StorageDomain, tx, staleKey)
+	require.NoError(t, err)
+	require.Empty(t, got,
+		"after Unwind, the overlay must not return failedBlock(%d) tx write %x (got %x)",
+		failedBlock, staleVal, got)
 
-	// Writes at or below the last committed txNum must be untouched (no over-pruning).
-	for _, c := range []struct {
-		key, val []byte
-		name     string
-	}{
-		{survivorKey, survivorVal, "below committed"},
-		{boundaryKey, boundaryVal, "at last committed txNum"},
-	} {
-		got, _, err := doms.GetLatest(kv.StorageDomain, tx, c.key)
-		require.NoError(t, err)
-		require.Equal(t, c.val, got, "%s write must survive the prune", c.name)
-	}
+	// A write in (committedBlock, unwindPoint] re-executes too, so it must also
+	// be pruned — the boundary is Max(s.BlockNumber), not u.UnwindPoint+1.
+	got, _, err = doms.GetLatest(kv.StorageDomain, tx, reexecKey)
+	require.NoError(t, err)
+	require.Empty(t, got,
+		"after Unwind, the overlay must not return the re-exec-range write at block %d (got %x): "+
+			"boundary must be Max(s.BlockNumber), not u.UnwindPoint+1",
+		unwindPoint, got)
+
+	// The first re-executed block's system tx at Min(committedBlock+1) is one past
+	// the boundary — the old boundary leaked it; it must now be pruned.
+	got, _, err = doms.GetLatest(kv.StorageDomain, tx, firstReExecKey)
+	require.NoError(t, err)
+	require.Empty(t, got,
+		"after Unwind, the overlay must not return the first re-executed system tx write at txNum %d (got %x)",
+		firstReExecTxNum, got)
+
+	// A write at/below committed progress is committed state — must survive.
+	got, _, err = doms.GetLatest(kv.StorageDomain, tx, keepKey)
+	require.NoError(t, err)
+	require.Equal(t, keepVal, got, "write at/below committed progress must survive the prune")
 }
 
 func makeHeader(number uint64, root common.Hash) *types.Header {

@@ -147,11 +147,14 @@ func (cfg ExecuteBlockCfg) WithAuthor(author accounts.Address) ExecuteBlockCfg {
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
-// overlayPruneToTxNum returns the overlay-prune boundary on unwind: the last
-// committed txNum, so TemporalMemBatch.Unwind (which keeps txNum <= boundary)
-// drops every write of a block that will be re-executed.
+// overlayPruneToTxNum / overlayPruneFromTxNum bracket the unwind: the overlay keeps
+// txNum <= pruneTo (last committed txNum) and re-executes from pruneFrom (= pruneTo+1).
 func overlayPruneToTxNum(ctx context.Context, cfg ExecuteBlockCfg, tx kv.Tx, committedBlock uint64) (uint64, error) {
 	return cfg.blockReader.TxnumReader().Max(ctx, tx, committedBlock)
+}
+
+func overlayPruneFromTxNum(ctx context.Context, cfg ExecuteBlockCfg, tx kv.Tx, committedBlock uint64) (uint64, error) {
+	return cfg.blockReader.TxnumReader().Min(ctx, tx, committedBlock+1)
 }
 
 // findExecutedDiffsetAtHeight returns the diffset of the block executed at currentBlock.
@@ -187,9 +190,7 @@ func findExecutedDiffsetAtHeight(ctx context.Context, rwTx kv.TemporalRwTx, br d
 func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	br := cfg.blockReader
 
-	// Boundary = last committed txNum (block u.UnwindPoint); re-execution still
-	// resumes at u.UnwindPoint+1.
-	txNum, err := overlayPruneToTxNum(ctx, cfg, rwTx, u.UnwindPoint)
+	pruneToTxNum, err := overlayPruneToTxNum(ctx, cfg, rwTx, u.UnwindPoint)
 	if err != nil {
 		return err
 	}
@@ -226,7 +227,7 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	if err != nil {
 		lastExecHash = common.Hash{}
 	}
-	if err := unwindExec3State(ctx, doms, rwTx, u.UnwindPoint, txNum, accumulator, changeSet, lastExecHash, logger); err != nil {
+	if err := unwindExec3State(ctx, doms, rwTx, u.UnwindPoint, pruneToTxNum, accumulator, changeSet, lastExecHash, logger); err != nil {
 		return fmt.Errorf("unwindExec3State(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
 	if err := rawdb.DeleteNewerEpochs(rwTx, u.UnwindPoint+1); err != nil {
@@ -400,27 +401,22 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	if u.UnwindPoint >= s.BlockNumber {
-		// MDBX has nothing above u.UnwindPoint to roll back here, but the in-RAM
-		// overlay (reused across the unwind→retry loop) can still hold uncommitted
-		// writes for blocks above it — e.g. a block that failed its post-execution
-		// gas check before its step was flushed. This early return skips u.Done, so
-		// committed progress stays at s.BlockNumber and the whole
-		// (s.BlockNumber, u.UnwindPoint] range re-executes from there; prune the
-		// overlay to the last committed txNum, Max(s.BlockNumber), so no re-executed
-		// block re-reads its own uncommitted write.
-		committedTxNum, err := overlayPruneToTxNum(ctx, cfg, rwTx, s.BlockNumber)
+		// This early return skips u.Done: committed progress stays at s.BlockNumber, so
+		// the whole (s.BlockNumber, u.UnwindPoint] range re-executes — prune to
+		// s.BlockNumber, not u.UnwindPoint.
+		pruneToTxNum, err := overlayPruneToTxNum(ctx, cfg, rwTx, s.BlockNumber)
 		if err != nil {
 			return err
 		}
-		resumeTxNum, err := cfg.blockReader.TxnumReader().Min(ctx, rwTx, s.BlockNumber+1)
+		pruneFromTxNum, err := overlayPruneFromTxNum(ctx, cfg, rwTx, s.BlockNumber)
 		if err != nil {
 			return err
 		}
-		// NB: do NOT ResetPendingUpdates / SeekCommitment here — the overlay and its
-		// deferred commitment updates are reused by the in-loop re-execution, so
-		// discarding them strands the commitment context and stalls the next block.
-		doms.Unwind(committedTxNum, nil)
-		doms.SetTxNum(resumeTxNum)
+		// Do NOT ResetPendingUpdates/SeekCommitment here (unlike the disk path): the
+		// overlay and its deferred commitment updates are reused by the in-loop
+		// re-execution, so discarding them stalls the next block.
+		doms.Unwind(pruneToTxNum, nil)
+		doms.SetTxNum(pruneFromTxNum)
 		return nil
 	}
 
