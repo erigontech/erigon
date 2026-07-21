@@ -56,8 +56,8 @@ type repeatedPatternEntry struct {
 	count uint32
 }
 
-func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) error {
-	if len(old) > len(new) {
+func ComputeCompressedSerializedUint64ListDiff(w io.Writer, oldVal, newVal []byte) error {
+	if len(oldVal) > len(newVal) {
 		return errors.New("old list is longer than new list")
 	}
 
@@ -71,16 +71,23 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) err
 	repeatedPattern := *repeatedPatternPtr
 	repeatedPattern = repeatedPattern[:0]
 
+<<<<<<< HEAD
 	delta := func(i int) uint64 {
 		if i+8 > len(old) {
 			return binary.LittleEndian.Uint64(new[i:])
 		}
 		return binary.LittleEndian.Uint64(new[i:i+8]) - binary.LittleEndian.Uint64(old[i:i+8])
+=======
+	for i := 0; i < len(newVal); i += 8 {
+		if i+8 > len(oldVal) {
+			return binary.LittleEndian.Uint64(newVal[i:])
+		}
+		return binary.LittleEndian.Uint64(newVal[i:i+8]) - binary.LittleEndian.Uint64(oldVal[i:i+8])
 	}
 	// Run-length encode the deltas in a single pass
 	prevVal := delta(0)
 	count := uint32(1)
-	for i := 8; i < len(new); i += 8 {
+	for i := 8; i < len(newVal); i += 8 {
 		if d := delta(i); d == prevVal {
 			count++
 		} else {
@@ -183,24 +190,24 @@ func ApplyCompressedSerializedUint64ListDiff(in, out []byte, diff []byte, revers
 	return out, nil
 }
 
-func ComputeCompressedSerializedValidatorSetListDiff(w io.Writer, old, new []byte) error {
-	if len(old) > len(new) {
+func ComputeCompressedSerializedValidatorSetListDiff(w io.Writer, oldVal, newVal []byte) error {
+	if len(oldVal) > len(newVal) {
 		return errors.New("old list is longer than new list")
 	}
 
 	validatorLength := validatorSSZSize
-	if len(old)%validatorLength != 0 {
-		return fmt.Errorf("old list is not a multiple of validator length got %d", len(old))
+	if len(oldVal)%validatorLength != 0 {
+		return fmt.Errorf("old list is not a multiple of validator length got %d", len(oldVal))
 	}
-	if len(new)%validatorLength != 0 {
-		return fmt.Errorf("new list is not a multiple of validator length got %d", len(new))
+	if len(newVal)%validatorLength != 0 {
+		return fmt.Errorf("new list is not a multiple of validator length got %d", len(newVal))
 	}
-	for i := 0; i < len(old); i += validatorLength {
-		if !bytes.Equal(old[i:i+validatorLength], new[i:i+validatorLength]) {
+	for i := 0; i < len(oldVal); i += validatorLength {
+		if !bytes.Equal(oldVal[i:i+validatorLength], newVal[i:i+validatorLength]) {
 			if err := binary.Write(w, binary.BigEndian, uint32(i/validatorLength)); err != nil {
 				return err
 			}
-			if _, err := w.Write(new[i : i+validatorLength]); err != nil {
+			if _, err := w.Write(newVal[i : i+validatorLength]); err != nil {
 				return err
 			}
 		}
@@ -209,7 +216,7 @@ func ComputeCompressedSerializedValidatorSetListDiff(w io.Writer, old, new []byt
 		return err
 	}
 
-	if _, err := w.Write(new[len(old):]); err != nil {
+	if _, err := w.Write(newVal[len(oldVal):]); err != nil {
 		return err
 	}
 

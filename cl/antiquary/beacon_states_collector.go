@@ -516,8 +516,8 @@ func (i *beaconStatesCollector) collectStateEvents(slot uint64, events *state_ac
 	return i.stateEventsCollector.Collect(base_encoding.Encode64ToBytes4(slot), events.CopyBytes())
 }
 
-func (i *beaconStatesCollector) collectBalancesDiffs(ctx context.Context, slot uint64, old, new []byte) error {
-	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), old, new, i.buf, i.balancesCollector, base_encoding.ComputeCompressedSerializedUint64ListDiff)
+func (i *beaconStatesCollector) collectBalancesDiffs(ctx context.Context, slot uint64, oldVal, newVal []byte) error {
+	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), oldVal, newVal, i.buf, i.balancesCollector, base_encoding.ComputeCompressedSerializedUint64ListDiff)
 }
 
 func (i *beaconStatesCollector) collectEffectiveBalancesDiffs(ctx context.Context, slot uint64, oldEffectiveBalances, newEffectiveBalances []byte) error {
@@ -715,11 +715,11 @@ func antiquateListSSZ[T solid.EncodableHashableSSZ](ctx context.Context, slot ui
 	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), buffer.Bytes())
 }
 
-func antiquateBytesListDiff(ctx context.Context, key []byte, old, newVal []byte, buffer *bytes.Buffer, collector *etl.Collector, diffFn func(w io.Writer, old, newVal []byte) error) error {
+func antiquateBytesListDiff(ctx context.Context, key []byte, oldVal, newVal []byte, buffer *bytes.Buffer, collector *etl.Collector, diffFn func(w io.Writer, oldVal, newVal []byte) error) error {
 	buffer.Reset()
 
 	// create a diff
-	if err := diffFn(buffer, old, newVal); err != nil {
+	if err := diffFn(buffer, oldVal, newVal); err != nil {
 		return err
 	}
 
