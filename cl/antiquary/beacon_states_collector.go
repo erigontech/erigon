@@ -86,8 +86,9 @@ type beaconStatesCollector struct {
 	builderPendingWithdrawalsWriter  *base_encoding.SSZQueueEncoder[*cltypes.BuilderPendingWithdrawal]
 	payloadExpectedWithdrawalsWriter *base_encoding.SSZQueueEncoder[*cltypes.Withdrawal]
 
-	buf        *bytes.Buffer
-	compressor *zstd.Encoder
+	buf           *bytes.Buffer
+	compressor    *zstd.Encoder
+	effBalScratch []byte
 
 	beaconCfg *clparams.BeaconChainConfig
 	logger    log.Logger
@@ -271,12 +272,9 @@ func (i *beaconStatesCollector) collectEffectiveBalancesDump(slot uint64, uncomp
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
 
-	validatorSetSize := 121
-	for j := 0; j < len(uncompressed)/validatorSetSize; j++ {
-		// 80:88
-		if _, err := i.compressor.Write(uncompressed[j*validatorSetSize+80 : j*validatorSetSize+88]); err != nil {
-			return err
-		}
+	i.effBalScratch = base_encoding.AppendEffectiveBalances(i.effBalScratch[:0], uncompressed)
+	if _, err := i.compressor.Write(i.effBalScratch); err != nil {
+		return err
 	}
 
 	if err := i.compressor.Close(); err != nil {
@@ -522,8 +520,8 @@ func (i *beaconStatesCollector) collectBalancesDiffs(ctx context.Context, slot u
 	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), old, new, i.buf, i.balancesCollector, base_encoding.ComputeCompressedSerializedUint64ListDiff)
 }
 
-func (i *beaconStatesCollector) collectEffectiveBalancesDiffs(ctx context.Context, slot uint64, oldValidatorSetSSZ, newValidatorSetSSZ []byte) error {
-	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), oldValidatorSetSSZ, newValidatorSetSSZ, i.buf, i.effectiveBalanceCollector, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff)
+func (i *beaconStatesCollector) collectEffectiveBalancesDiffs(ctx context.Context, slot uint64, oldEffectiveBalances, newEffectiveBalances []byte) error {
+	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), oldEffectiveBalances, newEffectiveBalances, i.buf, i.effectiveBalanceCollector, base_encoding.ComputeCompressedSerializedUint64ListDiff)
 }
 
 func (i *beaconStatesCollector) collectInactivityScores(slot uint64, inactivityScores []byte) error {
