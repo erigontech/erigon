@@ -308,10 +308,15 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if err != nil {
 			return 0, errors.New("getCodeSize failed")
 		}
+		// A transfer to a codeless recipient has a fixed, gas-independent cost, so a
+		// single trial at the ceiling yields the exact estimate: return its actual gas
+		// used rather than a hardcoded TxGas. This stays correct across forks,
+		// including EIP-2780's re-priced transfers (self=12000, zero-value=15000,
+		// account creation adds NEW_ACCOUNT state gas).
 		if codeSize == 0 {
-			failed, _, err := doCall(ctx, caller, params.TxGas, engine)
+			failed, result, err := doCall(ctx, caller, hi, engine)
 			if err == nil && !failed {
-				return hexutil.Uint64(params.TxGas), nil
+				return hexutil.Uint64(result.ReceiptGasUsed), nil
 			}
 		}
 	}
@@ -406,7 +411,7 @@ type StorageKeysInfo struct {
 	KeyLength int
 }
 
-// GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
+// GetProof implements eth_getProof; historical blocks are supported as far back as the commitment history allows.
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHashArg *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
 	blockNrOrHash := orLatest(blockNrOrHashArg)
 	if len(storageKeys) > maxGetProofKeys {
@@ -425,8 +430,6 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
-	} else if requestedBlockNr == 0 {
-		return nil, errors.New("block not found")
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, roTx, uint64(requestedBlockNr))
@@ -590,8 +593,8 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 
 		// prepare key path (keccak(address) | keccak(key))
-		addrHash := crypto.HashData(address[:])
-		keyHash := crypto.HashData(storageKey.Hash[:])
+		addrHash := crypto.Keccak256Hash(address[:])
+		keyHash := crypto.Keccak256Hash(storageKey.Hash[:])
 		fullKey := make([]byte, 0, 64)
 		fullKey = append(fullKey, addrHash[:]...)
 		fullKey = append(fullKey, keyHash[:]...)

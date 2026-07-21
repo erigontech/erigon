@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -52,8 +53,14 @@ Naming:
  Stream - high-level iterator-like api over Table/InvertedIndex/History/Domain. Server-side-streaming-friendly. See package `stream`
 
 Methods Naming:
- Prune: delete old data
+ Prune: delete old data from DB (db rows already written to files)
  Unwind: delete recent data
+ Collate: read one step of data out of the db, ready to write into a file
+ BuildFiles: write (and index) collated steps into new immutable files
+ Merge: fold adjacent visible files into a bigger one - only produces a new file; the small inputs become garbage
+ Retire: drop old visible files past the prune window; unlink deferred until no reader references them
+   Merge and Retire read/delete only visible files. Invisible garbage (subsumed/overlapping) is dropped by a
+   separate clean-up: RemoveOverlaps / cleanAfterMerge (also the "clean garbage" CLI tools).
  Get: exact match of criteria
  Range: [from, to). from=nil means StartOfTable, to=nil means EndOfTable, rangeLimit=-1 means Unlimited
      Range is analog of SQL's: SELECT * FROM Table WHERE k>=from AND k<to ORDER BY k ASC/DESC LIMIT n
@@ -429,13 +436,16 @@ type Putter interface {
 // This type represents a step in time across the chain history or an amount of steps.
 type Step uint64
 
+// NoStepBound marks the absence of a per-key step bound: every step is
+// servable. Distinct from a bound at step 0, which admits only step 0.
+const NoStepBound = Step(math.MaxUint64)
+
 // Returns the txNum of the first tx in the step.
 func (s Step) ToTxNum(stepSize uint64) uint64 { return uint64(s) * stepSize }
 
 type (
 	Domain      uint16
 	InvertedIdx uint16
-	ForkableId  uint16
 )
 
 type TemporalGetter interface {
@@ -474,9 +484,18 @@ type TemporalTx interface {
 
 	Debug() TemporalDebugTx
 	AggTx() any
+}
 
-	AggForkablesTx(ForkableId) any // any forkableId, returns that group
-	Unmarked(ForkableId) UnmarkedTx
+// TemporalFilesPin holds a consistent aggregator file snapshot so that multiple
+// read txns opened from it (BeginTemporalRo) all observe the same file
+// generation, even after newer generations are published. Concurrent readers
+// spawned from one commitment tx use this to avoid reading a domain from a file
+// generation inconsistent with the in-memory overlay that tx was built against.
+// Release with Close. A temporal tx exposes it via an optional `Pin()
+// TemporalFilesPin` method (type-asserted; not all backends can pin files).
+type TemporalFilesPin interface {
+	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
+	Close()
 }
 
 // TemporalDebugTx - set of slow low-level funcs for debug purposes
@@ -505,7 +524,6 @@ type TemporalDebugTx interface {
 	// per-domain cutoff (deferred deletion).
 	Retire(ctx context.Context, cutoffs RetireCutoffs) (retiredCount int, err error)
 	Dirs() datadir.Dirs
-	AllForkableIds() []ForkableId
 
 	NewMemBatch(ioMetrics any) TemporalMemBatch
 }
@@ -513,7 +531,6 @@ type TemporalDebugTx interface {
 type TemporalDebugDB interface {
 	DomainTables(names ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
-	ForkableTables(names ...ForkableId) []string
 	BuildMissedAccessors(ctx context.Context, workers int) error
 	EnableReadAhead() TemporalDebugDB
 	DisableReadAhead()
@@ -548,6 +565,9 @@ func WithFlushCallback(domain Domain, cb func(k []byte, v []byte, step Step, txN
 type TemporalMemBatch interface {
 	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte) error
 	DomainDel(domain Domain, k string, txNum uint64, preval []byte) error
+	// GetLatest returns the key's latest in-mem value. On a miss, step carries
+	// the key's in-flight-unwind bound — NoStepBound when none — so callers
+	// can bound their fall-through read.
 	GetLatest(domain Domain, key []byte) (v []byte, step Step, ok bool)
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
 	Merge(other TemporalMemBatch) error
@@ -559,10 +579,10 @@ type TemporalMemBatch interface {
 	SizeEstimate() uint64
 	Flush(ctx context.Context, tx RwTx, opts ...FlushOption) error
 	Close()
-	PutForkable(id ForkableId, num Num, v []byte) error
 	DiscardWrites(domain Domain)
 	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
 	GetAsOf(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
+	HistorySeek(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
 	SetInMemHistoryReads(v bool)
 	InMemHistoryReads() bool
 }
@@ -580,8 +600,6 @@ type TemporalRwTx interface {
 	RwTx
 	TemporalTx
 	TemporalPutDel
-
-	UnmarkedRw(ForkableId) UnmarkedRwTx
 
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
 	Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff) error
@@ -625,6 +643,14 @@ type TxnId uint64 // internal auto-increment ID. can't cast to eth-network canon
 
 type HasSpaceDirty interface {
 	SpaceDirty() (uint64, uint64, error)
+}
+
+// HasDeleteRange deletes all keys in [from, to) (to==nil deletes through the
+// last key) and returns the number removed. mdbx implements it as a native bulk
+// B-tree cut — far faster than per-key deletion; other backends may emulate it
+// by iterating, so hot-path callers should prefer the mdbx-backed tx.
+type HasDeleteRange interface {
+	DeleteRange(table string, from, to []byte) (uint64, error)
 }
 
 // BucketMigrator used for buckets migration, don't use it in usual app code

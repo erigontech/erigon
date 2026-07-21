@@ -25,12 +25,12 @@ func init() {
 	// Initialize global config once for all tests
 	// Set GloasForkEpoch high to ensure tests run in Fulu mode
 	// (tests create Fulu-style sidecars with SignedBlockHeader)
-	globalBeaconConfig = &clparams.BeaconChainConfig{
-		NumberOfColumns:             4,
-		SlotsPerEpoch:               32,
-		MaxBlobCommittmentsPerBlock: 6,
-		GloasForkEpoch:              18446744073709551615, // Max uint64 - Gloas not activated
-	}
+	cfg := clparams.MainnetBeaconConfig
+	cfg.NumberOfColumns = 4
+	cfg.SlotsPerEpoch = 32
+	cfg.MaxBlobCommittmentsPerBlock = 6
+	cfg.GloasForkEpoch = cfg.FarFutureEpoch
+	globalBeaconConfig = &cfg
 	globalCaplinConfig = &clparams.CaplinConfig{}
 	clparams.InitGlobalStaticConfig(globalBeaconConfig, globalCaplinConfig)
 }
@@ -212,14 +212,14 @@ func TestRemoveColumnSidecars(t *testing.T) {
 	blockRoot := common.HexToHash("0x1234567890abcdef")
 
 	// Write multiple sidecars
-	for i := int64(0); i < 3; i++ {
+	for i := range int64(3) {
 		sidecar := createTestDataColumnSidecar(1000, i)
 		err := storage.WriteColumnSidecars(ctx, blockRoot, i, sidecar)
 		require.NoError(t, err)
 	}
 
 	// Verify they exist
-	for i := int64(0); i < 3; i++ {
+	for i := range int64(3) {
 		exists, err := storage.ColumnSidecarExists(ctx, 1000, blockRoot, i)
 		require.NoError(t, err)
 		assert.True(t, exists)
@@ -250,14 +250,14 @@ func TestRemoveAllColumnSidecars(t *testing.T) {
 	blockRoot := common.HexToHash("0x1234567890abcdef")
 
 	// Write multiple sidecars
-	for i := int64(0); i < 3; i++ {
+	for i := range int64(3) {
 		sidecar := createTestDataColumnSidecar(1000, i)
 		err := storage.WriteColumnSidecars(ctx, blockRoot, i, sidecar)
 		require.NoError(t, err)
 	}
 
 	// Verify they exist
-	for i := int64(0); i < 3; i++ {
+	for i := range int64(3) {
 		exists, err := storage.ColumnSidecarExists(ctx, 1000, blockRoot, i)
 		require.NoError(t, err)
 		assert.True(t, exists)
@@ -268,7 +268,7 @@ func TestRemoveAllColumnSidecars(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify all are removed
-	for i := int64(0); i < 3; i++ {
+	for i := range int64(3) {
 		exists, err := storage.ColumnSidecarExists(ctx, 1000, blockRoot, i)
 		require.NoError(t, err)
 		assert.False(t, exists)
@@ -433,7 +433,7 @@ func TestConcurrentAccess(t *testing.T) {
 	const numGoroutines = 10
 	done := make(chan bool, numGoroutines)
 
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(idx int) {
 			sidecar := createTestDataColumnSidecar(1000, int64(idx))
 			err := storage.WriteColumnSidecars(ctx, blockRoot, int64(idx), sidecar)
@@ -443,12 +443,12 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 
 	// Wait for all goroutines to complete
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		<-done
 	}
 
 	// Verify all sidecars were written
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		exists, err := storage.ColumnSidecarExists(ctx, 1000, blockRoot, int64(i))
 		require.NoError(t, err)
 		assert.True(t, exists)

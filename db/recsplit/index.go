@@ -56,10 +56,10 @@ const (
 	//   It makes .seg files "warm" - which is bad because they are big and
 	//      data-locality of touches is bad (and maybe need visit a lot of shards to find key).
 	//   Can add a built-in "existence filter" (like bloom/cuckoo/ribbon/xor-filter/fuse-filter); it will improve
-	//      data-locality - filters are small-enough and existance-chekcs will be co-located on disk.
+	//      data-locality - filters are small-enough and existence-checks will be co-located on disk.
 	//   But there are 2 additional properties we have in our data:
 	//      "keys are known", "keys are hashed" (.idx works on murmur3), ".idx can calc key-number by key".
-	//   It means: if we rely on this properties then we can do better than general-purpose-existance-filter.
+	//   It means: if we rely on this properties then we can do better than general-purpose-existence-filter.
 	//   Seems just an "array of 1-st bytes of key-hashes" is great alternative:
 	//      general-purpose-filter: 9bits/key, 0.3% false-positives, 3 mem access
 	//      first-bytes-array: 8bits/key, 1/256=0.4% false-positives, 1 mem access
@@ -217,7 +217,7 @@ func (idx *Index) init() (err error) {
 	startSeedLen := int(idx.data[offset])
 	offset++
 	idx.startSeed = make([]uint64, startSeedLen)
-	for i := 0; i < startSeedLen; i++ {
+	for i := range startSeedLen {
 		idx.startSeed[i] = binary.BigEndian.Uint64(idx.data[offset:])
 		offset += 8
 	}
@@ -282,7 +282,7 @@ func (idx *Index) init() (err error) {
 	golombParamSize := binary.BigEndian.Uint16(idx.data[offset:])
 	offset += 4
 	idx.golombRice = make([]uint32, golombParamSize)
-	for i := uint16(0); i < golombParamSize; i++ {
+	for i := range golombParamSize {
 		if i == 0 {
 			idx.golombRice[i] = (bijMemo[i] << 27) | bijMemo[i]
 		} else if i <= idx.leafSize {

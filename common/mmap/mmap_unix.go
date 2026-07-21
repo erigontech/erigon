@@ -27,6 +27,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/unix"
+
+	_ "github.com/erigontech/erigon/common/race"
 )
 
 const MaxMapSize = 0xFFFFFFFFFFFF

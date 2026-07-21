@@ -16,7 +16,10 @@
 
 package snapshot
 
-import "sort"
+import (
+	"cmp"
+	"slices"
+)
 
 // StepRange represents a half-open interval [From, To) of aggregator steps.
 type StepRange struct {
@@ -56,7 +59,7 @@ func (rs StepRanges) Normalize() StepRanges {
 	if len(rs) <= 1 {
 		return rs
 	}
-	sort.Slice(rs, func(i, j int) bool { return rs[i].From < rs[j].From })
+	slices.SortFunc(rs, func(a, b StepRange) int { return cmp.Compare(a.From, b.From) })
 
 	merged := StepRanges{rs[0]}
 	for _, r := range rs[1:] {

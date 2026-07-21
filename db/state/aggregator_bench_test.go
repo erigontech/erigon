@@ -389,7 +389,7 @@ func Benchmark_BTree_SeekThenNext(b *testing.B) {
 			prevKey := common.Copy(keys[p])
 			ntimer := time.Duration(0)
 			nextKeys := 5000
-			for j := 0; j < nextKeys; j++ {
+			for range nextKeys {
 				ntime := time.Now()
 
 				if !cur.Next() {
@@ -637,7 +637,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	collector := etl.NewCollector(btindex.BtreeLogPrefix+" genCompress", tmp, etl.NewSortableBuffer(bufSize), logger)
 	defer collector.Close()
 
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		key := make([]byte, keySize)
 		n, err := rnd.Read(key)
 		require.Equal(tb, keySize, n)

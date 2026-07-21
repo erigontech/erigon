@@ -43,7 +43,7 @@ func GetCustodyGroups(nodeID enode.ID, custodyGroupCount uint64) ([]CustodyIndex
 		idBytes := currentID.Bytes32()
 		// Reverse the bytes to convert from big-endian to little-endian.
 		// This ensures compatibility with the hashing process that follows.
-		for i := 0; i < len(idBytes)/2; i++ {
+		for i := range len(idBytes) / 2 {
 			idBytes[i], idBytes[len(idBytes)-i-1] = idBytes[len(idBytes)-i-1], idBytes[i]
 		}
 		hash := sha256.Sum256(idBytes[:])
@@ -82,7 +82,7 @@ func ComputeColumnsForCustodyGroup(custodyGroup CustodyIndex) ([]ColumnIndex, er
 	columnsPerGroup := numberOfColumns / numberOfCustodyGroups
 	columns := make([]ColumnIndex, columnsPerGroup)
 
-	for i := ColumnIndex(0); i < columnsPerGroup; i++ {
+	for i := range columnsPerGroup {
 		columns[i] = numberOfCustodyGroups*i + custodyGroup
 	}
 
@@ -119,7 +119,7 @@ func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([][]c
 	matrix := make([][]cltypes.MatrixEntry, 0, blobCount)
 
 	// Process each blob row
-	for blobIndex := uint64(0); blobIndex < blobCount; blobIndex++ {
+	for blobIndex := range blobCount {
 		// Get cells and column indices for this blob row
 		var cellIndices []ColumnIndex
 		var cells []cltypes.Cell

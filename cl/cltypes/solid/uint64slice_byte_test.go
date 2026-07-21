@@ -47,7 +47,7 @@ func TestUint64SliceCopyTo(t *testing.T) {
 	num := 1000
 	set := solid.NewUint64ListSSZ(100_000)
 	set2 := solid.NewUint64ListSSZ(100_000)
-	for i := 0; i < num; i++ {
+	for i := range num {
 		set.Append(uint64(i))
 		set.HashSSZ()
 	}

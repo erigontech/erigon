@@ -59,7 +59,7 @@ func requireRestartParity(t *testing.T, batches []engineBatch, combinedK [][]byt
 // root row folds via propagate and no root branch record ever reaches disk.
 func singleNibbleCorpus() (k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, kc [][]byte, uc []Update) {
 	var addrs []string
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		addrs = append(addrs, addrHex(findAddressForNibble(7, 100+i)))
 	}
 	newcomer := addrHex(findAddressForNibble(7, 4711))
@@ -68,7 +68,7 @@ func singleNibbleCorpus() (k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, k
 	for i, a := range addrs {
 		ub1.Balance(a, uint64(1000+i))
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		ub1.Storage(addrs[0], hex.EncodeToString(slotHashBytes(i)), "0badc0de")
 	}
 	ub1.Storage(addrs[1], hex.EncodeToString(slotHashBytes(7)), "cafe")
@@ -89,7 +89,7 @@ func singleNibbleCorpus() (k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, k
 		ubc.Balance(a, bal)
 	}
 	ubc.Balance(newcomer, 42)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		ubc.Storage(addrs[0], hex.EncodeToString(slotHashBytes(i)), "0badc0de")
 	}
 	ubc.Storage(addrs[1], hex.EncodeToString(slotHashBytes(7)), "cafe")
@@ -114,7 +114,7 @@ func TestStateRoundTrip_PropagateRootSingleNibble(t *testing.T) {
 func TestStateRoundTrip_PropagateRootZeroNibblePrefix(t *testing.T) {
 	t.Parallel()
 	var addrs []string
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		addrs = append(addrs, addrHex(findAddressForHexPrefix([]byte{0, 0xa}, 800+i)))
 	}
 
@@ -152,7 +152,7 @@ func TestStateRoundTrip_PropagateRootZeroNibblePrefix(t *testing.T) {
 func TestStateRoundTrip_DeleteCollapseToSingleNibble(t *testing.T) {
 	t.Parallel()
 	var gone, kept []string
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		gone = append(gone, addrHex(findAddressForNibble(3, 200+i)))
 		kept = append(kept, addrHex(findAddressForNibble(7, 300+i)))
 	}
@@ -277,7 +277,7 @@ func TestStateRoundTrip_SeedAfterSchedulerStart(t *testing.T) {
 func TestStateRoundTrip_SeedChangeInvalidatesFoldedSplits(t *testing.T) {
 	t.Parallel()
 	var addrs []string
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		addrs = append(addrs, addrHex(findAddressForNibble(7, 500+i)))
 	}
 	ub1 := NewUpdateBuilder()

@@ -706,7 +706,7 @@ func TestBeaconStatesCollector_CollectEffectiveBalancesDump(t *testing.T) {
 	numValidators := 3
 	raw := make([]byte, validatorSetSize*numValidators)
 	// Set effective balances
-	for i := 0; i < numValidators; i++ {
+	for i := range numValidators {
 		binary.LittleEndian.PutUint64(raw[i*validatorSetSize+80:], uint64((i+1)*32_000_000_000))
 	}
 
@@ -732,7 +732,7 @@ func TestBeaconStatesCollector_CollectEffectiveBalancesDump(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, numValidators*8, len(decompressed))
 
-	for i := 0; i < numValidators; i++ {
+	for i := range numValidators {
 		eb := binary.LittleEndian.Uint64(decompressed[i*8:])
 		require.Equal(t, uint64((i+1)*32_000_000_000), eb)
 	}

@@ -24,8 +24,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -160,6 +163,7 @@ func TestHandleMessage_TxResultPinsAsOfReaderTxNum(t *testing.T) {
 
 	// First txResult: txNum jumps from 0 to 12345.
 	cc.handleMessage(context.Background(), &txResult{
+		rules:  &chain.Rules{},
 		txNum:  12345,
 		writes: someWrites,
 	})
@@ -171,6 +175,7 @@ func TestHandleMessage_TxResultPinsAsOfReaderTxNum(t *testing.T) {
 	// Subsequent txResult: txNum advances to 12346. Verifies the field
 	// is updated on every txResult, not just the first one.
 	cc.handleMessage(context.Background(), &txResult{
+		rules:  &chain.Rules{},
 		txNum:  12346,
 		writes: someWrites,
 	})
@@ -184,9 +189,74 @@ func TestHandleMessage_TxResultPinsAsOfReaderTxNum(t *testing.T) {
 	// so updating txNum would be wasted work and could mask real
 	// regressions in producers that drop writes.
 	cc.handleMessage(context.Background(), &txResult{
+		rules:  &chain.Rules{},
 		txNum:  12347,
 		writes: nil,
 	})
 	require.Equal(t, uint64(12346), cc.asOfReader.txNum,
 		"empty writes → no lazy-load → don't bump txNum; the prior pin stands.")
+}
+
+// TestHandleBlockRequest_EmptyBALFallsToIncremental pins the empty-BAL gate.
+// A genuine empty BAL (0xc0) decodes to a non-nil empty slice, so a nil check
+// alone selects BAL-driven mode and folds zero changes → parent root →
+// spurious wrong-trie-root. Mode selection must gate on len(bal) > 0.
+func TestHandleBlockRequest_EmptyBALFallsToIncremental(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	cc := &commitmentCalculator{
+		pending:     map[uint64]*pendingBlock{},
+		foldedAhead: map[uint64]bool{},
+		balRoots:    map[uint64][]byte{},
+		// Not the batch's first block and no blockResult seen yet, so the
+		// fold gate is shut — maybeFoldAhead returns before touching the
+		// (nil) doms/updates, isolating the mode-selection under test.
+		hasFirstBlock:      true,
+		firstBlockNum:      100,
+		hasSeenBlockResult: false,
+	}
+
+	emptyBAL := make(types.BlockAccessList, 0)
+	require.NotNil(t, emptyBAL, "empty BAL must be non-nil to exercise the gate")
+
+	cc.handleBlockRequest(context.Background(), &blockRequest{blockNum: 5, bal: emptyBAL})
+
+	pb, ok := cc.pending[5]
+	require.True(t, ok, "block request must be recorded")
+	assert.Equal(t, calcModeIncremental, pb.mode,
+		"an empty (non-nil) BAL declares no changes and must fall to "+
+			"incremental mode; folding it would compute the parent root and "+
+			"fail an otherwise-valid block with ErrWrongTrieRoot")
+}
+
+// TestFoldCap_StopsFoldAhead pins the orphan guard: once the shared executor
+// context carries a stopCause, the calculator must not fold any block past the
+// coalesce block M — otherwise commitment would advance past the state exec
+// stops at. The signal is read from the context cause, not a shared flag.
+func TestFoldCap_StopsFoldAhead(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	dbg.BALDrivenCommitment = true
+
+	signalCtx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+
+	cc := &commitmentCalculator{
+		signalCtx: signalCtx,
+		pending: map[uint64]*pendingBlock{
+			5: {req: &blockRequest{blockNum: 5, bal: make(types.BlockAccessList, 1)}, mode: calcModeBALDriven},
+		},
+		foldedAhead:   map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 5, // gate open for block 5 without a prior blockResult
+	}
+
+	// Coalesce block M=4: block 5 is past M and must not fold.
+	cancel(&stopCause{block: 4, kind: stopMoreWork})
+	cc.maybeFoldAhead(context.Background(), 5) // must return before foldBlockFromBAL
+
+	assert.False(t, cc.foldedAhead[5], "a fold past the coalesce block M must not run")
 }

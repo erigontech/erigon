@@ -349,7 +349,7 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 	binary.BigEndian.PutUint64(key, blockNumber)
 	copy(key[8:], blockHash[:])
 
-	for i := 0; i < chunkCount; i++ {
+	for i := range chunkCount {
 		start := i * DiffChunkLen
 		end := min((i+1)*DiffChunkLen, len(keys))
 		binary.BigEndian.PutUint64(key[40:], uint64(i))
@@ -394,7 +394,7 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 
 	key := make([]byte, 48)
 	val := make([]byte, 0, DiffChunkLen*chunkCount)
-	for i := uint64(0); i < chunkCount; i++ {
+	for i := range chunkCount {
 		binary.BigEndian.PutUint64(key, blockNumber)
 		copy(key[8:], blockHash[:])
 		binary.BigEndian.PutUint64(key[40:], i)

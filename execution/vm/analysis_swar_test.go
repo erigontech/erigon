@@ -81,14 +81,14 @@ func TestCodeBitmapSWAREquivalence(t *testing.T) {
 		}
 		return c
 	}
-	for iter := 0; iter < 20000; iter++ {
+	for iter := range 20000 {
 		code := gen(r.Intn(260), iter%3)
 		if !equalBitvec(codeBitmap(code), codeBitmapRef(code)) {
 			t.Fatalf("mismatch (len=%d) code=%x", len(code), code)
 		}
 	}
 	edges := [][]byte{{}, {0x5b}, {0x60}, {0x7f}, {0x00}}
-	for n := 0; n < 48; n++ {
+	for n := range 48 {
 		edges = append(edges,
 			append([]byte{0x7f}, make([]byte, n)...),       // PUSH32 + n bytes
 			append([]byte{0x5b, 0x7f}, make([]byte, n)...), // JUMPDEST, PUSH32, ...

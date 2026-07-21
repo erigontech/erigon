@@ -206,7 +206,7 @@ func (h *hasher) hashChildren(original Node, bufOffset int) ([]byte, error) {
 
 	case *DuoNode:
 		i1, i2 := n.childrenIdx()
-		for i := 0; i < 17; i++ {
+		for i := range 17 {
 			var child Node
 
 			if i == int(i1) {

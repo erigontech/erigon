@@ -259,7 +259,7 @@ func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparam
 	if version.AfterOrEqual(clparams.ElectraVersion) {
 		maxAttSlashing = MaxAttesterSlashingsElectra
 		maxAttestation = MaxAttestationsElectra
-		executionRequests = NewExecutionRequests(beaconCfg)
+		executionRequests = NewExecutionRequestsWithVersion(beaconCfg, version)
 	}
 
 	return &BlindedBeaconBody{

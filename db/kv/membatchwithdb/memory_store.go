@@ -26,11 +26,12 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	btree2 "github.com/tidwall/btree"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
-	btree2 "github.com/tidwall/btree"
 )
 
 // Compile-time check that memStore implements kv.RwTx.

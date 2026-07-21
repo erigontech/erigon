@@ -41,8 +41,8 @@ func encodeStringRLP(payload []byte) []byte {
 func BenchmarkStreamBytes_64B(b *testing.B) {
 	payload := bytes.Repeat([]byte{0xab}, 64)
 	encoded := encodeStringRLP(payload)
-	stream, done := NewStreamFromPool(bytes.NewReader(encoded), uint64(len(encoded)))
-	defer done()
+	stream := NewStreamFromPool(bytes.NewReader(encoded), uint64(len(encoded)))
+	defer PutStream(stream)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -58,8 +58,8 @@ func BenchmarkStreamBytes_64B(b *testing.B) {
 func BenchmarkStreamBytes_4KB(b *testing.B) {
 	payload := bytes.Repeat([]byte{0xab}, 4096)
 	encoded := encodeStringRLP(payload)
-	stream, done := NewStreamFromPool(bytes.NewReader(encoded), uint64(len(encoded)))
-	defer done()
+	stream := NewStreamFromPool(bytes.NewReader(encoded), uint64(len(encoded)))
+	defer PutStream(stream)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -75,8 +75,8 @@ func BenchmarkStreamBytes_4KB(b *testing.B) {
 func BenchmarkStreamReadBytes_64B(b *testing.B) {
 	payload := bytes.Repeat([]byte{0xab}, 64)
 	encoded := encodeStringRLP(payload)
-	stream, done := NewStreamFromPool(bytes.NewReader(encoded), uint64(len(encoded)))
-	defer done()
+	stream := NewStreamFromPool(bytes.NewReader(encoded), uint64(len(encoded)))
+	defer PutStream(stream)
 	dst := make([]byte, 64)
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -95,6 +95,41 @@ func BenchmarkDecodeBytes_Tiny(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		var dst []byte
+		if err := DecodeBytes(encoded, &dst); err != nil {
+			b.Fatal(err)
+		}
+		_ = dst
+	}
+}
+
+type benchCap struct {
+	Name    string
+	Version uint
+}
+
+type benchHandshake struct {
+	Version    uint64
+	Name       string
+	Caps       []benchCap
+	ListenPort uint64
+	ID         []byte
+}
+
+func BenchmarkDecodeStringFields(b *testing.B) {
+	encoded, err := EncodeToBytes(&benchHandshake{
+		Version:    5,
+		Name:       "erigon/v3.6.0-dev/linux-amd64/go1.25.0",
+		Caps:       []benchCap{{"eth", 68}, {"eth", 69}, {"snap", 1}, {"wit", 0}},
+		ListenPort: 30303,
+		ID:         bytes.Repeat([]byte{0xab}, 64),
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var dst benchHandshake
 		if err := DecodeBytes(encoded, &dst); err != nil {
 			b.Fatal(err)
 		}

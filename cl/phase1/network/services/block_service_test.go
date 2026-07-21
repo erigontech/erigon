@@ -130,7 +130,7 @@ func TestBlockServiceInvalidCommitmentsPerBlock(t *testing.T) {
 	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
 	blocks[1].Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
 	// Append lots of commitments
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		blocks[1].Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
 	}
 	require.Error(t, blockService.ProcessMessage(context.Background(), nil, blocks[1]))

@@ -329,7 +329,7 @@ func wipeCommitment(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, dir
 	}
 
 	newAgg := testAgg(t, db, dirs, stepSize, log.New())
-	newDB, err := temporal.New(db, newAgg)
+	newDB, err := temporal.New(db, newAgg, nil)
 	require.NoError(t, err)
 	require.NoError(t, newAgg.OpenFolder())
 
@@ -345,7 +345,7 @@ func reopenAggregator(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, s
 	agg.Close()
 
 	newAgg := testAgg(t, db, dirs, stepSize, log.New())
-	newDB, err := temporal.New(db, newAgg)
+	newDB, err := temporal.New(db, newAgg, nil)
 	require.NoError(t, err)
 
 	return newDB, newAgg

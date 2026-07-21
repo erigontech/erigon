@@ -38,7 +38,7 @@ func TestSyncCommittee(t *testing.T) {
 
 	// Test SetCommittee
 	newCommittee := make([]common.Bytes48, 512)
-	for i := 0; i < 512; i++ {
+	for i := range 512 {
 		copy(newCommittee[i][:], []byte{byte(i)})
 	}
 	syncCommittee.SetCommittee(newCommittee)
@@ -141,7 +141,7 @@ func TestSyncCommitteeMinimalPreset(t *testing.T) {
 func TestSyncCommitteeJson(t *testing.T) {
 	// Test MarshalJSON and UnmarshalJSON
 	committee := make([]common.Bytes48, 512)
-	for i := 0; i < 512; i++ {
+	for i := range 512 {
 		copy(committee[i][:], []byte{byte(i)})
 	}
 	aggregatePublicKey := [48]byte{1, 2, 3} // Example aggregate public key

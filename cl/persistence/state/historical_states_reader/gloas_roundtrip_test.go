@@ -629,7 +629,7 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 	// Block roots and state roots: ReadHistoricalState needs 32 entries
 	// (one per slot from 0 to slot-1) for readHistoryHashVector.
 	zeroHash := make([]byte, 32)
-	for i := uint64(0); i < slot; i++ {
+	for i := range slot {
 		k := base_encoding.Encode64ToBytes4(i)
 		require.NoError(t, tx.Put(kv.BlockRoot, k, zeroHash))
 		require.NoError(t, tx.Put(kv.StateRoot, k, zeroHash))

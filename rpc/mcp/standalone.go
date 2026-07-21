@@ -913,7 +913,7 @@ func (s *StandaloneMCPServer) handleResourceRecentBlocks(ctx context.Context, re
 
 	const recentBlockCount = 10
 	blocks := make([]json.RawMessage, 0, recentBlockCount)
-	for i := 0; i < recentBlockCount; i++ {
+	for i := range recentBlockCount {
 		blockNum := new(big.Int).Sub(currentBlock, big.NewInt(int64(i)))
 		hexNum := fmt.Sprintf("0x%x", blockNum)
 		var block json.RawMessage

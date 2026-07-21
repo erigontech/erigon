@@ -234,10 +234,7 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	// The addr budget is shared by both addr-keyed LRUs, so each "slot" costs
 	// addrEntryBytes (both entries combined). Divide in ByteSize space so the
 	// budget isn't truncated to int before the division.
-	addrEntries := int(addrCapacityBytes / datasize.ByteSize(addrEntryBytes))
-	if addrEntries < 1024 {
-		addrEntries = 1024
-	}
+	addrEntries := max(int(addrCapacityBytes/datasize.ByteSize(addrEntryBytes)), 1024)
 	addrLRU, err := lru.New[common.Address, versionedAddressID](addrEntries)
 	if err != nil {
 		panic(err)

@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -26,7 +27,7 @@ import (
 	"io"
 	"math/bits"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -138,10 +139,12 @@ type HexPatriciaHashed struct {
 	rootPresent   bool
 	traceW        io.Writer // nil = disabled, non-nil = write trace output
 	ctx           PatriciaContext
-	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
-	cellHashBuf   common.Hash   // shared scratch buffer for hashKey calls (avoids per-cell allocation)
-	leafHashBuf   [33]byte      // shared scratch for leaf hash prefixing (avoids per-leaf escape)
-	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
+	hashAuxBuffer [128]byte           // buffer to compute cell hash or write hash-related things
+	cellHashBuf   common.Hash         // shared scratch buffer for hashKey calls (avoids per-cell allocation)
+	leafHashBuf   [33]byte            // shared scratch for leaf hash prefixing (avoids per-leaf escape)
+	leafRlpBuf    [maxLeafRlpLen]byte // shared scratch for a leaf's RLP list prefix + compact key
+	rlpPrefixBuf  [8]byte             // shared scratch for RlpSerializable length prefixes
+	auxBuffer     *bytes.Buffer       // auxiliary buffer used during branch updates encoding
 	branchEncoder *BranchEncoder
 
 	mounted    bool  // true if this trie is mounted to some root trie
@@ -318,6 +321,12 @@ const (
 	cellLoadAccount = loadFlags(1)
 	cellLoadStorage = loadFlags(2)
 )
+
+// maxLeafRlpLen bounds a leaf's assembled RLP header: list prefix (tag plus up to
+// 8 length bytes), key prefix byte, then the compact key. Derived from the nibble
+// array rather than from the shorter keys today's depth arithmetic yields, so a
+// caller slicing deeper cannot overflow the buffer.
+const maxLeafRlpLen = 9 + 1 + (len(cell{}.hashedExtension)/2 + 1)
 
 func (f loadFlags) String() string {
 	var b strings.Builder
@@ -496,10 +505,7 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 	}
 	if lowCell.hashLen > 0 {
 		if (lowCell.accountAddrLen == 0 && lowDepth < 64) || (lowCell.storageAddrLen == 0 && lowDepth > 64) {
-			// Extension is related to either accounts branch node, or storage branch node, we prepend it by preExtension | nibble.
-			// The same nibbles are the unfold navigation path, so hashedExtension must stay in sync
-			// (like foldBranch does), or the cell demands an on-disk branch record that a propagate
-			// fold never writes.
+			// Extension is related to either accounts branch node, or storage branch node, we prepend it by preExtension | nibble
 			if len(preExtension) > 0 {
 				copy(cell.extension[:], preExtension)
 			}
@@ -508,8 +514,10 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 				copy(cell.extension[1+len(preExtension):], lowCell.extension[:lowCell.extLen])
 			}
 			cell.extLen = lowCell.extLen + 1 + int16(len(preExtension))
-			copy(cell.hashedExtension[:], cell.extension[:cell.extLen])
-			cell.hashedExtLen = cell.extLen
+			if cell.accountAddrLen == 0 && cell.storageAddrLen == 0 {
+				copy(cell.hashedExtension[:], cell.extension[:cell.extLen])
+				cell.hashedExtLen = cell.extLen
+			}
 		} else {
 			// Extension is related to a storage branch node, so we copy it upwards as is
 			cell.extLen = lowCell.extLen
@@ -522,7 +530,11 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 	if lowCell.hashLen > 0 {
 		copy(cell.hash[:], lowCell.hash[:lowCell.hashLen])
 	}
-	cell.loaded = lowCell.loaded
+	if lowDepth > 64 {
+		cell.loaded = cell.loaded.addFlag(lowCell.loaded)
+	} else {
+		cell.loaded = lowCell.loaded
+	}
 }
 
 func (cell *cell) deriveHashedKeys(depth int16, keccak keccak.KeccakState, accountKeyLen int16, hashBuf []byte) error {
@@ -721,9 +733,7 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) 
 func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable, singleton bool) ([]byte, error) {
 	// Compute the total length of binary representation
 	var kp, kl int
-	var keyPrefix [1]byte
 	if compactLen > 1 {
-		keyPrefix[0] = 0x80 + byte(compactLen)
 		kp = 1
 		kl = compactLen
 	} else {
@@ -731,8 +741,23 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 	}
 
 	totalLen := kp + kl + val.DoubleRLPLen()
-	var lenPrefix [4]byte
-	pl := rlp.EncodeListPrefixToBuf(totalLen, lenPrefix[:])
+	// The header (list prefix, key prefix, compact key) is assembled into one scratch
+	// buffer: passing per-write stack arrays to the io.Writer interface heap-allocates them.
+	header := hph.leafRlpBuf[:]
+	pl := rlp.EncodeListPrefixToBuf(totalLen, header)
+	n := pl
+	if kp > 0 {
+		header[n] = 0x80 + byte(compactLen)
+		n++
+	}
+	header[n] = compact0
+	n++
+	for i := 1; i < compactLen; i++ {
+		header[n] = key[ni]*16 + key[ni+1]
+		n++
+		ni += 2
+	}
+
 	canEmbed := !singleton && totalLen+pl < length.Hash
 	var writer io.Writer
 	if canEmbed {
@@ -743,25 +768,10 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 		hph.keccak.Reset()
 		writer = hph.witness.leafWriter(hph.keccak)
 	}
-	if _, err := writer.Write(lenPrefix[:pl]); err != nil {
+	if _, err := writer.Write(header[:n]); err != nil {
 		return nil, err
 	}
-	if _, err := writer.Write(keyPrefix[:kp]); err != nil {
-		return nil, err
-	}
-	b := [1]byte{compact0}
-	if _, err := writer.Write(b[:]); err != nil {
-		return nil, err
-	}
-	for i := 1; i < compactLen; i++ {
-		b[0] = key[ni]*16 + key[ni+1]
-		if _, err := writer.Write(b[:]); err != nil {
-			return nil, err
-		}
-		ni += 2
-	}
-	var prefixBuf [8]byte
-	if err := val.ToDoubleRLP(writer, prefixBuf[:]); err != nil {
+	if err := val.ToDoubleRLP(writer, hph.rlpPrefixBuf[:]); err != nil {
 		return nil, err
 	}
 	if canEmbed {
@@ -1339,7 +1349,7 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 	fmt.Printf("GRID:\n")
 	for row := 0; row < hph.activeRows; row++ {
 		fmt.Printf("row %d depth %d:\n", row, hph.depths[row])
-		for col := 0; col < 16; col++ {
+		for col := range 16 {
 			cell := &hph.grid[row][col]
 			if cell.hashedExtLen > 0 || cell.accountAddrLen > 0 {
 				var cellHash []byte
@@ -1528,7 +1538,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 		hph.currentKeyLen++
 	}
 	row := hph.activeRows
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		hph.grid[row][i].reset()
 	}
 	hph.touchMap[row], hph.afterMap[row], hph.branchBefore[row] = 0, 0, false
@@ -2128,7 +2138,7 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 
 	// Find the sibling nibble (the other set bit in afterMap)
 	siblingNibble := -1
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		if hph.afterMap[parentRow]&(1<<i) != 0 && i != deleteNibble {
 			siblingNibble = i
 			break
@@ -2631,7 +2641,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		for k := range hph.hadToLoadL {
 			ends = append(ends, k)
 		}
-		sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
+		slices.SortFunc(ends, func(a, b uint64) int { return cmp.Compare(b, a) })
 		var Li int
 		for _, k := range ends {
 			v := hph.hadToLoadL[k]
@@ -2768,7 +2778,7 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 		return nil, fmt.Errorf("encode root: %w", err)
 	}
 	d := make([]byte, len(s.Depths))
-	for i := 0; i < len(s.Depths); i++ {
+	for i := range len(s.Depths) {
 		d[i] = byte(s.Depths[i])
 	}
 	if n, err := ee.Write(d); err != nil || n != len(s.Depths) {
@@ -2782,7 +2792,7 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 	}
 
 	var before1, before2 uint64
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		if s.BranchBefore[i] {
 			before1 |= 1 << i
 		}
@@ -2830,7 +2840,7 @@ func (s *state) Decode(buf []byte) error {
 	if err := binary.Read(aux, binary.BigEndian, &d); err != nil {
 		return fmt.Errorf("depths: %w", err)
 	}
-	for i := 0; i < len(s.Depths); i++ {
+	for i := range len(s.Depths) {
 		s.Depths[i] = int16(d[i])
 	}
 	if err := binary.Read(aux, binary.BigEndian, &s.TouchMap); err != nil {
@@ -2847,7 +2857,7 @@ func (s *state) Decode(buf []byte) error {
 		return fmt.Errorf("branchBefore2: %w", err)
 	}
 
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		if branch1&(1<<i) != 0 {
 			s.BranchBefore[i] = true
 		}
@@ -2996,7 +3006,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 		hph.rootPresent = false
 		hph.activeRows = 0
 
-		for i := 0; i < len(hph.depths); i++ {
+		for i := range len(hph.depths) {
 			hph.depths[i] = 0
 			hph.branchBefore[i] = false
 			hph.touchMap[i] = 0
@@ -3122,8 +3132,8 @@ func HexTrieStateToString(enc []byte) (string, error) {
 	printAfterMap := func(sb *strings.Builder, name string, list []uint16, depths []int16, existedBefore []bool) {
 		fmt.Fprintf(sb, "\t::%s::\n\n", name)
 		lastNonZero := 0
-		for i := len(list) - 1; i >= 0; i-- {
-			if list[i] != 0 {
+		for i, l := range slices.Backward(list) {
+			if l != 0 {
 				lastNonZero = i
 				break
 			}

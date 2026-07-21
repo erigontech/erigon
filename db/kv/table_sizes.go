@@ -91,6 +91,9 @@ func CollectTableSizesPeriodically(ctx context.Context, db TemporalRoDB, label L
 		case <-ticker.C:
 			tableSizes, err := CollectTableSizes(ctx, db)
 			if err != nil {
+				if ctx.Err() != nil { // graceful shutdown mid-collect, not a real failure
+					return
+				}
 				logger.Error("[kv] failed to collect table sizes", "err", err)
 				continue
 			}

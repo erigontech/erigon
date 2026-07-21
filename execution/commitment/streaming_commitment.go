@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -96,15 +97,15 @@ type StreamingCommitter struct {
 
 	// rootValid gates root promotion: cleared each Process and set only on the
 	// folded path, so the no-touch path leaves the template's prior root untouched.
-	// rootSeeded marks the same snapshot as a base seed: a trie whose root row
-	// collapsed to one child has no root branch record on disk, so the carried
-	// root cell is the only way a fresh base can see the existing state.
 	rootCell    cell
 	rootChecked bool
 	rootTouched bool
 	rootPresent bool
 	rootValid   bool
-	rootSeeded  bool
+	// rootSeeded marks the same snapshot as a base seed: a trie whose root row
+	// collapsed to one child has no root branch record on disk, so the carried
+	// root cell is the only way a fresh base can see the existing state.
+	rootSeeded bool
 
 	traceW io.Writer
 }
@@ -318,7 +319,10 @@ func (sc *StreamingCommitter) SeedRootFrom(tmpl *HexPatriciaHashed) {
 		sc.releaseBase()
 	}
 	// Splits folded against the previous seed's base are stale; drop their cells and
-	// deferred updates so Process re-folds them against the reseeded base.
+	// deferred updates so Process re-folds them against the reseeded base. Read-lock
+	// trieMu: TouchKey inserts into sc.splits under its write lock, and iterating a
+	// map against a concurrent insert is a fatal runtime error.
+	sc.trieMu.RLock()
 	for _, s := range sc.splits {
 		s.mu.Lock()
 		s.folded = false
@@ -329,6 +333,7 @@ func (sc *StreamingCommitter) SeedRootFrom(tmpl *HexPatriciaHashed) {
 		s.deferred = nil
 		s.mu.Unlock()
 	}
+	sc.trieMu.RUnlock()
 }
 
 // PromoteRootInto copies the most recently folded root cell and flags into tmpl,
@@ -439,9 +444,8 @@ func (sc *StreamingCommitter) StartScheduler(ctx context.Context) error {
 	sc.dirtyCh = make(chan byte, 256)
 	sc.started.Store(true)
 
-	sc.wg.Add(sc.numWorkers)
 	for range sc.numWorkers {
-		go sc.scheduleWorker()
+		sc.wg.Go(sc.scheduleWorker)
 	}
 	return nil
 }
@@ -457,7 +461,6 @@ func (sc *StreamingCommitter) Stop() {
 }
 
 func (sc *StreamingCommitter) scheduleWorker() {
-	defer sc.wg.Done()
 	for {
 		select {
 		case <-sc.quit:
@@ -665,8 +668,9 @@ func (o *overlayContext) Storage(plainKey []byte) (*Update, error) { return o.ba
 // base, recording which slots were folded; it never applies or merges.
 func (sc *StreamingCommitter) foldPresentSplits(ctx context.Context, base *HexPatriciaHashed, root *prefixNode) ([16]bool, error) {
 	var present [16]bool
+	foldSem := newFoldSem()
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(sc.numWorkers)
+	g.SetLimit(min(sc.numWorkers, maxFoldConcurrency()))
 
 	childIdx := 0
 	for bm := root.bitmap; bm != 0; {
@@ -688,7 +692,7 @@ func (sc *StreamingCommitter) foldPresentSplits(ctx context.Context, base *HexPa
 			continue
 		}
 		ch := child
-		g.Go(func() error { return sc.foldSplit(gctx, base, s, ch) })
+		g.Go(func() error { return sc.foldSplit(gctx, foldSem, base, s, ch) })
 		childIdx++
 		bm &^= uint16(1) << nib
 	}
@@ -740,7 +744,7 @@ func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]boo
 // foldSplit re-folds one top-nibble subtree on a worker mounted at the unfolded
 // base, to the split cell rather than the root, replacing the split's cell and
 // deferred set.
-func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHashed, s *splitState, child *prefixNode) error {
+func (sc *StreamingCommitter) foldSplit(ctx context.Context, foldSem *semaphore.Weighted, base *HexPatriciaHashed, s *splitState, child *prefixNode) error {
 	ni := s.prefix[0]
 	w := sc.workerPool.Get().(*HexPatriciaHashed)
 	w.mountTo(base, int(ni))
@@ -761,8 +765,8 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHa
 	path := make([]byte, 0, 144)
 	path = append(path, ni)
 	path = append(path, child.ext...)
-	deepStorageRoot := func(n *prefixNode, pth []byte, accountFresh bool) (common.Hash, error) {
-		sr, err := foldStorageRoot(ctx, sc.numWorkers, sc.newStorageWorker, &pu, n, pth, accountFresh)
+	deepStorageRoot := func(n *prefixNode, pth []byte, accountFresh bool) (cell, error) {
+		sr, err := foldStorageRoot(ctx, foldSem, sc.newStorageWorker, &pu, n, pth, accountFresh)
 		if err == nil {
 			sc.deepLocalFolds.Add(1)
 		}

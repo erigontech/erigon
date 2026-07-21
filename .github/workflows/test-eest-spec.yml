@@ -21,12 +21,14 @@ jobs:
   # blockchain_tests_engine_x/); re-add it there when the fixture lands.
   load-matrix:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     outputs:
       matrix: ${{ steps.load.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
       # Warming runs replace the shard matrix with one build per cache class;
       # the -race suffix routes build-cache-extra-key below.
       - id: load
@@ -63,13 +65,15 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:
           submodules: false
           cleanup-space: ${{ !inputs.cache-warming-only }}
-          ramdisk: ${{ !inputs.cache-warming-only }}
+          # matrix.no-ramdisk is absent (null, falsy) for shards without the key.
+          ramdisk: ${{ !inputs.cache-warming-only && !matrix.no-ramdisk }}
           cache-namespace: test-eest-spec
           # All non-race shards build the same evm binary and all race shards the
           # same evm.race, so the cache splits by class rather than by shard.
@@ -102,7 +106,8 @@ jobs:
         env:
           EEST_SPEC_MAX_FAILURES: ${{ matrix.max-allowed-failures }}
           EEST_SPEC_WORKERS: ${{ matrix.workers }}
-        run: make eest-spec-${{ matrix.shard }}
+          SHARD: ${{ matrix.shard }}
+        run: make "eest-spec-$SHARD"
 
       - name: Build evm binary (cache warming)
         if: inputs.cache-warming-only
@@ -139,6 +144,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Restore EEST tarballs
         uses: actions/cache/restore@v6

@@ -90,7 +90,7 @@ func TestHashRate(t *testing.T) {
 	}
 
 	api := &API{ethash}
-	for i := 0; i < len(hashrate); i += 1 {
+	for i := range hashrate {
 		if res := api.SubmitHashRate(hashrate[i], ids[i]); !res {
 			t.Error("remote miner submit hashrate failed")
 		}

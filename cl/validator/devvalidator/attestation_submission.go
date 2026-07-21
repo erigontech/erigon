@@ -13,7 +13,7 @@ import (
 // attestation, which differs between the pre-Electra and Electra Beacon APIs.
 type attestationSubmission struct {
 	path    string
-	body    interface{}
+	body    any
 	version string // Eth-Consensus-Version header; empty for the pre-Electra V1 route
 }
 
@@ -30,7 +30,7 @@ func buildAttestationSubmission(
 	committeeLength, validatorPosition uint64,
 ) attestationSubmission {
 	if version >= clparams.ElectraVersion {
-		single := map[string]interface{}{
+		single := map[string]any{
 			"committee_index": strconv.FormatUint(committeeIndex, 10),
 			"attester_index":  strconv.FormatUint(validatorIndex, 10),
 			"data":            attData,
@@ -38,20 +38,20 @@ func buildAttestationSubmission(
 		}
 		return attestationSubmission{
 			path:    "/eth/v2/beacon/pool/attestations",
-			body:    []interface{}{single},
+			body:    []any{single},
 			version: version.String(),
 		}
 	}
 
 	aggBits := make([]byte, (committeeLength+7)/8)
 	aggBits[validatorPosition/8] |= 1 << (validatorPosition % 8)
-	legacy := map[string]interface{}{
+	legacy := map[string]any{
 		"aggregation_bits": hexutil.Encode(aggBits),
 		"data":             attData,
 		"signature":        hexutil.Encode(sig[:]),
 	}
 	return attestationSubmission{
 		path: "/eth/v1/beacon/pool/attestations",
-		body: []interface{}{legacy},
+		body: []any{legacy},
 	}
 }

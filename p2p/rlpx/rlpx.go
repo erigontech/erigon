@@ -675,7 +675,7 @@ func exportPubkey(pub *ecies.PublicKey) []byte {
 
 func xor(one, other []byte) (xor []byte) {
 	xor = make([]byte, len(one))
-	for i := 0; i < len(one); i++ {
+	for i := range one {
 		xor[i] = one[i] ^ other[i]
 	}
 	return xor

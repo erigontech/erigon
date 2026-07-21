@@ -340,7 +340,7 @@ func TestLightClientUpdates(t *testing.T) {
 	_ = got
 	expectedCount := 1
 	currentPeriod := 1
-	for i := 0; i < expectedCount; i++ {
+	for range expectedCount {
 		forkDigest := make([]byte, 4)
 
 		_, err := stream.Read(forkDigest)

@@ -414,7 +414,7 @@ type ExecutionPayloadEnvelope struct {
 func NewExecutionPayloadEnvelope(cfg *clparams.BeaconChainConfig) *ExecutionPayloadEnvelope {
 	return &ExecutionPayloadEnvelope{
 		Payload:               NewEth1Block(clparams.GloasVersion, cfg),
-		ExecutionRequests:     NewExecutionRequests(cfg),
+		ExecutionRequests:     NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion),
 		BuilderIndex:          0,
 		BeaconBlockRoot:       common.Hash{},
 		ParentBeaconBlockRoot: common.Hash{},
@@ -451,7 +451,7 @@ func (e *ExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
 		e.Payload = NewEth1Block(clparams.StateVersion(version), e.beaconCfg)
 	}
 	if e.ExecutionRequests == nil {
-		e.ExecutionRequests = NewExecutionRequests(e.beaconCfg)
+		e.ExecutionRequests = NewExecutionRequestsWithVersion(e.beaconCfg, clparams.StateVersion(version))
 	}
 	return ssz2.UnmarshalSSZ(buf, version,
 		e.Payload,

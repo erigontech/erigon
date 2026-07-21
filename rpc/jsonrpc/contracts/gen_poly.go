@@ -156,7 +156,7 @@ func bindPoly(address common.Address, caller bind.ContractCaller, transactor bin
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Poly *PolyRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Poly *PolyRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Poly.Contract.PolyCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -167,7 +167,7 @@ func (_Poly *PolyRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, erro
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Poly *PolyRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Poly *PolyRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Poly.Contract.PolyTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -175,7 +175,7 @@ func (_Poly *PolyRaw) Transact(opts *bind.TransactOpts, method string, params ..
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Poly *PolyCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Poly *PolyCallerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Poly.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -186,7 +186,7 @@ func (_Poly *PolyTransactorRaw) Transfer(opts *bind.TransactOpts) (types.Transac
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Poly *PolyTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Poly *PolyTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Poly.Contract.contract.Transact(opts, method, params...)
 }
 

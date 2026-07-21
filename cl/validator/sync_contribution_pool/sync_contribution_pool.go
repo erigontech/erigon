@@ -237,7 +237,7 @@ func (s *syncContributionPoolImpl) GetSyncAggregate(slot uint64, beaconBlockRoot
 			continue
 		}
 		for i := range contribution.AggregationBits {
-			for j := 0; j < 8; j++ {
+			for j := range 8 {
 				bitIndex := i*8 + j
 				participated := utils.IsBitOn(contribution.AggregationBits, bitIndex)
 				if participated {

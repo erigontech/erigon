@@ -84,7 +84,7 @@ func (test *connectCCBTest) makeHeader(parent *types.Header, difficulty uint64) 
 func (test *connectCCBTest) makeHeaders(parent *types.Header, difficulties []uint64) []*types.Header {
 	count := len(difficulties)
 	headers := make([]*types.Header, 0, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		header := test.makeHeader(parent, difficulties[i])
 		headers = append(headers, header)
 		parent = header

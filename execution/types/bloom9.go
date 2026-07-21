@@ -54,7 +54,7 @@ func BytesToBloom(b []byte) Bloom {
 
 func (b Bloom) IsEmpty() bool {
 	var bb []uint64 = unsafe.Slice((*uint64)(unsafe.Pointer(&b[0])), BloomByteLength/8)
-	for i := 0; i < BloomByteLength/8; i++ {
+	for i := range BloomByteLength / 8 {
 		if bb[i] != 0 {
 			return false
 		}
@@ -110,7 +110,7 @@ func (b Bloom) Test(topic []byte) bool {
 func (b *Bloom) Or(other *Bloom) {
 	bb := unsafe.Slice((*uint64)(unsafe.Pointer(&b[0])), BloomByteLength/8)
 	ob := unsafe.Slice((*uint64)(unsafe.Pointer(&other[0])), BloomByteLength/8)
-	for i := 0; i < BloomByteLength/8; i++ {
+	for i := range BloomByteLength / 8 {
 		bb[i] |= ob[i]
 	}
 }
@@ -143,8 +143,8 @@ func CreateBloom(receipts Receipts) Bloom {
 	for _, receipt := range receipts {
 		for _, log := range receipt.Logs {
 			bin.add(log.Address[:], &buf)
-			for _, b := range log.Topics {
-				bin.add(b[:], &buf)
+			for i := range log.Topics {
+				bin.add(log.Topics[i][:], &buf)
 			}
 		}
 	}

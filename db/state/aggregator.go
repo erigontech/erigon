@@ -40,6 +40,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
@@ -96,7 +97,6 @@ type Aggregator struct {
 	buildingFiles atomic.Bool
 	mergingFiles  atomic.Bool
 
-	//warmupWorking          atomic.Bool
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
@@ -107,7 +107,8 @@ type Aggregator struct {
 	// openTxs=1). Exposed via CommitGate() for use by any component.
 	commitGate sync.RWMutex
 
-	wg closingWaitGroup // goroutines spawned by Aggregator, to ensure all of them are finished at agg.Close
+	background         concurrent.ClosingWaitGroup // background goroutines
+	backgroundProgress *background.ProgressSet     // progress of background goroutines
 
 	// metricsCollector is the process-level KV-read metrics aggregate. Every read
 	// path (exec, commitment, warmup, RPC, engine) hands its finished per-worker
@@ -118,8 +119,6 @@ type Aggregator struct {
 
 	onFilesChange kv.OnFilesChange
 	onFilesDelete kv.OnFilesChange
-
-	ps *background.ProgressSet
 
 	// next fields are set only if agg.doTraceCtx is true. can enable by env: TRACE_AGG=true
 	leakDetector *dbg.LeakDetector
@@ -139,17 +138,17 @@ type Aggregator struct {
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	a := &Aggregator{
-		ctx:             ctx,
-		ctxCancel:       ctxCancel,
-		onFilesChange:   func(frozenFileNames []string) {},
-		onFilesDelete:   func(frozenFileNames []string) {},
-		dirs:            dirs,
-		reorgBlockDepth: reorgBlockDepth,
-		db:              db,
-		leakDetector:    dbg.NewLeakDetector("agg", dbg.SlowTx()),
-		ps:              background.NewProgressSet(),
-		logger:          logger,
-		workers:         workersCfg{merge: 1, collateAndBuild: 1},
+		ctx:                ctx,
+		ctxCancel:          ctxCancel,
+		onFilesChange:      func(frozenFileNames []string) {},
+		onFilesDelete:      func(frozenFileNames []string) {},
+		dirs:               dirs,
+		reorgBlockDepth:    reorgBlockDepth,
+		db:                 db,
+		leakDetector:       dbg.NewLeakDetector("agg", dbg.SlowTx()),
+		backgroundProgress: background.NewProgressSet(),
+		logger:             logger,
+		workers:            workersCfg{merge: 1, collateAndBuild: 1},
 
 		produce: true,
 	}
@@ -171,7 +170,6 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 
 type HasAgg interface {
 	Agg() any
-	ForkableAgg(kv.ForkableId) any
 }
 
 // GetStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
@@ -620,14 +618,14 @@ func (a *Aggregator) WaitForFiles() {
 
 func (a *Aggregator) Close() {
 	a.WaitForFiles()
-	if !a.wg.BeginClose() { // idempotent: safe to call Close multiple times
+	if !a.background.BeginClose() { // idempotent: safe to call Close multiple times
 		return
 	}
 	a.ctxCancel()
 	if a.metricsCollector != nil {
 		a.metricsCollector.Stop() // drain buffered samples before wg.Wait joins the goroutine
 	}
-	a.wg.Wait()
+	a.background.Wait()
 
 	// A closed Aggregator may linger referenced; release the cached branch data
 	// eagerly and drop this cache from the active-instance count so later
@@ -649,21 +647,17 @@ func (a *Aggregator) closeDirtyFiles() {
 		if d == nil {
 			continue
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			d.Close()
-		}()
+		})
 	}
 	for _, ii := range a.standaloneIIs() {
 		if ii == nil {
 			continue
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			ii.Close()
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -766,8 +760,8 @@ func (a *Aggregator) HasBackgroundFilesBuild2() bool {
 	return a.buildingFiles.Load() || a.mergingFiles.Load()
 }
 
-func (a *Aggregator) HasBackgroundFilesBuild() bool { return a.ps.Has() }
-func (a *Aggregator) BackgroundProgress() string    { return a.ps.String() }
+func (a *Aggregator) HasBackgroundFilesBuild() bool { return a.backgroundProgress.Has() }
+func (a *Aggregator) BackgroundProgress() string    { return a.backgroundProgress.String() }
 
 type VisibleFile = kv.VisibleFile
 type VisibleFiles = kv.VisibleFiles
@@ -982,7 +976,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 			collations = append(collations, collation)
 			collListMu.Unlock()
 
-			sf, err := d.buildFiles(ctx, step, collation, a.ps)
+			sf, err := d.buildFiles(ctx, step, collation, a.backgroundProgress)
 			collation.Close()
 			if err != nil {
 				sf.CleanupOnError()
@@ -1019,7 +1013,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 			if err != nil {
 				return fmt.Errorf("index collation %q has failed: %w", ii.FilenameBase, err)
 			}
-			sf, err := ii.buildFiles(ctx, step, collation, a.ps)
+			sf, err := ii.buildFiles(ctx, step, collation, a.backgroundProgress)
 			if err != nil {
 				sf.CleanupOnError()
 				return err
@@ -1127,12 +1121,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
-	if !a.wg.TryAdd() {
-		a.buildingFiles.Store(false)
-		return nil
-	}
-	go func() {
-		defer a.wg.Done()
+	started := a.background.TryGo(func() {
 		defer a.buildingFiles.Store(false)
 		if toStep > fromStep {
 			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
@@ -1151,15 +1140,17 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 			a.onFilesChange(nil)
 		}
 
-		if doMerge && a.wg.TryAdd() {
-			go func() {
-				defer a.wg.Done()
+		if doMerge {
+			a.background.TryGo(func() {
 				if err := a.mergeLoop(ctx); err != nil {
 					panic(err)
 				}
-			}()
+			})
 		}
-	}()
+	})
+	if !started {
+		a.buildingFiles.Store(false)
+	}
 	return nil
 }
 
@@ -1177,7 +1168,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 		return false, nil
 	}
 
-	outs, err := aggTx.FilesInRange(r)
+	outs, err := aggTx.filesInRange(r)
 	if err != nil {
 		return false, err
 	}
@@ -1197,10 +1188,10 @@ func (a *Aggregator) RemoveOverlapsAfterMerge(ctx context.Context) (err error) {
 }
 
 func (a *Aggregator) MergeLoop(ctx context.Context) error {
-	if !a.wg.TryAdd() {
+	if !a.background.TryAdd() {
 		return nil
 	}
-	defer a.wg.Done()
+	defer a.background.Done()
 	return a.mergeLoop(ctx)
 }
 
@@ -1899,7 +1890,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 	return r
 }
 
-func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, r *Ranges) (mf *MergeResult, err error) {
+func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *visibleFilesForMerge, r *Ranges) (mf *MergeResult, err error) {
 	mf = &MergeResult{}
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(at.a.workers.getMerge())
@@ -1960,7 +1951,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 				}
 			}
 
-			mf.d[id], mf.dIdx[id], mf.dHist[id], err = at.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.domain[id], vt, seqReadahead, at.a.ps)
+			mf.d[id], mf.dIdx[id], mf.dHist[id], err = at.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.domain[id], vt, seqReadahead, at.a.backgroundProgress)
 			if needCommitmentTransform {
 				if kid == kv.AccountsDomain || kid == kv.StorageDomain {
 					accStorageMerged.Done()
@@ -1982,7 +1973,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 		rng := rng
 		g.Go(func() error {
 			var err error
-			mf.iis[id], err = at.iis[id].mergeFiles(ctx, files.ii[id], rng.from, rng.to, at.a.ps)
+			mf.iis[id], err = at.iis[id].mergeFiles(ctx, files.ii[id], rng.from, rng.to, at.a.backgroundProgress)
 			return err
 		})
 	}
@@ -2125,16 +2116,9 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		return fin
 	}
 
-	if !a.wg.TryAdd() {
-		a.buildingFiles.Store(false)
-		close(fin)
-		return fin
-	}
-
 	step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
 
-	go func() {
-		defer a.wg.Done()
+	started := a.background.TryGo(func() {
 		defer a.buildingFiles.Store(false)
 
 		if a.snapshotBuildSema != nil {
@@ -2247,12 +2231,11 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			}
 			a.onFilesChange(nil)
 		}
-		if !doMerge || !a.wg.TryAdd() {
+		if !doMerge {
 			close(fin)
 			return
 		}
-		go func() {
-			defer a.wg.Done()
+		merged := a.background.TryGo(func() {
 			defer close(fin)
 			if err := a.mergeLoop(a.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
@@ -2260,8 +2243,16 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 				}
 				a.logger.Warn("[snapshots] merge", "err", err)
 			}
-		}()
-	}()
+		})
+		if !merged {
+			close(fin)
+			return
+		}
+	})
+	if !started {
+		a.buildingFiles.Store(false)
+		close(fin)
+	}
 	return fin
 }
 
@@ -2393,24 +2384,76 @@ func closeAndRemoveFiles(files []*FilesItem) {
 }
 
 func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
-	v := a.acquireVisibleFiles()
-	ac := &AggregatorRoTx{
-		a:        a,
-		visible:  v,
-		iisCount: a.iisCount,
-		_leakID:  a.leakDetector.Add(),
+	return a.beginFilesRoOn(a.acquireVisibleFiles())
+}
+
+// AggregatorFilesPin is a refcounted hold on one visible-file generation.
+// AggregatorRoTx values opened from it via BeginFilesRo all observe that same
+// snapshot, regardless of newer generations published meanwhile — so concurrent
+// readers derived from a single commitment tx never diverge across file
+// generations. It outlives the tx it was pinned from; release with Close.
+type AggregatorFilesPin struct {
+	a *Aggregator
+	v *aggregatorVisible
+}
+
+// Pin takes an independent refcount on this tx's visible-file generation so
+// consistent read txns can be spawned from it for the pin's lifetime. The
+// generation cannot be reclaimed between the load and the bump because this tx
+// already holds a pin on it.
+func (at *AggregatorRoTx) Pin() *AggregatorFilesPin {
+	at.visible.refcnt.Add(1)
+	return &AggregatorFilesPin{a: at.a, v: at.visible}
+}
+
+// BeginFilesRo opens a fresh AggregatorRoTx (its own cursors) pinned to the
+// pin's generation.
+func (p *AggregatorFilesPin) BeginFilesRo() *AggregatorRoTx {
+	p.v.refcnt.Add(1)
+	return p.a.beginFilesRoOn(p.v)
+}
+
+// Close releases the pin's refcount on the generation.
+func (p *AggregatorFilesPin) Close() {
+	if p.a != nil {
+		p.a.releaseVisibleFiles(p.v)
+		p.a, p.v = nil, nil
 	}
+}
+
+// aggRoTxArena lets one AggregatorRoTx and its children come from a single allocation.
+type aggRoTxArena struct {
+	at  AggregatorRoTx
+	d   [kv.DomainLen]DomainRoTx
+	h   [kv.DomainLen]HistoryRoTx
+	hii [kv.DomainLen]InvertedIndexRoTx
+	ii  [kv.StandaloneIdxLen]InvertedIndexRoTx
+}
+
+// beginFilesRoOn builds an AggregatorRoTx with fresh per-domain/per-index cursors
+// over the already-pinned visible generation v (caller owns the refcnt on v,
+// released by AggregatorRoTx.Close).
+func (a *Aggregator) beginFilesRoOn(v *aggregatorVisible) *AggregatorRoTx {
+	arena := &aggRoTxArena{}
+	ac := &arena.at
+	ac.a = a
+	ac.visible = v
+	ac.iisCount = a.iisCount
+	ac._leakID = a.leakDetector.Add()
+
 	for id, iv := range v.iis {
 		if iv == nil {
 			continue
 		}
-		ac.iis[id] = a.iis[id].beginFilesRo(iv)
+		a.iis[id].initFilesRo(&arena.ii[id], iv)
+		ac.iis[id] = &arena.ii[id]
 	}
 	for id, dv := range v.d {
 		if dv == nil {
 			continue
 		}
-		ac.d[id] = a.d[id].beginFilesRo(dv, v.dh[id], v.dhii[id])
+		a.d[id].initFilesRo(&arena.d[id], &arena.h[id], &arena.hii[id], dv, v.dh[id], v.dhii[id])
+		ac.d[id] = &arena.d[id]
 	}
 	return ac
 }

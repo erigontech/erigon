@@ -198,7 +198,7 @@ func testSentinelBlocksByRange(t *testing.T) {
 
 	responsePacket := make([]*cltypes.SignedBeaconBlock, 0)
 	r := bytes.NewReader(w.Bytes())
-	for i := 0; i < len(blocks); i++ {
+	for range blocks {
 		forkDigest := make([]byte, 4)
 		if _, err := r.Read(forkDigest); err != nil {
 			if err == io.EOF {
@@ -229,7 +229,7 @@ func testSentinelBlocksByRange(t *testing.T) {
 		r.ReadByte()
 	}
 	assertPanic(len(blocks) == len(responsePacket), "expected %d blocks, got %d", len(blocks), len(responsePacket))
-	for i := 0; i < len(blocks); i++ {
+	for i := range blocks {
 		root1, err := responsePacket[i].HashSSZ()
 		noErr(err)
 		root2, err := blocks[i].HashSSZ()
@@ -278,7 +278,7 @@ func testSentinelBlocksByRoots(t *testing.T) {
 
 	responsePacket := make([]*cltypes.SignedBeaconBlock, 0)
 	r := bytes.NewReader(w.Bytes())
-	for i := 0; i < len(blocks); i++ {
+	for range blocks {
 		forkDigest := make([]byte, 4)
 		if _, err := r.Read(forkDigest); err != nil {
 			if err == io.EOF {

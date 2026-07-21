@@ -18,10 +18,10 @@ package backup
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"maps"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -58,15 +58,13 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize,
 	return src, dst
 }
 
-func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, readAheadThreads int, logger log.Logger) error {
+func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, logger log.Logger) error {
 	srcTx, err1 := src.BeginRo(ctx)
 	if err1 != nil {
 		return err1
 	}
 	defer srcTx.Rollback()
 
-	commitEvery := time.NewTicker(5 * time.Minute)
-	defer commitEvery.Stop()
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -79,41 +77,71 @@ func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, readA
 		}
 	}
 
-	for name, b := range tablesMap {
-		if b.IsDeprecated {
+	var copiedTables int
+	var copiedRows uint64
+	for _, name := range slices.Sorted(maps.Keys(tablesMap)) { // deterministic order for reproducible benchmarks
+		if tablesMap[name].IsDeprecated {
 			continue
 		}
-		if err := backupTable(ctx, srcTx, dst, name, logEvery, logger); err != nil {
+		rows, err := backupTable(ctx, src, srcTx, dst, name, logEvery, logger)
+		if err != nil {
 			return err
 		}
+		if rows > 0 {
+			copiedTables++
+			copiedRows += rows
+		}
 	}
-	logger.Info("done")
+	logger.Info("done", "tablesWithData", copiedTables, "rows", common.PrettyCounter(copiedRows))
 	return nil
 }
 
-func backupTable(ctx context.Context, srcTx kv.Tx, dst kv.RwDB, table string, logEvery *time.Ticker, logger log.Logger) error {
-	var total uint64
+func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, table string, logEvery *time.Ticker, logger log.Logger) (uint64, error) {
+	t := time.Now()
 	srcC, err := srcTx.Cursor(table)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer srcC.Close()
-	total, _ = srcTx.Count(table)
+	total, err := srcTx.Count(table)
+	if err != nil {
+		return 0, err
+	}
+	size, err := srcTx.BucketSize(table)
+	if err != nil {
+		return 0, err
+	}
+	if total > 0 {
+		logger.Info("[mdbx_to_mdbx] copying", "table", table, "rows", common.PrettyCounter(total), "size", common.ByteCount(size))
+	}
+
+	// Read-ahead warms pages (values too — the copy reads them) just ahead of the
+	// copy cursor. No-op unless WARMUP_TABLE_WORKERS is set.
+	var ra *kv.ReadAhead
+	if workers := int(dbg.WarmupTableWorkers); workers > 0 && total > 0 {
+		bounds, _, err := kv.DistributeBounds(srcTx, table)
+		if err != nil {
+			logger.Warn("[mdbx_to_mdbx] read-ahead disabled", "table", table, "err", err)
+		} else {
+			ra = kv.NewReadAhead(ctx, src, table, kv.ReadAheadCfg{Bounds: bounds, TableSize: size, Workers: workers, WarmValues: true})
+		}
+	}
+	defer ra.Close()
 
 	if err := dst.Update(ctx, func(tx kv.RwTx) error {
 		return tx.ClearTable(table)
 	}); err != nil {
-		return err
+		return 0, err
 	}
 	dstTx, err := dst.BeginRw(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer dstTx.Rollback()
 
 	c, err := dstTx.RwCursor(table)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer c.Close()
 	casted, isDupsort := c.(kv.RwCursorDupSort)
@@ -121,56 +149,117 @@ func backupTable(ctx context.Context, srcTx kv.Tx, dst kv.RwDB, table string, lo
 
 	for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
 		if err != nil {
-			return err
+			return 0, err
 		}
 
 		if isDupsort {
 			if err = casted.AppendDup(k, v); err != nil {
-				return err
+				return 0, err
 			}
 		} else {
 			if err = c.Append(k, v); err != nil {
-				return err
+				return 0, err
 			}
 		}
 
 		i++
+		if i%1000 == 0 {
+			ra.SetPos(k)
+		}
 		if i%100_000 == 0 {
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return 0, ctx.Err()
 			case <-logEvery.C:
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
 				logger.Info("Progress", "table", table, "progress",
-					fmt.Sprintf("%s/%s", common.PrettyCounter(i), common.PrettyCounter(total)), "key", hex.EncodeToString(k),
+					fmt.Sprintf("%s/%s", common.PrettyCounter(i), common.PrettyCounter(total)),
+					"size", common.ByteCount(size), "keys/s", uint64(float64(i)/time.Since(t).Seconds()),
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			default:
 			}
 		}
 	}
-	// migrate bucket sequences to native mdbx implementation
-	//currentID, err := srcTx.Sequence(name, 0)
-	//if err != nil {
-	//	return err
-	//}
-	//_, err = dstTx.Sequence(name, currentID)
-	//if err != nil {
-	//	return err
-	//}
+
 	if err2 := dstTx.Commit(); err2 != nil {
-		return err2
+		return 0, err2
+	}
+	return i, nil
+}
+
+// ClearTables empties each table on the caller's open write tx — atomic with the
+// caller's other writes, and safe inside an open writer (a self-owned writer
+// would deadlock, since MDBX serializes writers). db drives optional read-ahead only.
+func ClearTables(ctx context.Context, db kv.RoDB, tx kv.RwTx, tables ...string) error {
+	for _, table := range tables {
+		if err := clearTable(ctx, db, tx, table); err != nil {
+			return fmt.Errorf("clearing %s: %w", table, err)
+		}
 	}
 	return nil
 }
 
-const ReadAheadThreads = 2048
+func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error {
+	workers := int(dbg.WarmupTableWorkers)
+	if workers == 0 { // chunked range-delete only pays off paired with read-ahead
+		log.Info("[clear]", "table", table)
+		return tx.ClearTable(table)
+	}
 
-func ClearTables(ctx context.Context, tx kv.RwTx, tables ...string) error {
-	for _, tbl := range tables {
-		log.Info("Clear", "table", tbl)
-		if err := tx.ClearTable(tbl); err != nil {
+	dr, ok := tx.(kv.HasDeleteRange)
+	if !ok { // backend has no range-delete: drop the whole table
+		return tx.ClearTable(table)
+	}
+
+	bounds, size, err := kv.DistributeBounds(tx, table)
+	if err != nil {
+		return err
+	}
+	log.Info("[clear]", "table", table, "size", common.ByteCount(size))
+	if len(bounds) <= 2 { // one chunk ([nil,nil]): native drop beats distribute+warm+whole-table DeleteRange
+		return tx.ClearTable(table)
+	}
+
+	// read-ahead over the same boundaries; keys-only — range-delete never reads values
+	ra := kv.NewReadAhead(ctx, db, table, kv.ReadAheadCfg{Bounds: bounds, TableSize: size, Workers: workers})
+	defer ra.Close()
+
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	lastLog := time.Now()
+	lastSize := size
+	var deleted, lastDeleted uint64
+	for i := 0; i+1 < len(bounds); i++ {
+		ra.SetPos(bounds[i])
+		t := time.Now()
+		n, err := dr.DeleteRange(table, bounds[i], bounds[i+1])
+		if took := time.Since(t); took > 500*time.Millisecond {
+			log.Warn("[clear] delete", "table", table, "took", took)
+		}
+		if err != nil {
 			return err
+		}
+		deleted += n
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			remaining, err := tx.BucketSize(table)
+			if err != nil {
+				continue // a failed progress read shouldn't abort the clear
+			}
+			now := time.Now()
+			secs := now.Sub(lastLog).Seconds()
+			log.Info("[clear]", "table", table,
+				"speed", common.ByteCount(uint64(float64(lastSize-remaining)/secs))+"/s",
+				"keys", common.PrettyCounter(uint64(float64(deleted-lastDeleted)/secs))+"/s",
+				"remaining", common.ByteCount(remaining),
+			)
+			lastLog, lastSize, lastDeleted = now, remaining, deleted
+		default:
 		}
 	}
 	return nil

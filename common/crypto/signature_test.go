@@ -122,7 +122,7 @@ func TestCompressPubkey(t *testing.T) {
 func TestPubkeyRandom(t *testing.T) {
 	const runs = 200
 
-	for i := 0; i < runs; i++ {
+	for i := range runs {
 		key, err := GenerateKey()
 		if err != nil {
 			t.Fatalf("iteration %d: %v", i, err)

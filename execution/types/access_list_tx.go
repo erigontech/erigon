@@ -144,7 +144,7 @@ func accessListSize(al AccessList) int {
 }
 
 func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
-	for i := 0; i < len(al); i++ {
+	for i := range al {
 		tupleLen := 21
 		// Each storage key takes 33 bytes
 		storageLen := 33 * len(al[i].StorageKeys)
@@ -278,7 +278,7 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 		// decode tuple
 		*al = append(*al, AccessTuple{StorageKeys: []common.Hash{}})
 		tuple := &(*al)[len(*al)-1]
-		if err = s.ReadBytes(tuple.Address[:]); err != nil {
+		if tuple.Address, err = s.Addr(); err != nil {
 			return fmt.Errorf("read Address: %w", err)
 		}
 		if _, err = s.List(); err != nil {

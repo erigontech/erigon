@@ -150,6 +150,47 @@ func TestOverride_GasLimitAndMaxGasLimit(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// OverrideBaseFee — message base fee (debug_traceCall / trace_callMany)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestOverrideBaseFee_NilReceiver(t *testing.T) {
+	var o *BlockOverrides
+	baseFee := uint256.NewInt(7)
+	got, err := o.OverrideBaseFee(baseFee)
+	require.NoError(t, err)
+	assert.Same(t, baseFee, got, "nil receiver must return the input unchanged")
+}
+
+func TestOverrideBaseFee_NoOverride(t *testing.T) {
+	baseFee := uint256.NewInt(7)
+	got, err := (&BlockOverrides{}).OverrideBaseFee(baseFee)
+	require.NoError(t, err)
+	assert.Same(t, baseFee, got, "no BaseFeePerGas must return the input unchanged")
+}
+
+func TestOverrideBaseFee_AppliesOverride(t *testing.T) {
+	o := BlockOverrides{BaseFeePerGas: bigHex(500)}
+	got, err := o.OverrideBaseFee(uint256.NewInt(7))
+	require.NoError(t, err)
+	assert.Equal(t, uint256.NewInt(500), got)
+}
+
+func TestOverrideBaseFee_AppliesOverrideOnPreLondonBlock(t *testing.T) {
+	o := BlockOverrides{BaseFeePerGas: bigHex(500)}
+	got, err := o.OverrideBaseFee(nil)
+	require.NoError(t, err)
+	assert.Equal(t, uint256.NewInt(500), got, "explicit BaseFeePerGas must apply even when the target block has no base fee")
+}
+
+func TestOverrideBaseFee_Overflow(t *testing.T) {
+	tooBig := new(big.Int).Lsh(big.NewInt(1), 256)
+	o := BlockOverrides{BaseFeePerGas: (*hexutil.Big)(tooBig)}
+	_, err := o.OverrideBaseFee(uint256.NewInt(1))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "BaseFeePerGas")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // OverrideHeader — block header copy (eth_simulateV1 block assembly)
 // ─────────────────────────────────────────────────────────────────────────────
 

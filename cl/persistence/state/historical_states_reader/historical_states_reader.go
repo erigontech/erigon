@@ -412,7 +412,13 @@ func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, kvGetter state_
 			return err
 		}
 		if len(v) != 32 {
-			return fmt.Errorf("invalid key %x", key)
+			// An empty entry is a not-yet-reconstructed slot the antiquary can
+			// re-antiquate past; a non-empty entry of the wrong length is
+			// corruption and must surface as a hard error.
+			if len(v) != 0 {
+				return fmt.Errorf("table %s slot %d: corrupt root, %d bytes (want 32)", table, i, len(v))
+			}
+			return fmt.Errorf("%w: table %s slot %d", ErrMissingHistoryVectorData, table, i)
 		}
 		currKeySlot = i
 		out.Set(int(currKeySlot%size), common.BytesToHash(v))
@@ -420,6 +426,12 @@ func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, kvGetter state_
 		if inserted == needFromDB {
 			break
 		}
+	}
+
+	// A short window means the tail slots are absent from both DB and snapshots;
+	// leaving those vector entries zero would fabricate roots, so surface it.
+	if inserted < needFromDB {
+		return fmt.Errorf("%w: table %s slot %d", ErrMissingHistoryVectorData, table, slot-needFromDB+inserted)
 	}
 
 	for i := 0; i < int(needFromGenesis); i++ {
@@ -954,7 +966,6 @@ func (r *HistoricalStatesReader) computeRelevantEpochs(slot uint64) (uint64, uin
 
 func (r *HistoricalStatesReader) tryCachingEpochsInParallell(tx kv.Tx, kvGetter state_accessors.GetValFn, activeIdxs [][]uint64, epochs []uint64) error {
 	var wg sync.WaitGroup
-	wg.Add(len(epochs))
 	for i, epoch := range epochs {
 		mixPosition := (epoch + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
 		mix, err := r.ReadRandaoMixBySlotAndIndex(tx, kvGetter, epochs[0]*r.cfg.SlotsPerEpoch, mixPosition)
@@ -962,11 +973,10 @@ func (r *HistoricalStatesReader) tryCachingEpochsInParallell(tx kv.Tx, kvGetter 
 			return err
 		}
 
-		go func(mix common.Hash, epoch uint64, idxs []uint64) {
-			defer wg.Done()
-
+		idxs := activeIdxs[i]
+		wg.Go(func() {
 			_, _ = r.ComputeCommittee(mix, idxs, epoch*r.cfg.SlotsPerEpoch, r.cfg.TargetCommitteeSize, 0)
-		}(mix, epoch, activeIdxs[i])
+		})
 	}
 	wg.Wait()
 	return nil
@@ -1131,6 +1141,14 @@ func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors
 // yet re-indexed the affected slots. The caller should trigger re-antiquation
 // rather than proceeding with zero-valued fields.
 var ErrMissingGloasData = errors.New("missing GLOAS snapshot data (re-antiquation required)")
+
+// ErrMissingHistoryVectorData is returned when a dense block_roots/state_roots
+// history slot has a missing (empty) snapshot entry. Per process_slot these
+// vectors are filled every slot (never empty), so an empty entry is a frozen
+// data gap, not valid state — the caller must re-antiquate past it rather than
+// fabricate a root. A non-empty entry of the wrong length is corruption and
+// surfaces as a hard error instead.
+var ErrMissingHistoryVectorData = errors.New("missing block/state root history (re-antiquation required)")
 
 // readCompressedSSZ reads a zstd-compressed SSZ value from the given table at the given slot,
 // decompresses it and decodes it into `out`. Used for per-slot GLOAS fields.

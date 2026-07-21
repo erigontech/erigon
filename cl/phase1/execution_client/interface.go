@@ -56,4 +56,6 @@ type ExecutionEngine interface {
 
 	// Blobs
 	GetBlobs(ctx context.Context, versionedHashes []common.Hash, version clparams.StateVersion) (blobs [][]byte, proofs [][][]byte, err error)
+	// Client identification
+	GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error)
 }

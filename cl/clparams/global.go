@@ -18,6 +18,9 @@ func InitGlobalStaticConfig(bcfg *BeaconChainConfig, ccfg *CaplinConfig) {
 	if globalBeaconConfig != nil {
 		panic("globalBeaconConfig already initialized")
 	}
+	if err := bcfg.ValidateExecutionRequestTypeConstants(); err != nil {
+		panic(err)
+	}
 	globalBeaconConfig = bcfg
 	globalCaplinConfig = ccfg
 }

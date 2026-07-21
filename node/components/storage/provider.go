@@ -35,10 +35,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
-	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
@@ -56,7 +56,7 @@ type Provider struct {
 	ChainDB              kv.TemporalRwDB
 	BlockReader          *freezeblocks.BlockReader
 	BlockWriter          *blockio.BlockWriter
-	AllSnapshots         *freezeblocks.RoSnapshots
+	AllSnapshots         *blocksnapshots.RoSnapshots
 	AllBorSnapshots      *heimdall.RoSnapshots // nil if not Bor
 	BridgeStore          bridge.Store          // nil if not Bor
 	HeimdallStore        heimdall.Store        // nil if not Bor
@@ -65,7 +65,7 @@ type Provider struct {
 	GenesisHash          common.Hash
 	CurrentBlockNumber   uint64
 	SegmentsBuildLimiter *semaphore.Weighted
-	BlockRetire          services.BlockRetire
+	BlockRetire          dbservices.BlockRetire
 
 	logger log.Logger
 }
@@ -79,7 +79,7 @@ type Deps struct {
 	ChainDB         kv.TemporalRwDB
 	BlockReader     *freezeblocks.BlockReader
 	BlockWriter     *blockio.BlockWriter
-	AllSnapshots    *freezeblocks.RoSnapshots
+	AllSnapshots    *blocksnapshots.RoSnapshots
 	AllBorSnapshots *heimdall.RoSnapshots // nil if not Bor
 	BridgeStore     bridge.Store          // nil if not Bor
 	HeimdallStore   heimdall.Store        // nil if not Bor
@@ -94,10 +94,10 @@ type Deps struct {
 	// DBEventNotifier — NOT owned by storage. Passed in so BlockRetire and
 	// file-change callbacks can forward snapshot events. Currently backed by
 	// shards.Events; will migrate to the framework event bus.
-	DBEventNotifier services.DBEventNotifier
+	DBEventNotifier dbservices.DBEventNotifier
 
 	// Downloader client for file-change callbacks (may be nil).
-	DownloaderClient downloader.Client
+	DownloaderClient dbservices.DownloaderClient
 
 	SegmentsBuildLimiter *semaphore.Weighted
 	Logger               log.Logger
@@ -139,7 +139,7 @@ func (p *Provider) Initialize(deps Deps) error {
 	}
 
 	// BlockRetire — heimdallStore and bridgeStore may be nil for non-Bor chains.
-	p.BlockRetire = freezeblocks.NewBlockRetire(1, config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB, p.HeimdallStore, p.BridgeStore, p.ChainConfig, config, deps.DBEventNotifier, p.SegmentsBuildLimiter, logger)
+	p.BlockRetire = freezeblocks.NewBlockRetire(ctx, 1, config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB, p.HeimdallStore, p.BridgeStore, p.ChainConfig, config, deps.DBEventNotifier, p.SegmentsBuildLimiter, logger)
 
 	// Serialize retirement's chain-DB reads against Aggregator commit+prune.
 	// Without this, retirement's db.View RO txs can overlap a commit and pin
@@ -183,4 +183,11 @@ func (p *Provider) Initialize(deps Deps) error {
 	)
 
 	return nil
+}
+
+// Close drains BlockRetire before the DB is torn down.
+func (p *Provider) Close() {
+	if p.BlockRetire != nil {
+		p.BlockRetire.Close()
+	}
 }

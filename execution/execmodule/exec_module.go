@@ -31,12 +31,13 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
@@ -184,7 +185,7 @@ func (c *CacheView) HasStorage(address common.Address) (bool, error) {
 type ExecModule struct {
 	bacgroundCtx context.Context
 	// Snapshots + MDBX
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 
 	// MDBX database
 	db kv.TemporalRwDB // main database
@@ -211,7 +212,8 @@ type ExecModule struct {
 	config  *chain.Config
 	syncCfg ethconfig.Sync
 	// rules engine
-	engine rules.Engine
+	engine         rules.Engine
+	balRegenerator *bal.Regenerator
 
 	fcuBackgroundPrune      bool
 	fcuBackgroundCommit     bool
@@ -238,7 +240,7 @@ var _ ExecutionModule = (*ExecModule)(nil) // compile-time interface check
 
 func NewExecModule(
 	ctx context.Context,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	db kv.TemporalRwDB,
 	pipelineExecutor *PipelineExecutor,
 	currentBlockNumber uint64,
@@ -284,6 +286,7 @@ func NewExecModule(
 		hook:                    hook,
 		accum:                   accum,
 		engine:                  engine,
+		balRegenerator:          bal.NewRegenerator(blockReader, engine, logger),
 		syncCfg:                 syncCfg,
 		bacgroundCtx:            ctx,
 		fcuBackgroundPrune:      fcuBackgroundPrune,
@@ -713,7 +716,7 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 		}
 		e.forkValidator.NotifyCurrentHeight(progress)
 		return nil
-	}); err != nil {
+	}); err != nil && !errors.Is(err, context.Canceled) {
 		e.logger.Warn("Could not notify fork validator of current height", "err", err)
 	}
 }
@@ -756,14 +759,15 @@ func (e *ExecModule) HasBlock(ctx context.Context, blockHash *common.Hash, _ *ui
 	if *num <= e.blockReader.FrozenBlocks() {
 		return true, nil
 	}
-	has, err := tx.Has(kv.Headers, dbutils.HeaderKey(*num, *blockHash))
+	dbKey := dbutils.HeaderKey(*num, *blockHash)
+	has, err := tx.Has(kv.Headers, dbKey)
 	if err != nil {
 		return false, err
 	}
 	if !has {
 		return false, nil
 	}
-	has, err = tx.Has(kv.BlockBody, dbutils.HeaderKey(*num, *blockHash))
+	has, err = tx.Has(kv.BlockBody, dbKey)
 	if err != nil {
 		return false, err
 	}

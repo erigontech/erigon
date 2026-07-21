@@ -902,7 +902,7 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 	if stepsInDb > 0 {
 		vals = append(vals, []any{
 			"stepsInDB", fmt.Sprintf("%.2f", stepsInDb),
-			"step", fmt.Sprintf("%.1f", float64(te.lastCommittedTxNum.Load())/float64(te.agg.StepSize())),
+			"step", fmt.Sprintf("%.1f", float64(te.lastCommittedTxNum.Load())/float64(te.doms.StepSize())),
 		}...)
 	}
 

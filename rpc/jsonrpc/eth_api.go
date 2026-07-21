@@ -33,13 +33,14 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -53,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -149,9 +151,9 @@ type BaseAPI struct {
 	_pruneMode                atomic.Pointer[prune.Mode]
 	_commitmentHistoryEnabled atomic.Pointer[bool]
 
-	_blockReader services.FullBlockReader
+	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
-	_txnReader   services.TxnReader
+	_txnReader   dbservices.TxnReader
 	_engine      rules.EngineReader
 
 	bridgeReader bridgeReader
@@ -159,22 +161,39 @@ type BaseAPI struct {
 	evmCallTimeout      time.Duration
 	blockRangeLimit     int
 	getLogsMaxResults   int
+	logQueryLimit       int
 	dirs                datadir.Dirs
 	receiptsGenerator   *receipts.Generator
 	borReceiptGenerator *receipts.BorGenerator
+	balRegenerator      *bal.Regenerator
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader, rangeLimit int, getLogsMaxResults int) *BaseAPI {
-	var (
-		blocksLRUSize = 128 // ~32Mb
-	)
+type BaseApiConfig struct {
+	SingleNodeMode    bool
+	EvmCallTimeout    time.Duration // 0 → rpccfg.DefaultEvmCallTimeout
+	Dirs              datadir.Dirs
+	BlockRangeLimit   int
+	GetLogsMaxResults int
+	LogQueryLimit     int
+}
+
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, bridgeReader bridgeReader, conf *BaseApiConfig) *BaseAPI {
+	if conf == nil {
+		conf = &BaseApiConfig{}
+	}
+	blocksLRUSize := 128 // ~32Mb
 	// if RPCDaemon deployed as independent process: increase cache sizes
-	if !singleNodeMode {
+	if !conf.SingleNodeMode {
 		blocksLRUSize *= 5
 	}
 	blocksLRU, err := lru.New[common.Hash, *types.Block](blocksLRUSize)
 	if err != nil {
 		panic(err)
+	}
+
+	evmCallTimeout := conf.EvmCallTimeout
+	if evmCallTimeout == 0 {
+		evmCallTimeout = rpccfg.DefaultEvmCallTimeout
 	}
 
 	return &BaseAPI{
@@ -186,12 +205,14 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		_txNumReader:        blockReader.TxnumReader(),
 		evmCallTimeout:      evmCallTimeout,
 		_engine:             engine,
-		receiptsGenerator:   receipts.NewGenerator(dirs, blockReader, engine, stateCache, evmCallTimeout, f),
+		receiptsGenerator:   receipts.NewGenerator(conf.Dirs, blockReader, engine, stateCache, evmCallTimeout, f),
 		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine, stateCache, f),
-		dirs:                dirs,
+		balRegenerator:      bal.NewRegenerator(blockReader, engine, log.Root()),
+		dirs:                conf.Dirs,
 		bridgeReader:        bridgeReader,
-		blockRangeLimit:     rangeLimit,
-		getLogsMaxResults:   getLogsMaxResults,
+		blockRangeLimit:     conf.BlockRangeLimit,
+		getLogsMaxResults:   conf.GetLogsMaxResults,
+		logQueryLimit:       conf.LogQueryLimit,
 	}
 }
 
@@ -339,7 +360,7 @@ func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.
 func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.Header().Number.Uint64(), nil
+			return it.NumberU64(), nil
 		}
 	}
 	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
@@ -362,7 +383,7 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 	}
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.Header(), isLatest, nil
+			return it.HeaderNoCopy(), isLatest, nil
 		}
 	}
 
@@ -383,7 +404,7 @@ func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, 
 
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(h); ok && it != nil {
-			return it.Header(), nil
+			return it.HeaderNoCopy(), nil
 		}
 	}
 	overlayTx := api.filters.WithOverlay(tx)
@@ -393,7 +414,7 @@ func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, 
 func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx) (*types.Header, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.Header(), nil
+			return it.HeaderNoCopy(), nil
 		}
 	}
 
@@ -445,7 +466,7 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 }
 
 // checkReceiptsAvailable checks if receipts are available for the given block.
-// In case --persist.receipts which makes all historical receipts available even when state history is pruned.
+// In case --prune.include-receipts which makes all historical receipts available even when state history is pruned.
 func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
 	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
 	if err != nil {

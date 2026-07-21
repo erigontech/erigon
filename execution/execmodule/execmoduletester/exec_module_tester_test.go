@@ -26,6 +26,15 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 )
 
+// CLI usage (e.g. evm blocktest via BlockTest.RunCLI) constructs the tester with
+// a nil testing.TB and owns its lifecycle. New must not dereference tb.
+func TestNewWithNilTB(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(nil)
+	require.NotNil(t, m)
+	m.Close()
+}
+
 func TestInsertChain(t *testing.T) {
 	t.Parallel()
 	m := execmoduletester.New(t)

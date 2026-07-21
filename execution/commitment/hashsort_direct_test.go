@@ -145,7 +145,7 @@ func TestHashSortModeDirect_MultiBatchOrder(t *testing.T) {
 			ut.TouchPlainKey(string(a), []byte("v"), ut.TouchStorage)
 		}
 		// Duplicate a handful of hashedKeys via the hashed-touch path.
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			ut.TouchHashedKey(KeyToHexNibbleHash(addrs[i*1000]))
 		}
 
@@ -157,7 +157,7 @@ func TestHashSortModeDirect_MultiBatchOrder(t *testing.T) {
 		require.EqualValues(t, 0, ut.Size(), "HashSort consumes the batch")
 
 		// Duplicated hashedKeys: plain-touched delivery precedes hashed-touched (touch order).
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			h := KeyToHexNibbleHash(addrs[i*1000])
 			idx := slices.IndexFunc(got, func(s sortedPair) bool { return bytes.Equal(s.hk, h) })
 			require.GreaterOrEqual(t, idx, 0)
@@ -172,7 +172,7 @@ func TestHashSortModeDirect_MultiBatchOrder(t *testing.T) {
 // and hashed-only sibling paths, with hashed duplicates of some plain keys) to ut.
 func touchRandomCorpus(ut *Updates, numKeys int) {
 	rnd := rand.New(rand.NewSource(7))
-	for i := 0; i < numKeys; i++ {
+	for i := range numKeys {
 		a := make([]byte, 20)
 		binary.BigEndian.PutUint64(a, rnd.Uint64())
 		binary.BigEndian.PutUint64(a[8:], uint64(i))

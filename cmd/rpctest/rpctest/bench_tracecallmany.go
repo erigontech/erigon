@@ -65,7 +65,7 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 		value := make([]*hexutil.Big, n)
 		data := make([]hexutil.Bytes, n)
 
-		for i := 0; i < n; i++ {
+		for i := range n {
 			tx := b.Result.Transactions[i]
 			from[i] = tx.From
 			to[i] = tx.To

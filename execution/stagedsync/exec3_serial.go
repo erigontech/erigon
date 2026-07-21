@@ -393,14 +393,16 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					blockStartTxNum := firstTask.TxNum - uint64(firstTask.TxIndex)
 					priorReceipts, priorErr := se.reconstructPriorReceipts(ctx, se.applyTx, txTask.Header, txTask.Txs, startTxIndex, blockStartTxNum)
 					if priorErr != nil {
-						return priorErr
+						se.logger.Warn(fmt.Sprintf("[%s] failed to reconstruct prior receipts for partial block", se.logPrefix),
+							"block", txTask.BlockNumber(), "startTxIndex", startTxIndex, "err", priorErr)
+					} else {
+						finalizeReceipts = append(priorReceipts, blockReceipts...)
+						priorComplete = true
 					}
-					finalizeReceipts = append(priorReceipts, blockReceipts...)
-					// The post-exec validator, which fills receipt blooms for
-					// full blocks, runs only when startTxIndex == 0 — complete
-					// the published set here.
+					// The post-exec validator, which fills receipt blooms for full
+					// blocks, skips partial ones — do it here, even when prior
+					// receipts couldn't be reconstructed (suffix still needs blooms).
 					receipts.DeriveFields(finalizeReceipts, txTask.BlockHash())
-					priorComplete = true
 				}
 
 				_, err = se.cfg.engine.Finalize(

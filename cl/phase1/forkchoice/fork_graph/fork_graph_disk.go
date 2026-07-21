@@ -19,6 +19,7 @@ package fork_graph
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -530,8 +531,8 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 	}
 
 	// Traverse the blocks from top to bottom.
-	for i := len(blocksInTheWay) - 1; i >= 0; i-- {
-		if err := transition.TransitionState(copyReferencedState, blocksInTheWay[i], nil, false); err != nil {
+	for _, b := range slices.Backward(blocksInTheWay) {
+		if err := transition.TransitionState(copyReferencedState, b, nil, false); err != nil {
 			if addChainSegment {
 				f.currentStateMu.Lock()
 				f.currentState = nil

@@ -127,7 +127,7 @@ func reopenAgg(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, dirs dat
 	t.Cleanup(newAgg.Close)
 	require.NoError(t, newAgg.OpenFolder())
 	require.NoError(t, newAgg.BuildMissedAccessors(t.Context(), 1))
-	newDB, err := temporal.New(db, newAgg)
+	newDB, err := temporal.New(db, newAgg, nil)
 	require.NoError(t, err)
 	return newDB
 }

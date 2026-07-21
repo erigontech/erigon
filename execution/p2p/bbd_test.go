@@ -19,6 +19,7 @@ package p2p
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -183,12 +184,9 @@ type chainServingBbdFetcher struct {
 }
 
 func (s *chainServingBbdFetcher) FetchHeadersBackwards(_ context.Context, hash common.Hash, amount uint64, _ *PeerId, _ ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
-	for i := len(s.headers) - 1; i >= 0; i-- {
-		if s.headers[i].Hash() == hash {
-			start := i - int(amount) + 1
-			if start < 0 {
-				start = 0
-			}
+	for i, header := range slices.Backward(s.headers) {
+		if header.Hash() == hash {
+			start := max(i-int(amount)+1, 0)
 			return FetcherResponse[[]*types.Header]{Data: s.headers[start : i+1]}, nil
 		}
 	}

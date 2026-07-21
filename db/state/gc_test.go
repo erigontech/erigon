@@ -124,10 +124,8 @@ func TestAggregatorReclaimConcurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
-	for i := 0; i < 16; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 16 {
+		wg.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -139,7 +137,7 @@ func TestAggregatorReclaimConcurrent(t *testing.T) {
 				_ = tx.d[kv.AccountsDomain].ht.files.EndTxNum()
 				tx.Close()
 			}
-		}()
+		})
 	}
 
 	require.NoError(t, agg.RemoveOverlapsAfterMerge(t.Context()))

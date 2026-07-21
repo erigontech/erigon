@@ -17,9 +17,12 @@ jobs:
           - macos-15
           - windows-2025
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-erigon
         id: erigon

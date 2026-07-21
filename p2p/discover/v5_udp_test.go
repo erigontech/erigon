@@ -21,6 +21,7 @@ package discover
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
 	"fmt"
@@ -49,7 +50,7 @@ func TestUDPv5_lookupE2E(t *testing.T) {
 
 	const N = 5
 	var nodes []*UDPv5
-	for i := 0; i < N; i++ {
+	for range N {
 		var cfg Config
 		if len(nodes) > 0 {
 			bn := nodes[0].Self()
@@ -95,11 +96,70 @@ func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 	realaddr := socket.LocalAddr().(*net.UDPAddr)
 	ln.SetStaticIP(realaddr.IP)
 	ln.SetFallbackUDP(realaddr.Port)
-	udp, err := ListenV5(socket, ln, cfg)
+	udp, err := ListenV5(t.Context(), socket, ln, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return udp
+}
+
+// This test checks that cancelling the context passed to ListenV5 shuts the transport
+// down completely, without an explicit Close.
+func TestUDPv5_listenCtxCancel(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	db, _ := enode.OpenDB("")
+	defer db.Close()
+	key := newkey()
+	udp, err := ListenV5(ctx, newpipe(), enode.NewLocalNode(db, key), Config{
+		PrivateKey:   key,
+		Log:          testlog.Logger(t, log.LvlInfo),
+		ValidSchemes: enode.ValidSchemesForTesting,
+		PingInterval: 1000 * time.Hour,
+	})
+	require.NoError(t, err)
+	defer udp.Close()
+
+	cancel()
+
+	// tab.closed is the last thing Close does, so observing it proves the whole
+	// shutdown ran: the socket is closed, readLoop and dispatch have exited, and
+	// the table loop has stopped.
+	select {
+	case <-udp.tab.closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelling the listen context did not shut the transport down")
+	}
+}
+
+// This test checks that trace logging follows the configured log level.
+func TestUDPv5_traceFollowsLogLevel(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		level log.Lvl
+		want  bool
+	}{
+		{log.LvlTrace, true},
+		{log.LvlInfo, false},
+	} {
+		t.Run(tc.level.String(), func(t *testing.T) {
+			db, _ := enode.OpenDB("")
+			defer db.Close()
+			key := newkey()
+			udp, err := ListenV5(t.Context(), newpipe(), enode.NewLocalNode(db, key), Config{
+				PrivateKey:   key,
+				Log:          testlog.Logger(t, tc.level),
+				ValidSchemes: enode.ValidSchemesForTesting,
+				PingInterval: 1000 * time.Hour,
+			})
+			require.NoError(t, err)
+			defer udp.Close()
+
+			require.Equal(t, tc.want, udp.trace)
+		})
+	}
 }
 
 // This test checks that incoming PING calls are handled correctly.
@@ -977,7 +1037,7 @@ func newUDPV5Test(t *testing.T) *udpV5Test {
 	ln := enode.NewLocalNode(test.db, test.localkey)
 	ln.SetStaticIP(net.IP{10, 0, 0, 1})
 	ln.SetFallbackUDP(30303)
-	test.udp, _ = ListenV5(test.pipe, ln, Config{
+	test.udp, _ = ListenV5(t.Context(), test.pipe, ln, Config{
 		PrivateKey:   test.localkey,
 		Log:          testlog.Logger(t, log.LvlTrace),
 		ValidSchemes: enode.ValidSchemesForTesting,

@@ -64,7 +64,7 @@ func (a Announcements) Swap(i, j int) {
 	a.sizes[i], a.sizes[j] = a.sizes[j], a.sizes[i]
 	ii := i * length.Hash
 	jj := j * length.Hash
-	for k := 0; k < length.Hash; k++ {
+	for range length.Hash {
 		a.hashes[ii], a.hashes[jj] = a.hashes[jj], a.hashes[ii]
 		ii++
 		jj++
@@ -145,7 +145,7 @@ func (h Hashes) Less(i, j int) bool {
 func (h Hashes) Swap(i, j int) {
 	ii := i * length.Hash
 	jj := j * length.Hash
-	for k := 0; k < length.Hash; k++ {
+	for range length.Hash {
 		h[ii], h[jj] = h[jj], h[ii]
 		ii++
 		jj++
