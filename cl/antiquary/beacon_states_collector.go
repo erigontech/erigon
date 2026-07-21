@@ -715,11 +715,11 @@ func antiquateListSSZ[T solid.EncodableHashableSSZ](ctx context.Context, slot ui
 	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), buffer.Bytes())
 }
 
-func antiquateBytesListDiff(ctx context.Context, key []byte, old, new []byte, buffer *bytes.Buffer, collector *etl.Collector, diffFn func(w io.Writer, old, new []byte) error) error {
+func antiquateBytesListDiff(ctx context.Context, key []byte, old, newVal []byte, buffer *bytes.Buffer, collector *etl.Collector, diffFn func(w io.Writer, old, newVal []byte) error) error {
 	buffer.Reset()
 
 	// create a diff
-	if err := diffFn(buffer, old, new); err != nil {
+	if err := diffFn(buffer, old, newVal); err != nil {
 		return err
 	}
 
