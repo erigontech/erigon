@@ -717,14 +717,10 @@ func (p *TxPool) Started() bool {
 	return p.started.Load()
 }
 
-// Pause blocks all state-reading entry points until the returned
-// resume closure is called. Callers defer resume immediately after
-// Pause. While paused, every temporal RO tx open blocks on the
-// pauseLock's RLock.
-func (p *TxPool) Pause() (resume func()) {
-	p.pauseLock.Lock()
-	return p.pauseLock.Unlock
-}
+// Stop blocks all state-reading entry points on the pool. Callers
+// pair Stop with Resume via defer.
+func (p *TxPool) Stop()   { p.pauseLock.Lock() }
+func (p *TxPool) Resume() { p.pauseLock.Unlock() }
 
 // best returns the highest-priority pending transactions that fit within the given gas and RLP space budgets.
 // EIP-8037: availableGas.Regular tracks regular gas; availableGas.State tracks intrinsic

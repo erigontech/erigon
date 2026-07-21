@@ -2215,8 +2215,8 @@ func (s *Ethereum) SetHead(ctx context.Context, targetBlock uint64) error {
 	// when FinalizeUnwind deletes a file an in-flight coreTx still
 	// references).
 	if s.txPool != nil {
-		resume := s.txPool.Pause()
-		defer resume()
+		s.txPool.Stop()
+		defer s.txPool.Resume()
 	}
 	return s.execModule.SetHead(ctx, targetBlock)
 }
