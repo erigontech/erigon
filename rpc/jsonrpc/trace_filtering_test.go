@@ -145,6 +145,37 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 	}
 }
 
+// TestCallTransactionNilTxnReturnsError reproduces
+// https://github.com/erigontech/erigon/issues/22643: at the live chain tip,
+// TxnByIdxInBlock can resolve a txIndex whose body hasn't materialized yet and
+// return (nil, nil) rather than an error. callTransaction must turn that into
+// a JSON-RPC error instead of dereferencing the nil transaction.
+func TestCallTransactionNilTxnReturnsError(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+
+	ctx := context.Background()
+	const blockNum = uint64(6)
+
+	tx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	block, err := m.BlockReader.BlockByNumber(ctx, tx, blockNum)
+	require.NoError(t, err)
+	require.NotNil(t, block, "block %d not found", blockNum)
+
+	chainConfig, err := api.chainConfig(ctx, tx)
+	require.NoError(t, err)
+
+	// Far past the last real transaction in the block, so TxnByIdxInBlock
+	// finds the body but no matching entry in kv.EthTx and returns (nil, nil).
+	unresolvedTxIndex := len(block.Transactions()) + 1_000_000
+
+	_, err = api.callTransaction(ctx, tx, block.Header(), []string{TraceTypeTrace}, unresolvedTxIndex, false, chainConfig, nil)
+	require.Error(t, err)
+}
+
 func testBankFunds() *big.Int {
 	n, _ := new(big.Int).SetString("100000000000000000000", 10)
 	return n
