@@ -128,6 +128,48 @@ func TestToolArgMapping(t *testing.T) {
 			wantArgs: []any{"0xabc"},
 		},
 		{
+			tool:     "debug_traceTransaction",
+			args:     map[string]any{"txHash": "0x1"},
+			result:   `{}`,
+			wantArgs: []any{"0x1", map[string]any{"tracer": "callTracer"}},
+		},
+		{
+			tool:     "debug_traceTransaction",
+			args:     map[string]any{"txHash": "0x1", "tracer": "prestateTracer"},
+			result:   `{}`,
+			wantArgs: []any{"0x1", map[string]any{"tracer": "prestateTracer"}},
+		},
+		{
+			tool:     "debug_traceCall",
+			args:     map[string]any{"to": "0xabc", "data": "0x01"},
+			result:   `{}`,
+			wantArgs: []any{map[string]any{"to": "0xabc", "data": "0x01"}, "latest", map[string]any{"tracer": "callTracer"}},
+		},
+		{
+			tool:     "debug_getModifiedAccountsByNumber",
+			args:     map[string]any{"startBlock": "0x1"},
+			result:   `[]`,
+			wantArgs: []any{"0x1"},
+		},
+		{
+			tool:     "debug_getModifiedAccountsByNumber",
+			args:     map[string]any{"startBlock": "0x1", "endBlock": "0x5"},
+			result:   `[]`,
+			wantArgs: []any{"0x1", "0x5"},
+		},
+		{
+			tool:     "trace_transaction",
+			args:     map[string]any{"txHash": "0x1"},
+			result:   `[]`,
+			wantArgs: []any{"0x1"},
+		},
+		{
+			tool:     "trace_filter",
+			args:     map[string]any{"fromBlock": "0x1", "toAddress": "0xabc"},
+			result:   `[]`,
+			wantArgs: []any{map[string]any{"fromBlock": "0x1", "toAddress": []string{"0xabc"}, "count": 100}},
+		},
+		{
 			tool:     "eth_call",
 			args:     map[string]any{"to": "0xabc", "data": "0x01", "from": "0xdef"},
 			result:   `"0x"`,
@@ -298,4 +340,11 @@ func TestToolCallTable(t *testing.T) {
 	for _, mutating := range []string{"admin_addPeer", "admin_removePeer", "admin_addTrustedPeer", "admin_removeTrustedPeer"} {
 		require.NotContains(t, seen, mutating, "mutating admin methods must not be exposed")
 	}
+	require.Contains(t, seen, "debug_traceTransaction")
+	require.Contains(t, seen, "debug_traceBlockByNumber")
+	require.Contains(t, seen, "debug_traceCall")
+	require.Contains(t, seen, "debug_getModifiedAccountsByNumber")
+	require.Contains(t, seen, "trace_transaction")
+	require.Contains(t, seen, "trace_block")
+	require.Contains(t, seen, "trace_filter")
 }

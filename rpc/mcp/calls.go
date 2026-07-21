@@ -223,6 +223,75 @@ func buildTxArgs(withBlock bool) func(req mcp.CallToolRequest) ([]any, error) {
 	}
 }
 
+// tracerConfig returns the debug_trace* config argument. The default is
+// callTracer rather than the RPC default (struct logger) because full opcode
+// logs are far too large for an MCP client's context; pass tracer="" to get
+// the struct logger anyway.
+func tracerConfig(req mcp.CallToolRequest) (map[string]any, bool) {
+	tracer := req.GetString("tracer", "callTracer")
+	if tracer == "" {
+		return nil, false
+	}
+	return map[string]any{"tracer": tracer}, true
+}
+
+func buildTraceArgs(prefix ...param) func(req mcp.CallToolRequest) ([]any, error) {
+	return func(req mcp.CallToolRequest) ([]any, error) {
+		args := make([]any, 0, len(prefix)+1)
+		for _, p := range prefix {
+			args = append(args, req.GetString(p.name, p.def))
+		}
+		if cfg, ok := tracerConfig(req); ok {
+			args = append(args, cfg)
+		}
+		return args, nil
+	}
+}
+
+func buildTraceCall(req mcp.CallToolRequest) ([]any, error) {
+	callObj := map[string]any{}
+	for _, k := range []string{"to", "data", "from", "value", "gas"} {
+		if v := req.GetString(k, ""); v != "" {
+			callObj[k] = v
+		}
+	}
+	args := []any{callObj, req.GetString("blockNumber", "latest")}
+	if cfg, ok := tracerConfig(req); ok {
+		args = append(args, cfg)
+	}
+	return args, nil
+}
+
+func buildTraceFilter(req mcp.CallToolRequest) ([]any, error) {
+	filter := map[string]any{}
+	if v := req.GetString("fromBlock", ""); v != "" {
+		filter["fromBlock"] = v
+	}
+	if v := req.GetString("toBlock", ""); v != "" {
+		filter["toBlock"] = v
+	}
+	for _, k := range []string{"fromAddress", "toAddress"} {
+		v := req.GetString(k, "")
+		if v == "" {
+			continue
+		}
+		if strings.HasPrefix(v, "[") {
+			var addrs []string
+			if err := json.Unmarshal([]byte(v), &addrs); err != nil {
+				return nil, fmt.Errorf("invalid %s JSON array: %w", k, err)
+			}
+			filter[k] = addrs
+		} else {
+			filter[k] = []string{v}
+		}
+	}
+	if v := req.GetString("mode", ""); v != "" {
+		filter["mode"] = v
+	}
+	filter["count"] = req.GetInt("count", 100)
+	return []any{filter}, nil
+}
+
 func buildStorageValues(req mcp.CallToolRequest) ([]any, error) {
 	requests, err := parseJSONParam("requests", req.GetString("requests", "{}"))
 	if err != nil {
@@ -620,6 +689,67 @@ func rpcToolCalls() []toolCall {
 		{
 			name: "txpool_contentFrom", desc: "Get pending/queued pool transactions of one sender",
 			params: []param{{name: "address", desc: "Sender address", kind: pString, required: true}},
+		},
+
+		// ===== DEBUG / TRACE TOOLS =====
+		{
+			name: "debug_traceTransaction", desc: "Trace a transaction with a tracer (default: callTracer call tree)",
+			params: []param{
+				txHashParam,
+				{name: "tracer", desc: "Tracer name, e.g. callTracer, prestateTracer (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
+			},
+			build: buildTraceArgs(param{name: "txHash"}),
+		},
+		{
+			name: "debug_traceBlockByNumber", desc: "Trace all transactions in a block with a tracer (default: callTracer)",
+			params: []param{
+				blockNumberParam,
+				{name: "tracer", desc: "Tracer name, e.g. callTracer, prestateTracer (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
+			},
+			build: buildTraceArgs(param{name: "blockNumber", def: "latest"}),
+		},
+		{
+			name: "debug_traceCall", desc: "Execute a call and trace it with a tracer (default: callTracer)",
+			params: []param{
+				{name: "to", desc: "Contract address", kind: pString, required: true},
+				{name: "data", desc: "Call data", kind: pString},
+				{name: "from", desc: "Sender address", kind: pString},
+				{name: "value", desc: "Value (hex)", kind: pString},
+				{name: "gas", desc: "Gas limit (hex)", kind: pString},
+				{name: "blockNumber", desc: "Block number", kind: pString},
+				{name: "tracer", desc: "Tracer name (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
+			},
+			build: buildTraceCall,
+		},
+		{
+			name: "debug_getModifiedAccountsByNumber", desc: "List accounts modified in a block range",
+			params: []param{
+				{name: "startBlock", desc: "Start block number", kind: pString, required: true},
+				{name: "endBlock", desc: "End block number (default: start block)", kind: pString, omit: true},
+			},
+		},
+		{
+			name: "trace_transaction", desc: "Get Parity-style traces for a transaction",
+			params: []param{txHashParam},
+			format: fmtArrayOrMsg("No trace entries found"),
+		},
+		{
+			name: "trace_block", desc: "Get Parity-style traces for all transactions in a block",
+			params: []param{blockNumberParam},
+			format: fmtArrayOrMsg("No trace entries found"),
+		},
+		{
+			name: "trace_filter", desc: "Search Parity-style traces by block range and addresses",
+			params: []param{
+				{name: "fromBlock", desc: "Start block", kind: pString},
+				{name: "toBlock", desc: "End block", kind: pString},
+				{name: "fromAddress", desc: "Sender address(es), single or JSON array", kind: pString},
+				{name: "toAddress", desc: "Recipient address(es), single or JSON array", kind: pString},
+				{name: "mode", desc: "Address filter mode: union (default) or intersection", kind: pString},
+				{name: "count", desc: "Maximum traces to return (default: 100)", kind: pInt, defInt: 100},
+			},
+			build:  buildTraceFilter,
+			format: fmtArrayOrMsg("No matching traces found"),
 		},
 
 		// ===== NET / ADMIN TOOLS =====
