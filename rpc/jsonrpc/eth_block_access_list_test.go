@@ -17,14 +17,17 @@
 package jsonrpc
 
 import (
+	"encoding/json"
 	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
@@ -34,6 +37,115 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
+
+type blockAccessListRPCCase struct {
+	name       string
+	selector   string
+	want       json.RawMessage
+	errCode    int
+	errMessage string
+}
+
+func TestBlockAccessListRPCSpec(t *testing.T) {
+	chainPack, client := newBlockAccessListRPCFixture(t)
+	availableJSON := marshalBlockAccessListJSON(t, chainPack.BlockAccessLists[1])
+	emptyJSON := marshalBlockAccessListJSON(t, chainPack.BlockAccessLists[2])
+	availableRaw := marshalHexBytesJSON(t, chainPack.BlockAccessLists[1])
+	emptyRaw := marshalHexBytesJSON(t, chainPack.BlockAccessLists[2])
+	t.Run("eth_getBlockAccessList", func(t *testing.T) {
+		cases := []blockAccessListRPCCase{
+			{name: "available by number", selector: "0x2", want: availableJSON},
+			{name: "available by tag", selector: "safe", want: availableJSON},
+			{name: "available by hash", selector: chainPack.Blocks[1].Hash().Hex(), want: availableJSON},
+			{name: "empty by number", selector: "0x3", want: emptyJSON},
+			{name: "empty by tag", selector: "latest", want: emptyJSON},
+			{name: "empty by hash", selector: chainPack.Blocks[2].Hash().Hex(), want: emptyJSON},
+			{name: "unknown number", selector: "0xff", want: json.RawMessage("null")},
+			{name: "unknown hash", selector: common.Hash{}.Hex(), want: json.RawMessage("null")},
+			{name: "pending", selector: "pending", want: json.RawMessage("null")},
+			{name: "pre-Amsterdam by number", selector: "0x1", errCode: -32001, errMessage: "Resource not found"},
+			{name: "pre-Amsterdam by tag", selector: "earliest", errCode: -32001, errMessage: "Resource not found"},
+			{name: "pre-Amsterdam by hash", selector: chainPack.Blocks[0].Hash().Hex(), errCode: -32001, errMessage: "Resource not found"},
+			{name: "pruned by number", selector: "0x4", errCode: 4444, errMessage: "Pruned history unavailable"},
+			{name: "pruned by tag", selector: "finalized", errCode: 4444, errMessage: "Pruned history unavailable"},
+			{name: "pruned by hash", selector: chainPack.Blocks[3].Hash().Hex(), errCode: 4444, errMessage: "Pruned history unavailable"},
+		}
+		runBlockAccessListRPCCases(t, client, "eth_getBlockAccessList", cases)
+	})
+	t.Run("debug_getRawBlockAccessList", func(t *testing.T) {
+		cases := []blockAccessListRPCCase{
+			{name: "available by number", selector: "0x2", want: availableRaw},
+			{name: "available by tag", selector: "safe", want: availableRaw},
+			{name: "available by hash", selector: chainPack.Blocks[1].Hash().Hex(), want: availableRaw},
+			{name: "empty by number", selector: "0x3", want: emptyRaw},
+			{name: "empty by tag", selector: "latest", want: emptyRaw},
+			{name: "empty by hash", selector: chainPack.Blocks[2].Hash().Hex(), want: emptyRaw},
+			{name: "unknown number", selector: "0xff", errCode: -32001, errMessage: "Resource not found"},
+			{name: "unknown hash", selector: common.Hash{}.Hex(), errCode: -32001, errMessage: "Resource not found"},
+			{name: "pending", selector: "pending", errCode: -32001, errMessage: "Resource not found"},
+			{name: "pre-Amsterdam by number", selector: "0x1", errCode: -32001, errMessage: "Resource not found"},
+			{name: "pre-Amsterdam by tag", selector: "earliest", errCode: -32001, errMessage: "Resource not found"},
+			{name: "pre-Amsterdam by hash", selector: chainPack.Blocks[0].Hash().Hex(), errCode: -32001, errMessage: "Resource not found"},
+			{name: "pruned by number", selector: "0x4", errCode: 4444, errMessage: "Pruned history unavailable"},
+			{name: "pruned by tag", selector: "finalized", errCode: 4444, errMessage: "Pruned history unavailable"},
+			{name: "pruned by hash", selector: chainPack.Blocks[3].Hash().Hex(), errCode: 4444, errMessage: "Pruned history unavailable"},
+		}
+		runBlockAccessListRPCCases(t, client, "debug_getRawBlockAccessList", cases)
+	})
+}
+
+func newBlockAccessListRPCFixture(t *testing.T) (*blockgen.ChainPack, *rpc.Client) {
+	t.Helper()
+	m, chainPack := rpcdaemontest.CreateTestBlockAccessListExecModule(t)
+	base := newBaseApiForTest(m)
+	ethAPI := newEthApiForTest(base, m.DB, nil, nil)
+	debugAPI := NewPrivateDebugAPI(base, m.DB, nil, 0, false)
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("eth", EthAPI(ethAPI)))
+	require.NoError(t, server.RegisterName("debug", PrivateDebugAPI(debugAPI)))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() {
+		client.Close()
+		server.Stop()
+	})
+	return chainPack, client
+}
+
+func marshalBlockAccessListJSON(t *testing.T, data []byte) json.RawMessage {
+	t.Helper()
+	bal, err := types.DecodeBlockAccessListBytes(data)
+	require.NoError(t, err)
+	encoded, err := json.Marshal(ethapi.MarshalBlockAccessList(bal))
+	require.NoError(t, err)
+	return encoded
+}
+
+func marshalHexBytesJSON(t *testing.T, data []byte) json.RawMessage {
+	t.Helper()
+	encoded, err := json.Marshal(hexutil.Bytes(data))
+	require.NoError(t, err)
+	return encoded
+}
+
+func runBlockAccessListRPCCases(t *testing.T, client *rpc.Client, method string, cases []blockAccessListRPCCase) {
+	t.Helper()
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var got json.RawMessage
+			err := client.CallContext(t.Context(), &got, method, testCase.selector)
+			if testCase.errCode != 0 {
+				require.Error(t, err)
+				var rpcErr rpc.Error
+				require.ErrorAs(t, err, &rpcErr)
+				require.Equal(t, testCase.errCode, rpcErr.ErrorCode())
+				require.Equal(t, testCase.errMessage, err.Error())
+				return
+			}
+			require.NoError(t, err)
+			require.JSONEq(t, string(testCase.want), string(got))
+		})
+	}
+}
 
 // TestGetBlockAccessListRegeneratesPrunedBAL verifies that eth_getBlockAccessList
 // serves BALs whose stored copy has been pruned (kept only for the reorg window)

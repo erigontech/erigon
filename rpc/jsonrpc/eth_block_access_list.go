@@ -17,9 +17,11 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -28,66 +30,79 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
+var errBlockAccessListNotFound = errors.New("block access list not found")
+
+func blockAccessListResourceNotFoundError() *rpc.CustomError {
+	return &rpc.CustomError{Code: -32001, Message: "Resource not found"}
+}
+
+func blockAccessListPrunedHistoryError() *rpc.CustomError {
+	return &rpc.CustomError{Code: 4444, Message: "Pruned history unavailable"}
+}
+
 // GetBlockAccessList returns the block access list for a given block (EIP-7928).
 func (api *APIImpl) GetBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethapi.RPCAccountAccess, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	data, err := api.blockAccessListBytes(ctx, api.db, numberOrHash)
+	if errors.Is(err, errBlockAccessListNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	bal, err := types.DecodeBlockAccessListBytes(data)
+	if err != nil {
+		return nil, err
+	}
+	return ethapi.MarshalBlockAccessList(bal), nil
+}
+
+func (api *BaseAPI) blockAccessListBytes(ctx context.Context, db kv.TemporalRoDB, numberOrHash rpc.BlockNumberOrHash) ([]byte, error) {
+	if numberOrHash.BlockNumber != nil && *numberOrHash.BlockNumber == rpc.PendingBlockNumber {
+		return nil, errBlockAccessListNotFound
+	}
+	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	if numberOrHash.BlockNumber != nil && *numberOrHash.BlockNumber == rpc.PendingBlockNumber {
-		return nil, errors.New("pending block access list is not available")
-	}
-
 	blockNum, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
-			return nil, nil
+			return nil, errBlockAccessListNotFound
 		}
 		return nil, err
 	}
-
 	header, err := api._blockReader.Header(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
 	if header == nil {
-		return nil, nil
+		return nil, errBlockAccessListNotFound
 	}
-
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 	if !chainConfig.IsAmsterdam(header.Time) {
-		return nil, &rpc.CustomError{
-			Code:    4445,
-			Message: "block access list not available for pre-Amsterdam blocks",
-		}
+		return nil, blockAccessListResourceNotFoundError()
 	}
-
 	data, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
+	// GetOne returns transaction-scoped mmap memory, but callers consume the BAL after rollback.
+	data = bytes.Clone(data)
 	if len(data) == 0 {
 		data, err = api.balRegenerator.GetBlockAccessListBytes(ctx, chainConfig, tx, blockHash, blockNum)
-		if err != nil && !errors.Is(err, state.PrunedError) {
+		if errors.Is(err, state.PrunedError) {
+			return nil, blockAccessListPrunedHistoryError()
+		}
+		if err != nil {
 			return nil, err
 		}
 	}
 	if len(data) == 0 {
-		return nil, &rpc.CustomError{
-			Code:    4444,
-			Message: "pruned history unavailable",
-		}
+		return nil, blockAccessListPrunedHistoryError()
 	}
-
-	bal, err := types.DecodeBlockAccessListBytes(data)
-	if err != nil {
-		return nil, err
-	}
-
-	return ethapi.MarshalBlockAccessList(bal), nil
+	return data, nil
 }
