@@ -77,9 +77,7 @@ const (
 	BlockPublishingValidationConsensusAndEquivocation BlockPublishingValidation = "consensus_and_equivocation"
 )
 
-var (
-	errBuilderNotEnabled = errors.New("builder is not enabled")
-)
+var errBuilderNotEnabled = errors.New("builder is not enabled")
 
 const (
 	caplinClientCode = "CN"
@@ -344,7 +342,8 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		committeesPerSlot := a.syncedData.CommitteeCount(epoch)
 		subnet := subnets.ComputeSubnetForAttestation(
 			committeesPerSlot, *slot, *committeeIndex,
-			a.beaconChainCfg.SlotsPerEpoch, 64)
+			a.beaconChainCfg.SlotsPerEpoch, 64,
+		)
 		a.logger.Debug("Produced Attestation", "slot", *slot,
 			"committee_index", *committeeIndex, "subnet", subnet, "cached", ok, "beacon_block_root",
 			attestationData.BeaconBlockRoot, "duration", time.Since(start))
@@ -519,7 +518,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 	log.Info("[Beacon API] Computed state root while producing slot", "slot", targetSlot, "duration", time.Since(startConsensusProcessing))
 
-	log.Info("BlockProduction: Block produced",
+	log.Info(
+		"BlockProduction: Block produced",
 		"proposerIndex", block.ProposerIndex,
 		"slot", targetSlot,
 		"state_root", block.StateRoot,
@@ -1301,8 +1301,8 @@ func (a *ApiHandler) getBlockOperations(s *state.CachingBeaconState, targetSlot 
 	*solid.ListSSZ[*cltypes.AttesterSlashing],
 	*solid.ListSSZ[*cltypes.ProposerSlashing],
 	*solid.ListSSZ[*cltypes.SignedVoluntaryExit],
-	*solid.ListSSZ[*cltypes.SignedBLSToExecutionChange]) {
-
+	*solid.ListSSZ[*cltypes.SignedBLSToExecutionChange],
+) {
 	targetEpoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
 	targetVersion := a.beaconChainCfg.GetCurrentStateVersion(targetEpoch)
 	var maxAttesterSlashings uint64
@@ -2450,8 +2450,8 @@ func (a *ApiHandler) aggregatePayloadAttestations(
 // computeAttestationReward computes the reward for a specific attestation.
 func computeAttestationReward(
 	s abstract.BeaconState,
-	attestation *solid.Attestation) (uint64, error) {
-
+	attestation *solid.Attestation,
+) (uint64, error) {
 	baseRewardPerIncrement := s.BaseRewardPerIncrement()
 	data := attestation.Data
 	currentEpoch := state.Epoch(s)

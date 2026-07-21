@@ -38,9 +38,7 @@ import (
 
 var _ BuilderClient = &builderClient{}
 
-var (
-	ErrNoContent = errors.New("no http content")
-)
+var ErrNoContent = errors.New("no http content")
 
 type builderClient struct {
 	// ref: https://ethereum.github.io/builder-specs/#/

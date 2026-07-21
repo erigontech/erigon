@@ -49,7 +49,8 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 			AllowedMethods:   routerCfg.AllowedMethods,
 			AllowCredentials: routerCfg.AllowCredentials,
 			MaxAge:           4,
-		}))
+		},
+	))
 
 	mux.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
 		nfw := &notFoundNoWriter{ResponseWriter: w, r: r} //nolint:govet

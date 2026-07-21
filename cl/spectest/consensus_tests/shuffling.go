@@ -31,8 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 )
 
-type ShufflingCore struct {
-}
+type ShufflingCore struct{}
 
 func (b *ShufflingCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
 	var meta struct {
