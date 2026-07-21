@@ -127,7 +127,7 @@ var (
 	BALShadowCompute     = EnvBool("BAL_SHADOW_COMPUTE", false)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
-	UseStateCache        = EnvBool("USE_STATE_CACHE", true)
+	UseStateCache        = EnvBool("USE_STATE_CACHE", false)
 	UseCodeStore         = EnvBool("USE_CODE_STORE", true)
 	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", false)
 	AssertStateCache     = EnvBool("ASSERT_STATE_CACHE", false)
