@@ -16,7 +16,7 @@ npm run typecheck # TypeScript check without emit
 
 ## Deployment
 
-Deployment is handled automatically by `.github/workflows/docs-deploy.yml` on every push to `release/3.5`. Do not use manual `yarn deploy` — it is not configured for this site.
+Deployment is handled automatically by the `docs-deploy.yml` workflow, which lives on the `release/3.5` branch (the deploy source) and runs on every push there. It is intentionally not present on `main`. Do not use manual `yarn deploy` — it is not configured for this site.
 
 ## Disk size data flow
 
