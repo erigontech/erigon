@@ -1744,7 +1744,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.execModule.SetBlockRetire(blockRetire)
 
 	if backend.txPool != nil {
-		backend.execModule.SetTxPoolQuiescer(backend.txPool)
+		backend.execModule.SetTxPoolPauser(backend.txPool)
 	}
 
 	var executionEngine executionclient.ExecutionEngine

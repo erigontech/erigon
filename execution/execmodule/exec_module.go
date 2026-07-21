@@ -291,11 +291,11 @@ type ExecModule struct {
 	// standalone-exec paths.
 	blockRetire retireCanceller
 
-	// txpoolQuiescer pauses the txpool's state-reading goroutines
+	// txpoolPauser pauses the txpool's state-reading goroutines
 	// around Provider.Unwind's file-swap window. Without it a
 	// concurrent tx that holds a domain-file reference panics with a
 	// nil decompressor when FinalizeUnwind deletes the file.
-	txpoolQuiescer txpoolQuiescer
+	txpoolPauser txpoolPauser
 }
 
 // eventBus is the publishing surface SetHead needs. Declared as a
@@ -324,12 +324,12 @@ type retireCanceller interface {
 	CleanOrphanSegsPastTarget(target uint64) ([]string, error)
 }
 
-// txpoolQuiescer is the narrow surface setHeadModeB needs from the
+// txpoolPauser is the narrow surface setHeadModeB needs from the
 // txpool. Pause blocks until in-flight state-reading tx close and
 // returns a resume closure the caller invokes via defer when the
 // file-swap window has closed. *txpool.TxPool satisfies this
 // directly.
-type txpoolQuiescer interface {
+type txpoolPauser interface {
 	Pause() (resume func())
 }
 
@@ -827,13 +827,13 @@ func (e *ExecModule) SetEventBus(bus eventBus) {
 	e.eventBus = bus
 }
 
-// SetTxPoolQuiescer installs the txpool pause/resume seam. Mode-B
+// SetTxPoolPauser installs the txpool pause/resume seam. Mode-B
 // setHead calls Pause() before Provider.Unwind and holds the returned
 // resume until after FinalizeUnwind — the file-swap window is where
 // concurrent txpool state reads panic on nil decompressor pointers.
 // nil is a no-op (harness paths that don't run a txpool).
-func (e *ExecModule) SetTxPoolQuiescer(q txpoolQuiescer) {
-	e.txpoolQuiescer = q
+func (e *ExecModule) SetTxPoolPauser(q txpoolPauser) {
+	e.txpoolPauser = q
 }
 
 // SetSetHeadMaxDepthBlocks installs the WS-window cap. Called from

@@ -44,8 +44,13 @@ const modeBQuiescencePoll = 50 * time.Millisecond
 const modeBRetireCancelTimeout = 60 * time.Second
 
 // modeBBuildQuiescenceTimeout caps the wait for in-flight Aggregator
-// build+merge to drain before mode-B starts.
-const modeBBuildQuiescenceTimeout = 120 * time.Second
+// build+merge to drain before mode-B starts. Sized to cover the
+// step-crossing build case: a mode_a2 that lands within seconds of a
+// step boundary kicks off a full step-file build in the background,
+// which for a heavy step (hundreds of thousands of branches) can
+// exceed two minutes. Mode-B setHead arriving in that window then
+// waits for the build to finish.
+const modeBBuildQuiescenceTimeout = 5 * time.Minute
 
 // setHeadModeB runs the past-diffset admin unwind path. Entered when
 // targetBlock < minUnwindableBlock AND the chain is aligned-mode AND
@@ -64,8 +69,8 @@ func (e *ExecModule) setHeadModeB(ctx context.Context, tx kv.TemporalRwTx, targe
 	e.adminUnwindInProgress.Store(true)
 	defer e.adminUnwindInProgress.Store(false)
 
-	if e.txpoolQuiescer != nil {
-		resume := e.txpoolQuiescer.Pause()
+	if e.txpoolPauser != nil {
+		resume := e.txpoolPauser.Pause()
 		defer resume()
 	}
 
