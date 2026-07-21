@@ -1743,10 +1743,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// line 1547 and is guaranteed non-nil on the production path.
 	backend.execModule.SetBlockRetire(blockRetire)
 
-	if backend.txPool != nil {
-		backend.execModule.SetTxPoolPauser(backend.txPool)
-	}
-
 	var executionEngine executionclient.ExecutionEngine
 
 	// Single EngineBlockDownloader shared by both the direct
@@ -2213,6 +2209,15 @@ func (s *Ethereum) RemoveTrustedPeer(ctx context.Context, req *remoteproto.Remov
 }
 
 func (s *Ethereum) SetHead(ctx context.Context, targetBlock uint64) error {
+	// Pause the txpool for the SetHead call so its state-reading
+	// goroutines can't race Provider.Unwind's post-commit file swap
+	// (nil-decompressor deref at senders.go:220 → domain.dataReader
+	// when FinalizeUnwind deletes a file an in-flight coreTx still
+	// references).
+	if s.txPool != nil {
+		resume := s.txPool.Pause()
+		defer resume()
+	}
 	return s.execModule.SetHead(ctx, targetBlock)
 }
 

@@ -290,12 +290,6 @@ type ExecModule struct {
 	// race). Wired by backend.go via SetBlockRetire; nil in harness /
 	// standalone-exec paths.
 	blockRetire retireCanceller
-
-	// txpoolPauser pauses the txpool's state-reading goroutines
-	// around Provider.Unwind's file-swap window. Without it a
-	// concurrent tx that holds a domain-file reference panics with a
-	// nil decompressor when FinalizeUnwind deletes the file.
-	txpoolPauser txpoolPauser
 }
 
 // eventBus is the publishing surface SetHead needs. Declared as a
@@ -322,15 +316,6 @@ type retireCanceller interface {
 	// residue. Called after CancelInFlight to unblock Mode-B's
 	// preflight findInventoryOrphansPastBlock check.
 	CleanOrphanSegsPastTarget(target uint64) ([]string, error)
-}
-
-// txpoolPauser is the narrow surface setHeadModeB needs from the
-// txpool. Pause blocks until in-flight state-reading tx close and
-// returns a resume closure the caller invokes via defer when the
-// file-swap window has closed. *txpool.TxPool satisfies this
-// directly.
-type txpoolPauser interface {
-	Pause() (resume func())
 }
 
 var _ ExecutionModule = (*ExecModule)(nil) // compile-time interface check
@@ -825,15 +810,6 @@ func (e *ExecModule) IsAdminUnwindInProgress() bool {
 // the bus). See docs/plans/20260609-mode-b-cl-rewind-gap.md.
 func (e *ExecModule) SetEventBus(bus eventBus) {
 	e.eventBus = bus
-}
-
-// SetTxPoolPauser installs the txpool pause/resume seam. Mode-B
-// setHead calls Pause() before Provider.Unwind and holds the returned
-// resume until after FinalizeUnwind — the file-swap window is where
-// concurrent txpool state reads panic on nil decompressor pointers.
-// nil is a no-op (harness paths that don't run a txpool).
-func (e *ExecModule) SetTxPoolPauser(q txpoolPauser) {
-	e.txpoolPauser = q
 }
 
 // SetSetHeadMaxDepthBlocks installs the WS-window cap. Called from
