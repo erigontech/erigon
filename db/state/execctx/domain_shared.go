@@ -187,7 +187,10 @@ func PickTrieVariant() commitment.TrieVariant {
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, opts ...SharedDomainOption) (*SharedDomains, error) {
-	o := sharedDomainOptions{trieCfg: commitment.DefaultTrieConfig(), useSharedBranchCache: true}
+	o := sharedDomainOptions{
+		trieCfg:              commitment.DefaultTrieConfig(),
+		useSharedBranchCache: true,
+	}
 	o.trieCfg.Variant = PickTrieVariant()
 	for _, opt := range opts {
 		opt(&o)

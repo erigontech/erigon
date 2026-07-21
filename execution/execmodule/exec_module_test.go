@@ -600,7 +600,6 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-
 	parentChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, gen *blockgen.BlockGen) {
 		tx, txErr := types.SignTx(
 			types.NewTransaction(0, common.Address{1}, uint256.NewInt(10_000), 50_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -613,7 +612,6 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(parentChain))
 	parent := parentChain.TopBlock
-
 	builderTx, err := types.SignTx(
 		types.NewTransaction(1, common.Address{2}, uint256.NewInt(20_000), 50_000, uint256.NewInt(parent.BaseFee().Uint64()), nil),
 		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
@@ -631,7 +629,6 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 		gen.AddTx(siblingTx)
 	})
 	require.NoError(t, err)
-
 	provider := &blockingTxnProvider{
 		ready:     make(chan struct{}),
 		release:   make(chan struct{}, 1),
@@ -644,7 +641,6 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 		default:
 		}
 	}()
-
 	parentBeaconBlockRoot := randomHash()
 	payloadID, err := assembleBlock(ctx, m.ExecModule, &builder.Parameters{
 		ParentHash:            parent.Hash(),
@@ -656,13 +652,11 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 		CustomTxnProvider:     provider,
 	})
 	require.NoError(t, err)
-
 	select {
 	case <-provider.ready:
 	case <-time.After(10 * time.Second):
 		t.Fatal("builder did not reach transaction selection")
 	}
-
 	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, siblingChain.Blocks))
 	provider.release <- struct{}{}
 	select {
@@ -670,13 +664,11 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("builder did not finish transaction selection")
 	}
-
 	built, err := getAssembledBlock(ctx, m.ExecModule, payloadID)
 	require.NoError(t, err)
 	require.Equal(t, parent.Hash(), built.ParentHash())
 	require.Len(t, built.Transactions(), 1)
 	require.Equal(t, builderTx.Hash(), built.Transactions()[0].Hash())
-
 	status, err := insertBlocks(ctx, m.ExecModule, []*types.Block{built})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
