@@ -194,7 +194,8 @@ func merkleizeProgressive(chunks [][32]byte, numLeaves uint64) ([32]byte, error)
 		return [32]byte{}, nil
 	}
 	count := min(uint64(len(chunks)), numLeaves)
-	left, err := MerkleizeVector(chunks[:count], numLeaves)
+	subtree := append([][32]byte(nil), chunks[:count]...)
+	left, err := MerkleizeVector(subtree, numLeaves)
 	if err != nil {
 		return [32]byte{}, err
 	}
