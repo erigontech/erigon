@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -42,4 +43,38 @@ func TestCodeReadParallel_NoMaterialize(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, code, got2)
 	assert.Empty(t, ibs.stateObjects)
+}
+
+// TestCodeReadParallel_EmptyCodeHashIgnoresStaleCode pins the codeHash gate on
+// the cold parallel code read. When a 7702 delegation is cleared the account's
+// codeHash becomes empty, but the address-keyed CodeDomain keeps the stale
+// delegation bytes (code is never deleted, only the codeHash pointer). The read
+// must honour the empty codeHash and report no code — otherwise GetDelegatedDesignation
+// sees the stale delegation and a plain transfer to the EOA is charged as a call
+// to delegated code, running out of gas and flipping the receipt status.
+func TestCodeReadParallel_EmptyCodeHashIgnoresStaleCode(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x30, 0x75, 0x76, 0xDd})
+	staleDelegation := types.AddressToDelegation(accounts.InternAddress([20]byte{0xfb, 0x77, 0x02}))
+
+	acc := accounts.NewAccount()
+	acc.Nonce = 594735
+	acc.CodeHash = accounts.EmptyCodeHash // delegation cleared: empty codehash...
+
+	reader := &codeReader{addr: addr, account: &acc, code: staleDelegation} // ...but CodeDomain still holds the stale bytes
+	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(100, 5)
+	ibs.SetVersion(0)
+
+	got, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	assert.Empty(t, got, "empty codehash must yield no code, not the stale CodeDomain bytes")
+
+	sz, err := ibs.GetCodeSize(addr)
+	require.NoError(t, err)
+	assert.Zero(t, sz, "empty codehash must yield zero code size")
+
+	_, ok, err := ibs.GetDelegatedDesignation(addr)
+	require.NoError(t, err)
+	assert.False(t, ok, "an empty-codehash account must not read as 7702-delegated")
 }

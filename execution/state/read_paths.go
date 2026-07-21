@@ -92,6 +92,13 @@ func (sdb *IntraBlockState) committedCodeDirect(addr accounts.Address) ([]byte, 
 	if cc, ok := sdb.versionedWriteCreateContract(addr); ok && cc {
 		return nil, nil
 	}
+	codeHash, err := sdb.committedCodeHash(addr)
+	if err != nil {
+		return nil, err
+	}
+	if codeHash.IsEmpty() {
+		return nil, nil
+	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
 		sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 	}
@@ -151,6 +158,13 @@ func (sdb *IntraBlockState) committedCodeHash(addr accounts.Address) (accounts.C
 // this tx created has zero code size until SetCode runs.
 func (sdb *IntraBlockState) committedCodeSizeDirect(addr accounts.Address) (int, error) {
 	if cc, ok := sdb.versionedWriteCreateContract(addr); ok && cc {
+		return 0, nil
+	}
+	codeHash, err := sdb.committedCodeHash(addr)
+	if err != nil {
+		return 0, err
+	}
+	if codeHash.IsEmpty() {
 		return 0, nil
 	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
