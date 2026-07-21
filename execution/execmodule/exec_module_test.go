@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"math/big"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -56,7 +57,35 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/txnprovider"
 )
+
+type blockingTxnProvider struct {
+	ready     chan struct{}
+	release   chan struct{}
+	exhausted chan struct{}
+	txns      []types.Transaction
+	readyOnce sync.Once
+	emptyOnce sync.Once
+}
+
+func (p *blockingTxnProvider) ProvideTxns(ctx context.Context, _ ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	first := false
+	p.readyOnce.Do(func() {
+		first = true
+		close(p.ready)
+	})
+	if first {
+		select {
+		case <-p.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return p.txns, nil
+	}
+	p.emptyOnce.Do(func() { close(p.exhausted) })
+	return nil, nil
+}
 
 func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	// See https://github.com/erigontech/erigon/issues/18823
@@ -565,6 +594,88 @@ func TestAssembleBlock(t *testing.T) {
 
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
+}
+
+func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	parentChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, gen *blockgen.BlockGen) {
+		tx, txErr := types.SignTx(
+			types.NewTransaction(0, common.Address{1}, uint256.NewInt(10_000), 50_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+			m.Key,
+		)
+		require.NoError(t, txErr)
+		gen.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(parentChain))
+	parent := parentChain.TopBlock
+	builderTx, err := types.SignTx(
+		types.NewTransaction(1, common.Address{2}, uint256.NewInt(20_000), 50_000, uint256.NewInt(parent.BaseFee().Uint64()), nil),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+		m.Key,
+	)
+	require.NoError(t, err)
+	builderTx.SetSender(accounts.InternAddress(m.Address))
+	siblingTx, err := types.SignTx(
+		types.NewTransaction(1, common.Address{3}, uint256.NewInt(30_000), 50_000, uint256.NewInt(parent.BaseFee().Uint64()), nil),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+		m.Key,
+	)
+	require.NoError(t, err)
+	siblingChain, err := blockgen.GenerateChain(m.ChainConfig, parent, m.Engine, m.DB, 1, func(_ int, gen *blockgen.BlockGen) {
+		gen.AddTx(siblingTx)
+	})
+	require.NoError(t, err)
+	provider := &blockingTxnProvider{
+		ready:     make(chan struct{}),
+		release:   make(chan struct{}, 1),
+		exhausted: make(chan struct{}),
+		txns:      []types.Transaction{builderTx},
+	}
+	parentBeaconBlockRoot := randomHash()
+	payloadID, err := assembleBlock(ctx, m.ExecModule, &builder.Parameters{
+		ParentHash:            parent.Hash(),
+		Timestamp:             parent.Time() + 1,
+		PrevRandao:            parent.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{4},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		CustomTxnProvider:     provider,
+	})
+	require.NoError(t, err)
+	defer func() {
+		select {
+		case provider.release <- struct{}{}:
+		default:
+		}
+		_, _ = getAssembledBlock(context.Background(), m.ExecModule, payloadID)
+	}()
+	select {
+	case <-provider.ready:
+	case <-time.After(10 * time.Second):
+		t.Fatal("builder did not reach transaction selection")
+	}
+	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, siblingChain.Blocks))
+	provider.release <- struct{}{}
+	select {
+	case <-provider.exhausted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("builder did not finish transaction selection")
+	}
+	built, err := getAssembledBlock(ctx, m.ExecModule, payloadID)
+	require.NoError(t, err)
+	require.Equal(t, parent.Hash(), built.ParentHash())
+	require.Len(t, built.Transactions(), 1)
+	require.Equal(t, builderTx.Hash(), built.Transactions()[0].Hash())
+	status, err := insertBlocks(ctx, m.ExecModule, []*types.Block{built})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	validation, err := validateChain(ctx, m.ExecModule, built.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 }
 
 func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
