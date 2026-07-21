@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -1005,6 +1006,9 @@ func serveHTTP(ctx context.Context, mcpServer *server.MCPServer, addr string, co
 		sse.CloseSessions()
 		return httpServer.Shutdown(shutdownCtx)
 	case err := <-errCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
 		return err
 	}
 }
