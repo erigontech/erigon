@@ -236,8 +236,39 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 
 	e.logger.Info("SetHead: successfully rewound chain", "targetBlock", targetBlock, "previousHead", currentHead)
+	if err := e.dispatchUnwindNotifications(ctx, currentHead, targetBlock, targetHash); err != nil {
+		e.logger.Warn("SetHead: dispatchUnwindNotifications failed (chain state was still committed)", "err", err, "targetBlock", targetBlock)
+	}
 	e.publishUnwindCompleted(targetBlock, currentHead)
 	return nil
+}
+
+// dispatchUnwindNotifications sends a StateChangeBatch{Direction=UNWIND}
+// so subscribers observe the SetHead rewind through the same channel
+// forward FCUs use. Without this the txpool never learns the chain went
+// backward: its cacheView, lastSeenBlock, and per-sender nonce/balance
+// state stay pinned at the pre-unwind head and only advance again on the
+// next forward FCU, keeping stale entries above the target.
+//
+// Best-effort — the unwind has already committed, so any error here is
+// logged and swallowed rather than reported to the caller.
+func (e *ExecModule) dispatchUnwindNotifications(ctx context.Context, currentHead, targetBlock uint64, targetHash common.Hash) error {
+	dispatcher := e.pipelineExecutor.Dispatcher()
+	if dispatcher == nil || e.accum == nil {
+		return nil
+	}
+	tx, err := e.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return fmt.Errorf("begin ro tx: %w", err)
+	}
+	defer tx.Rollback()
+	header := rawdb.ReadHeader(tx, targetHash, targetBlock)
+	if header == nil {
+		return fmt.Errorf("no header for target %d hash %x", targetBlock, targetHash)
+	}
+	e.accum.Accumulator.StartChange(header, nil, true)
+	prev := targetBlock
+	return dispatcher.Dispatch(ctx, tx, e.accum.Accumulator, e.accum.RecentReceipts, currentHead, targetBlock, &prev)
 }
 
 // publishUnwindCompleted broadcasts flow.UnwindCompleted to the storage
