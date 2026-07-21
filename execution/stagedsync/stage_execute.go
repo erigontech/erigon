@@ -147,14 +147,10 @@ func (cfg ExecuteBlockCfg) WithAuthor(author accounts.Address) ExecuteBlockCfg {
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
-// overlayPruneToTxNum / overlayPruneFromTxNum bracket the unwind: the overlay keeps
-// txNum <= pruneTo (last committed txNum) and re-executes from pruneFrom (= pruneTo+1).
+// overlayPruneToTxNum returns the last committed txNum (block committedBlock); on
+// unwind the overlay keeps txNum <= it and re-executes from the next txNum up.
 func overlayPruneToTxNum(ctx context.Context, cfg ExecuteBlockCfg, tx kv.Tx, committedBlock uint64) (uint64, error) {
 	return cfg.blockReader.TxnumReader().Max(ctx, tx, committedBlock)
-}
-
-func overlayPruneFromTxNum(ctx context.Context, cfg ExecuteBlockCfg, tx kv.Tx, committedBlock uint64) (uint64, error) {
-	return cfg.blockReader.TxnumReader().Min(ctx, tx, committedBlock+1)
 }
 
 // findExecutedDiffsetAtHeight returns the diffset of the block executed at currentBlock.
@@ -408,15 +404,11 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		if err != nil {
 			return err
 		}
-		pruneFromTxNum, err := overlayPruneFromTxNum(ctx, cfg, rwTx, s.BlockNumber)
-		if err != nil {
-			return err
-		}
 		// Do NOT ResetPendingUpdates/SeekCommitment here (unlike the disk path): the
 		// overlay and its deferred commitment updates are reused by the in-loop
 		// re-execution, so discarding them stalls the next block.
 		doms.Unwind(pruneToTxNum, nil)
-		doms.SetTxNum(pruneFromTxNum)
+		doms.SetTxNum(pruneToTxNum + 1)
 		return nil
 	}
 
