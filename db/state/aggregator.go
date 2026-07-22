@@ -308,16 +308,21 @@ func (a *Aggregator) applyReferencesInCommitmentBranches(refs bool) {
 	}
 }
 
-// SetDomainStepsInFrozenFile sets the domain merge cap from a flag spec: empty or
-// "Inf" means unbounded, otherwise a positive integer step count.
+// SetDomainStepsInFrozenFile sets the domain merge cap from a flag spec: empty means
+// no override (the domain uses the erigondb.toml cap), "Inf" means unbounded, otherwise
+// a positive integer step count.
 func (a *Aggregator) SetDomainStepsInFrozenFile(spec string) error {
-	v := config3.UnboundedDomainMerge
-	if spec != "" && !strings.EqualFold(spec, "inf") {
-		parsed, err := strconv.ParseUint(spec, 10, 64)
-		if err != nil || parsed == 0 {
-			return fmt.Errorf("invalid domain steps-in-frozen-file %q: must be a positive integer or \"Inf\"", spec)
+	var v uint64 // 0 = no override
+	if spec != "" {
+		if strings.EqualFold(spec, "inf") {
+			v = config3.UnboundedDomainMerge
+		} else {
+			parsed, err := strconv.ParseUint(spec, 10, 64)
+			if err != nil || parsed == 0 {
+				return fmt.Errorf("invalid domain steps-in-frozen-file %q: must be a positive integer or \"Inf\"", spec)
+			}
+			v = parsed
 		}
-		v = parsed
 	}
 	a.SetErigondbDomainStepsInFrozenFile(v)
 	return nil
