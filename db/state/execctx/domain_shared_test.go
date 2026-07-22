@@ -37,7 +37,9 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -248,6 +250,56 @@ func TestSharedDomain_UnwindDoesNotRestoreOverlayForNewKey(t *testing.T) {
 			"consulting sd.unwindToTxNum, and the unwindChangeset fallback is unreachable "+
 			"while the key remains in sd.storage.",
 		unwindTarget, writeTxNum, v)
+}
+
+// Unwind(t) prunes overlay writes in [t, ∞) and keeps [0, t); t is the resume
+// block's begin-system txNum, so the boundary write itself must not survive.
+func TestSharedDomain_UnwindPrunesBoundaryTxNum(t *testing.T) {
+	t.Parallel()
+
+	db := newTestDb(t, uint64(100))
+	ctx := t.Context()
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	keptSlot := common.HexToHash("0x01")
+	keptKey := composite(addr[:], keptSlot[:])
+	keptVal := []byte{0x0a}
+	boundarySlot := common.HexToHash("0x02")
+	boundaryKey := composite(addr[:], boundarySlot[:])
+	boundaryVal := []byte{0x0b}
+	const boundaryTxNum uint64 = 100
+
+	committedCs := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(committedCs)
+	domains.SetTxNum(boundaryTxNum - 1)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, keptKey, keptVal, boundaryTxNum-1, nil))
+
+	unwoundCs := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(unwoundCs)
+	domains.SetTxNum(boundaryTxNum)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, boundaryKey, boundaryVal, boundaryTxNum, nil))
+
+	var diffSet [kv.DomainLen][]kv.DomainEntryDiff
+	for idx, d := range unwoundCs.Diffs {
+		diffSet[idx] = d.GetDiffSet()
+	}
+	domains.Unwind(boundaryTxNum, &diffSet)
+
+	v, _, err := domains.GetLatest(kv.StorageDomain, rwTx, boundaryKey)
+	require.NoError(t, err)
+	require.Empty(t, v, "write at exactly the boundary txNum %d must be pruned", boundaryTxNum)
+
+	v, _, err = domains.GetLatest(kv.StorageDomain, rwTx, keptKey)
+	require.NoError(t, err)
+	require.Equal(t, keptVal, v, "write below the boundary txNum must survive")
 }
 
 // TestNewSharedDomains_StateAheadOfBlocks verifies that when the persisted
@@ -1801,6 +1853,88 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		}
 		require.NoError(t, err)
 		require.Equal(t, expectedRootHash, rootHash)
+	}
+}
+
+// Deleting an already-absent key must not record a redundant empty->empty
+// history entry, for every prevVal shape an absent key can take:
+//   - nil (same batch, resolved via sd.mem GetLatest)
+//   - []byte{} (explicit — the EIP-161 0x04 path, rw_v3.go:356)
+//   - []byte{} from a flushed DB tombstone (fresh SharedDomains, getLatestFromDb)
+//
+// Covers all three domains DomainDel handles: Accounts, Storage, Code.
+func TestSharedDomain_DeleteAbsentKeyIsNoop(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	addr := common.HexToAddress("0x0000000000000000000000000000000000000004")
+	slot := common.HexToHash("0x5ac7102aad1a639901bc2657323aaed9e90e40c550747c49170f1c82fd664e4f")
+
+	acc := accounts3.Account{Nonce: 1, Balance: *uint256.NewInt(1000)}
+	cases := []struct {
+		name   string
+		domain kv.Domain
+		idx    kv.InvertedIdx
+		key    []byte
+		value  []byte
+	}{
+		{"accounts", kv.AccountsDomain, kv.AccountsHistoryIdx, addr[:], accounts3.SerialiseV3(&acc)},
+		{"storage", kv.StorageDomain, kv.StorageHistoryIdx, composite(addr[:], slot[:]), []byte{0x01, 0x02, 0x03, 0x04}},
+		{"code", kv.CodeDomain, kv.CodeHistoryIdx, addr[:], []byte{0x60, 0x00, 0x60, 0x00}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			db := newTestDb(t, 100)
+			ctx := t.Context()
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+
+			const createTxNum, deleteTxNum uint64 = 1, 2
+
+			domains.SetTxNum(createTxNum)
+			require.NoError(t, domains.DomainPut(tc.domain, rwTx, tc.key, tc.value, createTxNum, nil))
+
+			domains.SetTxNum(deleteTxNum)
+			require.NoError(t, domains.DomainDel(tc.domain, rwTx, tc.key, deleteTxNum, nil))
+
+			// Same-batch redundant deletes: nil, then an explicit empty slice.
+			domains.SetTxNum(3)
+			require.NoError(t, domains.DomainDel(tc.domain, rwTx, tc.key, 3, nil))
+			domains.SetTxNum(4)
+			require.NoError(t, domains.DomainDel(tc.domain, rwTx, tc.key, 4, []byte{}))
+
+			// Flush the tombstone to the tx, then a fresh SharedDomains: GetLatest
+			// now resolves prevVal from getLatestFromDb, which returns []byte{}
+			// (non-nil) for a tombstone — the shape that slipped past == nil.
+			require.NoError(t, domains.Flush(ctx, rwTx))
+			domains.Close()
+
+			domains2, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer domains2.Close()
+
+			domains2.SetTxNum(5)
+			require.NoError(t, domains2.DomainDel(tc.domain, rwTx, tc.key, 5, nil))
+			domains2.SetTxNum(6)
+			require.NoError(t, domains2.DomainDel(tc.domain, rwTx, tc.key, 6, []byte{}))
+			require.NoError(t, domains2.Flush(ctx, rwTx))
+
+			it, err := rwTx.IndexRange(tc.idx, tc.key, 0, -1, order.Asc, -1)
+			require.NoError(t, err)
+			txNums, err := stream.ToArrayU64(it)
+			require.NoError(t, err)
+
+			require.Equal(t, []uint64{createTxNum, deleteTxNum}, txNums,
+				"only the create and the real delete must be recorded; every redundant delete (same-batch nil, explicit []byte{}, and post-flush DB tombstone) must be a no-op")
+		})
 	}
 }
 

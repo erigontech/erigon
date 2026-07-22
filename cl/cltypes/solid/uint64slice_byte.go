@@ -34,7 +34,6 @@ func convertDepthToChunkSize(d int) int {
 func getTreeCacheSize(listLen int, cacheDepth int) int {
 	treeChunks := convertDepthToChunkSize(cacheDepth)
 	return (listLen + treeChunks - 1) / treeChunks
-
 }
 
 // byteBasedUint64Slice represents a dynamic Uint64Slice data type that is byte-backed.

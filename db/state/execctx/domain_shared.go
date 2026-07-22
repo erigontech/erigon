@@ -187,7 +187,10 @@ func PickTrieVariant() commitment.TrieVariant {
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, opts ...SharedDomainOption) (*SharedDomains, error) {
-	o := sharedDomainOptions{trieCfg: commitment.DefaultTrieConfig()}
+	o := sharedDomainOptions{
+		trieCfg:              commitment.DefaultTrieConfig(),
+		useSharedBranchCache: true,
+	}
 	o.trieCfg.Variant = PickTrieVariant()
 	for _, opt := range opts {
 		opt(&o)
@@ -207,7 +210,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	// importing db/state directly — db/state already imports execctx, so
 	// the reverse import would create a cycle.
 	var branchCache *commitment.BranchCache
-	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok {
+	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok && o.useSharedBranchCache {
 		branchCache = p.BranchCache()
 	}
 	sd.branchCache = branchCache
@@ -218,7 +221,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 
 	// The pin controller is aggregator-scoped (co-located with branchCache) so pin
 	// residency ages by block-access recency across all SharedDomains, not per-SD.
-	if p, ok := tx.AggTx().(commitment.AdaptivePinControllerProvider); ok {
+	if p, ok := tx.AggTx().(commitment.AdaptivePinControllerProvider); ok && o.useSharedBranchCache {
 		sd.adaptivePinController = p.AdaptivePinController()
 	}
 
@@ -642,6 +645,7 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 	return d, ok, err
 }
 
+// Unwind drops [txNumUnwindTo, ∞)
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
 	// Tx/epoch-aware unwind of the commitment BranchCache: every cached branch
@@ -1203,11 +1207,8 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	}
 
 	// branchCache sits between sd.mem/parent.mem and the aggTx files for
-	// CommitmentDomain only. It mirrors MDBX-flushed bytes; writers' fresh
-	// bytes are held in sd.mem above, so a cache hit here is always
-	// equivalent to reading from MDBX. Refreshed per-key by sd.Flush and
-	// evicted by txN watermark on unwind, so a cache hit never coexists
-	// with a newer MDBX state.
+	// CommitmentDomain only. Snapshot-isolated readers must disable it because
+	// concurrent commits can advance the cache beyond their transaction view.
 	if domain == kv.CommitmentDomain && sd.branchCache != nil {
 		if cv, cStepU64, ok := sd.branchCache.Get(k); ok {
 			// Get returns the on-disk step index directly — do NOT divide by
@@ -1612,33 +1613,30 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		}
 	}
 
-	switch domain {
-	case kv.AccountsDomain:
+	// Deleting an account cascades to its storage and code — run before the
+	// absent-key skip so leftover storage/code is still wiped even if the
+	// account itself is already gone.
+	if domain == kv.AccountsDomain {
 		if err := sd.DomainDelPrefix(kv.StorageDomain, tx, k, txNum); err != nil {
 			return err
 		}
 		if err := sd.DomainDel(kv.CodeDomain, tx, k, txNum, nil); err != nil {
 			return err
 		}
-		// State cache is refreshed on flush only — see DomainPut. The flush
-		// callback handles the empty-value (delete) case for accounts, code
-		// and the addr→codeHash mapping.
-		// AccountsDomain — apply-side. Serialize against swap window.
-		sd.changesetMu.Lock()
-		defer sd.changesetMu.Unlock()
-		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal)
-	case kv.StorageDomain:
-		// State cache refreshed on flush only — see DomainPut.
-	case kv.CodeDomain:
-		if prevVal == nil {
-			return nil
-		}
-		// State cache refreshed on flush only — see DomainPut.
-	default:
-		//noop
 	}
-	// Serialize against the calculator's swap window for non-commitment
-	// domains; CommitmentDomain skipped — see DomainPut comment.
+
+	// Deleting an already-absent key is a no-op: recording it would append a
+	// redundant empty->empty history row (mirrors domainPut's bytes.Equal
+	// dedup). prevVal is nil when the key was never written, but []byte{} for a
+	// flushed tombstone (getLatestFromDb strips the step prefix) — so test len,
+	// not nil.
+	if len(prevVal) == 0 {
+		return nil
+	}
+
+	// State cache is refreshed on flush only — see DomainPut. Serialize against
+	// the calculator's swap window for non-commitment domains; CommitmentDomain
+	// skipped — see DomainPut comment.
 	if domain != kv.CommitmentDomain {
 		sd.changesetMu.Lock()
 		defer sd.changesetMu.Unlock()

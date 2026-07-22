@@ -17,9 +17,7 @@ const (
 	batchCheckInterval                  = 500 * time.Millisecond
 )
 
-var (
-	blsVerifyMultipleSignatures = bls.VerifyMultipleSignatures
-)
+var blsVerifyMultipleSignatures = bls.VerifyMultipleSignatures
 
 type BatchSignatureVerifier struct {
 	sentinel                   sentinelproto.SentinelClient

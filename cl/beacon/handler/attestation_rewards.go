@@ -225,7 +225,8 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		previousIdx,
 		a.isInactivityLeaking(epoch, finalizedCheckpoint),
 		filterIndicies,
-		epoch)
+		epoch,
+	)
 	if err != nil {
 		return nil, err
 	}

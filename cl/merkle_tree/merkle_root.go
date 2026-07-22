@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -44,7 +45,7 @@ func HashTreeRoot(schema ...any) ([32]byte, error) {
 		return [32]byte{}, errors.New("empty schema")
 	}
 	var stack [maxStackLeaves * length.Hash]byte // stack-allocation for most of cases
-	size := NextPowerOfTwo(uint64(len(schema) * length.Hash))
+	size := math.NextPowerOfTwo(uint64(len(schema) * length.Hash))
 	var leaves []byte
 	if size <= uint64(len(stack)) {
 		leaves = stack[:size]
@@ -142,7 +143,7 @@ func MerkleRootFromFlatLeaves(leaves []byte, out []byte) (err error) {
 		copy(out, leaves)
 		return
 	}
-	return globalHasher.merkleizeTrieLeavesFlat(leaves, out, NextPowerOfTwo(uint64((len(leaves)+31)/32)))
+	return globalHasher.merkleizeTrieLeavesFlat(leaves, out, math.NextPowerOfTwo(uint64((len(leaves)+31)/32)))
 }
 
 func MerkleRootFromFlatFromIntermediateLevel(nodes []byte, out []byte, leavesLen, intermediateLevel int) (err error) {
@@ -150,7 +151,7 @@ func MerkleRootFromFlatFromIntermediateLevel(nodes []byte, out []byte, leavesLen
 		copy(out, nodes)
 		return
 	}
-	return globalHasher.merkleizeTrieLeavesFlatWithStart(nodes, out, NextPowerOfTwo(uint64((leavesLen+31)/32)), uint64(intermediateLevel))
+	return globalHasher.merkleizeTrieLeavesFlatWithStart(nodes, out, math.NextPowerOfTwo(uint64((leavesLen+31)/32)), uint64(intermediateLevel))
 }
 
 func MerkleRootFromFlatFromIntermediateLevelWithLimit(nodes []byte, out []byte, limit, intermediateLevel int) (err error) {

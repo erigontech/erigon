@@ -1588,8 +1588,8 @@ func TestModeUpdatePreservesAccountAcrossStorageFold(t *testing.T) {
 		trie := NewHexPatriciaHashed(length.Addr, state, DefaultTrieConfig())
 		require.NoError(t, state.applyPlainUpdates(initialKeys, initialUpdates))
 		updates := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, initialKeys, initialUpdates)
+		defer updates.Close()
 		_, err := trie.Process(ctx, updates, "", nil, WarmupConfig{})
-		updates.Close()
 		require.NoError(t, err)
 		return state, trie
 	}
@@ -1597,15 +1597,15 @@ func TestModeUpdatePreservesAccountAcrossStorageFold(t *testing.T) {
 	directState, directTrie := newPreStateTrie()
 	require.NoError(t, directState.applyPlainUpdates(changedKeys, changedUpdates))
 	directUpdates := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, changedKeys, changedUpdates)
+	defer directUpdates.Close()
 	expected, err := directTrie.Process(ctx, directUpdates, "", nil, WarmupConfig{})
-	directUpdates.Close()
 	require.NoError(t, err)
 
 	staleState, updateTrie := newPreStateTrie()
 	updateTrie.ResetContext(staleState)
 	updateUpdates := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, changedKeys, changedUpdates)
+	defer updateUpdates.Close()
 	actual, err := updateTrie.Process(ctx, updateUpdates, "", nil, WarmupConfig{})
-	updateUpdates.Close()
 	require.NoError(t, err)
 
 	require.Equal(t, expected, actual)
