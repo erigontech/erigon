@@ -74,7 +74,7 @@ func warnUnevenIIAvailability(at *state.AggregatorRoTx, tx kv.Tx, logger log.Log
 		}
 		iiFromBlock, err := tx2block(iiStartTxNum)
 		if err != nil {
-			logger.Warn("[snapshots:history] Stat", "err", err)
+			logger.Debug("[snapshots:history] Stat", "err", err)
 			return
 		}
 		late = append(late, fmt.Sprintf("%s=%d", name.String(), iiFromBlock))
@@ -84,10 +84,10 @@ func warnUnevenIIAvailability(at *state.AggregatorRoTx, tx kv.Tx, logger log.Log
 	}
 	historyFromBlock, err := tx2block(historyStartTxNum)
 	if err != nil {
-		logger.Warn("[snapshots:history] Stat", "err", err)
+		logger.Debug("[snapshots:history] Stat", "err", err)
 		return
 	}
-	logger.Warn("[snapshots:history] uneven old-data availability: indices start later than state history; filtered eth_getLogs/trace_filter may return incomplete results for older blocks",
+	logger.Debug("[snapshots:history] uneven old-data availability: indices start later than state history; filtered eth_getLogs/trace_filter may return incomplete results for older blocks",
 		"state_history_from_block", historyFromBlock,
 		"index_from_block", strings.Join(late, ","))
 }
