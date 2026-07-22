@@ -21,10 +21,18 @@ rules:
   excessive-permissions:
     disable: true
 
-  # secrets: inherit is intentional in ci-gate.yml and cache-warming.yml;
-  # tracked in #21132.
+  # The remaining `secrets: inherit` calls target same-repo reusable workflows
+  # that genuinely consume secrets — sonar (SONAR_TOKEN) and the DockerHub-pull
+  # hive/kurtosis suites (DOCKERHUB_PULL_*). Those callees read the secrets
+  # directly without declaring workflow_call secrets, so inherit is how they
+  # receive them. Tracked in #21132.
   secrets-inherit:
-    disable: true
+    ignore:
+      - cache-warming.yml
+      - cache-warming-kurtosis-cl-images.yml
+      - cache-warming-kurtosis-gloas-images.yml
+      - ci-gate.yml
+      - sonar-branch-scan.yml
 
   # This workflow must build and publish an image for every triggering commit;
   # a concurrency group would cancel intermediate queued runs and skip images.
