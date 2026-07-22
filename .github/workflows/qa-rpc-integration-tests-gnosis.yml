@@ -27,6 +27,9 @@ concurrency:
     }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 jobs:
   gnosis-rpc-integ-tests:
     runs-on: [ self-hosted, qa, Gnosis, rpc-integration ]
