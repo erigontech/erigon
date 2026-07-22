@@ -377,7 +377,7 @@ type rlpStorageLog struct {
 
 // EncodeRLP implements rlp.Encoder.
 func (l *Log) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, rlpLog{Address: l.Address, Topics: l.Topics, Data: l.Data})
+	return rlp.Encode(w, &rlpLog{Address: l.Address, Topics: l.Topics, Data: l.Data})
 }
 
 // DecodeRLP implements rlp.Decoder.
@@ -414,7 +414,7 @@ type LogForStorage Log
 
 // EncodeRLP implements rlp.Encoder.
 func (l *LogForStorage) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, rlpStorageLog{
+	return rlp.Encode(w, &rlpStorageLog{
 		Address: l.Address,
 		Topics:  l.Topics,
 		Data:    l.Data,
