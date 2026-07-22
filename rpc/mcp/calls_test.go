@@ -343,6 +343,24 @@ func TestToolCallError(t *testing.T) {
 	require.Contains(t, got, "boom")
 }
 
+// A tracer that isn't a built-in name would be executed as a JS snippet by
+// erigon; MCP must reject it before it reaches the node.
+func TestTracerAllowlist(t *testing.T) {
+	caller := &fakeCaller{result: json.RawMessage(`{}`)}
+	e := NewErigonMCPServer(caller, "", false)
+
+	for _, tool := range []string{"debug_traceTransaction", "debug_traceBlockByNumber", "debug_traceCall"} {
+		caller.method = ""
+		got := callTool(t, e, tool, map[string]any{"txHash": "0x1", "to": "0xabc", "tracer": "for(;;){}"})
+		require.Empty(t, caller.method, "%s: JS-snippet tracer must not reach dispatch", tool)
+		require.Contains(t, got, "unsupported tracer")
+	}
+
+	caller.method = ""
+	callTool(t, e, "debug_traceTransaction", map[string]any{"txHash": "0x1", "tracer": "prestateTracer"})
+	require.Equal(t, "debug_traceTransaction", caller.method, "built-in tracer must be accepted")
+}
+
 func TestTraceFilterCountBounds(t *testing.T) {
 	caller := &fakeCaller{result: json.RawMessage(`[]`)}
 	e := NewErigonMCPServer(caller, "", false)

@@ -223,16 +223,32 @@ func buildTxArgs(withBlock bool) func(req mcp.CallToolRequest) ([]any, error) {
 	}
 }
 
+// allowedTracers is the set of built-in native tracer names MCP will forward.
+// Erigon's tracer lookup treats any unrecognized string as a JavaScript
+// snippet to execute (execution/tracing/tracers/js/goja.go), so allowlisting
+// keeps a read-only MCP surface from becoming arbitrary on-node code execution.
+var allowedTracers = map[string]struct{}{
+	"callTracer":     {},
+	"prestateTracer": {},
+	"flatCallTracer": {},
+	"4byteTracer":    {},
+	"muxTracer":      {},
+	"noopTracer":     {},
+}
+
 // tracerConfig returns the debug_trace* config argument. The default is
 // callTracer rather than the RPC default (struct logger) because full opcode
 // logs are far too large for an MCP client's context; pass tracer="" to get
-// the struct logger anyway.
-func tracerConfig(req mcp.CallToolRequest) (map[string]any, bool) {
+// the struct logger anyway. Only built-in tracer names are accepted.
+func tracerConfig(req mcp.CallToolRequest) (map[string]any, bool, error) {
 	tracer := strings.TrimSpace(req.GetString("tracer", "callTracer"))
 	if tracer == "" {
-		return nil, false
+		return nil, false, nil
 	}
-	return map[string]any{"tracer": tracer}, true
+	if _, ok := allowedTracers[tracer]; !ok {
+		return nil, false, fmt.Errorf("unsupported tracer %q; allowed: 4byteTracer, callTracer, flatCallTracer, muxTracer, noopTracer, prestateTracer", tracer)
+	}
+	return map[string]any{"tracer": tracer}, true, nil
 }
 
 func buildTraceArgs(prefix ...param) func(req mcp.CallToolRequest) ([]any, error) {
@@ -245,7 +261,11 @@ func buildTraceArgs(prefix ...param) func(req mcp.CallToolRequest) ([]any, error
 			}
 			args = append(args, v)
 		}
-		if cfg, ok := tracerConfig(req); ok {
+		cfg, ok, err := tracerConfig(req)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
 			args = append(args, cfg)
 		}
 		return args, nil
@@ -257,7 +277,11 @@ func buildTraceCall(req mcp.CallToolRequest) ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cfg, ok := tracerConfig(req); ok {
+	cfg, ok, err := tracerConfig(req)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
 		args = append(args, cfg)
 	}
 	return args, nil
@@ -707,7 +731,7 @@ func rpcToolCalls() []toolCall {
 			name: "debug_traceTransaction", desc: "Trace a transaction with a tracer (default: callTracer call tree)",
 			params: []param{
 				txHashParam,
-				{name: "tracer", desc: "Tracer name, e.g. callTracer, prestateTracer (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
+				{name: "tracer", desc: "Built-in tracer: callTracer, prestateTracer, flatCallTracer, 4byteTracer, muxTracer, noopTracer (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
 			},
 			build: buildTraceArgs(txHashParam),
 		},
@@ -715,7 +739,7 @@ func rpcToolCalls() []toolCall {
 			name: "debug_traceBlockByNumber", desc: "Trace all transactions in a block with a tracer (default: callTracer)",
 			params: []param{
 				blockNumberParam,
-				{name: "tracer", desc: "Tracer name, e.g. callTracer, prestateTracer (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
+				{name: "tracer", desc: "Built-in tracer: callTracer, prestateTracer, flatCallTracer, 4byteTracer, muxTracer, noopTracer (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
 			},
 			build: buildTraceArgs(blockNumberParam),
 		},
@@ -728,7 +752,7 @@ func rpcToolCalls() []toolCall {
 				{name: "value", desc: "Value (hex)", kind: pString},
 				{name: "gas", desc: "Gas limit (hex)", kind: pString},
 				{name: "blockNumber", desc: "Block number (default: latest)", kind: pString},
-				{name: "tracer", desc: "Tracer name (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
+				{name: "tracer", desc: "Built-in tracer: callTracer, prestateTracer, flatCallTracer, 4byteTracer, muxTracer, noopTracer (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
 			},
 			build: buildTraceCall,
 		},
