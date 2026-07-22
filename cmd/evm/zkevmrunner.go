@@ -249,7 +249,7 @@ func runWitnessTest(test *testutil.WitnessBlockTest) error {
 	}
 
 	baseApi := jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
-	debugApi := jsonrpc.NewPrivateDebugAPI(baseApi, m.DB, nil, 0, false)
+	debugApi := jsonrpc.NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{})
 	canonicalMode := "canonical"
 
 	for i := 0; i < test.NumBlocks(); i++ {
