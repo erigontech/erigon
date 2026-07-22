@@ -301,7 +301,7 @@ func TestGetDutiesProposerFutureEpochTooFarReturnsBadRequest(t *testing.T) {
 
 	headEpoch := postState.Slot() / handler.beaconChainCfg.SlotsPerEpoch
 	epoch := headEpoch + maxEpochsLookaheadForDuties + 1
-	request := httptest.NewRequest(http.MethodGet, "/eth/v1/validator/duties/proposer/"+strconv.FormatUint(epoch, 10), nil)
+	request := httptest.NewRequest(http.MethodGet, "/eth/v1/validator/duties/proposer/"+strconv.FormatUint(epoch, 10), http.NoBody)
 	recorder := httptest.NewRecorder()
 	handler.mux.ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
@@ -342,7 +342,7 @@ func TestGetDutiesProposerEpochOverflowReturnsBadRequest(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	epoch := uint64(math.MaxUint64)
-	request := httptest.NewRequest(http.MethodGet, "/eth/v1/validator/duties/proposer/"+strconv.FormatUint(epoch, 10), nil)
+	request := httptest.NewRequest(http.MethodGet, "/eth/v1/validator/duties/proposer/"+strconv.FormatUint(epoch, 10), http.NoBody)
 	recorder := httptest.NewRecorder()
 	handler.mux.ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
@@ -446,7 +446,7 @@ func getProposerDutiesForEpoch(t *testing.T, handler *ApiHandler, epoch uint64) 
 func getProposerDutiesForPath(t *testing.T, handler *ApiHandler, path string) proposerDutiesResponse {
 	t.Helper()
 
-	request := httptest.NewRequest(http.MethodGet, path, nil)
+	request := httptest.NewRequest(http.MethodGet, path, http.NoBody)
 	recorder := httptest.NewRecorder()
 	handler.mux.ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())

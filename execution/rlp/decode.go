@@ -33,6 +33,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp/internal/rlpstruct"
 )
 
@@ -950,6 +951,50 @@ func (s *Stream) MoreDataInList() bool {
 	return listLimit > 0
 }
 
+// Addr decodes an RLP string of exactly 20 bytes as an address. It reads
+// through the stream's scratch buffer, so unlike ReadBytes it never forces
+// the destination to escape to the heap.
+func (s *Stream) Addr() (a common.Address, err error) {
+	kind, size, err := s.Kind()
+	switch {
+	case err != nil:
+		return a, err
+	case kind == List:
+		return a, ErrExpectedString
+	case kind == Byte:
+		return a, fmt.Errorf("input value has wrong size 1, want %d", len(a))
+	case size != uint64(len(a)):
+		return a, fmt.Errorf("input value has wrong size %d, want %d", size, len(a))
+	}
+	if err = s.readFull(s.uintbuf[:len(a)]); err != nil {
+		return a, err
+	}
+	copy(a[:], s.uintbuf[:len(a)])
+	return a, nil
+}
+
+// ReadHash decodes an RLP string of exactly 32 bytes as a hash. Like Addr, it
+// reads through the stream's scratch buffer and never forces the destination
+// to escape to the heap.
+func (s *Stream) ReadHash() (h common.Hash, err error) {
+	kind, size, err := s.Kind()
+	switch {
+	case err != nil:
+		return h, err
+	case kind == List:
+		return h, ErrExpectedString
+	case kind == Byte:
+		return h, fmt.Errorf("input value has wrong size 1, want %d", len(h))
+	case size != uint64(len(h)):
+		return h, fmt.Errorf("input value has wrong size %d, want %d", size, len(h))
+	}
+	if err = s.readFull(s.uintbuf[:len(h)]); err != nil {
+		return h, err
+	}
+	copy(h[:], s.uintbuf[:len(h)])
+	return h, nil
+}
+
 // ReadUint256 decodes the next value as a uint256.
 func (s *Stream) ReadUint256(dst *uint256.Int) error {
 	var buffer []byte
@@ -1043,11 +1088,14 @@ func (s *Stream) Decode(val any) error {
 		return err
 	}
 
-	err = decoder(s, rval.Elem())
-	var decErr *decodeError
-	if errors.As(err, &decErr) && len(decErr.ctx) > 0 {
-		// Add decode target type to error so context has more meaning.
-		decErr.ctx = append(decErr.ctx, fmt.Sprint("(", rtyp.Elem(), ")"))
+	if err = decoder(s, rval.Elem()); err != nil {
+		// Declared in the error branch only: errors.As takes the target's address,
+		// which heap-allocates it on every call otherwise.
+		var decErr *decodeError
+		if errors.As(err, &decErr) && len(decErr.ctx) > 0 {
+			// Add decode target type to error so context has more meaning.
+			decErr.ctx = append(decErr.ctx, fmt.Sprint("(", rtyp.Elem(), ")"))
+		}
 	}
 	return err
 }

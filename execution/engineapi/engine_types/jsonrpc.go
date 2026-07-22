@@ -148,7 +148,7 @@ type ExecutionPayloadBody struct {
 type ExecutionPayloadBodyV2 struct {
 	Transactions    []hexutil.Bytes     `json:"transactions" gencodec:"required"`
 	Withdrawals     []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
-	BlockAccessList hexutil.Bytes       `json:"blockAccessList,omitempty"`
+	BlockAccessList *hexutil.Bytes      `json:"blockAccessList"`
 }
 
 type PayloadStatus struct {

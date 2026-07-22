@@ -63,14 +63,20 @@ jobs:
 
       # golangci-lint internally trims cache entries unused for 5 days,
       # so the cache is self-cleaning even as we save new versions.
+      #
+      # The linter config and the ruleguard rules are part of the key: golangci-lint
+      # compiles rules.go once and caches the result, so a cache restored from before
+      # a rule was edited keeps reporting the old rule — including rules that have
+      # since been deleted. Every restore-key must stay narrower than the config hash
+      # for that to hold.
       - name: Restore golangci-lint cache
         uses: actions/cache/restore@v6
         with:
           path: ~/.cache/golangci-lint
-          key: golangci-lint|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
+          key: golangci-lint|${{ runner.os }}|${{ hashFiles('.golangci.yml', 'rules.go') }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
           restore-keys: |
-            golangci-lint|${{ runner.os }}|${{ hashFiles('go.sum') }}|
-            golangci-lint|${{ runner.os }}|
+            golangci-lint|${{ runner.os }}|${{ hashFiles('.golangci.yml', 'rules.go') }}|${{ hashFiles('go.sum') }}|
+            golangci-lint|${{ runner.os }}|${{ hashFiles('.golangci.yml', 'rules.go') }}|
 
       - run: make lintci
 
@@ -84,7 +90,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ~/.cache/golangci-lint
-          key: golangci-lint|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
+          key: golangci-lint|${{ runner.os }}|${{ hashFiles('.golangci.yml', 'rules.go') }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
 
       # In the merge queue, cancel the run on first failure so the gate
       # doesn't stall waiting for still-running siblings. PR runs keep

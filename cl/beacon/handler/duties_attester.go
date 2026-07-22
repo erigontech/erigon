@@ -36,7 +36,7 @@ import (
 const maxEpochsLookaheadForDuties = 32
 
 func epochSlotOverflows(epoch, slotsPerEpoch uint64) bool {
-	return slotsPerEpoch > 0 && epoch > math.MaxUint64/slotsPerEpoch-1
+	return slotsPerEpoch > 0 && epoch >= math.MaxUint64/slotsPerEpoch
 }
 
 type attesterDutyResponse struct {
