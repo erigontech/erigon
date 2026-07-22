@@ -1013,6 +1013,11 @@ func serveHTTP(ctx context.Context, mcpServer *server.MCPServer, addr string, co
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			_ = httpServer.Close()
 		}
+		// Join the serve goroutine; this also surfaces a bind/serve error
+		// that raced with the cancellation instead of dropping it.
+		if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
 		return nil
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {

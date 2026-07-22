@@ -91,7 +91,11 @@ func TestListenAndServeShutsDownWithOpenStream(t *testing.T) {
 	streamReq, err := http.NewRequest(http.MethodGet, "http://"+addr+"/mcp", nil)
 	require.NoError(t, err)
 	streamReq.Header.Set("Accept", "text/event-stream")
-	streamResp, err := http.DefaultTransport.RoundTrip(streamReq)
+	// Bounds the header wait without a request deadline that would end the
+	// stream on its own and mask a stalled shutdown.
+	streamTransport := &http.Transport{ResponseHeaderTimeout: 2 * time.Second}
+	defer streamTransport.CloseIdleConnections()
+	streamResp, err := streamTransport.RoundTrip(streamReq)
 	require.NoError(t, err)
 	defer streamResp.Body.Close()
 	require.Equal(t, http.StatusOK, streamResp.StatusCode)
