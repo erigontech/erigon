@@ -32,7 +32,6 @@ const (
 )
 
 func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
-
 	req := &cltypes.BeaconBlocksByRangeRequest{}
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
 		return err
@@ -86,7 +85,6 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 }
 
 func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
-
 	var req solid.HashListSSZ = solid.NewHashList(100)
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
 		return err

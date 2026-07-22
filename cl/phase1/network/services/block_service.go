@@ -43,9 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-var (
-	ErrInvalidSignature = errors.New("invalid signature")
-)
+var ErrInvalidSignature = errors.New("invalid signature")
 
 type proposerIndexAndSlot struct {
 	proposerIndex uint64
@@ -128,7 +126,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	currentSlot := b.syncedData.HeadSlot()
 
 	// [IGNORE] The block is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that
-	//signed_beacon_block.message.slot <= current_slot (a client MAY queue future blocks for processing at the appropriate slot).
+	// signed_beacon_block.message.slot <= current_slot (a client MAY queue future blocks for processing at the appropriate slot).
 	if currentSlot < msg.Block.Slot && !b.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Block.Slot) {
 		return fmt.Errorf("%w: block is not from a future slot: %d > %d", ErrIgnore, currentSlot, msg.Block.Slot)
 	}

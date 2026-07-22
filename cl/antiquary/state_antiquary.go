@@ -192,7 +192,6 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 const stateAntiquaryMaxSlotsPerCommit uint64 = 4 * clparams.SlotsPerDump
 
 func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
-
 	// Check if you need to fill the static validators table
 	refilledStaticValidators, err := FillStaticValidatorsTableIfNeeded(ctx, s.logger, s.stateSn, s.validatorsTable)
 	if err != nil {
@@ -632,7 +631,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if to < (safetyMargin + blocksPerStatefulFile) {
 			return nil
 		}
-		to = to - (safetyMargin + blocksPerStatefulFile)
+		to -= (safetyMargin + blocksPerStatefulFile)
 		if from >= to {
 			return nil
 		}
