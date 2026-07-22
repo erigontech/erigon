@@ -3520,11 +3520,11 @@ To disable the embedded MCP server entirely, pass `--mcp.disable`:
 ./build/bin/erigon --datadir=./data --mcp.disable
 ```
 
-This mode uses **SSE (Server-Sent Events)** transport over HTTP and is the simplest option when you are already running a full Erigon node.
+This mode serves two HTTP transports on the same port — **streamable HTTP** (the current MCP standard) at `/mcp` and **SSE (Server-Sent Events)** at `/sse` for older clients — and is the simplest option when you are already running a full Erigon node.
 
 ### Standalone (`mcp` binary)
 
-A separate `mcp` binary that connects to an existing Erigon node either via its JSON-RPC endpoint or directly via the MDBX database. Supports both **stdio** (for Claude Desktop) and **SSE** transports.
+A separate `mcp` binary that connects to an existing Erigon node either via its JSON-RPC endpoint or directly via the MDBX database. Supports both **stdio** (for Claude Desktop) and **HTTP** (streamable HTTP + SSE) transports.
 
 ```bash
 make mcp
@@ -3556,8 +3556,8 @@ opening the port. If you are running multiple Erigon instances on the same machi
 | `--port` | — | Shorthand for `--rpc.url http://127.0.0.1:<port>` |
 | `--datadir` | — | Erigon data directory (enables direct DB access mode) |
 | `--private.api.addr` | `127.0.0.1:9090` | gRPC private API address (used with `--datadir`) |
-| `--transport` | `stdio` | Transport type: `stdio` or `sse` |
-| `--sse.addr` | `127.0.0.1:8553` | SSE listen address (when `--transport sse`) |
+| `--transport` | `stdio` | Transport type: `stdio` or `http` (`sse` is a deprecated alias of `http`) |
+| `--sse.addr` | `127.0.0.1:8553` | HTTP listen address (when `--transport http`) |
 | `--log.dir` | — | Path to Erigon log directory (enables log analysis tools) |
 
 ## Connection Modes (standalone)
@@ -3659,15 +3659,16 @@ Add the following to your Claude Desktop configuration file (`~/.config/claude-d
 {
   "mcpServers": {
     "erigon": {
-      "type": "sse",
-      "url": "http://127.0.0.1:8553/sse"
+      "type": "http",
+      "url": "http://127.0.0.1:8553/mcp"
     }
   }
 }
 ```
 
-The embedded MCP server starts by default on `127.0.0.1:8553`. To use a different address or port, pass `--mcp.addr` and
-`--mcp.port`. To disable it, pass `--mcp.disable`.
+The embedded MCP server starts by default on `127.0.0.1:8553` and serves streamable HTTP at `/mcp` plus SSE at `/sse`
+(use `"type": "sse"` with the `/sse` URL for clients that only support SSE). To use a different address or port, pass
+`--mcp.addr` and `--mcp.port`. To disable it, pass `--mcp.disable`.
 
 After saving, restart Claude Desktop. The Erigon tools will appear in the tool panel under **erigon**.
 
@@ -3675,7 +3676,13 @@ After saving, restart Claude Desktop. The Erigon tools will appear in the tool p
 
 [Claude Code](https://claude.ai/code) is Anthropic's CLI coding agent. Register the Erigon MCP server with a single command — no config file editing required.
 
-**Embedded SSE mode (recommended — zero extra binaries):**
+**Embedded HTTP mode (recommended — zero extra binaries):**
+
+```bash
+claude mcp add --transport http erigon http://127.0.0.1:8553/mcp
+```
+
+Older Claude Code versions without streamable HTTP support can use the SSE endpoint instead:
 
 ```bash
 claude mcp add --transport sse erigon http://127.0.0.1:8553/sse
@@ -3724,7 +3731,7 @@ mcp_servers:
 Save the file and start a new Codex session. The Erigon tools are loaded automatically — you can query your node in natural language alongside any coding task.
 
 :::tip
-The embedded SSE mode (`http://127.0.0.1:8553/sse`) works out of the box as long as Erigon is running. No separate binary is needed.
+The embedded HTTP mode (`http://127.0.0.1:8553/mcp`, or `/sse` for SSE-only clients) works out of the box as long as Erigon is running. No separate binary is needed.
 :::
 
 ## Available Tools
