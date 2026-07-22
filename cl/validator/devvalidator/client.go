@@ -35,7 +35,7 @@ type beaconResponse struct {
 // get performs a GET request and unmarshals the `data` field into dst.
 func (c *BeaconClient) get(ctx context.Context, path string, dst any) error {
 	url := c.baseURL + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return err
 	}

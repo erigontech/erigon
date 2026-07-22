@@ -123,33 +123,39 @@ func (v Validator) WithdrawalCredentials() (o common.Hash) {
 	copy(o[:], v[48:80])
 	return
 }
+
 func (v Validator) EffectiveBalance() uint64 {
 	if utils.IsSysLittleEndian {
 		return *(*uint64)(unsafe.Pointer(&v[80]))
 	}
 	return binary.LittleEndian.Uint64(v[80:88])
 }
+
 func (v Validator) Slashed() bool {
 	return v[88] != 0
 }
+
 func (v Validator) ActivationEligibilityEpoch() uint64 {
 	if utils.IsSysLittleEndian {
 		return *(*uint64)(unsafe.Pointer(&v[89]))
 	}
 	return binary.LittleEndian.Uint64(v[89:97])
 }
+
 func (v Validator) ActivationEpoch() uint64 {
 	if utils.IsSysLittleEndian {
 		return *(*uint64)(unsafe.Pointer(&v[97]))
 	}
 	return binary.LittleEndian.Uint64(v[97:105])
 }
+
 func (v Validator) ExitEpoch() uint64 {
 	if utils.IsSysLittleEndian {
 		return *(*uint64)(unsafe.Pointer(&v[105]))
 	}
 	return binary.LittleEndian.Uint64(v[105:113])
 }
+
 func (v Validator) WithdrawableEpoch() uint64 {
 	if utils.IsSysLittleEndian {
 		return *(*uint64)(unsafe.Pointer(&v[113]))
@@ -203,6 +209,7 @@ func (v Validator) SetSlashed(b bool) {
 	}
 	v[88] = 0
 }
+
 func (v Validator) SetActivationEligibilityEpoch(i uint64) {
 	if utils.IsSysLittleEndian {
 		*(*uint64)(unsafe.Pointer(&v[89])) = i

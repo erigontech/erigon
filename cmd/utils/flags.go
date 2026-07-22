@@ -1781,17 +1781,17 @@ func setWhitelist(ctx *cli.Command, cfg *ethconfig.Config) {
 	}
 	cfg.Whitelist = make(map[uint64]common.Hash)
 	for _, entry := range common.CliString2Array(whitelist) {
-		parts := strings.Split(entry, "=")
-		if len(parts) != 2 {
+		numberStr, hashStr, ok := strings.Cut(entry, "=")
+		if !ok || strings.Contains(hashStr, "=") {
 			Fatalf("Invalid whitelist entry: %s", entry)
 		}
-		number, err := strconv.ParseUint(parts[0], 0, 64)
+		number, err := strconv.ParseUint(numberStr, 0, 64)
 		if err != nil {
-			Fatalf("Invalid whitelist block number %s: %v", parts[0], err)
+			Fatalf("Invalid whitelist block number %s: %v", numberStr, err)
 		}
 		var hash common.Hash
-		if err = hash.UnmarshalText([]byte(parts[1])); err != nil {
-			Fatalf("Invalid whitelist hash %s: %v", parts[1], err)
+		if err = hash.UnmarshalText([]byte(hashStr)); err != nil {
+			Fatalf("Invalid whitelist hash %s: %v", hashStr, err)
 		}
 		cfg.Whitelist[number] = hash
 	}
@@ -2335,10 +2335,8 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 
 	for _, t := range tags {
 		if t != "" {
-			kv := strings.Split(t, "=")
-
-			if len(kv) == 2 {
-				tagsMap[kv[0]] = kv[1]
+			if k, v, ok := strings.Cut(t, "="); ok && !strings.Contains(v, "=") {
+				tagsMap[k] = v
 			}
 		}
 	}

@@ -143,8 +143,8 @@ func CreateBloom(receipts Receipts) Bloom {
 	for _, receipt := range receipts {
 		for _, log := range receipt.Logs {
 			bin.add(log.Address[:], &buf)
-			for _, b := range log.Topics {
-				bin.add(b[:], &buf)
+			for i := range log.Topics {
+				bin.add(log.Topics[i][:], &buf)
 			}
 		}
 	}

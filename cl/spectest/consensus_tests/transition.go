@@ -30,8 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/transition/machine"
 )
 
-type TransitionCore struct {
-}
+type TransitionCore struct{}
 
 func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
 	var meta struct {

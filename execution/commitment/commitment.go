@@ -456,14 +456,13 @@ func ApplyDeferredBranchUpdates(
 	errs := make([]error, numWorkers)
 	var wg sync.WaitGroup
 	for w := 0; w < numWorkers; w++ {
+		w := w
 		lo := w * chunk
 		hi := min(lo+chunk, len(deferred))
 		if lo >= hi {
 			break
 		}
-		wg.Add(1)
-		go func(w, lo, hi int) {
-			defer wg.Done()
+		wg.Go(func() {
 			merger := workerMergerPool.Get().(*BranchMerger)
 			defer workerMergerPool.Put(merger)
 			for i := lo; i < hi; i++ {
@@ -472,7 +471,7 @@ func ApplyDeferredBranchUpdates(
 					return
 				}
 			}
-		}(w, lo, hi)
+		})
 	}
 	wg.Wait()
 	for _, err := range errs {
@@ -1686,8 +1685,8 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 // from DomainPut.
 func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	if dbg.TraceTouchKey {
-		fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%d nonce=%d codeHash=%x\n",
-			key, update.Flags, &update.Balance, update.Nonce, update.CodeHash)
+		fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%s nonce=%d codeHash=%x\n",
+			key, update.Flags, update.Balance.String(), update.Nonce, update.CodeHash)
 	}
 	switch t.mode {
 	case ModeUpdate:

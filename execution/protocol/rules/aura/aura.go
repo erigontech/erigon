@@ -726,7 +726,9 @@ func (c *AuRa) applyRewards(header *types.Header, state *state.IntraBlockState, 
 		return err
 	}
 	for _, r := range rewards {
-		state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock)
+		if err := state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -846,7 +848,7 @@ func isEpochEnd(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, f
 			// block that breaks the invariant that the parent's step < the block's step.
 			self.step.can_propose.store(false, AtomicOrdering::SeqCst);
 		*/
-		return rlp.EncodeToBytes(EpochTransitionProof{SignalNumber: signalNumber.Uint64(), SetProof: pendingTransitionProof, FinalityProof: finalityProofRLP})
+		return rlp.EncodeToBytes(&EpochTransitionProof{SignalNumber: signalNumber.Uint64(), SetProof: pendingTransitionProof, FinalityProof: finalityProofRLP})
 	}
 	return nil, nil
 }
@@ -903,7 +905,7 @@ func (c *AuRa) GenesisEpochData(header *types.Header, caller rules.SystemCall) (
 	if err != nil {
 		return nil, err
 	}
-	res, err := rlp.EncodeToBytes(EpochTransitionProof{SignalNumber: 0, SetProof: setProof, FinalityProof: []byte{}})
+	res, err := rlp.EncodeToBytes(&EpochTransitionProof{SignalNumber: 0, SetProof: setProof, FinalityProof: []byte{}})
 	if err != nil {
 		panic(err)
 	}

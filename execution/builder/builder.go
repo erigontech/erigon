@@ -145,7 +145,7 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 		}
 	}
 
-	sd, err := execctx.NewSharedDomains(b.ctx, compositeTx, b.logger, execctx.WithoutDeferredBranchUpdates())
+	sd, err := execctx.NewSharedDomains(b.ctx, compositeTx, b.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache())
 	if err != nil {
 		return nil, err
 	}
