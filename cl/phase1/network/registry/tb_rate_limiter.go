@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -53,14 +54,14 @@ type tokenBucketRateLimiter struct {
 	burst   int
 }
 
-func newTokenBucketRateLimiter(ratePerSecond float64, burst int) *tokenBucketRateLimiter {
+func newTokenBucketRateLimiter(ctx context.Context, ratePerSecond float64, burst int) *tokenBucketRateLimiter {
 	tb := &tokenBucketRateLimiter{
 		limiter: make(map[string]tokenBucketLimiter),
 		mu:      sync.Mutex{},
 		rate:    rate.Limit(ratePerSecond),
 		burst:   burst,
 	}
-	go tb.cleanup()
+	go tb.cleanup(ctx)
 	return tb
 }
 
@@ -78,9 +79,18 @@ func (r *tokenBucketRateLimiter) acquire(key string) bool {
 	return limiter.limiter.Allow()
 }
 
-func (r *tokenBucketRateLimiter) cleanup() {
+func (r *tokenBucketRateLimiter) cleanup(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
 	for {
-		time.Sleep(10 * time.Second)
+		select {
+		case <-ctx.Done():
+			r.mu.Lock()
+			clear(r.limiter)
+			r.mu.Unlock()
+			return
+		case <-ticker.C:
+		}
 		r.mu.Lock()
 		for key, limiter := range r.limiter {
 			if time.Since(limiter.lastAccess) > 3*time.Minute {

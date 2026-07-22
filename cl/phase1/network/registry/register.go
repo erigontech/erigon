@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -16,6 +17,7 @@ import (
 // RegisterGossipServices registers all the gossip services with the given gossip manager.
 // Put it in a separate file to avoid circular dependency because it depends on many big packages.
 func RegisterGossipServices(
+	ctx context.Context,
 	gm *gossip.GossipManager,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	ethClock eth_clock.EthereumClock,
@@ -45,23 +47,23 @@ func RegisterGossipServices(
 	}
 
 	// register services
-	add(gossip.RegisterGossipService(gm, blockService, withRateLimiterByPeer(1, 2)))
-	add(gossip.RegisterGossipService(gm, syncContributionService, waitReady, withRateLimiterByPeer(8, 16)))
-	add(gossip.RegisterGossipService(gm, aggregateAndProofService, waitReady, withRateLimiterByPeer(8, 16)))
-	add(gossip.RegisterGossipService(gm, syncCommitteeMessagesService, waitReady, withRateLimiterByPeer(8, 16)))
-	add(gossip.RegisterGossipService(gm, attesterSlashingService, waitReady, withRateLimiterByPeer(2, 8)))
-	add(gossip.RegisterGossipService(gm, voluntaryExitService, waitReady, withRateLimiterByPeer(2, 8)))
-	add(gossip.RegisterGossipService(gm, blsToExecutionChangeService, waitReady, withRateLimiterByPeer(2, 8)))
-	add(gossip.RegisterGossipService(gm, proposerSlashingService, waitReady, withRateLimiterByPeer(2, 8)))
+	add(gossip.RegisterGossipService(gm, blockService, withRateLimiterByPeer(ctx, 1, 2)))
+	add(gossip.RegisterGossipService(gm, syncContributionService, waitReady, withRateLimiterByPeer(ctx, 8, 16)))
+	add(gossip.RegisterGossipService(gm, aggregateAndProofService, waitReady, withRateLimiterByPeer(ctx, 8, 16)))
+	add(gossip.RegisterGossipService(gm, syncCommitteeMessagesService, waitReady, withRateLimiterByPeer(ctx, 8, 16)))
+	add(gossip.RegisterGossipService(gm, attesterSlashingService, waitReady, withRateLimiterByPeer(ctx, 2, 8)))
+	add(gossip.RegisterGossipService(gm, voluntaryExitService, waitReady, withRateLimiterByPeer(ctx, 2, 8)))
+	add(gossip.RegisterGossipService(gm, blsToExecutionChangeService, waitReady, withRateLimiterByPeer(ctx, 2, 8)))
+	add(gossip.RegisterGossipService(gm, proposerSlashingService, waitReady, withRateLimiterByPeer(ctx, 2, 8)))
 	add(gossip.RegisterGossipService(gm, attestationService, waitReady, withGlobalTimeBasedRateLimiter(6*time.Second, 250)))
 	add(gossip.RegisterGossipService(gm, blobService, withEndVersion(clparams.FuluVersion), withGlobalTimeBasedRateLimiter(6*time.Second, 32)))
 	// fulu
-	add(gossip.RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withRateLimiterByPeer(32, 64)))
+	add(gossip.RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withRateLimiterByPeer(ctx, 32, 64)))
 	// gloas
-	add(gossip.RegisterGossipService(gm, executionPayloadService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(2, 4)))
-	add(gossip.RegisterGossipService(gm, payloadAttestationService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(8, 16)))
-	add(gossip.RegisterGossipService(gm, proposerPreferencesService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(2, 4)))
-	add(gossip.RegisterGossipService(gm, executionPayloadBidService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(8, 16)))
+	add(gossip.RegisterGossipService(gm, executionPayloadService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(ctx, 2, 4)))
+	add(gossip.RegisterGossipService(gm, payloadAttestationService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(ctx, 8, 16)))
+	add(gossip.RegisterGossipService(gm, proposerPreferencesService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(ctx, 2, 4)))
+	add(gossip.RegisterGossipService(gm, executionPayloadBidService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(ctx, 8, 16)))
 
 	log.Info("[GossipManager] Registered services", "subscribed", subscribed, "expired", expired)
 }
@@ -95,8 +97,8 @@ func withGlobalTimeBasedRateLimiter(duration time.Duration, maxRequests int) gos
 }
 
 // withRateLimiterByPeer returns a condition that checks if the message can be processed based on the token bucket rate limiter
-func withRateLimiterByPeer(ratePerSecond float64, burst int) gossip.ConditionFunc {
-	limiter := newTokenBucketRateLimiter(ratePerSecond, burst)
+func withRateLimiterByPeer(ctx context.Context, ratePerSecond float64, burst int) gossip.ConditionFunc {
+	limiter := newTokenBucketRateLimiter(ctx, ratePerSecond, burst)
 	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 		return limiter.acquire(pid.String())
 	}
