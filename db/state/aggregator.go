@@ -569,28 +569,46 @@ func (a *Aggregator) openFolder() error {
 		return err
 	}
 
+	standaloneIIs := a.standaloneIIs()
+	retiredByDomain := make([]retiredFiles, len(a.d))
+	retiredByII := make([]retiredFiles, len(standaloneIIs))
+
 	eg, ctx := errgroup.WithContext(a.ctx)
-	for _, d := range a.d {
+	for id, d := range a.d {
 		if d.Disable {
 			continue
 		}
 
-		d := d
-		eg.Go(func() error {
-			return d.openFolder(ctx, scanDirsRes)
+		eg.Go(func() (err error) {
+			retiredByDomain[id], err = d.openFolder(ctx, scanDirsRes)
+			return err
 		})
 	}
-	for _, ii := range a.standaloneIIs() {
+	for id, ii := range standaloneIIs {
 		if ii.Disable {
 			continue
 		}
-		ii := ii
-		eg.Go(func() error { return ii.openFolder(ctx, scanDirsRes) })
+		eg.Go(func() (err error) {
+			retiredByII[id], err = ii.openFolder(ctx, scanDirsRes)
+			return err
+		})
 	}
-	if err := eg.Wait(); err != nil {
-		return fmt.Errorf("openFolder: %w", err)
+	waitErr := eg.Wait()
+
+	var retired retiredFiles
+	for _, r := range retiredByDomain {
+		retired = append(retired, r...)
 	}
-	a.recalcVisibleFiles(nil)
+	for _, r := range retiredByII {
+		retired = append(retired, r...)
+	}
+	// Retire (not close in place); the last existing reader closes them. Attach even when
+	// a sibling open errored (only ctx cancellation): the files are already detached from
+	// dirtyFiles, so skipping recalc would strand them, never reclaimed.
+	a.recalcVisibleFiles(retired)
+	if waitErr != nil {
+		return fmt.Errorf("openFolder: %w", waitErr)
+	}
 	return nil
 }
 
@@ -1752,7 +1770,7 @@ type aggregatorVisible struct {
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
 
 	refcnt  atomic.Int32       // live readers
-	retired []*FilesItem       // files marked as "ready for delete"
+	retired retiredFiles       // last reader of  `aggregatorVisible` object will close/remove this files
 	next    *aggregatorVisible // oldest→newest linked-list link (set under dirtyFilesLock)
 }
 
@@ -1762,7 +1780,7 @@ type aggregatorVisible struct {
 // helpers, then publishes the completed snapshot with a.visible.Store(next).
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
-func (a *Aggregator) recalcVisibleFiles(retired []*FilesItem) {
+func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	toTxNum := a.dirtyFilesEndTxNumMinimax()
 	next := &aggregatorVisible{}
 	for id, d := range a.d {
@@ -1786,7 +1804,7 @@ func (a *Aggregator) recalcVisibleFiles(retired []*FilesItem) {
 
 	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
 	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
-	closeAndRemoveFiles(a.reclaimRetiredLocked())
+	reclaimFiles(a.reclaimRetiredLocked())
 }
 
 // stateMinimaxTxNum returns min(EndTxNum) across kv.StateDomains. Mirrors
@@ -2376,27 +2394,35 @@ func (a *Aggregator) releaseVisibleFiles(v *aggregatorVisible) {
 }
 
 // reclaimRetiredLocked oldest-first traverse linked-list of visibleFiles objects while `refcnt == 0`
-// collecting retired files for physical delete. Physical delete happen out of `dirtyFilesLock`
-func (a *Aggregator) reclaimRetiredLocked() (toDelete []*FilesItem) {
+// collecting retired files for physical reclaim. Physical reclaim happens out of `dirtyFilesLock`
+func (a *Aggregator) reclaimRetiredLocked() (toReclaim retiredFiles) {
 	cur := a.visible.Load()
 	for h := a.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
-		toDelete = append(toDelete, h.retired...)
+		toReclaim = append(toReclaim, h.retired...)
 		h.retired = nil
 		a.oldestVisible = h.next
 	}
-	return toDelete
+	return toReclaim
 }
 
 func (a *Aggregator) reclaimRetired() {
 	a.dirtyFilesLock.Lock()
-	toDelete := a.reclaimRetiredLocked()
+	toReclaim := a.reclaimRetiredLocked()
 	a.dirtyFilesLock.Unlock()
-	closeAndRemoveFiles(toDelete)
+	reclaimFiles(toReclaim)
 }
 
-func closeAndRemoveFiles(files []*FilesItem) {
+// reclaimFiles closes each retired file, additionally deleting it from disk when it is
+// marked deletable (canDelete). Files an external actor already removed from disk (an
+// OpenFolder that found them gone) are close-only, so a same-name recreation before the
+// pinning readers drain is never clobbered.
+func reclaimFiles(files retiredFiles) {
 	for _, f := range files {
-		f.closeFilesAndRemove()
+		if f.canDelete.Load() {
+			f.closeFilesAndRemove()
+		} else {
+			f.closeFiles()
+		}
 	}
 }
 
