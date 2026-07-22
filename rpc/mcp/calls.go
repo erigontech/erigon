@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math/big"
+	"slices"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -50,6 +52,7 @@ type toolCall struct {
 	build  func(req mcp.CallToolRequest) ([]any, error)
 	format func(req mcp.CallToolRequest, raw json.RawMessage) string
 	empty  string // replaces null/[] results, e.g. "Block not found"
+	raw    bool   // return the result bytes as-is, skipping the pretty-print pass
 }
 
 func (c *toolCall) tool() mcp.Tool {
@@ -137,6 +140,9 @@ func (c *toolCall) render(req mcp.CallToolRequest, raw json.RawMessage) string {
 	}
 	if c.format != nil {
 		return c.format(req, raw)
+	}
+	if c.raw {
+		return string(raw)
 	}
 	return toJSONIndent(raw)
 }
@@ -246,7 +252,8 @@ func tracerConfig(req mcp.CallToolRequest) (map[string]any, bool, error) {
 		return nil, false, nil
 	}
 	if _, ok := allowedTracers[tracer]; !ok {
-		return nil, false, fmt.Errorf("unsupported tracer %q; allowed: 4byteTracer, callTracer, flatCallTracer, muxTracer, noopTracer, prestateTracer", tracer)
+		allowed := slices.Sorted(maps.Keys(allowedTracers))
+		return nil, false, fmt.Errorf("unsupported tracer %q; allowed: %s", tracer, strings.Join(allowed, ", "))
 	}
 	return map[string]any{"tracer": tracer}, true, nil
 }
@@ -734,6 +741,7 @@ func rpcToolCalls() []toolCall {
 				{name: "tracer", desc: "Built-in tracer: callTracer, prestateTracer, flatCallTracer, 4byteTracer, muxTracer, noopTracer (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
 			},
 			build: buildTraceArgs(txHashParam),
+			raw:   true,
 		},
 		{
 			name: "debug_traceBlockByNumber", desc: "Trace all transactions in a block with a tracer (default: callTracer)",
@@ -742,6 +750,7 @@ func rpcToolCalls() []toolCall {
 				{name: "tracer", desc: "Built-in tracer: callTracer, prestateTracer, flatCallTracer, 4byteTracer, muxTracer, noopTracer (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
 			},
 			build: buildTraceArgs(blockNumberParam),
+			raw:   true,
 		},
 		{
 			name: "debug_traceCall", desc: "Execute a call and trace it with a tracer (default: callTracer)",
@@ -755,6 +764,7 @@ func rpcToolCalls() []toolCall {
 				{name: "tracer", desc: "Built-in tracer: callTracer, prestateTracer, flatCallTracer, 4byteTracer, muxTracer, noopTracer (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
 			},
 			build: buildTraceCall,
+			raw:   true,
 		},
 		{
 			name: "debug_getModifiedAccountsByNumber", desc: "List accounts modified in a block range",

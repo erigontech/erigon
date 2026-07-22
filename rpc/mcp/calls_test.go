@@ -361,6 +361,16 @@ func TestTracerAllowlist(t *testing.T) {
 	require.Equal(t, "debug_traceTransaction", caller.method, "built-in tracer must be accepted")
 }
 
+// Trace tools return the node's JSON as-is; re-indenting a large trace wastes
+// a parse+marshal pass and inflates the response.
+func TestTraceToolsReturnRawJSON(t *testing.T) {
+	compact := `{"type":"CALL","calls":[{"type":"STATICCALL"}]}`
+	caller := &fakeCaller{result: json.RawMessage(compact)}
+	e := NewErigonMCPServer(caller, "", false)
+	got := callTool(t, e, "debug_traceTransaction", map[string]any{"txHash": "0x1"})
+	require.Equal(t, compact, got, "trace output must be returned verbatim, not pretty-printed")
+}
+
 func TestTraceFilterCountBounds(t *testing.T) {
 	caller := &fakeCaller{result: json.RawMessage(`[]`)}
 	e := NewErigonMCPServer(caller, "", false)
