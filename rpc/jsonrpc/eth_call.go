@@ -662,6 +662,13 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return emptyWitnessBytes()
 	}
 
+	// A head-capture minimal node keeps no commitment history and cannot build this
+	// RLP/uncached witness on demand; report out-of-window for any block rather than a
+	// prune-history or hard-gate error, so the caller sees one typed signal.
+	if api.witnessCache != nil && api.witnessCache.HeadCapture() {
+		return nil, errWitnessOutOfWindow
+	}
+
 	if err = api.checkPruneHistory(ctx, tx, blockNr); err != nil {
 		return nil, err
 	}
@@ -774,7 +781,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
 
-	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
+	siblingPaths, err := detectCollapseSiblings(ctx, tx, nil, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNr, parentNum,
 		block.Root(), accessed, witnessModeLegacy)
 	if err != nil {

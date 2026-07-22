@@ -1243,7 +1243,7 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 	sentinel := &ExecutionWitnessResult{State: []hexutil.Bytes{{0xde, 0xad, 0xbe, 0xef}}}
 
 	t.Run("legacy hit returns cached pointer", func(t *testing.T) {
-		cache := newWitnessResultCache(96)
+		cache := newWitnessResultCache(96, 0, false, false)
 		cache.Add(block1Hash, sentinel)
 		api.witnessCache = cache
 		t.Cleanup(func() { api.witnessCache = nil })
@@ -1256,7 +1256,7 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 	})
 
 	t.Run("canonical request bypasses the cache", func(t *testing.T) {
-		cache := newWitnessResultCache(96)
+		cache := newWitnessResultCache(96, 0, false, false)
 		cache.Add(block1Hash, sentinel)
 		api.witnessCache = cache
 		t.Cleanup(func() { api.witnessCache = nil })
@@ -1269,7 +1269,7 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 	})
 
 	t.Run("empty-cache miss falls through to on-demand", func(t *testing.T) {
-		api.witnessCache = newWitnessResultCache(96)
+		api.witnessCache = newWitnessResultCache(96, 0, false, false)
 		t.Cleanup(func() { api.witnessCache = nil })
 
 		missBefore := witnessCacheMissCounter.GetValueUint64()

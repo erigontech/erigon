@@ -83,9 +83,6 @@ type DebugAPIImpl struct {
 	ethBackend        rpchelper.ApiBackend
 	GasCap            uint64
 	gethCompatibility bool // Geth-compatible storage iteration order for debug_storageRangeAt
-	// witnessCache serves recent legacy-mode debug_executionWitness results from
-	// memory, keyed by block hash; nil disables it (only the embedded node wires one).
-	witnessCache *witnessResultCache
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance

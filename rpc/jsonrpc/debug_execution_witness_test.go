@@ -18,15 +18,25 @@ package jsonrpc
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // fakeStateReader is a minimal state.StateReader backed by an in-memory account
@@ -388,4 +398,255 @@ func TestResolveWitnessMode(t *testing.T) {
 			t.Errorf("default should be legacy, got %v", got)
 		}
 	})
+}
+
+// TestWitnessReaderComposition pins the per-phase reader the two build phases install:
+// head-capture reads commitment from the pinned parent and plain state at the phase's
+// txNum (block-end for collapse detection, parent for the trie), while the durable path
+// reads both planes from a single committed tx.
+func TestWitnessReaderComposition(t *testing.T) {
+	t.Parallel()
+
+	const (
+		firstTxNumInBlock = uint64(500)
+		endTxNum          = uint64(1000)
+	)
+	hc := &headCaptureSource{}
+
+	collapse := collapseReaderFor(hc, nil, firstTxNumInBlock, endTxNum)
+	hcCollapse, ok := collapse.(*commitmentdb.CommitmentReplayStateReader)
+	require.True(t, ok, "head-capture collapse phase must install the dual-tx reader")
+	asOf, ok := hcCollapse.PlainStateAsOf()
+	require.True(t, ok)
+	require.Equal(t, endTxNum, asOf, "collapse detection reads plain state at block end")
+	require.False(t, collapse.WithHistory())
+
+	trie := trieReaderFor(hc, nil, firstTxNumInBlock)
+	hcTrie, ok := trie.(*commitmentdb.CommitmentReplayStateReader)
+	require.True(t, ok, "head-capture trie phase must install the dual-tx reader")
+	asOf, ok = hcTrie.PlainStateAsOf()
+	require.True(t, ok)
+	require.Equal(t, firstTxNumInBlock, asOf, "trie phase reads plain state at the parent")
+	require.True(t, trie.WithHistory(), "trie phase is read-only: PutBranch must no-op during witness capture")
+
+	durableCollapse := collapseReaderFor(nil, nil, firstTxNumInBlock, endTxNum)
+	splitReader, ok := durableCollapse.(*commitmentdb.SplitStateReader)
+	require.True(t, ok, "durable collapse phase installs the split-history reader")
+	asOf, ok = splitReader.PlainStateAsOf()
+	require.True(t, ok)
+	require.Equal(t, endTxNum, asOf, "durable collapse reads plain state at block end")
+
+	durableTrie := trieReaderFor(nil, nil, firstTxNumInBlock)
+	historyReader, ok := durableTrie.(*commitmentdb.HistoryStateReader)
+	require.True(t, ok, "durable trie phase installs a plain history reader")
+	require.Equal(t, firstTxNumInBlock, historyReader.AsOf())
+}
+
+// TestBuildWitnessResultHeadCapture_FailsClosedOnBadParent drives the head-capture build
+// with a tip-pinned tx used as the parent of an older block, so the pinned commitment
+// plane does not match parent(B). The build must fail a validation gate and return no
+// result — a wrong witness is never produced.
+func TestBuildWitnessResultHeadCapture_FailsClosedOnBadParent(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+
+	tx, err := api.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// Block 3 is a non-empty old block; a tx pinned at the committed tip carries the
+	// wrong parent commitment for it.
+	const blockNum = uint64(3)
+	bn := rpc.BlockNumber(blockNum)
+	info, err := api.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.NoError(t, err)
+
+	result, err := api.buildWitnessResultHeadCapture(ctx, tx, tx, info, witnessModeLegacy)
+	require.Error(t, err, "a mispinned parent must fail a validation gate")
+	require.Nil(t, result, "no witness is produced on gate failure")
+}
+
+// TestHeadCaptureFailClosedYieldsOutOfWindow is the end-to-end fail-closed guard: a stale
+// parent view (the committed tip pinned as the parent of an older block) fails a witness
+// validation gate, so the build returns an error and no result. On a cache-only head-capture
+// node nothing is cached and the block serves out-of-window — a wrong witness is never
+// produced and a miss never falls through to a history recompute.
+func TestHeadCaptureFailClosedYieldsOutOfWindow(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
+
+	tx, err := api.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const blockNum = uint64(3)
+	bn := rpc.BlockNumber(blockNum)
+	info, err := api.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.NoError(t, err)
+
+	// The tip-pinned tx carries block 13's commitment, not parent(3): a validation gate fails.
+	result, err := api.buildWitnessResultHeadCapture(ctx, tx, tx, info, witnessModeLegacy)
+	require.Error(t, err, "a stale parent view must fail a validation gate")
+	require.Nil(t, result, "no wrong witness is produced on gate failure")
+	require.Equal(t, 0, api.witnessCache.Len(), "a gate failure caches nothing")
+
+	served, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+	require.ErrorIs(t, err, errWitnessOutOfWindow, "cache-only never recomputes a failed block from history")
+	require.Nil(t, served)
+}
+
+// TestExecutionWitnessCacheOnlyServe pins the Task 7 cache-only serve contract for a
+// head-capture minimal node (no commitment history, never recomputes): a by-number miss
+// is out-of-window, a by-number hit serves the cached pointer, and a by-hash request for
+// a still-resident but no-longer-canonical hash is rejected as reorged-away rather than
+// served as canonical.
+func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	ctx := context.Background()
+
+	var block1Hash common.Hash
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		block1Hash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 1)
+		return err
+	}))
+
+	bn := rpc.BlockNumber(1)
+	sentinel := &ExecutionWitnessResult{State: []hexutil.Bytes{{0xde, 0xad, 0xbe, 0xef}}}
+
+	t.Run("by-number miss returns out-of-window, never recomputes", func(t *testing.T) {
+		api.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.ErrorIs(t, err, errWitnessOutOfWindow)
+		require.Nil(t, result, "a cache-only miss must not build a witness")
+	})
+
+	t.Run("canonical mode returns canonical-unavailable, not out-of-window", func(t *testing.T) {
+		api.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		canonical := "canonical"
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, &canonical)
+		require.ErrorIs(t, err, errWitnessCanonicalUnavailable)
+		require.Nil(t, result, "a cache-only node never builds a canonical witness")
+	})
+
+	t.Run("by-number hit serves cached pointer", func(t *testing.T) {
+		cache := newWitnessResultCache(96, 0, true, true)
+		cache.Add(block1Hash, sentinel)
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.Same(t, sentinel, result, "a cached by-number request serves the stored pointer")
+	})
+
+	t.Run("by-hash orphan is reorged-away, never serves the resident entry", func(t *testing.T) {
+		// Store a non-canonical fork header at height 1 so a by-hash request resolves to
+		// block 1 but the hash differs from the canonical one.
+		var hdr *types.Header
+		require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+			var err error
+			hdr, err = m.BlockReader.HeaderByNumber(ctx, tx, 1)
+			return err
+		}))
+		require.NotNil(t, hdr)
+		fork := types.CopyHeader(hdr)
+		fork.Extra = append(append([]byte{}, fork.Extra...), 0xff)
+		forkHash := fork.Hash()
+		require.NotEqual(t, block1Hash, forkHash)
+		require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+			return rawdb.WriteHeader(tx, fork)
+		}))
+
+		cache := newWitnessResultCache(96, 0, true, true)
+		cache.Add(forkHash, sentinel) // resident under the orphan hash
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		byHash := rpc.BlockNumberOrHash{BlockHash: &forkHash}
+
+		tx, err := api.db.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		result, hit, reorgedAway := api.serveFromWitnessCache(ctx, tx, byHash, witnessModeLegacy)
+		require.False(t, hit, "a non-canonical by-hash request must not serve its resident entry")
+		require.True(t, reorgedAway, "an orphan hash must be flagged reorged-away")
+		require.Nil(t, result)
+
+		_, err = api.ExecutionWitness(ctx, byHash, nil)
+		require.ErrorIs(t, err, errWitnessReorgedAway)
+
+		// requireCanonical: true must still land in the reorged-away bucket, not the generic
+		// out-of-window one: the serve path owns the canonical check for the orphan signal.
+		byHashRequireCanonical := rpc.BlockNumberOrHash{BlockHash: &forkHash, RequireCanonical: true}
+		result, hit, reorgedAway = api.serveFromWitnessCache(ctx, tx, byHashRequireCanonical, witnessModeLegacy)
+		require.False(t, hit)
+		require.True(t, reorgedAway, "requireCanonical must not collapse an orphan into a plain miss")
+		require.Nil(t, result)
+
+		_, err = api.ExecutionWitness(ctx, byHashRequireCanonical, nil)
+		require.ErrorIs(t, err, errWitnessReorgedAway)
+	})
+}
+
+// TestGetWitnessHeadCaptureOutOfWindow pins that eth_getWitness on a head-capture minimal
+// node (no commitment history, RLP/uncached, cannot recompute) returns the typed
+// out-of-window error rather than the commitment-history hard gate.
+func TestGetWitnessHeadCaptureOutOfWindow(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+
+	base := newBaseApiForTest(m)
+	base.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	bn := rpc.BlockNumber(1)
+	_, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.ErrorIs(t, err, errWitnessOutOfWindow)
+}
+
+// TestGetWitnessHeadCaptureOutOfWindowWhenPruned pins that eth_getWitness on a head-capture
+// minimal node returns the typed out-of-window error even for a block below the state-history
+// prune horizon: the head-capture check must precede the prune-history gate so an old request
+// gets one typed signal instead of a prune-history error.
+func TestGetWitnessHeadCaptureOutOfWindowWhenPruned(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+
+	base := newBaseApiForTest(m)
+	base.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
+	// A history-distance prune mode that leaves block 1 below the prune horizon, so the
+	// prune-history gate would fire first if it were still ahead of the head-capture check.
+	mode := prune.Mode{Initialised: true, History: prune.Distance(1)}
+	base._pruneMode.Store(&mode)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	bn := rpc.BlockNumber(1)
+	_, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.ErrorIs(t, err, errWitnessOutOfWindow)
 }

@@ -78,6 +78,7 @@ Filters created with `eth_newFilter`, `eth_newBlockFilter`, and `eth_newPendingT
 
 - `--prune.distance.blocks` now accepts readable policy names — `keep-post-merge` and `keep-all` — instead of the raw `MaxUint64`-based magic numbers (`18446744073709551615` / `18446744073709551614`); `--prune.distance` likewise accepts `keep-all`. Numeric values still work (#22119) — by @yperbasis
 - `--rpc.subscription.filters.timeout` — deadline for evicting idle RPC polling filters (default 5m; 0 disables). New `subscriptions_active` gauge and `subscriptions_created_total` / `subscriptions_unsubscribed_total` / `subscriptions_reaped_total` counters track the filter lifecycle (#22261) — by @onelapahead
+- `--witness.cache.blocks`, `--witness.cache.head-capture`, and `--witness.cache.maxmb` enable an eager in-memory cache of recent-block legacy `debug_executionWitness` results, keyed by block hash. Head-capture mode lets a minimal node (no commitment-domain history) serve witnesses for the last N head blocks cache-only — a miss returns out-of-window rather than recomputing from history. New `witness_cache_*` metrics track hits, misses, builds, and resident entries. Embedded RPC only — by @awskii
 
 ---
 

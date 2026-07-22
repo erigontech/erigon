@@ -78,6 +78,8 @@ type HttpCfg struct {
 	TraceCompatibility                bool // Bug for bug compatibility for trace_ routines with OpenEthereum
 	GethCompatibility                 bool // Geth-compatible storage iteration order for debug_storageRangeAt
 	WitnessCacheBlocks                uint // Recent blocks to eagerly cache legacy debug_executionWitness results for; 0 disables (embedded RPC only)
+	WitnessCacheHeadCapture           bool // Serve witnesses on a minimal node via head-capture (pinned parent commitment snapshot); cache-only (embedded RPC only)
+	WitnessCacheMaxMB                 uint // Resident-memory cap (MB) for the witness cache; 0 = count-only
 	TxPoolApiAddr                     string
 	StateCache                        kvcache.CoherentConfig
 	Snap                              ethconfig.BlocksFreezing

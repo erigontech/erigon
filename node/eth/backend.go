@@ -1184,10 +1184,12 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		testingEntry = &entry
 	}
 
-	// Eager witness cache (embedded RPC only). Gate on the DB-persisted
-	// commitment-history flag, not the CLI flag: a datadir built without it can never
-	// build a witness, so the cache would only accumulate failures.
+	// Eager witness cache (embedded RPC only). A datadir built with commitment history
+	// recomputes on miss (durable path); a minimal node without it can still serve recent
+	// witnesses cache-only when --witness.cache.head-capture is set, building each head from
+	// a pinned parent snapshot. Without either, no witness can be built, so the cache stays off.
 	enableWitnessCache := httpRpcCfg.WitnessCacheBlocks > 0
+	headCaptureMode := false
 	if enableWitnessCache {
 		var commitmentHistory bool
 		if err := chainKv.View(ctx, func(tx kv.Tx) error {
@@ -1197,12 +1199,14 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		}); err != nil {
 			s.logger.Warn("[witness-cache] could not read commitment-history flag; cache disabled", "err", err)
 			enableWitnessCache = false
-		} else if !jsonrpc.WitnessCacheShouldEnable(httpRpcCfg.WitnessCacheBlocks, commitmentHistory) {
-			s.logger.Warn("[witness-cache] --witness.cache.blocks set but commitment history is disabled; cache disabled (restart with --prune.experimental.include-commitment-history)")
-			enableWitnessCache = false
+		} else {
+			enableWitnessCache, headCaptureMode = jsonrpc.WitnessCacheMode(httpRpcCfg.WitnessCacheBlocks, commitmentHistory, httpRpcCfg.WitnessCacheHeadCapture)
+			if !enableWitnessCache {
+				s.logger.Warn("[witness-cache] --witness.cache.blocks set but commitment history is disabled and --witness.cache.head-capture is off; cache disabled (restart with --prune.experimental.include-commitment-history or --witness.cache.head-capture)")
+			}
 		}
 	}
-	witnessCache, witnessBuilder := jsonrpc.NewWitnessCacheBuilderAPI(enableWitnessCache, chainKv, s.ethRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.polygonBridge)
+	witnessCache, witnessBuilder := jsonrpc.NewWitnessCacheBuilderAPI(enableWitnessCache, headCaptureMode, chainKv, s.ethRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.polygonBridge)
 	if witnessBuilder != nil {
 		var headCh chan [][]byte
 		headCh, s.unsubscribeWitnessCache = s.notifications.Events.AddHeaderSubscription()
@@ -1210,7 +1214,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 			jsonrpc.RunWitnessCacheBuilder(ctx, witnessBuilder, headCh)
 			return nil
 		})
-		s.logger.Info("[witness-cache] eager witness cache enabled", "blocks", httpRpcCfg.WitnessCacheBlocks)
+		s.logger.Info("[witness-cache] eager witness cache enabled", "blocks", httpRpcCfg.WitnessCacheBlocks, "headCapture", headCaptureMode)
 	}
 
 	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService, testingEntry, witnessCache)

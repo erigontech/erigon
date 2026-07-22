@@ -446,7 +446,16 @@ var (
 	}
 	WitnessCacheBlocksFlag = cli.UintFlag{
 		Name:  "witness.cache.blocks",
-		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory, keyed by block hash in an LRU (embedded RPC only; requires --prune.experimental.include-commitment-history). 0 disables the cache; capped at 96. Each witness is stored as serialized JSON so a hit is served verbatim; memory use is roughly this count times the per-block witness size.",
+		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory, keyed by block hash in an LRU (embedded RPC only; requires either --prune.experimental.include-commitment-history for recompute-on-miss or --witness.cache.head-capture for cache-only serving on a minimal node). 0 disables the cache; capped at 96. Each witness is stored as serialized JSON so a hit is served verbatim; memory use is roughly this count times the per-block witness size.",
+		Value: 0,
+	}
+	WitnessCacheHeadCaptureFlag = cli.BoolFlag{
+		Name:  "witness.cache.head-capture",
+		Usage: "Serve recent-block debug_executionWitness on a minimal node without commitment-domain history: each head block's witness is built from a pinned parent commitment snapshot and the account/storage/code history the node keeps. Witnesses are served cache-only (out-of-window on miss, never a history recompute). Embedded RPC only.",
+	}
+	WitnessCacheMaxMBFlag = cli.UintFlag{
+		Name:  "witness.cache.maxmb",
+		Usage: "Resident-memory cap (in MB) for the witness cache; eviction triggers on whichever of the block count (--witness.cache.blocks, capped at 96) or this byte budget binds first. 0 = count-only (no byte cap).",
 		Value: 0,
 	}
 	RpcTxSyncDefaultTimeoutFlag = cli.DurationFlag{
