@@ -140,12 +140,13 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 
 // ProcessOperations is called by ProcessBlock and processes the block body operations
 func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blockBody cltypes.GenericBeaconBody) (signatures [][]byte, messages [][]byte, publicKeys [][]byte, err error) {
-	if s.Version() <= clparams.DenebVersion {
+	switch {
+	case s.Version() <= clparams.DenebVersion:
 		maxDepositsAllowed := int(min(s.BeaconConfig().MaxDeposits, s.Eth1Data().DepositCount-s.Eth1DepositIndex()))
 		if blockBody.GetDeposits().Len() != maxDepositsAllowed {
 			return nil, nil, nil, errors.New("outstanding deposits do not match maximum deposits")
 		}
-	} else if s.Version() < clparams.FuluVersion {
+	case s.Version() < clparams.FuluVersion:
 		eth1DepositIndexLimit := min(s.Eth1Data().DepositCount, s.GetDepositRequestsStartIndex())
 		if s.Eth1DepositIndex() < eth1DepositIndexLimit {
 			if uint64(blockBody.GetDeposits().Len()) != min(s.BeaconConfig().MaxDeposits, eth1DepositIndexLimit-s.Eth1DepositIndex()) {
@@ -156,7 +157,7 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 				return nil, nil, nil, errors.New("no deposits allowed after deposit contract limit")
 			}
 		}
-	} else if blockBody.GetDeposits().Len() != 0 {
+	case blockBody.GetDeposits().Len() != 0:
 		return nil, nil, nil, errors.New("old-style deposits are not allowed after Fulu")
 	}
 

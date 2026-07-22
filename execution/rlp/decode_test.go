@@ -335,6 +335,71 @@ func TestStreamAddr(t *testing.T) {
 	})
 }
 
+func TestStreamReadHash(t *testing.T) {
+	want := common.HexToHash("0xdeadbeef00112233445566778899aabbccddeeff00112233445566778899aabb")
+	enc, err := EncodeToBytes(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("bytes-stream", func(t *testing.T) {
+		s := NewBytesStream(enc)
+		defer PutStream(s)
+		got, err := s.ReadHash()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("got %x, want %x", got, want)
+		}
+	})
+
+	t.Run("reader-stream", func(t *testing.T) {
+		s := NewStream(bytes.NewReader(enc), uint64(len(enc)))
+		got, err := s.ReadHash()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("got %x, want %x", got, want)
+		}
+	})
+
+	t.Run("bad-inputs", func(t *testing.T) {
+		for _, in := range []string{
+			"C0", // empty list
+			"01", // single byte
+			"80", // empty string
+			"9Fdeadbeef00112233445566778899aabbccddeeff00112233445566778899",       // 31 bytes
+			"A1deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb00", // 33 bytes
+		} {
+			s := NewBytesStream(unhex(in))
+			_, err := s.ReadHash()
+			PutStream(s)
+			if err == nil {
+				t.Fatalf("expected error for input %s", in)
+			}
+		}
+	})
+
+	t.Run("no-allocs", func(t *testing.T) {
+		rdr := bytes.NewReader(enc)
+		s := NewStreamFromPool(rdr, uint64(len(enc)))
+		defer PutStream(s)
+		got := testing.AllocsPerRun(100, func() {
+			rdr.Reset(enc)
+			s.Reset(rdr, uint64(len(enc)))
+			h, err := s.ReadHash()
+			if err != nil || h != want {
+				t.Fatalf("h=%x err=%v", h, err)
+			}
+		})
+		if got != 0 {
+			t.Fatalf("ReadHash allocated %v times/op, want 0", got)
+		}
+	})
+}
+
 // TestStreamViewBytes pins the aliasing contract that separates ViewBytes from
 // Bytes: for an RLP string on a bytes-backed stream the result must share memory
 // with the input. Single-byte values are exempt, see TestStreamViewBytesSingleByte.
