@@ -992,7 +992,12 @@ func serveHTTP(ctx context.Context, mcpServer *server.MCPServer, addr string, co
 	// BaseContext ties every request context to ctx: open event streams (GET
 	// /mcp, /sse) end on cancellation instead of stalling Shutdown until its
 	// deadline.
-	httpServer := &http.Server{Addr: addr, Handler: mux, BaseContext: func(net.Listener) context.Context { return ctx }}
+	httpServer := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+	}
 
 	errCh := make(chan error, 1)
 	go func() {

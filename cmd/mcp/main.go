@@ -180,7 +180,7 @@ func serve(ctx context.Context, srv mcpserver.MCPTransport, transport, sseAddr s
 		logger.Info("[MCP] Starting stdio transport")
 		return srv.ServeContext(ctx)
 	case "http", "sse":
-		logger.Info("[MCP] Starting HTTP transport", "addr", sseAddr, "endpoints", "/mcp (streamable HTTP), /sse (SSE)")
+		logger.Info("[MCP] Starting HTTP transport", "addr", sseAddr, "endpoints", "/mcp (streamable HTTP), /sse + /message (SSE)")
 		return srv.ListenAndServe(ctx, sseAddr)
 	default:
 		return fmt.Errorf("unknown transport: %s (use 'stdio' or 'http')", transport)
