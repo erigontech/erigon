@@ -1179,7 +1179,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		mcpClient := rpc.DialInProcWithContext(kv.WithNonBlockingAcquire(ctx), mcpSrv, s.logger)
 		s.mcpRPC = mcp.NewErigonMCPServer(mcpClient, config.Dirs.Log, true)
 		s.bgComponentsEg.Go(func() error {
-			s.logger.Info("serve MCP on", "addr", config.MCPAddress, "endpoints", "/mcp (streamable HTTP), /sse (SSE)")
+			s.logger.Info("serve MCP on", "addr", config.MCPAddress, "endpoints", "/mcp (streamable HTTP), /sse + /message (SSE)")
 			mcpErr := s.mcpRPC.ListenAndServe(ctx, config.MCPAddress)
 			mcpClient.Close()
 			mcpSrv.Stop()
