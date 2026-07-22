@@ -788,7 +788,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	if config.MCPAddress != "" {
 		go func() {
-			logger.Info("serve MCP on", "addr", config.MCPAddress, "endpoints", "/mcp (streamable HTTP), /sse (SSE)")
+			logger.Info("serve MCP on", "addr", config.MCPAddress, "endpoints", "/mcp (streamable HTTP), /sse + /message (SSE)")
 			mcpErr := mcpServer.ListenAndServe(ctx, config.MCPAddress)
 			if mcpErr != nil {
 				logger.Error("mcpServer.ListenAndServe", "err", mcpErr)
