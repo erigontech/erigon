@@ -1136,7 +1136,7 @@ func TestMergeFiles(t *testing.T) {
 	defer rwTx.Rollback()
 
 	dc = d.beginForTests()
-	defer dc.Close()
+	dc.Close()
 }
 
 func TestMergeFilesWithDependency(t *testing.T) {
