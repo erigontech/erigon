@@ -129,6 +129,7 @@ func TestEIP2200(t *testing.T) {
 
 			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
+			defer s.Release(false)
 
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 			s.CreateAccount(address, true)
@@ -230,6 +231,7 @@ func TestEIP8038SStore(t *testing.T) {
 			require.NoError(t, err)
 			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
+			defer s.Release(false)
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 			s.CreateAccount(address, true)
 			s.SetCode(address, hexutil.MustDecode(tt.input), tracing.CodeChangeUnspecified)
@@ -372,6 +374,7 @@ func TestCallNewAccountSpillBefore63of64(t *testing.T) {
 			require.NoError(t, err)
 			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
+			defer s.Release(false)
 			caller := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 			s.CreateAccount(caller, true)
 			s.SetCode(caller, hexutil.MustDecode(callerCode), tracing.CodeChangeUnspecified)
@@ -472,6 +475,7 @@ func TestCreateGas(t *testing.T) {
 		stateWriter := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), 0)
 
 		s := state.New(stateReader)
+		defer s.Release(false)
 		s.CreateAccount(address, true)
 		s.SetCode(address, hexutil.MustDecode(tt.code), tracing.CodeChangeUnspecified)
 
@@ -517,6 +521,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 
 	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	s := state.New(r)
+	defer s.Release(false)
 
 	address := accounts.InternAddress(common.BytesToAddress([]byte("callee")))
 

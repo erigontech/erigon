@@ -18,7 +18,6 @@ package cache
 
 import (
 	"bytes"
-	"math/bits"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -31,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/cachebudget"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/cache/coherence"
 )
 
@@ -122,17 +122,10 @@ type GenericCache[T any] struct {
 
 func u64identity(k uint64) uint32 { return uint32(k) }
 
-func nextPow2(v uint32) uint32 {
-	if v <= 1 {
-		return 1
-	}
-	return 1 << bits.Len32(v-1)
-}
-
 // initialShardCount starts a lineage at ~64 entries per shard (freelru's own
 // small-cache geometry), bounded by ceil.
 func initialShardCount(capacity, ceil uint32) uint32 {
-	return min(nextPow2(capacity/64), ceil)
+	return min(uint32(math.NextPowerOfTwo(uint64(capacity/64))), ceil)
 }
 
 const (
@@ -189,7 +182,7 @@ func newGenericCacheEntries[T any](capacityBytes datasize.ByteSize, capacityEntr
 		sizeFunc:      sizeFunc,
 	}
 	c.curCap.Store(capacityEntries)
-	c.shardCeil = nextPow2(uint32(runtime.GOMAXPROCS(0) * 16))
+	c.shardCeil = uint32(math.NextPowerOfTwo(uint64(runtime.GOMAXPROCS(0) * 16)))
 	c.shardCount = initialShardCount(capacityEntries, c.shardCeil)
 	// Before any unwind every entry predates the (nonexistent) floor, so all
 	// reads are valid; the floor only drops once an unwind happens.

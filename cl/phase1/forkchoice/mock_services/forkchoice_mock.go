@@ -513,6 +513,7 @@ func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(
 func (f *ForkChoiceStorageMock) AddPreverifiedBlobSidecar(msg *cltypes.BlobSidecar) error {
 	return nil
 }
+
 func (f *ForkChoiceStorageMock) ValidateOnAttestation(attestation *solid.Attestation) error {
 	panic("implement me")
 }

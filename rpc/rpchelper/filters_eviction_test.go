@@ -190,9 +190,7 @@ func TestConcurrentTouchAndEviction(t *testing.T) {
 
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -202,7 +200,7 @@ func TestConcurrentTouchAndEviction(t *testing.T) {
 				runtime.Gosched()
 			}
 		}
-	}()
+	})
 
 	deadline := time.Now().Add(200 * time.Millisecond)
 	for time.Now().Before(deadline) {

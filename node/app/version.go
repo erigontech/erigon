@@ -328,14 +328,14 @@ func ParseVersion(s string) (Version, error) {
 	var build, prerelease []string
 	patchStr := parts[2]
 
-	if buildIndex := strings.IndexRune(patchStr, '+'); buildIndex != -1 {
-		build = strings.Split(patchStr[buildIndex+1:], ".")
-		patchStr = patchStr[:buildIndex]
+	if before, after, ok := strings.Cut(patchStr, "+"); ok {
+		build = strings.Split(after, ".")
+		patchStr = before
 	}
 
-	if preIndex := strings.IndexRune(patchStr, '-'); preIndex != -1 {
-		prerelease = strings.Split(patchStr[preIndex+1:], ".")
-		patchStr = patchStr[:preIndex]
+	if before, after, ok := strings.Cut(patchStr, "-"); ok {
+		prerelease = strings.Split(after, ".")
+		patchStr = before
 	}
 
 	if !containsOnly(patchStr, numbers) {

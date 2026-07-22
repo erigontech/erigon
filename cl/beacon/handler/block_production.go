@@ -77,9 +77,7 @@ const (
 	BlockPublishingValidationConsensusAndEquivocation BlockPublishingValidation = "consensus_and_equivocation"
 )
 
-var (
-	errBuilderNotEnabled = errors.New("builder is not enabled")
-)
+var errBuilderNotEnabled = errors.New("builder is not enabled")
 
 const (
 	caplinClientCode = "CN"
@@ -344,7 +342,8 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		committeesPerSlot := a.syncedData.CommitteeCount(epoch)
 		subnet := subnets.ComputeSubnetForAttestation(
 			committeesPerSlot, *slot, *committeeIndex,
-			a.beaconChainCfg.SlotsPerEpoch, 64)
+			a.beaconChainCfg.SlotsPerEpoch, 64,
+		)
 		a.logger.Debug("Produced Attestation", "slot", *slot,
 			"committee_index", *committeeIndex, "subnet", subnet, "cached", ok, "beacon_block_root",
 			attestationData.BeaconBlockRoot, "duration", time.Since(start))
@@ -519,7 +518,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 	log.Info("[Beacon API] Computed state root while producing slot", "slot", targetSlot, "duration", time.Since(startConsensusProcessing))
 
-	log.Info("BlockProduction: Block produced",
+	log.Info(
+		"BlockProduction: Block produced",
 		"proposerIndex", block.ProposerIndex,
 		"slot", targetSlot,
 		"state_root", block.StateRoot,
@@ -614,8 +614,7 @@ func (a *ApiHandler) produceBlock(
 	randaoReveal common.Bytes96,
 	graffiti common.Hash,
 ) (*cltypes.BlindOrExecutionBeaconBlock, error) {
-	wg := sync.WaitGroup{}
-	wg.Add(2)
+	var wg sync.WaitGroup
 	// produce beacon body
 	var (
 		beaconBody     *cltypes.BeaconBody
@@ -624,12 +623,11 @@ func (a *ApiHandler) produceBlock(
 		blobs          []*cltypes.Blob
 		kzgProofs      []common.Bytes48
 	)
-	go func() {
+	wg.Go(func() {
 		start := time.Now()
 		defer func() {
 			a.logger.Debug("Produced BeaconBody", "slot", targetSlot, "duration", time.Since(start))
 		}()
-		defer wg.Done()
 		beaconBody, localExecValue, localErr = a.produceBeaconBody(ctx, 3, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
 		// collect blobs
 		if beaconBody != nil {
@@ -657,26 +655,25 @@ func (a *ApiHandler) produceBlock(
 				kzgProofs = append(kzgProofs, blobBundle.KzgProofs...)
 			}
 		}
-	}()
+	})
 
 	// get the builder payload
 	var (
 		builderHeader *builder.ExecutionHeader
 		builderErr    error
 	)
-	go func() {
+	wg.Go(func() {
 		start := time.Now()
 		defer func() {
 			a.logger.Debug("MevBoost", "slot", targetSlot, "duration", time.Since(start))
 		}()
-		defer wg.Done()
 		if a.routerCfg.Builder && a.builderClient != nil {
 			builderHeader, builderErr = a.getBuilderPayload(ctx, baseState, targetSlot)
 			if builderErr != nil && builderErr != errBuilderNotEnabled {
 				log.Warn("Failed to get builder payload", "err", builderErr)
 			}
 		}
-	}()
+	})
 	// wait for both tasks to finish
 	wg.Wait()
 
@@ -969,9 +966,7 @@ func (a *ApiHandler) produceBeaconBody(
 
 	blockRoot := baseBlockRoot
 	// Process the execution data in a thread.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		start := time.Now()
 		defer func() {
 			log.Info("BlockProduction: ForkChoiceUpdate&GetPayload took", "duration", time.Since(start))
@@ -1210,11 +1205,9 @@ func (a *ApiHandler) produceBeaconBody(
 		// Cache the block body so the beacon API can return transactions
 		// immediately, before the EL commits to its database.
 		a.cacheExecutionBody(payload)
-	}()
+	})
 	// process the sync aggregate in parallel
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		start := time.Now()
 		defer func() {
 			log.Info("BlockProduction: GetSyncAggregate took", "duration", time.Since(start))
@@ -1223,11 +1216,9 @@ func (a *ApiHandler) produceBeaconBody(
 		if err != nil {
 			log.Error("BlockProduction: Failed to get sync aggregate", "err", err)
 		}
-	}()
+	})
 	// Process operations all in parallel with each other.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		start := time.Now()
 		defer func() {
 			poolSize := len(a.operationsPool.AttestationsPool.Raw())
@@ -1242,15 +1233,13 @@ func (a *ApiHandler) produceBeaconBody(
 			targetSlot,
 		)
 		beaconBody.Attestations = a.findBestAttestationsForBlockProduction(baseState)
-	}()
+	})
 	// [New in Gloas:EIP7732] Aggregate PTC votes into PayloadAttestations.
 	// The spec requires data.slot + 1 == state.slot, so we collect PTC votes
 	// for slot targetSlot-1 (= state.slot - 1), NOT baseBlockSlot. When slots
 	// are skipped the two differ and using baseBlockSlot produces invalid blocks.
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			start := time.Now()
 			defer func() {
 				paCount := 0
@@ -1260,7 +1249,7 @@ func (a *ApiHandler) produceBeaconBody(
 				log.Debug("BlockProduction: aggregatePayloadAttestations took", "duration", time.Since(start), "selectedPAs", paCount)
 			}()
 			beaconBody.PayloadAttestations = a.aggregatePayloadAttestations(baseState, targetSlot-1, baseBlockRoot)
-		}()
+		})
 	}
 	wg.Wait()
 	if executionErr != nil {
@@ -1312,8 +1301,8 @@ func (a *ApiHandler) getBlockOperations(s *state.CachingBeaconState, targetSlot 
 	*solid.ListSSZ[*cltypes.AttesterSlashing],
 	*solid.ListSSZ[*cltypes.ProposerSlashing],
 	*solid.ListSSZ[*cltypes.SignedVoluntaryExit],
-	*solid.ListSSZ[*cltypes.SignedBLSToExecutionChange]) {
-
+	*solid.ListSSZ[*cltypes.SignedBLSToExecutionChange],
+) {
 	targetEpoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
 	targetVersion := a.beaconChainCfg.GetCurrentStateVersion(targetEpoch)
 	var maxAttesterSlashings uint64
@@ -2461,8 +2450,8 @@ func (a *ApiHandler) aggregatePayloadAttestations(
 // computeAttestationReward computes the reward for a specific attestation.
 func computeAttestationReward(
 	s abstract.BeaconState,
-	attestation *solid.Attestation) (uint64, error) {
-
+	attestation *solid.Attestation,
+) (uint64, error) {
 	baseRewardPerIncrement := s.BaseRewardPerIncrement()
 	data := attestation.Data
 	currentEpoch := state.Epoch(s)

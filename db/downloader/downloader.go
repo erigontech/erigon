@@ -471,11 +471,9 @@ func (d *Downloader) ManifestReady() <-chan struct{} {
 // It discovers chain.toml from P2P peers and either merges new entries (acquiring mode)
 // or verifies against local entries (verify mode after initial sync).
 func (d *Downloader) StartChainTomlDiscovery(ctx context.Context, networkName string) {
-	d.wg.Add(1)
-	go func() {
-		defer d.wg.Done()
+	d.wg.Go(func() {
 		d.chainTomlDiscoveryLoop(ctx, networkName)
-	}()
+	})
 }
 
 // StartTorrentPeerManager launches the background torrent peer manager that
@@ -490,11 +488,9 @@ func (d *Downloader) StartTorrentPeerManager(ctx context.Context) {
 	}
 
 	d.peerManager = NewTorrentPeerManager(d.torrentClient, fn, d.logger)
-	d.wg.Add(1)
-	go func() {
-		defer d.wg.Done()
+	d.wg.Go(func() {
 		d.peerManager.Run(ctx)
-	}()
+	})
 }
 
 // Check snapshot data looks right.
@@ -834,9 +830,7 @@ func (d *Downloader) startSnapshotsDownload(
 	var batchCtx context.Context
 	batchCtx, batch.cancel = context.WithCancelCause(d.ctx)
 
-	batch.all.Add(1)
-	go func() {
-		defer batch.all.Done()
+	batch.all.Go(func() {
 		d.logDownload(
 			batchCtx,
 			items,
@@ -854,7 +848,7 @@ func (d *Downloader) startSnapshotsDownload(
 				}
 			},
 		)
-	}()
+	})
 
 	defer func() {
 		if err != nil {
@@ -1508,8 +1502,8 @@ func (d *Downloader) logSyncStats(startTime time.Time, stats AggStats, target st
 	}
 
 	addCtx(
-		"time-left", calculateTime(remainingBytes, stats.CompletionRate),
-		"time-elapsed", time.Since(startTime).Truncate(time.Second).String(),
+		"eta", calculateTime(remainingBytes, stats.CompletionRate),
+		"elapsed", time.Since(startTime).Truncate(time.Second).String(),
 	)
 
 	d.logStatsInner(log.LvlInfo, stats, fmt.Sprintf("Syncing %v", target), logCtx, true)
@@ -1540,7 +1534,7 @@ func (d *Downloader) logStatsInner(
 		}
 	}
 	addCtx(
-		"file-metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.NumTorrents),
+		"metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.NumTorrents),
 		"files", fmt.Sprintf(
 			"%d/%d",
 			// For now it's 1:1 files:torrents.
@@ -1550,7 +1544,7 @@ func (d *Downloader) logStatsInner(
 		"data", func() string {
 			if haveAllMetadata {
 				return fmt.Sprintf(
-					"%.2f%% - %s/%s",
+					"%.2f%%,%s/%s",
 					percentDone,
 					common.ByteCount(bytesDone),
 					common.ByteCount(stats.BytesTotal),
@@ -1631,11 +1625,7 @@ func (d *Downloader) spawn(f func()) bool {
 	if d.ctx.Err() != nil {
 		return false
 	}
-	d.wg.Add(1)
-	go func() {
-		defer d.wg.Done()
-		f()
-	}()
+	d.wg.Go(f)
 	return true
 }
 

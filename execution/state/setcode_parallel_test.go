@@ -83,6 +83,7 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 	// TX 88: clear the code (write EmptyCodeHash + nil code)
 	// -----------------------------------------------------------
 	ibs88 := NewWithVersionMap(reader, vm)
+	defer ibs88.Release(false)
 	ibs88.SetTxContext(100, 88)
 	ibs88.SetVersion(0)
 
@@ -103,6 +104,7 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 	// TX 90: re-set the same delegation code (hash A)
 	// -----------------------------------------------------------
 	ibs90 := NewWithVersionMap(reader, vm)
+	defer ibs90.Release(false)
 	ibs90.SetTxContext(100, 90)
 	ibs90.SetVersion(0)
 
@@ -143,6 +145,7 @@ func TestGetDelegatedDesignation_TracksSplitCodePublish(t *testing.T) {
 	priorVersion := Version{TxIndex: 0, Incarnation: 0}
 	vm.WriteCodeHash(authority, priorVersion, delegation.Hash, true)
 	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 1)
 	ibs.SetVersion(0)
 	hash, err := ibs.GetCodeHash(authority)

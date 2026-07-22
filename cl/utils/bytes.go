@@ -175,7 +175,6 @@ func IsNonStrictSupersetBitlist(a, b []byte) bool {
 func IsOverlappingSSZBitlist(a, b []byte) bool {
 	length := min(len(a), len(b))
 	for i := range length {
-
 		if a[i]&b[i] != 0 {
 			if i != length-1 {
 				return true
@@ -193,7 +192,6 @@ func IsOverlappingSSZBitlist(a, b []byte) bool {
 		}
 	}
 	return false
-
 }
 
 // func IsOverlappingBitlist(a, b []byte) bool {
