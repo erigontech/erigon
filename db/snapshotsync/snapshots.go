@@ -206,6 +206,10 @@ type DirtySegment struct {
 
 	frozen bool
 
+	// Set when the segment is retired for physical deletion; the last releaser
+	// deletes files from disk only when set, otherwise it just closes them.
+	canDelete atomic.Bool
+
 	// only caplin state
 	filePath string
 }
@@ -884,7 +888,7 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired []*DirtySegm
 
 	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
 	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
-	closeAndRemoveSegments(s.reclaimRetiredLocked())
+	reclaimSegments(s.reclaimRetiredLocked())
 }
 
 // acquireVisible pins the current generation. Load and increment are not atomic together,
@@ -926,13 +930,24 @@ func (s *BaseRoSnapshots) reclaimRetired() {
 	s.dirtyLock.Lock()
 	toDelete := s.reclaimRetiredLocked()
 	s.dirtyLock.Unlock()
-	closeAndRemoveSegments(toDelete)
+	reclaimSegments(toDelete)
 }
 
-func closeAndRemoveSegments(segs []*DirtySegment) {
+func reclaimSegments(segs []*DirtySegment) {
 	for _, sn := range segs {
-		sn.closeAndRemoveFiles()
+		if sn.canDelete.Load() {
+			sn.closeAndRemoveFiles()
+		} else {
+			sn.close()
+		}
 	}
+}
+
+func markCanDelete(segs []*DirtySegment) []*DirtySegment {
+	for _, sn := range segs {
+		sn.canDelete.Store(true)
+	}
+	return segs
 }
 
 // minimax of existing indices
@@ -1151,7 +1166,7 @@ func (s *BaseRoSnapshots) OpenFolder() error {
 		}
 		// Segments whose file vanished from disk leave the visible set; retire them so
 		// their fds close only after readers of the current generation drain.
-		retired = s.detachNotInList(list)
+		retired = markCanDelete(s.detachNotInList(list))
 		return s.openSegments(list, true, false)
 	}()
 	if err != nil {
@@ -1352,7 +1367,7 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 	func() {
 		s.dirtyLock.Lock()
 		defer s.dirtyLock.Unlock()
-		retired := s.detachNotInList(keepNames)
+		retired := markCanDelete(s.detachNotInList(keepNames))
 		s.recalcVisibleFiles(s.alignMin, retired)
 	}()
 
@@ -1471,7 +1486,7 @@ func (s *BaseRoSnapshots) retireFiles(fileNames ...string) error {
 			retired = append(retired, sn)
 		}
 	}
-	s.recalcVisibleFiles(s.alignMin, retired)
+	s.recalcVisibleFiles(s.alignMin, markCanDelete(retired))
 	return nil
 }
 

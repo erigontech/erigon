@@ -126,8 +126,8 @@ type FilesItem struct {
 	version  version.Version
 	refcount atomic.Int32
 
-	// Used by the SnapshotRepo mark-and-sweep reclamation path (with refcount); the
-	// aggregator instead reclaims via aggregatorVisible generations (retired + refcnt).
+	// Set when the file is retired for physical deletion; the last releaser
+	// deletes files from disk only when set, otherwise it just closes them.
 	canDelete atomic.Bool
 }
 
@@ -358,16 +358,22 @@ func (r retireReason) String() string {
 	}
 }
 
-// retire removes outs from dirtyFiles; the caller still owns outs and must
-// attach it to the outgoing visible generation itself. Physical deletion
-// (closeFilesAndRemove) happens once the last reader of that generation closes
-// — so readers still pinning these files are never surprised.
+// retire removes outs from dirtyFiles and marks them for deletion; the caller
+// still owns outs and must attach it to the outgoing visible generation itself.
+// Physical deletion (closeFilesAndRemove) happens once the last reader of that
+// generation closes — so readers still pinning these files are never surprised.
 func retire(dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, reason retireReason, logger log.Logger) {
 	for _, out := range outs {
 		if out == nil {
 			panic("must not happen: " + filenameBase)
 		}
 		dirtyFiles.Delete(out)
+		switch reason {
+		case retireReasonMerged, retireReasonAged:
+			out.canDelete.Store(true)
+		default:
+			panic(fmt.Sprintf("unknown retire reason: %d", reason))
+		}
 		if filenameBase == traceFileLife && out.decompressor != nil {
 			logger.Warn("[agg.dbg] retire", "f", out.decompressor.FileName(), "reason", reason)
 		}

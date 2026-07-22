@@ -191,3 +191,64 @@ func writeTestKVFile(t *testing.T, path, tmp string, logger log.Logger) {
 	require.NoError(t, comp.AddWord([]byte("v")))
 	require.NoError(t, comp.Compress())
 }
+
+// The last releaser of a retired file consults canDelete: files retired for
+// deletion are unlinked, files that merely left the visible set are only closed.
+func TestReclaimFilesRespectsCanDelete(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	logger := log.New()
+
+	newItem := func(name string) *FilesItem {
+		fPath := filepath.Join(tmp, name)
+		writeTestKVFile(t, fPath, tmp, logger)
+		dec, err := seg.NewDecompressor(fPath)
+		require.NoError(t, err)
+		item := newFilesItem(0, 10)
+		item.decompressor = dec
+		return item
+	}
+
+	keep := newItem("v1.0-keep.0-1.kv")
+	del := newItem("v1.0-del.0-1.kv")
+	del.canDelete.Store(true)
+
+	reclaimFiles([]*FilesItem{keep, del})
+
+	require.Nil(t, keep.decompressor)
+	require.Nil(t, del.decompressor)
+
+	exists, err := dir.FileExist(filepath.Join(tmp, "v1.0-keep.0-1.kv"))
+	require.NoError(t, err)
+	require.True(t, exists, "canDelete=false: close only, file stays on disk")
+
+	exists, err = dir.FileExist(filepath.Join(tmp, "v1.0-del.0-1.kv"))
+	require.NoError(t, err)
+	require.False(t, exists, "canDelete=true: file is deleted")
+}
+
+// Everything entering the generation chain via retire() is retired for deletion.
+func TestRetireMarksCanDelete(t *testing.T) {
+	t.Parallel()
+	for _, reason := range []retireReason{retireReasonMerged, retireReasonAged} {
+		t.Run(reason.String(), func(t *testing.T) {
+			tmp := t.TempDir()
+			logger := log.New()
+			fPath := filepath.Join(tmp, "v1.0-x.0-1.kv")
+			writeTestKVFile(t, fPath, tmp, logger)
+			dec, err := seg.NewDecompressor(fPath)
+			require.NoError(t, err)
+			item := newFilesItem(0, 10)
+			item.decompressor = dec
+			defer item.closeFiles()
+
+			df := newDirtyFiles()
+			df.Set(item)
+
+			retire(df, []*FilesItem{item}, "x", reason, logger)
+
+			require.True(t, item.canDelete.Load())
+			require.Equal(t, 0, df.Len(), "retire removes the item from dirtyFiles")
+		})
+	}
+}
