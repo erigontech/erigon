@@ -2678,6 +2678,8 @@ func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaT
 func (hph *HexPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
 	deferred := hph.branchEncoder.deferred
 	hph.branchEncoder.deferred = make([]*DeferredBranchUpdate, 0, 64)
+	hph.branchEncoder.arenaChunk = nil // taken updates keep the old chunk alive; next batch gets a fresh one
+	hph.branchEncoder.arenaOff = 0
 	if hph.branchEncoder.pendingPrefixes != nil {
 		hph.branchEncoder.pendingPrefixes.Clear()
 	}

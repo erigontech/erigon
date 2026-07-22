@@ -265,17 +265,41 @@ func GetDeferredUpdateMetrics() int64 {
 	return getDeferredUpdateCount.Load()
 }
 
+// arenaCopy returns a copy of src backed by the encoder's bump arena instead of a
+// fresh heap allocation. The returned slice has cap == len so a stray append can't
+// clobber a neighbouring copy in the same chunk. Not safe for concurrent use — one
+// fold goroutine owns the encoder.
+func (be *BranchEncoder) arenaCopy(src []byte) []byte {
+	n := len(src)
+	if n == 0 {
+		return nil
+	}
+	if n > deferredArenaChunkSize {
+		return common.Copy(src) // oversized: own dedicated allocation, leave the chunk untouched
+	}
+	if be.arenaChunk == nil || be.arenaOff+n > len(be.arenaChunk) {
+		be.arenaChunk = make([]byte, deferredArenaChunkSize)
+		be.arenaOff = 0
+	}
+	off := be.arenaOff
+	dst := be.arenaChunk[off : off+n : off+n]
+	copy(dst, src)
+	be.arenaOff = off + n
+	return dst
+}
+
 // getDeferredUpdate gets a DeferredBranchUpdate from the global pool and copies the
-// prefix, the collect-time raw encoding, and the predecessor. The copies transfer to
-// whoever the apply hands them to (putBranch retains prefix and data), so pooled
-// objects never keep their backing arrays.
-func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
+// prefix, the collect-time raw encoding, and the predecessor into the encoder's bump
+// arena. The apply sinks (ETL collector, domain mem-batch) copy their inputs, and the
+// arena chunks outlive the copies via the deferred structs that reference them, so the
+// pooled struct itself keeps no backing array (putDeferredUpdate nils the fields).
+func (be *BranchEncoder) getDeferredUpdate(prefix, raw, prev []byte) *DeferredBranchUpdate {
 	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
-	upd.prefix = common.Copy(prefix)
-	upd.raw = common.Copy(raw)
-	upd.prev = common.Copy(prev)
+	upd.prefix = be.arenaCopy(prefix)
+	upd.raw = be.arenaCopy(raw)
+	upd.prev = be.arenaCopy(prev)
 	upd.encoded = nil
 
 	return upd
@@ -328,7 +352,18 @@ type BranchEncoder struct {
 	maxDeferredUpdates int // flush threshold; 0 = use DefaultMaxDeferredUpdates from config
 	deferred           []*DeferredBranchUpdate
 	pendingPrefixes    *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
+
+	// Bump arena for deferred-update prefix/raw/prev copies: getDeferredUpdate
+	// packs them into these chunks instead of a heap allocation each. A chunk is
+	// freed by GC once every deferred struct with a slice into it is cleared, so
+	// no explicit reset is needed for correctness; recycle points drop the
+	// current-chunk pointer only to start the next batch in a fresh chunk. Only
+	// mutated by the single fold goroutine that owns this encoder.
+	arenaChunk []byte
+	arenaOff   int
 }
+
+const deferredArenaChunkSize = 64 * 1024
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
 	return &BranchEncoder{
@@ -371,6 +406,8 @@ func (be *BranchEncoder) ClearDeferred() {
 		putDeferredUpdate(upd)
 	}
 	be.deferred = be.deferred[:0]
+	be.arenaChunk = nil // drop this batch's chunk; next batch allocates a fresh one
+	be.arenaOff = 0
 	if be.pendingPrefixes != nil {
 		be.pendingPrefixes.Clear()
 	}
@@ -597,7 +634,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	if err != nil {
 		return err
 	}
-	be.deferred = append(be.deferred, getDeferredUpdate(prefix, raw, prev))
+	be.deferred = append(be.deferred, be.getDeferredUpdate(prefix, raw, prev))
 	return nil
 }
 
