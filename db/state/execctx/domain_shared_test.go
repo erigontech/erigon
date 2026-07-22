@@ -252,6 +252,56 @@ func TestSharedDomain_UnwindDoesNotRestoreOverlayForNewKey(t *testing.T) {
 		unwindTarget, writeTxNum, v)
 }
 
+// Unwind(t) prunes overlay writes in [t, ∞) and keeps [0, t); t is the resume
+// block's begin-system txNum, so the boundary write itself must not survive.
+func TestSharedDomain_UnwindPrunesBoundaryTxNum(t *testing.T) {
+	t.Parallel()
+
+	db := newTestDb(t, uint64(100))
+	ctx := t.Context()
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	keptSlot := common.HexToHash("0x01")
+	keptKey := composite(addr[:], keptSlot[:])
+	keptVal := []byte{0x0a}
+	boundarySlot := common.HexToHash("0x02")
+	boundaryKey := composite(addr[:], boundarySlot[:])
+	boundaryVal := []byte{0x0b}
+	const boundaryTxNum uint64 = 100
+
+	committedCs := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(committedCs)
+	domains.SetTxNum(boundaryTxNum - 1)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, keptKey, keptVal, boundaryTxNum-1, nil))
+
+	unwoundCs := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(unwoundCs)
+	domains.SetTxNum(boundaryTxNum)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, boundaryKey, boundaryVal, boundaryTxNum, nil))
+
+	var diffSet [kv.DomainLen][]kv.DomainEntryDiff
+	for idx, d := range unwoundCs.Diffs {
+		diffSet[idx] = d.GetDiffSet()
+	}
+	domains.Unwind(boundaryTxNum, &diffSet)
+
+	v, _, err := domains.GetLatest(kv.StorageDomain, rwTx, boundaryKey)
+	require.NoError(t, err)
+	require.Empty(t, v, "write at exactly the boundary txNum %d must be pruned", boundaryTxNum)
+
+	v, _, err = domains.GetLatest(kv.StorageDomain, rwTx, keptKey)
+	require.NoError(t, err)
+	require.Equal(t, keptVal, v, "write below the boundary txNum must survive")
+}
+
 // TestNewSharedDomains_StateAheadOfBlocks verifies that when the persisted
 // commitment state is ahead of the TxNums index (catch-up scenario),
 // NewSharedDomains returns ErrBehindCommitment but the SharedDomains itself
