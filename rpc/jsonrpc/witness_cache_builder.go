@@ -385,7 +385,6 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 	}
 	start := time.Now()
 	result, err := api.buildWitnessResult(ctx, tx, nil, info, witnessModeLegacy)
-	witnessCacheBuildDuration.ObserveDuration(start)
 	if err != nil {
 		if errors.Is(err, errWitnessVerifyFailed) {
 			witnessCacheBuildFailVerifyCounter.Inc()
@@ -395,6 +394,7 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		log.Warn("[witness-cache] build witness", "block", num, "err", err)
 		return false
 	}
+	witnessCacheBuildDuration.ObserveDuration(start)
 	enc, err := result.MarshalFastJSON()
 	if err != nil {
 		witnessCacheBuildFailOtherCounter.Inc()
