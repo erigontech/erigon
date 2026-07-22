@@ -33,13 +33,16 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/generics"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -1508,6 +1511,94 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 		require.NotNil(t, pb)
 		require.Equal(t, chainPack.BlockAccessLists[i], pb.BlockAccessList, "byRange block %d", i+1)
 	}
+}
+
+func TestGetPayloadBodiesEmptyBlockAccessList(t *testing.T) {
+	t.Parallel()
+	m, chainPack := newPayloadBodiesBALTestChain(t, chain.AllProtocolChanges)
+	block := chainPack.Blocks[0]
+	require.NotNil(t, block.Header().BlockAccessListHash)
+	err := m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		return rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), []byte{0xc0})
+	})
+	require.NoError(t, err)
+	requirePayloadBodiesBlockAccessList(t, m, block, []byte{0xc0})
+}
+
+func TestGetPayloadBodiesPreAmsterdamBlockAccessList(t *testing.T) {
+	t.Parallel()
+	var config chain.Config
+	require.NoError(t, copier.CopyWithOption(&config, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	config.AmsterdamTime = nil
+	m, chainPack := newPayloadBodiesBALTestChain(t, &config)
+	block := chainPack.Blocks[0]
+	require.Nil(t, block.Header().BlockAccessListHash)
+	requirePayloadBodiesBlockAccessList(t, m, block, nil)
+}
+
+func TestGetPayloadBodiesPrunedHistoryBlockAccessList(t *testing.T) {
+	t.Parallel()
+	m, chainPack := newPayloadBodiesBALTestChain(t, chain.AllProtocolChanges)
+	block := chainPack.Blocks[0]
+	require.NotNil(t, block.Header().BlockAccessListHash)
+	prunePayloadBodiesBALHistory(t, m, block)
+	requirePayloadBodiesBlockAccessList(t, m, block, nil)
+}
+
+func newPayloadBodiesBALTestChain(t *testing.T, config *chain.Config) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+	t.Helper()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(config))
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	return m, chainPack
+}
+
+func requirePayloadBodiesBlockAccessList(t *testing.T, m *execmoduletester.ExecModuleTester, block *types.Block, want []byte) {
+	t.Helper()
+	byHash, err := m.ExecModule.GetPayloadBodiesByHash(t.Context(), []common.Hash{block.Hash()})
+	require.NoError(t, err)
+	require.Len(t, byHash, 1)
+	require.NotNil(t, byHash[0])
+	require.Equal(t, want, byHash[0].BlockAccessList)
+	byRange, err := m.ExecModule.GetPayloadBodiesByRange(t.Context(), block.NumberU64(), 1)
+	require.NoError(t, err)
+	require.Len(t, byRange, 1)
+	require.NotNil(t, byRange[0])
+	require.Equal(t, want, byRange[0].BlockAccessList)
+}
+
+func prunePayloadBodiesBALHistory(t *testing.T, m *execmoduletester.ExecModuleTester, block *types.Block) {
+	t.Helper()
+	err := m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := tx.Delete(kv.BlockAccessList, dbutils.BlockBodyKey(block.NumberU64(), block.Hash())); err != nil {
+			return err
+		}
+		var historyStart [8]byte
+		binary.BigEndian.PutUint64(historyStart[:], ^uint64(0))
+		for _, table := range []struct {
+			name     string
+			valueLen int
+		}{{name: kv.TblAccountHistoryKeys, valueLen: length.Addr}, {name: kv.TblStorageHistoryKeys, valueLen: length.Addr + length.Hash}, {name: kv.TblCodeHistoryKeys, valueLen: length.Addr}} {
+			for {
+				key, err := kv.FirstKey(tx, table.name)
+				if err != nil {
+					return err
+				}
+				if key == nil {
+					break
+				}
+				if err := tx.Delete(table.name, key); err != nil {
+					return err
+				}
+			}
+			if err := tx.Put(table.name, historyStart[:], make([]byte, table.valueLen)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
 }
 
 // TestGetPayloadBodiesNonCanonicalBlockAccessList verifies that payload-bodies
