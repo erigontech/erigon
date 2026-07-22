@@ -363,7 +363,7 @@ type BranchEncoder struct {
 	arenaOff   int
 }
 
-const deferredArenaChunkSize = 64 * 1024
+const deferredArenaChunkSize = 1024 * 1024
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
 	return &BranchEncoder{
