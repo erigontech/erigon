@@ -768,10 +768,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	tx.Rollback()
 	tx = nil
 
-	// Offline re-execution should use the same read-cache tier as the live node,
-	// which attaches a StateCache in execmodule; without this, stage_exec bypasses
-	// it entirely. One process-lifetime cache is shared across the per-batch
-	// SharedDomains so it accumulates cross-batch. Self-gates on --exec.state-cache.
 	var execStateCache *cache.StateCache
 	if dbg.UseStateCache {
 		execStateCache = cache.NewDefaultStateCache()
