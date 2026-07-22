@@ -547,7 +547,7 @@ func rpcToolCalls() []toolCall {
 				{name: "from", desc: "Sender address", kind: pString},
 				{name: "value", desc: "Value (hex)", kind: pString},
 				{name: "gas", desc: "Gas limit (hex)", kind: pString},
-				{name: "blockNumber", desc: "Block number", kind: pString},
+				{name: "blockNumber", desc: "Block number (default: latest)", kind: pString},
 			},
 			build:  buildTxArgs(true),
 			format: fmtStringResult("Result: "),
@@ -625,7 +625,7 @@ func rpcToolCalls() []toolCall {
 			name: "eth_getStorageValues", desc: "Get multiple storage slot values for multiple accounts in a single request",
 			params: []param{
 				{name: "requests", desc: "JSON object mapping addresses to arrays of storage slot keys", kind: pString, required: true},
-				{name: "blockNumber", desc: "Block number or tag (latest, earliest, pending)", kind: pString},
+				{name: "blockNumber", desc: "Block number or tag (default: latest)", kind: pString},
 			},
 			build: buildStorageValues,
 		},
