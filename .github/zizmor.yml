@@ -5,26 +5,34 @@ rules:
   unpinned-uses:
     disable: true
 
-  # Cache-poisoning (artipacked) findings in these workflows are intentional;
-  # tracked in issue #21132.
+  # These self-hosted QA workflows cache a clone of the pinned external
+  # erigontech/rpc-tests repo (cache key includes RPC_VERSION). The restored
+  # content is fixed and re-fetchable test code, not build output feeding a
+  # publish or deploy step, so a poisoned cache has no privileged sink here.
+  # Tracked in #21132.
   cache-poisoning:
     ignore:
-      - manifest.yml
       - qa-rpc-integration-tests-gnosis.yml
       - qa-rpc-integration-tests.yml
       - qa-sync-from-scratch.yml
-      - test-kurtosis-assertoor.yml
-      - test-kurtosis-gloas.yml
 
   # Workflows missing explicit permissions: blocks — needs a cleanup pass
   # to add least-privilege permissions to each workflow; tracked in #21132.
   excessive-permissions:
     disable: true
 
-  # secrets: inherit is intentional in ci-gate.yml and cache-warming.yml;
-  # tracked in #21132.
+  # The remaining `secrets: inherit` calls target same-repo reusable workflows
+  # that genuinely consume secrets — sonar (SONAR_TOKEN) and the DockerHub-pull
+  # hive/kurtosis suites (DOCKERHUB_PULL_*). Those callees read the secrets
+  # directly without declaring workflow_call secrets, so inherit is how they
+  # receive them. Tracked in #21132.
   secrets-inherit:
-    disable: true
+    ignore:
+      - cache-warming.yml
+      - cache-warming-kurtosis-cl-images.yml
+      - cache-warming-kurtosis-gloas-images.yml
+      - ci-gate.yml
+      - sonar-branch-scan.yml
 
   # This workflow must build and publish an image for every triggering commit;
   # a concurrency group would cancel intermediate queued runs and skip images.
