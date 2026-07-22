@@ -51,4 +51,38 @@ func LogStats(at *state.AggregatorRoTx, tx kv.Tx, logger log.Logger, tx2block fu
 		"txs", common.PrettyCounter(at.Agg().EndTxNumMinimax()),
 		"first_history_idx_in_db", firstHistoryIndexBlockInDB,
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+
+	warnUnevenIIAvailability(at, tx, logger, tx2block)
+}
+
+// Standalone inverted indices (logtopics, logaddrs, tracesfrom, tracesto) are
+// expected to cover at least the state-history window; an index starting later
+// makes filtered eth_getLogs/trace_filter silently incomplete in the gap.
+func warnUnevenIIAvailability(at *state.AggregatorRoTx, tx kv.Tx, logger log.Logger, tx2block func(txNum uint64) (uint64, error)) {
+	historyStartTxNum := at.HistoryStartFrom(kv.AccountsDomain, tx)
+	var late []string
+	for id := range at.InvertedIndicesLen() {
+		name := at.InvertedIndexName(id)
+		iiStartTxNum := at.IIStartFrom(name, tx)
+		if iiStartTxNum <= historyStartTxNum {
+			continue
+		}
+		iiFromBlock, err := tx2block(iiStartTxNum)
+		if err != nil {
+			logger.Warn("[snapshots:history] Stat", "err", err)
+			return
+		}
+		late = append(late, fmt.Sprintf("%s=%d", name.String(), iiFromBlock))
+	}
+	if len(late) == 0 {
+		return
+	}
+	historyFromBlock, err := tx2block(historyStartTxNum)
+	if err != nil {
+		logger.Warn("[snapshots:history] Stat", "err", err)
+		return
+	}
+	logger.Warn("[snapshots:history] uneven old-data availability: indices start later than state history; filtered eth_getLogs/trace_filter may return incomplete results for older blocks",
+		"state_history_from_block", historyFromBlock,
+		"index_from_block", strings.Join(late, ","))
 }
