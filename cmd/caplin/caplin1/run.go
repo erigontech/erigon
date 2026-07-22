@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
+	"github.com/erigontech/erigon/cl/lifecycle"
 	clp2p "github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
@@ -372,6 +373,14 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	logger := log.New("app", "caplin")
 
+	// caplinGroup tracks Stop drains for Caplin sub-components. Stops
+	// fire in reverse registration order at RunCaplinService exit so
+	// each component's owned goroutines fully return before the next
+	// component's Stop begins. This is what lets CaplinService.Restart
+	// safely reclaim CL heap state across an unwind.
+	caplinGroup := lifecycle.NewGroup(logger)
+	defer caplinGroup.Stop()
+
 	config.NetworkId = clparams.CustomNetwork // Force custom network
 	freezeCfg := ethconfig.Defaults.Snapshot
 	freezeCfg.ChainName = beaconConfig.ConfigName
@@ -393,7 +402,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	syncContributionPool := sync_contribution_pool.NewSyncContributionPool(beaconConfig)
 	emitters := beaconevents.NewEventEmitter()
-	aggregationPool := aggregation.NewAggregationPool(ctx, beaconConfig, networkConfig, ethClock)
+	aggregationPool, aggregationPoolStop := aggregation.NewAggregationPool(ctx, beaconConfig, networkConfig, ethClock)
+	caplinGroup.OnStop("aggregation-pool", aggregationPoolStop)
 	doLMDSampling := len(state.GetActiveValidatorsIndices(state.Slot()/beaconConfig.SlotsPerEpoch)) >= 20_000
 
 	// create the public keys registry
@@ -425,7 +435,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		}
 	}
 
-	p2p, err := clp2p.NewP2Pmanager(ctx, &clp2p.P2PConfig{
+	p2p, p2pStop, err := clp2p.NewP2Pmanager(ctx, &clp2p.P2PConfig{
 		IpAddr:         config.CaplinDiscoveryAddr,
 		Port:           int(config.CaplinDiscoveryPort),
 		TCPPort:        uint(config.CaplinDiscoveryTCPPort),
@@ -447,6 +457,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	if err != nil {
 		return err
 	}
+	caplinGroup.OnStop("p2p-manager", p2pStop)
 	peerDasState := peerdasstate.NewPeerDasState(beaconConfig, networkConfig)
 	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), pruneBlobDistance, beaconConfig, ethClock, emitters)
 	sentinel, localNode, err := service.StartSentinelService(ctx, &sentinel.SentinelConfig{
@@ -496,31 +507,42 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	// Create the gossip manager
 	gossipManager := gossip.NewGossipManager(ctx, p2p, beaconConfig, networkConfig, ethClock, config.SubscribeAllTopics, uint64(len(activeIndicies)), config.MaxInboundTrafficPerPeer, config.MaxOutboundTrafficPerPeer, config.AdptableTrafficRequirements)
+	caplinGroup.OnStop("gossip-manager", func() { _ = gossipManager.Close() })
 
 	peerDasState.SetLocalNodeID(localNode)
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock, state)
+	caplinGroup.OnStop("beacon-rpc-p2p", beaconRpc.Stop)
 	gossipManager.SetPeerBanner(beaconRpc)
-	peerDas := das.NewPeerDas(ctx, beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager, rcsn, indexDB)
+	peerDas, peerDasStop := das.NewPeerDas(ctx, beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager, rcsn, indexDB)
+	caplinGroup.OnStop("peerdas", peerDasStop)
 	forkChoice.InitPeerDas(peerDas)   // hack init
 	peerDas.SetForkChoice(forkChoice) // [New in Gloas:EIP7732] Set forkChoice for GLOAS kzg_commitments lookup
-	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, beaconConfig, networkConfig, ethClock, aggregationPool, syncedDataManager, gossipManager)
+	committeeSub, committeeSubStop := committee_subscription.NewCommitteeSubscribeManagement(ctx, beaconConfig, networkConfig, ethClock, aggregationPool, syncedDataManager, gossipManager)
+	caplinGroup.OnStop("committee-subscription", committeeSubStop)
 	batchSignatureVerifier := services.NewBatchSignatureVerifier(ctx, sentinel)
+	caplinGroup.OnStop("batch-signature-verifier", batchSignatureVerifier.Stop)
 	// Define gossip services
-	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters)
+	blockService, blockServiceStop := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters)
+	caplinGroup.OnStop("gossip-block-service", blockServiceStop)
 	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, ethClock, emitters, false)
-	dataColumnSidecarService := services.NewDataColumnSidecarService(ctx, beaconConfig, ethClock, forkChoice, syncedDataManager, columnStorage, emitters)
+	dataColumnSidecarService, dataColumnSidecarStop := services.NewDataColumnSidecarService(ctx, beaconConfig, ethClock, forkChoice, syncedDataManager, columnStorage, emitters)
+	caplinGroup.OnStop("gossip-data-column-sidecar", dataColumnSidecarStop)
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, false)
 	attestationService := services.NewAttestationService(ctx, forkChoice, committeeSub, ethClock, syncedDataManager, beaconConfig, networkConfig, emitters, batchSignatureVerifier)
 	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters, batchSignatureVerifier, validatorParameters, false)
-	aggregateAndProofService := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, beaconConfig, pool, false, batchSignatureVerifier, validatorParameters)
+	aggregateAndProofService, aggregateAndProofStop := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, beaconConfig, pool, false, batchSignatureVerifier, validatorParameters)
+	caplinGroup.OnStop("gossip-aggregate-and-proof", aggregateAndProofStop)
 	voluntaryExitService := services.NewVoluntaryExitService(pool, emitters, syncedDataManager, beaconConfig, ethClock, batchSignatureVerifier)
 	blsToExecutionChangeService := services.NewBLSToExecutionChangeService(pool, emitters, syncedDataManager, beaconConfig, batchSignatureVerifier)
 	proposerSlashingService := services.NewProposerSlashingService(pool, syncedDataManager, beaconConfig, ethClock, emitters)
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
-	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig, emitters)
-	payloadAttestationService := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig, emitters)
+	executionPayloadService, executionPayloadStop := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig, emitters)
+	caplinGroup.OnStop("gossip-execution-payload", executionPayloadStop)
+	payloadAttestationService, payloadAttestationStop := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig, emitters)
+	caplinGroup.OnStop("gossip-payload-attestation", payloadAttestationStop)
 	proposerPreferencesService := services.NewProposerPreferencesService(syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool)
-	executionPayloadBidService := services.NewExecutionPayloadBidService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
+	executionPayloadBidService, executionPayloadBidStop := services.NewExecutionPayloadBidService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
+	caplinGroup.OnStop("gossip-execution-payload-bid", executionPayloadBidStop)
 	registry.RegisterGossipServices(
 		ctx,
 		gossipManager,
@@ -547,39 +569,42 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		go batchSignatureVerifier.Start()
 	}
 
-	{ // start ticking forkChoice
-		go func() {
-			tickInterval := time.NewTicker(2 * time.Millisecond)
-			for {
-				select {
-				case <-tickInterval.C:
-					forkChoice.OnTick(uint64(time.Now().Unix()))
-				case <-ctx.Done():
-					return
-				}
+	inlineBundle := lifecycle.NewBundle()
+	inlineBundle.Start(ctx)
+	caplinGroup.OnStop("caplin-inline-loops", inlineBundle.Stop)
+
+	// forkChoice tick (holds ForkChoiceStore + fork graph + validator set)
+	inlineBundle.Go(func(ctx context.Context) {
+		tickInterval := time.NewTicker(2 * time.Millisecond)
+		defer tickInterval.Stop()
+		for {
+			select {
+			case <-tickInterval.C:
+				forkChoice.OnTick(uint64(time.Now().Unix()))
+			case <-ctx.Done():
+				return
 			}
-		}()
-	}
+		}
+	})
 
 	logger.Info("Started Ethereum 2.0 Gossip Service")
 
-	{ // start logging peers
-		go func() {
-			logIntervalPeers := time.NewTicker(1 * time.Minute)
-			for {
-				select {
-				case <-logIntervalPeers.C:
-					if peerCount, err := beaconRpc.Peers(); err == nil {
-						logger.Info("Caplin P2P", "peers_count", peerCount)
-					} else {
-						logger.Error("Caplin P2P", "err", err)
-					}
-				case <-ctx.Done():
-					return
+	inlineBundle.Go(func(ctx context.Context) {
+		logIntervalPeers := time.NewTicker(1 * time.Minute)
+		defer logIntervalPeers.Stop()
+		for {
+			select {
+			case <-logIntervalPeers.C:
+				if peerCount, err := beaconRpc.Peers(); err == nil {
+					logger.Info("Caplin P2P", "peers_count", peerCount)
+				} else {
+					logger.Error("Caplin P2P", "err", err)
 				}
+			case <-ctx.Done():
+				return
 			}
-		}()
-	}
+		}
+	})
 
 	tx, err := indexDB.BeginRw(ctx)
 	if err != nil {
@@ -600,8 +625,9 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	stateSnapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}, beaconConfig, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB), logger)
 	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, stateSnapshots, csn, rcsn, syncedDataManager, logger, config.ArchiveStates, config.ArchiveBlocks, config.ArchiveBlobs, config.SnapshotGenerationEnabled, snBuildSema)
-	// Create the antiquary
-	go func() {
+	antiqBundle := lifecycle.NewBundle()
+	antiqBundle.Start(ctx)
+	antiqBundle.Go(func(ctx context.Context) {
 		keepGoing := true
 		for keepGoing {
 			select {
@@ -615,7 +641,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 				}
 			}
 		}
-	}()
+	})
+	caplinGroup.OnStop("antiquary-launcher", antiqBundle.Stop)
 
 	if err := tx.Commit(); err != nil {
 		return err

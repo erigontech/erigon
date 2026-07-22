@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/lifecycle"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -88,7 +89,7 @@ func NewPayloadAttestationService(
 	ethClock eth_clock.EthereumClock,
 	netCfg *clparams.NetworkConfig,
 	emitters *beaconevents.EventEmitter,
-) PayloadAttestationService {
+) (PayloadAttestationService, func()) {
 	seenCache, err := lru.New[seenPayloadAttestationKey, struct{}]("seen_payload_attestations", seenPayloadAttestationCacheSize)
 	if err != nil {
 		panic(err)
@@ -101,8 +102,10 @@ func NewPayloadAttestationService(
 		seenAttestationsCache: seenCache,
 		pendingCond:           sync.NewCond(&sync.Mutex{}),
 	}
-	go s.loop(ctx)
-	return s
+	bundle := lifecycle.NewBundle()
+	bundle.Start(ctx)
+	bundle.Go(s.loop)
+	return s, bundle.Stop
 }
 
 func (s *payloadAttestationService) Names() []string {

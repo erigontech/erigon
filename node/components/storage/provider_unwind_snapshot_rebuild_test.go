@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -397,7 +398,7 @@ func TestSeedLeftoverBlocks_MissingTxStraddle_SeedsHeadersBodiesOnly(t *testing.
 	for _, e := range entries {
 		name := e.Name()
 		if len(name) >= len("-transactions.seg") && name[len(name)-len("-transactions.seg"):] == "-transactions.seg" {
-			require.NoError(t, os.Remove(filepath.Join(snapDir, name)))
+			require.NoError(t, dir.RemoveFile(filepath.Join(snapDir, name)))
 		}
 	}
 

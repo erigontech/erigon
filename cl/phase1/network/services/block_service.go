@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/lifecycle"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -82,7 +83,7 @@ func NewBlockService(
 	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	emitter *beaconevents.EventEmitter,
-) BlockService {
+) (BlockService, func()) {
 	seenBlocksCache, err := lru.New[proposerIndexAndSlot, struct{}]("seenblocks", seenBlockCacheSize)
 	if err != nil {
 		panic(err)
@@ -96,8 +97,10 @@ func NewBlockService(
 		emitter:         emitter,
 		db:              db,
 	}
-	go b.loop(ctx)
-	return b
+	bundle := lifecycle.NewBundle()
+	bundle.Start(ctx)
+	bundle.Go(b.loop)
+	return b, bundle.Stop
 }
 
 func (b *blockService) Names() []string {

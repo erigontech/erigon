@@ -39,7 +39,7 @@ func setupExecutionPayloadService(t *testing.T) (ExecutionPayloadService, *mock_
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	service := NewExecutionPayloadService(ctx, forkchoiceMock, cfg, beaconevents.NewEventEmitter())
+	service, _ := NewExecutionPayloadService(ctx, forkchoiceMock, cfg, beaconevents.NewEventEmitter())
 	return service, forkchoiceMock
 }
 

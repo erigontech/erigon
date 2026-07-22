@@ -88,7 +88,7 @@ func (t *dataColumnSidecarTestSuite) SetupTest() {
 		MaxBlobsPerBlockElectra: 9,
 	}
 
-	t.dataColumnSidecarService = NewDataColumnSidecarService(
+	t.dataColumnSidecarService, _ = NewDataColumnSidecarService(
 		context.Background(),
 		t.beaconConfig,
 		t.mockEthClock,

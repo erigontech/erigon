@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/lifecycle"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/common"
@@ -85,7 +86,7 @@ func NewExecutionPayloadService(
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	beaconCfg *clparams.BeaconChainConfig,
 	emitters *beaconevents.EventEmitter,
-) ExecutionPayloadService {
+) (ExecutionPayloadService, func()) {
 	seenEnvelopesCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
 	if err != nil {
 		panic(err)
@@ -97,8 +98,10 @@ func NewExecutionPayloadService(
 		seenEnvelopesCache: seenEnvelopesCache,
 		pendingCond:        sync.NewCond(&sync.Mutex{}),
 	}
-	go s.loop(ctx)
-	return s
+	bundle := lifecycle.NewBundle()
+	bundle.Start(ctx)
+	bundle.Go(s.loop)
+	return s, bundle.Stop
 }
 
 func (s *executionPayloadService) Names() []string {

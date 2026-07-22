@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/lifecycle"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -59,7 +60,7 @@ func NewAggregationPool(
 	beaconConfig *clparams.BeaconChainConfig,
 	netConfig *clparams.NetworkConfig,
 	ethClock eth_clock.EthereumClock,
-) AggregationPool {
+) (AggregationPool, func()) {
 	p := &aggregationPoolImpl{
 		ethClock:              ethClock,
 		beaconConfig:          beaconConfig,
@@ -68,8 +69,10 @@ func NewAggregationPool(
 		aggregates:            make(map[common.Hash]*solid.Attestation),
 		aggregatesInCommittee: lru.NewWithTTL[keyAggrInCommittee, *solid.Attestation]("aggregation_in_committee", 100_000, 30*time.Minute),
 	}
-	go p.sweepStaleAtt(ctx)
-	return p
+	bundle := lifecycle.NewBundle()
+	bundle.Start(ctx)
+	bundle.Go(p.sweepStaleAtt)
+	return p, bundle.Stop
 }
 
 func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {

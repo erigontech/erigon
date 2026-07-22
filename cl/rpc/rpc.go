@@ -80,12 +80,21 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinelproto.SentinelClient,
 		ethClock:     ethClock,
 	}
 	rpc.columnDataPeers = newColumnPeers(
+		ctx,
 		sentinel,
 		beaconConfig,
 		ethClock,
 		beaconState,
 	)
 	return rpc
+}
+
+// Stop drains the BeaconRpcP2P's owned goroutines (currently the
+// columnDataPeers refresh loop). Idempotent.
+func (b *BeaconRpcP2P) Stop() {
+	if b.columnDataPeers != nil {
+		b.columnDataPeers.Stop()
+	}
 }
 
 func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqData []byte, maxResponseBytes uint64) ([]*cltypes.SignedBeaconBlock, string, error) {

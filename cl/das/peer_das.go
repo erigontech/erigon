@@ -15,6 +15,7 @@ import (
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/lifecycle"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	gossipmgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
@@ -90,6 +91,8 @@ type peerdas struct {
 	blockReader    freezeblocks.BeaconSnapshotReader
 	indiciesDB     kv.RoDB
 	gloasDataCache *lru.Cache[common.Hash, *gloasBlockData] // cache for GLOAS block data (~1KB per entry)
+
+	bundle *lifecycle.Bundle
 }
 
 func NewPeerDas(
@@ -106,9 +109,11 @@ func NewPeerDas(
 	gossipManager gossipmgr.Gossip,
 	blockReader freezeblocks.BeaconSnapshotReader, // [New in Gloas:EIP7732]
 	indiciesDB kv.RoDB, // [New in Gloas:EIP7732]
-) PeerDas {
+) (PeerDas, func()) {
 	kzg.InitKZGCtx()
 	gloasDataCache, _ := lru.New[common.Hash, *gloasBlockData]("gloasDataCache", 128)
+	bundle := lifecycle.NewBundle()
+	bundle.Start(ctx)
 	p := &peerdas{
 		state:             peerDasState,
 		nodeID:            nodeID,
@@ -129,13 +134,15 @@ func NewPeerDas(
 		blockReader:    blockReader,
 		indiciesDB:     indiciesDB,
 		gloasDataCache: gloasDataCache,
+
+		bundle: bundle,
 	}
 	p.resubscribeGossip()
 	for range numOfBlobRecoveryWorkers {
-		go p.blobsRecoverWorker(ctx)
+		bundle.Go(p.blobsRecoverWorker)
 	}
-	go p.syncColumnDataWorker(ctx)
-	return p
+	bundle.Go(p.syncColumnDataWorker)
+	return p, bundle.Stop
 }
 
 func (d *peerdas) StateReader() peerdasstate.PeerDasStateReader {

@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/lifecycle"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -94,7 +95,7 @@ func NewAggregateAndProofService(
 	test bool,
 	batchSignatureVerifier *BatchSignatureVerifier,
 	validatorParams *validator_params.ValidatorParams,
-) AggregateAndProofService {
+) (AggregateAndProofService, func()) {
 	seenAggCache, err := lru.New[seenAggregateIndex, struct{}]("seenAggregate", seenAggregateCacheSize)
 	if err != nil {
 		panic(err)
@@ -114,8 +115,10 @@ func NewAggregateAndProofService(
 		validatorParams:        validatorParams,
 		proposerIndicesCache:   proposerIndicesCache,
 	}
-	go a.loop(ctx)
-	return a
+	bundle := lifecycle.NewBundle()
+	bundle.Start(ctx)
+	bundle.Go(a.loop)
+	return a, bundle.Stop
 }
 
 func (a *aggregateAndProofServiceImpl) Names() []string {

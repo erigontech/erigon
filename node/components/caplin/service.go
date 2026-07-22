@@ -35,17 +35,6 @@ import (
 // hang the caller indefinitely.
 const teardownTimeout = 60 * time.Second
 
-// dbCloseSettleDelay is a short fixed delay after the Caplin goroutine
-// drains. Some Caplin-owned MDBX envs (e.g. OpenCaplinDatabase's
-// indexing + blob handles) close inside background goroutines that
-// select on ctx.Done — they may not have finished by the time
-// <-s.done returns. Letting them settle before reopen avoids
-// "resource temporarily unavailable" on the new mdbx.New().Open()
-// call. PersistentBlockCollector now closes synchronously via
-// Cfg.Close so the only remaining async closes are the ones in
-// OpenCaplinDatabase, which this delay covers.
-const dbCloseSettleDelay = 2 * time.Second
-
 // LaunchFn is the runtime closure that runs Caplin to completion. The
 // service supplies the context; the closure returns when ctx is
 // cancelled or Caplin exits on its own.
@@ -119,12 +108,6 @@ func (s *CaplinService) Restart() error {
 	case <-s.done:
 	case <-time.After(teardownTimeout):
 		return fmt.Errorf("CaplinService.Restart: prior goroutine did not exit within %s", teardownTimeout)
-	}
-
-	select {
-	case <-s.parentCtx.Done():
-		return s.parentCtx.Err()
-	case <-time.After(dbCloseSettleDelay):
 	}
 
 	// Wipe the PersistentBlockCollector's MDBX env. The cache holds

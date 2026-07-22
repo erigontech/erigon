@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/lifecycle"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	gossipMgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
@@ -68,7 +69,7 @@ func NewCommitteeSubscribeManagement(
 	aggregationPool aggregation.AggregationPool,
 	syncedData *synced_data.SyncedDataManager,
 	gossipManager *gossipMgr.GossipManager,
-) *CommitteeSubscribeMgmt {
+) (*CommitteeSubscribeMgmt, func()) {
 	c := &CommitteeSubscribeMgmt{
 		beaconConfig:    beaconConfig,
 		netConfig:       netConfig,
@@ -78,8 +79,10 @@ func NewCommitteeSubscribeManagement(
 		gossipManager:   gossipManager,
 		validatorSubs:   make(map[uint64]*validatorSub),
 	}
-	go c.sweepByStaleSlots(ctx)
-	return c
+	bundle := lifecycle.NewBundle()
+	bundle.Start(ctx)
+	bundle.Go(c.sweepByStaleSlots)
+	return c, bundle.Stop
 }
 
 type validatorSub struct {

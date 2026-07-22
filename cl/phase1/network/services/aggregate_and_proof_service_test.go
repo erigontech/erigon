@@ -84,7 +84,7 @@ func setupAggregateAndProofTest(t *testing.T) (AggregateAndProofService, *synced
 	t.Cleanup(cancel)
 	batchSignatureVerifier := NewBatchSignatureVerifier(verifierCtx, nil)
 	go batchSignatureVerifier.Start()
-	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams())
+	blockService, _ := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams())
 	return blockService, syncedDataManager, forkchoiceMock
 }
 
@@ -265,7 +265,7 @@ func setupAggregateAndProofTestWithConfig(t *testing.T, cfg *clparams.BeaconChai
 	t.Cleanup(cancel)
 	batchSignatureVerifier := NewBatchSignatureVerifier(verifierCtx, nil)
 	go batchSignatureVerifier.Start()
-	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams())
+	blockService, _ := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams())
 	return blockService, syncedDataManager, forkchoiceMock
 }
 

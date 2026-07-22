@@ -160,7 +160,7 @@ func (t *PoolTestSuite) TestAddAttestationElectra() {
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+		pool, _ := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
 		for i := range tc.atts {
 			pool.AddAttestation(tc.atts[i])
 		}
@@ -231,7 +231,7 @@ func (t *PoolTestSuite) TestAddAttestation() {
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+		pool, _ := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
 		for i := range tc.atts {
 			pool.AddAttestation(tc.atts[i])
 		}

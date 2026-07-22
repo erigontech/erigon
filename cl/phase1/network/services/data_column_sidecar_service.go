@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/lifecycle"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	st "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -86,7 +87,7 @@ func NewDataColumnSidecarService(
 	syncDataManager synced_data.SyncedData,
 	columnSidecarStorage blob_storage.DataColumnStorage,
 	emitters *beaconevents.EventEmitter,
-) DataColumnSidecarService {
+) (DataColumnSidecarService, func()) {
 	size := cfg.NumberOfColumns * cfg.SlotsPerEpoch * 4
 	seenSidecar, err := lru.New[seenSidecarKey, struct{}]("seenDataColumnSidecar", int(size))
 	if err != nil {
@@ -106,8 +107,10 @@ func NewDataColumnSidecarService(
 		columnSidecarStorage: columnSidecarStorage,
 		emitters:             emitters,
 	}
-	go s.loopPendingGloasSidecars(ctx)
-	return s
+	bundle := lifecycle.NewBundle()
+	bundle.Start(ctx)
+	bundle.Go(s.loopPendingGloasSidecars)
+	return s, bundle.Stop
 }
 
 func (s *dataColumnSidecarService) Names() []string {

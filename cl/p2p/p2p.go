@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/lifecycle"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -74,7 +75,7 @@ func loadOrGenerateKey(dataDir string) (*ecdsa.PrivateKey, error) {
 	return cfg.LoadOrGenerateAndSave(filepath.Join(dataDir, "caplin-nodekey"))
 }
 
-func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethClock eth_clock.EthereumClock) (P2PManager, error) {
+func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethClock eth_clock.EthereumClock) (P2PManager, func(), error) {
 	// Resolve external IP from NAT once so both discv5 ENR and libp2p multiaddrs use
 	// the same public address. ExtIP resolves immediately; STUN/UPnP make network calls.
 	if cfg.NAT != nil {
@@ -91,29 +92,29 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	for i, bootnode := range cfg.NetworkConfig.BootNodes {
 		newNode, err := enode.Parse(enode.ValidSchemes, bootnode)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		enodes[i] = newNode
 	}
 
 	privateKey, err := loadOrGenerateKey(cfg.DataDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	gater, err := NewGater(cfg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	opts, err := buildOptions(cfg, privateKey)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	bwc := metrics.NewBandwidthCounter()
 	opts = append(opts, libp2p.ConnectionGater(gater), libp2p.BandwidthReporter(bwc))
 	host, err := libp2p.New(opts...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	p := p2pManager{
@@ -128,7 +129,7 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	pubsub.TimeCacheDuration = gossipSubSeenTTL * gossipSubHeartbeatInterval
 	p.pubsub, err = pubsub.NewGossipSub(ctx, host, p.pubsubOptions(cfg.BeaconConfig)...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// udpv5
@@ -138,21 +139,23 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	}
 	p.udpv5, err = NewUDPv5Listener(ctx, cfg, discCfg, logger)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// connect to bootnodes
 	if err := p.connectToBootnodes(ctx, discCfg); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// setup ENR
 	if err := p.setupENR(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	go p.updateENR()
-	go p.peerMonitor(ctx)
-	return &p, nil
+	bundle := lifecycle.NewBundle()
+	bundle.Start(ctx)
+	bundle.Go(p.updateENR)
+	bundle.Go(p.peerMonitor)
+	return &p, bundle.Stop, nil
 }
 
 func (p *p2pManager) Pubsub() *pubsub.PubSub {
@@ -208,7 +211,7 @@ func (p *p2pManager) setupENR() error {
 	return nil
 }
 
-func (s *p2pManager) updateENR() {
+func (s *p2pManager) updateENR(ctx context.Context) {
 	node := s.udpv5.LocalNode()
 	if node == nil {
 		panic("local node is nil")
@@ -218,10 +221,13 @@ func (s *p2pManager) updateENR() {
 		if nextForkEpoch == s.cfg.BeaconConfig.FarFutureEpoch {
 			break
 		}
-		// sleep until next fork epoch
 		wakeupTime := s.ethClock.GetSlotTime(nextForkEpoch * s.cfg.BeaconConfig.SlotsPerEpoch).Add(time.Second)
 		log.Info("[Sentinel] Sleeping until next fork epoch", "nextForkEpoch", nextForkEpoch, "wakeupTime", wakeupTime)
-		time.Sleep(time.Until(wakeupTime)) // add 1 second for safety
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Until(wakeupTime)):
+		}
 		nfd, err := s.ethClock.NextForkDigest()
 		if err != nil {
 			log.Warn("[Sentinel] Could not get next fork digest", "err", err)

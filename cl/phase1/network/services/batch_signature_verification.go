@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/erigontech/erigon/cl/lifecycle"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -30,6 +31,7 @@ type BatchSignatureVerifier struct {
 	syncCommitteeMessage       chan *AggregateVerificationData
 	voluntaryExitVerify        chan *AggregateVerificationData
 	ctx                        context.Context
+	bundle                     *lifecycle.Bundle
 }
 
 var ErrInvalidBlsSignature = errors.New("invalid bls signature")
@@ -46,8 +48,10 @@ type AggregateVerificationData struct {
 }
 
 func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinelproto.SentinelClient) *BatchSignatureVerifier {
+	b := lifecycle.NewBundle()
+	b.Start(ctx)
 	return &BatchSignatureVerifier{
-		ctx:                        ctx,
+		ctx:                        b.Ctx(),
 		sentinel:                   sentinel,
 		attVerifyAndExecute:        make(chan *AggregateVerificationData, 1024),
 		aggregateProofVerify:       make(chan *AggregateVerificationData, 1024),
@@ -55,6 +59,7 @@ func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinelproto.Senti
 		syncContributionVerify:     make(chan *AggregateVerificationData, 1024),
 		syncCommitteeMessage:       make(chan *AggregateVerificationData, 1024),
 		voluntaryExitVerify:        make(chan *AggregateVerificationData, 1024),
+		bundle:                     b,
 	}
 }
 
@@ -89,12 +94,18 @@ func (b *BatchSignatureVerifier) ImmediateVerification(data *AggregateVerificati
 
 func (b *BatchSignatureVerifier) Start() {
 	// separate goroutines for each type of verification
-	go b.start(b.attVerifyAndExecute)
-	go b.start(b.aggregateProofVerify)
-	go b.start(b.blsToExecutionChangeVerify)
-	go b.start(b.syncContributionVerify)
-	go b.start(b.syncCommitteeMessage)
-	go b.start(b.voluntaryExitVerify)
+	b.bundle.Go(func(context.Context) { b.start(b.attVerifyAndExecute) })
+	b.bundle.Go(func(context.Context) { b.start(b.aggregateProofVerify) })
+	b.bundle.Go(func(context.Context) { b.start(b.blsToExecutionChangeVerify) })
+	b.bundle.Go(func(context.Context) { b.start(b.syncContributionVerify) })
+	b.bundle.Go(func(context.Context) { b.start(b.syncCommitteeMessage) })
+	b.bundle.Go(func(context.Context) { b.start(b.voluntaryExitVerify) })
+}
+
+// Stop cancels the verifier's ctx and waits for all six worker
+// goroutines to return. Idempotent.
+func (b *BatchSignatureVerifier) Stop() {
+	b.bundle.Stop()
 }
 
 // When receiving AggregateVerificationData, we simply collect all the signature verification data

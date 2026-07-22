@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
+	"github.com/erigontech/erigon/cl/lifecycle"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
@@ -47,14 +48,19 @@ type columnDataPeers struct {
 	peersMutex sync.RWMutex
 	peersQueue []peerData
 	peersIndex int
+
+	bundle *lifecycle.Bundle
 }
 
 func newColumnPeers(
+	ctx context.Context,
 	sentinel sentinelproto.SentinelClient,
 	beaconConfig *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
 	beaconState *state.CachingBeaconState,
 ) *columnDataPeers {
+	bundle := lifecycle.NewBundle()
+	bundle.Start(ctx)
 	s := &columnDataPeers{
 		sentinel:      sentinel,
 		beaconConfig:  beaconConfig,
@@ -63,11 +69,13 @@ func newColumnPeers(
 		beaconState:   beaconState,
 		peersQueue:    []peerData{},
 		peersIndex:    0,
+		bundle:        bundle,
 	}
-
-	go s.refreshPeers(context.Background())
+	bundle.Go(s.refreshPeers)
 	return s
 }
+
+func (c *columnDataPeers) Stop() { c.bundle.Stop() }
 
 type peerDataKey struct {
 	pid string

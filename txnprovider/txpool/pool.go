@@ -106,10 +106,10 @@ type remoteSource struct {
 //
 // It preserve TxnSlot objects immutable
 type TxPool struct {
-	_chainDB               kv.TemporalRoDB // remote db - use it wisely
-	_stateCache            kvcache.Cache
-	poolDB                 kv.RwDB
-	lock                   *sync.Mutex
+	_chainDB    kv.TemporalRoDB // remote db - use it wisely
+	_stateCache kvcache.Cache
+	poolDB      kv.RwDB
+	lock        *sync.Mutex
 	// pauseLock is held read-shared for the lifetime of every temporal
 	// RO tx the pool opens. Pause takes it write-exclusive; Resume
 	// releases. While paused, tx opens block on RLock so no in-flight

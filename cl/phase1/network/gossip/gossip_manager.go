@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/lifecycle"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/p2p"
 	serviceintf "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
@@ -64,8 +65,7 @@ type GossipManager struct {
 	subscriptions  *TopicSubscriptions
 	subscribeAll   bool
 
-	// For graceful shutdown
-	cancel context.CancelFunc
+	bundle *lifecycle.Bundle
 }
 
 func NewGossipManager(
@@ -80,7 +80,9 @@ func NewGossipManager(
 	maxOutboundTrafficPerPeer datasize.ByteSize,
 	adaptableTrafficRequirements bool,
 ) *GossipManager {
-	cctx, cancel := context.WithCancel(ctx)
+	bundle := lifecycle.NewBundle()
+	bundle.Start(ctx)
+	cctx := bundle.Ctx()
 
 	gm := &GossipManager{
 		p2p:                p2p,
@@ -92,11 +94,13 @@ func NewGossipManager(
 		subscriptions:      NewTopicSubscriptions(cctx, p2p),
 		subscribeAll:       subscribeAll,
 		activeIndicies:     activeIndicies,
-		cancel:             cancel,
+		bundle:             bundle,
 	}
 
-	go gm.observeBandwidth(cctx, maxInboundTrafficPerPeer, maxOutboundTrafficPerPeer, adaptableTrafficRequirements)
-	go gm.goCheckForkAndResubscribe(cctx)
+	bundle.Go(func(ctx context.Context) {
+		gm.observeBandwidth(ctx, maxInboundTrafficPerPeer, maxOutboundTrafficPerPeer, adaptableTrafficRequirements)
+	})
+	bundle.Go(gm.goCheckForkAndResubscribe)
 	//gm.stats.goPrintStats(cctx)
 	return gm
 }
@@ -106,9 +110,12 @@ func (g *GossipManager) SetPeerBanner(pb PeerBanner) {
 	g.peerBanner = pb
 }
 
-// Close gracefully shuts down the GossipManager and all its goroutines
+// Close gracefully shuts down the GossipManager and waits for all
+// its owned goroutines (observeBandwidth, goCheckForkAndResubscribe,
+// TopicSubscriptions.expireCheck plus any per-fork transient
+// unsubscribe timers) to return.
 func (g *GossipManager) Close() error {
-	g.cancel()
+	g.bundle.Stop()
 	return nil
 }
 
