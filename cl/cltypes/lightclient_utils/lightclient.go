@@ -69,7 +69,8 @@ import (
 func CreateLightClientUpdate(cfg *clparams.BeaconChainConfig, block *cltypes.SignedBeaconBlock, finalizedBlock *cltypes.SignedBeaconBlock,
 	attestedBlock *cltypes.SignedBeaconBlock, attestedSlot uint64,
 	attestedNextSyncCommittee *solid.SyncCommittee, attestedFinalizedCheckpoint solid.Checkpoint,
-	attestedNextSyncCommitteeBranch, attestedFinalityBranch solid.HashVectorSSZ) (*cltypes.LightClientUpdate, error) {
+	attestedNextSyncCommitteeBranch, attestedFinalityBranch solid.HashVectorSSZ,
+) (*cltypes.LightClientUpdate, error) {
 	var err error
 	if attestedBlock.Version() < clparams.AltairVersion {
 		return nil, fmt.Errorf("attested slot %d is before altair fork epoch %d", attestedSlot, cfg.AltairForkEpoch)

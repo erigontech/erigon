@@ -168,18 +168,9 @@ type BaseAPI struct {
 	balRegenerator      *bal.Regenerator
 }
 
-type BaseApiConfig struct {
-	SingleNodeMode    bool
-	EvmCallTimeout    time.Duration // 0 → rpccfg.DefaultEvmCallTimeout
-	Dirs              datadir.Dirs
-	BlockRangeLimit   int
-	GetLogsMaxResults int
-	LogQueryLimit     int
-}
-
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, bridgeReader bridgeReader, conf *BaseApiConfig) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, bridgeReader bridgeReader, conf *rpccfg.BaseApiConfig) *BaseAPI {
 	if conf == nil {
-		conf = &BaseApiConfig{}
+		conf = &rpccfg.BaseApiConfig{}
 	}
 	blocksLRUSize := 128 // ~32Mb
 	// if RPCDaemon deployed as independent process: increase cache sizes
@@ -539,20 +530,8 @@ type APIImpl struct {
 	logger                      log.Logger
 }
 
-// EthApiConfig defines the configurable parameters for EthAPI
-type EthApiConfig struct {
-	GasCap                      uint64
-	FeeCap                      float64
-	ReturnDataLimit             int
-	AllowUnprotectedTxs         bool
-	MaxGetProofRewindBlockCount int
-	SubscribeLogsChannelSize    int
-	RpcTxSyncDefaultTimeout     time.Duration
-	RpcTxSyncMaxTimeout         time.Duration
-}
-
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, cfg *EthApiConfig, logger log.Logger) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, cfg *rpccfg.EthApiConfig, logger log.Logger) *APIImpl {
 	gascap := cfg.GasCap
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)

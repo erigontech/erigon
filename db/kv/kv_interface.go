@@ -608,6 +608,13 @@ type TemporalRwTx interface {
 	Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff) error
 }
 
+// CanReopenUnderlyingFilesTx is implemented by temporal txs (and wrappers over
+// them) that pin aggregator/block-files views at begin-time and can refresh
+// those views to pick up files opened later in the same tx.
+type CanReopenUnderlyingFilesTx interface {
+	ForceReopenUnderlyingFilesTx()
+}
+
 type TemporalPutDel interface {
 	// DomainPut
 	// Optimizations:

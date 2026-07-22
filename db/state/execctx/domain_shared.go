@@ -196,7 +196,10 @@ func PickTrieVariant() commitment.TrieVariant {
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, opts ...SharedDomainOption) (*SharedDomains, error) {
-	o := sharedDomainOptions{trieCfg: commitment.DefaultTrieConfig()}
+	o := sharedDomainOptions{
+		trieCfg:              commitment.DefaultTrieConfig(),
+		useSharedBranchCache: true,
+	}
 	o.trieCfg.Variant = PickTrieVariant()
 	for _, opt := range opts {
 		opt(&o)
@@ -215,13 +218,11 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	// aggregator). The duck-typed BranchCacheProvider lookup avoids
 	// importing db/state directly — db/state already imports execctx, so
 	// the reverse import would create a cycle.
-	if !o.disableSharedBranchCache {
-		var branchCache *commitment.BranchCache
-		if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok {
-			branchCache = p.BranchCache()
-		}
-		sd.branchCache = branchCache
+	var branchCache *commitment.BranchCache
+	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok && o.useSharedBranchCache {
+		branchCache = p.BranchCache()
 	}
+	sd.branchCache = branchCache
 	if p, ok := tx.AggTx().(kvmetrics.MetricsCollectorProvider); ok {
 		sd.collector = p.MetricsCollector()
 	}
@@ -229,11 +230,8 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 
 	// The pin controller is aggregator-scoped (co-located with branchCache) so pin
 	// residency ages by block-access recency across all SharedDomains, not per-SD.
-	// Skip it too when the shared cache is detached (speculative builder domains).
-	if !o.disableSharedBranchCache {
-		if p, ok := tx.AggTx().(commitment.AdaptivePinControllerProvider); ok {
-			sd.adaptivePinController = p.AdaptivePinController()
-		}
+	if p, ok := tx.AggTx().(commitment.AdaptivePinControllerProvider); ok && o.useSharedBranchCache {
+		sd.adaptivePinController = p.AdaptivePinController()
 	}
 
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
@@ -656,6 +654,7 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 	return d, ok, err
 }
 
+// Unwind drops [txNumUnwindTo, ∞)
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
 	// Tx/epoch-aware unwind of the commitment BranchCache: every cached branch
@@ -1267,11 +1266,8 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	}
 
 	// branchCache sits between sd.mem/parent.mem and the aggTx files for
-	// CommitmentDomain only. It mirrors MDBX-flushed bytes; writers' fresh
-	// bytes are held in sd.mem above, so a cache hit here is always
-	// equivalent to reading from MDBX. Refreshed per-key by sd.Flush and
-	// evicted by txN watermark on unwind, so a cache hit never coexists
-	// with a newer MDBX state.
+	// CommitmentDomain only. Snapshot-isolated readers must disable it because
+	// concurrent commits can advance the cache beyond their transaction view.
 	if domain == kv.CommitmentDomain && sd.branchCache != nil {
 		if cv, cStepU64, ok := sd.branchCache.Get(k); ok {
 			// Get returns the on-disk step index directly — do NOT divide by

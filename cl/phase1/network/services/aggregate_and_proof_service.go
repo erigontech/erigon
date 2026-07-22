@@ -367,7 +367,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
 	return nil
-
 }
 
 func GetSignaturesOnAggregate(

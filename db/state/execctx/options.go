@@ -19,8 +19,8 @@ package execctx
 import "github.com/erigontech/erigon/execution/commitment"
 
 type sharedDomainOptions struct {
-	trieCfg                  commitment.TrieConfig
-	disableSharedBranchCache bool
+	trieCfg              commitment.TrieConfig
+	useSharedBranchCache bool
 }
 
 // SharedDomainOption configures NewSharedDomains.
@@ -32,7 +32,7 @@ type SharedDomainOption func(*sharedDomainOptions)
 // would both race the node's writers and pollute it with speculative branches.
 // Reads fall through to sd.mem / the parent chain / MDBX instead.
 func WithoutSharedBranchCache() SharedDomainOption {
-	return func(o *sharedDomainOptions) { o.disableSharedBranchCache = true }
+	return func(o *sharedDomainOptions) { o.useSharedBranchCache = false }
 }
 
 // WithTrieConfig replaces the trie configuration wholesale; the caller owns Variant.

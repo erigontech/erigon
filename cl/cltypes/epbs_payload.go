@@ -309,7 +309,8 @@ func (e *ExecutionPayloadBid) Static() bool {
 }
 
 func (e *ExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf,
+	return ssz2.MarshalSSZ(
+		buf,
 		e.ParentBlockHash[:],
 		e.ParentBlockRoot[:],
 		e.BlockHash[:],
@@ -327,7 +328,8 @@ func (e *ExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
 
 func (e *ExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
 	e.BlobKzgCommitments = *solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
-	return ssz2.UnmarshalSSZ(buf, version,
+	return ssz2.UnmarshalSSZ(
+		buf, version,
 		e.ParentBlockHash[:],
 		e.ParentBlockRoot[:],
 		e.BlockHash[:],
@@ -437,7 +439,8 @@ func (e *ExecutionPayloadEnvelope) Static() bool {
 }
 
 func (e *ExecutionPayloadEnvelope) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf,
+	return ssz2.MarshalSSZ(
+		buf,
 		e.Payload,
 		e.ExecutionRequests,
 		e.BuilderIndex,
@@ -453,7 +456,8 @@ func (e *ExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
 	if e.ExecutionRequests == nil {
 		e.ExecutionRequests = NewExecutionRequestsWithVersion(e.beaconCfg, clparams.StateVersion(version))
 	}
-	return ssz2.UnmarshalSSZ(buf, version,
+	return ssz2.UnmarshalSSZ(
+		buf, version,
 		e.Payload,
 		e.ExecutionRequests,
 		&e.BuilderIndex,

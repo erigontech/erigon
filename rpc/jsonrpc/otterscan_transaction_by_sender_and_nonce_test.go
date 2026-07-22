@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 func TestGetTransactionBySenderAndNonce(t *testing.T) {
@@ -30,7 +31,7 @@ func TestGetTransactionBySenderAndNonce(t *testing.T) {
 		t.Skip("slow test")
 	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewOtterscanAPI(NewBaseApi(nil, nil, m.BlockReader, m.Engine, nil, &BaseApiConfig{Dirs: m.Dirs}), m.OverlayDB(), 25)
+	api := NewOtterscanAPI(NewBaseApi(nil, nil, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), m.OverlayDB(), 25)
 
 	addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
 	expectCreator := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
