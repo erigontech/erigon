@@ -3504,14 +3504,15 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	logger.Info("Pruning has ended", "deleted blocks", allDeletedBlocks)
 
-	db, err = temporal.New(db, agg, res.BlockSnaps)
+	temporalDb, err := temporal.New(db, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
+	db = temporalDb
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err = agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
+	if err = temporalDb.BuildMissedAccessors(ctx, indexWorkers); err != nil {
 		return err
 	}
 

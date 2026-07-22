@@ -295,7 +295,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	if err := buildOrDeferE3Accessors(ctx, s, cfg, agg, headersProgress); err != nil {
+	if err := buildOrDeferE3Accessors(ctx, s, cfg, headersProgress); err != nil {
 		return err
 	}
 
@@ -383,12 +383,12 @@ func buildOrDeferE2Indices(ctx context.Context, s *StageState, cfg SnapshotsCfg,
 // (which checks accessor presence), so queries correctly reflect only indexed data.
 // Note: unlike E2, there is no Bor exception — the background path calls
 // BuildMissedAccessors directly without any Bor-specific early-exit guards.
-func buildOrDeferE3Accessors(ctx context.Context, s *StageState, cfg SnapshotsCfg, agg *state.Aggregator, headersProgress uint64) error {
+func buildOrDeferE3Accessors(ctx context.Context, s *StageState, cfg SnapshotsCfg, headersProgress uint64) error {
 	canDefer := headersProgress > 0
 
 	indexWorkers := estimate.IndexSnapshot.Workers()
 	if !canDefer {
-		if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
+		if err := cfg.db.Debug().BuildMissedAccessors(ctx, indexWorkers); err != nil {
 			return err
 		}
 	} else {
