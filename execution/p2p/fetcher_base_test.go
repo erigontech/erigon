@@ -602,6 +602,55 @@ func TestFetcherFetchBodies(t *testing.T) {
 	})
 }
 
+func TestFetcherFetchBodiesWithChunking(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	mockHeaders := newMockBlockHeaders(129)
+	mockBodies := make([]*types.Body, len(mockHeaders))
+	mockHashes := make([]common.Hash, len(mockHeaders))
+	for i := range mockBodies {
+		mockBodies[i] = &types.Body{}
+		mockHashes[i] = mockHeaders[i].Hash()
+	}
+
+	requestId1 := uint64(1234)
+	mockRequestResponse1 := requestResponseMock{
+		requestId: requestId1,
+		mockResponseInboundMessages: []*sentryproto.InboundMessage{
+			{
+				Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+				PeerId: peerId.H512(),
+				Data:   newMockBlockBodiesPacketBytes(t, requestId1, mockBodies[:128]...),
+			},
+		},
+		wantRequestPeerId: peerId,
+		wantRequestHashes: mockHashes[:128],
+	}
+
+	requestId2 := uint64(1235)
+	mockRequestResponse2 := requestResponseMock{
+		requestId: requestId2,
+		mockResponseInboundMessages: []*sentryproto.InboundMessage{
+			{
+				Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+				PeerId: peerId.H512(),
+				Data:   newMockBlockBodiesPacketBytes(t, requestId2, mockBodies[128:]...),
+			},
+		},
+		wantRequestPeerId: peerId,
+		wantRequestHashes: mockHashes[128:],
+	}
+
+	test := newFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
+	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
+	test.run(func(ctx context.Context, t *testing.T) {
+		bodies, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
+		require.NoError(t, err)
+		require.Len(t, bodies.Data, len(mockBodies))
+	})
+}
+
 func TestFetcherFetchBodiesResponseTimeout(t *testing.T) {
 	if testing.Short() {
 		t.Skip()

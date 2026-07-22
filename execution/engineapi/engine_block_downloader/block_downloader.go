@@ -45,6 +45,9 @@ const (
 	Idle Status = iota
 	Syncing
 	Synced
+
+	noPeersRetryDelay = time.Second
+	maxNoPeersRetries = 10
 )
 
 type BadHeaderEntry struct {
@@ -133,7 +136,9 @@ func (e *EngineBlockDownloader) StartDownloading(hashToDownload common.Hash, cha
 // download is the process that reverse download a specific block hash.
 // chainTip is optional and should be the block tip of the download request, which will be inserted at the end of the procedure if specified.
 func (e *EngineBlockDownloader) download(ctx context.Context, req BackwardDownloadRequest) {
-	err := e.processReq(ctx, req)
+	err := retryOnNoPeers(ctx, noPeersRetryDelay, maxNoPeersRetries, func() error {
+		return e.processReq(ctx, req)
+	})
 	if err != nil {
 		args := append(req.LogArgs(), "err", err)
 		if errors.Is(err, p2p.ErrChainLengthExceedsLimit) {
@@ -147,6 +152,21 @@ func (e *EngineBlockDownloader) download(ctx context.Context, req BackwardDownlo
 	}
 	e.logger.Info("[EngineBlockDownloader] backward download request successfully processed", req.LogArgs()...)
 	e.status.Store(Synced)
+}
+
+func retryOnNoPeers(ctx context.Context, retryDelay time.Duration, retries int, request func() error) error {
+	for attempt := 0; ; attempt++ {
+		err := request()
+		if !errors.Is(err, p2p.ErrNoPeersAvailable) || attempt == retries {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(retryDelay):
+		}
+	}
 }
 
 // newPayloadGapExceedsLimit reports whether the head-to-parent gap exceeds maxReorgDepth in either direction.
