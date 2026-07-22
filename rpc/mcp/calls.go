@@ -286,7 +286,7 @@ func buildTraceFilter(req mcp.CallToolRequest) ([]any, error) {
 			filter[k] = []string{v}
 		}
 	}
-	if v := req.GetString("mode", ""); v != "" {
+	if v := strings.TrimSpace(req.GetString("mode", "")); v != "" {
 		filter["mode"] = v
 	}
 	filter["count"] = req.GetInt("count", 100)
@@ -699,7 +699,7 @@ func rpcToolCalls() []toolCall {
 				txHashParam,
 				{name: "tracer", desc: "Tracer name, e.g. callTracer, prestateTracer (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
 			},
-			build: buildTraceArgs(param{name: "txHash"}),
+			build: buildTraceArgs(txHashParam),
 		},
 		{
 			name: "debug_traceBlockByNumber", desc: "Trace all transactions in a block with a tracer (default: callTracer)",
@@ -707,7 +707,7 @@ func rpcToolCalls() []toolCall {
 				blockNumberParam,
 				{name: "tracer", desc: "Tracer name, e.g. callTracer, prestateTracer (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
 			},
-			build: buildTraceArgs(param{name: "blockNumber", def: "latest", kind: pBlockNum}),
+			build: buildTraceArgs(blockNumberParam),
 		},
 		{
 			name: "debug_traceCall", desc: "Execute a call and trace it with a tracer (default: callTracer)",
