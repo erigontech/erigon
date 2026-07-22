@@ -289,9 +289,17 @@ func buildTraceFilter(req mcp.CallToolRequest) ([]any, error) {
 	if v := strings.TrimSpace(req.GetString("mode", "")); v != "" {
 		filter["mode"] = v
 	}
-	filter["count"] = req.GetInt("count", 100)
+	count := req.GetInt("count", 100)
+	if count < 1 || count > maxTraceFilterCount {
+		return nil, fmt.Errorf("count must be between 1 and %d", maxTraceFilterCount)
+	}
+	filter["count"] = count
 	return []any{filter}, nil
 }
+
+// maxTraceFilterCount bounds trace_filter results: unbounded trace scans are
+// expensive server-side and overflow an MCP client's context anyway.
+const maxTraceFilterCount = 1000
 
 func buildStorageValues(req mcp.CallToolRequest) ([]any, error) {
 	requests, err := parseJSONParam("requests", req.GetString("requests", "{}"))
@@ -719,7 +727,7 @@ func rpcToolCalls() []toolCall {
 				{name: "from", desc: "Sender address", kind: pString},
 				{name: "value", desc: "Value (hex)", kind: pString},
 				{name: "gas", desc: "Gas limit (hex)", kind: pString},
-				{name: "blockNumber", desc: "Block number", kind: pString},
+				{name: "blockNumber", desc: "Block number (default: latest)", kind: pString},
 				{name: "tracer", desc: "Tracer name (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
 			},
 			build: buildTraceCall,
@@ -749,7 +757,7 @@ func rpcToolCalls() []toolCall {
 				{name: "fromAddress", desc: "Sender address(es), single or JSON array", kind: pString},
 				{name: "toAddress", desc: "Recipient address(es), single or JSON array", kind: pString},
 				{name: "mode", desc: "Address filter mode: union (default) or intersection", kind: pString},
-				{name: "count", desc: "Maximum traces to return (default: 100)", kind: pInt, defInt: 100},
+				{name: "count", desc: "Maximum traces to return (default: 100, max: 1000)", kind: pInt, defInt: 100},
 			},
 			build:  buildTraceFilter,
 			format: fmtArrayOrMsg("No matching traces found"),

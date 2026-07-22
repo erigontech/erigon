@@ -176,6 +176,12 @@ func TestToolArgMapping(t *testing.T) {
 			wantArgs: []any{map[string]any{"toAddress": []string{"0xabc", "0xdef"}, "count": 100}},
 		},
 		{
+			tool:     "trace_filter",
+			args:     map[string]any{"fromBlock": "0x1", "count": 500},
+			result:   `[]`,
+			wantArgs: []any{map[string]any{"fromBlock": "0x1", "count": 500}},
+		},
+		{
 			tool:     "debug_traceTransaction",
 			args:     map[string]any{"txHash": "0x1", "tracer": ""},
 			result:   `{}`,
@@ -335,6 +341,19 @@ func TestToolCallError(t *testing.T) {
 	e := NewErigonMCPServer(caller, "", false)
 	got := callTool(t, e, "eth_blockNumber", nil)
 	require.Contains(t, got, "boom")
+}
+
+func TestTraceFilterCountBounds(t *testing.T) {
+	caller := &fakeCaller{result: json.RawMessage(`[]`)}
+	e := NewErigonMCPServer(caller, "", false)
+
+	got := callTool(t, e, "trace_filter", map[string]any{"count": 5000})
+	require.Empty(t, caller.method, "out-of-range count must not reach dispatch")
+	require.Contains(t, got, "count must be between")
+
+	got = callTool(t, e, "trace_filter", map[string]any{"count": 0})
+	require.Empty(t, caller.method)
+	require.Contains(t, got, "count must be between")
 }
 
 // Schema validation must reject mistyped arguments instead of letting the
