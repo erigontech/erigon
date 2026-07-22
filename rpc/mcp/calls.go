@@ -308,8 +308,10 @@ func fmtChainID(_ mcp.CallToolRequest, raw json.RawMessage) string {
 	if !ok {
 		return "Chain ID: " + hex
 	}
-	if name := chainspec.NetworkNameByID[n.Uint64()]; name != "" {
-		return fmt.Sprintf("Chain ID: %d (%s) - %s", n, hex, name)
+	if n.IsUint64() {
+		if name := chainspec.NetworkNameByID[n.Uint64()]; name != "" {
+			return fmt.Sprintf("Chain ID: %d (%s) - %s", n, hex, name)
+		}
 	}
 	return fmt.Sprintf("Chain ID: %d (%s)", n, hex)
 }
