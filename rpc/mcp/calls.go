@@ -142,6 +142,9 @@ func (c *toolCall) render(req mcp.CallToolRequest, raw json.RawMessage) string {
 		return c.format(req, raw)
 	}
 	if c.raw {
+		if len(raw) == 0 {
+			return "null"
+		}
 		return string(raw)
 	}
 	return toJSONIndent(raw)

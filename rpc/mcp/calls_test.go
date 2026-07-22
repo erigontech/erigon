@@ -369,6 +369,11 @@ func TestTraceToolsReturnRawJSON(t *testing.T) {
 	e := NewErigonMCPServer(caller, "", false)
 	got := callTool(t, e, "debug_traceTransaction", map[string]any{"txHash": "0x1"})
 	require.Equal(t, compact, got, "trace output must be returned verbatim, not pretty-printed")
+
+	nullCaller := &fakeCaller{result: json.RawMessage("null")}
+	eNull := NewErigonMCPServer(nullCaller, "", false)
+	require.Equal(t, "null", callTool(t, eNull, "debug_traceTransaction", map[string]any{"txHash": "0x1"}),
+		"a null raw result must render as \"null\", not an empty string")
 }
 
 func TestTraceFilterCountBounds(t *testing.T) {
