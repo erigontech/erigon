@@ -59,7 +59,12 @@ func LogStats(at *state.AggregatorRoTx, tx kv.Tx, logger log.Logger, tx2block fu
 // expected to cover at least the state-history window; an index starting later
 // makes filtered eth_getLogs/trace_filter silently incomplete in the gap.
 func warnUnevenIIAvailability(at *state.AggregatorRoTx, tx kv.Tx, logger log.Logger, tx2block func(txNum uint64) (uint64, error)) {
-	historyStartTxNum := at.HistoryStartFrom(kv.AccountsDomain, tx)
+	// same definition of "state history starts here" as state.StateHistoryStartTxNum
+	historyStartTxNum := min(
+		at.HistoryStartFrom(kv.AccountsDomain, tx),
+		at.HistoryStartFrom(kv.StorageDomain, tx),
+		at.HistoryStartFrom(kv.CodeDomain, tx),
+	)
 	var late []string
 	for id := range at.InvertedIndicesLen() {
 		name := at.InvertedIndexName(id)
