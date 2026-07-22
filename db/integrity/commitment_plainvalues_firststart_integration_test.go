@@ -93,7 +93,7 @@ func newTestDBWithSettings(t *testing.T, ctx context.Context, dirs datadir.Dirs,
 	agg := state.NewTest(dirs).WithErigonDBSettings(settings).MustOpen(ctx, rawDB)
 	require.NoError(t, agg.OpenFolder())
 	t.Cleanup(agg.Close)
-	db, err := temporal.New(rawDB, agg)
+	db, err := temporal.New(rawDB, agg, nil)
 	require.NoError(t, err)
 	t.Cleanup(db.Close)
 	return db

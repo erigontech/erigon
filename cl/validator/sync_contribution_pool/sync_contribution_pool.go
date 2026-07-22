@@ -68,7 +68,6 @@ func getSyncCommitteeFromState(s *state.CachingBeaconState) *solid.SyncCommittee
 		return s.CurrentSyncCommittee()
 	}
 	return s.NextSyncCommittee()
-
 }
 
 func (s *syncContributionPoolImpl) AddSyncContribution(headState *state.CachingBeaconState, contribution *cltypes.Contribution) error {
@@ -237,7 +236,7 @@ func (s *syncContributionPoolImpl) GetSyncAggregate(slot uint64, beaconBlockRoot
 			continue
 		}
 		for i := range contribution.AggregationBits {
-			for j := 0; j < 8; j++ {
+			for j := range 8 {
 				bitIndex := i*8 + j
 				participated := utils.IsBitOn(contribution.AggregationBits, bitIndex)
 				if participated {

@@ -266,7 +266,7 @@ func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter st
 	}
 
 	maxIterations := int(maxEpochsLookaheadForDuties * 2 * a.beaconChainCfg.SlotsPerEpoch)
-	for i := 0; i < maxIterations; i++ {
+	for range maxIterations {
 		dependentRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, dependentRootSlot)
 		if err != nil {
 			return common.Hash{}, err

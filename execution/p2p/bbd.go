@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -348,8 +349,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 
 		// collect the headers batch into the etl and check for a connecting point
 		headers := resp.Data
-		for i := len(headers) - 1; i >= 0; i-- {
-			header := headers[i]
+		for _, header := range slices.Backward(headers) {
 			headerNum := header.Number.Uint64()
 			if headerNum == 0 {
 				break

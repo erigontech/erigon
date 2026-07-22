@@ -17,7 +17,9 @@
 package integrity
 
 import (
+	"bytes"
 	"fmt"
+	"slices"
 	"sort"
 	"testing"
 
@@ -144,7 +146,7 @@ func TestChangedKeysPerBlock_KeysSharedAcrossBlocks(t *testing.T) {
 
 	require.Equal(t, 1, idx.NumKeys()) // "x" stored exactly once
 	require.Equal(t, 50, idx.NumBlocks())
-	for blockNum := uint64(0); blockNum < 50; blockNum++ {
+	for blockNum := range uint64(50) {
 		require.Equal(t, []string{"x"}, keysForBlock(idx, blockNum))
 	}
 }
@@ -208,7 +210,12 @@ func TestChangedKeysPerBlock_ManyKeysOneBlock(t *testing.T) {
 	for i := range pairs {
 		pairs[i] = pair(fmt.Sprintf("key%03d", i), uint64(i%10))
 	}
-	sort.Slice(pairs, func(a, b int) bool { return string(pairs[a].key) < string(pairs[b].key) })
+	slices.SortFunc(pairs, func(a, b struct {
+		key   []byte
+		txNum uint64
+	}) int {
+		return bytes.Compare(a.key, b.key)
+	})
 	idx, err := changedKeysPerBlock(&pairKU64{pairs: pairs}, simpleTxNums(1))
 	require.NoError(t, err)
 	require.Equal(t, 100, idx.NumKeys())

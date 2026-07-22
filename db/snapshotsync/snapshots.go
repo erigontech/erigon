@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
@@ -465,8 +464,8 @@ func (s VisibleSegments) BeginRo() *RoTx {
 
 type RoTx struct {
 	Segments VisibleSegments
-	// release drops the pin for a standalone RoTx (ViewType/ViewSingleFile). nil for the
-	// per-type children inside a View, whose single pin is dropped by View.Close.
+	// release drops the pin for a standalone RoTx (ViewType/ViewSingleFile); nil when the
+	// caller pins the generation itself (caplin's views).
 	release func()
 }
 
@@ -494,9 +493,17 @@ type BaseRoSnapshots struct {
 	types []snaptype.Type //immutable
 	enums []snaptype.Enum //immutable
 
-	dirtyLock     sync.RWMutex // guards `dirty` and the generation chain (publish/reclaim)
-	dirty         DirtyFiles   // ordered map `type.Enum()` -> DirtySegments
-	_visibleFiles visibleGenerations[blockVisible]
+	// baseSegType is the type Ranges reports against — each collection picks the one whose
+	// ranges stand for its coverage. Immutable.
+	baseSegType snaptype.Type
+
+	dirtyLock sync.RWMutex // guards `dirty` and the generation chain (oldestVisible/next/retired)
+	dirty     DirtyFiles   // ordered map `type.Enum()` -> DirtySegments
+	visible   atomic.Pointer[snapshotVisible]
+
+	// oldestVisible is the chain head: reclamation walks oldest->newest from here,
+	// deleting a generation's retired files once its refcnt hits 0. Mutated under dirtyLock.
+	oldestVisible *snapshotVisible
 
 	dir               string
 	segmentsMinByType map[snaptype.Enum]*atomic.Uint64 // min block number per segment type
@@ -542,9 +549,13 @@ func (s *BaseRoSnapshots) isInProgress(enum snaptype.Enum, from, to uint64) bool
 	return ok
 }
 
-type blockVisible struct {
+type snapshotVisible struct {
 	segments    []VisibleSegments // ordered map `type.Enum()` -> VisibleSegments
 	segmentsMax uint64            // max visible (indexed, non-subsumed, gap-free) segment height across all types
+
+	refcnt  atomic.Int32     // live readers pinning this generation
+	retired []*DirtySegment  // segments this generation is the last to reference; unlinked on head-drain
+	next    *snapshotVisible // oldest->newest chain link (set under dirtyLock)
 }
 
 // NewBaseRoSnapshots - opens all snapshots. But to simplify everything:
@@ -552,11 +563,11 @@ type blockVisible struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewBaseRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, alignMin bool, logger log.Logger) *BaseRoSnapshots {
-	return newRoSnapshots(cfg, snapDir, types, alignMin, logger)
+func NewBaseRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, baseSegType snaptype.Type, alignMin bool, logger log.Logger) *BaseRoSnapshots {
+	return newRoSnapshots(cfg, snapDir, types, baseSegType, alignMin, logger)
 }
 
-func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, alignMin bool, logger log.Logger) *BaseRoSnapshots {
+func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, baseSegType snaptype.Type, alignMin bool, logger log.Logger) *BaseRoSnapshots {
 	if cfg.ChainName == "" {
 		log.Debug("[dbg] newRoSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
@@ -564,9 +575,15 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	for i, t := range types {
 		enums[i] = t.Enum()
 	}
+	if baseSegType == nil {
+		panic("baseSegType is nil")
+	}
+	if !slices.Contains(enums, baseSegType.Enum()) {
+		panic(fmt.Sprintf("baseSegType %s is not in types", baseSegType.Name()))
+	}
 	snCfg := snapcfg.KnownCfgOrDevnet(cfg.ChainName)
 	s := &BaseRoSnapshots{dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
-		types: types, enums: enums,
+		types: types, enums: enums, baseSegType: baseSegType,
 		dirty:             make(DirtyFiles, snaptype.MaxEnum),
 		alignMin:          alignMin,
 		operators:         map[snaptype.Enum]*retireOperators{},
@@ -575,7 +592,9 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	for _, snapType := range types {
 		s.dirty[snapType.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	}
-	s._visibleFiles.init(&s.dirtyLock, blockVisible{segments: make([]VisibleSegments, snaptype.MaxEnum)})
+	empty := &snapshotVisible{segments: make([]VisibleSegments, snaptype.MaxEnum)}
+	s.visible.Store(empty)
+	s.oldestVisible = empty
 
 	for _, t := range s.enums {
 		u := &atomic.Uint64{}
@@ -594,7 +613,7 @@ func (s *BaseRoSnapshots) Dir() string                   { return s.dir }
 func (s *BaseRoSnapshots) DownloadReady() bool           { return s.downloadReady.Load() }
 func (s *BaseRoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
 func (s *BaseRoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
-func (s *BaseRoSnapshots) SegmentsMax() uint64           { return s._visibleFiles.current().segmentsMax }
+func (s *BaseRoSnapshots) SegmentsMax() uint64           { return s.visible.Load().segmentsMax }
 func (s *BaseRoSnapshots) SegmentsMinByType(t snaptype.Enum) (min uint64, ok bool) {
 	if s == nil {
 		return 0, false
@@ -703,7 +722,7 @@ func (s *BaseRoSnapshots) DisableReadAhead() *BaseRoSnapshots {
 	defer v.Close()
 
 	for _, t := range s.enums {
-		for _, sn := range v.segments[t].Segments {
+		for _, sn := range v.segments[t] {
 			sn.src.DisableReadAhead()
 		}
 	}
@@ -715,7 +734,7 @@ func (s *BaseRoSnapshots) EnableReadAhead() *BaseRoSnapshots {
 	defer v.Close()
 
 	for _, t := range s.enums {
-		for _, sn := range v.segments[t].Segments {
+		for _, sn := range v.segments[t] {
 			sn.src.MadvSequential()
 		}
 	}
@@ -727,7 +746,7 @@ func (s *BaseRoSnapshots) MadvNormal() *BaseRoSnapshots {
 	defer v.Close()
 
 	for _, t := range s.enums {
-		for _, sn := range v.segments[t].Segments {
+		for _, sn := range v.segments[t] {
 			sn.src.MadvNormal()
 		}
 	}
@@ -801,6 +820,14 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired []*DirtySegm
 		s.idxMax.Store(s.idxAvailability())
 	}()
 
+	if dbg.TraceDeletion && len(retired) > 0 {
+		names := make([]string, len(retired))
+		for i, sn := range retired {
+			names[i] = sn.FileName()
+		}
+		log.Debug("[removing] retiring block segments (deferred unlink)", "files", names, "stack", dbg.Stack())
+	}
+
 	visible := make([]VisibleSegments, snaptype.MaxEnum) // create new pointer - only new readers will see it. old-alive readers will continue use previous pointer
 	maxVisibleBlocks := make([]uint64, 0, len(s.types))
 
@@ -849,7 +876,57 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired []*DirtySegm
 		}
 	}
 
-	s._visibleFiles.publish(blockVisible{segments: visible, segmentsMax: segmentsMax}, retired)
+	next := &snapshotVisible{segments: visible, segmentsMax: segmentsMax}
+	old := s.visible.Load()
+	old.retired = retired
+	old.next = next
+	s.visible.Store(next)
+
+	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
+	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
+	closeAndRemoveSegments(s.reclaimRetiredLocked())
+}
+
+// acquireVisible pins the current generation. Load and increment are not atomic together,
+// so after incrementing we re-check the generation is still current; if superseded mid-pin
+// we drop the stale pin and retry (hazard-pointer style).
+func (s *BaseRoSnapshots) acquireVisible() *snapshotVisible {
+	for {
+		v := s.visible.Load()
+		v.refcnt.Add(1)
+		if s.visible.Load() == v {
+			return v
+		}
+		s.releaseVisible(v)
+	}
+}
+
+// releaseVisible drops a pin taken by acquireVisible; the last reader of a superseded
+// generation triggers reclamation of drained generations' retired files.
+func (s *BaseRoSnapshots) releaseVisible(v *snapshotVisible) {
+	if v.refcnt.Add(-1) == 0 {
+		s.reclaimRetired()
+	}
+}
+
+// reclaimRetiredLocked walks the oldest->newest chain from the head, collecting the
+// retired files of every fully-drained generation older than the current one. Must be
+// called with dirtyLock held; the returned files are deleted by the caller off-lock.
+func (s *BaseRoSnapshots) reclaimRetiredLocked() (toDelete []*DirtySegment) {
+	cur := s.visible.Load()
+	for h := s.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
+		toDelete = append(toDelete, h.retired...)
+		h.retired = nil
+		s.oldestVisible = h.next
+	}
+	return toDelete
+}
+
+func (s *BaseRoSnapshots) reclaimRetired() {
+	s.dirtyLock.Lock()
+	toDelete := s.reclaimRetiredLocked()
+	s.dirtyLock.Unlock()
+	closeAndRemoveSegments(toDelete)
 }
 
 func closeAndRemoveSegments(segs []*DirtySegment) {
@@ -872,7 +949,7 @@ func (s *BaseRoSnapshots) idxAvailability() uint64 {
 	}
 
 	var maxIdx uint64
-	visible := s._visibleFiles.current().segments[s.enums[0]]
+	visible := s.visible.Load().segments[s.enums[0]]
 	if len(visible) > 0 {
 		maxIdx = visible[len(visible)-1].to - 1
 	}
@@ -908,7 +985,7 @@ func (s *BaseRoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 }
 
 func (s *BaseRoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) (maxVisibleIdx uint64) {
-	visibleFiles := s._visibleFiles.current().segments[segtype]
+	visibleFiles := s.visible.Load().segments[segtype]
 	if len(visibleFiles) > 0 {
 		maxVisibleIdx = visibleFiles[len(visibleFiles)-1].to - 1
 	}
@@ -922,7 +999,7 @@ func (s *BaseRoSnapshots) Ls() {
 
 	var stats seg.Stats
 	for _, t := range s.enums {
-		for _, sn := range view.segments[t].Segments {
+		for _, sn := range view.segments[t] {
 			if sn.src == nil || sn.src.Decompressor == nil {
 				continue
 			}
@@ -938,7 +1015,7 @@ func (s *BaseRoSnapshots) Files() (list []string) {
 	view := s.View()
 	defer view.Close()
 	for _, t := range s.enums {
-		for _, seg := range view.segments[t].Segments {
+		for _, seg := range view.segments[t] {
 			list = append(list, seg.src.FileName())
 		}
 	}
@@ -1123,18 +1200,21 @@ func (s *BaseRoSnapshots) Close() {
 	defer s.dirtyLock.Unlock()
 
 	detached := s.detachNotInList(nil)
+
+	// Publish the empty generation before reading the outgoing one's refcnt, so a concurrent
+	// lock-free View() re-check fails its pin on it and retries onto the empty generation.
+	prev := s.visible.Load()
 	s.recalcVisibleFiles(s.alignMin, nil)
 
-	// Close fds only once the whole generation chain has drained. An older still-pinned
-	// generation can reference these same segments, so closing them would nil a Decompressor
-	// out from under that reader. At shutdown leaking the fds is preferable to that
-	// use-after-close.
-	if s._visibleFiles.drained() {
+	// Close fds only when no reader still pins the outgoing generation; closing a segment
+	// a live View holds would nil its Decompressor out from under that reader. At shutdown
+	// leaking the fds is preferable to that use-after-close.
+	if prev != nil && prev.refcnt.Load() != 0 {
+		s.logger.Warn("[snapshots] Close called with live readers; leaving fds open", "refcnt", prev.refcnt.Load())
+	} else {
 		for _, sn := range detached {
 			sn.close()
 		}
-	} else {
-		s.logger.Warn("[snapshots] Close called with live readers; leaving fds open")
 	}
 }
 
@@ -1375,8 +1455,9 @@ func (s *BaseRoSnapshots) delete(fileName string) *DirtySegment {
 	return delSeg
 }
 
-// prune visible segments
-func (s *BaseRoSnapshots) Delete(fileNames ...string) error {
+// retireFiles drops the named segments from the live set. Physical unlink is deferred
+// to the reader watermark via the generation chain, so files pinned by open views survive.
+func (s *BaseRoSnapshots) retireFiles(fileNames ...string) error {
 	if s == nil {
 		return nil
 	}
@@ -1392,6 +1473,76 @@ func (s *BaseRoSnapshots) Delete(fileNames ...string) error {
 	}
 	s.recalcVisibleFiles(s.alignMin, retired)
 	return nil
+}
+
+// RetireFilesBelow retires VISIBLE segments of type typ ending below blockTo, handing their
+// files (.seg + indexes) to onDelete for the seeder. Reads visible only — invisible garbage
+// is the merge clean-up's job. The View pins the generation for both the read and the
+// deferred off-lock unlink.
+func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, onDelete func(l []string) error) (bool, error) {
+	if s == nil {
+		return false, nil
+	}
+
+	v := s.View()
+	defer v.Close()
+	segs := v.Segments(typ)
+
+	wouldRetireEveryFile := len(segs) > 0 && blockTo > segs[len(segs)-1].To()
+	if wouldRetireEveryFile {
+		return false, nil
+	}
+
+	var names, paths []string
+	for _, sn := range segs {
+		if sn.To() >= blockTo {
+			continue
+		}
+		names = append(names, sn.src.FileName())
+		paths = append(paths, sn.src.FilePaths(s.dir)...)
+	}
+	if len(names) == 0 {
+		return false, nil
+	}
+
+	if onDelete != nil {
+		if err := onDelete(paths); err != nil {
+			return false, fmt.Errorf("onDelete: %w", err)
+		}
+	}
+	return true, s.retireFiles(names...)
+}
+
+// RetireFilesAbove retires VISIBLE segments whose range ends at or beyond blockNum — the extra
+// files downloaded past a SnapshotDownloadToBlock target — handing their files (.seg + indexes)
+// to onDelete for the seeder. Reads visible only; unlink is deferred to the reader watermark.
+func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []string) error) error {
+	if s == nil {
+		return nil
+	}
+
+	v := s.View()
+	defer v.Close()
+	var names, paths []string
+	for _, t := range s.types {
+		for _, sn := range v.Segments(t) {
+			if sn.To() < blockNum {
+				continue
+			}
+			names = append(names, sn.src.FileName())
+			paths = append(paths, sn.src.FilePaths(s.dir)...)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+
+	if onDelete != nil {
+		if err := onDelete(paths); err != nil {
+			return fmt.Errorf("onDelete: %w", err)
+		}
+	}
+	return s.retireFiles(names...)
 }
 
 func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {
@@ -1500,44 +1651,32 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 	}
 }
 
+// View pins one whole generation of files for its entire life: a tx passes through
+// many methods and can't predict which types get read, so every type stays readable
+// until Close drops the single pin.
 type View struct {
-	s           *BaseRoSnapshots
-	visible     *generation[blockVisible] // the pinned generation; released once by Close
-	segments    [snaptype.MaxEnum]*RoTx
-	baseSegType snaptype.Type
+	s *BaseRoSnapshots
+	*snapshotVisible
 }
 
 func (s *BaseRoSnapshots) View() *View {
-	v := s._visibleFiles.acquire()
-	view := &View{s: s, visible: v, baseSegType: snaptype2.Transactions} // Transactions is the last segment to be processed, so it's the most reliable.
-	for _, t := range s.enums {
-		view.segments[t] = v.payload.segments[t].BeginRo() // non-owning children; the View owns the single pin
-	}
-	return view
+	return &View{s: s, snapshotVisible: s.acquireVisible()}
 }
 
 func (v *View) Close() {
 	if v == nil || v.s == nil {
 		return
 	}
-	v.s._visibleFiles.release(v.visible)
+	v.s.releaseVisible(v.snapshotVisible)
 	v.s = nil
-}
-
-// WithBaseSegType returns a shallow copy sharing the same single pin; only the copy is
-// Closed, so the pin stays balanced. It must not re-acquire — that would leak a pin.
-func (s *View) WithBaseSegType(t snaptype.Type) *View {
-	v := *s
-	v.baseSegType = t
-	return &v
 }
 
 var noop = func() {}
 
 func (s *BaseRoSnapshots) ViewType(t snaptype.Type) *RoTx {
-	v := s._visibleFiles.acquire()
-	rotx := v.payload.segments[t.Enum()].BeginRo()
-	rotx.release = func() { s._visibleFiles.release(v) }
+	v := s.acquireVisible()
+	rotx := v.segments[t.Enum()].BeginRo()
+	rotx.release = func() { s.releaseVisible(v) }
 	return rotx
 }
 
@@ -1555,11 +1694,11 @@ func (s *BaseRoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segm
 }
 
 func (v *View) Segments(t snaptype.Type) VisibleSegments {
-	return v.segments[t.Enum()].Segments
+	return v.segments[t.Enum()]
 }
 
 func (v *View) Segment(t snaptype.Type, blockNum uint64) (*VisibleSegment, bool) {
-	for _, seg := range v.segments[t.Enum()].Segments {
+	for _, seg := range v.segments[t.Enum()] {
 		if !(blockNum >= seg.from && blockNum < seg.to) {
 			continue
 		}
@@ -1570,7 +1709,7 @@ func (v *View) Segment(t snaptype.Type, blockNum uint64) (*VisibleSegment, bool)
 
 func (v *View) Ranges(align bool) (ranges []Range) {
 	if !align {
-		for _, sn := range v.Segments(v.baseSegType) {
+		for _, sn := range v.Segments(v.s.baseSegType) {
 			ranges = append(ranges, sn.Range)
 		}
 
@@ -1598,7 +1737,7 @@ func (v *View) Ranges(align bool) (ranges []Range) {
 		}
 	}
 
-	for _, sn := range v.Segments(v.baseSegType) {
+	for _, sn := range v.Segments(v.s.baseSegType) {
 		if alignedRangeTo != nil && sn.Range.to > *alignedRangeTo {
 			continue
 		}

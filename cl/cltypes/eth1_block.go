@@ -443,8 +443,10 @@ func (b *Eth1Block) ensureSSZFields() {
 }
 
 func (b *Eth1Block) getSchema() []any {
-	s := []any{b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
-		b.PrevRandao[:], &b.BlockNumber, &b.GasLimit, &b.GasUsed, &b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions}
+	s := []any{
+		b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
+		b.PrevRandao[:], &b.BlockNumber, &b.GasLimit, &b.GasUsed, &b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions,
+	}
 	if b.version >= clparams.CapellaVersion {
 		s = append(s, b.Withdrawals)
 	}
@@ -521,7 +523,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 		if b.BlockAccessList == nil || b.BlockAccessList.EncodingSizeSSZ() == 0 {
 			*blockAccessListHash = empty.BlockAccessListHash
 		} else {
-			*blockAccessListHash = crypto.HashData(b.BlockAccessList.Bytes())
+			*blockAccessListHash = crypto.Keccak256Hash(b.BlockAccessList.Bytes())
 		}
 		header.BlockAccessListHash = blockAccessListHash
 		slotNumber := b.SlotNumber

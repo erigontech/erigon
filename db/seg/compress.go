@@ -163,15 +163,16 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 	// Collector for dictionary superstrings (sorted by their score)
 	superstrings := make(chan []uint16, workers*2)
 	wg := &sync.WaitGroup{}
-	wg.Add(workers)
 	suffixCollectors := make([]*etl.Collector, workers)
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		collector := etl.NewCollectorWithAllocator(logPrefix+"_dict", tmpDir, etl.SmallSortableBuffers, logger) //nolint:gocritic
 		collector.SortAndFlushInBackground(false)
 		collector.LogLvl(lvl)
 
 		suffixCollectors[i] = collector
-		go extractPatternsInSuperstrings(ctx, superstrings, collector, cfg, wg, logger)
+		wg.Go(func() {
+			extractPatternsInSuperstrings(ctx, superstrings, collector, cfg, logger)
+		})
 	}
 	_, outputFileName := filepath.Split(outputFile)
 	cc := &Compressor{

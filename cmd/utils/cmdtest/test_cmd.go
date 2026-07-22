@@ -60,12 +60,12 @@ type TestCmd struct {
 	Err error
 }
 
-var id int32
+var id atomic.Int32
 
 // Run exec's the current binary using name as argv[0] which will trigger the
 // reexec init function for that name (e.g. "geth-test" in cmd/geth/run_test.go)
 func (tt *TestCmd) Run(name string, args ...string) {
-	id := atomic.AddInt32(&id, 1)
+	id := id.Add(1)
 	tt.stderr = &testlogger{t: tt.T, name: strconv.FormatUint(uint64(id), 10)}
 	tt.cmd = &exec.Cmd{
 		Path:   reexec.Self(),

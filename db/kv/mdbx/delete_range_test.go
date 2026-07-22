@@ -44,7 +44,7 @@ func newFilledDB(t *testing.T, n int) kv.RwDB {
 		c, err := tx.RwCursor(deleteRangeTable)
 		require.NoError(t, err)
 		defer c.Close()
-		for i := 0; i < n; i++ {
+		for i := range n {
 			require.NoError(t, c.Append(u64tob(uint64(i)), []byte{1}))
 		}
 		return nil
@@ -161,8 +161,8 @@ func newFilledDupSortDB(t *testing.T, keys, dupsPerKey int) kv.RwDB {
 		c, err := tx.RwCursorDupSort(deleteRangeTable)
 		require.NoError(t, err)
 		defer c.Close()
-		for i := 0; i < keys; i++ {
-			for d := 0; d < dupsPerKey; d++ {
+		for i := range keys {
+			for d := range dupsPerKey {
 				require.NoError(t, c.AppendDup(u64tob(uint64(i)), u64tob(uint64(d))))
 			}
 		}

@@ -68,11 +68,11 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		addrData := data[:txs*length.Addr]
 		locData := data[txs*length.Addr : txs*(length.Addr+length.Hash)]
 		addrs := make([]common.Address, 1000)
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			copy(addrs[i][:], addrData[i*length.Addr:(i+1)*length.Addr])
 		}
 		locs := make([]common.Address, 1000)
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			copy(locs[i][:], locData[i*length.Hash:(i+1)*length.Hash])
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -179,11 +179,11 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 		addrData := data[:txs*length.Addr]
 		locData := data[txs*length.Addr : txs*(length.Addr+length.Hash)]
 		addrs := make([]common.Address, 1000)
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			copy(addrs[i][:], addrData[i*length.Addr:(i+1)*length.Addr])
 		}
 		locs := make([]common.Address, 1000)
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			copy(locs[i][:], locData[i*length.Hash:(i+1)*length.Hash])
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -248,7 +248,7 @@ func testFuzzDbAndAggregatorv3(f *testing.F, stepSize uint64) (kv.TemporalRwDB, 
 	f.Cleanup(agg.Close)
 	err = agg.OpenFolder()
 	require.NoError(err)
-	tdb, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(err)
 	return tdb, agg
 }

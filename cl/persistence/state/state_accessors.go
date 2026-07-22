@@ -32,11 +32,10 @@ type GetValFn func(table string, key []byte) ([]byte, error)
 func GetValFnTxAndSnapshot(tx kv.Tx, snapshotRoTx *snapshotsync.CaplinStateView) GetValFn {
 	return func(table string, key []byte) ([]byte, error) {
 		if snapshotRoTx != nil {
-			if typ, ok := snapshotsync.ParseCaplinStateType(table); ok {
-				slot := uint64(binary.BigEndian.Uint32(key))
-				if segment, found := snapshotRoTx.VisibleSegment(slot, typ); found {
-					return segment.Get(slot)
-				}
+			slot := uint64(binary.BigEndian.Uint32(key))
+			segment, ok := snapshotRoTx.VisibleSegment(slot, table)
+			if ok {
+				return segment.Get(slot)
 			}
 		}
 		return tx.GetOne(table, key)
@@ -56,6 +55,21 @@ func GetStateProcessingProgress(tx kv.Tx) (uint64, error) {
 
 func SetStateProcessingProgress(tx kv.RwTx, progress uint64) error {
 	return tx.Put(kv.StatesProcessingProgress, kv.StatesProcessingKey, base_encoding.Encode64ToBytes4(progress))
+}
+
+func ReadStatePruneProgress(tx kv.Tx, table string) (uint64, error) {
+	v, err := tx.GetOne(kv.StatesPruneProgress, []byte(table))
+	if err != nil {
+		return 0, err
+	}
+	if len(v) == 0 {
+		return 0, nil
+	}
+	return base_encoding.Decode64FromBytes4(v), nil
+}
+
+func SetStatePruneProgress(tx kv.RwTx, table string, slot uint64) error {
+	return tx.Put(kv.StatesPruneProgress, []byte(table), base_encoding.Encode64ToBytes4(slot))
 }
 
 func ReadSlotData(getFn GetValFn, slot uint64, cfg *clparams.BeaconChainConfig) (*SlotData, error) {

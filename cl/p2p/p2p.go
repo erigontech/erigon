@@ -209,7 +209,7 @@ func (p *p2pManager) setupENR() error {
 	if p.cfg.SubscribeAllTopics {
 		// Advertise all 64 attestation subnets and all 4 sync committee subnets
 		// so that peers see us as a useful node and keep us connected.
-		for i := 0; i < 64; i++ {
+		for i := range 64 {
 			initialAttnets.SetBitAt(uint64(i), true)
 		}
 		initialSyncnets = bitfield.Bitvector4{byte(0x0f)}

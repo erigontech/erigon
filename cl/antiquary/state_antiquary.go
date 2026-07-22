@@ -144,7 +144,7 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 			log.Info("[Caplin-Archive] Filled validators table", "progress", fmt.Sprintf("%d/%d", slot, stateSn.BlocksAvailable()))
 		default:
 		}
-		seg, ok := stateSnRoTx.VisibleSegment(slot, snapshotsync.CaplinStateEvents)
+		seg, ok := stateSnRoTx.VisibleSegment(slot, kv.StateEvents)
 		if !ok {
 			return false, fmt.Errorf("segment not found for slot %d", slot)
 		}
@@ -192,7 +192,6 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 const stateAntiquaryMaxSlotsPerCommit uint64 = 4 * clparams.SlotsPerDump
 
 func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
-
 	// Check if you need to fill the static validators table
 	refilledStaticValidators, err := FillStaticValidatorsTableIfNeeded(ctx, s.logger, s.stateSn, s.validatorsTable)
 	if err != nil {
@@ -218,8 +217,16 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	stateAntiquaryCollector := newBeaconStatesCollector(s.cfg, s.dirs.Tmp, s.logger)
 	defer stateAntiquaryCollector.close()
 
+	freshState := s.currentState == nil
 	if err := s.initializeStateAntiquaryIfNeeded(ctx, tx); err != nil {
 		return err
+	}
+	if freshState {
+		// A reconstruction resumed with backoff can re-flush rows the prune
+		// marker already passed; floor the markers so those rows stay prunable.
+		if err := s.floorStatePruneMarkers(ctx, s.currentState.Slot()); err != nil {
+			return err
+		}
 	}
 	if s.currentState.Slot() == s.genesisState.Slot() {
 		// Collect genesis state if we are at genesis
@@ -250,7 +257,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
 
-	var prevValSet []byte
 	events := state_accessors.NewStateEvents()
 	slashingOccurred := false
 	// setup the events handler for historical states replay.
@@ -393,6 +399,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return fmt.Errorf("static validators table has %d entries, state at slot %d has %d validators (truncated table)", got, s.currentState.Slot(), want)
 	}
 
+	var prevEffectiveBalances, newEffectiveBalances []byte
 	for ; slot < to && startLoop.Add(timeBeforeCommit).After(time.Now()); slot++ {
 		// Bound each mdbx commit: once maxSlotsPerCommit slots have accumulated,
 		// flush + commit them and start a fresh collector, so no single commit
@@ -405,6 +412,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			stateAntiquaryCollector = newBeaconStatesCollector(s.cfg, s.dirs.Tmp, s.logger)
 			changedValidators = &sync.Map{}
 			lastCommitSlot = slot
+			s.pruneFrozenStateTables(ctx, s.currentState.Slot())
 		}
 		slashingOccurred = false // Set this to false at the beginning of each slot.
 
@@ -458,9 +466,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 			continue
 		}
-		// We now compute the difference between the two balances.
-		prevValSet = prevValSet[:0]
-		prevValSet = append(prevValSet, s.currentState.RawValidatorSet()...)
+		// snapshot before TransitionState mutates the validator buffer in place
+		prevEffectiveBalances = base_encoding.AppendEffectiveBalances(prevEffectiveBalances[:0], s.currentState.RawValidatorSet())
 
 		fullValidation := slot%1000 == 0 || first
 		blockRewardsCollector := &eth2.BlockRewardsCollector{}
@@ -561,7 +568,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		isEpochCrossed := prevEpoch != state.Epoch(s.currentState)
 
 		if prevValidatorSetLength != s.currentState.ValidatorLength() || isEpochCrossed {
-			if err := stateAntiquaryCollector.collectEffectiveBalancesDiffs(ctx, slot, prevValSet, s.currentState.RawValidatorSet()); err != nil {
+			newEffectiveBalances = base_encoding.AppendEffectiveBalances(newEffectiveBalances[:0], s.currentState.RawValidatorSet())
+			if err := stateAntiquaryCollector.collectEffectiveBalancesDiffs(ctx, slot, prevEffectiveBalances, newEffectiveBalances); err != nil {
 				return err
 			}
 			if s.currentState.Version() >= clparams.AltairVersion {
@@ -609,6 +617,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 	}
+	// At tip this is the only prune site that runs on every call: the in-loop
+	// site needs a maxSlotsPerCommit batch and the snapgen site a fresh dump.
+	s.pruneFrozenStateTables(ctx, s.currentState.Slot())
 
 	if s.snapgen {
 		blocksPerStatefulFile := uint64(snaptype.CaplinMergeLimit * 5)
@@ -620,7 +631,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if to < (safetyMargin + blocksPerStatefulFile) {
 			return nil
 		}
-		to = to - (safetyMargin + blocksPerStatefulFile)
+		to -= (safetyMargin + blocksPerStatefulFile)
 		if from >= to {
 			return nil
 		}
@@ -641,6 +652,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err := s.stateSn.OpenFolder(); err != nil {
 			return err
 		}
+		// Prune only after OpenFolder: coverage must include the just-frozen range.
+		s.pruneFrozenStateTables(ctx, s.currentState.Slot())
 		if s.downloader != nil {
 			paths := s.stateSn.SegFileNames(0, to)
 			// Notify bittorent to seed the new snapshots

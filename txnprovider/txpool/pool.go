@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -1155,7 +1156,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	}
 
-	for i := 0; i < len(commitments); i++ {
+	for i := range commitments {
 		if libkzg.KZGToVersionedHash(commitments[i]) != libkzg.VersionedHash(blobHashes[i]) {
 			return txpoolcfg.BlobHashCheckFail
 		}
@@ -1933,9 +1934,7 @@ func (p *TxPool) sweepDormantQueued(ctx context.Context, currentBlock uint64, lo
 
 		// Snapshot the map for DB persistence while still holding the lock.
 		snapshot = make(map[uint64]uint64, len(p.senderLastActivity))
-		for k, v := range p.senderLastActivity {
-			snapshot[k] = v
-		}
+		maps.Copy(snapshot, p.senderLastActivity)
 	}()
 
 	if evictedSenders > 0 {
@@ -2363,7 +2362,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 			}
 		case announcements := <-p.newPendingTxns:
 			go func() {
-				for i := 0; i < 16; i++ { // drain more events from channel, then merge and dedup them
+				for range 16 { // drain more events from channel, then merge and dedup them
 					select {
 					case a := <-p.newPendingTxns:
 						announcements.AppendOther(a)

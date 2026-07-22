@@ -34,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/utils/bls"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -148,7 +149,8 @@ func (I *impl) ProcessAttesterSlashing(
 	currentEpoch := state.GetEpochAtSlot(s.BeaconConfig(), s.Slot())
 	for _, ind := range solid.IntersectionOfSortedSets(
 		solid.IterableSSZ[uint64](att1.AttestingIndices),
-		solid.IterableSSZ[uint64](att2.AttestingIndices)) {
+		solid.IterableSSZ[uint64](att2.AttestingIndices),
+	) {
 		validator, err := s.ValidatorForValidatorIndex(int(ind))
 		if err != nil {
 			return err
@@ -556,7 +558,8 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 	// Verify commitments are under limit
 	epoch := state.Epoch(s)
 	if bid.BlobKzgCommitments.Len() > int(s.BeaconConfig().GetBlobParameters(epoch).MaxBlobsPerBlock) {
-		return fmt.Errorf("processExecutionPayloadBid: too many blob kzg commitments: %d > %d",
+		return fmt.Errorf(
+			"processExecutionPayloadBid: too many blob kzg commitments: %d > %d",
 			bid.BlobKzgCommitments.Len(),
 			s.BeaconConfig().GetBlobParameters(epoch).MaxBlobsPerBlock,
 		)
@@ -991,7 +994,7 @@ func (I *impl) ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAg
 		if err != nil {
 			return err
 		}
-		msg := utils.Sha256(blockRoot[:], domain)
+		msg := crypto.Sha256(blockRoot[:], domain)
 		isValid, err := bls.VerifyAggregate(sync.SyncCommiteeSignature[:], msg[:], votedKeys)
 		if err != nil {
 			return err
@@ -1082,7 +1085,7 @@ func (I *impl) ProcessBlsToExecutionChange(
 		return errors.New("ProcessBlsToExecutionChange: withdrawal credentials prefix mismatch")
 	}
 	// assert validator.withdrawal_credentials[1:] == hash(address_change.from_bls_pubkey)[1:]
-	hashKey := utils.Sha256(change.From[:])
+	hashKey := crypto.Sha256(change.From[:])
 	if !bytes.Equal(credentials[1:], hashKey[1:]) {
 		return errors.New("ProcessBlsToExecutionChange: withdrawal credentials mismatch")
 	}
@@ -1091,7 +1094,8 @@ func (I *impl) ProcessBlsToExecutionChange(
 	domain, err := fork.ComputeDomain(
 		s.BeaconConfig().DomainBLSToExecutionChange[:],
 		utils.Uint32ToBytes4(uint32(s.BeaconConfig().GenesisForkVersion)),
-		s.GenesisValidatorsRoot())
+		s.GenesisValidatorsRoot(),
+	)
 	if err != nil {
 		return err
 	}
@@ -1507,7 +1511,7 @@ func batchVerifyAttestations(
 			}
 		}(idx)
 	}
-	for i := 0; i < len(indexedAttestations); i++ {
+	for range indexedAttestations {
 		result := <-c
 		if result.err != nil {
 			return false, result.err
@@ -1582,7 +1586,7 @@ func (I *impl) ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex ui
 func (I *impl) ProcessRandao(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error {
 	epoch := state.Epoch(s)
 	randaoMixes := s.GetRandaoMixes(epoch)
-	randaoHash := utils.Sha256(randao[:])
+	randaoHash := crypto.Sha256(randao[:])
 	mix := [32]byte{}
 	for i := range mix {
 		mix[i] = randaoMixes[i] ^ randaoHash[i]

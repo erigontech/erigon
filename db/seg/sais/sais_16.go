@@ -8,8 +8,9 @@
 // Copyright 2019 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
-
 package sais
+
+import "slices"
 
 func sais_16_32(text []uint16, textMax int, sa, tmp []int32) {
 	if len(sa) != len(text) || len(tmp) < textMax {
@@ -93,8 +94,8 @@ func placeLMS_16_32(text []uint16, sa, freq, bucket []int32) int {
 	lastB := int32(-1)
 
 	c0, c1, isTypeS := uint16(0), uint16(0), false
-	for i := len(text) - 1; i >= 0; i-- {
-		c0, c1 = text[i], c0
+	for i, t := range slices.Backward(text) {
+		c0, c1 = t, c0
 		if c0 < c1 {
 			isTypeS = true
 		} else if c0 > c1 && isTypeS {
@@ -128,7 +129,7 @@ func induceSubL_16_32(text []uint16, sa, freq, bucket []int32) {
 	sa[b] = int32(k)
 	b++
 
-	for i := 0; i < len(sa); i++ {
+	for i := range sa {
 		j := int(sa[i])
 		if j == 0 {
 			continue
@@ -195,8 +196,8 @@ func length_16_32(text []uint16, sa []int32, numLMS int) {
 	end := 0
 
 	c0, c1, isTypeS := uint16(0), uint16(0), false
-	for i := len(text) - 1; i >= 0; i-- {
-		c0, c1 = text[i], c0
+	for i, t := range slices.Backward(text) {
+		c0, c1 = t, c0
 		if c0 < c1 {
 			isTypeS = true
 		} else if c0 > c1 && isTypeS {
@@ -231,7 +232,7 @@ func assignID_16_32(text []uint16, sa []int32, numLMS int) int {
 			n := int(n)
 			this := text[j:][:n]
 			last := text[lastPos:][:n]
-			for i := 0; i < n; i++ {
+			for i := range n {
 				if this[i] != last[i] {
 					goto New
 				}
@@ -253,8 +254,8 @@ func unmap_16_32(text []uint16, sa []int32, numLMS int) {
 	j := len(unmap)
 
 	c0, c1, isTypeS := uint16(0), uint16(0), false
-	for i := len(text) - 1; i >= 0; i-- {
-		c0, c1 = text[i], c0
+	for i, t := range slices.Backward(text) {
+		c0, c1 = t, c0
 		if c0 < c1 {
 			isTypeS = true
 		} else if c0 > c1 && isTypeS {
@@ -311,7 +312,7 @@ func induceL_16_32(text []uint16, sa, freq, bucket []int32) {
 	sa[b] = int32(k)
 	b++
 
-	for i := 0; i < len(sa); i++ {
+	for i := range sa {
 		j := int(sa[i])
 		if j <= 0 {
 			continue

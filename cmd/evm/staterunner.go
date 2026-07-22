@@ -142,15 +142,13 @@ func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, files []string, work
 	}
 	close(fileCh)
 
-	for w := uint64(0); w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			for item := range fileCh {
 				r, err := runStateTest(ctx, cfg, item.fname)
 				resultCh <- fileResult{index: item.index, results: r, err: err}
 			}
-		}()
+		})
 	}
 	go func() {
 		wg.Wait()

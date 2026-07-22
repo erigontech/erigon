@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"net"
 	"path"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -179,8 +180,8 @@ type cleanupHandle struct {
 func (h *cleanupHandle) close() error {
 	h.once.Do(func() {
 		var errs []error
-		for i := len(h.cleanups) - 1; i >= 0; i-- {
-			err := h.cleanups[i]()
+		for _, cleanup := range slices.Backward(h.cleanups) {
+			err := cleanup()
 			if err != nil {
 				errs = append(errs, err)
 			}

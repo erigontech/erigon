@@ -17,9 +17,10 @@
 package snapshotsync
 
 import (
+	"cmp"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 
@@ -87,8 +88,11 @@ func hasDiskOverlap(t *testing.T, dir, table string) bool {
 		}
 		rs = append(rs, rng{fi.From, fi.To})
 	}
-	sort.Slice(rs, func(i, j int) bool {
-		return rs[i].from < rs[j].from || (rs[i].from == rs[j].from && rs[i].to < rs[j].to)
+	slices.SortFunc(rs, func(a, b rng) int {
+		if a.from != b.from {
+			return cmp.Compare(a.from, b.from)
+		}
+		return cmp.Compare(a.to, b.to)
 	})
 	for i := 1; i < len(rs); i++ {
 		if rs[i].from < rs[i-1].to {
@@ -98,20 +102,11 @@ func hasDiskOverlap(t *testing.T, dir, table string) bool {
 	return false
 }
 
-// mustCaplinStateType resolves an on-disk table name to its enum, failing the test
-// on an unknown name (the tests only use real state tables).
-func mustCaplinStateType(t *testing.T, name string) CaplinStateType {
-	t.Helper()
-	typ, ok := ParseCaplinStateType(name)
-	require.True(t, ok, "unknown caplin state type %q", name)
-	return typ
-}
-
 func openTestCaplinStateSnapshots(t *testing.T, dirs datadir.Dirs, table string, logger log.Logger) *CaplinStateSnapshots {
 	t.Helper()
 	types := SnapshotTypes{
-		KeyValueGetters: map[CaplinStateType]KeyValueGetter{mustCaplinStateType(t, table): nil},
-		Compression:     map[CaplinStateType]bool{},
+		KeyValueGetters: map[string]KeyValueGetter{table: nil},
+		Compression:     map[string]bool{},
 	}
 	s := NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, nil, dirs, types, logger)
 	t.Cleanup(s.Close)
@@ -132,7 +127,7 @@ func TestCaplinStateRecalcHidesInteriorSubset(t *testing.T) {
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
 
-	ranges := s.coveredRangesForType(mustCaplinStateType(t, table))
+	ranges := s.coveredRangesForType(table)
 	require.Len(t, ranges, 1, "interior subset must be hidden by the covering superset")
 	require.Equal(t, Range{from: 0, to: 150_000}, ranges[0])
 }
@@ -164,7 +159,7 @@ func TestCaplinStateRemoveOverlaps(t *testing.T) {
 	require.FileExists(t, tailIdx)
 	require.False(t, hasDiskOverlap(t, dirs.SnapCaplin, table), "overlap must be gone after RemoveOverlaps")
 
-	ranges := s.coveredRangesForType(mustCaplinStateType(t, table))
+	ranges := s.coveredRangesForType(table)
 	require.Equal(t, []Range{{from: 0, to: 150_000}, {from: 150_000, to: 200_000}}, ranges)
 }
 

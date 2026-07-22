@@ -26,6 +26,7 @@ on:
 jobs:
 
   Build:
+    name: Build and publish docker image
     # runs-on: ubuntu-latest
     runs-on: [devops-01-self-hosted]
     environment: dockerhub-publish
@@ -53,7 +54,6 @@ jobs:
         ##   latest image:    erigontech/erigon:${tag_name}${latest_suffix}
         ##   commit id image: erigontech/erigon:${tag_name}-${short_commit_id}
         env:
-          CHECKOUT_REF: ${{ inputs.checkout_ref }}
           BRANCH_REF: ${{ inputs.checkout_ref == '' && github.ref_name || inputs.checkout_ref }}
         run: |
           branch_name="$BRANCH_REF"
@@ -72,7 +72,7 @@ jobs:
               ;;
             * )
               # use last string after last slash '/' by default if branch contains slash:
-              export tag_name=$(echo $CHECKOUT_REF | sed -e  's/.*\///g' );
+              export tag_name=$(echo "$branch_name" | sed -e 's/.*\///g');
               export keep_images=0;
               export latest_suffix=''
               export binaries="erigon"
@@ -110,7 +110,7 @@ jobs:
         env:
           BUILD_VERSION: "${{ steps.def_docker_vars.outputs.tag_name }}-${{ steps.getCommitId.outputs.short_commit_id }}"
           BUILD_VERSION_LATEST: "${{ steps.def_docker_vars.outputs.tag_name }}${{ steps.def_docker_vars.outputs.latest_suffix }}"
-          DOCKER_PUBLISH_CONDITION: ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('--tag {0}:{1} ', env.DOCKER_URL, env.BUILD_VERSION) || '' }}
+          DOCKER_PUBLISH_CONDITION: ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('--tag {0}:{1}-{2} ', env.DOCKERHUB_REPOSITORY, steps.def_docker_vars.outputs.tag_name, steps.getCommitId.outputs.short_commit_id) || '' }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
           DOCKERFILE_PATH: Dockerfile
           BINARIES: ${{ steps.def_docker_vars.outputs.binaries }}
@@ -149,7 +149,7 @@ jobs:
         env:
           BUILD_VERSION: "${{ steps.def_docker_vars.outputs.tag_name }}-${{ steps.getCommitId.outputs.short_commit_id }}"
           BUILD_VERSION_LATEST: "${{ steps.def_docker_vars.outputs.tag_name }}${{ steps.def_docker_vars.outputs.latest_suffix }}"
-          BUILD_VERSION_CONDITION: ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('{0}:{1} ',env.DOCKER_URL,env.BUILD_VERSION) || '' }}
+          BUILD_VERSION_CONDITION: ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('{0}:{1}-{2} ', env.DOCKERHUB_REPOSITORY, steps.def_docker_vars.outputs.tag_name, steps.getCommitId.outputs.short_commit_id) || '' }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
           TAG_KEY: ${{ steps.def_docker_vars.outputs.tag_name }}
           KEEP_IMAGES: ${{ steps.def_docker_vars.outputs.keep_images }}
@@ -207,3 +207,22 @@ jobs:
               fi
               echo "Done."
             done
+
+      - name: Notify Discord on failure
+        # Alert only on the automated main-branch builds; manual dispatch runs
+        # are watched by whoever triggered them. No-op when the webhook is unset.
+        if: ${{ failure() && github.event_name == 'push' }}
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ -z "${DISCORD_WEBHOOK:-}" ]; then
+            echo "DISCORD_WEBHOOK not set — skipping Discord notification."
+            exit 0
+          fi
+          msg=":x: **CI-CD docker image build failed** on branch \`${BRANCH}\`\nRun: ${RUN_URL}"
+          payload=$(jq -nc --arg c "$msg" '{content: $c}')
+          curl -sS -f -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK" \
+            && echo "Discord notified." \
+            || echo "::warning::Discord notification failed (webhook unreachable or invalid)."

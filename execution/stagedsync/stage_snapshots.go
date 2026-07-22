@@ -20,20 +20,18 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
@@ -51,9 +49,9 @@ type SnapshotsCfg struct {
 	db                 kv.TemporalRwDB
 	chainConfig        *chain.Config
 	dirs               datadir.Dirs
-	blockRetire        services.BlockRetire
-	snapshotDownloader downloader.Client
-	blockReader        services.FullBlockReader
+	blockRetire        dbservices.BlockRetire
+	snapshotDownloader dbservices.DownloaderClient
+	blockReader        dbservices.FullBlockReader
 	notifier           *shards.Notifications
 	caplin             bool
 	blobs              bool
@@ -68,9 +66,9 @@ type SnapshotsCfg struct {
 }
 
 // Returns a seeder client for block management, a noop implementation if no downloader is attached.
-func (me *SnapshotsCfg) getSeederClient() downloader.SeederClient {
+func (me *SnapshotsCfg) getSeederClient() dbservices.SeederClient {
 	if me.snapshotDownloader == nil {
-		return downloader.NoopSeederClient{}
+		return dbservices.NoopSeederClient{}
 	}
 	return me.snapshotDownloader
 }
@@ -79,9 +77,9 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	chainConfig *chain.Config,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
-	blockRetire services.BlockRetire,
-	snapshotDownloader downloader.Client,
-	blockReader services.FullBlockReader,
+	blockRetire dbservices.BlockRetire,
+	snapshotDownloader dbservices.DownloaderClient,
+	blockReader dbservices.FullBlockReader,
 	notifier *shards.Notifications,
 	caplin bool,
 	blobs bool,
@@ -108,6 +106,18 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	}
 
 	return cfg
+}
+
+// mustReopenUnderlyingFilesTx refreshes the tx's pinned block-files/aggregator
+// view so files opened earlier in this stage are visible to reads made through
+// this tx. Panics rather than silently skipping: a tx that can't reopen would
+// reintroduce stale-view bugs (e.g. minimal-mode history pruning downloading all files).
+func mustReopenUnderlyingFilesTx(tx kv.RwTx) {
+	reopener, ok := tx.(kv.CanReopenUnderlyingFilesTx)
+	if !ok {
+		panic(fmt.Sprintf("snapshots stage requires a tx that can ForceReopenUnderlyingFilesTx, got %T", tx))
+	}
+	reopener.ForceReopenUnderlyingFilesTx()
 }
 
 func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) (err error) {
@@ -218,10 +228,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
+	mustReopenUnderlyingFilesTx(tx)
+
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
-		"remaining snapshots",
+		"snapshots",
 		false, /*headerChain=*/
 		cfg.blobs,
 		cfg.caplinState,
@@ -287,9 +299,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	if temporal, ok := tx.(*temporal.RwTx); ok {
-		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
-	}
+	mustReopenUnderlyingFilesTx(tx) // otherwise next stages will not see just-indexed-files
 
 	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
 	if cfg.notifier.Events != nil {
@@ -308,9 +318,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return fmt.Errorf("FillDBFromSnapshots: %w", err)
 	}
 
-	if temporal, ok := tx.(*temporal.RwTx); ok {
-		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
-	}
+	mustReopenUnderlyingFilesTx(tx) // otherwise next stages will not see just-indexed-files
 
 	// In E3, the post-execution state is in domain files. After FillDBFromSnapshots,
 	// snapshot domain state may be ahead of the Execution stage progress (which is 0
@@ -389,7 +397,7 @@ func buildOrDeferE3Accessors(ctx context.Context, s *StageState, cfg SnapshotsCf
 	return nil
 }
 
-func firstNonGenesisCheck(tx kv.RwTx, snapshots services.BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
+func firstNonGenesisCheck(tx kv.RwTx, snapshots dbservices.BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
 	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
 	if err != nil {
 		return err
@@ -404,7 +412,7 @@ func firstNonGenesisCheck(tx kv.RwTx, snapshots services.BlockSnapshots, logPref
 	return nil
 }
 
-func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services.FullBlockReader) error {
+func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader dbservices.FullBlockReader) error {
 	pruneThreshold := rawdbreset.GetPruneMarkerSafeThreshold(blockReader)
 	if pruneThreshold == 0 {
 		return nil
@@ -516,43 +524,14 @@ func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logg
 		return false, nil
 	}
 
-	// Keep at least 2 block snapshots as we do not want FrozenBlocks to be 0
 	pruneTo := cfg.prune.Blocks.PruneTo(headNumber)
-
 	if pruneTo > executionProgress {
 		return false, nil
 	}
 
-	//TODO: push-down this logic into `blockRetire`: instead of work on raw file names - we must work on dirtySegments. Instead of calling downloader.Del(file) we must call `downloader.Del(dirtySegment.Paths(snapDir)`
-	snapshotFileNames := cfg.blockReader.FrozenFiles()
-	filesDeleted := false
-	// Prune blocks snapshots if necessary
-	for _, file := range snapshotFileNames {
-		if !cfg.prune.Blocks.Enabled() || headNumber == 0 || !strings.Contains(file, "transactions") {
-			continue
-		}
-
-		// take the snapshot file name and parse it to get the "from"
-		info, _, ok := snaptype.ParseFileName(cfg.dirs.Snap, file)
-		if !ok {
-			continue
-		}
-		if info.To >= pruneTo {
-			continue
-		}
-		if info.To-info.From != snaptype.Erigon2MergeLimit {
-			continue
-		}
-		err = cfg.getSeederClient().Delete(ctx, []string{file})
-		if err != nil {
-			return filesDeleted, err
-		}
-		if err := cfg.blockReader.Snapshots().Delete(file); err != nil {
-			return filesDeleted, err
-		}
-		filesDeleted = true
-	}
-	return filesDeleted, nil
+	return cfg.blockRetire.RetireTransactionFiles(pruneTo, func(files []string) error {
+		return cfg.getSeederClient().Delete(ctx, files)
+	})
 }
 
 // readCommitmentBlockFromDB reads the commitment domain's "state" key via a

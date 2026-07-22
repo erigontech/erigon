@@ -166,7 +166,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	statedb := state.New(stateReader)
 
-	header := block.Header()
+	header := block.HeaderNoCopy()
 
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, block.Hash())
@@ -301,10 +301,8 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 
 	threads := min(runtime.NumCPU(), int(numBlocks))
 	jobs := make(chan *blockReplayTask, threads)
-	for th := 0; th < threads; th++ {
-		pend.Add(1)
-		go func() {
-			defer pend.Done()
+	for range threads {
+		pend.Go(func() {
 			tx, err := api.db.BeginTemporalRo(ctx)
 			if err != nil {
 				log.Error("Error", "error", err)
@@ -344,7 +342,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 
 				results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Logs: logs}
 			}
-		}()
+		})
 	}
 
 	hasOverrides := false
@@ -448,7 +446,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	replayTransactions = block.Transactions()
 	log.Debug("[replayBlock] replayTx", "length", len(replayTransactions))
 
-	header := block.Header()
+	header := block.HeaderNoCopy()
 
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)

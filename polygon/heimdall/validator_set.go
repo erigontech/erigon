@@ -237,7 +237,7 @@ func (vals *ValidatorSet) IncrementProposerPriority(times int) {
 
 	var proposer *Validator
 	// Call IncrementProposerPriority(1) times times.
-	for i := 0; i < times; i++ {
+	for range times {
 		proposer = vals.incrementProposerPriority()
 	}
 

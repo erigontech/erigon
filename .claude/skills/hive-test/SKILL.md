@@ -1,3 +1,8 @@
+---
+name: hive-test
+description: Run Ethereum Hive integration tests against a local Erigon build, including engine, RPC compatibility, standard EEST, BAL/Amsterdam EEST, and RLP suites. Use when setting up an ephemeral Hive environment, selecting or running Hive suites, interpreting Hive failures, or cleaning up Hive test resources.
+---
+
 # Skill: hive-test
 
 Run Ethereum Hive integration tests against a local Erigon build. Works from a clean

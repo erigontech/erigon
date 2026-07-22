@@ -174,7 +174,7 @@ func printDiffSide(n Node, w io.Writer, ind string, key string) {
 		fmt.Fprintf(w, "short %x(", n.reference())
 		keyHex := n.Key
 		hexV := make([]byte, len(keyHex))
-		for i := 0; i < len(hexV); i++ {
+		for i := range hexV {
 			hexV[i] = []byte(indices[keyHex[i]])[0]
 		}
 		fmt.Fprintf(w, "%s:", string(hexV))
@@ -263,7 +263,7 @@ func printDiff(n1, n2 Node, w io.Writer, ind string, key string) {
 			if bytes.Equal(n1.Key, n.Key) {
 				keyHex := n1.Key
 				hexV := make([]byte, len(keyHex))
-				for i := 0; i < len(hexV); i++ {
+				for i := range hexV {
 					hexV[i] = []byte(indices[keyHex[i]])[0]
 				}
 				fmt.Fprintf(w, "%s:", string(hexV))

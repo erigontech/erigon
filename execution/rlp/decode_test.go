@@ -30,6 +30,8 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
 )
 
 func TestStreamKind(t *testing.T) {
@@ -265,6 +267,240 @@ func TestStreamRaw(t *testing.T) {
 		if !bytes.Equal(want, raw) {
 			t.Errorf("test %d: raw mismatch: got %x, want %x", i, raw, want)
 		}
+	}
+}
+
+func TestStreamAddr(t *testing.T) {
+	want := common.HexToAddress("0xdeadbeef00112233445566778899aabbccddeeff")
+	enc, err := EncodeToBytes(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("bytes-stream", func(t *testing.T) {
+		s := NewBytesStream(enc)
+		defer PutStream(s)
+		got, err := s.Addr()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("got %x, want %x", got, want)
+		}
+	})
+
+	t.Run("reader-stream", func(t *testing.T) {
+		s := NewStream(bytes.NewReader(enc), uint64(len(enc)))
+		got, err := s.Addr()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("got %x, want %x", got, want)
+		}
+	})
+
+	t.Run("bad-inputs", func(t *testing.T) {
+		for _, in := range []string{
+			"C0", // empty list
+			"01", // single byte
+			"80", // empty string
+			"93deadbeef00112233445566778899aabbccddee",     // 19 bytes
+			"95deadbeef00112233445566778899aabbccddeeff00", // 21 bytes
+		} {
+			s := NewBytesStream(unhex(in))
+			_, err := s.Addr()
+			PutStream(s)
+			if err == nil {
+				t.Fatalf("expected error for input %s", in)
+			}
+		}
+	})
+
+	t.Run("no-allocs", func(t *testing.T) {
+		rdr := bytes.NewReader(enc)
+		s := NewStreamFromPool(rdr, uint64(len(enc)))
+		defer PutStream(s)
+		got := testing.AllocsPerRun(100, func() {
+			rdr.Reset(enc)
+			s.Reset(rdr, uint64(len(enc)))
+			a, err := s.Addr()
+			if err != nil || a != want {
+				t.Fatalf("a=%x err=%v", a, err)
+			}
+		})
+		if got != 0 {
+			t.Fatalf("Addr allocated %v times/op, want 0", got)
+		}
+	})
+}
+
+func TestStreamReadHash(t *testing.T) {
+	want := common.HexToHash("0xdeadbeef00112233445566778899aabbccddeeff00112233445566778899aabb")
+	enc, err := EncodeToBytes(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("bytes-stream", func(t *testing.T) {
+		s := NewBytesStream(enc)
+		defer PutStream(s)
+		got, err := s.ReadHash()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("got %x, want %x", got, want)
+		}
+	})
+
+	t.Run("reader-stream", func(t *testing.T) {
+		s := NewStream(bytes.NewReader(enc), uint64(len(enc)))
+		got, err := s.ReadHash()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("got %x, want %x", got, want)
+		}
+	})
+
+	t.Run("bad-inputs", func(t *testing.T) {
+		for _, in := range []string{
+			"C0", // empty list
+			"01", // single byte
+			"80", // empty string
+			"9Fdeadbeef00112233445566778899aabbccddeeff00112233445566778899",       // 31 bytes
+			"A1deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb00", // 33 bytes
+		} {
+			s := NewBytesStream(unhex(in))
+			_, err := s.ReadHash()
+			PutStream(s)
+			if err == nil {
+				t.Fatalf("expected error for input %s", in)
+			}
+		}
+	})
+
+	t.Run("no-allocs", func(t *testing.T) {
+		rdr := bytes.NewReader(enc)
+		s := NewStreamFromPool(rdr, uint64(len(enc)))
+		defer PutStream(s)
+		got := testing.AllocsPerRun(100, func() {
+			rdr.Reset(enc)
+			s.Reset(rdr, uint64(len(enc)))
+			h, err := s.ReadHash()
+			if err != nil || h != want {
+				t.Fatalf("h=%x err=%v", h, err)
+			}
+		})
+		if got != 0 {
+			t.Fatalf("ReadHash allocated %v times/op, want 0", got)
+		}
+	})
+}
+
+// TestStreamViewBytes pins the aliasing contract that separates ViewBytes from
+// Bytes: for an RLP string on a bytes-backed stream the result must share memory
+// with the input. Single-byte values are exempt, see TestStreamViewBytesSingleByte.
+func TestStreamViewBytes(t *testing.T) {
+	input := unhex("8401020304")
+
+	s := NewBytesStream(input)
+	defer PutStream(s)
+	b, err := s.ViewBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := unhex("01020304"); !bytes.Equal(b, want) {
+		t.Fatalf("content mismatch: got %x, want %x", b, want)
+	}
+	if &b[0] != &input[1] {
+		t.Fatal("ViewBytes must alias a bytes-backed input, not copy it")
+	}
+	if cap(b) != len(b) {
+		t.Fatalf("view cap %d must be clamped to len %d so appends cannot scribble the input", cap(b), len(b))
+	}
+	if s.Remaining() != 0 {
+		t.Fatalf("stream not advanced past the value: %d bytes remaining", s.Remaining())
+	}
+}
+
+// TestStreamViewBytesSingleByte pins the exception to the aliasing contract: a
+// single-byte value is encoded as its own type tag, so there is no separate content
+// in the input to alias and ViewBytes must allocate, exactly as Bytes does.
+func TestStreamViewBytesSingleByte(t *testing.T) {
+	s := NewBytesStream(unhex("05"))
+	defer PutStream(s)
+	b, err := s.ViewBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(b, []byte{0x05}) {
+		t.Fatalf("content mismatch: got %x, want 05", b)
+	}
+	if s.Remaining() != 0 {
+		t.Fatalf("stream not advanced past the value: %d bytes remaining", s.Remaining())
+	}
+}
+
+// TestStreamViewBytesFallsBackToCopy uses a reader that holds a byte slice but is
+// not the one NewBytesStream installs, which is what decides whether a view is
+// possible: only NewBytesStream is viewable, not "any reader over a slice".
+func TestStreamViewBytesFallsBackToCopy(t *testing.T) {
+	input := unhex("8401020304")
+
+	s := NewStream(bytes.NewReader(input), 0)
+	b, err := s.ViewBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := unhex("01020304"); !bytes.Equal(b, want) {
+		t.Fatalf("content mismatch: got %x, want %x", b, want)
+	}
+	if &b[0] == &input[1] {
+		t.Fatal("ViewBytes must copy when the stream is not from NewBytesStream")
+	}
+}
+
+func TestStreamViewBytesAdvancesAcrossValues(t *testing.T) {
+	s := NewBytesStream(unhex("C88301020483050607"))
+	defer PutStream(s)
+	if _, err := s.List(); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"010204", "050607"} {
+		b, err := s.ViewBytes()
+		if err != nil {
+			t.Fatalf("value %d: %v", i, err)
+		}
+		if !bytes.Equal(b, unhex(want)) {
+			t.Fatalf("value %d: got %x, want %s", i, b, want)
+		}
+	}
+	if err := s.ListEnd(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStreamViewBytesErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr error
+	}{
+		{"list", "C50102030405", ErrExpectedString},
+		{"non-canonical size", "8105", ErrCanonSize},
+		{"size exceeds input", "840102", ErrValueTooLarge},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewBytesStream(unhex(tt.input))
+			defer PutStream(s)
+			if _, err := s.ViewBytes(); !errors.Is(err, tt.wantErr) {
+				t.Fatalf("got %v, want %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
@@ -1060,7 +1296,7 @@ func BenchmarkDecodeIntSliceReuse(b *testing.B) {
 
 func encodeTestSlice(n uint) []byte {
 	s := make([]uint, n)
-	for i := uint(0); i < n; i++ {
+	for i := range n {
 		s[i] = i
 	}
 	b, err := EncodeToBytes(s)

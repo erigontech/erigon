@@ -29,10 +29,10 @@ func TestValidator(t *testing.T) {
 	// Initializing some dummy data
 	var pubKey [48]byte
 	var withdrawalCred common.Hash
-	for i := 0; i < 48; i++ {
+	for i := range 48 {
 		pubKey[i] = byte(i)
 	}
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		withdrawalCred[i] = byte(i + 50)
 	}
 	effectiveBalance := uint64(123456789)
@@ -72,7 +72,7 @@ func TestValidatorSetTest(t *testing.T) {
 	num := 1000
 	vset := NewValidatorSet(1000000)
 	vset2 := NewValidatorSet(1000000)
-	for i := 0; i < num; i++ {
+	for i := range num {
 		var pk [48]byte
 		var wk [32]byte
 		binary.BigEndian.PutUint32(pk[:], uint32(i))

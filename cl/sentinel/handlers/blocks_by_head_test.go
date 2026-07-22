@@ -169,7 +169,7 @@ func makeBlocksByHeadChain(t *testing.T, startSlot, count uint64) ([]*cltypes.Si
 	parentRoot := common.Hash{0x99}
 	blocks := make([]*cltypes.SignedBeaconBlock, 0, count)
 	roots := make([]common.Hash, 0, count)
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 		block.Block.Slot = startSlot + i
 		block.Block.StateRoot = common.Hash{byte(i + 1)}
@@ -202,7 +202,7 @@ func readBlocksByHeadResponses(t *testing.T, stream network.Stream, count int) [
 
 	ethClock := getEthClock(t)
 	blocks := make([]*cltypes.SignedBeaconBlock, 0, count)
-	for i := 0; i < count; i++ {
+	for range count {
 		prefix := make([]byte, 1)
 		require.NoError(t, stream.SetReadDeadline(time.Now().Add(5*time.Second)))
 		_, err := io.ReadFull(stream, prefix)

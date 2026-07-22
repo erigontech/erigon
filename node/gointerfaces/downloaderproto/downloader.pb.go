@@ -113,7 +113,7 @@ func (x *SeedRequest) GetPaths() []string {
 
 // DownloadItem:
 // - if Erigon created new snapshot and want seed it
-// - if Erigon wnat download files - it fills only "torrent_hash" field
+// - if Erigon want download files - it fills only "torrent_hash" field
 type DownloadItem struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`

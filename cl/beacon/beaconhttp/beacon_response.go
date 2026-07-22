@@ -77,9 +77,10 @@ func (r *BeaconResponse) With(key string, value any) (out *BeaconResponse) {
 func (r *BeaconResponse) WithFinalized(finalized bool) (out *BeaconResponse) {
 	out = new(BeaconResponse)
 	*out = *r
-	out.Finalized = new(bool)
-	out.ExecutionOptimistic = new(bool)
 	out.Finalized = &finalized
+	if out.ExecutionOptimistic == nil {
+		out.ExecutionOptimistic = new(bool)
+	}
 	return out
 }
 

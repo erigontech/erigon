@@ -8,7 +8,7 @@ participants:
     el_extra_params: ["--experimental.bal"]
     use_separate_vc: true
     vc_type: lighthouse
-    vc_image: ethpandaops/lighthouse:glamsterdam-devnet-5
+    vc_image: ethpandaops/lighthouse:glamsterdam-devnet-6
     count: 1
 global_log_level: 'debug'
 network_params:
@@ -18,9 +18,9 @@ network_params:
   fulu_fork_epoch: 0
   gloas_fork_epoch: 1
 ethereum_genesis_generator_params:
-  image: ethpandaops/ethereum-genesis-generator:5.3.5
+  image: ethpandaops/ethereum-genesis-generator:6.1.2
 additional_services: [assertoor]
 assertoor_params:
-  image: ethpandaops/assertoor:master
+  image: ethpandaops/assertoor:v0.1.3
   run_stability_check: false
   run_block_proposal_check: true

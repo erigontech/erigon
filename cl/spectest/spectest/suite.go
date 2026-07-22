@@ -88,5 +88,4 @@ func RunCases(t *testing.T, app Appendix, machineImpl machine.Interface, root fs
 		})
 		return true
 	})
-
 }

@@ -7,8 +7,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -26,7 +26,7 @@ import (
 // The db parameter is a temporary TemporalRoDB backed by a fresh aggregator
 // that sees all files on disk (including newly built ones not yet activated).
 func NewSnapshotVerifier(
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	logger log.Logger,

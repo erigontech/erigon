@@ -611,7 +611,7 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64, tx kv.Tx) (*cltypes.SignedBeac
 	}
 	// Decompress this thing
 	reader := decompressorPool.Get().(*zstd.Decoder)
-	defer decompressorPool.Put(reader)
+	defer putDecoder(reader)
 	reader.Reset(bytes.NewReader(buf))
 
 	// Use pooled readers to avoid allocations.

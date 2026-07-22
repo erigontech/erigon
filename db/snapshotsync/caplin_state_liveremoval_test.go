@@ -66,7 +66,6 @@ func TestCaplinStateReadersRaceRemoveOverlaps(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
 	table := kv.PendingDepositsDump
-	typ := mustCaplinStateType(t, table)
 
 	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 200_000, logger) // covering superset (kept, covers slot 0)
 	var subSegs []string
@@ -79,7 +78,7 @@ func TestCaplinStateReadersRaceRemoveOverlaps(t *testing.T) {
 
 	read := func() {
 		v := s.View()
-		if seg, ok := v.VisibleSegment(0, typ); ok {
+		if seg, ok := v.VisibleSegment(0, table); ok {
 			g := seg.src.MakeGetter() // touches the Decompressor reclaim would close
 			g.Reset(0)
 			if g.HasNext() {
@@ -91,10 +90,8 @@ func TestCaplinStateReadersRaceRemoveOverlaps(t *testing.T) {
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
-	for r := 0; r < 8; r++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -103,7 +100,7 @@ func TestCaplinStateReadersRaceRemoveOverlaps(t *testing.T) {
 					read()
 				}
 			}
-		}()
+		})
 	}
 	time.Sleep(20 * time.Millisecond) // let readers warm up so they churn Views when retirement hits
 
@@ -114,7 +111,7 @@ func TestCaplinStateReadersRaceRemoveOverlaps(t *testing.T) {
 	wg.Wait()
 
 	s.View().Close() // final drain collapses the generation chain and reclaims every retired file
-	require.Equal(t, s._visibleFiles.visible.Load(), s._visibleFiles.oldest, "generation chain must collapse once readers drain")
+	require.Equal(t, s.visible.Load(), s.oldestVisible, "generation chain must collapse once readers drain")
 	for _, f := range subSegs {
 		require.NoFileExists(t, f, "retired subset must be unlinked after all readers drain")
 	}
@@ -130,8 +127,8 @@ func TestCaplinStateCloseRemovesNoFiles(t *testing.T) {
 	segPath, idxPath := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 100_000, logger)
 
 	snTypes := SnapshotTypes{
-		KeyValueGetters: map[CaplinStateType]KeyValueGetter{mustCaplinStateType(t, table): nil},
-		Compression:     map[CaplinStateType]bool{},
+		KeyValueGetters: map[string]KeyValueGetter{table: nil},
+		Compression:     map[string]bool{},
 	}
 	s := NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, nil, dirs, snTypes, logger)
 	require.NoError(t, s.OpenFolder())
@@ -150,7 +147,6 @@ func TestCaplinStateCloseKeepsFdsForPinnedOlderGeneration(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
 	table := kv.BlockRoot
-	typ := mustCaplinStateType(t, table)
 
 	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 100_000, logger)
 
@@ -162,7 +158,7 @@ func TestCaplinStateCloseKeepsFdsForPinnedOlderGeneration(t *testing.T) {
 
 	s.Close() // publishes empty g2; g0 still pinned, so the chain has not drained
 
-	segs := v.VisibleSegments(typ)
+	segs := v.VisibleSegments(table)
 	require.NotEmpty(t, segs, "pinned view must still see its segment")
 	require.NotNil(t, segs[0].src.Decompressor, "Close must not close fds a pinned older generation references")
 
@@ -182,7 +178,6 @@ func TestCaplinStateOpenListSinglePublishNoTransient(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
 	table := kv.BlockRoot
-	typ := mustCaplinStateType(t, table)
 
 	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 100_000, logger)                  // A (kept)
 	cSeg, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 200_000, 250_000, logger) // C (goes stale)
@@ -191,8 +186,8 @@ func TestCaplinStateOpenListSinglePublishNoTransient(t *testing.T) {
 
 	v := s.View() // pin so the pre-reopen generation cannot be reclaimed
 	defer v.Close()
-	pinned := s._visibleFiles.visible.Load()
-	require.Equal(t, pinned, s._visibleFiles.oldest, "chain must be collapsed to the pinned generation")
+	pinned := s.visible.Load()
+	require.Equal(t, pinned, s.oldestVisible, "chain must be collapsed to the pinned generation")
 
 	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger) // B (new)
 
@@ -208,9 +203,9 @@ func TestCaplinStateOpenListSinglePublishNoTransient(t *testing.T) {
 	}
 	require.NoError(t, s.OpenList(kept, true))
 
-	require.NotEqual(t, pinned, s._visibleFiles.visible.Load(), "OpenList must publish a new generation")
-	require.Same(t, s._visibleFiles.visible.Load(), pinned.next,
+	require.NotEqual(t, pinned, s.visible.Load(), "OpenList must publish a new generation")
+	require.Same(t, s.visible.Load(), pinned.next,
 		"OpenList must publish exactly one generation: the pinned gen links directly to it, no transient in between")
-	require.Equal(t, []Range{{from: 0, to: 100_000}, {from: 100_000, to: 150_000}}, s.coveredRangesForType(typ),
+	require.Equal(t, []Range{{from: 0, to: 100_000}, {from: 100_000, to: 150_000}}, s.coveredRangesForType(table),
 		"published generation shows A+B (new B present, stale C gone) — never a transient missing B")
 }

@@ -252,7 +252,7 @@ var preflightTestAccessors = []string{".bt", ".kvi", ".kvei"}
 // are made unique for easier debugging.
 func fakeInputFiles(firstStep uint64, n int) VisibleFiles {
 	out := make(VisibleFiles, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		s := firstStep + uint64(i)
 		out[i] = fakeVisibleFile{
 			path:  fmt.Sprintf("/fake/v1-commitment.%d-%d.kv", s, s+1),

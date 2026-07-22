@@ -12,6 +12,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   sync-with-externalcl:
     runs-on: [self-hosted, qa, linux, X64, long-running]
@@ -36,6 +39,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Clean Erigon Build & Data Directories
         run: |

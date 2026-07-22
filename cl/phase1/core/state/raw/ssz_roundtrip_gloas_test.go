@@ -69,7 +69,7 @@ func TestGloasSSZRoundTrip(t *testing.T) {
 
 		// Compare leaves
 		t.Log("=== Leaf comparison ===")
-		for i := 0; i < StateLeafSizeGloas; i++ {
+		for i := range StateLeafSizeGloas {
 			leaf1 := common.BytesToHash(s1.leaves[i*32 : (i+1)*32])
 			leaf2 := common.BytesToHash(s2.leaves[i*32 : (i+1)*32])
 			if leaf1 != leaf2 {

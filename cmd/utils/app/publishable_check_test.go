@@ -193,7 +193,7 @@ func Test_CheckEmptyFutureForkTablesTolerated(t *testing.T) {
 			delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-%06d-%06d-%s.idx", r.fromStep, r.toStep, table))
 		}
 	}
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, true))
 	}
 }
@@ -229,8 +229,7 @@ func touchFiles(t *testing.T, dirs datadir.Dirs, ranges []snapRange) {
 	}
 	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil)
 
-	for typ := range stateSnapTypes.KeyValueGetters {
-		table := typ.String()
+	for table := range stateSnapTypes.KeyValueGetters {
 		// caplin/v1.1-000000-010500-ActiveValidatorIndicies.idx
 		// caplin/v1.1-000000-010500-ActiveValidatorIndicies.seg
 

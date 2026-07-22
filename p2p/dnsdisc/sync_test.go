@@ -69,7 +69,7 @@ func TestLinkCacheRandom(t *testing.T) {
 	// Create random links.
 	var lc linkCache
 	var remove []string
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		a, b := tags[rand.Intn(len(tags))], tags[rand.Intn(len(tags))]
 		lc.addLink(a, b)
 		remove = append(remove, a)

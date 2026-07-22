@@ -17,7 +17,8 @@
 package statechange
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"sync"
 
 	"github.com/erigontech/erigon/cl/abstract"
@@ -77,12 +78,11 @@ func ProcessRegistryUpdates(s abstract.BeaconState) error {
 
 	if s.Version() <= clparams.DenebVersion {
 		// order the queue accordingly.
-		sort.Slice(activationQueue, func(i, j int) bool {
-			//  Order by the sequence of activation_eligibility_epoch setting and then index.
-			if activationQueue[i].activationEligibilityEpoch != activationQueue[j].activationEligibilityEpoch {
-				return activationQueue[i].activationEligibilityEpoch < activationQueue[j].activationEligibilityEpoch
+		slices.SortFunc(activationQueue, func(a, b minimizeQueuedValidator) int {
+			if a.activationEligibilityEpoch != b.activationEligibilityEpoch {
+				return cmp.Compare(a.activationEligibilityEpoch, b.activationEligibilityEpoch)
 			}
-			return activationQueue[i].validatorIndex < activationQueue[j].validatorIndex
+			return cmp.Compare(a.validatorIndex, b.validatorIndex)
 		})
 		activationQueueLength := s.GetValidatorActivationChurnLimit()
 		if len(activationQueue) > int(activationQueueLength) {

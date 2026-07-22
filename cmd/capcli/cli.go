@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -1388,7 +1389,7 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
-	r, _ := stateSn.Get(snapshotsync.CaplinBlockRoot, 999424)
+	r, _ := stateSn.Get(kv.BlockRoot, 999424)
 	fmt.Printf("%x\n", r)
 
 	if err := stateSn.DumpCaplinState(ctx, to, c.StepSize, salt, dirs, runtime.NumCPU(), log.LvlInfo, log.Root()); err != nil {
@@ -1397,7 +1398,7 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
-	r, _ = stateSn.Get(snapshotsync.CaplinBlockRoot, 999424)
+	r, _ = stateSn.Get(kv.BlockRoot, 999424)
 	fmt.Printf("%x\n", r)
 
 	return nil
@@ -1483,7 +1484,7 @@ func (m *MakeDepositArgs) Run(ctx *Context) error {
 		return err
 	}
 
-	messageToSign := utils.Sha256(depositMessageRootForSigning[:], domain)
+	messageToSign := crypto.Sha256(depositMessageRootForSigning[:], domain)
 
 	signature := privateKeyBls.Sign(messageToSign[:])
 	signatureBytes := signature.Bytes()

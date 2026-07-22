@@ -25,6 +25,6 @@ import (
 )
 
 func TestCommitmentReferencesDefault(t *testing.T) {
-	assert.True(t, config3.DefaultReferencesInCommitmentBranches)
+	assert.False(t, config3.DefaultReferencesInCommitmentBranches)
 	assert.Equal(t, config3.DefaultReferencesInCommitmentBranches, Schema.CommitmentDomain.ReferencesInCommitmentBranches)
 }

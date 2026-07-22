@@ -139,7 +139,7 @@ func NewUDPv5Listener(ctx context.Context, cfg *P2PConfig, discCfg discover.Conf
 	}
 
 	// Start stream handlers
-	net, err := discover.ListenV5(conn, localNode, discCfg)
+	net, err := discover.ListenV5(ctx, conn, localNode, discCfg)
 	if err != nil {
 		return nil, err
 	}

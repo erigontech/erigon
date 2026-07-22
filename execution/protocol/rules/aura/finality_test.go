@@ -36,7 +36,7 @@ func TestRollingFinality(t *testing.T) {
 		signers := []common.Address{{0}, {1}, {2}, {3}, {4}, {5}}
 		f := NewRollingFinality(signers)
 		// 3 / 6 signers is < 51% so no finality.
-		for i := 0; i < 6; i++ {
+		for i := range 6 {
 			l, err := f.push(common.Hash{byte(i)}, uint64(i%3), []common.Address{signers[i%3]})
 			require.NoError(t, err)
 			assert.Empty(t, l)
@@ -45,7 +45,7 @@ func TestRollingFinality(t *testing.T) {
 		// blocks of the unverified chain become verified.
 		l, err := f.push(common.Hash{byte(6)}, 6, []common.Address{signers[4]})
 		require.NoError(t, err)
-		for i := uint64(0); i < 4; i++ {
+		for i := range uint64(4) {
 			assert.Equal(t, common.Hash{byte(i)}, l[i].hash)
 		}
 		assert.Len(t, l, 4)

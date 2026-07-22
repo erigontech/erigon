@@ -9,6 +9,9 @@ concurrency:
   group: rpc-clients-integration-${{ github.run_id }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   client-rpc-integ-tests:
     name: RPC Integration Tests - ${{ matrix.client }}
@@ -33,6 +36,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Read RPC version
         run: |

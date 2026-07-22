@@ -22,7 +22,7 @@ import (
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/ssz"
 )
@@ -34,7 +34,6 @@ func convertDepthToChunkSize(d int) int {
 func getTreeCacheSize(listLen int, cacheDepth int) int {
 	treeChunks := convertDepthToChunkSize(cacheDepth)
 	return (listLen + treeChunks - 1) / treeChunks
-
 }
 
 // byteBasedUint64Slice represents a dynamic Uint64Slice data type that is byte-backed.
@@ -191,7 +190,7 @@ func (arr *byteBasedUint64Slice) HashListSSZ() ([32]byte, error) {
 
 	coreRoot := arr.ComputeRoot()
 	lengthRoot := merkle_tree.Uint64Root(uint64(arr.l))
-	return utils.Sha256(coreRoot[:], lengthRoot[:]), nil
+	return crypto.Sha256(coreRoot[:], lengthRoot[:]), nil
 }
 
 // HashVectorSSZ computes the SSZ hash of the slice as a vector. It returns the hash and any error encountered.

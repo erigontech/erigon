@@ -113,14 +113,14 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 
 	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		k := c.Key()
 		require.Equal(t, keys[i], k)
 		c.Next()
 	}
 	c.Close()
 
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoErrorf(t, err, "i=%d", i)
 		require.Equalf(t, keys[i], cur.key, "i=%d", i)
@@ -173,7 +173,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
 	require.NotNil(t, c)
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		k := c.Key()
 		if !bytes.Equal(keys[i], k) {
 			fmt.Printf("\tinvalid, want %x\n", keys[i])
@@ -182,7 +182,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	}
 	c.Close()
 
-	for i := 0; i < 10000; i++ {
+	for i := range 10000 {
 		c, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
 		require.Equal(t, keys[i], c.Key())

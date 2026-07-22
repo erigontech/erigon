@@ -56,11 +56,11 @@ func TestCaplinStateWatermarkCapsAtZeroForUncoveredType(t *testing.T) {
 	writeCaplinStateFixture(t, dirs.SnapCaplin, present, 0, 100_000, logger)
 
 	types := SnapshotTypes{
-		KeyValueGetters: map[CaplinStateType]KeyValueGetter{
-			mustCaplinStateType(t, present): nil,
-			mustCaplinStateType(t, absent):  nil,
+		KeyValueGetters: map[string]KeyValueGetter{
+			present: nil,
+			absent:  nil,
 		},
-		Compression: map[CaplinStateType]bool{},
+		Compression: map[string]bool{},
 	}
 	s := NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, nil, dirs, types, logger)
 	t.Cleanup(s.Close)
@@ -74,22 +74,14 @@ func TestCaplinStateWatermarkCapsAtZeroForUncoveredType(t *testing.T) {
 // publish. Exercise it directly: min .to across configured types, and 0 whenever a configured
 // type is empty or the type list is empty.
 func TestIdxAvailabilityFrom(t *testing.T) {
-	a, b := CaplinStateType(0), CaplinStateType(1)
-	segs := func(fill map[CaplinStateType]VisibleSegments) []VisibleSegments {
-		out := make([]VisibleSegments, caplinStateTypeCount)
-		for k, v := range fill {
-			out[k] = v
-		}
-		return out
-	}
 	vs := func(to uint64) VisibleSegments {
 		return VisibleSegments{{Range: Range{from: 0, to: to}}}
 	}
 
-	require.Equal(t, uint64(100), idxAvailabilityFrom(segs(map[CaplinStateType]VisibleSegments{a: vs(100), b: vs(150)}), []CaplinStateType{a, b}),
+	require.Equal(t, uint64(100), idxAvailabilityFrom(map[string]VisibleSegments{"a": vs(100), "b": vs(150)}),
 		"min .to across configured types")
-	require.Zero(t, idxAvailabilityFrom(segs(map[CaplinStateType]VisibleSegments{a: vs(100)}), []CaplinStateType{a, b}),
+	require.Zero(t, idxAvailabilityFrom(map[string]VisibleSegments{"a": vs(100), "b": nil}),
 		"a configured type with no visible segment caps at 0")
-	require.Zero(t, idxAvailabilityFrom(segs(nil), nil),
+	require.Zero(t, idxAvailabilityFrom(map[string]VisibleSegments{}),
 		"no configured types yields 0")
 }

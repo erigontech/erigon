@@ -531,7 +531,7 @@ func TestReceiptEncode(t *testing.T) {
 	})
 	t.Run("Enc.List", func(t *testing.T) {
 		r1 := &ReceiptForStorage{FirstLogIndexWithinBlock: 1}
-		for i := 0; i < 13; i++ {
+		for range 13 {
 			r1.Logs = append(r1.Logs, &Log{Topics: make([]common.Hash, 300)})
 		}
 

@@ -104,7 +104,7 @@ func referenceSetCodeHash(tx *SetCodeTransaction) common.Hash {
 func TestTxHashMatchesReflectionReference(t *testing.T) {
 	t.Parallel()
 	tr := NewTRand()
-	for i := 0; i < 300; i++ {
+	for range 300 {
 		legacy := tr.RandTransaction(LegacyTxType).(*LegacyTx)
 		assertHash(t, "legacy", legacy.Hash(), referenceLegacyHash(legacy))
 
@@ -137,13 +137,13 @@ func assertHash(t *testing.T, name string, got, want common.Hash) {
 func TestAAHashMatchesMarshalBinary(t *testing.T) {
 	t.Parallel()
 	tr := NewTRand()
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		tx := tr.RandTransaction(AccountAbstractionTxType).(*AccountAbstractionTransaction)
 		var buf bytes.Buffer
 		if err := tx.MarshalBinary(&buf); err != nil {
 			t.Fatalf("MarshalBinary: %v", err)
 		}
-		if got, want := tx.Hash(), crypto.HashData(buf.Bytes()); got != want {
+		if got, want := tx.Hash(), crypto.Keccak256Hash(buf.Bytes()); got != want {
 			t.Fatalf("AA Hash %x != keccak(MarshalBinary) %x", got, want)
 		}
 	}

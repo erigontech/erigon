@@ -59,7 +59,7 @@ func RunBenchmark(ctx context.Context, c *rpcclient.Client, name string) (BenchO
 
 			// 10 reqs — warm avg + stddev
 			durs := make([]float64, 0, repeats)
-			for i := 0; i < repeats; i++ {
+			for i := range repeats {
 				t1 := time.Now()
 				if _, err := c.EthGetTransactionByHash(ctx, tx); err != nil {
 					return BenchOutput{}, fmt.Errorf("repeat %d eth_getTransactionByHash(%s): %w", i+1, tx, err)
