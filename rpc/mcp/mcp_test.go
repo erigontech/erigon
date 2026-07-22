@@ -49,6 +49,12 @@ func TestToJSONText(t *testing.T) {
 	}
 }
 
+func TestToJSONIndentNull(t *testing.T) {
+	require.Equal(t, "null", toJSONIndent(nil))
+	require.Equal(t, "null", toJSONIndent(json.RawMessage("null")))
+	require.Equal(t, "{}", toJSONIndent(json.RawMessage("{}")))
+}
+
 func resourceTemplateURIs(t *testing.T, srv *server.MCPServer) []string {
 	t.Helper()
 	resp := srv.HandleMessage(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"resources/templates/list"}`))

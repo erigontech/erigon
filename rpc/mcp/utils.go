@@ -18,8 +18,12 @@ func toJSONText(v any) string {
 	return string(formatted)
 }
 
-// toJSONIndent pretty-prints raw JSON bytes.
+// toJSONIndent pretty-prints raw JSON bytes. A nil message (what a JSON null
+// unmarshals into) renders as "null", not as an empty string.
 func toJSONIndent(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return "null"
+	}
 	var parsed any
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return string(raw)

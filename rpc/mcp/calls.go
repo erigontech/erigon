@@ -121,6 +121,7 @@ func (c *toolCall) buildArgs(req mcp.CallToolRequest) ([]any, error) {
 // hex quantities and hashes pass through. Erigon's BlockNumber decoders
 // accept decimal only as an unquoted JSON number, never as a quoted string.
 func normalizeBlockRef(s string) string {
+	s = strings.TrimSpace(s)
 	if s == "" || strings.HasPrefix(s, "0x") {
 		return s
 	}

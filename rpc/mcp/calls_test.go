@@ -134,6 +134,12 @@ func TestToolArgMapping(t *testing.T) {
 			wantArgs: []any{"0x14fb180", false},
 		},
 		{
+			tool:     "eth_getBlockByNumber",
+			args:     map[string]any{"blockNumber": " 22000000 "},
+			result:   `{}`,
+			wantArgs: []any{"0x14fb180", false},
+		},
+		{
 			tool:     "eth_getLogs",
 			args:     map[string]any{"fromBlock": "100", "toBlock": "200"},
 			result:   `[]`,
