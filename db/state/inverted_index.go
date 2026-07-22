@@ -187,18 +187,18 @@ func filesFromDir(dir string) ([]string, error) {
 	return filtered, nil
 }
 
-func (ii *InvertedIndex) openList(ctx context.Context, fNames, accessorFiles []string) error {
-	ii.closeWhatNotInList(fNames)
+func (ii *InvertedIndex) openList(ctx context.Context, fNames, accessorFiles []string) ([]*FilesItem, error) {
+	retired := ii.retireFilesNotInList(fNames)
 	ii.scanDirtyFiles(fNames)
 	if err := ii.openDirtyFiles(ctx, fNames, accessorFiles); err != nil {
-		return fmt.Errorf("InvertedIndex(%s).openDirtyFiles: %w", ii.FilenameBase, err)
+		return retired, fmt.Errorf("InvertedIndex(%s).openDirtyFiles: %w", ii.FilenameBase, err)
 	}
-	return nil
+	return retired, nil
 }
 
-func (ii *InvertedIndex) openFolder(ctx context.Context, r *ScanDirsResult) error {
+func (ii *InvertedIndex) openFolder(ctx context.Context, r *ScanDirsResult) ([]*FilesItem, error) {
 	if ii.Disable {
-		return nil
+		return nil, nil
 	}
 	return ii.openList(ctx, r.iiFiles, r.accessorFiles)
 }
@@ -292,6 +292,10 @@ func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.G
 
 func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 	closeWhatNotInList(ii.dirtyFiles, fNames)
+}
+
+func (ii *InvertedIndex) retireFilesNotInList(fNames []string) []*FilesItem {
+	return detachFilesNotInList(ii.dirtyFiles, fNames, ii.FilenameBase, ii.logger)
 }
 
 func (ii *InvertedIndex) Tables() []string { return []string{ii.KeysTable, ii.ValuesTable} }

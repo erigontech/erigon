@@ -345,6 +345,7 @@ type retireReason int
 const (
 	retireReasonMerged retireReason = iota + 1
 	retireReasonAged
+	retireReasonDeletedFromDisk
 )
 
 func (r retireReason) String() string {
@@ -353,6 +354,8 @@ func (r retireReason) String() string {
 		return "merged"
 	case retireReasonAged:
 		return "aged"
+	case retireReasonDeletedFromDisk:
+		return "deleted-from-disk"
 	default:
 		return "unknown"
 	}
@@ -849,18 +852,41 @@ func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, aggregationStep uint6
 	return
 }
 
-// closeWhatNotInList closes and removes from dirtyFiles all items whose decompressor file name
-// is not in the provided fNames list.
-func closeWhatNotInList(dirtyFiles *DirtyFiles, fNames []string) {
+// filesNotInList collects (without removing or closing) every dirtyFiles item whose
+// decompressor file is not in fNames. A nil decompressor has no backing file, so it
+// always qualifies.
+func filesNotInList(dirtyFiles *DirtyFiles, fNames []string) []*FilesItem {
 	protectFiles := make(map[string]struct{}, len(fNames))
 	for _, f := range fNames {
 		protectFiles[f] = struct{}{}
 	}
-	dirtyFiles.CloseIf(func(item *FilesItem) bool {
+	var outs []*FilesItem
+	dirtyFiles.Scan(func(item *FilesItem) bool {
 		if item.decompressor == nil {
+			outs = append(outs, item)
 			return true
 		}
-		_, protected := protectFiles[item.decompressor.FileName()]
-		return !protected
+		if _, protected := protectFiles[item.decompressor.FileName()]; !protected {
+			outs = append(outs, item)
+		}
+		return true
 	})
+	return outs
+}
+
+// closeWhatNotInList closes and removes from dirtyFiles all items whose decompressor file name
+// is not in the provided fNames list.
+func closeWhatNotInList(dirtyFiles *DirtyFiles, fNames []string) {
+	dirtyFiles.CloseItems(filesNotInList(dirtyFiles, fNames))
+}
+
+// detachFilesNotInList removes from dirtyFiles — but does not close — every item
+// whose decompressor file is absent from fNames, returning them for the caller to
+// attach to the outgoing visible generation. It must not close in place: a reader
+// may still hold the same FilesItem, so physical close waits until that reader's
+// generation drains (via recalcVisibleFiles/reclaimRetiredLocked).
+func detachFilesNotInList(dirtyFiles *DirtyFiles, fNames []string, filenameBase string, logger log.Logger) []*FilesItem {
+	outs := filesNotInList(dirtyFiles, fNames)
+	retire(dirtyFiles, outs, filenameBase, retireReasonDeletedFromDisk, logger)
+	return outs
 }

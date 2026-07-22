@@ -323,18 +323,19 @@ func (dt *DomainRoTx) NewWriter() *DomainBufferedWriter { return dt.newWriter(dt
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (d *Domain) OpenList(ctx context.Context, scanResult ScanDirsResult) error {
-	if err := d.History.openList(ctx, scanResult.iiFiles, scanResult.historyFiles, scanResult.accessorFiles); err != nil {
-		return err
+func (d *Domain) OpenList(ctx context.Context, scanResult ScanDirsResult) ([]*FilesItem, error) {
+	retired, err := d.History.openList(ctx, scanResult.iiFiles, scanResult.historyFiles, scanResult.accessorFiles)
+	if err != nil {
+		return retired, err
 	}
 
-	d.closeWhatNotInList(scanResult.domainFiles)
+	retired = append(retired, d.retireFilesNotInList(scanResult.domainFiles)...)
 	d.scanDirtyFiles(scanResult.domainFiles)
 	if err := d.openDirtyFiles(ctx, scanResult.domainFiles); err != nil {
-		return fmt.Errorf("Domain(%s).openList: %w", d.FilenameBase, err)
+		return retired, fmt.Errorf("Domain(%s).openList: %w", d.FilenameBase, err)
 	}
 	d.protectFromHistoryFilesAheadOfDomainFiles()
-	return nil
+	return retired, nil
 }
 
 // protectFromHistoryFilesAheadOfDomainFiles - in some corner-cases app may see more .ef/.v files than .kv:
@@ -344,9 +345,9 @@ func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
 	d.closeFilesAfterStep(kv.Step(d.dirtyFilesEndTxNumMinimax() / d.stepSize))
 }
 
-func (d *Domain) openFolder(ctx context.Context, r *ScanDirsResult) error {
+func (d *Domain) openFolder(ctx context.Context, r *ScanDirsResult) ([]*FilesItem, error) {
 	if d.Disable {
-		return nil
+		return nil, nil
 	}
 	return d.OpenList(ctx, *r)
 }
@@ -381,6 +382,10 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) 
 
 func (d *Domain) closeWhatNotInList(fNames []string) {
 	closeWhatNotInList(d.dirtyFiles, fNames)
+}
+
+func (d *Domain) retireFilesNotInList(fNames []string) []*FilesItem {
+	return detachFilesNotInList(d.dirtyFiles, fNames, d.FilenameBase, d.logger)
 }
 
 // calcVisibleFiles is pure — it does not mutate d, d.History, or d.History.InvertedIndex.

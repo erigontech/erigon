@@ -569,28 +569,47 @@ func (a *Aggregator) openFolder() error {
 		return err
 	}
 
+	standaloneIIs := a.standaloneIIs()
+	retiredByDomain := make([][]*FilesItem, len(a.d))
+	retiredByII := make([][]*FilesItem, len(standaloneIIs))
+
 	eg, ctx := errgroup.WithContext(a.ctx)
-	for _, d := range a.d {
+	for id, d := range a.d {
 		if d.Disable {
 			continue
 		}
 
-		d := d
+		id, d := id, d
 		eg.Go(func() error {
-			return d.openFolder(ctx, scanDirsRes)
+			retired, err := d.openFolder(ctx, scanDirsRes)
+			retiredByDomain[id] = retired
+			return err
 		})
 	}
-	for _, ii := range a.standaloneIIs() {
+	for id, ii := range standaloneIIs {
 		if ii.Disable {
 			continue
 		}
-		ii := ii
-		eg.Go(func() error { return ii.openFolder(ctx, scanDirsRes) })
+		id, ii := id, ii
+		eg.Go(func() error {
+			retired, err := ii.openFolder(ctx, scanDirsRes)
+			retiredByII[id] = retired
+			return err
+		})
 	}
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("openFolder: %w", err)
 	}
-	a.recalcVisibleFiles(nil)
+
+	var retired []*FilesItem
+	for _, r := range retiredByDomain {
+		retired = append(retired, r...)
+	}
+	for _, r := range retiredByII {
+		retired = append(retired, r...)
+	}
+	// Retire (not close in place) files gone from disk — see detachFilesNotInList.
+	a.recalcVisibleFiles(retired)
 	return nil
 }
 
