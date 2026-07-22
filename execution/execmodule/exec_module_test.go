@@ -1599,14 +1599,16 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 
 func TestGetPayloadBodiesEmptyBlockAccessList(t *testing.T) {
 	t.Parallel()
-	m, chainPack := newPayloadBodiesBALTestChain(t, chain.AllProtocolChanges)
-	block := chainPack.Blocks[0]
-	require.NotNil(t, block.Header().BlockAccessListHash)
-	err := m.DB.Update(t.Context(), func(tx kv.RwTx) error {
-		return rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), []byte{0xc0})
-	})
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, nil)
 	require.NoError(t, err)
-	requirePayloadBodiesBlockAccessList(t, m, block, []byte{0xc0})
+	block := chainPack.Blocks[0]
+	// A present-but-empty BAL (empty RLP list) is served verbatim, not treated
+	// as absent and regenerated. Write the block and its empty BAL to the DB and
+	// read them back through a synchronous getter that reads the DB directly.
+	writeCanonicalBlockFixture(t, m.DB, block, []byte{0xc0})
+	em := execmodule.NewGetterMockForTest(m.DB, m.BlockReader, m.Engine, m.ChainConfig, m.Log)
+	requireMockGetterBAL(t, em, block, []byte{0xc0})
 }
 
 func TestGetPayloadBodiesPreAmsterdamBlockAccessList(t *testing.T) {
@@ -1625,8 +1627,12 @@ func TestGetPayloadBodiesPrunedHistoryBlockAccessList(t *testing.T) {
 	m, chainPack := newPayloadBodiesBALTestChain(t, chain.AllProtocolChanges)
 	block := chainPack.Blocks[0]
 	require.NotNil(t, block.Header().BlockAccessListHash)
+	// Remove the stored BAL and the state history it could be regenerated from,
+	// then read through a synchronous DB-backed getter: with nothing to serve
+	// and no history to re-execute against, it must degrade to nil.
 	prunePayloadBodiesBALHistory(t, m, block)
-	requirePayloadBodiesBlockAccessList(t, m, block, nil)
+	em := execmodule.NewGetterMockForTest(m.DB, m.BlockReader, m.Engine, m.ChainConfig, m.Log)
+	requireMockGetterBAL(t, em, block, nil)
 }
 
 func newPayloadBodiesBALTestChain(t *testing.T, config *chain.Config) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
@@ -1646,6 +1652,44 @@ func requirePayloadBodiesBlockAccessList(t *testing.T, m *execmoduletester.ExecM
 	require.NotNil(t, byHash[0])
 	require.Equal(t, want, byHash[0].BlockAccessList)
 	byRange, err := m.ExecModule.GetPayloadBodiesByRange(t.Context(), block.NumberU64(), 1)
+	require.NoError(t, err)
+	require.Len(t, byRange, 1)
+	require.NotNil(t, byRange[0])
+	require.Equal(t, want, byRange[0].BlockAccessList)
+}
+
+// writeCanonicalBlockFixture stores a block (header, canonical marker, body) and
+// optionally its BAL directly in the DB, without going through the execution
+// module — for getter tests that assert DB-sourced serving deterministically.
+func writeCanonicalBlockFixture(t *testing.T, db kv.TemporalRwDB, block *types.Block, bal []byte) {
+	t.Helper()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := rawdb.WriteHeader(tx, block.Header()); err != nil {
+			return err
+		}
+		if err := rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
+			return err
+		}
+		if _, err := rawdb.WriteRawBodyIfNotExists(tx, block.Hash(), block.NumberU64(), block.RawBody()); err != nil {
+			return err
+		}
+		if bal != nil {
+			return rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), bal)
+		}
+		return nil
+	}))
+}
+
+// requireMockGetterBAL asserts the payload-bodies getters resolve the block's
+// BAL to want, reading through a synchronous DB-backed ExecModule.
+func requireMockGetterBAL(t *testing.T, em *execmodule.ExecModule, block *types.Block, want []byte) {
+	t.Helper()
+	byHash, err := em.GetPayloadBodiesByHash(t.Context(), []common.Hash{block.Hash()})
+	require.NoError(t, err)
+	require.Len(t, byHash, 1)
+	require.NotNil(t, byHash[0])
+	require.Equal(t, want, byHash[0].BlockAccessList)
+	byRange, err := em.GetPayloadBodiesByRange(t.Context(), block.NumberU64(), 1)
 	require.NoError(t, err)
 	require.Len(t, byRange, 1)
 	require.NotNil(t, byRange[0])
