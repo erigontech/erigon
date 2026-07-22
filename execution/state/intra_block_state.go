@@ -2363,7 +2363,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 		al := &sdb.accessList
 
 		al.AddAddress(sender)
-		if !dst.IsNil() {
+		if !rules.IsAmsterdam && !dst.IsNil() {
 			al.AddAddress(dst)
 			// If it's a create-tx, the destination will be added inside evm.create
 		}
@@ -2386,7 +2386,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 			sdb.AddAddressToAccessList(addr)
 		}
 
-		if !dst.IsNil() {
+		if !rules.IsAmsterdam && !dst.IsNil() {
 			dd, ok, err := sdb.GetDelegatedDesignation(dst)
 			if err != nil {
 				return err
