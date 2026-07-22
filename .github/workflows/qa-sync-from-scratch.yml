@@ -1,5 +1,4 @@
-name: QA - Sync from scratch
-
+name: QA - Sync from scratch (archive node)
 on:
   push:
     branches:
