@@ -726,7 +726,7 @@ func rpcToolCalls() []toolCall {
 			name: "debug_getModifiedAccountsByNumber", desc: "List accounts modified in a block range",
 			params: []param{
 				{name: "startBlock", desc: "Start block number", kind: pBlockNum, required: true},
-				{name: "endBlock", desc: "End block number (default: start block)", kind: pBlockNum, omit: true},
+				{name: "endBlock", desc: "End block number; covers blocks startBlock+1..endBlock. Omit to query exactly startBlock", kind: pBlockNum, omit: true},
 			},
 		},
 		{
