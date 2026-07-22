@@ -1366,7 +1366,7 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 	if err != nil {
 		return err
 	}
-	toStep := toTxNum / agg.StepSize()
+	toStep := toTxNum / tx.Debug().StepSize()
 	var toDelete []string
 	for _, dirPath := range []string{dirs.Snap, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors} {
 		filePaths, err := dir2.ListFiles(dirPath)
@@ -2012,7 +2012,6 @@ func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger
 	}
 
 	verifier := verify.NewHistoryVerifier(blockReader, chainConfig, engine, workers, logger)
-	stepSize := agg.StepSize()
 
 	// Iterate domain files to find history ranges to verify.
 	// We use AccountsDomain files as the canonical list of step ranges,
@@ -2022,6 +2021,7 @@ func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger
 		return err
 	}
 	defer tx.Rollback()
+	stepSize := tx.Debug().StepSize()
 	aggTx := state.AggTx(tx)
 	files := aggTx.Files(kv.AccountsDomain)
 
@@ -2709,7 +2709,7 @@ func doBlkTxNum(ctx context.Context, cliCtx *cli.Command) error {
 		if err != nil {
 			return err
 		}
-		stepSize := agg.StepSize()
+		stepSize := tx.Debug().StepSize()
 		minStep := min / stepSize
 		maxStep := max / stepSize
 		logger.Info("out", "block", blkNumber, "min_txnum", min, "max_txnum", max, "min_step", minStep, "max_step", maxStep)
