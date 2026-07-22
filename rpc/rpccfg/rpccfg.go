@@ -84,6 +84,32 @@ type EthApiConfig struct {
 	RpcTxSyncMaxTimeout         time.Duration
 }
 
+// DebugApiConfig defines the configurable parameters for the debug_ namespace
+type DebugApiConfig struct {
+	GasCap            uint64
+	GethCompatibility bool // Geth-compatible storage iteration order for debug_storageRangeAt
+}
+
+// TraceApiConfig defines the configurable parameters for the trace_ namespace
+type TraceApiConfig struct {
+	MaxTraces     uint64
+	GasCap        uint64
+	Compatibility bool // Bug for bug compatibility with OpenEthereum
+}
+
+// GraphQLApiConfig defines the configurable parameters for the GraphQL API
+type GraphQLApiConfig struct {
+	GasCap          uint64
+	ReturnDataLimit int
+}
+
+// OverlayApiConfig defines the configurable parameters for the overlay_ namespace
+type OverlayApiConfig struct {
+	GasCap                    uint64
+	OverlayGetLogsTimeout     time.Duration
+	OverlayReplayBlockTimeout time.Duration
+}
+
 var SlowLogBlackList = []string{
 	"eth_getBlock", "eth_getBlockByNumber", "eth_getBlockByHash", "eth_blockNumber",
 	"erigon_blockNumber", "erigon_getHeaderByNumber", "erigon_getHeaderByHash", "erigon_getBlockByTimestamp",
