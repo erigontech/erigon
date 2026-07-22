@@ -26,9 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-var (
-	ErrIgnore = errors.New("ignore")
-)
+var ErrIgnore = errors.New("ignore")
 
 // OnAttestation processes incoming attestations.
 func (f *ForkChoiceStore) OnAttestation(

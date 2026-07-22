@@ -60,7 +60,6 @@ func getTestBlobSidecars(blockHeader *cltypes.SignedBeaconBlockHeader) []*cltype
 		))
 	}
 	return out
-
 }
 
 func TestBlobsByRangeHandler(t *testing.T) {

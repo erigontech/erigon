@@ -35,7 +35,6 @@ import (
 )
 
 func TestGetStateFork(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
@@ -98,7 +97,6 @@ func stringRPCErr(r io.Reader) string {
 }
 
 func TestGetStateRoot(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
@@ -156,7 +154,6 @@ func TestGetStateRoot(t *testing.T) {
 }
 
 func TestGetStateFullHistorical(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 
@@ -249,7 +246,6 @@ func TestGetStateFullHistorical(t *testing.T) {
 }
 
 func TestGetStateFullForkchoice(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
@@ -318,7 +314,6 @@ func TestGetStateFullForkchoice(t *testing.T) {
 }
 
 func TestGetStateSyncCommittees(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
@@ -383,7 +378,6 @@ func TestGetStateSyncCommittees(t *testing.T) {
 }
 
 func TestGetStateSyncCommitteesHistorical(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
@@ -441,7 +435,6 @@ func TestGetStateSyncCommitteesHistorical(t *testing.T) {
 }
 
 func TestGetStateFinalityCheckpoints(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 
@@ -499,7 +492,6 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 }
 
 func TestGetRandao(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 

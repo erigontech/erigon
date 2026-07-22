@@ -145,7 +145,8 @@ func (m *SlotData) getSchema() []any {
 	}
 
 	if m.Version >= clparams.ElectraVersion {
-		schema = append(schema,
+		schema = append(
+			schema,
 			&m.DepositRequestsStartIndex,
 			&m.DepositBalanceToConsume,
 			&m.ExitBalanceToConsume,
@@ -155,7 +156,8 @@ func (m *SlotData) getSchema() []any {
 		)
 	}
 	if m.Version >= clparams.GloasVersion {
-		schema = append(schema,
+		schema = append(
+			schema,
 			&m.NextWithdrawalBuilderIndex,
 			m.LatestBlockHash[:],
 		)
