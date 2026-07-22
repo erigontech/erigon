@@ -73,7 +73,8 @@ func readFromBitset(bitset []byte, i int) bool {
 }
 
 func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, publicKeysRegistry public_keys_registry.PublicKeyRegistry, validatorSet []solid.Validator, randaoMixes solid.HashVectorSSZ,
-	genesisValidatorsRoot common.Hash, fork *cltypes.Fork, activeBalance, epoch uint64, checkpoint solid.Checkpoint) *checkpointState {
+	genesisValidatorsRoot common.Hash, fork *cltypes.Fork, activeBalance, epoch uint64, checkpoint solid.Checkpoint,
+) *checkpointState {
 	balances := make([]uint64, len(validatorSet))
 
 	bitsetSize := (len(validatorSet) + 7) / 8
@@ -202,6 +203,7 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 	}
 	return true, nil
 }
+
 func (c *checkpointState) epochAtSlot(slot uint64) uint64 {
 	return slot / c.beaconConfig.SlotsPerEpoch
 }

@@ -47,7 +47,6 @@ func (f *Fork) EncodeSSZ(dst []byte) ([]byte, error) {
 
 func (f *Fork) DecodeSSZ(buf []byte, _ int) error {
 	return ssz2.UnmarshalSSZ(buf, 0, f.PreviousVersion[:], f.CurrentVersion[:], &f.Epoch)
-
 }
 
 func (f *Fork) EncodingSizeSSZ() int {

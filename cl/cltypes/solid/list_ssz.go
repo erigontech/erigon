@@ -92,7 +92,6 @@ func (l *ListSSZ[T]) Static() bool {
 func (l *ListSSZ[T]) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	if !l.static {
 		return ssz.EncodeDynamicList(buf, l.list)
-
 	}
 	dst = buf
 	for _, element := range l.list {

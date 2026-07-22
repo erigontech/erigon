@@ -230,7 +230,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	if err != nil {
 		return nil, err
 	}
-	if (epoch)*a.beaconChainCfg.SlotsPerEpoch >= stageStateProgress {
+	if epoch*a.beaconChainCfg.SlotsPerEpoch >= stageStateProgress {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is not yet reconstructed", epoch))
 	}
 
@@ -250,7 +250,8 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	// finality case
 	activeIdxs, err := state_accessors.ReadActiveIndicies(
 		stateGetter,
-		epoch*a.beaconChainCfg.SlotsPerEpoch)
+		epoch*a.beaconChainCfg.SlotsPerEpoch,
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -406,7 +406,7 @@ func TestSnapshotPayloadAttestationPTCsCopiesMessageSlots(t *testing.T) {
 
 	snapshot := snapshotPayloadAttestationPTCs(provider, []*cltypes.PayloadAttestationMessage{
 		nil,
-		&cltypes.PayloadAttestationMessage{Data: nil},
+		{Data: nil},
 		msg,
 	})
 

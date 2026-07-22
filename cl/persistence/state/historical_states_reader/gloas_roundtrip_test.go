@@ -48,7 +48,8 @@ import (
 // per-slot GLOAS fields.
 func compressSSZ(t *testing.T, obj interface {
 	EncodeSSZ(buf []byte) ([]byte, error)
-}) []byte {
+},
+) []byte {
 	t.Helper()
 	sszData, err := obj.EncodeSSZ(nil)
 	require.NoError(t, err)
@@ -503,7 +504,8 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 
 	// BuilderPendingWithdrawals list
 	expectedBPW := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](
-		int(cfg.BuilderPendingWithdrawalsLimit), new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
+		int(cfg.BuilderPendingWithdrawalsLimit), new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ(),
+	)
 	expectedBPW.Append(&cltypes.BuilderPendingWithdrawal{
 		FeeRecipient: common.HexToAddress("0xdddddddddddddddddddddddddddddddddddddddd"),
 		Amount:       777, BuilderIndex: 3,
@@ -511,7 +513,8 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 
 	// PayloadExpectedWithdrawals list
 	expectedPEW := solid.NewStaticListSSZ[*cltypes.Withdrawal](
-		int(cfg.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ())
+		int(cfg.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ(),
+	)
 
 	// ExecutionPayloadAvailability bit-vector — seed two non-zero bits
 	expectedEPA := solid.NewBitVector(int(cfg.SlotsPerHistoricalRoot))
