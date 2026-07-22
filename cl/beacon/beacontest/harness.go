@@ -375,14 +375,15 @@ func (s *Source) executeRemote(ctx context.Context) (json.RawMessage, int, error
 		body = bytes.NewBuffer(msg)
 	}
 	var purl *url.URL
-	if s.Remote != nil {
+	switch {
+	case s.Remote != nil:
 		niceUrl, err := url.Parse(*s.Remote)
 		if err != nil {
 			return nil, 0, err
 		}
 		purl = niceUrl
 
-	} else if s.Handler != nil {
+	case s.Handler != nil:
 		handler, ok := s.h.handlers[*s.Handler]
 		if !ok {
 			return nil, 0, fmt.Errorf("handler not registered: %s", *s.Handler)
@@ -394,7 +395,7 @@ func (s *Source) executeRemote(ctx context.Context) (json.RawMessage, int, error
 			return nil, 0, err
 		}
 		purl = niceUrl
-	} else {
+	default:
 		panic("impossible code path. bug? source.Execute() should ensure this never happens")
 	}
 
