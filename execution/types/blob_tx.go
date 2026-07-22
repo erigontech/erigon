@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -369,17 +370,18 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if stx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
-	stx.To = &common.Address{}
 	if kind, size, err := s.Kind(); err != nil {
 		return err
 	} else if kind == rlp.Byte {
-		return fmt.Errorf("wrong size for To: 1")
-	} else if size != 20 {
+		return errors.New("wrong size for To: 1")
+	} else if size != length.Addr {
 		return fmt.Errorf("wrong size for To: %d", size)
 	}
-	if err = s.ReadBytes(stx.To[:]); err != nil {
+	to, err := s.Addr()
+	if err != nil {
 		return err
 	}
+	stx.To = &to
 	if err = s.ReadUint256(&stx.Value); err != nil {
 		return err
 	}
@@ -396,9 +398,8 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode BlobVersionedHashes
-	stx.BlobVersionedHashes = []common.Hash{}
-	if err = decodeBlobVersionedHashes(&stx.BlobVersionedHashes, s); err != nil {
-		return err
+	if stx.BlobVersionedHashes, err = decodeHashList(s); err != nil {
+		return fmt.Errorf("read BlobVersionedHashes: %w", err)
 	}
 	if len(stx.BlobVersionedHashes) == 0 {
 		return errors.New("a blob stx must contain at least one blob")
@@ -414,22 +415,4 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	return s.ListEnd()
-}
-
-func decodeBlobVersionedHashes(hashes *[]common.Hash, s *rlp.Stream) error {
-	_, err := s.List()
-	if err != nil {
-		return fmt.Errorf("open BlobVersionedHashes: %w", err)
-	}
-	for s.MoreDataInList() {
-		var h common.Hash
-		if err = s.ReadBytes(h[:]); err != nil {
-			return fmt.Errorf("read blobVersionedHash: %w", err)
-		}
-		*hashes = append(*hashes, h)
-	}
-	if err = s.ListEnd(); err != nil {
-		return fmt.Errorf("close BlobVersionedHashes: %w", err)
-	}
-	return nil
 }

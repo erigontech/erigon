@@ -1009,10 +1009,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 	var firstErr error
 
 	for range numWorkers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			workerTx, err := api.kv.BeginTemporalRo(ctx)
 			if err != nil {
 				errOnce.Do(func() { firstErr = err; cancel() })
@@ -1042,6 +1039,8 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 					return
 				}
 
+				// Copy is needed since each worker has its own independent state.
+				// workerReader reads state up to but not including the current transaction.
 				workerReader := state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(job.txIndex))
 				workerIbs := state.New(workerReader)
 
@@ -1052,7 +1051,6 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				ot.compat = api.compatibility
 				ot.r = traceResult
 				ot.idx = []string{fmt.Sprintf("%d-", job.txIndex)}
-				// The parallel path only activates when !hasStateDiff && !hasVmTrace, so
 				// TraceTypeTrace is always active here; initialise traceAddr unconditionally.
 				ot.traceAddr = []int{}
 
@@ -1091,7 +1089,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				traceResult.Output = common.Copy(execResult.ReturnData)
 				results[job.txIndex] = traceResult
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

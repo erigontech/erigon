@@ -89,7 +89,6 @@ func TestDecreaseBalance(t *testing.T) {
 }
 
 func TestInitiatieValidatorExit(t *testing.T) {
-
 	v1 := solid.NewValidator()
 	v1.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
 	v1.SetActivationEpoch(0)

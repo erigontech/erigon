@@ -302,9 +302,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 	threads := min(runtime.NumCPU(), int(numBlocks))
 	jobs := make(chan *blockReplayTask, threads)
 	for range threads {
-		pend.Add(1)
-		go func() {
-			defer pend.Done()
+		pend.Go(func() {
 			tx, err := api.db.BeginTemporalRo(ctx)
 			if err != nil {
 				log.Error("Error", "error", err)
@@ -344,7 +342,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 
 				results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Logs: logs}
 			}
-		}()
+		})
 	}
 
 	hasOverrides := false
