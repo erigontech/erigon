@@ -263,7 +263,7 @@ func (e *ErigonMCPServer) handleResourceBlockSummary(ctx context.Context, req mc
 	}
 
 	var block json.RawMessage
-	if err := e.client.CallContext(ctx, &block, "eth_getBlockByNumber", blockNumStr, false); err != nil {
+	if err := e.client.CallContext(ctx, &block, "eth_getBlockByNumber", normalizeBlockRef(blockNumStr), false); err != nil {
 		return nil, fmt.Errorf("eth_getBlockByNumber: %w", err)
 	}
 
