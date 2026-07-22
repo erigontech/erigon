@@ -183,10 +183,15 @@ func convertPayloadBodies(bodies []*execmodule.PayloadBody) []*engine_types.Exec
 		for j, tx := range body.Transactions {
 			txs[j] = tx
 		}
+		var blockAccessList *hexutil.Bytes
+		if body.BlockAccessList != nil {
+			bal := hexutil.Bytes(body.BlockAccessList)
+			blockAccessList = &bal
+		}
 		result[i] = &engine_types.ExecutionPayloadBodyV2{
 			Transactions:    txs,
 			Withdrawals:     body.Withdrawals,
-			BlockAccessList: body.BlockAccessList,
+			BlockAccessList: blockAccessList,
 		}
 	}
 	return result

@@ -632,7 +632,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if to < (safetyMargin + blocksPerStatefulFile) {
 			return nil
 		}
-		to = to - (safetyMargin + blocksPerStatefulFile)
+		to -= (safetyMargin + blocksPerStatefulFile)
 		if from >= to {
 			return nil
 		}
