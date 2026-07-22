@@ -357,9 +357,8 @@ MainLoop:
 				break
 			}
 
-			parts := strings.Split(string(kk), "=")
-			k, v := parts[0], parts[1]
-			if k == "database" {
+			k, v, ok := strings.Cut(string(kk), "=")
+			if ok && k == "database" {
 				bucket = v
 			}
 		}

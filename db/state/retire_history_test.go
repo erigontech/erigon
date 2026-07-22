@@ -268,9 +268,7 @@ func TestRetire_ReclaimConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 	for range 16 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -281,7 +279,7 @@ func TestRetire_ReclaimConcurrent(t *testing.T) {
 				_ = tx.d[kv.AccountsDomain].ht.files.EndTxNum()
 				tx.Close()
 			}
-		}()
+		})
 	}
 
 	_, err := aggRetire(t, agg, kv.RetireCutoffs{Default: 2 * stepSize})

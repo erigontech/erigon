@@ -136,6 +136,7 @@ func TestSyncContributionServiceSuccess(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockFuncs := &mockFuncs{ctrl: ctrl}
+	saveSignatureGlobals(t)
 	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
 	s, sd, clock := setupSyncContributionServiceTest(t, ctrl)
 	clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()

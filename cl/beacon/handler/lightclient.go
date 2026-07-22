@@ -79,7 +79,6 @@ func (a *ApiHandler) GetEthV1BeaconLightClientFinalityUpdate(w http.ResponseWrit
 }
 
 func (a *ApiHandler) GetEthV1BeaconLightClientUpdates(w http.ResponseWriter, r *http.Request) {
-
 	startPeriod, err := beaconhttp.Uint64FromQueryParams(r, "start_period")
 	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)

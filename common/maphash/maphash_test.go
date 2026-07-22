@@ -78,15 +78,13 @@ func TestShardedLRUConcurrent(t *testing.T) {
 	}
 	var wg sync.WaitGroup
 	for w := range 32 {
-		wg.Add(1)
-		go func(base int) {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range 2000 {
-				k := []byte{byte(base), byte(i), byte(i >> 8)}
-				l.Set(k, base*i)
+				k := []byte{byte(w), byte(i), byte(i >> 8)}
+				l.Set(k, w*i)
 				l.Get(k)
 			}
-		}(w)
+		})
 	}
 	wg.Wait()
 }
@@ -205,43 +203,35 @@ func TestMapConcurrentAccess(t *testing.T) {
 
 	// Concurrent writes
 	for i := range n {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			key := []byte{byte(i)}
 			m.Set(key, i)
-		}(i)
+		})
 	}
 	wg.Wait()
 
 	// Concurrent reads
 	for i := range n {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			key := []byte{byte(i)}
 			m.Get(key)
-		}(i)
+		})
 	}
 	wg.Wait()
 
 	// Concurrent mixed operations
 	for i := range n {
-		wg.Add(3)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			key := []byte{byte(i)}
 			m.Set(key, i*2)
-		}(i)
-		go func(i int) {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			key := []byte{byte(i)}
 			m.Get(key)
-		}(i)
-		go func(i int) {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			m.Len()
-		}(i)
+		})
 	}
 	wg.Wait()
 }
@@ -556,43 +546,35 @@ func TestLRUConcurrentAccess(t *testing.T) {
 
 	// Concurrent writes
 	for i := range n {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			key := []byte{byte(i)}
 			l.Set(key, i)
-		}(i)
+		})
 	}
 	wg.Wait()
 
 	// Concurrent reads
 	for i := range n {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			key := []byte{byte(i)}
 			l.Get(key)
-		}(i)
+		})
 	}
 	wg.Wait()
 
 	// Concurrent mixed operations
 	for i := range n {
-		wg.Add(3)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			key := []byte{byte(i)}
 			l.Set(key, i*2)
-		}(i)
-		go func(i int) {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			key := []byte{byte(i)}
 			l.Get(key)
-		}(i)
-		go func(i int) {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			l.Len()
-		}(i)
+		})
 	}
 	wg.Wait()
 }

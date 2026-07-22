@@ -6,10 +6,8 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
-var (
-	// shuffling metrics
-	computeShuffledIndicies = metrics.GetOrCreateGauge("compute_shuffled_indices")
-)
+// shuffling metrics
+var computeShuffledIndicies = metrics.GetOrCreateGauge("compute_shuffled_indices")
 
 // ObserveComputeShuffledIndiciesTime sets computeShuffledIndicies time
 func ObserveComputeShuffledIndiciesTime(startTime time.Time) {

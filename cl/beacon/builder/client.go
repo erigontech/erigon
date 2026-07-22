@@ -38,9 +38,7 @@ import (
 
 var _ BuilderClient = &builderClient{}
 
-var (
-	ErrNoContent = errors.New("no http content")
-)
+var ErrNoContent = errors.New("no http content")
 
 type builderClient struct {
 	// ref: https://ethereum.github.io/builder-specs/#/
@@ -70,7 +68,7 @@ func NewBlockBuilderClient(baseUrl string, beaconConfig *clparams.BeaconChainCon
 func (b *builderClient) RegisterValidator(ctx context.Context, registers []*cltypes.ValidatorRegistration) error {
 	// https://ethereum.github.io/builder-specs/#/Builder/registerValidator
 	path := "/eth/v1/builder/validators"
-	url := b.url.JoinPath(path).String()
+	targetURL := b.url.JoinPath(path).String()
 	if len(registers) == 0 {
 		return errors.New("empty registers")
 	}
@@ -78,7 +76,7 @@ func (b *builderClient) RegisterValidator(ctx context.Context, registers []*clty
 	if err != nil {
 		return err
 	}
-	_, err = httpCall[json.RawMessage](ctx, b.httpClient, http.MethodPost, url, nil, bytes.NewBuffer(payload), json.RawMessage{})
+	_, err = httpCall[json.RawMessage](ctx, b.httpClient, http.MethodPost, targetURL, nil, bytes.NewBuffer(payload), json.RawMessage{})
 	if errors.Is(err, ErrNoContent) {
 		// no content is ok
 		return nil
@@ -92,7 +90,7 @@ func (b *builderClient) RegisterValidator(ctx context.Context, registers []*clty
 func (b *builderClient) GetHeader(ctx context.Context, slot int64, parentHash common.Hash, pubKey common.Bytes48) (*ExecutionHeader, error) {
 	// https://ethereum.github.io/builder-specs/#/Builder/getHeader
 	path := fmt.Sprintf("/eth/v1/builder/header/%d/%s/%s", slot, parentHash.Hex(), pubKey.Hex())
-	url := b.url.JoinPath(path).String()
+	targetURL := b.url.JoinPath(path).String()
 	var headerIn ExecutionHeader
 	var epoch uint64
 	//
@@ -109,7 +107,7 @@ func (b *builderClient) GetHeader(ctx context.Context, slot int64, parentHash co
 	requestHeader := map[string]string{
 		"Date-Milliseconds": strconv.FormatInt(time.Now().UnixMilli(), 10),
 	}
-	header, err := httpCall[ExecutionHeader](ctx, b.httpClient, http.MethodGet, url, requestHeader, nil, headerIn)
+	header, err := httpCall[ExecutionHeader](ctx, b.httpClient, http.MethodGet, targetURL, requestHeader, nil, headerIn)
 	if err != nil {
 		log.Warn("[mev builder] httpCall error on GetExecutionPayloadHeader", "err", err, "slot", slot, "parentHash", parentHash.Hex(), "pubKey", pubKey.Hex())
 		return nil, err
@@ -124,7 +122,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 	if isPostFulu {
 		path = "/eth/v2/builder/blinded_blocks"
 	}
-	url := b.url.JoinPath(path).String()
+	targetURL := b.url.JoinPath(path).String()
 	payload, err := json.Marshal(block)
 	if err != nil {
 		return nil, nil, nil, err
@@ -136,14 +134,14 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 	var resp *BlindedBlockResponse
 
 	if isPostFulu {
-		_, err = httpCall(ctx, b.httpClient, http.MethodPost, url, headers, bytes.NewBuffer(payload), "")
+		_, err = httpCall(ctx, b.httpClient, http.MethodPost, targetURL, headers, bytes.NewBuffer(payload), "")
 		if err != nil {
 			log.Warn("[mev builder] httpCall error on SubmitBlindedBlocks", "err", err, "slot", block.Block.Slot)
 			return nil, nil, nil, err
 		}
 		return nil, nil, nil, nil // no content expected for Fulu version
 	} else {
-		resp, err = httpCall(ctx, b.httpClient, http.MethodPost, url, headers, bytes.NewBuffer(payload), BlindedBlockResponse{})
+		resp, err = httpCall(ctx, b.httpClient, http.MethodPost, targetURL, headers, bytes.NewBuffer(payload), BlindedBlockResponse{})
 		if err != nil {
 			log.Warn("[mev builder] httpCall error on SubmitBlindedBlocks", "err", err, "slot", block.Block.Slot)
 			return nil, nil, nil, err
@@ -195,8 +193,8 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 
 func (b *builderClient) GetStatus(ctx context.Context) error {
 	path := "/eth/v1/builder/status"
-	url := b.url.JoinPath(path).String()
-	_, err := httpCall[json.RawMessage](ctx, b.httpClient, http.MethodGet, url, nil, nil, json.RawMessage{})
+	targetURL := b.url.JoinPath(path).String()
+	_, err := httpCall[json.RawMessage](ctx, b.httpClient, http.MethodGet, targetURL, nil, nil, json.RawMessage{})
 	if errors.Is(err, ErrNoContent) {
 		// no content is ok, we just need to check if the server is up
 		return nil
@@ -204,10 +202,10 @@ func (b *builderClient) GetStatus(ctx context.Context) error {
 	return err
 }
 
-func httpCall[T any](ctx context.Context, client *http.Client, method, url string, headers map[string]string, payloadReader io.Reader, body T) (*T, error) {
-	request, err := http.NewRequestWithContext(ctx, method, url, payloadReader)
+func httpCall[T any](ctx context.Context, client *http.Client, method, rawURL string, headers map[string]string, payloadReader io.Reader, body T) (*T, error) {
+	request, err := http.NewRequestWithContext(ctx, method, rawURL, payloadReader)
 	if err != nil {
-		log.Warn("[mev builder] http.NewRequest failed", "err", err, "url", url, "method", method)
+		log.Warn("[mev builder] http.NewRequest failed", "err", err, "url", rawURL, "method", method)
 		return nil, err
 	}
 	request.Header.Set("Content-Type", "application/json")
@@ -217,7 +215,7 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 	// send request
 	response, err := client.Do(request)
 	if err != nil {
-		log.Warn("[mev builder] client.Do failed", "err", err, "url", url, "method", method)
+		log.Warn("[mev builder] client.Do failed", "err", err, "url", rawURL, "method", method)
 		return nil, err
 	}
 	defer func() {
@@ -230,11 +228,11 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 		if response.Body == nil {
 			return nil, fmt.Errorf("status code: %d", response.StatusCode)
 		}
-		bytes, err := io.ReadAll(response.Body)
+		bodyBytes, err := io.ReadAll(response.Body)
 		if err != nil {
-			log.Warn("[mev builder] io.ReadAll failed", "err", err, "url", url, "method", method)
+			log.Warn("[mev builder] io.ReadAll failed", "err", err, "url", rawURL, "method", method)
 		} else {
-			log.Warn("[mev builder] httpCall failed", "status", response.Status, "content", string(bytes))
+			log.Warn("[mev builder] httpCall failed", "status", response.Status, "content", string(bodyBytes))
 		}
 		return nil, fmt.Errorf("status code: %d", response.StatusCode)
 	}
@@ -246,16 +244,16 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 	if response.Body == nil {
 		return &body, nil
 	}
-	bytes, err := io.ReadAll(response.Body)
+	bodyBytes, err := io.ReadAll(response.Body)
 	if err != nil {
-		log.Warn("[mev builder] io.ReadAll failed", "err", err, "url", url, "method", method)
+		log.Warn("[mev builder] io.ReadAll failed", "err", err, "url", rawURL, "method", method)
 		return nil, err
 	}
-	if len(bytes) == 0 {
+	if len(bodyBytes) == 0 {
 		return &body, nil
 	}
-	if err := json.Unmarshal(bytes, &body); err != nil {
-		log.Warn("[mev builder] json.Unmarshal error", "err", err, "content", string(bytes))
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
+		log.Warn("[mev builder] json.Unmarshal error", "err", err, "content", string(bodyBytes))
 		return nil, err
 	}
 	return &body, nil
