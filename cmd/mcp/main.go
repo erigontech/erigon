@@ -258,6 +258,7 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 	// same path as rpcdaemon.
 	apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, heimdallReader, nil)
 	rpcSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
+	defer rpcSrv.Stop()
 	for _, api := range apiList {
 		if err := rpcSrv.RegisterName(api.Namespace, api.Service); err != nil {
 			return fmt.Errorf("failed to register %s API: %w", api.Namespace, err)
