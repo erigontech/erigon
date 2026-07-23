@@ -148,6 +148,7 @@ func ExecutionPayloadFromSSZBlock(block *cltypes.Eth1Block, version clparams.Sta
 		ExtraData:     block.Extra.Bytes(),
 		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
 		BlockHash:     block.BlockHash,
+		Transactions:  make([]hexutil.Bytes, 0, len(body.Transactions)),
 		Withdrawals:   body.Withdrawals,
 		SSZVersion:    version,
 	}
