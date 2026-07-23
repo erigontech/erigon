@@ -369,7 +369,7 @@ func pruneBeaconBlocksAndWriteProgress(ctx context.Context, db kv.RwDB, pruneTo,
 
 // weight for the semaphore to build only one type of snapshots at a time
 // for now all of them have the same weight
-//const caplinSnapshotBuildSemaWeight int64 = 1
+// const caplinSnapshotBuildSemaWeight int64 = 1
 
 // Antiquate will antiquate a specific block range (aka. retire snapshots), this should be ran in the background.
 func (a *Antiquary) antiquate() error {

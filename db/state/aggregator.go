@@ -647,21 +647,17 @@ func (a *Aggregator) closeDirtyFiles() {
 		if d == nil {
 			continue
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			d.Close()
-		}()
+		})
 	}
 	for _, ii := range a.standaloneIIs() {
 		if ii == nil {
 			continue
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			ii.Close()
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -840,11 +836,14 @@ func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 	return res
 }
 
-func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) error {
+func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int, opts ...kv.BuildAccessorsOption) error {
 	rotx := a.DebugBeginDirtyFilesRo()
 	defer rotx.Close()
 
 	missedFilesItems := rotx.FilesWithMissedAccessors()
+	if slices.Contains(opts, kv.SkipCoveredAccessors) {
+		rotx.dropCovered(missedFilesItems)
+	}
 	if !missedFilesItems.IsEmpty() {
 		defer a.onFilesChange(nil)
 	}

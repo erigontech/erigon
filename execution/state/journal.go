@@ -26,7 +26,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -61,23 +60,27 @@ const (
 )
 
 const (
-	flagCommitted        uint8 = 1 << 0 // the reverted value was already committed to state
-	flagSelfdestructPrev uint8 = 1 << 1 // selfdestructChange: account had already selfdestructed
+	flagCommitted                  uint8 = 1 << 0 // the reverted value was already committed to state
+	flagSelfdestructPrev           uint8 = 1 << 1 // kindSelfdestruct: account had already selfdestructed
+	flagSelfdestructHadIncarnation uint8 = 1 << 2 // kindSelfdestruct: a versioned incarnation write predated the destruct
+	flagSelfdestructHadBalance     uint8 = 1 << 3 // kindSelfdestruct: a versioned balance write predated the destruct
 )
 
 // journalExtra holds the fields needed only by the infrequent entry kinds,
 // kept out of line so the common entry stays small (see TestJournalEntrySize).
 type journalExtra struct {
-	prevObj  *stateObject      // kindResetObject
-	bi       *BalanceIncrease  // kindBalanceIncreaseTransfer
-	prevcode []byte            // kindCode
-	prevhash accounts.CodeHash // kindCode
+	prevObj              *stateObject         // kindResetObject
+	prevWrites           *createWriteSnapshot // kindResetObject
+	bi                   *BalanceIncrease     // kindBalanceIncreaseTransfer
+	prevcode             []byte               // kindCode
+	prevhash             accounts.CodeHash    // kindCode
+	prevBalanceVersioned uint256.Int          // kindSelfdestruct, when flagSelfdestructHadBalance is set
 }
 
 // journalEntry is a compact tagged union stored inline in journal.entries.
 // Fields are reused across kinds: value holds the reverted uint256, aux the
-// reverted scalar (nonce/refund/log index), flags the booleans, extra only
-// what the infrequent kinds need.
+// reverted scalar (nonce/refund/log index/incarnation), flags the booleans,
+// extra only what the infrequent kinds need.
 type journalEntry struct {
 	kind    entryKind
 	flags   uint8
@@ -169,8 +172,8 @@ func (j *journal) createObjectChange(account accounts.Address) {
 	j.append(journalEntry{kind: kindCreateObject, account: account})
 }
 
-func (j *journal) resetObjectChange(account accounts.Address, prev *stateObject) {
-	j.append(journalEntry{kind: kindResetObject, account: account, extra: &journalExtra{prevObj: prev}})
+func (j *journal) resetObjectChange(account accounts.Address, prev *stateObject, prevWrites *createWriteSnapshot) {
+	j.append(journalEntry{kind: kindResetObject, account: account, extra: &journalExtra{prevObj: prev, prevWrites: prevWrites}})
 }
 
 func (j *journal) selfdestructChange(account accounts.Address, prev bool, prevbalance uint256.Int, wasCommitted bool) {
@@ -179,6 +182,25 @@ func (j *journal) selfdestructChange(account accounts.Address, prev bool, prevba
 		flags |= flagSelfdestructPrev
 	}
 	j.append(journalEntry{kind: kindSelfdestruct, account: account, value: prevbalance, flags: flags})
+}
+
+// selfdestructChangeVersioned records a self-destruct on the parallel path,
+// capturing the versioned balance/incarnation writes it overwrites so a revert
+// can restore them (see selfdestructChange.revert).
+func (j *journal) selfdestructChangeVersioned(account accounts.Address, prev bool, prevbalance uint256.Int, wasCommitted, hadIncarnation bool, prevIncarnation uint64, hadBalance bool, prevBalanceVersioned uint256.Int) {
+	flags := commitFlag(wasCommitted)
+	if prev {
+		flags |= flagSelfdestructPrev
+	}
+	if hadIncarnation {
+		flags |= flagSelfdestructHadIncarnation
+	}
+	e := journalEntry{kind: kindSelfdestruct, account: account, value: prevbalance, aux: prevIncarnation, flags: flags}
+	if hadBalance {
+		e.flags |= flagSelfdestructHadBalance
+		e.extra = &journalExtra{prevBalanceVersioned: prevBalanceVersioned}
+	}
+	j.append(e)
 }
 
 func (j *journal) balanceChange(account accounts.Address, prev uint256.Int, wasCommitted bool) {
@@ -217,8 +239,8 @@ func (j *journal) addLogChange(txIndex int) {
 	j.append(journalEntry{kind: kindAddLog, aux: uint64(txIndex)})
 }
 
-func (j *journal) touchAccount(account accounts.Address) {
-	j.append(journalEntry{kind: kindTouch, account: account})
+func (j *journal) touchAccount(account accounts.Address, wasCommitted bool, prev uint256.Int) {
+	j.append(journalEntry{kind: kindTouch, account: account, value: prev, flags: commitFlag(wasCommitted)})
 }
 
 func (j *journal) accessListAddAccountChange(address accounts.Address) {
@@ -249,13 +271,6 @@ func (je *journalEntry) dirtied() (accounts.Address, bool) {
 
 var ripemd = accounts.InternAddress(common.HexToAddress("0000000000000000000000000000000000000003"))
 
-func (s *IntraBlockState) revertTrace(addr accounts.Address) (bool, string) {
-	if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-		return true, fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
-	}
-	return false, ""
-}
-
 // revert undoes the change recorded by this entry.
 func (je *journalEntry) revert(s *IntraBlockState) error {
 	switch je.kind {
@@ -265,6 +280,14 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		}
 		delete(s.stateObjects, je.account)
 		delete(s.stateObjectsDirty, je.account)
+		// The account did not exist before this create, so all of its versioned
+		// writes originate from the creation being reverted. Field-level entries
+		// (balance/nonce/…) prune themselves on revert; the account-record writes
+		// createObject emits (address/codeHash/…) have no field-level journal entry,
+		// so drop them here to keep versionedWrites in step with the journal.
+		if s.versionMap != nil {
+			s.versionedWrites.deleteAddr(je.account)
+		}
 		return nil
 
 	case kindResetObject:
@@ -272,87 +295,81 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		if current, ok := s.stateObjects[je.account]; ok && current != prev {
 			current.release()
 		}
-		s.setStateObject(je.account, prev)
+		if s.noMaterialize {
+			delete(s.stateObjects, je.account)
+		} else {
+			s.setStateObject(je.account, prev)
+		}
+		// Restore the account-record writes the recreation overwrote back to the
+		// snapshot taken before it ran, so versionedWrites reflects prev's state
+		// again (the field-level entries handle the fields creation doesn't write).
+		if s.versionMap != nil {
+			s.versionedWrites.restoreCreateFields(je.account, je.extra.prevWrites)
+		}
 		return nil
 
 	case kindSelfdestruct:
-		obj, err := s.getStateObject(je.account, false)
-		if err != nil {
-			return err
-		}
-		if obj == nil {
-			return nil
-		}
 		prev := je.flags&flagSelfdestructPrev != 0
-		wasCommitted := je.committed()
-		trace, tracePrefix := s.revertTrace(je.account)
-		if trace {
-			fmt.Printf("%s Revert SelfDestruct %x: %v:%d, prev: %v:%d, commited: %v\n", tracePrefix, je.account, prev, &je.value, obj.selfdestructed, &obj.data.Balance, wasCommitted)
+		if so, ok := s.stateObjects[je.account]; ok {
+			so.selfdestructed = prev
+			so.setBalance(je.value)
+		} else if s.versionMap == nil {
+			obj, err := s.getStateObject(je.account, false)
+			if err != nil {
+				return err
+			}
+			if obj != nil {
+				obj.selfdestructed = prev
+				obj.setBalance(je.value)
+			}
 		}
-		obj.selfdestructed = prev
-		obj.setBalance(je.value)
-
 		if s.versionMap != nil {
-			if wasCommitted {
-				if trace {
-					if v, ok := s.versionedWrites.GetSelfDestruct(je.account); ok {
-						sd := v.Val
-						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, je.account, sd, prev)
-					}
-					if v, ok := s.versionedWrites.GetBalance(je.account); ok {
-						val := v.Val
-						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, je.account, &val, &je.value)
-					}
-				}
-				s.versionedWrites.DelBalance(je.account)
+			if je.committed() {
 				s.versionedWrites.DelSelfDestruct(je.account)
+			} else if _, ok := s.versionedWrites.GetSelfDestruct(je.account); ok {
+				s.versionedWrites.updateSelfDestruct(je.account, prev)
+			}
+			// The self-destruct records BalancePath=0; restore the pre-destruct
+			// versioned balance write, or drop the cell if the self-destruct created
+			// it. Gating this on committed (which describes SelfDestructPath, not
+			// BalancePath) deleted balance writes that predated the snapshot.
+			if je.flags&flagSelfdestructHadBalance != 0 {
+				s.versionedWrites.updateBalance(je.account, je.extra.prevBalanceVersioned)
 			} else {
-				if v, ok := s.versionedWrites.GetSelfDestruct(je.account); ok {
-					if trace {
-						sd := v.Val
-						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, je.account, sd, prev)
-					}
-					s.versionedWrites.updateSelfDestruct(je.account, prev)
-				}
-				if v, ok := s.versionedWrites.GetBalance(je.account); ok {
-					if trace {
-						val := v.Val
-						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, je.account, &val, &je.value)
-					}
-					s.versionedWrites.updateBalance(je.account, je.value)
-				}
+				s.versionedWrites.DelBalance(je.account)
+			}
+			// selfdestructVersioned clears the incarnation cell on both paths. Restore
+			// it to its pre-destruct versioned value, or drop the write if the
+			// self-destruct created it.
+			if je.flags&flagSelfdestructHadIncarnation != 0 {
+				s.versionedWrites.updateIncarnation(je.account, je.aux)
+			} else {
+				s.versionedWrites.DelIncarnation(je.account)
 			}
 		}
 		return nil
 
 	case kindBalance:
-		obj, err := s.getStateObject(je.account, false)
-		if err != nil {
-			return err
+		// Keep a materialized so.data in step (serial always has one; the parallel
+		// path only when the account was materialized for some other reason). Never
+		// materialize one just to revert on the parallel path — the cells below are
+		// authoritative there.
+		if so, ok := s.stateObjects[je.account]; ok {
+			so.setBalance(je.value)
+		} else if s.versionMap == nil {
+			obj, err := s.getStateObject(je.account, false)
+			if err != nil {
+				return err
+			}
+			if obj != nil {
+				obj.setBalance(je.value)
+			}
 		}
-		wasCommitted := je.committed()
-		trace, tracePrefix := s.revertTrace(je.account)
-		if trace {
-			fmt.Printf("%s Revert Balance %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, je.account, &obj.data.Balance, &je.value, &obj.original.Balance, wasCommitted)
-		}
-		obj.setBalance(je.value)
 		if s.versionMap != nil {
-			if wasCommitted {
-				if trace {
-					if v, ok := s.versionedWrites.GetBalance(je.account); ok {
-						val := v.Val
-						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, je.account, &val, &je.value)
-					}
-				}
+			if je.committed() {
 				s.versionedWrites.DelBalance(je.account)
-			} else {
-				if v, ok := s.versionedWrites.GetBalance(je.account); ok {
-					if trace {
-						val := v.Val
-						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, je.account, &val, &je.value)
-					}
-					s.versionedWrites.updateBalance(je.account, je.value)
-				}
+			} else if _, ok := s.versionedWrites.GetBalance(je.account); ok {
+				s.versionedWrites.updateBalance(je.account, je.value)
 			}
 		}
 		return nil
@@ -372,82 +389,50 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindNonce:
-		obj, err := s.getStateObject(je.account, false)
-		if err != nil {
-			return err
+		if so, ok := s.stateObjects[je.account]; ok {
+			so.setNonce(je.aux)
+		} else if s.versionMap == nil {
+			obj, err := s.getStateObject(je.account, false)
+			if err != nil {
+				return err
+			}
+			if obj != nil {
+				obj.setNonce(je.aux)
+			}
 		}
-		wasCommitted := je.committed()
-		trace, tracePrefix := s.revertTrace(je.account)
-		if trace {
-			fmt.Printf("%s Revert Nonce %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, je.account, obj.data.Nonce, je.aux, obj.original.Nonce, wasCommitted)
-		}
-		obj.setNonce(je.aux)
 		if s.versionMap != nil {
-			if wasCommitted {
-				if trace {
-					if v, ok := s.versionedWrites.GetNonce(je.account); ok {
-						n := v.Val
-						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, je.account, n, je.aux)
-					}
-				}
+			if je.committed() {
 				s.versionedWrites.DelNonce(je.account)
-			} else {
-				if v, ok := s.versionedWrites.GetNonce(je.account); ok {
-					if trace {
-						n := v.Val
-						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, je.account, n, je.aux)
-					}
-					s.versionedWrites.updateNonce(je.account, je.aux)
-				}
+			} else if _, ok := s.versionedWrites.GetNonce(je.account); ok {
+				s.versionedWrites.updateNonce(je.account, je.aux)
 			}
 		}
 		return nil
 
 	case kindCode:
-		obj, err := s.getStateObject(je.account, false)
-		if err != nil {
-			return err
-		}
 		prevcode := je.extra.prevcode
 		prevhash := je.extra.prevhash
-		wasCommitted := je.committed()
-		trace, tracePrefix := s.revertTrace(je.account)
-		if trace {
-			_, cs := printCode(obj.code.Bytes)
-			_, ps := printCode(prevcode)
-			fmt.Printf("%s Revert Code %x: %x:%s, prevHash: %x, origHash: %x, prevCode: %s, commited: %v\n", tracePrefix,
-				je.account, obj.data.CodeHash, cs, prevhash, obj.original.CodeHash, ps, wasCommitted)
+		if so, ok := s.stateObjects[je.account]; ok {
+			so.setCode(accounts.Code{Hash: prevhash, Bytes: prevcode})
+		} else if s.versionMap == nil {
+			obj, err := s.getStateObject(je.account, false)
+			if err != nil {
+				return err
+			}
+			if obj != nil {
+				obj.setCode(accounts.Code{Hash: prevhash, Bytes: prevcode})
+			}
 		}
-		obj.setCode(accounts.Code{Hash: prevhash, Bytes: prevcode})
 		if s.versionMap != nil {
-			if wasCommitted {
-				if trace {
-					if v, ok := s.versionedWrites.GetCodeHash(je.account); ok {
-						fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, je.account, v.Val, prevhash)
-					}
-					if v, ok := s.versionedWrites.GetCode(je.account); ok {
-						_, cs := printCode(v.Val.Bytes)
-						_, ps := printCode(prevcode)
-						fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, je.account, cs, ps)
-					}
-				}
+			if je.committed() {
 				s.versionedWrites.DelCodeHash(je.account)
 				s.versionedWrites.DelCode(je.account)
 				s.versionedWrites.DelCodeSize(je.account)
 			} else {
-				if v, ok := s.versionedWrites.GetCode(je.account); ok {
-					if trace {
-						_, cs := printCode(v.Val.Bytes)
-						_, ps := printCode(prevcode)
-						fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, je.account, cs, ps)
-					}
+				if _, ok := s.versionedWrites.GetCode(je.account); ok {
 					s.versionedWrites.updateCode(je.account, accounts.Code{Hash: prevhash, Bytes: prevcode})
 				}
-				if v, ok := s.versionedWrites.GetCodeHash(je.account); ok {
-					if trace {
-						h := v.Val
-						fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, je.account, h, prevhash)
-					}
+				if _, ok := s.versionedWrites.GetCodeHash(je.account); ok {
 					s.versionedWrites.updateCodeHash(je.account, prevhash)
 				}
 				if _, ok := s.versionedWrites.GetCodeSize(je.account); ok {
@@ -458,37 +443,24 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindStorage:
-		obj, err := s.getStateObject(je.account, false)
-		if err != nil {
-			return err
-		}
-		wasCommitted := je.committed()
-		trace, tracePrefix := s.revertTrace(je.account)
-		if trace {
-			val, _ := obj.GetState(je.key)
-			commited, _ := obj.GetCommittedState(je.key)
-			fmt.Printf("%s Revert State %x %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, je.account, je.key, &val, &je.value, &commited, wasCommitted)
-		}
 		if s.versionMap != nil {
-			if wasCommitted {
-				if trace {
-					if v, ok := s.versionedWrites.GetStorage(je.account, je.key); ok {
-						val := v.Val
-						fmt.Printf("%s WRT Revert %x: %x: %x -> %x\n", tracePrefix, je.account, je.key, &val, &je.value)
-					}
-				}
+			if je.committed() {
 				s.versionedWrites.DelStorage(je.account, je.key)
-			} else {
-				if v, ok := s.versionedWrites.GetStorage(je.account, je.key); ok {
-					if trace {
-						val := v.Val
-						fmt.Printf("%s WRT Revert %x: %x: %d -> %d\n", tracePrefix, je.account, je.key, &val, &je.value)
-					}
-					s.versionedWrites.updateStorage(je.account, je.key, je.value)
-				}
+			} else if _, ok := s.versionedWrites.GetStorage(je.account, je.key); ok {
+				s.versionedWrites.updateStorage(je.account, je.key, je.value)
 			}
 		}
-		obj.setState(je.key, je.value)
+		if so, ok := s.stateObjects[je.account]; ok {
+			so.setState(je.key, je.value)
+		} else if s.versionMap == nil {
+			obj, err := s.getStateObject(je.account, false)
+			if err != nil {
+				return err
+			}
+			if obj != nil {
+				obj.setState(je.key, je.value)
+			}
+		}
 		return nil
 
 	case kindFakeStorage:
@@ -527,6 +499,18 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		// branched on it (e.g. Empty() returning true vs false).  Removing the
 		// read-set entry causes ValidateVersion to miss the dependency, allowing
 		// stale reads to pass validation and produce incorrect results.
+		//
+		// The touch's BalancePath=0 write must be undone, though: leaving it orphaned
+		// lets Normalize's EIP-161 pass delete an account whose touch was rolled back.
+		// Mirror kindBalance — drop the write if the touch created it, else restore
+		// the prior value.
+		if s.versionMap != nil {
+			if je.committed() {
+				s.versionedWrites.DelBalance(je.account)
+			} else if _, ok := s.versionedWrites.GetBalance(je.account); ok {
+				s.versionedWrites.updateBalance(je.account, je.value)
+			}
+		}
 		return nil
 
 	case kindAccessListAddAccount:

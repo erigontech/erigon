@@ -383,16 +383,14 @@ func TestParallelUpdateAppendDeferredConcurrent(t *testing.T) {
 	)
 
 	var wg sync.WaitGroup
-	wg.Add(workers)
 	for range workers {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			batch := make([]*DeferredBranchUpdate, perWorker)
 			for i := range batch {
 				batch[i] = &DeferredBranchUpdate{}
 			}
 			pu.appendDeferred(batch)
-		}()
+		})
 	}
 	wg.Wait()
 

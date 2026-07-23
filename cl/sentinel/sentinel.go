@@ -177,7 +177,8 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		s.peers,
 		s.cfg.NetworkConfig,
 		s.p2p.UDPv5Listener().LocalNode(),
-		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks).Start()
+		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks,
+	).Start()
 
 	/*if err := s.connectToBootnodes(); err != nil {
 		return nil, fmt.Errorf("failed to connect to bootnodes err=%w", err)

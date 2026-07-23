@@ -9,6 +9,9 @@ concurrency:
   group: rpc-clients-integration-${{ github.run_id }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   client-rpc-integ-tests:
     name: RPC Integration Tests - ${{ matrix.client }}

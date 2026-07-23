@@ -11,8 +11,7 @@ concurrency:
 
 jobs:
   test-hive-eest:
-    runs-on:
-      group: hive
+    runs-on: ${{ matrix.runner == 'ubuntu-latest' && 'ubuntu-latest' || fromJSON('{"group":"hive"}') }}
     timeout-minutes: 60
     name: test-hive-eest (${{ matrix.shard }}, ${{ matrix.exec_mode }})
     strategy:
@@ -26,7 +25,7 @@ jobs:
         # Each shard runs twice — once with serial exec
         # (ERIGON_EXEC3_PARALLEL=false) and once with parallel — so
         # divergence between the two paths is caught on the PR. Matrix
-        # entries spawn separate `hive` group runners and run concurrently —
+        # entries spawn separate runners and run concurrently —
         # wall-clock unchanged, runner-minutes doubled.
         include:
           # consume-enginex: split by fork for parallelism (~50k tests total).
@@ -36,51 +35,67 @@ jobs:
           # matches the suite name (eest/consume-enginex) while the remainder
           # filters individual pytest test IDs by fork parameter.
           - sim: consume-enginex
+            runner: ubuntu-latest
             sim-limit: ".*/.*fork_(Paris|Shanghai)"
             shard: paris+shanghai
             fixtures-tarball: eest_stable
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
             max-failures: 0
             exec_mode: serial
           - sim: consume-enginex
+            runner: ubuntu-latest
             sim-limit: ".*/.*fork_(Paris|Shanghai)"
             shard: paris+shanghai
             fixtures-tarball: eest_stable
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
             max-failures: 0
             exec_mode: parallel
           - sim: consume-enginex
+            runner: ubuntu-latest
             sim-limit: ".*/.*fork_Cancun"
             shard: cancun
             fixtures-tarball: eest_stable
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
             max-failures: 0
             exec_mode: serial
           - sim: consume-enginex
+            runner: ubuntu-latest
             sim-limit: ".*/.*fork_Cancun"
             shard: cancun
             fixtures-tarball: eest_stable
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
             max-failures: 0
             exec_mode: parallel
           - sim: consume-enginex
+            runner: ubuntu-latest
             sim-limit: ".*/.*fork_Prague"
             shard: prague
             fixtures-tarball: eest_stable
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
             max-failures: 0
             exec_mode: serial
           - sim: consume-enginex
+            runner: ubuntu-latest
             sim-limit: ".*/.*fork_Prague"
             shard: prague
             fixtures-tarball: eest_stable
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
             max-failures: 0
             exec_mode: parallel
           - sim: consume-enginex
+            runner: ubuntu-latest
             sim-limit: ".*/.*fork_(Osaka|BPO)"
             shard: osaka
             fixtures-tarball: eest_stable
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
             max-failures: 0
             exec_mode: serial
           - sim: consume-enginex
+            runner: ubuntu-latest
             sim-limit: ".*/.*fork_(Osaka|BPO)"
             shard: osaka
             fixtures-tarball: eest_stable
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
             max-failures: 0
             exec_mode: parallel
           - sim: consume-rlp
@@ -155,7 +170,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
 
       - name: Setup go env and cache
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: '>=1.25'
 
@@ -225,8 +240,8 @@ jobs:
       # them every run. Restore the base-branch cache warmed by
       # cache-warming-eest-fixtures.yml (restore-only — never saved here); on a
       # miss, fetch via the hardened tools/test-fixtures.sh. Then stage the
-      # tarball into the sim build context, where the (local-fixtures) eels
-      # Dockerfile extracts it for `consume --input /fixtures`.
+      # tarball into the sim build context, where the eels image keeps it
+      # compressed until startup and runs `consume --input /fixtures`.
       - name: Restore EEST fixtures cache
         id: eest-cache
         uses: actions/cache/restore@v6
@@ -257,7 +272,6 @@ jobs:
           if [ -n "$branch" ]; then
             branch_arg="--sim.buildarg branch=$branch"
           fi
-          fixtures_url=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].url' erigon-full/test-fixtures.json)
           cd hive
           docker ps
           run_suite() {
@@ -268,7 +282,7 @@ jobs:
             # image-build/registry/clone failure); a completed run is judged on its first result.
             local attempt=1 max_attempts=3
             while true; do
-              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures="$fixtures_url" ${branch_arg} ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
+              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=${{ matrix.runner == 'ubuntu-latest' && 4 || 12 }} --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures=/fixtures ${branch_arg} ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
               status_line=$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
               suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
               if [ -z "$suites" ]; then

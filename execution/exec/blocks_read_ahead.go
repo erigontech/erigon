@@ -145,11 +145,9 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, h
 		if !bra.warming.CompareAndSwap(false, true) {
 			return
 		}
-		bra.warmWg.Add(1)
-		go func() {
-			defer bra.warmWg.Done()
+		bra.warmWg.Go(func() {
 			bra.warmBody(ctx, db, header, body, 8) // use 8 workers for warming
-		}()
+		})
 	}
 }
 

@@ -189,7 +189,6 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 		size := stackData[stackLen-3]
 		init, err := tracers.GetMemoryCopyPadded(scope.MemoryData(), int64(offset.Uint64()), int64(size.Uint64()))
 		if err != nil {
-			t.Stop(fmt.Errorf("failed to copy CREATE2 in prestate tracer input err: %s", err))
 			return
 		}
 		inithash := accounts.InternCodeHash(crypto.Keccak256Hash(init))

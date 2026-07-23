@@ -13,6 +13,9 @@ on:
       - ready_for_review
   workflow_dispatch:     # Run manually
 
+permissions:
+  contents: read
+
 jobs:
   clean-exit-sd-test:
     concurrency:

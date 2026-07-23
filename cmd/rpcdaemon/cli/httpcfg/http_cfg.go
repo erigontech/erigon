@@ -18,6 +18,7 @@ package httpcfg
 
 import (
 	"net"
+	"runtime"
 	"time"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -26,6 +27,38 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
+
+// DefaultDBReadConcurrency is the default MDBX read-tx semaphore size;
+// rationale in DBReadConcurrencyFlag's usage.
+func DefaultDBReadConcurrency() int {
+	return min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000)
+}
+
+// execPermanentReadTxs counts the long-lived read txs a parallel batch always
+// holds beyond the worker count: the extra pool worker, the exec-loop and
+// apply-loop txs, the block-loader tx and the commitment-calculator tx.
+const execPermanentReadTxs = 5
+
+// execReadAheadTxs counts the block read-ahead txs held on non-initial applying
+// cycles — the steady tip-following mode — so they are counted with the fixed
+// holders rather than eating into the reserve.
+const execReadAheadTxs = 2
+
+// dbReadTxsReserved is read-tx headroom kept above parallel exec's permanent
+// holders. Without it a transient commitment/RPC reader can take the last slot
+// a blocked permanent holder needs, deadlocking the pipeline.
+const dbReadTxsReserved = 16
+
+// RoTxsLimit sizes the MDBX read-tx semaphore, flooring it at the parallel-exec
+// worker count plus reserved headroom; the configured value (or derived default
+// when unset) wins only when already above the floor.
+func RoTxsLimit(dbReadConcurrency, execWorkers int) int64 {
+	limit := DefaultDBReadConcurrency()
+	if dbReadConcurrency > 0 {
+		limit = dbReadConcurrency
+	}
+	return int64(max(limit, execWorkers+execPermanentReadTxs+execReadAheadTxs+dbReadTxsReserved))
+}
 
 type HttpCfg struct {
 	Enabled bool

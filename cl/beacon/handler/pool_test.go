@@ -255,7 +255,7 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 		},
 		{
 			Message: &cltypes.AggregateAndProof{
-				//Aggregate: solid.NewAttestionFromParameters([]byte{1, 2, 5, 6}, solid.NewAttestationData(), common.Bytes96{3, 0, 6}),
+				// Aggregate: solid.NewAttestionFromParameters([]byte{1, 2, 5, 6}, solid.NewAttestationData(), common.Bytes96{3, 0, 6}),
 				Aggregate: &solid.Attestation{
 					AggregationBits: solid.BitlistFromBytes([]byte{1, 2, 5, 6}, 2048),
 					Data:            &solid.AttestationData{},
