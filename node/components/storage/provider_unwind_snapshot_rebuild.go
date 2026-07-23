@@ -74,10 +74,11 @@ func chunkAlignedToBlock(toBlock uint64) uint64 {
 // range (live-caught 2026-07-23 iter 24: v1.1-003120-003130-headers.seg
 // advertised 10k entries but held only 5k after iter 17's rebuild).
 // Sort candidates widest-first — the merged superset is normally the
-// right choice — but validate each on disk before returning it: the
-// file must exist and its actual entry count must equal (To-From). Fall
-// back to the next-widest that passes validation. Return nil if no
-// candidate passes (caller treats as no-straddle).
+// right choice — and for one-entry-per-block snaptypes (headers,
+// bodies) validate that the file's Count() matches (To-From) before
+// returning it, falling back to the next-widest on mismatch. Skip the
+// count check for transactions: its entries are per-transaction, not
+// per-block.
 func (p *Provider) straddleBlockFileForType(toBlock uint64, typeEnum snaptype.Enum) (*snaptype.FileInfo, error) {
 	if p.Inventory == nil {
 		return nil, nil
@@ -99,8 +100,17 @@ func (p *Provider) straddleBlockFileForType(toBlock uint64, typeEnum snaptype.En
 	sort.SliceStable(candidates, func(i, j int) bool {
 		return (candidates[i].To - candidates[i].From) > (candidates[j].To - candidates[j].From)
 	})
+	// Entry-count validation is only defined for one-entry-per-block
+	// snaptypes (headers, bodies). Transactions store one entry per
+	// transaction — 10000-block chunk holds ~330k tx entries, not
+	// 10000 — so Count() there is unrelated to (To-From) and we skip
+	// the check.
+	validateCount := typeEnum == snaptype2.Enums.Headers || typeEnum == snaptype2.Enums.Bodies
 	for i := range candidates {
 		info := candidates[i]
+		if !validateCount {
+			return &info, nil
+		}
 		path := filepath.Join(p.snapDir, info.Name())
 		dec, err := seg.NewDecompressor(path)
 		if err != nil {
