@@ -17,6 +17,7 @@
 package state
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -745,6 +746,46 @@ func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canB
 		return false
 	}
 	return true
+}
+
+// coveredByVisibleFiles reports whether item's [startTxNum, endTxNum) range is fully
+// covered by other files that are themselves visible (i.e. have their accessors).
+func coveredByVisibleFiles(item *FilesItem, all []*FilesItem, l statecfg.Accessors) bool {
+	subs := make([]*FilesItem, 0, len(all))
+	for _, f := range all {
+		if f == nil || f == item {
+			continue
+		}
+		if f.isProperSubsetOf(item) && checkForVisibility(f, l, false) {
+			subs = append(subs, f)
+		}
+	}
+	slices.SortFunc(subs, func(a, b *FilesItem) int {
+		return cmp.Compare(a.startTxNum, b.startTxNum)
+	})
+	cur := item.startTxNum
+	for _, s := range subs {
+		if s.startTxNum > cur {
+			break
+		}
+		if s.endTxNum > cur {
+			cur = s.endTxNum
+		}
+	}
+	return cur >= item.endTxNum
+}
+
+func dropCoveredAccessors(missed, all []*FilesItem, l statecfg.Accessors) []*FilesItem {
+	if len(missed) == 0 {
+		return missed
+	}
+	out := make([]*FilesItem, 0, len(missed))
+	for _, m := range missed {
+		if !coveredByVisibleFiles(m, all, l) {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // visibleFiles have no garbage (overlaps, unindexed, etc...)
