@@ -57,6 +57,15 @@ func (b Big) MarshalText() ([]byte, error) {
 	return []byte(EncodeBig((*big.Int)(&b))), nil
 }
 
+// AppendText implements encoding.TextAppender (alloc-free MarshalText).
+func (b Big) AppendText(dst []byte) ([]byte, error) {
+	i := (*big.Int)(&b)
+	if i.BitLen() == 0 {
+		return append(dst, `0x0`...), nil
+	}
+	return i.Append(append(dst, `0x`...), 16), nil
+}
+
 // UnmarshalJSON implements json.Unmarshaler.
 func (b *Big) UnmarshalJSON(input []byte) error {
 	if !isString(input) {
@@ -121,6 +130,11 @@ func (b Uint64) MarshalText() ([]byte, error) {
 	copy(buf, `0x`)
 	buf = strconv.AppendUint(buf, uint64(b), 16)
 	return buf, nil
+}
+
+// AppendText implements encoding.TextAppender (alloc-free MarshalText).
+func (b Uint64) AppendText(dst []byte) ([]byte, error) {
+	return strconv.AppendUint(append(dst, `0x`...), uint64(b), 16), nil
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -297,6 +311,11 @@ type Uint uint
 // MarshalText implements encoding.TextMarshaler.
 func (b Uint) MarshalText() ([]byte, error) {
 	return Uint64(b).MarshalText()
+}
+
+// AppendText implements encoding.TextAppender (alloc-free MarshalText).
+func (b Uint) AppendText(dst []byte) ([]byte, error) {
+	return Uint64(b).AppendText(dst)
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
