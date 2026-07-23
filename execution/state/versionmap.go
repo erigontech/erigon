@@ -95,9 +95,6 @@ func (k AccountKey) String() string {
 // look like address-level operations (DeleteAll, StorageKeys) are pure
 // iterations of per-field operations.
 type AddressEntry struct {
-	// mu guards this account's cell maps. Held RLock for reads (readFloor and
-	// the per-path scans) and Lock for writes (putCell / Delete / markFlag).
-	mu             sync.RWMutex
 	Address        *btree.Map[int, *WriteCell[*accounts.Account]]
 	SelfDestruct   *btree.Map[int, *WriteCell[bool]]
 	Balance        *btree.Map[int, *WriteCell[uint256.Int]]
@@ -108,6 +105,9 @@ type AddressEntry struct {
 	CodeSize       *btree.Map[int, *WriteCell[int]]
 	CreateContract *btree.Map[int, *WriteCell[bool]]
 	Storage        map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]
+	// mu guards this account's cell maps. Held RLock for reads (readFloor and
+	// the per-path scans) and Lock for writes (putCell / Delete / markFlag).
+	mu sync.RWMutex
 }
 
 // putCell sets or updates a typed cell at txIdx. Caller must hold e.mu.Lock().
