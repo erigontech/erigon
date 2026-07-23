@@ -213,6 +213,83 @@ func seqUpdateBatch(t *testing.T, ms *MockState, keys [][]byte, upds []Update, b
 	return root, out
 }
 
+// parUpdateBatch folds one batch through a ParallelPatriciaHashed via the
+// ModeParallel path (TouchPlainKeyDirect carries the Update — including the SD-reset
+// marker — into the prefix trie). Mirrors processModeBatchState's modeParallel but
+// feeds Direct so the marker rides, matching the production parallel calculator.
+func parUpdateBatch(t *testing.T, ms *MockState, workers int, keys [][]byte, upds []Update, blob []byte, sdReset string) ([]byte, []byte) {
+	t.Helper()
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+	tr := newParTrie(t, ms, workers)
+	defer tr.Release()
+	require.NoError(t, tr.RootTrie().SetState(blob))
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	var sd []byte
+	if sdReset != "" {
+		sd, _ = hex.DecodeString(sdReset)
+	}
+	for i, k := range keys {
+		u := upds[i]
+		if sd != nil && bytes.Equal(k, sd) {
+			u.DeleteStorageSubtree = true
+		}
+		ut.TouchPlainKeyDirect(string(k), &u)
+	}
+	root := processRoot(t, tr, ut)
+	out, err := tr.RootTrie().EncodeCurrentState(nil)
+	require.NoError(t, err)
+	return root, out
+}
+
+// The trie-level SD reset on the PARALLEL engine, where a deep-fold recreate
+// diverges without the prune (unlike seq): same-block self-destruct-then-recreate
+// with the SD-reset marker must reproduce the oracle.
+func TestSelfDestructTrieReset_SameBlockRecreate_Parallel(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 900))
+	sib := addrHex(findAddressForNibble(7, 500))
+	const nOld = 1500
+	const workers = 4
+	recreate := func(ub *UpdateBuilder) {
+		ub.Balance(a, 7777).Nonce(a, 9)
+		for s := 5000; s < 6600; s++ {
+			ub.Storage(a, hex.EncodeToString(slotHashBytes(s)), "cc")
+		}
+	}
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	b1 := NewUpdateBuilder().Balance(a, 100).Nonce(a, 1).Balance(sib, 500)
+	for s := range nOld {
+		b1.Storage(a, hex.EncodeToString(slotHashBytes(s)), "0badc0de")
+	}
+	k1, u1 := b1.Build()
+	_, blob := parUpdateBatch(t, ms, workers, k1, u1, nil, "")
+
+	clean := NewUpdateBuilder()
+	for s := range nOld {
+		clean.DeleteStorage(a, hex.EncodeToString(slotHashBytes(s)))
+	}
+	ck, cu := clean.Build()
+	require.NoError(t, ms.applyPlainUpdates(ck, cu))
+
+	b2 := NewUpdateBuilder()
+	recreate(b2)
+	k2, u2 := b2.Build()
+	got, _ := parUpdateBatch(t, ms, workers, k2, u2, blob, a)
+
+	oms := NewMockState(t)
+	oms.SetConcurrentCommitment(true)
+	ob := NewUpdateBuilder().Balance(sib, 500)
+	recreate(ob)
+	ok, ou := ob.Build()
+	want, _ := parUpdateBatch(t, oms, workers, ok, ou, nil, "")
+
+	require.Truef(t, bytes.Equal(got, want),
+		"parallel same-block SD+recreate via trie-level reset must reproduce the oracle\n got=%x\nwant=%x", got, want)
+}
+
 // The trie-level SD reset: a same-block self-destruct-then-recreate (account ends
 // ALIVE, so no account-key delete is emitted) reproduces the oracle root when the
 // account update carries the SD-reset marker. The trie prunes the old storage
