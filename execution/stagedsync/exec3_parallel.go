@@ -2333,6 +2333,7 @@ type blockExecutor struct {
 	// serial floor; the components rank what to attack.
 	serialNanos      int64
 	valLoopNanos     int64
+	commitNanos      int64
 	scheduleNanos    int64
 	publishNanos     int64
 	stateWritesNanos int64
@@ -2734,6 +2735,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		if valid {
 			if cntInvalid == 0 {
+				var commitStart time.Time
+				if depShapeEnabled {
+					commitStart = time.Now()
+				}
 				be.validateTasks.markComplete(tx)
 
 				be.finalizedResults[tx] = txResult
@@ -2899,6 +2904,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.finalizedResults[tx] = txResult
 				txResult.cumulativeBlobGasUsed = be.blobGasUsed
 				be.publishTasks.pushPending(tx)
+				if depShapeEnabled {
+					be.commitNanos += time.Since(commitStart).Nanoseconds()
+				}
 			}
 		} else {
 			cntInvalid++

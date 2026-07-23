@@ -135,6 +135,7 @@ func buildDeps(deps []depSample) depMetrics {
 type serialSplit struct {
 	serialNanos      int64
 	valLoopNanos     int64
+	commitNanos      int64
 	scheduleNanos    int64
 	publishNanos     int64
 	stateWritesNanos int64
@@ -157,6 +158,7 @@ func (be *blockExecutor) serialTiming() serialSplit {
 	return serialSplit{
 		serialNanos:      be.serialNanos,
 		valLoopNanos:     be.valLoopNanos,
+		commitNanos:      be.commitNanos,
 		scheduleNanos:    be.scheduleNanos,
 		publishNanos:     be.publishNanos,
 		stateWritesNanos: be.stateWritesNanos,
@@ -235,6 +237,7 @@ func logDepShape(logger log.Logger, blockNum uint64, blockIO *state.VersionedIO,
 		"serialMs", fmt.Sprintf("%.1f", float64(serial.serialNanos)/1e6),
 		"wallMs", fmt.Sprintf("%.1f", float64(wallSpan.Nanoseconds())/1e6),
 		"valLoopMs", fmt.Sprintf("%.1f", float64(serial.valLoopNanos)/1e6),
+		"commitMs", fmt.Sprintf("%.1f", float64(serial.commitNanos)/1e6),
 		"scheduleMs", fmt.Sprintf("%.1f", float64(serial.scheduleNanos)/1e6),
 		"publishMs", fmt.Sprintf("%.1f", float64(serial.publishNanos)/1e6),
 		"stateWrMs", fmt.Sprintf("%.1f", float64(serial.stateWritesNanos)/1e6),
