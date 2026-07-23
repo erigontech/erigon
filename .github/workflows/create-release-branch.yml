@@ -167,9 +167,9 @@ jobs:
       contents: write
       pull-requests: write
     outputs:
-      outcome: ${{ steps.pr.outputs.outcome || steps.plan.outputs.outcome }}
+      outcome: ${{ steps.pr.outputs.outcome || steps.dryrun.outputs.outcome || steps.plan.outputs.outcome }}
       pr_url: ${{ steps.pr.outputs.pr_url }}
-      detail: ${{ steps.pr.outputs.detail || steps.plan.outputs.detail }}
+      detail: ${{ steps.pr.outputs.detail || steps.dryrun.outputs.detail || steps.plan.outputs.detail }}
     steps:
       - name: Determine outgoing series to archive
         id: plan
@@ -351,12 +351,19 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Dry-run summary
+        id: dryrun
         if: steps.plan.outputs.outcome == 'proceed' && inputs.dry_run
         env:
           ARCHIVE_LABEL: ${{ steps.plan.outputs.archive_label }}
           INCOMING_BRANCH: ${{ inputs.release_branch }}
           OUTGOING_BRANCH: ${{ steps.plan.outputs.outgoing_branch }}
         run: |
+          # Emit a terminal outcome so the job output isn't the non-terminal
+          # 'proceed' from the plan step, and notify can report the dry-run.
+          {
+            echo "outcome=dry-run"
+            echo "detail=dry-run: validated $ARCHIVE_LABEL (from $OUTGOING_BRANCH) → $INCOMING_BRANCH, no PR opened"
+          } >> "$GITHUB_OUTPUT"
           {
             echo "### Dry-run: docs archive validated"
             echo ""
@@ -396,8 +403,8 @@ jobs:
           # Summarize the docs-archive job (Q1) for the audit embed.
           if [ -n "${ARCHIVE_PR_URL:-}" ]; then
             archive_field="[Archive PR opened]($ARCHIVE_PR_URL)"
-          elif [ "${ARCHIVE_OUTCOME:-}" = "skipped" ]; then
-            archive_field=":information_source: ${ARCHIVE_DETAIL:-skipped}"
+          elif [ "${ARCHIVE_OUTCOME:-}" = "skipped" ] || [ "${ARCHIVE_OUTCOME:-}" = "dry-run" ]; then
+            archive_field=":information_source: ${ARCHIVE_DETAIL:-${ARCHIVE_OUTCOME}}"
           else
             archive_field="n/a"
           fi
