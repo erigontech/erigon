@@ -64,12 +64,7 @@ func TestMerkleizeProgressiveReferenceVectors(t *testing.T) {
 }
 
 func TestMixInActiveFieldsReferenceVectors(t *testing.T) {
-	// EIP-7495 is pinned here to ethereum/EIPs revision
-	// c81d843b3f8aa839fe42911c5b6e501c7d2940a3. The expected roots were
-	// generated with ethereum/remerkleable's ProgressiveContainer backing at
-	// 2f0baeef0082d4278acaef7d822deb7009d7db7e. EIP-7807 revision
-	// 75d7bc2c20a91ec017d147f400d6bbf767843e2c defines ExecutionPayload with
-	// active_fields=[1] * 18.
+	// Expected roots are pinned EIP-7495 reference vectors for these field layouts.
 	var root [32]byte
 	for i := range root {
 		root[i] = byte(i)
@@ -146,13 +141,13 @@ func TestMixInActiveFieldsRejectsMoreThan256Bits(t *testing.T) {
 	require.Zero(t, mixed)
 }
 
-func TestMixInActiveFieldsDoesNotModifyRoot(t *testing.T) {
-	root := [32]byte{0x42, 0x43, 0x44}
-	original := root
+func TestMixInActiveFieldsDoesNotModifyActiveFields(t *testing.T) {
+	activeFields := []bool{true, false, true}
+	original := append([]bool(nil), activeFields...)
 
-	_, err := merkle_tree.MixInActiveFields(root, []bool{true, false, true})
+	_, err := merkle_tree.MixInActiveFields([32]byte{0x42, 0x43, 0x44}, activeFields)
 	require.NoError(t, err)
-	require.Equal(t, original, root)
+	require.Equal(t, original, activeFields)
 }
 
 func progressiveTestChunks(count int) [][32]byte {

@@ -44,7 +44,7 @@ func MixInActiveFields(root [32]byte, activeFields []bool) ([32]byte, error) {
 		}
 	}
 
-	return utils.Sha256(root[:], packed[:]), nil
+	return crypto.Sha256(root[:], packed[:]), nil
 }
 
 func merkleizeProgressive(chunks [][32]byte, numLeaves uint64) ([32]byte, error) {
