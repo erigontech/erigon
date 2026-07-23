@@ -1618,7 +1618,13 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tempo
 		// preceding blockResult to trigger the fast-path install above).
 		pe.ensureChangesetAccumulator(txResult.Version().BlockNum)
 
-		blockResult, err = blockExecutor.nextResult(ctx, pe, txResult, applyTx)
+		if depShapeEnabled {
+			serialStart := time.Now()
+			blockResult, err = blockExecutor.nextResult(ctx, pe, txResult, applyTx)
+			blockExecutor.serialNanos += time.Since(serialStart).Nanoseconds()
+		} else {
+			blockResult, err = blockExecutor.nextResult(ctx, pe, txResult, applyTx)
+		}
 
 		if err != nil {
 			return blockResult, err
@@ -2318,6 +2324,20 @@ type blockExecutor struct {
 	applyCount  int
 	exhausted   *ErrLoopExhausted
 
+	// Serial-spine timing (DEP_SHAPE only): total wall spent in the single-
+	// threaded exec-loop apply path (nextResult), and the per-component split
+	// of the in-order validation loop. serialNanos / (exec wall) is the Amdahl
+	// serial floor; the components rank what to attack.
+	serialNanos    int64
+	valLoopNanos   int64
+	scheduleNanos  int64
+	publishNanos   int64
+	calcFeesNanos  int64
+	validateNanos  int64
+	flushNanos     int64
+	finalizeNanos  int64
+	normalizeNanos int64
+
 	// blockStateCache provides a stable pre-block snapshot of account data
 	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
 	blockStateCache *state.BlockStateCache
@@ -2602,6 +2622,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	cntInvalid := 0
 	var stateReader state.StateReader
 
+	var valLoopStart time.Time
+	if depShapeEnabled {
+		valLoopStart = time.Now()
+	}
 	for i := 0; i < len(toValidate); i++ {
 
 		be.cntTotalValidations++
@@ -2643,7 +2667,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
 				}
 			}
+			var calcFeesStart time.Time
+			if depShapeEnabled {
+				calcFeesStart = time.Now()
+			}
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, stateReader, txTask.Rules())
+			if depShapeEnabled {
+				be.calcFeesNanos += time.Since(calcFeesStart).Nanoseconds()
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -2654,6 +2685,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
+		var validateStart time.Time
+		if depShapeEnabled {
+			validateStart = time.Now()
+		}
 		validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
 			func(readVersion, writtenVersion state.Version) state.VersionValidity {
 				vv := state.VersionValid
@@ -2666,6 +2701,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				return vv
 			}, trace, tracePrefix)
+		if depShapeEnabled {
+			be.validateNanos += time.Since(validateStart).Nanoseconds()
+		}
 		be.versionMap.SetTrace(false)
 
 		if validity == state.VersionTooEarly {
@@ -2679,7 +2717,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		be.versionMap.SetTrace(trace)
 		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
+		var flushStart time.Time
+		if depShapeEnabled {
+			flushStart = time.Now()
+		}
 		be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)
+		if depShapeEnabled {
+			be.flushNanos += time.Since(flushStart).Nanoseconds()
+		}
 		be.versionMap.SetTrace(false)
 
 		if valid {
@@ -2751,7 +2796,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					}
 				}
 
+				var finalizeStart time.Time
+				if depShapeEnabled {
+					finalizeStart = time.Now()
+				}
 				_, addReads, finalizeWrites, err := txResult.finalize(cumulativeGasUsed, firstLogIndex, pe.cfg.engine, be.versionMap, stateReader)
+				if depShapeEnabled {
+					be.finalizeNanos += time.Since(finalizeStart).Nanoseconds()
+				}
 				if err != nil {
 					return nil, err
 				}
@@ -2819,7 +2871,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					}
 					// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
 					emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
+					var normalizeStart time.Time
+					if depShapeEnabled {
+						normalizeStart = time.Now()
+					}
 					normWrites, normErr := rawWrites.Normalize(be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
+					if depShapeEnabled {
+						be.normalizeNanos += time.Since(normalizeStart).Nanoseconds()
+					}
 					if domainKeysErr != nil {
 						return nil, fmt.Errorf("[parallel] iterate storage prefix for block write normalization: %w", domainKeysErr)
 					}
@@ -2860,9 +2919,24 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 	}
 
-	maxValidated := be.validateTasks.maxComplete()
-	be.scheduleExecution(ctx, pe)
+	if depShapeEnabled {
+		be.valLoopNanos += time.Since(valLoopStart).Nanoseconds()
+	}
 
+	maxValidated := be.validateTasks.maxComplete()
+	var scheduleStart time.Time
+	if depShapeEnabled {
+		scheduleStart = time.Now()
+	}
+	be.scheduleExecution(ctx, pe)
+	if depShapeEnabled {
+		be.scheduleNanos += time.Since(scheduleStart).Nanoseconds()
+	}
+
+	var publishStart time.Time
+	if depShapeEnabled {
+		publishStart = time.Now()
+	}
 	if be.publishTasks.minPending() != -1 {
 		toPublish := make(sort.IntSlice, 0, 2)
 
@@ -2938,6 +3012,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				return nil, err
 			}
 		}
+	}
+	if depShapeEnabled {
+		be.publishNanos += time.Since(publishStart).Nanoseconds()
 	}
 
 	if be.publishTasks.countComplete() == len(be.tasks) && be.execTasks.countComplete() == len(be.tasks) {
@@ -3153,7 +3230,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			blockStateCache:  be.blockStateCache,
 		}
 		if depShapeEnabled && !be.execStarted.IsZero() {
-			logDepShape(pe.logger, be.blockNum, be.blockIO, be.stats, time.Since(be.execStarted))
+			logDepShape(pe.logger, be.blockNum, be.blockIO, be.stats, time.Since(be.execStarted), be.serialTiming())
 		}
 		return be.result, nil
 	}

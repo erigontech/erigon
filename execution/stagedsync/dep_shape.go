@@ -129,10 +129,40 @@ func buildDeps(deps []depSample) depMetrics {
 	return m
 }
 
+// serialSplit is the exec-loop serial-spine timing for one block: total wall
+// spent single-threaded in nextResult, and the per-component breakdown of the
+// in-order validation loop.
+type serialSplit struct {
+	serialNanos    int64
+	valLoopNanos   int64
+	scheduleNanos  int64
+	publishNanos   int64
+	calcFeesNanos  int64
+	validateNanos  int64
+	flushNanos     int64
+	finalizeNanos  int64
+	normalizeNanos int64
+}
+
+func (be *blockExecutor) serialTiming() serialSplit {
+	return serialSplit{
+		serialNanos:    be.serialNanos,
+		valLoopNanos:   be.valLoopNanos,
+		scheduleNanos:  be.scheduleNanos,
+		publishNanos:   be.publishNanos,
+		calcFeesNanos:  be.calcFeesNanos,
+		validateNanos:  be.validateNanos,
+		flushNanos:     be.flushNanos,
+		finalizeNanos:  be.finalizeNanos,
+		normalizeNanos: be.normalizeNanos,
+	}
+}
+
 // logDepShape computes and logs the block's parallel-shape metric. blockIO holds
 // the committed per-tx read sets; stats holds per-tx wall times; wallSpan is the
-// achieved block exec wall. No-op when DEP_SHAPE is off.
-func logDepShape(logger log.Logger, blockNum uint64, blockIO *state.VersionedIO, stats map[int]ExecutionStat, wallSpan time.Duration) {
+// achieved block exec wall; serial is the serial-spine timing. No-op when
+// DEP_SHAPE is off.
+func logDepShape(logger log.Logger, blockNum uint64, blockIO *state.VersionedIO, stats map[int]ExecutionStat, wallSpan time.Duration, serial serialSplit) {
 	if !depShapeEnabled || blockIO == nil {
 		return
 	}
@@ -160,6 +190,14 @@ func logDepShape(logger log.Logger, blockNum uint64, blockIO *state.VersionedIO,
 		achieved = float64(m.totalExecNanos) / float64(wallSpan.Nanoseconds())
 	}
 
+	// serialPct = fraction of the exec wall the single-threaded exec-loop
+	// spine (nextResult) was busy; the Amdahl serial floor. High => the spine
+	// is the bottleneck and parallelising it is the lever.
+	var serialPct float64
+	if wallSpan > 0 {
+		serialPct = 100 * float64(serial.serialNanos) / float64(wallSpan.Nanoseconds())
+	}
+
 	logger.Info("[dep-shape]",
 		"blk", blockNum,
 		"txs", len(deps),
@@ -169,6 +207,17 @@ func logDepShape(logger log.Logger, blockNum uint64, blockIO *state.VersionedIO,
 		"depEdges", m.depEdges,
 		"dependent", m.dependentTxs,
 		"independent", m.independentTxs,
+		"serialPct", fmt.Sprintf("%.1f", serialPct),
+		"serialMs", fmt.Sprintf("%.1f", float64(serial.serialNanos)/1e6),
+		"wallMs", fmt.Sprintf("%.1f", float64(wallSpan.Nanoseconds())/1e6),
+		"valLoopMs", fmt.Sprintf("%.1f", float64(serial.valLoopNanos)/1e6),
+		"scheduleMs", fmt.Sprintf("%.1f", float64(serial.scheduleNanos)/1e6),
+		"publishMs", fmt.Sprintf("%.1f", float64(serial.publishNanos)/1e6),
+		"calcFeesMs", fmt.Sprintf("%.1f", float64(serial.calcFeesNanos)/1e6),
+		"validateMs", fmt.Sprintf("%.1f", float64(serial.validateNanos)/1e6),
+		"flushMs", fmt.Sprintf("%.1f", float64(serial.flushNanos)/1e6),
+		"finalizeMs", fmt.Sprintf("%.1f", float64(serial.finalizeNanos)/1e6),
+		"normalizeMs", fmt.Sprintf("%.1f", float64(serial.normalizeNanos)/1e6),
 		"perDim", perDimString(m.perPath),
 	)
 }
