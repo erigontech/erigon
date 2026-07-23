@@ -1,10 +1,23 @@
 package rpc
 
+// note: derived types of Proof and Leaf can change later
+
 type Path string
 
 type Filter string
 
 type Anchor string
+
+type Gindex int64
+
+type Proof string
+
+type Leaf string
+
+type Result struct {
+	// TODO: decide and implement actual fields later. probably have to create more result types depending on what's been queried for.
+	Dummy string `json:"dummy"`
+}
 
 type Aliases struct {
 	Path    Path   `json:"path"`
@@ -24,4 +37,12 @@ type SSZQLRequest struct {
 	Queries       []SSZQuery `json:"queries"`
 	IncludeProofs bool       `json:"include_proof,omitempty"`
 	Multiproof    bool       `json:"multiproof,omitempty"`
+}
+
+type SSZQLResponse struct {
+	Paths    []Path   `json:"paths"`
+	Gindices []Gindex `json:"gindices"`
+	Proofs   []Proof  `json:"proofs"`
+	Leaves   []Leaf   `json:"leaves"`
+	Results  []Result `json:"results"`
 }
