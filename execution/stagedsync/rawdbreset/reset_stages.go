@@ -25,7 +25,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
@@ -317,13 +316,21 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				if blockNum > blocksAvailable {
 					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
 				}
-				if !dbg.PruneTotalDifficulty() {
-					if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
-						return err
-					}
+				// Always write TD. Caplin's BlockCollector.Flush reads parent.TD
+				// for the block right after the mode-B unwind target; if that
+				// target sits below pruneMarkerBlockThreshold and TD wasn't
+				// stored, forward re-exec wedges on "parent's total difficulty
+				// not found" (live-caught on hoodi --prune.mode=minimal at
+				// depth 154k). TD is 32 bytes/block — ~100 MB per 3M-block
+				// chain — cheap next to the snapshots themselves.
+				if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
+					return err
 				}
 
-				// Write marker for pruning only if we are above our safe threshold
+				// Canonical hash still gated by pruneMarkerBlockThreshold: the
+				// stale-sidechain-pointer bug this guard was added for is
+				// unrelated to TD; keeping the guard here preserves the
+				// storage saving without breaking mode-B.
 				if blockNum >= pruneMarkerBlockThreshold || blockNum == 0 {
 					if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
 						return err
@@ -331,11 +338,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					binary.BigEndian.PutUint64(blockNumBytes, blockNum)
 					if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
 						return err
-					}
-					if dbg.PruneTotalDifficulty() {
-						if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
-							return err
-						}
 					}
 				}
 				select {
