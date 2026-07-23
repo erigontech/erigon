@@ -68,6 +68,44 @@ func TestForkGraphInDisk(t *testing.T) {
 	require.Equal(t, PreValidated, status)
 }
 
+func TestNewForkGraphDiskCachesAnchorStateRoot(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		stateSlot  uint64
+		headerSlot uint64
+		headerRoot common.Hash
+		cachedRoot common.Hash
+	}{
+		{name: "skipped slot", stateSlot: 64, headerSlot: 63, headerRoot: common.Hash{1}},
+		{name: "block slot", stateSlot: 64, headerSlot: 64},
+		{name: "legacy block slot", stateSlot: 64, headerSlot: 64, headerRoot: common.Hash{1}, cachedRoot: common.Hash{1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			anchorState := state.New(&clparams.MainnetBeaconConfig)
+			anchorState.SetVersion(clparams.GloasVersion)
+			anchorState.SetSlot(tc.stateSlot)
+			header := &cltypes.BeaconBlockHeader{Slot: tc.headerSlot, Root: tc.headerRoot}
+			anchorState.SetLatestBlockHeader(header)
+			expectedStateRoot, err := anchorState.HashSSZ()
+			require.NoError(t, err)
+			if tc.cachedRoot != (common.Hash{}) {
+				expectedStateRoot = tc.cachedRoot
+				anchorState.SetPreviousStateRoot(tc.cachedRoot)
+			}
+			anchorRoot, err := anchorState.BlockRoot()
+			require.NoError(t, err)
+
+			graph := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}).(*forkGraphDisk)
+
+			require.Equal(t, common.Hash(expectedStateRoot), anchorState.PeekPreviousStateRoot())
+			require.Equal(t, header.Root, anchorState.LatestBlockHeader().Root)
+			persistedState, err := graph.readBeaconStateFromDisk(anchorRoot)
+			require.NoError(t, err)
+			require.Equal(t, common.Hash(expectedStateRoot), persistedState.PeekPreviousStateRoot())
+		})
+	}
+}
+
 // A prune for an already-covered slot (e.g. from a concurrent lock-free drain)
 // must not move the lowest-available marker backward past deleted data.
 func TestPruneKeepsLowestAvailableBlockMonotonic(t *testing.T) {
