@@ -147,7 +147,8 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 
 // dirty explicitly sets an address to dirty, even if the change entries would
 // otherwise suggest it as clean. This method is an ugly hack to handle the RIPEMD
-// precompile consensus exception.
+// precompile consensus exception; CreateAccount also uses it to keep a
+// resurrected address dirty across an intra-tx revert.
 func (j *journal) dirty(addr accounts.Address) {
 	j.dirties[addr]++
 }
