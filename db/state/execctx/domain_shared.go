@@ -1645,6 +1645,9 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 }
 
 func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, prefix []byte, txNum uint64) error {
+	if domain == kv.CommitmentDomain {
+		return sd.delCommitmentStorageSubtree(roTx, prefix, txNum)
+	}
 	if domain != kv.StorageDomain {
 		return errors.New("DomainDelPrefix: not supported")
 	}
@@ -1676,6 +1679,49 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, p
 		}
 		if forgotten > 0 {
 			panic(fmt.Errorf("DomainDelPrefix: %d forgotten keys after '%x' prefix removal", forgotten, prefix))
+		}
+	}
+	return nil
+}
+
+// delCommitmentStorageSubtree tombstones every persisted commitment branch of a
+// self-destructed account's storage subtree. accountHash is the 32-byte hashed
+// account key; the subtree occupies two non-adjacent compact-key ranges keyed by
+// the parity of the branch path length (ContractTrunkKeyRanges). Replaces the
+// per-slot storage enumeration that drove the trie to collapse each branch.
+func (sd *SharedDomains) delCommitmentStorageSubtree(roTx kv.TemporalTx, accountHash []byte, txNum uint64) error {
+	nib := commitment.ContractNibbles(accountHash)
+	evenFrom, evenTo, oddFrom, oddTo := commitment.ContractTrunkKeyRanges(nib)
+
+	type tuple struct{ k, v []byte }
+	tombs := make([]tuple, 0, 16)
+	collect := func(from, to []byte) error {
+		it, err := roTx.RangeAsOf(kv.CommitmentDomain, from, to, txNum, order.Asc, kv.Unlim)
+		if err != nil {
+			return err
+		}
+		defer it.Close()
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return err
+			}
+			if len(v) == 0 {
+				continue
+			}
+			tombs = append(tombs, tuple{common.Copy(k), common.Copy(v)})
+		}
+		return nil
+	}
+	if err := collect(evenFrom, evenTo); err != nil {
+		return err
+	}
+	if err := collect(oddFrom, oddTo); err != nil {
+		return err
+	}
+	for _, t := range tombs {
+		if err := sd.DomainDel(kv.CommitmentDomain, roTx, t.k, txNum, t.v); err != nil {
+			return err
 		}
 	}
 	return nil
