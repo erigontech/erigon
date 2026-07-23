@@ -765,8 +765,8 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, foldSem *semaphore.
 	path := make([]byte, 0, 144)
 	path = append(path, ni)
 	path = append(path, child.ext...)
-	deepStorageRoot := func(n *prefixNode, pth []byte, accountFresh bool) (cell, error) {
-		sr, err := foldStorageRoot(ctx, foldSem, sc.newStorageWorker, &pu, n, pth, accountFresh)
+	deepStorageRoot := func(n *prefixNode, pth []byte, accountFresh, storageDestroyed bool) (cell, error) {
+		sr, err := foldStorageRoot(ctx, foldSem, sc.newStorageWorker, &pu, n, pth, accountFresh, storageDestroyed)
 		if err == nil {
 			sc.deepLocalFolds.Add(1)
 		}

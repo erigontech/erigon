@@ -46,7 +46,11 @@ var errStorageBaseNotBranch = errors.New("streaming: storage base has no branch 
 
 // Seed the base from the real on-disk branch, not a hand-seed, so untouched first-nibble subtrees survive instead of dropping and diverging the root from the sequential trie.
 
-func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
+// seedEmptyStorageBase sets up the depth-64 wall rows with no on-disk branch, so
+// the subtree folds from only the touched slots. Used both as the reset prelude
+// of unfoldStorageBase and, on its own, for a self-destructed account whose
+// storage base is empty by definition (skip the persisted-branch read entirely).
+func seedEmptyStorageBase(base *HexPatriciaHashed, accPrefix []byte) {
 	d := int16(len(accPrefix))
 	copy(base.currentKey[:], accPrefix)
 	base.currentKeyLen = d
@@ -56,6 +60,11 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 		base.grid[0][i].reset()
 	}
 	base.touchMap[0], base.afterMap[0], base.branchBefore[0] = 0, 0, false
+}
+
+func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
+	seedEmptyStorageBase(base, accPrefix)
+	d := int16(len(accPrefix))
 
 	branch, err := base.branchFromCacheOrDB(nibbles.HexToCompact(accPrefix))
 	if err != nil {
@@ -96,7 +105,7 @@ func isDeepStorageAccount(node *prefixNode, depth int) bool {
 
 // dfsSubtreeDeep walks node's subtree applying each key to w, but at a big-storage
 // account it injects storageRoot's result instead of streaming the slots.
-func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storageRoot func(node *prefixNode, path []byte, accountFresh bool) (cell, error)) error {
+func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storageRoot func(node *prefixNode, path []byte, accountFresh, storageDestroyed bool) (cell, error)) error {
 	if node == nil {
 		return nil
 	}
@@ -111,7 +120,8 @@ func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storage
 	}
 
 	if isDeepStorageAccount(node, len(path)) {
-		sr, err := storageRoot(node, path, accountFresh)
+		storageDestroyed := node.update != nil && node.update.DeleteStorageSubtree
+		sr, err := storageRoot(node, path, accountFresh, storageDestroyed)
 		if err == nil {
 			setAccountStorageRoot(w, path, sr)
 			return nil
@@ -143,7 +153,7 @@ func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storage
 // Storage-root analogue of the account mount fold: parallelize a whale's storage by first nibble.
 // sem is the shared fold-concurrency budget: acquired per first-nibble worker so that
 // this whale's fan-out plus every other concurrently-folding subtree stays within the core count.
-func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker func(context.Context) (*HexPatriciaHashed, func()), pu *parallelUpdate, node *prefixNode, path []byte, accountFresh bool) (cell, error) {
+func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker func(context.Context) (*HexPatriciaHashed, func()), pu *parallelUpdate, node *prefixNode, path []byte, accountFresh, storageDestroyed bool) (cell, error) {
 	accPrefix := append([]byte(nil), path...)
 
 	base, releaseBase := newWorker(ctx)
@@ -161,7 +171,9 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 		accTag = fmt.Sprintf("[%x] ", accID)
 		base.SetTraceWriter(tracePrefix(base.traceW, accTag))
 	}
-	if err := unfoldStorageBase(base, accPrefix); err != nil {
+	if storageDestroyed {
+		seedEmptyStorageBase(base, accPrefix)
+	} else if err := unfoldStorageBase(base, accPrefix); err != nil {
 		// A fresh account proves nothing exists on disk beneath accPrefix, so the reset
 		// (empty) wall rows unfoldStorageBase left behind are the correct seed.
 		if !accountFresh || !errors.Is(err, errStorageBaseNotBranch) {

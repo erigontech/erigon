@@ -27,47 +27,45 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// These tests pin the "delete-all-below-the-account" invariant for self-destruct:
-// instead of enumerating and deleting each of a destroyed account's storage slots
-// (the current commitment-calculator behaviour), the account-key delete plus a
-// single prefix-delete of the persisted commitment branches under the account's
-// hashed prefix must reproduce the trie root.
+// These tests pin the self-destruct "empty storage base" invariant: instead of
+// enumerating and deleting each of a destroyed account's storage slots (the
+// current commitment-calculator behaviour), the account update carries a
+// transient marker and the trie treats the storage base as empty — building the
+// subtree from only the recreate's touched slots without re-mounting the old
+// persisted subtree. Store cleanup of the orphaned branches is a separate,
+// live-domain concern (modelled by deleteBranchesUnderAccount below).
 //
 // The decisive case is recreation of the destroyed address. Two regimes emerge:
 //
 //   - shallow storage (below deepStorageThreshold): the root self-heals from the
-//     account-key delete alone — a freshly-recreated account rebuilds its subtree
-//     from only the touched slots, and orphaned branches are never mounted.
+//     account-key delete / cell-reset alone — a freshly-recreated account rebuilds
+//     its subtree from only the touched slots, and orphaned branches are never
+//     mounted.
 //   - deep-fold storage (above deepStorageThreshold): the parallel/streaming deep
 //     -fold worker mounts the account's storage subtree from persisted branches,
-//     so orphaned branches left by the account-key delete leak stale slots. Here
-//     the branch prefix-delete is load-bearing.
+//     so without the empty-base signal orphaned branches leak stale slots. Here
+//     the marker is load-bearing — the deep-fold skips unfoldStorageBase.
 //
-// DeleteBranchPrefix models the commitment-branch prefix-delete the calculator
-// performs on self-destruct: drop every persisted commitment branch at or below
-// the account's 64-nibble hashed prefix (its storage subtree). It is the test
-// context's stand-in for the production TrieContext.DeleteBranchPrefix.
-func (ms *MockState) DeleteBranchPrefix(hashedAccountPrefix []byte) error {
+// deleteBranchesUnderAccount deletes the storage-subtree commitment branches of
+// an account directly from the mock store, keyed by its 64-nibble hashed prefix.
+// It models the live-domain GC prefix-delete that runs BETWEEN blocks (apply
+// time), NOT during the commitment Process — so it is applied after a block, not
+// via a trie context capability.
+func deleteBranchesUnderAccount(t *testing.T, ms *MockState, accountHex string) {
+	t.Helper()
+	addrBytes, err := hex.DecodeString(accountHex)
+	require.NoError(t, err)
+	prefix := KeyToHexNibbleHash(addrBytes)
 	if ms.concurrent.Load() {
 		ms.mu.Lock()
 		defer ms.mu.Unlock()
 	}
 	for k := range ms.cm {
 		nib := nibbles.CompactToHex([]byte(k))
-		if len(nib) >= len(hashedAccountPrefix) && bytes.HasPrefix(nib, hashedAccountPrefix) {
+		if len(nib) >= len(prefix) && bytes.HasPrefix(nib, prefix) {
 			delete(ms.cm, k)
 		}
 	}
-	return nil
-}
-
-// pruneBranchesUnderAccount deletes the storage-subtree commitment branches of an
-// account via the context capability, keyed by its 64-nibble hashed prefix.
-func pruneBranchesUnderAccount(t *testing.T, ms *MockState, accountHex string) {
-	t.Helper()
-	addrBytes, err := hex.DecodeString(accountHex)
-	require.NoError(t, err)
-	require.NoError(t, ms.DeleteBranchPrefix(KeyToHexNibbleHash(addrBytes)))
 }
 
 // sdRecreateLifecycle folds the self-destruct-then-recreate lifecycle through one
@@ -105,7 +103,7 @@ func sdRecreateLifecycle(t *testing.T, mode runMode, workers, nSlots int, a, sib
 	k2, u2 := b2.Build()
 	_, blob2 := processModeBatchState(t, ms, mode, workers, k2, u2, blob)
 	if pruneBranches {
-		pruneBranchesUnderAccount(t, ms, a)
+		deleteBranchesUnderAccount(t, ms, a)
 	}
 
 	b3 := NewUpdateBuilder()
@@ -141,9 +139,12 @@ var sdEngineModes = []struct {
 	{"streaming-public", modeStreamingPublic},
 }
 
-// With the branch prefix-delete, dropping the per-slot storage enumeration
-// reproduces the oracle root across every engine and every recreate shape —
-// including the deep-fold regime where self-heal alone is insufficient.
+// With the live-domain GC prefix-delete applied between blocks (the orphaned
+// branches gone before the recreate reads them), dropping the per-slot storage
+// enumeration reproduces the oracle root across every engine and every recreate
+// shape — including the deep-fold regime where self-heal alone is insufficient.
+// This is the separate-block regime; the same-block regime is covered by the
+// empty-base-signal tests above.
 func TestSelfDestructBranchPrune_ReproducesOracle(t *testing.T) {
 	t.Parallel()
 	a := addrHex(findAddressForNibble(3, 900))
@@ -242,9 +243,11 @@ func parUpdateBatch(t *testing.T, ms *MockState, workers int, keys [][]byte, upd
 	return root, out
 }
 
-// The trie-level SD reset on the PARALLEL engine, where a deep-fold recreate
-// diverges without the prune (unlike seq): same-block self-destruct-then-recreate
-// with the SD-reset marker must reproduce the oracle.
+// The empty-base signal on the PARALLEL engine, where a deep-fold recreate
+// diverges without it (unlike seq): same-block self-destruct-then-recreate with
+// the SD-reset marker must reproduce the oracle, with the old branches still
+// present in the store (frozen-snapshot faithful — the deep-fold worker reads a
+// pre-block snapshot a mid-Process delete could not affect).
 func TestSelfDestructTrieReset_SameBlockRecreate_Parallel(t *testing.T) {
 	t.Parallel()
 	a := addrHex(findAddressForNibble(3, 900))
@@ -290,12 +293,12 @@ func TestSelfDestructTrieReset_SameBlockRecreate_Parallel(t *testing.T) {
 		"parallel same-block SD+recreate via trie-level reset must reproduce the oracle\n got=%x\nwant=%x", got, want)
 }
 
-// The trie-level SD reset: a same-block self-destruct-then-recreate (account ends
+// The empty-base signal: a same-block self-destruct-then-recreate (account ends
 // ALIVE, so no account-key delete is emitted) reproduces the oracle root when the
-// account update carries the SD-reset marker. The trie prunes the old storage
-// subtree during Process — synchronously, before the recreate's slots descend —
-// so it rebuilds from empty storage. This is the case the pre-Process external
-// prune could not handle. Seq engine first (ModeUpdate, the calculator's path).
+// account update carries the SD-reset marker. The trie treats the storage base as
+// empty and rebuilds from the recreate's touched slots — no persisted-subtree read
+// and no store mutation. Seq engine (ModeUpdate, the calculator's path); the old
+// branches remain in the store, so this proves the signal, not a delete.
 func TestSelfDestructTrieReset_SameBlockRecreate_Seq(t *testing.T) {
 	t.Parallel()
 	a := addrHex(findAddressForNibble(3, 900))
