@@ -155,7 +155,7 @@ func TestDomain_OpenFolder(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
-	err = d.openFolder(t.Context(), scanDirsRes)
+	_, err = d.openFolder(t.Context(), scanDirsRes)
 	require.NoError(t, err)
 	d.Close()
 }
@@ -861,7 +861,8 @@ func TestDomain_ScanFiles(t *testing.T) {
 	d.closeWhatNotInList([]string{})
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
-	require.NoError(t, d.openFolder(t.Context(), scanDirsRes))
+	_, err = d.openFolder(t.Context(), scanDirsRes)
+	require.NoError(t, err)
 
 	// Check the history
 	checkHistory(t, db, d, txs)
@@ -1373,7 +1374,7 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(dom.dirs)
 	require.NoError(t, err)
-	err = dom.openFolder(t.Context(), scanDirsRes)
+	_, err = dom.openFolder(t.Context(), scanDirsRes)
 
 	require.NoError(t, err)
 

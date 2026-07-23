@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/mvcc"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -126,14 +127,16 @@ type FilesItem struct {
 	version  version.Version
 	refcount atomic.Int32
 
-	// Used by the SnapshotRepo mark-and-sweep reclamation path (with refcount); the
-	// aggregator instead reclaims via aggregatorVisible generations (retired + refcnt).
 	canDelete atomic.Bool
 }
 
 func newFilesItem(startTxNum, endTxNum uint64) *FilesItem {
 	return &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum}
 }
+
+// retiredFiles will close in near future (or deleted from disk). `retiredFiles` already was removed from `dirtyFiles` list.
+// See `mvcc.RetireReason`
+type retiredFiles []*FilesItem
 
 func (i *FilesItem) Segment() *seg.Decompressor { return i.decompressor }
 
@@ -339,34 +342,26 @@ func filterDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext str
 	return res
 }
 
-// retireReason identifies why a file was removed from dirtyFiles.
-type retireReason int
-
-const (
-	retireReasonMerged retireReason = iota + 1
-	retireReasonAged
-)
-
-func (r retireReason) String() string {
-	switch r {
-	case retireReasonMerged:
-		return "merged"
-	case retireReasonAged:
-		return "aged"
+// retire removes outs from dirtyFiles; the caller still owns outs and must attach it
+// to the outgoing visible generation itself. Physical reclaim happens once the last
+// reader of that generation closes — so readers still pinning these files are never
+// surprised.
+func retire(reason mvcc.RetireReason, dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, logger log.Logger) {
+	// canDelete decides whether reclaim also deletes the file from disk, or only closes it.
+	var canDelete bool
+	switch reason {
+	case mvcc.RetireReasonMerged, mvcc.RetireReasonAged:
+		canDelete = true // our merge/prune output is still on disk and must be removed
+	case mvcc.RetireReasonWasDeletedFromDisk:
+		canDelete = false // an external actor already deleted it: close only, never re-delete
 	default:
-		return "unknown"
+		panic(fmt.Sprintf("retire: unknown reason %d", reason))
 	}
-}
-
-// retire removes outs from dirtyFiles; the caller still owns outs and must
-// attach it to the outgoing visible generation itself. Physical deletion
-// (closeFilesAndRemove) happens once the last reader of that generation closes
-// — so readers still pinning these files are never surprised.
-func retire(dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, reason retireReason, logger log.Logger) {
 	for _, out := range outs {
 		if out == nil {
 			panic("must not happen: " + filenameBase)
 		}
+		out.canDelete.Store(canDelete)
 		dirtyFiles.Delete(out)
 		if filenameBase == traceFileLife && out.decompressor != nil {
 			logger.Warn("[agg.dbg] retire", "f", out.decompressor.FileName(), "reason", reason)
@@ -849,18 +844,36 @@ func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, aggregationStep uint6
 	return
 }
 
-// closeWhatNotInList closes and removes from dirtyFiles all items whose decompressor file name
-// is not in the provided fNames list.
-func closeWhatNotInList(dirtyFiles *DirtyFiles, fNames []string) {
+// filesNotInList collects (without removing or closing) every dirtyFiles item whose
+// decompressor file is not in fNames. A nil decompressor has no backing file, so it
+// always qualifies.
+func filesNotInList(dirtyFiles *DirtyFiles, fNames []string) []*FilesItem {
 	protectFiles := make(map[string]struct{}, len(fNames))
 	for _, f := range fNames {
 		protectFiles[f] = struct{}{}
 	}
-	dirtyFiles.CloseIf(func(item *FilesItem) bool {
+	var outs []*FilesItem
+	dirtyFiles.Scan(func(item *FilesItem) bool {
 		if item.decompressor == nil {
+			outs = append(outs, item)
 			return true
 		}
-		_, protected := protectFiles[item.decompressor.FileName()]
-		return !protected
+		if _, protected := protectFiles[item.decompressor.FileName()]; !protected {
+			outs = append(outs, item)
+		}
+		return true
 	})
+	return outs
+}
+
+// closeWhatNotInList closes and removes from dirtyFiles all items whose decompressor file name
+// is not in the provided fNames list.
+func closeWhatNotInList(dirtyFiles *DirtyFiles, fNames []string) {
+	dirtyFiles.CloseItems(filesNotInList(dirtyFiles, fNames))
+}
+
+func retireFilesNotInList(reason mvcc.RetireReason, dirtyFiles *DirtyFiles, fNames []string, filenameBase string, logger log.Logger) retiredFiles {
+	outs := filesNotInList(dirtyFiles, fNames)
+	retire(reason, dirtyFiles, outs, filenameBase, logger)
+	return outs
 }
