@@ -528,10 +528,16 @@ type TemporalDebugTx interface {
 	NewMemBatch(ioMetrics any) TemporalMemBatch
 }
 
+type BuildAccessorsOption uint8
+
+// SkipCoveredAccessors skips files whose range is covered by other visible
+// sub-files; those self-heal via the background merge cycle.
+const SkipCoveredAccessors BuildAccessorsOption = 1
+
 type TemporalDebugDB interface {
 	DomainTables(names ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
-	BuildMissedAccessors(ctx context.Context, workers int) error
+	BuildMissedAccessors(ctx context.Context, workers int, opts ...BuildAccessorsOption) error
 	EnableReadAhead() TemporalDebugDB
 	DisableReadAhead()
 
