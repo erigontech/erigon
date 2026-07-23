@@ -109,7 +109,8 @@ func Sha256(data []byte, extras ...[]byte) common.Hash {
 
 func sha256Joined(data []byte, extras [][]byte) common.Hash {
 	p := joinBufPool.Get().(*[]byte)
-	buf := append((*p)[:0], data...)
+	buf := (*p)[:0]
+	buf = append(buf, data...)
 	for _, extra := range extras {
 		buf = append(buf, extra...)
 	}
