@@ -138,6 +138,8 @@ type serialSplit struct {
 	scheduleNanos    int64
 	publishNanos     int64
 	stateWritesNanos int64
+	acctReadNanos    int64
+	delPrefixNanos   int64
 	txIndexNanos     int64
 	calcFeesNanos    int64
 	validateNanos    int64
@@ -147,12 +149,19 @@ type serialSplit struct {
 }
 
 func (be *blockExecutor) serialTiming() serialSplit {
+	var acctReadNanos, delPrefixNanos int64
+	if be.blockStateCache != nil {
+		acctReadNanos = be.blockStateCache.AcctReadNanos
+		delPrefixNanos = be.blockStateCache.DelPrefixNanos
+	}
 	return serialSplit{
 		serialNanos:      be.serialNanos,
 		valLoopNanos:     be.valLoopNanos,
 		scheduleNanos:    be.scheduleNanos,
 		publishNanos:     be.publishNanos,
 		stateWritesNanos: be.stateWritesNanos,
+		acctReadNanos:    acctReadNanos,
+		delPrefixNanos:   delPrefixNanos,
 		txIndexNanos:     be.txIndexNanos,
 		calcFeesNanos:    be.calcFeesNanos,
 		validateNanos:    be.validateNanos,
@@ -229,6 +238,8 @@ func logDepShape(logger log.Logger, blockNum uint64, blockIO *state.VersionedIO,
 		"scheduleMs", fmt.Sprintf("%.1f", float64(serial.scheduleNanos)/1e6),
 		"publishMs", fmt.Sprintf("%.1f", float64(serial.publishNanos)/1e6),
 		"stateWrMs", fmt.Sprintf("%.1f", float64(serial.stateWritesNanos)/1e6),
+		"acctReadMs", fmt.Sprintf("%.1f", float64(serial.acctReadNanos)/1e6),
+		"delPrefixMs", fmt.Sprintf("%.1f", float64(serial.delPrefixNanos)/1e6),
 		"txIndexMs", fmt.Sprintf("%.1f", float64(serial.txIndexNanos)/1e6),
 		"calcFeesMs", fmt.Sprintf("%.1f", float64(serial.calcFeesNanos)/1e6),
 		"validateMs", fmt.Sprintf("%.1f", float64(serial.validateNanos)/1e6),

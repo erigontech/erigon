@@ -23,6 +23,7 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
@@ -40,6 +41,10 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
 )
+
+// applyTiming gates the DEP_SHAPE decomposition of WriteSet.Apply's per-tx
+// cost (base-account GetLatest vs DomainDelPrefix). Zero-cost when off.
+var applyTiming = dbg.EnvBool("DEP_SHAPE", false)
 
 type StateV3 struct {
 	domains                *execctx.SharedDomains
@@ -154,6 +159,26 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 			return bytes.Compare(av[:], bv[:])
 		})
 
+		getLatestAcct := func(k []byte) ([]byte, error) {
+			if !applyTiming || blockCache == nil {
+				v, _, err := domains.GetLatest(kv.AccountsDomain, roTx, k)
+				return v, err
+			}
+			t := time.Now()
+			v, _, err := domains.GetLatest(kv.AccountsDomain, roTx, k)
+			blockCache.AcctReadNanos += time.Since(t).Nanoseconds()
+			return v, err
+		}
+		delPrefixTimed := func(k []byte) error {
+			if !applyTiming || blockCache == nil {
+				return domains.DomainDelPrefix(kv.StorageDomain, roTx, k, txNum)
+			}
+			t := time.Now()
+			err := domains.DomainDelPrefix(kv.StorageDomain, roTx, k, txNum)
+			blockCache.DelPrefixNanos += time.Since(t).Nanoseconds()
+			return err
+		}
+
 		for _, addr := range addrs {
 			d := perAddr[addr]
 			address := addr.Value()
@@ -208,7 +233,7 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 			// Contract creation: clear stale storage before writing new account.
 			// Matches Writer.CreateContract which calls DomainDelPrefix.
 			if d.createContract {
-				if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
+				if err := delPrefixTimed(address[:]); err != nil {
 					return err
 				}
 			}
@@ -228,10 +253,10 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 					if blockCache != nil {
 						if enc, ok := blockCache.GetCurrentAccount(addr); ok && len(enc) > 0 {
 							_ = accounts.DeserialiseV3(&acc, enc)
-						} else if enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
+						} else if enc0, err := getLatestAcct(address[:]); err == nil && len(enc0) > 0 {
 							_ = accounts.DeserialiseV3(&acc, enc0)
 						}
-					} else if enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
+					} else if enc0, err := getLatestAcct(address[:]); err == nil && len(enc0) > 0 {
 						_ = accounts.DeserialiseV3(&acc, enc0)
 					}
 				}
@@ -1076,6 +1101,13 @@ type BlockStateCache struct {
 	// commitment-domain reads) that ask for state at an intra-block
 	// txNum.
 	writeLog []bcWriteOp
+
+	// DEP_SHAPE decomposition of the per-tx apply cost: time spent in the
+	// base-account GetLatest (overlay read) and in DomainDelPrefix (storage
+	// wipe on contract creation / self-destruct). Accumulated in Apply, read
+	// per block by dep-shape. Zero when DEP_SHAPE is off.
+	AcctReadNanos  int64
+	DelPrefixNanos int64
 }
 
 // bcOpKind enumerates the operations recorded in BlockStateCache.writeLog.
