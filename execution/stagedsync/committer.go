@@ -336,7 +336,11 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// the lazy-load path and never leaks into the trie fold path.
 		if !r.writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
-			cc.state.ApplyWrites(r.writes, r.rules.IsAmsterdam)
+			if r.commitWrites != nil {
+				cc.state.ApplyWrites(r.commitWrites, r.rules.IsAmsterdam)
+			} else {
+				cc.state.ApplyWrites(r.writes, r.rules.IsAmsterdam)
+			}
 		}
 
 		// A folded-ahead block already emitted its interior step checkpoints from

@@ -1754,9 +1754,16 @@ type txResult struct {
 	traceFroms            map[accounts.Address]struct{}
 	traceTos              map[accounts.Address]struct{}
 	writes                *state.WriteSet
+	commitWrites          state.WriteSetView // VMAP_COMMIT_VIEW A/B: versionMap-slice view fed to the calculator instead of the normalized writes
 	rules                 *chain.Rules
 	isFinalize            bool // block-end finalize writes — apply to sd.mem directly
 }
+
+// useVersionMapCommitView routes the commitment calculator's per-tx input
+// through the read-only versionMap-slice view (NewVersionMapWriteView) instead
+// of the normalized *WriteSet — an A/B to check commitment consistency of the
+// single-source-of-truth path. Off by default.
+var useVersionMapCommitView = dbg.EnvBool("VMAP_COMMIT_VIEW", false)
 
 // blockRequest is the commitment calculator's per-block heads-up, sent by the
 // dispatch layer on its own channel — ahead of, and separate from, the
@@ -3004,6 +3011,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if result.writes != nil {
 				applyResult.writes = result.writes
 				be.applyCount += applyResult.writes.Count()
+				if useVersionMapCommitView {
+					applyResult.commitWrites = state.NewVersionMapWriteView(result.writes, be.versionMap, task.Version().TxIndex)
+				}
 			}
 
 			// Apply state writes to sd.mem and block cache.
