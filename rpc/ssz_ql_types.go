@@ -8,20 +8,20 @@ type Anchor string
 
 type Aliases struct {
 	Path    Path   `json:"path"`
-	Filters Filter `json:"filter"`
+	Filters Filter `json:"filter,omitempty"`
 	Alias   string `json:"alias"`
 }
 
 type SSZQuery struct {
 	Anchor    Anchor `json:"anchor"`
 	Path      Path   `json:"path"`
-	Filters   Filter `json:"filter"`
-	Summaries bool   `json:"summaries"`
+	Filters   Filter `json:"filter,omitempty"`
+	Summaries bool   `json:"summaries,omitempty"`
 }
 
 type SSZQLRequest struct {
-	Aliases       []Aliases  `json:"aliases"`
-	Queries       []SSZQuery `json:"query"`
-	IncludeProofs bool       `json:"include_proof"`
-	Multiproof    bool       `json:"multiproof"`
+	Aliases       []Aliases  `json:"aliases,omitempty"`
+	Queries       []SSZQuery `json:"queries"`
+	IncludeProofs bool       `json:"include_proof,omitempty"`
+	Multiproof    bool       `json:"multiproof,omitempty"`
 }
