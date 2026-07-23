@@ -62,6 +62,7 @@ const DefaultOverlayGetLogsTimeout = 5 * time.Minute
 const DefaultOverlayReplayBlockTimeout = 10 * time.Second
 const DefaultRpcTxSyncDefaultTimeout = 25 * time.Second
 const DefaultRpcTxSyncMaxTimeout = 1 * time.Minute
+const DefaultGasCap = 50_000_000
 
 type BaseApiConfig struct {
 	SingleNodeMode    bool
@@ -88,6 +89,12 @@ type EthApiConfig struct {
 type DebugApiConfig struct {
 	GasCap            uint64
 	GethCompatibility bool // Geth-compatible storage iteration order for debug_storageRangeAt
+}
+
+// DefaultDebugApiConfig returns the DebugApiConfig used outside the RPC daemon
+// (e.g. block-test runners), where no HttpCfg is available.
+func DefaultDebugApiConfig() *DebugApiConfig {
+	return &DebugApiConfig{GasCap: DefaultGasCap}
 }
 
 // TraceApiConfig defines the configurable parameters for the trace_ namespace
