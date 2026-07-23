@@ -1692,6 +1692,9 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	case ModeUpdate:
 		if existing, ok := t.treeIdx[key]; ok {
 			// Merge into existing entry
+			if update.DeleteStorageSubtree {
+				existing.update.DeleteStorageSubtree = true
+			}
 			if update.Flags&DeleteUpdate != 0 {
 				existing.update.Flags = DeleteUpdate
 				existing.update.CodeHash = empty.CodeHash
@@ -2187,6 +2190,14 @@ type Update struct {
 	Flags      UpdateFlags
 	Balance    uint256.Int
 	Nonce      uint64
+
+	// DeleteStorageSubtree is a transient (never-serialized) signal that this
+	// account was self-destructed in the block: its whole storage subtree must be
+	// pruned before this account's update is applied, so a same-block recreate
+	// rebuilds from empty storage. Set by the commitment calculator from the SD
+	// marker; consumed by the trie during Process. Not a Flags bit because Flags
+	// is serialized and merged.
+	DeleteStorageSubtree bool
 }
 
 func (u *Update) Reset() {
@@ -2195,6 +2206,7 @@ func (u *Update) Reset() {
 	u.Nonce = 0
 	u.StorageLen = 0
 	u.CodeHash = empty.CodeHash
+	u.DeleteStorageSubtree = false
 }
 
 // Copy creates a deep copy of the Update.
@@ -2203,17 +2215,21 @@ func (u *Update) Copy() *Update {
 		return nil
 	}
 	c := &Update{
-		CodeHash:   u.CodeHash,
-		Storage:    u.Storage,
-		StorageLen: u.StorageLen,
-		Flags:      u.Flags,
-		Nonce:      u.Nonce,
+		CodeHash:             u.CodeHash,
+		Storage:              u.Storage,
+		StorageLen:           u.StorageLen,
+		Flags:                u.Flags,
+		Nonce:                u.Nonce,
+		DeleteStorageSubtree: u.DeleteStorageSubtree,
 	}
 	c.Balance.Set(&u.Balance)
 	return c
 }
 
 func (u *Update) Merge(b *Update) {
+	if b.DeleteStorageSubtree {
+		u.DeleteStorageSubtree = true
+	}
 	if b.Flags == DeleteUpdate {
 		u.Flags = DeleteUpdate
 		return

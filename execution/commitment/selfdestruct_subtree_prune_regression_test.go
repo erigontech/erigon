@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
@@ -183,11 +184,90 @@ func TestSelfDestructBranchPrune_ReproducesOracle(t *testing.T) {
 	}
 }
 
-// Guard: the branch prefix-delete is load-bearing on the deep-fold path. Deleting
-// only the account key (relying on self-heal) diverges from the oracle under the
-// parallel/streaming deep-fold, because the deep-fold mount rebuilds the subtree
-// from orphaned persisted branches. This pins WHY the prune cannot be dropped.
-func TestSelfDestructNoPrune_DeepFoldDiverges(t *testing.T) {
+// seqUpdateBatch folds one batch through a seq HexPatriciaHashed via the
+// ModeUpdate path (TouchPlainKeyDirect — the commitment calculator's path, which
+// carries the Update, including the transient SD-reset marker, through to the
+// trie). sdReset names the account whose update gets the marker (empty = none).
+func seqUpdateBatch(t *testing.T, ms *MockState, keys [][]byte, upds []Update, blob []byte, sdReset string) ([]byte, []byte) {
+	t.Helper()
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+	tr := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	defer tr.Release()
+	require.NoError(t, tr.SetState(blob))
+	ut := NewUpdates(ModeUpdate, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	var sd []byte
+	if sdReset != "" {
+		sd, _ = hex.DecodeString(sdReset)
+	}
+	for i, k := range keys {
+		u := upds[i]
+		if sd != nil && bytes.Equal(k, sd) {
+			u.DeleteStorageSubtree = true
+		}
+		ut.TouchPlainKeyDirect(string(k), &u)
+	}
+	root := processRoot(t, tr, ut)
+	out, err := tr.EncodeCurrentState(nil)
+	require.NoError(t, err)
+	return root, out
+}
+
+// The trie-level SD reset: a same-block self-destruct-then-recreate (account ends
+// ALIVE, so no account-key delete is emitted) reproduces the oracle root when the
+// account update carries the SD-reset marker. The trie prunes the old storage
+// subtree during Process — synchronously, before the recreate's slots descend —
+// so it rebuilds from empty storage. This is the case the pre-Process external
+// prune could not handle. Seq engine first (ModeUpdate, the calculator's path).
+func TestSelfDestructTrieReset_SameBlockRecreate_Seq(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 900))
+	sib := addrHex(findAddressForNibble(7, 500))
+	const nOld = 1500
+	recreate := func(ub *UpdateBuilder) {
+		ub.Balance(a, 7777).Nonce(a, 9)
+		for s := 5000; s < 6600; s++ {
+			ub.Storage(a, hex.EncodeToString(slotHashBytes(s)), "cc")
+		}
+	}
+
+	ms := NewMockState(t)
+	b1 := NewUpdateBuilder().Balance(a, 100).Nonce(a, 1).Balance(sib, 500)
+	for s := range nOld {
+		b1.Storage(a, hex.EncodeToString(slotHashBytes(s)), "0badc0de")
+	}
+	k1, u1 := b1.Build()
+	_, blob := seqUpdateBatch(t, ms, k1, u1, nil, "")
+
+	// SD-marker state cleanup: old slots gone from state.
+	clean := NewUpdateBuilder()
+	for s := range nOld {
+		clean.DeleteStorage(a, hex.EncodeToString(slotHashBytes(s)))
+	}
+	ck, cu := clean.Build()
+	require.NoError(t, ms.applyPlainUpdates(ck, cu))
+
+	// Same-block recreate, account update carries the SD-reset marker.
+	b2 := NewUpdateBuilder()
+	recreate(b2)
+	k2, u2 := b2.Build()
+	got, _ := seqUpdateBatch(t, ms, k2, u2, blob, a)
+
+	oms := NewMockState(t)
+	ob := NewUpdateBuilder().Balance(sib, 500)
+	recreate(ob)
+	ok, ou := ob.Build()
+	want, _ := seqUpdateBatch(t, oms, ok, ou, nil, "")
+
+	require.Truef(t, bytes.Equal(got, want),
+		"same-block SD+recreate via trie-level reset must reproduce the oracle\n got=%x\nwant=%x", got, want)
+}
+
+// Seq self-heals a deep-fold recreate from the account-key delete alone (no
+// prune, no per-slot enumeration): a freshly-recreated account rebuilds its
+// subtree from only the touched slots. The parallel/streaming deep-fold instead
+// needs the branch prefix-delete (TestSelfDestructBranchPrune_ReproducesOracle).
+func TestSelfDestructSeqSelfHeals_DeepFoldRecreate(t *testing.T) {
 	t.Parallel()
 	a := addrHex(findAddressForNibble(3, 900))
 	sib := addrHex(findAddressForNibble(7, 500))
@@ -197,19 +277,8 @@ func TestSelfDestructNoPrune_DeepFoldDiverges(t *testing.T) {
 			ub.Storage(a, hex.EncodeToString(slotHashBytes(s)), "cc")
 		}
 	}
-
-	for _, md := range sdEngineModes {
-		t.Run(md.name, func(t *testing.T) {
-			const workers = 4
-			noPrune := sdRecreateLifecycle(t, md.mode, workers, 1500, a, sib, false, recreate)
-			want := sdRecreateOracle(t, md.mode, workers, sib, recreate)
-			if md.mode == modeSeq {
-				require.True(t, bytes.Equal(noPrune, want),
-					"seq self-heals: account-key delete alone reproduces the oracle")
-			} else {
-				require.Falsef(t, bytes.Equal(noPrune, want),
-					"%s deep-fold must diverge without the branch prefix-delete — if this now matches, self-heal covers deep-fold and the guard can be relaxed", md.name)
-			}
-		})
-	}
+	noPrune := sdRecreateLifecycle(t, modeSeq, 0, 1500, a, sib, false, recreate)
+	want := sdRecreateOracle(t, modeSeq, 0, sib, recreate)
+	require.True(t, bytes.Equal(noPrune, want),
+		"seq self-heals: account-key delete alone reproduces the oracle")
 }

@@ -2190,9 +2190,42 @@ func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
 	hph.collapseTracer(siblingPath, common.Copy(hph.currentKey[:depth]))
 }
 
+// branchPrefixDeleter is optionally implemented by the PatriciaContext to prune
+// every persisted commitment branch under an account's hashed prefix (its storage
+// subtree), so a self-destruct need not enumerate and delete each slot.
+type branchPrefixDeleter interface {
+	DeleteBranchPrefix(hashedAccountPrefix []byte) error
+}
+
+// pruneAccountStorageSubtree drops the persisted storage-subtree branches of a
+// self-destructed account synchronously (before this Process reads them for a
+// deep-fold mount or a same-block recreate's descent) and clears the in-grid
+// account cell's storage-root reference so the account rebuilds from empty
+// storage. hashedKey is the 64-nibble hashed account key.
+func (hph *HexPatriciaHashed) pruneAccountStorageSubtree(hashedKey []byte) {
+	if pruner, ok := hph.ctx.(branchPrefixDeleter); ok {
+		if err := pruner.DeleteBranchPrefix(hashedKey); err != nil && hph.traceW != nil {
+			fmt.Fprintf(hph.traceW, "DeleteBranchPrefix(%x) failed: %v\n", hashedKey, err)
+		}
+	}
+	if hph.activeRows == 0 {
+		return
+	}
+	row := hph.activeRows - 1
+	nibble := int(hashedKey[hph.currentKeyLen])
+	cell := &hph.grid[row][nibble]
+	cell.hashLen = 0
+	cell.extLen = 0
+	cell.stateHashLen = 0
+}
+
 // fetches cell by key and set touch/after maps. Requires that prefix to be already unfolded
 func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) (cell *cell) {
 	hph.metrics.Updates(plainKey)
+
+	if u != nil && u.DeleteStorageSubtree && int16(len(plainKey)) == hph.accountKeyLen {
+		hph.pruneAccountStorageSubtree(hashedKey)
+	}
 
 	if u.Deleted() {
 		// Before the delete, check if this will cause a node collapse (FullNode → single child).
