@@ -96,6 +96,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
+	defer st.Release(false)
 	exist, err := st.Exist(accounts.InternAddress(to))
 	if err != nil {
 		t.Error(err)
@@ -183,6 +184,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
+	defer st.Release(false)
 	exist, err := st.Exist(accounts.InternAddress(to))
 	if err != nil {
 		t.Error(err)
@@ -257,6 +259,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
+	defer st.Release(false)
 	exist, err := st.Exist(accounts.InternAddress(to))
 	if err != nil {
 		t.Error(err)
@@ -331,6 +334,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
+	defer st.Release(false)
 	exist, err := st.Exist(accounts.InternAddress(to))
 	if err != nil {
 		t.Error(err)
@@ -405,6 +409,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
+	defer st.Release(false)
 	exist, err := st.Exist(accounts.InternAddress(to))
 	if err != nil {
 		t.Error(err)
@@ -458,6 +463,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err
@@ -488,6 +494,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err
@@ -514,6 +521,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err
@@ -568,6 +576,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err
@@ -594,6 +603,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err
@@ -668,6 +678,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err
@@ -695,6 +706,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err
@@ -776,6 +788,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err
@@ -802,6 +815,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		exist, err := st.Exist(accounts.InternAddress(from))
 		if err != nil {
 			return err

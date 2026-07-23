@@ -273,7 +273,6 @@ func (b *CachingBeaconState) initCaches() error {
 }
 
 func (b *CachingBeaconState) InitBeaconState() error {
-
 	b.publicKeyIndicies = maphash.NewNonConcurrentMap[uint64]()
 	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
 		pk := validator.PublicKey()

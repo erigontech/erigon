@@ -69,7 +69,6 @@ func getAggregateAndProofAndState(t *testing.T) (*SignedAggregateAndProofForGoss
 
 	a.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = s.Slot() / 32
 	return a, s
-
 }
 
 func setupAggregateAndProofTest(t *testing.T) (AggregateAndProofService, *synced_data.SyncedDataManager, *mock_services.ForkChoiceStorageMock) {

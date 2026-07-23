@@ -64,9 +64,7 @@ type PeerDas interface {
 	SetForkChoice(forkChoice BlockGetter) // [New in Gloas:EIP7732]
 }
 
-var (
-	numOfBlobRecoveryWorkers = 8
-)
+var numOfBlobRecoveryWorkers = 8
 
 type peerdas struct {
 	state             *peerdasstate.PeerDasState
@@ -474,7 +472,8 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				kzgCommitment,
 				kzgProof,
 				signedBlockHeader,
-				inclusionProof)
+				inclusionProof,
+			)
 			blobSidecars = append(blobSidecars, blobSidecar)
 			commitment := cltypes.KZGCommitment(kzgCommitment)
 			blobCommitments.Append(&commitment)
@@ -640,15 +639,13 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 	return nil
 }
 
-var (
-	allColumns = func() map[cltypes.CustodyIndex]bool {
-		columns := map[cltypes.CustodyIndex]bool{}
-		for i := range 128 {
-			columns[cltypes.CustodyIndex(i)] = true
-		}
-		return columns
-	}()
-)
+var allColumns = func() map[cltypes.CustodyIndex]bool {
+	columns := map[cltypes.CustodyIndex]bool{}
+	for i := range 128 {
+		columns[cltypes.CustodyIndex(i)] = true
+	}
+	return columns
+}()
 
 // DownloadMissingColumns downloads the missing columns for the given blocks but not recover the blobs
 func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error {
@@ -661,16 +658,14 @@ func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []cltyp
 	wg := sync.WaitGroup{}
 	for i := 0; i < len(blocks); i += batchBlcokSize {
 		blocks := blocks[i:min(i+batchBlcokSize, len(blocks))]
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			req, err := initializeDownloadRequest(blocks, d.beaconConfig, d.columnStorage, custodyColumns)
 			if err != nil {
 				log.Warn("failed to initialize download request", "err", err)
 				return
 			}
 			d.runDownload(ctx, req, false)
-		}()
+		})
 	}
 	wg.Wait()
 	return nil
@@ -719,16 +714,14 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []c
 	wg := sync.WaitGroup{}
 	for i := 0; i < len(blocksToProcess); i += batchBlcokSize {
 		blocks := blocksToProcess[i:min(i+batchBlcokSize, len(blocksToProcess))]
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			req, err := initializeDownloadRequest(blocks, d.beaconConfig, d.columnStorage, allColumns)
 			if err != nil {
 				log.Warn("failed to initialize download request", "err", err)
 				return
 			}
 			d.runDownload(ctx, req, true)
-		}()
+		})
 	}
 	wg.Wait()
 	return nil
@@ -760,9 +753,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 			case <-stopChan:
 				break loop
 			case <-ticker.C:
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 					defer cancel()
 					ids := req.requestData()
@@ -785,7 +776,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 					default:
 						// just drop it if the channel is full
 					}
-				}()
+				})
 			}
 		}
 		wg.Wait()
@@ -835,11 +826,9 @@ mainloop:
 				continue
 			}
 			log.Debug("received column sidecars", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars))
-			wg := sync.WaitGroup{}
+			var wg sync.WaitGroup
 			for _, sidecar := range result.sidecars {
-				wg.Add(1)
-				go func(sidecar *cltypes.DataColumnSidecar) {
-					defer wg.Done()
+				wg.Go(func() {
 					// [Modified in Gloas:EIP7732] Get slot first, then use epoch-based version detection
 					var slot uint64
 					if sidecar.SignedBlockHeader != nil && sidecar.SignedBlockHeader.Header != nil {
@@ -933,7 +922,7 @@ mainloop:
 					}
 					// done. remove the column from the download table
 					req.removeColumn(slot, blockRoot, columnIndex)
-				}(sidecar)
+				})
 			}
 			wg.Wait()
 			// check if there are any remaining requests and send again if there are

@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -319,6 +320,81 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 
 	return response, err
+}
+
+// GetBlockAccessList returns the block access list for a given block (EIP-7928).
+func (api *APIImpl) GetBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethapi.RPCAccountAccess, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	data, err := api.blockAccessListBytes(ctx, tx, numberOrHash)
+	if errors.Is(err, errBlockAccessListNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	bal, err := types.DecodeBlockAccessListBytes(data)
+	if err != nil {
+		return nil, err
+	}
+	return ethapi.MarshalBlockAccessList(bal), nil
+}
+
+var errBlockAccessListNotFound = errors.New("block access list not found")
+
+func blockAccessListResourceNotFoundError() *rpc.CustomError {
+	return &rpc.CustomError{Code: -32001, Message: "Resource not found"}
+}
+
+func blockAccessListPrunedHistoryError() *rpc.CustomError {
+	return &rpc.CustomError{Code: 4444, Message: "Pruned history unavailable"}
+}
+
+func (api *BaseAPI) blockAccessListBytes(ctx context.Context, tx kv.TemporalTx, numberOrHash rpc.BlockNumberOrHash) ([]byte, error) {
+	if numberOrHash.BlockNumber != nil && *numberOrHash.BlockNumber == rpc.PendingBlockNumber {
+		return nil, errBlockAccessListNotFound
+	}
+	blockNum, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, errBlockAccessListNotFound
+		}
+		return nil, err
+	}
+	header, err := api._blockReader.Header(ctx, tx, blockHash, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, errBlockAccessListNotFound
+	}
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if !chainConfig.IsAmsterdam(header.Time) {
+		return nil, blockAccessListResourceNotFoundError()
+	}
+	data, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		data, err = api.balRegenerator.GetBlockAccessListBytes(ctx, chainConfig, tx, blockHash, blockNum)
+		if errors.Is(err, state.PrunedError) {
+			return nil, blockAccessListPrunedHistoryError()
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(data) == 0 {
+		return nil, blockAccessListPrunedHistoryError()
+	}
+	return data, nil
 }
 
 // GetBlockTransactionCountByNumber implements eth_getBlockTransactionCountByNumber. Returns the number of transactions in a block given the block's block number.

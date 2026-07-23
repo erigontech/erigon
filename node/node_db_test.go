@@ -1,4 +1,4 @@
-// Copyright 2025 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,15 +14,25 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package types
+package node
 
 import (
-	"github.com/erigontech/erigon/common"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/node/nodecfg"
 )
 
-// LogForStorageGen - test struct for rlpgen code generation comparison
-type LogForStorageGen struct {
-	Address common.Address
-	Topics  []common.Hash
-	Data    []byte
+// The read-tx floor must size against the worker count this node actually runs
+// (nodecfg.ExecWorkerCount), not the process global: an embedded caller can
+// configure its executor without touching dbg.Exec3Workers.
+func TestExecWorkerCountPrefersNodeConfig(t *testing.T) {
+	orig := dbg.Exec3Workers
+	dbg.SetExec3Workers(8)
+	defer dbg.SetExec3Workers(orig)
+
+	require.Equal(t, 64, execWorkerCount(&nodecfg.Config{ExecWorkerCount: 64}))
+	require.Equal(t, 8, execWorkerCount(&nodecfg.Config{}))
 }

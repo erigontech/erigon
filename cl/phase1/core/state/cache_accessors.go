@@ -237,7 +237,6 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 	inclusionDelay uint64,
 	skipAssert bool,
 ) ([]uint8, error) {
-
 	var justifiedCheckpoint solid.Checkpoint
 	// get checkpoint from epoch
 	if data.Target.Epoch == Epoch(b) {
@@ -361,7 +360,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 	// pre-gloas computation
 	beaconConfig := b.BeaconConfig()
 	epoch := Epoch(b) + 1
-	//math.MaxUint8
+	// math.MaxUint8
 	activeValidatorIndicies := b.GetActiveValidatorsIndices(epoch)
 	activeValidatorCount := uint64(len(activeValidatorIndicies))
 	if activeValidatorCount == 0 {

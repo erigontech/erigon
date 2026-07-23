@@ -259,7 +259,7 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 
 	if sc.leaveDeferredForCaller {
 		sc.deferredForCaller = deferred
-	} else if err := sc.applyDeferred(deferred); err != nil {
+	} else if err := sc.applyDeferred(ctx, deferred); err != nil {
 		return nil, err
 	}
 	sc.captureRoot(base)
@@ -355,7 +355,7 @@ func (sc *StreamingCommitter) PromoteRootInto(tmpl *HexPatriciaHashed) bool {
 func (sc *StreamingCommitter) newProcessBase(ctx context.Context) (*HexPatriciaHashed, func(), *prefixNode, error) {
 	root := sc.trie.root
 	if root == nil || root.subtreeCount == 0 {
-		base, cleanup := sc.newBaseTrie()
+		base, cleanup := sc.newBaseTrie(ctx)
 		return base, cleanup, root, nil
 	}
 	if len(root.ext) != 0 {
@@ -370,9 +370,9 @@ func (sc *StreamingCommitter) newProcessBase(ctx context.Context) (*HexPatriciaH
 
 // newBaseTrie constructs a fresh deferring base trie, seeded with the carried
 // root snapshot when one exists, and a cleanup releasing it.
-func (sc *StreamingCommitter) newBaseTrie() (*HexPatriciaHashed, func()) {
+func (sc *StreamingCommitter) newBaseTrie(ctx context.Context) (*HexPatriciaHashed, func()) {
 	base := NewHexPatriciaHashed(sc.accountKeyLen, nil, sc.cfg)
-	bctx, bclean := sc.trieCtxFactory()
+	bctx, bclean := sc.trieCtxFactory(ctx)
 	base.ResetContext(bctx)
 	base.SetTraceWriter(sc.traceW)
 	base.branchEncoder.setDeferUpdates(true)
@@ -407,7 +407,7 @@ func (sc *StreamingCommitter) processBase(ctx context.Context) (*HexPatriciaHash
 // buildBase builds a base trie unfolded one level at the on-disk root so its
 // row 0 carries every top-nibble sibling the split cells stitch into.
 func (sc *StreamingCommitter) buildBase(ctx context.Context) (*HexPatriciaHashed, func(), error) {
-	base, cleanup := sc.newBaseTrie()
+	base, cleanup := sc.newBaseTrie(ctx)
 
 	if err := unfoldRootWall(ctx, base); err != nil {
 		cleanup()
@@ -444,9 +444,8 @@ func (sc *StreamingCommitter) StartScheduler(ctx context.Context) error {
 	sc.dirtyCh = make(chan byte, 256)
 	sc.started.Store(true)
 
-	sc.wg.Add(sc.numWorkers)
 	for range sc.numWorkers {
-		go sc.scheduleWorker()
+		sc.wg.Go(sc.scheduleWorker)
 	}
 	return nil
 }
@@ -462,7 +461,6 @@ func (sc *StreamingCommitter) Stop() {
 }
 
 func (sc *StreamingCommitter) scheduleWorker() {
-	defer sc.wg.Done()
 	for {
 		select {
 		case <-sc.quit:
@@ -575,7 +573,7 @@ func (sc *StreamingCommitter) foldKeys(nib byte, keys []touchedKey) (cell, []*De
 	} else {
 		w.SetTraceWriter(nil)
 	}
-	rctx, cleanup := sc.trieCtxFactory()
+	rctx, cleanup := sc.trieCtxFactory(sc.bgCtx)
 	if cleanup != nil {
 		defer cleanup()
 	}
@@ -755,7 +753,7 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, foldSem *semaphore.
 	} else {
 		w.SetTraceWriter(nil)
 	}
-	wctx, cleanup := sc.trieCtxFactory()
+	wctx, cleanup := sc.trieCtxFactory(ctx)
 	if cleanup != nil {
 		defer cleanup()
 	}
@@ -815,8 +813,8 @@ func (sc *StreamingCommitter) DeepLocalFolds() uint64 { return sc.deepLocalFolds
 
 // newStorageWorker sources a concurrent-storage-fold worker; disjoint subtree
 // prefixes keep a mid-fold self-flush from racing another fold's writes.
-func (sc *StreamingCommitter) newStorageWorker() (*HexPatriciaHashed, func()) {
-	return newDeferredStorageWorker(&sc.workerPool, sc.trieCtxFactory, sc.traceW)
+func (sc *StreamingCommitter) newStorageWorker(ctx context.Context) (*HexPatriciaHashed, func()) {
+	return newDeferredStorageWorker(ctx, &sc.workerPool, sc.trieCtxFactory, sc.traceW)
 }
 
 // dropSplitDeferred returns every split's staged deferred branch updates to the pool.
@@ -850,7 +848,7 @@ func mergeDeferredByPrefix(older, newer []*DeferredBranchUpdate) []*DeferredBran
 	return out
 }
 
-func (sc *StreamingCommitter) applyDeferred(deferred []*DeferredBranchUpdate) error {
+func (sc *StreamingCommitter) applyDeferred(ctx context.Context, deferred []*DeferredBranchUpdate) error {
 	defer func() {
 		for _, upd := range deferred {
 			putDeferredUpdate(upd)
@@ -859,7 +857,7 @@ func (sc *StreamingCommitter) applyDeferred(deferred []*DeferredBranchUpdate) er
 	if len(deferred) == 0 {
 		return nil
 	}
-	applyCtx, cleanup := sc.trieCtxFactory()
+	applyCtx, cleanup := sc.trieCtxFactory(ctx)
 	if cleanup != nil {
 		defer cleanup()
 	}
