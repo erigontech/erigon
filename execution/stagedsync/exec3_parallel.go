@@ -2151,7 +2151,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	calcFees bool) (result *exec.TxResult) {
 
 	var start time.Time
-	if ev.profile {
+	if ev.profile || depShapeEnabled {
 		start = time.Now()
 	}
 
@@ -2171,7 +2171,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 		return result
 	}
 
-	if ev.profile {
+	if ev.profile || depShapeEnabled {
 		ev.statsMutex.Lock()
 		ev.stats[ev.version.TxIndex] = ExecutionStat{
 			TxIdx:       ev.version.TxIndex,
@@ -3151,6 +3151,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			Header:           header,
 			Txs:              txs,
 			blockStateCache:  be.blockStateCache,
+		}
+		if depShapeEnabled && !be.execStarted.IsZero() {
+			logDepShape(pe.logger, be.blockNum, be.blockIO, be.stats, time.Since(be.execStarted))
 		}
 		return be.result, nil
 	}
