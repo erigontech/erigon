@@ -72,8 +72,8 @@ type journalExtra struct {
 	prevObj              *stateObject         // kindResetObject
 	prevWrites           *createWriteSnapshot // kindResetObject
 	bi                   *BalanceIncrease     // kindBalanceIncreaseTransfer
-	prevcode             []byte               // kindCode
 	prevhash             accounts.CodeHash    // kindCode
+	prevcode             []byte               // kindCode
 	prevBalanceVersioned uint256.Int          // kindSelfdestruct, when flagSelfdestructHadBalance is set
 }
 
@@ -82,21 +82,21 @@ type journalExtra struct {
 // reverted scalar (nonce/refund/log index/incarnation), flags the booleans,
 // extra only what the infrequent kinds need.
 type journalEntry struct {
-	kind    entryKind
-	flags   uint8
 	account accounts.Address
 	key     accounts.StorageKey
+	extra   *journalExtra
 	value   uint256.Int
 	aux     uint64
-	extra   *journalExtra
+	kind    entryKind
+	flags   uint8
 }
 
 // journal contains the list of state modifications applied since the last state
 // commit. These are tracked to be able to be reverted in case of an execution
 // exception or revertal request.
 type journal struct {
-	entries []journalEntry           // Current changes tracked by the journal
 	dirties map[accounts.Address]int // Dirty accounts and the number of changes
+	entries []journalEntry           // Current changes tracked by the journal
 }
 
 // newJournal gets a journal from the pool.
