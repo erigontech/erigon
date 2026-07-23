@@ -11,10 +11,10 @@ import (
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -617,7 +617,25 @@ func (cc *commitmentCalculator) foldBALToRoot(ctx context.Context, req *blockReq
 		balUpdates.SetMode(commitment.ModeUpdate)
 	}
 	balState.FlushToUpdates(balUpdates)
+	if err := cc.gcSelfDestructedSubtrees(balState.SelfDestructedSubtrees(), t.lastTxNum+1); err != nil {
+		return nil, fmt.Errorf("BAL SD subtree GC: %w", err)
+	}
 	return cc.computeRootFromUpdates(ctx, t, balUpdates, reader)
+}
+
+// gcSelfDestructedSubtrees tombstones the persisted CommitmentDomain storage
+// subtree of every account self-destructed in the current block. The trie's
+// empty-base signal keeps the computed root correct on its own; this reclaims the
+// orphaned branches from the domain — the replacement for the per-slot storage
+// enumeration.
+func (cc *commitmentCalculator) gcSelfDestructedSubtrees(sd map[accounts.Address]bool, txNum uint64) error {
+	for addr := range sd {
+		av := addr.Value()
+		if err := cc.doms.DomainDelPrefix(kv.CommitmentDomain, cc.roTx, crypto.Keccak256(av[:]), txNum); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // computeRootFromUpdates installs an explicit updates buffer + reader on the
@@ -648,6 +666,10 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockRe
 		return
 	}
 	cc.state.FlushToUpdates(cc.updates)
+	if err := cc.gcSelfDestructedSubtrees(cc.state.SelfDestructedSubtrees(), r.lastTxNum+1); err != nil {
+		cc.fail(ctx, r, fmt.Errorf("shadow incremental SD subtree GC: %w", err))
+		return
+	}
 	cc.state.ResetBlockFlags()
 	incUpdates := cc.updates
 	cc.updates = cc.updates.NewEmpty()
@@ -731,6 +753,11 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		return
 	}
 	cc.state.FlushToUpdates(cc.updates)
+	if err := cc.gcSelfDestructedSubtrees(cc.state.SelfDestructedSubtrees(), t.lastTxNum+1); err != nil {
+		cc.publish(ctx, commitmentResult{blockNum: t.blockNum, txNum: t.lastTxNum,
+			err: fmt.Errorf("commitmentCalculator: %sSD subtree GC: %w", m.label, err)})
+		return
+	}
 	if !m.midBlock {
 		cc.state.ResetBlockFlags()
 	}
@@ -986,39 +1013,3 @@ func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempor
 	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx}
 }
 
-// asOfStorageEnumerator lists the persisted storage slots under an address via
-// the calculator's stable roTx snapshot (the pre-cycle baseline the trie was
-// built from), so a self-destruct deletes the whole subtree. The exec loop's
-// DomainDelPrefix runs with inline TouchKey disabled in parallel mode, so this
-// is the parallel path's equivalent of serial's per-slot delete touches.
-type asOfStorageEnumerator struct {
-	reader *asOfStateReader
-}
-
-func (e *asOfStorageEnumerator) EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error {
-	addrVal := addr.Value()
-	toKey, _ := kv.NextSubtree(addrVal[:])
-	it, err := e.reader.roTx.RangeAsOf(kv.StorageDomain, addrVal[:], toKey, e.reader.txNum, order.Asc, kv.Unlim)
-	if err != nil {
-		return err
-	}
-	defer it.Close()
-	for it.HasNext() {
-		k, v, err := it.Next()
-		if err != nil {
-			return err
-		}
-		if len(v) == 0 || len(k) != 52 || !bytes.HasPrefix(k, addrVal[:]) {
-			continue
-		}
-		var h common.Hash
-		copy(h[:], k[20:])
-		if err := fn(accounts.InternKey(h)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// Keep imports used.
-var _ = commitment.CommitProgress{}

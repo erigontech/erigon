@@ -69,11 +69,6 @@ func (r *calcDomainReader) ReadAccountStorage(addr accounts.Address, key account
 	return val, true, nil
 }
 
-// storageEnumerator lists every persisted storage slot under an address.
-type storageEnumerator interface {
-	EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error
-}
-
 // calcState is the commitment calculator's local state accumulator.
 // It maintains the current state for every account/storage key that has been
 // touched. On first touch, values are lazy-loaded from the domain via the
@@ -86,12 +81,15 @@ type calcState struct {
 	// storageDirty tracks which slots were modified in the current block
 	storageDirty map[accounts.Address]map[accounts.StorageKey]bool
 
+	// sdSubtree holds addresses self-destructed in the current block (whether or
+	// not recreated before block end). Their persisted storage subtree is dropped
+	// by the trie's empty-base signal (the account update's DeleteStorageSubtree
+	// flag) and GC'd from the CommitmentDomain by the committer — no per-slot
+	// enumeration.
+	sdSubtree map[accounts.Address]bool
+
 	// domainReader provides lazy-load from the domain via asOfStateReader.
 	domainReader *calcDomainReader
-
-	// storageEnum enumerates an account's persisted storage subtree for
-	// self-destruct; nil disables the on-disk subtree wipe.
-	storageEnum storageEnumerator
 
 	// lazyLoadErr captures the first error encountered during ensureAccount /
 	// ensureStorage. Sticky — never cleared — so the calculator can fail the
@@ -114,8 +112,8 @@ func newCalcState(reader *asOfStateReader, logger log.Logger, logPrefix string) 
 		accounts:     make(map[accounts.Address]*calcAccountState),
 		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
+		sdSubtree:    make(map[accounts.Address]bool),
 		domainReader: &calcDomainReader{reader: reader},
-		storageEnum:  &asOfStorageEnumerator{reader: reader},
 		logger:       logger,
 		logPrefix:    logPrefix,
 	}
@@ -167,7 +165,8 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 			acc := cs.ensureAccount(addr)
 			acc.Deleted = true
 			acc.dirty = true
-			cs.deleteStorageSubtree(addr)
+			cs.sdSubtree[addr] = true
+			cs.zeroTouchedStorage(addr)
 		}
 	}
 	clearsDeleted := func(addr accounts.Address, nonZero bool) bool {
@@ -244,15 +243,13 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 	}
 }
 
-// deleteStorageSubtree zeroes and dirties every storage slot under a
-// self-destructed account, including untouched on-disk slots pulled via
-// storageEnum, so FlushToUpdates emits a DeleteUpdate for each.
-func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
+// zeroTouchedStorage zeroes and dirties the storage slots this block touched for
+// a self-destructed account, so FlushToUpdates emits a DeleteUpdate for each (the
+// versionMap StorageKeys cascade). Untouched persisted slots are NOT enumerated:
+// the trie drops the whole subtree via the account update's empty-base signal and
+// the committer GCs the persisted commitment branches.
+func (cs *calcState) zeroTouchedStorage(addr accounts.Address) {
 	slots := cs.storageState[addr]
-	if slots == nil {
-		slots = make(map[accounts.StorageKey]uint256.Int)
-		cs.storageState[addr] = slots
-	}
 	dirty := cs.storageDirty[addr]
 	if dirty == nil {
 		dirty = make(map[accounts.StorageKey]bool)
@@ -261,25 +258,6 @@ func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
 	for key := range slots {
 		slots[key] = uint256.Int{}
 		dirty[key] = true
-	}
-	if cs.storageEnum == nil {
-		return
-	}
-	if err := cs.storageEnum.EachStorageSlot(addr, func(key accounts.StorageKey) error {
-		if _, ok := slots[key]; !ok {
-			slots[key] = uint256.Int{}
-			dirty[key] = true
-		}
-		return nil
-	}); err != nil {
-		// Sticky — a partial subtree wipe yields a wrong root, so fail the
-		// next compute rather than silently leaving stale slots.
-		if cs.lazyLoadErr == nil {
-			cs.lazyLoadErr = fmt.Errorf("deleteStorageSubtree(%x): %w", addr.Value(), err)
-		}
-		if cs.logger != nil {
-			cs.logger.Warn("["+cs.logPrefix+"] commitmentCalculator: SD storage enumeration failed", "addr", addr, "err", err)
-		}
 	}
 }
 
@@ -381,28 +359,35 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 		// non-zero balance/nonce/code (or a retained incarnation) keeps its leaf,
 		// so emit a regular UPDATE with the real values instead.
 		isAllZero := acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash
+		var u commitment.Update
 		switch {
 		case acc.Deleted && acc.Incarnation > 0 && isAllZero:
-			updates.TouchPlainKeyDirect(key, &commitment.Update{
+			u = commitment.Update{
 				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
 				Balance:  uint256.Int{},
 				Nonce:    0,
 				CodeHash: empty.CodeHash,
-			})
+			}
 		case acc.Deleted && isAllZero:
-			updates.TouchPlainKeyDirect(key, &commitment.Update{
+			u = commitment.Update{
 				Flags:    commitment.DeleteUpdate,
 				CodeHash: empty.CodeHash,
-			})
+			}
 		default:
 			// Either not Deleted, or Deleted-with-retained-values.
-			updates.TouchPlainKeyDirect(key, &commitment.Update{
+			u = commitment.Update{
 				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
 				Balance:  acc.Balance,
 				Nonce:    acc.Nonce,
 				CodeHash: acc.CodeHash,
-			})
+			}
 		}
+		// Self-destructed this block (possibly recreated): the trie must drop the
+		// old storage subtree and rebuild from only this block's slots.
+		if cs.sdSubtree[addr] {
+			u.DeleteStorageSubtree = true
+		}
+		updates.TouchPlainKeyDirect(key, &u)
 	}
 
 	for addr, dirtySlots := range cs.storageDirty {
@@ -429,6 +414,13 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 	}
 }
 
+// SelfDestructedSubtrees returns the addresses self-destructed in the current
+// block, whose persisted commitment storage subtree the committer must GC. Valid
+// until ResetBlockFlags.
+func (cs *calcState) SelfDestructedSubtrees() map[accounts.Address]bool {
+	return cs.sdSubtree
+}
+
 // ResetBlockFlags clears the per-block dirty flags while keeping the
 // accumulated state values. Called after commitment computation to
 // prepare for the next block.
@@ -439,4 +431,5 @@ func (cs *calcState) ResetBlockFlags() {
 	for addr := range cs.storageDirty {
 		delete(cs.storageDirty, addr)
 	}
+	clear(cs.sdSubtree)
 }
