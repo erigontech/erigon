@@ -9,7 +9,6 @@ on:
   # zizmor: ignore[dangerous-triggers] no checkout of triggering run's head; BASE_BRANCH is pinned to release/3.5 for workflow_run events
   workflow_run:
     workflows:
-      - "QA - Sync from scratch"
       - "QA - Sync from scratch (minimal node)"
       - "QA - Sync from scratch (full node)"
     types:
@@ -170,17 +169,21 @@ jobs:
             ./artifacts \
             docs/site/src/data/disk-sizes.json \
             "$PRUNE_MODE"
+          # Project the updated JSON onto the static markers in the
+          # hardware-requirements page (see README "Disk size data flow").
+          python3 docs/site/scripts/render-disk-sizes.py
 
       - name: Check for changes
         id: diff
         run: |
           set -euo pipefail
-          if git diff --quiet docs/site/src/data/disk-sizes.json; then
+          TARGETS="docs/site/src/data/disk-sizes.json docs/site/docs/get-started/hardware-requirements.mdx"
+          if git diff --quiet -- $TARGETS; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No changes to disk-sizes.json"
+            echo "No changes to disk sizes"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            git diff docs/site/src/data/disk-sizes.json
+            git diff -- $TARGETS
           fi
 
       - name: Configure git
@@ -199,7 +202,7 @@ jobs:
         run: |
           set -euo pipefail
           BRANCH="docs/auto/disk-sizes-${BASE_BRANCH//\//-}"
-          git add docs/site/src/data/disk-sizes.json
+          git add docs/site/src/data/disk-sizes.json docs/site/docs/get-started/hardware-requirements.mdx
           git commit -m "chore(docs): auto-update measured disk sizes [$(date +%Y-%m-%d)]"
           git push origin "$BRANCH"
 
@@ -226,7 +229,7 @@ jobs:
           Opened automatically by the **Docs - Update disk sizes** CI workflow after a successful sync-from-scratch run.
 
           ### What changed
-          `docs/site/src/data/disk-sizes.json` — `full` and/or `minimal` mode disk usage updated from the latest CI measurement. The hardware requirements page consumes this file directly, so merging this PR is all that's needed.
+          `docs/site/src/data/disk-sizes.json` — `full` and/or `minimal` mode disk usage updated from the latest CI measurement. `docs/site/docs/get-started/hardware-requirements.mdx` is regenerated from it (static values between MDX markers), so both files are included and merging this PR is all that's needed.
 
           ### What this does NOT update
           - **Archive** mode: requires manual measurement from always-on snapshot machines.

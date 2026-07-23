@@ -27,6 +27,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 
@@ -48,15 +49,20 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -84,13 +90,37 @@ var debugTraceTransactionNoRefundTests = []struct {
 	{"b6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059", 62899, false, "0x"},
 }
 
+func TestGetRawBlockAccessListRPCSpec(t *testing.T) {
+	chainPack, client := newBlockAccessListRPCFixture(t)
+	availableRaw := marshalHexBytesJSON(t, chainPack.BlockAccessLists[1])
+	emptyRaw := marshalHexBytesJSON(t, chainPack.BlockAccessLists[2])
+	cases := []blockAccessListRPCCase{
+		{name: "available by number", selector: "0x2", want: availableRaw},
+		{name: "available by tag", selector: "safe", want: availableRaw},
+		{name: "available by hash", selector: chainPack.Blocks[1].Hash().Hex(), want: availableRaw},
+		{name: "empty by number", selector: "0x3", want: emptyRaw},
+		{name: "empty by tag", selector: "latest", want: emptyRaw},
+		{name: "empty by hash", selector: chainPack.Blocks[2].Hash().Hex(), want: emptyRaw},
+		{name: "unknown number", selector: "0xff", errCode: -32001, errMessage: "Resource not found"},
+		{name: "unknown hash", selector: common.Hash{}.Hex(), errCode: -32001, errMessage: "Resource not found"},
+		{name: "pending", selector: "pending", errCode: -32001, errMessage: "Resource not found"},
+		{name: "pre-Amsterdam by number", selector: "0x1", errCode: -32001, errMessage: "Resource not found"},
+		{name: "pre-Amsterdam by tag", selector: "earliest", errCode: -32001, errMessage: "Resource not found"},
+		{name: "pre-Amsterdam by hash", selector: chainPack.Blocks[0].Hash().Hex(), errCode: -32001, errMessage: "Resource not found"},
+		{name: "pruned by number", selector: "0x4", errCode: 4444, errMessage: "Pruned history unavailable"},
+		{name: "pruned by tag", selector: "finalized", errCode: 4444, errMessage: "Pruned history unavailable"},
+		{name: "pruned by hash", selector: chainPack.Blocks[3].Hash().Hex(), errCode: 4444, errMessage: "Pruned history unavailable"},
+	}
+	runBlockAccessListRPCCases(t, client, "debug_getRawBlockAccessList", cases)
+}
+
 func TestTraceBlockByNumber(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
 	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, nil, &BaseApiConfig{Dirs: m.Dirs})
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 	ethApi := newEthApiForTest(baseApi, m.DB, nil, nil)
 	api := NewPrivateDebugAPI(baseApi, m.DB, nil, 0, false)
 	for _, tt := range debugTraceTransactionTests {
@@ -170,6 +200,92 @@ func TestTraceBlockByHash(t *testing.T) {
 			t.Fatalf("incorrect length: %v", err)
 		}
 	}
+}
+
+// TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow verifies that an unexecutable
+// CREATE2 memory range does not panic or abort the prestate trace.
+// Its operands overflow the memory-end calculation, so gas validation fails before account creation.
+// Previously, GetMemoryCopyPadded added the positive int64 CREATE2 offset and size; only their sum
+// wrapped negative and compared less than the empty memory length. That branch passed the still-positive,
+// enormous size to make([]byte, size), causing runtime error: makeslice: len out of range.
+func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
+	sender := common.HexToAddress("0x5b20612d8c4d585e69838429135cd507319cae63")
+	coinbase := common.HexToAddress("0xf97e180c050e5ab072211ad2c213eb5aee4df134")
+	rawTx := "0x02f902428501a462808d8210a184773594008504a817c800830f42408080b901e17fed31282eee3bc1bde857e940edef1cfc1089ae426cfad485a4294a48cf57f16a7f0000000000000000000000000000000000000000000000000000000000023207336bf5274d567553ac8781594d06335b92f55b7f000000000000000000000000000000000833533fc9ed23992d2157bd01cc78d86000527f60df1e9d9638c3c798058bd079c61adaca8132637f8592f6a04d179a3432751f6020527f000000000000000000000000000000000e5c168bccdaf1363808a6cc387f33b76040527fc36efc4a0cb56a5139bbf86f8670213223a6102906649e3d78965f6b3118da6a6060527f68aa8400dd534bc72632e36b15b3dfe9e0bb8ae6816e19860eca270c9e38bf786080527f0000000000000000000000000000000006a82cb45b36e3377f5f26fdb5d7ee7960a0527f255a035ab2406f80123e4793c8e796179b059b477e0634d8fe6901bad630c93860c0527f0000000000000000000000000000000017e91b2c49464944c1feefe6db5955c960e0527f5a673098b913a338f1303293a3985174eb47ab41e0227c634e73e21e62e2243f610100527f198b0c6015b2a3240b03153835e3176a1ef4e975442b00c264499c8a442ec43461012052608061010061014060006000600c5af1610100516101205161014051610160514600c001a0203bef105491f41d890b579382216a527d6b009ce3949a97d6ab1889daaa63c3a0131c13da1e75cb2238bb12b5545124d7a326ec22e5500bc20bde9f460c2b5ea2"
+	tx, err := types.DecodeTransaction(common.FromHex(rawTx))
+	require.NoError(t, err)
+	require.Equal(t, common.HexToHash("0x13946ef4324d802e4b496a73d1f9b3789b21557de59d6f025e96435a2dbc9be4"), tx.Hash())
+	var cfg chain.Config
+	require.NoError(t, copier.CopyWithOption(&cfg, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	cfg.ChainName = "trace-create2-overflow"
+	cfg.ChainID = uint256.NewInt(7052886157)
+	gasLimit := uint64(0xb532b80)
+	blobGasUsed := uint64(0)
+	excessBlobGas := uint64(0)
+	parentBeaconBlockRoot := common.HexToHash("0x194bddd170136ba17081d9d3a0791e76b21e73f1e8bc483fe36e8c9adade96ff")
+	gspec := &types.Genesis{
+		Config:                &cfg,
+		Timestamp:             0x6a476e64 - 10,
+		GasLimit:              gasLimit,
+		GasUsed:               gasLimit / 2,
+		Difficulty:            uint256.NewInt(0),
+		BaseFee:               uint256.NewInt(7),
+		BlobGasUsed:           &blobGasUsed,
+		ExcessBlobGas:         &excessBlobGas,
+		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		Alloc: types.GenesisAlloc{
+			sender:   {Balance: uint256.MustFromHex("0x28704d335b594c07").ToBig(), Nonce: 4257},
+			coinbase: {Balance: uint256.MustFromHex("0x14a5fa81e10fd353696").ToBig()},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
+	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(coinbase)
+		gen.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(generated))
+	dbtx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer dbtx.Rollback()
+	st := state.New(m.NewStateReader(dbtx))
+	defer st.Release(false)
+	senderBalance, err := st.GetBalance(accounts.InternAddress(sender))
+	require.NoError(t, err)
+	require.Equal(t, uint256.MustFromHex("0x286a802d7b04d897"), &senderBalance)
+	senderNonce, err := st.GetNonce(accounts.InternAddress(sender))
+	require.NoError(t, err)
+	require.Equal(t, uint64(4258), senderNonce)
+	coinbaseBalance, err := st.GetBalance(accounts.InternAddress(coinbase))
+	require.NoError(t, err)
+	require.Equal(t, uint256.MustFromHex("0x14a5fadeb16dd327696"), &coinbaseBalance)
+	tracer := "prestateTracer"
+	var buf bytes.Buffer
+	stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	require.NoError(t, api.TraceBlockByHash(m.Ctx, generated.TopBlock.Hash(), &tracersConfig.TraceConfig{Tracer: &tracer}, stream))
+	require.NoError(t, stream.Flush())
+	var traces []struct {
+		TxHash common.Hash `json:"txHash"`
+		Result map[common.Address]struct {
+			Balance *hexutil.Big `json:"balance"`
+			Nonce   uint64       `json:"nonce"`
+		} `json:"result"`
+		Error json.RawMessage `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &traces))
+	require.Len(t, traces, 1)
+	require.Equal(t, tx.Hash(), traces[0].TxHash)
+	require.Empty(t, traces[0].Error)
+	require.Len(t, traces[0].Result, 2)
+	senderPrestate, ok := traces[0].Result[sender]
+	require.True(t, ok)
+	require.Equal(t, uint256.MustFromHex("0x28704d335b594c07").ToBig(), (*big.Int)(senderPrestate.Balance))
+	require.Equal(t, uint64(4257), senderPrestate.Nonce)
+	coinbasePrestate, ok := traces[0].Result[coinbase]
+	require.True(t, ok)
+	require.Equal(t, uint256.MustFromHex("0x14a5fa81e10fd353696").ToBig(), (*big.Int)(coinbasePrestate.Balance))
+	require.Zero(t, coinbasePrestate.Nonce)
 }
 
 func TestTraceTransaction(t *testing.T) {

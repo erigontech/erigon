@@ -17,6 +17,11 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+  actions: write
+  pull-requests: read
+
 jobs:
   sonar:
     runs-on: ubuntu-24.04

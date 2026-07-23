@@ -47,7 +47,7 @@ type EthereumClock interface {
 	LastFork() (common.Bytes4, error)                                      // GetLastFork
 	StateVersionByForkDigest(common.Bytes4) (clparams.StateVersion, error) // ForkDigestVersion
 	StateVersionByEpoch(uint64) clparams.StateVersion
-	//ComputeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error)
+	// ComputeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error)
 	ComputeForkDigest(epoch uint64) (digest common.Bytes4, err error) // new in fulu
 
 	GenesisValidatorsRoot() common.Hash

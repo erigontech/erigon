@@ -50,9 +50,11 @@ type SentinelServer struct {
 	logger log.Logger
 }
 
-type HTTPError = httpreqresp.HTTPError
-type PeerResponseError = httpreqresp.PeerResponseError
-type ResponseCode = httpreqresp.ResponseCode
+type (
+	HTTPError         = httpreqresp.HTTPError
+	PeerResponseError = httpreqresp.PeerResponseError
+	ResponseCode      = httpreqresp.ResponseCode
+)
 
 func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger log.Logger) *SentinelServer {
 	return &SentinelServer{
@@ -176,7 +178,6 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		},
 	}
 	return ans, nil
-
 }
 
 func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {
@@ -242,7 +243,6 @@ func (s *SentinelServer) Identity(ctx context.Context, in *sentinelproto.EmptyMe
 			Syncnets: fmt.Sprintf("%x", *metadata.Syncnets),
 		},
 	}, nil
-
 }
 
 func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelproto.Status) (*sentinelproto.EmptyMessage, error) {

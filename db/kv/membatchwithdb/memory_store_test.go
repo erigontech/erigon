@@ -557,9 +557,7 @@ func TestMemStore_ConcurrentReadWrite(t *testing.T) {
 
 	// Writers: continuously put new keys
 	for w := range numWriters {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range numOps {
 				key := fmt.Sprintf("w%d-key%04d", w, i)
 				val := fmt.Sprintf("w%d-val%04d", w, i)
@@ -568,14 +566,12 @@ func TestMemStore_ConcurrentReadWrite(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 
 	// Readers: continuously read and iterate
 	for range numReaders {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range numOps {
 				// Random reads
 				_, _ = s.GetOne("test", []byte("key0050"))
@@ -591,7 +587,7 @@ func TestMemStore_ConcurrentReadWrite(t *testing.T) {
 					return nil
 				})
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -622,9 +618,7 @@ func TestMemStore_ConcurrentCursors(t *testing.T) {
 
 	// Concurrent cursor operations
 	for range numGoroutines {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range numOps {
 				c := s.newCursor("test")
 
@@ -653,18 +647,16 @@ func TestMemStore_ConcurrentCursors(t *testing.T) {
 
 				c.Close()
 			}
-		}()
+		})
 	}
 
 	// Concurrent writer
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range numOps {
 			key := fmt.Sprintf("ckey%04d", i)
 			_ = s.Put("test", []byte(key), []byte("cval"))
 		}
-	}()
+	})
 
 	wg.Wait()
 }
@@ -676,9 +668,7 @@ func TestMemStore_ConcurrentSequences(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range numGoroutines {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range numIncrements {
 				_, err := s.IncrementSequence("counter", 1)
 				if err != nil {
@@ -686,7 +676,7 @@ func TestMemStore_ConcurrentSequences(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -708,9 +698,7 @@ func TestMemStore_ConcurrentRangeAndWrite(t *testing.T) {
 
 	// Range iterators while writing
 	for range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 200 {
 				iter, err := s.Range("test", []byte("key0010"), []byte("key0090"), true, -1)
 				if err != nil {
@@ -735,18 +723,16 @@ func TestMemStore_ConcurrentRangeAndWrite(t *testing.T) {
 					t.Errorf("Range returned 0 entries")
 				}
 			}
-		}()
+		})
 	}
 
 	// Writer
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range 200 {
 			key := fmt.Sprintf("key%04d", 1000+i)
 			_ = s.Put("test", []byte(key), []byte("new"))
 		}
-	}()
+	})
 
 	wg.Wait()
 }
@@ -768,9 +754,7 @@ func TestMemStore_ConcurrentDupSort(t *testing.T) {
 
 	// Concurrent readers with SeekBothRange
 	for range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 200 {
 				c := s.newCursor(table)
 				v, err := c.SeekBothRange([]byte("key05"), []byte("val03"))
@@ -784,19 +768,17 @@ func TestMemStore_ConcurrentDupSort(t *testing.T) {
 				}
 				c.Close()
 			}
-		}()
+		})
 	}
 
 	// Concurrent writer
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range 200 {
 			_ = s.Put(table,
 				[]byte(fmt.Sprintf("key%02d", i%10)),
 				[]byte(fmt.Sprintf("new%04d", i)))
 		}
-	}()
+	})
 
 	wg.Wait()
 }

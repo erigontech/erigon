@@ -215,9 +215,7 @@ func TestReadersRaceRetire(t *testing.T) {
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -226,7 +224,7 @@ func TestReadersRaceRetire(t *testing.T) {
 					read()
 				}
 			}
-		}()
+		})
 	}
 
 	// Let readers warm up so they are churning Views when retirement hits.

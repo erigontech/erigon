@@ -95,6 +95,7 @@ func TestSyncCommitteesSuccess(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockFuncs := &mockFuncs{ctrl: ctrl}
+	saveSignatureGlobals(t)
 	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
 
 	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)

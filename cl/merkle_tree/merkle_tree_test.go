@@ -42,7 +42,6 @@ func TestPowerOf2MerkleTree(t *testing.T) {
 	testBuffer[64] = 3
 	mt.MarkLeafAsDirty(2)
 	require.Equal(t, expectedRoot1, mt.ComputeRoot())
-
 }
 
 func TestMerkleTreeAppendLeaf(t *testing.T) {
