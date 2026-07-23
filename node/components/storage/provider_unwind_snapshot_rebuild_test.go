@@ -370,6 +370,75 @@ func TestSeedLeftoverBlocks_WritesHeadersBodiesTxsSenders(t *testing.T) {
 	}
 }
 
+// TestSeedLeftoverBlocks_NoDBCanonicalHash_FallsBackToHeaderHash pins
+// the deep-unwind path: under --prune.mode=minimal the writable DB
+// retains only ~100k blocks of history, so when mode-B targets a block
+// below that horizon the seed range's canonical hashes were never in
+// the DB and TruncateCanonicalHash had nothing to preserve.
+// seedLeftoverBlocks must fall back to hashing the header we're
+// already reading from the OLD snapshot and seed kv.HeaderCanonical so
+// downstream reads resolve.
+//
+// Reproduces iter-19 mode_b failure at depth 159937 on hoodi (target
+// 3_107_606, seed range [3_107_000, 3_107_606]).
+func TestSeedLeftoverBlocks_NoDBCanonicalHash_FallsBackToHeaderHash(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	snapDir := t.TempDir()
+	tmpDir := t.TempDir()
+
+	const (
+		fromBlock = uint64(2_000_000)
+		toBlock   = uint64(2_000_010)
+		baseTxn   = uint64(1_000)
+		txPer     = uint32(4)
+	)
+	hFI, bFI, tFI := makeBlockSnapshotTriple(t, ctx, snapDir, tmpDir, fromBlock, toBlock, baseTxn, txPer)
+
+	// NO pre-seed of kv.HeaderCanonical — simulate prune-minimal DB
+	// where the seed range is below the history horizon.
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	const (
+		seedFrom = uint64(2_000_005)
+		seedTo   = uint64(2_000_007)
+	)
+	require.NoError(t, seedLeftoverBlocks(ctx, rwTx, snapDir, hFI, bFI, &tFI, seedFrom, seedTo))
+
+	// Compute the expected hash the same way the fallback does:
+	// decode the header (matches makeBlockSnapshotTriple's shape) and
+	// call .Hash().
+	expectedHash := func(n uint64) common.Hash {
+		hdr := &types.Header{Number: *uint256.NewInt(n), Difficulty: *uint256.NewInt(1)}
+		var parent common.Hash
+		binary.BigEndian.PutUint64(parent[:8], n)
+		hdr.ParentHash = parent
+		return hdr.Hash()
+	}
+
+	for n := seedFrom; n <= seedTo; n++ {
+		got, err := rawdb.ReadCanonicalHash(rwTx, n)
+		require.NoError(t, err)
+		require.Equal(t, expectedHash(n), got, "kv.HeaderCanonical(%d) must be the header's computed hash", n)
+
+		key := make([]byte, 8+32)
+		binary.BigEndian.PutUint64(key[:8], n)
+		h := expectedHash(n)
+		copy(key[8:], h[:])
+		hdrBytes, err := rwTx.GetOne(kv.Headers, key)
+		require.NoError(t, err)
+		require.NotEmpty(t, hdrBytes, "kv.Headers must be written under the computed hash for block %d", n)
+	}
+
+	// Blocks below seedFrom must not have canonical-hash entries.
+	got, err := rawdb.ReadCanonicalHash(rwTx, fromBlock)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, got, "block %d (below seedFrom) must remain unseeded", fromBlock)
+}
+
 // TestSeedLeftoverBlocks_MissingTxStraddle_SeedsHeadersBodiesOnly pins
 // the prune=minimal-compatible path: when headers+bodies straddles are
 // present but transactions .seg was intentionally not stored for the

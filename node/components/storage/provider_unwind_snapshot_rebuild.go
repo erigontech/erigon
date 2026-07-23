@@ -347,25 +347,36 @@ func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHead
 
 		writeThisBlock := n >= fromBlock
 
-		// Resolve canonical hash from writable DB (preserved across
-		// mode-B's CanonicalHash truncation — entries ≤ toBlock survive).
+		// Resolve canonical hash: prefer the writable-DB entry (preserved
+		// across mode-B's CanonicalHash truncation for entries ≤ toBlock),
+		// but under --prune.mode=minimal seed blocks below the ~100k
+		// history horizon have no DB entry to preserve — fall back to
+		// hashing the header we already have from the OLD snapshot.
+		// WriteCanonicalHash seeds the DB so downstream reads succeed.
 		var hash common.Hash
 		if writeThisBlock {
+			if len(hBuf) < 1 {
+				return fmt.Errorf("seedLeftoverBlocks: empty header entry at block %d", n)
+			}
 			h, err := rawdb.ReadCanonicalHash(tx, n)
 			if err != nil {
 				return fmt.Errorf("seedLeftoverBlocks: ReadCanonicalHash(%d): %w", n, err)
 			}
 			if h == (common.Hash{}) {
-				return fmt.Errorf("seedLeftoverBlocks: no canonical hash for block %d (writable DB truncated below the seed range?)", n)
+				header := new(types.Header)
+				if err := rlp.DecodeBytes(hBuf[1:], header); err != nil {
+					return fmt.Errorf("seedLeftoverBlocks: decode header at block %d for canonical-hash fallback: %w", n, err)
+				}
+				h = header.Hash()
+				if err := rawdb.WriteCanonicalHash(tx, h, n); err != nil {
+					return fmt.Errorf("seedLeftoverBlocks: WriteCanonicalHash(%d): %w", n, err)
+				}
 			}
 			hash = h
 
 			// Header word format = 1-byte sort-prefix + header RLP.
 			// rawdb.WriteHeaderRaw writes kv.Headers + kv.HeaderNumber
 			// (the hash→num index).
-			if len(hBuf) < 1 {
-				return fmt.Errorf("seedLeftoverBlocks: empty header entry at block %d", n)
-			}
 			if err := rawdb.WriteHeaderRaw(tx, n, hash, hBuf[1:], false /* skipIndexing */); err != nil {
 				return fmt.Errorf("seedLeftoverBlocks: WriteHeaderRaw(%d): %w", n, err)
 			}
