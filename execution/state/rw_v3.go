@@ -289,7 +289,9 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 
 			for _, item := range d.storage {
 				key := item.key.Value()
-				composite := append(address[:], key[:]...)
+				composite := make([]byte, 0, len(address)+len(key))
+				composite = append(composite, address[:]...)
+				composite = append(composite, key[:]...)
 				v := item.value.Bytes()
 				if len(v) == 0 {
 					if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
@@ -953,7 +955,9 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 	if !key.IsNil() {
 		keyValue = key.Value()
 	}
-	composite := append(addressValue[:], keyValue[:]...)
+	composite := make([]byte, 0, len(addressValue)+len(keyValue))
+	composite = append(composite, addressValue[:]...)
+	composite = append(composite, keyValue[:]...)
 	v := value.Bytes()
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, key, v)

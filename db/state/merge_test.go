@@ -1058,7 +1058,9 @@ func Test_mergeEliasFano(t *testing.T) {
 	var merged multiencseq.SequenceReader
 	merged.Reset(0, menc)
 	require.EqualValues(t, len(uniq), merged.Count())
-	mergedLists := append(firstList, secondList...)
+	mergedLists := make([]int, 0, len(firstList)+len(secondList))
+	mergedLists = append(mergedLists, firstList...)
+	mergedLists = append(mergedLists, secondList...)
 	slices.Sort(mergedLists)
 	require.EqualValues(t, mergedLists[len(mergedLists)-1], merged.Max())
 
