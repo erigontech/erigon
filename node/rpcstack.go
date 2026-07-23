@@ -317,9 +317,10 @@ func compressLibdeflate(w http.ResponseWriter, src []byte, status int) bool {
 	}
 	defer putCompressor(c)
 
+	dst := gzDstPool.Get().([]byte)
 	gzBound := c.GzipCompressBound(len(src))
-	dst := slices.Grow(gzDstPool.Get().([]byte)[:0], gzBound)[:gzBound]
-	defer putDst(dst)
+	dst = slices.Grow(dst[:0], gzBound)[:gzBound]
+	defer putDst(dst) // `slices.Grow` can re-alloc - return big buf to pool
 
 	n, err := c.CompressGzip(dst, src)
 	if err != nil {
