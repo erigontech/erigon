@@ -85,6 +85,17 @@ func TestServerCatalog(t *testing.T) {
 	require.NotEmpty(t, resourceTemplateURIs(t, e.mcpServer))
 }
 
+// Every tool is a read-only query; declaring it lets MCP clients skip
+// per-call approval prompts for them.
+func TestAllToolsDeclareReadOnlyHint(t *testing.T) {
+	e := NewErigonMCPServer(nil, "", false)
+	for name, st := range e.mcpServer.ListTools() {
+		hint := st.Tool.Annotations.ReadOnlyHint
+		require.NotNil(t, hint, "tool %s missing readOnlyHint annotation", name)
+		require.True(t, *hint, "tool %s must declare readOnlyHint=true", name)
+	}
+}
+
 func freeAddr(t *testing.T) string {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
