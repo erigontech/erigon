@@ -18,6 +18,29 @@ Aligns Erigon with the `eth_simulateV1` error code specification ([NethermindEth
 
 ---
 
+# Erigon v3.5.3 — Tidal Tails — 2026-07-23
+
+v3.5.3 is a bugfix release recommended for all users. It is a drop-in upgrade from 3.5.2 — no re-sync required.
+
+**Bugfixes**
+
+- execution/stagedsync: restore log/receipt notifications for mid-block resumed blocks (#22648) by @lupin012 — backports the notification-completeness half of #22235. After the earlier `ReceiptDomain` fix, both executors still gated `RecentReceipts.Add` on a stale `isPartial`/`startTxIndex==0` flag, so a block resumed mid-block never emitted a correct receipt/log notification over `eth_subscribe("logs"/"newReceipts")`. Both executors now reconstruct the resumed block's prefix receipts and gate on a `receiptsComplete` field.
+- rpc: return a JSON-RPC error instead of panicking on a null transaction in the trace path (#22668) by @AskAlexSharov — `trace_transaction` / `trace_filter` could dereference a nil txn when `TxnByIdxInBlock` resolves a txIndex whose body hasn't materialized yet at the chain tip. Fixes #22643.
+- rpc: fix the `handleBatch` deadlock (#22459) by @yperbasis — a filtered JSON-RPC batch could wedge on `wg.Wait()` and time the request out. Fixes #22424.
+- types: reject legacy transactions wrapped in a typed (EIP-2718) envelope (#22525) by @taratorio.
+- types: reject an empty-string element in RLP transaction-list decoding (#22524) by @taratorio.
+- cl/phase1/stages: fix `uint64` underflow in the "Downloading Execution History" progress log (#22462) by @lystopad — once the live EL head advanced past the frozen initial progress, the `toprocess` subtraction wrapped to ~2⁶⁴ and produced a garbage ETA. Fixes #22455.
+- cl/phase1/stages: guard the "[Caplin] Forward Sync" progress log against slot under/overflow (#22465) by @lystopad — the same unguarded-subtraction / `time.Duration`-overflow pattern on the forward-sync line.
+
+**Improvements**
+
+- rpc: make the `eth_getLogs` per-position address/topic limit configurable via `--rpc.logs.querylimit` (#22477) by @lupin012 — replaces the hardcoded 1000-entry limit; default 1000 preserves current behaviour, 0 = unlimited.
+- cl/phase1/stages: route the history-download and forward-sync progress ETAs through the shared, overflow-safe `utils.ETA` helper (#22493, #22512) by @lystopad.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.5.2...v3.5.3
+
+---
+
 # Erigon v3.5.2 — Tidal Tails — 2026-07-13
 
 v3.5.2 is a bugfix release recommended for all users, and especially for anyone running 3.5.1 — it fixes a sync-halting trie-root regression introduced there (#22399). It is a drop-in upgrade from 3.5.1 — no re-sync required.
