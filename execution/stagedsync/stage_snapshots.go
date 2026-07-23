@@ -295,7 +295,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	if err := buildOrDeferE3Accessors(ctx, s, cfg, headersProgress); err != nil {
+	// a state file missing its accessor is excluded from the visible set, so E3 accessors
+	// must be rebuilt before execution — there is no background rebuild path
+	if err := cfg.db.Debug().BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers(), kv.SkipCoveredAccessors); err != nil {
 		return err
 	}
 
@@ -370,29 +372,6 @@ func buildOrDeferE2Indices(ctx context.Context, s *StageState, cfg SnapshotsCfg,
 		}
 	} else {
 		log.Debug(fmt.Sprintf("[%s] Deferring E2 indexing to background", s.LogPrefix()), "reason", "restart", "headersProgress", headersProgress)
-	}
-	return nil
-}
-
-// buildOrDeferE3Accessors decides whether to build E3 state accessors synchronously
-// or defer them to background processing.
-// On restart (headersProgress > 0), E3 indexing is skipped at startup. Missing accessors
-// will be built in the background via BuildMissedAccessorsInBackground (called from
-// SnapshotsPrune on every sync cycle).
-// Unindexed state files are safely excluded from visible files by checkForVisibility
-// (which checks accessor presence), so queries correctly reflect only indexed data.
-// Note: unlike E2, there is no Bor exception — the background path calls
-// BuildMissedAccessors directly without any Bor-specific early-exit guards.
-func buildOrDeferE3Accessors(ctx context.Context, s *StageState, cfg SnapshotsCfg, headersProgress uint64) error {
-	canDefer := headersProgress > 0
-
-	indexWorkers := estimate.IndexSnapshot.Workers()
-	if !canDefer {
-		if err := cfg.db.Debug().BuildMissedAccessors(ctx, indexWorkers); err != nil {
-			return err
-		}
-	} else {
-		log.Debug(fmt.Sprintf("[%s] Deferring E3 indexing to background", s.LogPrefix()), "reason", "restart", "headersProgress", headersProgress)
 	}
 	return nil
 }
