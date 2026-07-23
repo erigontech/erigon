@@ -42,21 +42,31 @@ import (
 //     so orphaned branches left by the account-key delete leak stale slots. Here
 //     the branch prefix-delete is load-bearing.
 //
-// pruneBranchesUnderAccount models the prefix-delete the calculator must perform
-// on self-destruct: drop every persisted commitment branch at or below the
-// account's 64-nibble hashed prefix.
-func pruneBranchesUnderAccount(ms *MockState, accountHex string) {
-	addrBytes, err := hex.DecodeString(accountHex)
-	if err != nil {
-		panic(err)
+// DeleteBranchPrefix models the commitment-branch prefix-delete the calculator
+// performs on self-destruct: drop every persisted commitment branch at or below
+// the account's 64-nibble hashed prefix (its storage subtree). It is the test
+// context's stand-in for the production TrieContext.DeleteBranchPrefix.
+func (ms *MockState) DeleteBranchPrefix(hashedAccountPrefix []byte) error {
+	if ms.concurrent.Load() {
+		ms.mu.Lock()
+		defer ms.mu.Unlock()
 	}
-	accountHash := KeyToHexNibbleHash(addrBytes)
 	for k := range ms.cm {
 		nib := nibbles.CompactToHex([]byte(k))
-		if len(nib) >= 64 && bytes.HasPrefix(nib, accountHash) {
+		if len(nib) >= len(hashedAccountPrefix) && bytes.HasPrefix(nib, hashedAccountPrefix) {
 			delete(ms.cm, k)
 		}
 	}
+	return nil
+}
+
+// pruneBranchesUnderAccount deletes the storage-subtree commitment branches of an
+// account via the context capability, keyed by its 64-nibble hashed prefix.
+func pruneBranchesUnderAccount(t *testing.T, ms *MockState, accountHex string) {
+	t.Helper()
+	addrBytes, err := hex.DecodeString(accountHex)
+	require.NoError(t, err)
+	require.NoError(t, ms.DeleteBranchPrefix(KeyToHexNibbleHash(addrBytes)))
 }
 
 // sdRecreateLifecycle folds the self-destruct-then-recreate lifecycle through one
@@ -94,7 +104,7 @@ func sdRecreateLifecycle(t *testing.T, mode runMode, workers, nSlots int, a, sib
 	k2, u2 := b2.Build()
 	_, blob2 := processModeBatchState(t, ms, mode, workers, k2, u2, blob)
 	if pruneBranches {
-		pruneBranchesUnderAccount(ms, a)
+		pruneBranchesUnderAccount(t, ms, a)
 	}
 
 	b3 := NewUpdateBuilder()
