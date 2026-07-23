@@ -232,7 +232,15 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 
 			// Contract creation: clear stale storage before writing new account.
 			// Matches Writer.CreateContract which calls DomainDelPrefix.
-			if d.createContract {
+			//
+			// The wipe only matters when a prior incarnation left storage behind
+			// (self-destruct→recreate, CREATE2-over-storage, pre-Cancun EIP-7610).
+			// A fresh CREATE has incarnation 1 (prevIncarnation 0), so there is no
+			// prior storage and DomainDelPrefix's IteratePrefix scan over sd.mem +
+			// every storage .kv file is a guaranteed no-op. Skip it only when we
+			// can prove prevIncarnation==0; a missing incarnation falls through to
+			// wiping, so the skip can never drop a required wipe.
+			if d.createContract && (d.incarnation == nil || *d.incarnation > 1) {
 				if err := delPrefixTimed(address[:]); err != nil {
 					return err
 				}
