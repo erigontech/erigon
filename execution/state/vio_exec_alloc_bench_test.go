@@ -34,10 +34,7 @@ var (
 )
 
 // BenchmarkVersionMapRead_Typed measures the typed ReadXxx primitives, which
-// return T directly with no interface box. The boxed Read().Value() arm was
-// removed when the generic any-boxed VersionMap.Read API was deleted. Run:
-//
-//	go test ./execution/state/ -run=^$ -bench=BenchmarkVersionMapRead_Typed -benchmem
+// return T directly with no interface box.
 func BenchmarkVersionMapRead_Typed(b *testing.B) {
 	mvhm := NewVersionMap(nil)
 	addr := accounts.InternAddress([20]byte{0x01})
@@ -83,9 +80,7 @@ func BenchmarkVersionMapRead_Typed(b *testing.B) {
 // prior "transactions", resetting per iteration to model the per-tx read
 // boundary the parallel executor enforces. allocs/op here is the per-tx
 // read-side garbage the typed-vio model aims to drive to zero; the non-storage
-// paths currently box via ReadResult.Value() any. Run:
-//
-//	go test ./execution/state/ -run=^$ -bench=BenchmarkVersionedExecReads -benchmem
+// paths currently box via ReadResult.Value() any.
 func BenchmarkVersionedExecReads(b *testing.B) {
 	_, tx, domains := NewTestRwTx(b)
 	mvhm := NewVersionMap(nil)
@@ -121,5 +116,46 @@ func BenchmarkVersionedExecReads(b *testing.B) {
 		sinkHash = h
 		s, _ := ibs.GetState(a, key)
 		sinkU256 = s
+	}
+}
+
+// BenchmarkWarmExtCodeHash drives the Empty()+GetCodeHash opcode pattern. NOTE:
+// it does NOT reproduce the warm-extcodehash benchmarkoor cell's refresh path —
+// with only field cells and an empty reader, readAccount returns nil and Empty()
+// short-circuits on the absent path (getVersionedAccount returns before
+// the per-field account refresh). Making it hit refresh needs a populated reader, not
+// just versionMap cells; the real warm-refresh + SelfDestruct-probe cost of the
+// 20x outlier must be measured on the benchmarkoor cell (per the perf skill),
+// not here. Retained as an absent/existence-read + SD-probe alloc baseline.
+func BenchmarkWarmExtCodeHash(b *testing.B) {
+	_, tx, domains := NewTestRwTx(b)
+	mvhm := NewVersionMap(nil)
+
+	const nAddrs = 64
+	addrs := make([]accounts.Address, nAddrs)
+	for i := range addrs {
+		var a [20]byte
+		a[0], a[1] = byte(i), byte(i>>8)
+		addrs[i] = accounts.InternAddress(a)
+		mvhm.WriteBalance(addrs[i], Version{TxIndex: 0}, *uint256.NewInt(uint64(1000 + i)), true)
+		mvhm.WriteNonce(addrs[i], Version{TxIndex: 0}, uint64(i), true)
+		mvhm.WriteCodeHash(addrs[i], Version{TxIndex: 0}, accounts.InternCodeHash(common.BytesToHash([]byte{0xaa, byte(i)})), true)
+	}
+
+	reader := NewReaderV3(domains.AsGetter(tx))
+	ibs := NewWithVersionMap(reader, mvhm)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ibs.Reset()
+		ibs.SetTxContext(1, 100)
+		a := addrs[i%nAddrs]
+		empty, _ := ibs.Empty(a)
+		sinkBool = empty
+		if !empty {
+			h, _ := ibs.GetCodeHash(a)
+			sinkHash = h
+		}
 	}
 }

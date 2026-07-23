@@ -1388,7 +1388,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 			return pc, nil, err
 		}
 	}
-	if rules.IsAmsterdam && !rules.IsEIPDisabled(7708) && !balance.IsZero() && self != beneficiaryAddr { // EIP-7708
+	if rules.IsEIPEnabled(7708) && !balance.IsZero() && self != beneficiaryAddr { // EIP-7708
 		ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
 	}
 	tracer := evm.Config().Tracer

@@ -89,7 +89,7 @@ MIN_BUILDER_WITHDRAWABILITY_DELAY: 8192
 `
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0644))
+	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0o644))
 
 	beaconCfg, _, err := CustomConfig(configPath)
 	require.NoError(t, err)
@@ -136,7 +136,7 @@ BUILDER_DEPOSIT_REQUEST_TYPE: 0x09
 `
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0644))
+	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0o644))
 
 	_, _, err := CustomConfig(configPath)
 	require.Error(t, err)
@@ -151,7 +151,7 @@ DEPOSIT_REQUEST_TYPE: 0x09
 `
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0644))
+	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0o644))
 
 	_, _, err := CustomConfig(configPath)
 	require.Error(t, err)
@@ -166,7 +166,7 @@ DEPOSIT_REQUEST_TYPE: 0x09
 `
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0644))
+	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0o644))
 
 	_, _, err := CustomConfig(configPath)
 	require.Error(t, err)
@@ -187,7 +187,7 @@ ELECTRA_FORK_EPOCH: 100000000
 `
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0644))
+	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0o644))
 
 	beaconCfg, _, err := CustomConfig(configPath)
 	require.NoError(t, err)

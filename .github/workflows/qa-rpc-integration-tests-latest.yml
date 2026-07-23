@@ -21,6 +21,9 @@ on:
     paths:
       - '.github/workflows/qa-rpc-integration-tests-latest.yml'
 
+permissions:
+  contents: read
+
 jobs:
   mainnet-rpc-integ-tests-latest:
     name: mainnet-rpc-integ-tests-latest (${{ matrix.exec_mode }})

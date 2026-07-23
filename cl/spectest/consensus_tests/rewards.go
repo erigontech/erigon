@@ -23,8 +23,7 @@ import (
 	"github.com/erigontech/erigon/cl/spectest/spectest"
 )
 
-type RewardsCore struct {
-}
+type RewardsCore struct{}
 
 func (b *RewardsCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
 	t.Skipf("Skippinf attestation reward calculation tests for now")

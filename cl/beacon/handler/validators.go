@@ -138,7 +138,6 @@ func validatorStatusFromValidator(v solid.Validator, currentEpoch uint64, balanc
 		return validatorWithdrawalDone
 	}
 	return validatorWithdrawalPossible
-
 }
 
 func (s validatorStatus) String() string {
@@ -391,7 +390,6 @@ func parseQueryValidatorIndex(syncedData synced_data.SyncedData, id string) (uin
 		return 0, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	return idx, nil
-
 }
 
 func parseQueryValidatorIndicies(syncedData synced_data.SyncedData, ids []string) ([]uint64, error) {

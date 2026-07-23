@@ -49,7 +49,6 @@ func (e *Eth1Data) Equal(b *Eth1Data) bool {
 // MarshalSSZTo ssz marshals the Eth1Data object to a target array
 func (e *Eth1Data) EncodeSSZ(buf []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(buf, e.Root[:], e.DepositCount, e.BlockHash[:])
-
 }
 
 func (e *Eth1Data) DecodeSSZ(buf []byte, _ int) error {

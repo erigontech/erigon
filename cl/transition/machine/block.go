@@ -228,7 +228,8 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 func forEachProcess[T solid.EncodableHashableSSZ](
 	s abstract.BeaconState,
 	list *solid.ListSSZ[T],
-	f func(s abstract.BeaconState, item T) error) error {
+	f func(s abstract.BeaconState, item T) error,
+) error {
 	return solid.RangeErr(list, func(index int, item T, length int) error {
 		return f(s, item)
 	})

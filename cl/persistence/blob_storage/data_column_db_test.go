@@ -18,8 +18,10 @@ import (
 	gomock "go.uber.org/mock/gomock"
 )
 
-var globalBeaconConfig *clparams.BeaconChainConfig
-var globalCaplinConfig *clparams.CaplinConfig
+var (
+	globalBeaconConfig *clparams.BeaconChainConfig
+	globalCaplinConfig *clparams.CaplinConfig
+)
 
 func init() {
 	// Initialize global config once for all tests
@@ -196,7 +198,7 @@ func TestColumnSidecarExistsWithDirectoryError(t *testing.T) {
 	// Create a directory with the same name as the expected file to cause a stat error
 	_, filepath := dataColumnFilePath(1000, blockRoot, uint64(columnIndex))
 	dir := filepath[:len(filepath)-2] // Remove the "_1" part
-	err := fs.MkdirAll(dir, 0755)
+	err := fs.MkdirAll(dir, 0o755)
 	require.NoError(t, err)
 
 	// This should still work correctly
@@ -333,11 +335,11 @@ func TestPrune(t *testing.T) {
 	mockClock.(*eth_clock.MockEthereumClock).EXPECT().GetCurrentSlot().Return(uint64(50000)).AnyTimes()
 
 	// Create some test directories
-	fs.MkdirAll("0", 0755) // slot 0-9999
-	fs.MkdirAll("1", 0755) // slot 10000-19999
-	fs.MkdirAll("2", 0755) // slot 20000-29999
-	fs.MkdirAll("3", 0755) // slot 30000-39999
-	fs.MkdirAll("4", 0755) // slot 40000-49999
+	fs.MkdirAll("0", 0o755) // slot 0-9999
+	fs.MkdirAll("1", 0o755) // slot 10000-19999
+	fs.MkdirAll("2", 0o755) // slot 20000-29999
+	fs.MkdirAll("3", 0o755) // slot 30000-39999
+	fs.MkdirAll("4", 0o755) // slot 40000-49999
 
 	// Test pruning with keepSlotDistance = 10000
 	err := storage.Prune(10000)
@@ -351,8 +353,8 @@ func TestPruneWithLargeKeepDistance(t *testing.T) {
 	mockClock.(*eth_clock.MockEthereumClock).EXPECT().GetCurrentSlot().Return(uint64(100000)).AnyTimes()
 
 	// Create some test directories
-	fs.MkdirAll("0", 0755) // slot 0-9999
-	fs.MkdirAll("1", 0755) // slot 10000-19999
+	fs.MkdirAll("0", 0o755) // slot 0-9999
+	fs.MkdirAll("1", 0o755) // slot 10000-19999
 
 	// Test pruning with very large keepSlotDistance
 	err := storage.Prune(50000)
@@ -366,7 +368,7 @@ func TestPruneWithZeroKeepDistance(t *testing.T) {
 	mockClock.(*eth_clock.MockEthereumClock).EXPECT().GetCurrentSlot().Return(uint64(1000)).AnyTimes()
 
 	// Create some test directories
-	fs.MkdirAll("0", 0755) // slot 0-9999
+	fs.MkdirAll("0", 0o755) // slot 0-9999
 
 	// Test pruning with zero keepSlotDistance
 	err := storage.Prune(0)
