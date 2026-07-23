@@ -128,6 +128,96 @@ func TestToolArgMapping(t *testing.T) {
 			wantArgs: []any{"0xabc"},
 		},
 		{
+			tool:     "debug_traceTransaction",
+			args:     map[string]any{"txHash": "0x1"},
+			result:   `{}`,
+			wantArgs: []any{"0x1", map[string]any{"tracer": "callTracer"}},
+		},
+		{
+			tool:     "debug_traceTransaction",
+			args:     map[string]any{"txHash": "0x1", "tracer": "prestateTracer"},
+			result:   `{}`,
+			wantArgs: []any{"0x1", map[string]any{"tracer": "prestateTracer"}},
+		},
+		{
+			tool:     "debug_traceCall",
+			args:     map[string]any{"to": "0xabc", "data": "0x01"},
+			result:   `{}`,
+			wantArgs: []any{map[string]any{"to": "0xabc", "data": "0x01"}, "latest", map[string]any{"tracer": "callTracer"}},
+		},
+		{
+			tool:     "debug_getModifiedAccountsByNumber",
+			args:     map[string]any{"startBlock": "0x1"},
+			result:   `[]`,
+			wantArgs: []any{"0x1"},
+		},
+		{
+			tool:     "debug_getModifiedAccountsByNumber",
+			args:     map[string]any{"startBlock": "0x1", "endBlock": "0x5"},
+			result:   `[]`,
+			wantArgs: []any{"0x1", "0x5"},
+		},
+		{
+			tool:     "trace_transaction",
+			args:     map[string]any{"txHash": "0x1"},
+			result:   `[]`,
+			wantArgs: []any{"0x1"},
+		},
+		{
+			tool:     "trace_filter",
+			args:     map[string]any{"fromBlock": "0x1", "toAddress": "0xabc"},
+			result:   `[]`,
+			wantArgs: []any{map[string]any{"fromBlock": "0x1", "toAddress": []string{"0xabc"}, "count": 100}},
+		},
+		{
+			tool:     "trace_filter",
+			args:     map[string]any{"toAddress": ` ["0xabc","0xdef"]`},
+			result:   `[]`,
+			wantArgs: []any{map[string]any{"toAddress": []string{"0xabc", "0xdef"}, "count": 100}},
+		},
+		{
+			tool:     "trace_filter",
+			args:     map[string]any{"fromBlock": "0x1", "count": 500},
+			result:   `[]`,
+			wantArgs: []any{map[string]any{"fromBlock": "0x1", "count": 500}},
+		},
+		{
+			tool:     "debug_traceTransaction",
+			args:     map[string]any{"txHash": "0x1", "tracer": ""},
+			result:   `{}`,
+			wantArgs: []any{"0x1"},
+		},
+		{
+			tool:     "debug_traceTransaction",
+			args:     map[string]any{"txHash": "0x1", "tracer": " "},
+			result:   `{}`,
+			wantArgs: []any{"0x1"},
+		},
+		{
+			tool:     "debug_traceBlockByNumber",
+			args:     map[string]any{"blockNumber": "22000000"},
+			result:   `{}`,
+			wantArgs: []any{"0x14fb180", map[string]any{"tracer": "callTracer"}},
+		},
+		{
+			tool:     "debug_getModifiedAccountsByNumber",
+			args:     map[string]any{"startBlock": "100", "endBlock": "200"},
+			result:   `[]`,
+			wantArgs: []any{"0x64", "0xc8"},
+		},
+		{
+			tool:     "trace_filter",
+			args:     map[string]any{"fromBlock": "100", "toAddress": "0xabc"},
+			result:   `[]`,
+			wantArgs: []any{map[string]any{"fromBlock": "0x64", "toAddress": []string{"0xabc"}, "count": 100}},
+		},
+		{
+			tool:     "debug_traceCall",
+			args:     map[string]any{"to": "0xabc", "blockNumber": "22000000"},
+			result:   `{}`,
+			wantArgs: []any{map[string]any{"to": "0xabc"}, "0x14fb180", map[string]any{"tracer": "callTracer"}},
+		},
+		{
 			tool:     "eth_call",
 			args:     map[string]any{"to": "0xabc", "data": "0x01", "from": "0xdef"},
 			result:   `"0x"`,
@@ -230,6 +320,10 @@ func TestToolResultFormatting(t *testing.T) {
 		{tool: "ots_getTransactionBySenderAndNonce", args: map[string]any{"address": "0xabc", "nonce": 1}, result: `null`, want: "Transaction not found"},
 		{tool: "ots_getTransactionBySenderAndNonce", args: map[string]any{"address": "0xabc", "nonce": 1}, result: `"0xdead"`, want: "Transaction hash: 0xdead"},
 		{tool: "eth_syncing", result: `{"currentBlock":"0x10"}`, want: `"currentBlock": "0x10"`},
+		{tool: "net_peerCount", result: `"0x19"`, want: "Peers: 25"},
+		{tool: "net_version", result: `"10200"`, want: "Network ID: 10200"},
+		{tool: "net_listening", result: `true`, want: "Listening: true"},
+		{tool: "admin_peers", result: `[]`, want: "No peers connected"},
 	}
 
 	for _, tt := range tests {
@@ -247,6 +341,52 @@ func TestToolCallError(t *testing.T) {
 	e := NewErigonMCPServer(caller, "", false)
 	got := callTool(t, e, "eth_blockNumber", nil)
 	require.Contains(t, got, "boom")
+}
+
+// A tracer that isn't a built-in name would be executed as a JS snippet by
+// erigon; MCP must reject it before it reaches the node.
+func TestTracerAllowlist(t *testing.T) {
+	caller := &fakeCaller{result: json.RawMessage(`{}`)}
+	e := NewErigonMCPServer(caller, "", false)
+
+	for _, tool := range []string{"debug_traceTransaction", "debug_traceBlockByNumber", "debug_traceCall"} {
+		caller.method = ""
+		got := callTool(t, e, tool, map[string]any{"txHash": "0x1", "to": "0xabc", "tracer": "for(;;){}"})
+		require.Empty(t, caller.method, "%s: JS-snippet tracer must not reach dispatch", tool)
+		require.Contains(t, got, "unsupported tracer")
+	}
+
+	caller.method = ""
+	callTool(t, e, "debug_traceTransaction", map[string]any{"txHash": "0x1", "tracer": "prestateTracer"})
+	require.Equal(t, "debug_traceTransaction", caller.method, "built-in tracer must be accepted")
+}
+
+// Trace tools return the node's JSON as-is; re-indenting a large trace wastes
+// a parse+marshal pass and inflates the response.
+func TestTraceToolsReturnRawJSON(t *testing.T) {
+	compact := `{"type":"CALL","calls":[{"type":"STATICCALL"}]}`
+	caller := &fakeCaller{result: json.RawMessage(compact)}
+	e := NewErigonMCPServer(caller, "", false)
+	got := callTool(t, e, "debug_traceTransaction", map[string]any{"txHash": "0x1"})
+	require.Equal(t, compact, got, "trace output must be returned verbatim, not pretty-printed")
+
+	nullCaller := &fakeCaller{result: json.RawMessage("null")}
+	eNull := NewErigonMCPServer(nullCaller, "", false)
+	require.Equal(t, "null", callTool(t, eNull, "debug_traceTransaction", map[string]any{"txHash": "0x1"}),
+		"a null raw result must render as \"null\", not an empty string")
+}
+
+func TestTraceFilterCountBounds(t *testing.T) {
+	caller := &fakeCaller{result: json.RawMessage(`[]`)}
+	e := NewErigonMCPServer(caller, "", false)
+
+	got := callTool(t, e, "trace_filter", map[string]any{"count": 5000})
+	require.Empty(t, caller.method, "out-of-range count must not reach dispatch")
+	require.Contains(t, got, "count must be between")
+
+	got = callTool(t, e, "trace_filter", map[string]any{"count": 0})
+	require.Empty(t, caller.method)
+	require.Contains(t, got, "count must be between")
 }
 
 // Schema validation must reject mistyped arguments instead of letting the
@@ -286,4 +426,19 @@ func TestToolCallTable(t *testing.T) {
 	require.Contains(t, seen, "txpool_status")
 	require.Contains(t, seen, "txpool_content")
 	require.Contains(t, seen, "txpool_contentFrom")
+	require.Contains(t, seen, "net_version")
+	require.Contains(t, seen, "net_listening")
+	require.Contains(t, seen, "net_peerCount")
+	require.Contains(t, seen, "admin_nodeInfo")
+	require.Contains(t, seen, "admin_peers")
+	for _, mutating := range []string{"admin_addPeer", "admin_removePeer", "admin_addTrustedPeer", "admin_removeTrustedPeer"} {
+		require.NotContains(t, seen, mutating, "mutating admin methods must not be exposed")
+	}
+	require.Contains(t, seen, "debug_traceTransaction")
+	require.Contains(t, seen, "debug_traceBlockByNumber")
+	require.Contains(t, seen, "debug_traceCall")
+	require.Contains(t, seen, "debug_getModifiedAccountsByNumber")
+	require.Contains(t, seen, "trace_transaction")
+	require.Contains(t, seen, "trace_block")
+	require.Contains(t, seen, "trace_filter")
 }

@@ -278,6 +278,18 @@ Standard JSON-RPC methods exposed as MCP tools: `eth_blockNumber`, `eth_getBlock
 
 `ots_getInternalOperations`, `ots_searchTransactionsBefore`, `ots_searchTransactionsAfter`, `ots_getBlockDetails`, `ots_traceTransaction`, `ots_getTransactionError`, `ots_getContractCreator`, and more.
 
+### Transaction Pool (`txpool_*`)
+
+`txpool_status`, `txpool_content`, `txpool_contentFrom` — inspect pending/queued transactions, e.g. to find out why a transaction is stuck.
+
+### Tracing (`debug_*`, `trace_*`)
+
+`debug_traceTransaction`, `debug_traceBlockByNumber`, `debug_traceCall` (default tracer: `callTracer`; selectable per call), `debug_getModifiedAccountsByNumber`, plus Parity-style `trace_transaction`, `trace_block` and `trace_filter`.
+
+### P2P (`net_*`, `admin_*`)
+
+`net_version`, `net_listening`, `net_peerCount`, `admin_nodeInfo`, `admin_peers` — read-only connectivity diagnostics; peer-management methods are not exposed.
+
 ### Log Analysis (`logs_*`)
 
 `logs_tail`, `logs_head`, `logs_grep`, `logs_stats` — require `--log.dir` or `--datadir` to locate Erigon log files.

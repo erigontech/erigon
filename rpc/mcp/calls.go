@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math/big"
+	"slices"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -50,6 +52,7 @@ type toolCall struct {
 	build  func(req mcp.CallToolRequest) ([]any, error)
 	format func(req mcp.CallToolRequest, raw json.RawMessage) string
 	empty  string // replaces null/[] results, e.g. "Block not found"
+	raw    bool   // return the result bytes as-is, skipping the pretty-print pass
 }
 
 func (c *toolCall) tool() mcp.Tool {
@@ -138,6 +141,12 @@ func (c *toolCall) render(req mcp.CallToolRequest, raw json.RawMessage) string {
 	if c.format != nil {
 		return c.format(req, raw)
 	}
+	if c.raw {
+		if len(raw) == 0 {
+			return "null"
+		}
+		return string(raw)
+	}
 	return toJSONIndent(raw)
 }
 
@@ -184,7 +193,7 @@ func buildLogFilter(req mcp.CallToolRequest) ([]any, error) {
 	if v := req.GetString("toBlock", ""); v != "" {
 		filter["toBlock"] = normalizeBlockRef(v)
 	}
-	if v := req.GetString("address", ""); v != "" {
+	if v := strings.TrimSpace(req.GetString("address", "")); v != "" {
 		if strings.HasPrefix(v, "[") {
 			var addrs []string
 			if err := json.Unmarshal([]byte(v), &addrs); err != nil {
@@ -222,6 +231,109 @@ func buildTxArgs(withBlock bool) func(req mcp.CallToolRequest) ([]any, error) {
 		return []any{callObj}, nil
 	}
 }
+
+// allowedTracers is the set of built-in native tracer names MCP will forward.
+// Erigon's tracer lookup treats any unrecognized string as a JavaScript
+// snippet to execute (execution/tracing/tracers/js/goja.go), so allowlisting
+// keeps a read-only MCP surface from becoming arbitrary on-node code execution.
+var allowedTracers = map[string]struct{}{
+	"callTracer":     {},
+	"prestateTracer": {},
+	"flatCallTracer": {},
+	"4byteTracer":    {},
+	"muxTracer":      {},
+	"noopTracer":     {},
+}
+
+// tracerConfig returns the debug_trace* config argument. The default is
+// callTracer rather than the RPC default (struct logger) because full opcode
+// logs are far too large for an MCP client's context; pass tracer="" to get
+// the struct logger anyway. Only built-in tracer names are accepted.
+func tracerConfig(req mcp.CallToolRequest) (map[string]any, bool, error) {
+	tracer := strings.TrimSpace(req.GetString("tracer", "callTracer"))
+	if tracer == "" {
+		return nil, false, nil
+	}
+	if _, ok := allowedTracers[tracer]; !ok {
+		allowed := slices.Sorted(maps.Keys(allowedTracers))
+		return nil, false, fmt.Errorf("unsupported tracer %q; allowed: %s", tracer, strings.Join(allowed, ", "))
+	}
+	return map[string]any{"tracer": tracer}, true, nil
+}
+
+func buildTraceArgs(prefix ...param) func(req mcp.CallToolRequest) ([]any, error) {
+	return func(req mcp.CallToolRequest) ([]any, error) {
+		args := make([]any, 0, len(prefix)+1)
+		for _, p := range prefix {
+			v := req.GetString(p.name, p.def)
+			if p.kind == pBlockNum {
+				v = normalizeBlockRef(v)
+			}
+			args = append(args, v)
+		}
+		cfg, ok, err := tracerConfig(req)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			args = append(args, cfg)
+		}
+		return args, nil
+	}
+}
+
+func buildTraceCall(req mcp.CallToolRequest) ([]any, error) {
+	args, err := buildTxArgs(true)(req)
+	if err != nil {
+		return nil, err
+	}
+	cfg, ok, err := tracerConfig(req)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		args = append(args, cfg)
+	}
+	return args, nil
+}
+
+func buildTraceFilter(req mcp.CallToolRequest) ([]any, error) {
+	filter := map[string]any{}
+	if v := req.GetString("fromBlock", ""); v != "" {
+		filter["fromBlock"] = normalizeBlockRef(v)
+	}
+	if v := req.GetString("toBlock", ""); v != "" {
+		filter["toBlock"] = normalizeBlockRef(v)
+	}
+	for _, k := range []string{"fromAddress", "toAddress"} {
+		v := strings.TrimSpace(req.GetString(k, ""))
+		if v == "" {
+			continue
+		}
+		if strings.HasPrefix(v, "[") {
+			var addrs []string
+			if err := json.Unmarshal([]byte(v), &addrs); err != nil {
+				return nil, fmt.Errorf("invalid %s JSON array: %w", k, err)
+			}
+			filter[k] = addrs
+		} else {
+			filter[k] = []string{v}
+		}
+	}
+	if v := strings.TrimSpace(req.GetString("mode", "")); v != "" {
+		filter["mode"] = v
+	}
+	count := req.GetInt("count", 100)
+	if count < 1 || count > maxTraceFilterCount {
+		return nil, fmt.Errorf("count must be between 1 and %d", maxTraceFilterCount)
+	}
+	filter["count"] = count
+	return []any{filter}, nil
+}
+
+// maxTraceFilterCount bounds trace_filter results: unbounded trace scans are
+// expensive server-side and overflow an MCP client's context anyway.
+const maxTraceFilterCount = 1000
 
 func buildStorageValues(req mcp.CallToolRequest) ([]any, error) {
 	requests, err := parseJSONParam("requests", req.GetString("requests", "{}"))
@@ -622,6 +734,93 @@ func rpcToolCalls() []toolCall {
 		{
 			name: "txpool_contentFrom", desc: "Get pending/queued pool transactions of one sender",
 			params: []param{{name: "address", desc: "Sender address", kind: pString, required: true}},
+		},
+
+		// ===== DEBUG / TRACE TOOLS =====
+		{
+			name: "debug_traceTransaction", desc: "Trace a transaction with a tracer (default: callTracer call tree)",
+			params: []param{
+				txHashParam,
+				{name: "tracer", desc: "Built-in tracer: callTracer, prestateTracer, flatCallTracer, 4byteTracer, muxTracer, noopTracer (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
+			},
+			build: buildTraceArgs(txHashParam),
+			raw:   true,
+		},
+		{
+			name: "debug_traceBlockByNumber", desc: "Trace all transactions in a block with a tracer (default: callTracer)",
+			params: []param{
+				blockNumberParam,
+				{name: "tracer", desc: "Built-in tracer: callTracer, prestateTracer, flatCallTracer, 4byteTracer, muxTracer, noopTracer (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
+			},
+			build: buildTraceArgs(blockNumberParam),
+			raw:   true,
+		},
+		{
+			name: "debug_traceCall", desc: "Execute a call and trace it with a tracer (default: callTracer)",
+			params: []param{
+				{name: "to", desc: "Contract address", kind: pString, required: true},
+				{name: "data", desc: "Call data", kind: pString},
+				{name: "from", desc: "Sender address", kind: pString},
+				{name: "value", desc: "Value (hex)", kind: pString},
+				{name: "gas", desc: "Gas limit (hex)", kind: pString},
+				{name: "blockNumber", desc: "Block number (default: latest)", kind: pString},
+				{name: "tracer", desc: "Built-in tracer: callTracer, prestateTracer, flatCallTracer, 4byteTracer, muxTracer, noopTracer (default: callTracer; empty string for raw struct logs)", kind: pString, def: "callTracer"},
+			},
+			build: buildTraceCall,
+			raw:   true,
+		},
+		{
+			name: "debug_getModifiedAccountsByNumber", desc: "List accounts modified in a block range",
+			params: []param{
+				{name: "startBlock", desc: "Start block number", kind: pBlockNum, required: true},
+				{name: "endBlock", desc: "End block number; covers blocks startBlock+1..endBlock. Omit to query exactly startBlock", kind: pBlockNum, omit: true},
+			},
+		},
+		{
+			name: "trace_transaction", desc: "Get Parity-style traces for a transaction",
+			params: []param{txHashParam},
+			format: fmtArrayOrMsg("No trace entries found"),
+		},
+		{
+			name: "trace_block", desc: "Get Parity-style traces for all transactions in a block",
+			params: []param{blockNumberParam},
+			format: fmtArrayOrMsg("No trace entries found"),
+		},
+		{
+			name: "trace_filter", desc: "Search Parity-style traces by block range and addresses",
+			params: []param{
+				{name: "fromBlock", desc: "Start block", kind: pString},
+				{name: "toBlock", desc: "End block", kind: pString},
+				{name: "fromAddress", desc: "Sender address(es), single or JSON array", kind: pString},
+				{name: "toAddress", desc: "Recipient address(es), single or JSON array", kind: pString},
+				{name: "mode", desc: "Address filter mode: union (default) or intersection", kind: pString},
+				{name: "count", desc: "Maximum traces to return (default: 100, max: 1000)", kind: pInt, defInt: 100},
+			},
+			build:  buildTraceFilter,
+			format: fmtArrayOrMsg("No matching traces found"),
+		},
+
+		// ===== NET / ADMIN TOOLS =====
+		// Read-only P2P inspection only; mutating admin methods (addPeer,
+		// removePeer, trusted-peer management) are deliberately not exposed.
+		{
+			name: "net_version", desc: "Get network ID",
+			format: fmtStringResult("Network ID: "),
+		},
+		{
+			name: "net_listening", desc: "Check if the node is listening for P2P connections",
+			format: fmtRawResult("Listening: "),
+		},
+		{
+			name: "net_peerCount", desc: "Get number of connected P2P peers",
+			format: fmtQuantity("Peers: ", ""),
+		},
+		{
+			name: "admin_nodeInfo", desc: "Get detailed P2P node info (enode, ports, protocols)",
+		},
+		{
+			name: "admin_peers", desc: "Get details of all connected P2P peers",
+			format: fmtArrayOrMsg("No peers connected"),
 		},
 
 		// ===== OTTERSCAN TOOLS =====
