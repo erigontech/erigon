@@ -283,15 +283,15 @@ jobs:
           cp -R "$src/versioned_docs" versioned_docs
           cp -R "$src/versioned_sidebars" versioned_sidebars
 
-          # 3-archived-version cap (versions.json is newest-first; prune the rest).
+          # 5-archived-version cap (versions.json is newest-first; prune the rest).
           count=$(jq 'length' versions.json)
-          if [ "$count" -gt 3 ]; then
-            for v in $(jq -r '.[3:][]' versions.json); do
+          if [ "$count" -gt 5 ]; then
+            for v in $(jq -r '.[5:][]' versions.json); do
               echo "Pruning archived version $v"
               rm -rf "versioned_docs/version-$v"
               rm -f  "versioned_sidebars/version-$v-sidebars.json"
             done
-            jq '.[:3]' versions.json > versions.json.tmp && mv versions.json.tmp versions.json
+            jq '.[:5]' versions.json > versions.json.tmp && mv versions.json.tmp versions.json
           fi
 
           npm ci
@@ -336,7 +336,7 @@ jobs:
             --body "Automated docs archive opened when \`$INCOMING_BRANCH\` was cut (\`create-release-branch.yml\`). Labelled \`docs\` for manual review and merge.
 
           - Snapshotted **$ARCHIVE_LABEL** from its authoritative branch \`$OUTGOING_BRANCH\` (not from \`$INCOMING_BRANCH\`, which already holds the next version's docs).
-          - Ported the full versioned state (versions.json + all versioned_docs/ + versioned_sidebars/) and enforced the 3-archived-version cap.
+          - Ported the full versioned state (versions.json + all versioned_docs/ + versioned_sidebars/) and enforced the 5-archived-version cap.
           - Regenerated llms.txt artifacts; \`npm run build\` passed in CI before this PR was opened.
 
           This does **not** flip the live docs deploy. Making $INCOMING_BRANCH the default on docs.erigon.tech is the separate manual step (retire the old \`docs-deploy.yml\` + publish, per #22062 / #22063).")
