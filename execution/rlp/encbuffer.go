@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"io"
 	"reflect"
-	"slices"
 	"sync"
 
 	"github.com/holiman/uint256"
@@ -346,8 +345,7 @@ func (w *EncoderBuffer) ToBytes() []byte {
 // AppendToBytes appends the encoded bytes to dst.
 func (w *EncoderBuffer) AppendToBytes(dst []byte) []byte {
 	size := w.buf.size()
-	out := slices.Grow(dst, size)
-	out = out[:len(dst)+size]
+	out := append(dst, make([]byte, size)...) //nolint:gocritic
 	w.buf.copyTo(out[len(dst):])
 	return out
 }
