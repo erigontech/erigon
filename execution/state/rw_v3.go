@@ -259,8 +259,18 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 				acc := accounts.NewAccount()
 				if !d.selfDestruct {
 					if blockCache != nil {
+						// Prefer values we already hold over a fresh domain read:
+						// current (this block's writes) → committed (the pre-block
+						// account CachedReaderV3 cached when it was read during exec)
+						// → GetLatest. At per-tx apply time sd.mem is still pre-block
+						// (in-block writes sit in blockCache until Flush), so the
+						// committed cache equals what GetLatest would return.
 						if enc, ok := blockCache.GetCurrentAccount(addr); ok && len(enc) > 0 {
 							_ = accounts.DeserialiseV3(&acc, enc)
+						} else if cacc, ok := blockCache.GetCommittedAccount(addr); ok {
+							if cacc != nil {
+								acc = *cacc
+							}
 						} else if enc0, err := getLatestAcct(address[:]); err == nil && len(enc0) > 0 {
 							_ = accounts.DeserialiseV3(&acc, enc0)
 						}
