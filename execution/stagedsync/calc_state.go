@@ -159,7 +159,7 @@ func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
 // recreate) revives it by clearing Deleted. A zero field write does not revive
 // a self-destructed address; for a non-self-destructed address any field write
 // — even zero — means it is alive (clears Deleted).
-func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
+func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 	sdThisCall := make(map[accounts.Address]bool)
 	for addr, vw := range writes.SelfDestructs() {
 		sdThisCall[addr] = vw.Val
