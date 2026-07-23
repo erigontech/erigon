@@ -113,6 +113,31 @@ func TestBuildExecutionPayload_BlockAccessListGloasOnly(t *testing.T) {
 	}
 }
 
+func TestBuildExecutionPayload_TransactionsAreJSONArray(t *testing.T) {
+	beaconCfg := clparams.MainnetBeaconConfig
+	tests := []struct {
+		name string
+		json string
+		want []any
+	}{
+		{name: "empty", json: "[]", want: []any{}},
+		{name: "non-empty", json: `["0x0102"]`, want: []any{"0x0102"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := gloas(&beaconCfg, nil)
+			require.NoError(t, payload.Transactions.UnmarshalJSON([]byte(tt.json)))
+
+			raw, err := json.Marshal(buildExecutionPayload(payload))
+			require.NoError(t, err)
+
+			var decoded map[string]any
+			require.NoError(t, json.Unmarshal(raw, &decoded))
+			require.Equal(t, tt.want, decoded["transactions"])
+		})
+	}
+}
+
 func gloas(cfg *clparams.BeaconChainConfig, balData []byte) *cltypes.Eth1Block {
 	block := cltypes.NewEth1Block(clparams.GloasVersion, cfg)
 	block.Extra = solid.NewExtraData()

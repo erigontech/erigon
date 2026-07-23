@@ -128,6 +128,7 @@ func buildExecutionPayload(payload *cltypes.Eth1Block) *engine_types.ExecutionPa
 		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
 	}
 	baseFee := new(uint256.Int).SetBytes(reversedBaseFeePerGas)
+	payloadBody := payload.Body()
 
 	request := &engine_types.ExecutionPayload{
 		ParentHash:   payload.ParentHash,
@@ -142,10 +143,10 @@ func buildExecutionPayload(payload *cltypes.Eth1Block) *engine_types.ExecutionPa
 		Timestamp:    hexutil.Uint64(payload.Time),
 		ExtraData:    payload.Extra.Bytes(),
 		BlockHash:    payload.BlockHash,
+		Transactions: make([]hexutil.Bytes, 0, len(payloadBody.Transactions)),
 	}
 	request.BaseFeePerGas = (*hexutil.Big)(baseFee.ToBig())
 
-	payloadBody := payload.Body()
 	request.Withdrawals = payloadBody.Withdrawals
 	for _, bytesTransaction := range payloadBody.Transactions {
 		request.Transactions = append(request.Transactions, bytesTransaction)
