@@ -108,6 +108,7 @@ export default async function createConfig(): Promise<Config> {
           path: 'help-center',
           routeBasePath: 'help-center',
           sidebarPath: './sidebars-help-center.ts',
+          showLastUpdateTime: true,
         },
       ],
       [
@@ -137,9 +138,19 @@ export default async function createConfig(): Promise<Config> {
             },
           },
           remarkPlugins: [[versionReplace, {currentVersion: latestVersion, versionStrings}]],
+          showLastUpdateTime: true,
         },
         blog: false as false,
         theme: {customCss: './src/css/custom.css'},
+        sitemap: {
+          // Emit <lastmod> per URL (from git history via showLastUpdateTime) so
+          // crawlers can prioritise changed pages. Drop the client-side search
+          // route, which has no indexable content.
+          lastmod: 'date',
+          changefreq: 'weekly',
+          priority: 0.5,
+          ignorePatterns: ['/search'],
+        },
       } satisfies Preset.Options],
     ],
 
