@@ -70,18 +70,18 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 	rs.txNum = txNum
 }
 
-// applyVersionedWrites applies a VersionedWrites slice directly to the shared
-// domains without any intermediate BTree representation.
+// Apply writes this (already-Normalized) write-set directly to the shared
+// domains, no intermediate BTree — the single write-set commit path shared by
+// the parallel executor and block production. trace gates the dbg.TraceApply
+// logging StateV3 used to read from its own flag.
 //
-// Writes from versionedWriteCollector carry complete account state (all fields
-// emitted by UpdateAccountData), so no domain reads are needed to reconstruct
-// the full serialised account. SelfDestructPath=true signals either:
+// Writes carry complete account state (all fields emitted by UpdateAccountData),
+// so no domain reads are needed to reconstruct the full serialised account.
+// SelfDestructPath=true signals either:
 //   - pure account deletion (no account fields follow) — from DeleteAccount
 //   - code+storage cleanup before recreation — from UpdateAccountData when
 //     original.Incarnation > account.Incarnation (followed by account fields)
-func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint64, writes *WriteSet, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache) error {
-	domains := rs.domains
-
+func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache, trace bool) error {
 	if writes != nil && !writes.IsEmpty() {
 		type addrState struct {
 			balance        *uint256.Int
@@ -159,7 +159,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			address := addr.Value()
 
 			if d.selfDestruct {
-				if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
+				if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d apply:del code+storage: %x\n", blockNum, addr)
 				}
 				// An EIP-8246 self-destruct keeps its balance write; the record
@@ -179,7 +179,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 						domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(address[:]), nil)
 					}
 					if pureDelete {
-						if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
+						if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 							fmt.Printf("%d apply:del account: %x\n", blockNum, addr)
 						}
 						continue
@@ -192,7 +192,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 						return err
 					}
 					if pureDelete {
-						if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
+						if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 							fmt.Printf("%d apply:del account: %x\n", blockNum, addr)
 						}
 						if err := domains.DomainDel(kv.AccountsDomain, roTx, address[:], txNum, nil); err != nil {
@@ -249,7 +249,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				} else if d.codeWritten {
 					acc.CodeHash = accounts.NewCode(d.code).Hash
 				}
-				if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
+				if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d apply:put account: %x balance:%s,nonce:%d,codehash:%x\n", blockNum, addr, acc.Balance.String(), acc.Nonce, acc.CodeHash)
 				}
 				enc := accounts.SerialiseV3(&acc)
@@ -266,7 +266,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			}
 
 			if d.codeWritten {
-				if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
+				if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 					code := d.code
 					if len(code) > 40 {
 						code = code[:40]
@@ -294,7 +294,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				composite = append(composite, key[:]...)
 				v := item.value.Bytes()
 				if len(v) == 0 {
-					if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
+					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d apply:del storage: %x %x\n", blockNum, addr, item.key)
 					}
 					if blockCache != nil {
@@ -308,7 +308,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 						}
 					}
 				} else {
-					if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
+					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, addr, item.key, v)
 					}
 					if blockCache != nil {
@@ -401,7 +401,7 @@ func (rs *StateV3) ApplyStateWrites(_ context.Context,
 	if writes.IsEmpty() && len(balanceIncreases) == 0 {
 		return nil
 	}
-	if err := rs.applyVersionedWrites(roTx, blockNum, txNum, writes, balanceIncreases, rules, blockCache); err != nil {
+	if err := writes.Apply(rs.domains, roTx, blockNum, txNum, balanceIncreases, rules, blockCache, rs.trace.Load()); err != nil {
 		return fmt.Errorf("StateV3.ApplyStateWrites: %w", err)
 	}
 	// Step-boundary commitment is computed by the explicit CommitStepBoundary
@@ -1050,7 +1050,9 @@ type BlockStateCache struct {
 
 	// committed holds pre-block state, lazily populated on first read.
 	// These values are returned by CachedReaderV3 for GetCommittedState.
-	committedAccounts map[accounts.Address]*accounts.Account
+	// committedAccounts is write-once-per-key (an immutable pre-block view),
+	// so it is a sync.Map for lock-free reads off the shared mu hot path.
+	committedAccounts sync.Map // accounts.Address -> *accounts.Account (nil ptr = absent)
 	committedStorage  map[accounts.Address]map[accounts.StorageKey][]byte
 
 	// current holds the latest state including intra-block writes.
@@ -1106,11 +1108,10 @@ type bcWriteOp struct {
 
 func NewBlockStateCache() *BlockStateCache {
 	return &BlockStateCache{
-		committedAccounts: make(map[accounts.Address]*accounts.Account),
-		committedStorage:  make(map[accounts.Address]map[accounts.StorageKey][]byte),
-		currentAccounts:   make(map[accounts.Address][]byte),
-		currentStorage:    make(map[accounts.Address]map[accounts.StorageKey][]byte),
-		currentCode:       make(map[accounts.Address][]byte),
+		committedStorage: make(map[accounts.Address]map[accounts.StorageKey][]byte),
+		currentAccounts:  make(map[accounts.Address][]byte),
+		currentStorage:   make(map[accounts.Address]map[accounts.StorageKey][]byte),
+		currentCode:      make(map[accounts.Address][]byte),
 	}
 }
 
@@ -1118,17 +1119,16 @@ func NewBlockStateCache() *BlockStateCache {
 
 // GetCommittedAccount returns the pre-block account, or (nil, false) if not cached.
 func (c *BlockStateCache) GetCommittedAccount(addr accounts.Address) (*accounts.Account, bool) {
-	c.mu.RLock()
-	acc, ok := c.committedAccounts[addr]
-	c.mu.RUnlock()
-	return acc, ok
+	v, ok := c.committedAccounts.Load(addr)
+	if !ok {
+		return nil, false
+	}
+	return v.(*accounts.Account), true
 }
 
 // PutCommittedAccount caches a pre-block account. Nil = doesn't exist.
 func (c *BlockStateCache) PutCommittedAccount(addr accounts.Address, acc *accounts.Account) {
-	c.mu.Lock()
-	c.committedAccounts[addr] = acc
-	c.mu.Unlock()
+	c.committedAccounts.Store(addr, acc)
 }
 
 // GetCommittedStorage returns the pre-block storage value, or (nil, false) if not cached.
@@ -1225,15 +1225,20 @@ func (c *BlockStateCache) GetCurrentAccount(addr accounts.Address) ([]byte, bool
 		c.mu.RUnlock()
 		return enc, true
 	}
-	// Fall back to serializing the committed account.
-	if acc, ok := c.committedAccounts[addr]; ok {
-		c.mu.RUnlock()
+	c.mu.RUnlock()
+	// The committed fallback runs after releasing mu, so the two reads are not one
+	// point-in-time snapshot. That is safe because committedAccounts is a
+	// write-once immutable pre-block view (a sync.Map for lock-free reads): a
+	// concurrent WriteAccount can only add a currentAccounts entry we'd miss —
+	// which the RLock-then-fallback ordering can't prevent regardless — never tear
+	// a committed value.
+	if v, ok := c.committedAccounts.Load(addr); ok {
+		acc := v.(*accounts.Account)
 		if acc == nil {
 			return nil, true
 		}
 		return accounts.SerialiseV3(acc), true
 	}
-	c.mu.RUnlock()
 	return nil, false
 }
 

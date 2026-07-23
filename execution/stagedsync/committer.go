@@ -532,7 +532,7 @@ func (cc *commitmentCalculator) foldBlockFromBAL(ctx context.Context, pb *pendin
 		StateRoot: req.stateRoot,
 		lastTxNum: req.lastTxNum,
 	}
-	// EIP-161 empty-removal inputs, matching normalizeWriteSet on the exec path.
+	// EIP-161 empty-removal inputs, matching Normalize on the exec path.
 	// IsEIP161Enabled (not IsSpuriousDragon) so a chain with EIP-161 in disabledEIPs
 	// keeps empty leaves in the fold exactly as exec does.
 	emptyRemoval := req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum)
