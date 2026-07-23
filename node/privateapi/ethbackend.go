@@ -20,8 +20,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"math"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -157,55 +156,12 @@ func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*typesproto
 }
 
 func (s *EthBackendServer) Syncing(ctx context.Context, _ *emptypb.Empty) (*remoteproto.SyncingReply, error) {
-	highestBlock := s.notifications.LastNewBlockSeen.Load()
-	frozenBlocks := s.blockReader.FrozenBlocks()
-
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	currentBlock, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return nil, err
-	}
-
-	if highestBlock < frozenBlocks {
-		highestBlock = frozenBlocks
-	}
-
-	reply := &remoteproto.SyncingReply{
-		CurrentBlock:     currentBlock,
-		FrozenBlocks:     frozenBlocks,
-		LastNewBlockSeen: highestBlock,
-		Syncing:          true,
-	}
-
-	// Maybe it is still downloading snapshots. Impossible to determine the highest block.
-	if highestBlock == 0 {
-		return reply, nil
-	}
-
-	// If the distance between the current block and the highest block is less than the reorg range, we are not syncing. abs(highestBlock - currentBlock) < reorgRange
-	reorgRange := 8
-	if math.Abs(float64(highestBlock)-float64(currentBlock)) < float64(reorgRange) {
-		reply.Syncing = false
-		return reply, nil
-	}
-
-	reply.Stages = make([]*remoteproto.SyncingReply_StageProgress, len(stages.AllStages))
-	for i, stage := range stages.AllStages {
-		progress, err := stages.GetStageProgress(tx, stage)
-		if err != nil {
-			return nil, err
-		}
-		reply.Stages[i] = &remoteproto.SyncingReply_StageProgress{}
-		reply.Stages[i].StageName = string(stage)
-		reply.Stages[i].BlockNumber = progress
-	}
-
-	return reply, nil
+	return s.notifications.BuildSyncingReply(tx, s.blockReader.FrozenBlocks())
 }
 
 func (s *EthBackendServer) PendingBlock(ctx context.Context, _ *emptypb.Empty) (*remoteproto.PendingBlockReply, error) {
@@ -265,6 +221,17 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 	defer clean()
 	newSnCh, newSnClean := s.notifications.Events.AddNewSnapshotSubscription()
 	defer newSnClean()
+	seedTx, err := s.db.BeginRo(subscribeServer.Context())
+	if err != nil {
+		return err
+	}
+	defer seedTx.Rollback()
+	syncStateCh, syncSeed, syncStateClean, err := s.notifications.SubscribeSyncState(seedTx, s.blockReader.FrozenBlocks())
+	seedTx.Rollback()
+	if err != nil {
+		return err
+	}
+	defer syncStateClean()
 	defer func() {
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
@@ -273,6 +240,17 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 		}
 	}()
 	_ = subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_NEW_SNAPSHOT})
+	// A fresh stream missed any SYNCING event published before it connected,
+	// and an unchanged state is never re-published — send the seed so a
+	// transition during a connection gap is not lost forever. The seed is
+	// ordered against syncStateCh by construction.
+	seedData, err := proto.Marshal(syncSeed)
+	if err != nil {
+		return err
+	}
+	if err = subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_SYNCING, Data: seedData}); err != nil {
+		return err
+	}
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -290,6 +268,14 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 			}
 		case <-newSnCh:
 			if err = subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_NEW_SNAPSHOT}); err != nil {
+				return err
+			}
+		case syncState := <-syncStateCh:
+			data, err := proto.Marshal(syncState)
+			if err != nil {
+				return err
+			}
+			if err = subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_SYNCING, Data: data}); err != nil {
 				return err
 			}
 		}
