@@ -5,6 +5,7 @@ import (
 	"iter"
 	"log/slog"
 	"slices"
+	"strings"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -20,6 +21,7 @@ func slogLevelToErigon(from slog.Level) log.Lvl {
 
 type slogHandler struct {
 	attrs       []slog.Attr
+	groups      []string
 	enabled     func(level slog.Level, names []string) bool
 	modifyLevel func(level *slog.Level, names []string)
 }
@@ -66,8 +68,12 @@ func (me *slogHandler) attrsToCtx(r slog.Record) (ret []any) {
 	ret = make([]any, 0, 2*(len(me.attrs)+r.NumAttrs()))
 	// Add attrs from the logger, then the record, flattening groups because I don't think erilog
 	// supports nesting.
-	for attr := range chainSeqs(slices.Values(me.attrs), r.Attrs) {
+	for attr := range slices.Values(me.attrs) {
 		ret = slices.AppendSeq(ret, attrToErilogCtxs("", attr))
+	}
+	recordPrefix := me.recordPrefix()
+	for attr := range r.Attrs {
+		ret = slices.AppendSeq(ret, attrToErilogCtxs(recordPrefix, attr))
 	}
 	return
 }
@@ -75,21 +81,54 @@ func (me *slogHandler) attrsToCtx(r slog.Record) (ret []any) {
 func (me *slogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	ret := *me
 	high := len(me.attrs)
-	ret.attrs = append(me.attrs[:high:high], attrs...)
+	ret.attrs = append(me.attrs[:high:high], me.groupAttrs(attrs)...)
 	return &ret
 }
 
 func (me *slogHandler) WithGroup(name string) slog.Handler {
-	// Assuming the no-nesting thing is correct, this would add an implicit key prefix to all new
-	// attrs.
-	panic("implement me")
+	if name == "" {
+		return me
+	}
+	ret := *me
+	high := len(me.groups)
+	ret.groups = append(me.groups[:high:high], name)
+	return &ret
 }
 
 func (me *slogHandler) getNames() (names []string) {
 	for _, a := range me.attrs {
-		if a.Key == "name" {
-			names = append(names, a.Value.String())
-		}
+		names = append(names, attrNames(a)...)
 	}
 	return
+}
+
+func (me *slogHandler) groupAttrs(attrs []slog.Attr) []slog.Attr {
+	if len(attrs) == 0 {
+		return nil
+	}
+	grouped := append([]slog.Attr(nil), attrs...)
+	for i := len(me.groups) - 1; i >= 0; i-- {
+		grouped = []slog.Attr{slog.GroupAttrs(me.groups[i], grouped...)}
+	}
+	return grouped
+}
+
+func (me *slogHandler) recordPrefix() string {
+	if len(me.groups) == 0 {
+		return ""
+	}
+	return strings.Join(me.groups, ".") + "."
+}
+
+func attrNames(attr slog.Attr) (names []string) {
+	if attr.Value.Kind() == slog.KindGroup {
+		for _, a := range attr.Value.Group() {
+			names = append(names, attrNames(a)...)
+		}
+		return names
+	}
+	if attr.Key == "name" {
+		names = append(names, attr.Value.String())
+	}
+	return names
 }
