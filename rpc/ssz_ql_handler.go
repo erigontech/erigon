@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -42,7 +43,17 @@ func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parseQuery(r.Body, version, block_id)
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
+	var req SSZQLRequest
+
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&req); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	parseQuery(req, version, block_id)
 
 }
 
