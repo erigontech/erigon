@@ -2178,11 +2178,14 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	}
 
 	if ev.profile || depShapeEnabled {
+		end := time.Now()
 		ev.statsMutex.Lock()
 		ev.stats[ev.version.TxIndex] = ExecutionStat{
 			TxIdx:       ev.version.TxIndex,
 			Incarnation: ev.version.Incarnation,
-			Duration:    time.Since(start),
+			Duration:    end.Sub(start),
+			StartNanos:  start.UnixNano(),
+			EndNanos:    end.UnixNano(),
 		}
 		ev.statsMutex.Unlock()
 	}
@@ -2328,15 +2331,17 @@ type blockExecutor struct {
 	// threaded exec-loop apply path (nextResult), and the per-component split
 	// of the in-order validation loop. serialNanos / (exec wall) is the Amdahl
 	// serial floor; the components rank what to attack.
-	serialNanos    int64
-	valLoopNanos   int64
-	scheduleNanos  int64
-	publishNanos   int64
-	calcFeesNanos  int64
-	validateNanos  int64
-	flushNanos     int64
-	finalizeNanos  int64
-	normalizeNanos int64
+	serialNanos      int64
+	valLoopNanos     int64
+	scheduleNanos    int64
+	publishNanos     int64
+	stateWritesNanos int64
+	txIndexNanos     int64
+	calcFeesNanos    int64
+	validateNanos    int64
+	flushNanos       int64
+	finalizeNanos    int64
+	normalizeNanos   int64
 
 	// blockStateCache provides a stable pre-block snapshot of account data
 	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
@@ -2994,18 +2999,32 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			// Apply state writes to sd.mem and block cache.
+			var stateWritesStart time.Time
+			if depShapeEnabled {
+				stateWritesStart = time.Now()
+			}
 			if err := pe.rs.ApplyStateWrites(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
 				nil, applyResult.rules, be.blockStateCache); err != nil {
 				return nil, err
+			}
+			if depShapeEnabled {
+				be.stateWritesNanos += time.Since(stateWritesStart).Nanoseconds()
 			}
 
 			// Apply per-tx indexes (logs, traces, receipt cache) here in the
 			// exec loop, on the SAME goroutine that owns sd.mem mutations.
 			// Doing this in the apply loop instead used to race with the next
 			// tx / block-end ApplyStateWrites on SharedDomains.mem.
+			var txIndexStart time.Time
+			if depShapeEnabled {
+				txIndexStart = time.Now()
+			}
 			if err := pe.rs.ApplyTxIndexes(applyTx, applyResult.txNum, applyResult.receipt, applyResult.cumulativeBlobGasUsed,
 				applyResult.logs, applyResult.traceFroms, applyResult.traceTos); err != nil {
 				return nil, fmt.Errorf("ApplyTxIndexes block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
+			}
+			if depShapeEnabled {
+				be.txIndexNanos += time.Since(txIndexStart).Nanoseconds()
 			}
 
 			if err := be.sendResult(ctx, &applyResult, false); err != nil {

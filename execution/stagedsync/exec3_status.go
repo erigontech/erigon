@@ -11,6 +11,13 @@ type ExecutionStat struct {
 	TxIdx       int
 	Incarnation int
 	Duration    time.Duration
+	// StartNanos/EndNanos are absolute wall timestamps (UnixNano) of the
+	// committed incarnation's execute call. DEP_SHAPE uses them to compute
+	// achieved concurrency over the worker-active window (interval sweep),
+	// independent of the exec-loop serial-apply tail that inflates the block
+	// wall. Zero when profiling/DEP_SHAPE are off.
+	StartNanos int64
+	EndNanos   int64
 }
 
 // complete/inProgress use dense []bool (O(1)) rather than sorted []int: completions

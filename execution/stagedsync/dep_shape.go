@@ -133,28 +133,32 @@ func buildDeps(deps []depSample) depMetrics {
 // spent single-threaded in nextResult, and the per-component breakdown of the
 // in-order validation loop.
 type serialSplit struct {
-	serialNanos    int64
-	valLoopNanos   int64
-	scheduleNanos  int64
-	publishNanos   int64
-	calcFeesNanos  int64
-	validateNanos  int64
-	flushNanos     int64
-	finalizeNanos  int64
-	normalizeNanos int64
+	serialNanos      int64
+	valLoopNanos     int64
+	scheduleNanos    int64
+	publishNanos     int64
+	stateWritesNanos int64
+	txIndexNanos     int64
+	calcFeesNanos    int64
+	validateNanos    int64
+	flushNanos       int64
+	finalizeNanos    int64
+	normalizeNanos   int64
 }
 
 func (be *blockExecutor) serialTiming() serialSplit {
 	return serialSplit{
-		serialNanos:    be.serialNanos,
-		valLoopNanos:   be.valLoopNanos,
-		scheduleNanos:  be.scheduleNanos,
-		publishNanos:   be.publishNanos,
-		calcFeesNanos:  be.calcFeesNanos,
-		validateNanos:  be.validateNanos,
-		flushNanos:     be.flushNanos,
-		finalizeNanos:  be.finalizeNanos,
-		normalizeNanos: be.normalizeNanos,
+		serialNanos:      be.serialNanos,
+		valLoopNanos:     be.valLoopNanos,
+		scheduleNanos:    be.scheduleNanos,
+		publishNanos:     be.publishNanos,
+		stateWritesNanos: be.stateWritesNanos,
+		txIndexNanos:     be.txIndexNanos,
+		calcFeesNanos:    be.calcFeesNanos,
+		validateNanos:    be.validateNanos,
+		flushNanos:       be.flushNanos,
+		finalizeNanos:    be.finalizeNanos,
+		normalizeNanos:   be.normalizeNanos,
 	}
 }
 
@@ -190,6 +194,14 @@ func logDepShape(logger log.Logger, blockNum uint64, blockIO *state.VersionedIO,
 		achieved = float64(m.totalExecNanos) / float64(wallSpan.Nanoseconds())
 	}
 
+	// Wall-independent concurrency: measured over the worker-active window
+	// (first task start → last task end), which excludes the serial-apply
+	// drain tail that inflates wallSpan. windowConc = avg concurrency across
+	// that window; peakConc = max simultaneously-running committed tasks
+	// (interval sweep). If windowConc >> achieved, the block wall — not the
+	// worker parallelism — is what suppresses the achieved figure.
+	windowConc, peakConc, windowNanos := workerWindowConcurrency(stats, m.totalExecNanos)
+
 	// serialPct = fraction of the exec wall the single-threaded exec-loop
 	// spine (nextResult) was busy; the Amdahl serial floor. High => the spine
 	// is the bottleneck and parallelising it is the lever.
@@ -203,6 +215,9 @@ func logDepShape(logger log.Logger, blockNum uint64, blockIO *state.VersionedIO,
 		"txs", len(deps),
 		"ideal", fmt.Sprintf("%.2f", ideal),
 		"achieved", fmt.Sprintf("%.2f", achieved),
+		"windowConc", fmt.Sprintf("%.2f", windowConc),
+		"peakConc", peakConc,
+		"workerWinMs", fmt.Sprintf("%.1f", float64(windowNanos)/1e6),
 		"critPathTxs", m.criticalPathTxs,
 		"depEdges", m.depEdges,
 		"dependent", m.dependentTxs,
@@ -213,6 +228,8 @@ func logDepShape(logger log.Logger, blockNum uint64, blockIO *state.VersionedIO,
 		"valLoopMs", fmt.Sprintf("%.1f", float64(serial.valLoopNanos)/1e6),
 		"scheduleMs", fmt.Sprintf("%.1f", float64(serial.scheduleNanos)/1e6),
 		"publishMs", fmt.Sprintf("%.1f", float64(serial.publishNanos)/1e6),
+		"stateWrMs", fmt.Sprintf("%.1f", float64(serial.stateWritesNanos)/1e6),
+		"txIndexMs", fmt.Sprintf("%.1f", float64(serial.txIndexNanos)/1e6),
 		"calcFeesMs", fmt.Sprintf("%.1f", float64(serial.calcFeesNanos)/1e6),
 		"validateMs", fmt.Sprintf("%.1f", float64(serial.validateNanos)/1e6),
 		"flushMs", fmt.Sprintf("%.1f", float64(serial.flushNanos)/1e6),
@@ -220,6 +237,57 @@ func logDepShape(logger log.Logger, blockNum uint64, blockIO *state.VersionedIO,
 		"normalizeMs", fmt.Sprintf("%.1f", float64(serial.normalizeNanos)/1e6),
 		"perDim", perDimString(m.perPath),
 	)
+}
+
+// workerWindowConcurrency measures achieved concurrency over the worker-active
+// window rather than the exec-loop block wall. It returns the average
+// concurrency (totalExec / window), the peak simultaneous committed tasks (via
+// an interval sweep over [StartNanos, EndNanos]), and the window span in nanos.
+// Tasks whose interval was not captured (StartNanos==0) are skipped.
+func workerWindowConcurrency(stats map[int]ExecutionStat, totalExecNanos int64) (avg float64, peak int, windowNanos int64) {
+	type endpoint struct {
+		t     int64
+		delta int
+	}
+	eps := make([]endpoint, 0, 2*len(stats))
+	var minStart, maxEnd int64
+	first := true
+	for _, s := range stats {
+		if s.StartNanos == 0 || s.EndNanos <= s.StartNanos {
+			continue
+		}
+		eps = append(eps, endpoint{s.StartNanos, 1}, endpoint{s.EndNanos, -1})
+		if first || s.StartNanos < minStart {
+			minStart = s.StartNanos
+		}
+		if first || s.EndNanos > maxEnd {
+			maxEnd = s.EndNanos
+		}
+		first = false
+	}
+	if len(eps) == 0 {
+		return 0, 0, 0
+	}
+	windowNanos = maxEnd - minStart
+	if windowNanos > 0 {
+		avg = float64(totalExecNanos) / float64(windowNanos)
+	}
+	sort.Slice(eps, func(i, j int) bool {
+		if eps[i].t != eps[j].t {
+			return eps[i].t < eps[j].t
+		}
+		// process ends before starts at the same instant so touching
+		// intervals don't inflate the peak.
+		return eps[i].delta < eps[j].delta
+	})
+	cur := 0
+	for _, e := range eps {
+		cur += e.delta
+		if cur > peak {
+			peak = cur
+		}
+	}
+	return avg, peak, windowNanos
 }
 
 func perDimString(perPath map[state.AccountPath]int64) string {
