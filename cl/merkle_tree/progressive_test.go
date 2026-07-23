@@ -62,6 +62,37 @@ func TestMerkleizeProgressiveReferenceVectors(t *testing.T) {
 	}
 }
 
+func TestProgressiveListRootReferenceVectors(t *testing.T) {
+	tests := []struct {
+		name          string
+		chunkCount    int
+		logicalLength uint64
+		expected      string
+	}{
+		{name: "empty", chunkCount: 0, logicalLength: 0, expected: "0xf5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b"},
+		{name: "single composite element", chunkCount: 1, logicalLength: 1, expected: "0xa21da97c8a597221c87c9ea5ecdfbd860fcd52fd6fb5b001723f6437856c8df1"},
+		{name: "start four-leaf subtree", chunkCount: 2, logicalLength: 2, expected: "0x9a4badc45a45e9dd4b131c2c1aaff8a054527d8db40d2a7cd07e8f0f02a8232b"},
+		{name: "end four-leaf subtree", chunkCount: 5, logicalLength: 5, expected: "0x183886e81b2e887d5960b2fa49b3464eabee62ec55ff5e6ee6f7e0495d8a01d1"},
+		{name: "start sixteen-leaf subtree", chunkCount: 6, logicalLength: 6, expected: "0x690beb7f075e2dc91699aa3ee9354687772923889ce755458cb405ae95e34055"},
+		{name: "end sixteen-leaf subtree", chunkCount: 21, logicalLength: 21, expected: "0x93589633f10a1e8fe51bef0481731c7c19d7a87269127b6c6a19720668ee47da"},
+		{name: "start sixty-four-leaf subtree", chunkCount: 22, logicalLength: 22, expected: "0xe79bdcda4e58dd09c4b855964e1f1c01c99e215b6e01602f5302763effaf8637"},
+		{name: "sixteen packed uint16 values", chunkCount: 1, logicalLength: 16, expected: "0xe803cfbc4d0caecd70bff297ea98e07b6c3e4d0057e7321e020a4023fe52a9d7"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			chunks := progressiveTestChunks(test.chunkCount)
+			original := make([][32]byte, len(chunks))
+			copy(original, chunks)
+
+			root, err := merkle_tree.ProgressiveListRoot(chunks, test.logicalLength)
+			require.NoError(t, err)
+			require.Equal(t, [32]byte(common.HexToHash(test.expected)), root)
+			require.Equal(t, original, chunks, "input chunks must not be modified")
+		})
+	}
+}
+
 func progressiveTestChunks(count int) [][32]byte {
 	chunks := make([][32]byte, count)
 	for i := range chunks {
