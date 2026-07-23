@@ -9,6 +9,10 @@ concurrency:
   group: hive-eest-tests-${{ github.run_id }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   test-hive-eest:
     runs-on: ${{ matrix.runner == 'ubuntu-latest' && 'ubuntu-latest' || fromJSON('{"group":"hive"}') }}
