@@ -374,7 +374,7 @@ func isReceiptsSegmentPruned(ctx context.Context, tx kv.RwTx, txNumsReader rawdb
 		return false
 	}
 	minStep := minTxNum / stepSize
-	return s.From < minStep
+	return s.To <= minStep // files storing data [from, to)
 }
 
 // unblackListFilesBySubstring - removes files from the blacklist that match any of the provided substrings.
