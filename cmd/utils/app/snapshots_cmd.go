@@ -1367,7 +1367,7 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 	if err != nil {
 		return err
 	}
-	toStep := toTxNum / agg.StepSize()
+	toStep := toTxNum / tx.Debug().StepSize()
 	var toDelete []string
 	for _, dirPath := range []string{dirs.Snap, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors} {
 		filePaths, err := dir2.ListFiles(dirPath)
@@ -1611,7 +1611,6 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 	defer clean()
 
 	defer blockRetire.MadvNormal().DisableReadAhead()
-	defer agg.MadvNormal().DisableReadAhead()
 
 	blockReader, _ := blockRetire.IO()
 	heimdallStore, _ := blockRetire.BorStore()
@@ -1619,6 +1618,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	defer db.Debug().EnableReadAhead().DisableReadAhead()
 	defer db.Close()
 
 	var commitmentHistoryEnabled bool
@@ -1815,11 +1815,11 @@ func doCheckCommitmentHistAtBlk(ctx context.Context, cliCtx *cli.Command, logger
 	}
 	defer clean()
 	defer blockRetire.MadvNormal().DisableReadAhead()
-	defer agg.MadvNormal().DisableReadAhead()
 	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
+	defer db.Debug().EnableReadAhead().DisableReadAhead()
 	defer db.Close()
 	blockReader, _ := blockRetire.IO()
 	blockNum := cliCtx.Uint64("block")
@@ -1885,11 +1885,11 @@ func doCheckRCacheRootAtBlk(ctx context.Context, cliCtx *cli.Command, logger log
 	defer clean()
 	blockRetire, agg := res.BlockRetire, res.Aggregator
 	defer blockRetire.MadvNormal().DisableReadAhead()
-	defer agg.MadvNormal().DisableReadAhead()
 	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
+	defer db.Debug().EnableReadAhead().DisableReadAhead()
 	defer db.Close()
 	blockReader, _ := blockRetire.IO()
 	blockNum := cliCtx.Uint64("block")
@@ -1913,11 +1913,11 @@ func doCheckRCacheRootAtBlkRange(ctx context.Context, cliCtx *cli.Command, logge
 	defer clean()
 	blockRetire, agg := res.BlockRetire, res.Aggregator
 	defer blockRetire.MadvNormal().DisableReadAhead()
-	defer agg.MadvNormal().DisableReadAhead()
 	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
+	defer db.Debug().EnableReadAhead().DisableReadAhead()
 	defer db.Close()
 	blockReader, _ := blockRetire.IO()
 
@@ -1967,11 +1967,11 @@ func doVerifyState(ctx context.Context, cliCtx *cli.Command, logger log.Logger) 
 
 	agg := openAgg(ctx, dirs, chainDB, logger)
 	defer agg.Close()
-	defer agg.MadvNormal().DisableReadAhead()
 	db, err := temporal.New(chainDB, agg, nil)
 	if err != nil {
 		return err
 	}
+	defer db.Debug().EnableReadAhead().DisableReadAhead()
 	defer db.Close()
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("from-step")
@@ -2013,7 +2013,6 @@ func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger
 	}
 
 	verifier := verify.NewHistoryVerifier(blockReader, chainConfig, engine, workers, logger)
-	stepSize := agg.StepSize()
 
 	// Iterate domain files to find history ranges to verify.
 	// We use AccountsDomain files as the canonical list of step ranges,
@@ -2023,6 +2022,7 @@ func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger
 		return err
 	}
 	defer tx.Rollback()
+	stepSize := tx.Debug().StepSize()
 	aggTx := state.AggTx(tx)
 	files := aggTx.Files(kv.AccountsDomain)
 
@@ -2710,7 +2710,7 @@ func doBlkTxNum(ctx context.Context, cliCtx *cli.Command) error {
 		if err != nil {
 			return err
 		}
-		stepSize := agg.StepSize()
+		stepSize := tx.Debug().StepSize()
 		minStep := min / stepSize
 		maxStep := max / stepSize
 		logger.Info("out", "block", blkNumber, "min_txnum", min, "max_txnum", max, "min_step", minStep, "max_step", maxStep)
@@ -3505,14 +3505,15 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	logger.Info("Pruning has ended", "deleted blocks", allDeletedBlocks)
 
-	db, err = temporal.New(db, agg, res.BlockSnaps)
+	temporalDb, err := temporal.New(db, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
+	db = temporalDb
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err = agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
+	if err = temporalDb.BuildMissedAccessors(ctx, indexWorkers); err != nil {
 		return err
 	}
 
