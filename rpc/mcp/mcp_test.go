@@ -3,17 +3,12 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"maps"
 	"net"
-	"slices"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/require"
-
-	"github.com/erigontech/erigon/rpc"
 )
 
 func TestToJSONText(t *testing.T) {
@@ -54,97 +49,10 @@ func TestToJSONText(t *testing.T) {
 	}
 }
 
-func TestParseBlockNumber(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		wantErr bool
-	}{
-		{
-			name:    "latest",
-			input:   "latest",
-			wantErr: false,
-		},
-		{
-			name:    "earliest",
-			input:   "earliest",
-			wantErr: false,
-		},
-		{
-			name:    "pending",
-			input:   "pending",
-			wantErr: false,
-		},
-		{
-			name:    "hex number",
-			input:   "0x10",
-			wantErr: false,
-		},
-		{
-			name:    "decimal number",
-			input:   "100",
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := parseBlockNumber(tt.input)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("parseBlockNumber(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr && result == rpc.BlockNumber(0) && tt.input != "0" && tt.input != "0x0" {
-				// For non-zero inputs, result should not be zero (unless it's earliest)
-				if tt.input != "earliest" {
-					t.Logf("parseBlockNumber(%q) = %v", tt.input, result)
-				}
-			}
-		})
-	}
-}
-
-func TestParseBlockNumberOrHash(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		wantErr bool
-	}{
-		{name: "block hash", input: "0x1234567890123456789012345678901234567890123456789012345678901234"},
-		{name: "block number", input: "latest"},
-		{name: "hex number", input: "0x10"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := parseBlockNumberOrHash(tt.input)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("parseBlockNumberOrHash(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr {
-				_ = result
-				t.Logf("parseBlockNumberOrHash(%q) succeeded", tt.input)
-			}
-		})
-	}
-
-	// Special characters must not produce a JSON syntax error — only a semantic block-format error.
-	for _, input := range []string{`foo"bar`, `foo\bar`, "foo\nbar"} {
-		_, err := parseBlockNumberOrHash(input)
-		if err == nil {
-			t.Errorf("parseBlockNumberOrHash(%q) succeeded, want error", input)
-			continue
-		}
-		var syntaxErr *json.SyntaxError
-		if errors.As(err, &syntaxErr) {
-			t.Errorf("parseBlockNumberOrHash(%q) returned JSON syntax error, want semantic error: %v", input, err)
-		}
-	}
-}
-
-func mapKeys[V any](m map[string]V) []string {
-	return slices.Collect(maps.Keys(m))
+func TestToJSONIndentNull(t *testing.T) {
+	require.Equal(t, "null", toJSONIndent(nil))
+	require.Equal(t, "null", toJSONIndent(json.RawMessage("null")))
+	require.Equal(t, "{}", toJSONIndent(json.RawMessage("{}")))
 }
 
 func resourceTemplateURIs(t *testing.T, srv *server.MCPServer) []string {
@@ -161,27 +69,31 @@ func resourceTemplateURIs(t *testing.T, srv *server.MCPServer) []string {
 	return uris
 }
 
-// TestEmbeddedAndStandaloneCatalogsMatch guards against the two servers
-// drifting apart: they must expose the same tools (embedded additionally has
-// eth_getStorageValues), prompts, resources, and resource templates.
-func TestEmbeddedAndStandaloneCatalogsMatch(t *testing.T) {
-	embedded := NewErigonMCPServer(nil, nil, nil, "")
-	standalone := NewStandaloneMCPServer(nil, "")
+// TestServerCatalog pins the composition of the server: JSON-RPC tools from
+// the call table, local log/metrics tools, prompts, resources and templates.
+func TestServerCatalog(t *testing.T) {
+	e := NewErigonMCPServer(nil, "", false)
 
-	embeddedTools := embedded.mcpServer.ListTools()
-	require.Contains(t, embeddedTools, "eth_getStorageValues")
-	delete(embeddedTools, "eth_getStorageValues")
-	require.ElementsMatch(t, mapKeys(embeddedTools), mapKeys(standalone.mcpServer.ListTools()))
+	tools := e.mcpServer.ListTools()
+	require.Len(t, tools, len(rpcToolCalls())+6, "expected call-table tools plus 4 logs_* and 2 metrics_* tools")
+	for _, name := range []string{"eth_blockNumber", "erigon_nodeInfo", "ots_traceTransaction", "logs_tail", "logs_grep", "metrics_list", "metrics_get"} {
+		require.Contains(t, tools, name)
+	}
 
-	require.ElementsMatch(t, mapKeys(embedded.mcpServer.ListPrompts()), mapKeys(standalone.mcpServer.ListPrompts()))
-	require.NotEmpty(t, embedded.mcpServer.ListPrompts())
+	require.NotEmpty(t, e.mcpServer.ListPrompts())
+	require.NotEmpty(t, e.mcpServer.ListResources())
+	require.NotEmpty(t, resourceTemplateURIs(t, e.mcpServer))
+}
 
-	require.ElementsMatch(t, mapKeys(embedded.mcpServer.ListResources()), mapKeys(standalone.mcpServer.ListResources()))
-	require.NotEmpty(t, embedded.mcpServer.ListResources())
-
-	embeddedTemplates := resourceTemplateURIs(t, embedded.mcpServer)
-	require.ElementsMatch(t, embeddedTemplates, resourceTemplateURIs(t, standalone.mcpServer))
-	require.NotEmpty(t, embeddedTemplates)
+// Every tool is a read-only query; declaring it lets MCP clients skip
+// per-call approval prompts for them.
+func TestAllToolsDeclareReadOnlyHint(t *testing.T) {
+	e := NewErigonMCPServer(nil, "", false)
+	for name, st := range e.mcpServer.ListTools() {
+		hint := st.Tool.Annotations.ReadOnlyHint
+		require.NotNil(t, hint, "tool %s missing readOnlyHint annotation", name)
+		require.True(t, *hint, "tool %s must declare readOnlyHint=true", name)
+	}
 }
 
 func freeAddr(t *testing.T) string {
@@ -191,15 +103,6 @@ func freeAddr(t *testing.T) string {
 	addr := l.Addr().String()
 	require.NoError(t, l.Close())
 	return addr
-}
-
-func TestMCPServerCreation(t *testing.T) {
-	// This tests that we can create the server struct without panicking
-	// We can't fully test without mock APIs
-	t.Run("server creation", func(t *testing.T) {
-		// Just verify the type exists and can be referenced
-		var _ *ErigonMCPServer
-	})
 }
 
 func TestJSONMarshaling(t *testing.T) {

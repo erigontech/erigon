@@ -761,46 +761,27 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.rpcDaemonStateCache = rpcDaemonStateCache
 	backend.rpcFilters = rpcFilters
 
-	baseApi := jsonrpc.NewBaseApi(
-		backend.rpcFilters,
-		backend.rpcDaemonStateCache,
-		blockReader,
-		backend.engine,
-		backend.polygonBridge,
-		jsonrpc.NewBaseApiConfig(&httpRpcCfg),
-	)
-	ethApiConfig := jsonrpc.NewEthApiConfig(&httpRpcCfg)
-	ethApi := jsonrpc.NewEthAPI(
-		baseApi,
-		backend.chainDB,
-		backend.ethRpcClient,
-		backend.txPoolRpcClient,
-		backend.miningRpcClient,
-		ethApiConfig,
-		logger,
-	)
-
-	erigonApi := jsonrpc.NewErigonAPI(baseApi, backend.chainDB, backend.ethRpcClient)
-
-	otsApi := jsonrpc.NewOtterscanAPI(baseApi, backend.chainDB, stack.Config().Http.OtsMaxPageSize)
-
-	mcpServer := mcp.NewErigonMCPServer(ethApi, erigonApi, otsApi, config.Dirs.Log)
-
-	if config.MCPAddress != "" {
-		go func() {
-			logger.Info("serve MCP on", "addr", config.MCPAddress, "endpoints", "/mcp (streamable HTTP), /sse + /message (SSE)")
-			mcpErr := mcpServer.ListenAndServe(ctx, config.MCPAddress)
-			if mcpErr != nil {
-				logger.Error("mcpServer.ListenAndServe", "err", mcpErr)
-				return
-			}
-		}()
-	}
-
 	if config.Shutter.Enabled {
 		if config.TxPool.Disable {
 			panic("can't enable shutter pool when devp2p txpool is disabled")
 		}
+		baseApi := jsonrpc.NewBaseApi(
+			backend.rpcFilters,
+			backend.rpcDaemonStateCache,
+			blockReader,
+			backend.engine,
+			backend.polygonBridge,
+			jsonrpc.NewBaseApiConfig(&httpRpcCfg),
+		)
+		ethApi := jsonrpc.NewEthAPI(
+			baseApi,
+			backend.chainDB,
+			backend.ethRpcClient,
+			backend.txPoolRpcClient,
+			backend.miningRpcClient,
+			jsonrpc.NewEthApiConfig(&httpRpcCfg),
+			logger,
+		)
 		contractBackend := contracts.NewDirectBackend(ethApi)
 		baseTxnProvider := backend.txPool
 		currentBlockNumReader := func(ctx context.Context) (*uint64, error) {
@@ -1169,7 +1150,45 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		entry := engineapi.NewTestingRPCEntry(s.engineBackendRPC, s.logger, s.chainDB)
 		testingEntry = &entry
 	}
-	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService, testingEntry)
+	mcpNamespaces := []string{"eth", "erigon", "ots", "txpool", "net", "admin", "debug", "trace"}
+	apiCfg := httpRpcCfg
+	if config.MCPAddress != "" {
+		apiCfg.API = slices.Clone(httpRpcCfg.API)
+		for _, ns := range mcpNamespaces {
+			if !slices.Contains(apiCfg.API, ns) {
+				apiCfg.API = append(apiCfg.API, ns)
+			}
+		}
+	}
+	// One APIList call even when MCP widens the namespace set, so the HTTP
+	// RPC server and MCP share the BaseApi block/receipt caches instead of
+	// each holding their own.
+	allAPIs := jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &apiCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService, testingEntry)
+	s.apiList = apisForNamespaces(allAPIs, append(slices.Clone(httpRpcCfg.API), "graphql"))
+
+	if config.MCPAddress != "" {
+		mcpSrv := rpc.NewServer(httpRpcCfg.RpcBatchConcurrency, httpRpcCfg.TraceRequests, httpRpcCfg.DebugSingleRequest, httpRpcCfg.RpcStreamingDisable, s.logger, httpRpcCfg.RPCSlowLogThreshold)
+		for _, api := range apisForNamespaces(allAPIs, mcpNamespaces) {
+			if err := mcpSrv.RegisterName(api.Namespace, api.Service); err != nil {
+				return err
+			}
+		}
+		// NonBlockingAcquire on the in-process connection so BeginRo fails
+		// fast (ErrServerOverloaded) instead of blocking MCP handlers when
+		// all DB read slots are held; node/rpcstack.go does the same for HTTP.
+		mcpClient := rpc.DialInProcWithContext(kv.WithNonBlockingAcquire(ctx), mcpSrv, s.logger)
+		s.mcpRPC = mcp.NewErigonMCPServer(mcpClient, config.Dirs.Log, true)
+		s.bgComponentsEg.Go(func() error {
+			s.logger.Info("serve MCP on", "addr", config.MCPAddress, "endpoints", "/mcp (streamable HTTP), /sse + /message (SSE)")
+			mcpErr := s.mcpRPC.ListenAndServe(ctx, config.MCPAddress)
+			mcpClient.Close()
+			mcpSrv.Stop()
+			if mcpErr != nil && !errors.Is(mcpErr, context.Canceled) {
+				s.logger.Error("mcpServer.ListenAndServe", "err", mcpErr)
+			}
+			return mcpErr
+		})
+	}
 
 	s.bgComponentsEg.Go(func() error {
 		err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger)
@@ -1677,4 +1696,14 @@ func setBorDefaultTxPoolPriceLimit(config *txpoolcfg.Config, chainConfig *chain.
 		config.MinFeeCap = txpoolcfg.BorDefaultTxPoolPriceLimit
 	}
 	_ = config.MinFeeCap
+}
+
+func apisForNamespaces(apis []rpc.API, namespaces []string) []rpc.API {
+	out := make([]rpc.API, 0, len(apis))
+	for _, api := range apis {
+		if slices.Contains(namespaces, api.Namespace) {
+			out = append(out, api)
+		}
+	}
+	return out
 }

@@ -15,7 +15,7 @@ import (
 // HTTP at /mcp and the legacy SSE pair at /sse + /message.
 func TestListenAndServeServesBothTransports(t *testing.T) {
 	addr := freeAddr(t)
-	srv := NewStandaloneMCPServer(nil, "")
+	srv := NewErigonMCPServer(nil, "", false)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -68,7 +68,7 @@ func TestListenAndServeServesBothTransports(t *testing.T) {
 // tied to the server context, so cancelling it ends the streams promptly.
 func TestListenAndServeShutsDownWithOpenStream(t *testing.T) {
 	addr := freeAddr(t)
-	srv := NewStandaloneMCPServer(nil, "")
+	srv := NewErigonMCPServer(nil, "", false)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
