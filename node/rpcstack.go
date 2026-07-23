@@ -25,6 +25,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -203,18 +204,41 @@ var libdeflateWarnOnce sync.Once
 var libdeflateCompressWarnOnce sync.Once
 var libdeflateDisabled atomic.Bool
 
-var gzCompressorPool = sync.Pool{
-	New: func() any {
-		c, err := libdeflate.NewCompressor(libdeflate.DefaultCompression)
-		if err != nil {
-			libdeflateDisabled.Store(true)
-			libdeflateWarnOnce.Do(func() {
-				log.Warn("libdeflate unavailable, falling back to stdlib gzip", "err", err)
-			})
-			return nil
-		}
+// gzCompressors pools libdeflate compressors. sync.Pool is unsafe for these: a
+// libdeflate.Compressor owns a C context freed only by Close(), and sync.Pool
+// drops entries on GC with no hook to Close them, so every evicted compressor
+// leaks its C memory. A buffered channel with Close-on-overflow instead frees the
+// C context deterministically and bounds the pooled working set.
+var gzCompressors = make(chan *libdeflate.Compressor, max(64, runtime.GOMAXPROCS(0)*8))
+
+func getCompressor() *libdeflate.Compressor {
+	if libdeflateDisabled.Load() {
+		return nil
+	}
+	select {
+	case c := <-gzCompressors:
 		return c
-	},
+	default:
+	}
+	c, err := libdeflate.NewCompressor(libdeflate.DefaultCompression)
+	if err != nil {
+		libdeflateDisabled.Store(true)
+		libdeflateWarnOnce.Do(func() {
+			log.Warn("libdeflate unavailable, falling back to stdlib gzip", "err", err)
+		})
+		return nil
+	}
+	return c
+}
+
+// putCompressor returns c for reuse, or frees its C context via Close when the
+// pool is full — never dropping it uncollected the way sync.Pool eviction would.
+func putCompressor(c *libdeflate.Compressor) {
+	select {
+	case gzCompressors <- c:
+	default:
+		c.Close()
+	}
 }
 
 var gzDstPool = sync.Pool{
@@ -287,15 +311,11 @@ func writeStdlibGzip(w http.ResponseWriter, src []byte, status int) {
 // Returns false if libdeflate is unavailable or compression fails; the caller
 // should then fall back to writeStdlibGzip.
 func compressLibdeflate(w http.ResponseWriter, src []byte, status int) bool {
-	if libdeflateDisabled.Load() {
+	c := getCompressor()
+	if c == nil {
 		return false
 	}
-	raw := gzCompressorPool.Get()
-	if raw == nil {
-		return false
-	}
-	c := raw.(*libdeflate.Compressor)
-	defer gzCompressorPool.Put(c)
+	defer putCompressor(c)
 
 	dst := gzDstPool.Get().([]byte)
 	gzBound := c.GzipCompressBound(len(src))
