@@ -47,6 +47,8 @@ type Config struct {
 	StatelessExec bool // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
 	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
 
+	NoInlineDispatch bool // Disable the inline fast-path loop (equivalence-oracle / debug seam; production leaves it enabled)
+
 	ExtraEips []int // Additional EIPS that are to be enabled
 }
 
@@ -484,9 +486,27 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 	// Hoist to locals so the compiler sees them as loop-invariant.
 	anyTrace := dbg.TraceDynamicGas || debug || trace
+	// The inline fast loop runs the hottest ops with constant-folded prologues;
+	// tracing must stay on the generic per-op path that drives the hooks.
+	inlineDispatch := !anyTrace && !evm.config.NoInlineDispatch
+	if inlineDispatch {
+		inlineConstsOnce.Do(func() { assertInlineConsts(evm.jt) })
+	}
 
 	for {
 		callContext.cacheGen++
+		if inlineDispatch {
+			var halt bool
+			pc, halt, err = evm.runGoInline(callContext, &contract, pc)
+			if err != nil {
+				break
+			}
+			if halt {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, nil
+			}
+			// pc is now at an opcode the inline loop does not handle; fall
+			// through to the generic path for that one op, then re-enter.
+		}
 		if anyTrace {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas
