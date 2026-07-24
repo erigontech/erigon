@@ -19,10 +19,10 @@ rules:
   # These workflows call the reusable test leaves. A called workflow's declared
   # token permissions must be granted by the caller (else the run fails at
   # startup), so each caller declares at the workflow level the union its leaves
-  # need: actions: write (the cap the self-cancelling leaves' `gh run cancel`
-  # needs) and pull-requests: read (sonar's PR context). ci-gate additionally
-  # uses pull-requests: write for its own dequeuePullRequest mutation. These are
-  # needed workflow-wide and can't be scoped to a single job. Tracked in #21132.
+  # need: actions: write (cap for the self-cancelling leaves' `gh run cancel`).
+  # Callers that include sonar additionally grant pull-requests: read (PR context).
+  # ci-gate additionally uses pull-requests: write for its own dequeuePullRequest mutation.
+  # These are needed workflow-wide and can't be scoped to a single job. Tracked in #21132.
   excessive-permissions:
     ignore:
       - ci-gate.yml
