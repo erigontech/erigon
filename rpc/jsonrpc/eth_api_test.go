@@ -69,6 +69,14 @@ func newEthApiForTest(base *BaseAPI, db kv.TemporalRoDB, txPool txpoolproto.Txpo
 	return NewEthAPI(base, db, nil, txPool, mining, cfg, log.New())
 }
 
+func newTraceApiForTest(m *execmoduletester.ExecModuleTester) *TraceAPIImpl {
+	return NewTraceAPI(newBaseApiForTest(m), m.DB, &rpccfg.TraceApiConfig{})
+}
+
+func newDebugApiForTest(m *execmoduletester.ExecModuleTester) *DebugAPIImpl {
+	return NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+}
+
 func TestNewBaseApiEvmCallTimeout(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 

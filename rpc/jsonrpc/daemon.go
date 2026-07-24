@@ -57,6 +57,36 @@ func NewEthApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.EthApiConfig {
 	}
 }
 
+func NewDebugApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.DebugApiConfig {
+	return &rpccfg.DebugApiConfig{
+		GasCap:            cfg.Gascap,
+		GethCompatibility: cfg.GethCompatibility,
+	}
+}
+
+func NewTraceApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.TraceApiConfig {
+	return &rpccfg.TraceApiConfig{
+		MaxTraces:     cfg.MaxTraces,
+		GasCap:        cfg.Gascap,
+		Compatibility: cfg.TraceCompatibility,
+	}
+}
+
+func NewGraphQLApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.GraphQLApiConfig {
+	return &rpccfg.GraphQLApiConfig{
+		GasCap:          cfg.Gascap,
+		ReturnDataLimit: cfg.ReturnDataLimit,
+	}
+}
+
+func NewOverlayApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.OverlayApiConfig {
+	return &rpccfg.OverlayApiConfig{
+		GasCap:                    cfg.Gascap,
+		OverlayGetLogsTimeout:     cfg.OverlayGetLogsTimeout,
+		OverlayReplayBlockTimeout: cfg.OverlayReplayBlockTimeout,
+	}
+}
+
 // APIList describes the list of available RPC apis
 func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
@@ -69,9 +99,9 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 	erigonImpl := NewErigonAPI(base, db, eth)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
 	netImpl := NewNetAPIImpl(eth)
-	debugImpl := NewPrivateDebugAPI(base, db, eth, cfg.Gascap, cfg.GethCompatibility)
+	debugImpl := NewPrivateDebugAPI(base, db, eth, NewDebugApiConfig(cfg))
 	debugImpl.witnessCache = witnessCache
-	traceImpl := NewTraceAPI(base, db, cfg)
+	traceImpl := NewTraceAPI(base, db, NewTraceApiConfig(cfg))
 	web3Impl := NewWeb3APIImpl(eth)
 	adminImpl := NewAdminAPI(eth)
 	parityImpl := NewParityAPIImpl(base, db)
@@ -94,8 +124,8 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 
 	otsImpl := NewOtterscanAPI(base, db, cfg.OtsMaxPageSize)
 	internalImpl := NewInternalAPI(base, db)
-	gqlImpl := NewGraphQLAPI(base, db, ethImpl, txPool, cfg.Gascap, cfg.ReturnDataLimit)
-	overlayImpl := NewOverlayAPI(base, db, cfg.Gascap, cfg.OverlayGetLogsTimeout, cfg.OverlayReplayBlockTimeout, otsImpl)
+	gqlImpl := NewGraphQLAPI(base, db, ethImpl, txPool, NewGraphQLApiConfig(cfg))
+	overlayImpl := NewOverlayAPI(base, db, NewOverlayApiConfig(cfg), otsImpl)
 
 	if cfg.GraphQLEnabled {
 		list = append(list, rpc.API{

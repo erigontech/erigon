@@ -143,7 +143,7 @@ func NewWitnessCacheBuilderAPI(
 	}
 	cache := newWitnessResultCache(cfg.WitnessCacheBlocks)
 	base := NewBaseApi(filters, stateCache, blockReader, engine, bridgeReader, NewBaseApiConfig(cfg))
-	impl := NewPrivateDebugAPI(base, db, eth, cfg.Gascap, cfg.GethCompatibility)
+	impl := NewPrivateDebugAPI(base, db, eth, NewDebugApiConfig(cfg))
 	impl.witnessCache = cache
 	return cache, impl
 }
