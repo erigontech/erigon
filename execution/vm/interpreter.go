@@ -76,6 +76,24 @@ type CallContext struct {
 	cachedKey     accounts.StorageKey
 	cachedAddr    accounts.Address
 
+	// Frame-local SLOAD value cache: memoizes the storage slots this frame has
+	// read/written so repeated SLOADs of the same slot skip the state read. The
+	// frame's storage address is fixed (scope.Contract.Address()), so the key is
+	// the slot alone. Kept coherent by opSstore (write-through) and cleared after
+	// a sub-call returns (a callee may have written this frame's storage via
+	// DELEGATECALL/CALLCODE or reentrancy).
+	slotCache map[accounts.StorageKey]uint256.Int
+
+	// Frame-local account-field caches (BALANCE / EXTCODESIZE / EXTCODEHASH),
+	// keyed by the queried address. Only the state read is memoized; the BAL
+	// MarkAddressAccess side-effect still runs on every access. Another account's
+	// balance/code can only change via a sub-call (value transfer, CREATE,
+	// reentrancy) or a terminal op (SELFDESTRUCT), so these are cleared on
+	// sub-call return alongside slotCache — no write-through path exists.
+	balanceCache  map[accounts.Address]uint256.Int
+	codeSizeCache map[accounts.Address]uint64
+	codeHashCache map[accounts.Address]uint256.Int
+
 	// Contract carries pointers, so it must precede the pointer-free Stack:
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
 	// Stack.data is 32 KB it can skip entirely.
@@ -129,6 +147,17 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 	return ctx
 }
 
+// invalidateFrameCaches drops this frame's memoized state reads after a
+// sub-call returns: the callee may have written this frame's storage
+// (delegatecall/callcode) or changed any account's balance/code via a value
+// transfer, CREATE, or reentrancy.
+func (c *CallContext) invalidateFrameCaches() {
+	clear(c.slotCache)
+	clear(c.balanceCache)
+	clear(c.codeSizeCache)
+	clear(c.codeHashCache)
+}
+
 func (c *CallContext) put() {
 	c.Memory.reset()
 	c.Stack.Reset()
@@ -142,6 +171,10 @@ func (c *CallContext) put() {
 	// idle in the pool; unique.Handle values keep interned entries alive.
 	c.cachedKey = accounts.NilKey
 	c.cachedAddr = accounts.NilAddress
+	clear(c.slotCache)
+	clear(c.balanceCache)
+	clear(c.codeSizeCache)
+	clear(c.codeHashCache)
 	c.input = nil
 	c.Contract = Contract{}
 	contextPool.Put(c)

@@ -378,10 +378,18 @@ func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	// BAL: BALANCE is a real state access per EIP-7928 — mark as non-revertable
 	// so the system address is included when explicitly queried by user txs.
 	evm.IntraBlockState().MarkAddressAccess(address, false)
+	if v, ok := scope.balanceCache[address]; ok {
+		slot.Set(&v)
+		return pc, nil, nil
+	}
 	balance, err := evm.IntraBlockState().GetBalance(address)
 	if err != nil {
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
+	if scope.balanceCache == nil {
+		scope.balanceCache = make(map[accounts.Address]uint256.Int)
+	}
+	scope.balanceCache[address] = balance
 	slot.Set(&balance)
 	return pc, nil, nil
 }
@@ -538,10 +546,18 @@ func opExtCodeSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	slot := scope.Stack.peek()
 	// BAL: EXTCODESIZE is a real state access per EIP-7928.
 	evm.IntraBlockState().MarkAddressAccess(addr, false)
+	if v, ok := scope.codeSizeCache[addr]; ok {
+		slot.SetUint64(v)
+		return pc, nil, nil
+	}
 	codeSize, err := evm.IntraBlockState().GetCodeSize(addr)
 	if err != nil {
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
+	if scope.codeSizeCache == nil {
+		scope.codeSizeCache = make(map[accounts.Address]uint64)
+	}
+	scope.codeSizeCache[addr] = uint64(codeSize)
 	slot.SetUint64(uint64(codeSize))
 	return pc, nil, nil
 }
@@ -637,6 +653,11 @@ func opExtCodeHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	// when Empty() returns true and GetCodeHash is never called.
 	evm.IntraBlockState().MarkAddressAccess(address, false)
 
+	if v, ok := scope.codeHashCache[address]; ok {
+		slot.Set(&v)
+		return pc, nil, nil
+	}
+
 	empty, err := evm.IntraBlockState().Empty(address)
 	if err != nil {
 		return pc, nil, err
@@ -652,6 +673,10 @@ func opExtCodeHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 		codeHashValue := codeHash.Value()
 		slot.SetBytes(codeHashValue[:])
 	}
+	if scope.codeHashCache == nil {
+		scope.codeHashCache = make(map[accounts.Address]uint256.Int)
+	}
+	scope.codeHashCache[address] = *slot
 	return pc, nil, nil
 }
 
@@ -780,7 +805,18 @@ func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err error) {
 	loc := scope.Stack.peek()
-	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey())
+	key := scope.peekStorageKey()
+	if v, ok := scope.slotCache[key]; ok {
+		*loc = v
+		return pc, nil, nil
+	}
+	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), key)
+	if err == nil {
+		if scope.slotCache == nil {
+			scope.slotCache = make(map[accounts.StorageKey]uint256.Int)
+		}
+		scope.slotCache[key] = *loc
+	}
 	return pc, nil, err
 }
 
@@ -796,6 +832,10 @@ func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	key := scope.peekStorageKey()
 	scope.Stack.pop()
 	val := scope.Stack.pop()
+	if scope.slotCache == nil {
+		scope.slotCache = make(map[accounts.StorageKey]uint256.Int)
+	}
+	scope.slotCache[key] = val
 	return pc, nil, evm.IntraBlockState().SetState(scope.Contract.Address(), key, val)
 }
 
@@ -1021,6 +1061,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 
 	res, addr, returnGas, childGasUsage, wasBalanceOnly, suberr := evm.Create(scope.Contract.Address(), input, gas, value, salt, false)
 	scope.Contract.selfBalanceCached = false
+	scope.invalidateFrameCaches()
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -1130,6 +1171,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		}
 	}
 	scope.Contract.selfBalanceCached = false
+	scope.invalidateFrameCaches()
 	evm.returnData = ret
 	return pc, ret, nil
 }
@@ -1179,6 +1221,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		scope.stateGasSpill += childGasUsage.StateSpill
 	}
 	scope.Contract.selfBalanceCached = false
+	scope.invalidateFrameCaches()
 	evm.returnData = ret
 	return pc, ret, nil
 }
@@ -1224,6 +1267,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		scope.stateGasSpill += childGasUsage.StateSpill
 	}
 	scope.Contract.selfBalanceCached = false
+	scope.invalidateFrameCaches()
 	evm.returnData = ret
 	return pc, ret, nil
 }
