@@ -66,7 +66,9 @@ func (b Big) AppendText(dst []byte) ([]byte, error) {
 	case -1:
 		// EncodeBig (fmt %#x) places the sign before the prefix ("-0x…"), whereas
 		// big.Int.Append would place it after ("0x-…").
-		return new(big.Int).Abs(i).Append(append(dst, `-0x`...), 16), nil
+		var abs big.Int
+		abs.Abs(i)
+		return abs.Append(append(dst, `-0x`...), 16), nil
 	default:
 		return i.Append(append(dst, `0x`...), 16), nil
 	}
