@@ -95,7 +95,7 @@ type stTransaction struct {
 	GasPrice             *math.HexOrDecimal256 `json:"gasPrice"`
 	MaxFeePerGas         *math.HexOrDecimal256 `json:"maxFeePerGas"`
 	MaxPriorityFeePerGas *math.HexOrDecimal256 `json:"maxPriorityFeePerGas"`
-	Nonce                math.HexOrDecimal64   `json:"nonce"`
+	Nonce                math.HexOrDecimal256  `json:"nonce"`
 	GasLimit             []math.HexOrDecimal64 `json:"gasLimit"`
 	PrivateKey           hexutil.Bytes         `json:"secretKey"`
 	To                   string                `json:"to"`
@@ -590,7 +590,10 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 		feeCap = big.Int(*gasPrice)
 		tipCap = big.Int(*gasPrice)
 	}
-
+	nonce := (*big.Int)(&tx.Nonce)
+	if !nonce.IsUint64() {
+		return nil, fmt.Errorf("invalid txn nonce (overflowed) %q", nonce)
+	}
 	gpi := big.Int(*gasPrice)
 	gasPriceInt := uint256.NewInt(gpi.Uint64())
 
@@ -602,7 +605,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 	msg := types.NewMessage(
 		from,
 		to,
-		uint64(tx.Nonce),
+		nonce.Uint64(),
 		value,
 		uint64(gasLimit),
 		gasPriceInt,
