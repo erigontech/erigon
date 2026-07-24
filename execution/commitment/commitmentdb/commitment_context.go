@@ -1046,17 +1046,19 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 		u.CodeHash = acc.CodeHash.Value()
 	}
 
-	if dbg.AssertEnabled { // verify code hash from account encoding matches stored code
+	// Verify only code-bearing accounts whose code is actually in the domain,
+	// and never fold the read into u. A cleared EIP-7702 delegation leaves a
+	// benign CodeDomain residue on a code-less account, and eth_simulateV1
+	// overrides put code in an overlay the domain read doesn't see.
+	if dbg.AssertEnabled && !acc.IsEmptyCodeHash() {
 		code, _, err := sdc.readDomain(kv.CodeDomain, plainKey)
 		if err != nil {
 			return nil, err
 		}
 		if len(code) > 0 {
-			u.CodeHash = crypto.Keccak256Hash(code)
-			u.Flags |= commitment.CodeUpdate
-		}
-		if acc.CodeHash.Value() != u.CodeHash {
-			return nil, fmt.Errorf("code hash mismatch: account '%x' != codeHash '%x'", acc.CodeHash, u.CodeHash[:])
+			if codeHash := crypto.Keccak256Hash(code); acc.CodeHash.Value() != codeHash {
+				return nil, fmt.Errorf("code hash mismatch: account '%x' != codeHash '%x'", acc.CodeHash, codeHash[:])
+			}
 		}
 	}
 	return u, nil
