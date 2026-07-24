@@ -53,6 +53,11 @@ func (h UnprefixedHash) MarshalText() ([]byte, error) {
 	return []byte(hex.EncodeToString(h[:])), nil
 }
 
+// AppendText implements encoding.TextAppender (alloc-free MarshalText).
+func (h UnprefixedHash) AppendText(dst []byte) ([]byte, error) {
+	return hex.AppendEncode(dst, h[:]), nil
+}
+
 /////////// Address
 
 var addressT = reflect.TypeFor[Address]()
@@ -68,6 +73,11 @@ func (a *UnprefixedAddress) UnmarshalText(input []byte) error {
 // MarshalText encodes the address as hex.
 func (a UnprefixedAddress) MarshalText() ([]byte, error) {
 	return []byte(hex.EncodeToString(a[:])), nil
+}
+
+// AppendText implements encoding.TextAppender (alloc-free MarshalText).
+func (a UnprefixedAddress) AppendText(dst []byte) ([]byte, error) {
+	return hex.AppendEncode(dst, a[:]), nil
 }
 
 // MixedcaseAddress retains the original string, which may or may not be
