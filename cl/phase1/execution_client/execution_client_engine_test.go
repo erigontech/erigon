@@ -113,6 +113,37 @@ func TestBuildExecutionPayload_BlockAccessListGloasOnly(t *testing.T) {
 	}
 }
 
+func TestBuildExecutionPayload_TransactionsAreJSONArray(t *testing.T) {
+	beaconCfg := clparams.MainnetBeaconConfig
+	tests := []struct {
+		name    string
+		version clparams.StateVersion
+		json    string
+		want    []any
+	}{
+		{name: "pre-Gloas empty", version: clparams.ElectraVersion, json: "[]", want: []any{}},
+		{name: "pre-Gloas non-empty", version: clparams.ElectraVersion, json: `["0x0102"]`, want: []any{"0x0102"}},
+		{name: "Gloas empty", version: clparams.GloasVersion, json: "[]", want: []any{}},
+		{name: "Gloas non-empty", version: clparams.GloasVersion, json: `["0x0102"]`, want: []any{"0x0102"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := cltypes.NewEth1Block(tt.version, &beaconCfg)
+			payload.Extra = solid.NewExtraData()
+			payload.Transactions = &solid.TransactionsSSZ{}
+			payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(beaconCfg.MaxWithdrawalsPerPayload), 44)
+			require.NoError(t, payload.Transactions.UnmarshalJSON([]byte(tt.json)))
+
+			raw, err := json.Marshal(buildExecutionPayload(payload))
+			require.NoError(t, err)
+
+			var decoded map[string]any
+			require.NoError(t, json.Unmarshal(raw, &decoded))
+			require.Equal(t, tt.want, decoded["transactions"])
+		})
+	}
+}
+
 func gloas(cfg *clparams.BeaconChainConfig, balData []byte) *cltypes.Eth1Block {
 	block := cltypes.NewEth1Block(clparams.GloasVersion, cfg)
 	block.Extra = solid.NewExtraData()

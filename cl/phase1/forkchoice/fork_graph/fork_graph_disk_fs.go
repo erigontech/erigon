@@ -156,13 +156,11 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 		log.Error("failed to write ssz buffer", "err", err)
 		return err
 	}
-	// Write the authoritative state root so it can be restored on load.
-	// Use the stored block header's Root (set from block.StateRoot in AddChainSegment)
-	// rather than the state's PreviousStateRoot cache field, which can be stale if
-	// a concurrent block arrival modified f.currentState between GetStateAtBlockRoot
-	// and the copy in OnHeadStateWithBlockRoot.
+	// A skipped-slot state root differs from the latest block header's state root.
 	var stateRootToWrite common.Hash
-	if hdr, ok := f.GetHeader(blockRoot); ok {
+	if bs.Version() >= clparams.GloasVersion && bs.LatestBlockHeader().Slot < bs.Slot() {
+		stateRootToWrite = bs.PeekPreviousStateRoot()
+	} else if hdr, ok := f.GetHeader(blockRoot); ok {
 		stateRootToWrite = hdr.Root
 	} else {
 		// Fallback for anchor state or cases where header isn't stored yet
