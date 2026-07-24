@@ -12,6 +12,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   sync-with-externalcl:
     runs-on: [self-hosted, qa, linux, X64, long-running]

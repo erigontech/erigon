@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/mvcc"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
@@ -124,21 +125,22 @@ func (h *History) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 // openList - main method to open list of files.
 // It's ok if some files was open earlier.
 // If some file already open: noop.
-// If some file already open but not in provided list: close and remove from `files` field.
-func (h *History) openList(ctx context.Context, idxFiles, histNames, accessorFiles []string) error {
-	if err := h.InvertedIndex.openList(ctx, idxFiles, accessorFiles); err != nil {
-		return err
+// An already-open file not in the provided list is retired (detached) and returned for deferred reclaim.
+func (h *History) openList(ctx context.Context, idxFiles, histNames, accessorFiles []string) (retiredFiles, error) {
+	retired, err := h.InvertedIndex.openList(ctx, idxFiles, accessorFiles)
+	if err != nil {
+		return retired, err
 	}
 
-	h.closeWhatNotInList(histNames)
+	retired = append(retired, h.retireFilesNotInList(histNames)...)
 	h.scanDirtyFiles(histNames)
 	if err := h.openDirtyFiles(ctx, histNames, accessorFiles); err != nil {
-		return fmt.Errorf("History(%s).openList: %w", h.FilenameBase, err)
+		return retired, fmt.Errorf("History(%s).openList: %w", h.FilenameBase, err)
 	}
-	return nil
+	return retired, nil
 }
 
-func (h *History) openFolder(ctx context.Context, scanDirsRes *ScanDirsResult) error {
+func (h *History) openFolder(ctx context.Context, scanDirsRes *ScanDirsResult) (retiredFiles, error) {
 	return h.openList(ctx, scanDirsRes.iiFiles, scanDirsRes.historyFiles, scanDirsRes.accessorFiles)
 }
 
@@ -158,6 +160,10 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 
 func (h *History) closeWhatNotInList(fNames []string) {
 	closeWhatNotInList(h.dirtyFiles, fNames)
+}
+
+func (h *History) retireFilesNotInList(fNames []string) retiredFiles {
+	return retireFilesNotInList(mvcc.RetireReasonWasDeletedFromDisk, h.dirtyFiles, fNames, h.FilenameBase, h.logger)
 }
 
 func (h *History) Tables() []string { return append(h.InvertedIndex.Tables(), h.ValuesTable) }
@@ -358,7 +364,13 @@ func (h *History) Scan(ctx context.Context, toTxNum uint64) error {
 		return err
 	}
 
-	if err := h.openFolder(ctx, scanResult); err != nil {
+	retired, err := h.openFolder(ctx, scanResult)
+	// Standalone reload: no visible generation to attach to and no concurrent readers, so close
+	// the detached files in place — even on error, else already-retired files are leaked.
+	for _, item := range retired {
+		item.closeFiles()
+	}
+	if err != nil {
 		return err
 	}
 

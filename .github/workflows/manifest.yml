@@ -19,6 +19,9 @@ on:
       - ready_for_review
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   ManifestCheck:
     # != true rather than == false: outside a pull_request event,

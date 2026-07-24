@@ -2,37 +2,16 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"reflect"
+	"math/big"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
-
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/rpc"
 )
 
-// resourceHandlerSet holds one handler per resource shared by the embedded and
-// standalone servers.
-type resourceHandlerSet struct {
-	nodeInfo            server.ResourceHandlerFunc
-	chainConfig         server.ResourceHandlerFunc
-	recentBlocks        server.ResourceHandlerFunc
-	networkStatus       server.ResourceHandlerFunc
-	gasInfo             server.ResourceHandlerFunc
-	addressSummary      server.ResourceTemplateHandlerFunc
-	blockSummary        server.ResourceTemplateHandlerFunc
-	transactionAnalysis server.ResourceTemplateHandlerFunc
-}
-
-func registerResources(srv *server.MCPServer, h resourceHandlerSet) {
-	hv := reflect.ValueOf(h)
-	for i := range hv.NumField() {
-		if hv.Field(i).IsNil() {
-			panic(fmt.Sprintf("mcp: missing resource handler %s", hv.Type().Field(i).Name))
-		}
-	}
+func (e *ErigonMCPServer) registerResources() {
+	srv := e.mcpServer
 
 	// Static resources
 	srv.AddResource(
@@ -41,7 +20,7 @@ func registerResources(srv *server.MCPServer, h resourceHandlerSet) {
 			mcp.WithResourceDescription("Get node information and capabilities"),
 			mcp.WithMIMEType("application/json"),
 		),
-		h.nodeInfo,
+		e.handleResourceNodeInfo,
 	)
 
 	srv.AddResource(
@@ -50,7 +29,7 @@ func registerResources(srv *server.MCPServer, h resourceHandlerSet) {
 			mcp.WithResourceDescription("Get chain configuration"),
 			mcp.WithMIMEType("application/json"),
 		),
-		h.chainConfig,
+		e.handleResourceChainConfig,
 	)
 
 	srv.AddResource(
@@ -59,7 +38,7 @@ func registerResources(srv *server.MCPServer, h resourceHandlerSet) {
 			mcp.WithResourceDescription("Get recent blocks (default: last 10)"),
 			mcp.WithMIMEType("application/json"),
 		),
-		h.recentBlocks,
+		e.handleResourceRecentBlocks,
 	)
 
 	srv.AddResource(
@@ -68,7 +47,7 @@ func registerResources(srv *server.MCPServer, h resourceHandlerSet) {
 			mcp.WithResourceDescription("Get network sync status and peer info"),
 			mcp.WithMIMEType("application/json"),
 		),
-		h.networkStatus,
+		e.handleResourceNetworkStatus,
 	)
 
 	srv.AddResource(
@@ -77,7 +56,7 @@ func registerResources(srv *server.MCPServer, h resourceHandlerSet) {
 			mcp.WithResourceDescription("Get current gas price information"),
 			mcp.WithMIMEType("application/json"),
 		),
-		h.gasInfo,
+		e.handleResourceGasInfo,
 	)
 
 	// Resource templates (with parameters)
@@ -87,7 +66,7 @@ func registerResources(srv *server.MCPServer, h resourceHandlerSet) {
 			mcp.WithTemplateDescription("Get address summary (balance, nonce, code)"),
 			mcp.WithTemplateMIMEType("application/json"),
 		),
-		h.addressSummary,
+		e.handleResourceAddressSummary,
 	)
 
 	srv.AddResourceTemplate(
@@ -96,7 +75,7 @@ func registerResources(srv *server.MCPServer, h resourceHandlerSet) {
 			mcp.WithTemplateDescription("Get block summary"),
 			mcp.WithTemplateMIMEType("application/json"),
 		),
-		h.blockSummary,
+		e.handleResourceBlockSummary,
 	)
 
 	srv.AddResourceTemplate(
@@ -105,44 +84,29 @@ func registerResources(srv *server.MCPServer, h resourceHandlerSet) {
 			mcp.WithTemplateDescription("Get transaction analysis"),
 			mcp.WithTemplateMIMEType("application/json"),
 		),
-		h.transactionAnalysis,
+		e.handleResourceTransactionAnalysis,
 	)
 }
 
-func (e *ErigonMCPServer) resourceHandlers() resourceHandlerSet {
-	return resourceHandlerSet{
-		nodeInfo:            e.handleResourceNodeInfo,
-		chainConfig:         e.handleResourceChainConfig,
-		recentBlocks:        e.handleResourceRecentBlocks,
-		networkStatus:       e.handleResourceNetworkStatus,
-		gasInfo:             e.handleResourceGasInfo,
-		addressSummary:      e.handleResourceAddressSummary,
-		blockSummary:        e.handleResourceBlockSummary,
-		transactionAnalysis: e.handleResourceTransactionAnalysis,
-	}
-}
-
-// Resource handlers
 func (e *ErigonMCPServer) handleResourceNodeInfo(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-	info, err := e.erigonAPI.NodeInfo(ctx)
-	if err != nil {
-		return nil, err
+	var result json.RawMessage
+	if err := e.client.CallContext(ctx, &result, "erigon_nodeInfo"); err != nil {
+		return nil, fmt.Errorf("erigon_nodeInfo: %w", err)
 	}
 
 	return []mcp.ResourceContents{
 		mcp.TextResourceContents{
 			URI:      "erigon://node/info",
 			MIMEType: "application/json",
-			Text:     toJSONText(info),
+			Text:     toJSONIndent(result),
 		},
 	}, nil
 }
 
 func (e *ErigonMCPServer) handleResourceChainConfig(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-	// Get chain config
-	blockNum, err := e.ethAPI.BlockNumber(ctx)
-	if err != nil {
-		return nil, err
+	var blockNum string
+	if err := e.client.CallContext(ctx, &blockNum, "eth_blockNumber"); err != nil {
+		return nil, fmt.Errorf("eth_blockNumber: %w", err)
 	}
 
 	return []mcp.ResourceContents{
@@ -158,20 +122,31 @@ func (e *ErigonMCPServer) handleResourceChainConfig(ctx context.Context, req mcp
 }
 
 func (e *ErigonMCPServer) handleResourceRecentBlocks(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-	// Get last 10 blocks
-	currentBlock, err := e.ethAPI.BlockNumber(ctx)
-	if err != nil {
-		return nil, err
+	var blockNumHex string
+	if err := e.client.CallContext(ctx, &blockNumHex, "eth_blockNumber"); err != nil {
+		return nil, fmt.Errorf("eth_blockNumber: %w", err)
 	}
 
-	blocks := make([]any, 0, 10)
-	for i := range 10 {
-		blockNum := currentBlock - hexutil.Uint64(i)
-		block, err := e.ethAPI.GetBlockByNumber(ctx, rpc.BlockNumber(blockNum), false)
-		if err != nil || block == nil {
+	currentBlock, ok := new(big.Int).SetString(strings.TrimPrefix(blockNumHex, "0x"), 16)
+	if !ok {
+		return nil, fmt.Errorf("eth_blockNumber: unexpected result %q", blockNumHex)
+	}
+
+	const recentBlockCount = 10
+	blocks := make([]json.RawMessage, 0, recentBlockCount)
+	for i := range recentBlockCount {
+		blockNum := new(big.Int).Sub(currentBlock, big.NewInt(int64(i)))
+		if blockNum.Sign() < 0 {
+			break
+		}
+		hexNum := fmt.Sprintf("0x%x", blockNum)
+		var block json.RawMessage
+		if err := e.client.CallContext(ctx, &block, "eth_getBlockByNumber", hexNum, false); err != nil {
 			continue
 		}
-		blocks = append(blocks, block)
+		if !isNullResult(block) {
+			blocks = append(blocks, block)
+		}
 	}
 
 	return []mcp.ResourceContents{
@@ -184,22 +159,24 @@ func (e *ErigonMCPServer) handleResourceRecentBlocks(ctx context.Context, req mc
 }
 
 func (e *ErigonMCPServer) handleResourceNetworkStatus(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-	nodeInfo, err := e.erigonAPI.NodeInfo(ctx)
-	if err != nil {
-		return nil, err
-	}
+	var nodeInfo json.RawMessage
+	_ = e.client.CallContext(ctx, &nodeInfo, "erigon_nodeInfo")
 
-	currentBlock, _ := e.ethAPI.BlockNumber(ctx)
+	var blockNum string
+	_ = e.client.CallContext(ctx, &blockNum, "eth_blockNumber")
 
-	syncing, err := e.ethAPI.Syncing(ctx)
-	if err != nil || syncing == nil {
-		syncing = false
+	// eth_syncing returns false when fully synced, or a JSON object with progress.
+	var syncResult json.RawMessage
+	_ = e.client.CallContext(ctx, &syncResult, "eth_syncing")
+	var syncStatus any = false
+	if syncResult != nil && string(syncResult) != "false" {
+		syncStatus = syncResult
 	}
 
 	status := map[string]any{
 		"node_info":     nodeInfo,
-		"current_block": currentBlock,
-		"syncing":       syncing,
+		"current_block": blockNum,
+		"syncing":       syncStatus,
 	}
 
 	return []mcp.ResourceContents{
@@ -212,19 +189,24 @@ func (e *ErigonMCPServer) handleResourceNetworkStatus(ctx context.Context, req m
 }
 
 func (e *ErigonMCPServer) handleResourceGasInfo(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-	gasPrice, err := e.ethAPI.GasPrice(ctx)
-	if err != nil {
-		return nil, err
+	var gasPriceHex string
+	if err := e.client.CallContext(ctx, &gasPriceHex, "eth_gasPrice"); err != nil {
+		return nil, fmt.Errorf("eth_gasPrice: %w", err)
+	}
+
+	gasInfo := map[string]any{
+		"gas_price": gasPriceHex,
 	}
 
 	// Get latest block for base fee
-	block, _ := e.ethAPI.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
-
-	gasInfo := map[string]any{
-		"gas_price": gasPrice,
-	}
-	if block != nil {
-		gasInfo["base_fee"] = block["baseFeePerGas"]
+	var block json.RawMessage
+	if err := e.client.CallContext(ctx, &block, "eth_getBlockByNumber", "latest", false); err == nil && block != nil {
+		var blockMap map[string]any
+		if json.Unmarshal(block, &blockMap) == nil {
+			if baseFee, ok := blockMap["baseFeePerGas"]; ok {
+				gasInfo["base_fee"] = baseFee
+			}
+		}
 	}
 
 	return []mcp.ResourceContents{
@@ -237,22 +219,32 @@ func (e *ErigonMCPServer) handleResourceGasInfo(ctx context.Context, req mcp.Rea
 }
 
 // Resource template handlers
+
 func (e *ErigonMCPServer) handleResourceAddressSummary(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 	address := extractURIParam(req.Params.URI, "erigon://address/", "/summary")
 	if address == "" {
 		return nil, fmt.Errorf("missing address parameter in URI: %s", req.Params.URI)
 	}
 
-	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
-	balance, _ := e.ethAPI.GetBalance(ctx, common.HexToAddress(address), &latest)
-	nonce, _ := e.ethAPI.GetTransactionCount(ctx, common.HexToAddress(address), &latest)
-	code, _ := e.ethAPI.GetCode(ctx, common.HexToAddress(address), &latest)
-
+	// Failed lookups become null rather than empty strings, so a client
+	// never mistakes an RPC failure for an empty balance or an EOA.
 	summary := map[string]any{
 		"address":     address,
-		"balance":     balance,
-		"nonce":       nonce,
-		"is_contract": len(code) > 0,
+		"balance":     nil,
+		"nonce":       nil,
+		"is_contract": nil,
+	}
+	var balance string
+	if err := e.client.CallContext(ctx, &balance, "eth_getBalance", address, "latest"); err == nil {
+		summary["balance"] = balance
+	}
+	var nonce string
+	if err := e.client.CallContext(ctx, &nonce, "eth_getTransactionCount", address, "latest"); err == nil {
+		summary["nonce"] = nonce
+	}
+	var code string
+	if err := e.client.CallContext(ctx, &code, "eth_getCode", address, "latest"); err == nil {
+		summary["is_contract"] = code != "" && code != "0x"
 	}
 
 	return []mcp.ResourceContents{
@@ -270,21 +262,16 @@ func (e *ErigonMCPServer) handleResourceBlockSummary(ctx context.Context, req mc
 		return nil, fmt.Errorf("missing block number parameter in URI: %s", req.Params.URI)
 	}
 
-	blockNum, err := parseBlockNumber(blockNumStr)
-	if err != nil {
-		return nil, err
-	}
-
-	block, err := e.ethAPI.GetBlockByNumber(ctx, blockNum, false)
-	if err != nil {
-		return nil, err
+	var block json.RawMessage
+	if err := e.client.CallContext(ctx, &block, "eth_getBlockByNumber", normalizeBlockRef(blockNumStr), false); err != nil {
+		return nil, fmt.Errorf("eth_getBlockByNumber: %w", err)
 	}
 
 	return []mcp.ResourceContents{
 		mcp.TextResourceContents{
 			URI:      fmt.Sprintf("erigon://block/%s/summary", blockNumStr),
 			MIMEType: "application/json",
-			Text:     toJSONText(block),
+			Text:     toJSONIndent(block),
 		},
 	}, nil
 }
@@ -295,16 +282,31 @@ func (e *ErigonMCPServer) handleResourceTransactionAnalysis(ctx context.Context,
 		return nil, fmt.Errorf("missing transaction hash parameter in URI: %s", req.Params.URI)
 	}
 
-	hash := common.HexToHash(txHash)
-	tx, _ := e.ethAPI.GetTransactionByHash(ctx, hash)
-	receipt, _ := e.ethAPI.GetTransactionReceipt(ctx, hash)
+	var tx json.RawMessage
+	if err := e.client.CallContext(ctx, &tx, "eth_getTransactionByHash", txHash); err != nil {
+		return nil, fmt.Errorf("eth_getTransactionByHash: %w", err)
+	}
 
+	var receipt json.RawMessage
+	if err := e.client.CallContext(ctx, &receipt, "eth_getTransactionReceipt", txHash); err != nil {
+		return nil, fmt.Errorf("eth_getTransactionReceipt: %w", err)
+	}
+
+	// Derive status from receipt's "status" field (0x1 = success, 0x0 = reverted).
 	status := "unknown"
-	if receiptStatus, ok := receipt["status"].(hexutil.Uint64); ok {
-		if receiptStatus == 0 {
-			status = "reverted"
-		} else {
-			status = "success"
+	if receipt != nil {
+		var receiptMap map[string]any
+		if json.Unmarshal(receipt, &receiptMap) == nil {
+			if s, ok := receiptMap["status"].(string); ok {
+				switch s {
+				case "0x1":
+					status = "success"
+				case "0x0":
+					status = "reverted"
+				default:
+					status = s
+				}
+			}
 		}
 	}
 
