@@ -285,8 +285,12 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		log.Warn("[witness-cache] marshal witness", "block", num, "err", err)
 		return false
 	}
-	api.witnessCache.Add(hash, &ExecutionWitnessResult{cachedJSON: enc})
-	witnessCacheEntriesResidentGauge.SetInt(api.witnessCache.Len())
+	api.storeWitness(num, hash, enc)
 	witnessCacheBuildOKCounter.Inc()
 	return true
+}
+
+func (api *DebugAPIImpl) storeWitness(num uint64, hash common.Hash, enc []byte) {
+	api.witnessCache.store(num, hash, enc)
+	witnessCacheEntriesResidentGauge.SetInt(api.witnessCache.Len())
 }

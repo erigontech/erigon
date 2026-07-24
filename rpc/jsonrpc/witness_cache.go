@@ -26,8 +26,13 @@ const witnessCacheMaxBlocks = 96
 
 // witnessResultCache maps a canonical block hash to its pre-marshaled legacy-mode
 // witness. Keying by hash makes reorgs self-evicting — a reorged hash is never
-// requested again and ages out via the LRU — so no reconcile step is needed.
-type witnessResultCache = lru.Cache[common.Hash, *ExecutionWitnessResult]
+// requested again and ages out via the LRU — so no reconcile step is needed. It also
+// carries the push feed both impls share: a non-nil cache always has a non-nil feed,
+// and store is the only insert path, so every cached witness is also published.
+type witnessResultCache struct {
+	lru  *lru.Cache[common.Hash, *ExecutionWitnessResult]
+	feed *witnessFeed
+}
 
 // WitnessCacheCapacity is the number of witnesses the cache actually holds for a
 // requested block count, after clamping to witnessCacheMaxBlocks.
@@ -43,5 +48,21 @@ func newWitnessResultCache(blocks uint) *witnessResultCache {
 	if err != nil {
 		panic(err)
 	}
-	return c
+	return &witnessResultCache{lru: c, feed: newWitnessFeed()}
 }
+
+func (c *witnessResultCache) Get(hash common.Hash) (*ExecutionWitnessResult, bool) {
+	return c.lru.Get(hash)
+}
+
+func (c *witnessResultCache) Contains(hash common.Hash) bool { return c.lru.Contains(hash) }
+
+func (c *witnessResultCache) Len() int { return c.lru.Len() }
+
+func (c *witnessResultCache) store(num uint64, hash common.Hash, enc []byte) {
+	c.lru.Add(hash, &ExecutionWitnessResult{cachedJSON: enc})
+	c.feed.publish(witnessPush{num: num, hash: hash, json: enc})
+}
+
+func (c *witnessResultCache) subscribe() chan witnessPush     { return c.feed.subscribe() }
+func (c *witnessResultCache) unsubscribe(ch chan witnessPush) { c.feed.unsubscribe(ch) }

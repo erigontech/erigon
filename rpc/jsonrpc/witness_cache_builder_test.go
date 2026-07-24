@@ -17,7 +17,9 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -145,6 +147,31 @@ func buildTestChainHeader(t *testing.T, m *execmoduletester.ExecModuleTester, bl
 	})
 	require.NoError(t, err)
 	return hash, headerRLP
+}
+
+func TestWitnessCacheStorePublishes(t *testing.T) {
+	cache := newWitnessResultCache(96)
+	api := &DebugAPIImpl{witnessCache: cache}
+
+	ch := cache.subscribe()
+	defer cache.unsubscribe(ch)
+
+	hash := hashN(0x42)
+	enc := json.RawMessage(`{"state":["0x01"],"codes":[],"keys":[],"headers":[]}`)
+	api.storeWitness(7, hash, enc)
+
+	cached, ok := cache.Get(hash)
+	require.True(t, ok, "storeWitness must insert into the cache")
+	require.True(t, bytes.Equal(enc, cached.cachedJSON), "cached bytes must be the stored bytes")
+
+	select {
+	case push := <-ch:
+		require.Equal(t, uint64(7), push.num)
+		require.Equal(t, hash, push.hash)
+		require.True(t, bytes.Equal(enc, push.json), "pushed bytes must be the identical cached bytes")
+	case <-time.After(time.Second):
+		t.Fatal("storeWitness must publish to the feed")
+	}
 }
 
 // TestWitnessCacheBuilderParity drives the full builder path against the test exec
