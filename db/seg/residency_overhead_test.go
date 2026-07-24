@@ -94,6 +94,45 @@ func BenchmarkResidencyWarmMincoreNoAlloc(b *testing.B) {
 	_ = ps
 }
 
+// warm path with the cached bitmap: a believed-resident page is a single atomic
+// bit-load, no syscall. This is what the cache buys on the common (warm) case.
+func BenchmarkResidencyWarmCached(b *testing.B) {
+	fd, m, _ := setupResidencyBench(b)
+	rb := newResidencyBitmap(m, fd)
+	defer rb.stop()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if !rb.residentRange(0, 0) {
+			rb.markRange(0, 0)
+		}
+	}
+}
+
+func TestResidencyBitmap(t *testing.T) {
+	fd, m, ps := setupResidencyBench(t)
+	rb := newResidencyBitmap(m, fd)
+	defer rb.stop()
+	rb.refresh() // seed deterministically (constructor seeds async)
+
+	// The file was just written, so the seed scan marks every page resident.
+	if !rb.residentRange(0, 0) {
+		t.Fatal("freshly written page 0 should seed resident")
+	}
+
+	// Evict page 3 and rescan: its bit must clear (refresh reflects the OS).
+	evictPage(fd, m, 3*ps, ps)
+	rb.refresh()
+	if rb.residentRange(3, 3) {
+		t.Fatal("evicted page 3 should read not-resident after refresh")
+	}
+
+	// markRange overrides the bit to resident (the set-on-warm path).
+	rb.markRange(3, 3)
+	if !rb.residentRange(3, 3) {
+		t.Fatal("markRange(3,3) should make page 3 read resident")
+	}
+}
+
 // warm path baseline: no gate, just read the resident byte.
 func BenchmarkResidencyWarmTouch(b *testing.B) {
 	_, m, _ := setupResidencyBench(b)

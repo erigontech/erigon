@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -193,6 +194,9 @@ type Decompressor struct {
 	filePath, fileName string
 
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
+
+	residency     atomic.Pointer[residencyBitmap] // cached page-residency bitmap for the gate; nil until enabled
+	residencyOnce sync.Once
 }
 
 const (
@@ -570,6 +574,10 @@ func (d *Decompressor) Close() {
 		return
 	}
 	d.checkFileLenChange()
+	if rb := d.residency.Load(); rb != nil {
+		rb.stop() // must join the refresh goroutine before munmap so no mincore touches freed memory
+		d.residency.Store(nil)
+	}
 	if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
 		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", d.FileName(), "stack", dbg.Stack())
 	}
