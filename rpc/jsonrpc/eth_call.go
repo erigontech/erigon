@@ -991,7 +991,8 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		var data bytes.Buffer
 		var buf [32]byte
 		rules := blockCtx.Rules(chainConfig)
-		for _, jsonAuth := range args.AuthorizationList {
+		for i := range args.AuthorizationList {
+			jsonAuth := &args.AuthorizationList[i]
 			auth, err := jsonAuth.ToAuthorization()
 			if err != nil {
 				continue

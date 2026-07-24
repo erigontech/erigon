@@ -137,7 +137,8 @@ func Bind(types []string, abis []string, bytecodes []string, fsigs []map[string]
 			transactIdentifiers = make(map[string]bool)
 			eventIdentifiers    = make(map[string]bool)
 		)
-		for _, original := range evmABI.Methods {
+		for name := range evmABI.Methods {
+			original := evmABI.Methods[name]
 			// Normalize the method for capital cases and non-anonymous inputs/outputs
 			normalized := original
 			normalizedName := methodNormalizer[lang](alias(aliases, original.Name))
@@ -153,9 +154,10 @@ func Bind(types []string, abis []string, bytecodes []string, fsigs []map[string]
 			normalized.Name = normalizedName
 			normalized.Inputs = make([]abi.Argument, len(original.Inputs))
 			copy(normalized.Inputs, original.Inputs)
-			for j, input := range normalized.Inputs {
+			for j := range normalized.Inputs {
+				input := &normalized.Inputs[j]
 				if input.Name == "" || isKeyWord(input.Name) {
-					normalized.Inputs[j].Name = fmt.Sprintf("arg%d", j)
+					input.Name = fmt.Sprintf("arg%d", j)
 				}
 				if hasStruct(input.Type) {
 					bindStructType[lang](input.Type, structs)
@@ -163,9 +165,10 @@ func Bind(types []string, abis []string, bytecodes []string, fsigs []map[string]
 			}
 			normalized.Outputs = make([]abi.Argument, len(original.Outputs))
 			copy(normalized.Outputs, original.Outputs)
-			for j, output := range normalized.Outputs {
+			for j := range normalized.Outputs {
+				output := &normalized.Outputs[j]
 				if output.Name != "" {
-					normalized.Outputs[j].Name = capitalise(output.Name)
+					output.Name = capitalise(output.Name)
 				}
 				if hasStruct(output.Type) {
 					bindStructType[lang](output.Type, structs)
@@ -178,7 +181,8 @@ func Bind(types []string, abis []string, bytecodes []string, fsigs []map[string]
 				transacts[original.Name] = &tmplMethod{Original: original, Normalized: normalized, Structured: structured(original.Outputs)}
 			}
 		}
-		for _, original := range evmABI.Events {
+		for name := range evmABI.Events {
+			original := evmABI.Events[name]
 			// Skip anonymous events as they don't support explicit filtering
 			if original.Anonymous {
 				continue
@@ -196,9 +200,10 @@ func Bind(types []string, abis []string, bytecodes []string, fsigs []map[string]
 
 			normalized.Inputs = make([]abi.Argument, len(original.Inputs))
 			copy(normalized.Inputs, original.Inputs)
-			for j, input := range normalized.Inputs {
+			for j := range normalized.Inputs {
+				input := &normalized.Inputs[j]
 				if input.Name == "" || isKeyWord(input.Name) {
-					normalized.Inputs[j].Name = fmt.Sprintf("arg%d", j)
+					input.Name = fmt.Sprintf("arg%d", j)
 				}
 				if hasStruct(input.Type) {
 					bindStructType[lang](input.Type, structs)
@@ -605,7 +610,8 @@ func structured(args abi.Arguments) bool {
 		return false
 	}
 	exists := make(map[string]bool)
-	for _, out := range args {
+	for i := range args {
+		out := &args[i]
 		// If the name is anonymous, we can't organize into a struct
 		if out.Name == "" {
 			return false

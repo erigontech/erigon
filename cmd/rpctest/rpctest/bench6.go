@@ -54,7 +54,8 @@ func Bench6(erigon_url string) error {
 			fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
 		}
 		accounts[b.Result.Miner] = struct{}{}
-		for _, txn := range b.Result.Transactions {
+		for i := range b.Result.Transactions {
+			txn := &b.Result.Transactions[i]
 			accounts[txn.From] = struct{}{}
 			if txn.To != nil {
 				accounts[*txn.To] = struct{}{}

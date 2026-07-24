@@ -208,10 +208,11 @@ func runStateTest(ctx *cli.Command, cfg vm.Config, fname string) ([]testResult, 
 	db := temporaltest.NewTestDB(nil, dirs)
 	defer db.Close()
 
-	for key, test := range stateTests {
+	for key := range stateTests {
 		if !re.MatchString(key) {
 			continue
 		}
+		test := stateTests[key]
 		for _, st := range test.Subtests() {
 			result := &testResult{Name: key, Fork: st.Fork, Pass: true}
 

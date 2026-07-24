@@ -145,9 +145,9 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 
 	// 'trace_get' index starts at one (oddly)
 	firstIndex := int(indicies[0]) + 1
-	for i, trace := range traces {
+	for i := range traces {
 		if i == firstIndex {
-			return &trace, nil
+			return &traces[i], nil
 		}
 	}
 	return nil, err

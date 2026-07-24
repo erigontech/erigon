@@ -51,7 +51,8 @@ func BenchTraceCall(erigonURL, oeURL string, needCompare bool, blockFrom uint64,
 			return err
 		}
 
-		for _, txn := range b.Result.Transactions {
+		for i := range b.Result.Transactions {
+			txn := &b.Result.Transactions[i]
 
 			request := reqGen.traceCall(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input, bn-1)
 			errCtx := fmt.Sprintf("block %d, txn %s", bn, txn.Hash)

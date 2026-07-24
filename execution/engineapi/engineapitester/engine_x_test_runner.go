@@ -138,15 +138,15 @@ func (extr *EngineXTestRunner) Close() error {
 	extr.mu.Lock()
 	var entries []testerEntry
 	for _, perAlloc := range extr.testers {
-		for _, entry := range perAlloc {
-			entries = append(entries, entry)
+		for i := range perAlloc {
+			entries = append(entries, perAlloc[i])
 		}
 	}
 	extr.testers = nil
 	extr.mu.Unlock()
 	var errs []error
-	for _, entry := range entries {
-		err := extr.evict(entry)
+	for i := range entries {
+		err := extr.evict(entries[i])
 		if err != nil {
 			errs = append(errs, err)
 		}

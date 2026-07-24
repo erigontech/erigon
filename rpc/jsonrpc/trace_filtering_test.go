@@ -188,7 +188,8 @@ func traceConfigWithWithdrawals() *config.TraceConfig {
 
 func assertNoWithdrawalTraces(t *testing.T, traces ParityTraces) {
 	t.Helper()
-	for _, tr := range traces {
+	for i := range traces {
+		tr := &traces[i]
 		action, ok := tr.Action.(*RewardTraceAction)
 		require.False(t, ok && action.RewardType == rewardTypeWithdrawal,
 			"unexpected withdrawal trace entry")

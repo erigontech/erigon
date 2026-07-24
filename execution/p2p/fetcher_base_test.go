@@ -1066,9 +1066,10 @@ func (ft *fetcherTest) mockSentryStreams(mocks ...requestResponseMock) {
 
 func (ft *fetcherTest) mockSentryInboundMessagesStream(mocks ...requestResponseMock) {
 	var numInboundMessages int
-	for _, mock := range mocks {
+	for i := range mocks {
+		mock := &mocks[i]
 		numInboundMessages += len(mock.mockResponseInboundMessages)
-		ft.requestResponseMocks[mock.requestId] = mock
+		ft.requestResponseMocks[mock.requestId] = *mock
 	}
 
 	inboundMessageStreamChan := make(chan *delayedMessage[*sentryproto.InboundMessage], numInboundMessages)

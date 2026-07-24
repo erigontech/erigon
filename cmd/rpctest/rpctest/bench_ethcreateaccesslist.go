@@ -57,7 +57,8 @@ func BenchEthCreateAccessList(erigonURL, gethURL string, needCompare, latest boo
 			continue
 		}
 
-		for _, txn := range b.Result.Transactions {
+		for i := range b.Result.Transactions {
+			txn := &b.Result.Transactions[i]
 
 			nTransactions = nTransactions + 1
 
