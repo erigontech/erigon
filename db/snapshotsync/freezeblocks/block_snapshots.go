@@ -1001,6 +1001,14 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	}, workers, lvl, logger)
 
 	if err != nil {
+		// A partial-content file at f.Path advertises the requested
+		// range in its name but doesn't hold the promised entries.
+		// Later reads/rebuilds trust the filename and hit "source ran
+		// out at entry N (wanted M)". Remove the file so retire can
+		// retry cleanly once the DB catches up (e.g. mode-B recovery
+		// re-fills the canonical-hash range).
+		sn.Close()
+		_ = dir2.RemoveFile(f.Path)
 		return lastKeyValue, fmt.Errorf("dump %s: %w", f.Name(), err)
 	}
 
@@ -1008,6 +1016,8 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	logger.Log(lvl, "[snapshots] Compression start", "file", f.Name()[:len(f.Name())-len(ext)], "workers", sn.WorkersAmount())
 
 	if err := sn.Compress(); err != nil {
+		sn.Close()
+		_ = dir2.RemoveFile(f.Path)
 		return lastKeyValue, fmt.Errorf("compress: %w", err)
 	}
 
@@ -1252,6 +1262,7 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom,
 
 	key := make([]byte, 8+32)
 	from := hexutil.EncodeTs(blockFrom)
+	var emitted uint64
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= blockTo {
@@ -1282,6 +1293,7 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom,
 		if err := collect(value); err != nil {
 			return false, err
 		}
+		emitted++
 
 		select {
 		case <-ctx.Done():
@@ -1299,6 +1311,21 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom,
 		return true, nil
 	}); err != nil {
 		return 0, err
+	}
+
+	// Verify the produced range matches the requested range. kv.BigChunks
+	// silently skips missing canonical-hash entries, so a sparse
+	// kv.HeaderCanonical (typical below pruneMarkerBlockThreshold under
+	// --prune.mode=minimal) yields fewer entries than blockTo-blockFrom
+	// but the caller's file path advertises the full range. Without this
+	// check, a partial-content file lands on disk under the full-range
+	// name — later reads/rebuilds trust the filename and hit
+	// "source ran out at entry N (wanted M)". Live-caught 2026-07-24
+	// tdfix-verify iter 24: retire produced
+	// v1.1-003120-003130-headers.seg with 5000 entries after mode-B
+	// unwind left canonical hashes sparse below the prune threshold.
+	if !test && emitted != (blockTo-blockFrom) {
+		return 0, fmt.Errorf("canonical hashes sparse in requested range: got %d entries for [%d, %d) (expected %d)", emitted, blockFrom, blockTo, blockTo-blockFrom)
 	}
 
 	// Make sure the canonical chain is not broken.
