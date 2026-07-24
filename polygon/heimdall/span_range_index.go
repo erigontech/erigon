@@ -151,8 +151,8 @@ func (i *txSpanRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64,
 			break
 		}
 		prevStartBlock := rangeIndexKeyParse(prevStartBlockRaw)
-		prevSpanId, prevBlock := rangeIndexValuePairParse(prevValuePair)
-		isInRange := blockNumInRange(blockNum, prevStartBlock, prevBlock)
+		prevSpanId, prevEndBlock := rangeIndexValuePairParse(prevValuePair)
+		isInRange := blockNumInRange(blockNum, prevStartBlock, prevEndBlock)
 		if !isInRange {
 			break // we have walked out of range, break to return current known lastSpanIdInRange
 		}
