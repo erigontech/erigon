@@ -58,21 +58,17 @@ func TestPeerMayHaveBlockNum(t *testing.T) {
 
 func TestPeerMayHaveBALNum(t *testing.T) {
 	t.Parallel()
-
 	psp := peerSyncProgress{
 		peerId: PeerIdFromUint64(1),
 	}
-
 	require.True(t, psp.peerMayHaveBALNum(5))
 	psp.balNumMissing(100)
 	require.False(t, psp.peerMayHaveBALNum(5))
 	require.False(t, psp.peerMayHaveBALNum(100))
 	require.True(t, psp.peerMayHaveBALNum(101))
-
 	psp.balNumMissing(50)
 	require.False(t, psp.peerMayHaveBALNum(100))
 	require.True(t, psp.peerMayHaveBALNum(101))
-
 	psp.maxMissingBALNumTs = psp.maxMissingBALNumTs.Add(-missingBALNumExpiry).Add(-time.Second)
 	psp.balNumMissing(50)
 	require.False(t, psp.peerMayHaveBALNum(50))

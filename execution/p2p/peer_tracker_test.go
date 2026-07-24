@@ -101,13 +101,11 @@ func TestPeerTracker(t *testing.T) {
 
 func TestPeerTrackerBALStateRemovedOnDisconnect(t *testing.T) {
 	t.Parallel()
-
 	test := newPeerTrackerTest(t)
 	peerID := PeerIdFromUint64(1)
 	test.peerTracker.PeerConnected(peerID)
 	test.peerTracker.BALNumMissing(peerID, 100)
 	require.False(t, test.peerTracker.PeerMayHaveBALNum(peerID, 100))
-
 	test.peerTracker.PeerDisconnected(peerID)
 	require.True(t, test.peerTracker.PeerMayHaveBALNum(peerID, 100))
 }
