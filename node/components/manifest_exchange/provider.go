@@ -291,13 +291,18 @@ func (p *Provider) UnbindBus() error {
 	hD := p.hDisconnected
 	hF := p.hForkBootstrapReq
 	cancel := p.cancelCtx
-	p.mu.Unlock()
 	if bus == nil || hC == nil {
+		p.mu.Unlock()
 		return nil
 	}
+	// Nil out the shutdown-observable state before releasing mu — new
+	// handler invocations (onPeerConnected, onForkBootstrapRequired)
+	// re-check these under the same mu and bail without calling
+	// fetchWG.Add(1) after fetchWG.Wait returns.
+	p.inflight = nil
+	p.ctx = nil
+	p.mu.Unlock()
 
-	// Cancel in-flight Download calls and drain the bus handlers that may
-	// still be launching fetch goroutines.
 	if cancel != nil {
 		cancel()
 	}
@@ -316,7 +321,14 @@ func (p *Provider) UnbindBus() error {
 			firstErr = err
 		}
 	}
-	p.unbindNoLock()
+	p.mu.Lock()
+	p.bus = nil
+	p.fetcher = nil
+	p.cancelCtx = nil
+	p.hConnected = nil
+	p.hDisconnected = nil
+	p.hForkBootstrapReq = nil
+	p.mu.Unlock()
 	return firstErr
 }
 
@@ -374,16 +386,10 @@ const ForkBootstrapParentPeerID = "fork-bootstrap-parent"
 //     event type is replayable).
 //   - ParseV2 error → log + return.
 func (p *Provider) onForkBootstrapRequired(e flow.ForkBootstrapRequired) {
-	p.mu.Lock()
-	fetcher := p.fetcher
-	bus := p.bus
-	ctx := p.ctx
-	logger := p.log
-	p.mu.Unlock()
-	if fetcher == nil || bus == nil || ctx == nil {
-		return
-	}
 	if e.ParentManifestHash == ([20]byte{}) {
+		p.mu.Lock()
+		logger := p.log
+		p.mu.Unlock()
 		if logger != nil {
 			logger.Info("[manifest_exchange] fork bootstrap: zero parent manifest hash — skipping parent-manifest fetch (legitimate for forks off pre-Phase-1 roots)",
 				"parent", e.Parent, "cut_block", e.CutBlock)
@@ -391,7 +397,20 @@ func (p *Provider) onForkBootstrapRequired(e flow.ForkBootstrapRequired) {
 		return
 	}
 
+	// Snapshot state + Add(1) atomically so UnbindBus's inflight-nil-before-Wait
+	// sequence never observes Add-after-Wait on this WG.
+	p.mu.Lock()
+	fetcher := p.fetcher
+	bus := p.bus
+	ctx := p.ctx
+	logger := p.log
+	if fetcher == nil || bus == nil || ctx == nil {
+		p.mu.Unlock()
+		return
+	}
 	p.fetchWG.Add(1)
+	p.mu.Unlock()
+
 	go func() {
 		defer p.fetchWG.Done()
 		if logger != nil {
@@ -480,12 +499,21 @@ func (p *Provider) onPeerConnected(e sentry.PeerConnected) {
 	p.mu.Unlock()
 
 	if state != nil && now != nil && state.blacklisted(peerID, now()) {
-		// Peer failed UCAN verification recently; skip until the
-		// blacklist entry expires.
 		return
 	}
 
 	p.mu.Lock()
+	// Re-check under mu: UnbindBus may have nil'd inflight/ctx while we
+	// ran the blacklist probe unlocked, and a concurrent onPeerConnected
+	// for the same peerID may have already registered.
+	if p.inflight == nil || p.ctx == nil {
+		p.mu.Unlock()
+		return
+	}
+	if _, exists := p.inflight[peerID]; exists {
+		p.mu.Unlock()
+		return
+	}
 	p.inflight[peerID] = struct{}{}
 	ctx := p.ctx
 	peerPub := e.Peer.Pubkey()
