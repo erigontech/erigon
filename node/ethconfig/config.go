@@ -113,7 +113,7 @@ var Defaults = Config{
 	},
 	FcuTimeout:          1 * time.Second,
 	FcuBackgroundPrune:  true,
-	FcuBackgroundCommit: false, // to enable, we need to 1) have rawdb API go via execctx and 2) revive Coherent cache for rpcdaemon
+	FcuBackgroundCommit: true,
 	ExperimentalBAL:     false,
 	WarmupKzgCtxOnInit:  true,
 }

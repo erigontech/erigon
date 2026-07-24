@@ -195,7 +195,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				return nil, rwTx, err
 			}
 
-			if shouldGenerateChangesets {
+			if shouldGenerateChangesets && blockNum > 0 {
 				se.doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
 			}
 			se.doms.SetChangesetAccumulator(nil)

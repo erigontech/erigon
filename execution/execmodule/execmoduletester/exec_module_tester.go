@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
@@ -147,6 +148,13 @@ type ExecModuleTester struct {
 }
 
 func (emt *ExecModuleTester) Close() {
+	// Drain and stop the background-commit worker (and its in-flight commit tx)
+	// before closing the DB, mirroring production shutdown. Otherwise DB.Close
+	// can race a commit still writing, which deadlocks. Must run before cancel()
+	// so WaitIdle can still acquire the foreground semaphore.
+	if emt.ExecModule != nil {
+		emt.ExecModule.WaitIdle(emt.Ctx)
+	}
 	emt.cancel()
 	if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
 		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
@@ -343,6 +351,12 @@ func WithFcuBackgroundCommit() Option {
 	}
 }
 
+func WithFcuForegroundCommit() Option {
+	return func(opts *options) {
+		opts.fcuBackgroundCommit = false
+	}
+}
+
 // WithAlwaysGenerateChangesets pins --experimental.always-generate-changesets
 // regardless of the tester default: true for tests that reorg deeper than
 // MaxReorgDepth, false for tests that rely on the windowed-changesets
@@ -395,11 +409,12 @@ func applyOptions(opts []Option) options {
 	defaultKey, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	defaultPruneMode := prune.MockMode
 	opt := options{
-		key:             defaultKey,
-		pruneMode:       &defaultPruneMode,
-		chainConfig:     chain.TestChainBerlinConfig,
-		experimentalBAL: false,
-		sentryProtocol:  direct.ETH68,
+		key:                 defaultKey,
+		pruneMode:           &defaultPruneMode,
+		chainConfig:         chain.TestChainBerlinConfig,
+		experimentalBAL:     false,
+		sentryProtocol:      direct.ETH68,
+		fcuBackgroundCommit: true,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -685,7 +700,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		mock.TxPool,
 		miningCancel,
 		latestBlockBuiltStore,
-		nil, /*sdProvider*/
 		logger,
 	)
 
@@ -781,6 +795,13 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	)
 	mock.ForkValidator = mock.ExecModule.ForkValidator()
 
+	// Mirror production (node/eth/backend.go): readers fall back to the
+	// published in-flight SharedDomains when no foreground context is active,
+	// so consensus-table reads see not-yet-committed state under background
+	// commit instead of a stale raw DB.
+	mock.ExecModule.SetPublishedSD(mock.Notifications.Events.LatestSD)
+	mock.StateCache.SetPublishedSD(mock.Notifications.Events.LatestSD)
+
 	mock.StreamWg.Add(1)
 	mock.bgComponentsEg.Go(func() error {
 		mock.sentriesClient.RecvMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
@@ -830,6 +851,14 @@ func (emt *ExecModuleTester) EnableLogs() {
 
 func (emt *ExecModuleTester) Cfg() ethconfig.Config { return emt.cfg }
 
+// PublishedSD returns the latest published SharedDomains (the tip after the
+// last FCU). Pass it to blockgen.GenerateChain when building on the tip so the
+// generator reads the tip's in-flight state under background commit instead of
+// a lagging raw DB.
+func (emt *ExecModuleTester) PublishedSD() *execctx.SharedDomains {
+	return emt.Notifications.Events.LatestSD()
+}
+
 func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 	wr := chainreader.NewChainReaderEth1(emt.ChainConfig, emt.ExecModule, time.Hour)
 
@@ -855,9 +884,23 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 
 	tipHash := chain.TopBlock.Hash()
 
-	status, verr, _, err := wr.UpdateForkChoice(emt.Ctx, tipHash, tipHash, tipHash)
-	if err != nil {
-		return err
+	// Busy means the background-commit backlog is full; the real CL retries the
+	// FCU, giving the commit worker a foreground-idle window to drain. Mirror
+	// that here instead of failing the insert.
+	var status execmodule.ExecutionStatus
+	var verr *string
+	for {
+		status, verr, _, err = wr.UpdateForkChoice(emt.Ctx, tipHash, tipHash, tipHash)
+		if err != nil {
+			return err
+		}
+		if status != execmodule.ExecutionStatusBusy {
+			break
+		}
+		if emt.Ctx.Err() != nil {
+			return emt.Ctx.Err()
+		}
+		time.Sleep(time.Millisecond)
 	}
 
 	if status != execmodule.ExecutionStatusSuccess {
@@ -902,11 +945,20 @@ func (emt *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
 	if err := emt.insertPoSBlocks(chain); err != nil {
 		return err
 	}
-	roTx, err := emt.DB.BeginRo(emt.Ctx)
+	baseTx, err := emt.DB.BeginTemporalRo(emt.Ctx)
 	if err != nil {
 		return err
 	}
-	defer roTx.Rollback()
+	defer baseTx.Rollback()
+	// Under background commit the just-inserted block metadata (header, stage
+	// progress, head hash) lives in the published SharedDomains overlay before
+	// it lands in the raw DB, so read through the overlay when one is published.
+	var roTx kv.Tx = baseTx
+	if sd := emt.PublishedSD(); sd != nil {
+		if v := sd.BlockOverlayTemporalTx(baseTx); v != nil {
+			roTx = v
+		}
+	}
 	// Check if the latest header was imported or rolled back
 	if rawdb.ReadHeader(roTx, chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
 		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
@@ -921,6 +973,10 @@ func (emt *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
 	if rawdb.ReadHeadBlockHash(roTx) != chain.TopBlock.Hash() {
 		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
+	// Under background commit InsertChain returns before its commit lands. Drain
+	// it before returning so a following operation (a reorg's unwind, a raw-DB
+	// read) cannot race the still-in-flight commit of the chain just inserted.
+	emt.ExecModule.WaitCommitsDrained()
 	return nil
 }
 

@@ -118,7 +118,7 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 		)
 		require.NoError(t, err)
 		b.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	require.Len(t, chainPack.Blocks, 1)
 	exec := m.ExecModule
@@ -184,7 +184,7 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 		)
 		require.NoError(t, err)
 		b.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	//goland:noinspection DuplicatedCode
 	shorterFork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
@@ -257,7 +257,7 @@ func TestValidateForkPayloadOffNonTipCanonicalBlockWithCache(t *testing.T) {
 	// entries. After this the head is block 2.
 	prefix, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
 		b.AddTx(mkTx(uint64(i), 1_000))
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	require.NoError(t, insertValidateAndUfc1By1(t.Context(), m.ExecModule, prefix.Blocks))
 	block2 := prefix.Blocks[1]
@@ -315,7 +315,7 @@ func TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T) {
 		)
 		require.NoError(t, err)
 		b.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	require.Len(t, chainPack.Blocks, 10)
 
@@ -400,7 +400,7 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 		)
 		require.NoError(t, err)
 		b.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	require.Len(t, chainPack.Blocks, 15)
 
@@ -449,6 +449,7 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 	res2, err := updateForkChoice(ctx, m.ExecModule, tip)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, res2.Status, "second FCU should execute forward to the tip")
+	m.ExecModule.WaitCommitsDrained()
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		execProg, err := stages.GetStageProgress(tx, stages.Execution)
 		require.NoError(t, err)
@@ -525,7 +526,7 @@ func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
 
 			// Let the last FCU's commit and prune (foreground or background)
 			// settle before reading the committed head.
-			m.ExecModule.WaitIdle(ctx)
+			m.ExecModule.WaitCommitsDrained()
 			require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 				require.Equal(t, headerAt(chainLen).Hash(), rawdb.ReadHeadBlockHash(tx), "head must be at canonical tip")
 				return nil
@@ -571,7 +572,7 @@ func TestAssembleBlock(t *testing.T) {
 		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(t, err)
 		gen.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	err = m.InsertChain(chainPack)
 	require.NoError(t, err)
@@ -695,7 +696,7 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(t, err)
 		gen.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	err = m.InsertChain(chainPack)
 	require.NoError(t, err)
@@ -799,15 +800,15 @@ func insertValidateAndUfc1By1(ctx context.Context, exec *execmodule.ExecModule, 
 			return fmt.Errorf("unexpected updateForkChoice status: %s", ur.Status)
 		}
 	}
-	// UpdateForkChoice returns before the background flush+commit finishes
-	// (per #21444). The next semaphore-acquiring op blocks until the prior
-	// FCU's commit defers complete — so do one more idempotent FCU for the
-	// last block to ensure commitBlock has settled before the caller reads it.
+	// UpdateForkChoice returns before the background flush+commit finishes, so do
+	// one more idempotent FCU for the last block and then wait for the commit
+	// backlog to drain — committed state is settled before the caller reads it.
 	if len(blocks) > 0 {
 		if _, err := updateForkChoice(ctx, exec, blocks[len(blocks)-1].Header()); err != nil {
 			return err
 		}
 	}
+	exec.WaitCommitsDrained()
 	return nil
 }
 
@@ -872,7 +873,7 @@ func TestAssembleEmptyBlock(t *testing.T) {
 		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(t, txErr)
 		gen.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	err = m.InsertChain(chainPack)
 	require.NoError(t, err)
@@ -910,7 +911,7 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(t, txErr)
 		gen.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	err = m.InsertChain(chainPack)
 	require.NoError(t, err)
@@ -960,6 +961,89 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestAssembleBlockRejectsWrongParent verifies AssembleBlock pins to the
+// requested ParentHash: a request whose parent is not the current head returns
+// Busy (the CL retries) rather than building on the wrong block, while a request
+// on the real head builds a block extending exactly that parent.
+func TestAssembleBlockRejectsWrongParent(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	exec := m.ExecModule
+
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	}, m.PublishedSD())
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	head := chainPack.TopBlock
+
+	mkParams := func(parent common.Hash) *builder.Parameters {
+		return &builder.Parameters{
+			ParentHash:            parent,
+			Timestamp:             head.Time() + 1,
+			PrevRandao:            head.Header().MixDigest,
+			SuggestedFeeRecipient: common.Address{1},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+			ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		}
+	}
+
+	// Wrong parent → Busy, no block built (call directly, not via the retryBusy helper).
+	res, err := exec.AssembleBlock(ctx, mkParams(randomHash()))
+	require.NoError(t, err)
+	require.True(t, res.Busy, "assemble on a non-head parent must return Busy")
+
+	// Correct parent → builds a block extending exactly that parent.
+	payloadId, err := assembleBlock(ctx, exec, mkParams(head.Hash()))
+	require.NoError(t, err)
+	block, err := getAssembledBlock(ctx, exec, payloadId)
+	require.NoError(t, err)
+	require.NotNil(t, block)
+	require.Equal(t, head.Hash(), block.ParentHash(), "assembled block must extend the requested parent")
+	require.Equal(t, head.NumberU64()+1, block.NumberU64())
+}
+
+// TestAssembleBlockRejectsOldCanonicalParent verifies AssembleBlock rejects a
+// parent that is canonical at its own height but is not the current head: it
+// must return Busy rather than build on a stale ancestor (which the async
+// builder would then fail its parent check against).
+func TestAssembleBlockRejectsOldCanonicalParent(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	exec := m.ExecModule
+
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	}, m.PublishedSD())
+	require.NoError(t, err)
+	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks))
+	head := chainPack.TopBlock       // block 2 — the head
+	oldParent := chainPack.Blocks[0] // block 1 — canonical, but not the head
+
+	mkParams := func(parent common.Hash) *builder.Parameters {
+		return &builder.Parameters{
+			ParentHash:            parent,
+			Timestamp:             head.Time() + 1,
+			PrevRandao:            head.Header().MixDigest,
+			SuggestedFeeRecipient: common.Address{1},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+			ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		}
+	}
+
+	res, err := exec.AssembleBlock(ctx, mkParams(oldParent.Hash()))
+	require.NoError(t, err)
+	require.True(t, res.Busy, "assemble on an old canonical ancestor must return Busy")
+
+	payloadId, err := assembleBlock(ctx, exec, mkParams(head.Hash()))
+	require.NoError(t, err)
+	block, err := getAssembledBlock(ctx, exec, payloadId)
+	require.NoError(t, err)
+	require.Equal(t, head.Hash(), block.ParentHash(), "assembled block must extend the head")
+}
+
 func TestAssembleBlockWithContractCreation(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -972,7 +1056,7 @@ func TestAssembleBlockWithContractCreation(t *testing.T) {
 		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(t, txErr)
 		gen.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	err = m.InsertChain(chainPack)
 	require.NoError(t, err)
@@ -1042,7 +1126,7 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 
 	// Generate 1 empty block as initial chain state.
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1,
-		func(i int, gen *blockgen.BlockGen) {})
+		func(i int, gen *blockgen.BlockGen) {}, m.PublishedSD())
 	require.NoError(t, err)
 	err = m.InsertChain(chainPack)
 	require.NoError(t, err)
@@ -1120,7 +1204,7 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(t, txErr)
 		gen.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	err = m.InsertChain(chainPack)
 	require.NoError(t, err)
@@ -1213,7 +1297,7 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 		)
 		require.NoError(t, err)
 		gen.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	err = m.InsertChain(chainPack)
 	require.NoError(t, err)
@@ -1515,14 +1599,16 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 
 func TestGetPayloadBodiesEmptyBlockAccessList(t *testing.T) {
 	t.Parallel()
-	m, chainPack := newPayloadBodiesBALTestChain(t, chain.AllProtocolChanges)
-	block := chainPack.Blocks[0]
-	require.NotNil(t, block.Header().BlockAccessListHash)
-	err := m.DB.Update(t.Context(), func(tx kv.RwTx) error {
-		return rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), []byte{0xc0})
-	})
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, nil)
 	require.NoError(t, err)
-	requirePayloadBodiesBlockAccessList(t, m, block, []byte{0xc0})
+	block := chainPack.Blocks[0]
+	// A present-but-empty BAL (empty RLP list) is served verbatim, not treated
+	// as absent and regenerated. Write the block and its empty BAL to the DB and
+	// read them back through a synchronous getter that reads the DB directly.
+	writeCanonicalBlockFixture(t, m.DB, block, []byte{0xc0})
+	em := execmodule.NewGetterMockForTest(m.DB, m.BlockReader, m.Engine, m.ChainConfig, m.Log)
+	requireMockGetterBAL(t, em, block, []byte{0xc0})
 }
 
 func TestGetPayloadBodiesPreAmsterdamBlockAccessList(t *testing.T) {
@@ -1541,8 +1627,12 @@ func TestGetPayloadBodiesPrunedHistoryBlockAccessList(t *testing.T) {
 	m, chainPack := newPayloadBodiesBALTestChain(t, chain.AllProtocolChanges)
 	block := chainPack.Blocks[0]
 	require.NotNil(t, block.Header().BlockAccessListHash)
+	// Remove the stored BAL and the state history it could be regenerated from,
+	// then read through a synchronous DB-backed getter: with nothing to serve
+	// and no history to re-execute against, it must degrade to nil.
 	prunePayloadBodiesBALHistory(t, m, block)
-	requirePayloadBodiesBlockAccessList(t, m, block, nil)
+	em := execmodule.NewGetterMockForTest(m.DB, m.BlockReader, m.Engine, m.ChainConfig, m.Log)
+	requireMockGetterBAL(t, em, block, nil)
 }
 
 func newPayloadBodiesBALTestChain(t *testing.T, config *chain.Config) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
@@ -1562,6 +1652,44 @@ func requirePayloadBodiesBlockAccessList(t *testing.T, m *execmoduletester.ExecM
 	require.NotNil(t, byHash[0])
 	require.Equal(t, want, byHash[0].BlockAccessList)
 	byRange, err := m.ExecModule.GetPayloadBodiesByRange(t.Context(), block.NumberU64(), 1)
+	require.NoError(t, err)
+	require.Len(t, byRange, 1)
+	require.NotNil(t, byRange[0])
+	require.Equal(t, want, byRange[0].BlockAccessList)
+}
+
+// writeCanonicalBlockFixture stores a block (header, canonical marker, body) and
+// optionally its BAL directly in the DB, without going through the execution
+// module — for getter tests that assert DB-sourced serving deterministically.
+func writeCanonicalBlockFixture(t *testing.T, db kv.TemporalRwDB, block *types.Block, bal []byte) {
+	t.Helper()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := rawdb.WriteHeader(tx, block.Header()); err != nil {
+			return err
+		}
+		if err := rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
+			return err
+		}
+		if _, err := rawdb.WriteRawBodyIfNotExists(tx, block.Hash(), block.NumberU64(), block.RawBody()); err != nil {
+			return err
+		}
+		if bal != nil {
+			return rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), bal)
+		}
+		return nil
+	}))
+}
+
+// requireMockGetterBAL asserts the payload-bodies getters resolve the block's
+// BAL to want, reading through a synchronous DB-backed ExecModule.
+func requireMockGetterBAL(t *testing.T, em *execmodule.ExecModule, block *types.Block, want []byte) {
+	t.Helper()
+	byHash, err := em.GetPayloadBodiesByHash(t.Context(), []common.Hash{block.Hash()})
+	require.NoError(t, err)
+	require.Len(t, byHash, 1)
+	require.NotNil(t, byHash[0])
+	require.Equal(t, want, byHash[0].BlockAccessList)
+	byRange, err := em.GetPayloadBodiesByRange(t.Context(), block.NumberU64(), 1)
 	require.NoError(t, err)
 	require.Len(t, byRange, 1)
 	require.NotNil(t, byRange[0])
@@ -1665,7 +1793,7 @@ func TestNotificationDispatchForegroundCommit(t *testing.T) {
 	headerCh, unsub := m.Notifications.Events.AddHeaderSubscription()
 	defer unsub()
 
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, nil)
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, nil, m.PublishedSD())
 	require.NoError(t, err)
 
 	err = insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks)
@@ -1707,7 +1835,7 @@ func TestNotificationDispatchBackgroundCommit(t *testing.T) {
 	headerCh, unsub := m.Notifications.Events.AddHeaderSubscription()
 	defer unsub()
 
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, nil)
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, nil, m.PublishedSD())
 	require.NoError(t, err)
 
 	err = m.InsertChain(chainPack)
@@ -1729,7 +1857,7 @@ func TestNotificationDispatchBackgroundPrune(t *testing.T) {
 	headerCh, unsub := m.Notifications.Events.AddHeaderSubscription()
 	defer unsub()
 
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, nil)
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, nil, m.PublishedSD())
 	require.NoError(t, err)
 
 	err = insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks)
@@ -1801,7 +1929,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 
 	// Generate 1 empty block as initial chain state.
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1,
-		func(i int, gen *blockgen.BlockGen) {})
+		func(i int, gen *blockgen.BlockGen) {}, m.PublishedSD())
 	require.NoError(t, err)
 	err = m.InsertChain(chainPack)
 	require.NoError(t, err)
@@ -1908,7 +2036,7 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 
 	// Generate block 1 with the deployment.
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1,
-		func(i int, gen *blockgen.BlockGen) { gen.AddTx(deployTx) })
+		func(i int, gen *blockgen.BlockGen) { gen.AddTx(deployTx) }, m.PublishedSD())
 	require.NoError(t, err)
 	err = m.InsertChain(chainPack)
 	require.NoError(t, err)
@@ -2039,7 +2167,7 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 	txpool := m.TxPoolGrpcServer
 
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1,
-		func(i int, gen *blockgen.BlockGen) {})
+		func(i int, gen *blockgen.BlockGen) {}, m.PublishedSD())
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainPack))
 
@@ -2141,7 +2269,7 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 	txpool := m.TxPoolGrpcServer
 
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1,
-		func(i int, gen *blockgen.BlockGen) {})
+		func(i int, gen *blockgen.BlockGen) {}, m.PublishedSD())
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainPack))
 
@@ -2267,7 +2395,7 @@ func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 		)
 		require.NoError(t, txErr)
 		gen.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 
 	require.Len(t, chainPack.Receipts[0], 1)
@@ -2330,7 +2458,7 @@ func TestInsertBlocksWithBatchedFCU(t *testing.T) {
 		)
 		require.NoError(t, err)
 		b.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	require.Len(t, chainPack.Blocks, totalBlocks)
 
@@ -2351,6 +2479,7 @@ func TestInsertBlocksWithBatchedFCU(t *testing.T) {
 		// After each batch's FCU, TxNums + execution must have advanced to
 		// the batch tip. The next batch's first block reads its parent's TD
 		// from this committed state.
+		m.ExecModule.WaitCommitsDrained()
 		require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 			lastTxNumBlock, _, err := rawdbv3.TxNums.Last(tx)
 			require.NoError(t, err)
@@ -2559,7 +2688,7 @@ func TestLargeBatchExecGeneratesChangesetsForReorgWindow(t *testing.T) {
 	chainLen := int(maxReorgDepth) + 14
 
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
-		transferGen(t, privKey, senderAddr, 1_000))
+		transferGen(t, privKey, senderAddr, 1_000), m.PublishedSD())
 	require.NoError(t, err)
 
 	insRes, err := insertBlocks(ctx, m.ExecModule, chainPack.Blocks)
@@ -2597,7 +2726,7 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 	divergeFrom := chainLen - reorgDepth
 
 	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
-		transferGen(t, privKey, senderAddr, 1_000))
+		transferGen(t, privKey, senderAddr, 1_000), m.PublishedSD())
 	require.NoError(t, err)
 	fork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
 		func(i int, b *blockgen.BlockGen) {
@@ -2627,6 +2756,7 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 		"shallow reorg of %d blocks after a %d-block batch must succeed; status=%s validationError=%q",
 		reorgDepth, chainLen, fcuRes.Status, fcuRes.ValidationError)
 
+	m.ExecModule.WaitCommitsDrained()
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		execProg, err := stages.GetStageProgress(tx, stages.Execution)
 		require.NoError(t, err)
@@ -2738,7 +2868,7 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 			)
 			require.NoError(t, txErr)
 			b.AddTx(tx)
-		})
+		}, m.PublishedSD())
 	require.NoError(t, err)
 
 	insRes, err := insertBlocksWithBAL(ctx, m.ExecModule, canonical.Blocks, canonical.BlockAccessLists)
@@ -2749,7 +2879,7 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status,
 		"batch with fold-ahead=%v must execute cleanly; validationError=%q", foldAhead, fcuRes.ValidationError)
 
-	m.ExecModule.WaitIdle(ctx)
+	m.ExecModule.WaitCommitsDrained()
 
 	res := balFoldResult{
 		windowCommitmentKeys: map[uint64][]string{},
@@ -2793,7 +2923,7 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 	back, err := updateForkChoice(ctx, m.ExecModule, canonical.Blocks[reorgBackTo-1].Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, back.Status, "reorg back must succeed")
-	m.ExecModule.WaitIdle(ctx)
+	m.ExecModule.WaitCommitsDrained()
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		execProg, err := stages.GetStageProgress(tx, stages.Execution)
 		require.NoError(t, err)
@@ -2806,7 +2936,7 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fwd.Status,
 		"forward re-exec after unwind must reach the correct root (fold-ahead=%v); validationError=%q",
 		foldAhead, fwd.ValidationError)
-	m.ExecModule.WaitIdle(ctx)
+	m.ExecModule.WaitCommitsDrained()
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		execProg, err := stages.GetStageProgress(tx, stages.Execution)
 		require.NoError(t, err)
@@ -2815,6 +2945,135 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 		return nil
 	}))
 	return res
+}
+
+// TestBALFoldAheadFiresOnTipValidateChain pins the goal of the changeset-ownership
+// refactor: a single chain-tip newPayload (ValidateChain) must fold its commitment
+// from the BAL. It fails today because ownsChangeset forces the tip onto the
+// incremental path; it passes once the changeset is produced result-locally by the
+// commitment calculator and the ownsChangeset fold gate is removed.
+func TestBALFoldAheadFiresOnTipValidateChain(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	const chainLen = 6
+	ctx := t.Context()
+	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	m := execmoduletester.New(t,
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.AllProtocolChanges,
+			Alloc:  types.GenesisAlloc{senderAddr: {Balance: big.NewInt(1 * common.Ether)}},
+		}),
+		execmoduletester.WithExperimentalBAL(),
+		execmoduletester.WithAlwaysGenerateChangesets(false),
+	)
+	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
+		func(i int, b *blockgen.BlockGen) {
+			tx, txErr := types.SignTx(
+				types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(10_000_000_000), nil),
+				*types.LatestSignerForChainID(nil), privKey,
+			)
+			require.NoError(t, txErr)
+			b.AddTx(tx)
+		}, m.PublishedSD())
+	require.NoError(t, err)
+
+	// Commit all but the tip so the tip is a single-block newPayload whose parent is
+	// already committed — the fold baseline comes from the prior cycle.
+	for i := range chainLen - 1 {
+		_, err := insertBlocksWithBAL(ctx, m.ExecModule, canonical.Blocks[i:i+1], canonical.BlockAccessLists[i:i+1])
+		require.NoError(t, err)
+		_, err = validateChain(ctx, m.ExecModule, canonical.Blocks[i].Header())
+		require.NoError(t, err)
+		_, err = updateForkChoice(ctx, m.ExecModule, canonical.Blocks[i].Header())
+		require.NoError(t, err)
+	}
+	m.ExecModule.WaitCommitsDrained()
+
+	tip := canonical.TopBlock
+	tipBAL := canonical.BlockAccessLists[chainLen-1]
+	// The tip payload must carry a BAL — that is the precondition that lets its
+	// commitment be folded in parallel with execution instead of computed
+	// incrementally from the per-tx result stream.
+	require.NotEmpty(t, tipBAL, "tip newPayload must carry a BAL")
+	_, err = insertBlocksWithBAL(ctx, m.ExecModule, []*types.Block{tip}, [][]byte{tipBAL})
+	require.NoError(t, err)
+
+	stagedsync.ResetFoldsAheadForTest()
+	vr, err := validateChain(ctx, m.ExecModule, tip.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus)
+
+	// With a BAL present, the tip's commitment is folded from it (in parallel with
+	// exec) rather than computed on the incremental path.
+	require.Positive(t, stagedsync.FoldsAheadPerformedForTest(),
+		"tip newPayload (ValidateChain) must fold its commitment from the BAL")
+}
+
+// TestBALFoldTipStorageClearValidateChain folds a single Amsterdam block whose tx
+// CLEARS a genesis-preset storage slot (SSTORE existing non-zero slot → 0) on an
+// account that also receives value (balance change). This is the storage-delete /
+// subtree-collapse case that a non-zero write does not exercise, and it is what
+// exposed a wrong folded root: the fold runs ahead of exec, so its as-of reader
+// returned pre-block state (slot still present) during the collapse. Mirrors the
+// EEST blockchain_test_from_state_test shape (one block on genesis).
+func TestBALFoldTipStorageClearValidateChain(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	contractAddr := common.HexToAddress("0x00000000000000000000000000000000c0de5501")
+	otherAddr := common.HexToAddress("0x00000000000000000000000000000000c0de5502")
+	m := execmoduletester.New(t,
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.AllProtocolChanges,
+			Alloc: types.GenesisAlloc{
+				senderAddr: {Balance: big.NewInt(1 * common.Ether)},
+				// Pre-set slot 0, then have the tx SSTORE(0,0) to CLEAR it (and send
+				// value, so the account leaf recomputes against the collapsed storage).
+				contractAddr: {
+					Balance: big.NewInt(0),
+					Code:    []byte{0x60, 0x00, 0x60, 0x00, 0x55, 0x00}, // SSTORE(0,0); STOP
+					Storage: map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(3))},
+				},
+				// A second storage-bearing account so the account trie has siblings.
+				otherAddr: {
+					Balance: big.NewInt(1),
+					Storage: map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(7))},
+				},
+			},
+		}),
+		execmoduletester.WithExperimentalBAL(),
+		execmoduletester.WithAlwaysGenerateChangesets(false),
+	)
+	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1,
+		func(i int, b *blockgen.BlockGen) {
+			tx, txErr := types.SignTx(
+				types.NewTransaction(0, contractAddr, uint256.NewInt(1_000), 100000, uint256.NewInt(10_000_000_000), nil),
+				*types.LatestSignerForChainID(nil), privKey,
+			)
+			require.NoError(t, txErr)
+			b.AddTx(tx)
+		}, m.PublishedSD())
+	require.NoError(t, err)
+
+	require.NotEmpty(t, canonical.BlockAccessLists[0], "block must carry a BAL")
+	stagedsync.ResetFoldsAheadForTest()
+	// Insert + FCU in one step (no intervening ValidateChain), matching the EEST
+	// blockchain-test path: the fold runs during the FCU's execution and a wrong
+	// folded root surfaces as a BadBlock here.
+	require.NoError(t, m.InsertChain(canonical))
+	require.Positive(t, stagedsync.FoldsAheadPerformedForTest(), "block must fold from its BAL")
 }
 
 // A forkchoice head at height 0 that is not the genesis (e.g. a block carrying a

@@ -708,6 +708,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.stateDiffClient = direct.NewStateDiffClientDirect(backend.kvRPC)
 
+	// SD-wrapper state cache, shared by the txpool and the embedded
+	// rpcdaemon. Both read account state from the authoritative in-flight
+	// SharedDomains rather than an async-notification-fed cache that can
+	// diverge from it during a background commit (gate item 2). execModule
+	// is wired later by NewExecModule; until then Cache.View falls back to
+	// the published SD via SetPublishedSD.
+	execmoduleCache := &execmodule.Cache{}
+	execmoduleCache.SetPublishedSD(backend.notifications.Events.LatestSD)
+
 	var txnProvider txnprovider.TxnProvider
 	var blobGetter txpool.BlobGetter
 	if config.TxPool.Disable {
@@ -724,7 +733,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			ctx,
 			config.TxPool,
 			backend.chainDB,
-			kvcache.NewLatestBatchCache(),
+			execmoduleCache,
 			sentries,
 			backend.stateDiffClient,
 			blockBuilderNotifyNewTxns,
@@ -739,8 +748,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		blobGetter = backend.txPool
 	}
 
-	execmoduleCache := &execmodule.Cache{}
-	execmoduleCache.SetPublishedSD(backend.notifications.Events.LatestSD)
 	httpRpcCfg := stack.Config().Http
 	httpRpcCfg.StateCache.LocalCache = execmoduleCache
 	ethRpcClient, txPoolRpcClient, miningRpcClient, rpcDaemonStateCache, rpcFilters := rpcdaemoncli.EmbeddedServices(
@@ -836,7 +843,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		txnProvider,
 		backend.miningSealingQuit,
 		latestBlockBuiltStore,
-		backend.notifications.Events.LatestSD,
 		logger,
 	)
 	backend.pendingBlocks = blkBuilder.PendingBlockCh()

@@ -609,7 +609,10 @@ func ReadBlockAccessListBytes(db kv.Getter, hash common.Hash, number uint64) ([]
 	return data, nil
 }
 
-// WriteBlockAccessListBytes stores the RLP-encoded block access list sidecar for a block.
+// WriteBlockAccessListBytes stores the RLP-encoded block access list sidecar for
+// a block. This is secondary storage (serving, backfill, unwind); the primary
+// carry into execution is Block.BlockAccessList(), written via the block overlay
+// in InsertBlocks and flushed at commit.
 func WriteBlockAccessListBytes(db kv.Putter, hash common.Hash, number uint64, data []byte) error {
 	if err := db.Put(kv.BlockAccessList, dbutils.BlockBodyKey(number, hash), data); err != nil {
 		return fmt.Errorf("failed to store block access list: %w", err)
@@ -807,6 +810,13 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 		return nil
 	}
 	block := types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals)
+	// Carry the BAL sidecar (secondary storage) so a block reconstructed from the
+	// DB carries its BAL like its header/body. Only Amsterdam+ blocks have one.
+	if header.BlockAccessListHash != nil {
+		if bal, err := ReadBlockAccessListBytes(tx, hash, number); err == nil && len(bal) > 0 {
+			block.SetBlockAccessList(bal)
+		}
+	}
 	return block
 }
 

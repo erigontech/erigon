@@ -88,7 +88,7 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 			return 0, err
 		}
 	default:
-		blockNum, err = rpchelper.GetLatestExecutedBlockNumber(tx)
+		blockNum, err = rpchelper.GetLatestExecutedBlockNumber(overlayTx)
 		if err != nil {
 			return 0, err
 		}

@@ -31,7 +31,7 @@ import (
 func TestOverlayGetBeginEnd(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := &OverlayAPIImpl{BaseAPI: newBaseApiForTest(m)}
-	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	tx, err := m.OverlayDB().BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 

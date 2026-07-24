@@ -35,7 +35,7 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 	}
 	assertions := require.New(t)
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 	ctx := context.Background()
 
 	a, err := api.GetTransactionByBlockNumberAndIndex(ctx, 10_000, 1)
@@ -80,7 +80,7 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 func TestNotFoundMustReturnError(t *testing.T) {
 	assertions := require.New(t)
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 	ctx := context.Background()
 
 	a, err := api.GetBalance(ctx, common.Address{}, bnhPtr(rpc.BlockNumberOrHashWithNumber(10_000)))

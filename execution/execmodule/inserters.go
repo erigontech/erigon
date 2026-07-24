@@ -54,15 +54,14 @@ func (e *ExecModule) flushBlockOverlayToDB(ctx context.Context, sd *execctx.Shar
 }
 
 func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock) (ExecutionStatus, error) {
-	// Serialize behind any in-flight exec-module op, blocking rather than failing fast with Busy.
-	start := time.Now()
-	// Timed across the whole call so the metric includes semaphore wait.
-	defer insertBlocksDuration.ObserveDuration(start)
-	if err := e.semaphore.Acquire(ctx, 1); err != nil {
-		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: semaphore acquire: %w", err)
+	defer insertBlocksDuration.ObserveDuration(time.Now())
+	// Serialize behind any in-flight exec-module op, blocking rather than
+	// failing fast with Busy (callers and tests rely on the block), while
+	// staying in the foreground-worker model (enterForeground for the worker).
+	if err := e.fgAcquire(ctx); err != nil {
+		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: fg acquire: %w", err)
 	}
-	defer e.semaphore.Release(1)
-	e.logger.Debug("ethereumExecutionModule.InsertBlocks: semaphore acquired", "wait", time.Since(start))
+	defer e.fgRelease()
 	e.forkValidator.ClearWithUnwind()
 	frozenBlocks := e.blockReader.FrozenBlocks()
 
@@ -85,12 +84,21 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 			}
 			e.logger.Info("ethereumExecutionModule.InsertBlocks: state ahead of blocks, proceeding with catch-up", "err", err)
 		}
+		// Chain to the newest in-flight commit generation so
+		// the parent-TD read below sees a previous FCU's not-yet-committed
+		// block data instead of a stale DB.
+		if sd != nil {
+			sd.SetReadCoordinator(e.beginCoordinatedRo)
+			if parent := e.latestGen(); parent != nil {
+				sd.SetParent(parent)
+			}
+		}
 		e.lock.Lock()
 		e.currentContext = sd
 		e.lock.Unlock()
 	}
 	if sd.BlockOverlay() == nil {
-		if err := sd.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+		if err := sd.InitBlockOverlay(e.overlayBaseFor(roTx), roTx.Debug().Dirs().Tmp); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: %w", err)
 		}
 	} else {

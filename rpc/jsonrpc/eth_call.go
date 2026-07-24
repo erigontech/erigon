@@ -472,6 +472,9 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	if err != nil {
 		return nil, err
 	}
+	if header == nil {
+		return nil, fmt.Errorf("header not found for block %d", blockNrOrHash.BlockNumber.Uint64())
+	}
 
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
@@ -480,7 +483,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
 
-	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
+	latestBlock, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(roTx))
 	if err != nil {
 		return nil, err
 	}
@@ -501,6 +504,19 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		sdCtx.SetHistoryStateReader(roTx, lastTxnInBlock)
 		if _, _, err := domains.SeekCommitment(context.Background(), roTx); err != nil {
 			return nil, err
+		}
+	} else if p, ok := tx.(interface {
+		PublishedSharedDomains() *execctx.SharedDomains
+	}); ok {
+		// Requested block is the tip. Under background commit its commitment
+		// still lives in the published SharedDomains, so chain the fresh domains
+		// to it and seek commitment through the chain to build the proof against
+		// the in-flight trie root.
+		if psd := p.PublishedSharedDomains(); psd != nil {
+			domains.SetParent(psd)
+			if _, _, err := domains.SeekCommitment(context.Background(), roTx); err != nil {
+				return nil, err
+			}
 		}
 	}
 

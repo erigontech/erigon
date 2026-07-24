@@ -73,7 +73,7 @@ func newTestBackendN(tb testing.TB, n int) *execmoduletester.ExecModuleTester {
 			}
 			b.AddTx(tx)
 		}
-	})
+	}, m.PublishedSD())
 	require.NoError(tb, err)
 	require.NoError(tb, m.InsertChain(ch))
 	return m

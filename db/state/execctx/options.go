@@ -26,6 +26,15 @@ type sharedDomainOptions struct {
 // SharedDomainOption configures NewSharedDomains.
 type SharedDomainOption func(*sharedDomainOptions)
 
+// WithoutSharedBranchCache detaches this SharedDomains from the aggregator-scope
+// commitment BranchCache. Use for speculative, discarded computations (e.g. the
+// block builder) that run concurrently with the live node: sharing the cache
+// would both race the node's writers and pollute it with speculative branches.
+// Reads fall through to sd.mem / the parent chain / MDBX instead.
+func WithoutSharedBranchCache() SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.useSharedBranchCache = false }
+}
+
 // WithTrieConfig replaces the trie configuration wholesale; the caller owns Variant.
 func WithTrieConfig(cfg commitment.TrieConfig) SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.trieCfg = cfg }
@@ -34,11 +43,6 @@ func WithTrieConfig(cfg commitment.TrieConfig) SharedDomainOption {
 // WithoutDeferredBranchUpdates disables deferred branch updates (read-only / one-shot domains).
 func WithoutDeferredBranchUpdates() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.trieCfg.DeferBranchUpdates = false }
-}
-
-// WithoutSharedBranchCache keeps commitment reads within the transaction snapshot.
-func WithoutSharedBranchCache() SharedDomainOption {
-	return func(o *sharedDomainOptions) { o.useSharedBranchCache = false }
 }
 
 // WithSequentialCommitment forces the sequential HexPatriciaHashed trie regardless

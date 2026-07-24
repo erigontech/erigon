@@ -121,8 +121,8 @@ func TestTraceBlockByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
-	ethApi := newEthApiForTest(baseApi, m.DB, nil, nil)
-	api := NewPrivateDebugAPI(baseApi, m.DB, nil, 0, false)
+	ethApi := newEthApiForTest(baseApi, m.OverlayDB(), nil, nil)
+	api := NewPrivateDebugAPI(baseApi, m.OverlayDB(), nil, 0, false)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -172,8 +172,8 @@ func TestTraceBlockByNumber(t *testing.T) {
 
 func TestTraceBlockByHash(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	ethApi := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	ethApi := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.OverlayDB(), nil, 0, false)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -290,7 +290,7 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 
 func TestTraceTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.OverlayDB(), nil, 0, false)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -319,7 +319,7 @@ func TestTraceTransaction(t *testing.T) {
 
 func TestTraceTransactionNotFound(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.OverlayDB(), nil, 0, false)
 
 	var buf bytes.Buffer
 	s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -332,7 +332,7 @@ func TestTraceTransactionNotFound(t *testing.T) {
 // the "result" field when the stream is untouched, producing {error:...} without result:null.
 func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.OverlayDB(), nil, 0, false)
 
 	newStream := func() (*bytes.Buffer, jsonstream.Stream) {
 		var buf bytes.Buffer
@@ -349,7 +349,7 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 
 	t.Run("TraceBlockByHash_genesis", func(t *testing.T) {
 		var genesisHash common.Hash
-		require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		require.NoError(t, m.OverlayDB().View(m.Ctx, func(tx kv.Tx) error {
 			genesisHash, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
 			return nil
 		}))
@@ -416,7 +416,7 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 }
 
 func (c *baseFeeTestChain) debugAPI() *DebugAPIImpl {
-	return NewPrivateDebugAPI(newBaseApiForTest(c.m), c.m.DB, nil, 0, false)
+	return NewPrivateDebugAPI(newBaseApiForTest(c.m), c.m.OverlayDB(), nil, 0, false)
 }
 
 // callDebugTraceCall invokes debug_traceCall with the given args and
@@ -516,8 +516,8 @@ func TestTxResultFieldStreamLazy(t *testing.T) {
 // before any write (inner.Written stays false): each tx object has "error" but no "result" field.
 func TestTraceBlockErrorBeforeWrite(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
-	ethApi := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.OverlayDB(), nil, 0, false)
+	ethApi := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 
 	tx, err := ethApi.GetTransactionByHash(m.Ctx, common.HexToHash(debugTraceTransactionTests[0].txHash))
 	require.NoError(t, err)
@@ -591,7 +591,7 @@ func TestTraceBlockErrorAfterWrite(t *testing.T) {
 
 func TestTraceTransactionNoRefund(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.OverlayDB(), nil, 0, false)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -621,11 +621,11 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 
 func TestStorageRangeAt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.OverlayDB(), nil, 0, false)
 	t.Run("invalid addr", func(t *testing.T) {
 		var block4 *types.Block
 		var err error
-		err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		err = m.OverlayDB().View(m.Ctx, func(tx kv.Tx) error {
 			block4, err = m.BlockReader.BlockByNumber(m.Ctx, tx, 4)
 			return err
 		})
@@ -638,7 +638,7 @@ func TestStorageRangeAt(t *testing.T) {
 	})
 	t.Run("block 4, addr 1", func(t *testing.T) {
 		var block4 *types.Block
-		err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		err := m.OverlayDB().View(m.Ctx, func(tx kv.Tx) error {
 			block4, _ = m.BlockReader.BlockByNumber(m.Ctx, tx, 4)
 			return nil
 		})
@@ -659,7 +659,7 @@ func TestStorageRangeAt(t *testing.T) {
 	})
 	t.Run("block latest, addr 1", func(t *testing.T) {
 		var latestBlock *types.Block
-		err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
+		err := m.OverlayDB().View(m.Ctx, func(tx kv.Tx) (err error) {
 			latestBlock, err = m.BlockReader.CurrentBlock(tx)
 			return err
 		})
@@ -715,10 +715,10 @@ func TestStorageRangeAt(t *testing.T) {
 
 func TestStorageRangeAtGethCompat(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, true) // gethCompatibility=true
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.OverlayDB(), nil, 0, true) // gethCompatibility=true
 	t.Run("block latest, addr 1", func(t *testing.T) {
 		var latestBlock *types.Block
-		err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
+		err := m.OverlayDB().View(m.Ctx, func(tx kv.Tx) (err error) {
 			latestBlock, err = m.BlockReader.CurrentBlock(tx)
 			return err
 		})
@@ -781,7 +781,7 @@ func TestStorageRangeAtGethCompat(t *testing.T) {
 
 func TestAccountRange(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.OverlayDB(), nil, 0, false)
 
 	t.Run("valid account", func(t *testing.T) {
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
@@ -880,7 +880,7 @@ func TestAccountRange(t *testing.T) {
 
 func TestGetModifiedAccountsByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.OverlayDB(), nil, 0, false)
 
 	t.Run("correct input", func(t *testing.T) {
 		n, n2 := rpc.BlockNumber(1), rpc.BlockNumber(2)
@@ -956,7 +956,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 		}
 	}
 	t.Run("descend", func(t *testing.T) {
-		tx, err := m.DB.BeginTemporalRo(m.Ctx)
+		tx, err := m.OverlayDB().BeginTemporalRo(m.Ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
 
@@ -968,7 +968,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 		checkIter(t, expectTxNums, txNumsIter)
 	})
 	t.Run("ascend", func(t *testing.T) {
-		tx, err := m.DB.BeginTemporalRo(m.Ctx)
+		tx, err := m.OverlayDB().BeginTemporalRo(m.Ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
 
@@ -980,7 +980,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 		checkIter(t, expectTxNums, txNumsIter)
 	})
 	t.Run("ascend limit", func(t *testing.T) {
-		tx, err := m.DB.BeginTemporalRo(m.Ctx)
+		tx, err := m.OverlayDB().BeginTemporalRo(m.Ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
 
@@ -995,10 +995,10 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 
 func TestAccountAt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.OverlayDB(), nil, 0, false)
 
 	var blockHash0, blockHash1, blockHash3, blockHash10, blockHashNonExistent common.Hash
-	_ = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+	_ = m.OverlayDB().View(m.Ctx, func(tx kv.Tx) error {
 		blockHash0, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
 		blockHash1, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
 		blockHash3, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 3)
@@ -1058,7 +1058,7 @@ func TestAccountAt(t *testing.T) {
 
 func TestGetBadBlocks(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 5000000, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.OverlayDB(), nil, 5000000, false)
 	ctx := context.Background()
 
 	require := require.New(t)
@@ -1113,7 +1113,7 @@ func TestGetBadBlocks(t *testing.T) {
 	tx.Commit()
 
 	// Reset the global bad block cache so it reads only from this test's DB
-	tx2, err := m.DB.BeginRo(ctx)
+	tx2, err := m.OverlayDB().BeginRo(ctx)
 	require.NoError(err)
 	defer tx2.Rollback()
 	require.NoError(rawdb.ResetBadBlockCache(tx2, 100))
@@ -1131,7 +1131,7 @@ func TestGetBadBlocks(t *testing.T) {
 
 func TestGetRawTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 5000000, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.OverlayDB(), nil, 5000000, false)
 	ctx := context.Background()
 
 	require := require.New(t)
@@ -1148,7 +1148,7 @@ func TestGetRawTransaction(t *testing.T) {
 	}
 	var testedOnce = false
 	for i := range number {
-		tx, err := m.DB.BeginRo(ctx)
+		tx, err := m.OverlayDB().BeginRo(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
 		block, err := api._blockReader.BlockByNumber(ctx, tx, i)
@@ -1172,11 +1172,11 @@ func TestGetRawTransaction(t *testing.T) {
 
 func TestGetRawReceipts(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 5000000, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.OverlayDB(), nil, 5000000, false)
 	ctx := context.Background()
 
 	require := require.New(t)
-	tx, err := m.DB.BeginTemporalRo(ctx)
+	tx, err := m.OverlayDB().BeginTemporalRo(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
 	number := *rawdb.ReadCurrentBlockNumber(tx)
@@ -1213,7 +1213,7 @@ func TestExecutionWitness(t *testing.T) {
 	})
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.OverlayDB(), nil, 0, false)
 	ctx := context.Background()
 
 	// Write the DB flag so that debug_executionWitness accepts the request.
@@ -1224,7 +1224,7 @@ func TestExecutionWitness(t *testing.T) {
 
 	// Get the latest block number
 	var latestBlockNum uint64
-	err = m.DB.View(ctx, func(tx kv.Tx) error {
+	err = m.OverlayDB().View(ctx, func(tx kv.Tx) error {
 		latestBlockNum, _ = stages.GetStageProgress(tx, stages.Execution)
 		return nil
 	})
@@ -1266,7 +1266,7 @@ func TestExecutionWitness(t *testing.T) {
 
 	t.Run("by block hash", func(t *testing.T) {
 		var blockHash common.Hash
-		err := m.DB.View(ctx, func(tx kv.Tx) error {
+		err := m.OverlayDB().View(ctx, func(tx kv.Tx) error {
 			blockHash, _, _ = m.BlockReader.CanonicalHash(ctx, tx, 1)
 			return nil
 		})
@@ -1363,7 +1363,7 @@ func TestSetHead(t *testing.T) {
 	logger := log.New()
 
 	// Determine the canonical head of the test chain.
-	roTx, err := m.DB.BeginRo(ctx)
+	roTx, err := m.OverlayDB().BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
 	head, err := rpchelper.GetLatestBlockNumber(roTx)
@@ -1376,7 +1376,7 @@ func TestSetHead(t *testing.T) {
 		backendServer := privateapi.NewEthBackendServer(ctx, mock, m.DB, m.Notifications, m.BlockReader, nil, logger, builder.NewLatestBlockBuiltStore(), nil)
 		backendClient := direct.NewEthBackendClientDirect(backendServer)
 		backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
-		return NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, backend, 0, false)
+		return NewPrivateDebugAPI(newBaseApiForTest(m), m.OverlayDB(), backend, 0, false)
 	}
 
 	// Rewinding one block below the current head is the simplest valid rewind.
@@ -1454,7 +1454,7 @@ func TestSetHeadCanonicalCleanup(t *testing.T) {
 	ctx := m.Ctx
 
 	// Snapshot canonical state before the unwind.
-	roTx, err := m.DB.BeginRo(ctx)
+	roTx, err := m.OverlayDB().BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
 	head, err := rpchelper.GetLatestBlockNumber(roTx)
@@ -1483,7 +1483,7 @@ func TestSetHeadCanonicalCleanup(t *testing.T) {
 	require.NoError(t, err)
 
 	// --- Verify DB state after unwind ---
-	roTx, err = m.DB.BeginRo(ctx)
+	roTx, err = m.OverlayDB().BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
@@ -1524,7 +1524,7 @@ func TestSetHeadCanonicalCleanup(t *testing.T) {
 		"UpdateForkChoice back to original head should succeed after SetHead")
 
 	// Verify the chain is back at the original head.
-	roTx, err = m.DB.BeginRo(ctx)
+	roTx, err = m.OverlayDB().BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
 

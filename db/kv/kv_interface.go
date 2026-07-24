@@ -580,6 +580,10 @@ type TemporalMemBatch interface {
 	ClearRam()
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
 	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte) (cont bool, err error)) error
+	RangeAsOf(ctx context.Context, domain Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int, roTx Tx) (stream.KV, error)
+	HistoryRange(ctx context.Context, domain Domain, fromTs, toTs int, asc order.By, limit int, roTx Tx) (stream.KV, error)
+	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, roTx Tx) (stream.U64, error)
+	HistorySeek(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
 	HasPrefix(domain Domain, prefix []byte, roTx Tx) ([]byte, []byte, bool, error)
 	HasPrefixInRAM(domain Domain, prefix []byte) bool
 	SizeEstimate() uint64
@@ -588,7 +592,6 @@ type TemporalMemBatch interface {
 	DiscardWrites(domain Domain)
 	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
 	GetAsOf(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
-	HistorySeek(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
 	SetInMemHistoryReads(v bool)
 	InMemHistoryReads() bool
 }

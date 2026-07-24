@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -88,6 +89,14 @@ type commitmentCalculator struct {
 	// At block boundary, the accumulated state is flushed to updates.
 	// Values are lazy-loaded from the domain on first touch via asOfReader.
 	state *calcState
+
+	// csPending buffers the current owned block's per-tx writes (new values); at
+	// settled compute time they are replayed to reconstruct the account/storage/code
+	// changeset result-locally with prevs resolved. csBuilderBlock is the block
+	// being buffered.
+	csPending      []csWrite
+	csBuilderBlock uint64
+	prevReader     *asOfPrevReader
 
 	// asOfReader is shared between calcState (lazy-load) and compute
 	// methods (fold/unfold sibling reads). Its txNum is updated at each
@@ -230,6 +239,7 @@ func newCommitmentCalculator(
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0}
 
 	return &commitmentCalculator{
+		prevReader:           &asOfPrevReader{sd: doms, roTx: roTx},
 		doms:                 doms,
 		db:                   db,
 		chainConfig:          chainConfig,
@@ -337,6 +347,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		if !r.writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
 			cc.state.ApplyWrites(r.writes, r.rules.IsAmsterdam)
+			cc.bufferChangesetWrites(r)
 		}
 
 		// A folded-ahead block already emitted its interior step checkpoints from
@@ -397,6 +408,12 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				cc.shadowCrossCheck(ctx, r)
 			} else {
 				cc.state.ResetBlockFlags()
+				// A folded owned block recorded its root + commitment branch deltas
+				// ahead of the tx-result stream; fill its account/storage/code diffs
+				// now that the block's writes are buffered.
+				if cc.ownsChangeset(r.BlockNum) {
+					cc.finalizeFoldedChangeset(r.BlockNum, r.BlockHash)
+				}
 			}
 		case cc.perBlockCompute(r.BlockNum):
 			if cc.lastComputedBlock == 0 && r.isPartial {
@@ -485,16 +502,17 @@ func (cc *commitmentCalculator) foldGateOpen(n uint64) bool {
 // gate is open, and folding it is safe. Folding overlaps the execution of
 // block n — the parallel-commitment win. Idempotent (foldedAhead guard).
 //
-// Two safety restrictions, both preserving the well-tested incremental path:
-//   - Only pre-window blocks (!ownsChangeset) fold. A block that owns a
-//     changeset computes incrementally at its own boundary so its per-block
-//     branch deltas are captured; folding it ahead would race the exec loop's
-//     changeset-accumulator install. Pre-window folds run under computeIsolated
-//     (nil accumulator), so nothing leaks into a later window block's changeset.
-//   - Fold only contiguously from the batch's first block: n's baseline is read
-//     from the commitment domain, which only a prior fold (or the prior cycle,
-//     for the first block) advanced. A missing-BAL block accumulates without
-//     advancing the domain, so folding across it would read a stale trie.
+// Safety restriction preserving the well-tested path: fold only contiguously from
+// the batch's first block. n's baseline is read from the commitment domain, which
+// only a prior fold (or the prior cycle, for the first block) advanced. A
+// missing-BAL block accumulates without advancing the domain, so folding across it
+// would read a stale trie.
+//
+// Owned (window/tip) blocks fold too: the calculator is the sole changeset
+// producer (result-local, no shared accumulator), so a fold no longer races an
+// exec-side accumulator install. A folded owned block records its commitment
+// branch deltas at fold time; its account/storage/code diffs are filled at the
+// block boundary by finalizeFoldedChangeset once the tx-result stream is complete.
 func (cc *commitmentCalculator) maybeFoldAhead(ctx context.Context, n uint64) {
 	pb, ok := cc.pending[n]
 	if !ok || pb.mode != calcModeBALDriven || cc.foldedAhead[n] {
@@ -505,9 +523,6 @@ func (cc *commitmentCalculator) maybeFoldAhead(ctx context.Context, n uint64) {
 	// (an orphan → wrong root on restart). Read the signal context, never the
 	// compute ctx — compute must still finish blocks up to M.
 	if sc, stopping := stopCauseOf(cc.signalCtx); stopping && n > sc.block {
-		return
-	}
-	if cc.ownsChangeset(n) {
 		return
 	}
 	if !cc.foldGateOpen(n) {
@@ -613,6 +628,11 @@ func (cc *commitmentCalculator) foldBALToRoot(ctx context.Context, req *blockReq
 		balUpdates.SetMode(commitment.ModeUpdate)
 	}
 	balState.FlushToUpdates(balUpdates)
+	// Overlay the fold's post-block state onto the reader for the commitment
+	// compute (set only now, so balState's own lazy-loads above read the pre-block
+	// baseline). This makes reader-sourced trie reads reflect POST-block state,
+	// matching the incremental path and fixing wrong roots on storage clears.
+	reader.postState = balState
 	return cc.computeRootFromUpdates(ctx, t, balUpdates, reader)
 }
 
@@ -855,30 +875,13 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 	}
 }
 
-// computeWithBlockAccumulator runs ComputeCommitment with the changeset
-// accumulator switched to block N's saved changeset (looked up by hash) so
-// that any branch writes during compute (mid-process inline flushes from
-// `pendingPrefixes` collisions, plus the [state] write at end via
-// encodeAndStoreCommitmentState) land in block N's CS rather than whatever
-// the exec loop has installed as current.
-//
-// IMPORTANT: hash-aware lookup is mandatory here. pastChangesAccumulator
-// can hold multiple changesets per block number after a fork-bounce
-// (canonical block 1 + forks[i] block 1 with different hashes), and a
-// number-only GetChangesetByBlockNum returns the first match in
-// non-deterministic map iteration order. That non-determinism caused the
-// calculator's [state] write for canonical block 1 to land in the fork's
-// block 1 CS during the TestBlockchainHeaderchainReorgConsistency
-// reproducer, leaving canonical block 1's CS without [state] and producing
-// off-by-one wrong-trie-root chains on the next iteration's re-execution.
-//
-// If block N's CS hasn't been saved yet it falls through to the live
-// accumulator, which — because the lookup is under changesetMu — is still N's
-// own (the apply loop can't rotate it while the lock is held).
-//
-// Also annotates the pending deferred update (set inside ComputeCommitment
-// when defer mode is on) with the block's hash, so the next call's
-// FlushPendingUpdates uses the same hash-aware routing.
+// computeWithBlockAccumulator computes an owned block's commitment against its
+// own result-local changeset. The block's changeset must be looked up by hash,
+// not number: after a fork-bounce pastChangesAccumulator holds multiple
+// changesets per block number, and a number-only lookup could route this block's
+// branch writes into a sibling fork's changeset — producing wrong-trie-root
+// chains on the next re-execution. It also stamps the pending deferred update
+// with the block hash so the next call's FlushPendingUpdates routes the same way.
 func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context, t commitTarget) ([]byte, error) {
 	defer func() {
 		// Stamp the pending update (if any was set during ComputeCommitment)
@@ -890,29 +893,55 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 		}
 	}()
 
-	// Look up cs AND compute under changesetMu: reading cs before the lock races
-	// the apply loop's SavePastChangesetAccumulator + accumulator rotation, which
-	// would route this block's [state] write into the next block's changeset. The
-	// lock is required even on the cs==nil path — the internal FlushPendingUpdates
-	// mutates the same global accumulator pointer.
+	// Reuse the block's saved changeset across its multiple computes so a fold's
+	// commitment branch deltas (Diffs[3], recorded ahead of the tx-result stream)
+	// accumulate with the step-edge and block-end computes instead of being lost;
+	// account/storage/code diffs (0..2) are filled once the buffered writes are
+	// ready (later via finalizeFoldedChangeset for a folded block). The swap and
+	// save run under changesetMu — the swap mutates the global accumulator pointer
+	// that the deferred branch flush and end-of-compute marker also touch,
+	// serializing against the apply goroutine; the *Locked variants avoid
+	// re-acquiring the mutex.
 	cc.doms.LockChangesetAccumulator()
 	defer cc.doms.UnlockChangesetAccumulator()
 	cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
 	if cs == nil {
-		return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
+		cs = &changeset.StateChangeSet{}
 	}
-	// LOAD-BEARING swap under the outer lock (already taken above). The
-	// swap below mutates the global current-accumulator pointer; the
-	// deferred branch writes from block N-1 (flushed inside
-	// ComputeCommitmentLocked → FlushPendingUpdatesLocked) AND the [state]
-	// marker write at end of compute also touch that same global pointer
-	// and the per-domain diff fields. Holding changesetMu through all of
-	// it serializes against the apply goroutine's DomainPut/DomainDel.
-	//
-	// Inside the lock we must use the *Locked variants — the public
-	// counterparts re-acquire the same Mutex and would self-deadlock.
+	if localAcc := cc.buildResultLocalChangeset(t.blockNum); localAcc != nil {
+		cs.Diffs[kv.AccountsDomain] = localAcc.Diffs[kv.AccountsDomain]
+		cs.Diffs[kv.StorageDomain] = localAcc.Diffs[kv.StorageDomain]
+		cs.Diffs[kv.CodeDomain] = localAcc.Diffs[kv.CodeDomain]
+	}
 	defer cc.doms.SwapChangesetAccumulatorLocked(cs)()
-	return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
+	rh, err := cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
+	if err != nil {
+		return nil, err
+	}
+	cc.doms.SavePastChangesetAccumulator(t.blockHash, t.blockNum, cs)
+	return rh, nil
+}
+
+// finalizeFoldedChangeset fills a folded owned block's account/storage/code diffs
+// (0..2) into its saved changeset at the block boundary — when the buffered per-tx
+// writes are complete — preserving the commitment branch deltas (Diffs[3]) the fold
+// already recorded. A fold computes the root (and Diffs[3]) ahead of the tx-result
+// stream, so 0..2 cannot be built at fold time; this closes that gap.
+func (cc *commitmentCalculator) finalizeFoldedChangeset(blockNum uint64, blockHash common.Hash) {
+	localAcc := cc.buildResultLocalChangeset(blockNum)
+	if localAcc == nil {
+		return
+	}
+	cc.doms.LockChangesetAccumulator()
+	defer cc.doms.UnlockChangesetAccumulator()
+	cs := cc.doms.GetChangesetByHash(blockNum, blockHash)
+	if cs == nil {
+		cs = &changeset.StateChangeSet{}
+	}
+	cs.Diffs[kv.AccountsDomain] = localAcc.Diffs[kv.AccountsDomain]
+	cs.Diffs[kv.StorageDomain] = localAcc.Diffs[kv.StorageDomain]
+	cs.Diffs[kv.CodeDomain] = localAcc.Diffs[kv.CodeDomain]
+	cc.doms.SavePastChangesetAccumulator(blockHash, blockNum, cs)
 }
 
 // asOfStateReader reads account/storage/code at a specific txNum via
@@ -928,6 +957,11 @@ type asOfStateReader struct {
 	// a concurrent trie-warmup worker doesn't write the shared main accumulator
 	// (a race) or take the global metrics lock. Nil on the main reader.
 	workerCtx context.Context
+	// postState, when set, overlays this block's post-values for the account/storage
+	// keys it changed, so the fold's commitment reads reflect POST-block state. The
+	// fold runs ahead of execution, so a plain as-of read returns pre-block state,
+	// which produces a wrong root when a cleared slot forces a storage collapse.
+	postState *calcState
 }
 
 func (r *asOfStateReader) WithHistory() bool { return false }
@@ -945,6 +979,17 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 			enc, step, err = r.sd.GetLatest(d, r.roTx, plainKey)
 		}
 	} else {
+		// Post-block overlay: for a key the block changed, return its post-block
+		// value so the fold (running ahead of exec) sees the same state the
+		// incremental path reads after exec's flush.
+		if r.postState != nil {
+			if v, hit := r.postState.postValue(d, plainKey); hit {
+				if stepSize > 0 {
+					step = kv.Step(r.txNum / stepSize)
+				}
+				return v, step, nil
+			}
+		}
 		// Account/storage/code: use GetAsOf to avoid reading future state.
 		// Check sd.mem first (in-memory data from current batch), then
 		// fall through to DB files for data not in the batch.
@@ -971,7 +1016,7 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 }
 
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum}
+	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, postState: r.postState}
 }
 
 // CloneForWorker meters the worker's CommitmentDomain reads into the per-worker
@@ -979,7 +1024,7 @@ func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
 // reader during block assembly, where trie-warmup runs concurrently — so it
 // must not write the shared main accumulator).
 func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx}
+	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx, postState: r.postState}
 }
 
 // asOfStorageEnumerator lists the persisted storage slots under an address via

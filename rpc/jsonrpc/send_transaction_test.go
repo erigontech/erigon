@@ -39,7 +39,7 @@ import (
 func oneBlockStep(m *execmoduletester.ExecModuleTester, require *require.Assertions) {
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1 /*number of blocks:*/, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-	})
+	}, m.PublishedSD())
 	require.NoError(err)
 	err = m.InsertChain(chain)
 	require.NoError(err)
@@ -55,7 +55,7 @@ func TestSendRawTransaction(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpoolproto.NewTxpoolClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, m.Log, nil)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, txPool, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), txPool, nil)
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
 	require.NoError(err)
@@ -96,7 +96,7 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpoolproto.NewTxpoolClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, m.Log, nil)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, txPool, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), txPool, nil)
 	// Enable unprotected txs flag
 	api.AllowUnprotectedTxs = true
 	buf := bytes.NewBuffer(nil)

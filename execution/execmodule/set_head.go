@@ -53,10 +53,10 @@ func getLatestBlockNumber(tx kv.Tx) (uint64, error) {
 func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	acquireCtx, acquireCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer acquireCancel()
-	if err := e.semaphore.Acquire(acquireCtx, 1); err != nil {
+	if err := e.fgAcquire(acquireCtx); err != nil {
 		return fmt.Errorf("execution module is busy: %w", err)
 	}
-	defer e.semaphore.Release(1)
+	defer e.fgRelease()
 
 	tx, err := e.db.BeginTemporalRw(ctx)
 	if err != nil {
@@ -161,6 +161,16 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	// after the commit succeeds, so a failed commit can't leave it poisoned.
 	if err := sd.Commit(ctx, tx); err != nil {
 		return fmt.Errorf("failed to commit shared domains: %w", err)
+	}
+
+	// The direct unwind above superseded any in-flight background-commit
+	// generations and the current context (they describe the unwound-away tip),
+	// so drop them and clear the published overlay. Readers and the next FCU
+	// then rebuild from the raw DB this unwind just committed.
+	e.closeAllGens()
+	e.closeModuleContext()
+	if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil {
+		dispatcher.PublishOverlay(nil)
 	}
 
 	e.logger.Info("SetHead: successfully rewound chain", "targetBlock", targetBlock, "previousHead", currentHead)

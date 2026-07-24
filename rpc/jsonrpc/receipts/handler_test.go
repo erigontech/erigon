@@ -356,7 +356,7 @@ func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.B
 		execmoduletester.WithKey(testKey),
 	)
 	if blocks > 0 {
-		chain, _ := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator)
+		chain, _ := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator, m.PublishedSD())
 		err := m.InsertChain(chain)
 		require.NoError(t, err)
 	}

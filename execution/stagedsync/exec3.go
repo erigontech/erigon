@@ -555,19 +555,25 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			defer close(blockRequests)
 		}
 
-		// Open a thread-local roTx for block metadata and StepsInFiles.
-		// Must NOT use the stageloop's rwTx — it's thread-bound.
-		execRoTx, err := te.cfg.db.BeginTemporalRo(ctx)
+		// Open a thread-local base roTx for block metadata and StepsInFiles,
+		// coordinated with the background-commit generation set so a generation
+		// dropped from the parent chain as committed is visible here (never
+		// neither). Must NOT use the stageloop's rwTx — it's thread-bound.
+		execRoTx, err := te.doms.BeginCoordinatedRo(ctx, te.cfg.db)
 		if err != nil {
 			return fmt.Errorf("executeBlocks: open roTx: %w", err)
 		}
 		defer execRoTx.Rollback()
 
-		var blockTx kv.Tx
-		if overlay := te.doms.BlockOverlay(); overlay != nil {
-			blockTx = overlay.NewReadView(execRoTx)
-		} else {
-			blockTx = execRoTx
+		// Resolve block metadata memory-first: walk the block-overlay chain
+		// (local overlay + parent generations' overlays), falling through to the
+		// goroutine-local execRoTx for the underlying DB read only on a miss —
+		// mirroring how domain-state reads chain sd.mem → parents → tx. The parent
+		// chain must be layered ahead of the tx so an uncommitted ancestor
+		// generation's block data stays visible until its commit lands.
+		var blockTx kv.Tx = execRoTx
+		if v := te.doms.BlockOverlayTemporalTx(execRoTx); v != nil {
+			blockTx = v
 		}
 
 		// Use the max of all state domain steps (not just commitment) to
@@ -612,12 +618,19 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			go warmTxsHashes(b)
 
 			var dbBAL types.BlockAccessList
-			// Read BAL through blockTx (overlay or execRoTx) — do NOT open
-			// a separate db.View() as it can deadlock with the stageloop's
-			// RW transaction when BlockOverlay is active.
-			data, err := rawdb.ReadBlockAccessListBytes(blockTx, b.Hash(), blockNum)
-			if err != nil {
-				return err
+			// Prefer the BAL carried on the block (the payload) — the newPayload /
+			// backward-sync paths attach it, so no read is needed. Fall back to the
+			// BAL sidecar in the DB (via blockTx: overlay or execRoTx) for blocks
+			// that don't carry it (snapshot / forward-sync); do NOT open a separate
+			// db.View() as it can deadlock with the stageloop's RW transaction when
+			// BlockOverlay is active. ProcessBAL still computes+validates the BAL
+			// from the write-set as the ultimate fallback.
+			data := b.BlockAccessList()
+			if len(data) == 0 {
+				data, err = rawdb.ReadBlockAccessListBytes(blockTx, b.Hash(), blockNum)
+				if err != nil {
+					return err
+				}
 			}
 			if len(data) > 0 && !dbg.IgnoreBAL {
 				dbBAL, err = types.DecodeBlockAccessListBytes(data)

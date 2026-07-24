@@ -7,6 +7,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -427,6 +428,54 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 			updates.TouchPlainKeyDirect(string(composite), &u)
 		}
 	}
+}
+
+// postValue returns the account/storage value AFTER this block's changes, in the
+// serialized form the domain would store, for a key the block modified. ok is
+// false for keys the block did not change (the caller should read the baseline).
+// It gives the fold's commitment reader a post-block-consistent view: the fold
+// runs ahead of execution, so a plain as-of read would return the pre-block value,
+// which yields a wrong root when a cleared slot forces a storage-subtree collapse.
+func (cs *calcState) postValue(d kv.Domain, plainKey []byte) (enc []byte, ok bool) {
+	switch d {
+	case kv.AccountsDomain:
+		if len(plainKey) != 20 {
+			return nil, false
+		}
+		acc, exists := cs.accounts[accounts.InternAddress(common.BytesToAddress(plainKey))]
+		if !exists || !acc.dirty {
+			return nil, false
+		}
+		if acc.Deleted && acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash {
+			return nil, true // removed → absent
+		}
+		a := accounts.NewAccount()
+		a.Balance = acc.Balance
+		a.Nonce = acc.Nonce
+		a.Incarnation = acc.Incarnation
+		a.CodeHash = accounts.InternCodeHash(common.Hash(acc.CodeHash))
+		return accounts.SerialiseV3(&a), true
+	case kv.StorageDomain:
+		if len(plainKey) != 20+32 {
+			return nil, false
+		}
+		addr := accounts.InternAddress(common.BytesToAddress(plainKey[:20]))
+		dirty := cs.storageDirty[addr]
+		if dirty == nil {
+			return nil, false
+		}
+		slot := accounts.InternKey(common.BytesToHash(plainKey[20:]))
+		if !dirty[slot] {
+			return nil, false
+		}
+		v := cs.storageState[addr][slot]
+		vb := v.Bytes()
+		if len(vb) == 0 {
+			return nil, true // cleared → absent
+		}
+		return vb, true
+	}
+	return nil, false
 }
 
 // ResetBlockFlags clears the per-block dirty flags while keeping the

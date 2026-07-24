@@ -17,6 +17,7 @@
 package state
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/binary"
@@ -24,6 +25,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 
@@ -31,6 +33,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -68,6 +72,13 @@ type TemporalMemBatch struct {
 
 	domainWriters [kv.DomainLen]*DomainBufferedWriter
 	iiWriters     []*InvertedIndexBufferedWriter
+	// iiMem is the queryable local copy of standalone inverted-index writes
+	// (index -> key -> ascending txNums). The ii writers are write-only etl
+	// buffers, so without this IndexRange can't answer in-flight queries for
+	// standalone indices (traces, logs) the way it can for domain-backed ones
+	// via the domain history. Populated by IndexAdd only when inMemHistoryReads
+	// is set — the same gate under which the domain history above is retained.
+	iiMem map[kv.InvertedIdx]map[string][]uint64
 
 	pastDomainWriters [kv.DomainLen][]*DomainBufferedWriter
 	pastIIWriters     []*InvertedIndexBufferedWriter
@@ -104,6 +115,7 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 		storage:           btree2.NewMap[string, []dataWithTxNum](128),
 		metrics:           ioMetrics.(*kvmetrics.DomainMetrics),
 		inMemHistoryReads: true,
+		iiMem:             map[kv.InvertedIdx]map[string][]uint64{},
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
@@ -345,8 +357,319 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 	return unwoundLatest(domain, keyS)
 }
 
-func (sd *TemporalMemBatch) HistorySeek(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return sd.GetAsOf(domain, key, ts)
+// RangeAsOf returns domain values over [fromKey, toKey) as of txNum ts, merging
+// the in-memory (not-yet-committed) history with committed DB+files. In-memory
+// values take precedence per key; keys deleted or not yet created as of ts are
+// omitted. Only used by the RPC test harness to read the in-flight tip.
+func (sd *TemporalMemBatch) RangeAsOf(ctx context.Context, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
+	committed, err := AggTx(roTx).RangeAsOf(ctx, roTx, domain, fromKey, toKey, ts, asc, limit)
+	if err != nil {
+		return nil, err
+	}
+	if !sd.inMemHistoryReads {
+		return committed, nil
+	}
+	mem := sd.memRangeAsOf(domain, fromKey, toKey, ts, asc)
+	if len(mem) == 0 {
+		return committed, nil
+	}
+	merged := stream.UnionKV(&memKVIter{pairs: mem}, committed, -1)
+	return &liveLimitKV{inner: merged, limit: limit}, nil
+}
+
+// memRangeAsOf collects the in-memory latest history for domain over
+// [fromKey, toKey), resolved as of ts. Tombstones (empty value) are kept so
+// they mask committed rows; keys with no in-memory entry at or before ts are
+// omitted so committed state supplies them.
+func (sd *TemporalMemBatch) memRangeAsOf(domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By) []memKVPair {
+	sd.latestStateLock.RLock()
+	defer sd.latestStateLock.RUnlock()
+	inRange := func(k string) bool {
+		if fromKey != nil && k < string(fromKey) {
+			return false
+		}
+		if toKey != nil && k >= string(toKey) {
+			return false
+		}
+		return true
+	}
+	var pairs []memKVPair
+	collect := func(k string, entries []dataWithTxNum) {
+		if !inRange(k) {
+			return
+		}
+		if v, ok := asOfEntry(entries, ts); ok {
+			pairs = append(pairs, memKVPair{k: []byte(k), v: v})
+		}
+	}
+	if domain == kv.StorageDomain {
+		sd.storage.Scan(func(k string, entries []dataWithTxNum) bool {
+			collect(k, entries)
+			return true
+		})
+	} else {
+		for k, entries := range sd.domains[domain] {
+			collect(k, entries)
+		}
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if asc == order.Asc {
+			return bytes.Compare(pairs[i].k, pairs[j].k) < 0
+		}
+		return bytes.Compare(pairs[i].k, pairs[j].k) > 0
+	})
+	return pairs
+}
+
+// HistorySeek returns the in-memory value in effect at ts: the value of the last
+// recorded change with txNum < ts. ok is true when the key has in-memory history;
+// a ts at or before the first change yields the empty creation-event marker
+// (non-nil empty, true). Returns (nil, false) only when the key has no in-memory
+// history, so the caller can fall back to committed history.
+func (sd *TemporalMemBatch) HistorySeek(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
+	if !sd.inMemHistoryReads {
+		return nil, false, nil
+	}
+	sd.latestStateLock.RLock()
+	defer sd.latestStateLock.RUnlock()
+	ks := common.ToStringZeroCopy(key)
+	var entries []dataWithTxNum
+	if domain == kv.StorageDomain {
+		entries, _ = sd.storage.Get(ks)
+	} else {
+		entries = sd.domains[domain][ks]
+	}
+	for _, e := range slices.Backward(entries) {
+		if e.txNum < ts {
+			return e.data, true, nil
+		}
+	}
+	if len(entries) > 0 {
+		return []byte{}, true, nil
+	}
+	return nil, false, nil
+}
+
+// asOfEntry returns the value in effect at ts from a txNum-ascending history
+// (the entry with the greatest txNum < ts). ok is false when ts precedes the
+// first entry, i.e. the key did not exist yet.
+func asOfEntry(entries []dataWithTxNum, ts uint64) ([]byte, bool) {
+	for i := range entries {
+		if ts > entries[i].txNum && (i == len(entries)-1 || ts <= entries[i+1].txNum) {
+			return entries[i].data, true
+		}
+	}
+	return nil, false
+}
+
+// HistoryRange returns one entry per key changed in [fromTs, toTs), each with
+// its value just before the range, merging in-memory history with committed.
+// In-memory keys take precedence. Only used by the RPC test harness.
+func (sd *TemporalMemBatch) HistoryRange(ctx context.Context, domain kv.Domain, fromTs, toTs int, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
+	committed, err := AggTx(roTx).HistoryRange(domain, fromTs, toTs, asc, limit, roTx)
+	if err != nil {
+		return nil, err
+	}
+	if !sd.inMemHistoryReads {
+		return committed, nil
+	}
+	mem := sd.memHistoryRange(domain, fromTs, toTs, asc, roTx)
+	if len(mem) == 0 {
+		return committed, nil
+	}
+	return stream.UnionKV(&memKVIter{pairs: mem}, committed, limit), nil
+}
+
+// memHistoryRange collects keys changed in [fromTs, toTs) from the in-memory
+// history, each paired with its pre-range value (in-memory value just before
+// fromTs, falling back to committed state when the key predates its in-memory
+// history). Empty pre-values are kept — they mean "did not exist before".
+func (sd *TemporalMemBatch) memHistoryRange(domain kv.Domain, fromTs, toTs int, asc order.By, roTx kv.Tx) []memKVPair {
+	sd.latestStateLock.RLock()
+	defer sd.latestStateLock.RUnlock()
+	from, to := uint64(fromTs), uint64(toTs)
+	var pairs []memKVPair
+	collect := func(k string, entries []dataWithTxNum) {
+		changed := false
+		for i := range entries {
+			if entries[i].txNum >= from && entries[i].txNum < to {
+				changed = true
+				break
+			}
+		}
+		if !changed {
+			return
+		}
+		pre, ok := asOfEntry(entries, from)
+		if !ok {
+			pre, _, _ = AggTx(roTx).GetAsOf(domain, common.ToBytesZeroCopy(k), from, roTx)
+		}
+		pairs = append(pairs, memKVPair{k: []byte(k), v: pre})
+	}
+	if domain == kv.StorageDomain {
+		sd.storage.Scan(func(k string, entries []dataWithTxNum) bool {
+			collect(k, entries)
+			return true
+		})
+	} else {
+		for k, entries := range sd.domains[domain] {
+			collect(k, entries)
+		}
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if asc == order.Asc {
+			return bytes.Compare(pairs[i].k, pairs[j].k) < 0
+		}
+		return bytes.Compare(pairs[i].k, pairs[j].k) > 0
+	})
+	return pairs
+}
+
+// IndexRange returns the txNums at which key k appears in [fromTs, toTs),
+// merging the in-flight in-memory index with the committed inverted index.
+// Domain-backed indices derive their in-memory txNums from the domain history;
+// standalone indices (logs, traces) read them from the local ii collection.
+func (sd *TemporalMemBatch) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
+	committed, err := AggTx(roTx).IndexRange(name, k, fromTs, toTs, asc, limit, roTx)
+	if err != nil {
+		return nil, err
+	}
+	if !sd.inMemHistoryReads {
+		return committed, nil
+	}
+	at := AggTx(roTx)
+	var memTs []uint64
+	found := false
+	for i := range at.d {
+		if at.d[i].d.HistoryIdx == name {
+			memTs = sd.memIndexTxNums(kv.Domain(i), k, fromTs, toTs, asc)
+			found = true
+			break
+		}
+	}
+	if !found {
+		memTs = sd.memIndexTxNumsII(name, k, fromTs, toTs, asc)
+	}
+	if len(memTs) == 0 {
+		return committed, nil
+	}
+	return stream.Union[uint64](stream.Array(memTs), committed, asc, limit), nil
+}
+
+// memIndexTxNumsII reads the local standalone inverted-index collection for the
+// txNums of key k in [fromTs, toTs), deduplicated and ordered per asc.
+func (sd *TemporalMemBatch) memIndexTxNumsII(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By) []uint64 {
+	sd.latestStateLock.RLock()
+	defer sd.latestStateLock.RUnlock()
+	txNums := sd.iiMem[name][common.ToStringZeroCopy(k)]
+	out := make([]uint64, 0, len(txNums))
+	for _, tn := range txNums {
+		if !idxTxNumInRange(tn, fromTs, toTs, asc) {
+			continue
+		}
+		if len(out) > 0 && out[len(out)-1] == tn {
+			continue // ascending append order makes duplicates consecutive
+		}
+		out = append(out, tn)
+	}
+	if asc == order.Desc {
+		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+			out[i], out[j] = out[j], out[i]
+		}
+	}
+	return out
+}
+
+func (sd *TemporalMemBatch) memIndexTxNums(domain kv.Domain, k []byte, fromTs, toTs int, asc order.By) []uint64 {
+	sd.latestStateLock.RLock()
+	defer sd.latestStateLock.RUnlock()
+	ks := common.ToStringZeroCopy(k)
+	var entries []dataWithTxNum
+	if domain == kv.StorageDomain {
+		entries, _ = sd.storage.Get(ks)
+	} else {
+		entries = sd.domains[domain][ks]
+	}
+	out := make([]uint64, 0, len(entries))
+	for i := range entries {
+		if tn := entries[i].txNum; idxTxNumInRange(tn, fromTs, toTs, asc) {
+			out = append(out, tn)
+		}
+	}
+	if asc == order.Desc {
+		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+			out[i], out[j] = out[j], out[i]
+		}
+	}
+	return out
+}
+
+// idxTxNumInRange applies the inverted-index range bounds: asc = [fromTs, toTs),
+// desc = (toTs, fromTs]. A negative bound is unbounded.
+func idxTxNumInRange(tn uint64, fromTs, toTs int, asc order.By) bool {
+	if asc == order.Asc {
+		return (fromTs < 0 || tn >= uint64(fromTs)) && (toTs < 0 || tn < uint64(toTs))
+	}
+	return (fromTs < 0 || tn <= uint64(fromTs)) && (toTs < 0 || tn > uint64(toTs))
+}
+
+type memKVPair struct{ k, v []byte }
+
+type memKVIter struct {
+	pairs []memKVPair
+	i     int
+}
+
+func (m *memKVIter) HasNext() bool { return m.i < len(m.pairs) }
+func (m *memKVIter) Close()        {}
+func (m *memKVIter) Next() ([]byte, []byte, error) {
+	p := m.pairs[m.i]
+	m.i++
+	return p.k, p.v, nil
+}
+
+// liveLimitKV drops tombstone (empty-value) rows from the merged stream and
+// stops after limit live rows (limit < 0 means unlimited).
+type liveLimitKV struct {
+	inner stream.KV
+	limit int
+	seen  int
+	k, v  []byte
+	ready bool
+	err   error
+}
+
+func (m *liveLimitKV) advance() {
+	if m.ready || m.err != nil {
+		return
+	}
+	if m.limit >= 0 && m.seen >= m.limit {
+		return
+	}
+	for m.inner.HasNext() {
+		k, v, err := m.inner.Next()
+		if err != nil {
+			m.err = err
+			return
+		}
+		if len(v) == 0 {
+			continue
+		}
+		m.k, m.v, m.ready = k, v, true
+		return
+	}
+}
+
+func (m *liveLimitKV) HasNext() bool { m.advance(); return m.ready || m.err != nil }
+func (m *liveLimitKV) Close()        { m.inner.Close() }
+func (m *liveLimitKV) Next() ([]byte, []byte, error) {
+	m.advance()
+	if m.err != nil {
+		return nil, nil, m.err
+	}
+	m.ready = false
+	m.seen++
+	return m.k, m.v, nil
 }
 
 func (sd *TemporalMemBatch) SizeEstimate() uint64 {
@@ -367,6 +690,7 @@ func (sd *TemporalMemBatch) ClearRam() {
 	}
 
 	sd.storage = btree2.NewMap[string, []dataWithTxNum](128)
+	sd.iiMem = map[kv.InvertedIdx]map[string][]uint64{}
 	sd.unwindToTxNum = 0
 	sd.unwindChangeset = nil
 	sd.unwindChangesetRaw = nil
@@ -595,6 +919,24 @@ func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLe
 			sd.storage.Set(e.key, e.kept)
 		}
 	}
+	for table, byKey := range sd.iiMem {
+		for k, txNums := range byKey {
+			kept := txNums[:0]
+			for _, tn := range txNums {
+				if tn <= unwindToTxNum {
+					kept = append(kept, tn)
+				}
+			}
+			if len(kept) == 0 {
+				delete(byKey, k)
+			} else {
+				byKey[k] = kept
+			}
+		}
+		if len(byKey) == 0 {
+			delete(sd.iiMem, table)
+		}
+	}
 
 	var unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
 	var unwindChangesetRaw *[kv.DomainLen][]kv.DomainEntryDiff
@@ -625,10 +967,27 @@ func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLe
 func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
 	for _, writer := range sd.iiWriters {
 		if writer.name == table {
+			if sd.inMemHistoryReads {
+				sd.iiMemAdd(table, key, txNum)
+			}
 			return writer.Add(key, txNum)
 		}
 	}
 	panic(fmt.Errorf("unknown index %s", table))
+}
+
+func (sd *TemporalMemBatch) iiMemAdd(table kv.InvertedIdx, key []byte, txNum uint64) {
+	sd.latestStateLock.Lock()
+	defer sd.latestStateLock.Unlock()
+	byKey := sd.iiMem[table]
+	if byKey == nil {
+		byKey = map[string][]uint64{}
+		sd.iiMem[table] = byKey
+	}
+	ks := string(key)
+	// IndexAdd is called in ascending txNum order during execution, so append
+	// keeps each key's txNum slice sorted.
+	byKey[ks] = append(byKey[ks], txNum)
 }
 
 func (sd *TemporalMemBatch) Close() {
