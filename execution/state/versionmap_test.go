@@ -1175,9 +1175,16 @@ func TestAbsentConclusionThenCreatorFlushAborts(t *testing.T) {
 		Val:         1,
 	})
 	vm.FlushVersionedWrites(ws, true, "")
-	require.PanicsWithValue(t, ErrDependency, func() {
-		_, _ = ibs.Exist(addr)
-	})
+	// The read-once fast path serves the repeat probe from the recorded read —
+	// consistent with the absence the EVM already consumed, never a silent
+	// adoption of the fresh cell — and commit-time validation catches the
+	// conflict and re-executes.
+	exists, err = ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+	io := NewVersionedIO(10)
+	io.RecordReads(Version{TxIndex: 9}, ibs.versionedReads)
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(9, io, validateEqualVersion, true, false, ""))
 }
 
 // A creator flush landing between a load's provisional nil record-probe and
@@ -1222,7 +1229,9 @@ func TestBALFedReaderSurvivesCreatorFlushMidLoad(t *testing.T) {
 		so, err := ibs.getStateObject(addr, true)
 		require.NoError(t, err)
 		require.NotNil(t, so)
-		require.EqualValues(t, 1, so.data.Nonce)
+		nonce, err := ibs.GetNonce(addr)
+		require.NoError(t, err)
+		require.EqualValues(t, 1, nonce)
 	})
 	tr, ok := ibs.versionedReads.GetAddress(addr)
 	require.True(t, ok)
@@ -1230,6 +1239,42 @@ func TestBALFedReaderSurvivesCreatorFlushMidLoad(t *testing.T) {
 	io := NewVersionedIO(10)
 	io.RecordReads(Version{TxIndex: 9, Incarnation: 0}, ibs.versionedReads)
 	require.Equal(t, VersionValid, vm.ValidateVersion(9, io, validateEqualVersion, true, false, ""))
+}
+
+// A cold account-field read resolves the account through readAccountInternal;
+// when that probe is served from the read set (the reconciled Address entry of
+// an earlier load), the field read must be recorded with the entry's
+// UNDERLYING source, not the synthetic ReadSetRead — validation rejects
+// tx-reads-sourced entries at MVReadResultNone, and since every re-execution
+// repeats the same flow, the tx livelocks into "too many validator-invalid
+// retries".
+func TestColdFieldReadAfterReconciledLoadValidates(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x15, 0x24})
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+	code := accounts.NewCode([]byte{0x60, 0x00, 0xf3})
+	reader := &codeReader{addr: addr, account: &accounts.Account{Nonce: 1, Balance: *uint256.NewInt(5), CodeHash: code.Hash}, code: code.Bytes}
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Release(false)
+	ibs.SetTxContext(1, 60)
+	ibs.SetVersion(0)
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+	ch, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, code.Hash, ch)
+	if tr, ok := ibs.versionedReads.GetCodeHash(addr); ok {
+		require.NotEqual(t, ReadSetRead, tr.Source)
+	}
+	io := NewVersionedIO(61)
+	io.RecordReads(Version{TxIndex: 60}, ibs.versionedReads)
+	require.Equal(t, VersionValid, vm.ValidateVersion(60, io, checkVersionEqual, true, false, ""))
 }
 
 // A DB-present account resolved after an AddressPath map-miss must reconcile
@@ -1246,7 +1291,9 @@ func TestGetVersionedAccount_ReconcilesDBLoadedRecordRead(t *testing.T) {
 	acc, _, _, err := ibs.getVersionedAccount(addr, true)
 	require.NoError(t, err)
 	require.NotNil(t, acc)
-	assert.Equal(t, *uint256.NewInt(700), acc.Balance)
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	assert.Equal(t, *uint256.NewInt(700), bal)
 	rd, ok := ibs.versionedReads.GetAddress(addr)
 	require.True(t, ok)
 	require.NotNil(t, rd.Val)
@@ -1345,7 +1392,9 @@ func TestGetStateObject_SelfDestructedButBALFunded_StaysAlive(t *testing.T) {
 	so, err := ibs.getStateObject(addr, true)
 	require.NoError(t, err)
 	require.NotNil(t, so)
-	assert.Equal(t, *uint256.NewInt(1000), so.data.Balance)
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	assert.Equal(t, *uint256.NewInt(1000), bal)
 }
 
 // Under EIP-161 a nil record read is equivalent to a dead one — a dead

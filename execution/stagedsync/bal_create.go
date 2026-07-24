@@ -103,6 +103,12 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isE
 // computed one under <dataDir>/bal for offline diffing.
 func reportBALMismatch(blockNum uint64, blockHash common.Hash, blockBal types.BlockAccessList, blockBalHash common.Hash, computedBlockBal types.BlockAccessList, dataDir string, logger log.Logger) {
 	logger.Error("BAL mismatch", "blockNum", blockNum, "blockHash", blockHash, "blockBalHash", blockBalHash, "computedBlockBalHash", computedBlockBal.Hash())
+	if dbg.Trace {
+		fmt.Printf("[BALTRACE] computed BAL block %d:\n%s\n", blockNum, computedBlockBal.DebugString())
+		if blockBal != nil {
+			fmt.Printf("[BALTRACE] stored/expected BAL block %d:\n%s\n", blockNum, blockBal.DebugString())
+		}
+	}
 	writeBALToFile(computedBlockBal, dataDir, fmt.Sprintf("computed_bal_%d.txt", blockNum), logger)
 	if blockBal != nil {
 		writeBALToFile(blockBal, dataDir, fmt.Sprintf("block_bal_%d.txt", blockNum), logger)

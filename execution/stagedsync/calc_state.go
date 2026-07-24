@@ -350,7 +350,7 @@ func (cs *calcState) LoadFromBALUpTo(bal types.BlockAccessList, maxTxIndex uint3
 
 	// EIP-161: a touched account whose merged block-end state is empty is
 	// removed from the trie. The BAL carries no deletion marker, so reconstruct
-	// it here, gated exactly as the incremental path (normalizeWriteSet).
+	// it here, gated exactly as the incremental path (Normalize).
 	for _, ac := range bal {
 		acc := cs.accounts[ac.Address]
 		if acc == nil || !acc.dirty || acc.Deleted {

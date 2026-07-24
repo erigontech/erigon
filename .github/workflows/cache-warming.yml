@@ -27,38 +27,36 @@ on:
       - performance-stable
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: write
+  pull-requests: read
+
 jobs:
   tests:
     uses: ./.github/workflows/test-all-erigon.yml
-    secrets: inherit
 
   race-tests:
     uses: ./.github/workflows/test-all-erigon-race.yml
-    secrets: inherit
 
   caplin:
     uses: ./.github/workflows/test-integration-caplin.yml
-    secrets: inherit
 
   lint:
     uses: ./.github/workflows/lint.yml
-    secrets: inherit
 
   bench:
     uses: ./.github/workflows/test-bench.yml
     with:
       cache-warming-only: true
-    secrets: inherit
 
   eest-spec:
     uses: ./.github/workflows/test-eest-spec.yml
     with:
       cache-warming-only: true
-    secrets: inherit
 
   repro:
     uses: ./.github/workflows/reproducible-build.yml
-    secrets: inherit
 
   sonar:
     uses: ./.github/workflows/sonar.yml

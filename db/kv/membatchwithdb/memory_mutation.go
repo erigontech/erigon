@@ -607,6 +607,14 @@ func (m *MemoryMutation) BlockFilesRoTx() *blocksnapshots.View {
 	return nil
 }
 
+func (m *MemoryMutation) ForceReopenUnderlyingFilesTx() {
+	p, ok := m.db.(kv.CanReopenUnderlyingFilesTx)
+	if !ok {
+		panic(fmt.Sprintf("snapshots stage requires a tx that can ForceReopenUnderlyingFilesTx, got %T", m.db))
+	}
+	p.ForceReopenUnderlyingFilesTx()
+}
+
 func (m *MemoryMutation) Count(bucket string) (uint64, error) {
 	panic("not implemented")
 }

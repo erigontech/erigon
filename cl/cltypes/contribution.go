@@ -25,8 +25,10 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-var _ ssz2.SizedObjectSSZ = (*ContributionAndProof)(nil)
-var _ ssz2.SizedObjectSSZ = (*Contribution)(nil)
+var (
+	_ ssz2.SizedObjectSSZ = (*ContributionAndProof)(nil)
+	_ ssz2.SizedObjectSSZ = (*Contribution)(nil)
+)
 
 /*
  * ContributionAndProof contains the index of the aggregator, the attestation

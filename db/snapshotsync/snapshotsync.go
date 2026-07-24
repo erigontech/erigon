@@ -374,7 +374,7 @@ func isReceiptsSegmentPruned(ctx context.Context, tx kv.RwTx, txNumsReader rawdb
 		return false
 	}
 	minStep := minTxNum / stepSize
-	return s.From < minStep
+	return s.To <= minStep // files storing data [from, to)
 }
 
 // unblackListFilesBySubstring - removes files from the blacklist that match any of the provided substrings.
@@ -436,6 +436,9 @@ func SyncSnapshots(
 			if err != nil {
 				return fmt.Errorf("error opening segments after to block filter deletion: %w", err)
 			}
+			// RetireFilesAbove + OpenSegments changed the on-disk file set; refresh the
+			// tx's pinned view so getMinimumBlocksToDownload below reads the new set.
+			tx.(kv.CanReopenUnderlyingFilesTx).ForceReopenUnderlyingFilesTx()
 		}
 
 		txNumsReader := blockReader.TxnumReader()

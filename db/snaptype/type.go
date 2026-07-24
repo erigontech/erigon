@@ -201,8 +201,7 @@ func (i Index) HasFile(info FileInfo, dirEntries []string, logger log.Logger) bo
 		return false
 	}
 
-	defer idx.Close()
-
+	idx.Close()
 	return true // idx.ModTime().After(segment.ModTime())
 }
 

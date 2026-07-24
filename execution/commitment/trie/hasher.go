@@ -32,12 +32,13 @@ import (
 )
 
 type hasher struct {
-	sha                  keccak.KeccakState
+	sha      keccak.KeccakState
+	bw       *ByteArrayWriter
+	callback func(common.Hash, Node)
+
 	valueNodesRlpEncoded bool
-	buffers              [1024 * 1024]byte
 	prefixBuf            [8]byte
-	bw                   *ByteArrayWriter
-	callback             func(common.Hash, Node)
+	buffers              [1024 * 1024]byte
 }
 
 const rlpPrefixLength = 4

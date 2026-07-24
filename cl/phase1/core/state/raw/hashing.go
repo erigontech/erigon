@@ -164,7 +164,6 @@ func (p *beaconStateHasher) run() {
 			case common.Hash:
 				p.b.updateLeaf(idx, obj)
 			}
-
 		})
 	}
 	wg.Wait()

@@ -161,6 +161,6 @@ func TestBlocksByRootHandler(t *testing.T) {
 		t.Fatal("Stream is not empty")
 	}
 
-	defer indiciesDB.Close()
-	defer tx.Rollback()
+	indiciesDB.Close()
+	tx.Rollback()
 }
