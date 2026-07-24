@@ -362,6 +362,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | debug_getModifiedAccountsByNumber          | Yes     |                                                       |
 | debug_getModifiedAccountsByHash            | Yes     |                                                       |
 | debug_getRawBlock                          | Yes     |                                                       |
+| debug_getRawBlockAccessList                | Yes     | Added in Amsterdam (EIP-7928)                         |
 | debug_getRawHeader                         | Yes     |                                                       |
 | debug_getRawReceipts                       | Yes     |                                                       |
 | debug_getRawTransaction                    | Yes     |                                                       |

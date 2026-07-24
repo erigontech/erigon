@@ -61,6 +61,8 @@ These flags cover the general behavior and configuration of the Erigon client.
 * `--trusted-setup-file value`: Absolute path to a `trusted_setup.json` file.
 * `--prune.include-receipts, --persist.receipts, --experiment.persist.receipts.v2`: Downloads and caches historical receipts. Without it, receipts and logs are re-derived on demand from state history, so the related RPC calls still work, just with higher latency.
   * Default: `false` (disabled) in every prune mode
+* `--keep.stored.chain.config`: Avoids overriding the chain configuration already stored in the database.
+  * Default: `false`
 
 ### Database and Caching
 
@@ -118,6 +120,8 @@ Flags for managing how old chain data is handled and stored. See [Snapshots Mana
   * Default: `false`
 * `--snap.chaintoml-url value` *(New in v3.5)*: Fetch the preverified `chain.toml` directly from this URL instead of the default R2/GitHub CDN. Precedence: the `ERIGON_REMOTE_PREVERIFIED` environment variable (path to a local override file) wins over this URL and the default CDN; a local `preverified.toml` in the datadir also takes precedence — delete it to re-fetch from the URL.
   * Default: `""` (uses the built-in CDN)
+* `--snap.download.to.block, --shadow.fork.block value`: Downloads snapshots only up to the given block number (exclusive). Intended for testing and shadow forks.
+  * Default: `0` (disabled — downloads all available snapshots)
 
 ### Transaction Pool (TxPool)
 
@@ -150,6 +154,9 @@ Options for configuring the [transaction pool](/fundamentals/modules/txpool).
   * Default: `15s`
 * `--txpool.gossip.disable`: Disables P2P gossip of transactions.
   * Default: `false`
+* `--txpool.queued.dormancy value`: Evicts queued transactions from senders with no on-chain state changes for at least this duration (e.g. `3h`, `2h30m`).
+  * Default: `3h0m0s`
+  * Set to `0` to disable dormancy-based eviction.
 
 ### Network and Peers
 
@@ -216,12 +223,16 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `8546`
 * `--ws.compression`: Enables compression over WebSocket.
   * Default: `true`
+* `--ws.max.connections value`: Maximum number of concurrent WebSocket connections.
+  * Default: `0` (unlimited)
 * `--rpc.batch.concurrency value`: Limits the number of goroutines for batch requests.
   * Default: `2`
 * `--rpc.max.concurrency value`: Maximum number of concurrent HTTP RPC requests (HTTP admission control).
   * Default: `0` (inherits value from `--db.read.concurrency`)
   * Set to `-1` to disable admission control (unlimited)
 * `--rpc.streaming.disable`: Disables JSON streaming for heavy endpoints.
+  * Default: `false`
+* `--state.stream.disable`: Disables streaming of state changes from the core to the RPC daemon.
   * Default: `false`
 * `--rpc.accessList value`: Specifies a granular API allowlist.
 * `--rpc.gascap value`: Sets a cap on gas usage for `eth_call`/`estimateGas`.
@@ -236,9 +247,15 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Applies to: `eth_getLogs`, `erigon_getLogs`, `erigon_getLatestLogs`
   * Set to `0` to remove the limit entirely (use with caution on large ranges).
   * Works in tandem with `--rpc.blockrange.limit`: both constraints apply independently — a query can be blocked by either limit.
+* `--rpc.logs.querylimit value`: Maximum number of alternative addresses or topics allowed per search position in the `eth_getLogs` filter criteria.
+  * Default: `1000`
+  * Applies to: `eth_getLogs`
+  * Set to `0` or a negative value for no limit.
 * `--rpc.returndata.limit value`: Sets the maximum return data size for `eth_call`.
   * Default: `100000`
 * `--rpc.allow-unprotected-txs`: Allows unprotected transactions via RPC.
+  * Default: `false`
+* `--rpc.gethcompat`: Enables Geth-compatible storage iteration order for `debug_storageRangeAt` (results sorted by keccak256 hash). Disabled by default for performance.
   * Default: `false`
 * `--rpc.txfeecap value`: Sets a cap on transaction fees in ether.
   * Default: `1`
@@ -250,6 +267,10 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `5m0s`
 * `--rpc.overlay.replayblocktimeout value`: The maximum time to wait to replay a single block.
   * Default: `10s`
+* `--rpc.txsync.defaulttimeout value`: The default timeout for `eth_sendRawTransactionSync` when the caller does not specify one.
+  * Default: `25s`
+* `--rpc.txsync.maxtimeout value`: The maximum timeout for `eth_sendRawTransactionSync`; larger requested timeouts are clamped to this value.
+  * Default: `1m0s`
 * `--rpc.subscription.filters.maxlogs value`: Maximum logs to store per subscription.
   * Default: `10000`
 * `--rpc.subscription.filters.maxheaders value`: Maximum block headers to store per subscription.
@@ -260,6 +281,9 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `0`
 * `--rpc.subscription.filters.maxtopics value`: Maximum topics per subscription to filter logs by.
   * Default: `0`
+* `--rpc.subscription.filters.timeout value`: Timeout before idle subscription filters are evicted.
+  * Default: `5m0s`
+  * Set to `0` to disable eviction.
 * `--http.timeouts.read value`: Maximum duration for reading a request.
   * Default: `30s`
 * `--http.timeouts.write value`: Maximum duration before timing out a response write.
@@ -345,6 +369,8 @@ Flags related to consensus mechanisms and network forks.
   * Default: `60`
 * `--proposer.disable`: Disables the PoS proposer.
   * Default: `false`
+* `--builder.maxblobs value`: Caps the number of blobs included in a locally built block.
+  * Default: unset — the protocol maximum applies. Setting it to `0` excludes blob transactions from built blocks entirely.
 * `--bor.heimdall value`: The URL of the Heimdall service.
   * Default: `http://localhost:1317`
 * `--bor.withoutheimdall`: Runs without the Heimdall service.
@@ -357,6 +383,8 @@ Flags related to consensus mechanisms and network forks.
   * Default: `false`
 * `--polygon.pos.ssf.block value`: Enables Polygon PoS Single Slot Finality from a specific block.
   * Default: `0`
+* `--polygon.wit-protocol`: Enables the WIT protocol (`wit/0`) for stateless witness data exchange. Primarily useful on Bor (Polygon) chains — the witness buffer is only populated there — and must be set explicitly.
+  * Default: `false`
 
 ### Sentry
 
@@ -466,6 +494,8 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `128`
 * `--caplin.enable-upnp`: Enables NAT porting for Caplin.
   * Default: `false`
+* `--caplin.local-discovery`: Also attempts to find peers over private IPs. May cause issues with some hosts (for example, Hetzner).
+  * Default: `false`
 * `--caplin.nat value`: NAT port mapping for Caplin P2P. Sets the external IP advertised in the discv5 ENR and libp2p multiaddrs while the socket binds to `--caplin.discovery.addr`. Required when running inside Docker or behind NAT. Accepted values: `""` (none), `"extip:1.2.3.4"`, `"stun"`, `"stun:<host>"`, `"upnp"`, `"pmp"`, `"pmp:192.168.0.1"`.
   * Default: `""` (no NAT mapping)
 * `--caplin.max-inbound-traffic-per-peer value`: The maximum inbound traffic per second per peer.
@@ -497,6 +527,12 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
 * `--caplin.custom-genesis value`: Sets a custom genesis for Caplin.
 * `--caplin.use-engine-api`: Uses the Engine API for internal Caplin.
   * Default: `false`
+* `--beacon.api.read.timeout value`: HTTP read timeout for the Beacon API server, in seconds.
+  * Default: `5`
+* `--beacon.api.write.timeout value`: HTTP write timeout for the Beacon API server, in seconds.
+  * Default: `31536000` (~1 year)
+* `--beacon.api.idle.timeout value`: HTTP idle (keep-alive) timeout for the Beacon API server, in seconds.
+  * Default: `25`
 
 ### Shutter Network Encrypted Transactions
 

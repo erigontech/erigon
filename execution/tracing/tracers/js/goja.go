@@ -502,7 +502,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			return nil
 		}
 		code = common.Copy(code)
-		codeHash := accounts.InternCodeHash(crypto.HashData(code))
+		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 		contractAddr := types.CreateAddress2(addr, common.HexToHash(salt), codeHash)
 		b := contractAddr[:]
 		res, err := t.toBuf(vm, b)

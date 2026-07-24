@@ -159,9 +159,10 @@ func TestNextKey(t *testing.T) {
 		"000000FF->00000100",
 		"FEFFFFFF->FF000000",
 	} {
-		parts := strings.Split(tc, "->")
-		input := decodeHex(parts[0])
-		expectedOutput := decodeHex(parts[1])
+		inputStr, expectedStr, ok := strings.Cut(tc, "->")
+		require.True(t, ok)
+		input := decodeHex(inputStr)
+		expectedOutput := decodeHex(expectedStr)
 		actualOutput, err := NextKey(input)
 		require.NoError(t, err)
 		assert.Equal(t, expectedOutput, actualOutput)
@@ -390,7 +391,9 @@ func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
 	var err error
 	valueMap := make(map[string][]byte)
 	valueMap["value"] = append(v, 0xAA)
-	k1 := append(k, 0xAA)
+	k1 := make([]byte, len(k)+1)
+	copy(k1, k)
+	k1[len(k)] = 0xAA
 	out, err := json.Marshal(valueMap)
 	if err != nil {
 		panic(err)
@@ -403,7 +406,9 @@ func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
 
 	valueMap = make(map[string][]byte)
 	valueMap["value"] = append(v, 0xBB)
-	k2 := append(k, 0xBB)
+	k2 := make([]byte, len(k)+1)
+	copy(k2, k)
+	k2[len(k)] = 0xBB
 	out, err = json.Marshal(valueMap)
 	if err != nil {
 		panic(err)

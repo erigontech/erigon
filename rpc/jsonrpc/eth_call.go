@@ -411,7 +411,7 @@ type StorageKeysInfo struct {
 	KeyLength int
 }
 
-// GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
+// GetProof implements eth_getProof; historical blocks are supported as far back as the commitment history allows.
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHashArg *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
 	blockNrOrHash := orLatest(blockNrOrHashArg)
 	if len(storageKeys) > maxGetProofKeys {
@@ -430,8 +430,6 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
-	} else if requestedBlockNr == 0 {
-		return nil, errors.New("block not found")
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, roTx, uint64(requestedBlockNr))
@@ -595,8 +593,8 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 
 		// prepare key path (keccak(address) | keccak(key))
-		addrHash := crypto.HashData(address[:])
-		keyHash := crypto.HashData(storageKey.Hash[:])
+		addrHash := crypto.Keccak256Hash(address[:])
+		keyHash := crypto.Keccak256Hash(storageKey.Hash[:])
 		fullKey := make([]byte, 0, 64)
 		fullKey = append(fullKey, addrHash[:]...)
 		fullKey = append(fullKey, keyHash[:]...)

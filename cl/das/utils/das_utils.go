@@ -24,9 +24,7 @@ type ColumnIndex = cltypes.ColumnIndex
 // RowIndex represents the index of a row in the matrix
 type RowIndex = cltypes.RowIndex
 
-var (
-	maxUint256 = new(uint256.Int).Sub(new(uint256.Int).Lsh(uint256.NewInt(1), 256), uint256.NewInt(1))
-)
+var maxUint256 = new(uint256.Int).Sub(new(uint256.Int).Lsh(uint256.NewInt(1), 256), uint256.NewInt(1))
 
 // GetCustodyGroups generates custody groups for a given node ID.
 // This function is re-entrant and thread-safe.

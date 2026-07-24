@@ -1,8 +1,9 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
-	"sort"
+	"slices"
 	"testing"
 	"time"
 
@@ -22,7 +23,7 @@ type preparedSplits struct {
 func newPreparedSplits(t testing.TB, factory TrieContextFactory) *preparedSplits {
 	t.Helper()
 	base := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
-	bctx, bclean := factory()
+	bctx, bclean := factory(context.Background())
 	base.ResetContext(bctx)
 	base.branchEncoder.setDeferUpdates(true)
 	base.SetLeaveDeferredForCaller(true)
@@ -37,7 +38,7 @@ func newPreparedSplits(t testing.TB, factory TrieContextFactory) *preparedSplits
 	for i := range 16 {
 		w := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
 		w.mountTo(base, i)
-		wctx, wclean := factory()
+		wctx, wclean := factory(context.Background())
 		w.ResetContext(wctx)
 		w.branchEncoder.setDeferUpdates(true)
 		w.SetLeaveDeferredForCaller(true)
@@ -117,14 +118,8 @@ func sortedTriples(pk [][]byte, upds []Update) []triple {
 	for i := range pk {
 		ts[i] = triple{hk: KeyToHexNibbleHash(pk[i]), pk: pk[i], upd: &upds[i]}
 	}
-	sort.Slice(ts, func(i, j int) bool {
-		a, b := ts[i].hk, ts[j].hk
-		for k := 0; k < len(a) && k < len(b); k++ {
-			if a[k] != b[k] {
-				return a[k] < b[k]
-			}
-		}
-		return len(a) < len(b)
+	slices.SortFunc(ts, func(a, b triple) int {
+		return bytes.Compare(a.hk, b.hk)
 	})
 	return ts
 }

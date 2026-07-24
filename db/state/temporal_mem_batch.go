@@ -17,13 +17,13 @@
 package state
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"maps"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 
@@ -256,7 +256,11 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 			}
 		}
 
-		return nil, 0, false
+		// kv.NoStepBound distinguishes "no in-flight unwind bounds this key"
+		// from a bound at step 0 (a delete-shape entry above whose keyStep is
+		// 0), so young chains — whose whole state lives in step 0 — still get
+		// the per-key signal.
+		return nil, kv.NoStepBound, false
 	}
 
 	keyS := common.ToStringZeroCopy(key)
@@ -280,7 +284,7 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 }
 
 func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	if !sd.inMemHistoryReads {
+	if !sd.inMemHistoryReads && domain != kv.ReceiptDomain {
 		return nil, false, errors.New("GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled")
 	}
 	sd.latestStateLock.RLock()
@@ -339,6 +343,10 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 		}
 	}
 	return unwoundLatest(domain, keyS)
+}
+
+func (sd *TemporalMemBatch) HistorySeek(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return sd.GetAsOf(domain, key, ts)
 }
 
 func (sd *TemporalMemBatch) SizeEstimate() uint64 {
@@ -540,27 +548,20 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 	return changeset.ReadDiffSet(tx, blockNumber, blockHash)
 }
 
+// Unwind drops [unwindToTxNum, ∞)
 func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
 
 	sd.unwindToTxNum = unwindToTxNum
 
-	// Drop overlay entries stamped with txNum > unwindToTxNum. Without this,
-	// getLatest returns entries written inside the unwound range because it
-	// picks dataWithTxNums[len-1] without consulting sd.unwindToTxNum — the
-	// unwindChangeset fallback below is only reachable on an overlay miss.
-	// Observed as post-Fusaka gas-used mismatches after forkchoice-driven
-	// unwinds (an SSTORE on a slot first-written inside the unwound range
-	// charges SSTORE_RESET instead of SSTORE_SET — a 17100 gas shortfall
-	// per slot). Keys whose slice empties out are removed so the
-	// unwindChangeset fallback can supply the pre-unwind answer.
 	pruneSlice := func(entries []dataWithTxNum) []dataWithTxNum {
 		kept := entries[:0]
 		for _, e := range entries {
-			if e.txNum <= unwindToTxNum {
-				kept = append(kept, e)
+			if e.txNum >= unwindToTxNum { // drop [unwindToTxNum, ∞)
+				continue
 			}
+			kept = append(kept, e)
 		}
 		return kept
 	}
@@ -762,8 +763,8 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 	if sd.unwindChangesetRaw != nil {
 		for domain := range sd.unwindChangesetRaw {
-			sort.Slice(sd.unwindChangesetRaw[domain], func(i, j int) bool {
-				return sd.unwindChangesetRaw[domain][i].Key < sd.unwindChangesetRaw[domain][j].Key
+			slices.SortFunc(sd.unwindChangesetRaw[domain], func(a, b kv.DomainEntryDiff) int {
+				return cmp.Compare(a.Key, b.Key)
 			})
 		}
 		if err := tx.(kv.TemporalRwTx).Unwind(ctx, sd.unwindToTxNum, sd.unwindChangesetRaw); err != nil {

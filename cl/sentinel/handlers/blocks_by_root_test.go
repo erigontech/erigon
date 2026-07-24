@@ -162,5 +162,5 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		t.Fatal("Stream is not empty")
 	}
 
-	defer indiciesDB.Close()
+	indiciesDB.Close()
 }

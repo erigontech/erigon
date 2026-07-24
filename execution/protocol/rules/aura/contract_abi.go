@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -92,7 +93,7 @@ func certifierAbi() abi.ABI     { return contracts.CertifierABI }
 func registrarAbi() abi.ABI     { return contracts.RegistrarABI }
 func withdrawalAbi() abi.ABI    { return contracts.WithdrawalABI }
 
-var serviceTransactionCheckerHashedKey, _ = common.HashData([]byte("service_transaction_checker"))
+var serviceTransactionCheckerHashedKey = crypto.Keccak256Hash([]byte("service_transaction_checker"))
 
 func getCertifier(registrar common.Address, syscall rules.SystemCall) *common.Address {
 	packed, err := registrarAbi().Pack("getAddress", serviceTransactionCheckerHashedKey, "A")

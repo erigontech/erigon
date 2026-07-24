@@ -749,7 +749,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 			require.NoError(t, err)
 
 			// Update account with real code hash
-			codeHash := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(code)))
+			codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 			acc := accounts.Account{
 				Nonce:       txNum,
 				Balance:     *uint256.NewInt(txNum * 1000),

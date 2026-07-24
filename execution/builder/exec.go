@@ -151,6 +151,13 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 	if ba.HasBAL() {
 		ibs.SetVersionMap(state.NewVersionMap(nil))
+		// Versioned assembly commits from the write-set (BalIO) below, not from a
+		// materialized stateObject, and reads cross-tx state from the versionMap
+		// (flushed per tx). Keep the stateObject cache out of it: a cached object
+		// left empty by the cell-authoritative balance path would be marked
+		// deleted at finalize and then wrongly shadow the account on the next tx's
+		// existence read (spurious re-create → lost balance).
+		ibs.SetNoMaterialize(true)
 	}
 
 	execCfg = execCfg.WithAuthor(accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase))
@@ -222,6 +229,49 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	}
 
 	blockHeight := block.NumberU64()
+
+	// When assembled in versioned (BAL) mode, FinalizeBlockExecution skipped the
+	// so.data CommitBlock; commit the accumulated per-phase write-sets to the
+	// domains via WriteSet.Normalize/Apply instead — the same path the parallel
+	// executor and block generation use. Each recorded phase (init/txs/finalize)
+	// is applied in order so the next phase's stateReader fallback sees it.
+	if ibs.IsVersioned() {
+		blockCtx := protocol.NewEVMBlockContext(current.Header, protocol.GetHashFn(current.Header, nil), cfg.engine, accounts.NilAddress, cfg.chainConfig)
+		blockRules := blockCtx.Rules(cfg.chainConfig)
+		var domainKeysErr error
+		domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
+			av := addr.Value()
+			const addrLen, hashLen = 20, 32
+			var keys []accounts.StorageKey
+			if iterErr := sd.IteratePrefix(kv.StorageDomain, av[:], tx, func(k, _ []byte) (bool, error) {
+				if len(k) >= addrLen+hashLen {
+					keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
+				}
+				return true, nil
+			}); iterErr != nil {
+				domainKeysErr = iterErr
+				return nil
+			}
+			return keys
+		}
+		emptyRemoval := blockHeight != 0 && cfg.chainConfig.IsEIP161Enabled(blockHeight)
+		isAura := cfg.chainConfig.Aura != nil
+		for i, ws := range ba.BalIO().Outputs() {
+			if ws == nil || ws.IsEmpty() {
+				continue
+			}
+			normalized, normErr := ws.Normalize(ibs.VersionMap(), i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, blockRules.IsAmsterdam)
+			if domainKeysErr != nil {
+				return fmt.Errorf("iterate storage prefix for block write normalization: %w", domainKeysErr)
+			}
+			if normErr != nil {
+				return fmt.Errorf("normalize block writes: %w", normErr)
+			}
+			if err := normalized.Apply(sd, tx, blockHeight, txNum, nil, blockRules, nil, false); err != nil {
+				return fmt.Errorf("apply versioned block writes: %w", err)
+			}
+		}
+	}
 
 	// Compute state root directly from the domain writes accumulated during
 	// block assembly. All state changes flow through CommitBlock in

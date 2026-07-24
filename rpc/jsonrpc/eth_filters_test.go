@@ -42,7 +42,7 @@ import (
 )
 
 func newBaseApiWithFiltersForTest(f *rpchelper.Filters, stateCache *kvcache.Coherent, m *execmoduletester.ExecModuleTester) *BaseAPI {
-	return NewBaseApi(f, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
+	return NewBaseApi(f, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 }
 
 func TestSubscriptionsRequireFiltersAndNotifier(t *testing.T) {
@@ -142,16 +142,15 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 	// make a lot of subscriptions
 	wg := sync.WaitGroup{}
 	for i := range 1000 {
-		wg.Add(1)
-		go func(idx int) {
+		idx := i
+		wg.Go(func() {
 			_, id, _ := ff.SubscribeLogs(32, crit, "")
 			defer func() {
 				time.Sleep(100 * time.Nanosecond)
 				ff.UnsubscribeLogs(id)
-				wg.Done()
 			}()
 			ids[idx] = id
-		}(i)
+		})
 	}
 	wg.Wait()
 }

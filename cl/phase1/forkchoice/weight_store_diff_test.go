@@ -21,7 +21,7 @@ import (
 	"context"
 	_ "embed"
 	"math"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -255,7 +255,7 @@ func TestGloasWeightTreeDeltaMatchesFullScan(t *testing.T) {
 		roots = append(roots, r)
 	}
 	require.GreaterOrEqual(t, len(roots), 2)
-	sort.Slice(roots, func(i, j int) bool { return bytes.Compare(roots[i][:], roots[j][:]) < 0 })
+	slices.SortFunc(roots, func(a, b common.Hash) int { return bytes.Compare(a[:], b[:]) })
 
 	for n, vi := range voters {
 		target := roots[n%len(roots)]

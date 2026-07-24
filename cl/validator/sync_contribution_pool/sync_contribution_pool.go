@@ -68,7 +68,6 @@ func getSyncCommitteeFromState(s *state.CachingBeaconState) *solid.SyncCommittee
 		return s.CurrentSyncCommittee()
 	}
 	return s.NextSyncCommittee()
-
 }
 
 func (s *syncContributionPoolImpl) AddSyncContribution(headState *state.CachingBeaconState, contribution *cltypes.Contribution) error {

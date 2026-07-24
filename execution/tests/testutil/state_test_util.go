@@ -499,7 +499,7 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 var rlpHash = types.RlpHash
 
 func vmTestBlockHash(n uint64) (common.Hash, error) {
-	return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
+	return crypto.Keccak256Hash([]byte(new(big.Int).SetUint64(n).String())), nil
 }
 
 // toMessage builds a protocol.Message directly from the JSON fixture's

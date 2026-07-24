@@ -22,9 +22,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
-var (
-	ErrNoGoodPeer = errors.New("no good peer found")
-)
+var ErrNoGoodPeer = errors.New("no good peer found")
 
 var (
 	peersCandidateRefreshInterval = time.Second * 15

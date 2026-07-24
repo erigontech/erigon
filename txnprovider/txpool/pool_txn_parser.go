@@ -22,10 +22,10 @@ import (
 	"fmt"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -55,11 +55,10 @@ type TxnParseContext struct {
 	chainID         uint256.Int
 	signer          *types.Signer // cached signer for sender recovery (non-malleable)
 	malleableSigner *types.Signer // cached signer that accepts pre-EIP-2 malleable signatures
-	keccak          keccak.KeccakState
-	bytesReader     bytes.Reader // reusable reader to avoid allocation per parse
-	authBuf         bytes.Buffer // reusable buffer for authorization signer recovery
-	authHashBuf     [32]byte     // reusable hash buffer for authorization signer recovery
-	innerTxBuf      []byte       // reusable buffer for blob wrapper inner tx bytes
+	bytesReader     bytes.Reader  // reusable reader to avoid allocation per parse
+	authBuf         bytes.Buffer  // reusable buffer for authorization signer recovery
+	authHashBuf     [32]byte      // reusable hash buffer for authorization signer recovery
+	innerTxBuf      []byte        // reusable buffer for blob wrapper inner tx bytes
 	withSender      bool
 	allowPreEip2s   bool // Allow s > secp256k1n/2; see EIP-2
 	chainIDRequired bool
@@ -71,7 +70,6 @@ func NewTxnParseContext(chainID uint256.Int) *TxnParseContext {
 	}
 	ctx := &TxnParseContext{
 		withSender: true,
-		keccak:     keccak.NewFastKeccak(),
 	}
 
 	// behave as of London enabled
@@ -369,13 +367,11 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// which txn.Hash() would do via rlpHash/prefixedRlpHash + reflection).
 	// For wrapped blob txns, the hash is of the inner tx_payload_body, not the full wrapper.
 	slot.Txn = txn
-	ctx.keccak.Reset()
+	hashInput := txBytes
 	if innerTxBytes != nil {
-		ctx.keccak.Write(innerTxBytes) //nolint:errcheck
-	} else {
-		ctx.keccak.Write(txBytes) //nolint:errcheck
+		hashInput = innerTxBytes
 	}
-	ctx.keccak.Read(slot.IDHash[:]) //nolint:errcheck
+	slot.IDHash = crypto.Keccak256Hash(hashInput)
 
 	if validateHash != nil {
 		if err := validateHash(slot.IDHash[:]); err != nil {

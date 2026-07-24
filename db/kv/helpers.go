@@ -17,11 +17,12 @@
 package kv
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
 	"maps"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -193,9 +194,7 @@ func ReadAheadDeprecated(ctx context.Context, db RoDB, progress *atomic.Bool, ta
 		cancel()
 		wg.Wait()
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer progress.Store(false)
 		_ = db.View(ctx, func(tx Tx) error {
 			c, err := tx.Cursor(table)
@@ -220,7 +219,7 @@ func ReadAheadDeprecated(ctx context.Context, db RoDB, progress *atomic.Bool, ta
 			}
 			return nil
 		})
-	}()
+	})
 	return clean
 }
 
@@ -342,8 +341,8 @@ func (d *DomainDiff) GetDiffSet() (keysToValue []DomainEntryDiff) {
 		d.prevValsSlice[i].Value = v
 		i++
 	}
-	sort.Slice(d.prevValsSlice, func(i, j int) bool {
-		return d.prevValsSlice[i].Key < d.prevValsSlice[j].Key
+	slices.SortFunc(d.prevValsSlice, func(a, b DomainEntryDiff) int {
+		return cmp.Compare(a.Key, b.Key)
 	})
 	return d.prevValsSlice
 }

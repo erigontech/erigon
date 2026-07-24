@@ -327,7 +327,7 @@ func randomAccountWithCode(random *rand.Rand, codeValue []byte) accounts.Account
 	if codeValue == nil {
 		acc.CodeHash = accounts.EmptyCodeHash
 	} else {
-		acc.CodeHash = accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(codeValue)))
+		acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(codeValue))
 	}
 	return acc
 }
@@ -397,7 +397,7 @@ func TestCodeNodeGetHashedAccount(t *testing.T) {
 	trie, _, address := newCodeTrie(t)
 
 	fakeAccount := genRandomByteArrayOfLen(50)
-	fakeAccountHash := common.BytesToHash(crypto.Keccak256(fakeAccount))
+	fakeAccountHash := crypto.Keccak256Hash(fakeAccount)
 
 	hex := nibbles.KeybytesToHex(crypto.Keccak256(address[:]))
 
@@ -447,7 +447,7 @@ func TestCodeNodeUpdateAccountAndCodeValidHash(t *testing.T) {
 	acc := insertAccountWithCode(t, trie, random, address, genRandomByteArrayOfLen(128))
 
 	codeValue2 := genRandomByteArrayOfLen(128)
-	acc.CodeHash = accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(codeValue2)))
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(codeValue2))
 
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
 	err := trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue2)
@@ -461,7 +461,7 @@ func TestCodeNodeUpdateAccountAndCodeInvalidHash(t *testing.T) {
 
 	codeValue2 := genRandomByteArrayOfLen(128)
 	codeValue3 := genRandomByteArrayOfLen(128)
-	acc.CodeHash = accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(codeValue2)))
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(codeValue2))
 
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
 	err := trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue3)
@@ -474,7 +474,7 @@ func TestCodeNodeUpdateAccountChangeCodeHash(t *testing.T) {
 	acc := insertAccountWithCode(t, trie, random, address, genRandomByteArrayOfLen(128))
 
 	codeValue2 := genRandomByteArrayOfLen(128)
-	acc.CodeHash = accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(codeValue2)))
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(codeValue2))
 
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
 	value, gotValue := trie.GetAccountCode(crypto.Keccak256(address[:]))

@@ -24,7 +24,6 @@ import (
 	"math"
 	"os"
 	"slices"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -1329,7 +1328,8 @@ func TestHistoryScanFiles(t *testing.T) {
 		// Recreate domain and re-scan the files
 		scanDirsRes, err := scanDirs(h.dirs)
 		require.NoError(err)
-		require.NoError(h.openFolder(t.Context(), scanDirsRes))
+		_, err = h.openFolder(t.Context(), scanDirsRes)
+		require.NoError(err)
 		// Check the history
 		checkHistoryHistory(t, h, txs)
 	}
@@ -1860,9 +1860,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 			//vals = append(vals, fmt.Sprintf("%x", v))
 		}
 
-		sort.Slice(writtenKeys, func(i, j int) bool {
-			return bytes.Compare(writtenKeys[i], writtenKeys[j]) < 0
-		})
+		slices.SortFunc(writtenKeys, bytes.Compare)
 
 		require.Equal(fmt.Sprintf("%#x", writtenKeys[0]), fmt.Sprintf("%#x", keys[0]))
 		require.Len(keys, len(writtenKeys))
@@ -1908,7 +1906,7 @@ func TestHistory_OpenFolder(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(h.dirs)
 	require.NoError(t, err)
-	err = h.openFolder(t.Context(), scanDirsRes)
+	_, err = h.openFolder(t.Context(), scanDirsRes)
 	require.NoError(t, err)
 	h.Close()
 }

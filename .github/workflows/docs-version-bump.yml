@@ -1,0 +1,152 @@
+name: Docs Version Bump
+run-name: "Docs Version Bump — archive ${{ inputs.archive_version }}, publish ${{ inputs.new_label }}"
+
+# One-click docs versioning for a new major/minor release.
+#
+# Run this ON THE DOCS SOURCE BRANCH for the new release (e.g. on `release/3.6`,
+# right after it is cut from the previous release branch), where `docs/site/docs`
+# still holds the about-to-be-archived version's content.
+#
+# It snapshots the current docs as an archived version, bumps the "current"
+# version label, enforces the 5-archived-version cap, regenerates the llms.txt
+# artifacts, verifies the build, and opens a PR.
+#
+# NOTE on {ERIGON_VERSION} injection: the remark plugin
+# (src/remark/version-replace.js) currently special-cases specific archived
+# versions by path (e.g. version-v3.3), rather than resolving generically from
+# versions.json. Until that plugin is made generic, adding a new archived
+# version whose pages contain {ERIGON_VERSION} placeholders may require a
+# matching case in version-replace.js (and/or docusaurus.config.ts) by hand —
+# review the diff this workflow produces before merging.
+#
+# NOTE: this does NOT move the Pages deploy trigger. If the docs deploy still
+# lives on a per-release branch (docs-deploy.yml), update that branch separately.
+
+on:
+  workflow_dispatch:
+    inputs:
+      archive_version:
+        description: 'Version id to freeze from the CURRENT docs, e.g. "v3.5". Creates versioned_docs/version-<id>.'
+        required: true
+        type: string
+      new_label:
+        description: 'New label for the current (unreleased) docs, e.g. "v3.6".'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs/site
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Don't persist the checkout token in .git/config (artipacked); the
+          # PR-opening step authenticates its push explicitly via GH_TOKEN.
+          persist-credentials: false
+
+      - name: Validate inputs
+        working-directory: ${{ github.workspace }}
+        env:
+          ARCHIVE_VERSION: ${{ inputs.archive_version }}
+          NEW_LABEL: ${{ inputs.new_label }}
+        run: |
+          test -d docs/site || { echo "::error::docs/site not found — run this on a branch that has the Docusaurus site"; exit 1; }
+          a="$ARCHIVE_VERSION"; n="$NEW_LABEL"
+          for v in "$a" "$n"; do
+            printf '%s' "$v" | grep -qE '^v[0-9]+\.[0-9]+$' \
+              || { echo "::error::Version '$v' must look like vMAJOR.MINOR (e.g. v3.6)"; exit 1; }
+          done
+          [ "$a" != "$n" ] || { echo "::error::archive_version and new_label must differ"; exit 1; }
+          if grep -q "\"$a\"" docs/site/versions.json; then
+            echo "::error::$a is already an archived version"; exit 1
+          fi
+          if grep -q "\"$n\"" docs/site/versions.json; then
+            echo "::error::new_label '$n' collides with an existing archived version — pick an unused label"; exit 1
+          fi
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: docs/site/package-lock.json
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Snapshot current docs as ${{ inputs.archive_version }}
+        env:
+          ARCHIVE_VERSION: ${{ inputs.archive_version }}
+        run: npx docusaurus docs:version "$ARCHIVE_VERSION"
+
+      - name: Bump current version label to ${{ inputs.new_label }}
+        env:
+          NEW_LABEL: ${{ inputs.new_label }}
+        run: |
+          sed -i -E "s/label: 'v[0-9]+\.[0-9]+'/label: '$NEW_LABEL'/" docusaurus.config.ts
+          grep -q "label: '$NEW_LABEL'" docusaurus.config.ts \
+            || { echo "::error::failed to update current version label"; exit 1; }
+
+      - name: Enforce 5-archived-version cap (prune oldest)
+        run: |
+          count=$(jq 'length' versions.json)
+          if [ "$count" -gt 5 ]; then
+            # versions.json is newest-first; everything past index 4 is pruned.
+            for v in $(jq -r '.[5:][]' versions.json); do
+              echo "Pruning archived version $v"
+              rm -rf "versioned_docs/version-$v"
+              rm -f  "versioned_sidebars/version-$v-sidebars.json"
+            done
+            jq '.[:5]' versions.json > versions.json.tmp && mv versions.json.tmp versions.json
+          fi
+
+      - name: Regenerate llms.txt artifacts
+        run: python3 scripts/generate-llms.py
+
+      - name: Verify build
+        run: npm run build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCHIVE_VERSION: ${{ inputs.archive_version }}
+          NEW_LABEL: ${{ inputs.new_label }}
+          BASE_REF: ${{ github.ref_name }}
+          RUN_ID: ${{ github.run_id }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          # Suffix the run id so re-runs (or a partially-failed prior run) don't
+          # collide with an existing remote branch at git push.
+          branch="docs/version-bump-$NEW_LABEL-$RUN_ID"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add -A
+          git commit -m "docs(site): archive $ARCHIVE_VERSION, bump current to $NEW_LABEL"
+          # Checkout runs with persist-credentials: false, so authenticate this
+          # one push explicitly with GH_TOKEN instead of a persisted credential.
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$branch"
+          gh pr create \
+            --base "$BASE_REF" \
+            --head "$branch" \
+            --title "docs(site): archive $ARCHIVE_VERSION, publish $NEW_LABEL" \
+            --body "Automated docs version bump (\`docs-version-bump.yml\`).
+
+          - Snapshotted the current docs as **$ARCHIVE_VERSION** (\`versioned_docs/version-$ARCHIVE_VERSION\`).
+          - Bumped the current version label to **$NEW_LABEL**.
+          - Enforced the 5-archived-version cap and regenerated llms.txt artifacts.
+          - \`npm run build\` passed in CI before this PR was opened.
+
+          If the Pages deploy still lives on a per-release branch, move \`docs-deploy.yml\` to this branch separately."

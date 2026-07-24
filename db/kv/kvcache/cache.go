@@ -18,21 +18,18 @@ package kvcache
 
 import (
 	"bytes"
-
 	"context"
 	"encoding/binary"
 	"fmt"
-	"hash"
-
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	keccak "github.com/erigontech/fastkeccak"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -102,7 +99,6 @@ type CacheView interface {
 //   - changes in Canonical View SHOULD reflect in stateEvict
 //   - changes in Non-Canonical View SHOULD NOT reflect in stateEvict
 type Coherent struct {
-	hasher               hash.Hash
 	codeEvictLen         metrics.Gauge
 	codeKeys             metrics.Gauge
 	keys                 metrics.Gauge
@@ -121,7 +117,6 @@ type Coherent struct {
 	lock                 sync.Mutex
 	waitExceededCount    atomic.Int32 // used as a circuit breaker to stop the cache waiting for new blocks
 }
-
 type CoherentRoot struct {
 	cache           *btree2.BTreeG[*Element]
 	codeCache       *btree2.BTreeG[*Element]
@@ -198,7 +193,6 @@ func New(cfg CoherentConfig) *Coherent {
 		roots:        map[uint64]*CoherentRoot{},
 		stateEvict:   &ThreadSafeEvictionList{l: NewList()},
 		codeEvict:    &ThreadSafeEvictionList{l: NewList()},
-		hasher:       keccak.NewFastKeccak(),
 		cfg:          cfg,
 		miss:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
 		hits:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
@@ -301,20 +295,16 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				v := sc.Changes[i].Data
 				c.add(addr[:], v, r, id)
-				c.hasher.Reset()
-				c.hasher.Write(sc.Changes[i].Code)
-				k := c.hasher.Sum(nil)
-				c.addCode(k, sc.Changes[i].Code, r, id)
+				k := crypto.Keccak256Hash(sc.Changes[i].Code)
+				c.addCode(k[:], sc.Changes[i].Code, r, id)
 			case remoteproto.Action_REMOVE:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				c.add(addr[:], nil, r, id)
 			case remoteproto.Action_STORAGE:
 				//skip, will check later
 			case remoteproto.Action_CODE:
-				c.hasher.Reset()
-				c.hasher.Write(sc.Changes[i].Code)
-				k := c.hasher.Sum(nil)
-				c.addCode(k, sc.Changes[i].Code, r, id)
+				k := crypto.Keccak256Hash(sc.Changes[i].Code)
+				c.addCode(k[:], sc.Changes[i].Code, r, id)
 			default:
 				panic("not implemented yet")
 			}

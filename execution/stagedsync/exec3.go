@@ -490,7 +490,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 		if te.hooks.OnGenesisBlock != nil {
 			var b *types.Block
 			if err := te.applyTx.Apply(ctx, func(tx kv.Tx) (err error) {
-				b, err = te.cfg.blockReader.BlockByHash(ctx, tx, blockHash)
+				b, _, err = te.cfg.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
 				return err
 			}); err != nil {
 				te.logger.Warn("hook: OnGenesisBlock: abandoned", "err", err)
@@ -505,7 +505,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 			var safe *types.Header
 
 			if err := te.applyTx.Apply(ctx, func(tx kv.Tx) (err error) {
-				b, err = te.cfg.blockReader.BlockByHash(ctx, tx, blockHash)
+				b, _, err = te.cfg.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
 				if err != nil {
 					return err
 				}

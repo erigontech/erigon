@@ -50,7 +50,6 @@ var emptyBlock = cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clp
 
 // obtain the test blocks
 func getTestBlocks(t *testing.T) []*cltypes.SignedBeaconBlock {
-
 	emptyBlock.EncodingSizeSSZ()
 
 	denebBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)

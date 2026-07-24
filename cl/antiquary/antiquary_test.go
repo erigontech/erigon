@@ -261,8 +261,8 @@ func TestAntiquateBytesListDiff(t *testing.T) {
 
 	key := base_encoding.Encode64ToBytes4(42)
 	// Use a simple diff function that just writes the new data
-	simpleDiff := func(w io.Writer, old, new []byte) error {
-		_, err := w.Write(new)
+	simpleDiff := func(w io.Writer, oldVal, newVal []byte) error {
+		_, err := w.Write(newVal)
 		return err
 	}
 

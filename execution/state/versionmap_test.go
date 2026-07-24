@@ -677,6 +677,7 @@ func TestVersionedWritePoolReuse_NoStaleFields(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), vm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(0, 3)
 
 	// Seed the pool so the recorder's getVWBalance hands back a poisoned cell.

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -435,6 +436,10 @@ type Putter interface {
 // This type represents a step in time across the chain history or an amount of steps.
 type Step uint64
 
+// NoStepBound marks the absence of a per-key step bound: every step is
+// servable. Distinct from a bound at step 0, which admits only step 0.
+const NoStepBound = Step(math.MaxUint64)
+
 // Returns the txNum of the first tx in the step.
 func (s Step) ToTxNum(stepSize uint64) uint64 { return uint64(s) * stepSize }
 
@@ -523,10 +528,16 @@ type TemporalDebugTx interface {
 	NewMemBatch(ioMetrics any) TemporalMemBatch
 }
 
+type BuildAccessorsOption uint8
+
+// SkipCoveredAccessors skips files whose range is covered by other visible
+// sub-files; those self-heal via the background merge cycle.
+const SkipCoveredAccessors BuildAccessorsOption = 1
+
 type TemporalDebugDB interface {
 	DomainTables(names ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
-	BuildMissedAccessors(ctx context.Context, workers int) error
+	BuildMissedAccessors(ctx context.Context, workers int, opts ...BuildAccessorsOption) error
 	EnableReadAhead() TemporalDebugDB
 	DisableReadAhead()
 
@@ -560,6 +571,9 @@ func WithFlushCallback(domain Domain, cb func(k []byte, v []byte, step Step, txN
 type TemporalMemBatch interface {
 	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte) error
 	DomainDel(domain Domain, k string, txNum uint64, preval []byte) error
+	// GetLatest returns the key's latest in-mem value. On a miss, step carries
+	// the key's in-flight-unwind bound — NoStepBound when none — so callers
+	// can bound their fall-through read.
 	GetLatest(domain Domain, key []byte) (v []byte, step Step, ok bool)
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
 	Merge(other TemporalMemBatch) error
@@ -574,6 +588,7 @@ type TemporalMemBatch interface {
 	DiscardWrites(domain Domain)
 	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
 	GetAsOf(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
+	HistorySeek(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
 	SetInMemHistoryReads(v bool)
 	InMemHistoryReads() bool
 }
@@ -594,6 +609,13 @@ type TemporalRwTx interface {
 
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
 	Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff) error
+}
+
+// CanReopenUnderlyingFilesTx is implemented by temporal txs (and wrappers over
+// them) that pin aggregator/block-files views at begin-time and can refresh
+// those views to pick up files opened later in the same tx.
+type CanReopenUnderlyingFilesTx interface {
+	ForceReopenUnderlyingFilesTx()
 }
 
 type TemporalPutDel interface {

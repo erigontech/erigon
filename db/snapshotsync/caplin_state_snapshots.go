@@ -17,6 +17,7 @@
 package snapshotsync
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -25,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -297,7 +299,7 @@ func (s *CaplinStateSnapshots) coveredRangesForType(name string) []Range {
 // starts at slot 0 for the given type, or 0 when coverage is not rooted at genesis.
 func (s *CaplinStateSnapshots) ContiguousCoverageEnd(typeName string) uint64 {
 	ranges := s.coveredRangesForType(typeName)
-	sort.Slice(ranges, func(i, j int) bool { return ranges[i].from < ranges[j].from })
+	slices.SortFunc(ranges, func(a, b Range) int { return cmp.Compare(a.from, b.from) })
 	var end uint64
 	for _, r := range ranges {
 		if r.from > end {

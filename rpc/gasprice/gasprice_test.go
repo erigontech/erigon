@@ -88,7 +88,7 @@ func TestSuggestPrice(t *testing.T) {
 	}
 
 	m := newTestBackend(t) //, big.NewInt(16), c.pending)
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
@@ -393,8 +393,7 @@ func TestSuggestTipCap_SparseBlocks(t *testing.T) {
 		Percentile: 60,
 		Default:    uint256.NewInt(common.GWei),
 	}
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
-		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 
 	dbTx, txErr := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, txErr)
@@ -431,8 +430,7 @@ func TestSuggestTipCap_AllEmptyBlocks(t *testing.T) {
 		Percentile: 60,
 		Default:    uint256.NewInt(common.GWei),
 	}
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
-		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 
 	dbTx, txErr := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, txErr)

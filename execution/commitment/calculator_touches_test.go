@@ -68,8 +68,13 @@ func TestCalculatorStorageCompositeKey(t *testing.T) {
 	slot1 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000004")
 	slot2 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000005")
 
-	composite1 := append(addr, slot1...)
-	composite2 := append(addr, slot2...)
+	composite1 := make([]byte, 0, len(addr)+len(slot1))
+	composite1 = append(composite1, addr...)
+	composite1 = append(composite1, slot1...)
+
+	composite2 := make([]byte, 0, len(addr)+len(slot2))
+	composite2 = append(composite2, addr...)
+	composite2 = append(composite2, slot2...)
 
 	updates.TouchPlainKey(string(composite1), []byte("val1"), updates.TouchStorage)
 	updates.TouchPlainKey(string(composite2), []byte("val2"), updates.TouchStorage)
@@ -226,4 +231,27 @@ func TestTouchPlainKeyDirect_Delete(t *testing.T) {
 
 	u := findKeyUpdate(t, ut, key)
 	assert.Equal(t, DeleteUpdate, u.Flags&DeleteUpdate, "Should have DeleteUpdate flag")
+}
+
+// TestTouchPlainKeyDirect_UpdateDoesNotEscape pins the escape-analysis property
+// this call site depends on: the caller builds an Update per write, so the
+// parameter must not escape or every write costs a heap allocation. Taking the
+// address of any field of update outside a value-taking helper breaks this.
+func TestTouchPlainKeyDirect_UpdateDoesNotEscape(t *testing.T) {
+	// Not t.Parallel: AllocsPerRun panics in a parallel test.
+	ut := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
+	defer ut.Close()
+
+	key := string(make([]byte, 128))
+	// Warm the dedup map so the measured calls hit the already-touched path and
+	// only the caller's Update is left to allocate.
+	ut.TouchPlainKeyDirect(key, &Update{Flags: BalanceUpdate})
+
+	allocs := testing.AllocsPerRun(100, func() {
+		ut.TouchPlainKeyDirect(key, &Update{
+			Flags:   BalanceUpdate,
+			Balance: *uint256.NewInt(7),
+		})
+	})
+	require.Zero(t, allocs, "TouchPlainKeyDirect must not allocate: the Update escaped")
 }
