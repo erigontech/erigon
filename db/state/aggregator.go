@@ -650,6 +650,16 @@ func (a *Aggregator) Close() {
 	}
 	a.background.Wait()
 
+	// closeDirtyFiles unmaps the files; a live reader's getter reads that same
+	// mapping under no shared lock. Readers unwind on ctx cancel, so wait for
+	// their pins to drain first. If one ignores cancellation, leave the files
+	// mapped rather than unmapping under it — the process is exiting and the OS
+	// reclaims them.
+	if !a.drainReaders() {
+		a.logger.Warn("[agg] Close: file readers did not drain; leaving files mapped for OS reclaim")
+		return
+	}
+
 	// A closed Aggregator may linger referenced; release the cached branch data
 	// eagerly and drop this cache from the active-instance count so later
 	// BranchCaches size their trunk depth against real concurrency.
@@ -662,6 +672,42 @@ func (a *Aggregator) Close() {
 	defer a.dirtyFilesLock.Unlock()
 	a.closeDirtyFiles()
 	a.recalcVisibleFiles(nil)
+}
+
+const closeReadersDrainTimeout = time.Minute
+
+// drainReaders blocks until no reader pins any visible-file generation, so Close
+// may unmap without racing an in-flight getter. Returns false if the backstop
+// timeout elapses first (a reader that ignored ctx cancellation).
+func (a *Aggregator) drainReaders() bool {
+	deadline := time.Now().Add(closeReadersDrainTimeout)
+	for {
+		a.dirtyFilesLock.Lock()
+		n := a.liveReadersLocked()
+		a.dirtyFilesLock.Unlock()
+		if n == 0 {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// liveReadersLocked sums reader pins across every still-visible generation. Each
+// AggregatorRoTx / AggregatorFilesPin holds one refcnt on the generation it
+// observes (the same count reclaimRetiredLocked gates file reclaim on), so a
+// zero sum means no reader can be mapping any file. Must hold dirtyFilesLock.
+func (a *Aggregator) liveReadersLocked() (n int32) {
+	cur := a.visible.Load()
+	for h := a.oldestVisible; ; h = h.next {
+		n += h.refcnt.Load()
+		if h == cur {
+			break
+		}
+	}
+	return n
 }
 
 func (a *Aggregator) closeDirtyFiles() {
