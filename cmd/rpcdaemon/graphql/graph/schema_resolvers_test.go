@@ -805,22 +805,22 @@ func TestBlockResolver_Miner(t *testing.T) {
 		}
 	})
 
-	t.Run("nil miner (ommer stub) returns nil without a state read", func(t *testing.T) {
+	t.Run("nil miner (ommer stub) returns an error without a state read", func(t *testing.T) {
 		mock := &mockGraphQLAPI{}
 		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
 		got, err := r.Miner(context.Background(), &model.Block{Number: 10}, nil)
-		if err != nil || got != nil {
-			t.Fatalf("expected (nil, nil), got (%v, %v)", got, err)
+		if err == nil || got != nil {
+			t.Fatalf("expected (nil, error), got (%v, %v)", got, err)
 		}
 	})
 
-	t.Run("miner stub with empty address returns nil without a state read", func(t *testing.T) {
+	t.Run("miner stub with empty address returns an error without a state read", func(t *testing.T) {
 		mock := &mockGraphQLAPI{}
 		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
 		obj := &model.Block{Number: 10, Miner: &model.Account{BlockNum: 10}}
 		got, err := r.Miner(context.Background(), obj, nil)
-		if err != nil || got != nil {
-			t.Fatalf("expected (nil, nil), got (%v, %v)", got, err)
+		if err == nil || got != nil {
+			t.Fatalf("expected (nil, error), got (%v, %v)", got, err)
 		}
 	})
 
@@ -900,12 +900,12 @@ func TestLogResolver_Account(t *testing.T) {
 		}
 	})
 
-	t.Run("nil account returns nil", func(t *testing.T) {
+	t.Run("nil account returns an error", func(t *testing.T) {
 		mock := &mockGraphQLAPI{}
 		r := &logResolver{&Resolver{GraphQLAPI: mock}}
 		got, err := r.Account(context.Background(), &model.Log{}, nil)
-		if err != nil || got != nil {
-			t.Fatalf("expected (nil, nil), got (%v, %v)", got, err)
+		if err == nil || got != nil {
+			t.Fatalf("expected (nil, error), got (%v, %v)", got, err)
 		}
 	})
 }

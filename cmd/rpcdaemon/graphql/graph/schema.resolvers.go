@@ -33,8 +33,11 @@ func (r *accountResolver) Storage(ctx context.Context, obj *model.Account, slot 
 
 // Miner is the resolver for the miner field.
 func (r *blockResolver) Miner(ctx context.Context, obj *model.Block, block *uint64) (*model.Account, error) {
+	// miner is non-nullable (Account!): a miner-less block must return an
+	// actionable error, not nil — gqlgen turns a nil non-null field into an
+	// opaque "must not be null".
 	if obj.Miner == nil || obj.Miner.Address == "" {
-		return nil, nil
+		return nil, fmt.Errorf("block %d has no miner", obj.Number)
 	}
 	return r.resolveAccountAtBlock(ctx, obj.Miner.Address, obj.Number, block)
 }
@@ -101,8 +104,11 @@ func (r *blockResolver) EstimateGas(ctx context.Context, obj *model.Block, data 
 
 // Account is the resolver for the account field.
 func (r *logResolver) Account(ctx context.Context, obj *model.Log, block *uint64) (*model.Account, error) {
-	if obj.Account == nil {
-		return nil, nil
+	// account is non-nullable (Account!): a log with no emitting address must
+	// return an actionable error, not nil — gqlgen turns a nil non-null field
+	// into an opaque "must not be null".
+	if obj.Account == nil || obj.Account.Address == "" {
+		return nil, fmt.Errorf("log has no account address")
 	}
 	return r.resolveAccountAtBlock(ctx, obj.Account.Address, obj.Account.BlockNum, block)
 }
