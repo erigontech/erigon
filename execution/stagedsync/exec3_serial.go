@@ -14,7 +14,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -89,43 +88,30 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			se.doms.SetChangesetAccumulator(changeSet)
 		}
 
-		select {
-		case readAhead <- blockNum:
-		default:
-		}
-
-		canonicalHash, err := rawdb.ReadCanonicalHash(se.applyTx, blockNum)
+		getHashFnMutex := sync.Mutex{}
+		var txTasks []exec.Task
+		var partialBlock bool
+		var err error
+		b, txTasks, inputTxNum, partialBlock, err = se.buildBlockTasks(ctx, se.applyTx, blockNum,
+			initialTxNum, inputTxNum, lastFrozenTxNum, readAhead,
+			func(hash common.Hash, number uint64) (*types.Header, error) {
+				getHashFnMutex.Lock()
+				defer getHashFnMutex.Unlock()
+				return se.getHeader(ctx, hash, number)
+			}, nil)
 		if err != nil {
 			return nil, rwTx, err
 		}
-		var ok bool
-		b, ok = se.cfg.readAheader.ReadBlockWithSenders(canonicalHash)
-		if b == nil || !ok {
-			b, err = exec.BlockWithSenders(ctx, se.cfg.db, se.applyTx, se.cfg.blockReader, blockNum)
-			if err != nil {
-				return nil, rwTx, err
-			}
+		if partialBlock {
+			havePartialBlock = true
 		}
-		if b == nil {
-			// TODO: panic here and see that overall process deadlock
-			return nil, rwTx, fmt.Errorf("nil block %d", blockNum)
-		}
-		go warmTxsHashes(b)
 
-		txs := b.Transactions()
 		header := b.HeaderNoCopy()
-		getHashFnMutex := sync.Mutex{}
 
 		if se.cfg.chainConfig.AmsterdamTime != nil && *se.cfg.chainConfig.AmsterdamTime > 0 && se.cfg.chainConfig.IsAmsterdam(header.Time) {
 			se.logger.Error(fmt.Sprintf("[%s] BLOCK PROCESSING FAILED: Amsterdam processing is not supported by serial exec", se.logPrefix), "fork-block", blockNum)
 			return nil, rwTx, fmt.Errorf("amsterdam processing is not supported by serial exec from block: %d", blockNum)
 		}
-
-		blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
-			getHashFnMutex.Lock()
-			defer getHashFnMutex.Unlock()
-			return se.getHeader(ctx, hash, number)
-		}), se.cfg.engine, se.cfg.author, se.cfg.chainConfig)
 
 		se.accumulator = accumulator // keep in sync for executeBlock's stateWriter
 		if accumulator != nil {
@@ -134,35 +120,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				return nil, rwTx, err
 			}
 			accumulator.StartChange(header, txs, false)
-		}
-
-		var txTasks []exec.Task
-
-		for txIndex := -1; txIndex <= len(txs); txIndex++ {
-			// Do not oversend, wait for the result heap to go under certain size
-			txTask := &exec.TxTask{
-				TxNum:           inputTxNum,
-				TxIndex:         txIndex,
-				Header:          header,
-				Uncles:          b.Uncles(),
-				Txs:             txs,
-				EvmBlockContext: blockContext,
-				Withdrawals:     b.Withdrawals(),
-				// use history reader instead of state reader to catch up to the tx where we left off
-				HistoryExecution: lastFrozenTxNum > 0 && inputTxNum <= lastFrozenTxNum,
-				Trace:            dbg.TraceTx(blockNum, txIndex),
-				Hooks:            se.hooks,
-				Logger:           se.logger,
-			}
-
-			if txTask.TxNum > 0 && txTask.TxNum <= initialTxNum {
-				havePartialBlock = true
-				inputTxNum++
-				continue
-			}
-
-			txTasks = append(txTasks, txTask)
-			inputTxNum++
 		}
 
 		start := time.Now()
