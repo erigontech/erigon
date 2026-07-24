@@ -19,7 +19,6 @@ package freezeblocks
 import (
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -544,26 +543,23 @@ func (br *BlockRetire) canonicalHashesCoverRange(ctx context.Context, blockFrom,
 	if blockTo <= blockFrom {
 		return true, nil
 	}
-	var covered bool
-	if err := br.db.View(ctx, func(tx kv.Tx) error {
-		var count uint64
-		from := hexutil.EncodeTs(blockFrom)
-		if err := kv.BigChunks(br.db, kv.HeaderCanonical, from, func(_ kv.Tx, k, _ []byte) (bool, error) {
-			blockNum := binary.BigEndian.Uint64(k)
-			if blockNum >= blockTo {
-				return false, nil
-			}
-			count++
-			return true, nil
-		}); err != nil {
-			return err
+	// kv.BigChunks opens its own inner db.View per batch (see
+	// db/kv/helpers.go). Wrapping this in an outer db.View recursively
+	// takes the commit-gate RLock on the same goroutine, which is
+	// illegal against a pending writer.
+	var count uint64
+	from := hexutil.EncodeTs(blockFrom)
+	if err := kv.BigChunks(br.db, kv.HeaderCanonical, from, func(_ kv.Tx, k, _ []byte) (bool, error) {
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum >= blockTo {
+			return false, nil
 		}
-		covered = count == (blockTo - blockFrom)
-		return nil
+		count++
+		return true, nil
 	}); err != nil {
 		return false, err
 	}
-	return covered, nil
+	return count == (blockTo - blockFrom), nil
 }
 
 func (br *BlockRetire) retireBlocks(
@@ -1069,6 +1065,16 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	p := &background.Progress{}
 
 	if err := f.Type.BuildIndexes(ctx, f, nil, chainConfig, tmpDir, p, lvl, logger); err != nil {
+		// Compress succeeded, .seg is on disk, .idx build failed
+		// (including ctx.Canceled from CancelInFlight). Remove the .seg
+		// + any partial accessor so the next retire attempt starts
+		// clean instead of stumbling over the leftover .seg (which
+		// looks valid by name but has no accessor).
+		sn.Close()
+		_ = dir2.RemoveFile(f.Path)
+		for _, idxName := range f.Type.IdxFileNames(f.From, f.To) {
+			_ = dir2.RemoveFile(filepath.Join(f.Dir(), idxName))
+		}
 		return lastKeyValue, err
 	}
 
@@ -1422,7 +1428,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 			return false, err
 		}
 		if body == nil {
-			logger.Warn("body missed", "block_num", blockNum, "hash", hex.EncodeToString(v))
+			logger.Warn("body missed", "block_num", blockNum, "hash", fmt.Sprintf("%x", v))
 			return true, nil
 		}
 		body.BaseTxnID = types.BaseTxnID(lastTxNum)
