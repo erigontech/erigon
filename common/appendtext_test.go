@@ -38,6 +38,7 @@ func TestAppendTextByteIdentical(t *testing.T) {
 	checkByteIdentical(t, "hexutil.Uint", hexutil.Uint(0xabcd))
 	checkByteIdentical(t, "hexutil.Big/0", hexutil.Big(*big.NewInt(0)))
 	checkByteIdentical(t, "hexutil.Big", hexutil.Big(*new(big.Int).SetBytes([]byte{0x12, 0x34, 0x56, 0x78, 0x9a})))
+	checkByteIdentical(t, "hexutil.Big/neg", hexutil.Big(*big.NewInt(-0x123456789)))
 	checkByteIdentical(t, "Hash", Hash{0x00, 0x11, 0xaa, 0xff})
 	checkByteIdentical(t, "Address", Address{0x00, 0x1a, 0xff})
 	checkByteIdentical(t, "Bytes4", Bytes4{0x00, 0xab, 0xcd, 0xef})

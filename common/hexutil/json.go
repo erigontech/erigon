@@ -60,10 +60,16 @@ func (b Big) MarshalText() ([]byte, error) {
 // AppendText implements encoding.TextAppender (alloc-free MarshalText).
 func (b Big) AppendText(dst []byte) ([]byte, error) {
 	i := (*big.Int)(&b)
-	if i.BitLen() == 0 {
+	switch i.Sign() {
+	case 0:
 		return append(dst, `0x0`...), nil
+	case -1:
+		// EncodeBig (fmt %#x) places the sign before the prefix ("-0x…"), whereas
+		// big.Int.Append would place it after ("0x-…").
+		return new(big.Int).Abs(i).Append(append(dst, `-0x`...), 16), nil
+	default:
+		return i.Append(append(dst, `0x`...), 16), nil
 	}
-	return i.Append(append(dst, `0x`...), 16), nil
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
