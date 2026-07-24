@@ -29,11 +29,17 @@ const witnessCacheMaxBlocks = 96
 // requested again and ages out via the LRU — so no reconcile step is needed.
 type witnessResultCache = lru.Cache[common.Hash, *ExecutionWitnessResult]
 
-func newWitnessResultCache(blocks uint) *witnessResultCache {
+// WitnessCacheCapacity is the number of witnesses the cache actually holds for a
+// requested block count, after clamping to witnessCacheMaxBlocks.
+func WitnessCacheCapacity(blocks uint) uint {
 	if blocks > witnessCacheMaxBlocks {
-		blocks = witnessCacheMaxBlocks
+		return witnessCacheMaxBlocks
 	}
-	c, err := lru.New[common.Hash, *ExecutionWitnessResult](int(blocks))
+	return blocks
+}
+
+func newWitnessResultCache(blocks uint) *witnessResultCache {
+	c, err := lru.New[common.Hash, *ExecutionWitnessResult](int(WitnessCacheCapacity(blocks)))
 	if err != nil {
 		panic(err)
 	}

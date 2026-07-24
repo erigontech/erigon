@@ -1178,7 +1178,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 			jsonrpc.RunWitnessCacheBuilder(ctx, witnessBuilder, headCh)
 			return nil
 		})
-		s.logger.Info("[witness-cache] eager witness cache enabled", "blocks", httpRpcCfg.WitnessCacheBlocks)
+		s.logger.Info("[witness-cache] eager witness cache enabled", "blocks", jsonrpc.WitnessCacheCapacity(httpRpcCfg.WitnessCacheBlocks))
 	}
 
 	mcpNamespaces := []string{"eth", "erigon", "ots", "txpool", "net", "admin", "debug", "trace"}
