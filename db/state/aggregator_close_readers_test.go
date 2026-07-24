@@ -72,8 +72,18 @@ func TestAggregatorCloseWaitsForFileReaders(t *testing.T) {
 		close(closed)
 	}()
 
-	time.Sleep(50 * time.Millisecond) // let Close reach the unmap while readers are mid-getter
-	close(stop)                       // readers release their pins; a correct Close drains first
+	time.Sleep(50 * time.Millisecond) // give Close time to reach the unmap while readers are mid-getter
+
+	// Positive barrier assertion, independent of -race: readers still hold their
+	// pins, so a correct Close must still be blocked in the drain. Without the
+	// drain, Close unmaps and returns here — failing deterministically.
+	select {
+	case <-closed:
+		t.Fatal("Close returned while file readers were still pinned")
+	default:
+	}
+
+	close(stop) // readers release their pins; Close drains, then unmaps
 	<-closed
 	wg.Wait()
 }
