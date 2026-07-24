@@ -198,12 +198,13 @@ type ShardedLRU[V any] struct {
 	mask   uint64
 }
 
-// NewShardedLRU creates a sharded LRU holding size entries total, partitioned
-// as evenly as possible across shards. The shard count is the requested count
-// capped at size, rounded down to a power of two.
+// NewShardedLRU creates a sharded LRU of size entries total, partitioned evenly.
+// The shard count is capped at size/2 then rounded down to a power of two, so for
+// size >= 2 no shard has capacity 1 (where two colliding keys would evict each other).
 func NewShardedLRU[V any](size, shards int) (*ShardedLRU[V], error) {
-	if shards > size {
-		shards = size
+	const minShardCapacity = 2
+	if maxShards := size / minShardCapacity; shards > maxShards {
+		shards = maxShards
 	}
 	n := 1
 	for n*2 <= shards {
