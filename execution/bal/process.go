@@ -1,4 +1,4 @@
-package stagedsync
+package bal
 
 import (
 	"fmt"
@@ -15,7 +15,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func CreateBAL(blockNum uint64, txIO *state.VersionedIO, dataDir string, logger log.Logger) types.BlockAccessList {
+func Create(blockNum uint64, txIO *state.VersionedIO, dataDir string, logger log.Logger) types.BlockAccessList {
 	bal := txIO.AsBlockAccessList()
 	if dbg.TraceBlockAccessLists {
 		writeBALToFile(bal, dataDir, fmt.Sprintf("computed_bal_%d.txt", blockNum), logger)
@@ -39,7 +39,7 @@ func writeBALToFile(bal types.BlockAccessList, dataDir string, name string, logg
 	}
 }
 
-func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) error {
+func Process(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) error {
 	if !isEIP7928 && !experimental {
 		return nil
 	}
@@ -48,7 +48,7 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isE
 	}
 	blockNum := h.Number.Uint64()
 	blockHash := h.Hash()
-	computedBlockBal := CreateBAL(blockNum, vio, dataDir, logger)
+	computedBlockBal := Create(blockNum, vio, dataDir, logger)
 	err := computedBlockBal.Validate()
 	if err != nil {
 		return fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)

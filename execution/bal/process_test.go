@@ -1,4 +1,4 @@
-package stagedsync
+package bal_test
 
 import (
 	"fmt"
@@ -8,6 +8,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	balpkg "github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -43,7 +45,7 @@ func TestCreateBALOrdering(t *testing.T) {
 
 	recordAll(io, readSets, writeSets)
 
-	bal := io.AsBlockAccessList()
+	bal := balpkg.Create(0, io, "", log.New())
 
 	if len(bal) != 2 {
 		t.Fatalf("expected two accounts in BAL, got %d", len(bal))
@@ -313,7 +315,7 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 
 	recordAll(vio, readSets, writeSets)
 
-	bal := vio.AsBlockAccessList()
+	bal := balpkg.Create(943, vio, "", log.New())
 
 	t.Logf("BAL accounts: %d", len(bal))
 	for i, ac := range bal {

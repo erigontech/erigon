@@ -48,7 +48,7 @@ import (
 // speculatively executes them concurrently, exercising the coinbase-balance
 // fee-aggregation path in finalizeTxSimple. Any divergence between the
 // assembler's BAL (sequential) and the parallel executor's BAL surfaces as a
-// BAL hash mismatch returned by ProcessBAL.
+// BAL hash mismatch returned by bal.Process.
 func TestEngineApiBALMultiSenderBlock(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")

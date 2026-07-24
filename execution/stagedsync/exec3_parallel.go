@@ -27,6 +27,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
@@ -750,7 +751,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 
 					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
 					if isAmsterdam || pe.cfg.experimentalBAL {
-						err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+						err = bal.Process(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
 						if err != nil {
 							failInfra(err)
 							continue
