@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   mainnet-rpc-integ-tests-latest:
-    name: mainnet-rpc-integ-tests-latest (${{ matrix.exec_mode }})
+    name: mainnet-rpc-integ-tests-latest (${{ matrix.commitment_mode }})
     concurrency:
       group: >-
         ${{
@@ -45,7 +45,7 @@ jobs:
       # just one after the other (~2× wall-clock).
       max-parallel: 1
       matrix:
-        exec_mode:
+        commitment_mode:
           - serial
           - parallel
     env:
@@ -56,10 +56,10 @@ jobs:
       ERIGON_ASSERT: true
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       CHAIN: mainnet
-      # Toggle dbg.Exec3Parallel from CI without code changes. envLookup
-      # in common/dbg/dbg_env.go auto-prepends ERIGON_, so this maps to
-      # the EXEC3_PARALLEL flag declared in common/dbg/experiments.go.
-      ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
+      # Toggle statecfg.ExperimentalParallelCommitment from CI without code
+      # changes. envLookup in common/dbg/dbg_env.go auto-prepends ERIGON_, so
+      # this maps to the COMMITMENT_PARALLEL flag read in db/state/statecfg.
+      ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
 
     steps:
       - name: Check out repository
@@ -128,7 +128,7 @@ jobs:
         if: failure() && steps.preparing_step.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
-          name: preparing-step-logs-${{ matrix.exec_mode }}
+          name: preparing-step-logs-${{ matrix.commitment_mode }}
           path: ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
 
       - name: Pause the Erigon instance dedicated to db maintenance
@@ -185,7 +185,7 @@ jobs:
         if: failure() && steps.pre_test_step.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
-          name: pre-test-logs-${{ matrix.exec_mode }}
+          name: pre-test-logs-${{ matrix.commitment_mode }}
           path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
       - name: Run RPC Integration Tests
@@ -270,7 +270,7 @@ jobs:
         if: always() && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: test-results-${{ matrix.exec_mode }}
+          name: test-results-${{ matrix.commitment_mode }}
           path: |
             ${{ env.TEST_RESULT_DIR }}
             ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
@@ -290,7 +290,7 @@ jobs:
             --repo erigon \
             --commit $(git rev-parse HEAD) \
             --branch "$GITHUB_REF_NAME" \
-            --test_name rpc-integration-tests-latest${{ matrix.exec_mode == 'parallel' && '-parallel' || '' }} \
+            --test_name rpc-integration-tests-latest${{ matrix.commitment_mode == 'parallel' && '-parallel' || '' }} \
             --chain $CHAIN \
             --runner "$RUNNER_NAME" \
             --db_version $db_version \
