@@ -417,7 +417,9 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	}
 
 	// UpdateForkChoice has an async commit so we need to wait to make sure
-	// it is completed before assuming all state changes etc are inserted
+	// it is completed before assuming all state changes etc are inserted.
+	// State-change events are dispatched pre-commit, so waiting on the stream
+	// only ensures the dispatcher fired — not that MDBX is flushed.
 	var lastSeenBlock uint64
 	for len(insertedBlocks) > 0 {
 		req, err := stream.Recv()
@@ -444,6 +446,10 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 			}
 		}
 	}
+
+	// Wait for the FCU background commit so HeadBlockHash can't land in MDBX
+	// ahead of the header it points to.
+	ethereum.ExecutionModule().WaitIdle(ethereum.SentryCtx())
 
 	return ethereum.ChainDB().Update(ethereum.SentryCtx(), func(tx kv.RwTx) error {
 		rawdb.WriteHeadBlockHash(tx, lvh)

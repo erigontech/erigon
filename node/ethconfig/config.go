@@ -111,9 +111,13 @@ var Defaults = Config{
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
-	FcuTimeout:          1 * time.Second,
-	FcuBackgroundPrune:  true,
-	FcuBackgroundCommit: false, // to enable, we need to 1) have rawdb API go via execctx and 2) revive Coherent cache for rpcdaemon
+	FcuTimeout:         1 * time.Second,
+	FcuBackgroundPrune: true,
+	// FcuBackgroundCommit returns the FCU response before the MDBX commit
+	// lands; the commit runs in a background goroutine and successive FCUs are
+	// serialized by the ExecModule semaphore. "Latest" state reads can lag the
+	// announced head by one block for the commit's duration.
+	FcuBackgroundCommit: false,
 	ExperimentalBAL:     false,
 	WarmupKzgCtxOnInit:  true,
 }
