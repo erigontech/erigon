@@ -257,6 +257,13 @@ type mockGraphQLAPI struct {
 
 	pendingTxns []types.Transaction
 	pendingErr  error
+
+	accountInfoAddr     common.Address
+	accountInfoBlockNum rpc.BlockNumber
+	accountBalance      string
+	accountNonce        uint64
+	accountCode         string
+	accountInfoErr      error
 }
 
 func (m *mockGraphQLAPI) GetBlockDetails(_ context.Context, _ rpc.BlockNumber) (map[string]any, error) {
@@ -267,8 +274,10 @@ func (m *mockGraphQLAPI) GetBlockDetailsByHash(_ context.Context, _ common.Hash)
 }
 func (m *mockGraphQLAPI) GetLatestBlockNumber(_ context.Context) (uint64, error) { return 0, nil }
 func (m *mockGraphQLAPI) GetChainID(_ context.Context) (*uint256.Int, error)     { return nil, nil }
-func (m *mockGraphQLAPI) GetAccountInfo(_ context.Context, _ common.Address, _ rpc.BlockNumber) (string, uint64, string, error) {
-	return "", 0, "", nil
+func (m *mockGraphQLAPI) GetAccountInfo(_ context.Context, addr common.Address, blockNum rpc.BlockNumber) (string, uint64, string, error) {
+	m.accountInfoAddr = addr
+	m.accountInfoBlockNum = blockNum
+	return m.accountBalance, m.accountNonce, m.accountCode, m.accountInfoErr
 }
 func (m *mockGraphQLAPI) GetAccountStorage(_ context.Context, _ common.Address, _ string, _ rpc.BlockNumber) (string, error) {
 	return "", nil
@@ -760,4 +769,143 @@ func TestPendingResolver_EstimateGas_ForwardsPendingBlockNumber(t *testing.T) {
 	if mock.estimateGasBlockNum != rpc.PendingBlockNumber {
 		t.Errorf("expected PendingBlockNumber, got %d", mock.estimateGasBlockNum)
 	}
+}
+
+func TestBlockResolver_Miner(t *testing.T) {
+	minerAddr := "0x1234567890123456789012345678901234567890"
+	obj := &model.Block{Number: 10, Miner: &model.Account{Address: minerAddr, BlockNum: 10}}
+
+	t.Run("populates account state at the block", func(t *testing.T) {
+		mock := &mockGraphQLAPI{accountBalance: "0x64", accountNonce: 7, accountCode: "0xabcd"}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		got, err := r.Miner(context.Background(), obj, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Balance != "0x64" || got.TransactionCount != 7 || got.Code != "0xabcd" {
+			t.Errorf("miner account not populated: %+v", got)
+		}
+		if mock.accountInfoBlockNum != rpc.BlockNumber(10) {
+			t.Errorf("expected block 10, got %d", mock.accountInfoBlockNum)
+		}
+		if mock.accountInfoAddr != common.HexToAddress(minerAddr) {
+			t.Errorf("wrong address queried: %s", mock.accountInfoAddr)
+		}
+	})
+
+	t.Run("honors the block argument", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		override := uint64(5)
+		if _, err := r.Miner(context.Background(), obj, &override); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mock.accountInfoBlockNum != rpc.BlockNumber(5) {
+			t.Errorf("expected override block 5, got %d", mock.accountInfoBlockNum)
+		}
+	})
+
+	t.Run("nil miner (ommer stub) returns an error without a state read", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		got, err := r.Miner(context.Background(), &model.Block{Number: 10}, nil)
+		if err == nil || got != nil {
+			t.Fatalf("expected (nil, error), got (%v, %v)", got, err)
+		}
+	})
+
+	t.Run("miner stub with empty address returns an error without a state read", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		obj := &model.Block{Number: 10, Miner: &model.Account{BlockNum: 10}}
+		got, err := r.Miner(context.Background(), obj, nil)
+		if err == nil || got != nil {
+			t.Fatalf("expected (nil, error), got (%v, %v)", got, err)
+		}
+	})
+
+	t.Run("GetAccountInfo error propagates", func(t *testing.T) {
+		mock := &mockGraphQLAPI{accountInfoErr: errors.New("state pruned")}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		if _, err := r.Miner(context.Background(), obj, nil); err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+func TestTransactionResolver_CreatedContract(t *testing.T) {
+	contractAddr := "0x1234567890123456789012345678901234567890"
+
+	t.Run("populates contract account at the tx block", func(t *testing.T) {
+		mock := &mockGraphQLAPI{accountBalance: "0x1", accountNonce: 1, accountCode: "0xdead"}
+		r := &transactionResolver{&Resolver{GraphQLAPI: mock}}
+		obj := &model.Transaction{
+			Block:           &model.Block{Number: 42},
+			CreatedContract: &model.Account{Address: contractAddr, BlockNum: 42},
+		}
+		got, err := r.CreatedContract(context.Background(), obj, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Balance != "0x1" || got.TransactionCount != 1 || got.Code != "0xdead" {
+			t.Errorf("createdContract account not populated: %+v", got)
+		}
+		if mock.accountInfoBlockNum != rpc.BlockNumber(42) {
+			t.Errorf("expected block 42, got %d", mock.accountInfoBlockNum)
+		}
+	})
+
+	t.Run("nil for non-contract-creating tx", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &transactionResolver{&Resolver{GraphQLAPI: mock}}
+		obj := &model.Transaction{Block: &model.Block{Number: 42}}
+		got, err := r.CreatedContract(context.Background(), obj, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != nil {
+			t.Errorf("expected nil createdContract, got %+v", got)
+		}
+	})
+}
+
+func TestLogResolver_Account(t *testing.T) {
+	logAddr := "0x1234567890123456789012345678901234567890"
+	obj := &model.Log{Account: &model.Account{Address: logAddr, BlockNum: 10}}
+
+	t.Run("populates emitting account at the log's block", func(t *testing.T) {
+		mock := &mockGraphQLAPI{accountBalance: "0x2", accountNonce: 3, accountCode: "0xbeef"}
+		r := &logResolver{&Resolver{GraphQLAPI: mock}}
+		got, err := r.Account(context.Background(), obj, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Balance != "0x2" || got.TransactionCount != 3 || got.Code != "0xbeef" {
+			t.Errorf("log account not populated: %+v", got)
+		}
+		if mock.accountInfoBlockNum != rpc.BlockNumber(10) {
+			t.Errorf("expected block 10, got %d", mock.accountInfoBlockNum)
+		}
+	})
+
+	t.Run("honors the block argument", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &logResolver{&Resolver{GraphQLAPI: mock}}
+		override := uint64(99)
+		if _, err := r.Account(context.Background(), obj, &override); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mock.accountInfoBlockNum != rpc.BlockNumber(99) {
+			t.Errorf("expected override block 99, got %d", mock.accountInfoBlockNum)
+		}
+	})
+
+	t.Run("nil account returns an error", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &logResolver{&Resolver{GraphQLAPI: mock}}
+		got, err := r.Account(context.Background(), &model.Log{}, nil)
+		if err == nil || got != nil {
+			t.Fatalf("expected (nil, error), got (%v, %v)", got, err)
+		}
+	})
 }
