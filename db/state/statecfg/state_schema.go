@@ -207,6 +207,11 @@ var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", false)
 // ExperimentalParallelCommitment.
 var ExperimentalStreamingCommitment = false
 
+// ExperimentalDeembeddedCommitment toggles the deembedded branch persistence
+// layout (VariantDeembeddedHexPatricia). Same root hash as the default trie;
+// the COMMITMENT_DEEMBED env var turns it on.
+var ExperimentalDeembeddedCommitment = dbg.EnvBool("COMMITMENT_DEEMBED", false)
+
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
 		Name: kv.AccountsDomain, ValuesTable: kv.TblAccountVals,

@@ -142,6 +142,10 @@ const (
 	VariantHexPatriciaTrie      TrieVariant = "hex-patricia-hashed"
 	VariantParallelHexPatricia  TrieVariant = "hex-parallel-patricia-hashed"
 	VariantStreamingHexPatricia TrieVariant = "hex-streaming-patricia-hashed"
+	// VariantDeembeddedHexPatricia stores each branch child under its own key
+	// instead of embedding all children in the branch value. Same root hash as
+	// VariantHexPatriciaTrie; see hex_patricia_hashed_deembed.go.
+	VariantDeembeddedHexPatricia TrieVariant = "hex-deembed-patricia-hashed"
 )
 
 // InitializeTrieAndUpdates constructs the trie + updates buffer from cfg.
@@ -158,6 +162,12 @@ func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *
 		trie.SetStreamingCommitter(sc)
 		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
 		tree.SetStreamingCommitter(sc)
+		return trie, tree
+	case VariantDeembeddedHexPatricia:
+		cfg.Variant = VariantDeembeddedHexPatricia
+		log.Info("[commitment] using deembedded branch layout (VariantDeembeddedHexPatricia)")
+		trie := NewHexPatriciaHashed(length.Addr, nil, cfg)
+		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		return trie, tree
 	case VariantHexPatriciaTrie:
 		fallthrough
