@@ -324,7 +324,7 @@ func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte) {
 		if prevValue == nil {
 			d.prevValues[valsKeySCopy] = []byte{} // no previous value (new key)
 		} else {
-			d.prevValues[valsKeySCopy] = common.Copy(prevValue)
+			d.prevValues[valsKeySCopy] = prevValue // EXPERIMENT: no-copy — hold caller's buffer directly
 		}
 		d.prevValsSlice = nil
 	}
