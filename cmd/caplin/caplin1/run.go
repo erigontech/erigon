@@ -83,6 +83,10 @@ import (
 	p2pnat "github.com/erigontech/erigon/p2p/nat"
 )
 
+// OpenCaplinDatabase returns the index db, the blob storage, and a
+// synchronous close func the caller MUST run before the next
+// OpenCaplinDatabase against the same paths. A prior ctx-Done async
+// close raced Restart's new MustOpen and produced MDBX_BUSY.
 func OpenCaplinDatabase(ctx context.Context,
 	beaconConfig *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
@@ -91,7 +95,7 @@ func OpenCaplinDatabase(ctx context.Context,
 	engine execution_client.ExecutionEngine,
 	wipeout bool,
 	blobPruneDistance uint64,
-) (kv.RwDB, blob_storage.BlobStorage, error) {
+) (kv.RwDB, blob_storage.BlobStorage, func(), error) {
 	dataDirIndexer := path.Join(dbPath, "beacon_indicies")
 	blobDbPath := path.Join(blobDir, "chaindata")
 
@@ -114,21 +118,22 @@ func OpenCaplinDatabase(ctx context.Context,
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
-		return nil, nil, err
+		db.Close()
+		blobDB.Close()
+		return nil, nil, nil, err
 	}
 	defer tx.Rollback()
 
 	if err := tx.Commit(); err != nil {
-		return nil, nil, err
+		db.Close()
+		blobDB.Close()
+		return nil, nil, nil, err
 	}
-	{ // start ticking forkChoice
-		go func() {
-			<-ctx.Done()
-			db.Close()
-			blobDB.Close() // close blob database here
-		}()
+	closeFn := func() {
+		db.Close()
+		blobDB.Close()
 	}
-	return db, blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), blobDir), blobPruneDistance, beaconConfig, ethClock), nil
+	return db, blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), blobDir), blobPruneDistance, beaconConfig, ethClock), closeFn, nil
 }
 
 func OpenCaplinIndexDb(ctx context.Context, dbPath string) (kv.RwDB, error) {
@@ -329,10 +334,15 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		pruneBlobDistance = math.MaxUint64
 	}
 
-	indexDB, blobStorage, err := OpenCaplinDatabase(ctx, beaconConfig, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, engine, false, pruneBlobDistance)
+	logger := log.New("app", "caplin")
+	caplinGroup := lifecycle.NewGroup(logger)
+	defer caplinGroup.Stop()
+
+	indexDB, blobStorage, closeCaplinDBs, err := OpenCaplinDatabase(ctx, beaconConfig, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, engine, false, pruneBlobDistance)
 	if err != nil {
 		return err
 	}
+	caplinGroup.OnStop("caplin-databases", closeCaplinDBs)
 
 	// Write the genesis beacon block to the index DB before the sentinel and fork
 	// choice are created. This ensures the genesis block is available when peers
@@ -370,16 +380,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	for _, opt := range caplinOptions {
 		opt(option)
 	}
-
-	logger := log.New("app", "caplin")
-
-	// caplinGroup tracks Stop drains for Caplin sub-components. Stops
-	// fire in reverse registration order at RunCaplinService exit so
-	// each component's owned goroutines fully return before the next
-	// component's Stop begins. This is what lets CaplinService.Restart
-	// safely reclaim CL heap state across an unwind.
-	caplinGroup := lifecycle.NewGroup(logger)
-	defer caplinGroup.Stop()
 
 	config.NetworkId = clparams.CustomNetwork // Force custom network
 	freezeCfg := ethconfig.Defaults.Snapshot
