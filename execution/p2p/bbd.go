@@ -36,10 +36,7 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
-var (
-	ErrChainLengthExceedsLimit = errors.New("chain length exceeds limit")
-	ErrNoPeersAvailable        = errors.New("no peers available")
-)
+var ErrChainLengthExceedsLimit = errors.New("chain length exceeds limit")
 
 type BbdHeaderReader interface {
 	HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error)
@@ -175,7 +172,7 @@ func (bbd *BackwardBlockDownloader) loadPeers(config bbdRequestConfig) (peersCon
 
 	peers := bbd.peerTracker.ListPeers()
 	if len(peers) == 0 {
-		return peersContext{}, ErrNoPeersAvailable
+		return peersContext{}, errors.New("no peers available")
 	}
 
 	return newPeersContext(peers), nil

@@ -17,15 +17,12 @@
 package engine_block_downloader
 
 import (
-	"fmt"
 	"testing"
-	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/p2p"
 )
 
 func newTestBadHeadersDownloader(t *testing.T) *EngineBlockDownloader {
@@ -101,18 +98,4 @@ func TestNewPayloadGapExceedsLimit(t *testing.T) {
 			require.Equal(t, tt.want, newPayloadGapExceedsLimit(tt.currentHead, tt.missingNum, tt.limit))
 		})
 	}
-}
-
-func TestRetryOnNoPeers(t *testing.T) {
-	attempts := 0
-	err := retryOnNoPeers(t.Context(), time.Nanosecond, 1, func() error {
-		attempts++
-		if attempts == 1 {
-			return fmt.Errorf("download: %w", p2p.ErrNoPeersAvailable)
-		}
-		return nil
-	})
-
-	require.NoError(t, err)
-	require.Equal(t, 2, attempts)
 }

@@ -33,8 +33,6 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
-const maxBodiesFetch = 128
-
 func NewFetcher(logger log.Logger, ml *MessageListener, ms *MessageSender, opts ...FetcherOption) *FetcherBase {
 	return &FetcherBase{
 		logger:          logger,
@@ -127,7 +125,16 @@ func (f *FetcherBase) FetchBodies(
 	totalBodiesSize := 0
 
 	for len(headers) > 0 {
-		headersChunk := headers[:min(len(headers), maxBodiesFetch)]
+		// Note: we always request MaxBodiesServe for optimal response sizes (fully utilising the 2 MB soft limit).
+		// In most cases the response will contain incomplete bodies list (ie < MaxBodiesServe) so we just
+		// continue asking it for more starting from the first hash in the sequence after the last received one.
+		// This is akin to how a paging API is consumed.
+		var headersChunk []*types.Header
+		if len(headers) > eth.MaxBodiesServe {
+			headersChunk = headers[:eth.MaxBodiesServe]
+		} else {
+			headersChunk = headers
+		}
 
 		bodiesChunk, err := f.fetchBodiesWithRetry(ctx, headersChunk, peerId, f.config.CopyWithOptions(opts...))
 		if err != nil {
