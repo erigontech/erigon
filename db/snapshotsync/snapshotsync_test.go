@@ -279,8 +279,8 @@ func TestBlackListForPruning_ChainHistoryExpiry(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if info.From >= mergeHeight {
-			t.Errorf("post-merge tx segment unexpectedly blacklisted: %s (From=%d)", p, info.From)
+		if info.To > mergeHeight {
+			t.Errorf("merge-spanning or post-merge tx segment unexpectedly blacklisted: %s (To=%d)", p, info.To)
 		} else {
 			sawPreMergeTx = true
 		}

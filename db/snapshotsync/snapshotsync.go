@@ -176,7 +176,7 @@ func buildBlackListForPruning(
 				blackList[name] = struct{}{}
 			}
 		case applyChainHistoryExpiry:
-			if cc.IsPreMerge(res.From) {
+			if cc.IsPreMerge(res.To - 1) {
 				blackList[name] = struct{}{}
 			}
 		}
