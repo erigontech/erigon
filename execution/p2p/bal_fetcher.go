@@ -60,12 +60,13 @@ type BALFetcher interface {
 // balFetchParallelism bounds how many peers Fetch queries concurrently for a batch's BALs.
 const balFetchParallelism = 8
 
-func NewBALFetcher(logger log.Logger, ml *MessageListener, ms *MessageSender, penalizer *PeerPenalizer) BALFetcher {
+func NewBALFetcher(logger log.Logger, ml *MessageListener, ms *MessageSender, penalizer *PeerPenalizer, peerTracker *PeerTracker) BALFetcher {
 	return &balFetcher{
 		logger:          logger,
 		messageListener: ml,
 		messageSender:   ms,
 		peerPenalizer:   penalizer,
+		peerTracker:     peerTracker,
 	}
 }
 
@@ -74,7 +75,7 @@ type balFetcher struct {
 	messageListener *MessageListener
 	messageSender   *MessageSender
 	peerPenalizer   *PeerPenalizer
-	misses          balPeerMisses
+	peerTracker     *PeerTracker
 }
 
 func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, batchTimeout time.Duration, requestTimeout time.Duration) map[common.Hash][]byte {
@@ -97,7 +98,7 @@ func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerI
 	}
 	plausible := make([]PeerId, 0, len(allPeers))
 	for _, p := range allPeers {
-		if f.misses.mayHave(p, maxNum) {
+		if f.peerTracker.PeerMayHaveBALNum(&p, maxNum) {
 			plausible = append(plausible, p)
 		}
 	}
@@ -192,7 +193,7 @@ func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerI
 	// are only truncation and say nothing.
 	for i := 0; i < len(response) && i < len(reqs); i++ {
 		if _, ok := out[reqs[i].Hash]; !ok {
-			f.misses.mark(*peerId, reqs[i].Number)
+			f.peerTracker.BALNumMissing(peerId, reqs[i].Number)
 		}
 	}
 	return out, err
