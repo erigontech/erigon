@@ -1146,6 +1146,9 @@ func (api *TraceAPIImpl) callTransaction(
 		if err != nil {
 			return nil, err
 		}
+		if txn == nil {
+			return nil, fmt.Errorf("transaction not found at block %d, index %d", blockNumber, txIndex)
+		}
 	}
 
 	parentHash := header.ParentHash

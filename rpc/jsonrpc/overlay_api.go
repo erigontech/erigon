@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -78,13 +79,13 @@ type blockReplayResult struct {
 }
 
 // NewOverlayAPI returns OverlayAPIImpl instance
-func NewOverlayAPI(base *BaseAPI, db kv.TemporalRoDB, gascap uint64, overlayGetLogsTimeout time.Duration, overlayReplayBlockTimeout time.Duration, otsApi OtterscanAPI) *OverlayAPIImpl {
+func NewOverlayAPI(base *BaseAPI, db kv.TemporalRoDB, cfg *rpccfg.OverlayApiConfig, otsApi OtterscanAPI) *OverlayAPIImpl {
 	return &OverlayAPIImpl{
 		BaseAPI:                   base,
 		db:                        db,
-		GasCap:                    gascap,
-		OverlayGetLogsTimeout:     overlayGetLogsTimeout,
-		OverlayReplayBlockTimeout: overlayReplayBlockTimeout,
+		GasCap:                    cfg.GasCap,
+		OverlayGetLogsTimeout:     cfg.OverlayGetLogsTimeout,
+		OverlayReplayBlockTimeout: cfg.OverlayReplayBlockTimeout,
 		OtsAPI:                    otsApi,
 	}
 }

@@ -3520,11 +3520,11 @@ To disable the embedded MCP server entirely, pass `--mcp.disable`:
 ./build/bin/erigon --datadir=./data --mcp.disable
 ```
 
-This mode uses **SSE (Server-Sent Events)** transport over HTTP and is the simplest option when you are already running a full Erigon node.
+This mode serves two HTTP transports on the same port — **streamable HTTP** (the current MCP standard) at `/mcp` and **SSE (Server-Sent Events)** at `/sse` for older clients — and is the simplest option when you are already running a full Erigon node.
 
 ### Standalone (`mcp` binary)
 
-A separate `mcp` binary that connects to an existing Erigon node either via its JSON-RPC endpoint or directly via the MDBX database. Supports both **stdio** (for Claude Desktop) and **SSE** transports.
+A separate `mcp` binary that connects to an existing Erigon node either via its JSON-RPC endpoint or directly via the MDBX database. Supports both **stdio** (for Claude Desktop) and **HTTP** (streamable HTTP + SSE) transports.
 
 ```bash
 make mcp
@@ -3556,8 +3556,8 @@ opening the port. If you are running multiple Erigon instances on the same machi
 | `--port` | — | Shorthand for `--rpc.url http://127.0.0.1:<port>` |
 | `--datadir` | — | Erigon data directory (enables direct DB access mode) |
 | `--private.api.addr` | `127.0.0.1:9090` | gRPC private API address (used with `--datadir`) |
-| `--transport` | `stdio` | Transport type: `stdio` or `sse` |
-| `--sse.addr` | `127.0.0.1:8553` | SSE listen address (when `--transport sse`) |
+| `--transport` | `stdio` | Transport type: `stdio` or `http` (`sse` is a deprecated alias of `http`) |
+| `--sse.addr` | `127.0.0.1:8553` | HTTP listen address (when `--transport http`) |
 | `--log.dir` | — | Path to Erigon log directory (enables log analysis tools) |
 
 ## Connection Modes (standalone)
@@ -3659,15 +3659,16 @@ Add the following to your Claude Desktop configuration file (`~/.config/claude-d
 {
   "mcpServers": {
     "erigon": {
-      "type": "sse",
-      "url": "http://127.0.0.1:8553/sse"
+      "type": "http",
+      "url": "http://127.0.0.1:8553/mcp"
     }
   }
 }
 ```
 
-The embedded MCP server starts by default on `127.0.0.1:8553`. To use a different address or port, pass `--mcp.addr` and
-`--mcp.port`. To disable it, pass `--mcp.disable`.
+The embedded MCP server starts by default on `127.0.0.1:8553` and serves streamable HTTP at `/mcp` plus SSE at `/sse`
+(use `"type": "sse"` with the `/sse` URL for clients that only support SSE). To use a different address or port, pass
+`--mcp.addr` and `--mcp.port`. To disable it, pass `--mcp.disable`.
 
 After saving, restart Claude Desktop. The Erigon tools will appear in the tool panel under **erigon**.
 
@@ -3675,7 +3676,13 @@ After saving, restart Claude Desktop. The Erigon tools will appear in the tool p
 
 [Claude Code](https://claude.ai/code) is Anthropic's CLI coding agent. Register the Erigon MCP server with a single command — no config file editing required.
 
-**Embedded SSE mode (recommended — zero extra binaries):**
+**Embedded HTTP mode (recommended — zero extra binaries):**
+
+```bash
+claude mcp add --transport http erigon http://127.0.0.1:8553/mcp
+```
+
+Older Claude Code versions without streamable HTTP support can use the SSE endpoint instead:
 
 ```bash
 claude mcp add --transport sse erigon http://127.0.0.1:8553/sse
@@ -3724,7 +3731,7 @@ mcp_servers:
 Save the file and start a new Codex session. The Erigon tools are loaded automatically — you can query your node in natural language alongside any coding task.
 
 :::tip
-The embedded SSE mode (`http://127.0.0.1:8553/sse`) works out of the box as long as Erigon is running. No separate binary is needed.
+The embedded HTTP mode (`http://127.0.0.1:8553/mcp`, or `/sse` for SSE-only clients) works out of the box as long as Erigon is running. No separate binary is needed.
 :::
 
 ## Available Tools
@@ -3742,6 +3749,18 @@ Standard JSON-RPC methods exposed as MCP tools: `eth_blockNumber`, `eth_getBlock
 ### Otterscan (`ots_*`)
 
 `ots_getInternalOperations`, `ots_searchTransactionsBefore`, `ots_searchTransactionsAfter`, `ots_getBlockDetails`, `ots_traceTransaction`, `ots_getTransactionError`, `ots_getContractCreator`, and more.
+
+### Transaction Pool (`txpool_*`)
+
+`txpool_status`, `txpool_content`, `txpool_contentFrom` — inspect pending/queued transactions, e.g. to find out why a transaction is stuck.
+
+### Tracing (`debug_*`, `trace_*`)
+
+`debug_traceTransaction`, `debug_traceBlockByNumber`, `debug_traceCall` (default tracer: `callTracer`; selectable per call), `debug_getModifiedAccountsByNumber`, plus Parity-style `trace_transaction`, `trace_block` and `trace_filter`.
+
+### P2P (`net_*`, `admin_*`)
+
+`net_version`, `net_listening`, `net_peerCount`, `admin_nodeInfo`, `admin_peers` — read-only connectivity diagnostics; peer-management methods are not exposed.
 
 ### Log Analysis (`logs_*`)
 
@@ -7787,6 +7806,43 @@ Everything you need to run Erigon smoothly — from quick answers to deep diagno
 # Frequently Asked Questions (FAQs)
 URL: https://docs.erigon.tech/help-center/frequently-asked-questions-faqs
 
+['What is the difference between Erigon and Geth?', 'Erigon began as a fork of Geth but was rewritten to prioritise disk space and sync speed, using a flat MDBX key-value database instead of a Merkle Patricia Trie for a much smaller footprint and faster synchronisation.'],
+  ['Is Erigon a good choice for client diversity?', 'Yes. Erigon has diverged far enough from Geth to be considered a separate client, making it a strong choice for supporting Ethereum client diversity.'],
+  ['What are the minimum hardware requirements?', 'A high-end NVMe or SSD with low latency is the most critical component. 16 GB of RAM and a fast SSD are generally the minimum for a full node; exact needs vary by network and pruning mode.'],
+  ['How long does it take to sync a node?', 'It depends on hardware and bandwidth. A fast system with a high-end NVMe can sync a full node in a few hours, while slower hardware can take several days.'],
+  ['How much disk space is required?', 'It grows with the blockchain and varies by network and pruning mode — a full node needs far less than an archive node. Check the Hardware Requirements page for current figures rather than a fixed value.'],
+  ['Can I run Erigon on an HDD?', 'No. Erigon depends on high-speed disk I/O, and an HDD will almost certainly cause the node to fall behind the chain tip.'],
+  ['What is the --prune.mode flag, and which mode should I use?', 'It controls which historical data is discarded. Use full (the Erigon 3 default) for most users, minimal for validators with limited disk, and archive for a complete historical record.'],
+  ['Can I change my pruning mode after starting the node?', 'No. The pruning mode is fixed at first sync; changing it requires deleting the datadir and re-syncing from scratch.'],
+  ['Do I need a separate consensus client?', 'No. Erigon includes Caplin, an embedded consensus client that runs by default, though some validators prefer a separate consensus client for added reliability.'],
+  ['How do I upgrade my Erigon binary?', 'Gracefully shut down the node, replace the old binary with the new one, and restart. Back up your datadir before any major upgrade.'],
+  ['How do I gracefully shut down Erigon?', 'Use a process manager such as systemd or supervisor, or press Ctrl+C in the terminal, so the database closes cleanly.'],
+  ["What is Erigon's RPC daemon?", 'The RPC daemon is a separate process that serves JSON-RPC API requests and can run on a different machine from the core client for security and scalability.'],
+  ['Is it possible to recover from database corruption?', 'The most reliable fix is to delete the corrupted datadir and re-sync, though repair tools may also help. Ungraceful shutdowns are the usual cause.'],
+  ['What are the required ports?', 'P2P networking uses 30303 (TCP/UDP) and RPC uses 8545 (HTTP), 8546 (WS), and 8551 (Engine API). See Default Ports for the full list.'],
+  ['What is a snapshot sync?', 'Snapshot sync downloads pre-made snapshots of the blockchain state to greatly accelerate the initial sync instead of processing from genesis.'],
+  ["How do I monitor my node's sync progress?", 'Read the stage prefix in the live log line (e.g. [6/8 Execution]), query eth_syncing on the RPC daemon, or ask an AI assistant through the built-in MCP server.'],
+  ['Can I use Erigon with Docker?', 'Yes. Erigon provides official Docker images on Docker Hub; see the Installation guide for setup.'],
+  ['Does Erigon support other chains besides Ethereum?', 'Yes. Erigon is EVM-compatible and supports networks such as Gnosis and Polygon; select the chain with the --chain flag.'],
+  ['Where can I find official support?', 'The official Erigon Discord and GitHub repository are the primary channels for support and community discussion.'],
+  ['What is Caplin?', "Caplin is Erigon's built-in beacon API server, letting Erigon act as both a consensus and execution client."],
+  ['What is OtterSync?', 'OtterSync is a syncing algorithm that shifts most computation to network bandwidth, reducing sync times and improving chain-tip performance, disk footprint, and decentralisation.'],
+  ["Why can't I query blocks before a certain height?", 'In full and minimal pruning modes Erigon discards historical state older than the pruning window. To query early blocks you must run an archive node, chosen at first sync.'],
+  ['Can I run Erigon on a Raspberry Pi or low-power ARM device?', 'It is not recommended for Mainnet, which needs a high-end NVMe SSD and at least 16 GB of RAM. A testnet like Sepolia may be feasible on higher-end ARM hardware.'],
+  ['What is the MCP server?', 'The MCP (Model Context Protocol) server is a built-in component that exposes Erigon blockchain data to AI assistants. It is enabled by default on 127.0.0.1:8553 and can be turned off with --mcp.disable.'],
+  ['How do I connect Claude Desktop to my Erigon node?', 'Build the standalone mcp binary with make mcp and add it to your Claude Desktop configuration pointing to your node JSON-RPC endpoint or datadir.'],
+  ['My node keeps falling behind the chain tip after running for a while. How do I fix it?', 'Delete only datadir/chaindata (not the whole datadir) and restart — Erigon rebuilds it from snapshots in minutes. Make sure you are on the latest release, as Erigon 3.4+ greatly reduces this problem.'],
+  ['What is the difference between deleting chaindata and deleting the whole datadir?', 'chaindata is the small mutable MDBX database that Erigon re-derives from the snapshots; the snapshots hold ~95% of the data. Deleting only chaindata is recoverable but not free — it triggers a chain-tip resync from the consensus layer, not an instant rebuild; deleting the whole datadir forces a full re-sync.'],
+  ["My node has no peers or won't sync. Which ports do I need to open?", 'Open 30303/30304 (execution P2P), 4000/4001 (Caplin), and 42069 (snapshot download), TCP and UDP where applicable; keep 8545 local. Behind NAT, set --nat and --caplin.nat to stun or upnp.'],
+  ['How do I reduce Erigon memory use or stop it from being OOM-killed?', 'Make Erigon and the Go runtime more conservative with GOMEMLIMIT, a lower GOGC, a capped GOMAXPROCS, and a smaller --batchSize.'],
+  ['Where do I report a security vulnerability?', "Report security issues through the Ethereum Foundation's Bug Bounty Program rather than public Discord or GitHub, so they can be handled responsibly."],
+  ["Where are Erigon's log files stored?", 'By default Erigon writes logs to /logs/erigon.log, in addition to standard output. Attach this file when opening a bug report.'],
+];
+
+  
+  
+
+# Frequently Asked Questions (FAQs)
 
 This list addresses the most common inquiries from the Erigon community, offering quick and direct answers to a variety of topics.
 
@@ -7794,7 +7850,7 @@ This list addresses the most common inquiries from the Erigon community, offerin
 2. **Is Erigon a good choice for client diversity?** Yes. The codebases have diverged so significantly from Geth that they are now considered separate clients, making Erigon an excellent choice to support Ethereum's client diversity goals.
 3. **What are the minimum hardware requirements?** The most critical component is a high-end NVMe or SSD with very low latency. While the exact requirements vary by network, 16GB of RAM and a fast SSD are generally the minimum for a full node. See [Hardware Requirements](/get-started/hardware-requirements) for detailed specs per network and pruning mode.
 4. **How long does it take to sync a node?** Initial synchronization time is highly dependent on hardware and bandwidth. A fast system with a high-end NVMe can sync a full node in as little as few hours, while on slower hardware, it can take several days.
-5. **How much disk space is required?** Disk space needs are constantly changing as the blockchain grows. As of September 2025, an Ethereum Mainnet full node requires about 920GB, while an archive node is significantly larger at around 1.77TB. See [Hardware Requirements](/get-started/hardware-requirements) for up-to-date figures.
+5. **How much disk space is required?** Disk requirements grow continuously with the blockchain and vary by network and pruning mode — a full node needs far less than an archive node. Because these figures drift over time, always check the current numbers rather than relying on a fixed value. See [Hardware Requirements](/get-started/hardware-requirements) for per-network specs and [Database](/fundamentals/database) for a breakdown of what consumes disk space.
 6. **Can I run Erigon on an HDD?** It is not recommended to run Erigon on an HDD. The client's performance is critically dependent on high-speed disk I/O, and an HDD will almost certainly cause the node to fall behind the blockchain tip.
 7. **What is the `--prune.mode` flag, and which mode should I use?** This flag determines which historical data is discarded. The `full` mode (the default for Erigon 3) is suitable for most users. The `minimal` mode is for validators with limited disk space. The `archive` mode is for those who need a full historical record for all past states. See [Pruning Modes](/fundamentals/pruning-modes) for a full comparison.
 8. **Can I change my pruning mode after starting the node?** No. The pruning mode is a permanent choice made at the first sync. Changing it requires deleting the `datadir` directory and a full re-sync from scratch.
@@ -7807,7 +7863,7 @@ This list addresses the most common inquiries from the Erigon community, offerin
 15. **What is a "snapshot sync"?** Snapshot sync is a stage of the synchronization process where the node downloads pre-made snapshots of the blockchain state. This significantly accelerates the initial sync, reducing the time required to catch up with the network. See [Pruning Modes](/fundamentals/pruning-modes) for details.
 16. **How do I monitor my node's sync progress?** There are three complementary ways:
 
-    * **Read the live log line** — every sync log line is prefixed with the current stage and its position in the pipeline, e.g. `[4/8 Bodies]`. The prefix advances through the stages until `[8/8 Finish]`, at which point the node is at the chain tip. See [Logs → Stage Definitions](/fundamentals/logs#stage-definitions) for the full ordered list.
+    * **Read the live log line** — every sync log line is prefixed with the current stage and its position in the pipeline, e.g. `[6/8 Execution]`. The two numbers show the current stage and the total number of stages for your configuration; the prefix advances through the stages until the final `Finish` stage, at which point the node is at the chain tip. See [Logs → Stage Definitions](/fundamentals/logs#stage-definitions) for the full ordered list.
     * **Query the JSON-RPC** — call `eth_syncing` against the RPC daemon (default port `8545`):
 
       ```bash
@@ -7827,6 +7883,12 @@ This list addresses the most common inquiries from the Erigon community, offerin
 23. **Can I run Erigon on a Raspberry Pi or low-power ARM device?** It is not recommended for Mainnet. Erigon requires a high-end NVMe SSD and sufficient RAM (16 GB minimum) for reliable operation. Low-power ARM devices typically lack the disk I/O performance and memory needed to keep up with the chain tip. See [Hardware Requirements](/get-started/hardware-requirements). A testnet like Sepolia may be feasible on higher-end ARM hardware, but expect limited performance.
 24. **What is the MCP server?** The MCP (Model Context Protocol) server is a built-in component that exposes Erigon's blockchain data to AI assistants like Claude Desktop. It is enabled by default and listens on `127.0.0.1:8553`. To disable it, pass `--mcp.disable` at startup.
 25. **How do I connect Claude Desktop to my Erigon node?** Build the standalone `mcp` binary with `make mcp`, then add it to your Claude Desktop configuration at `~/.config/claude-desktop/config.json` pointing to your node's JSON-RPC endpoint or datadir. See the [MCP Server](/fundamentals/mcp) page for the full configuration example.
+26. **My node keeps falling behind the chain tip after running for a while. How do I fix it?** In most cases you can recover by deleting only the hot database — `datadir/chaindata` — and restarting. Do **not** delete the whole `datadir`, which would force a full re-sync. Erigon re-derives `chaindata` from the immutable snapshots (re-downloading them if needed) and resyncs the post-snapshot tip from the consensus layer — treat it as a chain-tip resync, not an instant rebuild, and keep a backup if fast recovery matters. Make sure you are on the latest release: Erigon 3.4+ ships a much smaller `chaindata` and an improved pruning algorithm that greatly reduces this problem. See [Common Errors and Solutions](/help-center/common-errors-and-solutions) and [Optimizing Storage](/fundamentals/optimizing-storage).
+27. **What is the difference between deleting `chaindata` and deleting the whole `datadir`?** `chaindata` is Erigon's small, mutable MDBX database (typically 15–20 GB, even on an archive node) holding recent state and sync progress. The `snapshots` directory holds the immutable historical data — roughly 95% of the total footprint. Deleting `chaindata` is recoverable but not free: Erigon re-derives state from the snapshots (re-downloading them if needed) and resyncs the post-snapshot tip from the consensus layer — a chain-tip resync, not an instant rebuild. Deleting the entire `datadir` also discards the snapshots and forces a full re-sync. When in doubt, delete only `chaindata`. See [Database](/fundamentals/database).
+28. **My node has no peers or won't sync. Which ports do I need to open?** Erigon needs several ports reachable (both TCP and UDP where applicable): `30303`/`30304` (execution-layer P2P), `4000` and `4001` (Caplin consensus peering), and `42069` (BitTorrent snapshot download). Keep the RPC port (`8545`) bound to localhost and never expose it publicly. If your node is behind NAT, set `--nat` and `--caplin.nat` to `stun` or `upnp` and forward those ports on your router. See [Default Ports](/fundamentals/default-ports) and [NAT](/fundamentals/nat).
+29. **How do I reduce Erigon's memory use or stop it from being OOM-killed?** Erigon and the Go runtime size their memory and CPU use from the resources they can see, so on a shared or memory-constrained host you can make them more conservative: set `GOMEMLIMIT` (e.g. `GOMEMLIMIT=26GiB`), lower `GOGC` (e.g. `GOGC=80`), cap `GOMAXPROCS` (e.g. to half your cores), and reduce `--batchSize` (e.g. `--batchSize=256m`). See [Common Errors and Solutions](/help-center/common-errors-and-solutions) and [Performance Tricks](/fundamentals/performance-tricks).
+30. **Where do I report a security vulnerability?** Erigon is covered by the Ethereum Foundation's [Bug Bounty Program](https://ethereum.org/bug-bounty). Report security issues there so they can be handled responsibly — not via public Discord or GitHub issues. For non-security bugs, open a GitHub issue with logs and version info.
+31. **Where are Erigon's log files stored?** By default Erigon writes logs to `<datadir>/logs/erigon.log`, in addition to standard output. Attach this file when opening a bug report. See [Logs](/fundamentals/logs) for log-level and rotation options.
 
 ---
 
@@ -7843,15 +7905,15 @@ Erigon is highly resilient and uses a fully-transactional database. This design 
 When an issue arises, follow these steps to methodically diagnose and resolve the problem.
 
 1. **Check Hardware Requirements:** The most common cause of issues is insufficient disk or RAM. Ensure your system meets the recommended [Hardware Requirements](/get-started/hardware-requirements). Note that Erigon is very adaptive—adding more RAM to the server will make Erigon faster without requiring any setting changes.
-2. **Inspect Erigon Logs:** The logs are your best friend. Use `tail -f erigon.log` or `journalctl` to see real-time output and identify error messages or warnings. See [Logs](/fundamentals/logs) for log configuration options.
-3. **Verify Sync Status:** Use `curl localhost:8545 \-X POST \-H "Content-Type: application/json" \--data '{"jsonrpc":"2.0","method":"eth\_syncing","params":\[\],"id":1}'` to check if the node is actively syncing.
+2. **Inspect Erigon Logs:** The logs are your best friend. By default Erigon writes to `<datadir>/logs/erigon.log`; use `tail -f <datadir>/logs/erigon.log` or `journalctl` to see real-time output and identify error messages or warnings. See [Logs](/fundamentals/logs) for log configuration options.
+3. **Verify Sync Status:** Use `curl localhost:8545 -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}'` to check if the node is actively syncing.
 4. **Monitor System Resources:** Use `htop`, `top`, or `iostat` to monitor CPU, RAM, and disk I/O. This can help you identify a performance bottleneck. For a full monitoring dashboard, see [Creating a Dashboard](/fundamentals/creating-a-dashboard).
 5. **Look for OOM-kill events:** After an unexpected crash, always check your system logs for an "Out of Memory" killer event. This confirms if a memory issue caused the crash.
 6. **Perform a Simple Restart**: If the node is stalled, simply restart the service using `systemctl restart erigon`. Erigon's transactional database is designed to handle interruption gracefully.
 7. **Disable RPC/CL during Initial Sync**: If you are stalling during snapshot sync, try restarting without the [RPC daemon](/fundamentals/modules/rpc-daemon) or consensus client to reduce concurrent disk access, which is a bottleneck during the slowest stage (Blocks Execution).
 8. **Check for Disk Space:** Regularly check your disk usage. A full disk will cause performance degradation and can lead to a node crash. See [Optimizing Storage](/fundamentals/optimizing-storage) for tips on reducing disk usage.
 9. **Verify Network Time:** Ensure your system's clock is synchronized. Incorrect time can cause issues with block propagation.
-10. **Check P2P Peer Connections:** Use `net\_peerCount` or similar RPC methods to check if you have a healthy number of peers. A low count may indicate a network problem. See [Default Ports](/fundamentals/default-ports) to verify firewall rules allow P2P traffic.
+10. **Check P2P Peer Connections:** Use `net_peerCount` or similar RPC methods to check if you have a healthy number of peers. A low count may indicate a network problem. See [Default Ports](/fundamentals/default-ports) to verify firewall rules allow P2P traffic.
 11. **Review Firewall Rules:** Confirm that your firewall is not blocking inbound or outbound traffic on the required P2P and RPC [ports](/fundamentals/default-ports).
 12. **Double-Check Configuration Flags:** Review all your command-line flags for typos or incorrect values. A single misplaced character can cause a cryptic error. See the [CLI Reference](/fundamentals/configuring-erigon) for the full flag list.
 13. **Check for Snapshot File Issues:** For version upgrades, a known issue with snapshot filenames can cause problems. Use snapshot [upgrade](/get-started/installation/upgrading) and repair options.
@@ -8074,13 +8136,36 @@ This section details common error messages and provides clear, actionable steps 
 * **Cause:** This is almost always a disk-related problem. The read/write speed and latency of your storage device are the most significant performance bottlenecks for Erigon.
 * **Solution:** Upgrade your storage to a high-end NVMe SSD. Avoid using HDDs, network drives, or slow consumer-grade SSDs. See [Hardware Requirements](/get-started/hardware-requirements) and [Performance Tricks](/fundamentals/performance-tricks).
 
+### Node falls behind the tip after running for weeks
+
+* **Error Description:** A node that has been healthy for weeks gradually stops keeping up with the chain tip, sometimes after the mutable database has grown large.
+* **Cause:** Over time the mutable `chaindata` database can accumulate state that slows chain-tip processing.
+* **Solution:** Delete **only** the hot database — `datadir/chaindata` — and restart (do **not** delete the whole `datadir`, which would force a full re-sync). Erigon re-derives `chaindata` from the immutable snapshots (re-downloading them if needed) and resyncs the post-snapshot tip from the consensus layer — treat it as a chain-tip resync, not an instant rebuild, and keep a backup if fast recovery matters. Make sure you are on the latest release: Erigon 3.4+ ships a much smaller `chaindata` and an improved pruning algorithm that greatly reduces this problem. See [Optimizing Storage](/fundamentals/optimizing-storage).
+
+### Node stuck in a "bad block" / "invalid block" forkchoice loop
+
+* **Error Description:** The node repeatedly logs `invalid block ... gas used by execution` and `bad block as forkchoice`, and stops advancing the chain head.
+* **Cause:** Corrupted state in the mutable database, typically left over from an incorrect unwind, prevents the node from validating new blocks.
+* **Solution:** Wipe `datadir/chaindata` (not the entire `datadir`) and restart on the latest patch release, which is the reliable recovery. If it recurs immediately, running with the `USE_STATE_CACHE=false` environment variable is a known temporary workaround. If you can still reproduce it on the latest release, open a GitHub issue with your full `<datadir>/logs/erigon.log` attached.
+
 ## Memory and Resources
 
 ### Out of Memory (OOM) or unexpected process termination
 
-* **Error Description:** The Erigon process is abruptly terminated by the operating system, often with an OOM-kill event in the system logs.
-* **Cause:** This can be a genuine memory leak or, more commonly, a symptom of a disk I/O bottleneck. When the disk can't keep up with processing, memory usage can balloon as the system tries to buffer data.
-* **Solution:** Ensure your system meets the recommended RAM requirements in [Hardware Requirements](/get-started/hardware-requirements). A clean shutdown and restart can often resolve the issue. If the problem persists, check your dmesg logs and consider upgrading your disk.
+* **Error Description:** The Erigon process is abruptly terminated by the operating system, often with an OOM-kill event in the system logs (`code=killed, status=9/KILL`).
+* **Cause:** This can be a genuine memory leak or, more commonly, a symptom of a disk I/O bottleneck. When the disk can't keep up with processing, memory usage can balloon as the system tries to buffer data. Erigon and the Go runtime also size their memory and CPU use from the resources they can *see*, so on a shared or memory-constrained host they may reserve more than is safe.
+* **Solution:** Ensure your system meets the recommended RAM requirements in [Hardware Requirements](/get-started/hardware-requirements). To make Erigon more conservative on constrained hosts, set a hard memory ceiling and throttle the runtime:
+
+  ```bash
+  # Export the runtime tunables, then pass --batchSize as an Erigon flag:
+  export GOMEMLIMIT=26GiB               # cap total Go heap (set below your physical/container limit)
+  export GOGC=80                        # collect garbage more aggressively
+  export GOMAXPROCS=$(( $(nproc) / 2 )) # show Erigon fewer cores → smaller RAM estimates
+
+  erigon --batchSize=256m ...           # smaller execution batch buffer
+  ```
+
+  A clean shutdown and restart can often resolve a transient event. If the problem persists, check your `dmesg` logs and consider upgrading your disk. See [Performance Tricks](/fundamentals/performance-tricks) for related tuning.
 
 ## Database
 
@@ -8154,7 +8239,7 @@ This glossary provides concise definitions for essential terms related to the Er
 * **MDBX:** The high-performance, key-value database that Erigon uses to store blockchain data. It is a more efficient and scalable alternative to the databases used by other clients.
 * **Merkle Patricia Trie:** A data structure used by most Ethereum clients (like Geth) to store the blockchain state. It is highly secure but can be less space-efficient than MDBX.
 * **Mempool:** A pool of unconfirmed transactions that have been submitted to the network but have not yet been included in a block.
-* **MCP Server:** The Model Context Protocol server built into Erigon that exposes blockchain data to AI assistants. See [MCP Server](/fundamentals/mcp) (v3.4 only).
+* **MCP Server:** The Model Context Protocol server built into Erigon that exposes blockchain data to AI assistants. See [MCP Server](/fundamentals/mcp) (v3.4+).
 * **Node:** A piece of software that runs on a computer and interacts with the blockchain network. It can be a full node, light node, or validator node.
 * **OOM-kill:** An event where the operating system's "Out of Memory" killer terminates a process (e.g., Erigon) that is consuming too much memory. See [Hardware Requirements](/get-started/hardware-requirements) for recommended RAM specs.
 * **Peer:** Another node on the network that your client is connected to. The more healthy peers you have, the more reliable your connection is. See [Default Ports](/fundamentals/default-ports) for P2P port configuration.

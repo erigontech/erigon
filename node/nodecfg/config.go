@@ -72,6 +72,11 @@ type Config struct {
 	// Configuration of peer-to-peer networking.
 	P2P p2p.Config
 
+	// ExecWorkerCount is the resolved parallel-exec worker count for this node;
+	// OpenDatabase floors the read-tx semaphore on it. 0 falls back to the
+	// process-wide dbg.Exec3Workers.
+	ExecWorkerCount int `toml:"-"`
+
 	// IPCPath is the requested location to place the IPC endpoint. If the path is
 	// a simple file name, it is placed inside the data directory (or on the root
 	// pipe path on Windows), whereas if it's a resolvable path name (absolute or
