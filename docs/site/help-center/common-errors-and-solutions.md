@@ -26,13 +26,13 @@ This section details common error messages and provides clear, actionable steps 
 
 * **Error Description:** A node that has been healthy for weeks gradually stops keeping up with the chain tip, sometimes after the mutable database has grown large.
 * **Cause:** Over time the mutable `chaindata` database can accumulate state that slows chain-tip processing.
-* **Solution:** Delete **only** the hot database — `datadir/chaindata` — and restart (do **not** delete the whole `datadir`, which would force a full re-sync). Erigon rebuilds `chaindata` from the immutable snapshot files, which usually takes a few minutes. Make sure you are on the latest release: Erigon 3.4+ ships a much smaller `chaindata` and an improved pruning algorithm that greatly reduces this problem. See [Optimizing Storage](/fundamentals/optimizing-storage).
+* **Solution:** Delete **only** the hot database — `datadir/chaindata` — and restart (do **not** delete the whole `datadir`, which would force a full re-sync). Erigon re-derives `chaindata` from the immutable snapshots (re-downloading them if needed) and resyncs the post-snapshot tip from the consensus layer — treat it as a chain-tip resync, not an instant rebuild, and keep a backup if fast recovery matters. Make sure you are on the latest release: Erigon 3.4+ ships a much smaller `chaindata` and an improved pruning algorithm that greatly reduces this problem. See [Optimizing Storage](/fundamentals/optimizing-storage).
 
 ### Node stuck in a "bad block" / "invalid block" forkchoice loop
 
 * **Error Description:** The node repeatedly logs `invalid block ... gas used by execution` and `bad block as forkchoice`, and stops advancing the chain head.
 * **Cause:** Corrupted state in the mutable database, typically left over from an incorrect unwind, prevents the node from validating new blocks.
-* **Solution:** Wipe `datadir/chaindata` (not the entire `datadir`) and restart on the latest patch release, which is the reliable recovery. If it recurs immediately, running with the `USE_STATE_CACHE=false` environment variable is a known temporary workaround. If you can still reproduce it on the latest release, open a GitHub issue with your full `erigon.log` attached.
+* **Solution:** Wipe `datadir/chaindata` (not the entire `datadir`) and restart on the latest patch release, which is the reliable recovery. If it recurs immediately, running with the `USE_STATE_CACHE=false` environment variable is a known temporary workaround. If you can still reproduce it on the latest release, open a GitHub issue with your full `<datadir>/logs/erigon.log` attached.
 
 ## Memory and Resources
 
@@ -43,10 +43,12 @@ This section details common error messages and provides clear, actionable steps 
 * **Solution:** Ensure your system meets the recommended RAM requirements in [Hardware Requirements](/get-started/hardware-requirements). To make Erigon more conservative on constrained hosts, set a hard memory ceiling and throttle the runtime:
 
   ```bash
-  GOMEMLIMIT=26GiB          # cap total Go heap (set below your physical/container limit)
-  GOGC=80                   # collect garbage more aggressively
-  GOMAXPROCS=$(( $(nproc) / 2 ))   # show Erigon fewer cores → smaller RAM estimates
-  --batchSize=256m          # smaller execution batch buffer
+  # Export the runtime tunables, then pass --batchSize as an Erigon flag:
+  export GOMEMLIMIT=26GiB               # cap total Go heap (set below your physical/container limit)
+  export GOGC=80                        # collect garbage more aggressively
+  export GOMAXPROCS=$(( $(nproc) / 2 )) # show Erigon fewer cores → smaller RAM estimates
+
+  erigon --batchSize=256m ...           # smaller execution batch buffer
   ```
 
   A clean shutdown and restart can often resolve a transient event. If the problem persists, check your `dmesg` logs and consider upgrading your disk. See [Performance Tricks](/fundamentals/performance-tricks) for related tuning.
