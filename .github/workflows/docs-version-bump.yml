@@ -8,7 +8,7 @@ run-name: "Docs Version Bump — archive ${{ inputs.archive_version }}, publish 
 # still holds the about-to-be-archived version's content.
 #
 # It snapshots the current docs as an archived version, bumps the "current"
-# version label, enforces the 3-archived-version cap, regenerates the llms.txt
+# version label, enforces the 5-archived-version cap, regenerates the llms.txt
 # artifacts, verifies the build, and opens a PR.
 #
 # NOTE on {ERIGON_VERSION} injection: the remark plugin
@@ -97,17 +97,17 @@ jobs:
           grep -q "label: '$NEW_LABEL'" docusaurus.config.ts \
             || { echo "::error::failed to update current version label"; exit 1; }
 
-      - name: Enforce 3-archived-version cap (prune oldest)
+      - name: Enforce 5-archived-version cap (prune oldest)
         run: |
           count=$(jq 'length' versions.json)
-          if [ "$count" -gt 3 ]; then
-            # versions.json is newest-first; everything past index 2 is pruned.
-            for v in $(jq -r '.[3:][]' versions.json); do
+          if [ "$count" -gt 5 ]; then
+            # versions.json is newest-first; everything past index 4 is pruned.
+            for v in $(jq -r '.[5:][]' versions.json); do
               echo "Pruning archived version $v"
               rm -rf "versioned_docs/version-$v"
               rm -f  "versioned_sidebars/version-$v-sidebars.json"
             done
-            jq '.[:3]' versions.json > versions.json.tmp && mv versions.json.tmp versions.json
+            jq '.[:5]' versions.json > versions.json.tmp && mv versions.json.tmp versions.json
           fi
 
       - name: Regenerate llms.txt artifacts
@@ -146,7 +146,7 @@ jobs:
 
           - Snapshotted the current docs as **$ARCHIVE_VERSION** (\`versioned_docs/version-$ARCHIVE_VERSION\`).
           - Bumped the current version label to **$NEW_LABEL**.
-          - Enforced the 3-archived-version cap and regenerated llms.txt artifacts.
+          - Enforced the 5-archived-version cap and regenerated llms.txt artifacts.
           - \`npm run build\` passed in CI before this PR was opened.
 
           If the Pages deploy still lives on a per-release branch, move \`docs-deploy.yml\` to this branch separately."
