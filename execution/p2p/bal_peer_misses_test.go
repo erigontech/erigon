@@ -18,6 +18,7 @@ package p2p
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -35,4 +36,21 @@ func TestBALPeerMisses(t *testing.T) {
 	require.False(t, misses.mayHave(p1, 100))
 	require.True(t, misses.mayHave(p1, 101))
 	require.True(t, misses.mayHave(*PeerIdFromUint64(2), 1))
+}
+
+func TestBALPeerMissesExpiredMarkResetsHorizon(t *testing.T) {
+	t.Parallel()
+	var misses balPeerMisses
+	peerID := *PeerIdFromUint64(1)
+	misses.mark(peerID, 100)
+
+	misses.mu.Lock()
+	mark := misses.m[peerID]
+	mark.at = time.Now().Add(-balMissTTL - time.Second)
+	misses.m[peerID] = mark
+	misses.mu.Unlock()
+
+	misses.mark(peerID, 50)
+	require.False(t, misses.mayHave(peerID, 50))
+	require.True(t, misses.mayHave(peerID, 51))
 }

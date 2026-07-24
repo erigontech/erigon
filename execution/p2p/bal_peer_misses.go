@@ -44,10 +44,13 @@ func (b *balPeerMisses) mark(peerId PeerId, blockNum uint64) {
 		b.m = map[PeerId]balMissMark{}
 	}
 	mark := b.m[peerId]
-	if blockNum > mark.maxMissing || time.Since(mark.at) > balMissTTL {
+	now := time.Now()
+	if now.Sub(mark.at) > balMissTTL {
+		mark.maxMissing = blockNum
+	} else {
 		mark.maxMissing = max(blockNum, mark.maxMissing)
 	}
-	mark.at = time.Now()
+	mark.at = now
 	b.m[peerId] = mark
 }
 

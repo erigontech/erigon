@@ -524,6 +524,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 					bodiesResponse FetcherResponse[[]*types.Body]
 					balsResponse   map[common.Hash][]byte
 				)
+				balPrimary := peerId
 				var batchEg errgroup.Group
 				batchEg.Go(func() error {
 					var err error
@@ -535,7 +536,6 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 					// Bodies stream from peerId concurrently; lead the BAL fetch
 					// with a different peer so the two do not serialize on one link.
 					balPeers := peers.peersExcept(peerId)
-					balPrimary := peerId
 					if len(balPeers) > 0 {
 						lead := batchIndex % len(balPeers)
 						balPrimary = balPeers[lead]
@@ -595,7 +595,8 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 								"toNum", headerBatch[len(headerBatch)-1].Number.Uint64(),
 								"got", len(balsResponse),
 								"want", want,
-								"peerId", peerId.String(),
+								"bodyPeerId", peerId.String(),
+								"balLeadPeerId", balPrimary.String(),
 							)
 						}
 					}
