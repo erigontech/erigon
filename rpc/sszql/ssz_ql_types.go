@@ -47,8 +47,8 @@ type AliasResponse struct {
 type SSZQLResponse struct {
 	Paths    []Path          `json:"paths"`
 	Gindices []Gindex        `json:"gindices"`
-	Proofs   []Proof         `json:"proofs"`
+	Proofs   []Proof         `json:"proofs,omitempty"`
 	Leaves   []Leaf          `json:"leaves"`
 	Results  []Result        `json:"results"`
-	Aliases  []AliasResponse `json:"aliases"`
+	Aliases  []AliasResponse `json:"aliases,omitempty"`
 }
