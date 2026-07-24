@@ -531,6 +531,41 @@ func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool
 	return !haveGap, nil
 }
 
+// canonicalHashesCoverRange returns true when kv.HeaderCanonical has an
+// entry for every block in [blockFrom, blockTo). Called after CanRetire
+// resolves a candidate range and before DumpBlocks: DumpHeaders reads
+// kv.HeaderCanonical and silently skips missing entries, so a range
+// that looks eligible via the higher-level dbHasEnoughDataForBlocksRetire
+// (which reads kv.Headers) can still yield a partial file if FCU hasn't
+// yet written canonical hashes for the full range. Skip retire in that
+// window; the next retire tick will find the range fully covered as FCU
+// catches up.
+func (br *BlockRetire) canonicalHashesCoverRange(ctx context.Context, blockFrom, blockTo uint64) (bool, error) {
+	if blockTo <= blockFrom {
+		return true, nil
+	}
+	var covered bool
+	if err := br.db.View(ctx, func(tx kv.Tx) error {
+		var count uint64
+		from := hexutil.EncodeTs(blockFrom)
+		if err := kv.BigChunks(br.db, kv.HeaderCanonical, from, func(_ kv.Tx, k, _ []byte) (bool, error) {
+			blockNum := binary.BigEndian.Uint64(k)
+			if blockNum >= blockTo {
+				return false, nil
+			}
+			count++
+			return true, nil
+		}); err != nil {
+			return err
+		}
+		covered = count == (blockTo - blockFrom)
+		return nil
+	}); err != nil {
+		return false, err
+	}
+	return covered, nil
+}
+
 func (br *BlockRetire) retireBlocks(
 	ctx context.Context,
 	minBlockNum uint64,
@@ -553,6 +588,16 @@ func (br *BlockRetire) retireBlocks(
 		if has, err := br.dbHasEnoughDataForBlocksRetire(ctx); err != nil {
 			return false, err
 		} else if !has {
+			return false, nil
+		}
+		if covered, err := br.canonicalHashesCoverRange(ctx, blockFrom, blockTo); err != nil {
+			return false, err
+		} else if !covered {
+			// FCU hasn't finished writing canonical hashes for this
+			// range yet — kv.HeaderCanonical is sparse. DumpHeaders
+			// would iterate a subset and write a partial file whose
+			// name advertises the full range. Skip this tick; next
+			// retire round will find the range dense.
 			return false, nil
 		}
 		logger.Log(lvl, "[snapshots] Retire Blocks", "range",
