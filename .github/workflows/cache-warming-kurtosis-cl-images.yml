@@ -35,6 +35,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   warm:
