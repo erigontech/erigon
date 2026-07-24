@@ -123,6 +123,21 @@ func (v *VersionedAccountView) GetIncarnation() uint64 {
 	return 0
 }
 
+func (v *VersionedAccountView) GetCode() ([]byte, error) {
+	if v.destroyed() {
+		return nil, nil
+	}
+	if v.vm != nil {
+		if code, ok := versionedUpdateCode(v.vm, v.addr, v.txIdx); ok {
+			return code, nil
+		}
+	}
+	if v.base != nil {
+		return v.base.ReadAccountCode(v.addr)
+	}
+	return nil, nil
+}
+
 // exists reports whether the account exists at txIdx — i.e. the materialized
 // reader would return non-nil: not destroyed, and either some field cell was
 // written at ≤ txIdx or a base account is present.

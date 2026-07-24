@@ -101,6 +101,34 @@ func TestFlushToUpdates_DeletedWithIncarnation_EmitsZeroAccountUpdate(t *testing
 	assert.Equal(t, empty.CodeHash, got.CodeHash, "codeHash must be empty.CodeHash")
 }
 
+// TestApplyWrites_CodeHashSingleSourced pins that codeHash is sourced solely
+// from CodeHashes(): a Codes() entry that composes a different hash (e.g. the
+// versionMap-view's 7702 short-circuit, where a codeHash-bearing account has no
+// code cell so the composed code is empty) must NOT clobber the authoritative
+// codeHash. Before single-sourcing, the Codes() loop ran after CodeHashes() and
+// overwrote acc.CodeHash with keccak(empty)=EmptyCodeHash → wrong trie leaf.
+func TestApplyWrites_CodeHashSingleSourced(t *testing.T) {
+	cs := newTestCalcState()
+	addr := accounts.InternAddress([20]byte{0x69, 0x00, 0x77, 0x02})
+	realHash := accounts.NewCode([]byte{0x60, 0x00, 0x60, 0x00, 0xf3}).Hash
+
+	ws := &state.WriteSet{}
+	ws.SetCodeHash(addr, &state.VersionedWrite[accounts.CodeHash]{
+		WriteHeader: state.WriteHeader{Address: addr, Path: state.CodeHashPath},
+		Val:         realHash,
+	})
+	// Code composes empty (the view desync): its Hash is EmptyCodeHash.
+	ws.SetCode(addr, &state.VersionedWrite[accounts.Code]{
+		WriteHeader: state.WriteHeader{Address: addr, Path: state.CodePath},
+		Val:         accounts.NewCode(nil),
+	})
+
+	cs.ApplyWrites(ws, false)
+
+	require.Equal(t, realHash.Value(), common.Hash(cs.accounts[addr].CodeHash),
+		"codeHash must come from CodeHashes(), not be clobbered by an empty Codes() entry")
+}
+
 // TestFlushToUpdates_DeletedWithoutIncarnation_EmitsDelete verifies that a
 // touched-empty account (e.g. system address 0xff..fe after a Cancun
 // EIP-4788 system call) is emitted as DeleteUpdate, matching serial's

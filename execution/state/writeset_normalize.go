@@ -392,23 +392,16 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		if h.IsEmpty() || codeInOutput[addr] || sdSet[addr] {
 			continue
 		}
-		// Recover the code whose hash this tx emitted. Prefer the versionMap
-		// (this batch's writes); on the SetCode short-circuit path — a
-		// re-executing 7702 delegation whose code equals the already-committed
-		// designator, so the validated incarnation writes no CodePath and the
-		// prior incarnation's versionMap entry was invalidated on re-exec — the
-		// versionMap holds nothing for this tx, so fall back to the post-state
-		// via stateReader.
-		var code []byte
-		if c, _, ok := vm.ReadCode(addr, txIndex+1); ok {
-			code = c.Bytes
-		}
-		if len(code) == 0 && stateReader != nil {
-			c, err := stateReader.ReadAccountCode(addr)
-			if err != nil {
-				return nil, err
-			}
-			code = c
+		// Recover the code whose hash this tx emitted, composed through the same
+		// single source as every other account field: the versionMap floor at
+		// txIndex+1 (this batch's writes), else the committed post-state. On the
+		// SetCode short-circuit path — a re-executing 7702 delegation whose code
+		// equals the already-committed designator, so the validated incarnation
+		// writes no CodePath — the versionMap holds nothing and the composition
+		// falls through to committed state.
+		code, err := NewVersionedAccountView(addr, txIndex+1, vm, stateReader).GetCode()
+		if err != nil {
+			return nil, err
 		}
 		// Gate recovery to 7702 designators: that SetCode short-circuit is the only
 		// one that leaves uncommitted code without a CodePath. A regular deploy

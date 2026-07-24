@@ -32,8 +32,11 @@ func NewVersionMapWriteView(keys WriteSetView, vm *VersionMap, txIdx int) WriteS
 
 func (v *versionMapWriteView) Balances() iter.Seq2[accounts.Address, *VersionedWrite[uint256.Int]] {
 	return func(yield func(accounts.Address, *VersionedWrite[uint256.Int]) bool) {
-		for addr := range v.keys.Balances() {
-			val, _ := versionedUpdateBalance(v.vm, addr, v.txIdx+1)
+		for addr, kw := range v.keys.Balances() {
+			val, ok := versionedUpdateBalance(v.vm, addr, v.txIdx+1)
+			if !ok {
+				val = kw.Val
+			}
 			if !yield(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: val}) {
 				return
 			}
@@ -43,8 +46,11 @@ func (v *versionMapWriteView) Balances() iter.Seq2[accounts.Address, *VersionedW
 
 func (v *versionMapWriteView) Nonces() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
 	return func(yield func(accounts.Address, *VersionedWrite[uint64]) bool) {
-		for addr := range v.keys.Nonces() {
-			val, _ := versionedUpdateNonce(v.vm, addr, v.txIdx+1)
+		for addr, kw := range v.keys.Nonces() {
+			val, ok := versionedUpdateNonce(v.vm, addr, v.txIdx+1)
+			if !ok {
+				val = kw.Val
+			}
 			if !yield(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: val}) {
 				return
 			}
@@ -54,8 +60,11 @@ func (v *versionMapWriteView) Nonces() iter.Seq2[accounts.Address, *VersionedWri
 
 func (v *versionMapWriteView) Incarnations() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
 	return func(yield func(accounts.Address, *VersionedWrite[uint64]) bool) {
-		for addr := range v.keys.Incarnations() {
-			val, _ := versionedUpdateIncarnation(v.vm, addr, v.txIdx+1)
+		for addr, kw := range v.keys.Incarnations() {
+			val, ok := versionedUpdateIncarnation(v.vm, addr, v.txIdx+1)
+			if !ok {
+				val = kw.Val
+			}
 			if !yield(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath}, Val: val}) {
 				return
 			}
@@ -65,8 +74,11 @@ func (v *versionMapWriteView) Incarnations() iter.Seq2[accounts.Address, *Versio
 
 func (v *versionMapWriteView) CodeHashes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.CodeHash]] {
 	return func(yield func(accounts.Address, *VersionedWrite[accounts.CodeHash]) bool) {
-		for addr := range v.keys.CodeHashes() {
-			val, _ := versionedUpdateCodeHash(v.vm, addr, v.txIdx+1)
+		for addr, kw := range v.keys.CodeHashes() {
+			val, ok := versionedUpdateCodeHash(v.vm, addr, v.txIdx+1)
+			if !ok {
+				val = kw.Val
+			}
 			if !yield(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath}, Val: val}) {
 				return
 			}
@@ -76,9 +88,12 @@ func (v *versionMapWriteView) CodeHashes() iter.Seq2[accounts.Address, *Versione
 
 func (v *versionMapWriteView) Codes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.Code]] {
 	return func(yield func(accounts.Address, *VersionedWrite[accounts.Code]) bool) {
-		for addr := range v.keys.Codes() {
-			b, _ := versionedUpdateCode(v.vm, addr, v.txIdx+1)
-			if !yield(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath}, Val: accounts.NewCode(b)}) {
+		for addr, kw := range v.keys.Codes() {
+			code := kw.Val
+			if b, ok := versionedUpdateCode(v.vm, addr, v.txIdx+1); ok {
+				code = accounts.NewCode(b)
+			}
+			if !yield(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath}, Val: code}) {
 				return
 			}
 		}
@@ -103,8 +118,11 @@ func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[account
 	return func(yield func(accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]) bool) {
 		for addr, inner := range v.keys.Storages() {
 			out := make(map[accounts.StorageKey]*VersionedWrite[uint256.Int], len(inner))
-			for key := range inner {
-				val, _ := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1)
+			for key, kw := range inner {
+				val, ok := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1)
+				if !ok {
+					val = kw.Val
+				}
 				out[key] = &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
 			}
 			if !yield(addr, out) {

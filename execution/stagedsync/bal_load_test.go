@@ -179,6 +179,9 @@ func TestLoadFromBAL_MatchesApplyWrites(t *testing.T) {
 	incWrites.SetStorage(addrB, slotS2, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addrB, Path: state.StoragePath, Key: slotS2}, Val: *uint256.NewInt(42)})
 	incWrites.SetBalance(addrC, &state.VersionedWrite[uint256.Int]{WriteHeader: bal2(addrC, state.BalancePath), Val: *uint256.NewInt(1000)})
 	incWrites.SetCode(addrC, &state.VersionedWrite[accounts.Code]{WriteHeader: bal2(addrC, state.CodePath), Val: accounts.NewCode(codeC)})
+	// codeHash rides with code as the trio (matching the real incremental path);
+	// codeHash is single-sourced from CodeHashes() on both paths.
+	incWrites.SetCodeHash(addrC, &state.VersionedWrite[accounts.CodeHash]{WriteHeader: bal2(addrC, state.CodeHashPath), Val: accounts.NewCode(codeC).Hash})
 	incWrites.SetBalance(addrE, &state.VersionedWrite[uint256.Int]{WriteHeader: bal2(addrE, state.BalancePath), Val: *uint256.NewInt(200)})
 	incWrites.SetBalance(addrE, &state.VersionedWrite[uint256.Int]{WriteHeader: bal2(addrE, state.BalancePath), Val: *uint256.NewInt(500)})
 	csInc.ApplyWrites(incWrites, true)

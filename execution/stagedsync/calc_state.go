@@ -196,9 +196,12 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 			acc.Deleted = false
 		}
 	}
+	// codeHash is single-sourced from CodeHashes() above; Codes() carries only
+	// the code-presence signal for clearing Deleted (a fresh deploy), never the
+	// hash — so a view that composes empty code for a codeHash-bearing account
+	// cannot clobber the authoritative codeHash.
 	for addr, vw := range writes.Codes() {
 		acc := cs.ensureAccount(addr)
-		acc.CodeHash = vw.Val.Hash.Value()
 		acc.dirty = true
 		if clearsDeleted(addr, vw.Val.Len() > 0) {
 			acc.Deleted = false
@@ -312,8 +315,15 @@ func (cs *calcState) LoadFromBALUpTo(bal types.BlockAccessList, maxTxIndex uint3
 			})
 		}
 		if cc, ok := finalChangeUpTo(ac.CodeChanges, maxTxIndex); ok {
+			// Emit CodeHashPath alongside CodePath so codeHash is single-sourced
+			// from CodeHashes() on both the BAL and incremental paths (the BAL
+			// carries only bytecode; deriving the hash here converges the two).
+			code := accounts.NewCode(cc.Bytecode)
 			writes.SetCode(addr, &state.VersionedWrite[accounts.Code]{
-				WriteHeader: state.WriteHeader{Address: addr, Path: state.CodePath}, Val: accounts.NewCode(cc.Bytecode),
+				WriteHeader: state.WriteHeader{Address: addr, Path: state.CodePath}, Val: code,
+			})
+			writes.SetCodeHash(addr, &state.VersionedWrite[accounts.CodeHash]{
+				WriteHeader: state.WriteHeader{Address: addr, Path: state.CodeHashPath}, Val: code.Hash,
 			})
 		}
 		for _, sc := range ac.StorageChanges {
