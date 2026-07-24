@@ -91,6 +91,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/rpc/sszql"
 
 	// Force-load native and js packages, to trigger registration
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/js"
@@ -965,6 +966,12 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 		}
 		if cfg.WebsocketEnabled && wsHandler != nil && isWebsocket(r) {
 			wsHandler.ServeHTTP(w, r)
+			return
+		}
+
+		// TODO: add cli args options for enabling sszql, then implement conditional serving
+		if strings.HasPrefix(r.URL.Path, "/eth/") && strings.HasSuffix(r.URL.Path, "/query") {
+			sszql.SSZQueryHandler().ServeHTTP(w, r)
 			return
 		}
 

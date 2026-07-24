@@ -1,4 +1,4 @@
-package rpc
+package sszql
 
 // note: derived types of Proof and Leaf can change later
 

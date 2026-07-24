@@ -1,4 +1,4 @@
-package rpc
+package sszql
 
 import (
 	"encoding/json"
@@ -53,7 +53,9 @@ func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parseQuery(req, version, block_id)
+	res := parseQuery(req, version, block_id)
+
+	writeQueryResponse(w, res)
 
 }
 
@@ -64,4 +66,14 @@ func isValidBlockAndVersion(block_id string, version int) bool {
 	}
 
 	return true
+}
+
+func writeQueryResponse(w http.ResponseWriter, res SSZQLResponse) {
+	w.Header().Set("Content-Type", sszQLContentType)
+	w.WriteHeader(200)
+
+	enc := json.NewEncoder(w)
+	if err := enc.Encode(res); err != nil {
+		http.Error(w, "invalid response: "+err.Error(), http.StatusInternalServerError)
+	}
 }
