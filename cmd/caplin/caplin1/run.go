@@ -125,6 +125,7 @@ func OpenCaplinDatabase(ctx context.Context,
 	defer tx.Rollback()
 
 	if err := tx.Commit(); err != nil {
+		tx.Rollback()
 		db.Close()
 		blobDB.Close()
 		return nil, nil, nil, err

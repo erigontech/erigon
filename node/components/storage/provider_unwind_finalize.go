@@ -253,7 +253,10 @@ func (p *Provider) FinalizeUnwind() error {
 		removalAccessorOlds := make([]string, 0)
 		for _, r := range regen.removals {
 			oldSidecar := r.path + ".old"
-			if err := os.Rename(r.path, oldSidecar); err != nil && !os.IsNotExist(err) {
+			if err := os.Rename(r.path, oldSidecar); err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
 				if p.logger != nil {
 					p.logger.Warn("[storage] Provider.FinalizeUnwind: rename past-boundary .kv → .old failed (continuing)", "err", err, "path", r.path)
 				}

@@ -240,7 +240,7 @@ func truncateEthTxPastTxNum(ctx context.Context, tx kv.RwTx, lastTxNum uint64) e
 		if binary.BigEndian.Uint64(k[:8]) <= lastTxNum {
 			continue
 		}
-		if err := tx.Delete(kv.EthTx, k); err != nil {
+		if err := c.DeleteCurrent(); err != nil {
 			return err
 		}
 		select {

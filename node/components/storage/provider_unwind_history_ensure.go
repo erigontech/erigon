@@ -150,6 +150,9 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 		if err := p.Aggregator.OpenFolder(); err != nil && p.logger != nil {
 			p.logger.Warn("[storage] Provider.Unwind: OpenFolder after temp-history cleanup failed", "err", err)
 		}
+		if trw, ok := any(opts.Tx).(*temporal.RwTx); ok {
+			trw.ForceReopenAggCtx()
+		}
 	}, nil
 }
 
