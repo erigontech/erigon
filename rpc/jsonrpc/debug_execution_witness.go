@@ -558,19 +558,14 @@ type ExecutionWitnessResult struct {
 	cachedJSON []byte
 }
 
-// executionWitnessResultView drops the fastJSONResult method so json.Marshal
-// encodes the exported fields directly, without recursing through MarshalFastJSON.
-type executionWitnessResultView ExecutionWitnessResult
-
 // MarshalFastJSON is the rpc fast-result path (rpc.fastJSONResult): a cache shell
-// returns its stored bytes verbatim, while a freshly built result marshals its
-// fields exactly as encoding/json would — so cached and on-demand output match.
+// returns its stored bytes verbatim; a freshly built result marshals its exported
+// fields, byte-identical to the cached form so both paths agree.
 func (m *ExecutionWitnessResult) MarshalFastJSON() ([]byte, error) {
 	if m.cachedJSON != nil {
 		return m.cachedJSON, nil
 	}
-	v := executionWitnessResultView(*m)
-	return json.Marshal(&v)
+	return json.Marshal(m)
 }
 
 func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error) {
