@@ -520,9 +520,9 @@ func (s ReadSet) eachHeader(yield func(ReadHeader) bool) {
 // Shared across every per-path write via embedding in VersionedWrite[T].
 type WriteHeader struct {
 	Address     accounts.Address
-	Path        AccountPath
 	Key         accounts.StorageKey
 	Version     Version
+	Path        AccountPath
 	Reason      tracing.BalanceChangeReason
 	NonceReason tracing.NonceChangeReason
 }
@@ -2812,9 +2812,9 @@ type DAG struct {
 }
 
 type TxDep struct {
-	Index         int
 	Reads         ReadSet
 	FullWriteList []*WriteSet
+	Index         int
 }
 
 func HasReadDep(txFrom *WriteSet, txTo ReadSet) bool {

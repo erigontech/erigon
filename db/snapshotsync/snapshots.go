@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/mvcc"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -205,6 +206,8 @@ type DirtySegment struct {
 	version snaptype.Version
 
 	frozen bool
+
+	canDelete atomic.Bool
 
 	// only caplin state
 	filePath string
@@ -554,7 +557,7 @@ type snapshotVisible struct {
 	segmentsMax uint64            // max visible (indexed, non-subsumed, gap-free) segment height across all types
 
 	refcnt  atomic.Int32     // live readers pinning this generation
-	retired []*DirtySegment  // segments this generation is the last to reference; unlinked on head-drain
+	retired retiredSegments  // segments this generation is the last to reference; unlinked on head-drain
 	next    *snapshotVisible // oldest->newest chain link (set under dirtyLock)
 }
 
@@ -815,7 +818,7 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSe
 // (segments removed from dirty during the outgoing bundle's tenure): they are unlinked
 // only once every reader pinning that generation has drained. Must be called with
 // dirtyLock held, so the caller's dirty mutation and this publish are one atomic step.
-func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired []*DirtySegment) {
+func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired retiredSegments) {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
 	}()
@@ -884,7 +887,7 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired []*DirtySegm
 
 	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
 	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
-	closeAndRemoveSegments(s.reclaimRetiredLocked())
+	reclaimSegments(s.reclaimRetiredLocked())
 }
 
 // acquireVisible pins the current generation. Load and increment are not atomic together,
@@ -912,7 +915,7 @@ func (s *BaseRoSnapshots) releaseVisible(v *snapshotVisible) {
 // reclaimRetiredLocked walks the oldest->newest chain from the head, collecting the
 // retired files of every fully-drained generation older than the current one. Must be
 // called with dirtyLock held; the returned files are deleted by the caller off-lock.
-func (s *BaseRoSnapshots) reclaimRetiredLocked() (toDelete []*DirtySegment) {
+func (s *BaseRoSnapshots) reclaimRetiredLocked() (toDelete retiredSegments) {
 	cur := s.visible.Load()
 	for h := s.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
 		toDelete = append(toDelete, h.retired...)
@@ -926,12 +929,43 @@ func (s *BaseRoSnapshots) reclaimRetired() {
 	s.dirtyLock.Lock()
 	toDelete := s.reclaimRetiredLocked()
 	s.dirtyLock.Unlock()
-	closeAndRemoveSegments(toDelete)
+	reclaimSegments(toDelete)
 }
 
-func closeAndRemoveSegments(segs []*DirtySegment) {
+// retiredSegments were removed from the dirty set and handed to the outgoing visible
+// generation; they are closed (and deleted from disk when canDelete) once the last
+// reader of that generation drains. See mvcc.RetireReason.
+type retiredSegments []*DirtySegment
+
+// retire sets the reclaim disposition on segs per reason (mirrors db/state.retire):
+// merge/prune output is deleted from disk, a file an external actor already removed is
+// close-only.
+func retire(reason mvcc.RetireReason, segs retiredSegments) {
+	// canDelete decides whether reclaim also deletes the file from disk, or only closes it.
+	var canDelete bool
+	switch reason {
+	case mvcc.RetireReasonMerged, mvcc.RetireReasonAged:
+		canDelete = true // our merge/prune output is still on disk and must be removed
+	case mvcc.RetireReasonWasDeletedFromDisk:
+		canDelete = false // an external actor already deleted it: close only, never re-delete
+	default:
+		panic(fmt.Sprintf("retire: unknown reason %d", reason))
+	}
 	for _, sn := range segs {
-		sn.closeAndRemoveFiles()
+		sn.canDelete.Store(canDelete)
+	}
+}
+
+// reclaimSegments closes each retired segment, additionally deleting it from disk when it
+// is marked deletable (canDelete). Segments an external actor already removed from disk are
+// close-only, so a same-name recreation before the pinning readers drain is never clobbered.
+func reclaimSegments(segs retiredSegments) {
+	for _, sn := range segs {
+		if sn.canDelete.Load() {
+			sn.closeAndRemoveFiles()
+		} else {
+			sn.close()
+		}
 	}
 }
 
@@ -1131,7 +1165,7 @@ func (s *BaseRoSnapshots) Ranges(align bool) []Range {
 
 func (s *BaseRoSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
 func (s *BaseRoSnapshots) OpenFolder() error {
-	var retired []*DirtySegment
+	var retired retiredSegments
 	err := func() error {
 		s.dirtyLock.Lock()
 		defer s.dirtyLock.Unlock()
@@ -1151,7 +1185,7 @@ func (s *BaseRoSnapshots) OpenFolder() error {
 		}
 		// Segments whose file vanished from disk leave the visible set; retire them so
 		// their fds close only after readers of the current generation drain.
-		retired = s.detachNotInList(list)
+		retired = s.retireSegmentsNotInList(mvcc.RetireReasonWasDeletedFromDisk, list)
 		return s.openSegments(list, true, false)
 	}()
 	if err != nil {
@@ -1218,10 +1252,19 @@ func (s *BaseRoSnapshots) Close() {
 	}
 }
 
+// retireSegmentsNotInList detaches segments whose file is not in `protect` and marks their
+// reclaim disposition per reason (mirrors db/state.retireFilesNotInList), returning them for
+// the outgoing visible generation. Must be called with dirtyLock held.
+func (s *BaseRoSnapshots) retireSegmentsNotInList(reason mvcc.RetireReason, protect []string) retiredSegments {
+	detached := s.detachNotInList(protect)
+	retire(reason, detached)
+	return detached
+}
+
 // detachNotInList removes from dirty every segment whose file name is not in `protect`
 // and returns them without closing; the caller owns closing or retiring them. Must be
 // called with dirtyLock held.
-func (s *BaseRoSnapshots) detachNotInList(protect []string) []*DirtySegment {
+func (s *BaseRoSnapshots) detachNotInList(protect []string) retiredSegments {
 	protectFiles := make(map[string]struct{}, len(protect))
 	for _, f := range protect {
 		protectFiles[f] = struct{}{}
@@ -1352,7 +1395,7 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 	func() {
 		s.dirtyLock.Lock()
 		defer s.dirtyLock.Unlock()
-		retired := s.detachNotInList(keepNames)
+		retired := s.retireSegmentsNotInList(mvcc.RetireReasonMerged, keepNames)
 		s.recalcVisibleFiles(s.alignMin, retired)
 	}()
 
@@ -1457,7 +1500,7 @@ func (s *BaseRoSnapshots) delete(fileName string) *DirtySegment {
 
 // retireFiles drops the named segments from the live set. Physical unlink is deferred
 // to the reader watermark via the generation chain, so files pinned by open views survive.
-func (s *BaseRoSnapshots) retireFiles(fileNames ...string) error {
+func (s *BaseRoSnapshots) retireFiles(reason mvcc.RetireReason, fileNames ...string) error {
 	if s == nil {
 		return nil
 	}
@@ -1465,12 +1508,13 @@ func (s *BaseRoSnapshots) retireFiles(fileNames ...string) error {
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
-	var retired []*DirtySegment
+	var retired retiredSegments
 	for _, fileName := range fileNames {
 		if sn := s.delete(fileName); sn != nil {
 			retired = append(retired, sn)
 		}
 	}
+	retire(reason, retired)
 	s.recalcVisibleFiles(s.alignMin, retired)
 	return nil
 }
@@ -1510,7 +1554,7 @@ func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, on
 			return false, fmt.Errorf("onDelete: %w", err)
 		}
 	}
-	return true, s.retireFiles(names...)
+	return true, s.retireFiles(mvcc.RetireReasonAged, names...)
 }
 
 // RetireFilesAbove retires VISIBLE segments whose range ends at or beyond blockNum — the extra
@@ -1542,7 +1586,7 @@ func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []st
 			return fmt.Errorf("onDelete: %w", err)
 		}
 	}
-	return s.retireFiles(names...)
+	return s.retireFiles(mvcc.RetireReasonAged, names...)
 }
 
 func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {

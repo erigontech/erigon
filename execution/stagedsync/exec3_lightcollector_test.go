@@ -263,7 +263,9 @@ func TestLightCollectorStorageReentrancyGuard(t *testing.T) {
 	require.NoError(t, err)
 
 	slotHash := slotKey.Value()
-	composite := append(contractVal[:], slotHash[:]...)
+	composite := make([]byte, 0, len(contractVal)+len(slotHash))
+	composite = append(composite, contractVal[:]...)
+	composite = append(composite, slotHash[:]...)
 	one := uint256.NewInt(1)
 	err = domains.DomainPut(kv.StorageDomain, tx, composite, one.Bytes(), 0, nil)
 	require.NoError(t, err)
@@ -342,7 +344,9 @@ func TestLightCollectorStorageUnchangedSlot(t *testing.T) {
 	require.NoError(t, err)
 
 	slotHash := slotKey.Value()
-	composite := append(contractVal[:], slotHash[:]...)
+	composite := make([]byte, 0, len(contractVal)+len(slotHash))
+	composite = append(composite, contractVal[:]...)
+	composite = append(composite, slotHash[:]...)
 	one := uint256.NewInt(1)
 	err = domains.DomainPut(kv.StorageDomain, tx, composite, one.Bytes(), 0, nil)
 	require.NoError(t, err)
@@ -366,7 +370,9 @@ func TestLightCollectorStorageUnchangedSlot(t *testing.T) {
 	// Now verify a DIFFERENT slot on the same contract is unaffected
 	slotKey2 := accounts.InternKey(common.HexToHash("0xfe"))
 	slotHash2 := slotKey2.Value()
-	composite2 := append(contractVal[:], slotHash2[:]...)
+	composite2 := make([]byte, 0, len(contractVal)+len(slotHash2))
+	composite2 = append(composite2, contractVal[:]...)
+	composite2 = append(composite2, slotHash2[:]...)
 	thirtySeven := uint256.NewInt(37)
 	err = domains.DomainPut(kv.StorageDomain, tx, composite2, thirtySeven.Bytes(), 0, nil)
 	require.NoError(t, err)
