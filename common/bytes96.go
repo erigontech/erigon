@@ -48,6 +48,9 @@ func (b *Bytes96) UnmarshalText(input []byte) error {
 // MarshalText returns the hex representation of a.
 func (b Bytes96) MarshalText() ([]byte, error) { return hexutil.Bytes(b[:]).MarshalText() }
 
+// AppendText implements encoding.TextAppender (alloc-free MarshalText).
+func (b Bytes96) AppendText(dst []byte) ([]byte, error) { return hexutil.Bytes(b[:]).AppendText(dst) }
+
 // Format implements fmt.Formatter.
 // Hash supports the %v, %s, %v, %x, %X and %d format verbs.
 func (b Bytes96) Format(s fmt.State, c rune) { fixedFormat(s, c, "hash", b[:]) }
