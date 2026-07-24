@@ -16,15 +16,19 @@ rules:
       - qa-rpc-integration-tests.yml
       - qa-sync-from-scratch.yml
 
-  # ci-gate orchestrates the reusable test leaves. A called workflow's token
-  # permissions are capped by the caller, so ci-gate's workflow-level
-  # actions: write is the cap that lets every self-cancelling leaf run
-  # `gh run cancel`; pull-requests: write is used by the gate's own
-  # dequeuePullRequest mutation. Both are genuinely needed workflow-wide and
-  # can't be scoped to a single job. Tracked in #21132.
+  # These workflows call the reusable test leaves. A called workflow's declared
+  # token permissions must be granted by the caller (else the run fails at
+  # startup), so each caller declares at the workflow level the union its leaves
+  # need: actions: write (cap for the self-cancelling leaves' `gh run cancel`).
+  # Callers that include sonar additionally grant pull-requests: read (PR context).
+  # ci-gate additionally uses pull-requests: write for its own dequeuePullRequest mutation.
+  # These are needed workflow-wide and can't be scoped to a single job. Tracked in #21132.
   excessive-permissions:
     ignore:
       - ci-gate.yml
+      - cache-warming.yml
+      - sonar-branch-scan.yml
+      - cache-warming-kurtosis-cl-images.yml
 
   # The remaining `secrets: inherit` calls target same-repo reusable workflows
   # that genuinely consume secrets — sonar (SONAR_TOKEN) and the DockerHub-pull
