@@ -19,6 +19,7 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -99,6 +100,64 @@ func TestFlushToUpdates_DeletedWithIncarnation_EmitsZeroAccountUpdate(t *testing
 	assert.True(t, got.Balance.IsZero(), "balance must be zero")
 	assert.Equal(t, uint64(0), got.Nonce, "nonce must be zero")
 	assert.Equal(t, empty.CodeHash, got.CodeHash, "codeHash must be empty.CodeHash")
+}
+
+// TestRawViewVsNormalize_CalcParity drives the raw-view collapse: it feeds the
+// commitment calc the RAW versionMap view (touched keys, vm-floor values) and,
+// separately, the Normalize output, and asserts the resulting calcState is
+// identical. Divergences map exactly the semantics Normalize pre-computes that
+// the calc (and apply) must own once Normalize is removed — SD field-drop, the
+// R7 account-field fill, the R3 no-op filter. Scenarios that already match need
+// no calc change; the ones that diverge are the collapse work-list.
+func TestRawViewVsNormalize_CalcParity(t *testing.T) {
+	const txIdx, inc = 5, 0
+	ver := state.Version{TxIndex: txIdx, Incarnation: inc}
+	A := accounts.InternAddress([20]byte{0xaa})
+	k := accounts.InternKey(common.Hash{0x01})
+
+	cases := []struct {
+		name string
+		ws   *state.WriteSet
+	}{
+		{"simple account update", newWS().bal(A, ver, *uint256.NewInt(100)).nonce(A, ver, 3).build()},
+		{"account + storage", newWS().bal(A, ver, *uint256.NewInt(100)).stor(A, k, ver, *uint256.NewInt(7)).build()},
+		{"storage-only (R7 fill)", newWS().stor(A, k, ver, *uint256.NewInt(7)).build()},
+		{"self-destruct pre-existing (R2 drop)", newWS().selfDestruct(A, ver, true).bal(A, ver, *uint256.NewInt(0)).inc(A, ver, 1).build()},
+		{"create-then-self-destruct same tx (R2 drop, DeployAndDestruct)",
+			newWS().createContract(A, ver, true).inc(A, ver, 1).nonce(A, ver, 1).
+				codeHash(A, ver, accounts.NewCode([]byte{0x60, 0x00, 0x60, 0x00, 0xf3}).Hash).
+				bal(A, ver, *uint256.NewInt(0)).selfDestruct(A, ver, true).build()},
+		{"touched-empty account (R9 EIP-161 removal)",
+			newWS().bal(A, ver, uint256.Int{}).nonce(A, ver, 0).codeHash(A, ver, accounts.EmptyCodeHash).build()},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			vm := state.NewVersionMap(nil)
+			vm.FlushVersionedWrites(tc.ws, true, "")
+
+			normalized, err := tc.ws.Normalize(vm, txIdx, inc, nil, nil, true /*emptyRemoval*/, false, false)
+			require.NoError(t, err)
+			csN := newTestCalcState()
+			csN.ApplyWrites(normalized, false)
+
+			rawView := state.NewVersionMapWriteView(tc.ws, vm, txIdx)
+			csR := newTestCalcState()
+			csR.ApplyWrites(rawView, false)
+			// Mirror compute()'s rawViewCollapse block-end pass: the raw view
+			// carries no EIP-161 deletion marker (Normalize synthesized one).
+			csR.ApplyEIP161Removal(true /*emptyRemoval*/, false /*isAura*/)
+
+			require.Equal(t, csN.accounts, csR.accounts, "calcState.accounts: raw-view vs normalize")
+			require.Equal(t, csN.storageState, csR.storageState, "calcState.storageState: raw-view vs normalize")
+			require.Equal(t, csN.SelfDestructedSubtrees(), csR.SelfDestructedSubtrees(), "sdSubtree: raw-view vs normalize")
+
+			updN, updR := newTestUpdates(), newTestUpdates()
+			csN.FlushToUpdates(updN)
+			csR.FlushToUpdates(updR)
+			require.Equal(t, updatesSnapshot(t, updN), updatesSnapshot(t, updR), "FlushToUpdates: raw-view vs normalize")
+		})
+	}
 }
 
 // TestApplyWrites_CodeHashSingleSourced pins that codeHash is sourced solely
@@ -600,6 +659,19 @@ func TestSDOfPreExistingContract_MarksSubtreeReset(t *testing.T) {
 		"self-destruct must set the empty-base signal so the trie drops the whole storage subtree")
 	assert.Equal(t, 0, slotUpdates,
 		"untouched on-disk slots must NOT be enumerated (dropped by the empty-base signal + committer GC)")
+}
+
+// updatesSnapshot captures every emitted Update keyed by plainKey, in a form
+// comparable across two Updates instances (flags + account fields + storage).
+func updatesSnapshot(t *testing.T, updates *commitment.Updates) map[string]string {
+	t.Helper()
+	out := make(map[string]string)
+	require.NoError(t, updates.HashSort(t.Context(), nil, func(_, k []byte, u *commitment.Update) error {
+		out[string(k)] = fmt.Sprintf("flags=%d bal=%s nonce=%d code=%x stor=%x delSubtree=%v",
+			u.Flags, u.Balance.String(), u.Nonce, u.CodeHash, u.Storage[:u.StorageLen], u.DeleteStorageSubtree)
+		return nil
+	}))
+	return out
 }
 
 func lookupKeyUpdate(t *testing.T, updates *commitment.Updates, plainKey string) *commitment.Update {

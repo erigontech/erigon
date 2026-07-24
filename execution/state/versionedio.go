@@ -1267,6 +1267,12 @@ func (s *WriteSet) SelfDestructs() iter.Seq2[accounts.Address, *VersionedWrite[b
 	}
 	return maps.All(s.selfDestruct)
 }
+func (s *WriteSet) CreateContracts() iter.Seq2[accounts.Address, *VersionedWrite[bool]] {
+	if s == nil {
+		return maps.All(map[accounts.Address]*VersionedWrite[bool](nil))
+	}
+	return maps.All(s.createContract)
+}
 func (s *WriteSet) Codes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.Code]] {
 	if s == nil {
 		return maps.All(map[accounts.Address]*VersionedWrite[accounts.Code](nil))

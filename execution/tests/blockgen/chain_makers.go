@@ -667,7 +667,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 					if normErr != nil {
 						return nil, nil, nil, fmt.Errorf("normalize block writes: %w", normErr)
 					}
-					if err := normalized.Apply(domains, tx, blockNum, txNum, nil, blockRules, nil, false); err != nil {
+					if err := state.ApplyWrites(normalized, domains, tx, blockNum, txNum, nil, blockRules, nil, false); err != nil {
 						return nil, nil, nil, fmt.Errorf("apply versioned block writes: %w", err)
 					}
 				}

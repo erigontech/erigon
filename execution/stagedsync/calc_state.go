@@ -180,11 +180,18 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 			acc.Deleted = false
 		}
 	}
+	// Nonce/codeHash/code writes never revive a finally-self-destructed account
+	// (sdThisCall): a CREATE-then-SELFDESTRUCT in one tx leaves the pre-SD
+	// nonce=1/codeHash in the versionMap, and reviving on their non-zero value
+	// would resurrect the destroyed contract (wrong trie leaf). A genuine
+	// same-tx recreate ends with SelfDestructPath=false, so sdThisCall is false
+	// and the writes below correctly revive it. (Normalize drops these fields
+	// for SD'd accounts upstream, so this only bites the raw-view path.)
 	for addr, vw := range writes.Nonces() {
 		acc := cs.ensureAccount(addr)
 		acc.Nonce = vw.Val
 		acc.dirty = true
-		if clearsDeleted(addr, acc.Nonce != 0) {
+		if !sdThisCall[addr] {
 			acc.Deleted = false
 		}
 	}
@@ -192,7 +199,7 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 		acc := cs.ensureAccount(addr)
 		acc.CodeHash = vw.Val.Value()
 		acc.dirty = true
-		if clearsDeleted(addr, vw.Val.Value() != empty.CodeHash) {
+		if !sdThisCall[addr] {
 			acc.Deleted = false
 		}
 	}
@@ -200,10 +207,10 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 	// the code-presence signal for clearing Deleted (a fresh deploy), never the
 	// hash — so a view that composes empty code for a codeHash-bearing account
 	// cannot clobber the authoritative codeHash.
-	for addr, vw := range writes.Codes() {
+	for addr := range writes.Codes() {
 		acc := cs.ensureAccount(addr)
 		acc.dirty = true
-		if clearsDeleted(addr, vw.Val.Len() > 0) {
+		if !sdThisCall[addr] {
 			acc.Deleted = false
 		}
 	}
@@ -335,19 +342,26 @@ func (cs *calcState) LoadFromBALUpTo(bal types.BlockAccessList, maxTxIndex uint3
 		}
 	}
 	cs.ApplyWrites(writes, eip8246)
+	cs.ApplyEIP161Removal(emptyRemoval, isAura)
+}
 
-	// EIP-161: a touched account whose merged block-end state is empty is
-	// removed from the trie. The BAL carries no deletion marker, so reconstruct
-	// it here, gated exactly as the incremental path (Normalize).
-	for _, ac := range bal {
-		acc := cs.accounts[ac.Address]
-		if acc == nil || !acc.dirty || acc.Deleted {
+// ApplyEIP161Removal marks every touched account whose accumulated block-end
+// state is empty (balance 0, nonce 0, empty code) as Deleted, so FlushToUpdates
+// emits a leaf-removing DeleteUpdate — the trie-side of serial's touched-empty
+// removal. Neither the BAL nor the raw-view path carries a deletion marker
+// (Normalize used to synthesize one), so both reconstruct it here. sdSubtree is
+// set to match Normalize's empty→SelfDestruct conversion (a no-op GC for the
+// code-less accounts this can fire on, but keeps the update byte-identical).
+func (cs *calcState) ApplyEIP161Removal(emptyRemoval, isAura bool) {
+	for addr, acc := range cs.accounts {
+		if !acc.dirty || acc.Deleted {
 			continue
 		}
 		if acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash &&
-			state.EIP161EmptyRemoval(emptyRemoval, isAura, ac.Address) {
+			state.EIP161EmptyRemoval(emptyRemoval, isAura, addr) {
 			acc.Deleted = true
 			acc.Incarnation = 0
+			cs.sdSubtree[addr] = true
 		}
 	}
 }
