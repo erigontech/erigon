@@ -114,6 +114,18 @@ func (v *versionMapWriteView) SelfDestructs() iter.Seq2[accounts.Address, *Versi
 	}
 }
 
+func (v *versionMapWriteView) CreateContracts() iter.Seq2[accounts.Address, *VersionedWrite[bool]] {
+	return v.keys.CreateContracts()
+}
+
+func (v *versionMapWriteView) IsEmpty() bool {
+	return v.keys.IsEmpty()
+}
+
+func (v *versionMapWriteView) Count() int {
+	return v.keys.Count()
+}
+
 func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	return func(yield func(accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]) bool) {
 		for addr, inner := range v.keys.Storages() {

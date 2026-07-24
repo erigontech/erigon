@@ -439,7 +439,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		blockApplyCount := 0
 		// Collect per-tx writes so we can notify the accumulator AFTER
 		// StartChange (which arrives with the blockResult, after all txResults).
-		var pendingAccumulatorWrites []*state.WriteSet
+		var pendingAccumulatorWrites []state.WriteSetView
 
 		// handleCommitResult processes a single commitment result from the
 		// calculator. Defined here so both the blockResult handler and the
@@ -1753,7 +1753,7 @@ type txResult struct {
 	logs                  []*types.Log
 	traceFroms            map[accounts.Address]struct{}
 	traceTos              map[accounts.Address]struct{}
-	writes                *state.WriteSet
+	writes                state.WriteSetView
 	commitWrites          state.WriteSetView // VMAP_COMMIT_VIEW A/B: versionMap-slice view fed to the calculator instead of the normalized writes
 	rules                 *chain.Rules
 	isFinalize            bool // block-end finalize writes — apply to sd.mem directly
@@ -1764,6 +1764,14 @@ type txResult struct {
 // of the normalized *WriteSet — an A/B to check commitment consistency of the
 // single-source-of-truth path. Off by default.
 var useVersionMapCommitView = dbg.EnvBool("VMAP_COMMIT_VIEW", false)
+
+// rawViewCollapse feeds BOTH apply and the commitment calculator the read-only
+// versionMap-slice view over the tx's RAW write-set (touched keys + vm-floor
+// values), skipping Normalize entirely. Apply and calc own the semantics
+// Normalize used to pre-compute (SD account-field drop, EIP-161 empty removal,
+// no-op filter, SD storage cascade via the sdSubtree GC marker). Consensus-
+// critical: off by default until gated by eest + a tip re-exec.
+var rawViewCollapse = dbg.EnvBool("RAW_VIEW_COLLAPSE", false)
 
 // blockRequest is the commitment calculator's per-block heads-up, sent by the
 // dispatch layer on its own channel — ahead of, and separate from, the
@@ -1807,7 +1815,7 @@ type execTask struct {
 
 type execResult struct {
 	*exec.TxResult
-	writes                *state.WriteSet
+	writes                state.WriteSetView
 	cumulativeBlobGasUsed uint64
 }
 
@@ -2866,43 +2874,47 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// and resolves account values from the versionMap.
 					resultIncarnation := txResult.Version().Incarnation
 					rawWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-					// domainStorageKeys: enumerate every storage slot currently
-					// committed for addr (sd.mem + domain files), so a self-destruct
-					// emits the full StoragePath=0 cascade — covers genesis-allocated
-					// and prior-block storage that vm.StorageKeys doesn't see.
-					var domainKeysErr error
-					domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-						av := addr.Value()
-						const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash
-						var keys []accounts.StorageKey
-						if iterErr := pe.rs.Domains().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
-							if len(k) >= addrLen+hashLen {
-								keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
+					if rawViewCollapse {
+						txResult.writes = state.NewVersionMapWriteView(rawWrites, be.versionMap, txVersion.TxIndex)
+					} else {
+						// domainStorageKeys: enumerate every storage slot currently
+						// committed for addr (sd.mem + domain files), so a self-destruct
+						// emits the full StoragePath=0 cascade — covers genesis-allocated
+						// and prior-block storage that vm.StorageKeys doesn't see.
+						var domainKeysErr error
+						domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
+							av := addr.Value()
+							const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash
+							var keys []accounts.StorageKey
+							if iterErr := pe.rs.Domains().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
+								if len(k) >= addrLen+hashLen {
+									keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
+								}
+								return true, nil
+							}); iterErr != nil {
+								domainKeysErr = iterErr
+								return nil
 							}
-							return true, nil
-						}); iterErr != nil {
-							domainKeysErr = iterErr
-							return nil
+							return keys
 						}
-						return keys
+						// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
+						emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
+						var normalizeStart time.Time
+						if depShapeEnabled {
+							normalizeStart = time.Now()
+						}
+						normWrites, normErr := rawWrites.Normalize(be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
+						if depShapeEnabled {
+							be.normalizeNanos += time.Since(normalizeStart).Nanoseconds()
+						}
+						if domainKeysErr != nil {
+							return nil, fmt.Errorf("[parallel] iterate storage prefix for block write normalization: %w", domainKeysErr)
+						}
+						if normErr != nil {
+							return nil, fmt.Errorf("[parallel] normalize block writes: %w", normErr)
+						}
+						txResult.writes = normWrites
 					}
-					// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
-					emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
-					var normalizeStart time.Time
-					if depShapeEnabled {
-						normalizeStart = time.Now()
-					}
-					normWrites, normErr := rawWrites.Normalize(be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
-					if depShapeEnabled {
-						be.normalizeNanos += time.Since(normalizeStart).Nanoseconds()
-					}
-					if domainKeysErr != nil {
-						return nil, fmt.Errorf("[parallel] iterate storage prefix for block write normalization: %w", domainKeysErr)
-					}
-					if normErr != nil {
-						return nil, fmt.Errorf("[parallel] normalize block writes: %w", normErr)
-					}
-					txResult.writes = normWrites
 				}
 
 				// Snapshot the finalized result before pushing — prevents
@@ -3011,7 +3023,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if result.writes != nil {
 				applyResult.writes = result.writes
 				be.applyCount += applyResult.writes.Count()
-				if useVersionMapCommitView {
+				// Under rawViewCollapse result.writes is already the versionMap
+				// view; leave commitWrites nil so the calculator falls back to it
+				// (committer prefers commitWrites, else r.writes) — no double-wrap.
+				if useVersionMapCommitView && !rawViewCollapse {
 					applyResult.commitWrites = state.NewVersionMapWriteView(result.writes, be.versionMap, task.Version().TxIndex)
 				}
 			}
@@ -3105,7 +3120,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		// Block finalize: run engine.Finalize + MakeWriteSet on the producer
 		// side so finalize writes go to the BlockStateCache before the Flush.
-		var finalizeWrites *state.WriteSet
+		var finalizeWrites state.WriteSetView
 		if be.blockNum > 0 {
 			lastResult := be.results[len(be.results)-1]
 			finalTask := be.tasks[len(be.tasks)-1].Task
@@ -3183,30 +3198,34 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// so.data via MakeWriteSet. This keeps the parallel commit sourced
 				// solely from versionedWrites so the write-path stateObject is
 				// redundant.
-				var domainKeysErr error
-				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-					av := addr.Value()
-					const addrLen, hashLen = 20, 32
-					var keys []accounts.StorageKey
-					if iterErr := pe.rs.Domains().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
-						if len(k) >= addrLen+hashLen {
-							keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
+				if rawViewCollapse {
+					finalizeWrites = state.NewVersionMapWriteView(ivw, be.versionMap, finalVersion.TxIndex)
+				} else {
+					var domainKeysErr error
+					domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
+						av := addr.Value()
+						const addrLen, hashLen = 20, 32
+						var keys []accounts.StorageKey
+						if iterErr := pe.rs.Domains().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
+							if len(k) >= addrLen+hashLen {
+								keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
+							}
+							return true, nil
+						}); iterErr != nil {
+							domainKeysErr = iterErr
+							return nil
 						}
-						return true, nil
-					}); iterErr != nil {
-						domainKeysErr = iterErr
-						return nil
+						return keys
 					}
-					return keys
-				}
-				emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
-				var normErr error
-				finalizeWrites, normErr = ivw.Normalize(be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
-				if domainKeysErr != nil {
-					return nil, fmt.Errorf("[parallel] finalize iterate storage prefix for block write normalization: %w", domainKeysErr)
-				}
-				if normErr != nil {
-					return nil, fmt.Errorf("[parallel] normalize finalize writes: %w", normErr)
+					emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
+					var normErr error
+					finalizeWrites, normErr = ivw.Normalize(be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
+					if domainKeysErr != nil {
+						return nil, fmt.Errorf("[parallel] finalize iterate storage prefix for block write normalization: %w", domainKeysErr)
+					}
+					if normErr != nil {
+						return nil, fmt.Errorf("[parallel] normalize finalize writes: %w", normErr)
+					}
 				}
 				be.applyCount += finalizeWrites.Count()
 
@@ -3220,7 +3239,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		// Send finalize txResult through the channel for index writes.
 		// State writes are already in the BlockStateCache.
-		if !finalizeWrites.IsEmpty() {
+		if finalizeWrites != nil && !finalizeWrites.IsEmpty() {
 			lastResult := be.results[len(be.results)-1]
 			if err := be.sendResult(ctx, &txResult{
 				blockNum:              be.blockNum,

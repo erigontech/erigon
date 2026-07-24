@@ -26,7 +26,10 @@ type WriteSetView interface {
 	CodeHashes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.CodeHash]]
 	Codes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.Code]]
 	SelfDestructs() iter.Seq2[accounts.Address, *VersionedWrite[bool]]
+	CreateContracts() iter.Seq2[accounts.Address, *VersionedWrite[bool]]
 	Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]]
+	IsEmpty() bool
+	Count() int
 }
 
 var _ WriteSetView = (*WriteSet)(nil)

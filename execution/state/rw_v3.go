@@ -86,7 +86,7 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 //   - pure account deletion (no account fields follow) — from DeleteAccount
 //   - code+storage cleanup before recreation — from UpdateAccountData when
 //     original.Incarnation > account.Incarnation (followed by account fields)
-func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache, trace bool) error {
+func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache, trace bool) error {
 	if writes != nil && !writes.IsEmpty() {
 		type addrState struct {
 			balance        *uint256.Int
@@ -137,13 +137,30 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 		for a, vw := range writes.SelfDestructs() {
 			ensure(a).selfDestruct = vw.Val
 		}
-		for a, vw := range writes.createContract {
+		for a, vw := range writes.CreateContracts() {
 			ensure(a).createContract = vw.Val
 		}
 		for a, byKey := range writes.Storages() {
 			d := ensure(a)
 			for k, vw := range byKey {
 				d.storage = append(d.storage, storageItem{k, vw.Val})
+			}
+		}
+
+		// A self-destructed address (final state destroyed) must reach the
+		// pure-delete branch below, which fires only when no nonce/incarnation/
+		// codeHash and no storage writes accompany the SD. A raw versionMap view
+		// still carries the SD tx's own field/storage writes (Normalize dropped
+		// them upstream), so drop them here. Balance is kept: its zero-ness drives
+		// the EIP-8246 preserved-balance vs pure-delete decision.
+		for _, d := range perAddr {
+			if d.selfDestruct {
+				d.nonce = nil
+				d.incarnation = nil
+				d.codeHash = nil
+				d.code = nil
+				d.codeWritten = false
+				d.storage = nil
 			}
 		}
 
@@ -292,18 +309,37 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 				} else if d.codeWritten {
 					acc.CodeHash = accounts.NewCode(d.code).Hash
 				}
-				if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
-					fmt.Printf("%d apply:put account: %x balance:%s,nonce:%d,codehash:%x\n", blockNum, addr, acc.Balance.String(), acc.Nonce, acc.CodeHash)
-				}
-				enc := accounts.SerialiseV3(&acc)
-				if blockCache != nil {
-					blockCache.WriteAccount(addr, enc, txNum)
-					if !domains.InlineTouchKeyDisabled() {
-						domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(address[:]), enc)
+				// EIP-161: an account left Balance=0, Nonce=0, empty-code is
+				// removed rather than written as a zero leaf — matching serial's
+				// updateAccount and the balance-increase loop below. A raw
+				// versionMap view still carries the touched-empty account's field
+				// writes (Normalize converted them to a delete upstream).
+				if EIP161EmptyRemoval(rules.IsEIP161Enabled(), rules.IsAura, addr) && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
+					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
+						fmt.Printf("%d apply:del empty account: %x\n", blockNum, addr)
+					}
+					if blockCache != nil {
+						blockCache.DeleteAccount(addr, txNum)
+						if !domains.InlineTouchKeyDisabled() {
+							domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(address[:]), nil)
+						}
+					} else if err := domains.DomainDel(kv.AccountsDomain, roTx, address[:], txNum, nil); err != nil {
+						return err
 					}
 				} else {
-					if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], enc, txNum, nil); err != nil {
-						return err
+					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
+						fmt.Printf("%d apply:put account: %x balance:%s,nonce:%d,codehash:%x\n", blockNum, addr, acc.Balance.String(), acc.Nonce, acc.CodeHash)
+					}
+					enc := accounts.SerialiseV3(&acc)
+					if blockCache != nil {
+						blockCache.WriteAccount(addr, enc, txNum)
+						if !domains.InlineTouchKeyDisabled() {
+							domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(address[:]), enc)
+						}
+					} else {
+						if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], enc, txNum, nil); err != nil {
+							return err
+						}
 					}
 				}
 			}
@@ -434,15 +470,15 @@ func (rs *StateV3) ApplyStateWrites(_ context.Context,
 	roTx kv.TemporalTx,
 	blockNum uint64,
 	txNum uint64,
-	writes *WriteSet,
+	writes WriteSetView,
 	balanceIncreases map[accounts.Address]uint256.Int,
 	rules *chain.Rules,
 	blockCache *BlockStateCache,
 ) error {
-	if writes.IsEmpty() && len(balanceIncreases) == 0 {
+	if (writes == nil || writes.IsEmpty()) && len(balanceIncreases) == 0 {
 		return nil
 	}
-	if err := writes.Apply(rs.domains, roTx, blockNum, txNum, balanceIncreases, rules, blockCache, rs.trace.Load()); err != nil {
+	if err := ApplyWrites(writes, rs.domains, roTx, blockNum, txNum, balanceIncreases, rules, blockCache, rs.trace.Load()); err != nil {
 		return fmt.Errorf("StateV3.ApplyStateWrites: %w", err)
 	}
 	// Step-boundary commitment is computed by the explicit CommitStepBoundary
@@ -817,7 +853,7 @@ func (c *LightCollector) CreateContract(_ accounts.Address) error { return nil }
 // It reconstructs account state from the per-field writes and calls
 // ChangeAccount/ChangeCode/ChangeStorage on the accumulator. StartChange must
 // have been called on the accumulator before this function is invoked.
-func NotifyAccumulator(accumulator *shards.Accumulator, writes *WriteSet) {
+func NotifyAccumulator(accumulator *shards.Accumulator, writes WriteSetView) {
 	if accumulator == nil || writes.IsEmpty() {
 		return
 	}

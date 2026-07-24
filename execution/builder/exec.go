@@ -267,7 +267,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 			if normErr != nil {
 				return fmt.Errorf("normalize block writes: %w", normErr)
 			}
-			if err := normalized.Apply(sd, tx, blockHeight, txNum, nil, blockRules, nil, false); err != nil {
+			if err := state.ApplyWrites(normalized, sd, tx, blockHeight, txNum, nil, blockRules, nil, false); err != nil {
 				return fmt.Errorf("apply versioned block writes: %w", err)
 			}
 		}

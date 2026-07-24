@@ -2190,12 +2190,60 @@ func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
 	hph.collapseTracer(siblingPath, common.Copy(hph.currentKey[:depth]))
 }
 
+// deleteStorageSubtreeBranches tombstones every persisted commitment branch under
+// a self-destructed account's storage subtree, so a later recreate at the same
+// address cannot fold in stale branches. It walks the persisted subtree by point
+// read (branchFromCacheOrDB) following child pointers — bounded to the account's
+// real branches — rather than a domain range scan, which on the step-sharded
+// commitment domain maps every file. Each branch is deleted through the normal
+// branch-update path (empty branch → branchCache.Invalidate on flush). prefix is
+// the branch's key in nibbles.
+func (hph *HexPatriciaHashed) deleteStorageSubtreeBranches(prefix []byte) error {
+	branch, err := hph.branchFromCacheOrDB(nibbles.HexToCompact(prefix))
+	if err != nil {
+		return err
+	}
+	// No branch record at this prefix (leaf, absent, or already a tombstone).
+	if len(branch) < 4 || BranchData(branch).ChildCount() == 0 {
+		return nil
+	}
+	var scratch [16]cell
+	maps, err := DecodeBranchInto(branch[2:], false, &scratch)
+	if err != nil {
+		return fmt.Errorf("deleteStorageSubtreeBranches decode %x: %w", prefix, err)
+	}
+	// Snapshot child nibbles+extensions before recursing (each recursive call
+	// reads and decodes further branches).
+	type childRef struct {
+		nib byte
+		ext []byte
+	}
+	children := make([]childRef, 0, bits.OnesCount16(maps.Bitmap))
+	for bm := maps.Bitmap; bm != 0; {
+		nib := bits.TrailingZeros16(bm)
+		bm &^= uint16(1) << nib
+		c := &scratch[nib]
+		children = append(children, childRef{byte(nib), append([]byte{}, c.extension[:c.extLen]...)})
+	}
+	for _, ch := range children {
+		childPrefix := make([]byte, 0, len(prefix)+1+len(ch.ext))
+		childPrefix = append(childPrefix, prefix...)
+		childPrefix = append(childPrefix, ch.nib)
+		childPrefix = append(childPrefix, ch.ext...)
+		if err := hph.deleteStorageSubtreeBranches(childPrefix); err != nil {
+			return err
+		}
+	}
+	// Delete this branch: touchMap = all present children, afterMap = 0 → the
+	// merge clears every child, leaving an empty-branch tombstone.
+	return hph.branchEncoder.CollectUpdate(hph.ctx, nibbles.HexToCompact(prefix), 0, maps.Bitmap, 0, nil, false)
+}
+
 // resetAccountStorageRoot clears the in-grid account cell's storage-root
 // reference so a self-destructed account rebuilds from empty storage rather than
 // re-mounting its old subtree during this Process. hashedKey is the 64-nibble
-// hashed account key. Store cleanup of the orphaned persisted branches is a
-// separate, live-domain concern (not done here — this path reads a frozen
-// snapshot the delete could not affect anyway).
+// hashed account key. The persisted subtree branches are tombstoned by
+// deleteStorageSubtreeBranches (called first in updateCell).
 func (hph *HexPatriciaHashed) resetAccountStorageRoot(hashedKey []byte) {
 	if hph.activeRows == 0 {
 		return
@@ -2209,10 +2257,13 @@ func (hph *HexPatriciaHashed) resetAccountStorageRoot(hashedKey []byte) {
 }
 
 // fetches cell by key and set touch/after maps. Requires that prefix to be already unfolded
-func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) (cell *cell) {
+func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) (cell *cell, err error) {
 	hph.metrics.Updates(plainKey)
 
 	if u != nil && u.DeleteStorageSubtree && int16(len(plainKey)) == hph.accountKeyLen {
+		if err := hph.deleteStorageSubtreeBranches(hashedKey); err != nil {
+			return nil, fmt.Errorf("deleteStorageSubtreeBranches %x: %w", hashedKey, err)
+		}
 		hph.resetAccountStorageRoot(hashedKey)
 	}
 
@@ -2224,7 +2275,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 
 		hph.deleteCell(hashedKey)
 		hph.lastUpdateCellWasEmpty = false
-		return nil
+		return nil, nil
 	}
 
 	var depth int16
@@ -2271,7 +2322,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 	if hph.traceW != nil {
 		fmt.Fprintf(hph.traceW, "updateCell %x => %s\n", plainKey, u.String())
 	}
-	return cell
+	return cell, nil
 }
 
 func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
@@ -2348,7 +2399,9 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 			}
 		}
 	}
-	hph.updateCell(plainKey, hashedKey, stateUpdate)
+	if _, err := hph.updateCell(plainKey, hashedKey, stateUpdate); err != nil {
+		return err
+	}
 
 	mxTrieProcessedKeys.Inc()
 	return nil

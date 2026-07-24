@@ -11,7 +11,6 @@ import (
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -19,7 +18,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // commitmentResult is the outcome of a single commitment computation.
@@ -334,7 +332,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// computeAndPublish overwrites this back to lastTxNum+1 right
 		// before ComputeCommitment, so the per-tx setting only affects
 		// the lazy-load path and never leaks into the trie fold path.
-		if !r.writes.IsEmpty() {
+		if r.writes != nil && !r.writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
 			if r.commitWrites != nil {
 				cc.state.ApplyWrites(r.commitWrites, r.rules.IsAmsterdam)
@@ -617,25 +615,7 @@ func (cc *commitmentCalculator) foldBALToRoot(ctx context.Context, req *blockReq
 		balUpdates.SetMode(commitment.ModeUpdate)
 	}
 	balState.FlushToUpdates(balUpdates)
-	if err := cc.gcSelfDestructedSubtrees(balState.SelfDestructedSubtrees(), t.lastTxNum+1); err != nil {
-		return nil, fmt.Errorf("BAL SD subtree GC: %w", err)
-	}
 	return cc.computeRootFromUpdates(ctx, t, balUpdates, reader)
-}
-
-// gcSelfDestructedSubtrees tombstones the persisted CommitmentDomain storage
-// subtree of every account self-destructed in the current block. The trie's
-// empty-base signal keeps the computed root correct on its own; this reclaims the
-// orphaned branches from the domain — the replacement for the per-slot storage
-// enumeration.
-func (cc *commitmentCalculator) gcSelfDestructedSubtrees(sd map[accounts.Address]bool, txNum uint64) error {
-	for addr := range sd {
-		av := addr.Value()
-		if err := cc.doms.DomainDelPrefix(kv.CommitmentDomain, cc.roTx, crypto.Keccak256(av[:]), txNum); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // computeRootFromUpdates installs an explicit updates buffer + reader on the
@@ -666,10 +646,6 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockRe
 		return
 	}
 	cc.state.FlushToUpdates(cc.updates)
-	if err := cc.gcSelfDestructedSubtrees(cc.state.SelfDestructedSubtrees(), r.lastTxNum+1); err != nil {
-		cc.fail(ctx, r, fmt.Errorf("shadow incremental SD subtree GC: %w", err))
-		return
-	}
 	cc.state.ResetBlockFlags()
 	incUpdates := cc.updates
 	cc.updates = cc.updates.NewEmpty()
@@ -752,12 +728,15 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 			err: fmt.Errorf("commitmentCalculator: %slazy-load failed: %w", m.label, err)})
 		return
 	}
-	cc.state.FlushToUpdates(cc.updates)
-	if err := cc.gcSelfDestructedSubtrees(cc.state.SelfDestructedSubtrees(), t.lastTxNum+1); err != nil {
-		cc.publish(ctx, commitmentResult{blockNum: t.blockNum, txNum: t.lastTxNum,
-			err: fmt.Errorf("commitmentCalculator: %sSD subtree GC: %w", m.label, err)})
-		return
+	// Under rawViewCollapse the calc consumes the raw versionMap view, which
+	// carries no EIP-161 deletion marker (Normalize used to synthesize one). The
+	// normalize path already reflects the removal (empty→SelfDestruct→Deleted), so
+	// this is a no-op there — but gate it anyway to keep flag-off byte-identical.
+	if rawViewCollapse {
+		emptyRemoval := t.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(t.blockNum)
+		cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
 	}
+	cc.state.FlushToUpdates(cc.updates)
 	if !m.midBlock {
 		cc.state.ResetBlockFlags()
 	}
@@ -1012,4 +991,3 @@ func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
 func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
 	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx}
 }
-
