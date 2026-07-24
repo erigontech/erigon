@@ -77,46 +77,25 @@ func TestBadHeader_LaterReportOverridesValidationErr(t *testing.T) {
 	require.Equal(t, "second reason", gotErr)
 }
 
-func TestNewPayloadForwardGapExceedsLimit(t *testing.T) {
+func TestClassifyNewPayloadGap(t *testing.T) {
+	const limit = 96
 	tests := []struct {
 		name        string
 		currentHead uint64
 		parentNum   uint64
-		limit       uint64
-		want        bool
+		want        newPayloadGapAction
 	}{
-		{"parent far ahead", 100, 500, 96, true},
-		{"parent far behind", 500, 100, 96, false},
-		{"parent ahead by exact limit", 100, 196, 96, false},
-		{"parent ahead by one over limit", 100, 197, 96, true},
-		{"parent behind by one over limit", 197, 100, 96, false},
-		{"same block", 100, 100, 96, false},
+		{"parent far ahead catches up", 100, 500, newPayloadForwardCatchUp},
+		{"parent far behind is too deep", 500, 100, newPayloadReorgTooDeep},
+		{"parent ahead by exact limit stays bounded", 100, 196, newPayloadBoundedDownload},
+		{"parent ahead by one over limit catches up", 100, 197, newPayloadForwardCatchUp},
+		{"parent behind by exact limit stays bounded", 196, 100, newPayloadBoundedDownload},
+		{"parent behind by one over limit is too deep", 197, 100, newPayloadReorgTooDeep},
+		{"parent equals head stays bounded", 100, 100, newPayloadBoundedDownload},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, newPayloadForwardGapExceedsLimit(tt.currentHead, tt.parentNum, tt.limit))
-		})
-	}
-}
-
-func TestNewPayloadBackwardGapExceedsLimit(t *testing.T) {
-	tests := []struct {
-		name        string
-		currentHead uint64
-		parentNum   uint64
-		limit       uint64
-		want        bool
-	}{
-		{"parent far behind", 500, 100, 96, true},
-		{"parent far ahead", 100, 500, 96, false},
-		{"parent behind by exact limit", 196, 100, 96, false},
-		{"parent behind by one over limit", 197, 100, 96, true},
-		{"parent ahead by one over limit", 100, 197, 96, false},
-		{"same block", 100, 100, 96, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, newPayloadBackwardGapExceedsLimit(tt.currentHead, tt.parentNum, tt.limit))
+			require.Equal(t, tt.want, classifyNewPayloadGap(tt.currentHead, tt.parentNum, limit))
 		})
 	}
 }

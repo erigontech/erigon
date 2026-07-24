@@ -148,14 +148,28 @@ func (e *EngineBlockDownloader) download(ctx context.Context, req BackwardDownlo
 	e.status.Store(Synced)
 }
 
-// newPayloadForwardGapExceedsLimit reports whether the new payload's parent is more than maxReorgDepth blocks ahead of the current head.
-func newPayloadForwardGapExceedsLimit(currentHeadNum, parentNum, maxReorgDepth uint64) bool {
-	return parentNum > currentHeadNum && parentNum-currentHeadNum > maxReorgDepth
-}
+// newPayloadGapAction describes how a NewPayload backward download should treat the gap between the
+// local head and the payload's parent.
+type newPayloadGapAction int
 
-// newPayloadBackwardGapExceedsLimit reports whether the new payload's parent is more than maxReorgDepth blocks behind the current head.
-func newPayloadBackwardGapExceedsLimit(currentHeadNum, parentNum, maxReorgDepth uint64) bool {
-	return currentHeadNum > parentNum && currentHeadNum-parentNum > maxReorgDepth
+const (
+	newPayloadBoundedDownload newPayloadGapAction = iota // normal download bounded by MaxReorgDepth
+	newPayloadForwardCatchUp                             // parent far ahead: we are behind, catch up in full
+	newPayloadReorgTooDeep                               // parent far behind: reorg too deep to bridge
+)
+
+// classifyNewPayloadGap decides how to handle a NewPayload whose parent is parentNum given the local
+// head and the reorg-depth limit. A parent more than maxReorgDepth ahead is not a reorg — the node is
+// simply behind — so it catches up in full; a parent more than maxReorgDepth behind is a reorg too deep.
+func classifyNewPayloadGap(currentHead, parentNum, maxReorgDepth uint64) newPayloadGapAction {
+	switch {
+	case parentNum > currentHead && parentNum-currentHead > maxReorgDepth:
+		return newPayloadForwardCatchUp
+	case currentHead > parentNum && currentHead-parentNum > maxReorgDepth:
+		return newPayloadReorgTooDeep
+	default:
+		return newPayloadBoundedDownload
+	}
 }
 
 func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDownloadRequest) error {
@@ -195,10 +209,11 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 	if req.Trigger == NewPayloadTrigger {
 		forwardCatchUp := false
 		currentHeader := e.chainRW.CurrentHeader(ctx)
-		if currentHeader != nil && req.ValidateChainTip != nil {
+		if currentHeader != nil && req.ValidateChainTip != nil && req.ValidateChainTip.NumberU64() > 0 {
 			currentHead := currentHeader.Number.Uint64()
 			parentNum := req.ValidateChainTip.NumberU64() - 1
-			if newPayloadBackwardGapExceedsLimit(currentHead, parentNum, e.syncCfg.MaxReorgDepth) {
+			switch classifyNewPayloadGap(currentHead, parentNum, e.syncCfg.MaxReorgDepth) {
+			case newPayloadReorgTooDeep:
 				return fmt.Errorf(
 					"%w: currentHead=%d, parent=%d, limit=%d",
 					p2p.ErrChainLengthExceedsLimit,
@@ -206,8 +221,9 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 					parentNum,
 					e.syncCfg.MaxReorgDepth,
 				)
+			case newPayloadForwardCatchUp:
+				forwardCatchUp = true
 			}
-			forwardCatchUp = newPayloadForwardGapExceedsLimit(currentHead, parentNum, e.syncCfg.MaxReorgDepth)
 		}
 		if forwardCatchUp {
 			// catch up in full: the CL's initial-sync phase may feed new payloads without a follow-up FCU
