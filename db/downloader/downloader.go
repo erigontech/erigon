@@ -135,23 +135,11 @@ type Downloader struct {
 	// inside PublishChainToml doesn't leave the ENR pointing at V1.
 	lastV2InfoHash [20]byte
 
-	// publishStateMu, publishRunning, publishPending implement the
-	// single-flight + pending-follow-up pattern for PublishLocalChainToml.
-	// Coalesces concurrent callers (e.g. many DownloadSnapshots
-	// completions firing simultaneously at startup): only ONE publish
-	// runs at a time; subsequent callers record "pending" and return
-	// immediately. When the running publish finishes, if any caller
-	// requested another while it was running, it loops once more so the
-	// latest state is captured. Replaces the earlier serialising mutex
-	// which queued every concurrent caller and exposed a deadlock when
-	// downstream calls blocked on d.lock.
-	//
-	// Earlier symptom (2026-05-18 publisher6, PID 4192672): 277
-	// concurrent onDownloadRequested handlers all queued at the
-	// serialising mutex → publish goroutines indefinitely blocked → no
-	// DownloadComplete events emitted → orchestrator's statePending
-	// never drained → InitialStateReady never fired → exec never ran
-	// for 8h+.
+	// Single-flight + pending-follow-up for PublishLocalChainToml so
+	// concurrent DownloadSnapshots completions coalesce onto one publish;
+	// a pending flag makes the running publish loop once more if another
+	// caller arrived. Replaces an earlier serialising mutex that could
+	// deadlock when the downstream publish path took d.lock.
 	publishStateMu sync.Mutex
 	publishRunning bool
 	publishPending bool
@@ -724,14 +712,9 @@ func (d *Downloader) SelfIP() net.IP {
 // derived from the preverified registry's ExpectBlocks.
 // It also adds the chain.toml torrent to the client for seeding so other nodes can download it.
 //
-// Single-flight + pending-follow-up: only one publish runs at a time
-// across N concurrent callers. Subsequent callers record a "pending"
-// flag and return immediately; when the running publish finishes, if
-// any caller requested another, it loops once more so the latest
-// state is captured. This replaces the earlier serialising mutex,
-// which queued every caller and exposed a deadlock when the downstream
-// publish path blocked on other locks (publisher6 was stuck for 8h+
-// with no DownloadComplete events emerging from the bus handler).
+// PublishLocalChainToml coalesces concurrent callers onto a single
+// in-flight publish; late arrivals set publishPending and the running
+// publish loops once more so the latest state ships.
 func (d *Downloader) PublishLocalChainToml() error {
 	d.publishStateMu.Lock()
 	if d.publishRunning {

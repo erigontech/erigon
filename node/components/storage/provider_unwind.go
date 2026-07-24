@@ -49,58 +49,18 @@ type UnwindOpts struct {
 	Engine rules.EngineReader
 }
 
-// Unwind is the storage-layer entry point for an *administrative*
-// past-diffset unwind to an arbitrary block in aligned mode (mode B
-// in docs/plans/20260525-admin-sethead-unwind-design.md). The
-// exec-stage unwind path is unrelated: it stays on the existing
-// AggregatorRoTx.Unwind / unwindExec3 chain and remains bounded by
-// rawtemporaldb.CanUnwindBeforeBlockNum.
+// Unwind is the storage-layer entry point for an administrative
+// past-diffset unwind to toBlock (mode B). The exec-stage unwind path
+// is unrelated. Post-state: MDBX empty past toBlock, snapshot files
+// hold the only state — observably identical to a cold-start node
+// processing frozen blocks up to toBlock.
 //
-// Post-state invariant: MDBX is empty past toBlock; snapshot files
-// are the only state. Cold-start-equivalent.
+// The sub-ops (snapshot-trim, DB-reset + writable-shadow wipe,
+// commitment anchor, boundary-step regen, verify) must land together;
+// leaving the FS and DB out of step wedges subsequent forward exec.
 //
-// Sub-ops, in order — landed together to avoid intermediate-wedge
-// states (snapshot-trim without DB-reset leaves orphan DB entries
-// pointing past the new tip; DB-reset without snapshot-trim leaves
-// the file set inconsistent with the new chain head):
-//
-//  1. Snapshot-trim past toBlock — see unwindSnapshotsPastBlock.
-//     Removes block files with ToBlock > toBlock and state files
-//     with ToStep > stepBoundary, drops their torrents, republishes
-//     chain.toml.
-//  2. DB-reset past toBlock — see unwindDBPastBlock. Truncates
-//     TxNums + canonical hashes, resets Headers / Bodies /
-//     BlockHashes / Execution stages, clears ChangeSets3 > toBlock,
-//     resets HeadBlockHash / HeadHeaderHash / ForkchoiceHead, and
-//     wipes the writable-domain MDBX shadow (accounts / storage /
-//     code / commitment + standalone IIs) past lastTxNum so the
-//     snapshot files are the authoritative state.
-//  3. Commitment anchor at toBlock — see ensureCommitmentAtBlock.
-//     Pure verification: the commitment file's entry for toBlock's
-//     step boundary surfaces naturally once the writable shadow is
-//     gone. A mismatch surfaces as a fatal chain-malformed error
-//     rather than being papered over by a recompute.
-//
-// The post-state is observably identical to a freshly-started node
-// that has just processed frozen blocks up to toBlock (the cold-start
-// equivalence claim in the design doc). External CL forkchoice
-// coordination is test-driven per the design — implemented without
-// any EL/CL signal here; the test rig is responsible for confirming
-// standard Engine API responses are sufficient.
-//
-// Why this method can lift CLAUDE.md's "Unwind beyond data in
-// snapshots not allowed": that rule was a placeholder for the code
-// that just landed. The unit of cutting is the block: aligned chains
-// trim entire files at step boundaries that coincide with block
-// boundaries; non-aligned chains keep the file containing toBlock and
-// rely on the writable shadow's boundary-step diff-replay (see
-// WipeWritableShadowPast) to mask the file's excess coverage past
-// toBlock. Either way no in-place file mutation occurs.
-//
-// Concurrency: Provider.Unwind does not synchronise. SetHead has
-// already waited for ExecModule quiescence (no SharedDomains in
-// flight) before invoking the Unwinder. Caller owns opts.Tx
-// lifecycle and the commit.
+// Caller (SetHead) has already quiesced the ExecModule and owns
+// opts.Tx's lifetime and commit.
 func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) error {
 	if p == nil {
 		return fmt.Errorf("storage.Provider.Unwind: nil provider")

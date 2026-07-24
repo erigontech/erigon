@@ -1767,44 +1767,18 @@ func (ss *GrpcServer) startP2PServer() (*p2p.Server, error) {
 	return srv, nil
 }
 
-// ForceDiscv5Bonding keeps known endpoints in the discv5 routing table
-// with their latest ENR. On each tick it Pings every connected devp2p
-// peer, configured static peer, and bootnode; PING is a single round-trip
-// that returns the peer's current ENR sequence number, so we can detect
-// updates without re-fetching the full record. When the sequence has
-// advanced (or we have no cached value), Resolve fetches the rich ENR
-// and AddKnownNode injects it into the routing table.
+// ForceDiscv5Bonding periodically Pings every connected peer, static
+// peer, and bootnode; on ENR-seq change (or no cached seq) it Resolves
+// the rich ENR and AddKnownNode-injects it. Snapshot-flow's chain.toml
+// info-hashes ride discv5 ENR entries, so consumers need every ENR
+// bump propagated fast — random-walk discovery is minutes-scale on
+// sparse networks.
 //
-// Dedup criterion is (id, enr-seq): a node is only "duplicate" if it's
-// the same node AND its metadata has not changed since we last processed
-// it. Anything else triggers a refresh — sequence-bumps from a snapshot
-// publisher regenerating chain-toml info-hashes are exactly what we need
-// to propagate quickly.
-//
-// This is required for snapshot discovery, not just chain consensus. The
-// snapshot-flow architecture distributes chain.toml info-hashes via discv5
-// ENR records; consumers find publishers by scanning peers for that ENR
-// entry. Without explicit injection the chain-toml ENR is only learnt via
-// a discv5 random-walk that is minutes long on sparse networks. Without
-// per-seq refresh, ENR updates between bonds are silently dropped.
-//
-// Two reasons we use Resolve+AddKnownNode (not Ping alone) on the refresh
-// path:
-//  1. dv5.Ping bonds the peer at the wire layer, but the table-side add
-//     (via addInboundNode) is dropped while the table is still completing
-//     its initial seeding (see Table.handleAddNode's isInitDone gate).
-//     Resolve fetches the rich ENR over the wire; AddKnownNode injects it
-//     via the non-inbound path that bypasses that gate.
-//  2. Snapshot publishers may refuse our devp2p dial when their peer slots
-//     are full (DiscTooManyPeers), so a peer-only loop iterating srv.Peers()
-//     never targets them. Bootnodes are the same case, more load-bearing
-//     because in the snapshot-distribution model they are often root
-//     publishers of chain-toml. discv5 is lightweight UDP and snapshot
-//     peering lives in the torrent layer; neither belongs gated on the
-//     chain-consensus peer cap. discv5 seeds bootnodes into the table at
-//     startup but does not retry on failure; this loop re-bonds them and
-//     bonds static peers independently of devp2p connection state. See
-//     docs/plans/20260507-discv5-handshake-on-connect.md.
+// Uses Resolve+AddKnownNode on the refresh path (not Ping alone)
+// because the table-side add via Ping's addInboundNode is dropped
+// while Table.isInitDone is false, and because bootnodes / snapshot
+// publishers often refuse the devp2p dial (peer-slot cap) — Ping
+// alone via UDP still works.
 func ForceDiscv5Bonding(ctx context.Context, srv *p2p.Server, logger log.Logger) {
 	var mu sync.Mutex
 	lastSeq := make(map[enode.ID]uint64) // last successfully-injected ENR seq per id

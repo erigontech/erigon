@@ -30,68 +30,20 @@ import (
 )
 
 // WipeWritableShadowPast clears every writable-domain MDBX entry whose
-// txnum coordinate > lastTxNum. The post-state contract is per-tx, not
-// per-step: the last tx surviving the wipe in any writable-shadow
-// table is exactly lastTxNum (= the last txnum of toBlock), regardless
-// of whether lastTxNum happens to coincide with a step boundary.
+// txnum > lastTxNum, so the last tx surviving the wipe is exactly
+// lastTxNum regardless of step-boundary alignment.
 //
-// Mode-B admin SetHead (docs/plans/20260525-admin-sethead-unwind-design.md,
-// sub-op #2) calls this after snapshot files past toBlock have been
-// trimmed. With the per-tx contract above, the MDBX writable-domain
-// shadow holds nothing newer than lastTxNum, so the next forward
-// execution sees the snapshot files as the authoritative state and
-// no DB-shadow override of a write past toBlock survives.
+// The writable shadow is step-keyed only. Within the boundary step, an
+// entry reflects the latest write regardless of txnum, so non-aligned
+// cuts need a diff-replay: for every key touched in (lastTxNum,
+// boundaryStepEnd], write back GetAsOf(key, lastTxNum+1). Aligned cuts
+// skip the replay entirely. The (key, target) snapshot is captured
+// BEFORE the history prune below since prune would wipe the records
+// GetAsOf reads.
 //
-// Algorithm — two phases, per writable domain (accounts, storage, code,
-// commitment):
-//
-//  1. **Whole-step wipe past the boundary step.**
-//     Wipe ValuesTable entries with step > stepContaining (where
-//     stepContaining = lastTxNum / stepSize, the step that contains
-//     lastTxNum). These steps cover only txnums > lastTxNum.
-//
-//  2. **Boundary-step diff-replay.**
-//     The writable shadow's per-entry encoding is step-keyed only — no
-//     per-txnum granularity. Within step stepContaining, a key's stored
-//     value reflects the latest write to that key in that step,
-//     whichever txnum that was. For aligned cuts (lastTxNum is the
-//     LAST txnum of step stepContaining), every write within the step
-//     is at txnum ≤ lastTxNum, so the existing values are correct and
-//     no replay is needed. For non-aligned cuts, the value may have
-//     been written at txnum > lastTxNum and so reflects "the future"
-//     relative to our new tip; we must restore it to its
-//     as-of-lastTxNum form.
-//
-//     We compute the state diff for the boundary step from history:
-//     iterate HistoryKeyTxNumRange(d, lastTxNum+1, boundaryStepEnd),
-//     and for each key found there, call GetAsOf(d, key, lastTxNum+1)
-//     (ts is exclusive so +1 to include lastTxNum's own writes). The
-//     result is written directly into the shadow via cursor Put/Delete
-//     (see applyReplay) — the (key, target) snapshot is collected
-//     BEFORE history.prune runs in this same call, since prune would
-//     otherwise wipe the records GetAsOf reads.
-//
-//     For aligned cuts the iterator range is empty (lastTxNum+1 ==
-//     boundaryStepEnd) so phase 2 is a no-op and we keep the aligned
-//     fast path.
-//
-//  3. **History + standalone-II prune.** Existing prune machinery with
-//     txFrom = lastTxNum+1, txTo = math.MaxUint64.
-//
-// Preconditions enforced inline:
-//
-//   - StepSize() > 0.
-//
-// Data dependency for the non-aligned path: history files (.v) for the
-// affected domains must cover (lastTxNum, boundaryStepEnd]. If history
-// is locally absent for that range, GetAsOf returns wrong values and
-// the wipe corrupts the shadow. Mode B's caller is responsible for
-// ensuring history is present (today: assumes minimal-prune locality;
-// follow-up CWork.1 will trigger on-demand download as an extension of
-// the existing fork-unwind temp-download pattern).
-//
-// Caller owns tx lifecycle and the commit. WipeWritableShadowPast does
-// not commit and does not flush MDBX.
+// Requires history files for the affected domains to cover
+// (lastTxNum, boundaryStepEnd]; missing history corrupts the shadow.
+// Caller owns tx lifecycle and the commit.
 func (a *Aggregator) WipeWritableShadowPast(ctx context.Context, tx kv.TemporalRwTx, lastTxNum uint64) error {
 	stepSize := a.StepSize()
 	if stepSize == 0 {

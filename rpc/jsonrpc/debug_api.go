@@ -349,47 +349,14 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 	return getModifiedAccounts(tx, startTxNum, endTxNum+1)
 }
 
-// getModifiedAccounts returns a list of addresses that were modified in the txNum range
-// [startTxNum, endTxNum) (endTxNum is exclusive).
+// getModifiedAccounts returns addresses modified in [startTxNum, endTxNum).
 //
-// # Why we need two domain passes (Erigon vs Geth architecture)
-//
-// Geth uses a Merkle Patricia Trie (MPT). Every storage write changes the storageRoot field
-// inside the account's trie node, so a trie diff between two state roots automatically surfaces
-// ALL modified accounts — including contracts whose only change was a storage slot write.
-//
-// Erigon uses a flat key/value model with two separate domains:
-//   - AccountsDomain: balance, nonce, code hash (one record per address)
-//   - StorageDomain:  storage slots (one record per address+slot)
-//
-// A contract that writes to storage without changing balance/nonce/code produces history
-// entries only in StorageDomain, not in AccountsDomain. Querying AccountsDomain alone would
-// miss those contracts. We therefore perform two passes and union the results.
-//
-// # Filters applied to match Geth output exactly
-//
-//  1. Precompiles touched but not changed (e.g. 0x0000…0004 SHA256):
-//     AccountsDomain records a "touch" but balance/nonce/code did not change.
-//     Filter: bytes.Equal(preVal, postVal) → skip.
-//
-//  2. Self-destructed accounts (SELFDESTRUCT / EIP-161 zeroing):
-//     Geth walks the NEW state trie; destroyed accounts are absent from it and are
-//     never emitted. In Erigon, AccountsDomain records the deletion as postVal == empty.
-//     Filter: len(postVal) == 0 → record in deletedAddrs, skip from result.
-//
-//  3. Storage slots of deleted accounts:
-//     After SELFDESTRUCT all storage is cleared. Those slot entries appear in StorageDomain
-//     history but the owning account no longer exists. We skip them via deletedAddrs.
-//     No extra GetAsOf(Account) is needed: a destroyed account cannot run code, so it
-//     cannot produce new StorageDomain entries. The only re-use case (CREATE2 at the same
-//     address) causes an AccountsDomain entry (code hash changes) → address lands in `saw`
-//     and is skipped by the "already in result" fast-path.
-//
-// # Two-pass approach
-//
-//  1. AccountsDomain pass: collect modified accounts; build deletedAddrs for SELFDESTRUCT'd ones.
-//  2. StorageDomain pass: add any address with a net storage change that is not already included
-//     and not deleted. Filters are applied cheapest-first to minimise GetAsOf I/O calls.
+// Erigon splits state across AccountsDomain (balance/nonce/code) and
+// StorageDomain (slots), so a contract that only writes storage produces
+// no AccountsDomain history. We union both passes to match geth's
+// trie-diff output. Filters drop touched-but-unchanged precompiles
+// (preVal == postVal) and SELFDESTRUCTed accounts (postVal empty); slot
+// entries from destroyed accounts are dropped via deletedAddrs.
 func getModifiedAccounts(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]common.Address, error) {
 	saw := make(map[common.Address]struct{})
 	var result []common.Address
