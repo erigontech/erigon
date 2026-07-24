@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
@@ -157,6 +158,95 @@ func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg Sna
 	return nil
 }
 
+// startSnapshotDownloadProgressReporter polls the downloader for byte-level
+// completion and republishes sync state so eth_syncing and eth_subscribe("syncing")
+// show smooth progress during the (long) snapshot download. It maps the download
+// ratio onto block-based fields (currentBlock = ratio * blocks_to_be_downloaded).
+// Returns a stop func that pins the progress at 100% (bridging the handoff to
+// execution) and publishes a final state. It is a no-op when the downloader can't
+// report progress (e.g. an external one over gRPC) or the target block count is
+// unknown.
+func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg) func() {
+	noop := func() {}
+	if cfg.notifier == nil {
+		return noop
+	}
+	reporter, ok := cfg.snapshotDownloader.(dbservices.DownloadProgressReport)
+	if !ok {
+		return noop
+	}
+	var target uint64
+	if c, known := snapcfg.KnownCfg(cfg.chainConfig.ChainName); known {
+		target = c.ExpectBlocks
+	}
+	if target == 0 {
+		return noop
+	}
+
+	// Drop any sample left over from the header-chain phase: its byte total was a
+	// small subset, so reporting it here would spike the ratio before the full
+	// snapshot set is registered.
+	reporter.ResetProgress()
+
+	publishState := func() {
+		roTx, err := cfg.db.BeginRo(ctx)
+		if err != nil {
+			return
+		}
+		defer roTx.Rollback()
+		if err := cfg.notifier.PublishSyncState(roTx, cfg.blockReader.FrozenBlocks()); err != nil {
+			log.Warn("[OtterSync] sync-state publish failed", "err", err)
+		}
+	}
+
+	publish := func() {
+		done, total, ok, err := reporter.Completed(ctx)
+		// Skip a fully-complete sample: it is either the header-chain phase's
+		// terminal 100% (a small byte subset that would spike the ratio) or the
+		// snapshots phase's own completion, which stop() reports via the pin.
+		if err != nil || !ok || total == 0 || done >= total {
+			return
+		}
+		cfg.notifier.SetSnapshotDownloadProgress(done, total, target)
+		publishState()
+	}
+
+	stopCtx, cancel := context.WithCancel(ctx)
+	stopped := make(chan struct{})
+	go func() {
+		defer dbg.LogPanic()
+		defer close(stopped)
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-stopCtx.Done():
+				return
+			case <-t.C:
+				publish()
+			}
+		}
+	}()
+
+	return func() {
+		cancel()
+		<-stopped
+		// Bridge the download→execution handoff. Clearing to 0 here would make
+		// eth_syncing report currentBlock=0 for the ~minute between the download
+		// finishing and the Execution stage counter being updated, i.e. a jarring
+		// 100%→0%→100% dip. Instead pin at 100% (currentBlock == downloaded height):
+		// BuildSyncingReply's download branch only applies while Execution progress
+		// is 0, so it self-clears the moment execution advances.
+		frozen := cfg.blockReader.FrozenBlocks()
+		if _, total, ok, _ := reporter.Completed(ctx); ok && total > 0 {
+			cfg.notifier.SetSnapshotDownloadProgress(total, total, frozen)
+		} else {
+			cfg.notifier.SetSnapshotDownloadProgress(0, 0, 0)
+		}
+		publishState()
+	}
+}
+
 func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) error {
 	if !s.CurrentSyncCycle.IsFirstCycle {
 		return nil
@@ -229,6 +319,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	mustReopenUnderlyingFilesTx(tx)
+
+	// Report download progress only for this phase: the header-chain phase downloads
+	// a small subset (its own byte total), so mapping it would make the ratio jump
+	// backwards when the full-snapshots phase reveals the real total. Here BytesTotal
+	// is the full set and BytesCompleted is cumulative, so the ratio is monotonic.
+	stopReporter := startSnapshotDownloadProgressReporter(ctx, cfg)
+	defer stopReporter()
 
 	if err := snapshotsync.SyncSnapshots(
 		ctx,

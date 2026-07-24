@@ -46,3 +46,19 @@ func (c directGrpcServerClient) Seed(ctx context.Context, in *downloaderproto.Se
 func (c directGrpcServerClient) Delete(ctx context.Context, in *downloaderproto.DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Delete(ctx, in)
 }
+
+// Completed forwards snapshot-download progress from the embedded server. The
+// remote gRPC client does not implement this, so RpcClient degrades gracefully.
+func (c directGrpcServerClient) Completed() (done, total uint64, ok bool) {
+	if s, ok := c.server.(progressReporter); ok {
+		return s.Completed()
+	}
+	return 0, 0, false
+}
+
+// ResetStats forwards to the embedded server; no-op for a remote client.
+func (c directGrpcServerClient) ResetStats() {
+	if s, ok := c.server.(progressReporter); ok {
+		s.ResetStats()
+	}
+}

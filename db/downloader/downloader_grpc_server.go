@@ -119,6 +119,17 @@ func (s *GrpcServer) Delete(ctx context.Context, request *downloaderproto.Delete
 	return
 }
 
+// Completed exposes snapshot-download progress for in-process callers. It is
+// deliberately not a gRPC method: only the embedded downloader path reports it.
+func (s *GrpcServer) Completed() (done, total uint64, ok bool) {
+	return s.d.Completed()
+}
+
+// ResetStats drops the last progress sample; see Downloader.ResetStats.
+func (s *GrpcServer) ResetStats() {
+	s.d.ResetStats()
+}
+
 func Proto2InfoHash(in *typesproto.H160) metainfo.Hash {
 	return gointerfaces.ConvertH160toAddress(in)
 }

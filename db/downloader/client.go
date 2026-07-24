@@ -85,8 +85,29 @@ func (me *RpcClient) Delete(ctx context.Context, paths []string) (err error) {
 	return
 }
 
+// Completed reports snapshot-download progress in bytes. ok is false when the
+// underlying client can't report it (e.g. an external downloader over gRPC).
+func (me *RpcClient) Completed(ctx context.Context) (done, total uint64, ok bool, err error) {
+	c, canReport := me.inner.(progressReporter)
+	if !canReport {
+		return 0, 0, false, nil
+	}
+	done, total, ok = c.Completed()
+	return done, total, ok, nil
+}
+
+// ResetProgress drops any stale progress sample; no-op for a remote client.
+func (me *RpcClient) ResetProgress() {
+	if c, ok := me.inner.(progressReporter); ok {
+		c.ResetStats()
+	}
+}
+
 func NewRpcClient(inner downloaderproto.DownloaderClient, rootDir string) *RpcClient {
 	return &RpcClient{inner: inner, rootDir: rootDir}
 }
 
-var _ dbservices.DownloaderClient = (*RpcClient)(nil)
+var (
+	_ dbservices.DownloaderClient       = (*RpcClient)(nil)
+	_ dbservices.DownloadProgressReport = (*RpcClient)(nil)
+)

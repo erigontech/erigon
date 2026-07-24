@@ -130,6 +130,42 @@ type Downloader struct {
 	// manifestReady is closed after the first successful P2P manifest discovery.
 	// Non-nil only when --snap.p2p-manifest is enabled.
 	manifestReady chan struct{}
+
+	// Latest aggregated stats snapshot, published by the download logging loop
+	// so eth_syncing can report download progress. Nil until the first sample.
+	lastStats atomic.Pointer[AggStats]
+}
+
+// progressReporter is the in-process capability the embedded downloader chain
+// (*Downloader, *GrpcServer, directGrpcServerClient) exposes for eth_syncing
+// progress. The remote gRPC client does not implement it, so callers degrade
+// gracefully via a type assertion against this interface.
+type progressReporter interface {
+	Completed() (done, total uint64, ok bool)
+	ResetStats()
+}
+
+// Completed reports the latest snapshot-download progress in bytes. ok is false
+// until the first stats sample is available or when nothing is downloading.
+func (d *Downloader) Completed() (done, total uint64, ok bool) {
+	s := d.lastStats.Load()
+	if s == nil || s.BytesTotal == 0 {
+		return 0, 0, false
+	}
+	return s.BytesCompleted, s.BytesTotal, true
+}
+
+// ResetStats drops the last progress sample so Completed reports ok=false until a
+// fresh one arrives. Used at a phase boundary (header-chain → full snapshots) to
+// avoid exposing the previous phase's ratio, whose byte total was much smaller.
+func (d *Downloader) ResetStats() {
+	d.lastStats.Store(nil)
+}
+
+// storeStats publishes an immutable snapshot of the current stats: s is a fresh
+// copy, so the stored pointer never aliases the loop buffer being overwritten.
+func (d *Downloader) storeStats(s AggStats) {
+	d.lastStats.Store(&s)
 }
 
 type AggStats struct {
@@ -948,6 +984,7 @@ func (d *Downloader) logDownload(
 	// complete, so it would always fire and produce noisy (and potentially duplicate) output
 	// when sequential download batches each start their own logging goroutine.
 	stats = d.newStats(stats, ts)
+	d.storeStats(stats)
 	d.logSyncStats(startTime, stats, target)
 
 	interval := time.Second
@@ -958,6 +995,7 @@ func (d *Downloader) logDownload(
 		case <-time.After(interval):
 		}
 		stats = d.newStats(stats, ts)
+		d.storeStats(stats)
 		d.logSyncStats(startTime, stats, target)
 		d.logNoMetadata(getNoMetadataLvl(), ts)
 		interval = min(interval*2, 15*time.Second)

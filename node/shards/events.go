@@ -328,12 +328,27 @@ type Notifications struct {
 	RecentReceipts       *RecentReceipts
 	LastNewBlockSeen     atomic.Uint64 // This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
 
+	// Snapshot download progress, in bytes. snapDownloadTotal==0 means no
+	// download is in progress; eth_syncing then reports block-based progress.
+	snapDownloadDone   atomic.Uint64
+	snapDownloadTotal  atomic.Uint64
+	snapDownloadTarget atomic.Uint64 // highest block covered by the snapshots being downloaded
+
 	syncStateLock sync.Mutex
 	lastSyncState *remoteproto.SyncingReply
 }
 
 func (n *Notifications) NewLastBlockSeen(blockNum uint64) {
 	n.LastNewBlockSeen.Store(blockNum)
+}
+
+// SetSnapshotDownloadProgress records snapshot-download progress so eth_syncing
+// can report it as block-based progress. total==0 clears it (download done or
+// not started). targetBlock is the highest block the snapshots cover.
+func (n *Notifications) SetSnapshotDownloadProgress(done, total, targetBlock uint64) {
+	n.snapDownloadDone.Store(done)
+	n.snapDownloadTotal.Store(total)
+	n.snapDownloadTarget.Store(targetBlock)
 }
 
 func NewNotifications(StateChangesConsumer StateChangeConsumer) *Notifications {
