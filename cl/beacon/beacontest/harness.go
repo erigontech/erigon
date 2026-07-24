@@ -163,7 +163,8 @@ func Execute(options ...HarnessOption) {
 func (h *Harness) Execute() {
 	ctx := context.Background()
 	for suiteName, tests := range h.tests {
-		for idx, v := range tests {
+		for idx := range tests {
+			v := &tests[idx]
 			v.Actual.h = h
 			v.Expect.h = h
 			name := v.Name

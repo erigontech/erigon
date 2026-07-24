@@ -402,13 +402,13 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	if txn.Type() == types.SetCodeTxType {
 		auths := txn.GetAuthorizations()
 		slot.AuthAndNonces = make([]AuthAndNonce, 0, len(auths))
-		for _, auth := range auths {
+		for i := range auths {
+			auth := &auths[i]
 			if !auth.ChainID.IsUint64() {
 				continue
 			}
-			authCopy := auth
 			ctx.authBuf.Reset()
-			authority, err := authCopy.RecoverSigner(&ctx.authBuf, ctx.authHashBuf[:])
+			authority, err := auth.RecoverSigner(&ctx.authBuf, ctx.authHashBuf[:])
 			if err != nil {
 				continue
 			}

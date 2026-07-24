@@ -309,7 +309,8 @@ func (c *BoundContract) FilterLogs(opts *FilterOpts, name string, query ...[]any
 		return nil, nil, err
 	}
 	sub := event.NewSubscription(func(quit <-chan struct{}) error {
-		for _, log := range buff {
+		for i := range buff {
+			log := buff[i]
 			select {
 			case logs <- log:
 			case <-quit:
@@ -361,7 +362,9 @@ func (c *BoundContract) UnpackLog(out any, event string, log types.Log) error {
 		}
 	}
 	var indexed abi.Arguments
-	for _, arg := range c.abi.Events[event].Inputs {
+	inputs := c.abi.Events[event].Inputs
+	for i := range inputs {
+		arg := inputs[i]
 		if arg.Indexed {
 			indexed = append(indexed, arg)
 		}
@@ -377,7 +380,9 @@ func (c *BoundContract) UnpackLogIntoMap(out map[string]any, event string, log t
 		}
 	}
 	var indexed abi.Arguments
-	for _, arg := range c.abi.Events[event].Inputs {
+	inputs := c.abi.Events[event].Inputs
+	for i := range inputs {
+		arg := inputs[i]
 		if arg.Indexed {
 			indexed = append(indexed, arg)
 		}

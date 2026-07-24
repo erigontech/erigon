@@ -79,7 +79,8 @@ func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom u
 			}
 		}
 
-		for _, tx := range b.Result.Transactions {
+		for i := range b.Result.Transactions {
+			tx := &b.Result.Transactions[i]
 			var balance EthBalance
 			account := tx.From
 
@@ -186,7 +187,8 @@ func BenchEthGetBalanceRandomAccount(erigonURL string, concurentRequests int) er
 			return fmt.Errorf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
 		}
 
-		for _, tx := range b.Result.Transactions {
+		for i := range b.Result.Transactions {
+			tx := &b.Result.Transactions[i]
 			account := tx.From
 
 			reqQueue <- struct{}{}

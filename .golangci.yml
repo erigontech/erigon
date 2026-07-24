@@ -50,8 +50,6 @@ linters:
       enabled-checks:
         - ruleguard
       disabled-checks:
-        - regexpMust
-        - rangeValCopy
         - exitAfterDefer
         - elseif
         - dupBranchBody

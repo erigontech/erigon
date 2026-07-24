@@ -1066,11 +1066,12 @@ func AllTypedSegments(dir string, types []snaptype.Type) (res []snaptype.FileInf
 	}
 
 	for _, segType := range types {
-		for _, f := range list {
+		for i := range list {
+			f := &list[i]
 			if f.Type.Enum() != segType.Enum() {
 				continue
 			}
-			res = append(res, f)
+			res = append(res, *f)
 		}
 	}
 	return res, nil
@@ -1179,7 +1180,8 @@ func (s *BaseRoSnapshots) OpenFolder() error {
 		}
 
 		list := make([]string, 0, len(files))
-		for _, f := range files {
+		for i := range files {
+			f := &files[i]
 			_, fName := filepath.Split(f.Path)
 			list = append(list, fName)
 		}
@@ -1212,7 +1214,8 @@ func (s *BaseRoSnapshots) OpenSegments(types []snaptype.Type, alignMin bool) err
 		return err
 	}
 	list := make([]string, 0, len(files))
-	for _, f := range files {
+	for i := range files {
+		f := &files[i]
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
@@ -1358,8 +1361,8 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 	keepSegments, segmentsToRemove := findOverlaps(list)
 
 	keepNames := make([]string, 0, len(keepSegments))
-	for _, info := range keepSegments {
-		keepNames = append(keepNames, info.Name())
+	for i := range keepSegments {
+		keepNames = append(keepNames, keepSegments[i].Name())
 	}
 
 	// Notify the seeder before deletion. Includes idx overlaps whose .seg is already gone
@@ -1371,11 +1374,11 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 		}
 		_, accessorsToRemove := findOverlaps(idxList)
 		toRemove := make([]string, 0, len(segmentsToRemove)+len(accessorsToRemove))
-		for _, info := range segmentsToRemove {
-			toRemove = append(toRemove, info.Path)
+		for i := range segmentsToRemove {
+			toRemove = append(toRemove, segmentsToRemove[i].Path)
 		}
-		for _, info := range accessorsToRemove {
-			toRemove = append(toRemove, info.Path)
+		for i := range accessorsToRemove {
+			toRemove = append(toRemove, accessorsToRemove[i].Path)
 		}
 		relativePaths, err := toRelativePaths(s.dir, toRemove)
 		if err != nil {
@@ -1839,15 +1842,16 @@ func SegmentsCaplin(dir string) (res []snaptype.FileInfo, missingSnapshots []Ran
 	{
 		var l, lSidecars []snaptype.FileInfo
 		var m []Range
-		for _, f := range list {
+		for i := range list {
+			f := &list[i]
 			if f.Type != nil && f.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && f.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
 				continue
 			}
 			if f.Type != nil && f.Type.Enum() == snaptype.CaplinEnums.BlobSidecars {
-				lSidecars = append(lSidecars, f) // blobs are an exception
+				lSidecars = append(lSidecars, *f) // blobs are an exception
 				continue
 			}
-			l = append(l, f)
+			l = append(l, *f)
 		}
 		l, m = NoGaps(NoOverlaps(l))
 		if len(m) > 0 {

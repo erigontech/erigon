@@ -236,7 +236,8 @@ func (abi *ABI) MethodById(sigdata []byte) (*Method, error) {
 	if len(sigdata) < 4 {
 		return nil, fmt.Errorf("data too short (%d bytes) for abi method lookup", len(sigdata))
 	}
-	for _, method := range abi.Methods {
+	for name := range abi.Methods {
+		method := abi.Methods[name]
 		if bytes.Equal(method.ID, sigdata[:4]) {
 			return &method, nil
 		}
@@ -247,7 +248,8 @@ func (abi *ABI) MethodById(sigdata []byte) (*Method, error) {
 // EventByID looks an event up by its topic hash in the ABI.
 // It returns an error if no event is found.
 func (abi *ABI) EventByID(topic common.Hash) (*Event, error) {
-	for _, event := range abi.Events {
+	for name := range abi.Events {
+		event := abi.Events[name]
 		if bytes.Equal(event.ID[:], topic[:]) {
 			return &event, nil
 		}

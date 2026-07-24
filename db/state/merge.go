@@ -1077,7 +1077,8 @@ func NewRanges(domain [kv.DomainLen]DomainRanges, invertedIndex [kv.StandaloneId
 
 func (r Ranges) String() string {
 	ss := []string{}
-	for _, d := range &r.domain {
+	for i := range r.domain {
+		d := &r.domain[i]
 		if d.any() {
 			ss = append(ss, fmt.Sprintf("%s(%s)", d.name, d.String()))
 		}
@@ -1093,7 +1094,8 @@ func (r Ranges) String() string {
 }
 
 func (r Ranges) any() bool {
-	for _, d := range &r.domain {
+	for i := range r.domain {
+		d := &r.domain[i]
 		if d.any() {
 			return true
 		}
@@ -1107,7 +1109,8 @@ func (r Ranges) any() bool {
 }
 
 func (r Ranges) anyDomainValues() bool {
-	for _, d := range &r.domain {
+	for i := range r.domain {
+		d := &r.domain[i]
 		if d.values.needMerge {
 			return true
 		}
