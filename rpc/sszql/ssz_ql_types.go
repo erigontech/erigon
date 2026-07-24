@@ -39,10 +39,16 @@ type SSZQLRequest struct {
 	Multiproof    bool       `json:"multiproof,omitempty"`
 }
 
+type AliasResponse struct {
+	Alias string `json:"alias"`
+	Value string `json:"value"`
+}
+
 type SSZQLResponse struct {
-	Paths    []Path   `json:"paths"`
-	Gindices []Gindex `json:"gindices"`
-	Proofs   []Proof  `json:"proofs"`
-	Leaves   []Leaf   `json:"leaves"`
-	Results  []Result `json:"results"`
+	Paths    []Path          `json:"paths"`
+	Gindices []Gindex        `json:"gindices"`
+	Proofs   []Proof         `json:"proofs"`
+	Leaves   []Leaf          `json:"leaves"`
+	Results  []Result        `json:"results"`
+	Aliases  []AliasResponse `json:"aliases"`
 }
