@@ -665,10 +665,56 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 func StartRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
 	if cfg.Enabled {
-		return startRegularRpcServer(ctx, cfg, rpcAPI, logger)
+		srv, filteredAPIs, err := PrepareRpcServer(cfg, rpcAPI, logger)
+		if err != nil {
+			return err
+		}
+		return ServeRpcServer(ctx, cfg, srv, filteredAPIs, logger)
 	}
 
 	return nil
+}
+
+// PrepareRpcServer creates the RPC server instance, registers APIs, and sets
+// cfg.InProcServer. It returns the server and the engine-filtered API list
+// (which ServeRpcServer needs for graphql/healthcheck). The in-process server
+// is usable immediately after this call returns.
+func PrepareRpcServer(cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) (*rpc.Server, []rpc.API, error) {
+	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
+
+	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
+	if err != nil {
+		return nil, nil, err
+	}
+	srv.SetAllowList(allowListForRPC)
+	srv.SetBatchLimit(cfg.BatchLimit)
+
+	var defaultAPIList []rpc.API
+	for _, api := range rpcAPI {
+		if api.Namespace != "engine" {
+			defaultAPIList = append(defaultAPIList, api)
+		}
+	}
+
+	var apiFlags []string
+	for _, flag := range cfg.API {
+		if flag == "engine" || flag == "testing" {
+			continue
+		}
+		apiFlags = append(apiFlags, flag)
+	}
+	if slices.ContainsFunc(defaultAPIList, func(a rpc.API) bool { return a.Namespace == "testing" }) {
+		apiFlags = append(apiFlags, "testing")
+	} else if slices.Contains(cfg.API, "testing") {
+		logger.Warn("testing_ namespace is not available in standalone rpcdaemon (requires embedded execution service); ignoring")
+	}
+
+	if err := node.RegisterApisFromWhitelist(defaultAPIList, apiFlags, srv, false, logger); err != nil {
+		return nil, nil, fmt.Errorf("could not start register RPC apis: %w", err)
+	}
+
+	cfg.InProcServer = srv
+	return srv, defaultAPIList, nil
 }
 
 func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
@@ -694,46 +740,14 @@ func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg *httpcfg.HttpC
 	return ctx.Err()
 }
 
-func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
-	// register apis and create handler stack
-	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
-
-	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
-	if err != nil {
-		return err
-	}
-	srv.SetAllowList(allowListForRPC)
-
-	srv.SetBatchLimit(cfg.BatchLimit)
-
+// ServeRpcServer starts the HTTP/WS/gRPC listeners for an already-prepared
+// RPC server and blocks until ctx is cancelled. filteredAPIs is the
+// engine-filtered API list returned by PrepareRpcServer — it is used for
+// graphql and healthcheck handlers.
+func ServeRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, srv *rpc.Server, filteredAPIs []rpc.API, logger log.Logger) error {
 	defer srv.Stop()
 
-	var defaultAPIList []rpc.API
-
-	for _, api := range rpcAPI {
-		if api.Namespace != "engine" {
-			defaultAPIList = append(defaultAPIList, api)
-		}
-	}
-
-	var apiFlags []string
-	for _, flag := range cfg.API {
-		if flag == "engine" || flag == "testing" {
-			continue
-		}
-		apiFlags = append(apiFlags, flag)
-	}
-	// testing_ is only present in defaultAPIList when the caller (embedded mode)
-	// appended an implementation; re-admit it to the whitelist only then.
-	if slices.ContainsFunc(defaultAPIList, func(a rpc.API) bool { return a.Namespace == "testing" }) {
-		apiFlags = append(apiFlags, "testing")
-	} else if slices.Contains(cfg.API, "testing") {
-		logger.Warn("testing_ namespace is not available in standalone rpcdaemon (requires embedded execution service); ignoring")
-	}
-
-	if err := node.RegisterApisFromWhitelist(defaultAPIList, apiFlags, srv, false, logger); err != nil {
-		return fmt.Errorf("could not start register RPC apis: %w", err)
-	}
+	defaultAPIList := filteredAPIs
 
 	info := []any{
 		"grpc", cfg.GRPCServerEnabled,

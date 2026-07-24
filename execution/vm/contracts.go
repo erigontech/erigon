@@ -26,6 +26,7 @@ import (
 	"maps"
 	"math/big"
 	"math/bits"
+	"sync"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
@@ -69,25 +70,59 @@ func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 }
 
 func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+	base, forkIdx := defaultPrecompilesAndFork(chainRules)
+
+	chainID := chainRules.ChainID.Uint64()
+	key := precompilesCacheKey{chainID: chainID, forkIdx: forkIdx}
+
+	precompilesMu.RLock()
+	overrides := chainOverrides[chainID]
+	if len(overrides) == 0 {
+		precompilesMu.RUnlock()
+		return base
+	}
+	if cached, ok := mergedMapCache[key]; ok {
+		precompilesMu.RUnlock()
+		return cached
+	}
+	precompilesMu.RUnlock()
+
+	merged := maps.Clone(base)
+	for k, v := range overrides {
+		merged[k] = v
+	}
+
+	precompilesMu.Lock()
+	mergedMapCache[key] = merged
+	precompilesMu.Unlock()
+
+	return merged
+}
+
+// defaultPrecompilesAndFork returns the base precompile map for the
+// given fork rules and a fork index for cache keying. Both are derived
+// from a single switch so they cannot desync — adding a new fork here
+// automatically gets a distinct cache key.
+func defaultPrecompilesAndFork(rules *chain.Rules) (PrecompiledContracts, int8) {
 	switch {
-	case chainRules.IsOsaka:
-		return PrecompiledContractsOsaka
-	case chainRules.IsBhilai:
-		return PrecompiledContractsBhilai
-	case chainRules.IsPrague:
-		return PrecompiledContractsPrague
-	case chainRules.IsNapoli:
-		return PrecompiledContractsNapoli
-	case chainRules.IsCancun:
-		return PrecompiledContractsCancun
-	case chainRules.IsBerlin:
-		return PrecompiledContractsBerlin
-	case chainRules.IsIstanbul:
-		return PrecompiledContractsIstanbul
-	case chainRules.IsByzantium:
-		return PrecompiledContractsByzantium
+	case rules.IsOsaka:
+		return PrecompiledContractsOsaka, 9
+	case rules.IsBhilai:
+		return PrecompiledContractsBhilai, 8
+	case rules.IsPrague:
+		return PrecompiledContractsPrague, 7
+	case rules.IsNapoli:
+		return PrecompiledContractsNapoli, 6
+	case rules.IsCancun:
+		return PrecompiledContractsCancun, 5
+	case rules.IsBerlin:
+		return PrecompiledContractsBerlin, 4
+	case rules.IsIstanbul:
+		return PrecompiledContractsIstanbul, 3
+	case rules.IsByzantium:
+		return PrecompiledContractsByzantium, 2
 	default:
-		return PrecompiledContractsHomestead
+		return PrecompiledContractsHomestead, 1
 	}
 }
 
@@ -228,70 +263,68 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{eip7951: true},
 }
 
+// Single mutex protects all precompile state: per-chain overrides,
+// merged precompile maps, and active address caches. Using one mutex
+// eliminates the interleave race between RegisterPrecompile and
+// ActivePrecompiles that two separate mutexes would allow.
 var (
-	PrecompiledAddressesOsaka     []accounts.Address
-	PrecompiledAddressesPrague    []accounts.Address
-	PrecompiledAddressesNapoli    []accounts.Address
-	PrecompiledAddressesBhilai    []accounts.Address
-	PrecompiledAddressesCancun    []accounts.Address
-	PrecompiledAddressesBerlin    []accounts.Address
-	PrecompiledAddressesIstanbul  []accounts.Address
-	PrecompiledAddressesByzantium []accounts.Address
-	PrecompiledAddressesHomestead []accounts.Address
+	precompilesMu   sync.RWMutex
+	chainOverrides  = make(map[uint64]PrecompiledContracts) // chainID → custom precompiles
+	activeAddrCache = make(map[precompilesCacheKey][]accounts.Address)
+	mergedMapCache  = make(map[precompilesCacheKey]PrecompiledContracts)
 )
 
-func init() {
-	for k := range PrecompiledContractsHomestead {
-		PrecompiledAddressesHomestead = append(PrecompiledAddressesHomestead, k)
-	}
-	for k := range PrecompiledContractsByzantium {
-		PrecompiledAddressesByzantium = append(PrecompiledAddressesByzantium, k)
-	}
-	for k := range PrecompiledContractsIstanbul {
-		PrecompiledAddressesIstanbul = append(PrecompiledAddressesIstanbul, k)
-	}
-	for k := range PrecompiledContractsBerlin {
-		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
-	}
-	for k := range PrecompiledContractsCancun {
-		PrecompiledAddressesCancun = append(PrecompiledAddressesCancun, k)
-	}
-	for k := range PrecompiledContractsNapoli {
-		PrecompiledAddressesNapoli = append(PrecompiledAddressesNapoli, k)
-	}
-	for k := range PrecompiledContractsBhilai {
-		PrecompiledAddressesBhilai = append(PrecompiledAddressesBhilai, k)
-	}
-	for k := range PrecompiledContractsPrague {
-		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
-	}
-	for k := range PrecompiledContractsOsaka {
-		PrecompiledAddressesOsaka = append(PrecompiledAddressesOsaka, k)
-	}
+// precompilesCacheKey identifies a unique set of precompiles.
+// forkIdx is returned alongside the default map by
+// defaultPrecompilesAndFork, so the two derive from the same
+// switch and cannot desync.
+type precompilesCacheKey struct {
+	chainID uint64
+	forkIdx int8
 }
 
-// ActivePrecompiles returns the precompiles enabled with the current configuration.
+// ActivePrecompiles returns the precompile addresses active for the given
+// chain and fork rules. Results are cached per chain+fork so subsequent
+// calls (e.g. once per transaction via IntraBlockState.Prepare) do not
+// allocate.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
-	switch {
-	case rules.IsOsaka:
-		return PrecompiledAddressesOsaka
-	case rules.IsBhilai:
-		return PrecompiledAddressesBhilai
-	case rules.IsPrague:
-		return PrecompiledAddressesPrague
-	case rules.IsNapoli:
-		return PrecompiledAddressesNapoli
-	case rules.IsCancun:
-		return PrecompiledAddressesCancun
-	case rules.IsBerlin:
-		return PrecompiledAddressesBerlin
-	case rules.IsIstanbul:
-		return PrecompiledAddressesIstanbul
-	case rules.IsByzantium:
-		return PrecompiledAddressesByzantium
-	default:
-		return PrecompiledAddressesHomestead
+	_, forkIdx := defaultPrecompilesAndFork(rules)
+	key := precompilesCacheKey{chainID: rules.ChainID.Uint64(), forkIdx: forkIdx}
+
+	precompilesMu.RLock()
+	if cached, ok := activeAddrCache[key]; ok {
+		precompilesMu.RUnlock()
+		return cached
 	}
+	precompilesMu.RUnlock()
+
+	m := Precompiles(rules)
+	out := make([]accounts.Address, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+
+	precompilesMu.Lock()
+	activeAddrCache[key] = out
+	precompilesMu.Unlock()
+	return out
+}
+
+// RegisterPrecompile registers a custom precompiled contract for a specific
+// chain. Each chain has its own override map, so precompiles registered for
+// one chain do not leak into others. Must be called before execution starts
+// (typically during init or genesis setup).
+func RegisterPrecompile(chainID uint64, addr accounts.Address, p PrecompiledContract) {
+	precompilesMu.Lock()
+	overrides := chainOverrides[chainID]
+	if overrides == nil {
+		overrides = make(PrecompiledContracts)
+		chainOverrides[chainID] = overrides
+	}
+	overrides[addr] = p
+	clear(activeAddrCache)
+	clear(mergedMapCache)
+	precompilesMu.Unlock()
 }
 
 // RunPrecompiledContract runs and evaluates the output of a precompiled contract.

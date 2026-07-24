@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/devvalidator"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
@@ -189,6 +190,7 @@ type Ethereum struct {
 
 	notifications *shards.Notifications
 
+	httpRpcCfg         *httpcfg.HttpCfg
 	unsubscribeEthstat func()
 
 	txPool                    *txpool.TxPool
@@ -1138,6 +1140,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
+	s.httpRpcCfg = &httpRpcCfg
 	if config.Ethstats != "" {
 		var headCh chan [][]byte
 		headCh, s.unsubscribeEthstat = s.notifications.Events.AddHeaderSubscription()
@@ -1191,13 +1194,21 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		})
 	}
 
-	s.bgComponentsEg.Go(func() error {
-		err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			s.logger.Error("cli.StartRpcServer error", "err", err)
+	// Create the RPC server and register APIs synchronously so
+	// InProcServer() is available immediately after Init returns.
+	if httpRpcCfg.Enabled {
+		rpcSrv, filteredAPIs, err := rpcdaemoncli.PrepareRpcServer(&httpRpcCfg, s.apiList, s.logger)
+		if err != nil {
+			return err
 		}
-		return err
-	})
+		s.bgComponentsEg.Go(func() error {
+			err := rpcdaemoncli.ServeRpcServer(ctx, &httpRpcCfg, rpcSrv, filteredAPIs, s.logger)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				s.logger.Error("cli.ServeRpcServer error", "err", err)
+			}
+			return err
+		})
+	}
 
 	if chainConfig.Bor == nil || config.PolygonPosSingleSlotFinality {
 		s.bgComponentsEg.Go(func() error {
@@ -1630,6 +1641,16 @@ func (s *Ethereum) TxpoolServer() txpoolproto.TxpoolServer {
 
 func (s *Ethereum) ExecutionModule() *execmodule.ExecModule {
 	return s.execModule
+}
+
+// InProcServer returns the in-process RPC server once the HTTP API has started.
+// Returns nil before Init completes or if the RPC server hasn't bound yet.
+// Use rpc.DialInProc(srv) to get a zero-copy in-process client.
+func (s *Ethereum) InProcServer() *rpc.Server {
+	if s.httpRpcCfg == nil {
+		return nil
+	}
+	return s.httpRpcCfg.InProcServer
 }
 
 // RemoveContents is like dir.RemoveAll, but preserve dir itself

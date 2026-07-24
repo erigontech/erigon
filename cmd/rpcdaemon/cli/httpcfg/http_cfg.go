@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -154,4 +155,9 @@ type HttpCfg struct {
 	// When set, these listeners are passed to StartHTTPEndpoint instead of binding a new port.
 	HttpListener    net.Listener
 	AuthRpcListener net.Listener
+
+	// InProcServer is set by PrepareRpcServer once the RPC server is
+	// created and APIs are registered. Embedding applications can use
+	// rpc.DialInProc(srv) to get a zero-copy in-process client.
+	InProcServer *rpc.Server
 }
