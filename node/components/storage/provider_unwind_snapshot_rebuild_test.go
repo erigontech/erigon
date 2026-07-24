@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
-	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
@@ -662,51 +661,19 @@ func TestStraddleBlockFileForType_NoCandidate(t *testing.T) {
 	require.Nil(t, got, "no entry covers toBlock — must return nil")
 }
 
-// writeHeadersSegRange builds a headers .seg file with `to-from`
-// dummy entries (enough to satisfy the entry-count validation in
-// straddleBlockFileForType). No .idx sidecar — the validator only
-// checks entry count via seg.Decompressor.
-func writeHeadersSegRange(t *testing.T, dir string, from, to uint64) {
-	t.Helper()
-	enum := snaptype2.Headers.Enum()
-	c, err := seg.NewCompressor(t.Context(), "test",
-		filepath.Join(dir, snaptype.SegmentFileName(version.V1_1, from, to, enum)),
-		dir, seg.DefaultCfg, log.LvlError, log.New())
-	require.NoError(t, err)
-	defer c.Close()
-	c.DisableFsync()
-	for n := from; n < to; n++ {
-		require.NoError(t, c.AddWord([]byte{byte(n & 0xff)}))
-	}
-	require.NoError(t, c.Compress())
-}
-
-func writeBodiesSegRange(t *testing.T, dir string, from, to uint64) {
-	t.Helper()
-	enum := snaptype2.Bodies.Enum()
-	c, err := seg.NewCompressor(t.Context(), "test",
-		filepath.Join(dir, snaptype.SegmentFileName(version.V1_1, from, to, enum)),
-		dir, seg.DefaultCfg, log.LvlError, log.New())
-	require.NoError(t, err)
-	defer c.Close()
-	c.DisableFsync()
-	for n := from; n < to; n++ {
-		require.NoError(t, c.AddWord([]byte{byte(n & 0xff)}))
-	}
-	require.NoError(t, c.Compress())
-}
-
 // TestStraddleBlockFileForType_SingleStraddleWins pins the simple case:
 // exactly one inventory entry straddles toBlock and is returned.
 func TestStraddleBlockFileForType_SingleStraddleWins(t *testing.T) {
 	t.Parallel()
-	snapDir := t.TempDir()
 	inv := snapshot.NewInventory()
-	for _, r := range []struct{ from, to uint64 }{{2_900_000, 2_910_000}, {2_910_000, 2_920_000}, {2_920_000, 2_930_000}} {
-		writeHeadersSegRange(t, snapDir, r.from, r.to)
-		require.NoError(t, inv.AddFile(&snapshot.FileEntry{Name: snaptype.SegmentFileName(version.V1_1, r.from, r.to, snaptype2.Headers.Enum()), Local: true}))
+	for _, e := range []*snapshot.FileEntry{
+		{Name: "v1.1-002900-002910-headers.seg", Local: true},
+		{Name: "v1.1-002910-002920-headers.seg", Local: true}, // straddles 2,912,999
+		{Name: "v1.1-002920-002930-headers.seg", Local: true},
+	} {
+		require.NoError(t, inv.AddFile(e))
 	}
-	p := &Provider{Inventory: inv, snapDir: snapDir}
+	p := &Provider{Inventory: inv}
 	got, err := p.straddleBlockFileForType(2_912_999, snaptype2.Enums.Headers)
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -716,17 +683,25 @@ func TestStraddleBlockFileForType_SingleStraddleWins(t *testing.T) {
 
 // TestStraddleBlockFileForType_WidestWins pins the post-merge-window
 // contract: when the merged superset chunk and the unmerged sub-chunks
-// both straddle toBlock at once, the widest range wins provided its
-// on-disk content matches the advertised range.
+// both straddle toBlock at once, the widest range wins. Without this
+// the rebuild path resolved the straddle to a stale sub-chunk name
+// whose file had been merged away — live wedge 2026-06-12 (commit
+// 12717aae54).
 func TestStraddleBlockFileForType_WidestWins(t *testing.T) {
 	t.Parallel()
-	snapDir := t.TempDir()
 	inv := snapshot.NewInventory()
-	for _, r := range []struct{ from, to uint64 }{{2_990_000, 2_991_000}, {2_991_000, 2_992_000}, {2_996_000, 2_997_000}, {2_900_000, 3_000_000}} {
-		writeHeadersSegRange(t, snapDir, r.from, r.to)
-		require.NoError(t, inv.AddFile(&snapshot.FileEntry{Name: snaptype.SegmentFileName(version.V1_1, r.from, r.to, snaptype2.Headers.Enum()), Local: true}))
+	for _, e := range []*snapshot.FileEntry{
+		// Sub-chunks the merger superseded — still in inventory:
+		{Name: "v1.1-002990-002991-headers.seg", Local: true},
+		{Name: "v1.1-002991-002992-headers.seg", Local: true},
+		// Stale 1k sub-chunk that would mis-name the straddle:
+		{Name: "v1.1-002996-002997-headers.seg", Local: true},
+		// Merged 100k-chunk — wider, must win:
+		{Name: "v1.1-002900-003000-headers.seg", Local: true},
+	} {
+		require.NoError(t, inv.AddFile(e))
 	}
-	p := &Provider{Inventory: inv, snapDir: snapDir}
+	p := &Provider{Inventory: inv}
 	got, err := p.straddleBlockFileForType(2_996_374, snaptype2.Enums.Headers)
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -739,56 +714,18 @@ func TestStraddleBlockFileForType_WidestWins(t *testing.T) {
 // Headers query.
 func TestStraddleBlockFileForType_FiltersByType(t *testing.T) {
 	t.Parallel()
-	snapDir := t.TempDir()
 	inv := snapshot.NewInventory()
-	writeBodiesSegRange(t, snapDir, 2_910_000, 2_920_000)
-	writeHeadersSegRange(t, snapDir, 2_910_000, 2_920_000)
-	require.NoError(t, inv.AddFile(&snapshot.FileEntry{Name: snaptype.SegmentFileName(version.V1_1, 2_910_000, 2_920_000, snaptype2.Bodies.Enum()), Local: true}))
-	require.NoError(t, inv.AddFile(&snapshot.FileEntry{Name: snaptype.SegmentFileName(version.V1_1, 2_910_000, 2_920_000, snaptype2.Headers.Enum()), Local: true}))
-
-	p := &Provider{Inventory: inv, snapDir: snapDir}
+	for _, e := range []*snapshot.FileEntry{
+		{Name: "v1.1-002910-002920-bodies.seg", Local: true},  // straddles 2,912,999 but wrong type
+		{Name: "v1.1-002910-002920-headers.seg", Local: true}, // straddles + right type
+	} {
+		require.NoError(t, inv.AddFile(e))
+	}
+	p := &Provider{Inventory: inv}
 	got, err := p.straddleBlockFileForType(2_912_999, snaptype2.Enums.Headers)
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, snaptype2.Enums.Headers, got.Type.Enum(),
 		"only the headers file should be returned for a Headers query")
 	require.Equal(t, "v1.1-002910-002920-headers.seg", got.Name())
-}
-
-// TestStraddleBlockFileForType_SkipsStaleWiderFile pins the disk-content
-// validation. When a wider inventory entry advertises N entries but its
-// on-disk file only has M < N (live-caught 2026-07-23 iter 24: prior
-// mode-B rebuild left v1.1-003120-003130-headers.seg with 5000 entries
-// while its filename advertises 10000), fall back to the next-widest
-// candidate that DOES have the expected count.
-func TestStraddleBlockFileForType_SkipsStaleWiderFile(t *testing.T) {
-	t.Parallel()
-	snapDir := t.TempDir()
-	inv := snapshot.NewInventory()
-
-	// Stale wider file: name says 10000 entries but on-disk only has 5000.
-	// Write with the 5000-entry From/To first, then rename to the stale
-	// wider name so the file exists on disk under the misleading name.
-	writeHeadersSegRange(t, snapDir, 2_120_000, 2_125_000) // 5000 entries
-	staleName := snaptype.SegmentFileName(version.V1_1, 2_120_000, 2_130_000, snaptype2.Headers.Enum())
-	require.NoError(t, os.Rename(
-		filepath.Join(snapDir, snaptype.SegmentFileName(version.V1_1, 2_120_000, 2_125_000, snaptype2.Headers.Enum())),
-		filepath.Join(snapDir, staleName)))
-	require.NoError(t, inv.AddFile(&snapshot.FileEntry{Name: staleName, Local: true}))
-
-	// Correct narrower file that also straddles toBlock — genuine content
-	// matches its name.
-	writeHeadersSegRange(t, snapDir, 2_127_000, 2_128_000)
-	require.NoError(t, inv.AddFile(&snapshot.FileEntry{
-		Name:  snaptype.SegmentFileName(version.V1_1, 2_127_000, 2_128_000, snaptype2.Headers.Enum()),
-		Local: true,
-	}))
-
-	p := &Provider{Inventory: inv, snapDir: snapDir}
-	got, err := p.straddleBlockFileForType(2_127_653, snaptype2.Enums.Headers)
-	require.NoError(t, err)
-	require.NotNil(t, got, "narrower correct file must be returned when the widest is stale")
-	require.Equal(t, uint64(2_127_000), got.From,
-		"stale wider v1.1-002120-002130 (5000 on-disk vs 10000 advertised) must be skipped in favour of the correct v1.1-002127-002128")
-	require.Equal(t, uint64(2_128_000), got.To)
 }

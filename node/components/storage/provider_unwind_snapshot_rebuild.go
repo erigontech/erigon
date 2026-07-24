@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"path/filepath"
-	"sort"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -66,23 +65,20 @@ func chunkAlignedToBlock(toBlock uint64) uint64 {
 // straightforward and to tolerate any edge-case asymmetry from
 // historical retire boundaries.
 //
-// Overlapping entries: when block snapshots have been merged (1000-block
-// chunks rolled up into 100k-block chunks) the inventory can carry stale
-// entries for the original sub-chunks alongside the merged superset;
-// prior mode-B rebuilds can also leave a wider file whose on-disk
-// content was trimmed but whose filename still advertises the original
-// range (live-caught 2026-07-23 iter 24: v1.1-003120-003130-headers.seg
-// advertised 10k entries but held only 5k after iter 17's rebuild).
-// Sort candidates widest-first — the merged superset is normally the
-// right choice — but validate each on disk before returning it: the
-// file must exist and its actual entry count must equal (To-From). Fall
-// back to the next-widest that passes validation. Return nil if no
-// candidate passes (caller treats as no-straddle).
+// When block snapshots have been merged (1000-block chunks rolled up
+// into 100k-block chunks) the inventory can carry stale entries for
+// the original sub-chunks alongside the merged superset. Multiple
+// inventory entries can then straddle toBlock at once. Prefer the
+// widest range — the merged superset is the file actually on disk;
+// the stale sub-chunk would fail to open in seedLeftoverBlocks (live
+// 2026-06-12 wedge: setHead→2,996,374 looked up v1.1-002996-002997
+// while the disk only had v1.1-002900-003000).
 func (p *Provider) straddleBlockFileForType(toBlock uint64, typeEnum snaptype.Enum) (*snaptype.FileInfo, error) {
 	if p.Inventory == nil {
 		return nil, nil
 	}
-	var candidates []snaptype.FileInfo
+	var widest *snaptype.FileInfo
+	var widestSpan uint64
 	for _, e := range p.Inventory.BlockFiles() {
 		if e.FromBlock > toBlock || e.ToBlock <= toBlock {
 			continue
@@ -94,35 +90,14 @@ func (p *Provider) straddleBlockFileForType(toBlock uint64, typeEnum snaptype.En
 		if info.Type == nil || info.Type.Enum() != typeEnum {
 			continue
 		}
-		candidates = append(candidates, info)
-	}
-	sort.SliceStable(candidates, func(i, j int) bool {
-		return (candidates[i].To - candidates[i].From) > (candidates[j].To - candidates[j].From)
-	})
-	for i := range candidates {
-		info := candidates[i]
-		path := filepath.Join(p.snapDir, info.Name())
-		dec, err := seg.NewDecompressor(path)
-		if err != nil {
-			if p.logger != nil {
-				p.logger.Warn("[storage] straddleBlockFileForType: candidate unreadable — falling back to next widest",
-					"file", info.Name(), "err", err)
-			}
-			continue
+		span := info.To - info.From
+		if widest == nil || span > widestSpan {
+			infoCopy := info
+			widest = &infoCopy
+			widestSpan = span
 		}
-		got := uint64(dec.Count())
-		dec.Close()
-		want := info.To - info.From
-		if got != want {
-			if p.logger != nil {
-				p.logger.Warn("[storage] straddleBlockFileForType: candidate has mismatched entry count — falling back to next widest",
-					"file", info.Name(), "want", want, "got", got)
-			}
-			continue
-		}
-		return &info, nil
 	}
-	return nil, nil
+	return widest, nil
 }
 
 // headersStraddleFile is a thin convenience wrapper kept for the
