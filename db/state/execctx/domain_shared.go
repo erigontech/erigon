@@ -1035,41 +1035,15 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	}
 	for i := range pending {
 		u := &pending[i]
-		switch u.domain {
-		case kv.CommitmentDomain:
+		if u.domain == kv.CommitmentDomain {
 			if len(u.val) == 0 {
 				sd.branchCache.Invalidate(u.key)
 			} else {
 				sd.branchCache.Put(u.key, u.val, uint64(u.step), u.txN)
 			}
-		case kv.AccountsDomain:
-			if len(u.val) == 0 {
-				sd.stateCache.Delete(kv.AccountsDomain, u.key)
-				sd.stateCache.Delete(kv.CodeDomain, u.key)
-				sd.stateCache.DeleteAddrCodeHash(u.key)
-			} else {
-				sd.stateCache.Put(kv.AccountsDomain, u.key, u.val, u.txN)
-				sd.stateCache.DeleteAddrCodeHash(u.key)
-			}
-		case kv.StorageDomain:
-			if len(u.val) == 0 {
-				sd.stateCache.Delete(kv.StorageDomain, u.key)
-			} else {
-				sd.stateCache.Put(kv.StorageDomain, u.key, u.val, u.txN)
-			}
-		case kv.CodeDomain:
-			if len(u.val) == 0 {
-				sd.stateCache.Delete(kv.CodeDomain, u.key)
-			} else {
-				// Validated committed code: populate the addr layer AND the
-				// content-addressed codeHash->code map, keyed by keccak(v) so each
-				// entry is self-consistent by construction. The read-fill path
-				// (PutCodeWithHash on a cold GetLatest, below) populates the same
-				// way — both key on keccak(v), never a separately-read account
-				// codeHash, so the shared map only ever holds self-consistent entries.
-				sd.stateCache.PutCodeWithHash(u.key, u.val, crypto.Keccak256(u.val), u.txN)
-			}
+			continue
 		}
+		sd.stateCache.Apply(u.domain, u.key, u.val, u.txN)
 	}
 	return nil
 }
@@ -1157,13 +1131,12 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		MeteredGetLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error)
 	}
 
-	// stateCache holds in-flight values from previous transactions in the same batch
-	// that haven't been flushed to DB yet. Early return keeps correctness AND performance.
+	// stateCache holds committed values shared across domain readers.
 	if sd.stateCache != nil {
 		v, cTxNum, ok := sd.stateCache.GetWithTxNum(domain, k)
 		// The cache stamps txNums — divide to get the step the entry reflects.
-		// An empty value is stamped with the domain's progress at fill time, so
-		// its cStep is progress-derived, not the step of any deletion.
+		// A negative uses the last txNum included by its snapshot frontier, not
+		// the step of a deletion.
 		cStep := kv.Step(cTxNum / sd.StepSize())
 		if ok && !servableUnderBound(cStep, maxStep) {
 			ok = false
@@ -1236,30 +1209,12 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	// Populate the cache with if-absent semantics: a read-fill never carries
-	// newer information than a flush-apply, so it must not overwrite one
-	// (e.g. an embedded-RPC read straddling an FCU commit). Stamp with the
-	// last txNum of the step the value came from — an upper bound on its
-	// write txNum — so an unwind below it can't leave the entry stale. A
-	// negative carries no step; stamp it with the domain's progress at
-	// observation time so any unwind drops it.
-	if sd.stateCache != nil {
-		readTxNum := (uint64(step)+1)*sd.StepSize() - 1
-		if domain == kv.CodeDomain {
-			if len(v) > 0 {
-				// This SD getter is the single place that populates the code cache
-				// on a read. Key the content-addressed entry by the code's OWN hash,
-				// keccak(v) — NEVER a separately-read account codeHash, which under
-				// parallel exec can be a skewed or cross-account value and would
-				// poison the shared codeHash→code map for every account sharing
-				// that hash.
-				sd.stateCache.PutCodeWithHashIfAbsent(k, v, crypto.Keccak256(v), readTxNum)
-			}
-		} else {
-			if len(v) == 0 && sd.stateCache.GetCache(domain) != nil {
-				readTxNum = tx.Debug().DomainProgress(domain)
-			}
-			sd.stateCache.PutIfAbsent(domain, k, v, readTxNum)
+	// Snapshot freshness is rechecked while the fill is serialized against
+	// committed cache updates.
+	if sd.stateCache != nil && sd.stateCache.GetCache(domain) != nil {
+		if snapshotEnd, ok := tx.Debug().DomainVisibleEnd(domain); ok {
+			readTxNum := (uint64(step)+1)*sd.StepSize() - 1
+			sd.stateCache.FillIfFresh(domain, k, v, readTxNum, snapshotEnd)
 		}
 	}
 	// Only cache a branch when the read's txN is known: a txN=0 entry would
@@ -1418,32 +1373,40 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 		}
 	}
 
-	// Resolve from the committed layers (stateCache → MDBX/files) and populate
-	// the LRU. mem is intentionally not consulted here — it was checked above.
-	resolve := func() []byte {
+	// Resolve from the committed layers (stateCache → MDBX/files). mem is
+	// intentionally not consulted here — it was checked above. fromSnapshot
+	// reports whether the record was read from the tx snapshot.
+	resolve := func() ([]byte, bool) {
 		if sd.stateCache != nil {
 			if v, ok := sd.stateCache.Get(kv.AccountsDomain, addr); ok {
-				return accounts.DeserialiseV3CodeHash(v)
+				return accounts.DeserialiseV3CodeHash(v), false
 			}
 		}
 		v, _, err := tx.GetLatest(kv.AccountsDomain, addr)
-		if err != nil || len(v) == 0 {
-			return nil
+		if err != nil {
+			return nil, false
 		}
-		return accounts.DeserialiseV3CodeHash(v)
+		if len(v) == 0 {
+			return nil, true
+		}
+		return accounts.DeserialiseV3CodeHash(v), true
 	}
 
-	h := resolve()
-	if sd.stateCache != nil {
+	h, fromSnapshot := resolve()
+	if fromSnapshot && sd.stateCache != nil {
 		var fixed [32]byte
 		if len(h) == 32 {
 			copy(fixed[:], h)
 		}
-		// Always populate, including the zero-hash sentinel for misses —
-		// repeat lookups skip the whole resolve() chain. txNum is a
-		// conservative upper bound (>= the resolved account's write txNum), so
-		// the mapping drops on any unwind that reverts that account.
-		sd.stateCache.PutAddrCodeHash(addr, fixed, txNum)
+		// Only a snapshot-sourced record (including the zero-hash sentinel for
+		// misses) may seed the mapping: the admission gate vouches for the tx's
+		// frontier, and a cache-sourced record can lag a just-committed flush,
+		// slipping pre-apply state past the gate. txNum is a conservative upper
+		// bound (>= the resolved account's write txNum), so the mapping drops
+		// on any unwind that reverts that account.
+		if snapshotEnd, ok := tx.Debug().DomainVisibleEnd(kv.AccountsDomain); ok {
+			sd.stateCache.PutAddrCodeHashIfFresh(addr, fixed, txNum, snapshotEnd)
+		}
 	}
 	return h
 }

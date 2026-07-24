@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -267,11 +268,55 @@ type tx struct {
 type Tx struct {
 	kv.Tx
 	tx
+	visibleEnds domainVisibleEnds
 }
 
 type RwTx struct {
 	kv.RwTx
 	tx
+}
+
+type domainVisibleEnds struct {
+	ends  [kv.DomainLen]uint64
+	mu    sync.Mutex
+	state atomic.Uint32
+}
+
+// state packs a loaded and an available bit per domain — compile-time capacity check.
+var _ [32 - 2*int(kv.DomainLen)]struct{}
+
+func (v *domainVisibleEnds) get(tx *Tx, domain kv.Domain) (uint64, bool) {
+	bit := uint32(1) << uint32(domain)
+	state := v.state.Load()
+	if state&bit != 0 {
+		return v.ends[domain], state&(bit<<uint32(kv.DomainLen)) != 0
+	}
+	return v.load(tx, domain, bit)
+}
+
+func (v *domainVisibleEnds) load(tx *Tx, domain kv.Domain, bit uint32) (uint64, bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	state := v.state.Load()
+	availableBit := bit << uint32(kv.DomainLen)
+	if state&bit == 0 {
+		end, ok := tx.aggtx.DomainVisibleEnd(domain, tx.Tx)
+		v.ends[domain] = end
+		state |= bit
+		if ok {
+			state |= availableBit
+		}
+		v.state.Store(state)
+	}
+	return v.ends[domain], state&availableBit != 0
+}
+
+// reset takes mu so an in-flight load can't re-store pre-reset bits.
+func (v *domainVisibleEnds) reset() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.state.Store(0)
 }
 
 func (tx *tx) ForceReopenUnderlyingFilesTx() {
@@ -283,6 +328,13 @@ func (tx *tx) ForceReopenUnderlyingFilesTx() {
 		tx.aggtx.Close()
 	}
 	tx.aggtx = tx.Agg().BeginFilesRo()
+}
+
+// ForceReopenUnderlyingFilesTx swaps in a fresh files view, which can extend
+// the visible frontier — drop the memoized ends so they are re-derived.
+func (tx *Tx) ForceReopenUnderlyingFilesTx() {
+	tx.tx.ForceReopenUnderlyingFilesTx()
+	tx.visibleEnds.reset()
 }
 func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 
@@ -723,6 +775,12 @@ func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {
 }
 func (tx *RwTx) DomainProgress(domain kv.Domain) uint64 {
 	return tx.aggtx.DomainProgress(domain, tx.RwTx)
+}
+func (tx *Tx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
+	return tx.visibleEnds.get(tx, domain)
+}
+func (tx *RwTx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
+	return tx.aggtx.DomainVisibleEnd(domain, tx.RwTx)
 }
 func (tx *Tx) IIProgress(domain kv.InvertedIdx) uint64 {
 	return tx.aggtx.IIProgress(domain, tx.Tx)

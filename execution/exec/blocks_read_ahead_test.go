@@ -60,7 +60,7 @@ func TestCachePopulatingGetterKeepsFresherEntry(t *testing.T) {
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		sc := newTestStateCache()
 		sc.Put(domain, key, fresh, 54)
-		cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: stale}, sc: sc, stepSize: 1_562_500}
+		cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: stale}, sc: sc, stepSize: 1_562_500, visibleEnd: emptyVisibleEnd}
 
 		v, _, err := cpg.GetLatest(domain, key)
 		require.NoError(t, err)
@@ -80,7 +80,7 @@ func TestCachePopulatingGetterKeepsFresherCodeBinding(t *testing.T) {
 	staleCode := []byte{0xbb, 0x04, 0x05, 0x06}
 	sc := newTestStateCache()
 	sc.PutCodeWithHash(addr, freshCode, crypto.Keccak256(freshCode), 54)
-	cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: staleCode}, sc: sc, stepSize: 1_562_500}
+	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: staleCode}, sc: sc, stepSize: 1_562_500, visibleEnd: emptyVisibleEnd}
 
 	_, _, err := cpg.GetLatest(kv.CodeDomain, addr)
 	require.NoError(t, err)
@@ -98,7 +98,7 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		sc := newTestStateCache()
-		cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: val}, sc: sc, stepSize: 1_562_500}
+		cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: val}, sc: sc, stepSize: 1_562_500, visibleEnd: emptyVisibleEnd}
 		_, _, err := cpg.GetLatest(domain, key)
 		require.NoError(t, err)
 		got, ok := sc.Get(domain, key)
@@ -107,16 +107,19 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 	}
 
 	sc := newTestStateCache()
-	cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: code}, sc: sc, stepSize: 1_562_500}
+	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: code}, sc: sc, stepSize: 1_562_500, visibleEnd: emptyVisibleEnd}
 	_, _, err := cpg.GetLatest(kv.CodeDomain, key)
 	require.NoError(t, err)
 	got, ok := sc.Get(kv.CodeDomain, key)
 	require.True(t, ok)
 	require.Equal(t, code, got)
+	got, ok = sc.GetCodeByHash(crypto.Keccak256(code))
+	require.True(t, ok)
+	require.Equal(t, code, got)
 
 	// Negative results (missing account, empty slot) are cached as nil hits.
 	sc = newTestStateCache()
-	cpg = &cachePopulatingGetter{g: stubTemporalGetter{v: nil}, sc: sc, stepSize: 1_562_500, progress: func(kv.Domain) uint64 { return 100 }}
+	cpg = &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: nil}, sc: sc, stepSize: 1_562_500, visibleEnd: emptyVisibleEnd}
 	_, _, err = cpg.GetLatest(kv.AccountsDomain, key)
 	require.NoError(t, err)
 	got, ok = sc.Get(kv.AccountsDomain, key)
@@ -124,22 +127,56 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 	require.Empty(t, got)
 }
 
-// A negative (missing account, empty slot) carries no write step, so a
-// step-derived stamp pins it at the start of history where no unwind can drop
-// it. It must be stamped with the domain's progress at observation time —
-// any unwind at or below that progress then invalidates it (mirroring the SD
-// read-fill).
-func TestCachePopulatingGetterNegativeDroppedByUnwind(t *testing.T) {
+func TestCachePopulatingGetterNegativeUsesLastVisibleTxNum(t *testing.T) {
+	const visibleEnd = uint64(10_000_001)
 	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
 	sc := newTestStateCache()
-	cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: nil}, sc: sc, stepSize: 16, progress: func(kv.Domain) uint64 { return 100 }}
+	cpg := &cachePopulatingGetter{
+		TemporalGetter: stubTemporalGetter{v: nil}, sc: sc, stepSize: 1_562_500,
+		visibleEnd: func(kv.Domain) (uint64, bool) { return visibleEnd, true },
+	}
+	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
+	require.NoError(t, err)
+	_, ok := sc.Get(kv.AccountsDomain, key)
+	require.True(t, ok)
+
+	sc.Unwind(visibleEnd)
+	_, ok = sc.Get(kv.AccountsDomain, key)
+	require.True(t, ok, "a negative observed before the unwind floor must remain cached")
+
+	sc.Unwind(visibleEnd - 1)
+	_, ok = sc.Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a negative observed at the unwind floor must be invalidated")
+}
+
+func TestCachePopulatingGetterUnavailableVisibleEndNeverFills(t *testing.T) {
+	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
+	sc := newTestStateCache()
+	cpg := &cachePopulatingGetter{
+		TemporalGetter: stubTemporalGetter{v: nil}, sc: sc, stepSize: 1_562_500,
+		visibleEnd: func(kv.Domain) (uint64, bool) { return 0, false },
+	}
+	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
+	require.NoError(t, err)
+	_, ok := sc.Get(kv.AccountsDomain, key)
+	require.False(t, ok, "no exact frontier — nothing may be cached")
+}
+
+func TestCachePopulatingGetterStaleSnapshotDoesNotFill(t *testing.T) {
+	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
+	sc := newTestStateCache()
+	sc.Apply(kv.AccountsDomain, key, nil, 20)
+	cpg := &cachePopulatingGetter{
+		TemporalGetter: stubTemporalGetter{v: []byte("pre-delete-record")},
+		sc:             sc,
+		stepSize:       1_562_500,
+		visibleEnd:     func(kv.Domain) (uint64, bool) { return 11, true },
+	}
 
 	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
 	require.NoError(t, err)
 	_, ok := sc.Get(kv.AccountsDomain, key)
-	require.True(t, ok, "the negative result must be cached")
-
-	sc.Unwind(50)
-	_, ok = sc.Get(kv.AccountsDomain, key)
-	require.False(t, ok, "a negative must not survive an unwind below the progress at which it was observed")
+	require.False(t, ok)
 }
+
+func emptyVisibleEnd(kv.Domain) (uint64, bool) { return 0, true }

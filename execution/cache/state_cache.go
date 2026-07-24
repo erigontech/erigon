@@ -17,16 +17,17 @@
 package cache
 
 import (
-	"bytes"
+	"math"
 	"strings"
+	"sync"
 
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 const (
@@ -53,6 +54,10 @@ const (
 // Code uses CodeCache (two-level for deduplication).
 type StateCache struct {
 	caches [kv.DomainLen]Cache
+	// admissionMu makes Apply's frontier advance + cache mutation atomic
+	// against concurrent read-fills, which recheck freshness under RLock.
+	admissionMu sync.RWMutex
+	appliedEnd  [kv.DomainLen]uint64
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
@@ -109,7 +114,7 @@ func NewDefaultStateCache() *StateCache {
 }
 
 // Get retrieves data for the given domain and key.
-// Returns (value, true) on cache hit — including (nil, true) for deleted keys —
+// Returns (value, true) on cache hit — including (nil, true) for cached negatives —
 // and (nil, false) on cache miss.
 func (c *StateCache) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 	cache := c.caches[domain]
@@ -149,25 +154,11 @@ func (c *StateCache) GetCodeByHash(codeHash []byte) ([]byte, bool) {
 // codeHash-keyed codeHashToCode layer. Callers should prefer this over Put when they
 // have the codeHash from the account record — avoids a redundant keccak.
 func (c *StateCache) PutCodeWithHash(addr, code, codeHash []byte, txNum uint64) {
-	c.putCodeWithHash(addr, code, codeHash, txNum, true)
-}
-
-// PutCodeWithHashIfAbsent is PutCodeWithHash with if-absent binding semantics
-// (see Cache.PutIfAbsent).
-func (c *StateCache) PutCodeWithHashIfAbsent(addr, code, codeHash []byte, txNum uint64) {
-	c.putCodeWithHash(addr, code, codeHash, txNum, false)
-}
-
-func (c *StateCache) putCodeWithHash(addr, code, codeHash []byte, txNum uint64, overwrite bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
 	}
-	if overwrite {
-		cc.PutWithCodeHash(addr, common.Copy(code), codeHash, txNum)
-	} else {
-		cc.PutWithCodeHashIfAbsent(addr, common.Copy(code), codeHash, txNum)
-	}
+	cc.PutWithCodeHash(addr, common.Copy(code), codeHash, txNum)
 }
 
 // GetCodeSizeByHash returns the size of code by its Ethereum codeHash
@@ -203,21 +194,21 @@ func (c *StateCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return cc.GetAddrCodeHash(addr)
 }
 
-// PutAddrCodeHash records the addr → codeHash mapping in the addr-keyed
-// LRU above SD. Callers that have just decoded an account record should
-// call this so subsequent lookups skip the account-domain read.
-func (c *StateCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
+// PutAddrCodeHashIfFresh conditionally fills a mapping from a current account snapshot.
+func (c *StateCache) PutAddrCodeHashIfFresh(addr []byte, h [32]byte, txNum, snapshotEnd uint64) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
+		return
+	}
+	c.admissionMu.RLock()
+	defer c.admissionMu.RUnlock()
+	if snapshotEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
 	cc.PutAddrCodeHash(addr, h, txNum)
 }
 
-// DeleteAddrCodeHash drops the addr → codeHash mapping. Used by
-// invalidation paths (SELFDESTRUCT / CREATE2-replace / unwind diffsets)
-// where the account's codeHash has been mutated.
-func (c *StateCache) DeleteAddrCodeHash(addr []byte) {
+func (c *StateCache) deleteAddrCodeHash(addr []byte) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
@@ -228,27 +219,45 @@ func (c *StateCache) DeleteAddrCodeHash(addr []byte) {
 // Put stores data for the given domain and key, stamped with the txNum the
 // value reflects (for txNum/epoch unwind invalidation).
 func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, txNum uint64) {
-	c.put(domain, key, value, txNum, true)
-}
-
-// PutIfAbsent is Put with if-absent semantics (see Cache.PutIfAbsent).
-func (c *StateCache) PutIfAbsent(domain kv.Domain, key []byte, value []byte, txNum uint64) {
-	c.put(domain, key, value, txNum, false)
-}
-
-func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint64, overwrite bool) {
 	cache := c.caches[domain]
 	if cache == nil {
 		return
 	}
-	if domain == kv.CommitmentDomain && bytes.Equal(key, commitmentdb.KeyCommitmentState) {
+	cache.Put(key, common.Copy(value), txNum)
+}
+
+// FillIfFresh conditionally inserts a snapshot read without replacing an
+// authoritative entry. Negative values use the snapshot's last visible txNum.
+func (c *StateCache) FillIfFresh(domain kv.Domain, key []byte, value []byte, readTxNum, snapshotEnd uint64) {
+	cache := c.caches[domain]
+	if cache == nil || (domain == kv.CodeDomain && len(value) == 0) {
 		return
 	}
-	if overwrite {
-		cache.Put(key, common.Copy(value), txNum)
-	} else {
-		cache.PutIfAbsent(key, common.Copy(value), txNum)
+
+	var codeHash []byte
+	if domain == kv.CodeDomain {
+		codeHash = crypto.Keccak256(value)
 	}
+
+	c.admissionMu.RLock()
+	defer c.admissionMu.RUnlock()
+	if snapshotEnd < c.appliedEnd[domain] {
+		return
+	}
+
+	if domain == kv.CodeDomain {
+		if codeCache, ok := cache.(*CodeCache); ok {
+			codeCache.PutWithCodeHashIfAbsent(key, common.Copy(value), codeHash, readTxNum)
+		}
+		return
+	}
+	if len(value) == 0 {
+		readTxNum = 0
+		if snapshotEnd > 0 {
+			readTxNum = snapshotEnd - 1
+		}
+	}
+	cache.PutIfAbsent(key, common.Copy(value), readTxNum)
 }
 
 // Delete removes the data for the given domain and key.
@@ -260,13 +269,71 @@ func (c *StateCache) Delete(domain kv.Domain, key []byte) {
 	cache.Delete(key)
 }
 
+// Apply makes a committed domain update authoritative for subsequent fills.
+func (c *StateCache) Apply(domain kv.Domain, key, value []byte, txNum uint64) {
+	var codeHash []byte
+	if domain == kv.CodeDomain && len(value) > 0 {
+		// Copy before hashing so the stored bytes and codeHash come from the
+		// same snapshot of the caller-owned buffer.
+		value = common.Copy(value)
+		codeHash = crypto.Keccak256(value)
+	}
+
+	c.admissionMu.Lock()
+	defer c.admissionMu.Unlock()
+	cache := c.caches[domain]
+	if cache == nil {
+		return
+	}
+	c.noteApplied(domain, txNum)
+
+	switch domain {
+	case kv.AccountsDomain:
+		putOrDelete(cache, key, value, txNum)
+		c.deleteAddrCodeHash(key)
+		if len(value) == 0 {
+			c.Delete(kv.CodeDomain, key)
+		}
+	case kv.CodeDomain:
+		if len(value) == 0 {
+			cache.Delete(key)
+			c.deleteAddrCodeHash(key)
+		} else if codeCache, ok := cache.(*CodeCache); ok {
+			codeCache.PutWithCodeHash(key, value, codeHash, txNum)
+		}
+	default:
+		putOrDelete(cache, key, value, txNum)
+	}
+}
+
+func putOrDelete(cache Cache, key, value []byte, txNum uint64) {
+	if len(value) == 0 {
+		cache.Delete(key)
+		return
+	}
+	cache.Put(key, common.Copy(value), txNum)
+}
+
+func (c *StateCache) noteApplied(domain kv.Domain, txNum uint64) {
+	end := txNum
+	if end < math.MaxUint64 {
+		end++
+	}
+	if end > c.appliedEnd[domain] {
+		c.appliedEnd[domain] = end
+	}
+}
+
 // Clear removes all mutable entries from all caches.
 func (c *StateCache) Clear() {
+	c.admissionMu.Lock()
+	defer c.admissionMu.Unlock()
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Clear()
 		}
 	}
+	c.appliedEnd = [kv.DomainLen]uint64{}
 }
 
 // Close releases every sub-cache's slot in the shared memory envelope so later
@@ -285,10 +352,15 @@ func (c *StateCache) Close() {
 // and drops stale entries lazily on read. This is the sole cache-invalidation
 // path on unwind — the executor never touches the cache during forward execution.
 func (c *StateCache) Unwind(unwindToTxNum uint64) {
+	c.admissionMu.Lock()
+	defer c.admissionMu.Unlock()
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Unwind(unwindToTxNum)
 		}
+	}
+	for i := range c.appliedEnd {
+		c.appliedEnd[i] = min(c.appliedEnd[i], unwindToTxNum)
 	}
 }
 
