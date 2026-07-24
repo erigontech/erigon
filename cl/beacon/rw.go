@@ -74,6 +74,7 @@ func (f *notFoundNoWriter) WriteHeader(statusCode int) {
 	}
 	f.headers = f.ResponseWriter.Header()
 }
+
 func (f *notFoundNoWriter) Flush() {
 	flusher, ok := f.ResponseWriter.(http.Flusher)
 	if !ok {

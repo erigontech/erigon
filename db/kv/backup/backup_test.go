@@ -87,7 +87,7 @@ func TestClearTablesWarmupOff(t *testing.T) {
 		c, err := tx.RwCursor(testTable)
 		require.NoError(t, err)
 		defer c.Close()
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			require.NoError(t, c.Append(u64Key(uint64(i)), []byte{1}))
 		}
 		return nil
@@ -110,7 +110,7 @@ func TestClearTablesWarmupOnSmallTable(t *testing.T) {
 		c, err := tx.RwCursor(testTable)
 		require.NoError(t, err)
 		defer c.Close()
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			require.NoError(t, c.Append(u64Key(uint64(i)), []byte{1}))
 		}
 		return nil
@@ -140,7 +140,7 @@ func TestClearTablesMultiChunkWriteMap(t *testing.T) {
 			c, err := tx.RwCursor(testTable)
 			require.NoError(t, err)
 			defer c.Close()
-			for j := 0; j < 20_000; j++ {
+			for range 20_000 {
 				require.NoError(t, c.Append(u64Key(next), val))
 				next++
 			}

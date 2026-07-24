@@ -49,7 +49,7 @@ func TestSimulationIntraBlockHasStorageRAMBatch(t *testing.T) {
 	t.Cleanup(agg.Close)
 	require.NoError(t, agg.OpenFolder())
 
-	tdb, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)
 	t.Cleanup(tdb.Close)
 
@@ -69,7 +69,9 @@ func TestSimulationIntraBlockHasStorageRAMBatch(t *testing.T) {
 	slotKey := accounts.InternKey(common.Hash{}) // slot 0x00...00
 	slotVal := slotKey.Value()                   // [32]byte
 
-	storageKey := append(addrVal[:], slotVal[:]...)
+	storageKey := make([]byte, 0, len(addrVal)+len(slotVal))
+	storageKey = append(storageKey, addrVal[:]...)
+	storageKey = append(storageKey, slotVal[:]...)
 
 	// firstMinTxNum = 0: this is the canonical base state (before any simulated blocks).
 	// The contract does NOT exist in the canonical chain (empty DB), so RangeAsOf(0)

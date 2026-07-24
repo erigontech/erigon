@@ -35,10 +35,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -66,7 +65,7 @@ type Provider struct {
 	GenesisHash          common.Hash
 	CurrentBlockNumber   uint64
 	SegmentsBuildLimiter *semaphore.Weighted
-	BlockRetire          services.BlockRetire
+	BlockRetire          dbservices.BlockRetire
 
 	logger log.Logger
 }
@@ -95,10 +94,10 @@ type Deps struct {
 	// DBEventNotifier — NOT owned by storage. Passed in so BlockRetire and
 	// file-change callbacks can forward snapshot events. Currently backed by
 	// shards.Events; will migrate to the framework event bus.
-	DBEventNotifier services.DBEventNotifier
+	DBEventNotifier dbservices.DBEventNotifier
 
 	// Downloader client for file-change callbacks (may be nil).
-	DownloaderClient downloader.Client
+	DownloaderClient dbservices.DownloaderClient
 
 	SegmentsBuildLimiter *semaphore.Weighted
 	Logger               log.Logger

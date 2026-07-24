@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -135,14 +135,14 @@ func NewWitnessCacheBuilderAPI(
 	enable bool,
 	db kv.TemporalRoDB, eth rpchelper.ApiBackend,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
-	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg,
-	engine rules.EngineReader, bridgeReader bridgeReader,
+	blockReader dbservices.FullBlockReader, cfg *httpcfg.HttpCfg,
+	engine rules.Engine, bridgeReader bridgeReader,
 ) (*witnessResultCache, *DebugAPIImpl) {
 	if !enable {
 		return nil, nil
 	}
 	cache := newWitnessResultCache(cfg.WitnessCacheBlocks)
-	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.BlockRangeLimit, cfg.GetLogsMaxResults)
+	base := NewBaseApi(filters, stateCache, blockReader, engine, bridgeReader, NewBaseApiConfig(cfg))
 	impl := NewPrivateDebugAPI(base, db, eth, cfg.Gascap, cfg.GethCompatibility)
 	impl.witnessCache = cache
 	return cache, impl

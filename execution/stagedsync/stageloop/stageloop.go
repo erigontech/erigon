@@ -25,12 +25,11 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
@@ -56,6 +55,10 @@ type NotificationSender interface {
 	Dispatch(ctx context.Context, tx kv.Tx, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64) error
 }
 
+type FrozenBlocksReader interface {
+	FrozenBlocks() uint64
+}
+
 type Hook struct {
 	ctx                                 context.Context
 	notifications                       *shards.Notifications
@@ -66,6 +69,7 @@ type Hook struct {
 	updateHead                          func(ctx context.Context)
 	statusDataGetter                    sentry_multi_client.StatusGetter
 	blockRangePublisher                 *execp2p.Publisher
+	frozenBlocksReader                  FrozenBlocksReader
 	lastAnnouncedBlockRangeLatestNumber uint64
 	lastAnnouncedBlockRangeTime         time.Time
 }
@@ -80,6 +84,7 @@ func NewHook(
 	updateHead func(ctx context.Context),
 	statusDataGetter sentry_multi_client.StatusGetter,
 	blockRangePublisher *execp2p.Publisher,
+	frozenBlocksReader FrozenBlocksReader,
 ) *Hook {
 	return &Hook{
 		ctx:                 ctx,
@@ -91,6 +96,7 @@ func NewHook(
 		updateHead:          updateHead,
 		statusDataGetter:    statusDataGetter,
 		blockRangePublisher: blockRangePublisher,
+		frozenBlocksReader:  frozenBlocksReader,
 	}
 }
 
@@ -117,6 +123,9 @@ func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
 	if h == nil {
 		return nil
 	}
+	// Cycle start is where a node that fell behind first sees it; waiting for
+	// a cycle to end while still behind would miss fast catch-ups entirely.
+	h.NotifySyncState(tx)
 	return h.beforeRun(tx, inSync)
 }
 
@@ -163,7 +172,19 @@ func (h *Hook) UpdateHead(tx kv.Tx, finishProgressBefore uint64, isSynced bool) 
 		return err
 	}
 	h.maybeAnnounceBlockRange(finishProgressBefore, finishStageAfterSync, isSynced)
+	h.NotifySyncState(tx)
 	return nil
+}
+
+// NotifySyncState publishes the sync status on the event bus if it changed;
+// dedup and ordering live in Notifications.PublishSyncState.
+func (h *Hook) NotifySyncState(tx kv.Tx) {
+	if h == nil || h.notifications == nil || h.notifications.Events == nil || h.frozenBlocksReader == nil {
+		return
+	}
+	if err := h.notifications.PublishSyncState(tx, h.frozenBlocksReader.FrozenBlocks()); err != nil {
+		h.logger.Warn("[hook] sync state notification skipped", "err", err)
+	}
 }
 
 func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSync uint64, isSynced bool) {
@@ -322,9 +343,9 @@ func NewDefaultStages(ctx context.Context,
 	cfg *ethconfig.Config,
 	controlServer *sentry_multi_client.MultiClient,
 	notifications *shards.Notifications,
-	snapDownloader downloader.Client,
-	blockReader services.FullBlockReader,
-	blockRetire services.BlockRetire,
+	snapDownloader dbservices.DownloaderClient,
+	blockReader dbservices.FullBlockReader,
+	blockRetire dbservices.BlockRetire,
 	tracer *tracers.Tracer,
 	afterSnapshotDownload func(ctx context.Context) error,
 	readAheader *exec.BlockReadAheader,
@@ -353,9 +374,9 @@ func NewPipelineStages(ctx context.Context,
 	cfg *ethconfig.Config,
 	controlServer *sentry_multi_client.MultiClient,
 	notifications *shards.Notifications,
-	snapDownloader downloader.Client,
-	blockReader services.FullBlockReader,
-	blockRetire services.BlockRetire,
+	snapDownloader dbservices.DownloaderClient,
+	blockReader dbservices.FullBlockReader,
+	blockRetire dbservices.BlockRetire,
 	tracer *tracers.Tracer,
 	afterSnapshotDownload func(ctx context.Context) error,
 	readAheader *exec.BlockReadAheader,
@@ -390,7 +411,7 @@ func NewInMemoryExecution(
 	cfg *ethconfig.Config,
 	controlServer *sentry_multi_client.MultiClient,
 	notifications *shards.Notifications,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	blockWriter *blockio.BlockWriter,
 	logger log.Logger,
 	readAheader *exec.BlockReadAheader,

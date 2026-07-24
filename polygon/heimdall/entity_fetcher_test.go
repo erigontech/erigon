@@ -29,7 +29,7 @@ import (
 
 func makeEntities(count uint64) []*Checkpoint {
 	var entities []*Checkpoint
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		c := makeCheckpoint(i*256, 256)
 		c.Id = CheckpointId(i + 1)
 		entities = append(entities, c)
@@ -48,7 +48,7 @@ func makeFetchEntitiesPage(
 }
 
 func TestEntityFetcher_FetchAllEntities(t *testing.T) {
-	for count := uint64(0); count < 20; count++ {
+	for count := range uint64(20) {
 		testEntityFetcher_FetchAllEntities(t, count, 5)
 	}
 }

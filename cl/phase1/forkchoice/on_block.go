@@ -17,10 +17,11 @@
 package forkchoice
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -558,8 +559,8 @@ func (f *ForkChoiceStore) isDataAvailable(ctx context.Context, slot uint64, bloc
 	}
 	if !foundOnDisk {
 		// If we didn't find the sidecars on disk, we should write them to disk now
-		sort.Slice(sidecars, func(i, j int) bool {
-			return sidecars[i].Index < sidecars[j].Index
+		slices.SortFunc(sidecars, func(a, b *cltypes.BlobSidecar) int {
+			return cmp.Compare(a.Index, b.Index)
 		})
 		if err := f.blobStorage.WriteBlobSidecars(ctx, blockRoot, sidecars); err != nil {
 			return fmt.Errorf("failed to write blob sidecars: %v", err)

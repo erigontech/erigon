@@ -39,7 +39,7 @@ var (
 	EmptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 	// emptyState is the known hash of an empty state trie entry.
-	emptyState = crypto.HashData(nil)
+	emptyState = crypto.Keccak256Hash(nil)
 )
 
 // Trie is a Merkle Patricia Trie.
@@ -365,7 +365,7 @@ func (t *Trie) UpdateAccountCode(key []byte, code CodeNode) error {
 		return fmt.Errorf("account not found with key: %x", key)
 	}
 
-	actualCodeHash := crypto.HashData(code)
+	actualCodeHash := crypto.Keccak256Hash(code)
 	if accNode.CodeHash.Value() != actualCodeHash {
 		return fmt.Errorf("inserted code mismatch account hash (acc.CodeHash=%x codeHash=%x)", accNode.CodeHash, actualCodeHash)
 	}
@@ -472,12 +472,15 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 		newPrefixes = prefixes
 		newFixedBits = fixedbits
 		newHooks = hooks
-		newNibblePath := append(nibblePath, i1)
-		newHook := append(hook, i1)
+		newNibblePath := append([]byte(nil), nibblePath...)
+		newNibblePath = append(newNibblePath, i1)
+		newHook := append([]byte(nil), hook...)
+		newHook = append(newHook, i1)
 		if rl.Retain(newNibblePath) {
 			var newDbPrefix []byte
 			if bits%8 == 0 {
-				newDbPrefix = append(dbPrefix, i1<<4)
+				newDbPrefix = append([]byte(nil), dbPrefix...)
+				newDbPrefix = append(newDbPrefix, i1<<4)
 			} else {
 				newDbPrefix = dbPrefix
 				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
@@ -485,12 +488,15 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 			}
 			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child1, newNibblePath, newHook, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
 		}
-		newNibblePath = append(nibblePath, i2)
-		newHook = append(hook, i2)
+		newNibblePath = append([]byte(nil), nibblePath...)
+		newNibblePath = append(newNibblePath, i2)
+		newHook = append([]byte(nil), hook...)
+		newHook = append(newHook, i2)
 		if rl.Retain(newNibblePath) {
 			var newDbPrefix []byte
 			if bits%8 == 0 {
-				newDbPrefix = append(dbPrefix, i2<<4)
+				newDbPrefix = append([]byte(nil), dbPrefix...)
+				newDbPrefix = append(newDbPrefix, i2<<4)
 			} else {
 				newDbPrefix = dbPrefix
 				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
@@ -503,16 +509,17 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 		newPrefixes = prefixes
 		newFixedBits = fixedbits
 		newHooks = hooks
-		var newNibblePath []byte
-		var newHook []byte
 		for i, child := range n.Children {
 			if child != nil {
-				newNibblePath = append(nibblePath, byte(i))
-				newHook = append(hook, byte(i))
+				newNibblePath := append([]byte(nil), nibblePath...)
+				newNibblePath = append(newNibblePath, byte(i))
+				newHook := append([]byte(nil), hook...)
+				newHook = append(newHook, byte(i))
 				if rl.Retain(newNibblePath) {
 					var newDbPrefix []byte
 					if bits%8 == 0 {
-						newDbPrefix = append(dbPrefix, byte(i)<<4)
+						newDbPrefix = append([]byte(nil), dbPrefix...)
+						newDbPrefix = append(newDbPrefix, byte(i)<<4)
 					} else {
 						newDbPrefix = dbPrefix
 						newDbPrefix[len(newDbPrefix)-1] &= 0xf0
@@ -543,9 +550,12 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 		}
 		return newPrefixes, newFixedBits, newHooks
 	case *HashNode:
-		newPrefixes = append(prefixes, common.Copy(dbPrefix))
-		newFixedBits = append(fixedbits, bits)
-		newHooks = append(hooks, common.Copy(hook))
+		newPrefixes = prefixes
+		newPrefixes = append(newPrefixes, common.Copy(dbPrefix))
+		newFixedBits = fixedbits
+		newFixedBits = append(newFixedBits, bits)
+		newHooks = hooks
+		newHooks = append(newHooks, common.Copy(hook))
 		return newPrefixes, newFixedBits, newHooks
 	}
 	return prefixes, fixedbits, hooks
@@ -1320,7 +1330,7 @@ func (t *Trie) RLPEncode() ([][]byte, error) {
 				seen[hash] = struct{}{}
 				nodes = append(nodes, common.Copy(nodeRLP))
 			}
-			for i := 0; i < 17; i++ {
+			for i := range 17 {
 				if n.Children[i] != nil {
 					if err := collect(n.Children[i]); err != nil {
 						return err
@@ -1457,7 +1467,7 @@ func decodeTrieShort(elems []byte) (*ShortNode, error) {
 // decodeTrieFull decodes a full node (branch) for trie reconstruction.
 func decodeTrieFull(elems []byte) (*FullNode, error) {
 	n := &FullNode{}
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		var err error
 		n.Children[i], elems, err = decodeTrieRef(elems)
 		if err != nil {
@@ -1589,7 +1599,7 @@ func resolveHashNodes(node Node, nodeMap map[common.Hash]Node, insideStorageTree
 
 	case *FullNode:
 		newNode := &FullNode{}
-		for i := 0; i < 17; i++ {
+		for i := range 17 {
 			if n.Children[i] != nil {
 				resolved, err := resolveHashNodes(n.Children[i], nodeMap, insideStorageTree)
 				if err != nil {

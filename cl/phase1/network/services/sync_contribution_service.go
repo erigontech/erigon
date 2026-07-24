@@ -24,6 +24,8 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -39,8 +41,8 @@ import (
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type seenSyncCommitteeContribution struct {
@@ -173,7 +175,6 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 	aggregationBits := contributionAndProof.Contribution.AggregationBits
 
 	return s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-
 		// [IGNORE] The contribution's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. contribution.slot == current_slot.
 		if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(contributionAndProof.Contribution.Slot) {
 			return ErrIgnore
@@ -199,7 +200,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 		}
 
 		modulo := max(1, s.beaconCfg.SyncCommitteeSize/s.beaconCfg.SyncCommitteeSubnetCount/s.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
-		hashSignature := utils.Sha256(selectionProof[:])
+		hashSignature := crypto.Sha256(selectionProof[:])
 		if !s.test && binary.LittleEndian.Uint64(hashSignature[:8])%modulo != 0 {
 			return errors.New("selects the validator as an aggregator")
 		}
@@ -236,7 +237,6 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 
 		// further processing will be done after async signature verification
 		aggregateVerificationData.F = func() {
-
 			// mark the valid contribution as seen
 			s.markContributionAsSeen(contributionAndProof)
 
@@ -269,8 +269,8 @@ func (s *syncContributionService) GetSignaturesOnContributionSignatures(
 	headState *state.CachingBeaconState,
 	contributionAndProof *cltypes.ContributionAndProof,
 	signedContribution *SignedContributionAndProofForGossip,
-	subcommiteePubsKeys []common.Bytes48) (*AggregateVerificationData, error) {
-
+	subcommiteePubsKeys []common.Bytes48,
+) (*AggregateVerificationData, error) {
 	// [REJECT] The contribution_and_proof.selection_proof is a valid signature of the SyncAggregatorSelectionData derived from the contribution by the validator with index contribution_and_proof.aggregator_index.
 	signature1, signatureRoot1, pubKey1, err := verifySyncContributionSelectionProof(headState, contributionAndProof)
 	if !s.test && err != nil {
@@ -378,7 +378,7 @@ func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState,
 		return nil, nil, nil, err
 	}
 
-	msg := utils.Sha256(contribution.BeaconBlockRoot[:], domain)
+	msg := crypto.Sha256(contribution.BeaconBlockRoot[:], domain)
 	// only use the ones pertaining to the aggregation bits
 	subCommitteePubsKeys := make([][]byte, 0, len(subCommitteeKeys))
 	for i, key := range subCommitteeKeys {

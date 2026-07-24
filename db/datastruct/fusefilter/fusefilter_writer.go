@@ -21,12 +21,12 @@ const bufSize = 4096
 
 // WriterOffHeap does write all keys to temporary mmap file - and using it as a source for `fusefilter` building
 type WriterOffHeap struct {
+	tmpFile     *os.File
+	tmpFilePath string
+
 	count    int
 	buf      [bufSize]uint64
 	features Features
-
-	tmpFile     *os.File
-	tmpFilePath string
 }
 
 func initFeatures() Features {

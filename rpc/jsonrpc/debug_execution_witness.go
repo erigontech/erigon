@@ -634,7 +634,7 @@ func (api *BaseAPI) buildAccessedState(
 	ibs := state.New(recordingState)
 
 	// Get header for block context
-	header := block.Header()
+	header := block.HeaderNoCopy()
 
 	// Create EVM block context
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader, chainConfig)
@@ -934,7 +934,9 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 	}
 	for addr, keys := range a.Storage {
 		for key := range keys {
-			plainKey := append(addr[:], key[:]...)
+			plainKey := make([]byte, 0, len(addr)+len(key))
+			plainKey = append(plainKey, addr[:]...)
+			plainKey = append(plainKey, key[:]...)
 			postEnc, _, _ := post.Read(kv.StorageDomain, plainKey, stepSize)
 			if len(postEnc) == 0 {
 				preEnc, _, _ := pre.Read(kv.StorageDomain, plainKey, stepSize)
@@ -1534,10 +1536,7 @@ func (s *witnessStateless) ReadAccountDataForDebug(address accounts.Address) (*a
 
 func (s *witnessStateless) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	addr := address.Value()
-	addrHash, err := common.HashData(addr[:])
-	if err != nil {
-		return nil, err
-	}
+	addrHash := crypto.Keccak256Hash(addr[:])
 
 	// Check if account has been updated in memory
 	if acc, ok := s.accountUpdates[addr]; ok {
@@ -1587,16 +1586,8 @@ func (s *witnessStateless) ReadAccountStorage(address accounts.Address, key acco
 	addr := address.Value()
 	keyValue := key.Value()
 
-	addrHash, err := common.HashData(addr[:])
-	if err != nil {
-		return uint256.Int{}, false, err
-	}
-
-	seckey, err := common.HashData(keyValue[:])
-	if err != nil {
-		return uint256.Int{}, false, err
-	}
-
+	addrHash := crypto.Keccak256Hash(addr[:])
+	seckey := crypto.Keccak256Hash(keyValue[:])
 	// Check if storage has been updated in memory
 	if m, ok := s.storageWrites[addr]; ok {
 		if v, ok := m[keyValue]; ok {
@@ -1640,11 +1631,7 @@ func (s *witnessStateless) ReadAccountStorage(address accounts.Address, key acco
 
 func (s *witnessStateless) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	addr := address.Value()
-	addrHash, err := common.HashData(addr[:])
-	if err != nil {
-		return nil, err
-	}
-
+	addrHash := crypto.Keccak256Hash(addr[:])
 	// Check code updates first — look up by the account's code hash (matching UpdateAccountCode key)
 	acc, err := s.ReadAccountData(address)
 	if err != nil {
@@ -1707,11 +1694,7 @@ func (s *witnessStateless) ReadAccountIncarnation(address accounts.Address) (uin
 
 func (s *witnessStateless) HasStorage(address accounts.Address) (bool, error) {
 	addr := address.Value()
-	addrHash, err := common.HashData(addr[:])
-	if err != nil {
-		return false, err
-	}
-
+	addrHash := crypto.Keccak256Hash(addr[:])
 	// Check if account has been deleted
 	if _, ok := s.deleted[addr]; ok {
 		if s.tracing(addr) {
@@ -1769,10 +1752,7 @@ func (s *witnessStateless) UpdateAccountData(address accounts.Address, original,
 
 func (s *witnessStateless) DeleteAccount(address accounts.Address, original *accounts.Account) error {
 	addr := address.Value()
-	addrHash, err := common.HashData(addr[:])
-	if err != nil {
-		return err
-	}
+	addrHash := crypto.Keccak256Hash(addr[:])
 	// Only delete if the account exists in the original state (trie or was previously updated)
 	// Skip deletes for accounts that weren't in the witness - they don't affect the state root
 	accInTrie, isInTrie := s.t.GetAccount(addrHash[:])
@@ -1864,14 +1844,14 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
 			account.Root = trie.EmptyRoot
 		}
-		addrHash, _ := common.HashData(addr[:])
+		addrHash := crypto.Keccak256Hash(addr[:])
 		s.t.DeleteSubtree(addrHash[:])
 		// fmt.Printf("  Created contract %x: cleared subtrie\n", addr[:8])
 	}
 
 	// Apply account updates
 	for addr, account := range s.accountUpdates {
-		addrHash, _ := common.HashData(addr[:])
+		addrHash := crypto.Keccak256Hash(addr[:])
 		if account != nil {
 			// fmt.Printf("  UpdateAccount %x: Nonce=%d, Balance=%s\n", addr[:8], account.Nonce, account.Balance.String())
 			s.t.UpdateAccount(addrHash[:], account)
@@ -1885,7 +1865,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 		if account == nil {
 			continue
 		}
-		addrHash, _ := common.HashData(addr[:])
+		addrHash := crypto.Keccak256Hash(addr[:])
 		codeHashValue := account.CodeHash.Value()
 		if code, ok := s.codeUpdates[codeHashValue]; ok {
 			// fmt.Printf("  UpdateAccountCode %x: codeHash=%x, len=%d\n", addr[:8], codeHashValue[:8], len(code))
@@ -1903,9 +1883,9 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 			continue
 		}
 		updatedAccounts[addr] = struct{}{}
-		addrHash, _ := common.HashData(addr[:])
+		addrHash := crypto.Keccak256Hash(addr[:])
 		for key, v := range m {
-			keyHash, _ := common.HashData(key[:])
+			keyHash := crypto.Keccak256Hash(key[:])
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
 			// fmt.Printf("  Storage write: account=%x, key=%x, value=%x\n", addr[:8], key[:8], v.Bytes())
 			s.t.Update(cKey, v.Bytes())
@@ -1919,9 +1899,9 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 			continue
 		}
 		updatedAccounts[addr] = struct{}{}
-		addrHash, _ := common.HashData(addr[:])
+		addrHash := crypto.Keccak256Hash(addr[:])
 		for key := range m {
-			keyHash, _ := common.HashData(key[:])
+			keyHash := crypto.Keccak256Hash(key[:])
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
 			// fmt.Printf("DELETING Storage Key at path %x\n", cKey)
 			s.t.Delete(cKey)
@@ -1932,7 +1912,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 	// DeepHash computes the storage root, then we update the account with it
 	for addr := range updatedAccounts {
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
-			addrHash, _ := common.HashData(addr[:])
+			addrHash := crypto.Keccak256Hash(addr[:])
 			gotRoot, root := s.t.DeepHash(addrHash[:])
 			if gotRoot {
 				// Update the account's storage root and re-apply to trie
@@ -1950,7 +1930,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
 			account.Root = trie.EmptyRoot
 		}
-		addrHash, _ := common.HashData(addr[:])
+		addrHash := crypto.Keccak256Hash(addr[:])
 		s.t.DeleteSubtree(addrHash[:])
 	}
 
@@ -1984,7 +1964,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 
 	// Create the in-block state with the witness stateless as reader
 	ibs := state.New(stateless)
-	header := block.Header()
+	header := block.HeaderNoCopy()
 	blockNum := block.NumberU64()
 
 	// Create EVM block context - pass header.Coinbase as the author/beneficiary

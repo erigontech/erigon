@@ -33,6 +33,7 @@ import (
 
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/mvcc"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -319,22 +320,22 @@ func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 
 func (dt *DomainRoTx) NewWriter() *DomainBufferedWriter { return dt.newWriter(dt.d.dirs.Tmp, false) }
 
-// OpenList - main method to open list of files.
+// openList - main method to open list of files.
 // It's ok if some files was open earlier.
-// If some file already open: noop.
-// If some file already open but not in provided list: close and remove from `files` field.
-func (d *Domain) OpenList(ctx context.Context, scanResult ScanDirsResult) error {
-	if err := d.History.openList(ctx, scanResult.iiFiles, scanResult.historyFiles, scanResult.accessorFiles); err != nil {
-		return err
+// An already-open file not in the provided list is retired (detached) and returned for deferred reclaim.
+func (d *Domain) openList(ctx context.Context, scanResult ScanDirsResult) (retiredFiles, error) {
+	retired, err := d.History.openList(ctx, scanResult.iiFiles, scanResult.historyFiles, scanResult.accessorFiles)
+	if err != nil {
+		return retired, err
 	}
 
-	d.closeWhatNotInList(scanResult.domainFiles)
+	retired = append(retired, d.retireFilesNotInList(scanResult.domainFiles)...)
 	d.scanDirtyFiles(scanResult.domainFiles)
 	if err := d.openDirtyFiles(ctx, scanResult.domainFiles); err != nil {
-		return fmt.Errorf("Domain(%s).openList: %w", d.FilenameBase, err)
+		return retired, fmt.Errorf("Domain(%s).openList: %w", d.FilenameBase, err)
 	}
 	d.protectFromHistoryFilesAheadOfDomainFiles()
-	return nil
+	return retired, nil
 }
 
 // protectFromHistoryFilesAheadOfDomainFiles - in some corner-cases app may see more .ef/.v files than .kv:
@@ -344,11 +345,11 @@ func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
 	d.closeFilesAfterStep(kv.Step(d.dirtyFilesEndTxNumMinimax() / d.stepSize))
 }
 
-func (d *Domain) openFolder(ctx context.Context, r *ScanDirsResult) error {
+func (d *Domain) openFolder(ctx context.Context, r *ScanDirsResult) (retiredFiles, error) {
 	if d.Disable {
-		return nil
+		return nil, nil
 	}
-	return d.OpenList(ctx, *r)
+	return d.openList(ctx, *r)
 }
 
 func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
@@ -381,6 +382,10 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) 
 
 func (d *Domain) closeWhatNotInList(fNames []string) {
 	closeWhatNotInList(d.dirtyFiles, fNames)
+}
+
+func (d *Domain) retireFilesNotInList(fNames []string) retiredFiles {
+	return retireFilesNotInList(mvcc.RetireReasonWasDeletedFromDisk, d.dirtyFiles, fNames, d.FilenameBase, d.logger)
 }
 
 // calcVisibleFiles is pure — it does not mutate d, d.History, or d.History.InvertedIndex.
@@ -567,13 +572,12 @@ func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 
 // DomainRoTx allows accesing the same domain from multiple go-routines
 type DomainRoTx struct {
-	files             visibleFiles
-	visible           *domainVisible
-	name              kv.Domain
-	stepSize          uint64
-	stepsInFrozenFile uint64
-	ht                *HistoryRoTx
-	salt              *uint32
+	files    visibleFiles
+	visible  *domainVisible
+	name     kv.Domain
+	stepSize uint64
+	ht       *HistoryRoTx
+	salt     *uint32
 
 	d *Domain
 
@@ -641,18 +645,25 @@ func (d *Domain) beginForTests() *DomainRoTx {
 	return d.beginFilesRo(dv, hv, iv)
 }
 
-// beginFilesRo lets Aggregator.BeginFilesRo pass a snapshot pinned to a single
-// aggregatorVisible generation, avoiding a torn cross-entity read
 func (d *Domain) beginFilesRo(dv *domainVisible, hf visibleFiles, hiv *iiVisible) *DomainRoTx {
-	return &DomainRoTx{
-		name:              d.Name,
-		stepSize:          d.stepSize,
-		stepsInFrozenFile: d.stepsInFrozenFile,
-		d:                 d,
-		ht:                d.History.beginFilesRo(hf, hiv),
-		visible:           dv,
-		files:             dv.files,
-		salt:              d.salt.Load(),
+	dt := &DomainRoTx{}
+	d.initFilesRo(dt, &HistoryRoTx{}, &InvertedIndexRoTx{}, dv, hf, hiv)
+	return dt
+}
+
+// initFilesRo builds into caller-provided storage, letting Aggregator.BeginFilesRo back a
+// whole tx from one allocation. dv/hf/hiv must come from a single aggregatorVisible
+// generation, else the read is torn across entities.
+func (d *Domain) initFilesRo(dt *DomainRoTx, ht *HistoryRoTx, iit *InvertedIndexRoTx, dv *domainVisible, hf visibleFiles, hiv *iiVisible) {
+	d.History.initFilesRo(ht, iit, hf, hiv)
+	*dt = DomainRoTx{
+		name:     d.Name,
+		stepSize: d.stepSize,
+		d:        d,
+		ht:       ht,
+		visible:  dv,
+		files:    dv.files,
+		salt:     d.salt.Load(),
 	}
 }
 
@@ -1431,26 +1442,26 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 
 	// Walk newest→oldest; skip files starting strictly after maxTxNum so a key's
 	// last write in an older .kv is still found (walkback bounded by maxTxNum).
-	for i := len(dt.files) - 1; i >= 0; i-- {
-		if maxTxNum != math.MaxUint64 && dt.files[i].startTxNum > maxTxNum {
+	for i, f := range slices.Backward(dt.files) {
+		if maxTxNum != math.MaxUint64 && f.startTxNum > maxTxNum {
 			continue
 		}
 		// fmt.Printf("getLatestFromFiles: lim=%d %d %d %d %d\n", maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum, dt.files[i].startTxNum/dt.stepSize, dt.files[i].endTxNum/dt.stepSize)
 		if useExistenceFilter {
-			if dt.files[i].src.existence != nil {
-				if !dt.files[i].src.existence.ContainsHash(hi) {
+			if f.src.existence != nil {
+				if !f.src.existence.ContainsHash(hi) {
 					if traceGetLatest == dt.name {
-						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dt.d.FilenameBase, k, dt.files[i].src.existence.FileName)
+						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dt.d.FilenameBase, k, f.src.existence.FileName)
 					}
 					continue
 				} else {
 					if traceGetLatest == dt.name {
-						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> true\n", dt.d.FilenameBase, k, dt.files[i].src.existence.FileName)
+						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> true\n", dt.d.FilenameBase, k, f.src.existence.FileName)
 					}
 				}
 			} else {
 				if traceGetLatest == dt.name {
-					fmt.Printf("GetLatest(%s, %x) -> existence index is nil %s\n", dt.name.String(), k, dt.files[i].src.decompressor.FileName())
+					fmt.Printf("GetLatest(%s, %x) -> existence index is nil %s\n", dt.name.String(), k, f.src.decompressor.FileName())
 				}
 			}
 		}
@@ -1461,18 +1472,18 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		}
 		if !found {
 			if traceGetLatest == dt.name {
-				fmt.Printf("GetLatest(%s, %x) -> not found in file %s\n", dt.name.String(), k, dt.files[i].src.decompressor.FileName())
+				fmt.Printf("GetLatest(%s, %x) -> not found in file %s\n", dt.name.String(), k, f.src.decompressor.FileName())
 			}
 			continue
 		}
 		if traceGetLatest == dt.name {
-			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.name.String(), k, dt.files[i].src.decompressor.FileName())
+			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.name.String(), k, f.src.decompressor.FileName())
 		}
 
 		if dt.getFromFileCache != nil && useCache {
 			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
 		}
-		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
+		return v, true, f.startTxNum, f.endTxNum, nil
 	}
 	if traceGetLatest == dt.name {
 		fmt.Printf("GetLatest(%s, %x) -> not found in %d files\n", dt.name.String(), k, len(dt.files))

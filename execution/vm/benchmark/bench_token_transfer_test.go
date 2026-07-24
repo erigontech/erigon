@@ -146,7 +146,7 @@ func BenchmarkERC20BatchTransfers(b *testing.B) {
 		slots := map[uint256.Int]uint256.Int{
 			*uint256.NewInt(0): *uint256.NewInt(uint64(n) * 1000), // from balance
 		}
-		for i := 0; i < n; i++ {
+		for i := range n {
 			toSlot := uint64(i + 1)
 			slots[*uint256.NewInt(toSlot)] = *uint256.NewInt(0) // to balance starts at 0
 			p.

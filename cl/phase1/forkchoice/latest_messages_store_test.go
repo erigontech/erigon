@@ -21,7 +21,7 @@ func TestLatestMessagesStoreSetSurvivesDistinctMessageChurn(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, pinned, got)
 
-	for i := 0; i < math.MaxUint16+2; i++ {
+	for i := range math.MaxUint16 + 2 {
 		l.set(1, LatestMessage{Epoch: uint64(i + 2), Root: common.Hash{0xff}, Slot: uint64(i)})
 	}
 
@@ -50,7 +50,7 @@ func TestLatestMessagesStoreGrowthPreservesEntries(t *testing.T) {
 // One validator updates its vote while many other validators hold distinct votes.
 func BenchmarkLatestMessagesStoreSetWithPinnedMessages(b *testing.B) {
 	l := newLatestMessagesStore(100_000)
-	for i := 0; i < 10_000; i++ {
+	for i := range 10_000 {
 		l.set(i, LatestMessage{Epoch: uint64(i + 1), Root: common.Hash{byte(i), byte(i >> 8), 0x01}, Slot: uint64(i)})
 	}
 	b.ResetTimer()

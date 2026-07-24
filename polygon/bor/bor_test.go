@@ -349,7 +349,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 
 	validators := make([]validator, noValidators)
 
-	for i := 0; i < noValidators; i++ {
+	for i := range noValidators {
 		validators[i] = newValidator(t, heimdall, blocks)
 	}
 
@@ -367,7 +367,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 
 	lastProposerIndex := -1
 
-	for bi := 0; bi < chainLength; bi++ {
+	for bi := range chainLength {
 		for vi, v := range validators {
 			block := chains[vi].Blocks[bi]
 			receipts := chains[vi].Receipts[bi]

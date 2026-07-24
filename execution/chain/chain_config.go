@@ -115,6 +115,12 @@ type Config struct {
 	// (Optional) EIP-7251: Increase the MAX_EFFECTIVE_BALANCE
 	ConsolidationRequestContract *common.Address `json:"consolidationRequestContractAddress,omitempty"`
 
+	// (Optional) EIP-8282: The Builder Deposit Addresses
+	BuilderDepositContract *common.Address `json:"builderDepositContractAddress,omitempty"`
+
+	// (Optional) EIP-8282: The Builder Exit Addresses
+	BuilderExitContract *common.Address `json:"builderExitContractAddress,omitempty"`
+
 	DefaultBlockGasLimit *uint64 `json:"defaultBlockGasLimit,omitempty"`
 
 	// Various rules engines
@@ -139,9 +145,19 @@ type Config struct {
 	AllowAA bool
 }
 
-// IsEIPDisabled returns true if the given EIP number is in the DisabledEIPs list.
-func (c *Config) IsEIPDisabled(eip int) bool {
-	return slices.Contains(c.DisabledEIPs, eip)
+// IsEIPEnabled reports whether the given EIP is active at the given block time:
+// its parent fork is active AND it is not listed in DisabledEIPs. This is the
+// complete gate — call sites must not add a separate fork check.
+func (c *Config) IsEIPEnabled(eip int, time uint64) bool {
+	if slices.Contains(c.DisabledEIPs, eip) {
+		return false
+	}
+	switch eip {
+	case 7708, 7928:
+		return c.IsAmsterdam(time)
+	default:
+		panic(fmt.Sprintf("IsEIPEnabled: EIP %d is not mapped to a fork", eip))
+	}
 }
 
 // IsL2 returns whether this chain config carries L2-chain-specific config,
@@ -263,6 +279,11 @@ type L2Config interface {
 	// Name returns the short identifier of the L2 stack (e.g. used to select
 	// a registered rules engine).
 	Name() string
+
+	// ResolveRules lets an L2 stack finalize the per-block Rules after the
+	// standard fork resolution: set L2Version and flip any EVM-fork booleans
+	// that the L2 gates on its own version ladder instead of L1 time/number.
+	ResolveRules(l2Version, blockNum, blockTime uint64, rules *Rules)
 }
 
 func timestampToTime(unixSec uint64) *time.Time {
@@ -360,7 +381,7 @@ func (c *Config) IsSpuriousDragon(num uint64) bool {
 // IsEIP161Enabled reports whether EIP-161 empty-account clearing applies at num:
 // Spurious Dragon is active and EIP-161 has not been disabled.
 func (c *Config) IsEIP161Enabled(num uint64) bool {
-	return c.IsSpuriousDragon(num) && !c.IsEIPDisabled(161)
+	return c.IsSpuriousDragon(num) && !slices.Contains(c.DisabledEIPs, 161)
 }
 
 // IsByzantium returns whether num is either equal to the Byzantium fork block or greater.
@@ -567,6 +588,10 @@ func (c *Config) SecondsPerSlot() uint64 {
 
 func (c *Config) SystemContracts(time uint64) map[string]accounts.Address {
 	contracts := map[string]accounts.Address{}
+	if c.IsAmsterdam(time) {
+		contracts["BUILDER_DEPOSIT_CONTRACT_ADDRESS"] = c.GetBuilderDepositContract()
+		contracts["BUILDER_EXIT_CONTRACT_ADDRESS"] = c.GetBuilderExitContract()
+	}
 	if c.IsCancun(time) {
 		contracts["BEACON_ROOTS_ADDRESS"] = params.BeaconRootsAddress
 	}
@@ -595,6 +620,24 @@ func (c *Config) GetConsolidationRequestContract() accounts.Address {
 		return accounts.InternAddress(*c.ConsolidationRequestContract)
 	}
 	return params.ConsolidationRequestAddress
+}
+
+// GetBuilderDepositContract returns the configured EIP-8282 builder deposit contract address,
+// falling back to the default if not set in the chain config.
+func (c *Config) GetBuilderDepositContract() accounts.Address {
+	if c.BuilderDepositContract != nil {
+		return accounts.InternAddress(*c.BuilderDepositContract)
+	}
+	return params.BuilderDepositAddress
+}
+
+// GetBuilderExitContract returns the configured EIP-8282 builder exit contract address,
+// falling back to the default if not set in the chain config.
+func (c *Config) GetBuilderExitContract() accounts.Address {
+	if c.BuilderExitContract != nil {
+		return accounts.InternAddress(*c.BuilderExitContract)
+	}
+	return params.BuilderExitAddress
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -830,25 +873,42 @@ type Rules struct {
 	IsPrague, IsOsaka, IsAmsterdam                    bool
 	DisabledEIPs                                      []int
 	IsAura                                            bool
+
+	// L2Version is the L2 stack's own upgrade version (e.g. an ArbOS-style
+	// version ladder), resolved per block by the chain's L2Config oracle.
+	// Zero for L1 chains.
+	L2Version uint64
 }
 
-// IsEIPDisabled returns true if the given EIP number has been disabled for this chain.
-func (r *Rules) IsEIPDisabled(eip int) bool {
-	return slices.Contains(r.DisabledEIPs, eip)
+// IsEIPEnabled reports whether the given EIP is active for this chain: its
+// parent fork is active AND it is not listed in DisabledEIPs. Complete gate —
+// no separate fork check needed at call sites.
+func (r *Rules) IsEIPEnabled(eip int) bool {
+	if slices.Contains(r.DisabledEIPs, eip) {
+		return false
+	}
+	switch eip {
+	case 7708, 7928:
+		return r.IsAmsterdam
+	case 161, 170:
+		return r.IsSpuriousDragon
+	default:
+		panic(fmt.Sprintf("IsEIPEnabled: EIP %d is not mapped to a fork", eip))
+	}
 }
 
 // IsEIP161Enabled reports whether EIP-161 is in effect: the Spurious Dragon fork
 // is active and EIP-161 is not disabled (genesis/pre-state loads disable it via
 // DisabledEIPs to retain declared empty accounts).
 func (r *Rules) IsEIP161Enabled() bool {
-	return r.IsSpuriousDragon && !r.IsEIPDisabled(161)
+	return r.IsEIPEnabled(161)
 }
 
 // IsEIP170Enabled reports whether EIP-170 (the contract code-size limit) is
 // enabled: Spurious Dragon is active and EIP-170 is not disabled (Gnosis/Chiado
 // disable it via DisabledEIPs).
 func (r *Rules) IsEIP170Enabled() bool {
-	return r.IsSpuriousDragon && !r.IsEIPDisabled(170)
+	return r.IsEIPEnabled(170)
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.

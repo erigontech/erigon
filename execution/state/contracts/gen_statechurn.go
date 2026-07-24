@@ -156,7 +156,7 @@ func bindStateChurn(address common.Address, caller bind.ContractCaller, transact
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_StateChurn *StateChurnRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_StateChurn *StateChurnRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _StateChurn.Contract.StateChurnCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -167,7 +167,7 @@ func (_StateChurn *StateChurnRaw) Transfer(opts *bind.TransactOpts) (types.Trans
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_StateChurn *StateChurnRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_StateChurn *StateChurnRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _StateChurn.Contract.StateChurnTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -175,7 +175,7 @@ func (_StateChurn *StateChurnRaw) Transact(opts *bind.TransactOpts, method strin
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_StateChurn *StateChurnCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_StateChurn *StateChurnCallerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _StateChurn.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -186,7 +186,7 @@ func (_StateChurn *StateChurnTransactorRaw) Transfer(opts *bind.TransactOpts) (t
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_StateChurn *StateChurnTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_StateChurn *StateChurnTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _StateChurn.Contract.contract.Transact(opts, method, params...)
 }
 
@@ -194,7 +194,7 @@ func (_StateChurn *StateChurnTransactorRaw) Transact(opts *bind.TransactOpts, me
 //
 // Solidity: function check() view returns(bool)
 func (_StateChurn *StateChurnCaller) Check(opts *bind.CallOpts) (bool, error) {
-	var out []interface{}
+	var out []any
 	err := _StateChurn.contract.Call(opts, &out, "check")
 
 	if err != nil {
@@ -225,7 +225,7 @@ func (_StateChurn *StateChurnCallerSession) Check() (bool, error) {
 //
 // Solidity: function computedSum() view returns(uint256 sum)
 func (_StateChurn *StateChurnCaller) ComputedSum(opts *bind.CallOpts) (*big.Int, error) {
-	var out []interface{}
+	var out []any
 	err := _StateChurn.contract.Call(opts, &out, "computedSum")
 
 	if err != nil {
@@ -256,7 +256,7 @@ func (_StateChurn *StateChurnCallerSession) ComputedSum() (*big.Int, error) {
 //
 // Solidity: function cursor() view returns(uint256)
 func (_StateChurn *StateChurnCaller) Cursor(opts *bind.CallOpts) (*big.Int, error) {
-	var out []interface{}
+	var out []any
 	err := _StateChurn.contract.Call(opts, &out, "cursor")
 
 	if err != nil {
@@ -287,7 +287,7 @@ func (_StateChurn *StateChurnCallerSession) Cursor() (*big.Int, error) {
 //
 // Solidity: function trackedSum() view returns(uint256)
 func (_StateChurn *StateChurnCaller) TrackedSum(opts *bind.CallOpts) (*big.Int, error) {
-	var out []interface{}
+	var out []any
 	err := _StateChurn.contract.Call(opts, &out, "trackedSum")
 
 	if err != nil {

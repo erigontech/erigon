@@ -183,7 +183,7 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	for i := 0; i < size; i++ {
+	for i := range size {
 		if err = c.AddWord(fmt.Appendf(nil, "word-%d", i)); err != nil {
 			t.Fatal(err)
 		}
@@ -622,7 +622,7 @@ const N = 100
 func randWord() []byte {
 	size := rand.Intn(256) // size of the word
 	word := make([]byte, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		word[i] = byte(rand.Intn(256))
 	}
 	return word
@@ -633,7 +633,7 @@ func generateRandWords() (WORDS [N][]byte, WORD_FLAGS [N]bool, INPUT_FLAGS []int
 	WORD_FLAGS = [N]bool{} // false - uncompressed word, true - compressed word
 	INPUT_FLAGS = []int{}  // []byte or nil input
 
-	for i := 0; i < N-2; i++ {
+	for i := range N - 2 {
 		WORDS[i] = randWord()
 	}
 	// make sure we have at least 2 emtpy []byte
@@ -772,7 +772,9 @@ func TestMatchCmpCompressedBinaryKeys(t *testing.T) {
 		copy(bigger, k)
 		bigger[len(bigger)-1] = 0xff
 		if bytes.Compare(bigger, k) <= 0 {
-			bigger = append(k, 0xff)
+			bigger = make([]byte, len(k)+1)
+			copy(bigger, k)
+			bigger[len(k)] = 0xff
 		}
 		cmp = g.MatchCmp(bigger)
 		require.Equal(t, 1, cmp, "expected buf > word for key %x vs %x", bigger, k)

@@ -84,7 +84,7 @@ func Bench3(erigon_url, geth_url string) error {
 	if b.Error != nil {
 		fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
 	}
-	for txindex := 0; txindex < 18; txindex++ {
+	for txindex := range 18 {
 		txhash := b.Result.Transactions[txindex].Hash
 		req_id++
 		template = `

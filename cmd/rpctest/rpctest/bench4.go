@@ -35,7 +35,7 @@ func Bench4(erigon_url string) error {
 	if b.Error != nil {
 		fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
 	}
-	for txindex := 0; txindex < 6; txindex++ {
+	for txindex := range 6 {
 		txhash := b.Result.Transactions[txindex].Hash
 		req_id++
 		template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"],"id":%d}`

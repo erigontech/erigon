@@ -13,6 +13,9 @@ on:
       - ready_for_review
   workflow_dispatch:     # Run manually
 
+permissions:
+  contents: read
+
 jobs:
   clean-exit-sd-test:
     concurrency:
@@ -33,6 +36,8 @@ jobs:
     steps:
     - name: Check out repository
       uses: actions/checkout@v7
+      with:
+        persist-credentials: false
 
     - name: Clean Erigon Build & Data Directories
       run: |

@@ -59,7 +59,10 @@ Snapshots are organised into several subdirectories. The main ones are:
 
 - You can replay a single historical transaction without re-executing its block.
 - If an account changes V1 → V2 → V1 within one block, `debug_getModifiedAccountsByNumber` correctly returns it.
-- Erigon stores compact per-transaction receipt *metadata* — cumulative gas used, blob gas used, log index — in a **required** receipt domain. Full receipts (with logs) live in a separate cache domain that is **off by default** in every prune mode (opt in with `--persist.receipts`). When a full receipt isn't cached, it is reconstructed on demand, re-deriving logs by re-execution.
+- Erigon stores compact per-transaction receipt *metadata* — cumulative gas used, blob gas used, log index — in a
+  **required** receipt domain. Full receipts (with logs) live in a separate cache domain that is **off by default** in
+  every prune mode (opt in with `--prune.include-receipts`). When a full receipt isn't cached, it is reconstructed on
+  demand, re-deriving logs by re-execution.
 
 ## What does it cost on disk?
 
@@ -95,7 +98,7 @@ Deleting `chaindata/` is **recoverable but not free**: it discards the latest mu
 
 - **`--batchSize`** — size of the Execution stage's in-memory buffer before it is flushed to MDBX. Default: `512M`. Raising it (for example `--batchSize 1G` or higher) can speed up execution-heavy sync at the cost of more RAM.
 - **`--db.size.limit`** — caps the MDBX file size. Useful when running multiple Erigon instances on one disk to prevent one from starving the others.
-- **`--db.read.concurrency`** — number of concurrent MDBX read transactions. Increase when you run a high-throughput RPC Daemon against the same datadir.
+- **`--db.read.concurrency`** — maximum number of concurrent open MDBX read transactions (the read-tx semaphore). Raise it for nodes serving heavy parallel RPC (for example a high-throughput RPC daemon against the same datadir); low values are fine for low-read-concurrency nodes such as validators.
 - **Symlinks for tiered storage.** Place `chaindata/` and `snapshots/domain/` on fast NVMe, leave `snapshots/idx/` and `snapshots/history/` on cheaper SATA. See [Optimizing Storage](optimizing-storage) for the recipe.
 
 ## Safe-to-delete subdirectories

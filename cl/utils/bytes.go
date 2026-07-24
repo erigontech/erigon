@@ -160,7 +160,7 @@ func IsNonStrictSupersetBitlist(a, b []byte) bool {
 	}
 
 	// Check each bit in 'b' to ensure it is also set in 'a'
-	for i := 0; i < len(b); i++ {
+	for i := range b {
 		if (a[i] & b[i]) != b[i] {
 			return false
 		}
@@ -175,14 +175,13 @@ func IsNonStrictSupersetBitlist(a, b []byte) bool {
 func IsOverlappingSSZBitlist(a, b []byte) bool {
 	length := min(len(a), len(b))
 	for i := range length {
-
 		if a[i]&b[i] != 0 {
 			if i != length-1 {
 				return true
 			}
 			var foundOverlap bool
 			// check the overlap bit by bit
-			for j := 0; j < 8; j++ {
+			for j := range 8 {
 				if (a[i]>>j)&(b[i]>>j)&1 == 1 {
 					if foundOverlap {
 						return true
@@ -193,7 +192,6 @@ func IsOverlappingSSZBitlist(a, b []byte) bool {
 		}
 	}
 	return false
-
 }
 
 // func IsOverlappingBitlist(a, b []byte) bool {

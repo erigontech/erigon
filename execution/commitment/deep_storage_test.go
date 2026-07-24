@@ -69,7 +69,7 @@ func whaleByNibble(slots int) (addr []byte, accHash []byte, accNib int, accUpd U
 	a := hex.EncodeToString(addr)
 	ub := NewUpdateBuilder()
 	ub.Balance(a, 12345)
-	for i := 0; i < slots; i++ {
+	for range slots {
 		addRandomSlot(ub, rnd, a)
 	}
 	pk, upds = ub.Build()
@@ -125,7 +125,7 @@ func concurrentAccountRoot(ms *MockState, addr, accHash []byte, accNib int, accU
 	}
 	if parallel {
 		var eg errgroup.Group
-		for x := 0; x < 16; x++ {
+		for x := range 16 {
 			if len(groups[x]) == 0 {
 				continue
 			}
@@ -137,7 +137,7 @@ func concurrentAccountRoot(ms *MockState, addr, accHash []byte, accNib int, accU
 			return nil, err
 		}
 	} else {
-		for x := 0; x < 16; x++ {
+		for x := range 16 {
 			if len(groups[x]) == 0 {
 				continue
 			}
@@ -163,7 +163,7 @@ func concurrentAccountRoot(ms *MockState, addr, accHash []byte, accNib int, accU
 	asm.grid[0][accNib] = ac
 	asm.touchMap[0] = uint16(1) << accNib
 	asm.afterMap[0] = uint16(1) << accNib
-	for x := 0; x < 16; x++ {
+	for x := range 16 {
 		if present&(uint16(1)<<x) != 0 {
 			asm.grid[1][x] = children[x]
 		}

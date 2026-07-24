@@ -96,7 +96,7 @@ func expectingCollector(t *testing.T, count *int, steps []stepExpectation) HashC
 // genHashedKeys produces n sorted 8-byte keys derived from keccak hashes of a counter.
 func genHashedKeys(n uint32) []string {
 	keys := make([]string, 0, n)
-	for b := uint32(0); b < n; b++ {
+	for b := range n {
 		var preimage [4]byte
 		binary.BigEndian.PutUint32(preimage[:], b)
 		keys = append(keys, string(crypto.Keccak256(preimage[:])[:8]))
@@ -152,7 +152,7 @@ func TestV2Resolution(t *testing.T) {
 		rl.AddKey([]byte(keys[i]))
 	}
 	// Next, some non-existing keys
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		rl.AddKey(crypto.Keccak256([]byte(keys[i]))[:8])
 	}
 

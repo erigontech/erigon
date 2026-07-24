@@ -159,7 +159,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 
 	var receiptsField CapabilityField
 	if persistReceipts {
-		// --persist.receipts widens past state-history pruning (receipts are written to
+		// --prune.include-receipts widens past state-history pruning (receipts are written to
 		// RCacheDomain at execution time, not re-derived from state). The remaining bound
 		// is block-body availability: eth_getBlockReceipts walks block.Transactions(), and
 		// getLogsV3 reads log indexes whose snapshots follow prune.Blocks (see
@@ -167,7 +167,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		// blocksOldest with the same DeleteStrategy as blocks.
 		receiptsField = avail(blocksOldest, pruneMode.Blocks)
 	} else {
-		// Without --persist.receipts, receipts are re-executed on demand, requiring both state
+		// Without --prune.include-receipts, receipts are re-executed on demand, requiring both state
 		// history and the block body. Use the more restrictive of the two oldest-block bounds.
 		if blocksOldest > stateOldest {
 			receiptsField = avail(blocksOldest, pruneMode.Blocks)
@@ -217,21 +217,12 @@ func (api *APIImpl) Syncing(ctx context.Context) (any, error) {
 	// Still sync-ing, gather the block sync stats
 	highestBlock := reply.LastNewBlockSeen
 	currentBlock := reply.CurrentBlock
-	type S struct {
-		StageName   string         `json:"stage_name"`
-		BlockNumber hexutil.Uint64 `json:"block_number"`
-	}
-	stagesMap := make([]S, len(reply.Stages))
-	for i, stage := range reply.Stages {
-		stagesMap[i].StageName = stage.StageName
-		stagesMap[i].BlockNumber = hexutil.Uint64(stage.BlockNumber)
-	}
 
 	return map[string]any{
 		"startingBlock": "0x0", // 0x0 is a placeholder, I do not think it matters what we return here
 		"currentBlock":  hexutil.Uint64(currentBlock),
 		"highestBlock":  hexutil.Uint64(highestBlock),
-		"stages":        stagesMap,
+		"stages":        stagesFromReply(reply.Stages),
 	}, nil
 }
 

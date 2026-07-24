@@ -22,8 +22,8 @@ import (
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
@@ -144,7 +144,7 @@ func (u *ParticipationBitList) HashSSZ() ([32]byte, error) {
 		}
 	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(u.l))
-	return utils.Sha256(baseRoot[:], lengthRoot[:]), nil
+	return crypto.Sha256(baseRoot[:], lengthRoot[:]), nil
 }
 
 func (arr *ParticipationBitList) getBaseHash(xs []byte, depth uint8) error {
@@ -154,7 +154,7 @@ func (arr *ParticipationBitList) getBaseHash(xs []byte, depth uint8) error {
 		elements = append(elements, make([]byte, offset-len(arr.u)+1)...)
 	}
 	elements = elements[:offset]
-	for i := uint8(0); i < depth; i++ {
+	for i := range depth {
 		// Sequential
 		layerLen := len(elements)
 		if layerLen%64 == 32 {

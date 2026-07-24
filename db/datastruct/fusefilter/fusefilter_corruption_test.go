@@ -15,7 +15,7 @@ func validBlob(t *testing.T, n int) []byte {
 	w, err := NewWriterOffHeap(filepath.Join(t.TempDir(), "v"))
 	require.NoError(t, err)
 	defer w.Close()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		require.NoError(t, w.AddHash(uint64(i)))
 	}
 	var buf bytes.Buffer
@@ -30,7 +30,7 @@ func validShardedBlob(t *testing.T, n int) []byte {
 	w, err := NewWriterSharded(filepath.Join(t.TempDir(), "v"))
 	require.NoError(t, err)
 	defer w.Close()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		require.NoError(t, w.AddHash(uint64(i)))
 	}
 	var buf bytes.Buffer
@@ -190,7 +190,7 @@ func TestNewReaderShardedOnBytes_RejectsCorrupt(t *testing.T) {
 		// Find first non-empty shard slot and shrink it to less than headerSize.
 		bad := append([]byte(nil), good...)
 		offset := 4
-		for i := 0; i < 256; i++ {
+		for range 256 {
 			sz := binary.BigEndian.Uint64(bad[offset:])
 			if sz != 0 {
 				binary.BigEndian.PutUint64(bad[offset:], 4) // < filterBlobHeaderSize
@@ -207,7 +207,7 @@ func TestNewReaderShardedOnBytes_RejectsCorrupt(t *testing.T) {
 		// validation should reject without ever looking at fingerprints.
 		bad := append([]byte(nil), good...)
 		offset := 4
-		for i := 0; i < 256; i++ {
+		for range 256 {
 			sz := binary.BigEndian.Uint64(bad[offset:])
 			offset += 8
 			if sz != 0 {

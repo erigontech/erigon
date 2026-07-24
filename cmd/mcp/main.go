@@ -23,7 +23,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"syscall"
 	"time"
 
@@ -34,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -81,7 +81,8 @@ Three connection modes (in priority order):
 
 Transports:
   --transport stdio   (default) Read/write MCP protocol on stdin/stdout.
-  --transport sse     Serve over HTTP with Server-Sent Events.
+  --transport http    Serve over HTTP: streamable HTTP at /mcp, SSE at /sse.
+  --transport sse     Deprecated alias of http.
 
 Examples:
   # Claude Desktop config (stdio, auto-discovery):
@@ -93,8 +94,8 @@ Examples:
   # Direct DB access (offline):
   mcp --datadir /data/erigon --private.api.addr 127.0.0.1:9090
 
-  # SSE transport:
-  mcp --port 8545 --transport sse --sse.addr 127.0.0.1:8553`,
+  # HTTP transport (streamable HTTP + SSE):
+  mcp --port 8545 --transport http --sse.addr 127.0.0.1:8553`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			logger := debug.SetupCobra(cmd, "mcp")
 
@@ -139,7 +140,7 @@ Examples:
 				logger.Info("[MCP] Connected to Erigon", "url", url, "block", blockNum)
 			}
 
-			srv := mcpserver.NewStandaloneMCPServer(client, logDir)
+			srv := mcpserver.NewErigonMCPServer(client, logDir, false)
 			return serve(ctx, srv, transport, sseAddr, logger)
 		},
 	}
@@ -152,8 +153,8 @@ Examples:
 	rootCmd.Flags().UintVar(&port, "port", 0, "Erigon JSON-RPC port (shorthand for --rpc.url=http://127.0.0.1:{port})")
 	rootCmd.Flags().StringVar(&dataDir, "datadir", "", "Erigon data directory (enables direct DB access mode)")
 	rootCmd.Flags().StringVar(&privAPI, "private.api.addr", "127.0.0.1:9090", "Erigon gRPC private API address (used with --datadir)")
-	rootCmd.Flags().StringVar(&transport, "transport", "stdio", "MCP transport: 'stdio' or 'sse'")
-	rootCmd.Flags().StringVar(&sseAddr, "sse.addr", "127.0.0.1:8553", "SSE server listen address (when transport=sse)")
+	rootCmd.Flags().StringVar(&transport, "transport", "stdio", "MCP transport: 'stdio' or 'http' ('sse' is a deprecated alias of 'http')")
+	rootCmd.Flags().StringVar(&sseAddr, "sse.addr", "127.0.0.1:8553", "HTTP listen address (when transport=http)")
 	rootCmd.Flags().StringVar(&logDir, "log.dir", "", "Erigon log directory (overrides datadir-based detection)")
 
 	rootCtx, rootCancel := context.WithCancel(context.Background())
@@ -173,16 +174,16 @@ Examples:
 }
 
 // serve starts the MCP server in the chosen transport mode.
-func serve(ctx context.Context, srv mcpserver.MCPTransport, transport, sseAddr string, logger log.Logger) error {
+func serve(ctx context.Context, srv *mcpserver.ErigonMCPServer, transport, sseAddr string, logger log.Logger) error {
 	switch transport {
 	case "stdio":
 		logger.Info("[MCP] Starting stdio transport")
 		return srv.ServeContext(ctx)
-	case "sse":
-		logger.Info("[MCP] Starting SSE transport", "addr", sseAddr)
-		return srv.ServeSSE(ctx, sseAddr)
+	case "http", "sse":
+		logger.Info("[MCP] Starting HTTP transport", "addr", sseAddr, "endpoints", "/mcp (streamable HTTP), /sse + /message (SSE)")
+		return srv.ListenAndServe(ctx, sseAddr)
 	default:
-		return fmt.Errorf("unknown transport: %s (use 'stdio' or 'sse')", transport)
+		return fmt.Errorf("unknown transport: %s (use 'stdio' or 'http')", transport)
 	}
 }
 
@@ -222,17 +223,18 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 	dirs := datadir.Open(dataDir)
 
 	cfg := &httpcfg.HttpCfg{
-		Sync:       ethconfig.Defaults.Sync,
-		Enabled:    true,
-		StateCache: kvcache.DefaultCoherentConfig,
-		API:        []string{"eth", "erigon", "ots"}, // APIs needed by MCP tools
+		Sync:                ethconfig.Defaults.Sync,
+		Enabled:             true,
+		StateCache:          kvcache.DefaultCoherentConfig,
+		RpcBatchConcurrency: 2,
+		API:                 []string{"eth", "erigon", "ots", "txpool", "net", "admin", "debug", "trace"}, // APIs needed by MCP tools
 
 		DataDir:           dataDir,
 		Dirs:              dirs,
 		WithDatadir:       true,
 		PrivateApiAddr:    privAPI,
 		TxPoolApiAddr:     privAPI, // inherit from private API, same as rpcdaemon
-		DBReadConcurrency: min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
+		DBReadConcurrency: httpcfg.DefaultDBReadConcurrency(),
 	}
 
 	db, backend, txPool, mining, stateCache, blockReader, engine, ff, bridgeReader, heimdallReader, err :=
@@ -251,30 +253,21 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 		defer heimdallReader.Close()
 	}
 
-	// Create the typed JSON-RPC APIs — same path as rpcdaemon.
+	// Create the JSON-RPC APIs and serve them over an in-process connection —
+	// same path as rpcdaemon.
 	apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, heimdallReader, nil, nil)
-
-	// Extract the EthAPI, ErigonAPI, OtterscanAPI from the API list.
-	var (
-		ethAPI    jsonrpc.EthAPI
-		erigonAPI jsonrpc.ErigonAPI
-		otsAPI    jsonrpc.OtterscanAPI
-	)
+	rpcSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
+	defer rpcSrv.Stop()
 	for _, api := range apiList {
-		switch s := api.Service.(type) {
-		case jsonrpc.EthAPI:
-			ethAPI = s
-		case jsonrpc.ErigonAPI:
-			erigonAPI = s
-		case jsonrpc.OtterscanAPI:
-			otsAPI = s
+		if err := rpcSrv.RegisterName(api.Namespace, api.Service); err != nil {
+			return fmt.Errorf("failed to register %s API: %w", api.Namespace, err)
 		}
 	}
+	// NonBlockingAcquire so BeginRo fails fast instead of blocking MCP
+	// handlers when all DB read slots are held.
+	client := rpc.DialInProcWithContext(kv.WithNonBlockingAcquire(ctx), rpcSrv, logger)
+	defer client.Close()
 
-	if ethAPI == nil || erigonAPI == nil {
-		return fmt.Errorf("failed to initialize required APIs from datadir")
-	}
-
-	srv := mcpserver.NewErigonMCPServer(ethAPI, erigonAPI, otsAPI, logDir)
+	srv := mcpserver.NewErigonMCPServer(client, logDir, false)
 	return serve(ctx, srv, transport, sseAddr, logger)
 }

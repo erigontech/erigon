@@ -522,7 +522,7 @@ func (s txStore) PutEvents(ctx context.Context, events []*EventRecordWithTime) e
 	return nil
 }
 
-// EventsByTimeframe returns events withing [timeFrom, timeTo) interval.
+// EventsByTimeframe returns events within [timeFrom, timeTo) interval.
 func (s txStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint64) ([][]byte, []uint64, error) {
 	var events [][]byte
 	var ids []uint64

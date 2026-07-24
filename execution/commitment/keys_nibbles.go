@@ -117,7 +117,7 @@ func CompactKey(nibbles []byte) ([]byte, error) {
 	}
 
 	key := make([]byte, len(nibbles)/2)
-	for i := 0; i < len(key); i++ {
+	for i := range key {
 		highNibble := nibbles[i*2]
 		lowNibble := nibbles[i*2+1]
 
@@ -134,7 +134,7 @@ func CompactKey(nibbles []byte) ([]byte, error) {
 // updatedNibs returns a string of nibbles that are set in the given number.
 func updatedNibs(num uint16) string {
 	var nibbles []string
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		if num&(1<<i) != 0 {
 			nibbles = append(nibbles, fmt.Sprintf("%X", i))
 		}

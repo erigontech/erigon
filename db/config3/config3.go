@@ -39,7 +39,7 @@ const DefaultStepsInFrozenFile = LegacyStepsInFrozenFile * 4 // 256
 const UnboundedDomainMerge uint64 = math.MaxUint64
 
 // DefaultReferencesInCommitmentBranches is the default when erigondb.toml omits it.
-const DefaultReferencesInCommitmentBranches = true
+const DefaultReferencesInCommitmentBranches = false
 
 const EnableHistoryV4InTest = true
 

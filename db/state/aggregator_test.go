@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/etl"
@@ -45,6 +46,33 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func TestSetDomainStepsInFrozenFile(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		spec    string
+		want    uint64
+		wantErr bool
+	}{
+		{spec: "", want: 0}, // unset must mean "no override" (use erigondb.toml), matching the node's nil-pointer path
+		{spec: "Inf", want: config3.UnboundedDomainMerge},
+		{spec: "inf", want: config3.UnboundedDomainMerge},
+		{spec: "5", want: 5},
+		{spec: "0", wantErr: true},
+		{spec: "bad", wantErr: true},
+	} {
+		t.Run(tc.spec, func(t *testing.T) {
+			a := &Aggregator{}
+			err := a.SetDomainStepsInFrozenFile(tc.spec)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, a.erigondbDomainStepsInFrozenFile)
+		})
+	}
+}
 
 // takes first 100k keys from file
 func pivotKeysFromKV(dataPath string) ([][]byte, error) {
@@ -90,7 +118,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	collector := etl.NewCollector(btindex.BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)
 	defer collector.Close()
 
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		key := make([]byte, keySize)
 		n, err := rnd.Read(key)
 		require.Equal(tb, keySize, n)
@@ -159,19 +187,16 @@ func TestReferencesInCommitmentBranchesConcurrent(t *testing.T) {
 
 	const iters = 2000
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < iters; i++ {
+	wg.Go(func() {
+		for i := range iters {
 			agg.applyReferencesInCommitmentBranches(i%2 == 0)
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		for i := 0; i < iters; i++ {
+	})
+	wg.Go(func() {
+		for range iters {
 			_ = agg.referencesInCommitmentBranches()
 		}
-	}()
+	})
 	wg.Wait()
 }
 
@@ -184,10 +209,8 @@ func TestFilesAmountConcurrent(t *testing.T) {
 	d := agg.d[kv.AccountsDomain]
 	const iters = 2000
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < iters; i++ {
+	wg.Go(func() {
+		for i := range iters {
 			item := &FilesItem{startTxNum: uint64(i), endTxNum: uint64(i + 1)}
 			agg.dirtyFilesLock.Lock()
 			d.dirtyFiles.Set(item)
@@ -196,13 +219,12 @@ func TestFilesAmountConcurrent(t *testing.T) {
 			d.dirtyFiles.Delete(item)
 			agg.dirtyFilesLock.Unlock()
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		for i := 0; i < iters; i++ {
+	})
+	wg.Go(func() {
+		for range iters {
 			_ = agg.FilesAmount()
 		}
-	}()
+	})
 	wg.Wait()
 }
 
@@ -215,7 +237,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 	keys := make([][]byte, keyCount)
 
 	bk, bv := make([]byte, keySize), make([]byte, valueSize)
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		n, err := rnd.Read(bk)
 		require.Equal(tb, keySize, n)
 		require.NoError(tb, err)

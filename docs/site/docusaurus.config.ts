@@ -132,7 +132,7 @@ export default async function createConfig(): Promise<Config> {
           lastVersion: 'current',
           versions: {
             current: {
-              label: 'v3.4',
+              label: 'v3.6',
               badge: false,
             },
           },

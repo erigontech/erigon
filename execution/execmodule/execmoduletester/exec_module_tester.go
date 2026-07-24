@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -48,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -139,8 +139,8 @@ type ExecModuleTester struct {
 	HistoryV3      bool
 	cfg            ethconfig.Config
 	BlockSnapshots *blocksnapshots.RoSnapshots
-	blockRetire    services.BlockRetire
-	BlockReader    services.FullBlockReader
+	blockRetire    dbservices.BlockRetire
+	BlockReader    dbservices.FullBlockReader
 	ReceiptsReader *receipts.Generator
 	posStagedSync  *stagedsync.Sync
 	bgComponentsEg errgroup.Group
@@ -507,7 +507,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
-	allSnapshots := blocksnapshots.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
+	allSnapshots := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
 	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
 
 	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
@@ -563,6 +563,20 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		}
 	}
 
+	// Deploy Amsterdam system contracts (EIP-8282) at genesis whenever Amsterdam is
+	// scheduled — a later fork transition must still find deployed code. These are
+	// required for the Merge engine's FinalizeAndAssemble to process builder
+	// deposit and exit requests.
+	if gspec.Config.AmsterdamTime != nil {
+		if err := blockgen.InitAmsterdamPreDeploys(mock.DB, gspec.Config, mock.Log); err != nil {
+			if tb != nil {
+				tb.Fatal(err)
+			} else {
+				panic(err)
+			}
+		}
+	}
+
 	blockWriter := blockio.NewBlockWriter()
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
@@ -578,7 +592,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			ctx,
 			poolCfg,
 			mock.DB,
-			kvcache.NewSimple(),
+			kvcache.NewLatestBatchCache(),
 			sentries,
 			stateChangesClient,
 			func() {}, /* builderNotifyNewTxns */
@@ -731,7 +745,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, dispatcher, logger)
 
-	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil)
+	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil, mock.BlockReader)
 
 	mock.StateCache = &execmodule.Cache{}
 	onlySnapDownloadOnStart := cfg.Genesis.Config.Bor != nil
@@ -799,7 +813,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	return mock
 }
 
-func mockDownloader(ctrl *gomock.Controller, snapRoot string) downloader.Client {
+func mockDownloader(ctrl *gomock.Controller, snapRoot string) dbservices.DownloaderClient {
 	snapDownloader := downloaderproto.NewMockDownloaderClient(ctrl)
 
 	snapDownloader.EXPECT().
@@ -922,7 +936,7 @@ func (emt *ExecModuleTester) NewStateReader(tx kv.TemporalGetter) state.StateRea
 	return state.NewReaderV3(tx)
 }
 
-func (emt *ExecModuleTester) BlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
+func (emt *ExecModuleTester) BlocksIO() (dbservices.FullBlockReader, *blockio.BlockWriter) {
 	return emt.BlockReader, blockio.NewBlockWriter()
 }
 

@@ -40,7 +40,6 @@ concurrency:
 
 permissions:
   contents: read
-  issues: write   # notify job opens/updates the tracking issue
 
 jobs:
   fuzz:
@@ -83,6 +82,7 @@ jobs:
       - name: Checkout custom actions
         uses: actions/checkout@v7
         with:
+          persist-credentials: false
           fetch-depth: 1
 
       - uses: ./.github/actions/setup-erigon
@@ -104,8 +104,9 @@ jobs:
       - name: Fuzz ${{ matrix.fn }}
         env:
           FUZZTIME: ${{ inputs.fuzztime || '120s' }}
+          ERIGON_BUILD: ${{ steps.erigon.outputs.build }}
         run: |
-          mkdir -p "${{ steps.erigon.outputs.build }}/fuzz"
+          mkdir -p "$ERIGON_BUILD/fuzz"
           echo "::group::go test -fuzz ${{ matrix.fn }} (./${{ matrix.pkg }}, ${FUZZTIME})"
           go test "./${{ matrix.pkg }}/" -run '^$' -fuzz "^${{ matrix.fn }}$" -fuzztime "${FUZZTIME}"
           echo "::endgroup::"
@@ -129,6 +130,9 @@ jobs:
     # whoever triggered them. `always()` lets this run despite `fuzz` failing.
     if: ${{ always() && needs.fuzz.result == 'failure' && github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
       - name: Open or update tracking issue
         env:

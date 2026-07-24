@@ -38,7 +38,7 @@ func TestDiff64(t *testing.T) {
 	old := make([]byte, 800000)
 	new := make([]byte, 800008)
 	inc := 1
-	for i := 0; i < 80; i++ {
+	for i := range 80 {
 		if i%9 == 0 {
 			inc++
 		}
@@ -66,25 +66,28 @@ func TestDiff64(t *testing.T) {
 func TestDiff64Effective(t *testing.T) {
 	sizeOld := 800
 	sizeNew := 816
-	old := make([]byte, sizeOld*121)
-	new := make([]byte, sizeNew*121)
+	old := make([]byte, sizeOld*validatorSSZSize)
+	new := make([]byte, sizeNew*validatorSSZSize)
 	previous := make([]byte, sizeOld*8)
 	expected := make([]byte, sizeNew*8)
-	for i := 0; i < sizeNew; i++ {
-		validatorOffset := i * 121
+	for i := range sizeNew {
+		effBalOffset := i*validatorSSZSize + effectiveBalanceOffset
 		newNum := i + 32
 		oldNum := i + 12
-		binary.BigEndian.PutUint64(expected[i*8:], uint64(newNum))
-		binary.BigEndian.PutUint64(new[validatorOffset+80:], uint64(newNum))
-		if i < len(old)/121 {
-			binary.BigEndian.PutUint64(previous[i*8:], uint64(oldNum))
-			binary.BigEndian.PutUint64(old[validatorOffset+80:], uint64(oldNum))
+		binary.LittleEndian.PutUint64(expected[i*8:], uint64(newNum))
+		binary.LittleEndian.PutUint64(new[effBalOffset:], uint64(newNum))
+		if i < len(old)/validatorSSZSize {
+			binary.LittleEndian.PutUint64(previous[i*8:], uint64(oldNum))
+			binary.LittleEndian.PutUint64(old[effBalOffset:], uint64(oldNum))
 		}
 	}
 
+	require.Equal(t, previous, AppendEffectiveBalances(nil, old))
+	require.Equal(t, expected, AppendEffectiveBalances(nil, new))
+
 	var b bytes.Buffer
 
-	err := ComputeCompressedSerializedEffectiveBalancesDiff(&b, old, new)
+	err := ComputeCompressedSerializedUint64ListDiff(&b, AppendEffectiveBalances(nil, old), AppendEffectiveBalances(nil, new))
 	require.NoError(t, err)
 
 	out := b.Bytes()
@@ -94,12 +97,39 @@ func TestDiff64Effective(t *testing.T) {
 	require.Equal(t, expected, new2)
 }
 
+func TestAppendEffectiveBalances(t *testing.T) {
+	require.Empty(t, AppendEffectiveBalances(nil, nil))
+
+	const validators = 800
+	ssz := make([]byte, validators*validatorSSZSize)
+	packed := make([]byte, validators*8)
+	for i := range ssz {
+		ssz[i] = byte(i*7 + 1) // noise in non-effective-balance fields
+	}
+	for i := range validators {
+		binary.LittleEndian.PutUint64(ssz[i*validatorSSZSize+effectiveBalanceOffset:], uint64(i+32))
+		binary.LittleEndian.PutUint64(packed[i*8:], uint64(i+32))
+	}
+	require.Equal(t, packed, AppendEffectiveBalances(nil, ssz))
+
+	// a truncated trailing record (past the effective-balance offset) must be ignored
+	twoValidators := make([]byte, 2*validatorSSZSize)
+	binary.LittleEndian.PutUint64(twoValidators[effectiveBalanceOffset:], 111)
+	binary.LittleEndian.PutUint64(twoValidators[validatorSSZSize+effectiveBalanceOffset:], 222)
+	withPartialTail := make([]byte, len(twoValidators)+effectiveBalanceOffset+10)
+	copy(withPartialTail, twoValidators)
+	expected := make([]byte, 16)
+	binary.LittleEndian.PutUint64(expected[0:], 111)
+	binary.LittleEndian.PutUint64(expected[8:], 222)
+	require.Equal(t, expected, AppendEffectiveBalances(nil, withPartialTail))
+}
+
 func TestDiffValidators(t *testing.T) {
 	vals := 3
-	old := make([]byte, vals*121)
-	new := make([]byte, 121*(vals+1))
+	old := make([]byte, vals*validatorSSZSize)
+	new := make([]byte, validatorSSZSize*(vals+1))
 	inc := 1
-	for i := 0; i < vals*121; i++ {
+	for i := 0; i < vals*validatorSSZSize; i++ {
 		if i%9 == 0 {
 			inc++
 		}

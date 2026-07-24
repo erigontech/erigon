@@ -140,7 +140,7 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	// where the CL and EL share the same process.
 	idBytes := make([]byte, 8)
 	var id uint64
-	for attempt := 0; attempt < 30; attempt++ {
+	for range 30 {
 		id, err = cc.chainRW.AssembleBlock(head, attr)
 		if err == nil {
 			break

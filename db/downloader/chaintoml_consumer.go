@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"sort"
@@ -52,9 +53,7 @@ func BuildTomlFromMap(m map[string]string) []byte {
 // conflict (same key). Returns the merged map and the count of genuinely new entries.
 func MergeChainToml(existing, discovered map[string]string) (merged map[string]string, newCount int) {
 	merged = make(map[string]string, len(existing)+len(discovered))
-	for k, v := range existing {
-		merged[k] = v
-	}
+	maps.Copy(merged, existing)
 	for k, v := range discovered {
 		if _, exists := merged[k]; !exists {
 			merged[k] = v

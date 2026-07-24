@@ -19,7 +19,7 @@ package mdbx
 import (
 	"bytes"
 	"encoding/binary"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -35,7 +35,7 @@ import (
 // clustered shape that byte interpolation over the first 32 bytes can't split.
 func clusteredKey(i int) []byte {
 	k := make([]byte, 36)
-	for j := 0; j < 32; j++ {
+	for j := range 32 {
 		k[j] = 0xCC
 	}
 	binary.BigEndian.PutUint32(k[32:], uint32(i))
@@ -53,7 +53,7 @@ func TestSplitBucketByCount(t *testing.T) {
 		c, err := tx.RwCursor(table)
 		require.NoError(t, err)
 		defer c.Close()
-		for i := 0; i < n; i++ {
+		for i := range n {
 			require.NoError(t, c.Append(clusteredKey(i), []byte{1}))
 		}
 		return nil
@@ -66,9 +66,7 @@ func TestSplitBucketByCount(t *testing.T) {
 		require.Greater(t, len(bounds), 2, "must split clustered keys into many ranges, not one")
 		require.Nil(t, bounds[0])
 		require.Nil(t, bounds[len(bounds)-1])
-		require.True(t, sort.SliceIsSorted(bounds[1:len(bounds)-1], func(a, b int) bool {
-			return bytes.Compare(bounds[1+a], bounds[1+b]) < 0
-		}), "interior boundaries must be strictly increasing")
+		require.True(t, slices.IsSortedFunc(bounds[1:len(bounds)-1], bytes.Compare), "interior boundaries must be strictly increasing")
 
 		per, total := n/(len(bounds)-1), 0
 		for i := 0; i+1 < len(bounds); i++ {
@@ -103,9 +101,9 @@ func TestSplitBucketByCountDupSort(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 		key, val := make([]byte, 8), make([]byte, 8)
-		for i := 0; i < keys; i++ {
+		for i := range keys {
 			binary.BigEndian.PutUint64(key, uint64(i))
-			for j := 0; j < dupsPerKey; j++ {
+			for j := range dupsPerKey {
 				binary.BigEndian.PutUint64(val, uint64(j))
 				require.NoError(t, c.AppendDup(key, val))
 			}
@@ -119,9 +117,7 @@ func TestSplitBucketByCountDupSort(t *testing.T) {
 		require.Greater(t, len(bounds), 2, "must split into many ranges")
 		require.Nil(t, bounds[0])
 		require.Nil(t, bounds[len(bounds)-1])
-		require.True(t, sort.SliceIsSorted(bounds[1:len(bounds)-1], func(a, b int) bool {
-			return bytes.Compare(bounds[1+a], bounds[1+b]) < 0
-		}), "interior boundaries must be strictly increasing")
+		require.True(t, slices.IsSortedFunc(bounds[1:len(bounds)-1], bytes.Compare), "interior boundaries must be strictly increasing")
 
 		seen := 0
 		for i := 0; i+1 < len(bounds); i++ {
@@ -155,7 +151,7 @@ func TestSplitBucketByCountFewerPositions(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 		k := make([]byte, 8)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			binary.BigEndian.PutUint64(k, uint64(i))
 			require.NoError(t, c.Append(k, []byte{1}))
 		}
@@ -193,7 +189,7 @@ func TestSplitBucketByCountDupSortSkew(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 		key, val := make([]byte, 8), make([]byte, 8)
-		for d := 0; d < hotDups; d++ { // key 0 is hot: many dups
+		for d := range hotDups { // key 0 is hot: many dups
 			binary.BigEndian.PutUint64(val, uint64(d))
 			require.NoError(t, c.AppendDup(key, val))
 		}

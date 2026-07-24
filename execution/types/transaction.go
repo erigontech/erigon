@@ -171,13 +171,14 @@ func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Tran
 		}
 		txn = legacy
 	case rlp.String:
-		// Decode the EIP-2718 typed txn envelope.
+		// Decode the EIP-2718 typed txn envelope. Safe to view: every decoder
+		// copies out the fields it keeps.
 		var b []byte
-		if b, err = s.Bytes(); err != nil {
+		if b, err = s.ViewBytes(); err != nil {
 			return nil, err
 		}
-		if len(b) == 0 {
-			return nil, rlp.EOL
+		if len(b) > 0 && b[0] >= rlp.SingleByteThreshold {
+			return nil, ErrInvalidTxType
 		}
 		if txn, err = UnmarshalTransactionFromBinary(b, blobTxnsAreWrappedWithBlobs); err != nil {
 			return nil, err
@@ -208,8 +209,8 @@ func DecodeWrappedTransaction(data []byte) (Transaction, error) {
 	if data[0] < 0x80 { // the encoding is canonical, not RLP
 		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
-	s, done := rlp.NewStreamFromPool(bytes.NewReader(data), uint64(len(data)))
-	defer done()
+	s := rlp.NewBytesStream(data)
+	defer rlp.PutStream(s)
 	return DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 }
 
@@ -222,8 +223,8 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 	if data[0] < 0x80 { // the encoding is canonical, not RLP
 		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
-	s, done := rlp.NewStreamFromPool(bytes.NewReader(data), uint64(len(data)))
-	defer done()
+	s := rlp.NewBytesStream(data)
+	defer rlp.PutStream(s)
 	tx, err := DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 	if err != nil {
 		return nil, err
@@ -236,8 +237,8 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	if len(data) <= 1 {
 		return nil, fmt.Errorf("short input: %v", len(data))
 	}
-	s, done := rlp.NewStreamFromPool(bytes.NewReader(data[1:]), uint64(len(data)-1))
-	defer done()
+	s := rlp.NewBytesStream(data[1:])
+	defer rlp.PutStream(s)
 	var t Transaction
 	switch data[0] {
 	case AccessListTxType:

@@ -21,7 +21,14 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // TestIsWebsocket tests if an incoming websocket upgrade request is detected properly.
@@ -49,5 +56,17 @@ func TestParseSocketUrl(t *testing.T) {
 		socketUrl, err := url.Parse("tcp://localhost:1234")
 		require.NoError(t, err)
 		require.Equal(t, "localhost:1234", socketUrl.Host+socketUrl.EscapedPath())
+	})
+}
+
+// TestRemoteRulesEngineFinalizeDelegates guards the BAL-regeneration path on a
+// datadir-less rpcdaemon: block replay runs Initialize and Finalize on the
+// remote engine wrapper, so Finalize must delegate rather than panic.
+func TestRemoteRulesEngineFinalizeDelegates(t *testing.T) {
+	e := &remoteRulesEngine{engine: merge.New(ethash.NewFaker())}
+	header := &types.Header{Number: *uint256.NewInt(1)} // zero difficulty → PoS header
+	require.NotPanics(t, func() {
+		_, err := e.Finalize(&chain.Config{}, header, nil, nil, nil, nil, nil, nil, false, log.New())
+		require.NoError(t, err)
 	})
 }

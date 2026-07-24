@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/devgenesis"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
@@ -100,9 +101,9 @@ var (
 		Value: ethconfig.Defaults.NetworkID,
 	}
 	PersistReceiptsV2Flag = cli.BoolFlag{
-		Name:    "persist.receipts",
-		Aliases: []string{"experiment.persist.receipts.v2"},
-		Usage:   "Download historical Receipts. If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency)",
+		Name:    "prune.include-receipts",
+		Aliases: []string{"experiment.persist.receipts.v2", "persist.receipts"},
+		Usage:   "Download historical Receipts (stored on disk as the rcache domain: snapshots/history/*rcache*.v). If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency)",
 		Value:   ethconfig.Defaults.PersistReceiptsCacheV2,
 	}
 	DevValidatorSeedFlag = cli.StringFlag{
@@ -403,8 +404,8 @@ var (
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
-		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot rather than error. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. Low values are fine for low read-concurrency nodes (e.g. validators); raise it for nodes serving heavy parallel RPC",
-		Value: min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
+		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot rather than error. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. A value below the parallel-exec worker count is raised to it (each worker holds a long-lived read tx, so a lower ceiling would deadlock); to actually reduce read concurrency, lower --exec.workers instead",
+		Value: httpcfg.DefaultDBReadConcurrency(),
 	}
 	RpcMaxConcurrentRequestsFlag = cli.IntFlag{
 		Name:  "rpc.max.concurrency",
@@ -435,6 +436,11 @@ var (
 		Name:  "rpc.logs.maxresults",
 		Usage: "Maximum number of logs returned by eth_getLogs, erigon_getLogs, erigon_getLatestLogs (0 = unlimited)",
 		Value: 20_000,
+	}
+	RpcLogQueryLimit = cli.IntFlag{
+		Name:  "rpc.logs.querylimit",
+		Usage: "Maximum number of alternative addresses or topics allowed per search position in eth_getLogs filter criteria (<=0 = unlimited)",
+		Value: 1_000,
 	}
 	RpcTraceCompatFlag = cli.BoolFlag{
 		Name:  "trace.compat",
@@ -1118,9 +1124,14 @@ var (
 		Usage:   "Enables blazing fast eth_getProof for executed block",
 		Aliases: []string{"experimental.commitment-history", "prune.experimental.include-commitment-history"},
 	}
-	CommitmentHistoryDistanceFlag = cli.Uint64Flag{
+	CommitmentHistoryDistanceFlag = cli.StringFlag{
 		Name:  "prune.commitment-history.distance",
-		Usage: "Keep commitment history only for the latest N blocks. Older snapshots are skipped at download time. 0 (default) keeps everything. Requires --prune.include-commitment-history.",
+		Usage: "Keep commitment history only for the latest N blocks, or \"keep-all\". Older snapshots are skipped at download time. Empty or 0 (default) keeps everything. Requires --prune.include-commitment-history",
+	}
+	PersistReceiptsDistanceFlag = cli.StringFlag{
+		Name:    "prune.receipts.distance",
+		Aliases: []string{"persist.receipts.distance"},
+		Usage:   "Keep the receipt cache only for the latest N blocks, or \"keep-all\" to keep it all. Empty or 0 (default) follows the state-history window (NOT keep-all). Older snapshots are skipped at download time. Requires --prune.include-receipts",
 	}
 	AlwaysGenerateChangesetsFlag = cli.BoolFlag{
 		Name:  "experimental.always-generate-changesets",
@@ -1776,17 +1787,17 @@ func setWhitelist(ctx *cli.Command, cfg *ethconfig.Config) {
 	}
 	cfg.Whitelist = make(map[uint64]common.Hash)
 	for _, entry := range common.CliString2Array(whitelist) {
-		parts := strings.Split(entry, "=")
-		if len(parts) != 2 {
+		numberStr, hashStr, ok := strings.Cut(entry, "=")
+		if !ok || strings.Contains(hashStr, "=") {
 			Fatalf("Invalid whitelist entry: %s", entry)
 		}
-		number, err := strconv.ParseUint(parts[0], 0, 64)
+		number, err := strconv.ParseUint(numberStr, 0, 64)
 		if err != nil {
-			Fatalf("Invalid whitelist block number %s: %v", parts[0], err)
+			Fatalf("Invalid whitelist block number %s: %v", numberStr, err)
 		}
 		var hash common.Hash
-		if err = hash.UnmarshalText([]byte(parts[1])); err != nil {
-			Fatalf("Invalid whitelist hash %s: %v", parts[1], err)
+		if err = hash.UnmarshalText([]byte(hashStr)); err != nil {
+			Fatalf("Invalid whitelist hash %s: %v", hashStr, err)
 		}
 		cfg.Whitelist[number] = hash
 	}
@@ -2025,6 +2036,12 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	if ctx.IsSet(ExecSerialFlag.Name) && ctx.Bool(ExecSerialFlag.Name) {
 		dbg.SetExec3Workers(1)
 		cfg.ExecWorkerCount = 1
+	}
+	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
+		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount); int64(c) < limit {
+			logger.Warn("db.read.concurrency below the exec read-tx floor; raising to avoid a parallel-exec deadlock",
+				"configured", c, "using", limit, "execWorkers", cfg.ExecWorkerCount)
+		}
 	}
 	if ctx.IsSet(ExecNoMergeFlag.Name) {
 		dbg.SetNoMerge(ctx.Bool(ExecNoMergeFlag.Name))
@@ -2330,10 +2347,8 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 
 	for _, t := range tags {
 		if t != "" {
-			kv := strings.Split(t, "=")
-
-			if len(kv) == 2 {
-				tagsMap[kv[0]] = kv[1]
+			if k, v, ok := strings.Cut(t, "="); ok && !strings.Contains(v, "=") {
+				tagsMap[k] = v
 			}
 		}
 	}

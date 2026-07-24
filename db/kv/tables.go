@@ -18,7 +18,7 @@ package kv
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -279,6 +279,7 @@ const (
 	// End GLOAS
 
 	StatesProcessingProgress = "StatesProcessingProgress"
+	StatesPruneProgress      = "StatesPruneProgress" // table name => slot
 
 	//Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
@@ -294,6 +295,7 @@ var (
 	PruneHistory           = []byte("pruneHistory")
 	PruneBlocks            = []byte("pruneBlocks")
 	PruneCommitmentHistory = []byte("pruneCommitmentHistory")
+	PruneReceipts          = []byte("pruneReceipts")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 	GenesisKey         = []byte("genesis")
@@ -430,6 +432,7 @@ var ChaindataTables = []string{
 	RandaoMixes,
 	Proposers,
 	StatesProcessingProgress,
+	StatesPruneProgress,
 	InactivityScores,
 	NextSyncCommittee,
 	CurrentSyncCommittee,
@@ -634,9 +637,7 @@ func TablesCfgByLabel(label Label) TableCfg {
 	}
 }
 func sortBuckets() {
-	sort.SliceStable(ChaindataTables, func(i, j int) bool {
-		return strings.Compare(ChaindataTables[i], ChaindataTables[j]) < 0
-	})
+	slices.Sort(ChaindataTables)
 }
 
 func init() {

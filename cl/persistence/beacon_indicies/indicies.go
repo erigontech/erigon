@@ -353,7 +353,7 @@ func WriteBeaconBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeac
 	if err != nil {
 		return err
 	}
-	if err := encoder.Flush(); err != nil {
+	if err := encoder.Close(); err != nil {
 		return err
 	}
 	if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot), common.Copy(buf.Bytes())); err != nil {

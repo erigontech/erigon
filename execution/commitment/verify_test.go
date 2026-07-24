@@ -233,7 +233,7 @@ func TestVerifyBranchHashes_Storage(t *testing.T) {
 	var hashBuf2 [32]byte
 	keccak.Read(hashBuf2[:])
 	var nib [64]byte
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		nib[i*2] = hashBuf2[i] >> 4
 		nib[i*2+1] = hashBuf2[i] & 0x0f
 	}

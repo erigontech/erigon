@@ -143,11 +143,11 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 		return res, false, false
 	}
 
-	partsVersion := strings.SplitN(fileName, "-", 2)
-	if len(partsVersion) != 2 {
+	_, remainingPart, ok := strings.Cut(fileName, "-")
+	if !ok {
 		return res, false, false
 	}
-	croppedFileName, ok := strings.CutSuffix(partsVersion[1], res.Ext)
+	croppedFileName, ok := strings.CutSuffix(remainingPart, res.Ext)
 	if !ok {
 		return res, false, false
 	}
@@ -159,16 +159,14 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 	isStateFile := IsStateFileV2(croppedFileName)
 
 	if isStateFile { // accounts.24-28
-		idxDot := strings.Index(croppedFileName, ".")
-		idxDash := strings.Index(croppedFileName, "-")
-
-		if idxDot <= 0 || idxDash <= idxDot+1 || idxDash == len(croppedFileName)-1 {
+		typeString, rest, ok := strings.Cut(croppedFileName, ".")
+		if !ok || typeString == "" {
 			return res, false, false
 		}
-
-		typeString := croppedFileName[:idxDot]
-		fromStr := croppedFileName[idxDot+1 : idxDash]
-		toStr := croppedFileName[idxDash+1:]
+		fromStr, toStr, ok := strings.Cut(rest, "-")
+		if !ok || fromStr == "" || toStr == "" {
+			return res, false, false
+		}
 
 		from, err := strconv.Atoi(fromStr)
 		if err != nil {
@@ -185,23 +183,14 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 			res.CaplinTypeString = res.Type.Name()
 		}
 	} else { // 1-2-bodies
-		firstDash := strings.Index(croppedFileName, "-")
-		if firstDash <= 0 || firstDash == len(croppedFileName)-1 {
+		fromStr, rest, ok := strings.Cut(croppedFileName, "-")
+		if !ok || fromStr == "" {
 			return res, false, false
 		}
-		secondDash := strings.Index(croppedFileName[firstDash+1:], "-")
-		if secondDash < 0 {
+		toStr, typeString, ok := strings.Cut(rest, "-")
+		if !ok || toStr == "" || typeString == "" {
 			return res, false, false
 		}
-
-		secondDash += firstDash + 1
-		if secondDash == len(croppedFileName)-1 {
-			return res, false, false
-		}
-
-		fromStr := croppedFileName[:firstDash]
-		toStr := croppedFileName[firstDash+1 : secondDash]
-		typeString := croppedFileName[secondDash+1:]
 
 		from, err := strconv.Atoi(fromStr)
 		if err != nil {
@@ -238,12 +227,11 @@ func ParseFileNameOld(dir, fileName string) (res FileInfo, isE3Seedable bool, ok
 		parts := strings.Split(fileName, ".")
 		partsLen := len(parts)
 		if partsLen == 3 || partsLen == 4 {
-			fsteps := strings.Split(parts[partsLen-2], "-")
-			if len(fsteps) == 2 {
-				if from, err := strconv.ParseUint(fsteps[0], 10, 64); err == nil {
+			if fromStr, toStr, ok := strings.Cut(parts[partsLen-2], "-"); ok && !strings.Contains(toStr, "-") {
+				if from, err := strconv.ParseUint(fromStr, 10, 64); err == nil {
 					res.From = from
 				}
-				if to, err := strconv.ParseUint(fsteps[1], 10, 64); err == nil {
+				if to, err := strconv.ParseUint(toStr, 10, 64); err == nil {
 					res.To = to
 				}
 			}
@@ -298,8 +286,11 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	}
 
 	var err error
-	verParts := strings.SplitN(parts[0], string(filepath.Separator), 2)
-	res.Version, err = version.ParseVersion(verParts[len(verParts)-1])
+	verPart := parts[0]
+	if _, after, ok := strings.Cut(parts[0], string(filepath.Separator)); ok {
+		verPart = after
+	}
+	res.Version, err = version.ParseVersion(verPart)
 	if err != nil {
 		return res, false
 	}
@@ -380,11 +371,9 @@ func IsSeedableExtension(name string) bool {
 	return false
 }
 
-const Erigon3SeedableSteps = 64
-
 // Use-cases:
-//   - produce and seed snapshots earlier on chain tip. reduce depnedency on "good peers with history" at p2p-network.
-//     Some networks have no much archive peers, also ConsensusLayer clients are not-good(not-incentivised) at serving history.
+//   - produce and seed snapshots earlier on chain tip. reduce dependency on "good peers with history" at p2p-network.
+//     Some networks don't have many archive peers, also ConsensusLayer clients are not-good(not-incentivised) at serving history.
 //   - avoiding having too much files:
 //     more files(shards) - means "more metadata", "more lookups for non-indexed queries", "more dictionaries", "more bittorrent connections", ...
 //     less files - means small files will be removed after merge (no peers for this files).

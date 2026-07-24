@@ -705,7 +705,7 @@ type OnBlockchainInitTrace struct {
 }
 
 type OnBlockStartTrace struct {
-	Event tracing.BlockEvent `json:"event,omitempty"`
+	Event tracing.BlockEvent `json:"event"`
 }
 
 type OnBlockEndTrace struct {

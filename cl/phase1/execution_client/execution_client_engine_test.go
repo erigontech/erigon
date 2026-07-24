@@ -63,7 +63,7 @@ func TestBuildExecutionPayload_BlockAccessListGloasOnly(t *testing.T) {
 		raw, err := json.Marshal(ep)
 		require.NoError(t, err)
 
-		var m map[string]interface{}
+		var m map[string]any
 		require.NoError(t, json.Unmarshal(raw, &m))
 		_, ok := m["blockAccessList"]
 		require.False(t, ok, "blockAccessList must be absent from JSON for pre-Gloas blocks")
@@ -103,7 +103,7 @@ func TestBuildExecutionPayload_BlockAccessListGloasOnly(t *testing.T) {
 			raw, err := json.Marshal(ep)
 			require.NoError(t, err)
 
-			var m map[string]interface{}
+			var m map[string]any
 			require.NoError(t, json.Unmarshal(raw, &m))
 
 			bal, ok := m["blockAccessList"]

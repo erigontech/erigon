@@ -78,7 +78,7 @@ func (c ValidatorRegistryChecker) FilterRegistered(ctx context.Context, validato
 	nonces := make(map[int64]uint32, len(validators))
 	totalUpdatesU64 := totalUpdates.Uint64()
 	bigI := new(big.Int)
-	for i := uint64(0); i < totalUpdatesU64; i++ {
+	for i := range totalUpdatesU64 {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()

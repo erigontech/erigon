@@ -60,15 +60,21 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 
 		slot := callContext.peekStorageKey()
 		access := params.WarmStorageReadCostEIP2929
-		if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), slot); slotMod {
+		_, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), slot)
+		if slotMod {
 			access = coldAccess
-			if callContext.gas < access {
-				return mdgas.MdGas{}, ErrOutOfGas
-			}
 		}
 		var value uint256.Int
 		value.Set(callContext.Stack.Back(1))
+		// Read the current slot value before the cold-access affordability check
+		// so an SSTORE that clears the EIP-2200 sentry but then OOGs on the access
+		// cost still records the slot read in the EIP-7928 block access list. This
+		// matches the glamsterdam-devnet-6 fixtures; EELS later reordered
+		// get_storage vs charge_gas.
 		current, _ := evm.IntraBlockState().GetState(callContext.Address(), slot)
+		if slotMod && callContext.gas < access {
+			return mdgas.MdGas{}, ErrOutOfGas
+		}
 
 		if current.Eq(&value) { // noop (1)
 			return mdgas.MdGas{Regular: access}, nil
@@ -94,7 +100,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
 				evm.IntraBlockState().AddRefund(writeCreate)
 				if stateCreate > 0 {
-					callContext.creditStateGasRefund(stateCreate)
+					callContext.refillStateGas(stateCreate)
 				}
 			} else { // reset to original existing slot (2.2.2.2)
 				evm.IntraBlockState().AddRefund(writeExisting)

@@ -29,8 +29,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
@@ -56,7 +56,7 @@ type BadHeaderEntry struct {
 type EngineBlockDownloader struct {
 	backgroundCtx context.Context
 	status        atomic.Value // current Status of the downloading process, aka: is it doing anything
-	blockReader   services.FullBlockReader
+	blockReader   dbservices.FullBlockReader
 	db            kv.RoDB
 	chainRW       chainreader.ChainReaderWriterEth1
 	syncCfg       ethconfig.Sync
@@ -70,7 +70,7 @@ func NewEngineBlockDownloader(
 	ctx context.Context,
 	logger log.Logger,
 	executionClient execmodule.ExecutionModule,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	db kv.RoDB,
 	config *chain.Config,
 	syncCfg ethconfig.Sync,

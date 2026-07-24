@@ -55,23 +55,19 @@ func TestGen_ConcurrentUnwindNoTear(t *testing.T) {
 
 	const unwinds = 200
 	var wg sync.WaitGroup
-	for r := 0; r < 8; r++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < 1000; i++ {
+	for range 8 {
+		wg.Go(func() {
+			for i := range 1000 {
 				_ = g.IsStale(uint64(i), 0)
 				_ = g.Epoch()
 			}
-		}()
+		})
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < unwinds; i++ {
+	wg.Go(func() {
+		for i := range unwinds {
 			g.Unwind(uint64(unwinds - i)) // descending -> floor keeps dropping
 		}
-	}()
+	})
 	wg.Wait()
 	require.Equal(t, uint32(unwinds), g.Epoch())
 	require.True(t, g.IsStale(1, 0), "deepest floor reached 1")

@@ -116,10 +116,30 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 
 	// Negative results (missing account, empty slot) are cached as nil hits.
 	sc = newTestStateCache()
-	cpg = &cachePopulatingGetter{g: stubTemporalGetter{v: nil}, sc: sc, stepSize: 1_562_500}
+	cpg = &cachePopulatingGetter{g: stubTemporalGetter{v: nil}, sc: sc, stepSize: 1_562_500, progress: func(kv.Domain) uint64 { return 100 }}
 	_, _, err = cpg.GetLatest(kv.AccountsDomain, key)
 	require.NoError(t, err)
 	got, ok = sc.Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 	require.Empty(t, got)
+}
+
+// A negative (missing account, empty slot) carries no write step, so a
+// step-derived stamp pins it at the start of history where no unwind can drop
+// it. It must be stamped with the domain's progress at observation time —
+// any unwind at or below that progress then invalidates it (mirroring the SD
+// read-fill).
+func TestCachePopulatingGetterNegativeDroppedByUnwind(t *testing.T) {
+	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
+	sc := newTestStateCache()
+	cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: nil}, sc: sc, stepSize: 16, progress: func(kv.Domain) uint64 { return 100 }}
+
+	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
+	require.NoError(t, err)
+	_, ok := sc.Get(kv.AccountsDomain, key)
+	require.True(t, ok, "the negative result must be cached")
+
+	sc.Unwind(50)
+	_, ok = sc.Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a negative must not survive an unwind below the progress at which it was observed")
 }

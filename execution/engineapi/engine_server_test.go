@@ -66,11 +66,11 @@ func oneBlockStep(mockSentry *execmoduletester.ExecModuleTester, require *requir
 
 func newBaseApiForTest(m *execmoduletester.ExecModuleTester) *jsonrpc.BaseAPI {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	return jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	return jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 }
 
 func newEthApiForTest(base *jsonrpc.BaseAPI, db kv.TemporalRoDB, txPool txpoolproto.TxpoolClient) *jsonrpc.APIImpl {
-	cfg := &jsonrpc.EthApiConfig{
+	cfg := &rpccfg.EthApiConfig{
 		GasCap:                      5000000,
 		FeeCap:                      ethconfig.Defaults.RPCTxFeeCap,
 		ReturnDataLimit:             100_000,
@@ -330,7 +330,8 @@ func TestGetPayloadBodiesByHashV2(t *testing.T) {
 	req.NoError(err)
 	req.Len(bodies, 1)
 	req.NotNil(bodies[0])
-	req.NotEmpty(bodies[0].BlockAccessList)
+	req.NotNil(bodies[0].BlockAccessList)
+	req.NotEmpty(*bodies[0].BlockAccessList)
 
 	// Overwrite with a non-empty BAL and verify it's returned
 	balBytes := []byte{0x01, 0x02, 0x03}
@@ -341,7 +342,7 @@ func TestGetPayloadBodiesByHashV2(t *testing.T) {
 	req.Len(bodies, 1)
 	req.NotNil(bodies[0])
 	req.NotNil(bodies[0].BlockAccessList)
-	req.Equal(hexutil.Bytes(balBytes), bodies[0].BlockAccessList)
+	req.Equal(hexutil.Bytes(balBytes), *bodies[0].BlockAccessList)
 }
 
 func TestGetPayloadBodiesByRangeV2(t *testing.T) {
@@ -370,8 +371,10 @@ func TestGetPayloadBodiesByRangeV2(t *testing.T) {
 	req.Len(bodies, 2)
 	req.NotNil(bodies[0])
 	req.NotNil(bodies[1])
-	req.NotEmpty(bodies[0].BlockAccessList)
-	req.NotEmpty(bodies[1].BlockAccessList)
+	req.NotNil(bodies[0].BlockAccessList)
+	req.NotNil(bodies[1].BlockAccessList)
+	req.NotEmpty(*bodies[0].BlockAccessList)
+	req.NotEmpty(*bodies[1].BlockAccessList)
 
 	// Overwrite with non-empty BALs and verify they're returned
 	balBytes1 := []byte{0x01, 0x02, 0x03}
@@ -386,6 +389,6 @@ func TestGetPayloadBodiesByRangeV2(t *testing.T) {
 	req.NotNil(bodies[1])
 	req.NotNil(bodies[0].BlockAccessList)
 	req.NotNil(bodies[1].BlockAccessList)
-	req.Equal(hexutil.Bytes(balBytes1), bodies[0].BlockAccessList)
-	req.Equal(hexutil.Bytes(balBytes2), bodies[1].BlockAccessList)
+	req.Equal(hexutil.Bytes(balBytes1), *bodies[0].BlockAccessList)
+	req.Equal(hexutil.Bytes(balBytes2), *bodies[1].BlockAccessList)
 }
