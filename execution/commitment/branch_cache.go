@@ -98,6 +98,11 @@ type BranchCache struct {
 	// the trunk does not).
 	trunkDisabled bool
 
+	// disabled (env BRANCH_CACHE_DISABLE) turns the cache into a pass-through:
+	// every Get misses and every Put is dropped, so all branch reads fall through
+	// to the domain .kv. A/B lever for measuring the state read path uncached.
+	disabled bool
+
 	// Stats — atomic counters surfaced via Stats().
 	rootHits, rootMisses     atomic.Uint64
 	trunkHits, trunkMisses   atomic.Uint64
@@ -319,6 +324,7 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 		maxDepth:      maxDepth,
 		accountTrunk:  newAccountTrunk(maxDepth),
 		trunkDisabled: os.Getenv("BRANCH_CACHE_TRUNK_DISABLE") != "",
+		disabled:      os.Getenv("BRANCH_CACHE_DISABLE") != "",
 	}
 	// Before any unwind every entry's txN is at/below the floor, so the epoch
 	// check never strands a valid entry.
@@ -639,6 +645,9 @@ func (c *BranchCache) PinnedCount() int {
 // bytes (with the leading 2-byte touch-map prefix) plus the on-disk file
 // step the bytes came from (0 if not tracked).
 func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
+	if c.disabled {
+		return nil, 0, false
+	}
 	if isCommitmentStateKey(prefix) {
 		return nil, 0, false
 	}
@@ -664,6 +673,9 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 // Always copies the input data so the cache owns it independently of
 // caller buffer lifetime. See entry.txN for the txN tagging semantics.
 func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
+	if c.disabled {
+		return
+	}
 	if isCommitmentStateKey(prefix) {
 		return
 	}

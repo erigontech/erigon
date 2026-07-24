@@ -226,6 +226,7 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int, gen uint64) {
 	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
 		return
 	}
+	warmDumpKey(hashedKey, startDepth)
 	w.outstanding[gen%arenaRingSize].Add(1)
 	// Blocking By-Design!
 	// Speed of system is equal to speed of facing all page-faults during
@@ -321,4 +322,5 @@ func (w *Warmuper) Close() {
 	if w.work != nil {
 		close(w.work)
 	}
+	warmDumpFlush()
 }
