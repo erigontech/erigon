@@ -149,7 +149,9 @@ var ErrTooDeepUnwind = errors.New("too deep unwind")
 
 // findExecutedDiffsetAtHeight returns the diffset of the block executed at currentBlock.
 // When no canonical hash is recorded at that height (e.g. the block is no longer canonical
-// after a reorg) it falls back to the stored header.
+// after a reorg) it falls back to the stored header(s), selecting the one that carries a
+// diffset. When found is false, executedHash is only a probed candidate for diagnostics,
+// not necessarily the block that executed.
 func findExecutedDiffsetAtHeight(ctx context.Context, rwTx kv.TemporalRwTx, br dbservices.FullBlockReader, doms *execctx.SharedDomains, currentBlock uint64) (diffSet [kv.DomainLen][]kv.DomainEntryDiff, executedHash common.Hash, found bool, err error) {
 	executedHash, ok, err := br.CanonicalHash(ctx, rwTx, currentBlock)
 	if err != nil {
@@ -161,14 +163,34 @@ func findExecutedDiffsetAtHeight(ctx context.Context, rwTx kv.TemporalRwTx, br d
 		if err != nil {
 			return diffSet, common.Hash{}, false, err
 		}
-		switch {
-		case len(nonCanonicalHeaders) == 0:
+		if len(nonCanonicalHeaders) == 0 {
 			return diffSet, common.Hash{}, false, fmt.Errorf("can't find diffsets for: %d", currentBlock)
-		case len(nonCanonicalHeaders) == 1:
-			executedHash = nonCanonicalHeaders[0].Hash()
-		default:
-			return diffSet, common.Hash{}, false, fmt.Errorf("diffsets ambiguous for: %d, have %d headers", currentBlock, len(nonCanonicalHeaders))
 		}
+		// A reorg/fork can leave several headers at one height, but only the block
+		// that actually executed has a stored diffset. Pick that unique header;
+		// treat two diffset-bearing headers as genuinely ambiguous.
+		withDiffset := 0
+		for _, h := range nonCanonicalHeaders {
+			hash := h.Hash()
+			candidate, has, err := doms.GetDiffset(rwTx, hash, currentBlock)
+			if err != nil {
+				return diffSet, common.Hash{}, false, err
+			}
+			if has {
+				withDiffset++
+				diffSet, executedHash = candidate, hash
+			}
+		}
+		if withDiffset > 1 {
+			return diffSet, common.Hash{}, false, fmt.Errorf("diffsets ambiguous for: %d, have %d headers with diffsets", currentBlock, withDiffset)
+		}
+		if withDiffset == 0 {
+			// No sibling has executed here yet. Report a concrete header hash so the
+			// caller's not-found error is diagnosable rather than pointing at 0x0.
+			executedHash = nonCanonicalHeaders[0].Hash()
+			return diffSet, executedHash, false, nil
+		}
+		return diffSet, executedHash, true, nil
 	}
 	diffSet, found, err = doms.GetDiffset(rwTx, executedHash, currentBlock)
 	if err != nil {
