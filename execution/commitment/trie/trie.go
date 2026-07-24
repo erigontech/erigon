@@ -472,12 +472,15 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 		newPrefixes = prefixes
 		newFixedBits = fixedbits
 		newHooks = hooks
-		newNibblePath := append(nibblePath, i1)
-		newHook := append(hook, i1)
+		newNibblePath := append([]byte(nil), nibblePath...)
+		newNibblePath = append(newNibblePath, i1)
+		newHook := append([]byte(nil), hook...)
+		newHook = append(newHook, i1)
 		if rl.Retain(newNibblePath) {
 			var newDbPrefix []byte
 			if bits%8 == 0 {
-				newDbPrefix = append(dbPrefix, i1<<4)
+				newDbPrefix = append([]byte(nil), dbPrefix...)
+				newDbPrefix = append(newDbPrefix, i1<<4)
 			} else {
 				newDbPrefix = dbPrefix
 				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
@@ -485,12 +488,15 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 			}
 			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child1, newNibblePath, newHook, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
 		}
-		newNibblePath = append(nibblePath, i2)
-		newHook = append(hook, i2)
+		newNibblePath = append([]byte(nil), nibblePath...)
+		newNibblePath = append(newNibblePath, i2)
+		newHook = append([]byte(nil), hook...)
+		newHook = append(newHook, i2)
 		if rl.Retain(newNibblePath) {
 			var newDbPrefix []byte
 			if bits%8 == 0 {
-				newDbPrefix = append(dbPrefix, i2<<4)
+				newDbPrefix = append([]byte(nil), dbPrefix...)
+				newDbPrefix = append(newDbPrefix, i2<<4)
 			} else {
 				newDbPrefix = dbPrefix
 				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
@@ -503,16 +509,17 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 		newPrefixes = prefixes
 		newFixedBits = fixedbits
 		newHooks = hooks
-		var newNibblePath []byte
-		var newHook []byte
 		for i, child := range n.Children {
 			if child != nil {
-				newNibblePath = append(nibblePath, byte(i))
-				newHook = append(hook, byte(i))
+				newNibblePath := append([]byte(nil), nibblePath...)
+				newNibblePath = append(newNibblePath, byte(i))
+				newHook := append([]byte(nil), hook...)
+				newHook = append(newHook, byte(i))
 				if rl.Retain(newNibblePath) {
 					var newDbPrefix []byte
 					if bits%8 == 0 {
-						newDbPrefix = append(dbPrefix, byte(i)<<4)
+						newDbPrefix = append([]byte(nil), dbPrefix...)
+						newDbPrefix = append(newDbPrefix, byte(i)<<4)
 					} else {
 						newDbPrefix = dbPrefix
 						newDbPrefix[len(newDbPrefix)-1] &= 0xf0
@@ -543,9 +550,12 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 		}
 		return newPrefixes, newFixedBits, newHooks
 	case *HashNode:
-		newPrefixes = append(prefixes, common.Copy(dbPrefix))
-		newFixedBits = append(fixedbits, bits)
-		newHooks = append(hooks, common.Copy(hook))
+		newPrefixes = prefixes
+		newPrefixes = append(newPrefixes, common.Copy(dbPrefix))
+		newFixedBits = fixedbits
+		newFixedBits = append(newFixedBits, bits)
+		newHooks = hooks
+		newHooks = append(newHooks, common.Copy(hook))
 		return newPrefixes, newFixedBits, newHooks
 	}
 	return prefixes, fixedbits, hooks

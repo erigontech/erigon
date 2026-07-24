@@ -324,7 +324,8 @@ func (hi *HistoryKeyTxNumIterDB) scanLargeVals(k []byte) error {
 				hi.nextKey = nil
 				return nil
 			}
-			seek := append(next, hi.startTxKey[:]...)
+			seek := next
+			seek = append(seek, hi.startTxKey[:]...)
 			var err error
 			k, _, err = hi.valsC.Seek(seek)
 			if err != nil {

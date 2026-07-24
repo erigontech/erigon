@@ -50,8 +50,6 @@ linters:
       enabled-checks:
         - ruleguard
       disabled-checks:
-        - unnecessaryDefer
-        - appendAssign
         - regexpMust
         - rangeValCopy
         - exitAfterDefer

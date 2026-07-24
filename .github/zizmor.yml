@@ -16,10 +16,15 @@ rules:
       - qa-rpc-integration-tests.yml
       - qa-sync-from-scratch.yml
 
-  # Workflows missing explicit permissions: blocks — needs a cleanup pass
-  # to add least-privilege permissions to each workflow; tracked in #21132.
+  # ci-gate orchestrates the reusable test leaves. A called workflow's token
+  # permissions are capped by the caller, so ci-gate's workflow-level
+  # actions: write is the cap that lets every self-cancelling leaf run
+  # `gh run cancel`; pull-requests: write is used by the gate's own
+  # dequeuePullRequest mutation. Both are genuinely needed workflow-wide and
+  # can't be scoped to a single job. Tracked in #21132.
   excessive-permissions:
-    disable: true
+    ignore:
+      - ci-gate.yml
 
   # The remaining `secrets: inherit` calls target same-repo reusable workflows
   # that genuinely consume secrets — sonar (SONAR_TOKEN) and the DockerHub-pull
