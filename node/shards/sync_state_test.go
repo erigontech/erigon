@@ -77,6 +77,51 @@ func TestBuildSyncingReplyFrozenBlocksRaiseHighestBlock(t *testing.T) {
 	require.Equal(t, uint64(500), reply.FrozenBlocks)
 }
 
+func buildReplyWithDownloadForTest(t *testing.T, done, total, targetBlock, executionProgress uint64) *remoteproto.SyncingReply {
+	t.Helper()
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, executionProgress))
+
+	n := NewNotifications(nil)
+	n.SetSnapshotDownloadProgress(done, total, targetBlock)
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	return reply
+}
+
+// During snapshot download the byte-completion ratio is mapped onto the
+// block-based currentBlock/highestBlock so dashboards show smooth 0→100%
+// progress: currentBlock = ratio * blocks_to_be_downloaded.
+func TestBuildSyncingReplySnapshotDownloadMapsRatioToBlocks(t *testing.T) {
+	reply := buildReplyWithDownloadForTest(t, 250, 1000, 20_000_000, 0)
+	require.True(t, reply.Syncing)
+	require.Empty(t, reply.Stages)
+	require.Equal(t, uint64(5_000_000), reply.CurrentBlock)
+	require.Equal(t, uint64(20_000_000), reply.LastNewBlockSeen)
+}
+
+// Once execution has started the download mapping must not apply, even if stale
+// download progress lingers.
+func TestBuildSyncingReplySnapshotDownloadIgnoredAfterExecutionStarts(t *testing.T) {
+	reply := buildReplyWithDownloadForTest(t, 250, 1000, 20_000_000, 100)
+	require.True(t, reply.Syncing)
+	require.Equal(t, uint64(100), reply.CurrentBlock)
+}
+
+// After the download completes progress is pinned at 100% (done==total) to bridge
+// the handoff to execution: currentBlock must report the full target, not drop to
+// 0 while the Execution stage counter has not yet been updated.
+func TestBuildSyncingReplySnapshotDownloadCompletePinsFullProgress(t *testing.T) {
+	reply := buildReplyWithDownloadForTest(t, 1000, 1000, 20_000_000, 0)
+	require.True(t, reply.Syncing)
+	require.Empty(t, reply.Stages)
+	require.Equal(t, uint64(20_000_000), reply.CurrentBlock)
+	require.Equal(t, uint64(20_000_000), reply.LastNewBlockSeen)
+}
+
 func drainSyncStateEvents(ch chan *remoteproto.SyncingReply) []*remoteproto.SyncingReply {
 	var got []*remoteproto.SyncingReply
 	for {

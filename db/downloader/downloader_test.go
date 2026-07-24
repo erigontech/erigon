@@ -335,3 +335,36 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 		downloader: d,
 	}
 }
+
+func TestDownloaderCompletedAndResetStats(t *testing.T) {
+	var d Downloader
+
+	_, _, ok := d.Completed()
+	require.False(t, ok, "no sample yet")
+
+	d.lastStats.Store(&AggStats{BytesCompleted: 30, BytesTotal: 100})
+	done, total, ok := d.Completed()
+	require.True(t, ok)
+	require.Equal(t, uint64(30), done)
+	require.Equal(t, uint64(100), total)
+
+	d.ResetStats()
+	_, _, ok = d.Completed()
+	require.False(t, ok, "reset drops the sample")
+}
+
+// storeStats must publish an immutable snapshot: mutating the source after the
+// call must not change what Completed reports (guards the torn-read fix, where
+// the pointer used to alias the loop buffer overwritten each iteration).
+func TestDownloaderStoreStatsSnapshotIsImmutable(t *testing.T) {
+	var d Downloader
+
+	s := AggStats{BytesCompleted: 10, BytesTotal: 100}
+	d.storeStats(s)
+	s.BytesCompleted = 999 // mutate the source after storing
+
+	done, total, ok := d.Completed()
+	require.True(t, ok)
+	require.Equal(t, uint64(10), done, "stored snapshot must not alias the mutated source")
+	require.Equal(t, uint64(100), total)
+}
