@@ -99,7 +99,7 @@ var eip2200Tests = []struct {
 	{1, 2307, "0x6001600055", 806, 0, nil},                                     // 1 -> 1 (2301 sentry + 2xPUSH)
 }
 
-func testTemporalTxSD(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
+func testTemporalTxSD(t testing.TB) (kv.TemporalRwTx, *execctx.SharedDomains) {
 	dirs := datadir.New(t.TempDir())
 
 	db := temporaltest.NewTestDB(t, dirs)
