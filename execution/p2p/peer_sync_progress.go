@@ -18,12 +18,17 @@ package p2p
 
 import "time"
 
-const missingBlockNumExpiry = time.Hour
+const (
+	missingBlockNumExpiry = time.Hour
+	missingBALNumExpiry   = 2 * time.Minute
+)
 
 type peerSyncProgress struct {
 	peerId               *PeerId
 	minMissingBlockNum   uint64
 	minMissingBlockNumTs time.Time
+	maxMissingBALNum     uint64
+	maxMissingBALNumTs   time.Time
 }
 
 func (psp *peerSyncProgress) blockNumPresent(blockNum uint64) {
@@ -54,4 +59,25 @@ func (psp *peerSyncProgress) peerMayHaveBlockNum(blockNum uint64) bool {
 
 func (psp *peerSyncProgress) minMissingBlockNumTsExpired() bool {
 	return time.Now().After(psp.minMissingBlockNumTs.Add(missingBlockNumExpiry))
+}
+
+func (psp *peerSyncProgress) balNumMissing(blockNum uint64) {
+	if psp.maxMissingBALNumTsExpired() {
+		psp.maxMissingBALNum = blockNum
+	} else {
+		psp.maxMissingBALNum = max(blockNum, psp.maxMissingBALNum)
+	}
+	psp.maxMissingBALNumTs = time.Now()
+}
+
+func (psp *peerSyncProgress) peerMayHaveBALNum(blockNum uint64) bool {
+	if psp.maxMissingBALNumTsExpired() {
+		return true
+	}
+	// BAL retention keeps a recent window, so a miss also rules out older BALs.
+	return blockNum > psp.maxMissingBALNum
+}
+
+func (psp *peerSyncProgress) maxMissingBALNumTsExpired() bool {
+	return time.Now().After(psp.maxMissingBALNumTs.Add(missingBALNumExpiry))
 }
