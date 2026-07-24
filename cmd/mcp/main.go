@@ -255,7 +255,7 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 
 	// Create the JSON-RPC APIs and serve them over an in-process connection —
 	// same path as rpcdaemon.
-	apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, heimdallReader, nil)
+	apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, heimdallReader, nil, nil)
 	rpcSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
 	defer rpcSrv.Stop()
 	for _, api := range apiList {

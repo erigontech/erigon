@@ -3,6 +3,8 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -549,6 +551,21 @@ type ExecutionWitnessResult struct {
 
 	// lookup map for BLOCKHASH opcode, not serialized to JSON
 	headerByNumber map[uint64]*types.Header
+
+	// cachedJSON, when non-nil, is this result's pre-marshaled JSON. The eager
+	// witness cache stores a shell carrying only this, so a hit serves the bytes
+	// verbatim via MarshalFastJSON instead of re-marshaling the struct.
+	cachedJSON []byte
+}
+
+// MarshalFastJSON is the rpc fast-result path (rpc.fastJSONResult): a cache shell
+// returns its stored bytes verbatim; a freshly built result marshals its exported
+// fields, byte-identical to the cached form so both paths agree.
+func (m *ExecutionWitnessResult) MarshalFastJSON() ([]byte, error) {
+	if m.cachedJSON != nil {
+		return m.cachedJSON, nil
+	}
+	return json.Marshal(m)
 }
 
 func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error) {
@@ -709,6 +726,10 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 	defer tx.Rollback()
 
+	if cached, ok := api.serveFromWitnessCache(ctx, tx, blockNrOrHash, resolvedMode); ok {
+		return cached, nil
+	}
+
 	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
 	if err != nil {
 		return nil, err
@@ -721,6 +742,42 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if err != nil {
 		return nil, err
 	}
+
+	return api.buildWitnessResult(ctx, tx, info, resolvedMode)
+}
+
+// serveFromWitnessCache returns a cached legacy-mode witness when the eager cache
+// is enabled and holds an exact (num, hash) match for the requested block. A nil
+// cache, a canonical request, an unresolvable block, or a miss all report ok=false
+// so the caller falls through to the unchanged on-demand build.
+func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.BlockNumberOrHash, mode witnessMode) (*ExecutionWitnessResult, bool) {
+	if api.witnessCache == nil || mode != witnessModeLegacy {
+		return nil, false
+	}
+	_, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, false
+	}
+	result, ok := api.witnessCache.Get(hash)
+	if ok {
+		witnessCacheHitCounter.Inc()
+	} else {
+		witnessCacheMissCounter.Inc()
+	}
+	return result, ok
+}
+
+// errWitnessVerifyFailed wraps a stateless-verification failure from the shared build
+// seam so the eager cache builder can classify build_fail_verify separately from other
+// build errors; the on-demand handler surfaces it as a normal error.
+var errWitnessVerifyFailed = errors.New("witness stateless verification failed")
+
+// buildWitnessResult runs the witness-building pipeline for an already-resolved block
+// against an open temporal tx: re-execute to record accesses, fold the commitment trie,
+// collect ancestor headers, verify statelessly, then append the legacy empty-storage node
+// and sort. It is the single seam shared by the on-demand handler and the eager cache
+// builder, so both produce byte-identical results; never fork the build logic.
+func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalTx, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
 	blockNum := info.BlockNum
 	block := info.Block
 	firstTxNumInBlock := info.FirstTxNumInBlock
@@ -734,7 +791,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	engine := api.engine()
 
-	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, resolvedMode)
+	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -782,14 +839,14 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNum, parentNum,
-		block.Root(), accessed, resolvedMode)
+		block.Root(), accessed, mode)
 	if err != nil {
 		return nil, err
 	}
 
 	// Materialize exclusion-proof branches for strict sparse-trie verifiers in legacy/default
 	// mode; canonical mode stays minimal to match the reference witness.
-	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, resolvedMode != witnessModeCanonical)
+	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, mode != witnessModeCanonical)
 	if err != nil {
 		return nil, err
 	}
@@ -807,13 +864,13 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("engine does not support full rules.Engine interface")
 	}
 	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", errWitnessVerifyFailed, err)
 	}
 
 	// legacy carries the empty storage-trie node (0x80) once when some account has an
 	// empty storage root (EmptyRoot appears only as an account-leaf storage-root field);
 	// canonical omits it. Added after stateless verification, which rejects the bare node.
-	if resolvedMode == witnessModeLegacy {
+	if mode == witnessModeLegacy {
 		for _, node := range result.State {
 			if bytes.Contains(node, trie.EmptyRoot[:]) {
 				result.State = append(result.State, hexutil.Bytes{0x80})
