@@ -97,6 +97,11 @@ func (h Hash) MarshalText() ([]byte, error) {
 	return hexutil.Bytes(h[:]).MarshalText()
 }
 
+// AppendText implements encoding.TextAppender (alloc-free MarshalText).
+func (h Hash) AppendText(dst []byte) ([]byte, error) {
+	return hexutil.Bytes(h[:]).AppendText(dst)
+}
+
 // SetBytes sets the hash to the value of b.
 // If b is larger than len(h), b will be cropped from the left.
 func (h *Hash) SetBytes(b []byte) { fixedSetBytes(h[:], b) }
