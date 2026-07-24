@@ -213,7 +213,7 @@ jobs:
                 '{branch:$branch, commit:$commit, critical:$crit, high:$high, total:$total}' \
                 > out/meta.json
           {
-            echo "### \`${BRANCH}\` @ ${COMMIT} — ${total} fixable (CRITICAL: ${crit}, HIGH: ${high})"
+            echo "### \`${BRANCH}\` @ ${COMMIT} — ${total} HIGH/CRITICAL (CRITICAL: ${crit}, HIGH: ${high})"
             if [ "$total" -gt 0 ]; then
               echo
               echo "| Severity | Package | Installed | Fixed | ID |"
@@ -308,7 +308,7 @@ jobs:
             fi
             echo
             if [ "$grand" -gt 0 ]; then
-              echo "### Fixable findings"
+              echo "### Findings"
               echo
               cat body.md
             fi
@@ -323,10 +323,10 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           gh label create trivy-scan --color B60205 \
-            --description "Fixable vulnerabilities found by the weekly release-branch security scan" \
+            --description "HIGH/CRITICAL vulnerabilities found by the weekly release-branch security scan" \
             --force --repo "$REPO" || true
 
-          title="Trivy: fixable vulnerabilities in maintained release branches"
+          title="Trivy: HIGH/CRITICAL vulnerabilities in maintained release branches"
           num=$(gh issue list --repo "$REPO" --label trivy-scan --state open \
             --json number --jq '.[0].number')
           if [ -n "$num" ]; then
@@ -358,7 +358,7 @@ jobs:
           if [ "${SCAN_RESULT}" = "failure" ] || [ "${DISCOVER_RESULT}" = "failure" ]; then
             msg=":x: **Release-branch security scan failed** (build/scan error). Some branches may be unscanned.\nRun: ${RUN_URL}"
           else
-            msg=":warning: **Release-branch security scan** — ${GRAND} fixable HIGH/CRITICAL finding(s) across maintained release branches.\nRun: ${RUN_URL}\nDetails in the \`trivy-scan\` tracking issue."
+            msg=":warning: **Release-branch security scan** — ${GRAND} HIGH/CRITICAL finding(s) across maintained release branches.\nRun: ${RUN_URL}\nDetails in the \`trivy-scan\` tracking issue."
           fi
           payload=$(jq -n --arg c "$msg" '{content:$c}')
           curl -sS -f -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK" \
