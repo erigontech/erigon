@@ -241,13 +241,11 @@ jobs:
   report:
     name: Aggregate & notify
     needs: [discover, scan]
-    # Runs whenever there was something to scan or a job failed — so it can
-    # publish the run summary (green or not) and alert on failures.
+    # Runs whenever discover ran — so every run publishes a summary (green,
+    # idle, or failed), matching the "every run is openable" promise above.
     if: >-
       always() &&
-      ( needs.discover.result == 'failure' ||
-        needs.scan.result == 'failure' ||
-        (needs.discover.outputs.any == 'true' && needs.scan.result != 'skipped') )
+      ( needs.discover.result == 'success' || needs.discover.result == 'failure' )
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -265,6 +263,7 @@ jobs:
         id: agg
         env:
           SCAN_RESULT: ${{ needs.scan.result }}
+          ANY: ${{ needs.discover.outputs.any }}
           IGNORE_UNFIXED: ${{ needs.discover.outputs.ignore_unfixed }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           TRIVY_IGNORE: ${{ vars.RELEASE_SCAN_TRIVY_IGNORE }}
@@ -305,8 +304,10 @@ jobs:
             fi
             if [ "$count" -gt 0 ]; then
               cat "$overview"
-            else
+            elif [ "${ANY}" = "true" ]; then
               echo "_No branch reports produced — build/scan failed for all selected branches._"
+            else
+              echo "_No release branches had activity in the window — nothing to scan this run._"
             fi
             echo
             if [ "$grand" -gt 0 ]; then
@@ -330,7 +331,7 @@ jobs:
 
           title="Trivy: HIGH/CRITICAL vulnerabilities in maintained release branches"
           num=$(gh issue list --repo "$REPO" --label trivy-scan --state open \
-            --json number --jq '.[0].number')
+            --json number --jq '.[0].number // empty')
           if [ -n "$num" ]; then
             gh issue comment "$num" --repo "$REPO" --body-file report.md
             echo "Updated tracking issue #${num}"
