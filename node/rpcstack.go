@@ -25,6 +25,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -184,7 +185,7 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // gzPoolBufCap is the maximum dst capacity retained in the pool to bound RSS growth.
-const gzPoolBufCap = 1 << 20
+const gzPoolBufCap = 1024 * 1024
 
 // minGzipBodySize is the minimum response body size to compress. Responses
 // smaller than this are sent as-is: gzip framing overhead would exceed savings.
@@ -203,18 +204,70 @@ var libdeflateWarnOnce sync.Once
 var libdeflateCompressWarnOnce sync.Once
 var libdeflateDisabled atomic.Bool
 
-var gzCompressorPool = sync.Pool{
-	New: func() any {
-		c, err := libdeflate.NewCompressor(libdeflate.DefaultCompression)
-		if err != nil {
-			libdeflateDisabled.Store(true)
-			libdeflateWarnOnce.Do(func() {
-				log.Warn("libdeflate unavailable, falling back to stdlib gzip", "err", err)
-			})
-			return nil
-		}
+// libDeflateCompessorsPool pools libdeflate compressors. sync.Pool is unsafe for these: a
+// libdeflate.Compressor owns a C context freed only by Close(), and sync.Pool
+// drops entries on GC with no hook to Close them, so every evicted compressor
+// leaks its C memory. A buffered channel with Close-on-overflow instead frees the
+// C context deterministically and bounds the pooled working set.
+//
+// Each pooled compressor is a single ~653 KiB libdeflate C allocation (level 6),
+// so pool peak RAM = cap × 653 KiB. The cap floors at 64 and is capped at 512, so
+// peak stays ~41 MiB (64) .. ~326 MiB (512) regardless of GOMAXPROCS.
+var libDeflateCompessorsPool = make(chan *libdeflate.Compressor, min(512, max(64, runtime.GOMAXPROCS(0)*8)))
+
+func getLibflateCompressor() *libdeflate.Compressor {
+	if libdeflateDisabled.Load() {
+		return nil
+	}
+	select {
+	case c := <-libDeflateCompessorsPool:
 		return c
-	},
+	default:
+	}
+	c, err := libdeflate.NewCompressor(libdeflate.DefaultCompression)
+	if err != nil {
+		libdeflateDisabled.Store(true)
+		libdeflateWarnOnce.Do(func() {
+			log.Warn("libdeflate unavailable, falling back to stdlib gzip", "err", err)
+		})
+		closePooledLibflateCompressors()
+		return nil
+	}
+	return c
+}
+
+// putLibflateCompressor returns c for reuse, or frees its C context via Close when
+// the pool is full or libdeflate has been disabled — never dropping it uncollected
+// the way sync.Pool eviction would.
+func putLibflateCompressor(c *libdeflate.Compressor) {
+	if libdeflateDisabled.Load() {
+		c.Close()
+		return
+	}
+	select {
+	case libDeflateCompessorsPool <- c:
+		// If disable raced with this send, drain so c isn't stranded in the pool:
+		// once disabled, getLibflateCompressor never hands pooled compressors out.
+		if libdeflateDisabled.Load() {
+			closePooledLibflateCompressors()
+		}
+	default:
+		c.Close()
+	}
+}
+
+// closePooledLibflateCompressors frees every compressor currently in the pool.
+// Called once libdeflate is disabled, so the pool can't retain C contexts that
+// getLibflateCompressor would never hand out again.
+func closePooledLibflateCompressors() {
+	for {
+		select {
+		case c := <-libDeflateCompessorsPool:
+			c.Close()
+		default:
+			return
+		}
+	}
 }
 
 var gzDstPool = sync.Pool{
@@ -287,20 +340,16 @@ func writeStdlibGzip(w http.ResponseWriter, src []byte, status int) {
 // Returns false if libdeflate is unavailable or compression fails; the caller
 // should then fall back to writeStdlibGzip.
 func compressLibdeflate(w http.ResponseWriter, src []byte, status int) bool {
-	if libdeflateDisabled.Load() {
+	c := getLibflateCompressor()
+	if c == nil {
 		return false
 	}
-	raw := gzCompressorPool.Get()
-	if raw == nil {
-		return false
-	}
-	c := raw.(*libdeflate.Compressor)
-	defer gzCompressorPool.Put(c)
+	defer putLibflateCompressor(c)
 
 	dst := gzDstPool.Get().([]byte)
 	gzBound := c.GzipCompressBound(len(src))
 	dst = slices.Grow(dst[:0], gzBound)[:gzBound]
-	defer putDst(dst)
+	defer putDst(dst) // return the grown buffer for reuse (putDst drops it if over gzPoolBufCap)
 
 	n, err := c.CompressGzip(dst, src)
 	if err != nil {
