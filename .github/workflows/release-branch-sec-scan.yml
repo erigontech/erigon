@@ -169,7 +169,9 @@ jobs:
         env:
           BRANCH: ${{ matrix.branch }}
         run: |
-          IMAGE_TAG="erigon-scan:${BRANCH//\//-}"
+          SAFE_BRANCH="${BRANCH//\//-}"   # artifact names and image tags can't contain '/'
+          IMAGE_TAG="erigon-scan:${SAFE_BRANCH}"
+          echo "SAFE_BRANCH=${SAFE_BRANCH}" >> "$GITHUB_ENV"
           echo "IMAGE_TAG=${IMAGE_TAG}" >> "$GITHUB_ENV"
           echo "COMMIT=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
           # Same build as release.yml (same Dockerfile + bases), reduced to a
@@ -231,7 +233,7 @@ jobs:
       - name: Upload branch report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  ## v7.0.1
         with:
-          name: trivy-${{ replace(matrix.branch, '/', '-') }}
+          name: trivy-${{ env.SAFE_BRANCH }}
           path: out/
           retention-days: 30
           if-no-files-found: error
