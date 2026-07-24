@@ -147,18 +147,16 @@ type CaplinStateSnapshots struct {
 
 	Salt uint32
 
-	dirtySegmentsLock   sync.RWMutex
-	visibleSegmentsLock sync.RWMutex
+	// dirtySegmentsLock guards the dirty tree and the generation chain (publish/reclaim);
+	// sharing one lock makes a dirty mutation and its publish one atomic step.
+	dirtySegmentsLock sync.RWMutex
+	dirty             map[string]*btree.BTreeG[*DirtySegment] // ordered map type name -> DirtySegments
 
-	// BeaconBlocks *segments
-	// BlobSidecars *segments
-	// Segments      map[string]*segments
-	dirtyLock sync.RWMutex                            // guards `dirty` field
-	dirty     map[string]*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
-
-	visibleLock sync.RWMutex // guards  `visible` field
-	visible     sync.Map
-	//visible     map[string]VisibleSegments // ordered map `type.Enum()` -> VisbileSegments
+	// visible is the current published generation, read lock-free by readers; oldestVisible is the
+	// chain head reclamation walks from. A generation's retired files are closed and unlinked once
+	// its refcnt drains to 0. Mirrors the EL BaseRoSnapshots refcount model.
+	visible       atomic.Pointer[caplinStateVisible]
+	oldestVisible *caplinStateVisible // guarded by dirtySegmentsLock
 
 	snapshotTypes SnapshotTypes
 
@@ -170,6 +168,64 @@ type CaplinStateSnapshots struct {
 	logger      log.Logger
 	// chain cfg
 	beaconCfg *clparams.BeaconChainConfig
+}
+
+// caplinStateVisible is one published, immutable generation of the visible file set across all
+// caplin state types. Readers pin it via acquireVisible/releaseVisible; its retired files are
+// closed and unlinked only once every reader that pinned it drains (refcnt hits 0).
+type caplinStateVisible struct {
+	segments map[string]VisibleSegments // type name -> visible segments
+	refcnt   atomic.Int32               // live readers pinning this generation
+	retired  []*DirtySegment            // files this generation was the last to reference; unlinked on drain
+	next     *caplinStateVisible        // oldest->newest chain link (set under dirtySegmentsLock)
+}
+
+// acquireVisible pins the current generation. Load and increment are not atomic together, so after
+// incrementing we re-check the generation is still current; if superseded mid-pin we drop the stale
+// pin and retry (hazard-pointer style).
+func (s *CaplinStateSnapshots) acquireVisible() *caplinStateVisible {
+	for {
+		v := s.visible.Load()
+		v.refcnt.Add(1)
+		if s.visible.Load() == v {
+			return v
+		}
+		s.releaseVisible(v)
+	}
+}
+
+// releaseVisible drops a pin taken by acquireVisible; the last reader of a superseded generation
+// triggers reclamation of drained generations' retired files.
+func (s *CaplinStateSnapshots) releaseVisible(v *caplinStateVisible) {
+	if v.refcnt.Add(-1) == 0 {
+		s.reclaimRetired()
+	}
+}
+
+// reclaimRetiredLocked walks the oldest->newest chain from the head, collecting the retired files of
+// every fully-drained generation older than the current one. Caller must hold dirtySegmentsLock; the
+// returned files are closed and unlinked by the caller off-lock.
+func (s *CaplinStateSnapshots) reclaimRetiredLocked() (toDelete []*DirtySegment) {
+	cur := s.visible.Load()
+	for h := s.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
+		toDelete = append(toDelete, h.retired...)
+		h.retired = nil
+		s.oldestVisible = h.next
+	}
+	return toDelete
+}
+
+func (s *CaplinStateSnapshots) reclaimRetired() {
+	s.dirtySegmentsLock.Lock()
+	toDelete := s.reclaimRetiredLocked()
+	s.dirtySegmentsLock.Unlock()
+	closeAndRemoveSegments(toDelete)
+}
+
+// drained reports whether no generation older than the current one is still pinned. Caller must
+// hold dirtySegmentsLock (oldestVisible is lock-guarded).
+func (s *CaplinStateSnapshots) drained() bool {
+	return s.oldestVisible == s.visible.Load()
 }
 
 type KeyValueGetter func(numId uint64) ([]byte, []byte, error)
@@ -207,10 +263,16 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	}
 
 	c := &CaplinStateSnapshots{snapshotTypes: snapshotTypes, dir: dirs.SnapCaplin, tmpdir: dirs.Tmp, cfg: cfg, dirty: dirty, logger: logger, beaconCfg: beaconCfg}
-	for k := range snapshotTypes.KeyValueGetters {
-		c.visible.Store(k, make(VisibleSegments, 0))
+	empty := &caplinStateVisible{segments: make(map[string]VisibleSegments, len(dirty))}
+	for k := range dirty {
+		empty.segments[k] = make(VisibleSegments, 0)
 	}
-	c.recalcVisibleFiles()
+	c.visible.Store(empty)
+	c.oldestVisible = empty
+
+	c.dirtySegmentsLock.Lock()
+	c.recalcVisibleFiles(nil)
+	c.dirtySegmentsLock.Unlock()
 	return c
 }
 
@@ -230,13 +292,11 @@ func (s *CaplinStateSnapshots) LS() {
 	defer view.Close()
 
 	var stats seg.Stats
-	for _, roTx := range view.roTxs {
-		if roTx != nil {
-			for _, sn := range roTx.Segments {
-				d := sn.src.Decompressor
-				s.logger.Info("[agg] ", "f", d.FileName(), "words", d.Count(), "dictOnDisk", common.ByteCount(d.SerializedTotalDictSize()), "dictMem", common.ByteCount(d.DictMemSize()))
-				stats.Add(d)
-			}
+	for _, segs := range view.visible.segments {
+		for _, sn := range segs {
+			d := sn.src.Decompressor
+			s.logger.Info("[agg] ", "f", d.FileName(), "words", d.Count(), "dictOnDisk", common.ByteCount(d.SerializedTotalDictSize()), "dictMem", common.ByteCount(d.DictMemSize()))
+			stats.Add(d)
 		}
 	}
 	s.logger.Info("[agg] total", "words", stats.Words, "dictOnDisk", common.ByteCount(stats.Dict), "dictMem", common.ByteCount(stats.DictMem))
@@ -247,18 +307,13 @@ func (s *CaplinStateSnapshots) SegFileNames(from, to uint64) []string {
 	defer view.Close()
 
 	var res []string
-
-	for _, roTx := range view.roTxs {
-		if roTx == nil {
-			continue
-		}
-		for _, seg := range roTx.Segments {
+	for _, segs := range view.visible.segments {
+		for _, seg := range segs {
 			if seg.from >= to || seg.to <= from {
 				continue
 			}
 			res = append(res, seg.src.filePath)
 		}
-
 	}
 	return res
 }
@@ -277,17 +332,7 @@ func (s *CaplinStateSnapshots) TypeNames() []string {
 }
 
 func (s *CaplinStateSnapshots) coveredRangesForType(name string) []Range {
-	s.visibleLock.RLock()
-	defer s.visibleLock.RUnlock()
-
-	v, ok := s.visible.Load(name)
-	if !ok {
-		return nil
-	}
-	segs, ok := v.(VisibleSegments)
-	if !ok {
-		return nil
-	}
+	segs := s.visible.Load().segments[name]
 	ranges := make([]Range, 0, len(segs))
 	for _, seg := range segs {
 		ranges = append(ranges, seg.Range)
@@ -319,7 +364,16 @@ func (s *CaplinStateSnapshots) Close() {
 	s.dirtySegmentsLock.Lock()
 	defer s.dirtySegmentsLock.Unlock()
 
-	s.closeWhatNotInList(nil)
+	detached := s.detachNotInList(nil)
+	s.recalcVisibleFiles(nil)
+
+	if s.drained() {
+		for _, sn := range detached {
+			sn.close()
+		}
+	} else {
+		s.logger.Warn("[caplin-state] Close called with live readers; leaving fds open")
+	}
 }
 
 func (s *CaplinStateSnapshots) openSegIfNeed(sn *DirtySegment, filepath string) error {
@@ -336,12 +390,15 @@ func (s *CaplinStateSnapshots) openSegIfNeed(sn *DirtySegment, filepath string) 
 
 // OpenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) error {
-	defer s.recalcVisibleFiles()
-
 	s.dirtySegmentsLock.Lock()
 	defer s.dirtySegmentsLock.Unlock()
 
-	s.closeWhatNotInList(fileNames)
+	// Detach segments no longer in the list and retire them: fds close and the (already-absent)
+	// file is unlink-no-op'd once readers of the outgoing generation drain. Publish once, after all
+	// new files open, so no reader sees a transient set with stale gone but new not yet visible.
+	retired := s.detachNotInList(fileNames)
+	defer s.recalcVisibleFiles(retired)
+
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 	for _, fName := range fileNames {
@@ -449,15 +506,12 @@ func isIndexed(s *DirtySegment) bool {
 	return true
 }
 
-func (s *CaplinStateSnapshots) recalcVisibleFiles() {
-	defer func() {
-		s.idxMax.Store(s.idxAvailability())
-		s.indicesReady.Store(true)
-	}()
-
-	s.visibleLock.Lock()
-	defer s.visibleLock.Unlock()
-
+// recalcVisibleFiles builds a fresh visible bundle from dirty and publishes it as the new
+// generation. Must be called with dirtySegmentsLock held so the caller's dirty mutation and this
+// publish are one atomic step. retired are files removed from dirty during the outgoing generation's
+// tenure; they are closed and unlinked once no reader pins that generation. Ordinary visibility
+// replacement passes nil.
+func (s *CaplinStateSnapshots) recalcVisibleFiles(retired []*DirtySegment) {
 	getNewVisibleSegments := func(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSegments {
 		newVisibleSegments := make(VisibleSegments, 0, dirtySegments.Len())
 		dirtySegments.Walk(func(segments []*DirtySegment) bool {
@@ -486,26 +540,46 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 		return newVisibleSegments
 	}
 
-	// for k := range s.visible {
-	// 	s.visible[k] = getNewVisibleSegments(s.dirty[k])
-	// }
-	s.visible.Range(func(k, v any) bool {
-		s.visible.Store(k, getNewVisibleSegments(s.dirty[k.(string)]))
-		return true
-	})
+	segments := make(map[string]VisibleSegments, len(s.dirty))
+	for k, dirtySegments := range s.dirty {
+		segments[k] = getNewVisibleSegments(dirtySegments)
+	}
+
+	next := &caplinStateVisible{segments: segments}
+	old := s.visible.Load()
+	old.retired = retired
+	old.next = next
+	s.visible.Store(next)
+	closeAndRemoveSegments(s.reclaimRetiredLocked())
+
+	s.idxMax.Store(idxAvailabilityFrom(segments))
+	s.indicesReady.Store(true)
 }
 
-// RemoveOverlaps deletes state segment files that are fully covered by a larger
-// indexed segment of the same type, so the on-disk publishable check stops flagging
-// them as overlapping. Offline maintenance only: it munmaps and unlinks files, so no
-// CaplinStateView may be open concurrently.
+// RemoveOverlaps retires state segment files fully covered by a larger indexed segment of the same
+// type, so the on-disk publishable check stops flagging them as overlapping. The covered subsets are
+// handed to publish as retired; the drain-gated reclaim closes and unlinks them once no reader pins
+// the outgoing generation — nothing is closed or removed inline. The temp View pin taken here forces
+// the drain, so with no other reader the covered files are gone by the time this returns.
 func (s *CaplinStateSnapshots) RemoveOverlaps() error {
 	if s == nil {
 		return nil
 	}
-	s.dirtySegmentsLock.Lock()
+	v := s.View()
+	defer v.Close()
 
-	var toRemove []*DirtySegment
+	s.dirtySegmentsLock.Lock()
+	s.recalcVisibleFiles(s.detachOverlappedSubsets())
+	s.dirtySegmentsLock.Unlock()
+	return nil
+}
+
+// detachOverlappedSubsets removes from dirty and returns for retirement every segment fully covered
+// by a larger indexed segment of the same type. Coverage is index-aware: an un-indexed superset
+// can't serve reads, so a subset it covers is kept until the superset is indexed, while a covered
+// subset is dropped regardless of its own index state. Caller must hold dirtySegmentsLock.
+func (s *CaplinStateSnapshots) detachOverlappedSubsets() []*DirtySegment {
+	var retired []*DirtySegment //nolint:prealloc // sparse subset of dirty; full prealloc over-allocates
 	for _, dirtySegments := range s.dirty {
 		var indexed []*DirtySegment
 		dirtySegments.Walk(func(segments []*DirtySegment) bool {
@@ -533,44 +607,58 @@ func (s *CaplinStateSnapshots) RemoveOverlaps() error {
 		for _, sn := range rm {
 			dirtySegments.Delete(sn)
 		}
-		toRemove = append(toRemove, rm...)
+		retired = append(retired, rm...)
 	}
-
-	s.dirtySegmentsLock.Unlock()
-
-	s.recalcVisibleFiles()
-
-	for _, sn := range toRemove {
-		s.logger.Info("[caplin-state] removing overlapped segment", "file", sn.FileName())
-		sn.closeAndRemoveFiles()
-	}
-	return nil
+	return retired
 }
 
-func (s *CaplinStateSnapshots) idxAvailability() uint64 {
-	s.visibleLock.RLock()
-	defer s.visibleLock.RUnlock()
+// detachNotInList removes from dirty and returns (without closing) every segment whose file is not
+// in protect. Caller must hold dirtySegmentsLock; the caller owns closing or retiring the result.
+func (s *CaplinStateSnapshots) detachNotInList(protect []string) []*DirtySegment {
+	protectFiles := make(map[string]struct{}, len(protect))
+	for _, fName := range protect {
+		protectFiles[fName] = struct{}{}
+	}
+	total := 0
+	for _, dirtySegments := range s.dirty {
+		total += dirtySegments.Len()
+	}
+	detached := make([]*DirtySegment, 0, total)
+	for _, dirtySegments := range s.dirty {
+		var toDelete []*DirtySegment
+		dirtySegments.Walk(func(segments []*DirtySegment) bool {
+			for _, sn := range segments {
+				// sn.filePath, not the promoted Decompressor.FilePath(): the field is set
+				// for every tree member, incl. stubs whose Decompressor is nil.
+				_, name := filepath.Split(sn.filePath)
+				if _, ok := protectFiles[name]; ok {
+					continue
+				}
+				toDelete = append(toDelete, sn)
+			}
+			return true
+		})
+		for _, sn := range toDelete {
+			dirtySegments.Delete(sn)
+		}
+		detached = append(detached, toDelete...)
+	}
+	return detached
+}
 
+// idxAvailabilityFrom is the min visible .idx height across the candidate bundle about to be
+// published (read from the candidate, never the already-published generation). A configured type
+// with no visible segment caps availability at 0.
+func idxAvailabilityFrom(segments map[string]VisibleSegments) uint64 {
 	min := uint64(math.MaxUint64)
-	// for _, segs := range s.visible {
-	// 	if len(segs) == 0 {
-	// 		return 0
-	// 	}
-	// 	if segs[len(segs)-1].to < min {
-	// 		min = segs[len(segs)-1].to
-	// 	}
-	// }
-	s.visible.Range(func(_, v any) bool {
-		segs := v.(VisibleSegments)
+	for _, segs := range segments {
 		if len(segs) == 0 {
-			min = 0
-			return false
+			return 0
 		}
 		if segs[len(segs)-1].to < min {
 			min = segs[len(segs)-1].to
 		}
-		return true
-	})
+	}
 	if min == math.MaxUint64 {
 		return 0
 	}
@@ -600,76 +688,34 @@ func (s *CaplinStateSnapshots) OpenFolder() error {
 	return s.OpenList(listAllSegFilesInDir(s.dir), false)
 }
 
-func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
-	protectFiles := make(map[string]struct{}, len(l))
-	for _, fName := range l {
-		protectFiles[fName] = struct{}{}
-	}
-
-	for _, dirtySegments := range s.dirty {
-		closeAndDropNotProtected(dirtySegments, protectFiles, func(sn *DirtySegment) string {
-			// sn.filePath, not the promoted Decompressor.FilePath(): the field is
-			// set for every tree member, incl. stubs whose Decompressor is nil.
-			_, name := filepath.Split(sn.filePath)
-			return name
-		})
-	}
-}
-
 type CaplinStateView struct {
-	s      *CaplinStateSnapshots
-	roTxs  map[string]*RoTx
-	closed bool
+	s       *CaplinStateSnapshots
+	visible *caplinStateVisible // the pinned generation; released once by Close
+	closed  bool
 }
 
 func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	if s == nil {
 		return nil
 	}
-	s.visibleSegmentsLock.RLock()
-	defer s.visibleSegmentsLock.RUnlock()
-
-	v := &CaplinStateView{s: s, roTxs: make(map[string]*RoTx)}
-	// BeginRo increments refcount - which is contended
-	s.dirtySegmentsLock.RLock()
-	defer s.dirtySegmentsLock.RUnlock()
-
-	// for k, segments := range s.visible {
-	// 	v.roTxs[k] = segments.BeginRo()
-	// }
-	s.visible.Range(func(k, val any) bool {
-		v.roTxs[k.(string)] = val.(VisibleSegments).BeginRo()
-		return true
-	})
-	return v
+	return &CaplinStateView{s: s, visible: s.acquireVisible()}
 }
 
 func (v *CaplinStateView) Close() {
-	if v == nil {
+	if v == nil || v.closed {
 		return
 	}
-	if v.closed {
-		return
-	}
-	for _, segments := range v.roTxs {
-		segments.Close()
-	}
+	v.s.releaseVisible(v.visible)
 	v.s = nil
+	v.visible = nil
 	v.closed = true
 }
 
 func (v *CaplinStateView) VisibleSegments(tbl string) VisibleSegments {
-	// if v.s == nil || v.s.visible[tbl] == nil {
-	// 	return nil
-	// }
-	// return v.s.visible[tbl]
-	if v.s == nil {
+	if v == nil || v.visible == nil {
 		return nil
 	}
-	if val, ok := v.s.visible.Load(tbl); ok {
-		return val.(VisibleSegments)
-	}
-	return nil
+	return v.visible.segments[tbl]
 }
 
 func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*VisibleSegment, bool) {
