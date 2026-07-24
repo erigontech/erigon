@@ -172,16 +172,12 @@ type Orchestrator struct {
 	// configured with --snap.bootstrap-from-preverified. Cleared by
 	// onPeerManifestReceived when it sees PeerID == "bootstrap-preverified".
 	//
-	// Closes the live-rig 2026-06-02 race: without this gate, the
-	// inventory ChangeSet watcher (started in Start) fires
-	// tryFireInitialStateReady on the very first ChangeSet — before
-	// BootstrapFromPreverified has had a chance to publish its
-	// synthetic manifest. phase1Files is empty in that window so the
-	// gate would open with phase1_total=0; postIndexed would then run
-	// against a partial inventory view (e.g. blockReader.frozenBlocks
-	// = 2,899,999 instead of 2,935,999), and execution would fail
-	// with "nil block N" on the very next block after the partial
-	// view's tip.
+	// Without this gate, the inventory ChangeSet watcher can fire
+	// tryFireInitialStateReady on the first ChangeSet before
+	// BootstrapFromPreverified has published its synthetic manifest —
+	// phase1Files is empty in that window, so the gate opens on a
+	// partial inventory view and execution fails on the next block
+	// past the truncated tip.
 	//
 	// Read/written under peerMu (same as stateReadyFired).
 	awaitingBootstrap bool
@@ -671,14 +667,12 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 	// Phase-1 covers state-domain files AND every block file kind
 	// (headers + bodies + transactions). Caplin .seg flows through
 	// requestSimpleGaps (phase1=false) and is intentionally excluded from
-	// the gate. InitialStateReady fires only after the full phase-1 set is
-	// Indexed: postIndexed's FillDBFromSnapshots uses
-	// blockReader.FrozenBlocks() computed under alignMin=true as
-	// min(headers, bodies, transactions) — any missing block-kind collapses
-	// the count to 0 and the seed becomes a no-op (observed 2026-05-18:
-	// kv.HeaderTD left unpopulated; Caplin's BlockCollector then failed for
-	// 9.5h on a missing parent TD). Caplin's "headers only" path uses
-	// BlockHeadersReady, a separate earlier signal — that stays unaffected.
+	// the gate. InitialStateReady fires only after the full phase-1 set
+	// is Indexed: postIndexed's FillDBFromSnapshots uses
+	// blockReader.FrozenBlocks() with alignMin=true (min of headers,
+	// bodies, transactions), so a missing block-kind collapses the
+	// count to 0 and the seed becomes a no-op. Caplin's "headers only"
+	// path uses BlockHeadersReady, an earlier signal — unaffected.
 	toRequest := make([]*snapshot.FileEntry, 0, len(peerEntries))
 	o.peerMu.Lock()
 	for _, entry := range peerEntries {
@@ -724,16 +718,8 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 		return toRequest[i].Name > toRequest[j].Name
 	})
 
-	// State-domain files and ALL block files (headers + bodies +
-	// transactions) are phase 1: InitialStateReady gates on them.
-	// Stages 2-6 call rawdbreset.FillDBFromSnapshots, which uses
-	// blockReader.FrozenBlocks() computed under alignMin=true as
-	// min(headers, bodies, transactions) — if any block type is
-	// missing it collapses to 0 and the seed is a no-op (observed
-	// 2026-05-18: kv.HeaderTD unpopulated, Caplin's BlockCollector
-	// failed for 9.5h on a missing parent TD). The only phase-2
-	// artefact, Caplin .seg, is routed by requestSimpleGaps
-	// (phase1=false) and never reaches this function.
+	// State-domain files and every block-file kind gate InitialStateReady
+	// via the phase-1 set. Caplin .seg is phase 2 and routed elsewhere.
 	phase1 := toRequest
 
 	o.peerMu.Lock()

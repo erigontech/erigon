@@ -65,14 +65,9 @@ func chunkAlignedToBlock(toBlock uint64) uint64 {
 // straightforward and to tolerate any edge-case asymmetry from
 // historical retire boundaries.
 //
-// When block snapshots have been merged (1000-block chunks rolled up
-// into 100k-block chunks) the inventory can carry stale entries for
-// the original sub-chunks alongside the merged superset. Multiple
-// inventory entries can then straddle toBlock at once. Prefer the
-// widest range — the merged superset is the file actually on disk;
-// the stale sub-chunk would fail to open in seedLeftoverBlocks (live
-// 2026-06-12 wedge: setHead→2,996,374 looked up v1.1-002996-002997
-// while the disk only had v1.1-002900-003000).
+// Post-merge, inventory can carry both the merged superset and its
+// stale sub-chunks. Prefer the widest range — the sub-chunk file no
+// longer exists on disk, so seedLeftoverBlocks would fail to open it.
 func (p *Provider) straddleBlockFileForType(toBlock uint64, typeEnum snaptype.Enum) (*snaptype.FileInfo, error) {
 	if p.Inventory == nil {
 		return nil, nil
@@ -164,11 +159,8 @@ func (p *Provider) rebuildBlockStraddles(ctx context.Context, tx kv.RwTx, toBloc
 			// [newToBlock = straddle.From, toBlock] into the writable
 			// DB from the OLD file (still on disk until
 			// FinalizeUnwind). The strictly-past collector misses
-			// this file because FromBlock ≤ toBlock — it's the
-			// straddle, not strictly past — so without queueing it
-			// here the stale .seg stays on disk and the catch-up
-			// downloader walks into blocks past the new head whose
-			// TD was wiped (live-rig 2026-06-02 wedge).
+			// the straddle (FromBlock ≤ toBlock) — queue it here
+			// so the stale .seg doesn't survive the swap.
 			toRemoveStraddles = append(toRemoveStraddles, &storageSnapshotFileRef{Name: straddle.Name()})
 			for _, idxName := range straddle.Type.IdxFileNames(straddle.From, straddle.To) {
 				toRemoveStraddles = append(toRemoveStraddles, &storageSnapshotFileRef{Name: idxName})
@@ -176,14 +168,8 @@ func (p *Provider) rebuildBlockStraddles(ctx context.Context, tx kv.RwTx, toBloc
 			continue
 		}
 		if newToBlock >= straddle.To {
-			// Aligned newTo lands at or past the straddle's upper
-			// bound — the entire file's range [From, To) is within
-			// the surviving range [0, newTo). No rebuild needed;
-			// no removal queued. The file stays in place untouched.
-			// Live-caught 2026-06-13 soak iter 1 mode_a2: target
-			// 3,010,999 chunk-aligns to newTo=3,011,000 == straddle
-			// v1.1-003010-003011's To boundary; sliceStraddleSeg
-			// then rejected it as "outside straddle (3010000, 3011000)".
+			// Aligned newTo reaches the straddle's upper bound; the
+			// file's whole range survives untouched — no rebuild.
 			continue
 		}
 		newFI, rerr := s.rebuild(ctx, *straddle, newToBlock, p.snapDir, p.snapTmpDir, p.ChainConfig, p.logger)
@@ -194,17 +180,11 @@ func (p *Provider) rebuildBlockStraddles(ctx context.Context, tx kv.RwTx, toBloc
 		for _, idxName := range newFI.Type.IdxFileNames(newFI.From, newFI.To) {
 			rebuildPaths = append(rebuildPaths, filepath.Join(newFI.Dir(), idxName))
 		}
-		// Inventory write-through: the rebuild wrote a new primary
-		// file on disk; tell Inventory now so reads (LocalBlockTip,
-		// straddleBlockFileForType, etc.) see it immediately. The
-		// LifecycleDriver's periodic Sweep would eventually pick it
-		// up via disk-scan, but the ~60s gap between rebuild and the
-		// next Sweep tick leaves Caplin's stop-bound query (fired
-		// within seconds of UnwindCompleted) reading stale data —
-		// the contiguity walk stops at the highest contiguous
-		// pre-rebuild chunk instead of the new rebuilt tip, yielding
-		// 0 if any of headers/bodies/transactions lacks a contiguous
-		// chain. Live-caught 2026-06-28 iter-4 wedge.
+		// Inventory write-through: without this the LifecycleDriver's
+		// periodic Sweep is the only path to Inventory, and Caplin's
+		// stop-bound query fires within seconds of UnwindCompleted —
+		// long before the next Sweep tick — reading a contiguity walk
+		// that stops before the new rebuilt tip.
 		if p.Inventory != nil {
 			if err := p.Inventory.AddFile(&snapshot.FileEntry{
 				Name:         filepath.Base(newFI.Path),

@@ -25,47 +25,12 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// recoverOrphanRegenSidecars cleans up `.old` and `.regen` files left
-// behind by a crash mid-Provider.Unwind or mid-FinalizeUnwind. Both
-// kinds of sidecar are transient — they exist only during an active
-// mode-B unwind transaction — so any of them on disk at startup is an
-// unfinished transaction we need to roll back.
-//
-// Recovery rule for each orphan kind:
-//
-//   - `<name>.regen`: the regen scratch file written during
-//     Provider.Unwind. If FinalizeUnwind ran, this would already be
-//     renamed to its truncated final path. If we find it on disk at
-//     startup, that mode-B's tx either never reached commit (Abort-
-//     Unwind's cleanup didn't run) or FinalizeUnwind crashed before
-//     the rename. Either way, drop the .regen; the next mode-B will
-//     regenerate from the canonical file.
-//
-//   - `<name>.old`: the original broad .kv file renamed aside during
-//     FinalizeUnwind's swap. If the swap completed, the .old would
-//     have been unlinked at the end. If we find it on disk at
-//     startup, FinalizeUnwind crashed somewhere between the rename
-//     and the unlink. Recovery depends on whether the swap had
-//     completed by the crash:
-//
-//     (a) `<name>.kv` exists on disk → swap completed (broad was
-//     renamed to .old, regen successfully renamed into the
-//     target spot, .old unlink failed/skipped). Drop the .old;
-//     the new .kv is canonical.
-//
-//     (b) `<name>.kv` does NOT exist → swap incomplete (broad was
-//     renamed to .old, but no replacement file landed at
-//     <name>.kv). Restore the broad by renaming .old back to
-//     the original name. The next mode-B will redo the regen.
-//
-// The .kv accessor sidecars (.bt, .kvi, .kvei) follow the same logic
-// — they get the same .old dance in FinalizeUnwind. We sweep the
-// same patterns over both the top-level snapDir AND the per-kind
-// subdirs (domain/, history/, idx/, accessor/) where state-domain
-// files live.
-//
-// Idempotent. Best-effort: failures are logged + skipped; a subsequent
-// restart re-attempts cleanup of anything that survived.
+// recoverOrphanRegenSidecars rolls back a mode-B unwind transaction
+// interrupted by a crash. `.regen` files always drop (unfinished
+// regen). `.old` files depend on the swap state: if the target `.kv`
+// exists the swap completed and the .old is deleted; otherwise the
+// swap was incomplete and the .old is renamed back into place.
+// Sweeps snapDir and its per-kind subdirs. Idempotent, best-effort.
 func (p *Provider) recoverOrphanRegenSidecars() {
 	if p.snapDir == "" {
 		return

@@ -153,13 +153,9 @@ type BlockRetire struct {
 	lastRetireGapStart atomic.Uint64
 
 	// retireCancel holds the cancel func for the currently-running
-	// retire goroutine (set on launch in RetireBlocksInBackground,
-	// cleared on goroutine exit). CancelInFlight uses it to abort
-	// retire when an admin SetHead Mode-B unwind targets a block
-	// below retire's range — retire would otherwise produce snapshot
-	// /.idx files for blocks the unwind is about to remove (wasted
-	// work + recovery wedge: 1803s timeout in iter 3 of the 5-iter
-	// soak 2026-06-14). Reads/writes via Load/Store on the atomic.
+	// retire goroutine so SetHead's mode-B can abort retire before it
+	// writes .seg/.idx files for blocks the unwind is about to remove.
+	// Read/written via Load/Store on the atomic.
 	retireCancel atomic.Pointer[context.CancelFunc]
 
 	// shared semaphore with AggregatorV3 to allow only one type of snapshot building at a time
@@ -353,18 +349,11 @@ func (br *BlockRetire) CleanOrphanSegsPastTarget(targetBlock uint64) ([]string, 
 }
 
 // NotifyMergedSnapshotFiles fires the registered NotifyOnFilesChange
-// callback for the given block-snapshot file names. MergeBlocks
-// calls this after a merge produces a wider .seg (e.g.
-// v1.1-003020-003030 from 10 sub-chunks), so the Provider's onChange
-// hook can run inv.AddFile and Inventory ends up with the merged
-// entry. Without this, the merged file lives on disk and in
-// chain.toml but never reaches Inventory — straddleBlockFileForType
-// then returns nil at unwind time, the rebuild loop has no work,
-// and the stale 10k chunk stays past the new EL head (live-caught
-// 2026-06-17 5-iter soak v11 iter 1 mode_b).
-//
-// nil-safe on three axes: nil notifier, nil/empty names list,
-// nil-registered callback inside the notifier.
+// callback for the given block-snapshot names. MergeBlocks calls this
+// after a merge produces a wider .seg so Inventory picks up the
+// merged entry; without it, straddleBlockFileForType returns nil at
+// unwind time and the pre-merge chunks survive past the new tip.
+// nil-safe against a nil notifier / empty names / nil callback.
 func (br *BlockRetire) NotifyMergedSnapshotFiles(names []string) {
 	if br == nil || br.filesNotifier == nil || len(names) == 0 {
 		return
@@ -373,18 +362,11 @@ func (br *BlockRetire) NotifyMergedSnapshotFiles(names []string) {
 }
 
 // NotifyDeletedSnapshotFiles fires the registered NotifyOnFilesDelete
-// callback for the given block-snapshot file names. MergeBlocks calls
-// this after a merge has consolidated sub-chunks into a wider file,
-// so the Provider's onDelete hook can run inv.RemoveFile and keep
-// Inventory in sync with disk. Without this, Inventory keeps stale
-// sub-chunk entries that point at files merge already removed —
-// surfaced as a Provider.Unwind seedLeftoverBlocks failure trying to
-// open a path that no longer exists (2026-06-15 5-iter soak iter 1
-// mode_a2).
-//
-// nil-safe on three axes: nil notifier (CLI tool / standalone use),
-// nil/empty names list (caller didn't capture any deletions),
-// nil-registered callback inside the notifier.
+// callback for the given block-snapshot names. MergeBlocks calls this
+// after consolidating sub-chunks so Inventory drops entries pointing
+// at files merge already removed; without it, seedLeftoverBlocks
+// tries to open paths that no longer exist. nil-safe against a nil
+// notifier / empty names / nil callback.
 func (br *BlockRetire) NotifyDeletedSnapshotFiles(names []string) {
 	if br == nil || br.filesNotifier == nil || len(names) == 0 {
 		return
@@ -681,12 +663,9 @@ func (br *BlockRetire) MergeBlocks(
 		}
 		return seeder.Seed(ctx, mergedFileNames)
 	}
-	// Capture every deleted sub-chunk so we can fire NotifyOnFilesDelete
-	// after the merge — that's what drives the Provider's onDelete
-	// hook (inv.RemoveFile). Without it Inventory keeps stale per-step
-	// entries that point at files the merge consolidated away (Mode-B
-	// seedLeftoverBlocks then tries to open the wrong path; live-caught
-	// 2026-06-15 soak iter 1 mode_a2).
+	// Capture every deleted sub-chunk so NotifyOnFilesDelete drives
+	// Provider.onDelete (inv.RemoveFile); otherwise Inventory keeps
+	// stale per-step entries pointing at consolidated-away files.
 	var deletedSubChunks []string
 	captureDelete := func(ctx context.Context, names []string) error {
 		// Convert to basenames so the eventual NotifyOnFilesDelete →
@@ -1364,17 +1343,11 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom,
 		return 0, err
 	}
 
-	// Verify the produced range matches the requested range. kv.BigChunks
-	// silently skips missing canonical-hash entries, so a sparse
-	// kv.HeaderCanonical (typical below pruneMarkerBlockThreshold under
-	// --prune.mode=minimal) yields fewer entries than blockTo-blockFrom
-	// but the caller's file path advertises the full range. Without this
-	// check, a partial-content file lands on disk under the full-range
-	// name — later reads/rebuilds trust the filename and hit
-	// "source ran out at entry N (wanted M)". Live-caught 2026-07-24
-	// tdfix-verify iter 24: retire produced
-	// v1.1-003120-003130-headers.seg with 5000 entries after mode-B
-	// unwind left canonical hashes sparse below the prune threshold.
+	// kv.BigChunks silently skips missing canonical-hash entries, so a
+	// sparse kv.HeaderCanonical (below pruneMarkerBlockThreshold under
+	// --prune.mode=minimal) yields fewer entries than the file's
+	// advertised range and later reads/rebuilds hit "source ran out at
+	// entry N (wanted M)".
 	if !test && emitted != (blockTo-blockFrom) {
 		return 0, fmt.Errorf("canonical hashes sparse in requested range: got %d entries for [%d, %d) (expected %d)", emitted, blockFrom, blockTo, blockTo-blockFrom)
 	}

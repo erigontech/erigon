@@ -26,56 +26,17 @@ import (
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
-// unwindSnapshotsPastBlock removes every snapshot file whose content
-// extends past toBlock. Mode-B sub-op #1; runs under the
-// post-quiescence precondition established by Provider.Unwind's caller.
+// unwindSnapshotsPastBlock removes every snapshot file whose entire
+// content lies past toBlock: block files with FromBlock > toBlock and
+// state/history/idx files with FromStep >= stepBoundary. Straddle
+// files stay — block straddles source [FromBlock, toBlock] for the
+// writable DB, state straddles are regen-truncated in place by
+// regenerateBoundaryStepFiles. Caplin/meta/salt files are out of
+// scope (different axes).
 //
-// Works for both aligned cuts (lastTxNum at a step boundary; the file
-// containing lastTxNum ends exactly at that boundary, so trimming
-// leaves the file's coverage matching the new tip) and non-aligned
-// cuts (lastTxNum mid-step; the file containing lastTxNum keeps its
-// excess coverage past lastTxNum, which is masked at read time by the
-// writable shadow's boundary-step diff-replay — see
-// WipeWritableShadowPast).
-//
-// Files removed:
-//
-//   - block files where FromBlock > toBlock — i.e. files whose
-//     entire content is strictly past the new tip. The straddle
-//     file (FromBlock ≤ toBlock < ToBlock) STAYS: it still holds
-//     the headers / bodies / etc. for blocks in [FromBlock,
-//     toBlock], which the DB-reset's CanonicalHash truncation
-//     gates from being visible past toBlock. Removing the straddle
-//     file would leave the writable DB with no source for blocks
-//     in [FromBlock, toBlock], so a subsequent BlockReader read of
-//     those headers would return nil — exactly the failure mode
-//     that issue #2 from the 2026-06-01 live cycle surfaced: a
-//     second mode B targeting a block inside the removed straddle
-//     file's range failed with "no header for block N".
-//   - domain / history / idx files (all step-indexed) where
-//     FromStep >= stepBoundary, where stepBoundary ==
-//     (lastTxNum/stepSize)+1 — that is, files whose entire content
-//     lies strictly past the step containing lastTxNum. The straddle
-//     file (FromStep < stepBoundary ≤ ToStep) stays and is regen-
-//     truncated in place by regenerateBoundaryStepFiles; without
-//     that, the commitment-domain anchor is never planted at the new
-//     tip and Caplin's catchup wedges on `behind commitment`.
-//
-// Caplin / meta / salt files are intentionally out of scope here:
-// caplin lives on a slot axis (separate aligned-mode workstream);
-// meta + salt are chain-wide rather than per-range, so "past
-// toBlock" doesn't apply.
-//
-// Removal sequence per file:
-//
-//  1. Inventory.RemoveFile — held-view refcounts get pendingDeletes;
-//     ChangeSet subscribers see one notification per file.
-//  2. Filesystem delete (file + companion .torrent) — idempotent.
-//  3. downloaderClient.Delete (relative names) — stops seeding.
-//  4. republishChainToml — peers see the shorter manifest.
-//
-// Returns the sorted list of removed file names (relative to snapDir)
-// for the caller to log or test against.
+// Per-file: Inventory.RemoveFile → FS delete (file + .torrent) →
+// downloaderClient.Delete → republishChainToml. Returns the sorted
+// removed names for caller logging.
 func (p *Provider) unwindSnapshotsPastBlock(ctx context.Context, tx kv.TemporalRwTx, toBlock uint64) ([]string, error) {
 	if p.Inventory == nil {
 		// No inventory to traverse; nothing to trim. Tools / tests

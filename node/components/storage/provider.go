@@ -110,11 +110,7 @@ type Provider struct {
 	// together in Initialize when storage owns the lifecycle. The
 	// channel is exposed so backend.go can plumb it into
 	// cfg.Snapshot.InitialStateReady; the bus + orchestrator stay
-	// internal. NOTE: until the framework wires sentry/downloader
-	// to a shared bus, the orchestrator's input events
-	// (PeerManifestReceived / DownloadComplete) never arrive, so
-	// InitialStateReady will not fire in production today — see
-	// memory/shared-bus-wiring-todo.md.
+	// internal.
 	eventBus          event.EventBus
 	eventPool         *workerpool.WorkerPool
 	Orchestrator      *flow.Orchestrator
@@ -132,10 +128,6 @@ type Provider struct {
 	// a meaningful FrozenBlocks() tip and doesn't race the EL's
 	// snapshot-open by walking back to Bellatrix epoch.
 	//
-	// Architectural rule: only the storage component is aware of the
-	// downloader / snapshot lifecycle; Caplin (and every other
-	// non-storage consumer) depends on the storage bus event, never
-	// on the downloader directly.
 	BlockHeadersReady <-chan struct{}
 
 	// bootstrapChainName is set in Initialize when
@@ -1030,17 +1022,10 @@ func (p *Provider) Initialize(deps Deps) error {
 		// (C) Step 2: wire the post-Indexed callback. Storage now owns
 		// the file-open work that previously lived in
 		// stage_snapshots.go (lines 339-350) — running it as a callback
-		// the orchestrator invokes AFTER every phase-1 file reaches
-		// LifecycleIndexed AND BEFORE InitialStateReady fires. This
-		// closes the 2026-05-18 race where stage_snapshots.go's
-		// OpenFolder lstat-failed on a not-yet-built .idx (the
-		// lifecycle driver finished the Indexing transition ~150ms
-		// after InitialStateReady fired under the older gate).
-		// See docs/plans/20260518-storage-owns-post-download-pipeline.md.
-		//
-		// FillDBFromSnapshots (Step 3) will join this closure in a
-		// later commit; for now stage_snapshots.go still owns it (its
-		// own bounded-retry stopgap rides on top of this gate).
+		// The orchestrator invokes this AFTER every phase-1 file reaches
+		// LifecycleIndexed and BEFORE InitialStateReady fires — so the
+		// stage_snapshots.go OpenFolder call sees fully-built .idx files
+		// instead of racing the lifecycle-driver's Indexing transition.
 		blockReader := p.BlockReader
 		aggregator := deps.Aggregator
 		postIndexedSeed := deps.PostIndexedSeed
@@ -1078,16 +1063,11 @@ func (p *Provider) Initialize(deps Deps) error {
 			return fmt.Errorf("storage: orchestrator.SetPostIndexed: %w", err)
 		}
 
-		// Tell the orchestrator to wait for the synthetic
-		// bootstrap-from-preverified manifest before firing
-		// InitialStateReady. backend.go calls
-		// p.BootstrapFromPreverified() later in startup (after all bus
-		// subscribers are wired); without this gate, the orchestrator's
-		// inventory ChangeSet watcher fires on its first tick with
-		// phase1Files empty and postIndexed runs against a partial
-		// snapshot view. Live-rig 2026-06-02 surfaced this as exec
-		// failing with "nil block N" against blockReader.frozenBlocks
-		// that was lower than the on-disk file set.
+		// Have the orchestrator wait for the synthetic bootstrap-from-
+		// preverified manifest before firing InitialStateReady. Without
+		// this gate, its inventory ChangeSet watcher fires on the first
+		// tick with phase1Files empty and postIndexed runs against a
+		// partial snapshot view.
 		if config.Snapshot.BootstrapFromPreverified {
 			p.Orchestrator.MarkAwaitingBootstrap()
 		}
@@ -1110,34 +1090,20 @@ func (p *Provider) Initialize(deps Deps) error {
 		}
 
 		// Watch the inventory for the tip *-headers.seg reaching
-		// LifecycleIndexed. When it does, open EL header segments and
-		// publish flow.BlockHeadersReady so Caplin's stage_history_download
+		// LifecycleIndexed; open EL header segments and publish
+		// flow.BlockHeadersReady so Caplin's stage_history_download
 		// reads a meaningful FrozenBlocks() tip on first call.
-		// Architectural rule: only the storage component is aware of the
-		// downloader / snapshot lifecycle; Caplin (and every other
-		// non-storage consumer) waits on this bus event, not on the
-		// downloader itself.
 		if p.BlockReader != nil {
 			go p.watchTipHeaderForOpenSegments(ctx, deps.Inventory)
 		}
 
-		// Record the chain name + prune.Mode so
-		// BootstrapFromPreverified — invoked later by backend.go after
-		// BindBus has wired the downloader — knows which preverified
-		// registry to read AND how to filter it. Bootstrap can't fire
-		// here: the orchestrator subscribes to PeerManifestReceived,
-		// would process the synthetic manifest, and publish
-		// DownloadRequested events into a bus whose downloader-side
-		// subscriber doesn't exist yet (BindBus runs in backend.go
-		// AFTER storage.Initialize returns). The events would be lost
-		// and the wedge symptoms would be indistinguishable from the
-		// no-peer-bootstrap case the path is meant to fix.
-		//
-		// Prune mode lives alongside chain name because the filter
-		// must drop archive-only entries the running prune mode would
-		// just prune anyway — bug N filled the disk with 1.3 TB of
-		// .v history files a --prune.mode=minimal publisher would
-		// never keep.
+		// Record chain name + prune.Mode so BootstrapFromPreverified,
+		// invoked later by backend.go after BindBus wires the
+		// downloader, knows which preverified registry to read and how
+		// to filter it. Bootstrap can't fire here — the downloader-side
+		// bus subscriber doesn't exist until BindBus runs. Prune mode
+		// gates archive-only entries the running mode would immediately
+		// prune away.
 		if config.Snapshot.BootstrapFromPreverified {
 			p.bootstrapChainName = config.Snapshot.ChainName
 			p.bootstrapPruneMode = config.Prune
@@ -1163,22 +1129,12 @@ func (p *Provider) Initialize(deps Deps) error {
 	}
 
 	// Unconditional startup scan for pre-existing block-snapshot files.
-	// The lifecycle.Driver's discoverNewFiles only runs when
-	// LifecycleDrivenByStorage is on; for the legacy (driver-off) path
-	// nothing else feeds already-on-disk block files into Inventory at
-	// startup. Without this, Inventory.BlockFiles() comes up empty for
-	// every v1.1-*.seg already on disk (chain.toml advertised them, the
-	// downloader has the .torrent, the files are local-ready — they
-	// just aren't in inv.blocks), and Provider.Unwind's
-	// findInventoryOrphansPastBlock precondition refuses every deeper
-	// setHead with "N file(s) exist on disk past toBlock but are NOT in
-	// Inventory." Live-caught 2026-06-13 in the 5-iter soak (iter 3
-	// mode_b at depth 30k refused after 15 stable v1.1-*.seg files
-	// were absent from Inventory).
-	//
-	// Idempotent vs the driver-on path: when the lifecycle Driver later
-	// runs discoverNewFiles, AddFile's existing-entry check short-
-	// circuits — these entries were already populated here.
+	// The lifecycle.Driver's discoverNewFiles runs only when
+	// LifecycleDrivenByStorage is on; on the legacy path nothing else
+	// feeds already-on-disk block files into Inventory at startup, and
+	// Provider.Unwind's orphan-past-toBlock precondition refuses every
+	// deeper SetHead. Idempotent alongside the driver-on path — AddFile
+	// short-circuits duplicates.
 	if deps.Inventory != nil && p.snapDir != "" {
 		p.scanLocalBlockFilesAtStartup(deps.Inventory)
 	}
@@ -1380,15 +1336,9 @@ func (p *Provider) tryFireBlockHeadersReady(ctx context.Context, inv *snapshot.I
 
 	if p.indexBuilder != nil {
 		// Salt-arrival gate: BuildMissedIndices → GetIndexSalt reads
-		// salt-blocks.txt from snapDir. During bootstrap-from-preverified,
-		// the inventory's headers .seg arrives before salt-blocks.txt
-		// (just-in-time download order is parallel + size-driven, not
-		// dependency-aware). Every inventory ChangeSet that fires before
-		// salt arrives would hit GetIndexSalt's ERROR + full-stack log
-		// at type.go:134 — 630 ERROR-level lines observed during a single
-		// ~77s startup window on 2026-05-17. Gate the build silently
-		// until salt is on disk; the next ChangeSet after salt downloads
-		// will pick it up.
+		// salt-blocks.txt. During bootstrap, headers .seg can arrive
+		// before salt-blocks.txt; wait silently and pick up on the next
+		// ChangeSet.
 		saltPath := filepath.Join(p.AllSnapshots.Dir(), "salt-blocks.txt")
 		if _, err := os.Stat(saltPath); os.IsNotExist(err) {
 			p.logger.Debug("[storage] BuildMissedIndices: waiting for salt to arrive", "file", tipHeader.Name)

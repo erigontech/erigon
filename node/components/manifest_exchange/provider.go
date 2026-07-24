@@ -352,39 +352,12 @@ func (p *Provider) unbindNoLock() {
 // identifier that doesn't collide with any real peer.
 const ForkBootstrapParentPeerID = "fork-bootstrap-parent"
 
-// onForkBootstrapRequired handles flow.ForkBootstrapRequired by
-// fetching the parent's V2 manifest by ParentManifestHash from the
-// swarm and re-publishing it on the bus as a synthetic peer manifest.
-//
-// Lite-mode verification (the default): BitTorrent's info-hash
-// equality is the sole authenticity check — the protocol rejects
-// any payload whose bencoded info dict hashes differently from the
-// requested info-hash. The fork's chain.Config pinned this hash
-// at fork creation, and the fork's authority UCAN (signed under the
-// fork's trust root) vouches for the pin. No parent-chain UCAN walk
-// is required in lite mode. Belt-and-braces verification (independent
-// parent UCAN chain) lands with Phase 2g; this handler is the
-// lite-mode-only entry point.
-//
-// PeerID for the synthesised flow.PeerManifestReceived is the stable
-// sentinel ForkBootstrapParentPeerID — distinguishes parent-lineage
-// entries from any real peer's contributions and is never paired
-// with a flow.PeerDeparted (parent bootstrap is a once-per-process
-// seed, not a peer lifecycle).
-//
-// Runs in its own goroutine via fetchWG so a slow swarm doesn't
-// block the bus handler. UnbindBus cancels via ctx and waits for
-// the goroutine to return.
-//
-// Failure modes (all logged Warn, none fatal):
-//   - Zero ParentManifestHash → skip with Info log. A fork off a
-//     pre-Phase-1 root parent may legitimately lack a V2 manifest
-//     to pin; the fork-follower falls back to direct file downloads
-//     via the parent's preverified set.
-//   - FetchPeerManifestV2 error → log + return. The fork-follower
-//     can retry on a later bootstrap event (none today, but the
-//     event type is replayable).
-//   - ParseV2 error → log + return.
+// onForkBootstrapRequired fetches the parent's V2 manifest by
+// ParentManifestHash and re-publishes it under
+// ForkBootstrapParentPeerID as a synthetic peer manifest. Info-hash
+// equality is the sole authenticity check; the fork's authority UCAN
+// vouches for the pin. Runs on fetchWG so a slow swarm doesn't block
+// the bus handler.
 func (p *Provider) onForkBootstrapRequired(e flow.ForkBootstrapRequired) {
 	if e.ParentManifestHash == ([20]byte{}) {
 		p.mu.Lock()

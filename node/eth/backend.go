@@ -354,11 +354,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return err
 		}
 
-		// Persist the snapshot-flow mode flags. Omitting one on
-		// restart must not silently downgrade the datadir — e.g.
-		// dropping --snap.lifecycle-driven-by-storage previously left
-		// Provider.Inventory nil and the new mode-B snapshot-trim
-		// path a silent no-op (live-rig 2026-06-02). Flipping a
+		// Persist the snapshot-flow mode flags so omitting one on
+		// restart doesn't silently downgrade the datadir. Flipping a
 		// persisted value via CLI is refused at startup.
 		type snapModeFlag struct {
 			name string
@@ -681,11 +678,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.components.Downloader.Downloader.SetManifestSelfCheck(func(m *downloader.ChainTomlV2) error {
 			// Check against the live canonical quorum view when a
 			// genesis is pinned; otherwise fall back to the static
-			// canonicalView is the runtime source of truth: post-bootstrap
+			// canonicalView is the runtime source of truth. Post-bootstrap,
 			// every published advertisement is validated against the
-			// canonical-view's current set, NOT the compiled-in preverified
-			// data. Falling back to preverified at runtime advertised stale
-			// genesis/tip and caused the 2026-06-28 iter-4 wedge.
+			// canonical-view's current set, not the compiled-in preverified
+			// data — falling back to preverified at runtime would advertise
+			// stale genesis/tip.
 			if canonicalView == nil {
 				return nil // canonical-view not yet initialized → defensive no-op
 			}
@@ -751,12 +748,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		// files we hold are parent-canonicity (transported via raw BT
 		// info-hash discovery on the parent's manifest); listing them
 		// in the fork's manifest would impersonate parent canonicity
-		// under the fork's trust root. See
-		// memory/fork-trust-root-model-2026-05-24 for the rule. Empty
-		// stepToBlock is the safe default — state files conservatively
-		// classify as straddle and drop, which is correct for a fork
-		// publisher whose first retire produces fresh fork-lineage
-		// state files.
+		// under the fork's trust root. Empty stepToBlock is the safe
+		// default — state files classify as straddle and drop, matching
+		// what a fork publisher's first retire produces.
 		if chainConfig.Parent != "" && chainConfig.CutBlock > 0 {
 			backend.components.Downloader.Downloader.SetForkCutBlock(chainConfig.CutBlock, nil)
 
@@ -1654,16 +1648,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		config.Snapshot.PublishRetirementDone = func(fromBlock, toBlock uint64) {
 			bus.Publish(flow.RetirementDone{FromBlock: fromBlock, ToBlock: toBlock})
-			// Block-retire / merge produces new on-disk files (and
-			// supersedes smaller chunks). Without re-publishing
-			// chain.toml here, the Inventory falls behind disk until
-			// the next Provider.Unwind triggers a regeneration — at
-			// which point Provider.Unwind itself reads the stale
-			// manifest, finds zero files past toBlock, and no-ops on
-			// the snapshot trim. Wedge follows once mode-B engages
-			// because the writable DB resets to toBlock but the
-			// on-disk snapshots still cover past it. Caught live on
-			// hoodi (2026-06-12 iter-2 of the soak).
+			// Republish chain.toml after retire/merge; without it,
+			// Inventory falls behind disk until the next Provider.Unwind,
+			// which then reads a stale manifest and no-ops the snapshot
+			// trim — the writable DB resets to toBlock but the on-disk
+			// snapshots still cover past it.
 			if backend.components != nil && backend.components.Downloader != nil &&
 				backend.components.Downloader.Downloader != nil {
 				if err := backend.components.Downloader.Downloader.PublishLocalChainToml(); err != nil {
@@ -1734,13 +1723,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		newProviderUnwinderAdapter(backend.components.Storage),
 	)
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
-	// Install the BlockRetire cancellation lever so SetHead's Mode-B
-	// path can abort an in-flight retire whose range crosses the
-	// unwind target. Without this, retire keeps producing snapshot
-	// /.idx files for blocks the unwind is about to remove (the
-	// inv_extras=3 + recsplit-collision wedge from iter 3 of the
-	// 5-iter soak 2026-06-14). blockRetire is captured upthread at
-	// line 1547 and is guaranteed non-nil on the production path.
+	// Install the BlockRetire cancellation lever so SetHead's mode-B
+	// path can abort an in-flight retire whose range crosses the unwind
+	// target; otherwise retire keeps producing .seg/.idx files for
+	// blocks the unwind is about to remove.
 	backend.execModule.SetBlockRetire(blockRetire)
 
 	var executionEngine executionclient.ExecutionEngine
@@ -1825,13 +1811,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			localBlockTipFn = func() uint64 {
 				view := inv.View()
 				defer view.Close()
-				// LocalBlockTipCappedAt clamps the inventory's
-				// optimistic tip (files counted by on-disk presence)
-				// to what the aggregator can actually back. See
-				// snapshot.InventoryView.LocalBlockTipCappedAt for the
-				// full rationale. Live-caught 2026-06-14 v8 soak iter
-				// 3 mode_b (depth 30k); pinned by
-				// TestInventoryViewLocalBlockTipCappedAt_ClampsAboveCap.
+				// LocalBlockTipCappedAt clamps the inventory's optimistic
+				// tip (counted by on-disk presence) to what the aggregator
+				// can actually back.
 				return view.LocalBlockTipCappedAt(blockReader.FrozenBlocks())
 			}
 		}

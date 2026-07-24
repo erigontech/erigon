@@ -89,23 +89,11 @@ func FilterPreverifiedByPruneMode(items snapcfg.PreverifiedItems, cc *chain.Conf
 		return items
 	}
 
-	// Bug Z: under modes that actively prune block data with a finite
-	// distance (e.g. MinimalMode with Distance(100_000)), drop block
-	// data below the prune horizon at bootstrap rather than downloading
-	// the full chain only to prune ~immediately. With mainnet block-
-	// tip ≈ 25M and minimal-mode horizon = block_tip - 100K, this
-	// drops ~500 GB of pre-horizon transactions.seg the publisher
-	// otherwise pulls and then prunes (the live behaviour observed
-	// 2026-05-15).
-	//
-	// Headers stay regardless — they're small (~10 GB total mainnet)
-	// and required for ancestor / fork-choice lookups across the
-	// chain. Bodies + transactions follow the prune horizon.
-	//
-	// PruneTo returns 0 for KeepAll (archive, blocks) and chain-
-	// specific (full) — meaning "no horizon, keep everything"; the
-	// loop becomes a no-op for those modes. Distance-based modes
-	// (minimal) get a real horizon.
+	// Distance-pruning modes (minimal) drop block bodies+transactions
+	// below the prune horizon at bootstrap so the downloader doesn't
+	// pull hundreds of GB the pruner would delete immediately after.
+	// Headers stay regardless (small; needed for ancestor lookups).
+	// PruneTo returns 0 for KeepAll modes, making the loop a no-op.
 	var blockPruneHorizon uint64
 	if pruneMode.Blocks.Enabled() {
 		tips := DeriveManifestTips(items)
@@ -132,24 +120,11 @@ func FilterPreverifiedByPruneMode(items snapcfg.PreverifiedItems, cc *chain.Conf
 		//   3. "blobsidecars" substring — historical blob sidecars
 		//      at the top level (v1.1-NNNNNN-NNNNNN-blobsidecars.seg).
 		//
-		// Bug X: an earlier version of this filter only matched the
-		// caplin/ prefix, allowing 501 blobsidecars + 1050 beaconblocks
-		// entries (mainnet preverified) through to the bootstrap
-		// manifest. The downloader pulled 1.7 TB of historical blob
-		// sidecars on top of the EL set — exactly what minimal-mode
-		// is supposed to avoid. Matching the inline filter's full
-		// three-substring contains check makes the bootstrap path
-		// honour `--caplin.blocks-archive=false` and
-		// `--caplin.blobs-archive=false` (their defaults) via the
-		// same prune-history-driven gate.
-		//
-		// Coupling CL data to prune.History.Enabled() (rather than
-		// to dedicated CL-archive flags) is the bootstrap-side
-		// shorthand: every non-archive prune mode is consistent
-		// with "don't host the CL archive." If a future operator
-		// wants archive-CL + minimal-EL, the inline SyncSnapshots
-		// path's caplinState flag remains the explicit knob; the
-		// bootstrap filter would need a parallel parameter then.
+		// CL data is coupled to prune.History as bootstrap-side
+		// shorthand: every non-archive mode implies "don't host CL
+		// archive." Archive-CL + minimal-EL would need a dedicated
+		// parameter mirroring the inline SyncSnapshots caplinState
+		// flag.
 		if pruneMode.History.Enabled() && isCLData(p.Name) {
 			continue
 		}
@@ -163,10 +138,8 @@ func FilterPreverifiedByPruneMode(items snapcfg.PreverifiedItems, cc *chain.Conf
 				continue
 			}
 		}
-		// Bug Z: block bodies + transactions below prune horizon are
-		// dropped. Headers stay (small, needed for chain continuity
-		// across the full range). Caplin data is already filtered
-		// above; this branch only runs on non-CL entries.
+		// Drop block bodies + transactions below the prune horizon.
+		// Headers stay; CL data was already filtered above.
 		if blockPruneHorizon > 0 && isPrunableBlockFile(p.Name) {
 			info, isStateFile, ok := snaptype.ParseFileName("", p.Name)
 			if ok && !isStateFile && info.To > 0 && info.To <= blockPruneHorizon {
@@ -194,30 +167,11 @@ func isPrunableBlockFile(name string) bool {
 }
 
 // isCLData reports whether a preverified item name describes CL
-// (consensus-layer) data — beacon state snapshots, historical
-// beacon blocks, blob sidecars (the .seg data file), or blob-sidecar
-// accessor indexes (the .idx file, whose internal type-name is
-// "blocksidecars" — yes, with K not B, per
-// snaptype/type.go:157 where BlobSidecarSlot.Name = "blocksidecars").
-//
-// Four substring patterns now:
-//
-//  1. "caplin/" prefix — beacon state snapshots, validator
-//     balances dumps, ActiveValidatorIndicies, etc.
-//  2. "beaconblocks" substring — historical beacon blocks
-//     (top-level v1.1-NNNNNN-NNNNNN-beaconblocks.seg).
-//  3. "blobsidecars" substring — historical blob sidecars,
-//     the .seg data file (top-level
-//     v1.1-NNNNNN-NNNNNN-blobsidecars.seg).
-//  4. "blocksidecars" substring — the BLOB sidecar accessor
-//     INDEX file (top-level v1.1-NNNNNN-NNNNNN-blocksidecars.idx).
-//     Counterintuitive name; the K-not-B spelling is the internal
-//     Index.Name for BlobSidecarSlot in CaplinIndexes.
-//
-// Bug AB (2026-05-16): an earlier version of this filter only
-// matched (1)+(2)+(3) — the .idx blocksidecars entries (565 in
-// mainnet preverified) slipped through and consumers downloaded
-// them under minimal mode despite their CL nature.
+// (consensus-layer) data. Matches four substring patterns:
+// "caplin/" prefix (beacon state), "beaconblocks" (historical beacon
+// blocks), "blobsidecars" (blob sidecar .seg), and "blocksidecars"
+// (blob sidecar .idx — K-not-B is the internal Index.Name for
+// BlobSidecarSlot).
 func isCLData(name string) bool {
 	return strings.HasPrefix(name, "caplin/") ||
 		strings.Contains(name, "beaconblocks") ||
