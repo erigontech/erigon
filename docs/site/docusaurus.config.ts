@@ -144,8 +144,8 @@ export default async function createConfig(): Promise<Config> {
         theme: {customCss: './src/css/custom.css'},
         sitemap: {
           // Emit <lastmod> per URL (from git history via showLastUpdateTime) so
-          // crawlers can prioritise changed pages. Drop the client-side search
-          // route, which has no indexable content.
+          // crawlers can prioritise changed pages. Exclude /search from the
+          // sitemap — it has no indexable content (the route itself still exists).
           lastmod: 'date',
           changefreq: 'weekly',
           priority: 0.5,
