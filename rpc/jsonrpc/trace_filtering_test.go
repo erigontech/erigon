@@ -24,7 +24,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -50,7 +49,7 @@ import (
 // worker-pool path of doCallBlockParallel.
 func TestCallBlockParallelMatchesSequential(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 
 	ctx := context.Background()
 	const blockNum = uint64(6) // block 6 has 32 txs (case i=5 in test chain generation)
@@ -152,7 +151,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 // a JSON-RPC error instead of dereferencing the nil transaction.
 func TestCallTransactionNilTxnReturnsError(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 
 	ctx := context.Background()
 	const blockNum = uint64(6)
@@ -227,7 +226,7 @@ func TestBlockWithdrawalTraceEntries(t *testing.T) {
 	withdrawalAddr := common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 
 	m, blk := chainWithWithdrawal(t, withdrawalAddr, withdrawalGwei)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 	n := rpc.BlockNumber(blk.NumberU64())
 
 	traces, err := api.Block(context.Background(), n, new(bool), traceConfigWithWithdrawals())
@@ -264,7 +263,7 @@ func TestBlockWithdrawalNoEntriesWithoutFlag(t *testing.T) {
 	withdrawalAddr := common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 
 	m, blk := chainWithWithdrawal(t, withdrawalAddr, withdrawalGwei)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 	n := rpc.BlockNumber(blk.NumberU64())
 
 	traces, err := api.Block(context.Background(), n, new(bool), nil)
@@ -277,7 +276,7 @@ func TestBlockWithdrawalNoEntriesWithoutFlag(t *testing.T) {
 func TestBlockWithdrawalNoEntriesPreShanghai(t *testing.T) {
 	// Default test chain uses TestChainBerlinConfig which has no ShanghaiTime.
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 
 	// Block 1 is pre-Shanghai on the default test chain.
 	n := rpc.BlockNumber(1)
@@ -294,7 +293,7 @@ func TestReplayBlockTransactionsWithdrawalStateDiff(t *testing.T) {
 	withdrawalAddr := common.HexToAddress("0xcafecafecafecafecafecafecafecafecafecafe")
 
 	m, blk := chainWithWithdrawal(t, withdrawalAddr, withdrawalGwei)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 
 	n := rpc.BlockNumber(blk.NumberU64())
 	bnOrHash := rpc.BlockNumberOrHash{BlockNumber: &n}
@@ -350,7 +349,7 @@ func TestReplayBlockTransactionsMultiWithdrawalSameAddr(t *testing.T) {
 	require.NoError(t, err)
 	blk := generated.Blocks[0]
 
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 	n := rpc.BlockNumber(blk.NumberU64())
 	bnOrHash := rpc.BlockNumberOrHash{BlockNumber: &n}
 	results, err := api.ReplayBlockTransactions(context.Background(), bnOrHash, []string{"stateDiff"}, new(bool), traceConfigWithWithdrawals())
@@ -394,7 +393,7 @@ func TestReplayBlockTransactionsWithdrawalNewAddress(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(generated))
 
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 	n := rpc.BlockNumber(generated.Blocks[0].NumberU64())
 	bnOrHash := rpc.BlockNumberOrHash{BlockNumber: &n}
 	results, err := api.ReplayBlockTransactions(context.Background(), bnOrHash, []string{"stateDiff"}, new(bool), traceConfigWithWithdrawals())
@@ -439,7 +438,7 @@ func TestReplayBlockTransactionsMultiWithdrawalNewAddress(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(generated))
 
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 	n := rpc.BlockNumber(generated.Blocks[0].NumberU64())
 	bnOrHash := rpc.BlockNumberOrHash{BlockNumber: &n}
 	results, err := api.ReplayBlockTransactions(context.Background(), bnOrHash, []string{"stateDiff"}, new(bool), traceConfigWithWithdrawals())
@@ -470,7 +469,7 @@ func TestReplayBlockTransactionsWithdrawalNoEntriesWithoutFlag(t *testing.T) {
 	withdrawalAddr := common.HexToAddress("0xcafecafecafecafecafecafecafecafecafecafe")
 
 	m, blk := chainWithWithdrawal(t, withdrawalAddr, withdrawalGwei)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 	n := rpc.BlockNumber(blk.NumberU64())
 	bnOrHash := rpc.BlockNumberOrHash{BlockNumber: &n}
 

@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	ethapi "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -72,14 +73,14 @@ type GraphQLAPIImpl struct {
 	returnDataLimit int
 }
 
-func NewGraphQLAPI(base *BaseAPI, db kv.TemporalRoDB, eth EthAPI, txPool txpoolproto.TxpoolClient, gasCap uint64, returnDataLimit int) *GraphQLAPIImpl {
+func NewGraphQLAPI(base *BaseAPI, db kv.TemporalRoDB, eth EthAPI, txPool txpoolproto.TxpoolClient, cfg *rpccfg.GraphQLApiConfig) *GraphQLAPIImpl {
 	return &GraphQLAPIImpl{
 		BaseAPI:         base,
 		db:              db,
 		eth:             eth,
 		txPool:          txPool,
-		gasCap:          gasCap,
-		returnDataLimit: returnDataLimit,
+		gasCap:          cfg.GasCap,
+		returnDataLimit: cfg.ReturnDataLimit,
 	}
 }
 
