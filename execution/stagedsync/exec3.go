@@ -628,6 +628,16 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					return fmt.Errorf("invalid block access list: %w", err)
 				}
 			}
+			if dbBAL == nil && te.cfg.chainConfig.IsAmsterdam(b.HeaderNoCopy().Time) && b.HeaderNoCopy().HasBAL() {
+				te.logger.Debug("executing block without a BAL", "blockNum", blockNum)
+			}
+			if dbg.TraceBALFeed {
+				if dbBAL != nil {
+					fmt.Printf("BAL-FEED blk=%d bytes=%d accounts=%d\n", blockNum, len(data), len(dbBAL))
+				} else if te.cfg.chainConfig.IsAmsterdam(b.HeaderNoCopy().Time) {
+					fmt.Printf("BAL-MISSING blk=%d bytes=%d\n", blockNum, len(data))
+				}
+			}
 
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()

@@ -235,6 +235,6 @@ func TestGetDelegatedDesignation_TracksSplitCodePublish(t *testing.T) {
 			return VersionValid
 		}
 		return VersionInvalid
-	}, false, "")
+	}, true, false, "")
 	require.Equal(t, VersionInvalid, validity)
 }

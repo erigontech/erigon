@@ -48,7 +48,7 @@ func TestValueTiebreaker_BalancePath(t *testing.T) {
 	readVal := *balance // Same value
 
 	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		readVal, liveBalance, eqUint256, // value tiebreaker
+		readVal, liveBalance, eqUint256, recordBalance, // value tiebreaker
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 
@@ -69,7 +69,7 @@ func TestValueTiebreaker_DifferentBalance(t *testing.T) {
 	readVal := *uint256.NewInt(500)
 
 	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		readVal, liveBalance, eqUint256,
+		readVal, liveBalance, eqUint256, recordBalance,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 
@@ -87,14 +87,14 @@ func TestValueTiebreaker_NoncePath(t *testing.T) {
 
 	// Same nonce from storage → valid
 	valid := validateRead(vm, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		uint64(42), liveNonce, eqUint64,
+		uint64(42), liveNonce, eqUint64, recordNonce,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 	assert.Equal(t, VersionValid, valid, "Same nonce should be valid")
 
 	// Different nonce → invalid
 	valid = validateRead(vm, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		uint64(41), liveNonce, eqUint64,
+		uint64(41), liveNonce, eqUint64, recordNonce,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 	assert.Equal(t, VersionInvalid, valid, "Different nonce should be invalid")

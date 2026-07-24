@@ -86,7 +86,7 @@ func TestRevivalConsistency_SameTxMetamorphic_ReaderAndValidatorAgree(t *testing
 		Val:        *uint256.NewInt(1_000),
 	})
 	io.RecordReads(Version{TxIndex: 4}, rs)
-	require.Equal(t, VersionInvalid, vm.ValidateVersion(4, io, validateEqualVersion, false, ""),
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(4, io, validateEqualVersion, true, false, ""),
 		"pre-destruct field read is stale after same-tx re-create — reader and validator agree the old value is gone")
 }
 
@@ -126,6 +126,6 @@ func TestRevivalConsistency_AddressPathOnly_ReaderAndValidatorDiverge(t *testing
 		Val:        *uint256.NewInt(1_000),
 	})
 	io.RecordReads(Version{TxIndex: 5}, rs)
-	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""),
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, true, false, ""),
 		"validator lacks the AddressPath >= revival arm, so it diverges from the reader on an AddressPath-only revival")
 }
