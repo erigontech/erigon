@@ -24,10 +24,10 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -269,7 +269,6 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 	}
 	start := time.Now()
 	result, err := api.buildWitnessResult(ctx, tx, info, witnessModeLegacy)
-	witnessCacheBuildDuration.ObserveDuration(start)
 	if err != nil {
 		if errors.Is(err, errWitnessVerifyFailed) {
 			witnessCacheBuildFailVerifyCounter.Inc()
@@ -279,6 +278,7 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		log.Warn("[witness-cache] build witness", "block", num, "err", err)
 		return false
 	}
+	witnessCacheBuildDuration.ObserveDuration(start)
 	enc, err := result.MarshalFastJSON()
 	if err != nil {
 		witnessCacheBuildFailOtherCounter.Inc()
