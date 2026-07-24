@@ -583,9 +583,17 @@ func (a *Aggregator) OpenFolder() error {
 	// Propagate the visible file set so Inventory reflects on-disk
 	// reality: files that arrived via the downloader are visible in the
 	// aggregator but invisible to Inventory without this notification.
+	// a.Files returns absolute paths — pass basenames so the receiver's
+	// snap-dir-relative join produces `domain/<file>` rather than
+	// `domain/<absolute-path>` (bug seen in soak logs: torrent metainfo
+	// build fails to lstat the doubled path).
 	files := a.Files()
 	if len(files) > 0 && a.onFilesChange != nil {
-		a.onFilesChange(files)
+		basenames := make([]string, len(files))
+		for i, f := range files {
+			basenames[i] = filepath.Base(f)
+		}
+		a.onFilesChange(basenames)
 	}
 	return nil
 }
