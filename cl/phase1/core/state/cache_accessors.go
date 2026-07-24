@@ -173,7 +173,9 @@ func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64,
 	binary.LittleEndian.PutUint64(slotByteArray, slot)
 
 	// Add slot to the end of the input.
-	inputWithSlot := append(input[:], slotByteArray...)
+	inputWithSlot := make([]byte, 0, len(input)+len(slotByteArray))
+	inputWithSlot = append(inputWithSlot, input[:]...)
+	inputWithSlot = append(inputWithSlot, slotByteArray...)
 
 	// Calculate the hash.
 	hash.Write(inputWithSlot)
@@ -237,7 +239,6 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 	inclusionDelay uint64,
 	skipAssert bool,
 ) ([]uint8, error) {
-
 	var justifiedCheckpoint solid.Checkpoint
 	// get checkpoint from epoch
 	if data.Target.Epoch == Epoch(b) {
@@ -361,7 +362,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 	// pre-gloas computation
 	beaconConfig := b.BeaconConfig()
 	epoch := Epoch(b) + 1
-	//math.MaxUint8
+	// math.MaxUint8
 	activeValidatorIndicies := b.GetActiveValidatorsIndices(epoch)
 	activeValidatorCount := uint64(len(activeValidatorIndicies))
 	if activeValidatorCount == 0 {
@@ -605,7 +606,9 @@ func (b *CachingBeaconState) ComputePTC(slot uint64) ([]uint64, error) {
 	// seed = hash(get_seed(state, epoch, DOMAIN_PTC_ATTESTER) + uint_to_bytes(slot))
 	slotBytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotBytes, slot)
-	seedInput := append(baseSeed[:], slotBytes...)
+	seedInput := make([]byte, 0, len(baseSeed)+len(slotBytes))
+	seedInput = append(seedInput, baseSeed[:]...)
+	seedInput = append(seedInput, slotBytes...)
 	seed := crypto.Sha256(seedInput)
 
 	// Concatenate all committees for this slot in order

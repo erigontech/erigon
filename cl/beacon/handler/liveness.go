@@ -140,7 +140,6 @@ func (a *ApiHandler) obtainCurrentEpochParticipationFromEpoch(tx kv.Tx, epoch ui
 		return curr, err
 	}
 	return currParticipation, nil
-
 }
 
 func updateLivenessWithBlock(block *cltypes.SignedBeaconBlock, liveSet map[uint64]*live) {

@@ -32,8 +32,10 @@ import (
 	"github.com/erigontech/erigon/common/ssz"
 )
 
-var _ error = EndpointError{}
-var _ error = (*EndpointError)(nil)
+var (
+	_ error = EndpointError{}
+	_ error = (*EndpointError)(nil)
+)
 
 type EndpointError struct {
 	Code        int      `json:"code"`
@@ -43,8 +45,10 @@ type EndpointError struct {
 	err error
 }
 
-var ErrorCantFindBeaconState = errors.New("Could not find beacon state")
-var ErrorSszNotSupported = errors.New("This endpoint does not support SSZ response")
+var (
+	ErrorCantFindBeaconState = errors.New("Could not find beacon state")
+	ErrorSszNotSupported     = errors.New("This endpoint does not support SSZ response")
+)
 
 func WrapEndpointError(err error) *EndpointError {
 	e := &EndpointError{}
@@ -59,9 +63,9 @@ func WrapEndpointError(err error) *EndpointError {
 
 func NewEndpointError(code int, err error) *EndpointError {
 	// TODO: consider adding stack traces/debug mode ?
-	//b := make([]byte, 2048)
-	//n := runtime.Stack(b, false)
-	//s := string(b[:n])
+	// b := make([]byte, 2048)
+	// n := runtime.Stack(b, false)
+	// s := string(b[:n])
 	return &EndpointError{
 		Code:    code,
 		Message: err.Error(),

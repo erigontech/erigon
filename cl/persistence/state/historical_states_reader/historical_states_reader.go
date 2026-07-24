@@ -58,7 +58,8 @@ func NewHistoricalStatesReader(
 	blockReader freezeblocks.BeaconSnapshotReader,
 	validatorTable *state_accessors.StaticValidatorTable,
 	genesisState *state.CachingBeaconState, stateSn *snapshotsync.CaplinStateSnapshots,
-	syncedData synced_data.SyncedData) *HistoricalStatesReader {
+	syncedData synced_data.SyncedData,
+) *HistoricalStatesReader {
 	shuffledIndiciesCache := lru.NewWithTTL[uint64, []uint64]("shuffledIndiciesCacheReader", 64, 2*time.Minute)
 
 	return &HistoricalStatesReader{
@@ -517,7 +518,7 @@ func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, kvGetter state_access
 	}
 	var currKeyEpoch uint64
 
-	for i := roundedSlot - (needFromDB)*r.cfg.SlotsPerEpoch; i <= highestAvaiableSlot; i++ {
+	for i := roundedSlot - needFromDB*r.cfg.SlotsPerEpoch; i <= highestAvaiableSlot; i++ {
 		key := base_encoding.Encode64ToBytes4(i)
 		v, err := kvGetter(kv.RandaoMixes, key)
 		if err != nil {

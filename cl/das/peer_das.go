@@ -64,9 +64,7 @@ type PeerDas interface {
 	SetForkChoice(forkChoice BlockGetter) // [New in Gloas:EIP7732]
 }
 
-var (
-	numOfBlobRecoveryWorkers = 8
-)
+var numOfBlobRecoveryWorkers = 8
 
 type peerdas struct {
 	state             *peerdasstate.PeerDasState
@@ -474,7 +472,8 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				kzgCommitment,
 				kzgProof,
 				signedBlockHeader,
-				inclusionProof)
+				inclusionProof,
+			)
 			blobSidecars = append(blobSidecars, blobSidecar)
 			commitment := cltypes.KZGCommitment(kzgCommitment)
 			blobCommitments.Append(&commitment)
@@ -640,15 +639,13 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 	return nil
 }
 
-var (
-	allColumns = func() map[cltypes.CustodyIndex]bool {
-		columns := map[cltypes.CustodyIndex]bool{}
-		for i := range 128 {
-			columns[cltypes.CustodyIndex(i)] = true
-		}
-		return columns
-	}()
-)
+var allColumns = func() map[cltypes.CustodyIndex]bool {
+	columns := map[cltypes.CustodyIndex]bool{}
+	for i := range 128 {
+		columns[cltypes.CustodyIndex(i)] = true
+	}
+	return columns
+}()
 
 // DownloadMissingColumns downloads the missing columns for the given blocks but not recover the blobs
 func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error {

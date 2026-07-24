@@ -646,7 +646,9 @@ func TestReaderBinarySearch(t *testing.T) {
 	require.True(t, g.MatchPrefix(lastKey[:10]), "prefix of last key should match")
 
 	// prefix larger than last key (appended 0xFF) should not match
-	beyondKey := append(lastKey[:len(lastKey):len(lastKey)], 0xFF)
+	beyondKey := make([]byte, len(lastKey)+1)
+	copy(beyondKey, lastKey)
+	beyondKey[len(lastKey)] = 0xFF
 	g.Reset(lastOffset)
 	require.False(t, g.MatchPrefix(beyondKey), "prefix beyond last key should not match")
 

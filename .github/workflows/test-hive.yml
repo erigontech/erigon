@@ -10,6 +10,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || format('push-{0}-{1}', github.run_id, github.run_attempt) }}
   cancel-in-progress: ${{ github.event.pull_request.number != 0 }}
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   test-hive:
     name: test-hive (${{ matrix.sim }}, ${{ matrix.sim-limit }}, ${{ matrix.commitment_mode }})

@@ -217,7 +217,9 @@ func TestCCBConnectOverlapPartialSome(t *testing.T) {
 	require.Equal(t, headers, newConnectedHeaders)
 
 	headers45 := test.makeHeaders(headers[len(headers)-1], []uint64{4, 5})
-	overlapHeaders := append(headers[1:], headers45...)
+	overlapHeaders := make([]*types.Header, 0, len(headers)-1+len(headers45))
+	overlapHeaders = append(overlapHeaders, headers[1:]...)
+	overlapHeaders = append(overlapHeaders, headers45...)
 	expectedTip := overlapHeaders[len(overlapHeaders)-1]
 	expectedHeaders := append([]*types.Header{root, headers[0]}, overlapHeaders...)
 	test.testConnect(ctx, overlapHeaders, expectedTip, expectedHeaders, headers45)

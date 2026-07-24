@@ -42,7 +42,6 @@ func (f *operationFeed) SendProposerSlashing(value *ProposerSlashingData) int {
 		Event: OpProposerSlashing,
 		Data:  value,
 	})
-
 }
 
 func (f *operationFeed) SendAttesterSlashing(value *AttesterSlashingData) int {

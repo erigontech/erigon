@@ -41,7 +41,9 @@ import (
 )
 
 func init() {
-	ethereumTypes := append(BlockSnapshotTypes, snaptype.CaplinSnapshotTypes...)
+	ethereumTypes := make([]snaptype.Type, 0, len(BlockSnapshotTypes)+len(snaptype.CaplinSnapshotTypes))
+	ethereumTypes = append(ethereumTypes, BlockSnapshotTypes...)
+	ethereumTypes = append(ethereumTypes, snaptype.CaplinSnapshotTypes...)
 
 	snapcfg.RegisterKnownTypes(networkname.Mainnet, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Sepolia, ethereumTypes)

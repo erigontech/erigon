@@ -65,6 +65,12 @@ func RederiveBlockAccessList(
 		return nil, fmt.Errorf("bal.RederiveBlockAccessList: initialize block %d: %w", blockNum, err)
 	}
 	ibs.MergeTxIOInto(balIO)
+	// Publish this phase's writes to the versionMap so the next phase observes
+	// them across the ResetVersionedIO below — the cross-tx carrier the parallel
+	// executor and block builder also use. Without it a later tx's balance write
+	// (e.g. the accumulating coinbase fee) can't see the running value and the
+	// per-tx BAL change is lost.
+	ibs.FlushWritesToVersionMap()
 	ibs.ResetVersionedIO()
 	gasUsed := new(protocol.GasUsed)
 	gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(cfg.GetMaxBlobGasPerBlock(header.Time))
@@ -90,6 +96,7 @@ func RederiveBlockAccessList(
 			return nil, fmt.Errorf("bal.RederiveBlockAccessList: execution aborted replaying tx %d of block %d: %w", i, blockNum, ctx.Err())
 		}
 		ibs.MergeTxIOInto(balIO)
+		ibs.FlushWritesToVersionMap()
 		ibs.ResetVersionedIO()
 		receipts = append(receipts, receipt)
 	}

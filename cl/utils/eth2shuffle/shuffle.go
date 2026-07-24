@@ -20,11 +20,13 @@ import "encoding/binary"
 
 type HashFn func(input []byte) []byte
 
-const hSeedSize = int8(32)
-const hRoundSize = int8(1)
-const hPositionWindowSize = int8(4)
-const hPivotViewSize = hSeedSize + hRoundSize
-const hTotalSize = hSeedSize + hRoundSize + hPositionWindowSize
+const (
+	hSeedSize           = int8(32)
+	hRoundSize          = int8(1)
+	hPositionWindowSize = int8(4)
+	hPivotViewSize      = hSeedSize + hRoundSize
+	hTotalSize          = hSeedSize + hRoundSize + hPositionWindowSize
+)
 
 // To make it completely clear:
 // Memory layout hash input:

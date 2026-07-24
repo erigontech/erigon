@@ -26,14 +26,15 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
-func NewBaseApiConfig(cfg *httpcfg.HttpCfg) *BaseApiConfig {
+func NewBaseApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.BaseApiConfig {
 	if cfg == nil {
-		return &BaseApiConfig{}
+		return &rpccfg.BaseApiConfig{}
 	}
-	return &BaseApiConfig{
+	return &rpccfg.BaseApiConfig{
 		SingleNodeMode:    cfg.WithDatadir,
 		EvmCallTimeout:    cfg.EvmCallTimeout,
 		Dirs:              cfg.Dirs,
@@ -43,8 +44,8 @@ func NewBaseApiConfig(cfg *httpcfg.HttpCfg) *BaseApiConfig {
 	}
 }
 
-func NewEthApiConfig(cfg *httpcfg.HttpCfg) *EthApiConfig {
-	return &EthApiConfig{
+func NewEthApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.EthApiConfig {
+	return &rpccfg.EthApiConfig{
 		GasCap:                      cfg.Gascap,
 		FeeCap:                      cfg.Feecap,
 		ReturnDataLimit:             cfg.ReturnDataLimit,
@@ -111,6 +112,11 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 				Namespace: "eth",
 				Public:    true,
 				Service:   EthAPI(ethImpl),
+				Version:   "1.0",
+			}, rpc.API{
+				Namespace: "eth",
+				Public:    true,
+				Service:   NewEthSyncingSubscriptionAPI(filters, logger),
 				Version:   "1.0",
 			})
 		case "debug":

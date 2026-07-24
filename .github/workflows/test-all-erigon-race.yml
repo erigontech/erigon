@@ -8,12 +8,18 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+
 jobs:
   # Workflow files can't read local files directly — they must be loaded via a
   # job step. We do this so the matrix group names come from the same source as
   # the test code (tools/test-groups), keeping CI and local runs in sync.
   load-matrix:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
     timeout-minutes: 60
     outputs:
       test-groups: ${{ steps.load.outputs.groups }}
@@ -58,6 +64,9 @@ jobs:
           - parallel
     name: tests-linux (${{ matrix.os }}, ${{ matrix.test-group }}, ${{ matrix.commitment_mode }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: write
 
     steps:
       - name: Declare runners

@@ -9,7 +9,7 @@ require (
 	github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268
 	github.com/erigontech/go-libdeflate v0.1.0
 	github.com/erigontech/mdbx-go v0.40.3
-	github.com/erigontech/secp256k1 v1.2.1-0.20260218182123-377cc1bd6410
+	github.com/erigontech/secp256k1 v1.3.0
 )
 
 require (
