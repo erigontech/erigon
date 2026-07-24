@@ -83,6 +83,33 @@ func (s *chan_sub[T]) Send(x T) {
 	}
 }
 
+// SendLatest delivers with latest-value semantics: when the subscriber is
+// overloaded the oldest buffered message is dropped to make room, so the most
+// recent value always survives. For subscriptions where only the current
+// state matters, not the history.
+func (s *chan_sub[T]) SendLatest(x T) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if s.closed {
+		return
+	}
+	for {
+		select {
+		case s.ch <- x:
+			return
+		default:
+		}
+		if cap(s.ch) == 0 {
+			// nothing to evict: deliver only if a reader was ready
+			return
+		}
+		select {
+		case <-s.ch:
+		default:
+		}
+	}
+}
+
 // Close is idempotent and safe to call concurrently with Send and CloseIfIdle.
 func (s *chan_sub[T]) Close() {
 	s.lock.Lock()

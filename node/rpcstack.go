@@ -324,7 +324,7 @@ func sendGzipResponse(w http.ResponseWriter, grw *gzipResponseWriter) {
 
 	if grw.gzw != nil {
 		defer putGzip(grw.gzw)
-		defer grw.gzw.Close() //nolint:errcheck
+		grw.gzw.Close() //nolint:errcheck
 		return
 	}
 

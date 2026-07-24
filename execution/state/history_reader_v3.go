@@ -56,14 +56,14 @@ var PrunedError = errors.New("old data not available due to pruning")
 // pass sd=nil and blockCache=nil via the legacy NewHistoryReaderV3
 // constructor.
 type HistoryReaderV3 struct {
-	txNum       uint64
-	trace       bool
-	tracePrefix string
 	ttx         kv.TemporalTx
 	sd          *execctx.SharedDomains
 	blockCache  *BlockStateCache
-	addr        common.Address                  // reused account/code lookup key
+	tracePrefix string
+	txNum       uint64
 	composite   [length.Addr + length.Hash]byte // reused storage lookup key (addr||slot)
+	addr        common.Address                  // reused account/code lookup key
+	trace       bool
 }
 
 func NewHistoryReaderV3(ttx kv.TemporalTx, txNum uint64) *HistoryReaderV3 {

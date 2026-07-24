@@ -396,7 +396,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 						se.logger.Warn(fmt.Sprintf("[%s] failed to reconstruct prior receipts for partial block", se.logPrefix),
 							"block", txTask.BlockNumber(), "startTxIndex", startTxIndex, "err", priorErr)
 					} else {
-						finalizeReceipts = append(priorReceipts, blockReceipts...)
+						finalizeReceipts = priorReceipts
+						finalizeReceipts = append(finalizeReceipts, blockReceipts...)
 						priorComplete = true
 					}
 					// The post-exec validator, which fills receipt blooms for full

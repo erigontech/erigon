@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/mvcc"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -265,13 +266,16 @@ func (m *Merger) Merge(
 }
 
 func (m *Merger) integrateMergedDirtyFiles(snapshots *BaseRoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
-	var retired []*DirtySegment
+	var retired retiredSegments
 
 	snapshots.dirtyLock.Lock()
 	defer snapshots.dirtyLock.Unlock()
 	// Publish under the same lock so the dirty mutation and the bundle publish are one
 	// atomic step (no window for a concurrent open to re-adopt a just-retired file).
-	defer func() { snapshots.recalcVisibleFiles(snapshots.alignMin, retired) }()
+	defer func() {
+		retire(mvcc.RetireReasonMerged, retired) // merge output is on disk and must be deleted on reclaim
+		snapshots.recalcVisibleFiles(snapshots.alignMin, retired)
+	}()
 
 	// add new segments
 	for enum, newSegs := range in {
