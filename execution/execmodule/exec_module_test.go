@@ -484,6 +484,7 @@ func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
 		t.Run(mode.name, func(t *testing.T) {
 			ctx := t.Context()
 			m := execmoduletester.New(t, opts...)
+			m.ExecModule.WaitIdle(ctx)
 
 			const chainLen = 9
 			const reorgBackTo = 5

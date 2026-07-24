@@ -2726,7 +2726,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 			sdb.AddAddressToAccessList(addr)
 		}
 
-		if !dst.IsNil() {
+		if !rules.IsAmsterdam && !dst.IsNil() {
 			dd, ok, err := sdb.GetDelegatedDesignation(dst)
 			if err != nil {
 				return err
