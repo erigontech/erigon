@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -110,6 +111,11 @@ func (e *ExecModule) setHeadModeB(ctx context.Context, tx kv.TemporalRwTx, targe
 		return fmt.Errorf("SetHead mode B (unwind %d → %d): %w", currentHead, targetBlock, err)
 	}
 
+	// Resolve the target canonical hash before commit — the RwTx
+	// becomes invalid post-commit and the txpool dispatch below needs
+	// it to look up the target header.
+	targetHash, _, targetHashErr := e.blockReader.CanonicalHash(ctx, tx, targetBlock)
+
 	// Commit the unwind. Without this the outer SetHead's deferred
 	// tx.Rollback reverts every DB change Provider.Unwind made —
 	// head pointers, TxNums truncation, canonical-hash cleanup,
@@ -129,6 +135,22 @@ func (e *ExecModule) setHeadModeB(ctx context.Context, tx kv.TemporalRwTx, targe
 	// corrupting). The Unwinder logs internally on partial failure.
 	if err := e.unwinder.FinalizeUnwind(); err != nil {
 		e.logger.Warn("SetHead mode B: FinalizeUnwind returned an error (tx already committed)", "err", err, "targetBlock", targetBlock)
+	}
+	// Signal the txpool via the same StateChangeBatch{UNWIND} path
+	// mode-A uses (see set_head.go). Without this the pool's cacheView
+	// / lastSeenBlock / per-sender balances stay pinned to currentHead
+	// until the next forward FCU, which never sees the target block.
+	// Mode-B is the deeper rewind so the drift is more severe than the
+	// case that motivated the mode-A fix.
+	switch {
+	case targetHashErr != nil:
+		e.logger.Warn("SetHead mode B: cannot resolve target hash for dispatch (chain state was still committed)", "err", targetHashErr, "targetBlock", targetBlock)
+	case targetHash == (common.Hash{}):
+		e.logger.Warn("SetHead mode B: no canonical hash for target (chain state was still committed)", "targetBlock", targetBlock)
+	default:
+		if err := e.dispatchUnwindNotifications(ctx, currentHead, targetBlock, targetHash); err != nil {
+			e.logger.Warn("SetHead mode B: dispatchUnwindNotifications failed (chain state was still committed)", "err", err, "targetBlock", targetBlock)
+		}
 	}
 	// Shallow mode-B (target > frozen tip) doesn't trim any snapshot
 	// files — everything above target is in MDBX only. Signalling
