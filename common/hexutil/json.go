@@ -47,9 +47,9 @@ func UnmarshalFixedUnprefixedText(typeName string, input, out []byte) error {
 // Big marshals/unmarshals as a JSON string with 0x prefix.
 // The zero value marshals as "0x0".
 //
-// Negative integers are not supported at this time. Attempting to marshal them will
-// return an error. Values larger than 256bits are rejected by Unmarshal but will be
-// marshaled without error.
+// Negative integers are not round-trippable: MarshalText/AppendText encode them as
+// "-0x…", but UnmarshalText rejects that form. Values larger than 256 bits are
+// rejected by Unmarshal but will be marshaled without error.
 type Big big.Int
 
 // MarshalText implements encoding.TextMarshaler
@@ -64,11 +64,13 @@ func (b Big) AppendText(dst []byte) ([]byte, error) {
 	case 0:
 		return append(dst, `0x0`...), nil
 	case -1:
-		// EncodeBig (fmt %#x) places the sign before the prefix ("-0x…"), whereas
-		// big.Int.Append would place it after ("0x-…").
-		var abs big.Int
-		abs.Abs(i)
-		return abs.Append(append(dst, `-0x`...), 16), nil
+		// EncodeBig (fmt %#x) writes the sign before the prefix ("-0x…"); big.Int.Append
+		// writes it after ("0x-…"). Append "-0x", let Append add the magnitude with its
+		// own leading '-', then drop that duplicate '-'.
+		dst = append(dst, `-0x`...)
+		dash := len(dst)
+		dst = i.Append(dst, 16)
+		return append(dst[:dash], dst[dash+1:]...), nil
 	default:
 		return i.Append(append(dst, `0x`...), 16), nil
 	}
