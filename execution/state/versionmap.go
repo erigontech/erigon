@@ -254,7 +254,14 @@ func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 					len(codeChange.Bytecode),
 				)
 			}
-			vm.WriteCode(accountChanges.Address, Version{TxIndex: int(codeChange.Index) - 1}, accounts.NewCode(codeChange.Bytecode), true)
+			code := accounts.NewCode(codeChange.Bytecode)
+			version := Version{TxIndex: int(codeChange.Index) - 1}
+			vm.WriteCode(accountChanges.Address, version, code, true)
+			// The code determines its size and hash: write the derived cells so
+			// EXTCODESIZE/EXTCODEHASH readers resolve here instead of falling
+			// through to the DB and racing the creator's flush.
+			vm.WriteCodeSize(accountChanges.Address, version, code.Len(), true)
+			vm.WriteCodeHash(accountChanges.Address, version, code.Hash, true)
 		}
 	}
 }
@@ -878,6 +885,7 @@ func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, pat
 	readVal T,
 	readLive func(*VersionMap, accounts.Address, accounts.StorageKey, int) (T, ReadResult, bool),
 	eq func(a, b T) bool,
+	recordField func(*accounts.Account) T,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string) VersionValidity {
 	// One typed read supplies BOTH the status (for the version check) and the
@@ -886,7 +894,20 @@ func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, pat
 	// compares against the value that came with rr.
 	live, rr, ok := readLive(vm, addr, key, txIndex)
 	matchesLive := func() bool { return ok && eq(readVal, live) }
-	valid := vm.validateReadImpl(txIndex, addr, path, key, source, version, rr, matchesLive, checkVersion, traceInvalid, tracePrefix, false)
+	// A read folded onto the account record tiebreaks against the live record's
+	// field: record churn that keeps the field unchanged is not a conflict. A
+	// non-Done or absent record cannot prove equality (fail-safe: re-execute).
+	var matchesRecord func() bool
+	if recordField != nil {
+		matchesRecord = func() bool {
+			acc, arr, aok := vm.ReadAddress(addr, txIndex)
+			if !aok || arr.Status() != MVReadResultDone || acc == nil {
+				return false
+			}
+			return eq(readVal, recordField(acc))
+		}
+	}
+	valid := vm.validateReadImpl(txIndex, addr, path, key, source, version, rr, matchesLive, matchesRecord, checkVersion, traceInvalid, tracePrefix, false)
 	if dbg.TraceReexec && valid == VersionInvalid {
 		fmt.Printf(
 			"VINV tx=%d %x %s src=%s rv=(%d.%d) cell=(%d.%d,st=%d) readVal=%v live=%v liveOK=%v\n",
@@ -939,6 +960,13 @@ func eqCodeHash(a, b accounts.CodeHash) bool {
 	return a == b
 }
 
+// Record-field extractors for the fold tiebreaker: a sub-field read with no
+// dedicated cell validates against the account record, by field value.
+func recordBalance(a *accounts.Account) uint256.Int        { return a.Balance }
+func recordNonce(a *accounts.Account) uint64               { return a.Nonce }
+func recordIncarnation(a *accounts.Account) uint64         { return a.Incarnation }
+func recordCodeHash(a *accounts.Account) accounts.CodeHash { return a.CodeHash }
+
 // The AddressPath record tiebreakers are existence-only: the record's version
 // churns as workers re-stamp it, but each sub-field (balance/nonce/codeHash)
 // is recorded and validated as its own read. Under EIP-161 a nil read is
@@ -987,6 +1015,7 @@ func eqAccountStrict(a, b *accounts.Account) bool {
 func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
 	rr ReadResult,
 	matchesLive func() bool,
+	matchesRecord func() bool,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string, recursive bool) VersionValidity {
 
@@ -1052,9 +1081,9 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			(path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath) {
 			// A sub-field read with no dedicated cell is recorded folded onto
 			// AddressPath (its source/version), so validate it against AddressPath
-			// at that version.
+			// at that version — with the record-field value as the tiebreaker.
 			valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
-				version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
+				version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), matchesRecord, nil, checkVersion, traceInvalid, tracePrefix, true)
 			if valid == VersionInvalid {
 				invReason = "fold-addr"
 			}
@@ -1069,20 +1098,20 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				// any property (code, storage slots, balance, nonce, etc.).
 				if path != AddressPath && path != SelfDestructPath {
 					if valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
-						version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true); valid == VersionValid {
+						version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), nil, nil, checkVersion, traceInvalid, tracePrefix, true); valid == VersionValid {
 						valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
+							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, nil, checkVersion, traceInvalid, tracePrefix, true)
 						if valid == VersionInvalid {
 							invReason = "xval-sd"
 						}
 					} else {
 						invReason = "xval-addr"
 						vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
+							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, nil, checkVersion, traceInvalid, tracePrefix, true)
 					}
 				} else if path == AddressPath {
 					valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-						version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
+						version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, nil, checkVersion, traceInvalid, tracePrefix, true)
 					if valid == VersionInvalid {
 						invReason = "addr-xval-sd"
 					}
@@ -1163,7 +1192,7 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	// check is authoritative. One ReadStatus, no value comparison.
 	noValueRead := func(addr accounts.Address, path AccountPath, key accounts.StorageKey, hdr ReadHeader) VersionValidity {
 		return vm.validateReadImpl(txIdx, addr, path, key, hdr.Source, hdr.Version,
-			vm.ReadStatus(addr, path, key, txIdx), nil, checkVersion, traceInvalid, tracePrefix, false)
+			vm.ReadStatus(addr, path, key, txIdx), nil, nil, checkVersion, traceInvalid, tracePrefix, false)
 	}
 
 	// Value paths go through the generic validateRead so the recorded value stays
@@ -1181,33 +1210,33 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 			deadAddr = a
 			eqAccount = eqAccountDead
 		}
-		if !ok(validateRead(vm, txIdx, a, AddressPath, accounts.NilKey, tr.Source, tr.Version, rv, liveAddress, eqAccount, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, AddressPath, accounts.NilKey, tr.Source, tr.Version, rv, liveAddress, eqAccount, nil, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.balance {
-		if !ok(validateRead(vm, txIdx, a, BalancePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveBalance, eqUint256, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, BalancePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveBalance, eqUint256, recordBalance, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.nonce {
-		if !ok(validateRead(vm, txIdx, a, NoncePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveNonce, eqUint64, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, NoncePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveNonce, eqUint64, recordNonce, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.incarnation {
-		if !ok(validateRead(vm, txIdx, a, IncarnationPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveIncarnation, eqUint64, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, IncarnationPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveIncarnation, eqUint64, recordIncarnation, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.codeHash {
-		if !ok(validateRead(vm, txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeHash, eqCodeHash, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeHash, eqCodeHash, recordCodeHash, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, inner := range rs.storage {
 		for k, tr := range inner {
-			if !ok(validateRead(vm, txIdx, a, StoragePath, k, tr.Source, tr.Version, tr.Val, liveStorage, eqUint256, checkVersion, traceInvalid, tracePrefix)) {
+			if !ok(validateRead(vm, txIdx, a, StoragePath, k, tr.Source, tr.Version, tr.Val, liveStorage, eqUint256, nil, checkVersion, traceInvalid, tracePrefix)) {
 				return
 			}
 		}
@@ -1223,7 +1252,7 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		}
 	}
 	for a, tr := range rs.code {
-		if !ok(validateRead(vm, txIdx, a, CodePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCode, eqCode, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, CodePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCode, eqCode, nil, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}

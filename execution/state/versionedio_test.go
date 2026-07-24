@@ -1255,6 +1255,27 @@ func TestAccountRead_BalancePathPromotion_DoesNotInvalidate(t *testing.T) {
 // IncarnationPath read must default to (StorageRead, UnknownVersion), not
 // the outer (MapRead, V_bal) promotion — same livelock class as the
 // accountRead path.
+// CreateAccount must not record a SelfDestructPath read: the flag is a worker
+// signal the BAL cannot pre-populate, so a recorded probe races the destroyer's
+// flush when a CREATE2 re-creates an address destroyed earlier in the block.
+// The value-carrying synthetic incarnation/balance reads pin every consequence
+// of the flag, so validation coverage is unchanged.
+func TestCreateAccount_RecordsNoSelfDestructRead(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xC4EA7E01"))
+	reader := newAccountStateReader(addr)
+	vm := NewVersionMap(nil)
+	ibs := New(NewVersionedStateReader(1, ReadSet{}, vm, reader))
+	defer ibs.Release(false)
+	ibs.SetTxContext(0, 5)
+	ibs.SetVersion(0)
+	ibs.SetVersionMap(vm)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	reads := ibs.VersionedReads()
+	_, tracked := reads.GetSelfDestruct(addr)
+	require.False(t, tracked)
+}
+
 func TestCreateAccount_SyntheticIncarnationStamp_DoesNotInvalidate(t *testing.T) {
 	t.Parallel()
 

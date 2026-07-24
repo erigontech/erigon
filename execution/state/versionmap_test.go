@@ -835,6 +835,7 @@ func TestValidateRead_MapReadValueTiebreaker(t *testing.T) {
 		*uint256.NewInt(100),
 		liveBalance,
 		eqUint256,
+		recordBalance,
 		checkVersionEq,
 		false,
 		"",
@@ -851,6 +852,7 @@ func TestValidateRead_MapReadValueTiebreaker(t *testing.T) {
 		*uint256.NewInt(999),
 		liveBalance,
 		eqUint256,
+		recordBalance,
 		checkVersionEq,
 		false,
 		"",
@@ -996,6 +998,159 @@ func TestBALFedReaderDoesNotRaceCreatorFlush(t *testing.T) {
 			})
 		}
 	}
+}
+
+// A sub-field read with no dedicated cell folds onto the account record for
+// validation. A later record write that keeps the field's value unchanged
+// (fee-merge churn re-stamps the coinbase record every tx) must not invalidate
+// the folded read — the fold compares values, not record versions.
+func TestValidateRead_FoldedNonceSurvivesRecordChurn(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xee, 0x2d})
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+	newIO := func() *VersionedIO {
+		io := NewVersionedIO(100)
+		rs := ReadSet{}
+		rs.SetNonce(addr, VersionedRead[uint64]{
+			ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 4}},
+			Val:        69,
+		})
+		io.RecordReads(Version{TxIndex: 99}, rs)
+		return io
+	}
+	t.Run("same nonce in churned record stays valid", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		vm.WriteAddress(addr, Version{TxIndex: 4}, &accounts.Account{Nonce: 69, CodeHash: accounts.EmptyCodeHash}, true)
+		vm.WriteAddress(addr, Version{TxIndex: 98}, &accounts.Account{Nonce: 69, Balance: *uint256.NewInt(123), CodeHash: accounts.EmptyCodeHash}, true)
+		require.Equal(t, VersionValid, vm.ValidateVersion(99, newIO(), checkVersionEqual, true, false, ""))
+	})
+	t.Run("changed nonce in churned record invalidates", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		vm.WriteAddress(addr, Version{TxIndex: 4}, &accounts.Account{Nonce: 69, CodeHash: accounts.EmptyCodeHash}, true)
+		vm.WriteAddress(addr, Version{TxIndex: 98}, &accounts.Account{Nonce: 70, Balance: *uint256.NewInt(123), CodeHash: accounts.EmptyCodeHash}, true)
+		require.Equal(t, VersionInvalid, vm.ValidateVersion(99, newIO(), checkVersionEqual, true, false, ""))
+	})
+	t.Run("estimate record cannot prove equality", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		vm.WriteAddress(addr, Version{TxIndex: 4}, &accounts.Account{Nonce: 69, CodeHash: accounts.EmptyCodeHash}, true)
+		vm.WriteAddress(addr, Version{TxIndex: 98}, nil, false)
+		require.Equal(t, VersionInvalid, vm.ValidateVersion(99, newIO(), checkVersionEqual, true, false, ""))
+	})
+}
+
+// A synthesized account's incarnation is a guess (the BAL carries no
+// incarnation and an empty-code contract creation carries no code change
+// either), so the load must not record it as an incarnation read: the
+// creator's later Incarnation flush would spuriously invalidate the guess.
+// A DB-loaded account's incarnation is an observation and stays recorded.
+func TestSynthesizedAccountRecordsNoIncarnationGuess(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xd9, 0x6c})
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+	vm := NewVersionMap([]*types.AccountChanges{{
+		Address:      addr,
+		NonceChanges: []*types.NonceChange{{Index: 227, Value: 1}},
+	}})
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	defer ibs.Release(false)
+	ibs.SetTxContext(1, 227)
+	ibs.SetVersion(0)
+	acc, _, _, err := ibs.getVersionedAccount(addr, true)
+	require.NoError(t, err)
+	require.NotNil(t, acc)
+	reads := ibs.VersionedReads()
+	_, tracked := reads.GetIncarnation(addr)
+	require.False(t, tracked)
+	io := NewVersionedIO(228)
+	io.RecordReads(Version{TxIndex: 227}, reads)
+	vm.WriteAddress(addr, Version{TxIndex: 226}, &accounts.Account{Nonce: 1, Incarnation: 1, CodeHash: accounts.EmptyCodeHash}, true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 226}, 1, true)
+	require.Equal(t, VersionValid, vm.ValidateVersion(227, io, checkVersionEqual, true, false, ""))
+}
+
+// The DB-loaded twin (fund-then-deploy): a balance-only account CREATE2'd onto
+// by the preceding tx. The reader's EVM-visible view is already deterministic
+// (nonce/code from BAL cells, balance from the DB), so the pre-block
+// incarnation must not be recorded either — the creator's Incarnation flush
+// would spuriously invalidate it while normalization resolves the final
+// incarnation from the map.
+func TestDBLoadedAccountRecordsNoIncarnationDefault(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xd9, 0x6d})
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+	deployed := accounts.NewCode([]byte{0x60, 0x80, 0x60, 0x40})
+	reader := &codeReader{addr: addr, account: &accounts.Account{Balance: *uint256.NewInt(9), CodeHash: accounts.EmptyCodeHash}}
+	vm := NewVersionMap([]*types.AccountChanges{{
+		Address:      addr,
+		NonceChanges: []*types.NonceChange{{Index: 227, Value: 1}},
+		CodeChanges:  []*types.CodeChange{{Index: 227, Bytecode: deployed.Bytes}},
+	}})
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Release(false)
+	ibs.SetTxContext(1, 227)
+	ibs.SetVersion(0)
+	acc, _, _, err := ibs.getVersionedAccount(addr, true)
+	require.NoError(t, err)
+	require.NotNil(t, acc)
+	reads := ibs.VersionedReads()
+	_, tracked := reads.GetIncarnation(addr)
+	require.False(t, tracked)
+	io := NewVersionedIO(228)
+	io.RecordReads(Version{TxIndex: 227}, reads)
+	vm.WriteAddress(addr, Version{TxIndex: 226}, &accounts.Account{Nonce: 1, Incarnation: 1, Balance: *uint256.NewInt(9), CodeHash: deployed.Hash}, true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 226}, 1, true)
+	require.Equal(t, VersionValid, vm.ValidateVersion(227, io, checkVersionEqual, true, false, ""))
+}
+
+// A BAL code change determines the code's size and hash, so the pre-population
+// must write those derived cells too: an EXTCODESIZE/EXTCODEHASH reader of a
+// just-created contract otherwise misses the map, falls through to the DB, and
+// races the creator's flush.
+func TestBALPrePopulatesDerivedCodeCells(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xcd, 0x01})
+	bytecode := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
+	vm := NewVersionMap([]*types.AccountChanges{{
+		Address:     addr,
+		CodeChanges: []*types.CodeChange{{Index: 3, Bytecode: bytecode}},
+	}})
+	size, sres, ok := vm.ReadCodeSize(addr, 5)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDone, sres.Status())
+	require.Equal(t, len(bytecode), size)
+	hash, hres, ok := vm.ReadCodeHash(addr, 5)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDone, hres.Status())
+	require.Equal(t, accounts.NewCode(bytecode).Hash, hash)
+	_, _, ok = vm.ReadCodeSize(addr, 2)
+	require.False(t, ok)
+}
+
+func TestBALPrePopulatesDerivedCodeCells_ClearedCode(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xcd, 0x02})
+	vm := NewVersionMap([]*types.AccountChanges{{
+		Address:     addr,
+		CodeChanges: []*types.CodeChange{{Index: 3, Bytecode: nil}},
+	}})
+	size, sres, ok := vm.ReadCodeSize(addr, 5)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDone, sres.Status())
+	require.Zero(t, size)
+	hash, hres, ok := vm.ReadCodeHash(addr, 5)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDone, hres.Status())
+	require.Equal(t, accounts.EmptyCodeHash, hash)
 }
 
 // The provisional marker must not outlive its load: once a load concludes

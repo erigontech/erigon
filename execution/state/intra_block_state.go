@@ -1922,31 +1922,26 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		if readAccount != nil {
 			account := readAccount
 
-			destructed, _, _, err := refreshSelfDestruct(sdb, addr)
-
-			if err != nil {
-				return err
+			// Derive destructed without recording a SelfDestructPath read: the
+			// flag is a worker signal the BAL cannot pre-populate, so a recorded
+			// probe races the destroyer's flush on a CREATE2 re-creation. The
+			// value-carrying synthetic incarnation/balance reads below pin every
+			// consequence of the flag, so a stale conclusion still invalidates.
+			destructed := false
+			if sd, ok := sdb.versionedWriteSelfDestruct(addr); ok {
+				destructed = sd
+			} else if d, res, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone && d {
+				destructed = true
 			}
 
 			// Reuse the cached stateObject directly `previous` so that (a) selfdestructed=true is captured,
 			// (b) the accumulated incarnation is used for the new object's PrevIncarnation (important when the
 			// account was created and destroyed multiple times within the same block), and
-			// (c) after a REVERT CommitBlock can still emit DeleteAccount for it.
+			// (c) after a REVERT CommitBlock can still emit DeleteAccount for it (accumulated-IBS
+			// path, e.g. GenerateChain, where the map carries no SelfDestructPath cell).
 			if !destructed {
 				if so, ok := sdb.stateObjects[addr]; ok && so.selfdestructed {
-					// Accumulated-IBS path (e.g. GenerateChain): stateObjects cache marks the
-					// account as selfdestructed but versionedReadCore returned false due to the
-					// so.deleted early exit.  Reuse the cached stateObject to preserve the
-					// correct selfdestructed flag and accumulated incarnation.
 					previous = so
-				} else if sdb.versionMap != nil {
-					// Fresh-IBS worker path (e.g. InsertChain parallel executor): no stateObjects
-					// cache, but the versionMap may have SelfDestructPath=true from a prior tx.
-					// versionedReadCore returns false for SelfDestructPath via the early-exit at
-					// lines 459-462 — bypass it here so we correctly set selfdestructed=true.
-					if d, res, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone && d {
-						destructed = true
-					}
 				}
 			}
 

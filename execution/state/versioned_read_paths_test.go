@@ -448,10 +448,12 @@ func TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet(t *testing.T) {
 	assert.Equal(t, uint64(7), nonceRead.Val,
 		"recorded NoncePath value must be the refresh defaultV (currentNonce), not zero")
 
-	incRead, ok := ibs.versionedReads.GetIncarnation(addr)
-	require.True(t, ok, "IncarnationPath read must be recorded")
-	assert.Equal(t, uint64(3), incRead.Val,
-		"recorded IncarnationPath value must be the refresh defaultV (currentIncarnation), not zero")
+	// IncarnationPath is deliberately NOT recorded on the no-cell refresh:
+	// the pre-block incarnation is metadata whose consequences are pinned by
+	// the value-validated field reads, and recording it would race a
+	// re-creating tx's Incarnation flush.
+	_, ok = ibs.versionedReads.GetIncarnation(addr)
+	require.False(t, ok)
 
 	chRead, ok := ibs.versionedReads.GetCodeHash(addr)
 	require.True(t, ok, "CodeHashPath read must be recorded")

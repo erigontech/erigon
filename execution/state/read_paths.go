@@ -861,9 +861,11 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 	case outcomeReturnZero:
 		return 0, r.source, r.version, nil
 	case outcomeReturnDefault:
-		if r.recordVR {
-			s.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{r.hdr, currentIncarnation})
-		}
+		// Not recorded: with no cell the current incarnation is pre-block state
+		// (or a synthesis guess), and every consequence of a prior tx re-creating
+		// the account is pinned by the value-validated field reads; the final
+		// incarnation is resolved from the map at write normalization. Recording
+		// it here would spuriously invalidate against the creator's flush.
 		return currentIncarnation, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("refreshIncarnation: unexpected outcome %d for %x", r.outcome, addr))
