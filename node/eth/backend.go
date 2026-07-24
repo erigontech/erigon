@@ -915,7 +915,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					config.BatchSize,
 					chainConfig,
 					backend.engine,
-					&vm.Config{},
+					&vm.Config{UseGevm: config.UseGevm},
 					backend.notifications,
 					config.StateStream,
 					false, /*badBlockHalt*/
@@ -928,7 +928,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					config.ExperimentalBAL,
 				),
 				stagedsync.StageSendersCfg(chainConfig, config.Sync, false /* badBlockHalt */, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
-				builderstages.StageBuilderExecCfg(builderStatePos, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
+				builderstages.StageBuilderExecCfg(builderStatePos, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{UseGevm: config.UseGevm}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
 				builderstages.StageBuilderFinishCfg(backend.chainConfig, backend.engine, builderStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
 			),
 			builderstages.BuilderUnwindOrder,
