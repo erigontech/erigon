@@ -561,7 +561,6 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services
 		return err
 	}
 	defer c.Close()
-	var tdKey [40]byte
 	for k, v, err := c.First(); k != nil && err == nil; k, v, err = c.Next() {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum == 0 { // Do not prune genesis marker
@@ -573,13 +572,11 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services
 		if err := tx.Delete(kv.HeaderNumber, v); err != nil {
 			return err
 		}
-		if dbg.PruneTotalDifficulty() {
-			copy(tdKey[:], k)
-			copy(tdKey[8:], v)
-			if err := tx.Delete(kv.HeaderTD, tdKey[:]); err != nil {
-				return err
-			}
-		}
+		// kv.HeaderTD is intentionally kept for pruned blocks: mode-B
+		// setHead can target a block below pruneThreshold whose parent
+		// TD Caplin's BlockCollector.Flush needs to insert the block
+		// after the unwind target. Wiping it here mirror-defeats the
+		// always-write in FillDBFromSnapshots (f5b704561a).
 		if err := c.DeleteCurrent(); err != nil {
 			return err
 		}
