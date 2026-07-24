@@ -1099,8 +1099,13 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 								return nil
 							}
 							pe.Lock()
+							done, wasPending := pe.blockExecutors[blockResult.BlockNum]
 							delete(pe.blockExecutors, blockResult.BlockNum)
 							pe.Unlock()
+							// Off-lock: walking a block's cells can be long.
+							if wasPending {
+								done.versionMap.Release()
+							}
 							pe.scheduleNextPending(ctx)
 						}
 					}
@@ -1228,8 +1233,13 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				}
 
 				pe.Lock()
+				done, wasPending := pe.blockExecutors[blockResult.BlockNum]
 				delete(pe.blockExecutors, blockResult.BlockNum)
 				pe.Unlock()
+				// Off-lock: walking a block's cells can be long.
+				if wasPending {
+					done.versionMap.Release()
+				}
 
 				if terminal {
 					// commitResults is drained by the calculator on its own
