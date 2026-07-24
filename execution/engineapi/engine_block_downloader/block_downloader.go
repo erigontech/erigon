@@ -28,7 +28,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
@@ -149,9 +148,14 @@ func (e *EngineBlockDownloader) download(ctx context.Context, req BackwardDownlo
 	e.status.Store(Synced)
 }
 
-// newPayloadGapExceedsLimit reports whether the head-to-parent gap exceeds maxReorgDepth in either direction.
-func newPayloadGapExceedsLimit(currentHeadNum, missingBlockNum, maxReorgDepth uint64) bool {
-	return math.AbsoluteDifference(currentHeadNum, missingBlockNum) > maxReorgDepth
+// newPayloadForwardGapExceedsLimit reports whether the new payload's parent is more than maxReorgDepth blocks ahead of the current head.
+func newPayloadForwardGapExceedsLimit(currentHeadNum, parentNum, maxReorgDepth uint64) bool {
+	return parentNum > currentHeadNum && parentNum-currentHeadNum > maxReorgDepth
+}
+
+// newPayloadBackwardGapExceedsLimit reports whether the new payload's parent is more than maxReorgDepth blocks behind the current head.
+func newPayloadBackwardGapExceedsLimit(currentHeadNum, parentNum, maxReorgDepth uint64) bool {
+	return currentHeadNum > parentNum && currentHeadNum-parentNum > maxReorgDepth
 }
 
 func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDownloadRequest) error {
@@ -187,20 +191,31 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req BackwardDownloadRequest) error {
 	blocksBatchSize := min(500, uint64(e.syncCfg.LoopBlockLimit))
 	opts := []p2p.BbdOption{p2p.WithBlocksBatchSize(blocksBatchSize)}
+	execForwardInBatches := req.Trigger == FcuTrigger
 	if req.Trigger == NewPayloadTrigger {
-		opts = append(opts, p2p.WithChainLengthLimit(e.syncCfg.MaxReorgDepth))
+		forwardCatchUp := false
 		currentHeader := e.chainRW.CurrentHeader(ctx)
-		if currentHeader != nil {
-			opts = append(opts, p2p.WithChainLengthCurrentHead(currentHeader.Number.Uint64()))
-			if req.ValidateChainTip != nil &&
-				newPayloadGapExceedsLimit(currentHeader.Number.Uint64(), req.ValidateChainTip.NumberU64()-1, e.syncCfg.MaxReorgDepth) {
+		if currentHeader != nil && req.ValidateChainTip != nil {
+			currentHead := currentHeader.Number.Uint64()
+			parentNum := req.ValidateChainTip.NumberU64() - 1
+			if newPayloadBackwardGapExceedsLimit(currentHead, parentNum, e.syncCfg.MaxReorgDepth) {
 				return fmt.Errorf(
 					"%w: currentHead=%d, parent=%d, limit=%d",
 					p2p.ErrChainLengthExceedsLimit,
-					currentHeader.Number.Uint64(),
-					req.ValidateChainTip.NumberU64()-1,
+					currentHead,
+					parentNum,
 					e.syncCfg.MaxReorgDepth,
 				)
+			}
+			forwardCatchUp = newPayloadForwardGapExceedsLimit(currentHead, parentNum, e.syncCfg.MaxReorgDepth)
+		}
+		if forwardCatchUp {
+			// catch up in full: the CL's initial-sync phase may feed new payloads without a follow-up FCU
+			execForwardInBatches = true
+		} else {
+			opts = append(opts, p2p.WithChainLengthLimit(e.syncCfg.MaxReorgDepth))
+			if currentHeader != nil {
+				opts = append(opts, p2p.WithChainLengthCurrentHead(currentHeader.Number.Uint64()))
 			}
 		}
 	}
@@ -243,7 +258,7 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 		}
 		insertedBlocksWithoutExec += len(blocks)
 		lastTip = blocks[len(blocks)-1]
-		if req.Trigger == FcuTrigger && uint(insertedBlocksWithoutExec) >= e.syncCfg.LoopBlockLimit {
+		if execForwardInBatches && uint(insertedBlocksWithoutExec) >= e.syncCfg.LoopBlockLimit {
 			e.logger.Info(
 				"[EngineBlockDownloader] executing downloaded batch as it reached sync loop block limit",
 				"to", lastTip.NumberU64(),
@@ -259,7 +274,7 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 	if err != nil {
 		return err
 	}
-	if req.Trigger == FcuTrigger && insertedBlocksWithoutExec > 0 && lastTip != nil {
+	if execForwardInBatches && insertedBlocksWithoutExec > 0 && lastTip != nil {
 		e.logger.Info(
 			"[EngineBlockDownloader] executing final downloaded batch",
 			"to", lastTip.NumberU64(),
