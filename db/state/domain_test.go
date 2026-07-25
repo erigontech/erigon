@@ -18,9 +18,11 @@ package state
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"math"
@@ -28,9 +30,8 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -50,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -99,6 +101,15 @@ func testDbAndDomainOfStep(t *testing.T, domainCfg statecfg.DomainCfg, aggStep u
 	return db, d
 }
 
+// requireFileNameMatches asserts the file name shape - base, step range and
+// extension - without pinning the schema version, which bumps independently.
+func requireFileNameMatches(t *testing.T, path, mask string) {
+	t.Helper()
+	matched, err := filepath.Match(mask, filepath.Base(path))
+	require.NoError(t, err)
+	require.Truef(t, matched, "%s does not match %s", path, mask)
+}
+
 func TestDomain_CollationBuild(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -123,16 +134,18 @@ func TestDomain_OpenFolder(t *testing.T) {
 
 	db, d, txs := filledDomain(t, log.New())
 
-	err := db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+	err := db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
 		collateAndMerge(t, tx, d, txs)
 		return nil
 	})
 	require.NoError(t, err)
 
-	list := d._visible.files
+	dc := d.beginForTests()
+	list := dc.files
 	require.NotEmpty(t, list)
 	ff := list[len(list)-1]
 	fn := ff.src.decompressor.FilePath()
+	dc.Close()
 	d.Close()
 
 	err = dir.RemoveFile(fn)
@@ -142,7 +155,7 @@ func TestDomain_OpenFolder(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
-	err = d.openFolder(scanDirsRes)
+	_, err = d.openFolder(t.Context(), scanDirsRes)
 	require.NoError(t, err)
 	d.Close()
 }
@@ -154,7 +167,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if compressDomainVals {
 		d.Compression = seg.CompressKeys | seg.CompressVals
@@ -163,7 +176,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
@@ -210,10 +223,9 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		c, err := d.collate(ctx, 0, 0, 16, tx)
 
 		require.NoError(t, err)
-		require.True(t, strings.HasSuffix(c.valuesPath, "v2.0-accounts.0-1.kv"))
+		requireFileNameMatches(t, c.valuesPath, d.kvFileNameMask(0, 1))
 		require.Equal(t, 2, c.valuesCount)
-		require.True(t, strings.HasSuffix(c.historyPath, "v2.0"+
-			"-accounts.0-1.v"))
+		requireFileNameMatches(t, c.historyPath, d.History.vFileNameMask(0, 1))
 
 		require.Equal(t, seg.WordsAmount2PagesAmount(3, d.CompressorCfg.ValuesOnCompressedPage), 1) // 16 valus per page
 		require.Equal(t, 3, c.historyComp.Count())                                                  // no compression on collate
@@ -291,17 +303,88 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 	}
 }
 
-func TestDomain_AfterPrune(t *testing.T) {
+// TestDumpStepRangeToPath verifies the dstDir + integrate=false escape hatch on
+// dumpStepRangeOnDisk's body: the .kv plus accessor outputs land in the override
+// directory and the aggregator's view (Domain.dirtyFiles) is not mutated.
+func TestDumpStepRangeToPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
 	logger := log.New()
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	db, d := testDbAndDomain(t, logger)
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
 	ctx := context.Background()
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domainRoTx := d.BeginFilesRo()
+
+	domainRoTx := d.beginForTests()
+	defer domainRoTx.Close()
+	writer := domainRoTx.NewWriter()
+	defer writer.Close()
+
+	require.NoError(t, writer.PutWithPrev([]byte("k1"), []byte("v1"), 2, nil))
+	require.NoError(t, writer.PutWithPrev([]byte("k2"), []byte("v2"), 3, nil))
+
+	// Snapshot dirtyFiles count before invoking; integrate=false must leave it unchanged.
+	countDirty := func() int {
+		n := 0
+		d.dirtyFiles.Walk(func(items []*FilesItem) bool {
+			n += len(items)
+			return true
+		})
+		return n
+	}
+	beforeDirty := countDirty()
+
+	dstDir := t.TempDir()
+	batch := &TemporalMemBatch{}
+	batch.domainWriters[d.Name] = writer
+
+	require.NoError(t, d.dumpStepRangeToPath(ctx, 0, 1, batch, nil, dstDir, false))
+
+	// .kv must land in dstDir, not in d.dirs.SnapDomain.
+	expectedKV := d.kvNewFilePathIn(dstDir, 0, 1)
+	gotKV, errStat := os.Stat(expectedKV)
+	require.NoError(t, errStat, "expected .kv at %s", expectedKV)
+	require.False(t, gotKV.IsDir())
+
+	// .bt (commitment/account domain has BTree accessor) must also land in dstDir.
+	if d.Accessors.Has(statecfg.AccessorBTree) {
+		btPath := d.kvBtAccessorNewFilePathIn(dstDir, 0, 1)
+		_, err := os.Stat(btPath)
+		require.NoError(t, err, "expected .bt at %s", btPath)
+	}
+	if d.Accessors.Has(statecfg.AccessorHashMap) {
+		kviPath := d.kviAccessorNewFilePathIn(dstDir, 0, 1)
+		_, err := os.Stat(kviPath)
+		require.NoError(t, err, "expected .kvi at %s", kviPath)
+	}
+
+	// SnapDomain must be free of the new step file because integrate=false skips
+	// integrateDirtyFiles and dstDir overrides the write path.
+	snapKV := d.kvNewFilePath(0, 1)
+	_, err = os.Stat(snapKV)
+	require.Truef(t, errors.Is(err, fs.ErrNotExist),
+		"unexpected file in SnapDomain at %s (err=%v)", snapKV, err)
+
+	// dirtyFiles count is unchanged: integrate=false skips integration.
+	require.Equal(t, beforeDirty, countDirty(), "dirtyFiles must not grow when integrate=false")
+}
+
+func TestDomain_AfterPrune(t *testing.T) {
+	logger := log.New()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	db, d := testDbAndDomain(t, logger)
+	ctx := t.Context()
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
@@ -343,7 +426,7 @@ func TestDomain_AfterPrune(t *testing.T) {
 
 	require.NoError(t, d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
 	var v []byte
-	domainRoTx = d.BeginFilesRo()
+	domainRoTx = d.beginForTests()
 	defer domainRoTx.Close()
 	v, _, found, err := domainRoTx.GetLatest(k1, tx)
 	require.Truef(t, found, "key1 not found")
@@ -375,14 +458,14 @@ func TestDomain_AfterPrune(t *testing.T) {
 func fillDomain(t *testing.T, d *Domain, db kv.RwDB, logger log.Logger) uint64 {
 	t.Helper()
 	require := require.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
 
 	txs := uint64(1000)
 
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
@@ -427,11 +510,11 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	t.Helper()
 	fmt.Printf("txs: %d\n", txs)
 	require := require.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	var err error
 
 	// Check the history
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	roTx, err := db.BeginRo(ctx)
 	require.NoError(err)
@@ -465,7 +548,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 
 	// Structural invariants: no duplicates, monotonic txNums, index-history consistency, etc.
 	checkHistoryProperties(t, domainRoTx.ht)
-	// Domain file invariants: key-count, accessor presence, frozen flag, sort order, alignment, bloom.
+	// Domain file invariants: key-count, accessor presence, sort order, alignment, bloom.
 	checkDomainFileProperties(t, domainRoTx)
 }
 
@@ -474,7 +557,6 @@ func checkDomainFileProperties(t *testing.T, dt *DomainRoTx) {
 	t.Helper()
 	checkDomainFileKeyCountConsistency(t, dt)
 	checkDomainFileAccessorsPresent(t, dt)
-	checkDomainFileFrozenFlagConsistency(t, dt)
 	checkDomainFileSortedKeyOrder(t, dt)
 	checkDomainHistoryRangeAlignment(t, dt)
 	checkDomainExistenceFilterNoFalseNegatives(t, dt)
@@ -524,20 +606,6 @@ func checkDomainFileAccessorsPresent(t *testing.T, dt *DomainRoTx) {
 				"file %d [%d-%d): AccessorExistence configured but existence is nil",
 				i, f.startTxNum, f.endTxNum)
 		}
-	}
-}
-
-// checkDomainFileFrozenFlagConsistency verifies (property 7):
-// file.frozen == (endStep - startStep >= stepsInFrozenFile).
-func checkDomainFileFrozenFlagConsistency(t *testing.T, dt *DomainRoTx) {
-	t.Helper()
-	for i, f := range dt.files {
-		startStep := f.startTxNum / dt.stepSize
-		endStep := f.endTxNum / dt.stepSize
-		expectedFrozen := (endStep - startStep) >= dt.stepsInFrozenFile
-		require.Equal(t, expectedFrozen, f.src.frozen,
-			"file %d [%d-%d): frozen=%v but expected frozen=%v (steps=%d, stepsInFrozenFile=%d)",
-			i, f.startTxNum, f.endTxNum, f.src.frozen, expectedFrozen, endStep-startStep, dt.stepsInFrozenFile)
 	}
 }
 
@@ -618,7 +686,7 @@ func TestHistory(t *testing.T) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	db, d, txs := filledDomain(t, logger)
-	err := db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+	err := db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
 		collateAndMerge(t, tx, d, txs)
 		return nil
 	})
@@ -640,7 +708,6 @@ func (d *Domain) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv.
 		return err
 	}
 	d.integrateDirtyFiles(sf, txFrom, txTo)
-	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 	return nil
 }
 
@@ -648,13 +715,13 @@ func collateAndMerge(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
 	t.Helper()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := context.Background()
+	ctx := t.Context()
 	// Leave the last 2 aggregation steps un-collated
 	for step := kv.Step(0); step < kv.Step(txs/d.stepSize)-1; step++ {
 		require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
-		require.Greater(t, len(d._visible.files), 0, d.dirtyFilesEndTxNumMinimax())
 
-		domainRoTx := d.BeginFilesRo()
+		domainRoTx := d.beginForTests()
+		require.Greater(t, len(domainRoTx.files), 0, d.dirtyFilesEndTxNumMinimax())
 		_, err := domainRoTx.Prune(ctx, tx, step, uint64(step)*d.stepSize, uint64(step+1)*d.stepSize, math.MaxUint64, logEvery)
 		domainRoTx.Close()
 		require.NoError(t, err)
@@ -664,20 +731,19 @@ func collateAndMerge(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
 
 	for {
 		if stop := func() bool {
-			domainRoTx := d.BeginFilesRo()
+			domainRoTx := d.beginForTests()
 			defer domainRoTx.Close()
-			r = domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan)
+			r = domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan, maxSpan)
 			if !r.any() {
 				return true
 			}
 			valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
-			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
 			require.NoError(t, err)
 			//if valuesIn != nil && valuesIn.decompressor != nil {
 			//fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
 			//}
 			d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
-			d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 			return false
 		}(); stop {
 			break
@@ -689,12 +755,12 @@ func collateAndMergeOnceWithScanPrune(t *testing.T, d *Domain, tx kv.RwTx, step 
 	t.Helper()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := context.Background()
+	ctx := t.Context()
 	require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
 
 	if prune {
 		txFrom, txTo := step.ToTxNum(d.stepSize), (step + 1).ToTxNum(d.stepSize)
-		domainRoTx := d.BeginFilesRo()
+		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
 		stat, err := domainRoTx.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
 		t.Logf("prune stat: %s  (%d-%d)", stat, txFrom, txTo)
@@ -704,18 +770,17 @@ func collateAndMergeOnceWithScanPrune(t *testing.T, d *Domain, tx kv.RwTx, step 
 	maxSpan := d.stepSize * config3.DefaultStepsInFrozenFile
 	for {
 		if stop := func() bool {
-			domainRoTx := d.BeginFilesRo()
+			domainRoTx := d.beginForTests()
 			defer domainRoTx.Close()
-			r := domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan)
+			r := domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan, maxSpan)
 			if !r.any() {
 				return true
 			}
 			valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
-			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
 			require.NoError(t, err)
 
 			d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
-			d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 			return false
 		}(); stop {
 			break
@@ -727,13 +792,13 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prun
 	t.Helper()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
 
 	if prune {
 		txFrom, txTo := step.ToTxNum(d.stepSize), (step + 1).ToTxNum(d.stepSize)
-		domainRoTx := d.BeginFilesRo()
+		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
 		stat, err := domainRoTx.OldPrune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
 		t.Logf("prune stat: %s  (%d-%d)", stat, txFrom, txTo)
@@ -742,18 +807,17 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prun
 
 	maxSpan := d.stepSize * config3.DefaultStepsInFrozenFile
 	for {
-		domainRoTx := d.BeginFilesRo()
-		r := domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan)
+		domainRoTx := d.beginForTests()
+		r := domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan, maxSpan)
 		if !r.any() {
 			domainRoTx.Close()
 			break
 		}
 		valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
-		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
 		require.NoError(t, err)
 
 		d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
-		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 		domainRoTx.Close()
 	}
 }
@@ -767,7 +831,7 @@ func TestDomain_MergeFiles(t *testing.T) {
 
 	logger := log.New()
 	db, d, txs := filledDomain(t, logger)
-	rwTx, err := db.BeginRw(context.Background())
+	rwTx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
@@ -786,22 +850,62 @@ func TestDomain_ScanFiles(t *testing.T) {
 
 	logger := log.New()
 	db, d, txs := filledDomain(t, logger)
-	err := db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+	err := db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
 		collateAndMerge(t, tx, d, txs)
 		return nil
 	})
 	require.NoError(t, err)
 	// Recreate domain and re-scan the files
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	d.closeWhatNotInList([]string{})
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
-	require.NoError(t, d.openFolder(scanDirsRes))
-	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	_, err = d.openFolder(t.Context(), scanDirsRes)
+	require.NoError(t, err)
 
 	// Check the history
 	checkHistory(t, db, d, txs)
+}
+
+func TestCommitmentKvWriteVersion(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, logger)
+
+	d.ReferencesInCommitmentBranches = true
+	require.Equal(t, version.V2_1, d.kvWriteVersion())
+	require.Contains(t, d.kvNewFilePath(0, 1), "v2.1-commitment.0-1.kv")
+
+	d.ReferencesInCommitmentBranches = false
+	require.Equal(t, version.V2_2, d.kvWriteVersion())
+	require.Contains(t, d.kvNewFilePath(0, 1), "v2.2-commitment.0-1.kv")
+}
+
+func TestNonCommitmentKvWriteVersionUsesCurrent(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
+	require.Equal(t, d.FileVersion.DataKV.Current, d.kvWriteVersion())
+	require.Contains(t, d.kvNewFilePath(0, 1), d.FileVersion.DataKV.Current.String()+"-accounts.0-1.kv")
+}
+
+func TestCommitmentKvVersionAcceptance(t *testing.T) {
+	t.Parallel()
+	vers := statecfg.Schema.CommitmentDomain.FileVersion.DataKV
+	require.True(t, vers.Supports(version.V2_0))
+	require.True(t, vers.Supports(version.V2_1))
+	require.True(t, vers.Supports(version.V2_2))
+	// A newer minor within the same major is a content-only, backward-readable change.
+	require.True(t, vers.Supports(version.Version{Major: 2, Minor: 3}))
+	// A newer major changes read logic and is rejected.
+	require.False(t, vers.Supports(version.Version{Major: 3, Minor: 0}))
+
+	require.NotPanics(t, func() { vers.MustSupport(version.V2_0, "v2.0-commitment.0-1.kv") })
+	require.NotPanics(t, func() { vers.MustSupport(version.V2_1, "v2.1-commitment.0-1.kv") })
+	require.NotPanics(t, func() { vers.MustSupport(version.V2_2, "v2.2-commitment.0-1.kv") })
+	require.NotPanics(t, func() { vers.MustSupport(version.Version{Major: 2, Minor: 3}, "v2.3-commitment.0-1.kv") })
+	require.Panics(t, func() { vers.MustSupport(version.Version{Major: 3, Minor: 0}, "v3.0-commitment.0-1.kv") })
 }
 
 func TestDomainRoTx_CursorParentCheck(t *testing.T) {
@@ -810,12 +914,12 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 
 	logger := log.New()
 	db, d := testDbAndDomain(t, logger)
-	ctx, require := context.Background(), require.New(t)
+	ctx, require := t.Context(), require.New(t)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
 
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
@@ -858,6 +962,82 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	require.NoError(err)
 }
 
+// TestDomain_CollationSelectsExactStep pins that collate picks only entries
+// tagged with the requested step. This is what makes the per-domain collation
+// read-tx snapshots in buildFiles interchangeable: later-step data visible in
+// a newer snapshot cannot leak into an earlier step's file.
+func TestDomain_CollationSelectsExactStep(t *testing.T) {
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
+	ctx := t.Context()
+
+	k1 := []byte("key1")
+	k2 := []byte("key2")
+	v1s0 := []byte("value1_step0")
+	v2s0 := []byte("value2_step0")
+	v1s1 := []byte("value1_step1") // k1 modified again in step 1
+	// k2 is NOT modified in step 1
+
+	// Write both keys in step 0, then k1 again in step 1, all in one transaction.
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback() //nolint:gocritic
+	dt := d.beginForTests()
+	w := dt.NewWriter()
+
+	// Step 0 writes (txNums 0-15)
+	require.NoError(t, w.PutWithPrev(k1, v1s0, 5, nil))
+	require.NoError(t, w.PutWithPrev(k2, v2s0, 7, nil))
+
+	// Step 1 write (txNums 16-31) — overwrites k1 only
+	require.NoError(t, w.PutWithPrev(k1, v1s1, 20, v1s0))
+
+	require.NoError(t, w.Flush(ctx, tx))
+	require.NoError(t, tx.Commit())
+	w.Close()
+	dt.Close()
+
+	// Collate step 0 — should get k1=v1s0 and k2=v2s0, NOT k1=v1s1.
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	coll, err := d.collate(ctx, 0, 0, 16, roTx)
+	require.NoError(t, err)
+	defer coll.Close()
+	sf, err := d.buildFiles(ctx, 0, coll, background.NewProgressSet())
+	require.NoError(t, err)
+	defer sf.CleanupOnError()
+
+	g := d.dataReader(sf.valuesDecomp)
+	g.Reset(0)
+	var words []string
+	for g.HasNext() {
+		w, _ := g.Next(nil)
+		words = append(words, string(w))
+	}
+	require.Equal(t, []string{"key1", "value1_step0", "key2", "value2_step0"}, words,
+		"step 0 collation must contain step 0 values only")
+
+	// Collate step 1 — should get k1=v1s1 only (k2 was not modified in step 1).
+	coll1, err := d.collate(ctx, 1, 16, 32, roTx)
+	require.NoError(t, err)
+	defer coll1.Close()
+	sf1, err := d.buildFiles(ctx, 1, coll1, background.NewProgressSet())
+	require.NoError(t, err)
+	defer sf1.CleanupOnError()
+
+	g = d.dataReader(sf1.valuesDecomp)
+	g.Reset(0)
+	var words1 []string
+	for g.HasNext() {
+		w, _ := g.Next(nil)
+		words1 = append(words1, string(w))
+	}
+	require.Equal(t, []string{"key1", "value1_step1"}, words1,
+		"step 1 collation must contain only step 1 values")
+}
+
 func TestDomain_Delete(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -867,17 +1047,17 @@ func TestDomain_Delete(t *testing.T) {
 
 	logger := log.New()
 	db, d := testDbAndDomain(t, logger)
-	ctx, require := context.Background(), require.New(t)
+	ctx, require := t.Context(), require.New(t)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
 
 	// Put on even txNum, delete on odd txNum
-	for txNum := uint64(0); txNum < uint64(1000); txNum++ {
+	for txNum := range uint64(1000) {
 		original, _, _, err := domainRoTx.GetLatest([]byte("key1"), tx)
 		require.NoError(err)
 		if txNum%2 == 0 {
@@ -893,9 +1073,9 @@ func TestDomain_Delete(t *testing.T) {
 	domainRoTx.Close()
 
 	// Check the history
-	domainRoTx = d.BeginFilesRo()
+	domainRoTx = d.beginForTests()
 	defer domainRoTx.Close()
-	for txNum := uint64(0); txNum < 1000; txNum++ {
+	for txNum := range uint64(1000) {
 		label := fmt.Sprintf("txNum=%d", txNum)
 		//val, ok, err := domainRoTx.GetLatestBeforeTxNum([]byte("key1"), txNum+1, tx)
 		//require.NoError(err)
@@ -961,25 +1141,25 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 	logger := log.New()
 	keyCount, txCount := uint64(4), uint64(64)
 	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 16, logger)
-	err := db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+	err := db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
 		collateAndMerge(t, tx, dom, txCount)
 		return nil
 	})
 	require.NoError(t, err)
 	maxFrozenFiles := (txCount / dom.stepSize) / config3.DefaultStepsInFrozenFile
 
-	ctx := context.Background()
+	ctx := t.Context()
 	roTx, err := db.BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
 	// Check the history
-	domainRoTx := dom.BeginFilesRo()
+	domainRoTx := dom.beginForTests()
 	defer domainRoTx.Close()
 	var k, v [8]byte
 
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
-		for keyNum := uint64(0); keyNum < keyCount; keyNum++ {
+		for keyNum := range keyCount {
 			step := txNum / dom.stepSize
 			frozenFileNum := step / 32
 			if frozenFileNum < maxFrozenFiles { // frozen data
@@ -1041,12 +1221,12 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	keysCount, txCount := uint64(16), uint64(64)
 
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
@@ -1094,7 +1274,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	domainRoTx.Close()
 
 	// Check the history
-	domainRoTx = d.BeginFilesRo()
+	domainRoTx = d.beginForTests()
 	defer domainRoTx.Close()
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
 		for keyNum := uint64(1); keyNum <= keysCount; keyNum++ {
@@ -1156,13 +1336,13 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	err := db.Update(ctx, func(tx kv.RwTx) error {
 		for step := kv.Step(0); step < kv.Step(txCount/dom.stepSize)-1; step++ {
 			require.NoError(t, dom.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
 			s, ns := step.ToTxNum(dom.stepSize), (step + 1).ToTxNum(dom.stepSize)
-			domainRoTx := dom.BeginFilesRo()
+			domainRoTx := dom.beginForTests()
 			_, pruneErr := domainRoTx.Prune(ctx, tx, step, s, ns, math.MaxUint64, logEvery)
 			domainRoTx.Close()
 			require.NoError(t, pruneErr)
@@ -1172,37 +1352,44 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 	require.NoError(t, err)
 
+	domRoTx := dom.beginForTests()
+	domVisible := domRoTx.files
+	histVisible := domRoTx.ht.files
 	run1Doms, run1Hist := make([]string, 0), make([]string, 0)
-	for i := 0; i < len(dom._visible.files); i++ {
-		run1Doms = append(run1Doms, dom._visible.files[i].src.decompressor.FileName())
+	for i := 0; i < len(domVisible); i++ {
+		run1Doms = append(run1Doms, domVisible[i].src.decompressor.FileName())
 		// should be equal length
-		run1Hist = append(run1Hist, dom.History._visibleFiles[i].src.decompressor.FileName())
+		run1Hist = append(run1Hist, histVisible[i].src.decompressor.FileName())
 	}
 
 	removedHist := make(map[string]struct{})
-	for i := len(dom.History._visibleFiles) - 1; i > 3; i-- {
-		removedHist[dom.History._visibleFiles[i].src.decompressor.FileName()] = struct{}{}
-		t.Logf("rm hist: %s\n", dom.History._visibleFiles[i].src.decompressor.FileName())
+	for i := len(histVisible) - 1; i > 3; i-- {
+		removedHist[histVisible[i].src.decompressor.FileName()] = struct{}{}
+		t.Logf("rm hist: %s\n", histVisible[i].src.decompressor.FileName())
 
-		dom.History._visibleFiles[i].src.closeFilesAndRemove()
+		histVisible[i].src.closeFilesAndRemove()
 	}
+	domRoTx.Close()
 	dom.Close()
 
 	scanDirsRes, err := scanDirs(dom.dirs)
 	require.NoError(t, err)
-	err = dom.openFolder(scanDirsRes)
-	dom.reCalcVisibleFiles(dom.dirtyFilesEndTxNumMinimax())
+	_, err = dom.openFolder(t.Context(), scanDirsRes)
 
 	require.NoError(t, err)
 
+	domRoTx = dom.beginForTests()
+	defer domRoTx.Close()
+	domVisible = domRoTx.files
+	histVisible = domRoTx.ht.files
 	// domain files for same range should not be available so lengths should match
-	require.Len(t, dom._visible.files, len(run1Doms)-len(removedHist))
-	require.Len(t, dom.History._visibleFiles, len(dom._visible.files))
-	require.Len(t, dom.History._visibleFiles, len(run1Hist)-len(removedHist))
+	require.Len(t, domVisible, len(run1Doms)-len(removedHist))
+	require.Len(t, histVisible, len(domVisible))
+	require.Len(t, histVisible, len(run1Hist)-len(removedHist))
 
-	for i := 0; i < len(dom._visible.files); i++ {
-		require.Equalf(t, run1Doms[i], dom._visible.files[i].src.decompressor.FileName(), "kv i=%d", i)
-		require.Equalf(t, run1Hist[i], dom.History._visibleFiles[i].src.decompressor.FileName(), " v i=%d", i)
+	for i := 0; i < len(domVisible); i++ {
+		require.Equalf(t, run1Doms[i], domVisible[i].src.decompressor.FileName(), "kv i=%d", i)
+		require.Equalf(t, run1Hist[i], histVisible[i].src.decompressor.FileName(), " v i=%d", i)
 	}
 
 	danglingDomains := make(map[string]bool, len(removedHist))
@@ -1276,8 +1463,9 @@ func TestScanStaticFilesD(t *testing.T) {
 	}
 	d.scanDirtyFiles(files)
 	require.Equal(t, 6, d.dirtyFiles.Len())
-	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
-	require.Equal(t, 0, len(d._visible.files))
+	dc := d.beginForTests()
+	require.Equal(t, 0, len(dc.files))
+	dc.Close()
 }
 
 func TestDomain_CollationBuildInMem(t *testing.T) {
@@ -1292,13 +1480,13 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 
 	maxTx := uint64(10000)
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, maxTx, log.New())
-	ctx := context.Background()
+	ctx := t.Context()
 	defer d.Close()
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 
 	writer := domainRoTx.NewWriter()
@@ -1331,9 +1519,9 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	c, err := d.collate(ctx, 0, 0, maxTx, tx)
 
 	require.NoError(t, err)
-	require.True(t, strings.HasSuffix(c.valuesPath, "v2.0-accounts.0-1.kv"))
+	requireFileNameMatches(t, c.valuesPath, d.kvFileNameMask(0, 1))
 	require.Equal(t, 3, c.valuesCount)
-	require.True(t, strings.HasSuffix(c.historyPath, "v2.0-accounts.0-1.v"))
+	requireFileNameMatches(t, c.historyPath, d.History.vFileNameMask(0, 1))
 
 	require.Equal(t, seg.WordsAmount2PagesAmount(int(3*maxTx), d.CompressorCfg.ValuesOnCompressedPage), 469) // because 646 values at one page
 	require.Equal(t, int(3*maxTx), c.historyComp.Count())                                                    // no compression on collate
@@ -1386,7 +1574,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	defer db.Close()
 	defer d.Close()
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -1396,14 +1584,14 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	var i int
 	values := make(map[string][][]byte)
 
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
 
 	defer func(t time.Time) { fmt.Printf("domain_test.go:1217: %s\n", time.Since(t)) }(time.Now())
 	var prev []byte
-	for i = 0; i < len(vals); i++ {
+	for i = range vals {
 
 		for j := 0; j < len(keys); j++ {
 			acc := accounts3.Account{
@@ -1423,16 +1611,16 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 			}
 		}
 	}
-	err = writer.Flush(context.Background(), tx)
+	err = writer.Flush(t.Context(), tx)
 	require.NoError(t, err)
 	defer domainRoTx.Close()
 
 	defer func(t time.Time) { fmt.Printf("domain_test.go:1243: %s\n", time.Since(t)) }(time.Now())
-	ctx := context.Background()
+	ctx := t.Context()
 	ps := background.NewProgressSet()
 
 	processStep := func(step kv.Step) {
-		domainRoTx := d.BeginFilesRo()
+		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
 
 		//fmt.Printf("Step %d [%d,%d)\n", step, txFrom, txTo)
@@ -1445,14 +1633,13 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		_, err = domainRoTx.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
 		require.NoError(t, err)
 
-		ranges := domainRoTx.findMergeRange(txFrom, txTo)
+		ranges := domainRoTx.findMergeRange(txFrom, txTo, txTo)
 		vl, il, hl := domainRoTx.staticFilesInRange(ranges)
 
-		dv, di, dh, err := domainRoTx.mergeFiles(ctx, vl, il, hl, ranges, nil, ps)
+		dv, di, dh, err := domainRoTx.mergeFiles(ctx, vl, il, hl, ranges, nil, true, ps)
 		require.NoError(t, err)
 
 		d.integrateMergedDirtyFiles(dv, di, dh)
-		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 
 		logEvery.Stop()
 	}
@@ -1463,14 +1650,14 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 
 	defer func(t time.Time) { fmt.Printf("domain_test.go:1283: %s\n", time.Since(t)) }(time.Now())
 
-	domainRoTx = d.BeginFilesRo()
+	domainRoTx = d.beginForTests()
 	defer domainRoTx.Close()
 
 	for key, bufs := range values {
 		var i int
 
 		beforeTx := d.stepSize
-		for i = 0; i < len(bufs); i++ {
+		for i = range bufs {
 			ks, _ := hex.DecodeString(key)
 			val, _, err := domainRoTx.GetAsOf(ks, beforeTx, tx)
 			require.NoError(t, err)
@@ -1488,11 +1675,11 @@ type upd struct {
 func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain, map[uint64][]bool) {
 	t.Helper()
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, aggStep, logger)
-	ctx := context.Background()
+	ctx := t.Context()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
@@ -1513,7 +1700,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
 		step := txNum / d.stepSize
 		frozenFileNum := step / 32
-		for keyNum := uint64(0); keyNum < keysCount; keyNum++ {
+		for keyNum := range keysCount {
 			if frozenFileNum < maxFrozenFiles { // frozen data
 				allowInsert := (keyNum == 0 && frozenFileNum == 0) ||
 					(keyNum == 1 && (frozenFileNum == 1 || frozenFileNum == 2)) ||
@@ -1589,7 +1776,7 @@ func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 
-	for i := uint64(0); i < keyTxsLimit; i++ {
+	for i := range keyTxsLimit {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
 		up := upd{txNum: txNum, value: []byte{}}
 
@@ -1601,7 +1788,7 @@ func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 		updates = append(updates, up)
 		usedTxNums[txNum] = true
 	}
-	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
+	slices.SortFunc(updates, func(a, b upd) int { return cmp.Compare(a.txNum, b.txNum) })
 
 	return updates
 }
@@ -1623,7 +1810,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 5, log.New())
 	require := require.New(t)
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(t.Context())
 	require.NoError(err)
 	defer tx.Rollback()
 
@@ -1632,7 +1819,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 	d.FilenameBase = kv.CommitmentDomain.String()
 
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
@@ -1647,7 +1834,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		pv := []byte{}
-		for i := 0; i < len(updates); i++ {
+		for i := range updates {
 			if i > 0 {
 				pv = updates[i-1].value
 			}
@@ -1655,19 +1842,19 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 		}
 	}
 
-	err = writer.Flush(context.Background(), tx)
+	err = writer.Flush(t.Context(), tx)
 	require.NoError(err)
 
 	// aggregate
 	collateAndMerge(t, tx, d, totalTx)
 	require.NoError(tx.Commit())
 
-	tx, err = db.BeginRw(context.Background())
+	tx, err = db.BeginRw(t.Context())
 	require.NoError(err)
 	defer tx.Rollback()
 	domainRoTx.Close()
 
-	domainRoTx = d.BeginFilesRo()
+	domainRoTx = d.beginForTests()
 	defer domainRoTx.Close()
 
 	kc := 0
@@ -1696,7 +1883,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 
 func TestDomainRange(t *testing.T) {
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 25, log.New())
-	require, ctx := require.New(t), context.Background()
+	require, ctx := require.New(t), t.Context()
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
@@ -1707,7 +1894,7 @@ func TestDomainRange(t *testing.T) {
 	d.Compression = seg.CompressNone         // seg.CompressKeys | seg.CompressVals
 	d.FilenameBase = kv.AccountsDomain.String()
 
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
@@ -1726,7 +1913,7 @@ func TestDomainRange(t *testing.T) {
 
 	for key, updates := range data {
 		pv := []byte{}
-		for i := 0; i < len(updates); i++ {
+		for i := range updates {
 			if i > 0 {
 				pv = updates[i-1].value
 			}
@@ -1755,7 +1942,7 @@ func TestDomainRange(t *testing.T) {
 	defer tx.Rollback()
 	domainRoTx.Close()
 
-	domainRoTx = d.BeginFilesRo()
+	domainRoTx = d.beginForTests()
 	defer domainRoTx.Close()
 
 	{
@@ -1813,7 +2000,7 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 
 	t.Parallel()
 
-	aggStep, ctx := uint64(5), context.Background()
+	aggStep, ctx := uint64(5), t.Context()
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, aggStep, log.New())
 
 	tx, err := db.BeginRw(ctx)
@@ -1825,7 +2012,7 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	d.Compression = seg.CompressKeys | seg.CompressVals
 	d.FilenameBase = kv.CommitmentDomain.String()
 
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
@@ -1839,17 +2026,17 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
-		for i := 0; i < len(updates); i++ {
+		for i := range updates {
 			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
 			p = common.Copy(updates[i].value)
 		}
 	}
 
-	err = writer.Flush(context.Background(), tx)
+	err = writer.Flush(t.Context(), tx)
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
 
-	tx, err = db.BeginRw(context.Background())
+	tx, err = db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 	domainRoTx.Close()
@@ -1857,7 +2044,7 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	stepToPrune := kv.Step(2)
 	collateAndMergeOnceWithScanPrune(t, d, tx, stepToPrune, true)
 
-	domainRoTx = d.BeginFilesRo()
+	domainRoTx = d.beginForTests()
 
 	can, untilStep := domainRoTx.canScanPruneDomainTables(tx, aggStep)
 	defer domainRoTx.Close()
@@ -1868,7 +2055,7 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	collateAndMergeOnceWithScanPrune(t, d, tx, stepToPrune, false)
 
 	// refresh file list
-	domainRoTx = d.BeginFilesRo()
+	domainRoTx = d.beginForTests()
 	t.Logf("pruning step %d", stepToPrune)
 	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune))
 	require.True(t, can, "third step is not yet pruned")
@@ -1882,7 +2069,7 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	stepToPrune = 30
 	collateAndMergeOnceWithScanPrune(t, d, tx, stepToPrune, true)
 
-	domainRoTx = d.BeginFilesRo()
+	domainRoTx = d.beginForTests()
 	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, aggStep*uint64(stepToPrune))
 	require.False(t, can, "latter step is not yet pruned")
 	require.Equal(t, stepToPrune, untilStep)
@@ -1891,110 +2078,13 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	stepToPrune = 35
 	collateAndMergeOnceWithScanPrune(t, d, tx, stepToPrune, false)
 
-	domainRoTx = d.BeginFilesRo()
+	domainRoTx = d.beginForTests()
 	t.Logf("pruning step %d", stepToPrune)
 	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune))
 	require.True(t, can, "third step is not yet pruned")
 	require.LessOrEqual(t, stepToPrune, untilStep)
 
 	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune)+(aggStep/2))
-	require.True(t, can, "third step is not yet pruned, we are checking for a half-step after it and still have something to prune")
-	require.LessOrEqual(t, stepToPrune, untilStep)
-	domainRoTx.Close()
-}
-
-func TestDomain_CanHashPruneAfterAggregation(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
-	t.Parallel()
-
-	aggStep, ctx := uint64(5), context.Background()
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, aggStep, log.New())
-
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	d.HistoryLargeValues = false
-	d.History.Compression = seg.CompressKeys | seg.CompressVals
-	d.Compression = seg.CompressKeys | seg.CompressVals
-	d.FilenameBase = kv.CommitmentDomain.String()
-
-	domainRoTx := d.BeginFilesRo()
-	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
-	defer writer.Close()
-
-	keySize1 := uint64(length.Addr)
-	keySize2 := uint64(length.Addr + length.Hash)
-	totalTx := uint64(2500)
-	keyTxsLimit := uint64(50)
-	keyLimit := uint64(200)
-	SaveExecV3PrunableProgress(tx, kv.MinimumPrunableStepDomainKey, 0)
-	// Put some kvs
-	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
-	for key, updates := range data {
-		p := []byte{}
-		for i := 0; i < len(updates); i++ {
-			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
-			p = common.Copy(updates[i].value)
-		}
-	}
-
-	err = writer.Flush(context.Background(), tx)
-	require.NoError(t, err)
-	require.NoError(t, tx.Commit())
-
-	tx, err = db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	domainRoTx.Close()
-
-	stepToPrune := kv.Step(2)
-	collateAndMergeOnce(t, d, tx, stepToPrune, true)
-
-	domainRoTx = d.BeginFilesRo()
-	can, untilStep := domainRoTx.canPruneDomainTables(tx, aggStep)
-	defer domainRoTx.Close()
-	require.Falsef(t, can, "those step is already pruned")
-	require.Equal(t, stepToPrune, untilStep)
-
-	stepToPrune = 3
-	collateAndMergeOnce(t, d, tx, stepToPrune, false)
-
-	// refresh file list
-	domainRoTx = d.BeginFilesRo()
-	t.Logf("pruning step %d", stepToPrune)
-	can, untilStep = domainRoTx.canPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune))
-	require.True(t, can, "third step is not yet pruned")
-	require.LessOrEqual(t, stepToPrune, untilStep)
-
-	can, untilStep = domainRoTx.canPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune)+(aggStep/2))
-	require.True(t, can, "third step is not yet pruned, we are checking for a half-step after it and still have something to prune")
-	require.LessOrEqual(t, stepToPrune, untilStep)
-	domainRoTx.Close()
-
-	stepToPrune = 30
-	collateAndMergeOnce(t, d, tx, stepToPrune, true)
-
-	domainRoTx = d.BeginFilesRo()
-	can, untilStep = domainRoTx.canPruneDomainTables(tx, aggStep*uint64(stepToPrune))
-	require.False(t, can, "latter step is not yet pruned")
-	require.Equal(t, stepToPrune, untilStep)
-	domainRoTx.Close()
-
-	stepToPrune = 35
-	collateAndMergeOnce(t, d, tx, stepToPrune, false)
-
-	domainRoTx = d.BeginFilesRo()
-	t.Logf("pruning step %d", stepToPrune)
-	can, untilStep = domainRoTx.canPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune))
-	require.True(t, can, "third step is not yet pruned")
-	require.LessOrEqual(t, stepToPrune, untilStep)
-
-	can, untilStep = domainRoTx.canPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune)+(aggStep/2))
 	require.True(t, can, "third step is not yet pruned, we are checking for a half-step after it and still have something to prune")
 	require.LessOrEqual(t, stepToPrune, untilStep)
 	domainRoTx.Close()
@@ -2011,7 +2101,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	defer db.Close()
 	defer d.Close()
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -2019,7 +2109,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	d.History.Compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
@@ -2037,13 +2127,13 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
-		for i := 0; i < len(updates); i++ {
+		for i := range updates {
 			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
 			p = common.Copy(updates[i].value)
 		}
 	}
 
-	err = writer.Flush(context.Background(), tx)
+	err = writer.Flush(t.Context(), tx)
 	require.NoError(t, err)
 
 	// aggregate
@@ -2051,12 +2141,12 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 
 	require.NoError(t, tx.Commit())
 
-	tx, err = db.BeginRw(context.Background())
+	tx, err = db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 	domainRoTx.Close()
 
-	domainRoTx = d.BeginFilesRo()
+	domainRoTx = d.beginForTests()
 	defer domainRoTx.Close()
 
 	kc := 0
@@ -2093,7 +2183,7 @@ func TestPruneProgress(t *testing.T) {
 	latestKey := []byte("682c02b93b63aeb260eccc33705d584ffb5f0d4c")
 
 	t.Run("reset", func(t *testing.T) {
-		tx, err := db.BeginRw(context.Background())
+		tx, err := db.BeginRw(t.Context())
 		require.NoError(t, err)
 		defer tx.Rollback()
 		err = SaveExecV3PruneProgress(tx, kv.TblAccountVals, latestKey)
@@ -2111,7 +2201,7 @@ func TestPruneProgress(t *testing.T) {
 	})
 
 	t.Run("someKey and reset", func(t *testing.T) {
-		tx, err := db.BeginRw(context.Background())
+		tx, err := db.BeginRw(t.Context())
 		require.NoError(t, err)
 		defer tx.Rollback()
 		err = SaveExecV3PruneProgress(tx, kv.TblAccountVals, latestKey)
@@ -2130,7 +2220,7 @@ func TestPruneProgress(t *testing.T) {
 	})
 
 	t.Run("emptyKey and reset", func(t *testing.T) {
-		tx, err := db.BeginRw(context.Background())
+		tx, err := db.BeginRw(t.Context())
 		require.NoError(t, err)
 		defer tx.Rollback()
 		expected := []byte{}
@@ -2150,114 +2240,234 @@ func TestPruneProgress(t *testing.T) {
 	})
 }
 
+// TestDomain_PruneProgress tests rolling-cursor progress tracking in domain.prune.
+//
+// The original test was skipped because it used the old ExecV3 progress API and
+// relied on unstable timing to interrupt scans. This rewrite uses direct state
+// injection via SavePruneValProgress to make tests deterministic.
+//
+// Tests verified:
+//  1. Mid-rotation cursor position (LastPrunedValue) is respected: prune resumes
+//     from the injected key position rather than scanning from First.
+//  2. Early-exit: when prg.TxTo >= txTo && Done, prune returns Done with no work.
+//  3. Rotation reset: after Done a new call with larger txTo starts from First.
 func TestDomain_PruneProgress(t *testing.T) {
-	t.Skip("fails because in domain.Prune progress does not updated")
+	t.Parallel()
 
-	stepSize := uint64(1000)
+	const (
+		stepSize = uint64(1000)
+		keyCount = 200 // enough keys to make the midpoint test meaningful
+	)
+	ctx := t.Context()
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
-	defer db.Close()
-	defer d.Close()
+	d.HistoryLargeValues = false
 
-	rwTx, err := db.BeginRw(context.Background())
+	rwTx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	d.HistoryLargeValues = false
-	d.History.Compression = seg.CompressKeys | seg.CompressVals
-	d.Compression = seg.CompressKeys | seg.CompressVals
-
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
 
-	keySize1 := uint64(length.Addr)
-	keySize2 := uint64(length.Addr + length.Hash)
-	totalTx := uint64(5000)
-	keyTxsLimit := uint64(150)
-	keyLimit := uint64(2000)
-
-	// Put some kvs
-	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
-	for key, updates := range data {
-		p := []byte{}
-		for i := 0; i < len(updates); i++ {
-			err = writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
-			require.NoError(t, err)
-			p = common.Copy(updates[i].value)
-		}
+	// Write keyCount keys at txNum=1 (step 0).
+	// No segment files are built, so history CanPrune returns false and
+	// history.Prune is a no-op, letting us test domain values prune in isolation.
+	var k, v [8]byte
+	for keyNum := range uint64(keyCount) {
+		binary.BigEndian.PutUint64(k[:], keyNum)
+		binary.BigEndian.PutUint64(v[:], keyNum) // distinct value per key
+		err = writer.PutWithPrev(k[:], v[:], 1, nil)
+		require.NoError(t, err)
 	}
-
-	err = writer.Flush(context.Background(), rwTx)
+	err = writer.Flush(ctx, rwTx)
 	require.NoError(t, err)
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	// aggregate
-	for step := kv.Step(0); step < kv.Step(totalTx/stepSize); step++ {
-		ctx := context.Background()
-		require.NoError(t, d.collateBuildIntegrate(ctx, step, rwTx, background.NewProgressSet()))
-	}
-	require.NoError(t, rwTx.Commit())
 
-	rwTx, err = db.BeginRw(context.Background())
+	// --- Part 1: cursor injection — resume from midpoint -------------------
+	//
+	// Inject InProgress with LastPrunedValue = key[keyCount/2]. The subsequent
+	// prune call must seek to that key and only delete entries at or after it,
+	// leaving the first half untouched.
+	midKey := make([]byte, 8)
+	binary.BigEndian.PutUint64(midKey, keyCount/2)
+	injected := &prune.Stat{
+		ValueProgress:   prune.InProgress,
+		KeyProgress:     prune.Done,
+		LastPrunedValue: midKey,
+		TxFrom:          0,
+		TxTo:            stepSize,
+	}
+	err = SavePruneValProgress(rwTx, d.ValuesTable, injected)
+	require.NoError(t, err)
+
+	stat, err := domainRoTx.prune(ctx, rwTx, 0, 0, stepSize, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat.Progress, "prune must complete the rotation from midpoint")
+	// Keys 0..keyCount/2-1 were skipped (before cursor); only keyCount/2..keyCount-1 deleted.
+	require.LessOrEqual(t, stat.Values+stat.Dups, uint64(keyCount/2),
+		"only entries at/after the cursor position should be deleted")
+
+	prg, err := GetPruneValProgress(rwTx, []byte(d.ValuesTable))
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, prg.ValueProgress)
+	require.Nil(t, prg.LastPrunedValue, "cursor must be nil after a completed rotation")
+
+	// Verify the first half of keys still exists (before the cursor, not pruned).
+	remaining := countDupSortKeys(t, rwTx, d.ValuesTable)
+	require.Equal(t, int(keyCount/2), remaining,
+		"keys 0..keyCount/2-1 skipped by rolling cursor must remain")
+
+	// --- Part 2: early-exit ------------------------------------------------
+	//
+	// prg.TxTo == txTo && Done → prune must return Done immediately (no work).
+	stat2, err := domainRoTx.prune(ctx, rwTx, 0, 0, stepSize, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat2.Progress)
+	require.Zero(t, stat2.Values+stat2.Dups, "early-exit must do no deletions")
+	require.Equal(t, int(keyCount/2), countDupSortKeys(t, rwTx, d.ValuesTable),
+		"early-exit must not change table contents")
+
+	// --- Part 3: new rotation when txTo advances ---------------------------
+	//
+	// Previous rotation completed with TxTo=stepSize. A call with TxTo=stepSize+1
+	// triggers a new rotation starting from First, cleaning the remaining keys.
+	stat3, err := domainRoTx.prune(ctx, rwTx, 0, 0, stepSize+1, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat3.Progress)
+	require.EqualValues(t, keyCount/2, stat3.Values+stat3.Dups,
+		"new rotation must clean the first half skipped in rotation 1")
+	require.Zero(t, countDupSortKeys(t, rwTx, d.ValuesTable), "all step-0 entries must be gone")
+
+	prg3, err := GetPruneValProgress(rwTx, []byte(d.ValuesTable))
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, prg3.ValueProgress)
+}
+
+// countDupSortKeys counts unique keys in a DupSort table.
+func countDupSortKeys(t testing.TB, tx kv.Tx, tbl string) int {
+	t.Helper()
+	cur, err := tx.CursorDupSort(tbl)
+	require.NoError(t, err)
+	defer cur.Close()
+	n := 0
+	for k, _, err := cur.First(); k != nil; k, _, err = cur.NextNoDup() {
+		require.NoError(t, err)
+		n++
+	}
+	return n
+}
+
+// TestDomain_PruneRollingCursorProgress verifies the three properties of the
+// rolling-cursor optimisation added to domain.prune:
+//
+//  1. Early-exit: prg.TxTo >= txTo && Done → return immediately, no work.
+//  2. Rotation reset: Done → next call with higher txTo resets cursor to First.
+//  3. Cursor preservation: InProgress cursor survives a txTo advance — the
+//     subsequent call continues from LastPrunedValue, not from First.
+func TestDomain_PruneRollingCursorProgress(t *testing.T) {
+	t.Parallel()
+
+	const (
+		stepSize = uint64(16)
+		keyCount = 40
+	)
+	ctx := t.Context()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
+	d.HistoryLargeValues = false
+
+	rwTx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
-	domainRoTx.Close()
 
-	domainRoTx = d.BeginFilesRo()
-	defer domainRoTx.Close()
+	domRoTx := d.beginForTests()
+	defer domRoTx.Close()
 
-	ct, cancel := context.WithTimeout(context.Background(), time.Millisecond*1)
-	_, err = domainRoTx.Prune(ct, rwTx, 0, 0, stepSize, math.MaxUint64, time.NewTicker(time.Second))
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	cancel()
-
-	key, err := GetExecV3PruneProgress(rwTx, domainRoTx.d.ValuesTable)
-	require.NoError(t, err)
-	require.NotNil(t, key)
-
-	keysCursor, err := rwTx.RwCursorDupSort(domainRoTx.d.ValuesTable)
-	require.NoError(t, err)
-	defer keysCursor.Close()
-
-	k, istep, err := keysCursor.Seek(key)
-	require.NoError(t, err)
-	require.GreaterOrEqual(t, k, key)
-	require.NotEqualValues(t, 0, ^binary.BigEndian.Uint64(istep))
-
-	var i int
-	for step := kv.Step(0); ; step++ {
-		// step changing should not affect pruning. Prune should finish step 0 first.
-		i++
-		ct, cancel := context.WithTimeout(context.Background(), time.Millisecond*2)
-		_, err = domainRoTx.Prune(ct, rwTx, step, uint64(step)*stepSize, (uint64(step)*stepSize)+1, math.MaxUint64, time.NewTicker(time.Second))
-		if err != nil {
-			require.ErrorIs(t, err, context.DeadlineExceeded)
-		} else {
-			require.NoError(t, err)
+	writeStep := func(step kv.Step) {
+		t.Helper()
+		w := domRoTx.NewWriter()
+		defer w.Close()
+		txNum := uint64(step)*stepSize + 1 // first txNum of the step
+		var k, v [8]byte
+		for keyNum := range uint64(keyCount) {
+			binary.BigEndian.PutUint64(k[:], keyNum)
+			binary.BigEndian.PutUint64(v[:], txNum+keyNum)
+			require.NoError(t, w.PutWithPrev(k[:], v[:], txNum, nil))
 		}
-		cancel()
-
-		key, err := GetExecV3PruneProgress(rwTx, domainRoTx.d.ValuesTable)
-		require.NoError(t, err)
-		if step == 0 && key == nil {
-
-			fmt.Printf("pruned in %d iterations\n", i)
-
-			keysCursor, err := rwTx.RwCursorDupSort(domainRoTx.d.ValuesTable)
-			require.NoError(t, err)
-			defer keysCursor.Close()
-
-			// check there are no keys with 0 step left
-			for k, v, err := keysCursor.First(); k != nil && err == nil; k, v, err = keysCursor.Next() {
-				require.NotEqualValues(t, 0, ^binary.BigEndian.Uint64(v))
-			}
-			break
-		}
-
+		require.NoError(t, w.Flush(ctx, rwTx))
 	}
-	fmt.Printf("exitiig after %d iterations\n", i)
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	// ── Property 1: full prune of step 0 + early-exit ─────────────────────
+	// Write only step 0 so each key has a single dup (^0 || v0, txNum=0).
+	// TableScanningPrune uses NextNoDup which returns only the first dup per
+	// key; writing step 1 first would place its dup ahead, hiding step 0.
+	writeStep(0)
+	stat0, err := domRoTx.prune(ctx, rwTx, 0, 0, stepSize, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat0.Progress)
+	require.NotZero(t, stat0.Values+stat0.Dups, "step-0 entries must have been deleted")
+	require.Zero(t, countDupSortKeys(t, rwTx, d.ValuesTable), "table must be empty after step-0 prune")
+
+	prg, err := GetPruneValProgress(rwTx, []byte(d.ValuesTable))
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, prg.ValueProgress)
+	require.EqualValues(t, stepSize, prg.TxTo)
+
+	// Same txTo again → early-exit, no work.
+	statEarly, err := domRoTx.prune(ctx, rwTx, 0, 0, stepSize, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, statEarly.Progress)
+	require.Zero(t, statEarly.Values+statEarly.Dups, "early-exit must delete nothing")
+
+	// ── Property 2: rotation reset when txTo advances ──────────────────────
+	// Previous state is Done with TxTo=stepSize. Write step 1 (one dup per
+	// key: ^1 || v1, txNum=16), then call with TxTo=2*stepSize.
+	// The code resets cursor to First (new rotation) and deletes step-1 entries.
+	writeStep(1)
+	stat1, err := domRoTx.prune(ctx, rwTx, 1, stepSize, stepSize*2, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat1.Progress)
+	require.NotZero(t, stat1.Values+stat1.Dups, "step-1 entries must be deleted in new rotation")
+	require.Zero(t, countDupSortKeys(t, rwTx, d.ValuesTable), "table must be empty after both rotations")
+
+	prg1, err := GetPruneValProgress(rwTx, []byte(d.ValuesTable))
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, prg1.ValueProgress)
+	require.Nil(t, prg1.LastPrunedValue, "cursor reset after rotation completion")
+
+	// ── Property 3: cursor preservation when txTo advances mid-rotation ────
+	// Inject an InProgress state at key[keyCount/2] with TxTo=X, then call
+	// prune with a larger TxTo=Y. The cursor must continue from key[keyCount/2]
+	// rather than resetting to First.
+	writeStep(2)
+
+	midKey := make([]byte, 8)
+	binary.BigEndian.PutUint64(midKey, keyCount/2)
+	txFrom2, txTo2 := stepSize*2, stepSize*3
+	injected := &prune.Stat{
+		ValueProgress:   prune.InProgress,
+		KeyProgress:     prune.Done,
+		LastPrunedValue: midKey,
+		TxFrom:          txFrom2,
+		TxTo:            txTo2,
+	}
+	require.NoError(t, SavePruneValProgress(rwTx, d.ValuesTable, injected))
+
+	// Call with the same txTo2 (InProgress, not Done → no reset).
+	stat2, err := domRoTx.prune(ctx, rwTx, 2, txFrom2, txTo2, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat2.Progress)
+	// Only keys >= keyCount/2 were visited → at most keyCount/2 deletions.
+	require.LessOrEqual(t, stat2.Values+stat2.Dups, uint64(keyCount/2),
+		"cursor started at midKey so only the second half of keys could be deleted")
+	// First half still in table (cursor skipped them).
+	require.Equal(t, int(keyCount/2), countDupSortKeys(t, rwTx, d.ValuesTable),
+		"first half of step-2 keys must remain (before cursor position)")
 }
 
 func TestDomain_Unwind(t *testing.T) {
@@ -2270,7 +2480,7 @@ func TestDomain_Unwind(t *testing.T) {
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, log.New())
 	defer d.Close()
 	defer db.Close()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	maxTx := d.stepSize - 2
 	currTx := maxTx - 1
@@ -2278,7 +2488,7 @@ func TestDomain_Unwind(t *testing.T) {
 
 	writeKeys := func(t *testing.T, d *Domain, db kv.RwDB, maxTx uint64) {
 		t.Helper()
-		domainRoTx := d.BeginFilesRo()
+		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
@@ -2287,7 +2497,7 @@ func TestDomain_Unwind(t *testing.T) {
 		defer writer.Close()
 		var preval1, preval2, preval3, preval4 []byte
 
-		for i := uint64(0); i < maxTx; i++ {
+		for i := range maxTx {
 			writer.diff = &kv.DomainDiff{}
 			if i%3 == 0 && i > 0 { // once in 3 txn Put key3 -> value3.i and skip other keys update
 				if i%12 == 0 { // once in 12 txn delete key3 before update
@@ -2331,7 +2541,7 @@ func TestDomain_Unwind(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		domainRoTx := d.BeginFilesRo()
+		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
 		writer := domainRoTx.NewWriter()
 		defer writer.Close()
@@ -2370,9 +2580,9 @@ func TestDomain_Unwind(t *testing.T) {
 			require.NoError(t, err)
 			defer utx.Rollback()
 
-			ectx := expected.BeginFilesRo()
+			ectx := expected.beginForTests()
 			defer ectx.Close()
-			uc := d.BeginFilesRo()
+			uc := d.beginForTests()
 			defer uc.Close()
 			et, err := ectx.DebugRangeLatest(etx, nil, nil, -1)
 			require.NoError(t, err)
@@ -2393,14 +2603,14 @@ func TestDomain_Unwind(t *testing.T) {
 			require.NoError(t, err)
 			defer utx.Rollback()
 
-			ectx := expected.BeginFilesRo()
+			ectx := expected.beginForTests()
 			defer ectx.Close()
-			uc := d.BeginFilesRo()
+			uc := d.beginForTests()
 			defer uc.Close()
-			et, err := ectx.RangeAsOf(context.Background(), etx, nil, nil, unwindTo, order.Asc, -1)
+			et, err := ectx.RangeAsOf(t.Context(), etx, nil, nil, unwindTo, order.Asc, -1)
 			require.NoError(t, err)
 
-			ut, err := uc.RangeAsOf(context.Background(), etx, nil, nil, unwindTo, order.Asc, -1)
+			ut, err := uc.RangeAsOf(t.Context(), etx, nil, nil, unwindTo, order.Asc, -1)
 			require.NoError(t, err)
 
 			compareIterators(t, et, ut)
@@ -2416,15 +2626,15 @@ func TestDomain_Unwind(t *testing.T) {
 			require.NoError(t, err)
 			defer utx.Rollback()
 
-			ectx := expected.BeginFilesRo()
+			ectx := expected.beginForTests()
 			defer ectx.Close()
-			uc := d.BeginFilesRo()
+			uc := d.beginForTests()
 			defer uc.Close()
 
-			et, err := ectx.ht.RangeAsOf(context.Background(), unwindTo-1, nil, nil, order.Asc, -1, etx)
+			et, err := ectx.ht.RangeAsOf(t.Context(), unwindTo-1, nil, nil, order.Asc, -1, etx)
 			require.NoError(t, err)
 
-			ut, err := uc.ht.RangeAsOf(context.Background(), unwindTo-1, nil, nil, order.Asc, -1, utx)
+			ut, err := uc.ht.RangeAsOf(t.Context(), unwindTo-1, nil, nil, order.Asc, -1, utx)
 			require.NoError(t, err)
 
 			compareIterators(t, et, ut)
@@ -2440,9 +2650,9 @@ func TestDomain_Unwind(t *testing.T) {
 			require.NoError(t, err)
 			defer utx.Rollback()
 
-			ectx := expected.BeginFilesRo()
+			ectx := expected.beginForTests()
 			defer ectx.Close()
-			uc := d.BeginFilesRo()
+			uc := d.beginForTests()
 			defer uc.Close()
 
 			et, err := ectx.ht.HistoryRange(int(unwindTo)-1, -1, order.Asc, -1, etx)
@@ -2514,9 +2724,9 @@ func TestDomain_PruneSimple(t *testing.T) {
 	writeOneKey := func(t *testing.T, d *Domain, db kv.RwDB, maxTx, stepSize uint64) {
 		t.Helper()
 
-		ctx := context.Background()
+		ctx := t.Context()
 
-		domainRoTx := d.BeginFilesRo()
+		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
@@ -2539,7 +2749,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	pruneOneKeyHistory := func(t *testing.T, domainRoTx *DomainRoTx, db kv.RwDB, pruneFrom, pruneTo uint64) {
 		t.Helper()
 		// prune history
-		ctx := context.Background()
+		ctx := t.Context()
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
@@ -2552,7 +2762,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	pruneOneKeyDomain := func(t *testing.T, domainRoTx *DomainRoTx, db kv.RwDB, step kv.Step, pruneFrom, pruneTo uint64) {
 		t.Helper()
 		// prune
-		ctx := context.Background()
+		ctx := t.Context()
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
@@ -2565,7 +2775,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	checkKeyPruned := func(t *testing.T, domainRoTx *DomainRoTx, db kv.RwDB, stepSize, pruneFrom, pruneTo uint64) {
 		t.Helper()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
@@ -2602,7 +2812,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
 		writeOneKey(t, d, db, 3*stepSize, stepSize)
 
-		domainRoTx := d.BeginFilesRo()
+		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
 		pruneOneKeyHistory(t, domainRoTx, db, pruneFrom, pruneTo)
 
@@ -2614,7 +2824,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
 		writeOneKey(t, d, db, 3*stepSize, stepSize)
 
-		domainRoTx := d.BeginFilesRo()
+		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
 		pruneOneKeyHistory(t, domainRoTx, db, pruneFrom, pruneTo)
 
@@ -2626,12 +2836,12 @@ func TestDomain_PruneSimple(t *testing.T) {
 		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
 		writeOneKey(t, d, db, 3*stepSize, stepSize)
 
-		ctx := context.Background()
+		ctx := t.Context()
 		rotx, err := db.BeginRo(ctx)
 		require.NoError(t, err)
 		t.Cleanup(rotx.Rollback)
 
-		domainRoTx := d.BeginFilesRo()
+		domainRoTx := d.beginForTests()
 		v, vs, ok, err := domainRoTx.GetLatest(pruningKey, rotx)
 		require.NoError(t, err)
 		require.True(t, ok)
@@ -2644,10 +2854,9 @@ func TestDomain_PruneSimple(t *testing.T) {
 		require.NoError(t, err)
 		c.Close()
 		d.integrateDirtyFiles(sf, pruneFrom, pruneTo)
-		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 		rotx.Rollback()
 
-		domainRoTx = d.BeginFilesRo()
+		domainRoTx = d.beginForTests()
 		pruneOneKeyDomain(t, domainRoTx, db, 0, pruneFrom, pruneTo)
 		domainRoTx.Close()
 		//checkKeyPruned(t, domainRoTx, db, stepSize, pruneFrom, pruneTo)
@@ -2656,7 +2865,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(rotx.Rollback)
 
-		domainRoTx = d.BeginFilesRo()
+		domainRoTx = d.beginForTests()
 		defer domainRoTx.Close()
 		v, vs, ok, err = domainRoTx.GetLatest(pruningKey, rotx)
 		require.NoError(t, err)
@@ -2670,7 +2879,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
 		writeOneKey(t, d, db, 2*stepSize, stepSize)
 
-		domainRoTx := d.BeginFilesRo()
+		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
 		pruneOneKeyHistory(t, domainRoTx, db, pruneFrom, pruneTo)
 
@@ -2684,12 +2893,12 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	}
 
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 5, log.New())
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
 	d.HistoryLargeValues = true
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
@@ -2704,13 +2913,13 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
-		for i := 0; i < len(updates); i++ {
+		for i := range updates {
 			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
 			p = common.Copy(updates[i].value)
 		}
 	}
 
-	err = writer.Flush(context.Background(), tx)
+	err = writer.Flush(t.Context(), tx)
 	require.NoError(t, err)
 
 	// aggregate
@@ -2718,12 +2927,12 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 
 	require.NoError(t, tx.Commit())
 
-	tx, err = db.BeginRw(context.Background())
+	tx, err = db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 	domainRoTx.Close()
 
-	domainRoTx = d.BeginFilesRo()
+	domainRoTx = d.beginForTests()
 
 	findFile := func(start, end uint64) *FilesItem {
 		var foundFile *FilesItem
@@ -2745,9 +2954,9 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		v, found, st, en, err := domainRoTx.getLatestFromFiles([]byte(key), 0)
 		require.True(t, found)
 		require.NoError(t, err)
-		for i := len(updates) - 1; i >= 0; i-- {
-			if st <= updates[i].txNum && updates[i].txNum < en {
-				require.Equal(t, updates[i].value, v)
+		for _, update := range slices.Backward(updates) {
+			if st <= update.txNum && update.txNum < en {
+				require.Equal(t, update.value, v)
 				break
 			}
 		}
@@ -2766,12 +2975,12 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 
 func TestCanBuild(t *testing.T) {
 	db, d := testDbAndDomain(t, log.New())
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
 	d.HistoryLargeValues = true
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 
 	domainRoTx.files = append(domainRoTx.files, visibleFile{startTxNum: 0, endTxNum: d.stepSize})
@@ -2782,14 +2991,14 @@ func TestCanBuild(t *testing.T) {
 	k, v := []byte{1}, []byte{1}
 	// db has data which already in files
 	_ = writer.PutWithPrev(k, v, 0, nil)
-	_ = writer.Flush(context.Background(), tx)
+	_ = writer.Flush(t.Context(), tx)
 	canBuild := domainRoTx.canBuild(tx)
 	require.NoError(t, err)
 	require.False(t, canBuild)
 
 	// db has data which already in files and next step. still not enough - we need full step in db.
 	_ = writer.PutWithPrev(k, v, d.stepSize, nil)
-	_ = writer.Flush(context.Background(), tx)
+	_ = writer.Flush(t.Context(), tx)
 	canBuild = domainRoTx.canBuild(tx)
 	require.NoError(t, err)
 	require.False(t, canBuild)
@@ -2797,7 +3006,7 @@ func TestCanBuild(t *testing.T) {
 
 	// db has: 1. data which already in files 2. full next step 3. a bit of next-next step. -> can build
 	_ = writer.PutWithPrev(k, v, d.stepSize*2, nil)
-	_ = writer.Flush(context.Background(), tx)
+	_ = writer.Flush(t.Context(), tx)
 	canBuild = domainRoTx.canBuild(tx)
 	require.NoError(t, err)
 	require.True(t, canBuild)
@@ -2822,7 +3031,7 @@ func testTraceKey(t *testing.T, largeVals bool) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	db, d := testDbAndDomain(t, logger)
 	d.HistoryLargeValues = largeVals
@@ -2838,10 +3047,10 @@ func testTraceKey(t *testing.T, largeVals bool) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 
-	domainRoTx2 := d.BeginFilesRo()
+	domainRoTx2 := d.beginForTests()
 	defer domainRoTx2.Close()                                                // need to have different HistoryFilesRo for HistorySeek (because it changes internal state)
 	randfn := func(till uint64) uint64 { return 1 + (rand.Uint64() % till) } // [1,till]
 
@@ -2895,13 +3104,13 @@ func TestCommitmentDomain_DebugRangeLatest(t *testing.T) {
 	// testDbAndomainRoTxommitmentDomain creates a test domain with CommitmentDomain configuration.
 	// CommitmentDomain uses AccessorHashMap without enums (i.e. elias fano).
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, logger)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
@@ -2943,7 +3152,7 @@ func TestCommitmentDomain_DebugRangeLatest(t *testing.T) {
 
 	domainRoTx.Close()
 	// reopen
-	domainRoTx = d.BeginFilesRo()
+	domainRoTx = d.beginForTests()
 	defer domainRoTx.Close()
 
 	// Test DebugRangeLatest - this exercises the HashMap iteration path
@@ -3006,13 +3215,13 @@ func TestDomain_DebugRangeLatestFromFiles(t *testing.T) {
 
 	logger := log.New()
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
@@ -3052,7 +3261,7 @@ func TestDomain_DebugRangeLatestFromFiles(t *testing.T) {
 	defer tx.Rollback()
 
 	domainRoTx.Close()
-	domainRoTx = d.BeginFilesRo()
+	domainRoTx = d.beginForTests()
 	defer domainRoTx.Close()
 	writer = domainRoTx.NewWriter()
 	defer writer.Close()
@@ -3160,14 +3369,14 @@ func TestDomain_IntegrateDirtyFilesNilGuard(t *testing.T) {
 
 	logger := log.New()
 	db, d := testDbAndDomain(t, logger) // stepSize=16, accounts domain
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// -- write data spanning steps 0 and 1 (txNums 1..32) --
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
@@ -3292,7 +3501,7 @@ func collateAndMergeWithCollisionRetry(t *testing.T, tx kv.RwTx, d *Domain, txs 
 	t.Helper()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Collate without collision forcing first
 	for step := kv.Step(0); step < kv.Step(txs/d.stepSize)-1; step++ {
@@ -3304,17 +3513,16 @@ func collateAndMergeWithCollisionRetry(t *testing.T, tx kv.RwTx, d *Domain, txs 
 		rs.ForceCollisionOnce()
 	}
 
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 
 	// Merge with collision retry
-	r := domainRoTx.findMergeRange(d.dirtyFilesEndTxNumMinimax(), d.dirtyFilesEndTxNumMinimax())
+	r := domainRoTx.findMergeRange(d.dirtyFilesEndTxNumMinimax(), d.dirtyFilesEndTxNumMinimax(), d.dirtyFilesEndTxNumMinimax())
 	if r.values.needMerge {
 		valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
-		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
 		require.NoError(t, err)
 		d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
-		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 	}
 }
 
@@ -3332,7 +3540,7 @@ func TestDomain_KeyPosResetOnCollisionRetry(t *testing.T) {
 	logger := log.New()
 	db, d, txs := filledDomainWithHashMapAccessor(t, logger)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -3346,7 +3554,7 @@ func TestDomain_KeyPosResetOnCollisionRetry(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	domainRoTx := d.BeginFilesRo()
+	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 
 	// Check that we can look up keys correctly
@@ -3363,5 +3571,193 @@ func TestDomain_KeyPosResetOnCollisionRetry(t *testing.T) {
 		var expected [8]byte
 		binary.BigEndian.PutUint64(expected[:], txs/keyNum)
 		require.Equal(t, expected[:], val, "key %x value mismatch", k)
+	}
+}
+
+// TestDomain_DeletedKeyNotResurrectedByFiles is a regression test for the bug
+// where getLatestFromDb discards deletion entries whose step is already covered
+// by frozen files. Since frozen files lack tombstones, the fallthrough to
+// getLatestFromFiles returns a stale pre-deletion value.
+func TestDomain_DeletedKeyNotResurrectedByFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	// Cover both DupSort (LargeValues=false) and non-DupSort (LargeValues=true) paths.
+	for _, tc := range []struct {
+		name      string
+		domainCfg statecfg.DomainCfg
+	}{
+		{"DupSort", statecfg.Schema.AccountsDomain},
+		{"LargeValues", statecfg.Schema.CodeDomain},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			logger := log.New()
+			db, d := testDbAndDomainOfStep(t, tc.domainCfg, 16, logger)
+			ctx := t.Context()
+			require := require.New(t)
+
+			tx, err := db.BeginRw(ctx)
+			require.NoError(err)
+			defer tx.Rollback()
+
+			domainRoTx := d.beginForTests()
+			defer domainRoTx.Close()
+			writer := domainRoTx.NewWriter()
+			defer writer.Close()
+
+			key := []byte("key1")
+			value := []byte("value1")
+
+			// Step 0 (txNum 2): write key1=value1
+			err = writer.PutWithPrev(key, value, 2, nil)
+			require.NoError(err)
+
+			// Step 1 (txNum 18): delete key1
+			err = writer.DeleteWithPrev(key, 18, value)
+			require.NoError(err)
+
+			err = writer.Flush(ctx, tx)
+			require.NoError(err)
+			domainRoTx.Close()
+
+			// Build files covering steps 0 and 1 without pruning DB entries.
+			// After this, files.EndTxNum() = 32 so the step-age guard considers
+			// step 1 "already covered by files" and would discard the deletion entry.
+			require.NoError(d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
+			require.NoError(d.collateBuildIntegrate(ctx, 1, tx, background.NewProgressSet()))
+
+			require.NoError(tx.Commit())
+
+			roTx, err := db.BeginRo(ctx)
+			require.NoError(err)
+			defer roTx.Rollback()
+
+			domainRoTx = d.beginForTests()
+			defer domainRoTx.Close()
+
+			v, _, found, err := domainRoTx.GetLatest(key, roTx)
+			require.NoError(err)
+			// The key was deleted at step 1. The deletion entry in DB must be
+			// authoritative even though step 1 is covered by frozen files.
+			// Without the fix, getLatestFromDb discards the deletion entry and
+			// getLatestFromFiles returns stale "value1" from the step 0 file.
+			require.True(found, "deletion entry should be found in DB")
+			require.Empty(v, "deleted key should have empty value, got %q", v)
+		})
+	}
+}
+
+// TestDomain_UnwindRestoresDeletionMarker is a regression test for the bug
+// where unwind() fails to restore empty tombstones. When a slot is deleted
+// then re-written within the same step, unwinding the re-write must restore
+// the deletion marker so that getLatestFromFiles doesn't return the stale
+// pre-unwind value from frozen files.
+func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	// Cover both DupSort (LargeValues=false) and non-DupSort (LargeValues=true) paths.
+	for _, tc := range []struct {
+		name      string
+		domainCfg statecfg.DomainCfg
+	}{
+		{"DupSort", statecfg.Schema.AccountsDomain},
+		{"LargeValues", statecfg.Schema.CodeDomain},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			logger := log.New()
+			db, d := testDbAndDomainOfStep(t, tc.domainCfg, 16, logger)
+			ctx := t.Context()
+			require := require.New(t)
+
+			// Phase 1: Write key1=value1 in step 0, then delete and re-write it in
+			// step 1, recording diffs. Step 0 gets filed; the unwind target stays
+			// above the file boundary, as production unwinds always do.
+			tx, err := db.BeginRw(ctx)
+			require.NoError(err)
+			defer tx.Rollback()
+
+			domainRoTx := d.beginForTests()
+			defer domainRoTx.Close()
+			writer := domainRoTx.NewWriter()
+			defer writer.Close()
+
+			key := []byte("key1")
+			value1 := []byte("value1")
+			value2 := []byte("value2")
+
+			// txNum 0 (step 0): write key1=value1 (new key, prev=nil)
+			writer.diff = &kv.DomainDiff{}
+			err = writer.PutWithPrev(key, value1, 0, nil)
+			require.NoError(err)
+
+			// txNum 17 (step 1): delete key1 (prev=value1)
+			writer.diff = &kv.DomainDiff{}
+			err = writer.DeleteWithPrev(key, 17, value1)
+			require.NoError(err)
+
+			// txNum 18 (step 1): re-write key1=value2 (prev=nil, key was deleted)
+			// Only this diff is needed for the unwind — it captures the previous
+			// state (deleted → Value=[]byte{}) that unwind must restore.
+			writer.diff = &kv.DomainDiff{}
+			err = writer.PutWithPrev(key, value2, 18, nil)
+			require.NoError(err)
+			txNum18Diff := writer.diff.GetDiffSet()
+
+			// Verify the nil-vs-empty distinction survives serialization round-trip.
+			// Production diffs go through SerializeDiffSet/DeserializeDiffSet when
+			// stored in ChangeSets3; this ensures the []byte{} tombstone is preserved.
+			txNum18Diff = changeset.DeserializeDiffSet(changeset.SerializeDiffSet(txNum18Diff, nil))
+
+			err = writer.Flush(ctx, tx)
+			require.NoError(err)
+			domainRoTx.Close()
+
+			// Phase 2: Build files for step 0. The file will contain key1=value1.
+			require.NoError(d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
+			require.NoError(tx.Commit())
+
+			// Phase 3: Unwind to revert txNum 18 (keep txNums 0..17).
+			tx, err = db.BeginRw(ctx)
+			require.NoError(err)
+			defer tx.Rollback()
+
+			domainRoTx = d.beginForTests()
+			defer domainRoTx.Close()
+
+			// diff for txNum 18: prev was empty (key was deleted) → Value=[]byte{}
+			err = domainRoTx.unwind(ctx, tx, 1, 18, txNum18Diff)
+			require.NoError(err)
+			domainRoTx.Close()
+			require.NoError(tx.Commit())
+
+			// Phase 4: Verify GetLatest returns empty (deletion marker restored).
+			roTx, err := db.BeginRo(ctx)
+			require.NoError(err)
+			defer roTx.Rollback()
+
+			domainRoTx = d.beginForTests()
+			defer domainRoTx.Close()
+
+			v, _, found, err := domainRoTx.GetLatest(key, roTx)
+			require.NoError(err)
+			// After unwinding txNum 18, the state should reflect txNums 0..17.
+			// At txNum 17, key1 was deleted. The unwind must restore the deletion
+			// marker (empty tombstone) in DB. Without the fix, `if len(value) > 0`
+			// skips restoring the empty tombstone, and getLatestFromFiles returns
+			// stale "value1" from the step 0 file.
+			require.True(found, "deletion marker should be found after unwind")
+			require.Empty(v, "deleted key should have empty value after unwind, got %q", v)
+		})
 	}
 }

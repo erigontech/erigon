@@ -20,7 +20,7 @@
 package ethapi
 
 import (
-	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -185,9 +185,9 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 
 	if args.AuthorizationList != nil {
 		authorizations := make([]types.Authorization, len(args.AuthorizationList))
-		for i, auth := range args.AuthorizationList {
+		for i := range args.AuthorizationList {
 			var err error
-			authorizations[i], err = auth.ToAuthorization()
+			authorizations[i], err = args.AuthorizationList[i].ToAuthorization()
 			if err != nil {
 				return nil, err
 			}
@@ -224,8 +224,8 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 		authorizations := make([]types.Authorization, 0)
 		if args.AuthorizationList != nil {
 			authorizations = make([]types.Authorization, len(args.AuthorizationList))
-			for i, auth := range args.AuthorizationList {
-				authorizations[i], err = auth.ToAuthorization()
+			for i := range args.AuthorizationList {
+				authorizations[i], err = args.AuthorizationList[i].ToAuthorization()
 				if err != nil {
 					return nil, err
 				}
@@ -287,6 +287,7 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 			TipCap:     *msg.TipCap(),
 			AccessList: al,
 		}
+	// Unlike Geth, an explicit accessList with gasPrice produces type 1 rather than dropping the list.
 	case args.AccessList != nil:
 		al := types.AccessList{}
 		if args.AccessList != nil {
@@ -378,53 +379,11 @@ type ExecutionResult struct {
 
 // StructLogRes stores a structured log emitted by the EVM while replaying a
 // transaction in debug mode
-type StructLogRes struct {
-	Pc      uint64             `json:"pc"`
-	Op      string             `json:"op"`
-	Gas     uint64             `json:"gas"`
-	GasCost uint64             `json:"gasCost"`
-	Depth   int                `json:"depth"`
-	Error   error              `json:"error,omitempty"`
-	Stack   *[]string          `json:"stack,omitempty"`
-	Memory  *[]string          `json:"memory,omitempty"`
-	Storage *map[string]string `json:"storage,omitempty"`
-}
+type StructLogRes = logger.StructLogRes
 
 // FormatLogs formats EVM returned structured logs for json output
 func FormatLogs(logs []logger.StructLog) []StructLogRes {
-	formatted := make([]StructLogRes, len(logs))
-	for index, trace := range logs {
-		formatted[index] = StructLogRes{
-			Pc:      trace.Pc,
-			Op:      trace.Op.String(),
-			Gas:     trace.Gas,
-			GasCost: trace.GasCost,
-			Depth:   trace.Depth,
-			Error:   trace.Err,
-		}
-		if trace.Stack != nil {
-			stack := make([]string, len(trace.Stack))
-			for i, stackValue := range trace.Stack {
-				stack[i] = hex.EncodeToString(math.PaddedBigBytes(stackValue, 32))
-			}
-			formatted[index].Stack = &stack
-		}
-		if trace.Memory != nil {
-			memory := make([]string, 0, (len(trace.Memory)+31)/32)
-			for i := 0; i+32 <= len(trace.Memory); i += 32 {
-				memory = append(memory, hex.EncodeToString(trace.Memory[i:i+32]))
-			}
-			formatted[index].Memory = &memory
-		}
-		if trace.Storage != nil {
-			storage := make(map[string]string)
-			for i, storageValue := range trace.Storage {
-				storage[fmt.Sprintf("%x", i)] = fmt.Sprintf("%x", storageValue)
-			}
-			formatted[index].Storage = &storage
-		}
-	}
-	return formatted
+	return logger.FormatLogs(logs)
 }
 
 // RPCMarshalHeader converts the given header to the RPC output .
@@ -538,6 +497,50 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 	return fields, nil
 }
 
+// SignTransactionResult represents a RLP-encoded transaction paired with its JSON form.
+type SignTransactionResult struct {
+	Raw hexutil.Bytes   `json:"raw"`
+	Tx  *RPCTransaction `json:"tx"`
+}
+
+func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
+	if r.Tx == nil {
+		return nil, errors.New("nil transaction")
+	}
+	type plain struct {
+		Raw hexutil.Bytes   `json:"raw"`
+		Tx  json.RawMessage `json:"tx"`
+	}
+	txBytes, err := json.Marshal(r.Tx)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(txBytes, &m); err != nil {
+		return nil, err
+	}
+	for _, k := range []string{"blockHash", "blockNumber", "blockTimestamp", "transactionIndex", "from"} {
+		delete(m, k)
+	}
+	nullVal := json.RawMessage("null")
+	for _, k := range []string{"gasPrice", "maxFeePerGas", "maxPriorityFeePerGas"} {
+		if _, ok := m[k]; !ok {
+			m[k] = nullVal
+		}
+	}
+	zeroHex := json.RawMessage(`"0x0"`)
+	for _, k := range []string{"v", "r", "s"} {
+		if v, ok := m[k]; !ok || string(v) == "null" {
+			m[k] = zeroHex
+		}
+	}
+	stripped, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(plain{Raw: r.Raw, Tx: stripped})
+}
+
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
 	BlockHash            *common.Hash               `json:"blockHash"`
@@ -588,15 +591,23 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 	}
 
 	v, r, s := txn.RawSignatureValues()
-	result.V = (*hexutil.Big)(v.ToBig())
-	result.R = (*hexutil.Big)(r.ToBig())
-	result.S = (*hexutil.Big)(s.ToBig())
+	// For LegacyTx, v=r=s=0 means an unsigned system/protocol transaction (e.g. EIP-4788);
+	// match geth which returns null for these. For typed transactions (EIP-1559, EIP-2930…),
+	// v=0 is valid yParity=0 and must serialise as "0x0" — do not suppress it.
+	if txn.Type() != types.LegacyTxType || !v.IsZero() || !r.IsZero() || !s.IsZero() {
+		result.V = (*hexutil.Big)(v.ToBig())
+		result.R = (*hexutil.Big)(r.ToBig())
+		result.S = (*hexutil.Big)(s.ToBig())
+	}
 
 	if txn.Type() == types.LegacyTxType {
 		if !v.IsZero() { // skip chain id derivation in case of call simulation (where v,r,s are zero)
-			chainId = types.DeriveChainId(v)
+			var err error
+			chainId, err = types.DeriveChainId(v)
 			// if a legacy transaction has an EIP-155 chain id, include it explicitly, otherwise chain id is not included
-			if !chainId.IsZero() {
+			if err != nil {
+				log.Warn("[rpc] chain id derivation", "err", err)
+			} else if !chainId.IsZero() {
 				result.ChainID = (*hexutil.Big)(chainId.ToBig())
 			}
 		}
@@ -622,15 +633,16 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 			result.BlobVersionedHashes = blobTx.BlobVersionedHashes
 		} else if txn.Type() == types.SetCodeTxType {
 			setCodeTx := txn.(*types.SetCodeTransaction)
-			ats := make([]types.JsonAuthorization, len(setCodeTx.GetAuthorizations()))
-			for i, a := range setCodeTx.GetAuthorizations() {
-				ats[i] = types.JsonAuthorization{}.FromAuthorization(a)
+			auths := setCodeTx.GetAuthorizations()
+			ats := make([]types.JsonAuthorization, len(auths))
+			for i := range auths {
+				ats[i] = types.JsonAuthorization{}.FromAuthorization(auths[i])
 			}
 			result.Authorizations = &ats
 		}
 	}
 
-	signer := types.LatestSignerForChainID(chainId.ToBig())
+	signer := types.LatestSignerForChainID(chainId)
 	from, err := txn.Sender(*signer)
 	if err != nil {
 		log.Warn("sender recovery", "err", err)
@@ -647,8 +659,8 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 	return result
 }
 
-func computeGasPrice(txn types.Transaction, blockHash common.Hash, baseFee *uint256.Int) *hexutil.Big {
-	if baseFee != nil && blockHash != (common.Hash{}) {
+func computeGasPrice(txn types.Transaction, _ common.Hash, baseFee *uint256.Int) *hexutil.Big {
+	if baseFee != nil {
 		// price = min(tip + baseFee, gasFeeCap)
 		price := u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap())
 		return (*hexutil.Big)(price.ToBig())
@@ -658,7 +670,7 @@ func computeGasPrice(txn types.Transaction, blockHash common.Hash, baseFee *uint
 
 // NewRPCBorTransaction returns a Bor transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, blockHash common.Hash, blockNumber uint64, index uint64, chainId *big.Int) *RPCTransaction {
+func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, blockHash common.Hash, blockNumber uint64, index uint64, chainId *uint256.Int) *RPCTransaction {
 	txn := opaqueTxn.(*types.LegacyTx)
 	result := &RPCTransaction{
 		Type:     hexutil.Uint64(txn.Type()),
@@ -676,7 +688,7 @@ func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, block
 		S:        (*hexutil.Big)(big.NewInt(0)),
 	}
 	if blockHash != (common.Hash{}) {
-		result.ChainID = (*hexutil.Big)(chainId)
+		result.ChainID = (*hexutil.Big)(chainId.ToBig())
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
 		result.TransactionIndex = (*hexutil.Uint64)(&index)

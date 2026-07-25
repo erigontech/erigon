@@ -67,7 +67,7 @@ func (l *OperatorUnmarshaller) ReadKey() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return keyBytesToNibbles(b), nil
+	return witnessKeyBytesToNibbles(b), nil
 }
 
 func (l *OperatorUnmarshaller) ReadUInt64() (uint64, error) {
@@ -106,7 +106,7 @@ func (w *OperatorMarshaller) WriteOpCode(opcode OperatorKindCode) error {
 
 func (w *OperatorMarshaller) WriteKey(keyNibbles []byte) error {
 	w.WithColumn(ColumnLeafKeys)
-	return w.encoder.Encode(keyNibblesToBytes(keyNibbles))
+	return w.encoder.Encode(witnessKeyNibblesToBytes(keyNibbles))
 }
 
 func (w *OperatorMarshaller) WriteByteValue(value byte) error {
@@ -161,7 +161,27 @@ func (w *OperatorMarshaller) GetStats() *BlockWitnessStats {
 	}
 }
 
-func keyNibblesToBytes(nibbles []byte) []byte {
+// witnessKeyNibblesToBytes / witnessKeyBytesToNibbles implement a CUSTOM
+// wire format for the OperatorMarshaller CBOR stream, originally derived
+// from polygon zkevm. It is NOT the Ethereum yellow-paper compact encoding.
+//
+// Legacy corner case: inputs of length < 2 (empty or a single nibble) are
+// returned as-is with no header byte prepended. In that case the bit layout
+// described below does not apply, and the round-trip via witnessKeyBytesToNibbles
+// mirrors the same short-circuit. This behavior is preserved for wire-format
+// compatibility with existing witnesses.
+//
+// Bit layout of the first byte (only for inputs of length >= 2):
+//
+//	bit 0: parity (1 if the nibble count is odd)
+//	bit 1: terminator flag
+//	(no inline first nibble for odd lengths — unlike spec compact encoding)
+//
+// DO NOT "fix" this to match the spec: that would change the witness wire
+// format and break any consumer reading existing witnesses.
+// For spec-compliant compact encoding, use nibbles.HexToCompact /
+// nibbles.CompactToHex in execution/commitment/nibbles.
+func witnessKeyNibblesToBytes(nibbles []byte) []byte {
 	if len(nibbles) < 1 {
 		return []byte{}
 	}
@@ -194,7 +214,7 @@ func keyNibblesToBytes(nibbles []byte) []byte {
 	return result
 }
 
-func keyBytesToNibbles(b []byte) []byte {
+func witnessKeyBytesToNibbles(b []byte) []byte {
 	if len(b) < 1 {
 		return []byte{}
 	}

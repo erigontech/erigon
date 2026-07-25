@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -13,104 +15,32 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func CreateBAL(blockNum uint64, txIO *state.VersionedIO, dataDir string) types.BlockAccessList {
+func CreateBAL(blockNum uint64, txIO *state.VersionedIO, dataDir string, logger log.Logger) types.BlockAccessList {
 	bal := txIO.AsBlockAccessList()
-	writeBALToFile(bal, blockNum, dataDir)
+	if dbg.TraceBlockAccessLists {
+		writeBALToFile(bal, dataDir, fmt.Sprintf("computed_bal_%d.txt", blockNum), logger)
+	}
 	return bal
 }
 
-// writeBALToFile writes the Block Access List to a text file for debugging/analysis
-func writeBALToFile(bal types.BlockAccessList, blockNum uint64, dataDir string) {
+// writeBALToFile dumps the Block Access List to <dataDir>/bal/<name> for debugging/analysis.
+func writeBALToFile(bal types.BlockAccessList, dataDir string, name string, logger log.Logger) {
 	if dataDir == "" {
 		return
 	}
-
 	balDir := filepath.Join(dataDir, "bal")
-	if err := os.MkdirAll(balDir, 0755); err != nil {
-		log.Warn("Failed to create BAL directory", "dir", balDir, "error", err)
+	if err := os.MkdirAll(balDir, 0o755); err != nil {
+		logger.Warn("failed to create BAL debug directory", "dir", balDir, "err", err)
 		return
 	}
-
-	filename := filepath.Join(balDir, fmt.Sprintf("bal_block_%d.txt", blockNum))
-
-	file, err := os.Create(filename)
-	if err != nil {
-		log.Warn("Failed to create BAL file", "blockNum", blockNum, "error", err)
-		return
+	path := filepath.Join(balDir, name)
+	if err := os.WriteFile(path, []byte(bal.DebugString()), 0o644); err != nil {
+		logger.Warn("failed to write BAL debug file", "path", path, "err", err)
 	}
-	defer file.Close()
-
-	// Write header information
-	fmt.Fprintf(file, "Block Access List for Block %d\n", blockNum)
-	fmt.Fprintf(file, "Total Accounts: %d\n\n", len(bal))
-
-	// Write each account's changes
-	for _, account := range bal {
-		fmt.Fprintf(file, "Account: %s\n", account.Address.Value().Hex())
-
-		// Storage changes
-		if len(account.StorageChanges) > 0 {
-			fmt.Fprintf(file, "  Storage Changes (%d):\n", len(account.StorageChanges))
-			for _, slotChange := range account.StorageChanges {
-				fmt.Fprintf(file, "    Slot: %s\n", slotChange.Slot.Value().Hex())
-				for _, change := range slotChange.Changes {
-					fmt.Fprintf(file, "      [%d] -> %s\n", change.Index, change.Value.Hex())
-				}
-			}
-		}
-
-		// Storage reads
-		if len(account.StorageReads) > 0 {
-			fmt.Fprintf(file, "  Storage Reads (%d):\n", len(account.StorageReads))
-			for _, read := range account.StorageReads {
-				fmt.Fprintf(file, "    %s\n", read.Value().Hex())
-			}
-		}
-
-		// Balance changes
-		if len(account.BalanceChanges) > 0 {
-			fmt.Fprintf(file, "  Balance Changes (%d):\n", len(account.BalanceChanges))
-			for _, change := range account.BalanceChanges {
-				fmt.Fprintf(file, "    [%d] -> %s\n", change.Index, change.Value.String())
-			}
-		}
-
-		// Nonce changes
-		if len(account.NonceChanges) > 0 {
-			fmt.Fprintf(file, "  Nonce Changes (%d):\n", len(account.NonceChanges))
-			for _, change := range account.NonceChanges {
-				fmt.Fprintf(file, "    [%d] -> %d\n", change.Index, change.Value)
-			}
-		}
-
-		// Code changes
-		if len(account.CodeChanges) > 0 {
-			fmt.Fprintf(file, "  Code Changes (%d):\n", len(account.CodeChanges))
-			for _, change := range account.CodeChanges {
-				fmt.Fprintf(file, "    [%d] -> %d bytes\n", change.Index, len(change.Bytecode))
-				if len(change.Bytecode) <= 64 {
-					fmt.Fprintf(file, "      Bytecode: %x\n", change.Bytecode)
-				} else {
-					fmt.Fprintf(file, "      Bytecode: %x... (truncated)\n", change.Bytecode[:64])
-				}
-			}
-		}
-
-		// If no changes, indicate that
-		if len(account.StorageChanges) == 0 && len(account.StorageReads) == 0 &&
-			len(account.BalanceChanges) == 0 && len(account.NonceChanges) == 0 &&
-			len(account.CodeChanges) == 0 {
-			fmt.Fprintf(file, "  No changes (accessed only)\n")
-		}
-
-		fmt.Fprintf(file, "\n")
-	}
-
-	//log.Info("BAL written to file", "blockNum", blockNum, "filename", filename, "accounts", len(bal))
 }
 
-func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, amsterdam bool, experimental bool, dataDir string) error {
-	if !amsterdam && !experimental {
+func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) error {
+	if !isEIP7928 && !experimental {
 		return nil
 	}
 	if h == nil {
@@ -118,68 +48,69 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 	}
 	blockNum := h.Number.Uint64()
 	blockHash := h.Hash()
-	bal := CreateBAL(blockNum, vio, dataDir)
-	err := bal.Validate()
+	computedBlockBal := CreateBAL(blockNum, vio, dataDir, logger)
+	err := computedBlockBal.Validate()
 	if err != nil {
 		return fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
 	}
-	if err := bal.ValidateMaxItems(h.GasLimit); err != nil {
-		return fmt.Errorf("block %d: %w", blockNum, err)
-	}
-	log.Debug("bal", "blockNum", blockNum, "hash", bal.Hash())
-	if !amsterdam {
+	if !isEIP7928 {
 		return nil
 	}
-	if h.BlockAccessListHash == nil {
-		return fmt.Errorf("block %d: missing block access list hash", blockNum)
+	// EIP-7928 size bound is only consensus-binding once Amsterdam activates.
+	if err := computedBlockBal.ValidateMaxItems(h.GasLimit); err != nil {
+		return fmt.Errorf("%w, block %d: %w", rules.ErrInvalidBlock, blockNum, err)
 	}
-	headerBALHash := *h.BlockAccessListHash
-	dbBALBytes, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
+	if h.BlockAccessListHash == nil {
+		return fmt.Errorf("block %d: EIP-7928 active but BlockAccessListHash is nil in header", blockNum)
+	}
+	blockBalHash := *h.BlockAccessListHash
+	blockBalBytes, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
 	if err != nil {
 		return fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
 	}
-	// BAL data may not be stored for blocks downloaded via backward
-	// block downloader (p2p sync) since it does not carry BAL sidecars.
-	// Remove after eth/71 has been implemented.
-	if dbBALBytes != nil {
-		dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
+	// A stored BAL sidecar may be absent — eth/71 backfill is best-effort and
+	// never blocks stage progress — so cross-check it only when present.
+	var blockBal types.BlockAccessList
+	if blockBalBytes != nil {
+		blockBal, err = types.DecodeBlockAccessListBytes(blockBalBytes)
 		if err != nil {
 			return fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
 		}
-		if err = dbBAL.Validate(); err != nil {
+		if err = blockBal.Validate(); err != nil {
 			return fmt.Errorf("block %d: db block access list is invalid: %w", blockNum, err)
 		}
-
-		if headerBALHash != dbBAL.Hash() {
-			log.Info(fmt.Sprintf("bal from block: %s", dbBAL.DebugString()))
-			return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, dbBAL.Hash(), headerBALHash)
+		if err = blockBal.ValidateMaxItems(h.GasLimit); err != nil {
+			return fmt.Errorf("block %d: stored block access list exceeds max items: %w", blockNum, err)
+		}
+		if blockBalHash != blockBal.Hash() {
+			reportBALMismatch(blockNum, blockHash, blockBal, blockBalHash, computedBlockBal, dataDir, logger)
+			return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, blockBal.Hash(), blockBalHash)
 		}
 	}
 	// Always validate computed BAL against header. The BalancePath cross-check
 	// in VersionMap.validateRead ensures deterministic parallel execution even
 	// without a stored BAL body (HasBAL=false), so the computed BAL is accurate.
-	if headerBALHash != bal.Hash() {
-		if dataDir != "" {
-			balDir := filepath.Join(dataDir, "bal")
-			if err := os.MkdirAll(balDir, 0o755); err != nil {
-				log.Warn("failed to create BAL debug directory", "dir", balDir, "err", err)
-			} else {
-				computedPath := filepath.Join(balDir, fmt.Sprintf("computed_bal_%d.txt", blockNum))
-				if err := os.WriteFile(computedPath, []byte(bal.DebugString()), 0o644); err != nil {
-					log.Warn("failed to write computed BAL debug file", "path", computedPath, "err", err)
-				}
-				dbBAL2, err := types.DecodeBlockAccessListBytes(dbBALBytes)
-				if err != nil {
-					log.Warn("failed to decode stored BAL for debug dump", "err", err)
-				} else if dbBAL2 != nil {
-					storedPath := filepath.Join(balDir, fmt.Sprintf("stored_bal_%d.txt", blockNum))
-					if err := os.WriteFile(storedPath, []byte(dbBAL2.DebugString()), 0o644); err != nil {
-						log.Warn("failed to write stored BAL debug file", "path", storedPath, "err", err)
-					}
-				}
-			}
-		}
-		return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, blockNum, bal.Hash(), headerBALHash)
+	computedBlockBalHash := computedBlockBal.Hash()
+	if blockBalHash != computedBlockBalHash {
+		reportBALMismatch(blockNum, blockHash, blockBal, blockBalHash, computedBlockBal, dataDir, logger)
+		return fmt.Errorf("%w, block=%d (hash=%s): block access list mismatch: got %s expected %s",
+			rules.ErrInvalidBlock, blockNum, blockHash, computedBlockBalHash, blockBalHash)
 	}
 	return nil
+}
+
+// reportBALMismatch logs a BAL hash mismatch and dumps the block's BAL and the
+// computed one under <dataDir>/bal for offline diffing.
+func reportBALMismatch(blockNum uint64, blockHash common.Hash, blockBal types.BlockAccessList, blockBalHash common.Hash, computedBlockBal types.BlockAccessList, dataDir string, logger log.Logger) {
+	logger.Error("BAL mismatch", "blockNum", blockNum, "blockHash", blockHash, "blockBalHash", blockBalHash, "computedBlockBalHash", computedBlockBal.Hash())
+	if dbg.Trace {
+		fmt.Printf("[BALTRACE] computed BAL block %d:\n%s\n", blockNum, computedBlockBal.DebugString())
+		if blockBal != nil {
+			fmt.Printf("[BALTRACE] stored/expected BAL block %d:\n%s\n", blockNum, blockBal.DebugString())
+		}
+	}
+	writeBALToFile(computedBlockBal, dataDir, fmt.Sprintf("computed_bal_%d.txt", blockNum), logger)
+	if blockBal != nil {
+		writeBALToFile(blockBal, dataDir, fmt.Sprintf("block_bal_%d.txt", blockNum), logger)
+	}
 }

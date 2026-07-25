@@ -22,8 +22,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 )
@@ -33,12 +33,12 @@ type TrieCfg struct {
 	checkRoot         bool
 	tmpDir            string
 	saveNewHashesToDB bool // no reason to save changes when calculating root for mining
-	blockReader       services.FullBlockReader
+	blockReader       dbservices.FullBlockReader
 
 	agg *state.Aggregator
 }
 
-func StageTrieCfg(db kv.TemporalRwDB, checkRoot, saveNewHashesToDB bool, tmpDir string, blockReader services.FullBlockReader) TrieCfg {
+func StageTrieCfg(db kv.TemporalRwDB, checkRoot, saveNewHashesToDB bool, tmpDir string, blockReader dbservices.FullBlockReader) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,
@@ -56,5 +56,14 @@ func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg, squeeze b
 	if err != nil {
 		return trie.EmptyRoot, err
 	}
+	return common.BytesToHash(rh), err
+}
+
+func RebuildPatriciaTrieWithHistory(ctx context.Context, cfg TrieCfg, squeeze bool) (common.Hash, error) {
+	rh, err := state.RebuildCommitmentFilesWithHistory(ctx, cfg.db, cfg.blockReader, log.New(), squeeze)
+	if err != nil {
+		return trie.EmptyRoot, err
+	}
+
 	return common.BytesToHash(rh), err
 }

@@ -18,10 +18,12 @@ package downloader
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,6 +61,73 @@ func TestConcurrentDownload(t *testing.T) {
 	}
 }
 
+// TestAllActiveSnapshotsConcurrentWithWrites pins that allActiveSnapshots may run concurrently
+// with torrentsByName mutations; it data-races under -race unless the map read holds d.lock.
+func TestAllActiveSnapshotsConcurrentWithWrites(t *testing.T) {
+	test := newDownloaderTest(t)
+	d := test.downloader
+	ctx := t.Context()
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	wg.Go(func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				d.allActiveSnapshots()
+			}
+		}
+	})
+	// Stop the reader on every exit path, including a require failure (Goexit).
+	defer func() {
+		close(stop)
+		wg.Wait()
+	}()
+
+	for i := range 64 {
+		name := fmt.Sprintf("v1-%06d-%06d-headers.seg", i, i+1)
+		ih := snaptype.Hex2InfoHash(fmt.Sprintf("%040x", i+1))
+		require.NoError(t, d.testStartSingleDownloadNoWait(ctx, ih, name))
+	}
+}
+
+// TestAddNewSeedableFileConcurrentWithAllActiveSnapshots pins that AddNewSeedableFile's
+// torrentsByName mutation holds d.lock, so it does not race allActiveSnapshots' iteration.
+// Without the lock the map write and the RLock'd read report a data race under -race — an
+// RLock cannot exclude a writer that holds no lock.
+func TestAddNewSeedableFileConcurrentWithAllActiveSnapshots(t *testing.T) {
+	test := newDownloaderTest(t)
+	d := test.downloader
+	ctx := t.Context()
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	wg.Go(func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				d.allActiveSnapshots()
+			}
+		}
+	})
+	defer func() {
+		close(stop)
+		wg.Wait()
+	}()
+
+	for i := range 64 {
+		name := fmt.Sprintf("v1-%06d-%06d-headers.seg", i, i+1)
+		require.NoError(t, os.WriteFile(filepath.Join(test.dirs.Snap, name), nil, 0o644))
+		require.NoError(t, d.AddNewSeedableFile(ctx, name))
+	}
+}
+
 func TestChangeInfoHashOfSameFile(t *testing.T) {
 	ctx := t.Context()
 	require := require.New(t)
@@ -89,7 +158,7 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 
 func TestNoEscape(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tf := NewAtomicTorrentFS(dirs.Snap)
 	// allow adding files only if they are inside snapshots dir
@@ -140,7 +209,7 @@ func TestVerifyDataDownloaderClosed(t *testing.T) {
 func TestAddDel(t *testing.T) {
 	require := require.New(t)
 	test := newDownloaderTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// In the following tests we use combinations of f1Abs, f1, f2, and f1BadAbs. Absolute file
 	// paths are allowed to calls to RpcClient if they're local to the SnapDir, it does the required
@@ -229,7 +298,7 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 
 	dirs := datadir.New(t.TempDir())
 	cfg, err := downloadercfg.New(
-		context.Background(),
+		t.Context(),
 		dirs,
 		"",
 		log.LvlInfo,
@@ -248,7 +317,7 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 		cfg.ClientConfig.DisableUTP = true
 	}
 
-	d, err := New(context.Background(), cfg, log.New())
+	d, err := New(t.Context(), cfg, log.New())
 	require.NoError(err)
 
 	// Register cleanup in reverse order (downloader closes before config file)

@@ -20,7 +20,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
+	"runtime"
+	"sync"
+	"time"
 
+	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
@@ -51,10 +56,18 @@ import (
 )
 
 const (
-	rewardTraceType = "reward"
-	rewardTypeBlock = "block"
-	rewardTypeUncle = "uncle"
+	rewardTraceType      = "reward"
+	rewardTypeBlock      = "block"
+	rewardTypeUncle      = "uncle"
+	rewardTypeWithdrawal = "withdrawal"
 )
+
+type withdrawalBalanceDiff struct {
+	address common.Address
+	prev    uint256.Int
+	amount  uint256.Int
+	existed bool
+}
 
 // Transaction implements trace_transaction
 func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error) {
@@ -71,27 +84,12 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	var isBorStateSyncTxn bool
-	blockNumber, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
+	blockNumber, txNum, isBorStateSyncTxn, ok, err := api.txnLookupWithBorFallback(ctx, tx, txHash, chainConfig)
 	if err != nil {
 		return nil, err
 	}
-
 	if !ok {
-		if chainConfig.Bor == nil {
-			return nil, nil
-		}
-
-		// otherwise this may be a bor state sync transaction - check
-		blockNumber, ok, err = api.bridgeReader.EventTxnLookup(ctx, txHash)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, nil
-		}
-
-		isBorStateSyncTxn = true
+		return nil, nil
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
@@ -107,26 +105,15 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, nil
 	}
 
-	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNumber)
+	txIndex, err := api.txnIndexInBlock(ctx, tx, blockNumber, txNum, isBorStateSyncTxn)
 	if err != nil {
 		return nil, err
 	}
 
-	if txNumMin+1 > txNum && !isBorStateSyncTxn {
-		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNumber)
-	}
-
-	var txIndex = int(txNum - txNumMin - 1)
-
-	if isBorStateSyncTxn {
-		txIndex = -1
-	}
-
 	bn := hexutil.Uint64(blockNumber)
 	hash := header.Hash()
-	signer := types.MakeSigner(chainConfig, blockNumber, header.Time)
 	// Returns an array of trace arrays, one trace array for each transaction
-	trace, err := api.callTransaction(ctx, tx, header, []string{TraceTypeTrace}, txIndex, *gasBailOut, signer, chainConfig, traceConfig)
+	trace, err := api.callTransaction(ctx, tx, header, []string{TraceTypeTrace}, txIndex, *gasBailOut, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -158,9 +145,9 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 
 	// 'trace_get' index starts at one (oddly)
 	firstIndex := int(indicies[0]) + 1
-	for i, trace := range traces {
+	for i := range traces {
 		if i == firstIndex {
-			return &trace, nil
+			return &traces[i], nil
 		}
 	}
 	return nil, err
@@ -179,6 +166,22 @@ func rewardKindToString(kind protocolrules.RewardKind) string {
 	default:
 		return "unknown"
 	}
+}
+
+func newRewardTrace(blockHash common.Hash, blockNum uint64, author common.Address, rewardType string, amount *big.Int) ParityTrace {
+	var tr ParityTrace
+	rewardAction := &RewardTraceAction{}
+	rewardAction.Author = author
+	rewardAction.RewardType = rewardType
+	rewardAction.Value.ToInt().Set(amount)
+	bh := blockHash
+	tr.Action = rewardAction
+	tr.BlockHash = &bh
+	tr.BlockNumber = new(uint64)
+	*tr.BlockNumber = blockNum
+	tr.Type = rewardTraceType
+	tr.TraceAddress = []int{}
+	return tr
 }
 
 // Block implements trace_block
@@ -220,8 +223,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	if err != nil {
 		return nil, err
 	}
-	signer := types.MakeSigner(cfg, blockNum, block.Time())
-	traces, syscall, err := api.callBlock(ctx, tx, block, []string{TraceTypeTrace}, *gasBailOut /* gasBailOut */, signer, cfg, traceConfig)
+	traces, wdiffs, syscall, err := api.callBlock(ctx, tx, block, []string{TraceTypeTrace}, *gasBailOut /* gasBailOut */, cfg, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -243,20 +245,16 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 
+	blockHash := block.Hash()
+	blockNum = block.NumberU64()
 	for _, r := range rewards {
-		var tr ParityTrace
-		rewardAction := &RewardTraceAction{}
-		rewardAction.Author = r.Beneficiary.Value()
-		rewardAction.RewardType = rewardKindToString(r.Kind)
-		rewardAction.Value.ToInt().Set(r.Amount.ToBig())
-		tr.Action = rewardAction
-		tr.BlockHash = &common.Hash{}
-		copy(tr.BlockHash[:], block.Hash().Bytes())
-		tr.BlockNumber = new(uint64)
-		*tr.BlockNumber = block.NumberU64()
-		tr.Type = rewardTraceType
-		tr.TraceAddress = []int{}
-		out = append(out, tr)
+		out = append(out, newRewardTrace(blockHash, blockNum, r.Beneficiary.Value(), rewardKindToString(r.Kind), r.Amount.ToBig()))
+	}
+
+	if traceConfig.IncludeWithdrawalsEnabled() {
+		for _, wd := range wdiffs {
+			out = append(out, newRewardTrace(blockHash, blockNum, wd.address, rewardTypeWithdrawal, wd.amount.ToBig()))
+		}
 	}
 
 	return out, err
@@ -269,7 +267,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 
 	for _, addr := range req.FromAddress {
 		if addr != nil {
-			it, err := tx.IndexRange(kv.TracesFromIdx, addr.Bytes(), int(from), int(to), order.Asc, kv.Unlim)
+			it, err := tx.IndexRange(kv.TracesFromIdx, addr[:], int(from), int(to), order.Asc, kv.Unlim)
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -280,7 +278,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 
 	for _, addr := range req.ToAddress {
 		if addr != nil {
-			it, err := tx.IndexRange(kv.TracesToIdx, addr.Bytes(), int(from), int(to), order.Asc, kv.Unlim)
+			it, err := tx.IndexRange(kv.TracesToIdx, addr[:], int(from), int(to), order.Asc, kv.Unlim)
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -367,6 +365,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		return err
 	}
 
+	if err := overrideBlockContext(traceConfig, &evmtypes.BlockContext{}); err != nil {
+		return err
+	}
+
 	return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
 }
 
@@ -424,10 +426,15 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *chain.Rules
+	var lastBaseFee uint256.Int
 
 	noop := state.NewNoopWriter()
 	isPos := false
+
 	for it.HasNext() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		txNum, blockNum, txIndex, isFnalTxn, blockNumChanged, err := it.Next()
 		if err != nil {
 			if first {
@@ -467,13 +474,17 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 			if !isPos && chainConfig.TerminalTotalDifficulty != nil {
 				header := lastHeader
-				isPos = header.Difficulty.IsZero() || header.Difficulty.CmpBig(chainConfig.TerminalTotalDifficulty) >= 0
+				isPos = header.Difficulty.IsZero() || header.Difficulty.Cmp(chainConfig.TerminalTotalDifficulty) >= 0
 			}
 
 			lastBlockHash = lastHeader.Hash()
-			lastSigner = types.MakeSigner(chainConfig, blockNum, lastHeader.Time)
 			blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
+			if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+				return err
+			}
+			lastSigner = types.MakeSigner(chainConfig, blockCtx.BlockNumber, blockCtx.Time)
 			lastRules = blockCtx.Rules(chainConfig)
+			lastBaseFee = blockCtx.BaseFee
 		}
 		if isFnalTxn {
 			// TODO(yperbasis) proper rewards for Gnosis
@@ -500,18 +511,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, lastHeader, body.Uncles)
 			if _, ok := toAddresses[lastHeader.Coinbase]; ok || includeAll {
 				nSeen++
-				var tr ParityTrace
-				var rewardAction = &RewardTraceAction{}
-				rewardAction.Author = lastHeader.Coinbase
-				rewardAction.RewardType = rewardTypeBlock
-				rewardAction.Value.ToInt().Set(minerReward.ToBig())
-				tr.Action = rewardAction
-				tr.BlockHash = &common.Hash{}
-				copy(tr.BlockHash[:], lastBlockHash.Bytes())
-				tr.BlockNumber = new(uint64)
-				*tr.BlockNumber = blockNum
-				tr.Type = rewardTraceType
-				tr.TraceAddress = []int{}
+				tr := newRewardTrace(lastBlockHash, blockNum, lastHeader.Coinbase, rewardTypeBlock, minerReward.ToBig())
 				b, err := json.Marshal(tr)
 				if err != nil {
 					if first {
@@ -540,18 +540,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				if _, ok := toAddresses[uncle.Coinbase]; ok || includeAll {
 					if i < len(uncleRewards) {
 						nSeen++
-						var tr ParityTrace
-						rewardAction := &RewardTraceAction{}
-						rewardAction.Author = uncle.Coinbase
-						rewardAction.RewardType = rewardTypeUncle
-						rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
-						tr.Action = rewardAction
-						tr.BlockHash = &common.Hash{}
-						copy(tr.BlockHash[:], lastBlockHash[:])
-						tr.BlockNumber = new(uint64)
-						*tr.BlockNumber = blockNum
-						tr.Type = rewardTraceType
-						tr.TraceAddress = []int{}
+						tr := newRewardTrace(lastBlockHash, blockNum, uncle.Coinbase, rewardTypeUncle, uncleRewards[i].ToBig())
 						b, err := json.Marshal(tr)
 						if err != nil {
 							if first {
@@ -601,7 +590,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue //guess block doesn't have transactions
 		}
 		txHash := txn.Hash()
-		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
+		msg, err := txn.AsMessage(*lastSigner, &lastBaseFee, lastRules)
 		if err != nil {
 			if first {
 				first = false
@@ -632,8 +621,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ibs := state.New(cachedReader)
 
 		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
-		txCtx := protocol.NewEVMTxContext(msg)
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+		if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+			return err
+		}
+		evmTxCtx := protocol.NewEVMTxContext(msg)
+		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		ibs.SetTxContext(blockNum, txIndex)
@@ -643,8 +635,35 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
 		}
 
+		var timer *time.Timer
+		if api.evmCallTimeout > 0 {
+			timer = time.AfterFunc(api.evmCallTimeout, evm.Cancel)
+		}
 		var execResult *evmtypes.ExecutionResult
 		execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
+		if timer != nil {
+			timer.Stop()
+		}
+		timedOut := timer != nil && evm.Cancelled()
+
+		if timedOut {
+			timeoutErr := fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
+			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
+				ot.Tracer().OnTxEnd(nil, timeoutErr)
+			}
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.WriteObjectStart()
+			rpc.HandleError(timeoutErr, stream)
+			stream.WriteObjectEnd()
+			// Safe to skip FinalizeTx/CommitBlock: each iteration creates a fresh
+			// stateCache, cachedReader and ibs from the next txNum, and writes go
+			// to a noop writer, so no partial state escapes this scope.
+			continue
+		}
 		if err != nil {
 			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
 				ot.Tracer().OnTxEnd(nil, err)
@@ -755,10 +774,9 @@ func (api *TraceAPIImpl) callBlock(
 	block *types.Block,
 	traceTypes []string,
 	gasBailOut bool,
-	signer *types.Signer,
 	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
-) ([]*TraceCallResult, protocolrules.SystemCall, error) {
+) ([]*TraceCallResult, []withdrawalBalanceDiff, protocolrules.SystemCall, error) {
 	blockNumber := block.NumberU64()
 	pNo := blockNumber
 	if pNo > 0 {
@@ -769,7 +787,11 @@ func (api *TraceAPIImpl) callBlock(
 	header := block.Header()
 	engine := api.engine()
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
+	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+		return nil, nil, nil, err
+	}
 	rules := blockCtx.Rules(cfg)
+	signer := types.MakeSigner(cfg, blockCtx.BlockNumber, blockCtx.Time)
 	txs := block.Transactions()
 	var borStateSyncTxn types.Transaction
 	var borStateSyncTxnHash common.Hash
@@ -781,7 +803,7 @@ func (api *TraceAPIImpl) callBlock(
 		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
 
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		if ok {
 			borStateSyncTxn = bortypes.NewBorTransaction()
@@ -798,14 +820,14 @@ func (api *TraceAPIImpl) callBlock(
 		RequireCanonical: true,
 	}
 
-	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	stateCache := shards.NewStateCache(
 		32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
@@ -818,10 +840,10 @@ func (api *TraceAPIImpl) callBlock(
 	logger := log.New("trace_filtering")
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err = ibs.CommitBlock(rules, cachedWriter); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	msgs := make([]*types.Message, len(txs))
@@ -835,9 +857,9 @@ func (api *TraceAPIImpl) callBlock(
 			// we use an empty message for bor state sync txn since it gets handled differently
 		} else {
 			txnHash = txn.Hash()
-			msg, err = txn.AsMessage(*signer, header.BaseFee, rules)
+			msg, err = txn.AsMessage(*signer, &blockCtx.BaseFee, rules)
 			if err != nil {
-				return nil, nil, fmt.Errorf("convert txn into msg: %w", err)
+				return nil, nil, nil, fmt.Errorf("convert txn into msg: %w", err)
 			}
 		}
 
@@ -850,11 +872,71 @@ func (api *TraceAPIImpl) callBlock(
 		msgs[i] = msg
 	}
 
-	traces, _, cmErr := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
-		&parentNrOrHash, header, gasBailOut /* gasBailout */, traceConfig)
+	// Use parallel execution when replaying historical blocks without stateDiff or vmTrace:
+	// each tx can read its own pre-state independently from the temporal DB,
+	// so workers never share mutable state and need no conflict detection.
+	// Bor state-sync txns are excluded because they require bridgeReader.Events
+	// which uses the shared dbtx. vmTrace is excluded because the parallel path
+	// does not initialise traceResult.VmTrace.
+	// When the parallel path is taken, ibs only has InitializeBlockExecution effects
+	// (no user-tx state); CalculateRewards is safe because rewards are header-derived.
+	hasStateDiff := false
+	hasVmTrace := false
+	for _, t := range traceTypes {
+		switch t {
+		case TraceTypeStateDiff:
+			hasStateDiff = true
+		case TraceTypeVmTrace:
+			hasVmTrace = true
+		}
+		if hasStateDiff && hasVmTrace {
+			break
+		}
+	}
+	hsr, isHistoricalStateReader := stateReader.(state.HistoricalStateReader)
+	var baseTxNum uint64
+	if isHistoricalStateReader {
+		baseTxNum = hsr.GetTxNum()
+	}
+
+	var traces []*TraceCallResult
+	var cmErr error
+	if isHistoricalStateReader && !hasStateDiff && !hasVmTrace && borStateSyncTxn == nil && len(txs) > 1 {
+		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, gasBailOut, traceConfig)
+	} else {
+		traces, _, cmErr = api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
+			&parentNrOrHash, header, gasBailOut /* gasBailout */, traceConfig)
+	}
 
 	if cmErr != nil {
-		return nil, nil, cmErr
+		return nil, nil, nil, cmErr
+	}
+
+	// Collect balance diffs for beacon chain withdrawals; prev is read only when stateDiff is requested.
+	wdiffs := make([]withdrawalBalanceDiff, 0, len(block.Withdrawals()))
+	for _, w := range block.Withdrawals() {
+		var prev uint256.Int
+		var existed bool
+		if hasStateDiff {
+			addr := accounts.InternAddress(w.Address)
+			var err error
+			prev, err = ibs.GetBalance(addr)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			existed, err = ibs.Exist(addr)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+		}
+		var amountWei uint256.Int
+		amountWei.Mul(uint256.NewInt(w.Amount), uint256.NewInt(common.GWei))
+		wdiffs = append(wdiffs, withdrawalBalanceDiff{
+			address: w.Address,
+			prev:    prev,
+			amount:  amountWei,
+			existed: existed,
+		})
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
@@ -862,7 +944,160 @@ func (api *TraceAPIImpl) callBlock(
 		return ret, err
 	}
 
-	return traces, syscall, nil
+	return traces, wdiffs, syscall, nil
+}
+
+type blockTraceTxJob struct {
+	txIndex   int
+	txn       types.Transaction
+	msg       *types.Message
+	callParam TraceCallParam
+}
+
+// doCallBlockParallel traces all transactions in a block concurrently using a
+// worker pool of size min(GOMAXPROCS, len(txns)).  Each worker opens its own
+// read-only temporal transaction so that the underlying MDBX transaction is
+// never accessed from more than one goroutine.  Because the temporal DB stores
+// the exact pre-state for every txNum, each transaction can be replayed
+// independently without conflict detection or state forwarding.
+//
+// Preconditions (checked by the caller):
+//   - stateReader is a HistoricalStateReader (historical block, not latest)
+//   - no stateDiff is requested (stateDiff needs per-tx cloneCache isolation)
+//   - no Bor state-sync txn (it uses bridgeReader.Events via the shared dbtx)
+func (api *TraceAPIImpl) doCallBlockParallel(
+	ctx context.Context,
+	dbtx kv.TemporalTx,
+	baseTxNum uint64,
+	txns []types.Transaction,
+	msgs []*types.Message,
+	callParams []TraceCallParam,
+	header *types.Header,
+	gasBailout bool,
+	traceConfig *config.TraceConfig,
+) ([]*TraceCallResult, error) {
+	chainConfig, err := api.chainConfig(ctx, dbtx)
+	if err != nil {
+		return nil, err
+	}
+	engine := api.engine()
+
+	var cancel context.CancelFunc
+	if api.evmCallTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, api.evmCallTimeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
+	defer cancel()
+
+	results := make([]*TraceCallResult, len(txns))
+
+	// Cap at 32 to bound memory from concurrent IntraBlockState instances and
+	// MDBX read transactions even on high-core-count machines.
+	const maxParallelWorkers = 32
+	numWorkers := min(runtime.GOMAXPROCS(0), len(txns), maxParallelWorkers)
+
+	// Pre-fill a buffered channel so the main goroutine never blocks.
+	jobs := make(chan blockTraceTxJob, len(txns))
+	for txIndex, msg := range msgs {
+		jobs <- blockTraceTxJob{txIndex: txIndex, txn: txns[txIndex], msg: msg, callParam: callParams[txIndex]}
+	}
+	close(jobs)
+
+	var wg sync.WaitGroup
+	var errOnce sync.Once
+	var firstErr error
+
+	for range numWorkers {
+		wg.Go(func() {
+			workerTx, err := api.kv.BeginTemporalRo(ctx)
+			if err != nil {
+				errOnce.Do(func() { firstErr = err; cancel() })
+				return
+			}
+			defer workerTx.Rollback()
+
+			// Per-worker constants: same for every job this worker processes.
+			// blockCtx captures workerTx in its GetHash closure, so it cannot
+			// be shared across workers (each needs its own copy).
+			blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, workerTx, api._blockReader, chainConfig)
+			if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+				errOnce.Do(func() { firstErr = err; cancel() })
+				return
+			}
+			chainRules := blockCtx.Rules(chainConfig)
+			oeConfig, err := parseOeTracerConfig(traceConfig)
+			if err != nil {
+				errOnce.Do(func() { firstErr = err; cancel() })
+				return
+			}
+			noop := state.NewNoopWriter()
+
+			for job := range jobs {
+				if err := common.Stopped(ctx.Done()); err != nil {
+					errOnce.Do(func() { firstErr = err })
+					return
+				}
+
+				// Copy is needed since each worker has its own independent state.
+				// workerReader reads state up to but not including the current transaction.
+				workerReader := state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(job.txIndex))
+				workerIbs := state.New(workerReader)
+
+				traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: job.callParam.txHash}
+
+				var ot OeTracer
+				ot.config = oeConfig
+				ot.compat = api.compatibility
+				ot.r = traceResult
+				ot.idx = []string{fmt.Sprintf("%d-", job.txIndex)}
+				// TraceTypeTrace is always active here; initialise traceAddr unconditionally.
+				ot.traceAddr = []int{}
+
+				tracer := ot.Tracer()
+				vmConfig := vm.Config{Tracer: tracer.Hooks}
+
+				workerIbs.SetTxContext(blockCtx.BlockNumber, job.txIndex)
+				workerIbs.SetHooks(tracer.Hooks)
+
+				txCtx := protocol.NewEVMTxContext(job.msg)
+				evm := vm.NewEVM(blockCtx, txCtx, workerIbs, chainConfig, vmConfig)
+				gp := new(protocol.GasPool).AddGas(job.msg.Gas()).AddBlobGas(job.msg.BlobGas())
+
+				if tracer.Hooks.OnTxStart != nil {
+					tracer.Hooks.OnTxStart(evm.GetVMContext(), job.txn, job.msg.From())
+				}
+
+				execResult, execErr := protocol.ApplyMessage(evm, job.msg, gp, true /* refunds */, gasBailout, engine)
+				if execErr != nil {
+					if tracer.Hooks.OnTxEnd != nil {
+						tracer.Hooks.OnTxEnd(nil, execErr)
+					}
+					errOnce.Do(func() { firstErr = fmt.Errorf("txIndex %d: %w", job.txIndex, execErr); cancel() })
+					return
+				}
+
+				if tracer.Hooks.OnTxEnd != nil {
+					tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
+				}
+
+				if err := workerIbs.FinalizeTx(chainRules, noop); err != nil {
+					errOnce.Do(func() { firstErr = err; cancel() })
+					return
+				}
+
+				traceResult.Output = common.Copy(execResult.ReturnData)
+				results[job.txIndex] = traceResult
+			}
+		})
+	}
+
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return results, nil
 }
 
 func (api *TraceAPIImpl) callTransaction(
@@ -872,7 +1107,6 @@ func (api *TraceAPIImpl) callTransaction(
 	traceTypes []string,
 	txIndex int,
 	gasBailOut bool,
-	signer *types.Signer,
 	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
 ) (*TraceCallResult, error) {
@@ -885,7 +1119,11 @@ func (api *TraceAPIImpl) callTransaction(
 	parentNo := rpc.BlockNumber(pNo)
 	engine := api.engine()
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
+	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+		return nil, err
+	}
 	rules := blockCtx.Rules(cfg)
+	signer := types.MakeSigner(cfg, blockCtx.BlockNumber, blockCtx.Time)
 	var txn types.Transaction
 	var borStateSyncTxnHash common.Hash
 	isBorStateSyncTxn := txIndex == -1 && cfg.Bor != nil
@@ -908,6 +1146,9 @@ func (api *TraceAPIImpl) callTransaction(
 		if err != nil {
 			return nil, err
 		}
+		if txn == nil {
+			return nil, fmt.Errorf("transaction not found at block %d, index %d", blockNumber, txIndex)
+		}
 	}
 
 	parentHash := header.ParentHash
@@ -917,7 +1158,7 @@ func (api *TraceAPIImpl) callTransaction(
 		RequireCanonical: true,
 	}
 
-	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -950,7 +1191,7 @@ func (api *TraceAPIImpl) callTransaction(
 		// we use an empty message for bor state sync txn since it gets handled differently
 	} else {
 		txnHash = txn.Hash()
-		msg, err = txn.AsMessage(*signer, header.BaseFee, rules)
+		msg, err = txn.AsMessage(*signer, &blockCtx.BaseFee, rules)
 		if err != nil {
 			return nil, fmt.Errorf("convert txn into msg: %w", err)
 		}

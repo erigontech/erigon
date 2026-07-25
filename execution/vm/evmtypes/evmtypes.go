@@ -39,17 +39,20 @@ type BlockContext struct {
 	PostApplyMessage PostApplyMessageFunc
 
 	// Block information
-	Coinbase         accounts.Address // Provides information for COINBASE
-	GasLimit         uint64           // Provides information for GASLIMIT
-	MaxGasLimit      bool             // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
-	BlockNumber      uint64           // Provides information for NUMBER
-	Time             uint64           // Provides information for TIME
-	Difficulty       uint256.Int      // Provides information for DIFFICULTY
-	BaseFee          uint256.Int      // Provides information for BASEFEE
-	PrevRanDao       *common.Hash     // Provides information for PREVRANDAO
-	BlobBaseFee      uint256.Int      // Provides information for BLOBBASEFEE
-	SlotNumber       uint64           // Provides information for SLOTNUM
-	CostPerStateByte uint64           // Holds the calculated cost per state byte for the given block
+	Coinbase    accounts.Address // Provides information for COINBASE
+	GasLimit    uint64           // Provides information for GASLIMIT
+	MaxGasLimit bool             // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
+	BlockNumber uint64           // Provides information for NUMBER
+	Time        uint64           // Provides information for TIME
+	Difficulty  uint256.Int      // Provides information for DIFFICULTY
+	BaseFee     uint256.Int      // Provides information for BASEFEE
+	PrevRanDao  *common.Hash     // Provides information for PREVRANDAO
+	BlobBaseFee uint256.Int      // Provides information for BLOBBASEFEE
+	SlotNumber  uint64           // Provides information for SLOTNUM
+
+	// L2Version is populated by the chain's engine/block-context construction
+	// for L2 chains; zero otherwise.
+	L2Version uint64
 }
 
 // TxContext provides the EVM with information about a transaction.
@@ -78,11 +81,6 @@ type ExecutionResult struct {
 	FeeTipped            uint256.Int
 	FeeBurnt             uint256.Int
 	BurntContractAddress accounts.Address
-
-	// SelfDestructedWithBalance holds accounts that were selfdestructed during
-	// execution but received ETH after the SELFDESTRUCT opcode ran (EIP-7708).
-	// Captured before SoftFinalise clears the journal.
-	SelfDestructedWithBalance []AddressAndBalance
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -128,21 +126,12 @@ type (
 	PostApplyMessageFunc func(ibs IntraBlockState, sender accounts.Address, coinbase accounts.Address, result *ExecutionResult, chainRules *chain.Rules)
 )
 
-type AddressAndBalance struct {
-	Address common.Address
-	Balance uint256.Int
-}
-
 // IntraBlockState is an EVM database for full state querying.
 type IntraBlockState interface {
 	SubBalance(accounts.Address, uint256.Int, tracing.BalanceChangeReason) error
 	AddBalance(accounts.Address, uint256.Int, tracing.BalanceChangeReason) error
 	GetBalance(accounts.Address) (uint256.Int, error)
-
-	GetRemovedAccountsWithBalance() []AddressAndBalance
-
 	AddLog(*types.Log)
-
 	SetHooks(hooks *tracing.Hooks)
 	Trace() bool
 	BlockNumber() uint64

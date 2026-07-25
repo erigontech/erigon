@@ -25,7 +25,6 @@ import (
 	"math"
 	"math/big"
 	"strings"
-	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
@@ -46,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/node/shards"
 	ptracer "github.com/erigontech/erigon/polygon/tracer"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -213,13 +213,13 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 				}
 			}
 			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
-			var gasPrice uint256.Int
+			gasPrice = new(uint256.Int)
 			if !gasFeeCap.IsZero() || !gasTipCap.IsZero() {
-				gasPrice = u256.Min(u256.Add(*gasTipCap, *baseFee), *gasFeeCap)
+				*gasPrice = u256.Min(u256.Add(*gasTipCap, *baseFee), *gasFeeCap)
 			} else {
 				// This means gasFeeCap == 0, gasTipCap == 0
 				gasPrice.Set(baseFee)
-				gasFeeCap, gasTipCap = &gasPrice, &gasPrice
+				gasFeeCap, gasTipCap = gasPrice, gasPrice
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
@@ -250,7 +250,26 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	return msg, nil
 }
 
+// overrideBaseFee is a nil-safe wrapper around (*ethapi.BlockOverrides).OverrideBaseFee.
+func overrideBaseFee(traceConfig *config.TraceConfig, baseFee *uint256.Int) (*uint256.Int, error) {
+	if traceConfig == nil {
+		return baseFee, nil
+	}
+	return traceConfig.BlockOverrides.OverrideBaseFee(baseFee)
+}
+
+// overrideBlockContext applies traceConfig's BlockOverrides (if any) to blockCtx.
+func overrideBlockContext(traceConfig *config.TraceConfig, blockCtx *evmtypes.BlockContext) error {
+	if traceConfig == nil {
+		return nil
+	}
+	return traceConfig.BlockOverrides.Override(blockCtx)
+}
+
 func parseOeTracerConfig(traceConfig *config.TraceConfig) (OeTracerConfig, error) {
+	if traceConfig != nil && traceConfig.Tracer != nil && *traceConfig.Tracer != "" {
+		return OeTracerConfig{}, errors.New("trace_* does not support custom tracers; use debug_* (e.g. debug_traceTransaction) for named or JS tracers")
+	}
 	if traceConfig == nil || traceConfig.TracerConfig == nil || *traceConfig.TracerConfig == nil {
 		return OeTracerConfig{}, nil
 	}
@@ -892,27 +911,12 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	var isBorStateSyncTxn bool
-	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
+	blockNum, txNum, isBorStateSyncTxn, ok, err := api.txnLookupWithBorFallback(ctx, tx, txHash, chainConfig)
 	if err != nil {
 		return nil, err
 	}
-
 	if !ok {
-		if chainConfig.Bor == nil {
-			return nil, nil
-		}
-
-		// otherwise this may be a bor state sync transaction - check
-		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txHash)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, nil
-		}
-
-		isBorStateSyncTxn = true
+		return nil, nil
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
@@ -925,24 +929,13 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum, isBorStateSyncTxn)
 	if err != nil {
 		return nil, err
 	}
 
-	if txNumMin+1 > txNum && !isBorStateSyncTxn {
-		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
-	}
-
-	var txnIndex = int(txNum - txNumMin - 1)
-
-	if isBorStateSyncTxn {
-		txnIndex = -1
-	}
-
-	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
 	// Returns an array of trace arrays, one trace array for each transaction
-	trace, err := api.callTransaction(ctx, tx, header, traceTypes, txnIndex, *gasBailOut, signer, chainConfig, traceConfig)
+	trace, err := api.callTransaction(ctx, tx, header, traceTypes, txnIndex, *gasBailOut, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -1022,9 +1015,8 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		}
 	}
 
-	signer := types.MakeSigner(chainConfig, blockNumber, block.Time())
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, _, err := api.callBlock(ctx, tx, block, traceTypes, *gasBailOut, signer, chainConfig, traceConfig)
+	traces, wdiffs, _, err := api.callBlock(ctx, tx, block, traceTypes, *gasBailOut, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -1046,6 +1038,57 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		}
 		tr.TransactionHash = trace.TransactionHash
 		result[i] = tr
+	}
+
+	// Withdrawals are surfaced only via stateDiff; trace_block emits them as reward traces
+	// in its flat output, but this per-tx result structure has no block-level slot for them.
+	if traceTypeStateDiff && traceConfig.IncludeWithdrawalsEnabled() && len(wdiffs) > 0 {
+		sdMap := make(map[accounts.Address]*StateDiffAccount, len(wdiffs))
+		for _, wd := range wdiffs {
+			addr := accounts.InternAddress(wd.address)
+			if entry, ok := sdMap[addr]; ok {
+				if wd.existed {
+					bal := entry.Balance.(map[string]*StateDiffBalance)["*"]
+					var cur uint256.Int
+					cur.SetFromBig(bal.To.ToInt())
+					cur.Add(&cur, &wd.amount)
+					bal.To = (*hexutil.Big)(cur.ToBig())
+				} else {
+					balMap := entry.Balance.(map[string]*hexutil.Big)
+					var cur uint256.Int
+					cur.SetFromBig(balMap["+"].ToInt())
+					cur.Add(&cur, &wd.amount)
+					balMap["+"] = (*hexutil.Big)(cur.ToBig())
+				}
+			} else {
+				var to uint256.Int
+				to.Add(&wd.prev, &wd.amount)
+				if wd.existed {
+					sdMap[addr] = &StateDiffAccount{
+						Balance: map[string]*StateDiffBalance{
+							"*": {
+								From: (*hexutil.Big)(wd.prev.ToBig()),
+								To:   (*hexutil.Big)(to.ToBig()),
+							},
+						},
+						Code:    "=",
+						Nonce:   "=",
+						Storage: map[common.Hash]map[string]any{},
+					}
+				} else {
+					sdMap[addr] = &StateDiffAccount{
+						Balance: map[string]*hexutil.Big{"+": (*hexutil.Big)(to.ToBig())},
+						Code:    map[string]hexutil.Bytes{"+": {}},
+						Nonce:   map[string]hexutil.Uint64{"+": 0},
+						Storage: map[common.Hash]map[string]any{},
+					}
+				}
+			}
+		}
+		result = append(result, &TraceCallResult{
+			Trace:     []*ParityTrace{},
+			StateDiff: sdMap,
+		})
 	}
 
 	return result, nil
@@ -1088,7 +1131,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1100,18 +1143,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	ibs := state.New(stateReader)
 
-	// Setup context so it may be cancelled the call has completed
-	// or, in case of unmetered gas, setup a context with a timeout.
-	var cancel context.CancelFunc
-	if api.evmCallTimeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, api.evmCallTimeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
-
-	// Make sure the context is cancelled when the call has completed
-	// this makes sure resources are cleaned up.
-	defer cancel()
+	_, storeEVM, cleanup := setupEVMTimeout(ctx, api.evmCallTimeout)
+	defer cleanup()
 
 	traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
@@ -1142,7 +1175,18 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 
 	// Get a new instance of the EVM.
-	baseFee := header.BaseFee
+	var blockOverrides *ethapi.BlockOverrides
+	if traceConfig != nil {
+		blockOverrides = traceConfig.BlockOverrides
+	}
+	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
+	blockCtx.GasLimit = math.MaxUint64
+	blockCtx.MaxGasLimit = true
+	if err := blockOverrides.Override(&blockCtx); err != nil {
+		return nil, err
+	}
+
+	baseFee := &blockCtx.BaseFee
 	msg, err := args.ToMessage(api.gasCap, baseFee)
 	if err != nil {
 		return nil, err
@@ -1151,26 +1195,14 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
-
-	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	txCtx := protocol.NewEVMTxContext(msg)
 
-	blockCtx.GasLimit = math.MaxUint64
-	blockCtx.MaxGasLimit = true
-
 	var precompiles vm.PrecompiledContracts
-	if traceConfig != nil {
-		if traceConfig.BlockOverrides != nil {
-			if err := traceConfig.BlockOverrides.Override(&blockCtx); err != nil {
-				return nil, err
-			}
-		}
-		if traceConfig.StateOverrides != nil {
-			rules := blockCtx.Rules(chainConfig)
-			precompiles = vm.ActivePrecompiledContracts(rules)
-			if err := traceConfig.StateOverrides.Override(ibs, precompiles, rules); err != nil {
-				return nil, err
-			}
+	if traceConfig != nil && traceConfig.StateOverrides != nil {
+		rules := blockCtx.Rules(chainConfig)
+		precompiles = vm.ActivePrecompiledContracts(rules)
+		if err := traceConfig.StateOverrides.Override(ibs, precompiles, rules); err != nil {
+			return nil, err
 		}
 	}
 
@@ -1178,19 +1210,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if precompiles != nil {
 		evm.SetPrecompiles(precompiles)
 	}
-
-	done := make(chan struct{})
-	defer close(done)
-
-	var timedOut atomic.Bool
-	go func() {
-		select {
-		case <-ctx.Done():
-			timedOut.Store(true)
-			evm.Cancel()
-		case <-done:
-		}
-	}()
+	storeEVM(evm)
 
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
@@ -1220,11 +1240,12 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 		initialIbs := state.New(stateReader)
-		sd.CompareStates(initialIbs, ibs)
+		if err = sd.CompareStates(initialIbs, ibs); err != nil {
+			return nil, err
+		}
 	}
 
-	// If the timer caused an abort, return an appropriate error message
-	if timedOut.Load() {
+	if evm.Cancelled() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
 	}
 
@@ -1304,9 +1325,13 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	if parentHeader.BaseFee != nil {
 		baseFee = parentHeader.BaseFee
 	}
+	if baseFee, err = overrideBaseFee(traceConfig, baseFee); err != nil {
+		return nil, err
+	}
 	msgs := make([]*types.Message, len(callParams))
 	txns := make([]types.Transaction, len(callParams))
-	for i, args := range callParams {
+	for i := range callParams {
+		args := &callParams[i]
 		msgs[i], err = args.ToMessage(api.gasCap, baseFee)
 		if err != nil {
 			return nil, fmt.Errorf("convert callParam to msg: %w", err)
@@ -1318,7 +1343,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		}
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1397,6 +1422,9 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	}
 
 	blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
+	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+		return nil, nil, err
+	}
 	var tracer *tracers.Tracer
 	var tracingHooks *tracing.Hooks
 
@@ -1615,6 +1643,9 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	}
 
 	blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
+	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+		return nil, err
+	}
 
 	if isHistoricalStateReader {
 		historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
@@ -1799,7 +1830,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 
-	err = rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1809,15 +1840,8 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		return nil, err
 	}
 
-	ibs := state.New(stateReader)
-
-	var cancel context.CancelFunc
-	if api.evmCallTimeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, api.evmCallTimeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
-	defer cancel()
+	_, storeEVM, cleanup := setupEVMTimeout(ctx, api.evmCallTimeout)
+	defer cleanup()
 
 	traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
@@ -1836,6 +1860,8 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	if traceTypeVmTrace {
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 	}
+
+	ibs := state.New(stateReader)
 
 	var ot OeTracer
 	ot.config, err = parseOeTracerConfig(nil)
@@ -1866,19 +1892,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	blockCtx.MaxGasLimit = true
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: ot.Tracer().Hooks})
-
-	done := make(chan struct{})
-	defer close(done)
-
-	var timedOut atomic.Bool
-	go func() {
-		select {
-		case <-ctx.Done():
-			timedOut.Store(true)
-			evm.Cancel()
-		case <-done:
-		}
-	}()
+	storeEVM(evm)
 
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
@@ -1900,6 +1914,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 
 	traceResult.Output = common.Copy(execResult.ReturnData)
+
 	if traceTypeStateDiff {
 		sdMap := make(map[accounts.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
@@ -1908,10 +1923,12 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 			return nil, err
 		}
 		initialIbs := state.New(stateReader)
-		sd.CompareStates(initialIbs, ibs)
+		if err = sd.CompareStates(initialIbs, ibs); err != nil {
+			return nil, err
+		}
 	}
 
-	if timedOut.Load() {
+	if evm.Cancelled() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
 	}
 

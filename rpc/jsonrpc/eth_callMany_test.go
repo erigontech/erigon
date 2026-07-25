@@ -17,13 +17,20 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
 	"math/big"
 	"strconv"
 	"testing"
+	"time"
 
+	"github.com/holiman/uint256"
+	jsoniter "github.com/json-iterator/go"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/datadir"
@@ -32,11 +39,55 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
+
+// Pins that an EVM stored after the deadline has already fired is still cancelled.
+func TestSetupEVMTimeoutCancelsEVMStoredAfterExpiry(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	cancelParent()
+
+	_, storeEVM, cleanup := setupEVMTimeout(parent, time.Hour)
+	defer cleanup()
+
+	// let the one-shot AfterFunc fire before any EVM is registered
+	time.Sleep(50 * time.Millisecond)
+
+	evm := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, vm.Config{})
+	storeEVM(evm)
+	require.True(t, evm.Cancelled())
+}
+
+func TestCallManyEmptyBundles(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	baseApi := newBaseApiForTest(m)
+	api := newEthApiForTest(baseApi, m.DB, nil, nil)
+	debugApi := NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{GasCap: 5000000})
+	ctx := context.Background()
+
+	txIndex := -1
+	stateCtx := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}
+
+	for name, bundles := range map[string][]Bundle{
+		"noBundles":         {},
+		"noTransactions":    {{}, {}},
+		"emptyTransactions": {{Transactions: []ethapi.CallArgs{}}},
+	} {
+		_, err := api.CallMany(ctx, bundles, stateCtx, nil, nil)
+		require.EqualError(t, err, "empty bundles", name)
+
+		var buf bytes.Buffer
+		stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		err = debugApi.TraceCallMany(ctx, bundles, stateCtx, nil, stream)
+		require.EqualError(t, err, "empty bundles", name)
+	}
+}
 
 // block 1 contains 3 Transactions
 //	 1. deploy token A
@@ -55,7 +106,7 @@ func TestCallMany(t *testing.T) {
 		address1 = crypto.PubkeyToAddress(key1.PublicKey)
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
 		gspec    = &types.Genesis{
-			Config: chain.TestChainConfig,
+			Config: chain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
@@ -63,7 +114,7 @@ func TestCallMany(t *testing.T) {
 			},
 			GasLimit: 10000000,
 		}
-		chainID = big.NewInt(1337)
+		chainID = uint256.NewInt(1337)
 		ctx     = context.Background()
 
 		addr1BalanceCheck = "70a08231" + "000000000000000000000000" + address1.Hex()[2:]
@@ -97,7 +148,7 @@ func TestCallMany(t *testing.T) {
 
 	db := contractBackend.DB()
 	engine := contractBackend.Engine()
-	api := newEthApiForTest(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), false, rpccfg.DefaultEvmCallTimeout, engine, datadir.New(t.TempDir()), nil, 0, 0), db, nil, nil)
+	api := newEthApiForTest(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), engine, nil, &rpccfg.BaseApiConfig{Dirs: datadir.New(t.TempDir())}), db, nil, nil)
 
 	callArgAddr1 := ethapi.CallArgs{From: &address, To: &tokenAddr, Nonce: &nonce,
 		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1e9)),

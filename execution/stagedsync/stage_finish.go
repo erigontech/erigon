@@ -27,18 +27,15 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 )
 
 type FinishCfg struct {
-	forkValidator     *engine_helpers.ForkValidator
 	initialCycleStart *time.Time
 }
 
-func StageFinishCfg(forkValidator *engine_helpers.ForkValidator) FinishCfg {
+func StageFinishCfg() FinishCfg {
 	initialCycleStart := time.Now()
 	return FinishCfg{
-		forkValidator:     forkValidator,
 		initialCycleStart: &initialCycleStart,
 	}
 }
@@ -59,10 +56,6 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	if err != nil {
 		return err
 	}
-	if cfg.forkValidator != nil {
-		cfg.forkValidator.NotifyCurrentHeight(executionAt)
-	}
-
 	if s.CurrentSyncCycle.IsInitialCycle {
 		if err := rawdb.SetErigonVersion(tx, version.VersionKeyFinished); err != nil {
 			return err
@@ -73,6 +66,13 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 }
 
 func UnwindFinish(u *UnwindState, tx kv.RwTx) (err error) {
+	hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
+	if err != nil {
+		return err
+	}
+	if hash != (common.Hash{}) {
+		rawdb.WriteHeadBlockHash(tx, hash)
+	}
 	return u.Done(tx)
 }
 

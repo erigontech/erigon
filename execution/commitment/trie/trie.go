@@ -25,10 +25,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"reflect"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -91,189 +92,6 @@ func NewInMemoryTrieRLPEncoded(root Node) *Trie {
 	return trie
 }
 
-// this will merge node2 into node1, returns a boolean mergeNecessary, if it was necessary to replace a child.
-// If not, then the two full nodes are the same so no replacement was necessary
-// This function also performs certain sanity checks which can result in an error if they fail
-func merge2FullNodes(node1, node2 *FullNode) (bool, error) {
-	furtherMergingNeeded := false
-	for i := 0; i < len(node1.Children); i++ {
-		// either both children are hashnodes, or only one of them is, or none of them is.
-		// if both of the two children (of trie1 and trie2) at a certain index are not hashnodes
-		// they must be the same type (e.g. both a FullNode, or both a ShortNode, or both nil) . If this is true for all children then no merge takes place at this level.
-		child1 := node1.Children[i]
-		child2 := node2.Children[i]
-		if hashNode1, ok1 := child1.(*HashNode); ok1 { // child1 is a hashnode
-			if hashNode2, ok2 := child2.(*HashNode); ok2 { //child2 is a hashnode
-				// both are hashnodes
-				if !bytes.Equal(hashNode1.hash, hashNode2.hash) { // sanity check
-					return false, fmt.Errorf("children hashnodes have different hashes: hash1(%x)!=hash2(%x)", hashNode1.hash, hashNode2.hash)
-				}
-			} else if child2 == nil {
-				return false, fmt.Errorf("child of tr2 should not be nil, because child of tr1 is a hashnode")
-			} else { // child2 is not a hashnode, in this case replace the hashnode in tree 1 by child2 which has the expanded node type
-				node1.Children[i] = child2
-			}
-		} else if child1 == nil {
-			if child2 != nil {
-				// sanity check
-				return false, fmt.Errorf("child of first node is nil , but corresponding child of second node is non-nil")
-			}
-		} else { // child1 is not nil and not a hashnode
-			if _, ok2 := child2.(*HashNode); !ok2 { // if child2 is not hashnode, now they are expected to have the same type , if child2 is a hashnode then no changes are necessary to node1
-				if reflect.TypeOf(child1) != reflect.TypeOf(child2) { // sanity check
-					return false, fmt.Errorf("children have different types: %T != %T", child1, child2)
-				} else { // further merging will be needed at the next level
-					furtherMergingNeeded = true
-				}
-			}
-		}
-	}
-	return furtherMergingNeeded, nil
-}
-
-func merge2ShortNodes(node1, node2 *ShortNode) (bool, error) {
-	furtherMergingNeeded := false
-	if !bytes.Equal(node1.Key, node2.Key) { // sanity check
-		return false, fmt.Errorf("mismatch in the short node keys node1.Key(%x)!=node2.Key(%x)", node1.Key, node2.Key)
-	}
-	if hashNode1, ok1 := node1.Val.(*HashNode); ok1 { // node1.Val is a HashNode
-		if hashNode2, ok2 := node2.Val.(*HashNode); ok2 { // node2.Val is a HashNode
-			// both are hashnodes
-			if !bytes.Equal(hashNode1.hash, hashNode2.hash) { // sanity check
-				return false, fmt.Errorf("hashnodes have different hashes: hash1(%x) != hash2(%x)", hashNode1.hash, hashNode2.hash)
-			}
-		} else if node2.Val == nil {
-			return false, fmt.Errorf("node2.Val should not be nil, because node1.Val is a hashnode")
-		} else { // in this case node2.Val is not a HashNode, while node1.Val is a hash node, so replace node1.Val by node2.Val, and the merging is complete
-			node1.Val = node2.Val
-		}
-	} else { // node1.Val is not a hashnode
-		// if node2.Val is not  a hashnode, node2.Val is expected to have the same type as node1.Val, otherwise if it is a hashnode no action is necessary (just ignore the hashnode)
-		if _, ok2 := node2.Val.(*HashNode); !ok2 {
-			if reflect.TypeOf(node1.Val) != reflect.TypeOf(node2.Val) { // sanity check
-				return false, fmt.Errorf("node1.Val and node2.Val have different types: %T != %T ", node1.Val, node2.Val)
-			} else {
-				furtherMergingNeeded = true
-			}
-		}
-	}
-	return furtherMergingNeeded, nil
-}
-
-func merge2AccountNodes(node1, node2 *AccountNode) (furtherMergingNeeded bool) {
-	storage1 := node1.Storage
-	storage2 := node2.Storage
-	if storage1 == nil || storage2 == nil { // in this case do nothing, we can use the storage tree of node 1
-		return false
-	}
-	_, isHashNode1 := storage1.(*HashNode) // check if storage1 is a hashnode
-	_, isHashNode2 := storage2.(*HashNode) // check if storage2 is a hashnode
-	if isHashNode1 && !isHashNode2 {       // node2 has the expanded storage trie, so use that instead of the hashnode
-		node1.Storage = storage2
-		return false
-	}
-
-	if !isHashNode1 && !isHashNode2 { // the 2 storage tries need to be merged
-		return true
-	}
-	return false
-}
-
-func merge2Tries(tr1 *Trie, tr2 *Trie) (*Trie, error) {
-	// starting from the roots merge each level
-	rootNode1 := tr1.RootNode
-	rootNode2 := tr2.RootNode
-	mergeComplete := false
-
-	for !mergeComplete {
-		switch node1 := (rootNode1).(type) {
-		case nil:
-			// sanity checks might be good later on
-			return nil, nil
-		case *ShortNode:
-			node2, ok := rootNode2.(*ShortNode)
-			if !ok {
-				return nil, fmt.Errorf("expected *trie.ShortNode in trie 2, but got %T", rootNode2)
-			}
-			furtherMergingNeeded, err := merge2ShortNodes(node1, node2)
-			if err != nil {
-				return nil, err
-			}
-			if furtherMergingNeeded {
-				rootNode1 = node1.Val
-				rootNode2 = node2.Val
-			} else {
-				mergeComplete = true
-			}
-		case *FullNode:
-			node2, ok := rootNode2.(*FullNode)
-			if !ok {
-				return nil, fmt.Errorf("expected *trie.FullNode in trie 2, but got %T", rootNode2)
-			}
-			furthedMergingNeeded, err := merge2FullNodes(node1, node2)
-			if err != nil {
-				return nil, err
-			}
-			if furthedMergingNeeded { // find the next nodes to merge
-				nextRootsFound := false
-				for i := 0; i < len(node1.Children); i++ { // it is guaranteed that we will find a non-nil, non-hashnode
-					childNode1 := node1.Children[i]
-					childNode2 := node2.Children[i]
-					if _, isHashNode := childNode2.(*HashNode); childNode2 != nil && !isHashNode {
-						// update rootNode1, and rootNode2 to merge at the next level at the next iteration
-						rootNode1 = childNode1
-						rootNode2 = childNode2
-						nextRootsFound = true
-						break
-					}
-				}
-				if !nextRootsFound {
-					return nil, errors.New("could not find next node pair to merge")
-				}
-			} else {
-				mergeComplete = true
-			}
-		case *HashNode:
-			return tr2, nil
-		case ValueNode:
-			return tr1, nil
-		case *AccountNode:
-			node2, ok := rootNode2.(*AccountNode)
-			if !ok {
-				return nil, fmt.Errorf("expected *trie.AccountNode in trie 2, but got %T", rootNode2)
-			}
-			furthedMergingNeeded := merge2AccountNodes(node1, node2)
-			if !furthedMergingNeeded {
-				return tr1, nil
-			} else {
-				// need to merge storage trees
-				rootNode1 = node1.Storage
-				rootNode2 = node2.Storage
-			}
-
-		}
-	}
-	return tr1, nil
-}
-func MergeTries(tries []*Trie) (*Trie, error) {
-	if len(tries) == 0 {
-		return nil, nil
-	}
-
-	if len(tries) == 1 {
-		return tries[0], nil
-	}
-
-	resultingTrie := tries[0]
-	for i := 1; i < len(tries); i++ {
-		resultingTrie, err := merge2Tries(resultingTrie, tries[i])
-		if err != nil {
-			return resultingTrie, err
-		}
-	}
-	return resultingTrie, nil
-}
-
 // NewTestRLPTrie treats all the data provided to `Update` function as rlp-encoded.
 // it is usually used for testing purposes.
 func NewTestRLPTrie(root common.Hash) *Trie {
@@ -297,7 +115,7 @@ func (t *Trie) Get(key []byte) (value []byte, gotValue bool) {
 		return nil, true
 	}
 
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 	return t.get(t.RootNode, hex, 0)
 }
 
@@ -306,7 +124,7 @@ func (t *Trie) FindPath(key []byte) (value []byte, parents [][]byte, gotValue bo
 		return nil, nil, true
 	}
 
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 	return t.getPath(t.RootNode, nil, hex, 0)
 }
 
@@ -315,7 +133,7 @@ func (t *Trie) GetAccount(key []byte) (value *accounts.Account, gotValue bool) {
 		return nil, true
 	}
 
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
@@ -331,7 +149,7 @@ func (t *Trie) GetAccountCode(key []byte) (value []byte, gotValue bool) {
 		return nil, false
 	}
 
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
@@ -353,7 +171,7 @@ func (t *Trie) GetAccountCodeSize(key []byte) (value int, gotValue bool) {
 		return 0, false
 	}
 
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
@@ -375,7 +193,7 @@ func (t *Trie) getAccount(origNode Node, key []byte, pos int) (value *AccountNod
 	case nil:
 		return nil, true
 	case *ShortNode:
-		matchlen := prefixLen(key[pos:], n.Key)
+		matchlen := nibbles.CommonPrefixLen(key[pos:], n.Key)
 		if matchlen == len(n.Key) {
 			if v, ok := n.Val.(*AccountNode); ok {
 				return v, true
@@ -417,7 +235,7 @@ func (t *Trie) get(origNode Node, key []byte, pos int) (value []byte, gotValue b
 	case *AccountNode:
 		return t.get(n.Storage, key, pos)
 	case *ShortNode:
-		matchlen := prefixLen(key[pos:], n.Key)
+		matchlen := nibbles.CommonPrefixLen(key[pos:], n.Key)
 		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 			value, gotValue = t.get(n.Val, key, pos+matchlen)
 		} else {
@@ -458,7 +276,7 @@ func (t *Trie) getPath(origNode Node, parents [][]byte, key []byte, pos int) ([]
 	case *AccountNode:
 		return t.getPath(n.Storage, append(parents, n.reference()), key, pos)
 	case *ShortNode:
-		matchlen := prefixLen(key[pos:], n.Key)
+		matchlen := nibbles.CommonPrefixLen(key[pos:], n.Key)
 		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 			return t.getPath(n.Val, append(parents, n.reference()), key, pos+matchlen)
 		} else {
@@ -497,14 +315,19 @@ func (t *Trie) getPath(origNode Node, parents [][]byte, key []byte, pos int) ([]
 // stored in the trie.
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Update(key, value []byte) {
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
+
+	if len(value) == 0 {
+		_, t.RootNode = t.delete(t.RootNode, hex, false)
+		return
+	}
 
 	newnode := ValueNode(value)
 
 	if t.RootNode == nil {
 		t.RootNode = NewShortNode(hex, newnode)
 	} else {
-		_, t.RootNode = t.insert(t.RootNode, hex, ValueNode(value))
+		_, t.RootNode = t.insert(t.RootNode, hex, newnode)
 	}
 }
 
@@ -513,7 +336,7 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	value := new(accounts.Account)
 	value.Copy(acc)
 
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 
 	var newnode *AccountNode
 	if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
@@ -535,16 +358,15 @@ func (t *Trie) UpdateAccountCode(key []byte, code CodeNode) error {
 		return nil
 	}
 
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode == nil || !gotValue {
 		return fmt.Errorf("account not found with key: %x", key)
 	}
 
-	actualCodeHash := crypto.Keccak256(code)
-	codeHashValue := accNode.CodeHash.Value()
-	if !bytes.Equal(codeHashValue[:], actualCodeHash) {
+	actualCodeHash := crypto.Keccak256Hash(code)
+	if accNode.CodeHash.Value() != actualCodeHash {
 		return fmt.Errorf("inserted code mismatch account hash (acc.CodeHash=%x codeHash=%x)", accNode.CodeHash, actualCodeHash)
 	}
 
@@ -562,7 +384,7 @@ func (t *Trie) UpdateAccountCodeSize(key []byte, codeSize int) error {
 		return nil
 	}
 
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode == nil || !gotValue {
@@ -650,12 +472,15 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 		newPrefixes = prefixes
 		newFixedBits = fixedbits
 		newHooks = hooks
-		newNibblePath := append(nibblePath, i1)
-		newHook := append(hook, i1)
+		newNibblePath := append([]byte(nil), nibblePath...)
+		newNibblePath = append(newNibblePath, i1)
+		newHook := append([]byte(nil), hook...)
+		newHook = append(newHook, i1)
 		if rl.Retain(newNibblePath) {
 			var newDbPrefix []byte
 			if bits%8 == 0 {
-				newDbPrefix = append(dbPrefix, i1<<4)
+				newDbPrefix = append([]byte(nil), dbPrefix...)
+				newDbPrefix = append(newDbPrefix, i1<<4)
 			} else {
 				newDbPrefix = dbPrefix
 				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
@@ -663,12 +488,15 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 			}
 			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child1, newNibblePath, newHook, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
 		}
-		newNibblePath = append(nibblePath, i2)
-		newHook = append(hook, i2)
+		newNibblePath = append([]byte(nil), nibblePath...)
+		newNibblePath = append(newNibblePath, i2)
+		newHook = append([]byte(nil), hook...)
+		newHook = append(newHook, i2)
 		if rl.Retain(newNibblePath) {
 			var newDbPrefix []byte
 			if bits%8 == 0 {
-				newDbPrefix = append(dbPrefix, i2<<4)
+				newDbPrefix = append([]byte(nil), dbPrefix...)
+				newDbPrefix = append(newDbPrefix, i2<<4)
 			} else {
 				newDbPrefix = dbPrefix
 				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
@@ -681,16 +509,17 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 		newPrefixes = prefixes
 		newFixedBits = fixedbits
 		newHooks = hooks
-		var newNibblePath []byte
-		var newHook []byte
 		for i, child := range n.Children {
 			if child != nil {
-				newNibblePath = append(nibblePath, byte(i))
-				newHook = append(hook, byte(i))
+				newNibblePath := append([]byte(nil), nibblePath...)
+				newNibblePath = append(newNibblePath, byte(i))
+				newHook := append([]byte(nil), hook...)
+				newHook = append(newHook, byte(i))
 				if rl.Retain(newNibblePath) {
 					var newDbPrefix []byte
 					if bits%8 == 0 {
-						newDbPrefix = append(dbPrefix, byte(i)<<4)
+						newDbPrefix = append([]byte(nil), dbPrefix...)
+						newDbPrefix = append(newDbPrefix, byte(i)<<4)
 					} else {
 						newDbPrefix = dbPrefix
 						newDbPrefix[len(newDbPrefix)-1] &= 0xf0
@@ -721,9 +550,12 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 		}
 		return newPrefixes, newFixedBits, newHooks
 	case *HashNode:
-		newPrefixes = append(prefixes, common.Copy(dbPrefix))
-		newFixedBits = append(fixedbits, bits)
-		newHooks = append(hooks, common.Copy(hook))
+		newPrefixes = prefixes
+		newPrefixes = append(newPrefixes, common.Copy(dbPrefix))
+		newFixedBits = fixedbits
+		newFixedBits = append(newFixedBits, bits)
+		newHooks = hooks
+		newHooks = append(newHooks, common.Copy(hook))
 		return newPrefixes, newFixedBits, newHooks
 	}
 	return prefixes, fixedbits, hooks
@@ -784,7 +616,7 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 		}
 		return updated, n
 	case *ShortNode:
-		matchlen := prefixLen(key[pos:], n.Key)
+		matchlen := nibbles.CommonPrefixLen(key[pos:], n.Key)
 		// If the whole key matches, keep this short node as is
 		// and only update the value.
 		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
@@ -902,7 +734,7 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (Node, Node, bool, uint64) {
 		case nil:
 			return nil, nil, false, incarnation
 		case *ShortNode:
-			matchlen := prefixLen(hex[pos:], n.Key)
+			matchlen := nibbles.CommonPrefixLen(hex[pos:], n.Key)
 			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 				parent = n
 				nd = n.Val
@@ -1043,7 +875,7 @@ func (t *Trie) touchAll(n Node, hex []byte, del bool, incarnation uint64) {
 // Delete removes any existing value for key from the trie.
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Delete(key []byte) {
-	hex := keybytesToHex(key)
+	hex := nibbles.KeybytesToHex(key)
 	_, t.RootNode = t.delete(t.RootNode, hex, false)
 }
 
@@ -1081,7 +913,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 	var nn Node
 	switch n := origNode.(type) {
 	case *ShortNode:
-		matchlen := prefixLen(key[keyStart:], n.Key)
+		matchlen := nibbles.CommonPrefixLen(key[keyStart:], n.Key)
 		if matchlen == min(len(n.Key), len(key[keyStart:])) || n.Key[matchlen] == 16 || key[keyStart+matchlen] == 16 {
 			fullMatch := matchlen == len(key)-keyStart
 			removeNodeEntirely := fullMatch
@@ -1270,7 +1102,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 // The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 // wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 func (t *Trie) DeleteSubtree(keyPrefix []byte) {
-	hexPrefix := keybytesToHex(keyPrefix)
+	hexPrefix := nibbles.KeybytesToHex(keyPrefix)
 
 	_, t.RootNode = t.delete(t.RootNode, hexPrefix, true)
 
@@ -1286,7 +1118,10 @@ func concat(s1 []byte, s2 ...byte) []byte {
 // Root returns the root hash of the trie.
 //
 // Deprecated: use Hash instead.
-func (t *Trie) Root() []byte { return t.Hash().Bytes() }
+func (t *Trie) Root() []byte {
+	h := t.Hash()
+	return h[:]
+}
 
 // Hash returns the root hash of the trie. It does not write to the
 // database and can be used even if the trie doesn't have one.
@@ -1319,7 +1154,7 @@ func (t *Trie) getHasher() *hasher {
 // key prefix is removed from the key.
 // First returned value is `true` if the node with the specified prefix is found.
 func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
-	hexPrefix := keybytesToHex(keyPrefix)
+	hexPrefix := nibbles.KeybytesToHex(keyPrefix)
 	accNode, gotValue := t.getAccount(t.RootNode, hexPrefix, 0)
 	if !gotValue {
 		return false, common.Hash{}
@@ -1437,4 +1272,443 @@ func (t *Trie) TrieSize() int {
 
 func (t *Trie) NumberOfAccounts() int {
 	return calcSubtreeNodes(t.RootNode)
+}
+
+// RLPEncode traverses the trie from root to leaves and collects
+// all unique RLP-encoded nodes.
+func (t *Trie) RLPEncode() ([][]byte, error) {
+	if t == nil || t.RootNode == nil {
+		return nil, nil
+	}
+
+	var nodes [][]byte
+	seen := make(map[common.Hash]struct{})
+	h := newHasher(t.valueNodesRLPEncoded)
+	defer returnHasherToPool(h)
+
+	var collect func(node Node) error
+	collect = func(node Node) error {
+		if node == nil {
+			return nil
+		}
+
+		switch n := node.(type) {
+		case *ShortNode:
+			nodeRLP, err := h.hashChildren(n, 0)
+			if err != nil {
+				return err
+			}
+			hash := crypto.Keccak256Hash(nodeRLP)
+			if _, ok := seen[hash]; !ok {
+				seen[hash] = struct{}{}
+				nodes = append(nodes, common.Copy(nodeRLP))
+			}
+			return collect(n.Val)
+
+		case *DuoNode:
+			nodeRLP, err := h.hashChildren(n, 0)
+			if err != nil {
+				return err
+			}
+			hash := crypto.Keccak256Hash(nodeRLP)
+			if _, ok := seen[hash]; !ok {
+				seen[hash] = struct{}{}
+				nodes = append(nodes, common.Copy(nodeRLP))
+			}
+			if err := collect(n.child1); err != nil {
+				return err
+			}
+			return collect(n.child2)
+
+		case *FullNode:
+			nodeRLP, err := h.hashChildren(n, 0)
+			if err != nil {
+				return err
+			}
+			hash := crypto.Keccak256Hash(nodeRLP)
+			if _, ok := seen[hash]; !ok {
+				seen[hash] = struct{}{}
+				nodes = append(nodes, common.Copy(nodeRLP))
+			}
+			for i := range 17 {
+				if n.Children[i] != nil {
+					if err := collect(n.Children[i]); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+
+		case *AccountNode:
+			// AccountNode may have a storage trie
+			if n.Storage != nil {
+				return collect(n.Storage)
+			}
+			return nil
+
+		case ValueNode:
+			// Leaf value, nothing to collect
+			return nil
+
+		case *HashNode:
+			// HashNode means this subtrie wasn't expanded
+			return nil
+
+		default:
+			return nil
+		}
+	}
+
+	if err := collect(t.RootNode); err != nil {
+		return nil, err
+	}
+
+	return nodes, nil
+}
+
+// RLPDecode reconstructs a trie from RLP-encoded nodes produced by RLPEncode.
+// The first element must be the root node.
+func RLPDecode(encodedNodes [][]byte) (*Trie, error) {
+	if len(encodedNodes) == 0 {
+		return New(common.Hash{}), nil
+	}
+
+	// Build a map from hash -> decoded node
+	nodeMap := make(map[common.Hash]Node)
+	for _, encoded := range encodedNodes {
+		// The legacy witness carries the empty storage-trie preimage (RLP empty
+		// string, keccak256 == EmptyRoot); it is not a trie node, so skip it.
+		if len(encoded) == 1 && encoded[0] == 0x80 {
+			continue
+		}
+		hash := crypto.Keccak256Hash(encoded)
+		node, err := decodeTrieNode(encoded)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode node: %w", err)
+		}
+		nodeMap[hash] = node
+	}
+
+	// Decode the root node (first in the list)
+	rootHash := crypto.Keccak256Hash(encodedNodes[0])
+	rootNode, ok := nodeMap[rootHash]
+	if !ok {
+		return nil, errors.New("root node not found in map")
+	}
+
+	// Resolve all HashNodes by looking them up in the map
+	resolved, err := resolveHashNodes(rootNode, nodeMap /* insideStorageTree */, false)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewInMemoryTrie(resolved), nil
+}
+
+// decodeTrieNode decodes an RLP-encoded trie node for trie reconstruction.
+// Unlike decodeNode (used for proof verification), this fully decodes leaf values.
+func decodeTrieNode(encoded []byte) (Node, error) {
+	if len(encoded) == 0 {
+		return nil, errors.New("nodes must not be zero length")
+	}
+	elems, _, err := rlp.SplitList(encoded)
+	if err != nil {
+		return nil, err
+	}
+	switch c, _ := rlp.CountValues(elems); c {
+	case 2:
+		return decodeTrieShort(elems)
+	case 17:
+		return decodeTrieFull(elems)
+	default:
+		return nil, fmt.Errorf("invalid number of list elements: %v", c)
+	}
+}
+
+// decodeTrieShort decodes a short node (extension or leaf) for trie reconstruction.
+func decodeTrieShort(elems []byte) (*ShortNode, error) {
+	kbuf, rest, err := rlp.SplitString(elems)
+	if err != nil {
+		return nil, err
+	}
+	kb := CompactToKeybytes(kbuf)
+	if kb.Terminating {
+		// For leaf nodes, the value is double-RLP encoded
+		// First rlp.SplitString gets the outer RLP string
+		val, _, err := rlp.SplitString(rest)
+		if err != nil {
+			return nil, err
+		}
+		// Decode the inner RLP string to get the raw value
+		rawVal, _, err := rlp.SplitString(val)
+		if err != nil {
+			// If inner decode fails, value might be empty or already raw
+			return &ShortNode{
+				Key: kb.ToHex(),
+				Val: ValueNode(val),
+			}, nil
+		}
+		return &ShortNode{
+			Key: kb.ToHex(),
+			Val: ValueNode(rawVal),
+		}, nil
+	}
+
+	val, _, err := decodeTrieRef(rest)
+	if err != nil {
+		return nil, err
+	}
+	return &ShortNode{
+		Key: kb.ToHex(),
+		Val: val,
+	}, nil
+}
+
+// decodeTrieFull decodes a full node (branch) for trie reconstruction.
+func decodeTrieFull(elems []byte) (*FullNode, error) {
+	n := &FullNode{}
+	for i := range 16 {
+		var err error
+		n.Children[i], elems, err = decodeTrieRef(elems)
+		if err != nil {
+			return nil, err
+		}
+	}
+	val, _, err := rlp.SplitString(elems)
+	if err != nil {
+		return nil, err
+	}
+	if len(val) > 0 {
+		// Decode inner RLP for the value
+		rawVal, _, err := rlp.SplitString(val)
+		if err != nil {
+			n.Children[16] = ValueNode(val)
+		} else {
+			n.Children[16] = ValueNode(rawVal)
+		}
+	}
+	return n, nil
+}
+
+// decodeTrieRef decodes a node reference for trie reconstruction.
+func decodeTrieRef(buf []byte) (Node, []byte, error) {
+	kind, val, rest, err := rlp.Split(buf)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch {
+	case kind == rlp.List:
+		if len(buf)-len(rest) >= 32 {
+			return nil, nil, errors.New("embedded nodes must be less than hash size")
+		}
+		n, err := decodeTrieNode(buf)
+		if err != nil {
+			return nil, nil, err
+		}
+		return n, rest, nil
+	case kind == rlp.String && len(val) == 0:
+		return nil, rest, nil
+	case kind == rlp.String && len(val) == 32:
+		return &HashNode{hash: val}, rest, nil
+	default:
+		return nil, nil, fmt.Errorf("invalid RLP string size %d (want 0 through 32)", len(val))
+	}
+}
+
+// decodeAccountNode attempts to decode a ValueNode as an AccountNode.
+// Returns the AccountNode if successful
+func decodeAccountNode(val ValueNode, nodeMap map[common.Hash]Node) (*AccountNode, error) {
+	if len(val) == 0 {
+		return nil, nil
+	}
+
+	// Try to decode as account RLP: [nonce, balance, storageRoot, codeHash]
+	acc := new(accounts.Account)
+	if err := acc.DecodeForHashing(val); err != nil {
+		return nil, err
+	}
+
+	// Successfully decoded as account
+	an := &AccountNode{
+		Account:     *acc,
+		RootCorrect: true,
+	}
+	// -1 marks a code-bearing proof node whose code isn't in the witness; an
+	// empty-code account must stay 0 so serialization emits no bogus code size.
+	if !acc.IsEmptyCodeHash() {
+		an.CodeSize = codeSizeUncached
+	}
+
+	// If account has non-empty storage root, try to find it in nodeMap
+	if acc.Root != EmptyRoot && acc.Root != (common.Hash{}) {
+		if storageNode, ok := nodeMap[acc.Root]; ok {
+			an.Storage = storageNode
+		} else {
+			// Storage root exists but we don't have the nodes - use HashNode
+			an.Storage = &HashNode{hash: acc.Root[:]}
+		}
+	}
+
+	return an, nil
+}
+
+// resolveHashNodes recursively replaces HashNodes with their actual nodes from the map
+// and converts ValueNodes containing account data back into AccountNodes.
+func resolveHashNodes(node Node, nodeMap map[common.Hash]Node, insideStorageTree bool) (Node, error) {
+	if node == nil {
+		return nil, nil
+	}
+
+	switch n := node.(type) {
+	case *ShortNode:
+		resolved, err := resolveHashNodes(n.Val, nodeMap, insideStorageTree)
+		if err != nil {
+			return nil, err
+		}
+
+		// Check if this is a leaf node (terminating key) with a ValueNode
+		// that might be account data
+		// resolve value node only if we're not inside the storage tree
+		if vn, ok := resolved.(ValueNode); ok && len(n.Key) > 0 && n.Key[len(n.Key)-1] == 16 && !insideStorageTree {
+			// Key ends with terminator (16), this is a leaf
+			an, err := decodeAccountNode(vn, nodeMap)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decode AccountNode : %w", err)
+			}
+			if an == nil {
+				return nil, fmt.Errorf("AccountNode decoded into nil")
+			}
+			// Resolve storage if present
+			if an.Storage != nil {
+				resolvedStorage, err := resolveHashNodes(an.Storage, nodeMap /* insideStorageTree */, true)
+				if err != nil {
+					return nil, err
+				}
+				an.Storage = resolvedStorage
+			}
+			return &ShortNode{
+				Key: n.Key,
+				Val: an,
+			}, nil
+		}
+
+		return &ShortNode{
+			Key: n.Key,
+			Val: resolved,
+		}, nil
+
+	case *FullNode:
+		newNode := &FullNode{}
+		for i := range 17 {
+			if n.Children[i] != nil {
+				resolved, err := resolveHashNodes(n.Children[i], nodeMap, insideStorageTree)
+				if err != nil {
+					return nil, err
+				}
+				newNode.Children[i] = resolved
+			}
+		}
+		return newNode, nil
+
+	case HashNode:
+		hash := common.BytesToHash(n.hash)
+		if resolved, ok := nodeMap[hash]; ok {
+			// Recursively resolve the looked-up node
+			return resolveHashNodes(resolved, nodeMap, insideStorageTree)
+		}
+		// HashNode not in map, keep as is (partial trie)
+		return n, nil
+
+	case *HashNode:
+		hash := common.BytesToHash(n.hash)
+		if resolved, ok := nodeMap[hash]; ok {
+			return resolveHashNodes(resolved, nodeMap, insideStorageTree)
+		}
+		return n, nil
+
+	case ValueNode:
+		return n, nil
+
+	case *AccountNode:
+		if n.Storage != nil {
+			resolved, err := resolveHashNodes(n.Storage, nodeMap /* inside storage tree */, true)
+			if err != nil {
+				return nil, err
+			}
+			newNode := *n
+			newNode.Storage = resolved
+			return &newNode, nil
+		}
+		return n, nil
+
+	default:
+		return n, nil
+	}
+}
+
+// GetNode returns the trie node found at the given hex-nibble path,
+// or nil if the path does not lead to a node.
+func (t *Trie) GetNode(path []byte) Node {
+	return getNode(t.RootNode, path, 0)
+}
+
+func getNode(n Node, path []byte, pos int) Node {
+	if n == nil {
+		return nil
+	}
+	if pos >= len(path) {
+		return n
+	}
+	switch nd := n.(type) {
+	case *ShortNode:
+		key := nd.Key
+		// Strip terminator if present
+		if len(key) > 0 && key[len(key)-1] == 16 {
+			key = key[:len(key)-1]
+		}
+		remaining := path[pos:]
+		if len(remaining) < len(key) {
+			// Path is a prefix of the short node key — we're inside this node
+			if hasPrefix(key, remaining) {
+				return nd
+			}
+			return nil
+		}
+		if !hasPrefix(remaining, key) {
+			return nil
+		}
+		return getNode(nd.Val, path, pos+len(key))
+	case *FullNode:
+		child := nd.Children[path[pos]]
+		return getNode(child, path, pos+1)
+	case *DuoNode:
+		i1, i2 := nd.childrenIdx()
+		nibble := path[pos]
+		if nibble == i1 {
+			return getNode(nd.child1, path, pos+1)
+		}
+		if nibble == i2 {
+			return getNode(nd.child2, path, pos+1)
+		}
+		return nil
+	case *AccountNode:
+		// If we've reached an account node and there's more path,
+		// descend into the account's storage trie
+		return getNode(nd.Storage, path, pos)
+	default:
+		// HashNode, ValueNode — terminal, no further traversal
+		return n
+	}
+}
+
+func hasPrefix(s, prefix []byte) bool {
+	if len(s) < len(prefix) {
+		return false
+	}
+	for i, b := range prefix {
+		if s[i] != b {
+			return false
+		}
+	}
+	return true
 }

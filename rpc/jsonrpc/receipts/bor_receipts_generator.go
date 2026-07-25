@@ -6,11 +6,12 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -25,16 +26,22 @@ import (
 
 type BorGenerator struct {
 	receiptCache *lru.Cache[common.Hash, *types.Receipt]
-	blockReader  services.FullBlockReader
+	blockReader  dbservices.FullBlockReader
 	engine       rules.EngineReader
 	stateCache   kvcache.Cache
+	filters      *rpchelper.Filters
 }
 
-func NewBorGenerator(blockReader services.FullBlockReader,
-	engine rules.EngineReader, stateCache kvcache.Cache) *BorGenerator {
+func NewBorGenerator(blockReader dbservices.FullBlockReader,
+	engine rules.EngineReader, stateCache kvcache.Cache, filters ...*rpchelper.Filters) *BorGenerator {
 	receiptCache, err := lru.New[common.Hash, *types.Receipt](receiptsCacheLimit)
 	if err != nil {
 		panic(err)
+	}
+
+	var f *rpchelper.Filters
+	if len(filters) > 0 {
+		f = filters[0]
 	}
 
 	return &BorGenerator{
@@ -42,6 +49,7 @@ func NewBorGenerator(blockReader services.FullBlockReader,
 		blockReader:  blockReader,
 		engine:       engine,
 		stateCache:   stateCache,
+		filters:      f,
 	}
 }
 
@@ -52,7 +60,7 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 		return receipt, nil
 	}
 
-	err := rpchelper.CheckBlockExecuted(tx, block.NumberU64())
+	err := rpchelper.CheckBlockExecuted(g.filters.WithOverlay(tx), block.NumberU64())
 	if err != nil {
 		return nil, err
 	}
@@ -129,8 +137,8 @@ func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *protocol.GasPool, ibs *s
 		}
 	}
 	for i, l := range receiptLogs {
-		l.TxIndex = txIndex
-		l.Index = logIndex + uint(i)
+		l.TxIndex = hexutil.Uint(txIndex)
+		l.Index = hexutil.Uint(logIndex + uint(i))
 	}
 	return receiptLogs, nil
 }

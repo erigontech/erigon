@@ -22,6 +22,8 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/notifications"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/shards"
@@ -134,25 +136,31 @@ func (a *ReceiptsFilterAggregator) subscribeReceipts(server remoteproto.ETHBACKE
 	return nil
 }
 
-func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*remoteproto.SubscribeReceiptsReply) error {
+// distributeReceipts receives native receipt notifications, filters them, and converts
+// to protobuf only when sending over gRPC.
+func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.ReceiptNotification) error {
 	a.receiptsFilterLock.Lock()
 	defer a.receiptsFilterLock.Unlock()
 	filtersToDelete := make(map[uint64]*ReceiptsFilter)
-	for _, receipt := range receipts {
+	for _, rn := range receipts {
+		txHash := rn.Receipt.TxHash
 		if a.aggReceiptsFilter.allTxHashes == 0 {
-			txHash := gointerfaces.ConvertH256ToHash(receipt.TransactionHash)
 			if _, ok := a.aggReceiptsFilter.txHashes[txHash]; !ok {
 				continue
 			}
 		}
+		// Lazy convert: only build protobuf when we actually need to send
+		var proto *remoteproto.SubscribeReceiptsReply
 		for filterId, filter := range a.receiptsFilters {
 			if filter.allTxHashes == 0 {
-				txHash := gointerfaces.ConvertH256ToHash(receipt.TransactionHash)
 				if _, ok := filter.txHashes[txHash]; !ok {
 					continue
 				}
 			}
-			if err := filter.sender.Send(receipt); err != nil {
+			if proto == nil {
+				proto = receiptNotificationToProto(rn)
+			}
+			if err := filter.sender.Send(proto); err != nil {
 				filtersToDelete[filterId] = filter
 			}
 		}
@@ -162,4 +170,63 @@ func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*remoteproto.Su
 		delete(a.receiptsFilters, filterId)
 	}
 	return nil
+}
+
+// receiptNotificationToProto converts a native ReceiptNotification to protobuf for gRPC.
+func receiptNotificationToProto(rn *notifications.ReceiptNotification) *remoteproto.SubscribeReceiptsReply {
+	receipt := rn.Receipt
+	blockNum := receipt.BlockNumber.Uint64()
+
+	// Convert logs
+	protoLogs := make([]*remoteproto.SubscribeLogsReply, 0, len(receipt.Logs))
+	for _, l := range receipt.Logs {
+		protoLogs = append(protoLogs, logNotificationToProto(&notifications.LogNotification{
+			Log:     l,
+			Removed: rn.Removed,
+		}))
+	}
+
+	protoReceipt := &remoteproto.SubscribeReceiptsReply{
+		BlockHash:         gointerfaces.ConvertHashToH256(receipt.BlockHash),
+		BlockNumber:       blockNum,
+		TransactionHash:   gointerfaces.ConvertHashToH256(receipt.TxHash),
+		TransactionIndex:  uint64(receipt.TransactionIndex),
+		Type:              uint32(receipt.Type),
+		Status:            receipt.Status,
+		CumulativeGasUsed: receipt.CumulativeGasUsed,
+		GasUsed:           receipt.GasUsed,
+		LogsBloom:         receipt.Bloom[:],
+		Logs:              protoLogs,
+		BlobGasUsed:       receipt.BlobGasUsed,
+	}
+
+	// Add contract address if present
+	if receipt.ContractAddress != (common.Address{}) {
+		protoReceipt.ContractAddress = gointerfaces.ConvertAddressToH160(receipt.ContractAddress)
+	}
+
+	// Add transaction data (from/to)
+	if rn.Tx != nil {
+		signer := types.MakeSigner(nil, blockNum, 0)
+		if sender, err := rn.Tx.Sender(*signer); err == nil {
+			protoReceipt.From = gointerfaces.ConvertAddressToH160(sender.Value())
+		}
+		if to := rn.Tx.GetTo(); to != nil {
+			protoReceipt.To = gointerfaces.ConvertAddressToH160(*to)
+		}
+		protoReceipt.TxType = uint32(rn.Tx.Type())
+	}
+
+	// Add header data
+	if rn.Header != nil {
+		if rn.Header.BaseFee != nil {
+			protoReceipt.BaseFee = gointerfaces.ConvertUint256IntToH256(rn.Header.BaseFee)
+		}
+		protoReceipt.BlockTime = rn.Header.Time
+		if rn.Header.ExcessBlobGas != nil {
+			protoReceipt.ExcessBlobGas = *rn.Header.ExcessBlobGas
+		}
+	}
+
+	return protoReceipt
 }

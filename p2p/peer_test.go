@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -147,6 +148,30 @@ func TestPeerProtoReadMsg(t *testing.T) {
 	}
 }
 
+func TestProtoRWMeterIngress(t *testing.T) {
+	rw := &protoRW{Protocol: Protocol{Name: "metertest", Version: 99, Length: 4}}
+
+	rw.meterIngress(2, 1234)
+
+	if got := metrics.GetOrCreateGauge("p2p_ingress_metertest_99_0x02").GetValue(); got != 1234 {
+		t.Fatalf("ingress bytes gauge = %v, want 1234", got)
+	}
+	if got := metrics.GetOrCreateGauge("p2p_ingress_metertest_99_0x02_packets").GetValue(); got != 1 {
+		t.Fatalf("ingress packets gauge = %v, want 1", got)
+	}
+}
+
+func TestProtoRWMeterIngressNoAllocs(t *testing.T) {
+	rw := &protoRW{Protocol: Protocol{Name: "metertestnoalloc", Version: 1, Length: 8}}
+	rw.meterIngress(3, 100) // warm the per-code gauge cache
+
+	if allocs := testing.AllocsPerRun(1000, func() {
+		rw.meterIngress(3, 100)
+	}); allocs != 0 {
+		t.Errorf("meterIngress allocates %v objects per call after warmup, want 0", allocs)
+	}
+}
+
 func TestPeerProtoEncodeMsg(t *testing.T) {
 	proto := Protocol{
 		Name:   "a",
@@ -204,7 +229,7 @@ func TestPeerDisconnect(t *testing.T) {
 func TestPeerDisconnectRace(t *testing.T) {
 	maybe := func() bool { return rand.Intn(2) == 1 }
 
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		protoclose := make(chan *PeerError)
 		protodisc := make(chan *PeerError)
 		closer, rw, p, disc := testPeer([]Protocol{

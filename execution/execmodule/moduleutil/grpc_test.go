@@ -35,7 +35,7 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 		key, _      = crypto.GenerateKey()
 		txs         = make([]types.Transaction, txCount)
 		receipts    = make([]*types.Receipt, len(txs))
-		signer      = types.LatestSigner(chain.TestChainConfig)
+		signer      = types.LatestSigner(chain.AllProtocolChanges)
 		uncles      = make([]*types.Header, uncleCount)
 		withdrawals = make([]*types.Withdrawal, withdrawalCount)
 	)
@@ -113,6 +113,19 @@ func TestBlockRpcConversion(t *testing.T) {
 	require.NotEmpty(testBlockRaw.Uncles)
 	require.NotEmpty(testBlockRaw.Withdrawals)
 	require.Nil(deep.Equal(testBlockRaw, roundTripBody))
+}
+
+func BenchmarkBlockRpcConversion(b *testing.B) {
+	testBlock := makeBlock(50, 2, 3)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rpcBlock := ConvertBlockToRPC(testBlock)
+		_, err := ConvertRawBlockBodyFromRpc(rpcBlock.Body)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
 }
 
 func TestBigIntConversion(t *testing.T) {

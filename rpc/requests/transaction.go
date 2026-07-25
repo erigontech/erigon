@@ -23,9 +23,9 @@ import (
 	"fmt"
 	"math/big"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -36,7 +36,7 @@ type ETHEstimateGas struct {
 	Number hexutil.Uint64 `json:"result"`
 }
 
-func (reqGen *requestGenerator) EstimateGas(args ethereum.CallMsg, blockRef BlockNumber) (uint64, error) {
+func (reqGen *requestGenerator) EstimateGas(args bind.CallMsg, blockRef BlockNumber) (uint64, error) {
 	var b ETHEstimateGas
 
 	gas := hexutil.Uint64(args.Gas)

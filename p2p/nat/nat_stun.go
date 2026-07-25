@@ -21,7 +21,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/pion/stun"
+	"github.com/pion/stun/v3"
 )
 
 const STUNDefaultServerAddr = "stun.l.google.com:19302"

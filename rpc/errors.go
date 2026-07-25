@@ -36,8 +36,9 @@ var (
 )
 
 const (
-	ErrCodeNonceTooHigh            = -38011
 	ErrCodeNonceTooLow             = -38010
+	ErrCodeNonceTooHigh            = -38011
+	ErrCodeBaseFeeTooLow           = -38012
 	ErrCodeIntrinsicGas            = -38013
 	ErrCodeInsufficientFunds       = -38014
 	ErrCodeBlockGasLimitReached    = -38015
@@ -50,9 +51,12 @@ const (
 	ErrCodeInvalidParams           = -32602
 	ErrCodeDefault                 = -32000
 	ErrCodeVMError                 = -32015
+	ErrCodeServerOverloaded        = -32005 // JSON-RPC "Too many requests"
 
 	ErrCodeTxSyncTimeout = 4
 )
+
+const ErrMsgServerOverloaded = "server overloaded, retry later"
 
 type methodNotFoundError struct{ method string }
 

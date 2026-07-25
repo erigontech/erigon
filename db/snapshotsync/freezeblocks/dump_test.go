@@ -72,7 +72,7 @@ func TestDump(t *testing.T) {
 
 	withConfig := func(config *chain.Config, sprints map[string]uint64) *chain.Config {
 		var copy chain.Config
-		copier.Copy(&copy, config)
+		require.NoError(t, copier.CopyWithOption(&copy, config, copier.Option{DeepCopy: true}))
 		bor := *config.Bor.(*borcfg.BorConfig)
 		bor.Sprint = sprints
 		copy.Bor = &bor
@@ -82,11 +82,11 @@ func TestDump(t *testing.T) {
 	tests := []test{
 		{
 			chainSize:   5,
-			chainConfig: chain.TestChainConfig,
+			chainConfig: chain.AllProtocolChanges,
 		},
 		{
 			chainSize:   50,
-			chainConfig: chain.TestChainConfig,
+			chainConfig: chain.AllProtocolChanges,
 		},
 		{
 			chainSize:   1000,
@@ -259,7 +259,7 @@ func TestDump(t *testing.T) {
 			snConfig, _ := snapcfg.KnownCfg(networkname.Mainnet)
 			snConfig.ExpectBlocks = math.MaxUint64
 
-			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), m.ChainConfig, tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader, snConfig)
+			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), m.ChainConfig, tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader, snConfig, nil)
 			require.NoError(err)
 		})
 	}
@@ -280,7 +280,6 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *e
 		t,
 		execmoduletester.WithGenesisSpec(gspec),
 		execmoduletester.WithKey(key),
-		execmoduletester.WithBlockBufferSize(chainSize),
 		execmoduletester.WithPruneMode(prune.DefaultMode),
 	)
 

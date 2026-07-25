@@ -22,7 +22,6 @@ package types
 import (
 	"bytes"
 	"errors"
-	"math"
 	"reflect"
 	"testing"
 
@@ -40,7 +39,10 @@ func TestDecodeEmptyTypedReceipt(t *testing.T) {
 	input := []byte{0x80}
 	var r Receipt
 	err := rlp.DecodeBytes(input, &r)
-	if !errors.Is(err, rlp.EOL) {
+	// An empty typed receipt is invalid and must surface a real error.
+	// It must NOT return rlp.EOL: as a slice element that sentinel would be
+	// read as end-of-list and silently drop the receipt (see FuzzRLP).
+	if !errors.Is(err, errShortTypedReceipt) {
 		t.Fatal("wrong error:", err)
 	}
 }
@@ -159,45 +161,6 @@ func TestTypedReceiptEncodingDecoding(t *testing.T) {
 		}
 		check(bundle)
 	}
-}
-
-func clearComputedFieldsOnReceipts(t *testing.T, receipts Receipts) {
-	t.Helper()
-
-	for _, receipt := range receipts {
-		clearComputedFieldsOnReceipt(t, receipt)
-	}
-}
-
-func clearComputedFieldsOnReceipt(t *testing.T, receipt *Receipt) {
-	t.Helper()
-
-	receipt.TxHash = common.Hash{}
-	receipt.BlockHash = common.Hash{}
-	receipt.BlockNumber = uint256.NewInt(math.MaxUint32)
-	receipt.TransactionIndex = math.MaxUint32
-	receipt.ContractAddress = common.Address{}
-	receipt.GasUsed = 0
-
-	clearComputedFieldsOnLogs(t, receipt.Logs)
-}
-
-func clearComputedFieldsOnLogs(t *testing.T, logs []*Log) {
-	t.Helper()
-
-	for _, log := range logs {
-		clearComputedFieldsOnLog(t, log)
-	}
-}
-
-func clearComputedFieldsOnLog(t *testing.T, log *Log) {
-	t.Helper()
-
-	log.BlockNumber = math.MaxUint32
-	log.BlockHash = common.Hash{}
-	log.TxHash = common.Hash{}
-	log.TxIndex = math.MaxUint32
-	log.Index = math.MaxUint32
 }
 
 func TestReceiptUnmarshalBinary(t *testing.T) {
@@ -568,7 +531,7 @@ func TestReceiptEncode(t *testing.T) {
 	})
 	t.Run("Enc.List", func(t *testing.T) {
 		r1 := &ReceiptForStorage{FirstLogIndexWithinBlock: 1}
-		for i := 0; i < 13; i++ {
+		for range 13 {
 			r1.Logs = append(r1.Logs, &Log{Topics: make([]common.Hash, 300)})
 		}
 

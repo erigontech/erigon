@@ -307,7 +307,9 @@ func New(
 
 // LoadSnapshotsHashes checks local preverified.toml. If file exists, used local hashes.
 // If there are no such file, try to fetch hashes from the web and create local file.
-func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName string) error {
+//
+// forceChainTomlURL is forwarded to snapcfg.LoadRemotePreverified — see its docstring.
+func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName string, forceChainTomlURL string) error {
 	cfg, known := snapcfg.KnownCfg(chainName)
 	if !known {
 		log.Root().Warn("No snapshot hashes for chain", "chain", chainName)
@@ -328,7 +330,7 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 		snapcfg.SetToml(chainName, haveToml, true)
 	} else {
 		// Fetch the snapshot hashes from the web
-		err := snapcfg.LoadRemotePreverified(ctx, chainName)
+		err := snapcfg.LoadRemotePreverified(ctx, chainName, forceChainTomlURL)
 		if err != nil {
 			log.Root().Crit("Snapshot hashes for supported networks was not loaded. Please check your network connection and/or GitHub status here https://www.githubstatus.com/", "chain", chainName, "err", err)
 			return fmt.Errorf("failed to fetch remote snapshot hashes for chain %s", chainName)

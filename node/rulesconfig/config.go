@@ -18,19 +18,17 @@ package rulesconfig
 
 import (
 	"context"
-	"path/filepath"
+	"sync"
 
 	"github.com/davecgh/go-spew/spew"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura"
-	"github.com/erigontech/erigon/execution/protocol/rules/clique"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -43,12 +41,63 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
+// L2EngineFunc builds an L2 stack's rules engine for a chain configured
+// with that stack's L2Config. Registered by the L2 package at init time and
+// consulted by CreateRulesEngine before the built-in type switch.
+type L2EngineFunc func(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine
+
+var (
+	l2EnginesMu sync.RWMutex
+	l2Engines   = map[string]L2EngineFunc{}
+)
+
+// RegisterL2Engine registers an L2 stack's rules-engine constructor under its
+// L2Config.Name(). Panics on an empty name, a nil constructor, or a name that
+// is already registered — all programming errors caught at init time.
+func RegisterL2Engine(name string, newEngine L2EngineFunc) {
+	if name == "" {
+		panic("rulesconfig: RegisterL2Engine: empty name")
+	}
+	if newEngine == nil {
+		panic("rulesconfig: RegisterL2Engine: nil constructor for " + name)
+	}
+	l2EnginesMu.Lock()
+	defer l2EnginesMu.Unlock()
+	if _, exists := l2Engines[name]; exists {
+		panic("L2 rules engine already registered: " + name)
+	}
+	l2Engines[name] = newEngine
+}
+
+func unregisterL2Engine(name string) {
+	l2EnginesMu.Lock()
+	defer l2EnginesMu.Unlock()
+	delete(l2Engines, name)
+}
+
+func l2Engine(name string) (L2EngineFunc, bool) {
+	l2EnginesMu.RLock()
+	defer l2EnginesMu.RUnlock()
+	newEngine, ok := l2Engines[name]
+	return newEngine, ok
+}
+
 func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config any, noVerify bool,
-	withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
+	withoutHeimdall bool, blockReader dbservices.FullBlockReader, readonly bool,
 	logger log.Logger, polygonBridge *bridge.Service, heimdallService *heimdall.Service,
 ) rules.Engine {
 	var eng rules.Engine
 
+	if chainConfig.L2 != nil {
+		newEngine, ok := l2Engine(chainConfig.L2.Name())
+		if !ok {
+			panic("no L2 rules engine registered for: " + chainConfig.L2.Name())
+		}
+		// An L2 engine owns its complete behavior; the merge (PoS) wrap below
+		// is for L1-family engines even when the L2 chain config carries a
+		// terminal total difficulty.
+		return newEngine(ctx, chainConfig, logger)
+	}
 	switch consensusCfg := config.(type) {
 	case *ethashcfg.Config:
 		switch consensusCfg.PowMode {
@@ -71,31 +120,6 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 				DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
 			}, noVerify)
 		}
-	case *chainspec.ConsensusSnapshotConfig:
-		if chainConfig.Clique != nil {
-			if consensusCfg.InMemory {
-				nodeConfig.Dirs.DataDir = ""
-			} else {
-				if consensusCfg.DBPath != "" {
-					if filepath.Base(consensusCfg.DBPath) == "clique" {
-						nodeConfig.Dirs.DataDir = filepath.Dir(consensusCfg.DBPath)
-					} else {
-						nodeConfig.Dirs.DataDir = consensusCfg.DBPath
-					}
-				}
-			}
-
-			var err error
-			var db kv.RwDB
-
-			db, err = node.OpenDatabase(ctx, nodeConfig, dbcfg.ConsensusDB, "clique", readonly, logger)
-
-			if err != nil {
-				panic(err)
-			}
-
-			eng = clique.New(chainConfig, consensusCfg, db, logger)
-		}
 	case *chain.AuRaConfig:
 		if chainConfig.Aura != nil {
 			var err error
@@ -115,7 +139,7 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 	case *borcfg.BorConfig:
 		// If Matic bor consensus is requested, set it up
 		// In order to pass the ethereum transaction tests, we need to set the burn contract which is in the bor config
-		// Then, bor != nil will also be enabled for ethash and clique. Only enable Bor for real if there is a validator contract present.
+		// Then, bor != nil will also be enabled for ethash. Only enable Bor for real if there is a validator contract present.
 		if chainConfig.Bor != nil && consensusCfg.ValidatorContract != "" {
 			stateReceiver := bor.NewStateReceiver(consensusCfg.StateReceiverContractAddress())
 			spanner := bor.NewChainSpanner(borabi.ValidatorSetContractABI(), chainConfig, withoutHeimdall, logger)
@@ -137,12 +161,12 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 func CreateRulesEngineBareBones(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine {
 	var consensusConfig any
 
-	if chainConfig.Clique != nil {
-		consensusConfig = chainspec.CliqueSnapshot
-	} else if chainConfig.Aura != nil {
+	if chainConfig.Aura != nil {
 		consensusConfig = chainConfig.Aura
 	} else if chainConfig.Bor != nil {
 		consensusConfig = chainConfig.Bor
+	} else if chainConfig.L2 != nil {
+		consensusConfig = chainConfig.L2
 	} else {
 		var ethashCfg ethashcfg.Config
 		ethashCfg.PowMode = ethashcfg.ModeFake

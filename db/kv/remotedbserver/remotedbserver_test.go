@@ -17,7 +17,6 @@
 package remotedbserver
 
 import (
-	"context"
 	"runtime"
 	"testing"
 
@@ -38,7 +37,7 @@ func TestKvServer_renew(t *testing.T) {
 	}
 
 	dirs := datadir.New(t.TempDir())
-	require, ctx, db := require.New(t), context.Background(), temporaltest.NewTestDB(t, dirs)
+	require, ctx, db := require.New(t), t.Context(), temporaltest.NewTestDB(t, dirs)
 	require.NoError(db.Update(ctx, func(tx kv.RwTx) error {
 		wc, err := tx.RwCursorDupSort(kv.TblAccountVals)
 		require.NoError(err)
@@ -98,14 +97,14 @@ func TestKvServer_renew(t *testing.T) {
 		s.rollback(id)
 		return nil
 	}
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		g.Go(testCase)
 	}
 	require.NoError(g.Wait())
 }
 
 func TestKVServerSnapshotsReturnsSnapshots(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ctrl := gomock.NewController(t)
 	blockSnapshots := NewMockSnapshots(ctrl)
 	blockSnapshots.EXPECT().Files().Return([]string{"headers.seg", "bodies.seg"}).Times(1)
@@ -120,7 +119,7 @@ func TestKVServerSnapshotsReturnsSnapshots(t *testing.T) {
 }
 
 func TestKVServerSnapshotsReturnsBorSnapshots(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ctrl := gomock.NewController(t)
 	blockSnapshots := NewMockSnapshots(ctrl)
 	blockSnapshots.EXPECT().Files().Return([]string{"headers.seg", "bodies.seg"}).Times(1)
@@ -137,7 +136,7 @@ func TestKVServerSnapshotsReturnsBorSnapshots(t *testing.T) {
 }
 
 func TestKVServerSnapshotsReturnsEmptyIfNoBlockSnapshots(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := NewKvServer(ctx, nil, nil, nil, nil, log.New())
 	reply, err := s.Snapshots(ctx, nil)
 	require.NoError(t, err)

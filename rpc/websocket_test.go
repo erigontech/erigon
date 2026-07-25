@@ -21,17 +21,20 @@ package rpc
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func TestWebsocketClientHeaders(t *testing.T) {
@@ -70,9 +73,12 @@ func TestWebsocketOriginCheck(t *testing.T) {
 		client.Close()
 		t.Fatal("no error for wrong origin")
 	}
-	wantErr := wsHandshakeError{websocket.ErrBadHandshake, "403 Forbidden"}
-	if err.Error() != wantErr.Error() {
-		t.Fatalf("wrong error for wrong origin: %q", err)
+	var handshakeErr wsHandshakeError
+	if !errors.As(err, &handshakeErr) {
+		t.Fatalf("wrong error type %T: %v", err, err)
+	}
+	if handshakeErr.status != "403 Forbidden" {
+		t.Fatalf("wrong HTTP status in error: %q", handshakeErr.status)
 	}
 
 	// Connections without origin header should work.
@@ -221,15 +227,12 @@ func wsPingTestServer(t *testing.T, sendPing <-chan struct{}) *http.Server {
 	})
 	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Upgrade to WebSocket.
-		upgrader := websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
-		}
-		conn, err := upgrader.Upgrade(w, r, nil)
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 		if err != nil {
 			t.Errorf("server WS upgrade error: %v", err)
 			return
 		}
-		defer conn.Close()
+		defer conn.CloseNow()
 
 		// Handle the connection.
 		wsPingTestHandler(t, conn, shutdown, sendPing)
@@ -253,39 +256,35 @@ func wsPingTestHandler(t *testing.T, conn *websocket.Conn, shutdown, sendPing <-
 	)
 
 	// Handle subscribe request.
-	if _, _, err := conn.ReadMessage(); err != nil {
+	if _, _, err := conn.Read(context.Background()); err != nil {
 		t.Errorf("server read error: %v", err)
 		return
 	}
-	if err := conn.WriteMessage(websocket.TextMessage, []byte(subResp)); err != nil {
+	if err := conn.Write(context.Background(), websocket.MessageText, []byte(subResp)); err != nil {
 		t.Errorf("server write error: %v", err)
 		return
 	}
 
-	// Read from the connection to process control messages.
-	var pongCh = make(chan string)
-	conn.SetPongHandler(func(d string) error {
-		t.Logf("server got pong: %q", d)
-		pongCh <- d
-		return nil
-	})
+	// coder/websocket requires a concurrent conn.Read() for conn.Ping() to work:
+	// pong frames are only processed (and the waiting Ping() unblocked) when the
+	// read pump is actively reading. Run a background goroutine for this purpose.
+	readCtx, readCancel := context.WithCancel(context.Background())
+	defer readCancel()
 	go func() {
 		for {
-			typ, msg, err := conn.ReadMessage()
+			typ, msg, err := conn.Read(readCtx)
 			if err != nil {
 				return
 			}
-			t.Logf("server got message (%d): %q", typ, msg)
+			t.Logf("server got message (%s): %q", typ, msg)
 		}
 	}()
 
 	// Write messages.
-	var (
-		wantPong string
-		timer    = time.NewTimer(0)
-	)
+	var timer = time.NewTimer(0)
 	defer timer.Stop()
 	<-timer.C
+
 	for {
 		select {
 		case _, open := <-sendPing:
@@ -293,22 +292,119 @@ func wsPingTestHandler(t *testing.T, conn *websocket.Conn, shutdown, sendPing <-
 				sendPing = nil
 			}
 			t.Logf("server sending ping")
-			conn.WriteMessage(websocket.PingMessage, []byte("ping"))
-			wantPong = "ping"
-		case data := <-pongCh:
-			if wantPong == "" {
-				t.Errorf("unexpected pong")
-			} else if data != wantPong {
-				t.Errorf("got pong with wrong data %q", data)
+			pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err := conn.Ping(pingCtx)
+			cancel()
+			if err != nil {
+				t.Logf("server ping error: %v", err)
+				return
 			}
-			wantPong = ""
+			t.Logf("server got pong")
 			timer.Reset(200 * time.Millisecond)
 		case <-timer.C:
 			t.Logf("server sending response")
-			conn.WriteMessage(websocket.TextMessage, []byte(subNotify))
+			conn.Write(context.Background(), websocket.MessageText, []byte(subNotify)) //nolint:errcheck
 		case <-shutdown:
-			conn.Close()
 			return
+		}
+	}
+}
+
+// dbOverloadSvc simulates a service whose method returns ErrReadTxLimitExceeded.
+// It also records whether the handler context had kv.NonBlockingAcquire set.
+type dbOverloadSvc struct {
+	sawNonBlocking atomic.Bool
+}
+
+func (s *dbOverloadSvc) Overload(ctx context.Context) error {
+	s.sawNonBlocking.Store(kv.IsNonBlockingAcquire(ctx))
+	return kv.ErrReadTxLimitExceeded
+}
+
+// TestWebsocketNonBlockingAcquire verifies two things about the WS handler:
+//  1. The context passed to method handlers has kv.WithNonBlockingAcquire tagged,
+//     so a real BeginRo would use TryAcquire instead of blocking.
+//  2. When a handler returns kv.ErrReadTxLimitExceeded, remapDBOverload converts it
+//     to JSON-RPC -32005 and the client receives that error code (no HTTP 503 is
+//     possible on an already-upgraded WebSocket connection).
+func TestWebsocketNonBlockingAcquire(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+
+	svc := &dbOverloadSvc{}
+	srv := NewServer(50, false, false, true, logger, 100)
+	if err := srv.RegisterName("db", svc); err != nil {
+		t.Fatal(err)
+	}
+	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer srv.Stop()
+	defer httpsrv.Close()
+
+	wsURL := "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
+	client, err := DialWebsocket(context.Background(), wsURL, "", logger)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+
+	var result any
+	callErr := client.Call(&result, "db_overload")
+
+	// The handler context must have NonBlockingAcquire set.
+	if !svc.sawNonBlocking.Load() {
+		t.Error("handler context did not have kv.NonBlockingAcquire tagged")
+	}
+
+	// The client must receive a JSON-RPC -32005 (not a nil error, not a generic error).
+	if callErr == nil {
+		t.Fatal("expected -32005 error but Call succeeded")
+	}
+	rpcErr, ok := callErr.(Error)
+	if !ok {
+		t.Fatalf("expected rpc.Error, got %T: %v", callErr, callErr)
+	}
+	if rpcErr.ErrorCode() != ErrCodeServerOverloaded {
+		t.Errorf("expected error code %d (server overloaded), got %d", ErrCodeServerOverloaded, rpcErr.ErrorCode())
+	}
+}
+
+// TestWebsocketServerGracefulClose verifies that when the server initiates a
+// websocket closure, it explicitly sends a clean StatusNormalClosure (1000)
+// rather than an abnormal closure.
+func TestWebsocketServerGracefulClose(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+
+	srv := newTestServer(logger)
+	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	wsURL := "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
+	defer srv.Stop()
+	defer httpsrv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		t.Fatalf("failed to dial: %v", err)
+	}
+	defer conn.CloseNow()
+
+	if err := conn.Write(ctx, websocket.MessageText, []byte("invalid json")); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+
+	for {
+		_, _, err := conn.Read(ctx)
+		if err != nil {
+			status := websocket.CloseStatus(err)
+			if status != websocket.StatusNormalClosure {
+				t.Errorf("expected close status %v, got %v (err: %v)", websocket.StatusNormalClosure, status, err)
+			}
+			break
 		}
 	}
 }

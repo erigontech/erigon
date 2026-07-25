@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
 )
 
 type SlotData struct {
@@ -47,6 +48,9 @@ type SlotData struct {
 	EarliestExitEpoch             uint64
 	ConsolidationBalanceToConsume uint64
 	EarliestConsolidationEpoch    uint64
+	// GLOAS (EIP-7732)
+	NextWithdrawalBuilderIndex uint64
+	LatestBlockHash            common.Hash
 
 	// BlockRewards for proposer
 	AttestationsRewards  uint64
@@ -75,7 +79,10 @@ func SlotDataFromBeaconState(s *state.CachingBeaconState) *SlotData {
 		EarliestExitEpoch:             s.EarliestExitEpoch(),
 		ConsolidationBalanceToConsume: s.ConsolidationBalanceToConsume(),
 		EarliestConsolidationEpoch:    s.EarliestConsolidationEpoch(),
-		Fork:                          s.Fork(),
+		// GLOAS
+		NextWithdrawalBuilderIndex: s.GetNextWithdrawalBuilderIndex(),
+		LatestBlockHash:            s.GetLatestBlockHash(),
+		Fork:                       s.Fork(),
 	}
 }
 
@@ -138,13 +145,21 @@ func (m *SlotData) getSchema() []any {
 	}
 
 	if m.Version >= clparams.ElectraVersion {
-		schema = append(schema,
+		schema = append(
+			schema,
 			&m.DepositRequestsStartIndex,
 			&m.DepositBalanceToConsume,
 			&m.ExitBalanceToConsume,
 			&m.EarliestExitEpoch,
 			&m.ConsolidationBalanceToConsume,
 			&m.EarliestConsolidationEpoch,
+		)
+	}
+	if m.Version >= clparams.GloasVersion {
+		schema = append(
+			schema,
+			&m.NextWithdrawalBuilderIndex,
+			m.LatestBlockHash[:],
 		)
 	}
 	return schema

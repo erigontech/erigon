@@ -14,6 +14,7 @@ import (
 	big "math/big"
 	reflect "reflect"
 
+	clparams "github.com/erigontech/erigon/cl/clparams"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	common "github.com/erigontech/erigon/common"
 	hexutil "github.com/erigontech/erigon/common/hexutil"
@@ -87,18 +88,18 @@ func (c *MockExecutionEngineCurrentHeaderCall) DoAndReturn(f func(context.Contex
 }
 
 // ForkChoiceUpdate mocks base method.
-func (m *MockExecutionEngine) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
+func (m *MockExecutionEngine) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attributes *engine_types.PayloadAttributes, version clparams.StateVersion) ([]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ForkChoiceUpdate", ctx, finalized, safe, head, attributes)
+	ret := m.ctrl.Call(m, "ForkChoiceUpdate", ctx, finalized, safe, head, attributes, version)
 	ret0, _ := ret[0].([]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ForkChoiceUpdate indicates an expected call of ForkChoiceUpdate.
-func (mr *MockExecutionEngineMockRecorder) ForkChoiceUpdate(ctx, finalized, safe, head, attributes any) *MockExecutionEngineForkChoiceUpdateCall {
+func (mr *MockExecutionEngineMockRecorder) ForkChoiceUpdate(ctx, finalized, safe, head, attributes, version any) *MockExecutionEngineForkChoiceUpdateCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ForkChoiceUpdate", reflect.TypeOf((*MockExecutionEngine)(nil).ForkChoiceUpdate), ctx, finalized, safe, head, attributes)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ForkChoiceUpdate", reflect.TypeOf((*MockExecutionEngine)(nil).ForkChoiceUpdate), ctx, finalized, safe, head, attributes, version)
 	return &MockExecutionEngineForkChoiceUpdateCall{Call: call}
 }
 
@@ -114,13 +115,13 @@ func (c *MockExecutionEngineForkChoiceUpdateCall) Return(arg0 []byte, arg1 error
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockExecutionEngineForkChoiceUpdateCall) Do(f func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes) ([]byte, error)) *MockExecutionEngineForkChoiceUpdateCall {
+func (c *MockExecutionEngineForkChoiceUpdateCall) Do(f func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error)) *MockExecutionEngineForkChoiceUpdateCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockExecutionEngineForkChoiceUpdateCall) DoAndReturn(f func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes) ([]byte, error)) *MockExecutionEngineForkChoiceUpdateCall {
+func (c *MockExecutionEngineForkChoiceUpdateCall) DoAndReturn(f func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error)) *MockExecutionEngineForkChoiceUpdateCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -164,9 +165,9 @@ func (c *MockExecutionEngineFrozenBlocksCall) DoAndReturn(f func(context.Context
 }
 
 // GetAssembledBlock mocks base method.
-func (m *MockExecutionEngine) GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+func (m *MockExecutionEngine) GetAssembledBlock(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetAssembledBlock", ctx, id)
+	ret := m.ctrl.Call(m, "GetAssembledBlock", ctx, id, version)
 	ret0, _ := ret[0].(*cltypes.Eth1Block)
 	ret1, _ := ret[1].(*engine_types.BlobsBundle)
 	ret2, _ := ret[2].(*typesproto.RequestsBundle)
@@ -176,9 +177,9 @@ func (m *MockExecutionEngine) GetAssembledBlock(ctx context.Context, id []byte) 
 }
 
 // GetAssembledBlock indicates an expected call of GetAssembledBlock.
-func (mr *MockExecutionEngineMockRecorder) GetAssembledBlock(ctx, id any) *MockExecutionEngineGetAssembledBlockCall {
+func (mr *MockExecutionEngineMockRecorder) GetAssembledBlock(ctx, id, version any) *MockExecutionEngineGetAssembledBlockCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAssembledBlock", reflect.TypeOf((*MockExecutionEngine)(nil).GetAssembledBlock), ctx, id)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAssembledBlock", reflect.TypeOf((*MockExecutionEngine)(nil).GetAssembledBlock), ctx, id, version)
 	return &MockExecutionEngineGetAssembledBlockCall{Call: call}
 }
 
@@ -194,30 +195,31 @@ func (c *MockExecutionEngineGetAssembledBlockCall) Return(arg0 *cltypes.Eth1Bloc
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockExecutionEngineGetAssembledBlockCall) Do(f func(context.Context, []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error)) *MockExecutionEngineGetAssembledBlockCall {
+func (c *MockExecutionEngineGetAssembledBlockCall) Do(f func(context.Context, []byte, clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error)) *MockExecutionEngineGetAssembledBlockCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockExecutionEngineGetAssembledBlockCall) DoAndReturn(f func(context.Context, []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error)) *MockExecutionEngineGetAssembledBlockCall {
+func (c *MockExecutionEngineGetAssembledBlockCall) DoAndReturn(f func(context.Context, []byte, clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error)) *MockExecutionEngineGetAssembledBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // GetBlobs mocks base method.
-func (m *MockExecutionEngine) GetBlobs(ctx context.Context, versionedHashes []common.Hash) ([][]byte, [][][]byte) {
+func (m *MockExecutionEngine) GetBlobs(ctx context.Context, versionedHashes []common.Hash, version clparams.StateVersion) ([][]byte, [][][]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetBlobs", ctx, versionedHashes)
+	ret := m.ctrl.Call(m, "GetBlobs", ctx, versionedHashes, version)
 	ret0, _ := ret[0].([][]byte)
 	ret1, _ := ret[1].([][][]byte)
-	return ret0, ret1
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
 }
 
 // GetBlobs indicates an expected call of GetBlobs.
-func (mr *MockExecutionEngineMockRecorder) GetBlobs(ctx, versionedHashes any) *MockExecutionEngineGetBlobsCall {
+func (mr *MockExecutionEngineMockRecorder) GetBlobs(ctx, versionedHashes, version any) *MockExecutionEngineGetBlobsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBlobs", reflect.TypeOf((*MockExecutionEngine)(nil).GetBlobs), ctx, versionedHashes)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBlobs", reflect.TypeOf((*MockExecutionEngine)(nil).GetBlobs), ctx, versionedHashes, version)
 	return &MockExecutionEngineGetBlobsCall{Call: call}
 }
 
@@ -227,19 +229,19 @@ type MockExecutionEngineGetBlobsCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockExecutionEngineGetBlobsCall) Return(blobs [][]byte, proofs [][][]byte) *MockExecutionEngineGetBlobsCall {
-	c.Call = c.Call.Return(blobs, proofs)
+func (c *MockExecutionEngineGetBlobsCall) Return(blobs [][]byte, proofs [][][]byte, err error) *MockExecutionEngineGetBlobsCall {
+	c.Call = c.Call.Return(blobs, proofs, err)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockExecutionEngineGetBlobsCall) Do(f func(context.Context, []common.Hash) ([][]byte, [][][]byte)) *MockExecutionEngineGetBlobsCall {
+func (c *MockExecutionEngineGetBlobsCall) Do(f func(context.Context, []common.Hash, clparams.StateVersion) ([][]byte, [][][]byte, error)) *MockExecutionEngineGetBlobsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockExecutionEngineGetBlobsCall) DoAndReturn(f func(context.Context, []common.Hash) ([][]byte, [][][]byte)) *MockExecutionEngineGetBlobsCall {
+func (c *MockExecutionEngineGetBlobsCall) DoAndReturn(f func(context.Context, []common.Hash, clparams.StateVersion) ([][]byte, [][][]byte, error)) *MockExecutionEngineGetBlobsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -322,6 +324,45 @@ func (c *MockExecutionEngineGetBodiesByRangeCall) DoAndReturn(f func(context.Con
 	return c
 }
 
+// GetClientVersionV1 mocks base method.
+func (m *MockExecutionEngine) GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetClientVersionV1", ctx, callerVersion)
+	ret0, _ := ret[0].([]engine_types.ClientVersionV1)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetClientVersionV1 indicates an expected call of GetClientVersionV1.
+func (mr *MockExecutionEngineMockRecorder) GetClientVersionV1(ctx, callerVersion any) *MockExecutionEngineGetClientVersionV1Call {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetClientVersionV1", reflect.TypeOf((*MockExecutionEngine)(nil).GetClientVersionV1), ctx, callerVersion)
+	return &MockExecutionEngineGetClientVersionV1Call{Call: call}
+}
+
+// MockExecutionEngineGetClientVersionV1Call wrap *gomock.Call
+type MockExecutionEngineGetClientVersionV1Call struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockExecutionEngineGetClientVersionV1Call) Return(arg0 []engine_types.ClientVersionV1, arg1 error) *MockExecutionEngineGetClientVersionV1Call {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockExecutionEngineGetClientVersionV1Call) Do(f func(context.Context, *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error)) *MockExecutionEngineGetClientVersionV1Call {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockExecutionEngineGetClientVersionV1Call) DoAndReturn(f func(context.Context, *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error)) *MockExecutionEngineGetClientVersionV1Call {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // HasBlock mocks base method.
 func (m *MockExecutionEngine) HasBlock(ctx context.Context, hash common.Hash) (bool, error) {
 	m.ctrl.T.Helper()
@@ -400,17 +441,17 @@ func (c *MockExecutionEngineHasGapInSnapshotsCall) DoAndReturn(f func(context.Co
 }
 
 // InsertBlock mocks base method.
-func (m *MockExecutionEngine) InsertBlock(ctx context.Context, block *types.Block) error {
+func (m *MockExecutionEngine) InsertBlock(ctx context.Context, block *types.Block, bal []byte) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "InsertBlock", ctx, block)
+	ret := m.ctrl.Call(m, "InsertBlock", ctx, block, bal)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // InsertBlock indicates an expected call of InsertBlock.
-func (mr *MockExecutionEngineMockRecorder) InsertBlock(ctx, block any) *MockExecutionEngineInsertBlockCall {
+func (mr *MockExecutionEngineMockRecorder) InsertBlock(ctx, block, bal any) *MockExecutionEngineInsertBlockCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertBlock", reflect.TypeOf((*MockExecutionEngine)(nil).InsertBlock), ctx, block)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertBlock", reflect.TypeOf((*MockExecutionEngine)(nil).InsertBlock), ctx, block, bal)
 	return &MockExecutionEngineInsertBlockCall{Call: call}
 }
 
@@ -426,29 +467,29 @@ func (c *MockExecutionEngineInsertBlockCall) Return(arg0 error) *MockExecutionEn
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockExecutionEngineInsertBlockCall) Do(f func(context.Context, *types.Block) error) *MockExecutionEngineInsertBlockCall {
+func (c *MockExecutionEngineInsertBlockCall) Do(f func(context.Context, *types.Block, []byte) error) *MockExecutionEngineInsertBlockCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockExecutionEngineInsertBlockCall) DoAndReturn(f func(context.Context, *types.Block) error) *MockExecutionEngineInsertBlockCall {
+func (c *MockExecutionEngineInsertBlockCall) DoAndReturn(f func(context.Context, *types.Block, []byte) error) *MockExecutionEngineInsertBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // InsertBlocks mocks base method.
-func (m *MockExecutionEngine) InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error {
+func (m *MockExecutionEngine) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "InsertBlocks", ctx, blocks, wait)
+	ret := m.ctrl.Call(m, "InsertBlocks", ctx, blocks, bals)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // InsertBlocks indicates an expected call of InsertBlocks.
-func (mr *MockExecutionEngineMockRecorder) InsertBlocks(ctx, blocks, wait any) *MockExecutionEngineInsertBlocksCall {
+func (mr *MockExecutionEngineMockRecorder) InsertBlocks(ctx, blocks, bals any) *MockExecutionEngineInsertBlocksCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertBlocks", reflect.TypeOf((*MockExecutionEngine)(nil).InsertBlocks), ctx, blocks, wait)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertBlocks", reflect.TypeOf((*MockExecutionEngine)(nil).InsertBlocks), ctx, blocks, bals)
 	return &MockExecutionEngineInsertBlocksCall{Call: call}
 }
 
@@ -464,13 +505,13 @@ func (c *MockExecutionEngineInsertBlocksCall) Return(arg0 error) *MockExecutionE
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockExecutionEngineInsertBlocksCall) Do(f func(context.Context, []*types.Block, bool) error) *MockExecutionEngineInsertBlocksCall {
+func (c *MockExecutionEngineInsertBlocksCall) Do(f func(context.Context, []*types.Block, [][]byte) error) *MockExecutionEngineInsertBlocksCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockExecutionEngineInsertBlocksCall) DoAndReturn(f func(context.Context, []*types.Block, bool) error) *MockExecutionEngineInsertBlocksCall {
+func (c *MockExecutionEngineInsertBlocksCall) DoAndReturn(f func(context.Context, []*types.Block, [][]byte) error) *MockExecutionEngineInsertBlocksCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

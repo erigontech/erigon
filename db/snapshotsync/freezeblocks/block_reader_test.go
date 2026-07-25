@@ -18,23 +18,29 @@ package freezeblocks
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -43,7 +49,7 @@ import (
 func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
-	c, err := seg.NewCompressor(context.Background(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
+	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
 	c.DisableFsync()
@@ -63,7 +69,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 	idx.DisableFsync()
 	err = idx.AddKey([]byte{1}, 0)
 	require.NoError(t, err)
-	err = idx.Build(context.Background())
+	err = idx.Build(t.Context())
 	require.NoError(t, err)
 	if name == snaptype2.Transactions.Enum() {
 		idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -76,84 +82,524 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 		require.NoError(t, err)
 		err = idx.AddKey([]byte{1}, 0)
 		require.NoError(t, err)
-		err = idx.Build(context.Background())
+		err = idx.Build(t.Context())
 		require.NoError(t, err)
 		defer idx.Close()
 	}
 }
 
-// TestBlockReaderGenesisBlockWithSnapshots tests that the genesis block is always read from the database, even when snapshots exist
-func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
-	tmpDir := t.TempDir()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+func createTestSegmentOnlyFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
+	compressCfg := seg.DefaultCfg
+	compressCfg.MinPatternScore = 100
+	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+	defer c.Close()
+	c.DisableFsync()
+	require.NoError(t, c.AddWord([]byte{1}))
+	require.NoError(t, c.Compress())
+}
+
+func requireSegmentFilesExist(t *testing.T, dir string, ver snaptype.Version, from, to uint64, names ...snaptype.Enum) {
+	t.Helper()
+	for _, name := range names {
+		_, err := os.Stat(filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)))
+		require.NoError(t, err)
+	}
+}
+
+// TestBlockRetireSkipsOnGap verifies that the block retirement
+// logic correctly prevents freezing when there is a gap between the last block available
+// in the snapshots and the first block still present in the database. If this gap exists,
+// we cannot retire blocks because the history is not contiguous.
+func TestBlockRetireSkipsOnGap(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
 	logger := log.New()
 
-	tx, err := db.BeginRo(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	ver := version.V1_0
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
 
-	genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
-	require.NoError(t, err)
-	assert.Equal(t, genesisHash, (common.Hash{})) // genesis hash should be empty
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
+	require.NoError(t, snapshots.OpenFolder())
+	require.Equal(t, uint64(999), snapshots.SegmentsMax())
 
-	// create minimal genesis block for testing
-	tx.Rollback()
-	rwTx, err := db.BeginRw(context.Background())
+	rwTx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
 	genesisHeader := &types.Header{}
-	genesisHash = genesisHeader.Hash()
-	err = rawdb.WriteHeader(rwTx, genesisHeader)
-	require.NoError(t, err)
-	err = rawdb.WriteCanonicalHash(rwTx, genesisHash, 0)
-	require.NoError(t, err)
-	err = rawdb.WriteHeadHeaderHash(rwTx, genesisHash)
-	require.NoError(t, err)
-	err = rwTx.Commit()
-	require.NoError(t, err)
-
-	// create snapshots file for testing starting from block 1
-	cfg := ethconfig.Defaults.Snapshot
-	cfg.ChainName = networkname.Mainnet
-	snapshots := NewRoSnapshots(cfg, tmpDir, logger)
-	ver := version.V1_0
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, tmpDir, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
-
-	err = snapshots.OpenFolder()
-	require.NoError(t, err)
-	defer snapshots.Close()
-
-	blocksAvailable := snapshots.BlocksAvailable()
-	assert.Greater(t, blocksAvailable, uint64(0))
+	require.NoError(t, rawdb.WriteHeader(rwTx, genesisHeader))
+	prunedBoundaryHeader := &types.Header{Number: *uint256.NewInt(1001)}
+	require.NoError(t, rawdb.WriteHeader(rwTx, prunedBoundaryHeader))
+	require.NoError(t, rwTx.Commit())
 
 	blockReader := NewBlockReader(snapshots, nil)
+	br := &BlockRetire{
+		db:          db,
+		blockReader: blockReader,
+		logger:      logger,
+	}
 
-	// Try to read genesis block (block 0) when snapshots exist.This should read from database not snapshots
-	tx, err = db.BeginRo(context.Background())
+	hasEnough, err := br.dbHasEnoughDataForBlocksRetire(t.Context())
+	require.NoError(t, err)
+	require.False(t, hasEnough)
+}
+
+// TestBlockRetireContiguous ensures that block retirement is allowed
+// to proceed when the database block history starts exactly where the snapshots end.
+// This is the correct, contiguous state where we can transition retired blocks.
+func TestBlockRetireContiguous(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	logger := log.New()
+
+	ver := version.V1_0
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
+	require.NoError(t, snapshots.OpenFolder())
+	require.Equal(t, uint64(999), snapshots.SegmentsMax())
+
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	genesisHeader := &types.Header{}
+	require.NoError(t, rawdb.WriteHeader(rwTx, genesisHeader))
+	nextHeader := &types.Header{Number: *uint256.NewInt(1000)}
+	require.NoError(t, rawdb.WriteHeader(rwTx, nextHeader))
+	require.NoError(t, rwTx.Commit())
+
+	blockReader := NewBlockReader(snapshots, nil)
+	br := &BlockRetire{
+		db:          db,
+		blockReader: blockReader,
+		logger:      logger,
+	}
+
+	hasEnough, err := br.dbHasEnoughDataForBlocksRetire(t.Context())
+	require.NoError(t, err)
+	require.True(t, hasEnough)
+}
+
+// TestBlockRetireFallback verifies that if a merged segment is written
+// to disk but its index is not generated yet, the node restart will not hide the smaller
+// subsegments. These subsegments must remain visible so that block retirement can keep
+// running without getting stuck (fixes issue #21472). Once the unindexed covering segment
+// is deleted or indexed, the visibility should remain stable.
+func TestBlockRetireFallback(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	logger := log.New()
+
+	ver := version.V1_0
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
+	require.NoError(t, snapshots.OpenFolder())
+	require.Equal(t, uint64(1999), snapshots.SegmentsMax())
+
+	requireSegmentFilesExist(t, dirs.Snap, ver, 1, 1000, snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions)
+	requireSegmentFilesExist(t, dirs.Snap, ver, 1000, 2000, snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions)
+
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	genesisHeader := &types.Header{}
+	require.NoError(t, rawdb.WriteHeader(rwTx, genesisHeader))
+	nextHeader := &types.Header{Number: *uint256.NewInt(2000)}
+	require.NoError(t, rawdb.WriteHeader(rwTx, nextHeader))
+	require.NoError(t, rwTx.Commit())
+
+	// DB starts right after snapshots, retirement should be allowed.
+	blockReader := NewBlockReader(snapshots, nil)
+	br := &BlockRetire{
+		db:          db,
+		blockReader: blockReader,
+		logger:      logger,
+	}
+	hasEnough, err := br.dbHasEnoughDataForBlocksRetire(t.Context())
+	require.NoError(t, err)
+	require.True(t, hasEnough)
+
+	// Simulate a restart after a merged transaction segment landed on disk but before
+	// its indexes were built: the smaller indexed subsegments must stay visible until
+	// the covering segment is indexed. reopenedSnapshots below is the fresh open.
+	createTestSegmentOnlyFile(t, 1, 2000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+
+	reopenedSnapshots := blocksnapshots.NewRoSnapshots(snapshots.Cfg(), dirs.Snap, logger)
+	defer reopenedSnapshots.Close() // fallback safety guard in case of early test failure
+	require.NoError(t, reopenedSnapshots.OpenFolder())
+	require.Equal(t, uint64(1999), reopenedSnapshots.SegmentsMax())
+	requireSegmentFilesExist(t, dirs.Snap, ver, 1, 1000, snaptype2.Enums.Transactions)
+	requireSegmentFilesExist(t, dirs.Snap, ver, 1000, 2000, snaptype2.Enums.Transactions)
+
+	blockReader = NewBlockReader(reopenedSnapshots, nil)
+	br = &BlockRetire{
+		db:          db,
+		blockReader: blockReader,
+		logger:      logger,
+	}
+	hasEnough, err = br.dbHasEnoughDataForBlocksRetire(t.Context())
+	require.NoError(t, err)
+	require.True(t, hasEnough)
+	// Close reopenedSnapshots before removing the unindexed overlap to start the restore phase.
+	reopenedSnapshots.Close()
+
+	// Removing the unindexed overlap leaves the same indexed subsegments visible.
+	unindexedOverlap := filepath.Join(dirs.Snap, snaptype.SegmentFileName(ver, 1, 2000, snaptype2.Enums.Transactions))
+	require.NoError(t, dir.RemoveFile(unindexedOverlap))
+
+	restoredSnapshots := blocksnapshots.NewRoSnapshots(snapshots.Cfg(), dirs.Snap, logger)
+	require.NoError(t, restoredSnapshots.OpenFolder())
+	defer restoredSnapshots.Close()
+	require.Equal(t, uint64(1999), restoredSnapshots.SegmentsMax())
+
+	blockReader = NewBlockReader(restoredSnapshots, nil)
+	br = &BlockRetire{
+		db:          db,
+		blockReader: blockReader,
+		logger:      logger,
+	}
+	hasEnough, err = br.dbHasEnoughDataForBlocksRetire(t.Context())
+	require.NoError(t, err)
+	require.True(t, hasEnough)
+}
+
+// TestBlockRetireAllOverlapped tests a scenario where all block
+// snapshot types (Headers, Bodies, and Transactions) have unindexed covering segments
+// on disk. Under the alignMin setting, we must verify that all three types correctly
+// fall back to their indexed subsegments and maintain the correct visible range, allowing
+// block retirement to proceed (related to issue #21472).
+func TestBlockRetireAllOverlapped(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	logger := log.New()
+
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	ver := version.V1_0
+
+	// Create indexed subsegments for all types.
+	for _, enum := range []snaptype.Enum{snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions} {
+		createTestSegmentFile(t, 1, 1000, enum, dirs.Snap, ver, logger)
+		createTestSegmentFile(t, 1000, 2000, enum, dirs.Snap, ver, logger)
+	}
+
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
+	require.NoError(t, snapshots.OpenFolder())
+	require.Equal(t, uint64(1999), snapshots.SegmentsMax())
+
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	genesisHeader := &types.Header{}
+	require.NoError(t, rawdb.WriteHeader(rwTx, genesisHeader))
+	nextHeader := &types.Header{Number: *uint256.NewInt(2000)}
+	require.NoError(t, rawdb.WriteHeader(rwTx, nextHeader))
+	require.NoError(t, rwTx.Commit())
+
+	// Add unindexed covering segments for ALL types. With alignMin=true,
+	// RecalcVisibleSegments must fall back to indexed subsegments for every
+	// type, and SegmentsMax must take the correct minimum.
+	for _, enum := range []snaptype.Enum{snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions} {
+		createTestSegmentOnlyFile(t, 1, 2000, enum, dirs.Snap, ver, logger)
+	}
+
+	reopened := blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, logger)
+	require.NoError(t, reopened.OpenFolder())
+	defer reopened.Close()
+	require.Equal(t, uint64(1999), reopened.SegmentsMax())
+
+	blockReader := NewBlockReader(reopened, nil)
+	br := &BlockRetire{
+		db:          db,
+		blockReader: blockReader,
+		logger:      logger,
+	}
+	hasEnough, err := br.dbHasEnoughDataForBlocksRetire(t.Context())
+	require.NoError(t, err)
+	require.True(t, hasEnough)
+}
+
+// TestBlockReaderGenesisBlockWithSnapshots tests that the genesis block is always read from the database, even when snapshots exist
+func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	logger := log.New()
+
+	// Snapshot segments (blocks 1..1000) must exist before the temporal DB opens
+	// them, so its block-files view (shared with the reader) includes them.
+	ver := version.V1_0
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+
+	db := temporaltest.NewTestDB(t, dirs)
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
+	blockReader := NewBlockReader(snapshots, nil)
+	require.Greater(t, snapshots.BlocksAvailable(), uint64(0))
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+	require.NoError(t, err)
+	assert.Equal(t, genesisHash, common.Hash{}) // genesis hash should be empty
+	tx.Rollback()
+
+	// create minimal genesis block for testing
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	genesisHeader := &types.Header{}
+	genesisHash = genesisHeader.Hash()
+	require.NoError(t, rawdb.WriteHeader(rwTx, genesisHeader))
+	require.NoError(t, rawdb.WriteCanonicalHash(rwTx, genesisHash, 0))
+	require.NoError(t, rawdb.WriteHeadHeaderHash(rwTx, genesisHash))
+	require.NoError(t, rwTx.Commit())
+
+	// Read genesis (block 0) with snapshots present: must come from the DB, not snapshots.
+	tx, err = db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	hash, ok, err := blockReader.CanonicalHash(context.Background(), tx, 0)
+	hash, ok, err := blockReader.CanonicalHash(t.Context(), tx, 0)
 	assert.NoError(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, genesisHash, hash)
 
-	block, senders, err := blockReader.BlockWithSenders(context.Background(), tx, genesisHash, 0)
+	block, senders, err := blockReader.BlockWithSenders(t.Context(), tx, genesisHash, 0)
 	assert.NoError(t, err)
 	// should be nil because genesis block does not have transactions
 	assert.Nil(t, block)
 	assert.Nil(t, senders)
 
-	header, err := blockReader.Header(context.Background(), tx, genesisHash, 0)
+	header, err := blockReader.Header(t.Context(), tx, genesisHash, 0)
 	require.NoError(t, err)
 	assert.NotNil(t, header)
 	assert.Equal(t, uint64(0), header.Number.Uint64())
 
 	// HasSenders should work for genesis
-	hasSenders, err := blockReader.HasSenders(context.Background(), tx, genesisHash, 0)
+	hasSenders, err := blockReader.HasSenders(t.Context(), tx, genesisHash, 0)
 	assert.NoError(t, err)
 	assert.False(t, hasSenders) // should be false because genesis block does not have senders
+}
+
+func TestCanonicalHashCache_DBHit(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles(), nil)
+
+	// Write a canonical hash to the DB
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	header := &types.Header{Number: *uint256.NewInt(0)}
+	expectedHash := header.Hash()
+	require.NoError(t, rawdb.WriteCanonicalHash(rwTx, expectedHash, 0))
+	require.NoError(t, rwTx.Commit())
+
+	tx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// First call: should read from DB (DB results are not cached, only snapshot results are)
+	hash, ok, err := blockReader.CanonicalHash(context.Background(), tx, 0)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, expectedHash, hash)
+
+	// DB results should NOT be cached (only snapshot data is immutable and cacheable)
+	_, found := blockReader.canonicalHashCache.Get(uint64(0))
+	assert.False(t, found)
+
+	// Second call: should still return correct result from DB
+	hash2, ok2, err := blockReader.CanonicalHash(context.Background(), tx, 0)
+	require.NoError(t, err)
+	assert.True(t, ok2)
+	assert.Equal(t, expectedHash, hash2)
+}
+
+func TestCanonicalHashCache_Miss(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles(), nil)
+
+	tx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// Block 999 doesn't exist in DB or snapshots
+	hash, ok, err := blockReader.CanonicalHash(context.Background(), tx, 999)
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.Equal(t, common.Hash{}, hash)
+
+	// Should not be cached
+	_, found := blockReader.canonicalHashCache.Get(uint64(999))
+	assert.False(t, found)
+}
+
+func TestCanonicalHashCache_MultipleBlocks(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles(), nil)
+
+	// Write multiple canonical hashes
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	hashes := make([]common.Hash, 5)
+	for i := range uint64(5) {
+		header := &types.Header{Number: *uint256.NewInt(i)}
+		hashes[i] = header.Hash()
+		require.NoError(t, rawdb.WriteCanonicalHash(rwTx, hashes[i], i))
+	}
+	require.NoError(t, rwTx.Commit())
+	tx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// Read all blocks — results come from DB, not snapshots, so the cache stays empty.
+	for i := range uint64(5) {
+		hash, ok, err := blockReader.CanonicalHash(context.Background(), tx, i)
+		require.NoError(t, err)
+		assert.True(t, ok)
+		assert.Equal(t, hashes[i], hash)
+	}
+
+	// DB results should NOT be cached (only snapshot data is immutable and cacheable)
+	for i := range uint64(5) {
+		_, found := blockReader.canonicalHashCache.Get(i)
+		assert.False(t, found, "block %d should not be cached (DB data)", i)
+	}
+}
+
+// TestCanonicalHashCache_SnapshotPath verifies that CanonicalHash populates
+// canonicalHashCache when the hash is read from a snapshot segment (not from DB),
+// and that subsequent calls are served from the cache without touching the snapshot.
+func TestCanonicalHashCache_SnapshotPath(t *testing.T) {
+	// Use the same from/to range as the other snapshot tests so OpenFolder
+	// recognises the segment (naming convention: v1.0-000000-000001-headers.seg).
+	const (
+		from     = uint64(1)
+		to       = uint64(1000)
+		blockNum = from // first block in the segment; OrdinalLookup(from-from)=OrdinalLookup(0)
+	)
+	dirs := datadir.New(t.TempDir())
+	logger := log.New()
+	ver := version.V1_0
+
+	// Build a header and RLP-encode it.
+	// Snapshot word format: 1 prefix byte (skipped by the decoder) + RLP bytes.
+	header := &types.Header{Number: *uint256.NewInt(blockNum)}
+	rlpBytes, err := rlp.EncodeToBytes(header)
+	require.NoError(t, err)
+	word := append([]byte{0}, rlpBytes...)
+
+	// Write the headers segment with a single valid entry.
+	segPath := filepath.Join(dirs.Snap, snaptype.SegmentFileName(ver, from, to, snaptype2.Enums.Headers))
+	compressCfg := seg.DefaultCfg
+	compressCfg.MinPatternScore = 100
+	c, err := seg.NewCompressor(t.Context(), "test", segPath, dirs.Snap, compressCfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+	c.DisableFsync()
+	require.NoError(t, c.AddWord(word))
+	require.NoError(t, c.Compress())
+	c.Close()
+
+	// Build index with BaseDataID=from so OrdinalLookup(blockNum-from)=OrdinalLookup(0).
+	idxPath := filepath.Join(dirs.Snap, snaptype.IdxFileName(ver, from, to, snaptype2.Enums.Headers.String()))
+	idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   1,
+		BucketSize: 10,
+		TmpDir:     dirs.Snap,
+		IndexFile:  idxPath,
+		LeafSize:   8,
+		BaseDataID: from,
+		Enums:      true,
+	}, logger)
+	require.NoError(t, err)
+	idx.DisableFsync()
+	require.NoError(t, idx.AddKey([]byte{0}, 0))
+	require.NoError(t, idx.Build(t.Context()))
+	idx.Close()
+
+	// Bodies and Transactions segments are required for OpenFolder to recognise the range.
+	createTestSegmentFile(t, from, to, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, from, to, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+
+	db := temporaltest.NewTestDB(t, dirs)
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles(), nil)
+
+	// No canonical hash written to DB → CanonicalHash must fall through to snapshot path.
+	tx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// First call: DB miss → snapshot read → cache populated.
+	hash1, ok, err := blockReader.CanonicalHash(context.Background(), tx, blockNum)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, header.Hash(), hash1)
+
+	cached, found := blockReader.canonicalHashCache.Get(blockNum)
+	assert.True(t, found, "canonicalHashCache must be populated after a snapshot read")
+	assert.Equal(t, header.Hash(), cached)
+
+	// Second call: must be served from cache (no snapshot I/O).
+	hash2, ok2, err := blockReader.CanonicalHash(context.Background(), tx, blockNum)
+	require.NoError(t, err)
+	assert.True(t, ok2)
+	assert.Equal(t, header.Hash(), hash2)
+}
+
+// TestTxBlockView_StaleUntilReopen reproduces the minimal-mode history-download
+// regression: a temporal tx pins its block-files view at begin-time, so body
+// segments opened afterwards stay invisible to reads through that tx until the
+// tx reopens its underlying-files view. When they stayed invisible, the
+// snapshots stage's download filter walked an empty body view, couldn't compute
+// the history prune cutoff, and downloaded every history file.
+func TestTxBlockView_StaleUntilReopen(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	logger := log.New()
+
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
+	blockReader := NewBlockReader(snapshots, nil)
+
+	// Begin the tx BEFORE any block segments exist: it pins an empty view.
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	bodiesInTxView := func() int {
+		view, release := blockReader.view(rwTx)
+		defer release()
+		return len(view.Bodies())
+	}
+	require.Equal(t, 0, bodiesInTxView())
+
+	// Create and open header/body/tx segments after the tx began.
+	ver := version.V1_0
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+	require.NoError(t, snapshots.OpenFolder())
+	require.Equal(t, uint64(999), snapshots.SegmentsMax())
+
+	// Regression: the tx still sees its stale, empty view.
+	require.Equal(t, 0, bodiesInTxView())
+
+	// Fix: reopening the tx's underlying-files view exposes the bodies.
+	rwTx.(kv.CanReopenUnderlyingFilesTx).ForceReopenUnderlyingFilesTx()
+	require.Positive(t, bodiesInTxView())
 }

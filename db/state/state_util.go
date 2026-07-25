@@ -27,7 +27,7 @@ import (
 // SaveExecV3PruneProgress saves latest pruned key in given table to the database.
 // nil key also allowed and means that latest pruning run has been finished.
 func SaveExecV3PruneProgress(db kv.Putter, prunedTblName string, prunedKey []byte) error {
-	empty := make([]byte, 1)
+	empty := make([]byte, 1, 1+len(prunedKey))
 	if prunedKey != nil {
 		empty[0] = 1
 	}

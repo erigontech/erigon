@@ -1,0 +1,466 @@
+name: Create release branch
+
+run-name: "Create ${{ inputs.release_branch }} from ${{ inputs.from_ref }} by @${{ github.actor }}"
+
+# Manually-dispatched utility to create a `release/N.N` branch. Gated by the
+# `release-branch-management` GitHub Environment: the job only runs after one of
+# that environment's required reviewers approves, so dispatching the workflow is
+# not enough on its own to create a branch in the protected release namespace.
+#
+# Branch-protection rules are applied MANUALLY in repo settings, on purpose:
+# that keeps `administration:write` out of any automation token and off the
+# repo's attack surface. This workflow only needs `contents:write` (to create
+# the ref), which the release App already has.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_branch:
+        description: "Release branch to create, e.g. release/3.6 (must match release/N.N)"
+        required: true
+        type: string
+      from_ref:
+        description: "Base to cut from: a branch, tag, or commit SHA (any past commit, on any branch) — e.g. main, v3.5.0, a1b2c3d"
+        required: false
+        type: string
+        default: main
+      dry_run:
+        description: "Resolve the base commit and validate, but do not create the branch"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  # Serialize per target branch so two runs can't race on the same ref.
+  group: create-release-branch-${{ inputs.release_branch }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  create-release-branch:
+    runs-on: ubuntu-latest
+    # Approval gate: configure required reviewers on this environment in repo
+    # settings. Only those reviewers can release the run to continue.
+    environment: release-branch-management
+    timeout-minutes: 10
+    outputs:
+      outcome: ${{ steps.result.outputs.outcome }}
+      detail: ${{ steps.result.outputs.detail }}
+      base_sha: ${{ steps.result.outputs.base_sha }}
+    steps:
+      - name: Validate release branch name
+        env:
+          RELEASE_BRANCH: ${{ inputs.release_branch }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_BRANCH" =~ ^release/[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$RELEASE_BRANCH' does not match the required pattern 'release/N.N' (e.g. release/3.6)."
+            exit 1
+          fi
+          echo "Release branch name '$RELEASE_BRANCH' is valid."
+
+      - name: Generate GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  ## v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
+          repositories: "erigon"
+          # Scope the token to only what this workflow needs (create a ref),
+          # instead of inheriting all the App's installation permissions.
+          permission-contents: write
+
+      - name: Create branch
+        id: result
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          REPO: ${{ github.repository }}
+          RELEASE_BRANCH: ${{ inputs.release_branch }}
+          FROM_REF: ${{ inputs.from_ref }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          fail() {
+            echo "detail=$1" >> "$GITHUB_OUTPUT"
+            echo "outcome=failure" >> "$GITHUB_OUTPUT"
+            echo "::error::$1"
+            exit 1
+          }
+
+          # Refuse to overwrite an existing release branch.
+          if gh api "repos/$REPO/branches/$RELEASE_BRANCH" >/dev/null 2>&1; then
+            fail "Branch '$RELEASE_BRANCH' already exists — refusing to recreate."
+          fi
+
+          # Resolve FROM_REF to a commit SHA. The commits/{ref} endpoint accepts
+          # a branch, tag, or SHA uniformly, so any past commit (on any branch)
+          # works as the base.
+          base_sha=$(gh api "repos/$REPO/commits/$FROM_REF" --jq '.sha' 2>/dev/null || true)
+          if [ -z "$base_sha" ] || [ "$base_sha" = "null" ]; then
+            fail "Could not resolve base '$FROM_REF' to a commit (check the branch/tag/SHA exists)."
+          fi
+          echo "Base '$FROM_REF' resolves to $base_sha"
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+
+          if [ "$DRY_RUN" = "true" ]; then
+            detail="dry-run: would create '$RELEASE_BRANCH' at $base_sha (from '$FROM_REF')"
+            echo "$detail"
+            echo "detail=$detail" >> "$GITHUB_OUTPUT"
+            echo "outcome=dry-run" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Creating '$RELEASE_BRANCH' at $base_sha"
+          gh api -X POST "repos/$REPO/git/refs" \
+            -f "ref=refs/heads/$RELEASE_BRANCH" \
+            -f "sha=$base_sha" >/dev/null \
+            || fail "Failed to create branch '$RELEASE_BRANCH'."
+
+          detail="'$RELEASE_BRANCH' created at $base_sha (from '$FROM_REF')."
+          echo "detail=$detail" >> "$GITHUB_OUTPUT"
+          echo "outcome=success" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Release branch \`$RELEASE_BRANCH\` created"
+            echo ""
+            echo "- Base: \`$FROM_REF\` → \`$base_sha\`"
+            echo "- **Manual step required:** add the branch-protection rule in **Settings → Branches**."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Q1 of the docs version transition: archive the OUTGOING stable version onto
+  # the freshly-cut branch. Runs right after the cut (same run, already knows the
+  # incoming branch name). Opens a review-ready PR labelled `docs`; a human
+  # reviews and merges it. This does NOT flip the live docs deploy — that's Q2,
+  # still the manual retire+publish PR pair (see #22062 / #22063). See
+  # docs-version-bump.yml for the manual escape hatch.
+  #
+  # The PR is opened with the default GITHUB_TOKEN and left for manual approval.
+  # Note: a GITHUB_TOKEN-opened PR does not itself trigger pull_request-based CI
+  # (Actions recursion guard). The archive is already build-verified in this job
+  # before the PR opens; a reviewer merges after inspecting the diff. If a
+  # release branch's protection ever requires status checks that must run on the
+  # PR, either re-trigger them (close/reopen) or open via the release App token.
+  #
+  # Correctness: the snapshot is generated from the OUTGOING release branch's
+  # own docs (release/N.<M-1>), never from the just-cut branch — which was cut
+  # from main and already holds the NEXT version's content. And it ports the
+  # outgoing branch's FULL versioned state (versions.json + all versioned_docs +
+  # all versioned_sidebars) plus the fresh snapshot, so no older version silently
+  # drops off the site at the next cut.
+  archive-previous-docs-version:
+    needs: [create-release-branch]
+    # Real cut → open a PR. Dry-run → validate the port + build, but open nothing.
+    if: >-
+      needs.create-release-branch.outputs.outcome == 'success' ||
+      needs.create-release-branch.outputs.outcome == 'dry-run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # contents:write to push the PR branch; pull-requests:write to open it.
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      outcome: ${{ steps.pr.outputs.outcome || steps.dryrun.outputs.outcome || steps.plan.outputs.outcome }}
+      pr_url: ${{ steps.pr.outputs.pr_url }}
+      detail: ${{ steps.pr.outputs.detail || steps.dryrun.outputs.detail || steps.plan.outputs.detail }}
+    steps:
+      - name: Determine outgoing series to archive
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          INCOMING_BRANCH: ${{ inputs.release_branch }}
+        run: |
+          set -euo pipefail
+          # Defensive re-validate (job 1 already checked) and capture MAJOR.MINOR.
+          if [[ ! "$INCOMING_BRANCH" =~ ^release/([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error::incoming '$INCOMING_BRANCH' is not release/N.N"; exit 1
+          fi
+          in_major="${BASH_REMATCH[1]}"; in_minor="${BASH_REMATCH[2]}"
+
+          # Enumerate existing release/N.N branches (fail-closed: a gh API error
+          # aborts the job rather than guessing). Exact regex excludes patch-style
+          # names like release/3.0.10; numeric per-component sort so 3.10 > 3.9.
+          all=$(gh api "repos/$REPO/branches" --paginate --jq '.[].name')
+          series=$(printf '%s\n' "$all" \
+            | grep -E '^release/[0-9]+\.[0-9]+$' \
+            | sed 's#^release/##' \
+            | sort -t. -k1,1n -k2,2n || true)
+
+          # Highest series strictly below the incoming one (list is ascending, so
+          # the last match wins). Robust across major bumps (e.g. 3.9 → 4.0).
+          outgoing=""
+          while IFS= read -r s; do
+            [ -n "$s" ] || continue
+            maj="${s%%.*}"; min="${s##*.}"
+            if [ "$maj" -lt "$in_major" ] || { [ "$maj" -eq "$in_major" ] && [ "$min" -lt "$in_minor" ]; }; then
+              outgoing="$s"
+            fi
+          done <<< "$series"
+
+          if [ -z "$outgoing" ]; then
+            echo "No release/* series below $INCOMING_BRANCH — nothing to archive (first release branch)."
+            echo "outcome=skipped" >> "$GITHUB_OUTPUT"
+            echo "detail=no previous series to archive" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "outgoing_branch=release/$outgoing"
+            echo "archive_label=v$outgoing"
+            echo "outcome=proceed"
+          } >> "$GITHUB_OUTPUT"
+          echo "Will archive v$outgoing (docs from release/$outgoing) onto $INCOMING_BRANCH."
+
+      - name: Checkout outgoing branch (authoritative docs for the archived version)
+        if: steps.plan.outputs.outcome == 'proceed'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.plan.outputs.outgoing_branch }}
+          path: outgoing
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        if: steps.plan.outputs.outcome == 'proceed'
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v6
+        if: steps.plan.outputs.outcome == 'proceed'
+        with:
+          python-version: '3.11'
+
+      - name: Snapshot outgoing docs and capture full versioned state
+        if: steps.plan.outputs.outcome == 'proceed'
+        working-directory: outgoing/docs/site
+        env:
+          ARCHIVE_LABEL: ${{ steps.plan.outputs.archive_label }}
+        run: |
+          set -euo pipefail
+          npm ci
+          # docusaurus keys the snapshot off the argument, not current.label, so
+          # this freezes the outgoing branch's live docs as $ARCHIVE_LABEL and
+          # prepends it to that branch's versions.json (newest-first).
+          npx docusaurus docs:version "$ARCHIVE_LABEL"
+          # Stash the COMPLETE versioned state outside the workspace so the next
+          # checkout's clean step can't wipe it. This state already carries the
+          # prior archived versions + the freshly-frozen one.
+          dest="$RUNNER_TEMP/versioned-state"
+          rm -rf "$dest"; mkdir -p "$dest"
+          cp versions.json "$dest/versions.json"
+          cp -R versioned_docs "$dest/versioned_docs"
+          cp -R versioned_sidebars "$dest/versioned_sidebars"
+          echo "Captured versioned state:"; cat "$dest/versions.json"
+
+      - name: Checkout target branch
+        if: steps.plan.outputs.outcome == 'proceed'
+        uses: actions/checkout@v7
+        with:
+          # Real cut → the new branch. Dry-run → the base commit (identical docs
+          # content to what the new branch would hold), so the port + build are
+          # exercised without the branch existing.
+          ref: ${{ inputs.dry_run && needs.create-release-branch.outputs.base_sha || inputs.release_branch }}
+          path: incoming
+          persist-credentials: false
+
+      - name: Port versioned state, enforce cap, regenerate llms, build-verify
+        if: steps.plan.outputs.outcome == 'proceed'
+        working-directory: incoming/docs/site
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/versioned-state"
+          # Full-state port: replace the target's archived state wholesale.
+          rm -rf versioned_docs versioned_sidebars versions.json
+          cp "$src/versions.json" versions.json
+          cp -R "$src/versioned_docs" versioned_docs
+          cp -R "$src/versioned_sidebars" versioned_sidebars
+
+          # 5-archived-version cap (versions.json is newest-first; prune the rest).
+          count=$(jq 'length' versions.json)
+          if [ "$count" -gt 5 ]; then
+            for v in $(jq -r '.[5:][]' versions.json); do
+              echo "Pruning archived version $v"
+              rm -rf "versioned_docs/version-$v"
+              rm -f  "versioned_sidebars/version-$v-sidebars.json"
+            done
+            jq '.[:5]' versions.json > versions.json.tmp && mv versions.json.tmp versions.json
+          fi
+
+          npm ci
+          python3 scripts/generate-llms.py
+          # onBrokenLinks/onBrokenAnchors are 'throw' → a bad ported link fails
+          # here, before any PR is opened.
+          npm run build
+
+      - name: Open archive PR
+        id: pr
+        if: steps.plan.outputs.outcome == 'proceed' && !inputs.dry_run
+        working-directory: incoming
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          INCOMING_BRANCH: ${{ inputs.release_branch }}
+          OUTGOING_BRANCH: ${{ steps.plan.outputs.outgoing_branch }}
+          ARCHIVE_LABEL: ${{ steps.plan.outputs.archive_label }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No changes — $ARCHIVE_LABEL is already archived on $INCOMING_BRANCH. Skipping PR."
+            echo "outcome=skipped" >> "$GITHUB_OUTPUT"
+            echo "detail=$ARCHIVE_LABEL already archived on $INCOMING_BRANCH" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Suffix the run id so re-runs don't collide with an existing remote branch.
+          pr_branch="docs/auto-archive-$ARCHIVE_LABEL-$RUN_ID"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$pr_branch"
+          git add -A
+          git commit -m "docs(site): archive $ARCHIVE_LABEL for $INCOMING_BRANCH"
+          # persist-credentials:false on checkout → authenticate this push explicitly.
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:refs/heads/$pr_branch"
+          url=$(gh pr create \
+            --base "$INCOMING_BRANCH" \
+            --head "$pr_branch" \
+            --label "docs" \
+            --title "docs(site): archive $ARCHIVE_LABEL on $INCOMING_BRANCH" \
+            --body "Automated docs archive opened when \`$INCOMING_BRANCH\` was cut (\`create-release-branch.yml\`). Labelled \`docs\` for manual review and merge.
+
+          - Snapshotted **$ARCHIVE_LABEL** from its authoritative branch \`$OUTGOING_BRANCH\` (not from \`$INCOMING_BRANCH\`, which already holds the next version's docs).
+          - Ported the full versioned state (versions.json + all versioned_docs/ + versioned_sidebars/) and enforced the 5-archived-version cap.
+          - Regenerated llms.txt artifacts; \`npm run build\` passed in CI before this PR was opened.
+
+          This does **not** flip the live docs deploy. Making $INCOMING_BRANCH the default on docs.erigon.tech is the separate manual step (retire the old \`docs-deploy.yml\` + publish, per #22062 / #22063).")
+          {
+            echo "pr_url=$url"
+            echo "outcome=pr_opened"
+            echo "detail=opened $url"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Docs archive PR opened"
+            echo "- $ARCHIVE_LABEL archived onto \`$INCOMING_BRANCH\`: $url"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dry-run summary
+        id: dryrun
+        if: steps.plan.outputs.outcome == 'proceed' && inputs.dry_run
+        env:
+          ARCHIVE_LABEL: ${{ steps.plan.outputs.archive_label }}
+          INCOMING_BRANCH: ${{ inputs.release_branch }}
+          OUTGOING_BRANCH: ${{ steps.plan.outputs.outgoing_branch }}
+        run: |
+          # Emit a terminal outcome so the job output isn't the non-terminal
+          # 'proceed' from the plan step, and notify can report the dry-run.
+          {
+            echo "outcome=dry-run"
+            echo "detail=dry-run: validated $ARCHIVE_LABEL (from $OUTGOING_BRANCH) → $INCOMING_BRANCH, no PR opened"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Dry-run: docs archive validated"
+            echo ""
+            echo "- Would archive **$ARCHIVE_LABEL** (from \`$OUTGOING_BRANCH\`) onto **$INCOMING_BRANCH**."
+            echo "- Full versioned-state port + \`npm run build\` succeeded. No PR opened (dry-run)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  notify:
+    needs: [create-release-branch, archive-previous-docs-version]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          JOB_RESULT: ${{ needs.create-release-branch.result }}
+          OUTCOME: ${{ needs.create-release-branch.outputs.outcome }}
+          DETAIL: ${{ needs.create-release-branch.outputs.detail }}
+          BASE_SHA: ${{ needs.create-release-branch.outputs.base_sha }}
+          RELEASE_BRANCH: ${{ inputs.release_branch }}
+          FROM_REF: ${{ inputs.from_ref }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ARCHIVE_OUTCOME: ${{ needs.archive-previous-docs-version.outputs.outcome }}
+          ARCHIVE_PR_URL: ${{ needs.archive-previous-docs-version.outputs.pr_url }}
+          ARCHIVE_DETAIL: ${{ needs.archive-previous-docs-version.outputs.detail }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISCORD_WEBHOOK:-}" ]; then
+            echo "DISCORD_WEBHOOK not set — skipping Discord notification."
+            exit 0
+          fi
+
+          now=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+          # Summarize the docs-archive job (Q1) for the audit embed.
+          if [ -n "${ARCHIVE_PR_URL:-}" ]; then
+            archive_field="[Archive PR opened]($ARCHIVE_PR_URL)"
+          elif [ "${ARCHIVE_OUTCOME:-}" = "skipped" ] || [ "${ARCHIVE_OUTCOME:-}" = "dry-run" ]; then
+            archive_field=":information_source: ${ARCHIVE_DETAIL:-${ARCHIVE_OUTCOME}}"
+          else
+            archive_field="n/a"
+          fi
+
+          # A cancelled/skipped upstream job (e.g. environment approval denied or
+          # timed out) reports as failure to the team.
+          mention="@here"
+          if [ "$JOB_RESULT" = "success" ] && [ "$OUTCOME" = "success" ]; then
+            title=":white_check_mark: Release branch created"; color=3066993
+            desc=":warning: **Manual step required:** add the branch-protection rule for this branch in **Settings → Branches** (mirror the existing release branch)."
+          elif [ "$OUTCOME" = "dry-run" ]; then
+            # A dry-run is the operator's own check — don't ping the channel.
+            title=":mag: Release branch dry-run"; color=3447003; mention=""
+            desc="Dry-run only — no branch was created."
+          else
+            title=":x: Release branch creation failed"; color=15158332
+            desc="${DETAIL:-Job result: ${JOB_RESULT}. See the run for details.}"
+          fi
+
+          # allowed_mentions.parse=["everyone"] authorizes the @here ping; the
+          # embed carries the full audit record so the message answers who/when/
+          # what without opening the run.
+          payload=$(jq -nc \
+            --arg mention "$mention" \
+            --arg title "$title" \
+            --argjson color "$color" \
+            --arg desc "$desc" \
+            --arg branch "$RELEASE_BRANCH" \
+            --arg from "$FROM_REF" \
+            --arg sha "${BASE_SHA:-n/a}" \
+            --arg actor "$ACTOR" \
+            --arg when "$now" \
+            --arg ts "$ts" \
+            --arg url "$RUN_URL" \
+            --arg archive "$archive_field" \
+            '{
+              content: $mention,
+              allowed_mentions: {parse: ["everyone"]},
+              embeds: [{
+                title: $title,
+                description: $desc,
+                color: $color,
+                url: $url,
+                timestamp: $ts,
+                fields: [
+                  {name: "Branch",       value: ("`" + $branch + "`"), inline: true},
+                  {name: "Base ref",     value: ("`" + $from + "`"),   inline: true},
+                  {name: "Commit",       value: ("`" + $sha + "`"),    inline: false},
+                  {name: "Triggered by", value: ("[" + $actor + "](https://github.com/" + $actor + ")"), inline: true},
+                  {name: "When (UTC)",   value: $when,                 inline: true},
+                  {name: "Docs archive", value: $archive,              inline: false},
+                  {name: "Run",          value: ("[Open workflow run](" + $url + ")"), inline: false}
+                ],
+                footer: {text: "erigon • create-release-branch"}
+              }]
+            }')
+          curl -sS -f -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK" \
+            && echo "Discord notified." \
+            || echo "::warning::Discord notification failed (webhook unreachable or invalid)."

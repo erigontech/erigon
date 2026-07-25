@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 /*
@@ -47,6 +50,7 @@ type Version struct {
 }
 
 var ErrVersionIsNotSupported error = errors.New("this version is not supported")
+var ErrInvalidVersion = errors.New("invalid version")
 
 var (
 	ZeroVersion                  = Version{}
@@ -57,6 +61,7 @@ var (
 	V1_2                Version  = Version{1, 2}
 	V2_0                Version  = Version{2, 0}
 	V2_1                Version  = Version{2, 1}
+	V2_2                Version  = Version{2, 2}
 	V1_0_standart       Versions = Versions{V1_0, V1_0}
 	V1_1_standart       Versions = Versions{V1_1, V1_0}
 	V1_2_standart       Versions = Versions{V1_2, V1_0}
@@ -133,34 +138,29 @@ func (v Version) IsSearch() bool {
 }
 
 func ParseVersion(v string) (Version, error) {
-	if strings.HasPrefix(v, "v") {
-		versionString := strings.Split(v, "-")[0]
-		strVersions := strings.Split(versionString[1:], ".")
-		major, err := strconv.ParseUint(strVersions[0], 10, 8)
+	if len(v) == 0 || v[0] != 'v' {
+		return Version{}, ErrInvalidVersion
+	}
+
+	verStr, _, _ := strings.Cut(v[1:], "-")
+	majorStr, minorStr, hasDot := strings.Cut(verStr, ".")
+	if hasDot && minorStr == "" {
+		return Version{}, ErrInvalidVersion
+	}
+
+	major, err := strconv.ParseUint(majorStr, 10, 8)
+	if err != nil {
+		return Version{}, ErrInvalidVersion
+	}
+	var minor uint64
+	if len(minorStr) > 0 {
+		minor, err = strconv.ParseUint(minorStr, 10, 8)
 		if err != nil {
-			return Version{}, fmt.Errorf("invalid version: %w", err)
+			return Version{}, ErrInvalidVersion
 		}
-		var minor uint64
-		if len(strVersions) > 1 {
-			minor, err = strconv.ParseUint(strVersions[1], 10, 8)
-			if err != nil {
-				return Version{}, fmt.Errorf("invalid version: %w", err)
-			}
-		} else {
-			minor = 0
-		}
-
-		return Version{
-			Major: major,
-			Minor: minor,
-		}, nil
 	}
 
-	if len(v) == 0 {
-		return Version{}, errors.New("invalid version: no prefix")
-	}
-
-	return Version{}, fmt.Errorf("invalid version prefix: %s", v[0:1])
+	return Version{Major: major, Minor: minor}, nil
 }
 
 func (v Version) String() string {
@@ -186,7 +186,40 @@ func (v Versions) String() string {
 }
 
 func (v Versions) Supports(ver Version) bool {
-	return ver.GreaterOrEqual(v.MinSupported) && ver.LessOrEqual(v.Current)
+	if ver.Less(v.MinSupported) {
+		return false
+	}
+	// A minor bump only changes a file's content, not how it is read, so a newer
+	// minor within a supported major stays readable; only a newer major changes
+	// read logic and must be rejected.
+	if ver.Major == v.Current.Major {
+		return true
+	}
+	return ver.LessOrEqual(v.Current)
+}
+
+var mustSupportLogOnce sync.Once
+
+// MustSupport panics if ver is unsupported: older than MinSupported, or a newer
+// major than Current (a newer minor within a supported major is allowed).
+func (v Versions) MustSupport(ver Version, filename string) {
+	if v.Supports(ver) {
+		return
+	}
+	var msg string
+	if ver.Less(v.MinSupported) {
+		msg = fmt.Sprintf(
+			"Snapshot file is too old for this Erigon build: file=%s, minimum_required=%s. To fix, reset snapshots: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
+			filename, v.MinSupported,
+		)
+	} else {
+		msg = fmt.Sprintf(
+			"Snapshot file is newer than this Erigon build supports: file=%s, highest_supported=v%d.x. To fix, either upgrade Erigon to a newer release, or align snapshots by command: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
+			filename, v.Current.Major,
+		)
+	}
+	mustSupportLogOnce.Do(func() { log.Error(msg) })
+	panic(msg)
 }
 
 // FindFilesWithVersionsByPattern return an filepath by pattern
@@ -200,14 +233,14 @@ func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, erro
 		return "", Version{}, false, nil
 	}
 	if len(matches) > 1 {
-		sort.Slice(matches, func(i, j int) bool {
-			_, fName1 := filepath.Split(matches[i])
+		slices.SortFunc(matches, func(a, b string) int {
+			_, fName1 := filepath.Split(a)
 			version1, _ := ParseVersion(fName1)
 
-			_, fName2 := filepath.Split(matches[j])
+			_, fName2 := filepath.Split(b)
 			version2, _ := ParseVersion(fName2)
 
-			return version1.Less(version2)
+			return version1.Cmp(version2)
 		})
 		_, fName := filepath.Split(matches[len(matches)-1])
 		ver, _ := ParseVersion(fName)
@@ -314,13 +347,4 @@ func (v *Version) UnmarshalYAML(node *yaml.Node) error {
 	}
 	*v = ver
 	return nil
-}
-
-func VersionTooLowPanic(filename string, version Versions) {
-	panic(fmt.Sprintf(
-		"FileVersion is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
-		filename,
-		version.MinSupported,
-		version.Current,
-	))
 }

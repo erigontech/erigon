@@ -24,7 +24,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // Fatalf formats a message to standard error and exits the program.
@@ -45,4 +49,20 @@ func Fatalf(format string, args ...any) {
 	}
 	fmt.Fprintf(w, "Fatal: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+// HandleTerminationSignals blocks until SIGTERM or SIGINT is received.
+// On SIGTERM it calls stopFunc; on SIGINT it exits immediately.
+func HandleTerminationSignals(stopFunc func(), logger log.Logger) {
+	signalCh := make(chan os.Signal, 1)
+	signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
+
+	switch s := <-signalCh; s {
+	case syscall.SIGTERM:
+		logger.Info("Stopping")
+		stopFunc()
+	case syscall.SIGINT:
+		logger.Info("Terminating")
+		os.Exit(-int(syscall.SIGINT))
+	}
 }

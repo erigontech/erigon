@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/caplin/caplinflags"
@@ -54,14 +54,15 @@ type CaplinCliCfg struct {
 	MaxPeerCount          uint64        `json:"max_peer_count"`
 	JwtSecret             []byte
 
-	AllowedMethods   []string `json:"allowed_methods"`
-	AllowedOrigins   []string `json:"allowed_origins"`
-	AllowCredentials bool     `json:"allow_credentials"`
+	AllowedMethods     []string `json:"allowed_methods"`
+	AllowedOrigins     []string `json:"allowed_origins"`
+	AllowCredentials   bool     `json:"allow_credentials"`
+	SubscribeAllTopics bool     `json:"subscribe_all_topics"`
 
 	Dirs datadir.Dirs
 }
 
-func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
+func SetupCaplinCli(ctx *cli.Command) (cfg *CaplinCliCfg, err error) {
 	cfg = &CaplinCliCfg{}
 	cfg.SentinelCliCfg, err = sentinelcli.SetupSentinelCli(ctx)
 	if err != nil {
@@ -73,9 +74,9 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 	cfg.AllowedEndpoints = ctx.StringSlice(utils.BeaconAPIFlag.Name)
 
 	cfg.BeaconApiReadTimeout = time.Duration(ctx.Uint64(caplinflags.BeaconApiReadTimeout.Name)) * time.Second
-	cfg.BeaconApiWriteTimeout = time.Duration(ctx.Uint(caplinflags.BeaconApiWriteTimeout.Name)) * time.Second
+	cfg.BeaconApiWriteTimeout = time.Duration(ctx.Uint64(caplinflags.BeaconApiWriteTimeout.Name)) * time.Second
 	cfg.MaxPeerCount = ctx.Uint64(utils.CaplinMaxPeerCount.Name)
-	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(caplinflags.BeaconApiAddr.Name), ctx.Int(caplinflags.BeaconApiPort.Name))
+	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(caplinflags.BeaconApiAddr.Name), ctx.Uint(caplinflags.BeaconApiPort.Name))
 	cfg.AllowCredentials = ctx.Bool(utils.BeaconApiAllowCredentialsFlag.Name)
 	cfg.AllowedMethods = ctx.StringSlice(utils.BeaconApiAllowMethodsFlag.Name)
 	cfg.AllowedOrigins = ctx.StringSlice(utils.BeaconApiAllowOriginsFlag.Name)
@@ -86,7 +87,7 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 
 	cfg.RunEngineAPI = ctx.Bool(caplinflags.RunEngineAPI.Name)
 	cfg.EngineAPIAddr = ctx.String(caplinflags.EngineApiHostFlag.Name)
-	cfg.EngineAPIPort = ctx.Int(caplinflags.EngineApiPortFlag.Name)
+	cfg.EngineAPIPort = int(ctx.Uint(caplinflags.EngineApiPortFlag.Name))
 	if cfg.RunEngineAPI {
 		secret, err := ObtainJwtSecret(ctx)
 		if err != nil {
@@ -101,6 +102,7 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 		clparams.ConfigurableCheckpointsURLs = checkpointUrls
 	}
 
+	cfg.SubscribeAllTopics = ctx.Bool(utils.CaplinSubscribeAllTopicsFlag.Name)
 	cfg.Chaindata = ctx.String(caplinflags.ChaindataFlag.Name)
 
 	cfg.MevRelayUrl = ctx.String(caplinflags.MevRelayUrl.Name)
@@ -112,7 +114,7 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 	return cfg, err
 }
 
-func ObtainJwtSecret(ctx *cli.Context) ([]byte, error) {
+func ObtainJwtSecret(ctx *cli.Command) ([]byte, error) {
 	path := ctx.String(caplinflags.JwtSecret.Name)
 	if len(strings.TrimSpace(path)) == 0 {
 		return nil, errors.New("Missing jwt secret path")

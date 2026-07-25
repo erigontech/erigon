@@ -18,7 +18,8 @@ package sync
 
 import (
 	"context"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/p2p"
@@ -33,7 +34,7 @@ type p2pService interface {
 	FetchHeaders(ctx context.Context, start, end uint64, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Header], error)
 	FetchBodies(ctx context.Context, headers []*types.Header, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Body], error)
 	FetchBlocksBackwards(ctx context.Context, h common.Hash, hr p2p.BbdHeaderReader, opts ...p2p.BbdOption) (p2p.BbdResultFeed, error)
-	PublishNewBlock(block *types.Block, td *big.Int)
+	PublishNewBlock(block *types.Block, td uint256.Int)
 	PublishNewBlockHashes(block *types.Block)
 	Penalize(ctx context.Context, peerId *p2p.PeerId) error
 }

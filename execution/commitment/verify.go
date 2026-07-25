@@ -17,11 +17,14 @@
 package commitment
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -49,15 +52,15 @@ func VerifyBranchHashes(
 	// The branch node identified by N nibbles was folded at depth = N + 1,
 	// because the branch stores children one level deeper than its prefix path.
 	// E.g., root branch (0 nibbles) → depth=1; branch at "3a" (2 nibbles) → depth=3.
-	nibbles := uncompactNibbles(branchKey)
-	if HasTerm(nibbles) {
-		nibbles = nibbles[:len(nibbles)-1]
+	nib := nibbles.CompactToHex(branchKey)
+	if nibbles.HasTerm(nib) {
+		nib = nib[:len(nib)-1]
 	}
-	depth := int16(len(nibbles)) + 1
+	depth := int16(len(nib)) + 1
 
 	var mismatches []string
 
-	for nibble := 0; nibble < 16; nibble++ {
+	for nibble := range 16 {
 		c := row[nibble]
 		if c == nil {
 			continue
@@ -116,8 +119,9 @@ func VerifyBranchHashes(
 		c.stateHashLen = 0
 
 		// Create a fresh HexPatriciaHashed for each cell to avoid any shared state issues.
-		hph := NewHexPatriciaHashed(length.Addr, nil)
-		hph.memoizationOff = true
+		verifyCfg := DefaultTrieConfig()
+		verifyCfg.MemoizationOff = true
+		hph := NewHexPatriciaHashed(length.Addr, nil, verifyCfg)
 
 		computed, err := hph.computeCellHash(c, depth, nil)
 		if err != nil {
@@ -140,11 +144,13 @@ func VerifyBranchHashes(
 	}
 
 	if len(mismatches) > 0 {
-		msg := fmt.Sprintf("hash verification failed with %d mismatch(es) at branchKey=%x:", len(mismatches), branchKey)
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "hash verification failed with %d mismatch(es) at branchKey=%x:", len(mismatches), branchKey)
 		for _, m := range mismatches {
-			msg += "\n  " + m
+			sb.WriteString("\n  ")
+			sb.WriteString(m)
 		}
-		return fmt.Errorf("%s", msg)
+		return errors.New(sb.String())
 	}
 	return nil
 }

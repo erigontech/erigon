@@ -17,39 +17,32 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io/fs"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
-	"time"
 
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/go-viper/mapstructure/v2"
-	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/health"
-	"google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/keepalive"
-	"google.golang.org/grpc/reflection"
 
 	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/db/downloader/webseeds"
 
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
-	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -59,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -66,6 +60,7 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p/nat"
@@ -113,12 +108,14 @@ var (
 	seedbox              bool
 	dbWritemap           bool
 	all                  bool
+	diffMode             bool
 )
 
 var cobraFlagValues struct {
 	webseeds string
 	//preverifiedSource string
-	datadir string
+	datadir      string
+	chainTomlURL string
 }
 
 func init() {
@@ -128,6 +125,7 @@ func init() {
 	withChainFlag(rootCmd)
 
 	rootCmd.Flags().StringVar(&cobraFlagValues.webseeds, utils.WebSeedsFlag.Name, utils.WebSeedsFlag.Value, utils.WebSeedsFlag.Usage)
+	rootCmd.Flags().StringVar(&cobraFlagValues.chainTomlURL, utils.SnapChainTomlURLFlag.Name, utils.SnapChainTomlURLFlag.Value, utils.SnapChainTomlURLFlag.Usage)
 	rootCmd.Flags().StringVar(&natSetting, "nat", utils.NATFlag.Value, utils.NATFlag.Usage)
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
 	rootCmd.Flags().StringVar(&downloadRateStr, "torrent.download.rate", utils.TorrentDownloadRateFlag.Value, utils.TorrentDownloadRateFlag.Usage)
@@ -178,6 +176,7 @@ func init() {
 	if err := printTorrentHashes.MarkFlagFilename("targetfile"); err != nil {
 		panic(err)
 	}
+	printTorrentHashes.Flags().BoolVar(&diffMode, "diff", false, "show diff against the currently released .toml from erigon-snapshot (GitHub)")
 	rootCmd.AddCommand(printTorrentHashes)
 
 	withChainFlag(&verifyWebseedsCmd)
@@ -276,7 +275,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		webseedsList = append(webseedsList, known...)
 	}
 	if seedbox {
-		err = downloadercfg.LoadSnapshotsHashes(ctx, dirs, chain)
+		err = downloadercfg.LoadSnapshotsHashes(ctx, dirs, chain, strings.TrimSpace(cobraFlagValues.chainTomlURL))
 		if err != nil {
 			return err
 		}
@@ -671,6 +670,10 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	for _, t := range torrents {
 		res[t.DisplayName] = t.InfoHash.String()
 	}
+	if diffMode {
+		return doDiffTorrentHashes(ctx, res)
+	}
+
 	serialized, err := toml.Marshal(res)
 	if err != nil {
 		return err
@@ -699,57 +702,68 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	return nil
 }
 
-func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
-	lis, err := net.Listen("tcp", addr)
+type hashChange struct{ name, released, local string }
+
+func doDiffTorrentHashes(ctx context.Context, local map[string]string) error {
+	branch := version.DefaultSnapshotGitBranch
+	url := snapcfg.ChainTomlGitHubURL(branch, chain)
+	body, err := snapcfg.FetchChainToml(ctx, snapcfg.Github, branch, chain)
 	if err != nil {
-		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
+		return fmt.Errorf("diff: %w", err)
 	}
 
-	var (
-		streamInterceptors = make([]grpc.StreamServerInterceptor, 0, 1)
-		unaryInterceptors  = make([]grpc.UnaryServerInterceptor, 0, 1)
-	)
-	streamInterceptors = append(streamInterceptors, recovery.StreamServerInterceptor())
-	unaryInterceptors = append(unaryInterceptors, recovery.UnaryServerInterceptor())
-
-	//if metrics.Enabled {
-	//	streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
-	//	unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
-	//}
-
-	opts := []grpc.ServerOption{
-		// https://github.com/grpc/grpc-go/issues/3171#issuecomment-552796779
-		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
-			MinTime:             10 * time.Second,
-			PermitWithoutStream: true,
-		}),
-		grpc.ChainStreamInterceptor(streamInterceptors...),
-		grpc.ChainUnaryInterceptor(unaryInterceptors...),
+	released := map[string]string{}
+	if err := toml.Unmarshal(body, &released); err != nil {
+		return fmt.Errorf("diff: unmarshal released toml: %w", err)
 	}
-	if creds == nil {
-		// no specific opts
-	} else {
-		opts = append(opts, grpc.Creds(*creds))
+
+	var added, removed []string
+	var changed []hashChange
+	for name, localHash := range local {
+		if relHash, ok := released[name]; !ok {
+			added = append(added, name)
+		} else if relHash != localHash {
+			changed = append(changed, hashChange{name, relHash, localHash})
+		}
 	}
-	grpcServer := grpc.NewServer(opts...)
-	reflection.Register(grpcServer) // Register reflection service on gRPC server.
+	for name := range released {
+		if _, ok := local[name]; !ok {
+			removed = append(removed, name)
+		}
+	}
+
+	slices.Sort(added)
+	slices.Sort(removed)
+	slices.SortFunc(changed, func(a, b hashChange) int { return cmp.Compare(a.name, b.name) })
+
+	fmt.Printf("released branch: %s  url: %s\n", branch, url)
+	fmt.Printf("released: %d entries, local: %d entries, changed: %d, added: %d, removed: %d\n", len(released), len(local), len(changed), len(added), len(removed))
+
+	if len(added) == 0 && len(removed) == 0 && len(changed) == 0 {
+		fmt.Println("no diff")
+		return nil
+	}
+	for _, c := range changed {
+		fmt.Printf("CHANGED %s released=%s local=%s\n", c.name, c.released, c.local)
+	}
+	for _, name := range added {
+		fmt.Printf("ADDED   %s %s\n", name, local[name])
+	}
+	for _, name := range removed {
+		fmt.Printf("REMOVED %s %s\n", name, released[name])
+	}
+	return nil
+}
+
+func StartGrpc(snServer *downloader.GrpcServer, addr string, creds credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
+	grpcServer := grpcutil.NewServerWithOpts(creds)
 	if snServer != nil {
 		downloaderproto.RegisterDownloaderServer(grpcServer, snServer)
 	}
 
-	//if metrics.Enabled {
-	//	grpc_prometheus.Register(grpcServer)
-	//}
-
-	healthServer := health.NewServer()
-	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
-
-	go func() {
-		defer healthServer.Shutdown()
-		if err := grpcServer.Serve(lis); err != nil {
-			logger.Error("gRPC server stop", "err", err)
-		}
-	}()
+	if err := grpcutil.StartServer(grpcServer, addr, true, logger, "gRPC server stop"); err != nil {
+		return nil, err
+	}
 	logger.Info("Started gRPC server", "on", addr)
 	return grpcServer, nil
 }
@@ -771,7 +785,7 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	}
 	defer db.Close()
 
-	if cc := tool.ChainConfigFromDB(db); cc != nil {
+	if cc := fromdb.ChainConfig(db); cc != nil {
 		spc, err := chainspec.ChainSpecByName(chainName)
 		if err != nil {
 			return fmt.Errorf("unknown chain: %s", chainName)

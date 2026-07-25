@@ -33,14 +33,14 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 type Opt func(bt *Backtester)
@@ -69,7 +69,7 @@ func WithChartsPageSize(n uint64) Opt {
 	}
 }
 
-func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, outputDir string, opts ...Opt) Backtester {
+func New(logger log.Logger, db kv.TemporalRoDB, br dbservices.FullBlockReader, outputDir string, opts ...Opt) Backtester {
 	bt := Backtester{
 		logger:          logger,
 		db:              db,
@@ -87,7 +87,7 @@ func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, out
 type Backtester struct {
 	logger          log.Logger
 	db              kv.TemporalRoDB
-	blockReader     services.FullBlockReader
+	blockReader     dbservices.FullBlockReader
 	outputDir       string
 	paraTrie        bool
 	trieWarmup      bool
@@ -154,8 +154,12 @@ func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64
 	if err != nil {
 		return err
 	}
+	idx, err := integrity.NewChangedKeysPerBlockIdx(ctx, tx, bt.blockReader, fromBlock, toBlock+1, bt.logger)
+	if err != nil {
+		return err
+	}
 	for block := fromBlock; block <= toBlock; block++ {
-		err = bt.backtestBlock(ctx, tx, block, tnr, runOutputDir)
+		err = bt.backtestBlock(ctx, tx, block, tnr, runOutputDir, idx)
 		if err != nil {
 			return err
 		}
@@ -174,7 +178,7 @@ func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64
 	return nil
 }
 
-func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block uint64, tnr rawdbv3.TxNumsReader, runOutputDir string) error {
+func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block uint64, tnr rawdbv3.TxNumsReader, runOutputDir string, idx *integrity.ChangedKeysPerBlockIdx) error {
 	start := time.Now()
 	bt.logger.Info("backtesting block commitment", "block", block)
 	blockOutputDir := deriveBlockOutputDir(runOutputDir, block)
@@ -192,17 +196,19 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	}
 	toTxNum := maxTxNum + 1
 	bt.logger.Info("backtesting block commitment", "fromTxNum", fromTxNum, "toTxNum", toTxNum, "paraTrie", bt.paraTrie)
+	cfg := commitment.DefaultTrieConfig()
 	if bt.paraTrie {
-		statecfg.ExperimentalConcurrentCommitment = true
+		cfg.Variant = commitment.VariantParallelHexPatricia
 	}
-	sd, err := execctx.NewSharedDomains(ctx, tx, bt.logger)
+	cfg.EnableTrieWarmup = bt.trieWarmup
+	cfg.CsvMetricsFilePrefix = deriveBlockMetricsFilePrefix(blockOutputDir)
+	sd, err := execctx.NewSharedDomains(ctx, tx, bt.logger, execctx.WithTrieConfig(cfg))
 	if err != nil {
 		return err
 	}
 	defer sd.Close()
 	if bt.trieWarmup {
 		sd.EnableParaTrieDB(bt.db)
-		sd.EnableTrieWarmup(true)
 	}
 	if bt.paraTrie {
 		sd.EnableParaTrieDB(bt.db)
@@ -211,8 +217,11 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	//   - commitment data as-of the beginning of the block
 	//   - account/storage/code data as-of the end of the block
 	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewSplitHistoryReader(tx, fromTxNum, toTxNum /* withHistory */, false))
-	sd.GetCommitmentCtx().SetTrace(bt.logger.Enabled(ctx, log.LvlTrace))
-	sd.GetCommitmentCtx().EnableCsvMetrics(deriveBlockMetricsFilePrefix(blockOutputDir))
+	if bt.logger.Enabled(ctx, log.LvlTrace) {
+		sd.GetCommitmentCtx().SetTraceWriter(os.Stderr)
+	} else {
+		sd.GetCommitmentCtx().SetTraceWriter(nil)
+	}
 	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
 		return err
@@ -221,15 +230,15 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 		return fmt.Errorf("unexpected sd block number: %d != %d", latestBlockNum, expected)
 	}
 	if expected := fromTxNum - 1; latestTxNum != expected {
-		return fmt.Errorf("unexpected sd tx number: %d != %d", latestTxNum, maxTxNum)
+		return fmt.Errorf("unexpected sd tx number: %d != %d", latestTxNum, expected)
 	}
-	err = bt.replayChanges(tx, kv.AccountsDomain, sd, fromTxNum, toTxNum)
-	if err != nil {
-		return err
-	}
-	err = bt.replayChanges(tx, kv.StorageDomain, sd, fromTxNum, toTxNum)
-	if err != nil {
-		return err
+	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+		domainIdx := idx[d]
+		offsets := domainIdx.Offsets(block)
+		for _, off := range offsets {
+			sd.GetCommitmentCtx().TouchKey(d, domainIdx.Key(off), nil)
+		}
+		bt.logger.Info("replayed changes", "domain", d, "changes", len(offsets))
 	}
 	bt.logger.Info("computing commitment", "block", block)
 	cpuProfilePath := path.Join(blockOutputDir, "cpu.prof")
@@ -285,29 +294,6 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	return nil
 }
 
-func (bt Backtester) replayChanges(tx kv.TemporalTx, d kv.Domain, sd *execctx.SharedDomains, fromTxNum uint64, toTxNum uint64) error {
-	starTime := time.Now()
-	changes := 0
-	defer func() {
-		bt.logger.Info("replayed changes", "domain", d, "changes", changes, "in", time.Since(starTime))
-	}()
-	bt.logger.Info("replaying changes", "domain", d, "fromTxNum", fromTxNum, "toTxNum", toTxNum)
-	it, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
-	if err != nil {
-		return err
-	}
-	defer it.Close()
-	for it.HasNext() {
-		k, _, err := it.Next()
-		if err != nil {
-			return err
-		}
-		sd.GetCommitmentContext().TouchKey(d, string(k), nil)
-		changes++
-	}
-	return nil
-}
-
 func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputDir string) (string, error) {
 	bt.logger.Info("processing results", "fromBlock", fromBlock, "toBlock", toBlock, "runOutputDir", runOutputDir)
 	var chartsPageFilePaths []string
@@ -339,15 +325,15 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 				heap.Push(&topNSlowest, mv)
 			}
 			for branchKey, branchStats := range mVals[0].Branches {
-				nibbles, err := hex.DecodeString(branchKey)
+				nibs, err := hex.DecodeString(branchKey)
 				if err != nil {
 					return "", err
 				}
-				if commitment.HasTerm(nibbles) {
-					nibbles = nibbles[:len(nibbles)-1]
+				if nibbles.HasTerm(nibs) {
+					nibs = nibs[:len(nibs)-1]
 				}
-				lastNibble := nibbles[len(nibbles)-1]
-				depth := len(nibbles) - 1
+				lastNibble := nibs[len(nibs)-1]
+				depth := len(nibs) - 1
 				branchJumpdestCounts[depth][lastNibble] += branchStats.LoadBranch
 				branchKeyLenCounts[depth]++
 			}

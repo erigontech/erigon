@@ -23,11 +23,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 )
 
-func SnapBlocksRead(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, from, to uint64, failFast bool) error {
+func SnapBlocksRead(ctx context.Context, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, from, to uint64, failFast bool) error {
 	defer log.Info("[integrity] Blocks: done")
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
@@ -35,14 +35,18 @@ func SnapBlocksRead(ctx context.Context, db kv.TemporalRoDB, blockReader service
 	maxBlockNum := blockReader.Snapshots().SegmentsMax()
 
 	if to != 0 && maxBlockNum > to {
-		maxBlockNum = 2
+		maxBlockNum = to
 	}
 
 	for i := from; i < maxBlockNum; i += 10_000 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			b, err := blockReader.BlockByNumber(ctx, tx, i)
 			if err != nil {
-				return err
+				if failFast {
+					return err
+				}
+				log.Error("[integrity] Blocks", "err", err)
+				return nil
 			}
 			if b == nil {
 				err := fmt.Errorf("[integrity] block not found in snapshots: %d", i)

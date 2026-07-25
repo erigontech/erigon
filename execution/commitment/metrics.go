@@ -1,10 +1,11 @@
 package commitment
 
 import (
+	"cmp"
 	"encoding/csv"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,12 +35,15 @@ type Metrics struct {
 	cacheBranch     atomic.Uint64
 	cacheAccount    atomic.Uint64
 	cacheStorage    atomic.Uint64
+	missBranch      atomic.Uint64
+	missAccount     atomic.Uint64
+	missStorage     atomic.Uint64
 	updateBranch    atomic.Uint64
 	loadDepths      [10]uint64
 	unfolds         atomic.Uint64
-	spentUnfolding  time.Duration
-	spentFolding    time.Duration
-	spentProcessing time.Duration
+	spentUnfolding  atomic.Int64
+	spentFolding    atomic.Int64
+	spentProcessing atomic.Int64
 	// metric config related
 	metricsFilePrefix        string
 	collectCommitmentMetrics bool
@@ -59,6 +63,9 @@ type MetricValues struct {
 	CacheBranch     uint64
 	CacheAccount    uint64
 	CacheStorage    uint64
+	MissBranch      uint64
+	MissAccount     uint64
+	MissStorage     uint64
 	UpdateBranch    uint64
 	LoadDepths      [10]uint64
 	Unfolds         uint64
@@ -79,17 +86,40 @@ func (m MetricValues) RUnlock() {
 	}
 }
 
-func NewMetrics() *Metrics {
+// NewMetrics creates a new Metrics instance. If csvPrefix is non-empty, CSV metrics
+// are enabled with that prefix. Otherwise, falls back to the
+// ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX environment variable.
+func NewMetrics(csvPrefix string) *Metrics {
 	metrics := &Metrics{
 		Accounts:                 NewAccounts(),
 		Branches:                 NewBranches(),
 		collectCommitmentMetrics: dbg.KVReadLevelledMetrics,
 	}
-	csvFilePathPrefix := dbg.EnvString("ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX", "")
-	if csvFilePathPrefix != "" {
-		metrics.EnableCsvMetrics(csvFilePathPrefix)
-	}
+	metrics.SetCsvMetrics(csvPrefix)
 	return metrics
+}
+
+// SetCsvMetrics enables CSV metrics for filePathPrefix, falling back to the
+// ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX env var when it is empty. An
+// empty prefix with no env var disables CSV metrics, so a pooled Metrics reused
+// without a prefix does not keep writing to a stale file.
+var csvMetricsEnvPrefix = sync.OnceValue(func() string {
+	return dbg.EnvString("ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX", "")
+})
+
+func (m *Metrics) SetCsvMetrics(filePathPrefix string) {
+	if filePathPrefix == "" {
+		filePathPrefix = csvMetricsEnvPrefix()
+	}
+	if filePathPrefix != "" {
+		m.EnableCsvMetrics(filePathPrefix)
+		return
+	}
+	m.metricsFilePrefix = ""
+	m.writeCommitmentMetrics = false
+	m.collectCommitmentMetrics = dbg.KVReadLevelledMetrics
+	m.Accounts.writeCommitmentMetrics = false
+	m.Branches.writeCommitmentMetrics = false
 }
 
 func (m *Metrics) EnableCsvMetrics(filePathPrefix string) {
@@ -114,12 +144,15 @@ func (m *Metrics) AsValues() MetricValues {
 		CacheBranch:     m.cacheBranch.Load(),
 		CacheAccount:    m.cacheAccount.Load(),
 		CacheStorage:    m.cacheStorage.Load(),
+		MissBranch:      m.missBranch.Load(),
+		MissAccount:     m.missAccount.Load(),
+		MissStorage:     m.missStorage.Load(),
 		UpdateBranch:    m.updateBranch.Load(),
 		LoadDepths:      m.loadDepths,
 		Unfolds:         m.unfolds.Load(),
-		SpentUnfolding:  m.spentUnfolding,
-		SpentFolding:    m.spentFolding,
-		SpentProcessing: m.spentProcessing,
+		SpentUnfolding:  time.Duration(m.spentUnfolding.Load()),
+		SpentFolding:    time.Duration(m.spentFolding.Load()),
+		SpentProcessing: time.Duration(m.spentProcessing.Load()),
 	}
 }
 
@@ -145,8 +178,10 @@ func (m *Metrics) logMetrics() []any {
 		"rds", common.PrettyCounter(m.loadStorage.Load()), "wrb", common.PrettyCounter(m.updateBranch.Load()),
 		"cb", common.PrettyCounter(m.cacheBranch.Load()), "ca", common.PrettyCounter(m.cacheAccount.Load()),
 		"cs", common.PrettyCounter(m.cacheStorage.Load()),
-		"fld", common.PrettyCounter(m.unfolds.Load()), "pdur", common.Round(m.spentProcessing, 0).String(),
-		"fdur", common.Round(m.spentFolding, 0).String(), "ufdur", common.Round(m.spentUnfolding, 0),
+		"mb", common.PrettyCounter(m.missBranch.Load()), "ma", common.PrettyCounter(m.missAccount.Load()),
+		"ms", common.PrettyCounter(m.missStorage.Load()),
+		"fld", common.PrettyCounter(m.unfolds.Load()), "pdur", common.Round(time.Duration(m.spentProcessing.Load()), 0).String(),
+		"fdur", common.Round(time.Duration(m.spentFolding.Load()), 0).String(), "ufdur", common.Round(time.Duration(m.spentUnfolding.Load()), 0),
 	}
 }
 
@@ -197,9 +232,9 @@ func (m *Metrics) Values() [][]string {
 			strconv.FormatUint(m.loadDepths[6], 10) + "/" + strconv.FormatUint(m.loadDepths[7], 10),
 			strconv.FormatUint(m.loadDepths[8], 10) + "/" + strconv.FormatUint(m.loadDepths[9], 10),
 			strconv.FormatUint(m.unfolds.Load(), 10),
-			strconv.FormatInt(m.spentUnfolding.Milliseconds(), 10),
-			strconv.FormatInt(m.spentFolding.Milliseconds(), 10),
-			strconv.FormatInt(m.spentProcessing.Milliseconds(), 10),
+			strconv.FormatInt(time.Duration(m.spentUnfolding.Load()).Milliseconds(), 10),
+			strconv.FormatInt(time.Duration(m.spentFolding.Load()).Milliseconds(), 10),
+			strconv.FormatInt(time.Duration(m.spentProcessing.Load()).Milliseconds(), 10),
 		},
 	}
 	if have, want := len(vals[0]), len(m.Headers()); have != want {
@@ -236,21 +271,29 @@ func UnmarshallMetricsCsv(filePath string) ([]*Metrics, error) {
 			col++
 			for k := range 5 {
 				depthsPair := row[col]
-				depthsSplit := strings.Split(depthsPair, "/")
-				if len(depthsSplit) != 2 {
+				left, right, ok := strings.Cut(depthsPair, "/")
+				if !ok || strings.Contains(right, "/") {
 					return nil, fmt.Errorf("invalid depths pair: %s", depthsPair)
 				}
-				current.loadDepths[k*2] = mustParseUintCsvCell(depthsSplit, 0, filePath)
-				current.loadDepths[k*2+1] = mustParseUintCsvCell(depthsSplit, 1, filePath)
+				leftVal, err := strconv.ParseUint(left, 10, 64)
+				if err != nil {
+					panic(fmt.Errorf("parsing %q cell at column 0 in %s: %w", left, filePath, err))
+				}
+				rightVal, err := strconv.ParseUint(right, 10, 64)
+				if err != nil {
+					panic(fmt.Errorf("parsing %q cell at column 1 in %s: %w", right, filePath, err))
+				}
+				current.loadDepths[k*2] = leftVal
+				current.loadDepths[k*2+1] = rightVal
 				col++
 			}
 			current.unfolds.Store(mustParseUintCsvCell(row, col, filePath))
 			col++
-			current.spentUnfolding = mustParseMillisecondsCsvCell(row, col, filePath)
+			current.spentUnfolding.Store(int64(mustParseMillisecondsCsvCell(row, col, filePath)))
 			col++
-			current.spentFolding = mustParseMillisecondsCsvCell(row, col, filePath)
+			current.spentFolding.Store(int64(mustParseMillisecondsCsvCell(row, col, filePath)))
 			col++
-			current.spentProcessing = mustParseMillisecondsCsvCell(row, col, filePath)
+			current.spentProcessing.Store(int64(mustParseMillisecondsCsvCell(row, col, filePath)))
 			if cols := col + 1; cols != len(row) {
 				return nil, fmt.Errorf("invalid number of columns processed: row=%d, have=%d, want=%d, file=%s", i, cols, len(row), filePath)
 			}
@@ -268,6 +311,9 @@ func (m *Metrics) Reset() {
 	m.loadAccount.Store(0)
 	m.loadStorage.Store(0)
 	m.updateBranch.Store(0)
+	m.missBranch.Store(0)
+	m.missAccount.Store(0)
+	m.missStorage.Store(0)
 	m.unfolds.Store(0)
 
 	if !m.collectCommitmentMetrics {
@@ -276,9 +322,9 @@ func (m *Metrics) Reset() {
 
 	m.Accounts.Reset()
 	m.Branches.Reset()
-	m.spentUnfolding = 0
-	m.spentFolding = 0
-	m.spentProcessing = 0
+	m.spentUnfolding.Store(0)
+	m.spentFolding.Store(0)
+	m.spentProcessing.Store(0)
 }
 
 func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
@@ -290,7 +336,7 @@ func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
 		ends = append(ends, k)
 	}
 	// sort by file endTxNum
-	sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
+	slices.SortFunc(ends, func(a, b uint64) int { return cmp.Compare(b, a) })
 	for i := 0; i < 5 && i < len(ends); i++ {
 		// get stats for specific file depth
 		v := endTxNumStats[ends[i]]
@@ -346,7 +392,7 @@ func (m *Metrics) StartUnfolding(plainKey []byte) func() {
 		start := time.Now()
 		return func() {
 			d := time.Since(start)
-			m.spentUnfolding += d
+			m.spentUnfolding.Add(int64(d))
 			m.Accounts.collect(plainKey, func(mx *AccountStats) {
 				mx.SpentUnfolding += d
 			})
@@ -360,7 +406,7 @@ func (m *Metrics) StartFolding(plainKey []byte) func() {
 		start := time.Now()
 		return func() {
 			d := time.Since(start)
-			m.spentFolding += d
+			m.spentFolding.Add(int64(d))
 			m.Accounts.collect(plainKey, func(mx *AccountStats) {
 				mx.SpentFolding += d
 			})
@@ -371,7 +417,7 @@ func (m *Metrics) StartFolding(plainKey []byte) func() {
 
 func (m *Metrics) TotalProcessingTimeInc(t time.Time) {
 	if m.collectCommitmentMetrics {
-		m.spentProcessing += time.Since(t)
+		m.spentProcessing.Add(int64(time.Since(t)))
 	}
 }
 

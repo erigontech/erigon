@@ -55,3 +55,18 @@ func TestTracer_AccessList_Order(t *testing.T) {
 	require.Equal(t, ordered, al.accessListSorted())
 	require.True(t, al.Equal(al)) //nolint:gocritic
 }
+
+func TestNewAccessListTracerExcludedAddress(t *testing.T) {
+	excluded := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	slot := common.HexToHash("0x01")
+	prelude := types.AccessList{{
+		Address:     excluded,
+		StorageKeys: []common.Hash{slot},
+	}}
+	excl := map[common.Address]struct{}{excluded: {}}
+	tracer := NewAccessListTracer(prelude, excl, nil)
+	got := tracer.AccessList()
+	if len(got) != 0 {
+		t.Fatalf("excluded prelude address must not contribute tuples, got %+v", got)
+	}
+}

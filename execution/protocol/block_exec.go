@@ -25,9 +25,6 @@ import (
 	"slices"
 	"time"
 
-	keccak "github.com/erigontech/fastkeccak"
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -38,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -68,16 +64,16 @@ type RejectedTx struct {
 type RejectedTxs []*RejectedTx
 
 type EphemeralExecResult struct {
-	StateRoot        common.Hash         `json:"stateRoot"`
-	TxRoot           common.Hash         `json:"txRoot"`
-	ReceiptRoot      common.Hash         `json:"receiptsRoot"`
-	LogsHash         common.Hash         `json:"logsHash"`
-	Bloom            types.Bloom         `json:"logsBloom"        gencodec:"required"`
-	Receipts         types.Receipts      `json:"receipts"`
-	Rejected         RejectedTxs         `json:"rejected,omitempty"`
-	Difficulty       *uint256.Int        `json:"currentDifficulty" gencodec:"required"`
-	GasUsed          math.HexOrDecimal64 `json:"gasUsed"`
-	StateSyncReceipt *types.Receipt      `json:"-"`
+	StateRoot        common.Hash           `json:"stateRoot"`
+	TxRoot           common.Hash           `json:"txRoot"`
+	ReceiptRoot      common.Hash           `json:"receiptsRoot"`
+	LogsHash         common.Hash           `json:"logsHash"`
+	Bloom            types.Bloom           `json:"logsBloom"        gencodec:"required"`
+	Receipts         types.Receipts        `json:"receipts"`
+	Rejected         RejectedTxs           `json:"rejected,omitempty"`
+	Difficulty       *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
+	GasUsed          math.HexOrDecimal64   `json:"gasUsed"`
+	StateSyncReceipt *types.Receipt        `json:"-"`
 }
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
@@ -101,10 +97,9 @@ func ExecuteBlockEphemerally(
 	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Time()))
 
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnBlockStart != nil {
-		td := chainReader.GetTd(block.ParentHash(), block.NumberU64()-1)
 		vmConfig.Tracer.OnBlockStart(tracing.BlockEvent{
 			Block:     block,
-			TD:        td,
+			TD:        chainReader.GetTd(block.ParentHash(), block.NumberU64()-1),
 			Finalized: chainReader.CurrentFinalizedHeader(),
 			Safe:      chainReader.CurrentSafeHeader(),
 		})
@@ -177,7 +172,9 @@ func ExecuteBlockEphemerally(
 
 	var bloom types.Bloom
 	if !vmConfig.NoReceipts {
-		bloom = types.CreateBloom(receipts)
+		// ApplyTransaction populated each receipt's Bloom, so merge those
+		// instead of hashing all logs again.
+		bloom = receipts.MergedBloom()
 		if !vmConfig.StatelessExec && bloom != header.Bloom {
 			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
@@ -200,7 +197,7 @@ func ExecuteBlockEphemerally(
 		Bloom:       bloom,
 		LogsHash:    rlpHash(blockLogs),
 		Receipts:    receipts,
-		Difficulty:  &header.Difficulty,
+		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty.ToBig()),
 		GasUsed:     math.HexOrDecimal64(blockGasUsed),
 		Rejected:    rejectedTxs,
 	}
@@ -230,12 +227,7 @@ func ExecuteBlockEphemerally(
 	return execRs, nil
 }
 
-func rlpHash(x any) (h common.Hash) {
-	hw := keccak.NewFastKeccak()
-	rlp.Encode(hw, x) //nolint:errcheck
-	hw.Sum(h[:0])
-	return h
-}
+var rlpHash = types.RlpHash
 
 func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	isBor := chainConfig.Bor != nil
@@ -279,9 +271,14 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	mdGas := mdgas.MdGas{
 		Regular: msg.Gas(),
-		State:   0, // state gas reservoir will consume from regular gas for sys calls
+		State:   0, // pre-Amsterdam: state-gas reservoir not used; spills into regular gas
 	}
-	ret, _, err := evm.Call(
+	if evm.ChainRules().IsAmsterdam {
+		// EIP-8037: extra state-gas reservoir on top of the 30M regular budget
+		// so system calls keep their pre-EIP-8037 execution margin.
+		mdGas.State = params.StateGasSystemMaxSstores
+	}
+	ret, _, _, err := evm.Call(
 		msg.From(),
 		msg.To(),
 		msg.Data(),
@@ -356,9 +353,15 @@ func FinalizeBlockExecution(
 		return nil, nil, err
 	}
 
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
-	if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
-		return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
+	// A versioned ibs (parallel-mode block assembly) commits from the versionMap
+	// write-set — the caller applies ba.BalIO() via WriteSet.Normalize/Apply after
+	// assembly, so so.data must not also be flushed here. versionMap==nil callers
+	// (ExecuteBlockEphemerally, RPC) keep the so.data CommitBlock.
+	if !ibs.IsVersioned() {
+		blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
+		if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
+			return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
+		}
 	}
 
 	return newBlock, retRequests, nil
@@ -379,57 +382,4 @@ func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader
 	}
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
 	return ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
-}
-
-var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
-
-func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
-	if blockGasUsed != h.GasUsed {
-		logger.Warn("gas used mismatch", "block", h.Number.Uint64(), "header", h.GasUsed, "execution", blockGasUsed,
-			"diff", int64(blockGasUsed)-int64(h.GasUsed), "txCount", len(txns), "receiptCount", len(receipts))
-		// Dump per-tx gas for debugging
-		var cumGas uint64
-		for i, r := range receipts {
-			txGas := r.GasUsed
-			cumGas += txGas
-			var txHash string
-			if i < len(txns) {
-				txHash = txns[i].Hash().Hex()[:18]
-			}
-			logger.Warn("  tx gas detail", "block", h.Number.Uint64(), "txIdx", i, "txHash", txHash,
-				"gasUsed", txGas, "cumGasUsed", r.CumulativeGasUsed, "computedCumGas", cumGas, "status", r.Status)
-		}
-		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
-			blockGasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
-	}
-
-	if h.BlobGasUsed != nil && blobGasUsed != *h.BlobGasUsed {
-		return fmt.Errorf("blobGasUsed by execution: %d, in header: %d, headerNum=%d, %x",
-			blobGasUsed, *h.BlobGasUsed, h.Number.Uint64(), h.Hash())
-	}
-
-	if checkReceipts && !alwaysSkipReceiptCheck {
-		for _, r := range receipts {
-			r.Bloom = types.CreateBloom(types.Receipts{r})
-		}
-		receiptHash := types.DeriveSha(receipts)
-		if receiptHash != h.ReceiptHash {
-			if dbg.LogHashMismatchReason() {
-				ethutils.LogReceipts(log.LvlWarn, "receipt hash mismatch in BlockPostValidation", receipts, txns, chainConfig, h, logger)
-			}
-			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
-				receiptHash, h.ReceiptHash, h.Number.Uint64(), h.Hash())
-		}
-
-		lbloom := types.CreateBloom(receipts)
-		if lbloom != h.Bloom {
-			return fmt.Errorf("invalid bloom (remote: %x  local: %x)", h.Bloom, lbloom)
-		}
-	}
-
-	if dbg.TraceLogs && dbg.TraceBlock(h.Number.Uint64()) {
-		ethutils.LogReceipts(log.LvlInfo, "trace logs", receipts, txns, chainConfig, h, logger)
-	}
-
-	return nil
 }

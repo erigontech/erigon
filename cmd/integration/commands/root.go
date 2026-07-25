@@ -88,7 +88,7 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	return opts
 }
 
-func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
+func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
 	migrationDBs := map[kv.Label]bool{
 		dbcfg.ChainDB:         true,
 		dbcfg.ConsensusDB:     true,
@@ -99,12 +99,15 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Lo
 		panic(opts.GetLabel())
 	}
 
-	rawDB := opts.MustOpen()
+	// Apply migrations BEFORE the accede-mode open. In accede mode MDBX cannot
+	// create new tables, so if a table was added to the schema after the DB was
+	// originally created (e.g. BlockAccessList) the open would panic. The
+	// exclusive-mode open used during migration creates any missing tables as a
+	// side-effect, preventing the subsequent accede-mode open from panicking.
 	if applyMigrations {
 		dirs := datadir.New(datadirCli)
 		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
 		if err != nil {
-			rawDB.Close()
 			return nil, fmt.Errorf("open migrations db: %w", err)
 		}
 		defer migrationsDB.Close()
@@ -116,25 +119,30 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Lo
 		}
 		if has {
 			logger.Info("Re-Opening DB in exclusive mode to apply DB migrations")
-			rawDB.Close()
-			rawDB = opts.Exclusive(true).MustOpen()
-			if err := migrator.Apply(rawDB, migrationsDB, datadirCli, "", logger); err != nil {
+			rawDBExcl := opts.Exclusive(true).MustOpen()
+			if err := migrator.Apply(rawDBExcl, migrationsDB, datadirCli, "", logger); err != nil {
+				rawDBExcl.Close()
 				return nil, err
 			}
-			rawDB.Close()
-			rawDB = opts.MustOpen()
+			rawDBExcl.Close()
 		}
 	}
+
+	rawDB := opts.MustOpen()
 
 	dirs := datadir.New(datadirCli)
 	if err := CheckSaltFilesExist(dirs); err != nil {
 		return nil, err
 	}
 
-	_, _, agg, _, _, _, err := allSnapshots(context.Background(), rawDB, logger)
+	blockSnaps, _, agg, _, _, _, err := allSnapshots(ctx, rawDB, logger)
 	if err != nil {
 		return nil, err
 	}
 
-	return temporal.New(rawDB, agg)
+	db, err := temporal.New(rawDB, agg, blockSnaps)
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
 }

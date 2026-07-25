@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -19,38 +19,35 @@ package shards
 import (
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
-func TestRecentReceipts(t *testing.T) {
-	t.Parallel()
-	t.Run("Evict", func(t *testing.T) {
-		e := NewRecentReceipts(3)
-		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(1)}}, []types.Transaction{}, nil)
-		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(11)}}, []types.Transaction{}, nil)
-		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(21)}}, []types.Transaction{}, nil)
-		require.Len(t, e.receipts, 3)
+func TestSyncStateSubscriptionReceivesPublishedReply(t *testing.T) {
+	events := NewEvents()
+	ch, unsubscribe := events.AddSyncStateSubscription()
+	defer unsubscribe()
 
-		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(31)}}, []types.Transaction{}, nil)
-		require.Len(t, e.receipts, 1)
-	})
-	t.Run("Nil", func(t *testing.T) {
-		e := NewRecentReceipts(3)
-		e.Add(types.Receipts{nil, {BlockNumber: uint256.NewInt(1)}}, []types.Transaction{}, nil)
-		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(21)}, nil}, []types.Transaction{}, nil)
-		e.Add(types.Receipts{nil, nil, {BlockNumber: uint256.NewInt(31)}}, []types.Transaction{}, nil)
-		require.Len(t, e.receipts, 3)
-	})
-	t.Run("Order", func(t *testing.T) {
-		e := NewRecentReceipts(3)
-		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(1)}}, []types.Transaction{}, nil)
-		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(11)}}, []types.Transaction{}, nil)
-		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(1)}}, []types.Transaction{}, nil)
-		require.Len(t, e.receipts, 2)
-		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(11)}}, []types.Transaction{}, nil)
-		require.Len(t, e.receipts, 2)
-	})
+	published := &remoteproto.SyncingReply{Syncing: true, CurrentBlock: 42, LastNewBlockSeen: 100}
+	events.OnNewSyncState(published)
+
+	select {
+	case got := <-ch:
+		require.Equal(t, published, got)
+	default:
+		t.Fatal("expected a sync state notification on the subscription channel")
+	}
+}
+
+func TestSyncStateSubscriptionUnsubscribeStopsDelivery(t *testing.T) {
+	events := NewEvents()
+	ch, unsubscribe := events.AddSyncStateSubscription()
+	unsubscribe()
+
+	events.OnNewSyncState(&remoteproto.SyncingReply{Syncing: false})
+
+	if _, ok := <-ch; ok {
+		t.Fatal("expected closed channel with no pending notifications after unsubscribe")
+	}
 }

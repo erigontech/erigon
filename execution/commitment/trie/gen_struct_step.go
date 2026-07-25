@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -44,15 +45,11 @@ type structInfoReceiver interface {
 	topHash() []byte
 	topHashes(prefix []byte, branches, children uint16) []byte
 	printTopHashes(prefix []byte, branches, children uint16)
-	setProofElement(pe *proofElement)
 }
 
-// hashCollector gets called whenever there might be a need to create intermediate hash record
-type HashCollector func(keyHex []byte, hash []byte) error
-type StorageHashCollector func(accWithInc []byte, keyHex []byte, hash []byte) error
-
-type HashCollector2 func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error
-type StorageHashCollector2 func(accWithInc []byte, keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error
+// HashCollector gets called whenever there might be a need to create intermediate hash record
+type HashCollector func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error
+type StorageHashCollector func(accWithInc []byte, keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error
 
 func calcPrecLen(groups []uint16) int {
 	if len(groups) == 0 {
@@ -104,20 +101,16 @@ func (GenStructStepHashData) GenStructStepData() {}
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 
-// GenStructStepEx is extended to support optional generation of an Account Proof during trie_root.go CalcTrieRoot().
-// The wrapper below calls it with nil/false defaults so that other callers do not need to be modified.
-func GenStructStepEx(
+func GenStructStep(
 	retain func(prefix []byte) bool,
 	curr, succ []byte,
 	e structInfoReceiver,
-	h HashCollector2,
+	h HashCollector,
 	data GenStructStepData,
 	groups []uint16,
 	hasTree []uint16,
 	hasHash []uint16,
 	trace bool,
-	retainProof func(prefix []byte) *proofElement,
-	cutoff bool,
 ) ([]uint16, []uint16, []uint16, error) {
 	for precLen, buildExtensions := calcPrecLen(groups), false; precLen >= 0; precLen, buildExtensions = calcPrecLen(groups), true {
 		var precExists = len(groups) > 0
@@ -126,7 +119,7 @@ func GenStructStepEx(
 		if len(groups) > 0 {
 			precLen = len(groups) - 1
 		}
-		succLen := prefixLen(succ, curr)
+		succLen := nibbles.CommonPrefixLen(succ, curr)
 		var maxLen int
 		maxLen = max(precLen, succLen)
 		if trace || maxLen >= len(curr) {
@@ -150,20 +143,6 @@ func GenStructStepEx(
 		}
 		//fmt.Printf("groups is now %x,%d,%b\n", extraDigit, maxLen, groups)
 
-		// retainIfProving will call setProofElement to a new proof element
-		// it is the caller's responsibility set the proof element to nil after the
-		// next element invocation. This function returns whether a proof is needed
-		// for this node.
-		retainIfProving := func(key []byte) bool {
-			if retainProof != nil {
-				if pe := retainProof(key); pe != nil {
-					e.setProofElement(pe)
-					return true
-				}
-			}
-			return false
-		}
-
 		if !buildExtensions {
 			switch v := data.(type) {
 			case *GenStructStepHashData:
@@ -183,13 +162,9 @@ func GenStructStepEx(
 				}
 				buildExtensions = true
 			case *GenStructStepAccountData:
-				proving := retainIfProving(curr[:remainderStart])
-				if proving || retain(curr[:maxLen]) {
+				if retain(curr[:maxLen]) {
 					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet, codeSizeUncached); err != nil {
 						return nil, nil, nil, err
-					}
-					if proving {
-						e.setProofElement(nil)
 					}
 				} else {
 					if err := e.accountLeafHash(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
@@ -198,13 +173,9 @@ func GenStructStepEx(
 				}
 			case *GenStructStepLeafData:
 				/* building leafs */
-				proving := retainIfProving(curr[:remainderStart])
-				if proving || retain(curr[:maxLen]) {
+				if retain(curr[:maxLen]) {
 					if err := e.leaf(remainderLen, curr, v.Value); err != nil {
 						return nil, nil, nil, err
-					}
-					if proving {
-						e.setProofElement(nil)
 					}
 				} else {
 					if err := e.leafHash(remainderLen, curr, v.Value); err != nil {
@@ -245,13 +216,9 @@ func GenStructStepEx(
 					fmt.Printf("Extension: %x, %b, %b, %b\n", curr[remainderStart:remainderStart+remainderLen], hasHash, hasTree, groups)
 				}
 				/* building extensions */
-				proving := retainIfProving(curr[:remainderStart])
-				if proving || retain(curr[:maxLen]) {
+				if retain(curr[:maxLen]) {
 					if err := e.extension(curr[remainderStart : remainderStart+remainderLen]); err != nil {
 						return nil, nil, nil, err
-					}
-					if proving {
-						e.setProofElement(nil)
 					}
 				} else {
 					if err := e.extensionHash(curr[remainderStart : remainderStart+remainderLen]); err != nil {
@@ -301,13 +268,9 @@ func GenStructStepEx(
 			if trace {
 				e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
 			}
-			proving := retainIfProving(curr[:maxLen])
-			if proving || retain(curr[:maxLen]) {
+			if retain(curr[:maxLen]) {
 				if err := e.branch(groups[maxLen]); err != nil {
 					return nil, nil, nil, err
-				}
-				if proving {
-					e.setProofElement(nil)
 				}
 			} else {
 				if err := e.branchHash(groups[maxLen]); err != nil {
@@ -339,139 +302,4 @@ func GenStructStepEx(
 		}
 	}
 	return nil, nil, nil, nil
-}
-func GenStructStep(
-	retain func(prefix []byte) bool,
-	curr, succ []byte,
-	e structInfoReceiver,
-	h HashCollector2,
-	data GenStructStepData,
-	groups []uint16,
-	hasTree []uint16,
-	hasHash []uint16,
-	trace bool,
-) ([]uint16, []uint16, []uint16, error) {
-	return GenStructStepEx(retain, curr, succ, e, h, data, groups, hasTree, hasHash, trace, nil, false)
-}
-
-func GenStructStepOld(
-	retain func(prefix []byte) bool,
-	curr, succ []byte,
-	e structInfoReceiver,
-	h HashCollector,
-	data GenStructStepData,
-	groups []uint16,
-	trace bool,
-) ([]uint16, error) {
-	for precLen, buildExtensions := calcPrecLen(groups), false; precLen >= 0; precLen, buildExtensions = calcPrecLen(groups), true {
-		var precExists = len(groups) > 0
-		// Calculate the prefix of the smallest prefix group containing curr
-		var precLen int
-		if len(groups) > 0 {
-			precLen = len(groups) - 1
-		}
-		succLen := prefixLen(succ, curr)
-		var maxLen int
-		maxLen = max(precLen, succLen)
-		if trace || maxLen >= len(curr) {
-			fmt.Printf("curr: %x, succ: %x, maxLen %d, groups: %b, precLen: %d, succLen: %d, buildExtensions: %t\n", curr, succ, maxLen, groups, precLen, succLen, buildExtensions)
-		}
-		// Add the digit immediately following the max common prefix and compute length of remainder length
-		extraDigit := curr[maxLen]
-		for maxLen >= len(groups) {
-			groups = append(groups, 0)
-		}
-		groups[maxLen] |= 1 << extraDigit
-		//fmt.Printf("groups is now %b\n", groups)
-		remainderStart := maxLen
-		if len(succ) > 0 || precExists {
-			remainderStart++
-		}
-		remainderLen := len(curr) - remainderStart
-
-		if !buildExtensions {
-			switch v := data.(type) {
-			case *GenStructStepHashData:
-				/* building a hash */
-				if err := e.hash(v.Hash[:]); err != nil {
-					return nil, err
-				}
-				buildExtensions = true
-			case *GenStructStepAccountData:
-				if retain(curr[:maxLen]) {
-					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet, codeSizeUncached); err != nil {
-						return nil, err
-					}
-				} else {
-					if err := e.accountLeafHash(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
-						return nil, err
-					}
-				}
-			case *GenStructStepLeafData:
-				/* building leafs */
-				if retain(curr[:maxLen]) {
-					if err := e.leaf(remainderLen, curr, v.Value); err != nil {
-						return nil, err
-					}
-				} else {
-					if err := e.leafHash(remainderLen, curr, v.Value); err != nil {
-						return nil, err
-					}
-				}
-			default:
-				panic(fmt.Errorf("unknown data type: %T", data))
-			}
-		}
-
-		if buildExtensions {
-			if remainderLen > 0 {
-				if trace {
-					fmt.Printf("Extension %x\n", curr[remainderStart:remainderStart+remainderLen])
-				}
-				/* building extensions */
-				if retain(curr[:maxLen]) {
-					if err := e.extension(curr[remainderStart : remainderStart+remainderLen]); err != nil {
-						return nil, err
-					}
-				} else {
-					if err := e.extensionHash(curr[remainderStart : remainderStart+remainderLen]); err != nil {
-						return nil, err
-					}
-				}
-			}
-		}
-		// Check for the optional part
-		if precLen <= succLen && len(succ) > 0 {
-			return groups, nil
-		}
-		// Close the immediately encompassing prefix group, if needed
-		if len(succ) > 0 || precExists {
-			if retain(curr[:maxLen]) {
-				if err := e.branch(groups[maxLen]); err != nil {
-					return nil, err
-				}
-			} else {
-				if err := e.branchHash(groups[maxLen]); err != nil {
-					return nil, err
-				}
-			}
-			if h != nil {
-				if err := h(curr[:maxLen], e.topHash()[1:]); err != nil {
-					return nil, err
-				}
-			}
-		}
-		groups = groups[:maxLen]
-		// Check the end of recursion
-		if precLen == 0 {
-			return groups, nil
-		}
-		// Identify preceding key for the buildExtensions invocation
-		curr = curr[:precLen]
-		for len(groups) > 0 && groups[len(groups)-1] == 0 {
-			groups = groups[:len(groups)-1]
-		}
-	}
-	return nil, nil
-
 }

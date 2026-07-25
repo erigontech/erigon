@@ -17,7 +17,6 @@
 package rpctest
 
 import (
-	"encoding/base64"
 	"fmt"
 	"net/http"
 	"strings"
@@ -127,6 +126,31 @@ func (g *RequestGenerator) getLogsForAddresses(prevBn uint64, bn uint64, account
 	return sb.String()
 }
 
+// getLogsForTopics builds a positional topic filter; nil at a position means "match any".
+func (g *RequestGenerator) getLogsForTopics(prevBn uint64, bn uint64, topics [][]common.Hash) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "topics": [`, prevBn, bn)
+	for i, posTopics := range topics {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		if posTopics == nil {
+			sb.WriteString("null")
+		} else {
+			sb.WriteByte('[')
+			for j, t := range posTopics {
+				if j > 0 {
+					sb.WriteByte(',')
+				}
+				fmt.Fprintf(&sb, `"0x%x"`, t)
+			}
+			sb.WriteByte(']')
+		}
+	}
+	fmt.Fprintf(&sb, `]}],"id":%d}`, g.reqID.Add(1))
+	return sb.String()
+}
+
 func (g *RequestGenerator) getOverlayLogs(prevBn uint64, bn uint64, account common.Address) string {
 	const template = `{"jsonrpc":"2.0","method":"overlay_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"},{}],"id":%d}`
 	return fmt.Sprintf(template, prevBn, bn, account, g.reqID.Add(1))
@@ -154,8 +178,7 @@ func (g *RequestGenerator) getOverlayLogs2(prevBn uint64, bn uint64, account com
 
 func (g *RequestGenerator) accountRange(bn uint64, page []byte, num int) string { //nolint
 	const template = `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x%x", "%s", %d, false, false], "id":%d}`
-	encodedKey := base64.StdEncoding.EncodeToString(page)
-	return fmt.Sprintf(template, bn, encodedKey, num, g.reqID.Add(1))
+	return fmt.Sprintf(template, bn, hexutil.Encode(page), num, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getProof(bn uint64, account common.Address, storageList []common.Hash) string {
@@ -176,26 +199,32 @@ func (g *RequestGenerator) getProof(bn uint64, account common.Address, storageLi
 	}
 }
 
-func (g *RequestGenerator) traceCall(from common.Address, to *common.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes, bn uint64) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_call", "params": [{"from":"0x%x"`, from)
+// writeTxObj writes the common transaction call object fields to sb.
+func writeTxObj(sb *strings.Builder, from common.Address, to *common.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes) {
+	fmt.Fprintf(sb, `{"from":"0x%x"`, from)
 	if to != nil {
-		fmt.Fprintf(&sb, `,"to":"0x%x"`, *to)
+		fmt.Fprintf(sb, `,"to":"0x%x"`, *to)
 	}
 	if gas != nil {
-		fmt.Fprintf(&sb, `,"gas":"%s"`, gas)
+		fmt.Fprintf(sb, `,"gas":"%s"`, gas)
 	}
 	if gasPrice != nil {
-		fmt.Fprintf(&sb, `,"gasPrice":"%s"`, gasPrice)
+		fmt.Fprintf(sb, `,"gasPrice":"%s"`, gasPrice)
 	}
 	if value != nil {
-		fmt.Fprintf(&sb, `,"value":"%s"`, value)
+		fmt.Fprintf(sb, `,"value":"%s"`, value)
 	}
 	if len(data) > 0 {
-		fmt.Fprintf(&sb, `,"data":"%s"`, data)
+		fmt.Fprintf(sb, `,"data":"%s"`, data)
 	}
-	fmt.Fprintf(&sb, `},["trace", "stateDiff"],"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
-	//fmt.Fprintf(&sb, `},["trace"],"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
+	fmt.Fprintf(sb, `}`)
+}
+
+func (g *RequestGenerator) traceCall(from common.Address, to *common.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes, bn uint64) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_call", "params": [`)
+	writeTxObj(&sb, from, to, gas, gasPrice, value, data)
+	fmt.Fprintf(&sb, `,["trace", "stateDiff"],"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
 	return sb.String()
 }
 
@@ -206,23 +235,9 @@ func (g *RequestGenerator) traceCallMany(from []common.Address, to []*common.Add
 		if i > 0 {
 			fmt.Fprintf(&sb, `,`)
 		}
-		fmt.Fprintf(&sb, `[{"from":"0x%x"`, f)
-		if to[i] != nil {
-			fmt.Fprintf(&sb, `,"to":"0x%x"`, *to[i])
-		}
-		if gas[i] != nil {
-			fmt.Fprintf(&sb, `,"gas":"%s"`, gas[i])
-		}
-		if gasPrice[i] != nil {
-			fmt.Fprintf(&sb, `,"gasPrice":"%s"`, gasPrice[i])
-		}
-		if value[i] != nil {
-			fmt.Fprintf(&sb, `,"value":"%s"`, value[i])
-		}
-		if len(data[i]) > 0 {
-			fmt.Fprintf(&sb, `,"data":"%s"`, data[i])
-		}
-		fmt.Fprintf(&sb, `},["trace", "stateDiff", "vmTrace"]]`)
+		fmt.Fprintf(&sb, `[`)
+		writeTxObj(&sb, f, to[i], gas[i], gasPrice[i], value[i], data[i])
+		fmt.Fprintf(&sb, `,["trace", "stateDiff", "vmTrace"]]`)
 	}
 	fmt.Fprintf(&sb, `],"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
 	return sb.String()
@@ -230,23 +245,9 @@ func (g *RequestGenerator) traceCallMany(from []common.Address, to []*common.Add
 
 func (g *RequestGenerator) debugTraceCall(from common.Address, to *common.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes, bn uint64) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "debug_traceCall", "params": [{"from":"0x%x"`, from)
-	if to != nil {
-		fmt.Fprintf(&sb, `,"to":"0x%x"`, *to)
-	}
-	if gas != nil {
-		fmt.Fprintf(&sb, `,"gas":"%s"`, gas)
-	}
-	if gasPrice != nil {
-		fmt.Fprintf(&sb, `,"gasPrice":"%s"`, gasPrice)
-	}
-	if value != nil {
-		fmt.Fprintf(&sb, `,"value":"%s"`, value)
-	}
-	if len(data) > 0 {
-		fmt.Fprintf(&sb, `,"data":"%s"`, data)
-	}
-	fmt.Fprintf(&sb, `},"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
+	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "debug_traceCall", "params": [`)
+	writeTxObj(&sb, from, to, gas, gasPrice, value, data)
+	fmt.Fprintf(&sb, `,"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
 	return sb.String()
 }
 
@@ -283,89 +284,33 @@ func (g *RequestGenerator) traceTransaction(hash string) string {
 
 func (g *RequestGenerator) ethCall(from common.Address, to *common.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes, bn uint64) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_call", "params": [{"from":"0x%x"`, from)
-	if to != nil {
-		fmt.Fprintf(&sb, `,"to":"0x%x"`, *to)
-	}
-	if gas != nil {
-		fmt.Fprintf(&sb, `,"gas":"%s"`, gas)
-	}
-	if gasPrice != nil {
-		fmt.Fprintf(&sb, `,"gasPrice":"%s"`, gasPrice)
-	}
-	if len(data) > 0 {
-		fmt.Fprintf(&sb, `,"data":"%s"`, data)
-	}
-	if value != nil {
-		fmt.Fprintf(&sb, `,"value":"%s"`, value)
-	}
-	fmt.Fprintf(&sb, `},"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
+	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_call", "params": [`)
+	writeTxObj(&sb, from, to, gas, gasPrice, value, data)
+	fmt.Fprintf(&sb, `,"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
 	return sb.String()
 }
 
 func (g *RequestGenerator) ethEstimateGas(from common.Address, to *common.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_estimateGas", "params": [{"from":"0x%x"`, from)
-	if to != nil {
-		fmt.Fprintf(&sb, `,"to":"0x%x"`, *to)
-	}
-	if gas != nil {
-		fmt.Fprintf(&sb, `,"gas":"%s"`, gas)
-	}
-	if gasPrice != nil {
-		fmt.Fprintf(&sb, `,"gasPrice":"%s"`, gasPrice)
-	}
-	if len(data) > 0 {
-		fmt.Fprintf(&sb, `,"data":"%s"`, data)
-	}
-	if value != nil {
-		fmt.Fprintf(&sb, `,"value":"%s"`, value)
-	}
-	fmt.Fprintf(&sb, `}], "id":%d}`, g.reqID.Add(1))
+	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_estimateGas", "params": [`)
+	writeTxObj(&sb, from, to, gas, gasPrice, value, data)
+	fmt.Fprintf(&sb, `], "id":%d}`, g.reqID.Add(1))
 	return sb.String()
 }
 
 func (g *RequestGenerator) ethCreateAccessList(from common.Address, to *common.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes, bn uint64) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_createAccessList", "params": [{"from":"0x%x"`, from)
-	if to != nil {
-		fmt.Fprintf(&sb, `,"to":"0x%x"`, *to)
-	}
-	if gas != nil {
-		fmt.Fprintf(&sb, `,"gas":"%s"`, gas)
-	}
-	if gasPrice != nil {
-		fmt.Fprintf(&sb, `,"gasPrice":"%s"`, gasPrice)
-	}
-	if len(data) > 0 {
-		fmt.Fprintf(&sb, `,"data":"%s"`, data)
-	}
-	if value != nil {
-		fmt.Fprintf(&sb, `,"value":"%s"`, value)
-	}
-	fmt.Fprintf(&sb, `},"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
+	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_createAccessList", "params": [`)
+	writeTxObj(&sb, from, to, gas, gasPrice, value, data)
+	fmt.Fprintf(&sb, `,"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
 	return sb.String()
 }
 
 func (g *RequestGenerator) ethCallLatest(from common.Address, to *common.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_call", "params": [{"from":"0x%x"`, from)
-	if to != nil {
-		fmt.Fprintf(&sb, `,"to":"0x%x"`, *to)
-	}
-	if gas != nil {
-		fmt.Fprintf(&sb, `,"gas":"%s"`, gas)
-	}
-	if gasPrice != nil {
-		fmt.Fprintf(&sb, `,"gasPrice":"%s"`, gasPrice)
-	}
-	if len(data) > 0 {
-		fmt.Fprintf(&sb, `,"data":"%s"`, data)
-	}
-	if value != nil {
-		fmt.Fprintf(&sb, `,"value":"%s"`, value)
-	}
-	fmt.Fprintf(&sb, `},"latest"], "id":%d}`, g.reqID.Add(1))
+	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_call", "params": [`)
+	writeTxObj(&sb, from, to, gas, gasPrice, value, data)
+	fmt.Fprintf(&sb, `,"latest"], "id":%d}`, g.reqID.Add(1))
 	return sb.String()
 }
 func (g *RequestGenerator) otsGetBlockTransactions(block_number uint64, page_number uint64, page_size uint64) string {

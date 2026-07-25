@@ -19,26 +19,18 @@ package txpool
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
-	"net"
-	"sync"
-	"time"
 
-	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/health"
-	"google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/keepalive"
-	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -50,7 +42,7 @@ var TxPoolAPIVersion = &typesproto.VersionReply{Major: 1, Minor: 0, Patch: 0}
 type txPool interface {
 	ValidateSerializedTxn(serializedTxn []byte) error
 
-	PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, availableRlpSpace int) (bool, error)
+	PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64) (bool, error)
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx)
@@ -94,6 +86,9 @@ func (*GrpcDisabled) Status(ctx context.Context, request *txpoolproto.StatusRequ
 	return nil, ErrPoolDisabled
 }
 func (*GrpcDisabled) Nonce(ctx context.Context, request *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
+	return nil, ErrPoolDisabled
+}
+func (*GrpcDisabled) GetBlobs(ctx context.Context, request *txpoolproto.GetBlobsRequest) (*txpoolproto.GetBlobsReply, error) {
 	return nil, ErrPoolDisabled
 }
 
@@ -149,7 +144,7 @@ func (s *GrpcServer) Pending(ctx context.Context, _ *emptypb.Empty) (*txpoolprot
 	reply := &txpoolproto.PendingReply{}
 	reply.Txs = make([]*txpoolproto.PendingReply_Tx, 0, 32)
 	txnsRlp := TxnsRlp{}
-	if _, err := s.txPool.PeekBest(ctx, math.MaxInt16, &txnsRlp, 0 /* onTopOf */, math.MaxUint64 /* availableGas */, math.MaxUint64 /* availableBlobGas */, math.MaxInt /* availableRlpSpace */); err != nil {
+	if _, err := s.txPool.PeekBest(ctx, math.MaxInt16, &txnsRlp, 0 /* onTopOf */); err != nil {
 		return nil, err
 	}
 
@@ -214,7 +209,6 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 	j := 0
 	for i := range reply.Imported {
 		if reply.Imported[i] != txpoolproto.ImportResult_SUCCESS {
-			j++
 			continue
 		}
 
@@ -321,89 +315,13 @@ func (s *GrpcServer) Nonce(ctx context.Context, in *txpoolproto.NonceRequest) (*
 }
 
 // NewSlotsStreams - it's safe to use this class as non-pointer
-type NewSlotsStreams struct {
-	chans map[uint]txpoolproto.Txpool_OnAddServer
-	mu    sync.Mutex
-	id    uint
-}
+type NewSlotsStreams = grpcutil.StreamBroadcaster[txpoolproto.OnAddReply]
 
-func (s *NewSlotsStreams) Add(stream txpoolproto.Txpool_OnAddServer) (remove func()) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.chans == nil {
-		s.chans = make(map[uint]txpoolproto.Txpool_OnAddServer)
-	}
-	s.id++
-	id := s.id
-	s.chans[id] = stream
-	return func() { s.remove(id) }
-}
-
-func (s *NewSlotsStreams) Broadcast(reply *txpoolproto.OnAddReply, logger log.Logger) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, stream := range s.chans {
-		err := stream.Send(reply)
-		if err != nil {
-			logger.Debug("failed send to mined block stream", "err", err)
-			select {
-			case <-stream.Context().Done():
-				delete(s.chans, id)
-			default:
-			}
-		}
-	}
-}
-
-func (s *NewSlotsStreams) remove(id uint) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.chans[id]
-	if !ok { // double-unsubscribe support
-		return
-	}
-	delete(s.chans, id)
-}
-
-func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.MiningServer, addr string, creds *credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
-	lis, err := net.Listen("tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
-	}
-
-	var (
-		streamInterceptors = make([]grpc.StreamServerInterceptor, 0, 2)
-		unaryInterceptors  = make([]grpc.UnaryServerInterceptor, 0, 2)
-	)
-	streamInterceptors = append(streamInterceptors, recovery.StreamServerInterceptor())
-	unaryInterceptors = append(unaryInterceptors, recovery.UnaryServerInterceptor())
-
-	//if metrics.Enabled {
-	//	streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
-	//	unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
-	//}
-
-	//cpus := uint32(runtime.GOMAXPROCS(-1))
-	opts := []grpc.ServerOption{
-		//grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
+func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.MiningServer, addr string, creds credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
+	grpcServer := grpcutil.NewServerWithOpts(creds,
 		grpc.ReadBufferSize(0),  // reduce buffers to save mem
 		grpc.WriteBufferSize(0), // reduce buffers to save mem
-		// Don't drop the connection, settings accordign to this comment on GitHub
-		// https://github.com/grpc/grpc-go/issues/3171#issuecomment-552796779
-		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
-			MinTime:             10 * time.Second,
-			PermitWithoutStream: true,
-		}),
-		grpc.ChainStreamInterceptor(streamInterceptors...),
-		grpc.ChainUnaryInterceptor(unaryInterceptors...),
-	}
-	if creds == nil {
-		// no specific opts
-	} else {
-		opts = append(opts, grpc.Creds(*creds))
-	}
-	grpcServer := grpc.NewServer(opts...)
-	reflection.Register(grpcServer) // Register reflection service on gRPC server.
+	)
 	if txPoolServer != nil {
 		txpoolproto.RegisterTxpoolServer(grpcServer, txPoolServer)
 	}
@@ -411,19 +329,9 @@ func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.M
 		txpoolproto.RegisterMiningServer(grpcServer, miningServer)
 	}
 
-	//if metrics.Enabled {
-	//	grpc_prometheus.Register(grpcServer)
-	//}
-
-	healthServer := health.NewServer()
-	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
-
-	go func() {
-		defer healthServer.Shutdown()
-		if err := grpcServer.Serve(lis); err != nil {
-			logger.Error("private RPC server fail", "err", err)
-		}
-	}()
+	if err := grpcutil.StartServer(grpcServer, addr, true, logger, "txpool gRPC server fail"); err != nil {
+		return nil, err
+	}
 	logger.Info("Started gRPC server", "on", addr)
 	return grpcServer, nil
 }

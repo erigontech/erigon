@@ -23,26 +23,48 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"sync"
 
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
+
+// FilterType represents the type of a filter subscription for metrics tracking.
+type FilterType string
+
+const (
+	FilterTypeLogs       FilterType = "logs"
+	FilterTypeHeads      FilterType = "heads"
+	FilterTypePendingTxs FilterType = "pendingTxs"
+	FilterTypeSyncing    FilterType = "syncing"
+)
+
+// trackedSub indexes a pollable subscription for O(1) id lookup: polls resolve the
+// filter type and reset the eviction deadline in one step, and the eviction loop
+// iterates all pollable subscriptions regardless of element type.
+type trackedSub struct {
+	ft      FilterType
+	tracker SubTracker
+}
 
 // Filters holds the state for managing subscriptions to various Ethereum events.
 // It allows for the subscription and management of events such as new blocks, pending transactions,
@@ -52,9 +74,15 @@ type Filters struct {
 
 	pendingBlock *types.Block
 
-	headsSubs             *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
-	pendingLogsSubs       *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
-	pendingBlockSubs      *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
+	headsSubs        *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
+	pendingLogsSubs  *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
+	pendingBlockSubs *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
+	syncingSubs      *concurrent.SyncMap[SyncingSubID, *chan_sub[*remoteproto.SyncingReply]]
+	// syncingLock orders subscriber registration+seed against event delivery:
+	// every stream event lands either in the seed or on the channel, never
+	// reordered across the two.
+	syncingLock           sync.Mutex
+	lastSyncing           *remoteproto.SyncingReply
 	pendingTxsSubs        *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
 	logsSubs              *LogsFilterAggregator
 	logsRequestor         atomic.Value
@@ -66,7 +94,16 @@ type Filters struct {
 	logsStores         *concurrent.SyncMap[LogsSubID, []*types.Log]
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
 	pendingTxsStores   *concurrent.SyncMap[PendingTxsSubID, [][]types.Transaction]
+	trackedSubs        *concurrent.SyncMap[SubscriptionID, trackedSub]
 	logger             log.Logger
+
+	// latestSD is the local fallback for the most recent SharedDomains.
+	// When events is non-nil (embedded mode), LatestSD() reads directly from
+	// Events.LatestSD() which is updated synchronously in PublishOverlay.
+	// When events is nil (remote mode), latestSD is not populated and
+	// LatestSD() returns nil — remote rpcdaemons do not use the overlay.
+	latestSD atomic.Pointer[execctx.SharedDomains]
+	events   *shards.Events
 
 	config FiltersConfig
 }
@@ -74,7 +111,7 @@ type Filters struct {
 // New creates a new Filters instance, initializes it, and starts subscription goroutines for Ethereum events.
 // It requires a context, Ethereum backend, transaction pool client, mining client, snapshot callback function,
 // and a logger for logging events.
-func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, onNewSnapshot func(), logger log.Logger) *Filters {
+func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, onNewSnapshot func(), logger log.Logger, events *shards.Events) *Filters {
 	logger.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{
@@ -82,14 +119,31 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		pendingTxsSubs:     concurrent.NewSyncMap[PendingTxsSubID, Sub[[]types.Transaction]](),
 		pendingLogsSubs:    concurrent.NewSyncMap[PendingLogsSubID, Sub[types.Logs]](),
 		pendingBlockSubs:   concurrent.NewSyncMap[PendingBlockSubID, Sub[*types.Block]](),
+		syncingSubs:        concurrent.NewSyncMap[SyncingSubID, *chan_sub[*remoteproto.SyncingReply]](),
 		receiptsSubs:       NewReceiptsFilterAggregator(),
 		logsSubs:           NewLogsFilterAggregator(),
 		onNewSnapshot:      onNewSnapshot,
 		logsStores:         concurrent.NewSyncMap[LogsSubID, []*types.Log](),
 		pendingHeadsStores: concurrent.NewSyncMap[HeadsSubID, []*types.Header](),
 		pendingTxsStores:   concurrent.NewSyncMap[PendingTxsSubID, [][]types.Transaction](),
+		trackedSubs:        concurrent.NewSyncMap[SubscriptionID, trackedSub](),
 		logger:             logger,
 		config:             config,
+		events:             events,
+	}
+
+	// Start the timeout loop for filter eviction if timeout is configured
+	if config.RpcSubscriptionFiltersTimeout > 0 {
+		// Check more frequently than the timeout to ensure timely eviction, with a
+		// 1s floor: time.NewTicker panics on non-positive intervals and a
+		// sub-second sweep would burn CPU for no practical benefit.
+		checkInterval := max(config.RpcSubscriptionFiltersTimeout/2, time.Second)
+		logger.Info("[rpc] [filters] starting timeout loop for idle filter eviction",
+			"timeout", config.RpcSubscriptionFiltersTimeout,
+			"checkInterval", checkInterval)
+		go ff.timeoutLoop(ctx, config.RpcSubscriptionFiltersTimeout, checkInterval)
+	} else {
+		logger.Info("[rpc] [filters] timeout-based filter eviction disabled")
 	}
 
 	go func() {
@@ -274,6 +328,97 @@ func (ff *Filters) LastPendingBlock() *types.Block {
 	return ff.pendingBlock
 }
 
+// timeoutLoop runs periodically and evicts subscriptions that have not been polled within the timeout duration.
+// This prevents unbounded accumulation of idle subscriptions and matches geth's behavior.
+func (ff *Filters) timeoutLoop(ctx context.Context, timeout, checkInterval time.Duration) {
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			ff.logger.Debug("[rpc] [filters] timeout loop stopping due to context cancellation")
+			return
+		case <-ticker.C:
+			ff.logger.Trace("[rpc] [filters] running eviction check")
+			ff.evictStaleSubscriptions(timeout)
+		}
+	}
+}
+
+// evictStaleSubscriptions removes filters that haven't been accessed within the timeout
+// duration. CloseIfIdle decides staleness and closes in one atomic step, so a concurrent
+// Touch either lands before it (the subscription survives) or finds the subscription
+// already closed; teardown and metrics follow after the Range to avoid mutating the
+// maps during iteration. Evicted logs filters share one remote-filter update per cycle.
+func (ff *Filters) evictStaleSubscriptions(timeout time.Duration) {
+	type victim struct {
+		id       SubscriptionID
+		ft       FilterType
+		protocol SubProtocol
+	}
+	checked := 0
+	var victims []victim
+	ff.trackedSubs.Range(func(id SubscriptionID, sub trackedSub) error {
+		checked++
+		if sub.tracker.CloseIfIdle(timeout) {
+			victims = append(victims, victim{id, sub.ft, sub.tracker.Protocol()})
+		}
+		return nil
+	})
+
+	evicted := 0
+	logsEvicted := false
+	for _, v := range victims {
+		var removed bool
+		switch v.ft {
+		case FilterTypeHeads:
+			removed = ff.unsubscribeHeadsInternal(HeadsSubID(v.id))
+		case FilterTypePendingTxs:
+			removed = ff.unsubscribePendingTxsInternal(PendingTxsSubID(v.id))
+		case FilterTypeSyncing:
+			removed = ff.unsubscribeSyncingInternal(SyncingSubID(v.id))
+		case FilterTypeLogs:
+			removed = ff.removeLogsSubscription(LogsSubID(v.id), false)
+			logsEvicted = logsEvicted || removed
+		}
+		if !removed {
+			continue
+		}
+		evicted++
+		ff.logger.Info("[rpc] [filters] evicted idle filter", "type", v.ft, "id", v.id, "protocol", v.protocol, "timeout", timeout)
+		ff.decrementMetrics(v.ft, v.protocol)
+		reapedSubscriptionsCounter.WithLabelValues(string(v.ft)).Inc()
+	}
+	if logsEvicted {
+		ff.updateRemoteLogsFilter()
+	}
+
+	if evicted > 0 {
+		ff.logger.Debug("[rpc] [filters] eviction cycle complete", "checked", checked, "evicted", evicted)
+	} else {
+		ff.logger.Trace("[rpc] [filters] eviction cycle complete, no stale filters", "checked", checked)
+	}
+}
+
+// TouchSubscription resets the eviction deadline of the subscription and reports its
+// filter type, so a poll on a quiet chain keeps the filter alive even when nothing is
+// buffered. Called on every poll: a single map lookup, no logging.
+func (ff *Filters) TouchSubscription(id SubscriptionID) (FilterType, bool) {
+	sub, ok := ff.trackedSubs.Get(id)
+	if !ok {
+		return "", false
+	}
+	sub.tracker.Touch()
+	return sub.ft, true
+}
+
+func (ff *Filters) registerSubscription(id SubscriptionID, ft FilterType, tracker SubTracker) {
+	ff.trackedSubs.Put(id, trackedSub{ft: ft, tracker: tracker})
+	ff.logger.Debug("[rpc] [filters] registered subscription", "type", ft, "id", id, "protocol", tracker.Protocol())
+	ff.incrementMetrics(ft, tracker.Protocol())
+}
+
 // subscribeToPendingTransactions subscribes to pending transactions using the given transaction pool client.
 // It listens for new transactions and processes them as they arrive.
 func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool txpoolproto.TxpoolClient) error {
@@ -333,6 +478,7 @@ func (ff *Filters) HandlePendingBlock(reply *txpoolproto.OnPendingBlockReply) {
 	}
 	if err := rlp.DecodeBytes(reply.RplBlock, b); err != nil {
 		ff.logger.Warn("OnNewPendingBlock rpc filters, unprocessable payload", "err", err)
+		return
 	}
 
 	ff.mu.Lock()
@@ -390,25 +536,52 @@ func (ff *Filters) HandlePendingLogs(reply *txpoolproto.OnPendingLogsReply) {
 
 // SubscribeNewHeads subscribes to new block headers and returns a channel to receive the headers
 // and a subscription ID to manage the subscription.
-func (ff *Filters) SubscribeNewHeads(size int) (<-chan *types.Header, HeadsSubID) {
+func (ff *Filters) SubscribeNewHeads(size int, protocol SubProtocol) (<-chan *types.Header, HeadsSubID) {
 	id := HeadsSubID(generateSubscriptionID())
-	sub := newChanSub[*types.Header](size)
+	sub := newChanSub[*types.Header](size, protocol)
 	ff.headsSubs.Put(id, sub)
+	ff.registerSubscription(SubscriptionID(id), FilterTypeHeads, sub)
 	return sub.ch, id
 }
 
 // UnsubscribeHeads unsubscribes from new block headers using the given subscription ID.
 // It returns true if the unsubscription was successful, otherwise false.
 func (ff *Filters) UnsubscribeHeads(id HeadsSubID) bool {
-	ch, ok := ff.headsSubs.Get(id)
+	sub, ok := ff.headsSubs.Get(id)
+	if !ok {
+		ff.logger.Debug("[rpc] [filters] unsubscribe heads filter not found", "id", id)
+		return false
+	}
+	protocol := sub.Protocol()
+	if !ff.unsubscribeHeadsInternal(id) {
+		return false
+	}
+	ff.logger.Debug("[rpc] [filters] unsubscribed heads filter", "id", id, "protocol", protocol)
+	ff.decrementMetrics(FilterTypeHeads, protocol)
+	return true
+}
+
+func (ff *Filters) unsubscribeHeadsInternal(id HeadsSubID) bool {
+	if !unsubscribeSubInternal(ff.headsSubs, ff.pendingHeadsStores, id) {
+		return false
+	}
+	ff.trackedSubs.Delete(SubscriptionID(id))
+	return true
+}
+
+// unsubscribeSubInternal tears down a subscription and its buffered store without
+// updating metrics: eviction and client unsubscribe share it, and the caller owns
+// the single decrement, gated on the map delete succeeding.
+func unsubscribeSubInternal[K comparable, T, S any](subs *concurrent.SyncMap[K, Sub[T]], stores *concurrent.SyncMap[K, S], id K) bool {
+	sub, ok := subs.Get(id)
 	if !ok {
 		return false
 	}
-	ch.Close()
-	if _, ok = ff.headsSubs.Delete(id); !ok {
+	sub.Close()
+	if _, ok = subs.Delete(id); !ok {
 		return false
 	}
-	ff.pendingHeadsStores.Delete(id)
+	stores.Delete(id)
 	return true
 }
 
@@ -416,74 +589,136 @@ func (ff *Filters) UnsubscribeHeads(id HeadsSubID) bool {
 // and a subscription ID to manage the subscription. It uses the specified filter criteria.
 func (ff *Filters) SubscribePendingLogs(size int) (<-chan types.Logs, PendingLogsSubID) {
 	id := PendingLogsSubID(generateSubscriptionID())
-	sub := newChanSub[types.Logs](size)
+	sub := newChanSub[types.Logs](size, "")
 	ff.pendingLogsSubs.Put(id, sub)
 	return sub.ch, id
 }
 
 // UnsubscribePendingLogs unsubscribes from pending logs using the given subscription ID.
-func (ff *Filters) UnsubscribePendingLogs(id PendingLogsSubID) {
+// It returns true if the unsubscription was successful, otherwise false.
+func (ff *Filters) UnsubscribePendingLogs(id PendingLogsSubID) bool {
 	ch, ok := ff.pendingLogsSubs.Get(id)
 	if !ok {
-		return
+		return false
 	}
 	ch.Close()
 	ff.pendingLogsSubs.Delete(id)
+	return true
 }
 
 // SubscribePendingBlock subscribes to pending blocks and returns a channel to receive the blocks
 // and a subscription ID to manage the subscription.
 func (ff *Filters) SubscribePendingBlock(size int) (<-chan *types.Block, PendingBlockSubID) {
 	id := PendingBlockSubID(generateSubscriptionID())
-	sub := newChanSub[*types.Block](size)
+	sub := newChanSub[*types.Block](size, "")
 	ff.pendingBlockSubs.Put(id, sub)
 	return sub.ch, id
 }
 
 // UnsubscribePendingBlock unsubscribes from pending blocks using the given subscription ID.
-func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) {
+// It returns true if the unsubscription was successful, otherwise false.
+func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) bool {
 	ch, ok := ff.pendingBlockSubs.Get(id)
 	if !ok {
-		return
+		return false
 	}
 	ch.Close()
 	ff.pendingBlockSubs.Delete(id)
+	return true
+}
+
+// SubscribeSyncing subscribes to sync status changes and returns a channel to receive
+// the updates and a subscription ID to manage the subscription. The last state seen
+// on the event stream, if any, is delivered on the channel as first message.
+func (ff *Filters) SubscribeSyncing(size int, protocol SubProtocol) (<-chan *remoteproto.SyncingReply, SyncingSubID) {
+	id := SyncingSubID(generateSubscriptionID())
+	sub := newChanSub[*remoteproto.SyncingReply](size, protocol)
+	ff.syncingLock.Lock()
+	defer ff.syncingLock.Unlock()
+	ff.syncingSubs.Put(id, sub)
+	ff.registerSubscription(SubscriptionID(id), FilterTypeSyncing, sub)
+	if ff.lastSyncing != nil {
+		sub.SendLatest(ff.lastSyncing)
+	}
+	return sub.ch, id
+}
+
+// UnsubscribeSyncing unsubscribes from sync status changes using the given subscription ID.
+// It returns true if the unsubscription was successful, otherwise false.
+func (ff *Filters) UnsubscribeSyncing(id SyncingSubID) bool {
+	sub, ok := ff.syncingSubs.Get(id)
+	if !ok {
+		ff.logger.Debug("[rpc] [filters] unsubscribe syncing filter not found", "id", id)
+		return false
+	}
+	protocol := sub.Protocol()
+	if !ff.unsubscribeSyncingInternal(id) {
+		return false
+	}
+	ff.logger.Debug("[rpc] [filters] unsubscribed syncing filter", "id", id, "protocol", protocol)
+	ff.decrementMetrics(FilterTypeSyncing, protocol)
+	return true
+}
+
+func (ff *Filters) unsubscribeSyncingInternal(id SyncingSubID) bool {
+	sub, ok := ff.syncingSubs.Get(id)
+	if !ok {
+		return false
+	}
+	sub.Close()
+	if _, ok = ff.syncingSubs.Delete(id); !ok {
+		return false
+	}
+	ff.trackedSubs.Delete(SubscriptionID(id))
+	return true
 }
 
 // SubscribePendingTxs subscribes to pending transactions and returns a channel to receive the transactions
 // and a subscription ID to manage the subscription.
-func (ff *Filters) SubscribePendingTxs(size int) (<-chan []types.Transaction, PendingTxsSubID) {
+func (ff *Filters) SubscribePendingTxs(size int, protocol SubProtocol) (<-chan []types.Transaction, PendingTxsSubID) {
 	id := PendingTxsSubID(generateSubscriptionID())
-	sub := newChanSub[[]types.Transaction](size)
+	sub := newChanSub[[]types.Transaction](size, protocol)
 	ff.pendingTxsSubs.Put(id, sub)
+	ff.registerSubscription(SubscriptionID(id), FilterTypePendingTxs, sub)
 	return sub.ch, id
 }
 
 // UnsubscribePendingTxs unsubscribes from pending transactions using the given subscription ID.
 // It returns true if the unsubscription was successful, otherwise false.
 func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) bool {
-	ch, ok := ff.pendingTxsSubs.Get(id)
+	sub, ok := ff.pendingTxsSubs.Get(id)
 	if !ok {
+		ff.logger.Debug("[rpc] [filters] unsubscribe pending txs filter not found", "id", id)
 		return false
 	}
-	ch.Close()
-	if _, ok = ff.pendingTxsSubs.Delete(id); !ok {
+	protocol := sub.Protocol()
+	if !ff.unsubscribePendingTxsInternal(id) {
 		return false
 	}
-	ff.pendingTxsStores.Delete(id)
+	ff.logger.Debug("[rpc] [filters] unsubscribed pending txs filter", "id", id, "protocol", protocol)
+	ff.decrementMetrics(FilterTypePendingTxs, protocol)
+	return true
+}
+
+func (ff *Filters) unsubscribePendingTxsInternal(id PendingTxsSubID) bool {
+	if !unsubscribeSubInternal(ff.pendingTxsSubs, ff.pendingTxsStores, id) {
+		return false
+	}
+	ff.trackedSubs.Delete(SubscriptionID(id))
 	return true
 }
 
 // SubscribeReceipts subscribes to transaction receipts and returns a channel to receive the receipts
-// and a subscription ID to manage the subscription.
-func (ff *Filters) SubscribeReceipts(size int, criteria filters.ReceiptsFilterCriteria) (<-chan *remoteproto.SubscribeReceiptsReply, ReceiptsSubID) {
-	sub := newChanSub[*remoteproto.SubscribeReceiptsReply](size)
+// and a subscription ID to manage the subscription. When the remote filter update fails, no subscription
+// is installed and the error is returned.
+func (ff *Filters) SubscribeReceipts(size int, criteria filters.ReceiptsFilterCriteria) (<-chan *remoteproto.SubscribeReceiptsReply, ReceiptsSubID, error) {
+	sub := newChanSub[*remoteproto.SubscribeReceiptsReply](size, "")
 	id := ff.receiptsSubs.insertReceiptsFilter(sub, criteria.TransactionHashes, ff.config.RpcSubscriptionFiltersMaxLogs)
 	if err := ff.sendReceiptsFilterUpdate(); err != nil {
-		ff.logger.Warn("Could not update remote receipts filter", "err", err)
 		ff.receiptsSubs.removeReceiptsFilter(id)
+		return nil, "", fmt.Errorf("could not update remote receipts filter: %w", err)
 	}
-	return sub.ch, id
+	return sub.ch, id, nil
 }
 
 // UnsubscribeReceipts unsubscribes from transaction receipts using the given subscription ID.
@@ -518,9 +753,10 @@ func (ff *Filters) sendReceiptsFilterUpdate() error {
 }
 
 // SubscribeLogs subscribes to logs using the specified filter criteria and returns a channel to receive the logs
-// and a subscription ID to manage the subscription.
-func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-chan *types.Log, LogsSubID) {
-	sub := newChanSub[*types.Log](size)
+// and a subscription ID to manage the subscription. When the remote filter update fails, no subscription is
+// installed and the error is returned.
+func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, protocol SubProtocol) (<-chan *types.Log, LogsSubID, error) {
+	sub := newChanSub[*types.Log](size, protocol)
 	id, f := ff.logsSubs.insertLogsFilter(sub)
 
 	// Initialize address and topic maps
@@ -551,7 +787,7 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 	} else {
 		// Limit the number of topics
 		topicCount := 0
-		allowedTopics := [][]common.Hash{}
+		allowedTopics := make([][]common.Hash, 0, len(criteria.Topics))
 		for _, topics := range criteria.Topics {
 			allowedTopicsRow := []common.Hash{}
 			for _, topic := range topics {
@@ -563,9 +799,8 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 					break
 				}
 			}
-			if len(allowedTopicsRow) > 0 {
-				allowedTopics = append(allowedTopics, allowedTopicsRow)
-			}
+			// Preserve per-position wildcard slots (empty rows) for correct positional matching.
+			allowedTopics = append(allowedTopics, allowedTopicsRow)
 		}
 		f.topicsOriginal = allowedTopics
 	}
@@ -586,12 +821,13 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 	loaded := ff.loadLogsRequester()
 	if loaded != nil {
 		if err := loaded.(func(*remoteproto.LogsFilterRequest) error)(lfr); err != nil {
-			ff.logger.Warn("Could not update remote logs filter", "err", err)
 			ff.logsSubs.removeLogsFilter(id)
+			return nil, "", fmt.Errorf("could not update remote logs filter: %w", err)
 		}
 	}
 
-	return sub.ch, id
+	ff.registerSubscription(SubscriptionID(id), FilterTypeLogs, sub)
+	return sub.ch, id, nil
 }
 
 // loadLogsRequester loads the current logs requester and returns it.
@@ -601,49 +837,58 @@ func (ff *Filters) loadLogsRequester() any {
 	return ff.logsRequestor.Load()
 }
 
-func (ff *Filters) HasSubscription(id LogsSubID) bool {
-	return ff.logsSubs.hasLogsFilter(id)
-}
-
-// HasHeadsSubscription returns true if a heads (new block headers) subscription exists for the given ID.
-func (ff *Filters) HasHeadsSubscription(id HeadsSubID) bool {
-	_, ok := ff.headsSubs.Get(id)
-	return ok
-}
-
-// HasPendingTxsSubscription returns true if a pending transactions subscription exists for the given ID.
-func (ff *Filters) HasPendingTxsSubscription(id PendingTxsSubID) bool {
-	_, ok := ff.pendingTxsSubs.Get(id)
-	return ok
-}
-
 // UnsubscribeLogs unsubscribes from logs using the given subscription ID.
 // It returns true if the unsubscription was successful, otherwise false.
 func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
-	isDeleted := ff.logsSubs.removeLogsFilter(id)
-	// if any filters in the aggregate need all addresses or all topics then the request to the central
-	// log subscription needs to honour this
+	filter, ok := ff.logsSubs.logsFilters.Get(id)
+	if !ok {
+		ff.logger.Debug("[rpc] [filters] unsubscribe logs filter not found", "id", id)
+		return false
+	}
+	protocol := filter.sender.Protocol()
+	if !ff.removeLogsSubscription(id, true) {
+		return false
+	}
+	ff.logger.Debug("[rpc] [filters] unsubscribed logs filter", "id", id, "protocol", protocol)
+	ff.decrementMetrics(FilterTypeLogs, protocol)
+	return true
+}
+
+// removeLogsSubscription is the logs counterpart of unsubscribeSubInternal (metrics
+// stay with the caller); logs additionally push the shrunken aggregate to the remote,
+// which eviction batches into one update per cycle via pushRemote=false. The store
+// and tracking entry are released regardless of whether the remote update succeeds —
+// a failed update only means the upstream keeps sending logs we'll now discard, it
+// does not reanimate the local subscription.
+func (ff *Filters) removeLogsSubscription(id LogsSubID, pushRemote bool) bool {
+	if !ff.logsSubs.removeLogsFilter(id) {
+		return false
+	}
+	if pushRemote {
+		ff.updateRemoteLogsFilter()
+	}
+	ff.deleteLogStore(id)
+	ff.trackedSubs.Delete(SubscriptionID(id))
+	return true
+}
+
+// updateRemoteLogsFilter pushes the aggregated filter state to the remote log source.
+// If any filters in the aggregate need all addresses or all topics then the request to
+// the central log subscription needs to honour this.
+func (ff *Filters) updateRemoteLogsFilter() {
 	lfr := ff.logsSubs.createFilterRequest()
-
 	addresses, topics := ff.logsSubs.getAggMaps()
-
 	for addr := range addresses {
 		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))
 	}
 	for topic := range topics {
 		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
 	}
-	loaded := ff.loadLogsRequester()
-	if loaded != nil {
+	if loaded := ff.loadLogsRequester(); loaded != nil {
 		if err := loaded.(func(*remoteproto.LogsFilterRequest) error)(lfr); err != nil {
 			ff.logger.Warn("Could not update remote logs filter", "err", err)
-			return isDeleted || ff.logsSubs.removeLogsFilter(id)
 		}
 	}
-
-	ff.deleteLogStore(id)
-
-	return isDeleted
 }
 
 // deleteLogStore deletes the log store associated with the given subscription ID.
@@ -671,9 +916,26 @@ func (ff *Filters) onNewEvent(event *remoteproto.SubscribeReply) error {
 		return ff.onPendingLog(event)
 	case remoteproto.Event_PENDING_BLOCK:
 		return ff.onPendingBlock(event)
+	case remoteproto.Event_SYNCING:
+		return ff.onSyncing(event)
 	default:
 		return errors.New("unsupported event type")
 	}
+}
+
+// onSyncing handles a sync status event from the remote and notifies subscribers.
+func (ff *Filters) onSyncing(event *remoteproto.SubscribeReply) error {
+	var reply remoteproto.SyncingReply
+	if err := proto.Unmarshal(event.Data, &reply); err != nil {
+		return fmt.Errorf("unprocessable payload: %w", err)
+	}
+	ff.syncingLock.Lock()
+	defer ff.syncingLock.Unlock()
+	ff.lastSyncing = &reply
+	return ff.syncingSubs.Range(func(k SyncingSubID, v *chan_sub[*remoteproto.SyncingReply]) error {
+		v.SendLatest(&reply)
+		return nil
+	})
 }
 
 // TODO: implement?
@@ -721,10 +983,28 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 	if err != nil {
 		return fmt.Errorf("unprocessable payload: %w", err)
 	}
+
+	ff.invalidateStalePendingBlock(&header)
+
 	return ff.headsSubs.Range(func(k HeadsSubID, v Sub[*types.Header]) error {
 		v.Send(&header)
 		return nil
 	})
+}
+
+// invalidateStalePendingBlock drops the cached pending block once the chain
+// moves on without it: a header at or above its height, or a competing block
+// replacing its parent. A stale pending block would otherwise pin "pending"
+// reads to an outdated height until this node builds a payload again.
+func (ff *Filters) invalidateStalePendingBlock(header *types.Header) {
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	if ff.pendingBlock == nil {
+		return
+	}
+	if header.Number.Uint64()+1 >= ff.pendingBlock.NumberU64() && header.Hash() != ff.pendingBlock.ParentHash() {
+		ff.pendingBlock = nil
+	}
 }
 
 // OnReceipts handles a new receipt event from the remote and processes it.
@@ -760,83 +1040,81 @@ func (ff *Filters) OnNewLogs(reply *remoteproto.SubscribeLogsReply) {
 
 // AddLogs adds logs to the store associated with the given subscription ID.
 func (ff *Filters) AddLogs(id LogsSubID, log *types.Log) {
-	ff.logsStores.DoAndStore(id, func(st []*types.Log, ok bool) []*types.Log {
+	ff.logsStores.Do(id, func(st []*types.Log, ok bool) ([]*types.Log, bool) {
+		// Drop (and clear) the entry when the subscription is gone: reads are gated
+		// on the subscription's existence, so a late write from the forwarding
+		// goroutine draining a closed channel would orphan the entry forever.
+		// Checking under the store lock makes this race-free against the
+		// remove-subscription-then-delete-store teardown ordering.
+		if !ff.logsSubs.hasLogsFilter(id) {
+			return nil, false
+		}
 		if !ok {
 			st = make([]*types.Log, 0)
 		}
 
 		maxLogs := ff.config.RpcSubscriptionFiltersMaxLogs
 		if maxLogs > 0 && len(st)+1 > maxLogs {
-			// Calculate the number of logs to remove
 			excessLogs := len(st) + 1 - maxLogs
-			if excessLogs > 0 {
-				if excessLogs >= len(st) {
-					// If excessLogs is greater than or equal to the length of st, remove all
-					st = []*types.Log{}
-				} else {
-					// Otherwise, remove the oldest logs
-					st = st[excessLogs:]
-				}
+			if excessLogs >= len(st) {
+				st = []*types.Log{}
+			} else {
+				st = st[excessLogs:]
 			}
 		}
 
 		// Append the new log
 		st = append(st, log)
-		return st
+		return st, true
 	})
 }
 
 // ReadLogs reads logs from the store associated with the given subscription ID.
 // It returns the logs and a boolean indicating whether the logs were found.
 func (ff *Filters) ReadLogs(id LogsSubID) ([]*types.Log, bool) {
-	res, ok := ff.logsStores.Delete(id)
-	if !ok {
-		return res, false
-	}
-	return res, true
+	return ff.logsStores.Delete(id)
 }
 
 // AddPendingBlock adds a pending block header to the store associated with the given subscription ID.
 func (ff *Filters) AddPendingBlock(id HeadsSubID, block *types.Header) {
-	ff.pendingHeadsStores.DoAndStore(id, func(st []*types.Header, ok bool) []*types.Header {
+	ff.pendingHeadsStores.Do(id, func(st []*types.Header, ok bool) ([]*types.Header, bool) {
+		// Same orphaned-store guard as AddLogs.
+		if _, exists := ff.headsSubs.Get(id); !exists {
+			return nil, false
+		}
 		if !ok {
 			st = make([]*types.Header, 0)
 		}
 
 		maxHeaders := ff.config.RpcSubscriptionFiltersMaxHeaders
 		if maxHeaders > 0 && len(st)+1 > maxHeaders {
-			// Calculate the number of headers to remove
 			excessHeaders := len(st) + 1 - maxHeaders
-			if excessHeaders > 0 {
-				if excessHeaders >= len(st) {
-					// If excessHeaders is greater than or equal to the length of st, remove all
-					st = []*types.Header{}
-				} else {
-					// Otherwise, remove the oldest headers
-					st = st[excessHeaders:]
-				}
+			if excessHeaders >= len(st) {
+				st = []*types.Header{}
+			} else {
+				st = st[excessHeaders:]
 			}
 		}
 
 		// Append the new header
 		st = append(st, block)
-		return st
+		return st, true
 	})
 }
 
 // ReadPendingBlocks reads pending block headers from the store associated with the given subscription ID.
 // It returns the block headers and a boolean indicating whether the headers were found.
 func (ff *Filters) ReadPendingBlocks(id HeadsSubID) ([]*types.Header, bool) {
-	res, ok := ff.pendingHeadsStores.Delete(id)
-	if !ok {
-		return res, false
-	}
-	return res, true
+	return ff.pendingHeadsStores.Delete(id)
 }
 
 // AddPendingTxs adds pending transactions to the store associated with the given subscription ID.
 func (ff *Filters) AddPendingTxs(id PendingTxsSubID, txs []types.Transaction) {
-	ff.pendingTxsStores.DoAndStore(id, func(st [][]types.Transaction, ok bool) [][]types.Transaction {
+	ff.pendingTxsStores.Do(id, func(st [][]types.Transaction, ok bool) ([][]types.Transaction, bool) {
+		// Same orphaned-store guard as AddLogs.
+		if _, exists := ff.pendingTxsSubs.Get(id); !exists {
+			return nil, false
+		}
 		if !ok {
 			st = make([][]types.Transaction, 0)
 		}
@@ -856,16 +1134,11 @@ func (ff *Filters) AddPendingTxs(id PendingTxsSubID, txs []types.Transaction) {
 				flatSt = append(flatSt, txBatch...)
 			}
 
-			// Calculate how many transactions need to be removed
 			excessTxs := len(flatSt) + len(txs) - maxTxs
-			if excessTxs > 0 {
-				if excessTxs >= len(flatSt) {
-					// If excessTxs is greater than or equal to the length of flatSt, remove all
-					flatSt = []types.Transaction{}
-				} else {
-					// Otherwise, remove the oldest transactions
-					flatSt = flatSt[excessTxs:]
-				}
+			if excessTxs >= len(flatSt) {
+				flatSt = []types.Transaction{}
+			} else {
+				flatSt = flatSt[excessTxs:]
 			}
 
 			// Convert flatSt back to [][]types.Transaction with a single batch
@@ -874,16 +1147,75 @@ func (ff *Filters) AddPendingTxs(id PendingTxsSubID, txs []types.Transaction) {
 
 		// Append the new transactions as a new batch
 		st = append(st, txs)
-		return st
+		return st, true
 	})
 }
 
 // ReadPendingTxs reads pending transactions from the store associated with the given subscription ID.
 // It returns the transactions and a boolean indicating whether the transactions were found.
 func (ff *Filters) ReadPendingTxs(id PendingTxsSubID) ([][]types.Transaction, bool) {
-	res, ok := ff.pendingTxsStores.Delete(id)
-	if !ok {
-		return res, false
+	return ff.pendingTxsStores.Delete(id)
+}
+
+// LatestSD returns the most recent SharedDomains published via Events,
+// or nil if none is available (either no background commit in progress
+// or the commit has completed).
+// In embedded mode, reads directly from Events.LatestSD() which is updated
+// synchronously in PublishOverlay — no channel delay.
+func (ff *Filters) LatestSD() *execctx.SharedDomains {
+	if ff.events != nil {
+		return ff.events.LatestSD()
 	}
-	return res, true
+	return ff.latestSD.Load()
+}
+
+// WithOverlay returns a read view backed by the latest block overlay if one
+// is available, otherwise returns the given tx unchanged. The read view uses
+// the overlay's in-memory data for table lookups, falling back to the caller's tx
+// for data not in the overlay.
+// Safe to call on a nil receiver.
+func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
+	if ff == nil {
+		return tx
+	}
+	sd := ff.LatestSD()
+	if sd == nil {
+		return tx
+	}
+	if overlay := sd.BlockOverlay(); overlay != nil {
+		return overlay.NewReadView(tx)
+	}
+	return tx
+}
+
+// WithTemporalOverlay is like WithOverlay but returns kv.TemporalTx directly,
+// avoiding repeated type assertions at callsites that need temporal access.
+func (ff *Filters) WithTemporalOverlay(tx kv.TemporalTx) kv.TemporalTx {
+	if ff == nil {
+		return tx
+	}
+	sd := ff.LatestSD()
+	if sd == nil {
+		return tx
+	}
+	if overlay := sd.BlockOverlay(); overlay != nil {
+		return overlay.NewReadView(tx)
+	}
+	return tx
+}
+
+func (ff *Filters) incrementMetrics(ft FilterType, protocol SubProtocol) {
+	if protocol == "" {
+		return // internal subscription, not tracked
+	}
+	activeSubscriptionsGauge.WithLabelValues(string(ft), string(protocol)).Inc()
+	createdSubscriptionsCounter.WithLabelValues(string(ft), string(protocol)).Inc()
+}
+
+func (ff *Filters) decrementMetrics(ft FilterType, protocol SubProtocol) {
+	if protocol == "" {
+		return // internal subscription, not tracked
+	}
+	activeSubscriptionsGauge.WithLabelValues(string(ft), string(protocol)).Dec()
+	unsubscribedSubscriptionsCounter.WithLabelValues(string(ft), string(protocol)).Inc()
 }

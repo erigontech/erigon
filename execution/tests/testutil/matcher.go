@@ -135,6 +135,22 @@ func (tm *TestMatcher) CheckFailureWithName(t *testing.T, name string, err error
 	return err
 }
 
+// CheckFailureForName is the testing.T-free counterpart of CheckFailureWithName
+// for CLI runners: it matches name against the expected-failure patterns and, on
+// a match, swallows a non-nil err (expected) or reports "test succeeded
+// unexpectedly" when err is nil.
+func (tm *TestMatcher) CheckFailureForName(name string, err error) error {
+	for _, m := range tm.failpat {
+		if m.p.MatchString(name) {
+			if err != nil {
+				return nil
+			}
+			return errors.New("test succeeded unexpectedly")
+		}
+	}
+	return err
+}
+
 // Walk invokes its runTest argument for all subtests in the given directory.
 //
 // runTest should be a function of type func(t *testing.T, name string, x <TestType>),
@@ -227,16 +243,15 @@ func readJSONFile(fn string, value any) error {
 func jsoniterErrorOffset(err error) (int64, bool) {
 	const marker = ", error found in #"
 	msg := err.Error()
-	idx := strings.Index(msg, marker)
-	if idx < 0 {
+	_, rest, found := strings.Cut(msg, marker)
+	if !found {
 		return 0, false
 	}
-	rest := msg[idx+len(marker):]
-	end := strings.IndexByte(rest, ' ')
-	if end < 0 {
+	numStr, _, found := strings.Cut(rest, " ")
+	if !found {
 		return 0, false
 	}
-	n, parseErr := strconv.ParseInt(rest[:end], 10, 64)
+	n, parseErr := strconv.ParseInt(numStr, 10, 64)
 	if parseErr != nil {
 		return 0, false
 	}

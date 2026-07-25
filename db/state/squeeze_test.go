@@ -1,11 +1,15 @@
 package state_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"math"
 	randOld "math/rand"
 	"math/rand/v2"
+	"os"
 	"strings"
 	"testing"
 
@@ -14,6 +18,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
@@ -24,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -70,7 +77,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 	keys := make([][]byte, keyCount)
 
 	bk, bv := make([]byte, keySize), make([]byte, valueSize)
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		n, err := rnd.Read(bk)
 		require.Equal(tb, keySize, n)
 		require.NoError(tb, err)
@@ -84,6 +91,43 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 	return keys, values
 }
 
+// testDbAndAggregatorForLargeData creates a temporal DB + aggregator sized for large datasets (10M+ keys).
+// When persistentDir is non-empty, creates an on-disk MDBX at that path (for integration binary compatibility).
+// When persistentDir is empty, uses t.TempDir() with InMem MDBX.
+// Returns dirs so the caller knows the output path.
+func testDbAndAggregatorForLargeData(tb testing.TB, aggStep uint64, persistentDir string) (kv.TemporalRwDB, *state.Aggregator, datadir.Dirs) {
+	tb.Helper()
+	logger := log.New()
+
+	var dirs datadir.Dirs
+	var db kv.RwDB
+
+	if persistentDir != "" {
+		dirs = datadir.New(persistentDir)
+		db = mdbx.New(dbcfg.ChainDB, logger).
+			Path(dirs.Chaindata).
+			GrowthStep(64 * datasize.MB).
+			MapSize(16 * datasize.GB).
+			MustOpen()
+	} else {
+		dirs = datadir.New(tb.TempDir())
+		db = mdbx.New(dbcfg.ChainDB, logger).
+			InMem(tb, dirs.Chaindata).
+			GrowthStep(64 * datasize.MB).
+			MapSize(16 * datasize.GB).
+			MustOpen()
+	}
+	tb.Cleanup(db.Close)
+
+	agg := testAgg(tb, db, dirs, aggStep, logger)
+	err := agg.OpenFolder()
+	require.NoError(tb, err)
+	tdb, err := temporal.New(db, agg, nil)
+	require.NoError(tb, err)
+	tb.Cleanup(tdb.Close)
+	return tdb, agg, dirs
+}
+
 func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator) {
 	tb.Helper()
 	logger := log.New()
@@ -94,7 +138,7 @@ func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.TemporalRwDB, *sta
 	agg := testAgg(tb, db, dirs, aggStep, logger)
 	err := agg.OpenFolder()
 	require.NoError(tb, err)
-	tdb, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(tb, err)
 	tb.Cleanup(tdb.Close)
 	return tdb, agg
@@ -111,18 +155,18 @@ func testAgg(tb testing.TB, db kv.RwDB, dirs datadir.Dirs, aggStep uint64, logge
 func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig) (kv.TemporalRwDB, *state.Aggregator) {
 	tb.Helper()
 	db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, !cfg.disableCommitmentBranchTransform)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, !cfg.disableCommitmentBranchTransform)
 
-	ctx := context.Background()
+	ctx := tb.Context()
 
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	rwTx, err := db.BeginTemporalRw(context.Background())
+	rwTx, err := db.BeginTemporalRw(tb.Context())
 	require.NoError(tb, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(tb.Context(), rwTx, log.New())
 	require.NoError(tb, err)
 	defer domains.Close()
 
@@ -130,10 +174,10 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 	tb.Logf("keys %d vals %d\n", len(keys), len(vals))
 
 	var txNum, blockNum uint64
-	for i := 0; i < len(vals); i++ {
+	for i := range vals {
 		txNum = uint64(i)
 
-		for j := 0; j < len(keys); j++ {
+		for j := range keys {
 			acc := accounts.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i * 100_000)),
@@ -154,7 +198,7 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 		}
 	}
 
-	err = domains.Flush(context.Background(), rwTx)
+	err = domains.Flush(tb.Context(), rwTx)
 	require.NoError(tb, err)
 
 	require.NoError(tb, rwTx.Commit())
@@ -170,35 +214,35 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	cfgd := &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true}
 	db, agg := testDbAggregatorWithFiles(t, cfgd)
 
-	rwTx, err := db.BeginTemporalRw(context.Background())
+	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
 	var blockNum uint64
 	// get latest commited root
-	latestRoot, err := domains.ComputeCommitment(context.Background(), rwTx, false, blockNum, 0, "", nil)
+	latestRoot, err := domains.ComputeCommitment(t.Context(), rwTx, false, blockNum, 0, "", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, latestRoot)
 	domains.Close()
 
 	// now do the squeeze
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
-	err = state.SqueezeCommitmentFiles(context.Background(), state.AggTx(rwTx), log.New())
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
+	err = state.SqueezeCommitmentFiles(t.Context(), state.AggTx(rwTx), log.New())
 	require.NoError(t, err)
 
 	//agg.recalcVisibleFiles(matgh.MaxUint64)
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	rwTx, err = db.BeginTemporalRw(context.Background())
+	rwTx, err = db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err = execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+	domains, err = execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 
 	// collect account keys to trigger commitment
@@ -215,11 +259,86 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	}
 
 	// check if the commitment is the same
-	root, err := domains.ComputeCommitment(context.Background(), rwTx, false, blockNum, 0, "", nil)
+	root, err := domains.ComputeCommitment(t.Context(), rwTx, false, blockNum, 0, "", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
 	require.Equal(t, latestRoot, root)
-	require.NotEqual(t, empty.RootHash.Bytes(), root)
+	require.NotEqual(t, empty.RootHash[:], root)
+}
+
+// TestExpandShortenedKeysInBranch_ReadPath drives the read path through squeezed commitment files
+// and asserts that the returned BranchData has plain keys (20-byte account, 52-byte storage),
+// and validates. This exercises ExpandShortenedKeysInBranch via the public read-path API
+// (DebugGetLatestFromFiles → replaceShortenedKeysInBranch → ExpandShortenedKeysInBranch).
+func TestExpandShortenedKeysInBranch_ReadPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	cfgd := &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: false}
+	db, agg := testDbAggregatorWithFiles(t, cfgd)
+	_ = agg
+
+	rwTx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	at := state.AggTx(rwTx)
+
+	// Walk every commitment file. For each non-state key, read latest from files —
+	// the returned value goes through replaceShortenedKeysInBranch → ExpandShortenedKeysInBranch.
+	// Any embedded plain-key field must be exactly 20 bytes (account) or 52 bytes (addr+slot).
+	totalChecked := 0
+	for _, vf := range at.Files(kv.CommitmentDomain) {
+		decomp, err := seg.NewDecompressor(vf.Fullpath())
+		require.NoError(t, err)
+		defer decomp.Close()
+		reader := seg.NewReader(decomp.MakeGetter(), agg.Cfg(kv.CommitmentDomain).Compression)
+		reader.Reset(0)
+
+		for reader.HasNext() {
+			k, _ := reader.Next(nil)
+			require.True(t, reader.HasNext(), "value missing for key in %s", vf.Fullpath())
+			_, _ = reader.Next(nil)
+
+			if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+				continue
+			}
+
+			// Read via the read path; for commitment domain this expands shortened keys.
+			v, ok, _, _, err := at.DebugGetLatestFromFiles(kv.CommitmentDomain, k, math.MaxUint64)
+			require.NoError(t, err)
+			if !ok {
+				continue
+			}
+			require.NotEmpty(t, v)
+
+			expanded := commitment.BranchData(v)
+			require.NoError(t, expanded.Validate(k),
+				"expanded BranchData failed Validate for key %x in %s", k, vf.Fullpath())
+
+			// Walk embedded plain-key fields and assert each is full-length.
+			_, err = expanded.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+				if isStorage {
+					require.Equal(t, length.Addr+length.Hash, len(key),
+						"expanded storage key length %d (expected %d) for branch %x in %s",
+						len(key), length.Addr+length.Hash, k, vf.Fullpath())
+				} else {
+					require.Equal(t, length.Addr, len(key),
+						"expanded account key length %d (expected %d) for branch %x in %s",
+						len(key), length.Addr, k, vf.Fullpath())
+				}
+				return nil, nil
+			})
+			require.NoError(t, err)
+			totalChecked++
+		}
+
+		if totalChecked > 0 {
+			break // one file with at least one non-state branch is enough
+		}
+	}
+	require.Greater(t, totalChecked, 0, "no non-state branches found across squeezed commitment files")
 }
 
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
@@ -235,7 +354,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	var fPaths []string
 
 	{
-		tx, err := db.BeginTemporalRw(context.Background())
+		tx, err := db.BeginTemporalRw(t.Context())
 		require.NoError(t, err)
 		defer tx.Rollback()
 		ac := state.AggTx(tx)
@@ -255,12 +374,12 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	}
 
 	agg = testAgg(t, db, agg.Dirs(), agg.StepSize(), log.New())
-	db, err := temporal.New(db, agg)
+	db, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)
 	defer db.Close()
 
 	// now clean all commitment files along with related db buckets
-	rwTx, err := db.BeginRw(context.Background())
+	rwTx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
@@ -287,17 +406,70 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	err = agg.OpenFolder()
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	finalRoot, err := state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), true)
 	require.NoError(t, err)
 	require.NotEmpty(t, finalRoot)
-	require.NotEqual(t, empty.RootHash.Bytes(), finalRoot)
+	require.NotEqual(t, empty.RootHash[:], finalRoot)
 
 	require.Equal(t, rootInFiles, finalRoot)
 }
 
 func composite(k, k2 []byte) []byte {
 	return append(common.Copy(k), k2...)
+}
+
+// makeAccountAddr generates a deterministic 20-byte account address with uniform
+// first-nibble distribution using sha256(0xAC || idx).
+func makeAccountAddr(idx uint64) []byte {
+	var buf [9]byte
+	buf[0] = 0xAC
+	binary.BigEndian.PutUint64(buf[1:], idx)
+	h := sha256.Sum256(buf[:])
+	return h[:length.Addr]
+}
+
+// makeStorageKey generates a deterministic 52-byte composite storage key
+// (20-byte addr + 32-byte slot) using sha256(0x57 || addrIdx*maxSlots+slotIdx).
+func makeStorageKey(addrIdx, slotIdx uint64, maxSlots uint64) []byte {
+	addr := makeAccountAddr(addrIdx)
+	var buf [9]byte
+	buf[0] = 0x57
+	binary.BigEndian.PutUint64(buf[1:], addrIdx*maxSlots+slotIdx)
+	h := sha256.Sum256(buf[:])
+	return composite(addr, h[:length.Hash])
+}
+
+// makeCodeValue generates deterministic bytecode of 32-256 bytes.
+// Size is derived from idx for full reproducibility independent of call order.
+func makeCodeValue(idx uint64) []byte {
+	size := 32 + int(idx%225) // 32..256 bytes
+	code := make([]byte, size)
+	// Use sha256 of index as repeatable seed data
+	var buf [9]byte
+	buf[0] = 0xCD
+	binary.BigEndian.PutUint64(buf[1:], idx)
+	h := sha256.Sum256(buf[:])
+	// Fill code with hash-derived bytes, repeating as needed
+	for i := range size {
+		code[i] = h[i%len(h)]
+	}
+	return code
+}
+
+func TestMakeAccountAddr_NibbleDistribution(t *testing.T) {
+	nibbles := make(map[byte]int, 16)
+	const count = 1000
+	for i := range uint64(count) {
+		addr := makeAccountAddr(i)
+		firstNibble := addr[0] >> 4
+		nibbles[firstNibble]++
+	}
+	// All 16 nibble values must be present
+	for n := range byte(16) {
+		require.Positive(t, nibbles[n], "missing first nibble %x in %d generated keys", n, count)
+	}
+	t.Logf("nibble distribution over %d keys: %v", count, nibbles)
 }
 
 func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
@@ -337,16 +509,16 @@ type runCfg struct {
 // - new aggregator SeekCommitment must return txNum equal to amount of total txns
 func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	logger := log.New()
 	aggStep := rc.aggStep
 	db, agg := testDbAndAggregatorv3(t, aggStep)
 
-	tx, err := db.BeginTemporalRw(context.Background())
+	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -394,7 +566,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	_, err = domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
 	require.NoError(t, err)
 
-	err = domains.Flush(context.Background(), tx)
+	err = domains.Flush(t.Context(), tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -409,17 +581,17 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	defer anotherAgg.Close()
 	require.NoError(t, anotherAgg.OpenFolder())
 
-	db, err = temporal.New(db, anotherAgg) // to set aggregator in the db
+	db, err = temporal.New(db, anotherAgg, nil) // to set aggregator in the db
 	require.NoError(t, err)
 	defer db.Close()
 
-	rwTx, err := db.BeginTemporalRw(context.Background())
+	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
 	//anotherAgg.SetTx(rwTx)
 	startTx := anotherAgg.EndTxNumMinimax()
-	dom2, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+	dom2, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 	defer dom2.Close()
 
@@ -432,7 +604,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	rwTx.Rollback()
 
 	// Check the history
-	roTx, err := db.BeginTemporalRo(context.Background())
+	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
@@ -441,16 +613,206 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 }
 
-func TestAggregatorV3_SharedDomains(t *testing.T) {
-	t.Parallel()
-	db, _ := testDbAndAggregatorv3(t, 20)
-	ctx := context.Background()
+// TestGenerateCommitmentRebuildData generates a dataset with valid commitment roots.
+// The resulting datadir can be used for manual testing of
+// `integration commitment rebuild`.
+//
+// Skipped under `-short`. In the default (non-short) run it uses a small
+// CI-safe dataset (1K accounts, 3 steps). To generate the full-scale dataset
+// (3M accounts, 59 steps, ~10M keys) for manual integration testing, set
+// TEST_DATADIR to a persistent output directory — that both switches the
+// parameters to full scale and writes the files to a reusable location.
+//
+// Environment variables:
+//   - TEST_DATADIR: optional persistent output directory. When set, switches
+//     to full-scale parameters and requires a long timeout. Unset (default):
+//     small CI-safe parameters, writes to t.TempDir().
+func TestGenerateCommitmentRebuildData(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping data generation in short mode")
+	}
 
-	rwTx, err := db.BeginTemporalRw(context.Background())
+	persistentDir := dbg.EnvString("TEST_DATADIR", "")
+
+	// Fail early if persistent directory already contains data (avoids mixing old+new state).
+	// Check chaindata and all snapshot subdirectories that OpenFolder/scanDirs will read.
+	if persistentDir != "" {
+		dirs := datadir.New(persistentDir)
+		for _, sub := range []string{dirs.Chaindata, dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+			if entries, err := os.ReadDir(sub); err == nil && len(entries) > 0 {
+				t.Fatalf("TEST_DATADIR %q already contains data in %s; use an empty directory or remove the existing data first", persistentDir, sub)
+			}
+		}
+	}
+
+	// Default: small CI-safe parameters.
+	var (
+		stepSize        uint64 = 10
+		totalSteps      uint64 = 3
+		numAccounts     uint64 = 1000
+		slotsPerAcct    uint64 = 2
+		numCodeAccounts uint64 = 300
+	)
+
+	// Scale up only when a persistent output directory is provided — this is
+	// the manual integration-testing path.
+	if persistentDir != "" {
+		stepSize = 100
+		totalSteps = 59
+		numAccounts = 3_000_000
+		slotsPerAcct = 2
+		numCodeAccounts = 1_000_000
+	}
+
+	totalTxs := stepSize * totalSteps
+	totalStorage := numAccounts * slotsPerAcct
+	totalCode := numCodeAccounts
+	totalKeys := numAccounts + totalStorage + totalCode
+
+	t.Logf("Parameters: stepSize=%d totalSteps=%d totalTxs=%d", stepSize, totalSteps, totalTxs)
+	t.Logf("Keys: accounts=%d storage=%d code=%d total=%d", numAccounts, totalStorage, totalCode, totalKeys)
+
+	db, agg, dirs := testDbAndAggregatorForLargeData(t, stepSize, persistentDir)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+
+	ctx := t.Context()
+
+	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	// Calculate per-tx batch sizes (ceiling division to ensure all keys are written)
+	accPerTx := (numAccounts + totalTxs - 1) / totalTxs
+	storPerTx := (totalStorage + totalTxs - 1) / totalTxs
+	codePerTx := (totalCode + totalTxs - 1) / totalTxs
+	if accPerTx == 0 {
+		accPerTx = 1
+	}
+	if storPerTx == 0 {
+		storPerTx = 1
+	}
+	if codePerTx == 0 {
+		codePerTx = 1
+	}
+
+	t.Logf("Per-tx batch: accounts=%d storage=%d code=%d", accPerTx, storPerTx, codePerTx)
+
+	var (
+		blockNum    uint64
+		accIdx      uint64
+		storAccIdx  uint64
+		storSlotIdx uint64
+		codeIdx     uint64
+		lastRoot    []byte
+	)
+
+	for txNum := range totalTxs {
+		// Write accounts batch
+		for i := uint64(0); i < accPerTx && accIdx < numAccounts; i++ {
+			addr := makeAccountAddr(accIdx)
+			acc := accounts.Account{
+				Nonce:       txNum,
+				Balance:     *uint256.NewInt(txNum * 1000),
+				CodeHash:    accounts.EmptyCodeHash,
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil)
+			require.NoError(t, err)
+			accIdx++
+		}
+
+		// Write storage batch
+		for i := uint64(0); i < storPerTx && (storAccIdx*slotsPerAcct+storSlotIdx) < totalStorage; i++ {
+			skey := makeStorageKey(storAccIdx, storSlotIdx, slotsPerAcct)
+			var val [32]byte
+			binary.BigEndian.PutUint64(val[24:], txNum)
+			err = domains.DomainPut(kv.StorageDomain, rwTx, skey, val[:], txNum, nil)
+			require.NoError(t, err)
+
+			storSlotIdx++
+			if storSlotIdx >= slotsPerAcct {
+				storSlotIdx = 0
+				storAccIdx++
+			}
+		}
+
+		// Write code batch
+		for i := uint64(0); i < codePerTx && codeIdx < numCodeAccounts; i++ {
+			addr := makeAccountAddr(codeIdx)
+			code := makeCodeValue(codeIdx)
+			err = domains.DomainPut(kv.CodeDomain, rwTx, addr, code, txNum, nil)
+			require.NoError(t, err)
+
+			// Update account with real code hash
+			codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+			acc := accounts.Account{
+				Nonce:       txNum,
+				Balance:     *uint256.NewInt(txNum * 1000),
+				CodeHash:    codeHash,
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil)
+			require.NoError(t, err)
+			codeIdx++
+		}
+
+		// At step boundary: compute commitment, flush, and record block→txNum mapping
+		if (txNum+1)%stepSize == 0 {
+			step := (txNum + 1) / stepSize
+			rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+			require.NoError(t, err)
+			require.NotEmpty(t, rh)
+			lastRoot = rh
+			t.Logf("Step %d/%d (txNum=%d): root=%x", step, totalSteps, txNum, rh)
+
+			err = domains.Flush(ctx, rwTx)
+			require.NoError(t, err)
+
+			// Populate MaxTxNum table so `integration commitment rebuild` passes TxNums check
+			err = rawdbv3.TxNums.Append(rwTx, blockNum, txNum)
+			require.NoError(t, err)
+			blockNum++
+		}
+	}
+
+	// Final flush and commit
+	err = domains.Flush(ctx, rwTx)
+	require.NoError(t, err)
+	domains.Close()
+	require.NoError(t, rwTx.Commit())
+
+	// Build files
+	t.Logf("Building files for %d txs...", totalTxs)
+	err = agg.BuildFiles(totalTxs)
+	require.NoError(t, err)
+
+	// Validate
+	require.NotEmpty(t, lastRoot, "final root must be non-empty")
+	require.NotEqual(t, empty.RootHash[:], lastRoot, "final root must differ from empty trie root")
+
+	t.Logf("Done. Final root: %x", lastRoot)
+	t.Logf("Output datadir: %s", dirs.DataDir)
+	if persistentDir != "" {
+		fmt.Fprintf(os.Stderr, "\n=== DATADIR: %s ===\n", dirs.DataDir)
+	}
+}
+
+func TestAggregatorV3_SharedDomains(t *testing.T) {
+	t.Parallel()
+	db, _ := testDbAndAggregatorv3(t, 20)
+	ctx := t.Context()
+
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	changesetAt5 := &changeset.StateChangeSet{}
@@ -494,16 +856,16 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		roots = append(roots, rh)
 	}
 
-	err = domains.Flush(context.Background(), rwTx)
+	err = domains.Flush(t.Context(), rwTx)
 	require.NoError(t, err)
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	rwTx, err = db.BeginTemporalRw(context.Background())
+	rwTx, err = db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err = execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+	domains, err = execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	diffs := [kv.DomainLen][]kv.DomainEntryDiff{}
@@ -511,7 +873,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		diffs[idx] = changesetAt5.Diffs[idx].GetDiffSet()
 	}
 	err = rwTx.Unwind(ctx, pruneFrom, &diffs)
-	//err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs)
+	//err = domains.Unwind(t.Context(), rwTx, 0, pruneFrom, &diffs)
 	require.NoError(t, err)
 
 	domains.SetChangesetAccumulator(changesetAt3)
@@ -541,7 +903,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		require.Equal(t, roots[i], rh)
 	}
 
-	err = domains.Flush(context.Background(), rwTx)
+	err = domains.Flush(t.Context(), rwTx)
 	require.NoError(t, err)
 
 	pruneFrom = 3
@@ -549,17 +911,17 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	rwTx, err = db.BeginTemporalRw(context.Background())
+	rwTx, err = db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err = execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+	domains, err = execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	for idx := range changesetAt3.Diffs {
 		diffs[idx] = changesetAt3.Diffs[idx].GetDiffSet()
 	}
-	err = rwTx.Unwind(context.Background(), pruneFrom, &diffs)
+	err = rwTx.Unwind(t.Context(), pruneFrom, &diffs)
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {

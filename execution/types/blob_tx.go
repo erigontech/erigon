@@ -20,18 +20,23 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-var ErrNilToFieldTx = errors.New("txn: field 'To' can not be 'nil'")
+var (
+	ErrNilToFieldTx                = errors.New("txn: field 'To' can not be 'nil'")
+	ErrBlobTxnEmptyBlobs           = errors.New("blob txn must contain at least one blob versioned hash")
+	ErrBlobTxnInvalidVersionedHash = errors.New("blob txn versioned hash has invalid version byte")
+)
 
 type BlobTx struct {
 	DynamicFeeTransaction
@@ -67,12 +72,24 @@ func (stx *BlobTx) GetBlobGas() uint64 {
 }
 
 func (stx *BlobTx) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
-	var stxTo accounts.Address
-	if stx.To == nil {
-		stxTo = accounts.NilAddress
-	} else {
-		stxTo = accounts.InternAddress(*stx.To)
+	if !rules.IsCancun {
+		return nil, errors.New("BlobTx transactions require Cancun")
 	}
+	// EIP-4844 transaction validity: a blob txn must specify a recipient (no
+	// contract creation), carry at least one versioned hash, and every hash
+	// must start with the KZG version byte.
+	if stx.To == nil {
+		return nil, ErrNilToFieldTx
+	}
+	if len(stx.BlobVersionedHashes) == 0 {
+		return nil, ErrBlobTxnEmptyBlobs
+	}
+	for _, h := range stx.BlobVersionedHashes {
+		if h[0] != kzg.BlobCommitmentVersionKZG {
+			return nil, ErrBlobTxnInvalidVersionedHash
+		}
+	}
+	stxTo := accounts.InternAddress(*stx.To)
 	msg := Message{
 		nonce:            stx.Nonce,
 		gasLimit:         stx.GasLimit,
@@ -86,9 +103,6 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules)
 		checkNonce:       true,
 		checkTransaction: true,
 		checkGas:         true,
-	}
-	if !rules.IsCancun {
-		return nil, errors.New("BlobTx transactions require Cancun")
 	}
 	if baseFee != nil {
 		msg.gasPrice.Set(baseFee)
@@ -131,26 +145,16 @@ func (stx *BlobTx) Hash() common.Hash {
 	if hash := stx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(BlobTxType, []any{
-		&stx.ChainID,
-		stx.Nonce,
-		&stx.TipCap,
-		&stx.FeeCap,
-		stx.GasLimit,
-		stx.To,
-		&stx.Value,
-		stx.Data,
-		stx.AccessList,
-		&stx.MaxFeePerBlobGas,
-		stx.BlobVersionedHashes,
-		stx.V, stx.R, stx.S,
+	payloadSize, accessListLen, blobHashesLen := stx.payloadSize()
+	hash := prefixedPayloadHash(BlobTxType, func(w io.Writer, b []byte) error {
+		return stx.encodePayload(w, b, payloadSize, accessListLen, blobHashesLen)
 	})
 	stx.hash.Store(&hash)
 	return hash
 }
 
 type blobTxSigHash struct {
-	ChainID    *big.Int
+	ChainID    *uint256.Int
 	Nonce      uint64
 	GasTipCap  *uint256.Int
 	GasFeeCap  *uint256.Int
@@ -163,7 +167,7 @@ type blobTxSigHash struct {
 	BlobHashes []common.Hash
 }
 
-func (stx *BlobTx) SigningHash(chainID *big.Int) common.Hash {
+func (stx *BlobTx) SigningHash(chainID *uint256.Int) common.Hash {
 	return prefixedRlpHash(
 		BlobTxType,
 		&blobTxSigHash{
@@ -224,7 +228,7 @@ func blobVersionedHashesSize(hashes []common.Hash) int {
 }
 
 func encodeBlobVersionedHashes(hashes []common.Hash, w io.Writer, b []byte) error {
-	for i := 0; i < len(hashes); i++ {
+	for i := range hashes {
 		if err := rlp.EncodeString(hashes[i][:], w, b); err != nil {
 			return err
 		}
@@ -258,11 +262,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListL
 		return err
 	}
 	// encode To
-	b[0] = 128 + 20
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if _, err := w.Write(stx.To[:]); err != nil {
+	if err := EncodeOptionalAddress(stx.To, w, b); err != nil {
 		return err
 	}
 	// encode Value
@@ -370,17 +370,18 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if stx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
-	stx.To = &common.Address{}
 	if kind, size, err := s.Kind(); err != nil {
 		return err
 	} else if kind == rlp.Byte {
-		return fmt.Errorf("wrong size for To: 1")
-	} else if size != 20 {
+		return errors.New("wrong size for To: 1")
+	} else if size != length.Addr {
 		return fmt.Errorf("wrong size for To: %d", size)
 	}
-	if err = s.ReadBytes(stx.To[:]); err != nil {
+	to, err := s.Addr()
+	if err != nil {
 		return err
 	}
+	stx.To = &to
 	if err = s.ReadUint256(&stx.Value); err != nil {
 		return err
 	}
@@ -397,9 +398,8 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode BlobVersionedHashes
-	stx.BlobVersionedHashes = []common.Hash{}
-	if err = decodeBlobVersionedHashes(&stx.BlobVersionedHashes, s); err != nil {
-		return err
+	if stx.BlobVersionedHashes, err = decodeHashList(s); err != nil {
+		return fmt.Errorf("read BlobVersionedHashes: %w", err)
 	}
 	if len(stx.BlobVersionedHashes) == 0 {
 		return errors.New("a blob stx must contain at least one blob")
@@ -415,22 +415,4 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	return s.ListEnd()
-}
-
-func decodeBlobVersionedHashes(hashes *[]common.Hash, s *rlp.Stream) error {
-	_, err := s.List()
-	if err != nil {
-		return fmt.Errorf("open BlobVersionedHashes: %w", err)
-	}
-	for s.MoreDataInList() {
-		var h common.Hash
-		if err = s.ReadBytes(h[:]); err != nil {
-			return fmt.Errorf("read blobVersionedHash: %w", err)
-		}
-		*hashes = append(*hashes, h)
-	}
-	if err = s.ListEnd(); err != nil {
-		return fmt.Errorf("close BlobVersionedHashes: %w", err)
-	}
-	return nil
 }

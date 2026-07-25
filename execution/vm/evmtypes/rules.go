@@ -17,7 +17,7 @@
 package evmtypes
 
 import (
-	"math/big"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/execution/chain"
 )
@@ -26,11 +26,11 @@ import (
 func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 	chainID := c.ChainID
 	if chainID == nil {
-		chainID = new(big.Int)
+		chainID = new(uint256.Int)
 	}
 
-	return &chain.Rules{
-		ChainID:            new(big.Int).Set(chainID),
+	r := &chain.Rules{
+		ChainID:            new(uint256.Int).Set(chainID),
 		IsHomestead:        c.IsHomestead(bc.BlockNumber),
 		IsTangerineWhistle: c.IsTangerineWhistle(bc.BlockNumber),
 		IsSpuriousDragon:   c.IsSpuriousDragon(bc.BlockNumber),
@@ -48,6 +48,13 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		IsPrague:           c.IsPrague(bc.Time) || c.IsBhilai(bc.BlockNumber),
 		IsOsaka:            c.IsOsaka(bc.Time),
 		IsAmsterdam:        c.IsAmsterdam(bc.Time),
+		DisabledEIPs:       c.DisabledEIPs,
 		IsAura:             c.Aura != nil,
 	}
+
+	if c.L2 != nil {
+		c.L2.ResolveRules(bc.L2Version, bc.BlockNumber, bc.Time, r)
+	}
+
+	return r
 }

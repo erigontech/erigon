@@ -5,6 +5,9 @@ on:
     - cron: '0 20 * * 0'  # Run on Sunday at 08:00 PM UTC
   workflow_dispatch:     # Run manually
 
+permissions:
+  contents: read
+
 jobs:
   constrained-tip-tracking-test:
     strategy:
@@ -33,7 +36,9 @@ jobs:
 
     steps:
     - name: Check out repository
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
 
     - name: Clean Erigon Build Directory
       run: |
@@ -129,7 +134,7 @@ jobs:
 
     - name: Upload Downloader Torrent Client Status
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: torrent-client-status-${{ env.CHAIN }}
         path: torrent-client-status.txt
@@ -147,24 +152,24 @@ jobs:
         python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
           --repo erigon \
           --commit $(git rev-parse HEAD) \
-          --branch ${{ github.ref_name }} \
+          --branch "$GITHUB_REF_NAME" \
           --test_name constrained-tip-tracking \
           --chain $CHAIN \
-          --runner ${{ runner.name }} \
+          --runner "$RUNNER_NAME" \
           --db_version $db_version \
           --outcome $TEST_RESULT \
-          --result_file ${{ github.workspace }}/result-$CHAIN.json
+          --result_file "$GITHUB_WORKSPACE/result-$CHAIN.json"
 
     - name: Upload test results
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: test-results-${{ env.CHAIN }}
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
     - name: Upload erigon logs
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: erigon-logs-${{ env.CHAIN }}
         path: |
@@ -173,14 +178,14 @@ jobs:
 
     - name: Upload metric plots
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: metric-plots-${{ env.CHAIN }}
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
     - name: Upload FD Leak Analysis
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: fd-leak-analysis-${{ env.CHAIN }}
         path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md

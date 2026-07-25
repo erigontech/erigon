@@ -11,7 +11,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -73,7 +73,7 @@ var (
 
 	mxExecStorageDomainReads             = metrics.NewGauge(`exec_domain_read_rate{domain="storage"}`)
 	mxExecStorageDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="storage"}`)
-	mxExexStorageDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="storage"}`)
+	mxExecStorageDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="storage"}`)
 	mxExecStorageDomainCacheReadDuration = metrics.NewGauge(`exec_domain_cache_read_dur{domain="storage"}`)
 	mxExecStorageDomainPutRate           = metrics.NewGauge(`exec_domain_cache_put_rate{domain="storage"}`)
 	mxExecStorageDomainPutSize           = metrics.NewGauge(`exec_domain_cache_put_size{domain="storage"}`)
@@ -86,7 +86,7 @@ var (
 
 	mxExecCodeDomainReads             = metrics.NewGauge(`exec_domain_read_rate{domain="code"}`)
 	mxExecCodeDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="code"}`)
-	mxExexCodeDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="code"}`)
+	mxExecCodeDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="code"}`)
 	mxExecCodeDomainCacheReadDuration = metrics.NewGauge(`exec_domain_cache_read_dur{domain="code"}`)
 	mxExecCodeDomainPutRate           = metrics.NewGauge(`exec_domain_cache_put_rate{domain="code"}`)
 	mxExecCodeDomainPutSize           = metrics.NewGauge(`exec_domain_cache_put_size{domain="code"}`)
@@ -99,13 +99,12 @@ var (
 
 	mxCommitmentTransactions            = metrics.NewGauge(`commit_txns`)
 	mxCommitmentBlocks                  = metrics.NewGauge("commit_blocks")
-	mxCommitmentMGasSec                 = metrics.NewGauge(`commit_mgas_sec`)
 	mxCommitmentBlockDuration           = metrics.NewGauge("commit_block_dur")
 	mxCommitmentReadRate                = metrics.NewGauge("commit_read_rate")
 	mxCommitmentAccountReadRate         = metrics.NewGauge("commit_account_read_rate")
 	mxCommitmentStorageReadRate         = metrics.NewGauge("commit_storage_read_rate")
 	mxCommitmentBranchReadRate          = metrics.NewGauge("commit_branch_read_rate")
-	mxCommitmentBrancgWriteRate         = metrics.NewGauge("commit_branch_write_rate")
+	mxCommitmentBranchWriteRate         = metrics.NewGauge("commit_branch_write_rate")
 	mxCommitmentKeyRate                 = metrics.NewGauge("commit_key_rate")
 	mxCommitmentAccountKeyRate          = metrics.NewGauge("commit_account_key_rate")
 	mxCommitmentStorageKeyRate          = metrics.NewGauge("commit_storage_key_rate")
@@ -209,7 +208,7 @@ func resetCommitmentGauges(ctx context.Context) {
 		commitResetTask.Timer = time.NewTimer(resetDelay)
 		commitResetTask.ctx = ctx
 		commitResetTask.gauges = []metrics.Gauge{
-			mxCommitmentTransactions, mxCommitmentBlocks, mxCommitmentMGasSec, mxCommitmentBlockDuration,
+			mxCommitmentTransactions, mxCommitmentBlocks, mxCommitmentBlockDuration,
 		}
 		commitResetTask.run(ctx)
 	}
@@ -233,15 +232,15 @@ func resetDomainGauges(ctx context.Context) {
 			mxExecDomainFileReads, mxExecDomainFileReadDuration, mxExecAccountDomainReads, mxExecAccountDomainReadDuration,
 			mxExecAccountDomainCacheReads, mxExecAccountDomainCacheReadDuration, mxExecAccountDomainDbReads, mxExecAccountDomainDbReadDuration,
 			mxExecAccountDomainFileReads, mxExecAccountDomainFileReadDuration, mxExecStorageDomainReads, mxExecStorageDomainReadDuration,
-			mxExexStorageDomainCacheReads, mxExecStorageDomainCacheReadDuration, mxExecStorageDomainDbReads, mxExecStorageDomainDbReadDuration,
+			mxExecStorageDomainCacheReads, mxExecStorageDomainCacheReadDuration, mxExecStorageDomainDbReads, mxExecStorageDomainDbReadDuration,
 			mxExecStorageDomainFileReads, mxExecStorageDomainFileReadDuration, mxExecCodeDomainReads, mxExecCodeDomainReadDuration,
-			mxExexCodeDomainCacheReads, mxExecCodeDomainCacheReadDuration, mxExecCodeDomainDbReads, mxExecCodeDomainDbReadDuration,
+			mxExecCodeDomainCacheReads, mxExecCodeDomainCacheReadDuration, mxExecCodeDomainDbReads, mxExecCodeDomainDbReadDuration,
 			mxExecCodeDomainFileReads, mxExecCodeDomainFileReadDuration, mxExecDomainPutRate, mxExecDomainPutSize,
 			mxExecDomainPutKeySize, mxExecDomainPutValueSize, mxExecAccountDomainPutRate, mxExecAccountDomainPutSize,
 			mxExecAccountDomainPutKeySize, mxExecAccountDomainPutValueSize, mxExecStorageDomainPutRate, mxExecStorageDomainPutSize,
 			mxExecStorageDomainPutKeySize, mxExecStorageDomainPutValueSize, mxExecCodeDomainPutRate, mxExecCodeDomainPutSize,
 			mxExecCodeDomainPutKeySize, mxExecCodeDomainPutValueSize, mxCommitmentReadRate, mxCommitmentAccountReadRate,
-			mxCommitmentStorageReadRate, mxCommitmentBranchReadRate, mxCommitmentBrancgWriteRate, mxCommitmentKeyRate,
+			mxCommitmentStorageReadRate, mxCommitmentBranchReadRate, mxCommitmentBranchWriteRate, mxCommitmentKeyRate,
 			mxCommitmentAccountKeyRate, mxCommitmentStorageKeyRate, mxCommitmentFoldRate, mxCommitmentUnfoldRate, mxCommitmentDomainReads,
 			mxCommitmentDomainReadDuration, mxCommitmentDomainCacheReads, mxCommitmentDomainCacheReadDuration, mxCommitmentDomainDbReads,
 			mxCommitmentDomainDbReadDuration, mxCommitmentDomainFileReads, mxCommitmentDomainFileReadDuration, mxCommitmentDomainPutRate,
@@ -251,14 +250,14 @@ func resetDomainGauges(ctx context.Context) {
 	}
 }
 
-func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *changeset.DomainMetrics, interval time.Duration,
-	executing bool) *changeset.DomainMetrics {
+func updateExecDomainMetrics(metrics *kvmetrics.DomainMetrics, prevMetrics *kvmetrics.DomainMetrics, interval time.Duration,
+	executing bool) *kvmetrics.DomainMetrics {
 	metrics.RLock()
 	defer metrics.RUnlock()
 
 	if prevMetrics == nil {
-		prevMetrics = &changeset.DomainMetrics{
-			Domains: map[kv.Domain]*changeset.DomainIOMetrics{},
+		prevMetrics = &kvmetrics.DomainMetrics{
+			Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{},
 		}
 	}
 
@@ -291,7 +290,7 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 	prevMetrics.DomainIOMetrics = metrics.DomainIOMetrics
 
 	if accountMetrics, ok := metrics.Domains[kv.AccountsDomain]; ok {
-		var prevAccountMetrics changeset.DomainIOMetrics
+		var prevAccountMetrics kvmetrics.DomainIOMetrics
 
 		if prev, ok := prevMetrics.Domains[kv.AccountsDomain]; ok {
 			prevAccountMetrics = *prev
@@ -313,7 +312,7 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 		mxExecAccountDomainCacheReads.Set(float64(cacheReads) / seconds)
 		mxExecAccountDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
 		if executing {
-			mxExecAccountDomainPutRate.Set(float64(cachePutCount))
+			mxExecAccountDomainPutRate.Set(float64(cachePutCount) / seconds)
 			mxExecAccountDomainPutSize.Set(float64(cachePutSize))
 			mxExecAccountDomainPutKeySize.Set(float64(cachePutKeySize))
 			mxExecAccountDomainPutValueSize.Set(float64(cachePutValueSize))
@@ -328,7 +327,7 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 	}
 
 	if storageMetrics, ok := metrics.Domains[kv.StorageDomain]; ok {
-		var prevStorageMetrics changeset.DomainIOMetrics
+		var prevStorageMetrics kvmetrics.DomainIOMetrics
 
 		if prev, ok := prevMetrics.Domains[kv.StorageDomain]; ok {
 			prevStorageMetrics = *prev
@@ -347,10 +346,10 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 
 		mxExecStorageDomainReads.Set(float64(cacheReads+dbReads+fileReads) / seconds)
 		mxExecStorageDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
-		mxExexStorageDomainCacheReads.Set(float64(cacheReads) / seconds)
+		mxExecStorageDomainCacheReads.Set(float64(cacheReads) / seconds)
 		mxExecStorageDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
 		if executing {
-			mxExecStorageDomainPutRate.Set(float64(cachePutCount))
+			mxExecStorageDomainPutRate.Set(float64(cachePutCount) / seconds)
 			mxExecStorageDomainPutSize.Set(float64(cachePutSize))
 			mxExecStorageDomainPutKeySize.Set(float64(cachePutKeySize))
 			mxExecStorageDomainPutValueSize.Set(float64(cachePutValueSize))
@@ -365,7 +364,7 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 	}
 
 	if codeMetrics, ok := metrics.Domains[kv.CodeDomain]; ok && executing {
-		var prevCodeMetrics changeset.DomainIOMetrics
+		var prevCodeMetrics kvmetrics.DomainIOMetrics
 
 		if prev, ok := prevMetrics.Domains[kv.CodeDomain]; ok {
 			prevCodeMetrics = *prev
@@ -384,9 +383,9 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 
 		mxExecCodeDomainReads.Set(float64(cacheReads+dbReads+fileReads) / seconds)
 		mxExecCodeDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
-		mxExexCodeDomainCacheReads.Set(float64(cacheReads) / seconds)
+		mxExecCodeDomainCacheReads.Set(float64(cacheReads) / seconds)
 		mxExecCodeDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
-		mxExecCodeDomainPutRate.Set(float64(cachePutCount))
+		mxExecCodeDomainPutRate.Set(float64(cachePutCount) / seconds)
 		mxExecCodeDomainPutSize.Set(float64(cachePutSize))
 		mxExecCodeDomainPutKeySize.Set(float64(cachePutKeySize))
 		mxExecCodeDomainPutValueSize.Set(float64(cachePutValueSize))
@@ -400,7 +399,7 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 	}
 
 	if commitmentMetrics, ok := metrics.Domains[kv.CommitmentDomain]; !executing && ok {
-		var prevCommitmentMetrics changeset.DomainIOMetrics
+		var prevCommitmentMetrics kvmetrics.DomainIOMetrics
 
 		if prev, ok := prevMetrics.Domains[kv.CommitmentDomain]; ok {
 			prevCommitmentMetrics = *prev
@@ -421,7 +420,7 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 		mxCommitmentDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
 		mxCommitmentDomainCacheReads.Set(float64(cacheReads) / seconds)
 		mxCommitmentDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
-		mxCommitmentDomainPutRate.Set(float64(cachePutCount))
+		mxCommitmentDomainPutRate.Set(float64(cachePutCount) / seconds)
 		mxCommitmentDomainPutSize.Set(float64(cachePutSize))
 		mxCommitmentDomainPutKeySize.Set(float64(cachePutKeySize))
 		mxCommitmentDomainPutValueSize.Set(float64(cachePutValueSize))
@@ -483,7 +482,7 @@ type Progress struct {
 	prevCommitTime                 time.Time
 	prevCommittedBlockNum          uint64
 	prevCommittedTxNum             uint64
-	prevCommittedGas               int64
+	prevCommitLogGas               int64
 	prevCommitmentKeyCount         uint64
 	prevCommitmentAccountKeyCount  uint64
 	prevCommitmentStorageKeyCount  uint64
@@ -492,14 +491,14 @@ type Progress struct {
 	prevBranchReadCount            uint64
 	prevBranchWriteCount           uint64
 	commitThreshold                uint64
-	prevDomainMetrics              *changeset.DomainMetrics
+	prevDomainMetrics              *kvmetrics.DomainMetrics
 	logPrefix                      string
 	logger                         log.Logger
 }
 
 type executor interface {
 	LogExecution()
-	LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress)
+	LogCommitments(committedTransactions uint64, stepsInDb float64, lastProgress commitment.CommitProgress)
 	LogComplete(stepsInDb float64)
 }
 
@@ -724,7 +723,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 	}
 }
 
-func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart time.Time, stepsInDb float64, lastProgress commitment.CommitProgress) {
+func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, stepsInDb float64, lastProgress commitment.CommitProgress) {
 	var te *txExecutor
 	var suffix string
 
@@ -738,14 +737,11 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 		suffix = " serial"
 	}
 
-	if p.prevCommitTime.Before(commitStart) {
-		p.prevCommitTime = commitStart
-	}
-
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevCommitTime)
 
-	committedGasSec := uint64(float64(te.committedGas.Load()-p.prevCommittedGas) / interval.Seconds())
+	executedGas := te.executedGas.Load()
+	gasSec := uint64(float64(executedGas-p.prevCommitLogGas) / interval.Seconds())
 	var committedTxSec uint64
 	if te.lastCommittedTxNum.Load() > p.prevCommittedTxNum {
 		committedTxSec = uint64(float64(te.lastCommittedTxNum.Load()-p.prevCommittedTxNum) / interval.Seconds())
@@ -766,6 +762,12 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 	storageReadCount := lastProgress.Metrics.LoadStorage
 	branchReadCount := lastProgress.Metrics.LoadBranch
 	branchWriteCount := lastProgress.Metrics.UpdateBranch
+	cacheBranchHits := lastProgress.Metrics.CacheBranch
+	cacheAccountHits := lastProgress.Metrics.CacheAccount
+	cacheStorageHits := lastProgress.Metrics.CacheStorage
+	missBranchCount := lastProgress.Metrics.MissBranch
+	missAccountCount := lastProgress.Metrics.MissAccount
+	missStorageCount := lastProgress.Metrics.MissStorage
 	lastProgress.Metrics.RUnlock()
 
 	curKeyCount := int64(keyCount - p.prevCommitmentKeyCount)
@@ -789,22 +791,26 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 	mxCommitmentAccountReadRate.Set(float64(curAccountReadCount) / interval.Seconds())
 	mxCommitmentStorageReadRate.Set(float64(curStorageReadCount) / interval.Seconds())
 	mxCommitmentBranchReadRate.Set(float64(curBranchReadCount) / interval.Seconds())
-	mxCommitmentBrancgWriteRate.SetUint64(curBranchWriteRate)
+	mxCommitmentBranchWriteRate.SetUint64(curBranchWriteRate)
 
 	mxCommitmentTransactions.Set(float64(committedTxSec))
-	mxCommitmentMGasSec.Set(float64(committedGasSec / 1e6))
+	mxCommitmentBlocks.Set(float64(committedDiffBlocks))
 	mxCommitmentBlockDuration.Set(float64(commitedBlockDur))
+
+	totalCacheHits := cacheBranchHits + cacheAccountHits + cacheStorageHits
+	totalCacheMisses := missBranchCount + missAccountCount + missStorageCount
 
 	rs.Domains().Metrics().RLock()
 	commitVals := []any{
 		"bdur", common.Round(commitedBlockDur, 0),
 		"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(lastProgress.KeyIndex), common.PrettyCounter(lastProgress.UpdateCount)),
 		"buf", common.ByteCount(uint64(rs.Domains().Metrics().CachePutSize + rs.Domains().Metrics().CacheGetSize)),
+		"chit", common.PrettyCounter(totalCacheHits), "cmiss", common.PrettyCounter(totalCacheMisses),
 	}
 	rs.Domains().Metrics().RUnlock()
 
 	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum.Load(), committedDiffBlocks,
-		te.lastCommittedTxNum.Load()-p.prevCommittedTxNum, committedTxSec, committedGasSec, 0, stepsInDb, commitVals)
+		te.lastCommittedTxNum.Load()-p.prevCommittedTxNum, committedTxSec, gasSec, 0, stepsInDb, commitVals)
 
 	p.prevDomainMetrics = updateExecDomainMetrics(te.doms.Metrics(), p.prevDomainMetrics, interval, false)
 
@@ -812,7 +818,7 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 
 	if te.lastCommittedTxNum.Load() > 0 {
 		p.prevCommittedTxNum = te.lastCommittedTxNum.Load()
-		p.prevCommittedGas = te.committedGas.Load()
+		p.prevCommitLogGas = executedGas
 		p.prevCommittedBlockNum = te.lastCommittedBlockNum.Load()
 	}
 }
@@ -896,7 +902,7 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 	if stepsInDb > 0 {
 		vals = append(vals, []any{
 			"stepsInDB", fmt.Sprintf("%.2f", stepsInDb),
-			"step", fmt.Sprintf("%.1f", float64(te.lastCommittedTxNum.Load())/float64(te.agg.StepSize())),
+			"step", fmt.Sprintf("%.1f", float64(te.lastCommittedTxNum.Load())/float64(te.doms.StepSize())),
 		}...)
 	}
 

@@ -41,7 +41,9 @@ import (
 )
 
 func init() {
-	ethereumTypes := append(BlockSnapshotTypes, snaptype.CaplinSnapshotTypes...)
+	ethereumTypes := make([]snaptype.Type, 0, len(BlockSnapshotTypes)+len(snaptype.CaplinSnapshotTypes))
+	ethereumTypes = append(ethereumTypes, BlockSnapshotTypes...)
+	ethereumTypes = append(ethereumTypes, snaptype.CaplinSnapshotTypes...)
 
 	snapcfg.RegisterKnownTypes(networkname.Mainnet, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Sepolia, ethereumTypes)
@@ -107,10 +109,6 @@ var (
 		[]snaptype.Index{Indexes.HeaderHash},
 		snaptype.IndexBuilderFunc(
 			func(ctx context.Context, info snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
-				hasher := crypto.NewKeccakState()
-				defer crypto.ReturnToPool(hasher)
-				var h common.Hash
-
 				cfg := recsplit.RecSplitArgs{
 					Enums:              true,
 					BucketSize:         recsplit.DefaultBucketSize,
@@ -125,10 +123,7 @@ var (
 						p.Processed.Add(1)
 					}
 
-					headerRlp := word[1:]
-					hasher.Reset()
-					hasher.Write(headerRlp)
-					hasher.Read(h[:])
+					h := crypto.Keccak256Hash(word[1:])
 					if err := idx.AddKey(h[:], offset); err != nil {
 						return err
 					}
@@ -199,13 +194,7 @@ var (
 				if !ok {
 					return fmt.Errorf("can't find files with vers by pattern %s for indexing in bodies", bodiesPathPattern)
 				}
-				if bVer.Less(statecfg.Schema.BodiesBlock.FileVersion.DataSeg.MinSupported) {
-					verToPanic := version.Versions{
-						Current:      bVer,
-						MinSupported: statecfg.Schema.BodiesBlock.FileVersion.DataSeg.MinSupported,
-					}
-					version.VersionTooLowPanic(filepath.Base(bodiesPath), verToPanic)
-				}
+				statecfg.Schema.BodiesBlock.FileVersion.DataSeg.MustSupport(bVer, filepath.Base(bodiesPath))
 				bodiesSegment, err := seg.NewDecompressor(bodiesPath)
 				if err != nil {
 					return fmt.Errorf("can't open %s for indexing in bodies: %w", sn.As(Bodies).Path, err)
@@ -228,13 +217,7 @@ var (
 				if !ok {
 					return fmt.Errorf("can't find files with vers by pattern %s for indexing in txs", txPathPattern)
 				}
-				if tVer.Less(statecfg.Schema.TransactionsBlock.FileVersion.DataSeg.MinSupported) {
-					verToPanic := version.Versions{
-						Current:      tVer,
-						MinSupported: statecfg.Schema.TransactionsBlock.FileVersion.DataSeg.MinSupported,
-					}
-					version.VersionTooLowPanic(filepath.Base(txPath), verToPanic)
-				}
+				statecfg.Schema.TransactionsBlock.FileVersion.DataSeg.MustSupport(tVer, filepath.Base(txPath))
 				d, err := seg.NewDecompressor(txPath)
 				if err != nil {
 					return fmt.Errorf("can't open %s for indexing in transactions: %w", sn.Path, err)

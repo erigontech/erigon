@@ -1,0 +1,422 @@
+package state
+
+import (
+	"errors"
+	"fmt"
+	"math"
+
+	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+)
+
+// IsBuilderIndex returns true if the given validator index is actually a builder index.
+// Builder indices have the BUILDER_INDEX_FLAG bit (bit 40) set.
+func IsBuilderIndex(validatorIndex uint64) bool {
+	return (validatorIndex & clparams.BuilderIndexFlag) != 0
+}
+
+// ConvertBuilderIndexToValidatorIndex converts a builder index to a validator index
+// by setting the BUILDER_INDEX_FLAG bit.
+func ConvertBuilderIndexToValidatorIndex(builderIndex uint64) uint64 {
+	return builderIndex | clparams.BuilderIndexFlag
+}
+
+// ConvertValidatorIndexToBuilderIndex converts a validator index (with builder flag set)
+// to a builder index by clearing the BUILDER_INDEX_FLAG bit.
+func ConvertValidatorIndexToBuilderIndex(validatorIndex uint64) uint64 {
+	return validatorIndex &^ clparams.BuilderIndexFlag
+}
+
+// IsActiveBuilder checks if the builder at builderIndex is active for the given state.
+// A builder is considered active if:
+// - Its deposit epoch is finalized (deposit_epoch < finalized_checkpoint.epoch)
+// - It has not initiated an exit (withdrawable_epoch == FAR_FUTURE_EPOCH)
+func IsActiveBuilder(state abstract.BeaconState, builderIndex uint64) bool {
+	builders := state.GetBuilders()
+	if builders == nil {
+		log.Debug("builders is nil")
+		return false
+	}
+	if builderIndex >= uint64(builders.Len()) {
+		return false
+	}
+	builder := builders.Get(int(builderIndex))
+	if builder == nil {
+		log.Debug("builder is nil", "builderIndex", builderIndex)
+		return false
+	}
+	finalizedEpoch := state.FinalizedCheckpoint().Epoch
+	farFuture := state.BeaconConfig().FarFutureEpoch
+	return builder.DepositEpoch < finalizedEpoch && builder.WithdrawableEpoch == farFuture
+}
+
+// IsBuilderWithdrawalCredential checks if the withdrawal credentials belong to a builder.
+// Builder withdrawal credentials have the BUILDER_WITHDRAWAL_PREFIX (0x03) as the first byte.
+func IsBuilderWithdrawalCredential(withdrawalCredentials [32]byte, beaconConfig *clparams.BeaconChainConfig) bool {
+	return withdrawalCredentials[0] == byte(beaconConfig.BuilderWithdrawalPrefix)
+}
+
+// IsValidIndexedPayloadAttestation checks if the indexed payload attestation is valid.
+// It verifies that:
+// - Indices are non-empty and sorted
+// - The aggregate signature is valid
+func IsValidIndexedPayloadAttestation(s abstract.BeaconState, attestation *cltypes.IndexedPayloadAttestation) (bool, error) {
+	indices := attestation.AttestingIndices
+	if indices.Length() == 0 || !solid.IsUint64Sorted(indices) {
+		return false, errors.New("isValidIndexedPayloadAttestation: attesting indices are empty or not sorted")
+	}
+
+	// Collect public keys from validators
+	pks := make([][]byte, 0, indices.Length())
+	indices.Range(func(_ int, idx uint64, _ int) bool {
+		val, err := s.ValidatorForValidatorIndex(int(idx))
+		if err != nil {
+			return false
+		}
+		pk := val.PublicKeyBytes()
+		pks = append(pks, pk)
+		return true
+	})
+	if len(pks) != indices.Length() {
+		return false, errors.New("isValidIndexedPayloadAttestation: failed to get all validator public keys")
+	}
+
+	// Get domain for PTC attester
+	epoch := GetEpochAtSlot(s.BeaconConfig(), attestation.Data.Slot)
+	domain, err := s.GetDomain(s.BeaconConfig().DomainPtcAttester, epoch)
+	if err != nil {
+		return false, fmt.Errorf("unable to get the domain: %v", err)
+	}
+
+	// Compute signing root
+	signingRoot, err := fork.ComputeSigningRoot(attestation.Data, domain)
+	if err != nil {
+		return false, fmt.Errorf("unable to get signing root: %v", err)
+	}
+
+	// Verify aggregate signature
+	valid, err := bls.VerifyAggregate(attestation.Signature[:], signingRoot[:], pks)
+	if err != nil {
+		return false, fmt.Errorf("error while validating signature: %v", err)
+	}
+	if !valid {
+		return false, errors.New("invalid aggregate signature")
+	}
+
+	return true, nil
+}
+
+// CanBuilderCoverBid returns true if the builder has enough balance to cover the bid amount
+// after accounting for the minimum deposit and pending withdrawals.
+func CanBuilderCoverBid(s abstract.BeaconState, builderIndex uint64, bidAmount uint64) bool {
+	builders := s.GetBuilders()
+	if builders == nil {
+		log.Debug("builders is nil")
+		return false
+	}
+	if builderIndex >= uint64(builders.Len()) {
+		return false
+	}
+	builder := builders.Get(int(builderIndex))
+	if builder == nil {
+		log.Debug("builder is nil", "builderIndex", builderIndex)
+		return false
+	}
+
+	builderBalance := builder.Balance
+	pendingWithdrawalsAmount := GetPendingBalanceToWithdrawForBuilder(s, builderIndex)
+	if pendingWithdrawalsAmount > math.MaxUint64-s.BeaconConfig().MinDepositAmount {
+		return false
+	}
+	minBalance := s.BeaconConfig().MinDepositAmount + pendingWithdrawalsAmount
+	if builderBalance < minBalance {
+		return false
+	}
+	return builderBalance-minBalance >= bidAmount
+}
+
+func GetProposerDependentRoot(s abstract.BeaconState, epoch uint64) (common.Hash, error) {
+	cfg := s.BeaconConfig()
+	if epoch < cfg.MinSeedLookahead {
+		return common.Hash{}, fmt.Errorf("proposer dependent root epoch %d before min seed lookahead %d", epoch, cfg.MinSeedLookahead)
+	}
+	dependentEpoch := epoch - cfg.MinSeedLookahead
+	if dependentEpoch == 0 {
+		return common.Hash{}, fmt.Errorf("proposer dependent root slot underflow for epoch %d", epoch)
+	}
+	dependentSlot := dependentEpoch*cfg.SlotsPerEpoch - 1
+	return s.GetBlockRootAtSlot(dependentSlot)
+}
+
+// GetPendingBalanceToWithdrawForBuilder returns the total pending balance to withdraw for a builder.
+// This includes:
+// - Amounts from builder_pending_withdrawals (direct withdrawal requests)
+// - Amounts from builder_pending_payments (payments that include withdrawals)
+func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex uint64) uint64 {
+	var total uint64
+
+	// Sum from builder_pending_withdrawals
+	pendingWithdrawals := s.GetBuilderPendingWithdrawals()
+	if pendingWithdrawals != nil {
+		pendingWithdrawals.Range(func(_ int, withdrawal *cltypes.BuilderPendingWithdrawal, _ int) bool {
+			if withdrawal != nil && withdrawal.BuilderIndex == builderIndex {
+				if withdrawal.Amount > math.MaxUint64-total {
+					total = math.MaxUint64
+					return false
+				}
+				total += withdrawal.Amount
+			}
+			return true
+		})
+	} else {
+		log.Debug("builder_pending_withdrawals is nil")
+	}
+
+	// Sum from builder_pending_payments
+	pendingPayments := s.GetBuilderPendingPayments()
+	if pendingPayments != nil {
+		pendingPayments.Range(func(_ int, payment *cltypes.BuilderPendingPayment, _ int) bool {
+			if payment != nil && payment.Withdrawal != nil && payment.Withdrawal.BuilderIndex == builderIndex {
+				if payment.Withdrawal.Amount > math.MaxUint64-total {
+					total = math.MaxUint64
+					return false
+				}
+				total += payment.Withdrawal.Amount
+			}
+			return true
+		})
+	} else {
+		log.Debug("builder_pending_payments is nil")
+	}
+
+	return total
+}
+
+// IsPendingValidator returns true if any pending deposit in the list matches
+// the given pubkey AND has a valid deposit signature.
+// [New in Gloas:EIP7732]
+func IsPendingValidator(cfg *clparams.BeaconChainConfig, pendingDeposits *solid.ListSSZ[*solid.PendingDeposit], pubkey common.Bytes48) bool {
+	if pendingDeposits == nil {
+		return false
+	}
+	for i := 0; i < pendingDeposits.Len(); i++ {
+		d := pendingDeposits.Get(i)
+		if d.PubKey != pubkey {
+			continue
+		}
+		valid, err := IsValidDepositSignature(cfg, d.PubKey, d.WithdrawalCredentials, d.Amount, d.Signature)
+		if err != nil {
+			log.Debug("IsValidDepositSignature failed", "pubkey", d.PubKey, "err", err)
+			continue
+		}
+		if valid {
+			return true
+		}
+	}
+	return false
+}
+
+// IsBuilderPubkey returns true if the given pubkey belongs to any builder in the state.
+// [New in Gloas:EIP7732]
+func IsBuilderPubkey(s abstract.BeaconState, pubkey common.Bytes48) bool {
+	builders := s.GetBuilders()
+	if builders == nil {
+		return false
+	}
+	for i := 0; i < builders.Len(); i++ {
+		builder := builders.Get(i)
+		if builder != nil && builder.Pubkey == pubkey {
+			return true
+		}
+	}
+	return false
+}
+
+// IsValidDepositSignature validates a validator deposit signature.
+func IsValidDepositSignature(cfg *clparams.BeaconChainConfig, pubkey common.Bytes48, withdrawalCredentials common.Hash, amount uint64, signature common.Bytes96) (bool, error) {
+	return isValidDepositSignatureForDomain(cfg, cfg.DomainDeposit, pubkey, withdrawalCredentials, amount, signature)
+}
+
+func IsValidBuilderDepositSignature(cfg *clparams.BeaconChainConfig, request *solid.BuilderDepositRequest) (bool, error) {
+	return isValidDepositSignatureForDomain(cfg, cfg.DomainBuilderDeposit, request.PubKey, request.WithdrawalCredentials, request.Amount, request.Signature)
+}
+
+func isValidDepositSignatureForDomain(cfg *clparams.BeaconChainConfig, domainType [4]byte, pubkey common.Bytes48, withdrawalCredentials common.Hash, amount uint64, signature common.Bytes96) (bool, error) {
+	domain, err := fork.ComputeDomain(
+		domainType[:],
+		utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)),
+		[32]byte{},
+	)
+	if err != nil {
+		return false, err
+	}
+	depositData := &cltypes.DepositData{
+		PubKey:                pubkey,
+		WithdrawalCredentials: withdrawalCredentials,
+		Amount:                amount,
+		Signature:             signature,
+	}
+	depositMessageRoot, err := depositData.MessageHash()
+	if err != nil {
+		return false, err
+	}
+	signedRoot := crypto.Sha256(depositMessageRoot[:], domain)
+	valid, err := bls.Verify(signature[:], signedRoot[:], pubkey[:])
+	if err != nil {
+		return false, err
+	}
+	return valid, nil
+}
+
+// GetIndexForNewBuilder returns the first builder index that is reusable
+// (withdrawable_epoch <= current_epoch and balance == 0), or len(state.builders)
+// if no such slot exists.
+// [New in Gloas:EIP7732]
+func GetIndexForNewBuilder(s abstract.BeaconState) uint64 {
+	builders := s.GetBuilders()
+	if builders == nil {
+		return 0
+	}
+	epoch := GetEpochAtSlot(s.BeaconConfig(), s.Slot())
+	for i := 0; i < builders.Len(); i++ {
+		builder := builders.Get(i)
+		if builder != nil && builder.WithdrawableEpoch <= epoch && builder.Balance == 0 {
+			return uint64(i)
+		}
+	}
+	return uint64(builders.Len())
+}
+
+// AddBuilderToRegistry adds a new builder to the registry.
+func AddBuilderToRegistry(s abstract.BeaconState, pubkey common.Bytes48, version uint8, executionAddress common.Address, amount uint64, slot uint64) error {
+	cfg := s.BeaconConfig()
+	builders := s.GetBuilders()
+	if builders == nil {
+		return errors.New("builder registry unavailable")
+	}
+	index := GetIndexForNewBuilder(s)
+	if index >= cfg.BuilderRegistryLimit {
+		return fmt.Errorf("builder registry full: index %d >= limit %d", index, cfg.BuilderRegistryLimit)
+	}
+
+	builder := &cltypes.Builder{
+		Pubkey:            pubkey,
+		Version:           version,
+		ExecutionAddress:  executionAddress,
+		Balance:           amount,
+		DepositEpoch:      GetEpochAtSlot(cfg, slot),
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	}
+
+	if int(index) < builders.Len() {
+		builders.Set(int(index), builder)
+	} else {
+		builders.Append(builder)
+	}
+	s.SetBuilders(builders)
+	return nil
+}
+
+// ApplyDepositForBuilder processes a fork-onboarding builder deposit.
+// If the pubkey is new and signature is valid, registers a new builder.
+// If the pubkey already exists, increases the builder's balance.
+func ApplyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withdrawalCredentials common.Hash, amount uint64, signature common.Bytes96, slot uint64) error {
+	builders := s.GetBuilders()
+
+	// Check if pubkey already exists in builders
+	builderIndex := -1
+	if builders != nil {
+		for i := 0; i < builders.Len(); i++ {
+			builder := builders.Get(i)
+			if builder != nil && builder.Pubkey == pubkey {
+				builderIndex = i
+				break
+			}
+		}
+	}
+
+	if builderIndex == -1 {
+		// New builder: verify deposit signature (proof of possession)
+		valid, err := IsValidDepositSignature(s.BeaconConfig(), pubkey, withdrawalCredentials, amount, signature)
+		if err != nil {
+			log.Debug("invalid builder deposit signature", "err", err)
+			return nil
+		}
+		if valid {
+			return AddBuilderToRegistry(
+				s,
+				pubkey,
+				s.BeaconConfig().PayloadBuilderVersion,
+				common.BytesToAddress(withdrawalCredentials[12:]),
+				amount,
+				slot,
+			)
+		}
+	} else {
+		builder := builders.Get(builderIndex)
+		if builder == nil {
+			return nil
+		}
+		newBuilder := *builder
+		if amount > math.MaxUint64-newBuilder.Balance {
+			return fmt.Errorf("builder balance overflow: %d + %d", newBuilder.Balance, amount)
+		}
+		newBuilder.Balance += amount
+		builders.Set(builderIndex, &newBuilder)
+		s.SetBuilders(builders)
+	}
+	return nil
+}
+
+func ApplyBuilderDepositRequest(s abstract.BeaconState, request *solid.BuilderDepositRequest) error {
+	builders := s.GetBuilders()
+	builderIndex := -1
+	if builders != nil {
+		for i := 0; i < builders.Len(); i++ {
+			builder := builders.Get(i)
+			if builder != nil && builder.Pubkey == request.PubKey {
+				builderIndex = i
+				break
+			}
+		}
+	}
+
+	if builderIndex == -1 {
+		valid, err := IsValidBuilderDepositSignature(s.BeaconConfig(), request)
+		if err != nil || !valid {
+			return nil
+		}
+		return AddBuilderToRegistry(
+			s,
+			request.PubKey,
+			request.WithdrawalCredentials[0],
+			common.BytesToAddress(request.WithdrawalCredentials[12:]),
+			request.Amount,
+			s.Slot(),
+		)
+	}
+
+	builder := builders.Get(builderIndex)
+	if builder == nil {
+		return nil
+	}
+	newBuilder := *builder
+	if newBuilder.WithdrawableEpoch != s.BeaconConfig().FarFutureEpoch {
+		newBuilder.WithdrawableEpoch = GetEpochAtSlot(s.BeaconConfig(), s.Slot()) + s.BeaconConfig().MinBuilderWithdrawabilityDelay
+	}
+	if request.Amount > math.MaxUint64-newBuilder.Balance {
+		return fmt.Errorf("builder balance overflow: %d + %d", newBuilder.Balance, request.Amount)
+	}
+	newBuilder.Balance += request.Amount
+	builders.Set(builderIndex, &newBuilder)
+	s.SetBuilders(builders)
+	return nil
+}

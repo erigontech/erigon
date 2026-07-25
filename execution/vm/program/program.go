@@ -28,6 +28,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
@@ -128,11 +129,14 @@ func (p *Program) Push(val any) *Program {
 		p.doPush(new(uint256.Int).SetBytes(v))
 	case byte:
 		p.doPush(new(uint256.Int).SetUint64(uint64(v)))
-	case interface{ Bytes() []byte }:
-		// Here, we jump through some hoops in order to avoid depending on
-		// go-ethereum accounts.Address and common.Hash, and instead use the
-		// interface. This works on both values and pointers!
-		p.doPush(new(uint256.Int).SetBytes(v.Bytes()))
+	case common.Address:
+		p.doPush(new(uint256.Int).SetBytes(v[:]))
+	case *common.Address:
+		p.doPush(new(uint256.Int).SetBytes(v[:]))
+	case common.Hash:
+		p.doPush(new(uint256.Int).SetBytes(v[:]))
+	case *common.Hash:
+		p.doPush(new(uint256.Int).SetBytes(v[:]))
 	case nil:
 		p.doPush(nil)
 	default:

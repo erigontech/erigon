@@ -43,7 +43,7 @@ func TestHeaderVerification(t *testing.T) {
 	t.Parallel()
 	// Create a simple chain to verify
 	var (
-		gspec  = &types.Genesis{Config: libchain.TestChainConfig}
+		gspec  = &types.Genesis{Config: libchain.TestChainBerlinConfig}
 		engine = ethash.NewFaker()
 	)
 	logger := testlog.Logger(t, log.LvlInfo)
@@ -58,7 +58,7 @@ func TestHeaderVerification(t *testing.T) {
 		if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 			for j, valid := range []bool{true, false} {
 				chainReader := stagedsync.ChainReader{
-					Cfg:         libchain.TestChainConfig,
+					Cfg:         libchain.TestChainBerlinConfig,
 					Db:          tx,
 					BlockReader: m.BlockReader,
 					Logger:      logger,

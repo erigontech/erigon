@@ -17,7 +17,6 @@
 package state
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -30,7 +29,8 @@ import (
 )
 
 // BenchmarkInvertedIndexMergeFiles benchmarks InvertedIndexRoTx.mergeFiles
-// with varying numbers of input files to expose the O(N²) incremental-merge cost.
+// with varying numbers of input files. findMergeRange selects the largest power-of-2
+// span in one pass, so the full merge is O(N) rather than O(N²).
 func BenchmarkInvertedIndexMergeFiles(b *testing.B) {
 	for _, numFiles := range []int{4, 8, 16, 32} {
 		b.Run(fmt.Sprintf("files=%d", numFiles), func(b *testing.B) {
@@ -48,7 +48,7 @@ func benchmarkIIMergeFiles(b *testing.B, numFiles int) {
 	const module = 31 // number of distinct keys
 
 	txs := uint64(numFiles) * aggStep
-	ctx := context.Background()
+	ctx := b.Context()
 	logger := log.New()
 
 	db, ii, _ := filledInvIndexOfSize(b, txs, aggStep, module, logger)
@@ -65,7 +65,7 @@ func benchmarkIIMergeFiles(b *testing.B, numFiles int) {
 	}
 
 	// Determine the merge range covering all files.
-	ic := ii.BeginFilesRo()
+	ic := ii.beginForTests()
 	defer ic.Close()
 
 	maxEndTxNum := ii.dirtyFilesEndTxNumMinimax()

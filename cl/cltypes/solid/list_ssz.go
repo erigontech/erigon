@@ -92,7 +92,6 @@ func (l *ListSSZ[T]) Static() bool {
 func (l *ListSSZ[T]) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	if !l.static {
 		return ssz.EncodeDynamicList(buf, l.list)
-
 	}
 	dst = buf
 	for _, element := range l.list {
@@ -155,6 +154,11 @@ func (l *ListSSZ[T]) Range(fn func(index int, value T, length int) bool) {
 
 func (l *ListSSZ[T]) Len() int {
 	return len(l.list)
+}
+
+func (l *ListSSZ[T]) Set(index int, value T) {
+	l.list[index] = value
+	l.root = common.Hash{}
 }
 
 func (l *ListSSZ[T]) Append(obj T) {

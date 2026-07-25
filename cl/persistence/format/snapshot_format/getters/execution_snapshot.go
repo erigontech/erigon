@@ -26,21 +26,21 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/ssz"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 type ExecutionSnapshotReader struct {
 	ctx context.Context
 
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 	beaconCfg   *clparams.BeaconChainConfig
 
 	db kv.RoDB
 }
 
-func NewExecutionSnapshotReader(ctx context.Context, blockReader services.FullBlockReader, db kv.RoDB) *ExecutionSnapshotReader {
+func NewExecutionSnapshotReader(ctx context.Context, blockReader dbservices.FullBlockReader, db kv.RoDB) *ExecutionSnapshotReader {
 	return &ExecutionSnapshotReader{ctx: ctx, blockReader: blockReader, db: db}
 }
 
@@ -124,4 +124,8 @@ func (r *ExecutionSnapshotReader) Withdrawals(number uint64, hash common.Hash) (
 		})
 	}
 	return ret, nil
+}
+
+func (r *ExecutionSnapshotReader) CacheBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal) {
+	// No-op: local snapshot reader doesn't need caching — EL data is always available.
 }

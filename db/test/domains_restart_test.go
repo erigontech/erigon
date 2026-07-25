@@ -17,7 +17,6 @@
 package test
 
 import (
-	"context"
 	"encoding/binary"
 	"fmt"
 	"io/fs"
@@ -74,7 +73,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	aggStep := uint64(100)
 	blockSize := uint64(10) // lets say that each block contains 10 tx, after each block we do commitment
-	ctx := context.Background()
+	ctx := t.Context()
 
 	db, agg, datadir := testDbAndAggregatorv3(t, t.TempDir(), aggStep)
 	tx, err := db.BeginTemporalRw(ctx)
@@ -288,7 +287,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		hashes    = make([][]byte, 0)
 	)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	db, agg, datadir := testDbAndAggregatorv3(t, t.TempDir(), aggStep)
 	blockNum, txNum := uint64(0), uint64(0)
@@ -448,7 +447,7 @@ func randomAccount(t *testing.T) (*accounts.Account, accounts.Address) {
 func TestCommit(t *testing.T) {
 	aggStep := uint64(100)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db, _, _ := testDbAndAggregatorv3(t, t.TempDir(), aggStep)
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
@@ -481,7 +480,6 @@ func TestCommit(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	domains.SetTrace(false, false)
 	domainsHash, err := domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
 	require.NoError(t, err)
 	err = domains.Flush(ctx, tx)
@@ -489,4 +487,36 @@ func TestCommit(t *testing.T) {
 
 	require.Equal(t, common.BytesToHash(common.FromHex("0xfe81cd91357cd915cae7c02b5a4771e903c16b29dec582818076954be3741030")), common.BytesToHash(domainsHash))
 
+}
+
+// The commitment context routes both the trie trace and the branch read/write
+// trace through one io.Writer; branch writes surface as [SDC] lines.
+func TestCommitmentContextTraceWriter(t *testing.T) {
+	ctx := t.Context()
+	db, _, _ := testDbAndAggregatorv3(t, t.TempDir(), uint64(100))
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	acc := accounts.Account{Balance: u256.U64(7), CodeHash: accounts.EmptyCodeHash, Incarnation: 1}
+	val := accounts.SerialiseV3(&acc)
+	addr := common.Hex2Bytes("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e")
+	for i := 1; i < 12; i++ { // diverging first nibbles force a branch node
+		addr[0] = byte(i * 16)
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, common.Copy(addr), val, 0, nil))
+	}
+
+	var trace strings.Builder
+	domains.GetCommitmentCtx().SetTraceWriter(&trace)
+	_, err = domains.ComputeCommitment(ctx, tx, true, 0, 0, "", nil)
+	require.NoError(t, err)
+	domains.GetCommitmentCtx().SetTraceWriter(nil)
+
+	out := trace.String()
+	require.Contains(t, out, "[SDC] PutBranch", "branch writes must trace through the writer")
+	require.Contains(t, out, "[proc]", "trie must trace processed keys through the same writer")
 }

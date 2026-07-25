@@ -17,10 +17,15 @@
 package app
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
@@ -35,12 +40,17 @@ type bundle struct {
 
 type RootNum = kv.RootNum
 
+func TestSegLS_NoChaindata(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, lsDatadir(context.Background(), dirs, log.New()))
+}
+
 func Test_DeleteLatestStateSnaps(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	b := bundle{}
 	for _, dc := range []statecfg.DomainCfg{statecfg.Schema.AccountsDomain, statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain, statecfg.Schema.ReceiptDomain} {
 		b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			createFiles(t, dirs, i*10, (i+1)*10, &b)
 		}
 	}
@@ -69,7 +79,7 @@ func Test_DeleteLatestStateSnaps_DomainWithLargeRange(t *testing.T) {
 	dc := statecfg.Schema.ReceiptDomain
 	b.domain, b.history, _ = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
 
-	for i := 0; i < 9; i++ {
+	for i := range 9 {
 		createSchemaFiles(t, b.history, i*10, (i+1)*10)
 	}
 	createSchemaFiles(t, b.domain, 0, 100)
@@ -88,7 +98,7 @@ func Test_DeleteLatestStateSnaps_DomainAndHistorySameEnd(t *testing.T) {
 	dc := statecfg.Schema.ReceiptDomain
 	b.domain, b.history, _ = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
 
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		createSchemaFiles(t, b.history, i*10, (i+1)*10)
 	}
 	createSchemaFiles(t, b.domain, 0, 40)
@@ -161,7 +171,7 @@ func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
 	b := bundle{}
 	dc := statecfg.Schema.ReceiptDomain
 	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		createFiles(t, dirs, i*10, (i+1)*10, &b)
 	}
 
@@ -171,9 +181,6 @@ func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
 		f.Close()
 	}
 
-	// SnapForkable is not auto-created by datadir.New, so create it manually
-	require.NoError(t, os.MkdirAll(dirs.SnapForkable, 0755))
-
 	// Create .tmp files in all snapshot directories (matching patterns from issue #18789)
 	tmpFiles := []string{
 		filepath.Join(dirs.Snap, "v1.1-headers.0-500.seg.123456.tmp"),
@@ -182,7 +189,6 @@ func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
 		filepath.Join(dirs.SnapIdx, "v1.1-storage.8256-8288.bt.209594880.tmp"),
 		filepath.Join(dirs.SnapAccessors, "v2.0-commitment.8256-8272.kvi.3646922560.existence.tmp"),
 		filepath.Join(dirs.SnapCaplin, "v1.0-beaconblocks.0-100.seg.999999.tmp"),
-		filepath.Join(dirs.SnapForkable, "v1.0-forkable.0-100.kv.111111.tmp"),
 	}
 	for _, tf := range tmpFiles {
 		touchFile(tf)
@@ -206,7 +212,7 @@ func Test_DeleteStateSnaps_DryRunKeepsTmpFiles(t *testing.T) {
 	b := bundle{}
 	dc := statecfg.Schema.ReceiptDomain
 	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		createFiles(t, dirs, i*10, (i+1)*10, &b)
 	}
 
@@ -328,6 +334,72 @@ func Test_DeleteStateSnaps_StepRange_SubsetRemoval(t *testing.T) {
 	confirmExist(t, file)
 }
 
+func Test_parseStepRange(t *testing.T) {
+	const maxStep = 224
+	for _, tc := range []struct {
+		name     string
+		in       string
+		from, to uint64
+		wantErr  bool
+	}{
+		{name: "range", in: "5-10", from: 5, to: 10},
+		{name: "range from zero", in: "0-128", from: 0, to: 128},
+		{name: "from plus", in: "5+", from: 5, to: maxStep},
+		{name: "from plus zero", in: "0+", from: 0, to: maxStep},
+		{name: "from plus equals max", in: "224+", from: 224, to: maxStep},
+		{name: "empty", in: "", wantErr: true},
+		{name: "plus only", in: "+", wantErr: true},
+		{name: "single number", in: "5", wantErr: true},
+		{name: "bad plus prefix", in: "5x+", wantErr: true},
+		{name: "range trailing chars", in: "5-10x", wantErr: true},
+		{name: "range extra dash", in: "5-10-20", wantErr: true},
+		{name: "not a number", in: "abc", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			from, to, err := parseStepRange(tc.in, maxStep)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.from, from)
+			require.Equal(t, tc.to, to)
+		})
+	}
+}
+
+// Test_DeleteStateSnaps_StepRange_FromPlus verifies that "N+" resolves "to" to the
+// highest available step, removing everything from step N to the latest.
+func Test_DeleteStateSnaps_StepRange_FromPlus(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	b := bundle{}
+	dc := statecfg.Schema.ReceiptDomain
+	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 1)
+
+	ranges := [][2]int{
+		{0, 128}, {128, 192},
+		{192, 224},
+		{192, 208}, {208, 216}, {216, 220}, {220, 222}, {222, 223}, {223, 224},
+	}
+	for _, r := range ranges {
+		createFiles(t, dirs, r[0], r[1], &b)
+	}
+
+	// "192+" must behave like "192-224" because 224 is the highest available step.
+	err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, StepRange: "192+", DomainNames: []string{"receipt"}})
+	require.NoError(t, err)
+
+	for _, r := range [][2]int{{192, 224}, {192, 208}, {208, 216}, {216, 220}, {220, 222}, {222, 223}, {223, 224}} {
+		file, _ := b.domain.DataFile(version.V1_0, RootNum(r[0]), RootNum(r[1]))
+		confirmDoesntExist(t, file)
+	}
+
+	file, _ := b.domain.DataFile(version.V1_0, RootNum(0), RootNum(128))
+	confirmExist(t, file)
+	file, _ = b.domain.DataFile(version.V1_0, RootNum(128), RootNum(192))
+	confirmExist(t, file)
+}
+
 // Test_DeleteLatestStateSnaps_NoFalseSubsetRemoval verifies that sub-range files
 // of a non-removed merged file are NOT incorrectly removed by the subset pass.
 func Test_DeleteLatestStateSnaps_NoFalseSubsetRemoval(t *testing.T) {
@@ -410,4 +482,995 @@ func Test_DeleteLatestStateSnaps_NoCrossDomainSubsetRemoval(t *testing.T) {
 	// storage.223-224 SHOULD be gone (From >= _maxFrom=223, direct match)
 	file, _ := stoBundle.domain.DataFile(version.V1_0, RootNum(223), RootNum(224))
 	confirmDoesntExist(t, file)
+}
+
+// Test_DeleteStateSnaps_StepRange_OverlappingNonSubsetPreserved verifies that files whose
+// step range overlaps a removed file but is NOT a strict subset are preserved.
+// Uses --step mode to precisely control which range is targeted, avoiding the
+// _maxFrom/_maxTo heuristics of --latest mode.
+func Test_DeleteStateSnaps_StepRange_OverlappingNonSubsetPreserved(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	b := bundle{}
+	dc := statecfg.Schema.ReceiptDomain
+	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 1)
+
+	// Create files:
+	// 0-64: base file (outside target range)
+	// 64-192: merged file targeted for removal via --step 64-192
+	// 32-128: overlaps 64-192 but starts before it — NOT a subset
+	// 128-256: overlaps 64-192 but extends beyond it — NOT a subset
+	// 96-160: strict subset of 64-192 — SHOULD be removed
+	// 64-128: strict subset of 64-192 — SHOULD be removed
+	ranges := [][2]int{
+		{0, 64},
+		{64, 192},
+		{32, 128},
+		{128, 256},
+		{96, 160},
+		{64, 128},
+	}
+	for _, r := range ranges {
+		createFiles(t, dirs, r[0], r[1], &b)
+	}
+
+	// Use --step 64-192 to precisely target the merged file
+	err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, StepRange: "64-192", DomainNames: []string{"receipt"}})
+	require.NoError(t, err)
+
+	// 64-192 and its strict subsets 96-160, 64-128 should be gone
+	for _, r := range [][2]int{{64, 192}, {96, 160}, {64, 128}} {
+		file, _ := b.domain.DataFile(version.V1_0, RootNum(r[0]), RootNum(r[1]))
+		confirmDoesntExist(t, file)
+	}
+
+	// Overlapping-but-non-subset files should still exist
+	file, _ := b.domain.DataFile(version.V1_0, RootNum(32), RootNum(128))
+	confirmExist(t, file)
+	file, _ = b.domain.DataFile(version.V1_0, RootNum(128), RootNum(256))
+	confirmExist(t, file)
+
+	// Base file should still exist
+	file, _ = b.domain.DataFile(version.V1_0, RootNum(0), RootNum(64))
+	confirmExist(t, file)
+}
+
+// Test_DeleteLatestStateSnaps_DryRunPreservesSubsetFiles verifies that dry-run mode
+// does not actually delete subset files — they should appear in output but remain on disk.
+func Test_DeleteLatestStateSnaps_DryRunPreservesSubsetFiles(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	b := bundle{}
+	dc := statecfg.Schema.ReceiptDomain
+	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 1)
+
+	// Create files:
+	// 0-128: base merged file
+	// 128-256: merged file (latest, will be targeted for removal)
+	// 128-192, 192-224: sub-ranges of 128-256
+	// 256-257: tip file
+	ranges := [][2]int{
+		{0, 128},
+		{128, 256},
+		{128, 192}, {192, 224},
+		{256, 257},
+	}
+	for _, r := range ranges {
+		createFiles(t, dirs, r[0], r[1], &b)
+	}
+
+	// First dry-run call: targets tip 256-257 — should NOT delete anything
+	err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true, DryRun: true, DomainNames: []string{"receipt"}})
+	require.NoError(t, err)
+
+	// ALL files should still exist after dry-run
+	for _, r := range [][2]int{{0, 128}, {128, 256}, {128, 192}, {192, 224}, {256, 257}} {
+		file, _ := b.domain.DataFile(version.V1_0, RootNum(r[0]), RootNum(r[1]))
+		confirmExist(t, file)
+	}
+
+	// Now actually remove the tip so the next call targets 128-256
+	err = DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true, DomainNames: []string{"receipt"}})
+	require.NoError(t, err)
+
+	file, _ := b.domain.DataFile(version.V1_0, RootNum(256), RootNum(257))
+	confirmDoesntExist(t, file)
+
+	// Dry-run targeting 128-256 and its subsets — should NOT delete anything
+	err = DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true, DryRun: true, DomainNames: []string{"receipt"}})
+	require.NoError(t, err)
+
+	// 128-256 and all sub-ranges should STILL exist (dry-run)
+	for _, r := range [][2]int{{128, 256}, {128, 192}, {192, 224}} {
+		file, _ := b.domain.DataFile(version.V1_0, RootNum(r[0]), RootNum(r[1]))
+		confirmExist(t, file)
+	}
+
+	// Base file should still exist
+	file, _ = b.domain.DataFile(version.V1_0, RootNum(0), RootNum(128))
+	confirmExist(t, file)
+}
+
+// ── du tests ────────────────────────────────────────────────────────────
+
+func TestDUClassifyFile(t *testing.T) {
+	tests := []struct {
+		dir, name string
+		want      string
+	}{
+		// domains (data files)
+		{"domain", "v1.0-accounts.0-16.kv", duCatDomains},
+		{"domain", "v1.0-storage.16-32.kv", duCatDomains},
+
+		// domain accessors (.kvi, .kvei, .bt) live in domain/ and are never pruned
+		{"domain", "v1.0-accounts.0-16.kvi", duCatDomains},
+		{"domain", "v1.0-accounts.0-16.kvei", duCatDomains},
+		{"domain", "v1.0-accounts.0-16.bt", duCatDomains},
+
+		// rcache overrides domain
+		{"domain", "v1.0-rcache.0-16.kv", duCatRcache},
+		{"history", "v1.0-rcache.0-16.v", duCatRcache},
+		{"idx", "v1.0-rcache.0-16.ef", duCatRcache},
+
+		// commitment hist overrides history/idx
+		{"history", "v1.0-commitment.0-16.v", duCatCommitHist},
+		{"idx", "v1.0-commitment.0-16.ef", duCatCommitHist},
+
+		// commitment in domain is still domains (not commitment hist)
+		{"domain", "v1.0-commitment.0-16.kv", duCatDomains},
+
+		// plain categories
+		{"history", "v1.0-accounts.0-16.v", duCatHistory},
+		{"idx", "v1.0-accounts.0-16.ef", duCatInvIdx},
+		{"accessor", "v1.0-accounts.0-16.bt", duCatAccessors},
+		{"caplin", "v1.0-beaconblocks.0-100.seg", duCatCaplin},
+
+		// block segments (top-level snapshots dir)
+		{"snapshots", "v1.0-0-500-headers.seg", duCatBlocks},
+		{"snapshots", "v1.0-0-500-bodies.seg", duCatBlocks},
+		{"snapshots", "v1.0-0-500-transactions.idx", duCatBlocks},
+
+		// case insensitivity
+		{"Domain", "v1.0-accounts.0-16.kv", duCatDomains},
+		{"HISTORY", "v1.0-RCACHE.0-16.v", duCatRcache},
+
+		// unknown dir with segment extension → block segments
+		{"something", "random.dat", duCatBlocks},
+
+		// non-segment files → other
+		{"snapshots", "salt.txt", duCatOther},
+		{"snapshots", "v1.0-0-500-headers.torrent", duCatOther},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.dir+"/"+tt.name, func(t *testing.T) {
+			got := duClassifyFile(tt.dir, tt.name)
+			if got != tt.want {
+				t.Errorf("duClassifyFile(%q, %q) = %q, want %q", tt.dir, tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDUWalkSnapshots(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+
+	// Create mock files in various snapshot subdirectories.
+	writeFile := func(dir, name string, size int) {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(path, make([]byte, size), 0644))
+	}
+
+	// domain files (state file format: type.from-to)
+	writeFile(dirs.SnapDomain, "v1.0-accounts.0-16.kv", 1000)
+	writeFile(dirs.SnapDomain, "v1.0-rcache.0-16.kv", 200)
+
+	// history files
+	writeFile(dirs.SnapHistory, "v1.0-accounts.0-16.v", 500)
+	writeFile(dirs.SnapHistory, "v1.0-commitment.0-16.v", 300)
+
+	// idx files
+	writeFile(dirs.SnapIdx, "v1.0-accounts.0-16.ef", 400)
+
+	// accessor files
+	writeFile(dirs.SnapAccessors, "v1.0-accounts.0-16.bt", 250)
+
+	// caplin files
+	writeFile(dirs.SnapCaplin, "v1.0-beaconblocks.0-100.seg", 600)
+
+	// block segment files (top-level snapshots dir)
+	writeFile(dirs.Snap, "v1.0-0-500-headers.seg", 800)
+
+	files, err := duWalkSnapshots(dirs)
+	require.NoError(t, err)
+
+	// Build category->totalSize map.
+	catSizes := make(map[string]int64)
+	catCounts := make(map[string]int)
+	for _, f := range files {
+		catSizes[f.Category] += f.Size
+		catCounts[f.Category]++
+	}
+
+	require.Equal(t, int64(1000), catSizes[duCatDomains])
+	require.Equal(t, int64(200), catSizes[duCatRcache])
+	require.Equal(t, int64(500), catSizes[duCatHistory])
+	require.Equal(t, int64(300), catSizes[duCatCommitHist])
+	require.Equal(t, int64(400), catSizes[duCatInvIdx])
+	require.Equal(t, int64(250), catSizes[duCatAccessors])
+	require.Equal(t, int64(600), catSizes[duCatCaplin])
+	require.Equal(t, int64(800), catSizes[duCatBlocks])
+
+	// Check range parsing works for a state file.
+	var found bool
+	for _, f := range files {
+		if f.Name == "v1.0-accounts.0-16.kv" {
+			require.Equal(t, uint64(0), f.From)
+			require.Equal(t, uint64(16), f.To)
+			require.True(t, f.IsState)
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "accounts domain file should be in results")
+
+	// Check block segment is not a state file.
+	for _, f := range files {
+		if f.Name == "v1.0-0-500-headers.seg" {
+			require.False(t, f.IsState)
+			// Block file ranges are multiplied by 1000 by ParseFileName
+			require.Equal(t, uint64(0), f.From)
+			require.Equal(t, uint64(500000), f.To)
+			break
+		}
+	}
+}
+
+func TestDUWalkSnapshots_EmptyDir(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	files, err := duWalkSnapshots(dirs)
+	require.NoError(t, err)
+	require.Empty(t, files)
+}
+
+func TestDUWalkSnapshots_MissingDir(t *testing.T) {
+	// Use Open instead of New to avoid creating directories.
+	dirs := datadir.Open(filepath.Join(t.TempDir(), "nonexistent"))
+	files, err := duWalkSnapshots(dirs)
+	require.NoError(t, err)
+	require.Empty(t, files)
+}
+
+func TestDUComputeEstimates(t *testing.T) {
+	// Synthetic file list simulating an archive node with realistic mainnet-like values:
+	// - domain files (always kept)
+	// - old and new history/idx files
+	// - commitment hist (archive-only)
+	// - rcache domain and history files (kept in non-archive modes with receipt pruning)
+	// - logaddrs inv idx (receipt-related, kept in blocks mode)
+	// - old and new block segments
+	// - caplin (always kept)
+	//
+	// maxStep=2000, maxBlock=20_000_000
+	// Full mode (DefaultPruneDistance=262_144):
+	//   fullStepPruneDistance = 262_144 * 2000 / 20_000_000 = 26
+	//   state cutoff: step To <= 2000-26 = 1974
+	//   block cutoff: block To <= 20_000_000-262_144 = 19_737_856
+	// Minimal mode (MinimalPruneDistance=100_000):
+	//   minimalStepPruneDistance = 100_000 * 2000 / 20_000_000 = 10
+	//   state cutoff: step To <= 2000-10 = 1990
+	//   block cutoff: block To <= 20_000_000-100_000 = 19_900_000
+	// Test data includes:
+	//   - "old" files well below both cutoffs (pruned by full and minimal),
+	//   - "new" files well above both (kept by both),
+	//   - two boundary files in the gap between minimal's and full's cutoffs
+	//     (kept by full, pruned by minimal) — these are the ones that actually
+	//     validate the per-mode cutoff math rather than the structural rules.
+
+	files := []duFileInfo{
+		// Domains — always kept in all modes
+		{Name: "accounts.0-500.kv", Size: 1000, Category: duCatDomains, IsState: true, From: 0, To: 500},
+		{Name: "storage.1500-2000.kv", Size: 2000, Category: duCatDomains, IsState: true, From: 1500, To: 2000},
+
+		// Old accessor (To=500 below both cutoffs) — pruned in blocks/full/minimal
+		{Name: "accounts.0-500.bt", Size: 500, Category: duCatAccessors, IsState: true, From: 0, To: 500},
+
+		// Old history (To=500 below both cutoffs) — pruned in blocks/full/minimal
+		{Name: "accounts.0-500.v", Size: 3000, Category: duCatHistory, IsState: true, From: 0, To: 500},
+
+		// New history (To=2000 above both cutoffs) — kept in all
+		{Name: "accounts.1500-2000.v", Size: 4000, Category: duCatHistory, IsState: true, From: 1500, To: 2000},
+
+		// Old inverted index (To=500 below both cutoffs) — pruned in blocks/full/minimal
+		{Name: "accounts.0-500.ef", Size: 1500, Category: duCatInvIdx, IsState: true, From: 0, To: 500},
+
+		// New inverted index — kept
+		{Name: "accounts.1500-2000.ef", Size: 2500, Category: duCatInvIdx, IsState: true, From: 1500, To: 2000},
+
+		// Boundary state history (To=1985: 1985 > 1974 full-cutoff, 1985 <= 1990 minimal-cutoff)
+		// — kept by full, pruned by minimal.
+		{Name: "accounts.1900-1985.v", Size: 1234, Category: duCatHistory, IsState: true, From: 1900, To: 1985},
+
+		// Commitment hist — archive only (excluded from all non-archive modes)
+		{Name: "commitment.0-500.v", Size: 800, Category: duCatCommitHist, IsState: true, From: 0, To: 500},
+
+		// Rcache domain file (in domain/) — never pruned, kept in all modes
+		{Path: "/data/snapshots/domain/rcache.0-500.kv", Name: "rcache.0-500.kv", Size: 400, Category: duCatRcache, IsState: true, From: 0, To: 500},
+
+		// Rcache history file (in history/) — receipt-pruned by distance in
+		// full and minimal (To=500 below both cutoffs).
+		{Path: "/data/snapshots/history/rcache.0-500.v", Name: "rcache.0-500.v", Size: 200, Category: duCatRcache, IsState: true, From: 0, To: 500},
+
+		// Old logaddrs inv idx (receipt-related, To=500 below both cutoffs) —
+		// pruned in full/minimal.
+		{Name: "logaddrs.0-500.ef", Size: 350, Category: duCatInvIdx, IsState: true, From: 0, To: 500},
+
+		// Old transaction block segment (To=15M below both block cutoffs) — pruned in full/minimal
+		{Name: "0-15000-transactions.seg", Size: 5000, Category: duCatBlocks, IsState: false, From: 0, To: 15_000_000},
+
+		// Boundary transaction block segment (To=19_800_000: above full's 19_737_856,
+		// at or below minimal's 19_900_000) — kept by full, pruned by minimal.
+		{Name: "19000-19800-transactions.seg", Size: 5678, Category: duCatBlocks, IsState: false, From: 19_000_000, To: 19_800_000},
+
+		// Old headers block segment — NOT prunable (headers/bodies always kept)
+		{Name: "0-15000-headers.seg", Size: 3000, Category: duCatBlocks, IsState: false, From: 0, To: 15_000_000},
+
+		// New block segment (To=20M above both block cutoffs) — kept in all
+		{Name: "15000-20000-headers.seg", Size: 6000, Category: duCatBlocks, IsState: false, From: 15_000_000, To: 20_000_000},
+
+		// Caplin — always kept
+		{Name: "beaconblocks.0-100.seg", Size: 700, Category: duCatCaplin, IsState: false, From: 0, To: 100},
+	}
+
+	maxBlock := uint64(20_000_000)
+	maxStep := uint64(2000)
+
+	estimates := duComputeEstimates(files, maxBlock, maxStep)
+	require.Len(t, estimates, 4)
+
+	// Archive: sum everything
+	archiveTotal := int64(1000 + 2000 + 500 + 3000 + 4000 + 1500 + 2500 + 1234 + 800 + 400 + 200 + 350 + 5000 + 5678 + 3000 + 6000 + 700)
+	require.Equal(t, "archive", estimates[0].Mode)
+	require.Equal(t, archiveTotal, estimates[0].TotalBytes)
+	require.Equal(t, int64(0), estimates[0].Delta)
+
+	// Full: archive minus commitHist(800) minus old accessor(500) minus old history(3000)
+	// minus old idx(1500) minus old rcache hist(200) minus old logaddrs(350) minus old tx(5000).
+	// Boundary state(1234) and boundary tx(5678) sit above full's cutoffs → kept.
+	// Rcache domain (400) is kept.
+	fullTotal := archiveTotal - 800 - 500 - 3000 - 1500 - 200 - 350 - 5000
+	require.Equal(t, "full", estimates[1].Mode)
+	require.Equal(t, fullTotal, estimates[1].TotalBytes)
+	require.Equal(t, fullTotal-archiveTotal, estimates[1].Delta)
+	require.Equal(t, "last 262.144", estimates[1].BlocksDesc)
+	require.Equal(t, "last 262.144", estimates[1].HistoryDesc)
+
+	// Blocks: archive minus commitHist(800) minus old accessor(500) minus
+	// old history(3000) minus old idx(1500). Keeps everything full prunes via
+	// tx/receipt distance (old rcache hist, old logaddrs, old tx, boundary tx).
+	blocksTotal := archiveTotal - 800 - 500 - 3000 - 1500
+	require.Equal(t, "blocks", estimates[2].Mode)
+	require.Equal(t, blocksTotal, estimates[2].TotalBytes)
+	require.Equal(t, blocksTotal-archiveTotal, estimates[2].Delta)
+	require.Equal(t, "all blocks", estimates[2].BlocksDesc)
+	require.Equal(t, "last 262.144", estimates[2].HistoryDesc)
+
+	// Minimal: full minus boundary state(1234) and boundary tx(5678),
+	// which fall in the gap between full's and minimal's cutoffs.
+	minimalTotal := fullTotal - 1234 - 5678
+	require.Equal(t, "minimal", estimates[3].Mode)
+	require.Equal(t, minimalTotal, estimates[3].TotalBytes)
+	require.Equal(t, minimalTotal-archiveTotal, estimates[3].Delta)
+	require.Equal(t, "last 100.000", estimates[3].BlocksDesc)
+	require.Equal(t, "last 100.000", estimates[3].HistoryDesc)
+
+	// Invariant: archive > blocks > full > minimal (strict, with boundary files in test data)
+	require.Greater(t, estimates[0].TotalBytes, estimates[2].TotalBytes, "archive > blocks")
+	require.Greater(t, estimates[2].TotalBytes, estimates[1].TotalBytes, "blocks > full")
+	require.Greater(t, estimates[1].TotalBytes, estimates[3].TotalBytes, "full > minimal")
+}
+
+func TestDUComputeEstimates_NoPruning(t *testing.T) {
+	// When maxStep and maxBlock are small (below pruneDistance),
+	// nothing gets pruned, so all modes should be equal (except commitment hist).
+	files := []duFileInfo{
+		{Name: "d.kv", Size: 100, Category: duCatDomains, IsState: true, From: 0, To: 10},
+		{Name: "h.v", Size: 200, Category: duCatHistory, IsState: true, From: 0, To: 10},
+		{Name: "b.seg", Size: 300, Category: duCatBlocks, IsState: false, From: 0, To: 50000},
+	}
+
+	estimates := duComputeEstimates(files, 50000, 10)
+	// All modes include everything (no old files to prune, no commitment/rcache)
+	require.Equal(t, int64(600), estimates[0].TotalBytes) // archive
+	require.Equal(t, int64(600), estimates[1].TotalBytes) // full
+	require.Equal(t, int64(600), estimates[2].TotalBytes) // blocks
+	require.Equal(t, int64(600), estimates[3].TotalBytes) // minimal
+}
+
+func TestDUComputeEstimates_EmptyFiles(t *testing.T) {
+	estimates := duComputeEstimates(nil, 0, 0)
+	require.Len(t, estimates, 4)
+	for _, e := range estimates {
+		require.Equal(t, int64(0), e.TotalBytes)
+	}
+}
+
+func TestDUDetectNodeType(t *testing.T) {
+	t.Run("archive - has old state history from step 0", func(t *testing.T) {
+		// Archive mode keeps all history — old history files from step 0 are present.
+		files := []duFileInfo{
+			{Category: duCatDomains, Size: 100, IsState: true, To: 2000},
+			{Category: duCatHistory, Size: 500, IsState: true, From: 0, To: 500},
+			{Category: duCatHistory, Size: 500, IsState: true, From: 500, To: 2000},
+			{Category: duCatBlocks, IsState: false, From: 0, To: 500000, Size: 200},
+		}
+		require.Equal(t, "archive", duDetectNodeType(files))
+	})
+
+	t.Run("archive - with commitment hist and rcache (still archive by history)", func(t *testing.T) {
+		files := []duFileInfo{
+			{Category: duCatDomains, Size: 100, IsState: true, To: 2000},
+			{Category: duCatHistory, Size: 500, IsState: true, From: 0, To: 500},
+			{Category: duCatCommitHist, Size: 50, IsState: true, From: 0, To: 500},
+			{Category: duCatRcache, Size: 50, IsState: true, From: 0, To: 500},
+			{Category: duCatBlocks, IsState: false, To: 500000, Size: 200},
+		}
+		require.Equal(t, "archive", duDetectNodeType(files))
+	})
+
+	t.Run("blocks - has tx blocks from 0, no old state history", func(t *testing.T) {
+		// Blocks mode keeps all tx segments (including from genesis) but
+		// prunes state history. Detector recognises this via a tx segment
+		// starting at From=0 on a chain mature enough for distance pruning
+		// to have kicked in. maxBlock=2_000_000 > MinimalPruneDistance=100_000.
+		files := []duFileInfo{
+			{Category: duCatDomains, Size: 100, IsState: true, To: 50},
+			{Category: duCatHistory, Size: 500, IsState: true, From: 40, To: 50},
+			{Category: duCatRcache, Size: 50, IsState: true, From: 0, To: 50},
+			{Name: "0-300-transactions.seg", Category: duCatBlocks, IsState: false, From: 0, To: 300000, Size: 200},
+			{Name: "300-2000-headers.seg", Category: duCatBlocks, IsState: false, From: 300000, To: 2000000, Size: 200},
+		}
+		require.Equal(t, "blocks", duDetectNodeType(files))
+	})
+
+	t.Run("full - has old transaction blocks not from 0, no old state history", func(t *testing.T) {
+		// Transactions start at 800000 (not 0). To=1_500_000 below minimal's
+		// cutoff (1_900_000) → "full". maxBlock=2_000_000,
+		// MinimalPruneDistance=100_000.
+		files := []duFileInfo{
+			{Category: duCatDomains, Size: 100, IsState: true, To: 50},
+			{Category: duCatHistory, Size: 500, IsState: true, From: 40, To: 50},
+			{Name: "800-1500-transactions.seg", Category: duCatBlocks, IsState: false, From: 800000, To: 1500000, Size: 200},
+			{Name: "1500-2000-transactions.seg", Category: duCatBlocks, IsState: false, From: 1500000, To: 2000000, Size: 200},
+		}
+		require.Equal(t, "full", duDetectNodeType(files))
+	})
+
+	t.Run("minimal - only recent blocks", func(t *testing.T) {
+		files := []duFileInfo{
+			{Category: duCatDomains, Size: 100, IsState: true, To: 50},
+			{Category: duCatBlocks, IsState: false, From: 450000, To: 500000, Size: 200},
+		}
+		require.Equal(t, "minimal", duDetectNodeType(files))
+	})
+
+	t.Run("minimal - empty files", func(t *testing.T) {
+		require.Equal(t, "minimal", duDetectNodeType(nil))
+	})
+
+	t.Run("minimal - blocks below prune distance threshold", func(t *testing.T) {
+		// maxBlock=50000 < MinimalPruneDistance=100_000 → can't determine old blocks
+		files := []duFileInfo{
+			{Category: duCatBlocks, IsState: false, From: 0, To: 50000, Size: 200},
+		}
+		require.Equal(t, "minimal", duDetectNodeType(files))
+	})
+
+	t.Run("young chain with history from 0 not detected as archive", func(t *testing.T) {
+		// Chain too young for pruning to matter — archive detection uses full's
+		// step distance (the larger one) so any state at step 0 only proves
+		// archive when full would already have pruned.
+		// fullStepPruneDistance = 262144 * 5 / 50000 = 26, maxStep=5 < 26
+		files := []duFileInfo{
+			{Category: duCatDomains, Size: 100, IsState: true, To: 5},
+			{Category: duCatHistory, Size: 500, IsState: true, From: 0, To: 5},
+			{Category: duCatBlocks, IsState: false, From: 0, To: 50000, Size: 200},
+		}
+		// maxStep=5 <= fullStepPruneDistance=26 → too young for archive classification,
+		// falls through to block-based detection. maxBlock=50000 <
+		// MinimalPruneDistance=100_000 → no full classification → minimal.
+		require.Equal(t, "minimal", duDetectNodeType(files))
+	})
+
+	t.Run("genesis tx in [MinimalPruneDistance, DefaultPruneDistance] band not classified as blocks", func(t *testing.T) {
+		// maxBlock=200_000 sits between MinimalPruneDistance (100_000) and
+		// DefaultPruneDistance (262_144). At this height a full-mode node
+		// still has the genesis tx segment because distance pruning hasn't
+		// kicked in yet — gating "blocks" on MinimalPruneDistance would
+		// misclassify it. With the fullPruneDistance gate the genesis tx is
+		// not evidence of blocks here, and the next branch correctly
+		// classifies it as full via the segment whose To equals the minimal
+		// cutoff (100_000 == 200_000 - 100_000).
+		files := []duFileInfo{
+			{Category: duCatDomains, Size: 100, IsState: true, To: 50},
+			{Category: duCatHistory, Size: 500, IsState: true, From: 40, To: 50},
+			{Name: "0-100-transactions.seg", Category: duCatBlocks, IsState: false, From: 0, To: 100_000, Size: 200},
+			{Name: "100-200-transactions.seg", Category: duCatBlocks, IsState: false, From: 100_000, To: 200_000, Size: 200},
+		}
+		require.Equal(t, "full", duDetectNodeType(files))
+	})
+}
+
+func TestDUAggregateCategories(t *testing.T) {
+	files := []duFileInfo{
+		{Category: duCatDomains, Size: 100},
+		{Category: duCatDomains, Size: 200},
+		{Category: duCatHistory, Size: 300},
+		{Category: duCatBlocks, Size: 50},
+	}
+
+	cats := duAggregateCategories(files)
+	require.Equal(t, duCategoryStat{Bytes: 300, Files: 2}, cats[duCatDomains])
+	require.Equal(t, duCategoryStat{Bytes: 300, Files: 1}, cats[duCatHistory])
+	require.Equal(t, duCategoryStat{Bytes: 50, Files: 1}, cats[duCatBlocks])
+	require.Len(t, cats, 3)
+}
+
+func TestDUAggregateCategories_Empty(t *testing.T) {
+	cats := duAggregateCategories(nil)
+	require.Empty(t, cats)
+}
+
+func TestDUFormatHuman(t *testing.T) {
+	result := duResult{
+		Chain:        "mainnet",
+		DetectedMode: "archive",
+		BlockRange:   [2]uint64{0, 21500000},
+		StepRange:    [2]uint64{0, 2048},
+		TotalBytes:   1024 * 1024 * 1024 * 100, // 100 GB
+		TotalFiles:   500,
+		Categories: map[string]duCategoryStat{
+			duCatDomains: {Bytes: 50 * 1024 * 1024 * 1024, Files: 200},
+			duCatHistory: {Bytes: 30 * 1024 * 1024 * 1024, Files: 150},
+			duCatBlocks:  {Bytes: 20 * 1024 * 1024 * 1024, Files: 150},
+		},
+		Estimates: []duEstimate{
+			{Mode: "archive", TotalBytes: 100 * 1024 * 1024 * 1024, Delta: 0, BlocksDesc: "all blocks", HistoryDesc: "all history"},
+			{Mode: "full", TotalBytes: 80 * 1024 * 1024 * 1024, Delta: -20 * 1024 * 1024 * 1024, BlocksDesc: "all blocks", HistoryDesc: "last 100.000"},
+		},
+	}
+
+	var buf bytes.Buffer
+	duFormatHuman(&buf, result, false)
+	out := buf.String()
+
+	// Check header line — no ConfiguredMode set, so shows "archive (detected)".
+	require.True(t, strings.Contains(out, "mainnet"), "should contain chain name")
+	require.True(t, strings.Contains(out, "archive (detected)"), "should show detected mode with qualifier when DB unavailable")
+	require.True(t, strings.Contains(out, "21.500.000"), "should contain formatted block range")
+	require.True(t, strings.Contains(out, "2.048"), "should contain formatted step range")
+
+	// Check breakdown section.
+	require.True(t, strings.Contains(out, "Breakdown"), "should have breakdown header")
+	require.True(t, strings.Contains(out, "domains"), "should list domains category")
+	require.True(t, strings.Contains(out, "history"), "should list history category")
+	require.True(t, strings.Contains(out, "block segments"), "should list block segments category")
+	require.True(t, strings.Contains(out, "total"), "should have total line")
+
+	// Check estimates section.
+	require.True(t, strings.Contains(out, "Estimated Size by Node Type"), "should have estimates header")
+	require.True(t, strings.Contains(out, "all blocks"), "should show blocks description")
+	require.True(t, strings.Contains(out, "last 100.000"), "should show history description")
+}
+
+func TestDUFormatHuman_ConfiguredMode(t *testing.T) {
+	t.Run("configured matches detected", func(t *testing.T) {
+		result := duResult{
+			Chain:          "mainnet",
+			ConfiguredMode: "full",
+			DetectedMode:   "full",
+			Categories:     map[string]duCategoryStat{},
+		}
+		var buf bytes.Buffer
+		duFormatHuman(&buf, result, false)
+		out := buf.String()
+		require.Contains(t, out, "full")
+		require.NotContains(t, out, "(detected)")
+		require.NotContains(t, out, "files look like")
+	})
+
+	t.Run("configured differs from detected", func(t *testing.T) {
+		result := duResult{
+			Chain:          "mainnet",
+			ConfiguredMode: "full",
+			DetectedMode:   "archive",
+			Categories:     map[string]duCategoryStat{},
+		}
+		var buf bytes.Buffer
+		duFormatHuman(&buf, result, false)
+		out := buf.String()
+		require.Contains(t, out, "full")
+		require.Contains(t, out, "files look like archive")
+	})
+
+	t.Run("no DB - shows detected with qualifier", func(t *testing.T) {
+		result := duResult{
+			Chain:        "unknown",
+			DetectedMode: "minimal",
+			Categories:   map[string]duCategoryStat{},
+		}
+		var buf bytes.Buffer
+		duFormatHuman(&buf, result, false)
+		out := buf.String()
+		require.Contains(t, out, "minimal (detected)")
+	})
+}
+
+func TestDUFormatHuman_EmptyResult(t *testing.T) {
+	result := duResult{
+		Chain:        "unknown",
+		DetectedMode: "minimal",
+		Categories:   map[string]duCategoryStat{},
+	}
+
+	var buf bytes.Buffer
+	duFormatHuman(&buf, result, false)
+	out := buf.String()
+
+	require.True(t, strings.Contains(out, "unknown"), "should contain chain name")
+	require.True(t, strings.Contains(out, "total"), "should have total line")
+}
+
+func TestDUFormatJSON(t *testing.T) {
+	result := duResult{
+		Chain:        "mainnet",
+		DetectedMode: "archive",
+		BlockRange:   [2]uint64{0, 21500000},
+		StepRange:    [2]uint64{0, 2048},
+		TotalBytes:   107374182400,
+		TotalFiles:   500,
+		Categories: map[string]duCategoryStat{
+			duCatDomains: {Bytes: 53687091200, Files: 200},
+			duCatHistory: {Bytes: 32212254720, Files: 150},
+		},
+		Estimates: []duEstimate{
+			{Mode: "archive", TotalBytes: 107374182400, Delta: 0, BlocksDesc: "all blocks", HistoryDesc: "all history"},
+		},
+	}
+
+	var buf bytes.Buffer
+	err := duFormatJSON(&buf, result)
+	require.NoError(t, err)
+
+	// Verify valid JSON by unmarshaling.
+	var decoded duResult
+	err = json.Unmarshal(buf.Bytes(), &decoded)
+	require.NoError(t, err)
+
+	require.Equal(t, "mainnet", decoded.Chain)
+	require.Equal(t, "archive", decoded.DetectedMode)
+	require.Equal(t, [2]uint64{0, 21500000}, decoded.BlockRange)
+	require.Equal(t, [2]uint64{0, 2048}, decoded.StepRange)
+	require.Equal(t, int64(107374182400), decoded.TotalBytes)
+	require.Equal(t, 500, decoded.TotalFiles)
+	require.Len(t, decoded.Categories, 2)
+	require.Equal(t, int64(53687091200), decoded.Categories[duCatDomains].Bytes)
+	require.Equal(t, 200, decoded.Categories[duCatDomains].Files)
+	require.Len(t, decoded.Estimates, 1)
+	require.Equal(t, "archive", decoded.Estimates[0].Mode)
+}
+
+func TestDUFormatJSON_EmptyResult(t *testing.T) {
+	result := duResult{
+		Chain:      "unknown",
+		Categories: map[string]duCategoryStat{},
+	}
+
+	var buf bytes.Buffer
+	err := duFormatJSON(&buf, result)
+	require.NoError(t, err)
+
+	var decoded map[string]any
+	err = json.Unmarshal(buf.Bytes(), &decoded)
+	require.NoError(t, err)
+	require.Equal(t, "unknown", decoded["chain"])
+}
+
+func TestDUFormatSize(t *testing.T) {
+	tests := []struct {
+		input    int64
+		expected string
+	}{
+		{0, "0B"},
+		{512, "512B"},
+		{1024, "1.0KB"},
+		{1536, "1.5KB"},
+		{1048576, "1.0MB"},
+		{1073741824, "1.0GB"},
+		{1099511627776, "1.0TB"},
+		{-1073741824, "-1.0GB"},
+	}
+
+	for _, tt := range tests {
+		require.Equal(t, tt.expected, duFormatSize(tt.input), "for input %d", tt.input)
+	}
+}
+
+func TestDUFormatNumber(t *testing.T) {
+	tests := []struct {
+		input    uint64
+		expected string
+	}{
+		{0, "0"},
+		{999, "999"},
+		{1000, "1.000"},
+		{21500000, "21.500.000"},
+		{1000000000, "1.000.000.000"},
+	}
+
+	for _, tt := range tests {
+		require.Equal(t, tt.expected, duFormatNumber(tt.input), "for input %d", tt.input)
+	}
+}
+
+// TestDUAcceptanceCriteria is an end-to-end acceptance test that verifies:
+// 1. All three output sections render correctly (header, breakdown, estimates)
+// 2. --json flag produces valid parseable JSON
+// 3. Estimates are consistent (archive >= full >= minimal)
+// 4. Category sizes sum to total
+func TestDUAcceptanceCriteria(t *testing.T) {
+	// Build a realistic file set that exercises all categories and pruning paths.
+	files := []duFileInfo{
+		{Name: "accounts.0-50000.kv", Size: 10000, Category: duCatDomains, IsState: true, From: 0, To: 50000},
+		{Name: "storage.150000-200000.kv", Size: 20000, Category: duCatDomains, IsState: true, From: 150000, To: 200000},
+		{Name: "accounts.0-50000.v", Size: 8000, Category: duCatHistory, IsState: true, From: 0, To: 50000},
+		{Name: "accounts.150000-200000.v", Size: 12000, Category: duCatHistory, IsState: true, From: 150000, To: 200000},
+		{Name: "accounts.0-50000.ef", Size: 5000, Category: duCatInvIdx, IsState: true, From: 0, To: 50000},
+		{Name: "accounts.150000-200000.ef", Size: 7000, Category: duCatInvIdx, IsState: true, From: 150000, To: 200000},
+		{Name: "accounts.0-50000.bt", Size: 3000, Category: duCatAccessors, IsState: true, From: 0, To: 50000},
+		{Name: "commitment.0-50000.v", Size: 2000, Category: duCatCommitHist, IsState: true, From: 0, To: 50000},
+		{Name: "rcache.0-50000.kv", Size: 1500, Category: duCatRcache, IsState: true, From: 0, To: 50000},
+		{Name: "0-300-headers.seg", Size: 15000, Category: duCatBlocks, IsState: false, From: 0, To: 300000},
+		{Name: "0-300-transactions.seg", Size: 10000, Category: duCatBlocks, IsState: false, From: 0, To: 300000},
+		{Name: "300-500-bodies.seg", Size: 18000, Category: duCatBlocks, IsState: false, From: 300000, To: 500000},
+		{Name: "beaconblocks.0-100.seg", Size: 4000, Category: duCatCaplin, IsState: false, From: 0, To: 100},
+	}
+
+	maxBlock := uint64(500000)
+	maxStep := uint64(200000)
+
+	// Aggregate categories.
+	cats := duAggregateCategories(files)
+
+	// Verify category sizes sum to total.
+	var catSum int64
+	var catFiles int
+	for _, c := range cats {
+		catSum += c.Bytes
+		catFiles += c.Files
+	}
+	var expectedTotal int64
+	for _, f := range files {
+		expectedTotal += f.Size
+	}
+	require.Equal(t, expectedTotal, catSum, "category bytes must sum to total")
+	require.Equal(t, len(files), catFiles, "category file count must sum to total files")
+
+	// Compute estimates.
+	estimates := duComputeEstimates(files, maxBlock, maxStep)
+	require.Len(t, estimates, 4)
+
+	// Verify archive >= blocks >= full >= minimal (acceptance criterion 3).
+	require.GreaterOrEqual(t, estimates[0].TotalBytes, estimates[2].TotalBytes, "archive >= blocks")
+	require.GreaterOrEqual(t, estimates[2].TotalBytes, estimates[1].TotalBytes, "blocks >= full")
+	require.GreaterOrEqual(t, estimates[1].TotalBytes, estimates[3].TotalBytes, "full >= minimal")
+
+	// Archive delta must be 0.
+	require.Equal(t, int64(0), estimates[0].Delta)
+	// Non-archive deltas must be negative or zero.
+	require.LessOrEqual(t, estimates[1].Delta, int64(0))
+	require.LessOrEqual(t, estimates[2].Delta, int64(0))
+	require.LessOrEqual(t, estimates[3].Delta, int64(0))
+
+	// Build result struct.
+	result := duResult{
+		Chain:        "mainnet",
+		DetectedMode: "archive",
+		BlockRange:   [2]uint64{0, maxBlock},
+		StepRange:    [2]uint64{0, maxStep},
+		TotalBytes:   expectedTotal,
+		TotalFiles:   len(files),
+		Categories:   cats,
+		Estimates:    estimates,
+	}
+
+	// Acceptance criterion 1: human output has all three sections.
+	var humanBuf bytes.Buffer
+	duFormatHuman(&humanBuf, result, false)
+	human := humanBuf.String()
+
+	// Header section.
+	require.Contains(t, human, "mainnet")
+	require.Contains(t, human, "archive")
+	require.Contains(t, human, "500.000")
+	require.Contains(t, human, "200.000")
+
+	// Breakdown section.
+	require.Contains(t, human, "Breakdown")
+	require.Contains(t, human, "domains")
+	require.Contains(t, human, "history")
+	require.Contains(t, human, "block segments")
+	require.Contains(t, human, "caplin")
+	require.Contains(t, human, "total")
+
+	// Estimates section.
+	require.Contains(t, human, "Estimated Size by Node Type")
+	require.Contains(t, human, "archive")
+	require.Contains(t, human, "full")
+	require.Contains(t, human, "minimal")
+
+	// Acceptance criterion 2: JSON output is valid and parseable.
+	var jsonBuf bytes.Buffer
+	err := duFormatJSON(&jsonBuf, result)
+	require.NoError(t, err)
+
+	var decoded duResult
+	err = json.Unmarshal(jsonBuf.Bytes(), &decoded)
+	require.NoError(t, err, "JSON must be valid and unmarshalable")
+
+	// Verify round-trip fidelity.
+	require.Equal(t, result.Chain, decoded.Chain)
+	require.Equal(t, result.DetectedMode, decoded.DetectedMode)
+	require.Equal(t, result.BlockRange, decoded.BlockRange)
+	require.Equal(t, result.StepRange, decoded.StepRange)
+	require.Equal(t, result.TotalBytes, decoded.TotalBytes)
+	require.Equal(t, result.TotalFiles, decoded.TotalFiles)
+	require.Len(t, decoded.Categories, len(result.Categories))
+	require.Len(t, decoded.Estimates, 4)
+
+	// Verify JSON estimates also maintain archive >= blocks >= full >= minimal.
+	require.GreaterOrEqual(t, decoded.Estimates[0].TotalBytes, decoded.Estimates[2].TotalBytes, "archive >= blocks")
+	require.GreaterOrEqual(t, decoded.Estimates[2].TotalBytes, decoded.Estimates[1].TotalBytes, "blocks >= full")
+	require.GreaterOrEqual(t, decoded.Estimates[1].TotalBytes, decoded.Estimates[3].TotalBytes, "full >= minimal")
+}
+
+// touchBlockSnap creates an empty file at <dirs.Snap>/<name>, ensuring the snap
+// directory exists. Used by the rm-blocks tests below.
+func touchBlockSnap(t *testing.T, dirs datadir.Dirs, name string) string {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dirs.Snap, 0755))
+	full := filepath.Join(dirs.Snap, name)
+	f, err := os.OpenFile(full, os.O_RDONLY|os.O_CREATE, 0644)
+	require.NoError(t, err)
+	f.Close()
+	return full
+}
+
+// Test_DeleteBlockSnaps covers the happy path end-to-end: only the latest
+// range is removed (incl. transactions-to-block.idx and .torrent / partial
+// .torrent<suffix> companions), older ranges and their torrents survive,
+// and .tmp artifacts in dirs.Snap are swept regardless.
+func Test_DeleteBlockSnaps(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+
+	keep := []string{
+		"v1.0-000000-000500-headers.seg",
+		"v1.0-000000-000500-headers.seg.torrent", // companion of an older range — must survive
+		"v1.0-000000-000500-bodies.seg",
+		"v1.0-000000-000500-transactions.seg",
+		"v1.0-000000-000500-transactions-to-block.idx",
+	}
+	rm := []string{
+		"v1.0-000500-001000-headers.seg",
+		"v1.0-000500-001000-headers.seg.torrent",      // exact .torrent companion
+		"v1.0-000500-001000-headers.seg.torrent.bolt", // partial .torrent<suffix>
+		"v1.0-000500-001000-bodies.seg",
+		"v1.0-000500-001000-transactions.seg",
+		"v1.0-000500-001000-transactions.idx",
+		"v1.0-000500-001000-transactions-to-block.idx",
+		"v1.1-headers.0-500.seg.123456.tmp",     // unconditional sweep
+		"v1.0-000500-001000-bodies.seg.999.tmp", // unconditional sweep
+	}
+	var keepPaths, rmPaths []string
+	for _, n := range keep {
+		keepPaths = append(keepPaths, touchBlockSnap(t, dirs, n))
+	}
+	for _, n := range rm {
+		rmPaths = append(rmPaths, touchBlockSnap(t, dirs, n))
+	}
+
+	err := DeleteBlockSnapshots(DeleteBlockSnapshotsArgs{Dirs: dirs})
+	require.NoError(t, err)
+
+	for _, p := range keepPaths {
+		confirmExist(t, p)
+	}
+	for _, p := range rmPaths {
+		confirmDoesntExist(t, p)
+	}
+}
+
+// Test_DeleteBlockSnaps_DryRun verifies that DryRun does not modify the
+// filesystem (block files OR .tmp artifacts).
+func Test_DeleteBlockSnaps_DryRun(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	files := []string{
+		"v1.0-000000-000500-headers.seg",
+		"v1.0-000500-001000-headers.seg",
+		"v1.0-000500-001000-transactions-to-block.idx",
+		"v1.0-000500-001000-headers.seg.torrent.bolt",
+		"v1.1-headers.0-500.seg.123456.tmp",
+	}
+	var paths []string
+	for _, n := range files {
+		paths = append(paths, touchBlockSnap(t, dirs, n))
+	}
+
+	err := DeleteBlockSnapshots(DeleteBlockSnapshotsArgs{Dirs: dirs, DryRun: true})
+	require.NoError(t, err)
+
+	for _, p := range paths {
+		confirmExist(t, p)
+	}
+}
+
+// Test_DeleteBlockSnaps_NoBlockFilesSweepsTmp verifies the empty-snap-dir
+// branch still cleans .tmp leftovers.
+func Test_DeleteBlockSnaps_NoBlockFilesSweepsTmp(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	tmp := touchBlockSnap(t, dirs, "v1.1-headers.0-500.seg.123456.tmp")
+
+	err := DeleteBlockSnapshots(DeleteBlockSnapshotsArgs{Dirs: dirs})
+	require.NoError(t, err)
+
+	confirmDoesntExist(t, tmp)
+}
+
+func Test_removeAccessorsForRebuild(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+
+	touch := func(path string) {
+		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0644)
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+	}
+
+	accessors := []string{
+		filepath.Join(dirs.Snap, "v1.0-headers.0-500.idx"),
+		filepath.Join(dirs.SnapCaplin, "v1.0-beaconstate.0-100.idx"),
+		filepath.Join(dirs.SnapAccessors, "v1.0-accounts.0-64.vi"),
+		filepath.Join(dirs.SnapAccessors, "v1.0-accounts.0-64.efi"),
+		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kvi"),
+		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.bt"),
+		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kvei"),
+	}
+	dataFiles := []string{
+		filepath.Join(dirs.Snap, "v1.0-headers.0-500.seg"),
+		filepath.Join(dirs.SnapCaplin, "v1.0-beaconstate.0-100.seg"),
+		filepath.Join(dirs.SnapIdx, "v1.0-accounts.0-64.ef"),
+		filepath.Join(dirs.SnapHistory, "v1.0-accounts.0-64.v"),
+		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kv"),
+	}
+	for _, f := range accessors {
+		touch(f)
+		touch(f + ".torrent")
+	}
+	for _, f := range dataFiles {
+		touch(f)
+	}
+
+	orphanTorrent := filepath.Join(dirs.SnapDomain, "v1.0-storage.0-64.kvi.torrent")
+	touch(orphanTorrent)
+	dataTorrent := filepath.Join(dirs.Snap, "v1.0-headers.0-500.seg.torrent")
+	touch(dataTorrent)
+
+	require.NoError(t, removeAccessorsForRebuild(dirs, log.New()))
+
+	for _, f := range accessors {
+		confirmDoesntExist(t, f)
+		confirmDoesntExist(t, f+".torrent")
+	}
+	confirmDoesntExist(t, orphanTorrent)
+	for _, f := range dataFiles {
+		confirmExist(t, f)
+	}
+	confirmExist(t, dataTorrent)
 }

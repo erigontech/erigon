@@ -17,7 +17,6 @@
 package etl
 
 import (
-	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -30,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
+	"github.com/erigontech/erigon/db/bufiopool"
 )
 
 type dataProvider interface {
@@ -115,11 +115,14 @@ func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 		return nil, err
 	}
 
-	w := bufio.NewWriterSize(bufferFile, BufIOSize)
-	defer w.Flush() //nolint:errcheck
+	w := bufiopool.Writer(bufferFile)
+	defer bufiopool.PutWriter(w)
 
 	if err = b.Write(w); err != nil {
 		return bufferFile, fmt.Errorf("error writing entries to disk: %w", err)
+	}
+	if err = w.Flush(); err != nil {
+		return bufferFile, fmt.Errorf("error flushing buffer to disk: %w", err)
 	}
 	return bufferFile, nil
 }
@@ -201,15 +204,17 @@ func (p *fileDataProvider) Dispose() {
 
 	p.Wait()
 
+	if p.mmapData != nil {
+		_ = mmap.Munmap(p.mmapData, p.mmapHandle2)
+		p.mmapData = nil
+		p.mmapHandle2 = nil
+		p.mmapReader = nil
+	}
+
 	filePath := p.file.Name()
 	p.file.Close()
 	p.file = nil
 	_ = dir.RemoveFile(filePath)
-
-	// Note: We intentionally do NOT munmap here. The mmap'd memory remains mapped
-	// and valid for zero-copy slices returned to callers. The OS will unmap when
-	// the process exits or memory pressure requires it. This is safe for the ETL
-	// use case where data is consumed immediately before Close() is called.
 }
 
 func (p *fileDataProvider) String() string {

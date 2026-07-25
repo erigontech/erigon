@@ -255,7 +255,7 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 		},
 		{
 			Message: &cltypes.AggregateAndProof{
-				//Aggregate: solid.NewAttestionFromParameters([]byte{1, 2, 5, 6}, solid.NewAttestationData(), common.Bytes96{3, 0, 6}),
+				// Aggregate: solid.NewAttestionFromParameters([]byte{1, 2, 5, 6}, solid.NewAttestationData(), common.Bytes96{3, 0, 6}),
 				Aggregate: &solid.Attestation{
 					AggregationBits: solid.BitlistFromBytes([]byte{1, 2, 5, 6}, 2048),
 					Data:            &solid.AttestationData{},
@@ -344,12 +344,12 @@ func TestPoolSyncCommittees(t *testing.T) {
 		Slot:              1,
 		BeaconBlockRoot:   common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
 		SubcommitteeIndex: 0,
-		AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
+		AggregationBits:   make([]byte, cltypes.DefaultSyncCommitteeAggregationBitsSize),
 	}, out.Data)
 }
 
 func TestPoolSyncContributionAndProofs(t *testing.T) {
-	aggrBits := make([]byte, cltypes.SyncCommitteeAggregationBitsSize)
+	aggrBits := make([]byte, cltypes.DefaultSyncCommitteeAggregationBitsSize)
 	aggrBits[0] = 1
 	msgs := []*cltypes.SignedContributionAndProof{
 		{

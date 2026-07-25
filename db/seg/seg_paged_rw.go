@@ -22,11 +22,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/compress"
 )
 
@@ -246,13 +246,7 @@ func (g *PagedReader) Skip() (uint64, int) {
 	return offset, len(v)
 }
 
-var workers = dbg.EnvInt("PAGED_WRITER_WORKERS", 1)
-
-func NewPagedWriter(ctx context.Context, parent CompressorI, compressionEnabled bool) *PagedWriter {
-	return NewPagedWriterWithWorkers(ctx, parent, compressionEnabled, workers)
-}
-
-func NewPagedWriterWithWorkers(ctx context.Context, parent CompressorI, compressionEnabled bool, numWorkers int) *PagedWriter {
+func NewPagedWriter(ctx context.Context, parent CompressorI, compressionEnabled bool, numWorkers int) *PagedWriter {
 	pw := &PagedWriter{
 		parent:             parent,
 		pageSize:           parent.GetValuesOnCompressedPage(),
@@ -311,15 +305,17 @@ func (c *PagedWriter) initWorkers() {
 	c.pendingResults = make(map[int]*pageResult, queueDepth)
 	c.eg, c.egCtx = errgroup.WithContext(c.ctx)
 
-	var workerWg sync.WaitGroup
-	workerWg.Add(c.numWorkers)
+	workerEg, workerCtx := errgroup.WithContext(c.egCtx)
 	for range c.numWorkers {
-		c.eg.Go(func() error {
-			defer workerWg.Done()
-			return c.compressionWorker(c.egCtx)
+		workerEg.Go(func() error {
+			return c.compressionWorker(workerCtx)
 		})
 	}
-	go func() { workerWg.Wait(); close(c.resultCh) }()
+	c.eg.Go(func() error {
+		err := workerEg.Wait()
+		close(c.resultCh)
+		return err
+	})
 	c.eg.Go(c.reducer)
 }
 
@@ -532,9 +528,9 @@ func (c *PagedWriter) bytesUncompressed() (wholePage []byte, notEmpty bool) {
 func pageHeaderTo(buf []byte, kLengths, vLengths []uint32, capacityHint int) []byte {
 	headerSize := 1 + len(kLengths)*2*4
 	if capacityHint > headerSize {
-		buf = growslice(buf, capacityHint)[:headerSize]
+		buf = slices.Grow(buf[:0], capacityHint)[:headerSize]
 	} else {
-		buf = growslice(buf, headerSize)
+		buf = slices.Grow(buf[:0], headerSize)[:headerSize]
 	}
 	buf[0] = uint8(len(kLengths))
 	lensBuf := buf[1:]
@@ -566,15 +562,6 @@ func (c *PagedWriter) SetMetadata(metadata []byte) {
 
 type disableFsycn interface {
 	DisableFsync()
-}
-
-// growslice ensures b has the wanted length by either expanding it to its capacity
-// or allocating a new slice if b has insufficient capacity.
-func growslice(b []byte, wantLength int) []byte {
-	if cap(b) >= wantLength {
-		return b[:wantLength]
-	}
-	return make([]byte, wantLength, max(wantLength, 2*cap(b)))
 }
 
 // Global pools for page work items and results - optimized for GC

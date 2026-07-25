@@ -24,13 +24,14 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestCreateLoadingPrefixes(t *testing.T) {
 	assert := assert.New(t)
 
-	tr := New(common.Hash{})
+	tr := newEmpty()
 	kAcc1 := common.FromHex("0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
 	kInc := make([]byte, 8)
 	binary.BigEndian.PutUint64(kInc, uint64(1))
@@ -53,8 +54,8 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	tr.Hash()
 
 	// Evict accounts only
-	tr.EvictNode(keybytesToHex(kAcc1))
-	tr.EvictNode(keybytesToHex(kAcc2))
+	tr.EvictNode(nibbles.KeybytesToHex(kAcc1))
+	tr.EvictNode(nibbles.KeybytesToHex(kAcc2))
 	rs := NewRetainList(0)
 	rs.AddKey(concat(concat(kAcc1, kInc...), ks1...))
 	rs.AddKey(concat(concat(kAcc2, kInc...), ks2...))

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -9,13 +10,36 @@ import (
 
 	"github.com/erigontech/erigon/db/version"
 
-	"github.com/charmbracelet/bubbles/table"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/erigontech/erigon/cmd/bumper/internal/schema"
 )
+
+var (
+	accentColor = lipgloss.Color("212")
+	dimColor    = lipgloss.Color("240")
+)
+
+func panelBorder(active bool) lipgloss.Style {
+	s := lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
+	if active {
+		return s.BorderForeground(accentColor)
+	}
+	return s.BorderForeground(dimColor)
+}
+
+func tableStyles(active bool) table.Styles {
+	s := table.DefaultStyles()
+	if active {
+		s.Selected = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
+	} else {
+		s.Selected = lipgloss.NewStyle().Foreground(dimColor)
+	}
+	return s
+}
 
 type focus int
 
@@ -78,20 +102,30 @@ func Run(file string) error {
 		return err
 	}
 	m := newModel(file, s)
-	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
+	_, err = tea.NewProgram(m).Run()
 	return err
 }
 
 func newModel(file string, s schema.Schema) *model {
 	cats := schema.Cats(s)
 
-	l := table.New(table.WithColumns([]table.Column{{Title: "Schemas", Width: 18}}))
+	lCols := []table.Column{{Title: "Schemas", Width: 18}}
+	l := table.New(table.WithColumns(lCols), table.WithWidth(colsWidth(lCols)), table.WithHeight(18))
 	lrows := make([]table.Row, len(cats))
 	for i, c := range cats {
 		lrows[i] = table.Row{c}
 	}
 	l.SetRows(lrows)
 	l.Focus()
+
+	rCols := []table.Column{
+		{Title: "Part", Width: 8},
+		{Title: "Key", Width: 6},
+		{Title: "Current", Width: 8},
+		{Title: "Min", Width: 6},
+		{Title: "Status", Width: 12},
+	}
+	r := table.New(table.WithColumns(rCols), table.WithWidth(colsWidth(rCols)), table.WithHeight(18))
 
 	ti := textinput.New()
 	ti.Placeholder = "1.1"
@@ -104,6 +138,7 @@ func newModel(file string, s schema.Schema) *model {
 		orig:   clone(s),
 		cats:   cats,
 		left:   l,
+		right:  r,
 		editor: ti,
 	}
 	m.rebuildRight()
@@ -138,16 +173,6 @@ func (m *model) rebuildRight() {
 	add("hist", cat.Hist)
 	add("ii", cat.Ii)
 	add("block", cat.Block)
-
-	cols := []table.Column{
-		{Title: "Part", Width: 8},
-		{Title: "Key", Width: 6},
-		{Title: "Current", Width: 8},
-		{Title: "Min", Width: 6},
-		{Title: "Status", Width: 12},
-	}
-	m.right = table.New(table.WithColumns(cols))
-	m.right.SetHeight(18)
 
 	m.rows = m.rows[:0]
 	trows := make([]table.Row, 0, len(list))
@@ -226,6 +251,42 @@ func (m *model) updateStatus() {
 		tag = "unsaved changes"
 	}
 	m.status = base + " • " + tag + " • Ctrl+S=Save&Exit"
+}
+
+// changes lists the edits pending against the on-disk schema, one line per
+// changed version, e.g. "commitment.kv  v2.1 → v2.2".
+func (m *model) changes() []string {
+	groups := []struct {
+		name string
+		sel  func(schema.Category) schema.Group
+	}{
+		{"domain", func(c schema.Category) schema.Group { return c.Domain }},
+		{"hist", func(c schema.Category) schema.Group { return c.Hist }},
+		{"ii", func(c schema.Category) schema.Group { return c.Ii }},
+		{"block", func(c schema.Category) schema.Group { return c.Block }},
+	}
+	var out []string
+	for _, cat := range schema.Cats(m.cur) {
+		oc, cc := m.orig[cat], m.cur[cat]
+		for _, g := range groups {
+			cg := g.sel(cc)
+			keys := make([]string, 0, len(cg))
+			for k := range cg {
+				keys = append(keys, k)
+			}
+			slices.Sort(keys)
+			for _, k := range keys {
+				ov, cv := g.sel(oc)[k], cg[k]
+				if !ov.Current.Eq(cv.Current) {
+					out = append(out, fmt.Sprintf("%s.%s  %s → %s", cat, k, ov.Current.String(), cv.Current.String()))
+				}
+				if !ov.Min.Eq(cv.Min) {
+					out = append(out, fmt.Sprintf("%s.%s (min)  %s → %s", cat, k, ov.Min.String(), cv.Min.String()))
+				}
+			}
+		}
+	}
+	return out
 }
 
 func (m *model) Init() tea.Cmd { return nil }
@@ -318,7 +379,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modal = mkSaveConfirm
 			m.foc = fModal
 			return m, nil
-		case "tab", "right":
+		case "tab":
+			if m.foc == fLeft {
+				m.foc = fRight
+			} else {
+				m.foc = fLeft
+			}
+			return m, nil
+		case "right":
 			if m.foc == fLeft {
 				m.foc = fRight
 			}
@@ -346,12 +414,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "e":
 			m.edit = cCurrent
-			m.beginEdit()
-			return m, nil
+			return m, m.beginEdit()
 		case "m":
 			m.edit = cMin
-			m.beginEdit()
-			return m, nil
+			return m, m.beginEdit()
 		case ".":
 			m.bump(minor)
 			return m, nil
@@ -363,10 +429,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *model) beginEdit() {
+func (m *model) beginEdit() tea.Cmd {
 	r := m.right.Cursor()
 	if r < 0 || r >= len(m.rows) {
-		return
+		return nil
 	}
 	row := m.rows[r]
 	v := m.get(row.cat, row.part, row.key)
@@ -376,40 +442,58 @@ func (m *model) beginEdit() {
 	}
 	m.editor.SetValue(cur)
 	m.editor.CursorEnd()
-	m.editor.Focus()
+	cmd := m.editor.Focus()
 	m.foc = fEdit
+	return cmd
 }
 
-func (m *model) View() string {
+func (m *model) View() tea.View {
+	leftActive := m.foc == fLeft
+	rightActive := m.foc == fRight || m.foc == fEdit
+	m.left.SetStyles(tableStyles(leftActive))
+	m.right.SetStyles(tableStyles(rightActive))
+
 	title := lipgloss.NewStyle().Bold(true).Render("Bumper 1.0.1")
-	left := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Render(
+	left := panelBorder(leftActive).Render(
 		lipgloss.JoinVertical(lipgloss.Left, "Schemas", m.left.View()),
 	)
 	cat := ""
 	if c := m.left.Cursor(); c >= 0 && c < len(m.cats) {
 		cat = m.cats[c]
 	}
-	right := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Render(
-		lipgloss.JoinVertical(lipgloss.Left, cat, m.right.View(),
-			func() string {
-				if m.foc == fEdit {
-					return "\nEdit: " + m.editor.View()
-				}
-				return ""
-			}(),
-		),
+	editorLine := " "
+	if m.foc == fEdit {
+		editorLine = "Edit: " + m.editor.View()
+	}
+	right := panelBorder(rightActive).Render(
+		lipgloss.JoinVertical(lipgloss.Left, cat, m.right.View(), editorLine),
 	)
 	help := "[↑/↓] move  [Tab] switch  [e] edit current  [m] edit min  [.] +0.1  [M] +1.0  [S] save  [Ctrl+S] save&exit  [Q] quit"
 	stat := m.status
 	if m.err != nil {
 		stat = "Error: " + m.err.Error()
 	}
-	body := lipgloss.JoinVertical(lipgloss.Left,
+	rows := []string{
 		title,
 		lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right),
 		lipgloss.NewStyle().Faint(true).Render(help),
 		stat,
-	)
+	}
+	if ch := m.changes(); len(ch) > 0 {
+		const maxShow = 12
+		shown := ch
+		var extra int
+		if len(shown) > maxShow {
+			extra, shown = len(shown)-maxShow, shown[:maxShow]
+		}
+		block := []string{lipgloss.NewStyle().Bold(true).Render("Pending changes:")}
+		block = append(block, shown...)
+		if extra > 0 {
+			block = append(block, fmt.Sprintf("… (+%d more)", extra))
+		}
+		rows = append(rows, lipgloss.NewStyle().Foreground(accentColor).Render(strings.Join(block, "\n")))
+	}
+	body := lipgloss.JoinVertical(lipgloss.Left, rows...)
 	if m.foc == fModal {
 		box := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -424,10 +508,12 @@ func (m *model) View() string {
 			txt = "Save changes now? [enter/y] Yes • [esc] Cancel"
 		}
 		overlay := box.Render(txt)
-		return lipgloss.PlaceHorizontal(lipgloss.Width(body), lipgloss.Center,
+		body = lipgloss.PlaceHorizontal(lipgloss.Width(body), lipgloss.Center,
 			lipgloss.JoinVertical(lipgloss.Center, body, overlay))
 	}
-	return body
+	v := tea.NewView(body)
+	v.AltScreen = true
+	return v
 }
 
 func (m *model) bump(mode string) {
@@ -494,4 +580,13 @@ func eqGroup(x, y schema.Group) bool {
 		}
 	}
 	return true
+}
+
+// colsWidth sums column widths including 2-char cell padding per column (bubbles v2 DefaultStyles).
+func colsWidth(cols []table.Column) int {
+	w := 0
+	for _, c := range cols {
+		w += c.Width + 2
+	}
+	return w
 }

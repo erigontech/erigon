@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -37,8 +38,8 @@ func ComputeBorTxHash(blockNumber uint64, blockHash common.Hash) common.Hash {
 	txKeyPlain := make([]byte, 0, len(BorTxKeyPrefix)+8+32)
 	txKeyPlain = append(txKeyPlain, BorTxKeyPrefix...)
 	txKeyPlain = append(txKeyPlain, BorReceiptKey(blockNumber)...)
-	txKeyPlain = append(txKeyPlain, blockHash.Bytes()...)
-	return common.BytesToHash(crypto.Keccak256(txKeyPlain))
+	txKeyPlain = append(txKeyPlain, blockHash[:]...)
+	return crypto.Keccak256Hash(txKeyPlain)
 }
 
 // NewBorTransaction create new bor transaction for bor receipt
@@ -59,17 +60,17 @@ func DeriveFieldsForBorReceipt(receipt *types.Receipt, blockHash common.Hash, bl
 	receipt.BlockNumber = uint256.NewInt(blockNumber)
 
 	logIndex := 0
-	for i := 0; i < len(receipts); i++ {
+	for i := range receipts {
 		logIndex += len(receipts[i].Logs)
 	}
 
 	// The derived log fields can simply be set from the block and transaction
 	for j := 0; j < len(receipt.Logs); j++ {
-		receipt.Logs[j].BlockNumber = blockNumber
+		receipt.Logs[j].BlockNumber = hexutil.Uint64(blockNumber)
 		receipt.Logs[j].BlockHash = blockHash
 		receipt.Logs[j].TxHash = txHash
-		receipt.Logs[j].TxIndex = txIndex
-		receipt.Logs[j].Index = uint(logIndex)
+		receipt.Logs[j].TxIndex = hexutil.Uint(txIndex)
+		receipt.Logs[j].Index = hexutil.Uint(logIndex)
 		logIndex++
 	}
 }

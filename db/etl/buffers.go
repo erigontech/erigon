@@ -48,6 +48,36 @@ const (
 	entryLocSize = 16 // sizeof(entryLoc): insertionOrder(4) + offset(4) + keyLen(4) + valLen(4)
 )
 
+// writeSortedEntries writes buffer entries to w in varint-length-prefixed format.
+func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
+	var numBuf [binary.MaxVarintLen64]byte
+	for _, entry := range entries {
+		lk := int64(len(entry.key))
+		if entry.key == nil {
+			lk = -1
+		}
+		n := binary.PutVarint(numBuf[:], lk)
+		if _, err := w.Write(numBuf[:n]); err != nil {
+			return err
+		}
+		if _, err := w.Write(entry.key); err != nil {
+			return err
+		}
+		lv := int64(len(entry.value))
+		if entry.value == nil {
+			lv = -1
+		}
+		n = binary.PutVarint(numBuf[:], lv)
+		if _, err := w.Write(numBuf[:n]); err != nil {
+			return err
+		}
+		if _, err := w.Write(entry.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
 
 // 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
@@ -163,8 +193,12 @@ func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
 }
 
 func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
-	b.entries = make([]entryLoc, 0, predictKeysAmount)
-	b.data = make([]byte, 0, predictDataSize)
+	if cap(b.entries) < predictKeysAmount {
+		b.entries = make([]entryLoc, 0, predictKeysAmount)
+	}
+	if cap(b.data) < predictDataSize {
+		b.data = make([]byte, 0, predictDataSize)
+	}
 	return b
 }
 
@@ -285,39 +319,15 @@ func (b *appendSortableBuffer) Reset() {
 	b.size = 0
 }
 func (b *appendSortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
-	b.entries = make(map[string][]byte, predictKeysAmount)
-	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount)
+	b.entries = make(map[string][]byte, predictKeysAmount) // maps have no cap(), always recreate
+	if cap(b.sortedBuf) < predictKeysAmount {
+		b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount)
+	}
 	return b
 }
 
 func (b *appendSortableBuffer) Write(w io.Writer) error {
-	var numBuf [binary.MaxVarintLen64]byte
-	entries := b.sortedBuf
-	for _, entry := range entries {
-		lk := int64(len(entry.key))
-		if entry.key == nil {
-			lk = -1
-		}
-		n := binary.PutVarint(numBuf[:], lk)
-		if _, err := w.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if _, err := w.Write(entry.key); err != nil {
-			return err
-		}
-		lv := int64(len(entry.value))
-		if entry.value == nil {
-			lv = -1
-		}
-		n = binary.PutVarint(numBuf[:], lv)
-		if _, err := w.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if _, err := w.Write(entry.value); err != nil {
-			return err
-		}
-	}
-	return nil
+	return writeSortedEntries(w, b.sortedBuf)
 }
 
 func (b *appendSortableBuffer) CheckFlushSize() bool {
@@ -385,39 +395,15 @@ func (b *oldestEntrySortableBuffer) Reset() {
 	b.size = 0
 }
 func (b *oldestEntrySortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
-	b.entries = make(map[string][]byte, predictKeysAmount)
-	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount)
+	b.entries = make(map[string][]byte, predictKeysAmount) // maps have no cap(), always recreate
+	if cap(b.sortedBuf) < predictKeysAmount {
+		b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount)
+	}
 	return b
 }
 
 func (b *oldestEntrySortableBuffer) Write(w io.Writer) error {
-	var numBuf [binary.MaxVarintLen64]byte
-	entries := b.sortedBuf
-	for _, entry := range entries {
-		lk := int64(len(entry.key))
-		if entry.key == nil {
-			lk = -1
-		}
-		n := binary.PutVarint(numBuf[:], lk)
-		if _, err := w.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if _, err := w.Write(entry.key); err != nil {
-			return err
-		}
-		lv := int64(len(entry.value))
-		if entry.value == nil {
-			lv = -1
-		}
-		n = binary.PutVarint(numBuf[:], lv)
-		if _, err := w.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if _, err := w.Write(entry.value); err != nil {
-			return err
-		}
-	}
-	return nil
+	return writeSortedEntries(w, b.sortedBuf)
 }
 func (b *oldestEntrySortableBuffer) CheckFlushSize() bool {
 	return b.size >= b.optimalSize

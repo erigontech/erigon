@@ -37,7 +37,7 @@ func (i *IndexedAttestation) Clone() clonable.Clonable {
 
 	*/
 	return &IndexedAttestation{
-		//AttestingIndices: attestingIndices,
+		// AttestingIndices: attestingIndices,
 		Data: &solid.AttestationData{},
 	}
 }
@@ -75,8 +75,8 @@ func (*SignedAggregateAndProof) Clone() clonable.Clonable {
 	return &SignedAggregateAndProof{}
 }
 
-func (*SyncAggregate) Clone() clonable.Clonable {
-	return &SyncAggregate{}
+func (a *SyncAggregate) Clone() clonable.Clonable {
+	return NewSyncAggregateWithSize(len(a.SyncCommiteeBits))
 }
 
 func (*SignedVoluntaryExit) Clone() clonable.Clonable {
@@ -134,7 +134,7 @@ func (*KZGCommitment) Clone() clonable.Clonable {
 }
 
 func (*Eth1Header) Clone() clonable.Clonable {
-	return &Eth1Header{}
+	return NewEth1Header(0)
 }
 
 func (*Withdrawal) Clone() clonable.Clonable {

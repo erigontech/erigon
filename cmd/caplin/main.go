@@ -22,11 +22,12 @@ import (
 	"os"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/cmd/caplin/caplincli"
@@ -43,7 +44,7 @@ import (
 
 func main() {
 	app := app.MakeApp("caplin", runCaplinNode, append(caplinflags.CliFlags, sentinelflags.CliFlags...))
-	if err := app.Run(os.Args); err != nil {
+	if err := app.Run(context.Background(), os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
 			log.Warn("Fprintln error", "err", printErr)
@@ -52,13 +53,13 @@ func main() {
 	}
 }
 
-func runCaplinNode(cliCtx *cli.Context) error {
+func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 	cfg, err := caplincli.SetupCaplinCli(cliCtx)
 	if err != nil {
 		log.Error("[Phase1] Could not initialize caplin", "err", err)
 		return err
 	}
-	if _, err := debug.SetupSimple(cliCtx, true /* root logger */); err != nil {
+	if _, err := debug.SetupSimple(ctx, cliCtx, true /* root logger */); err != nil {
 		return err
 	}
 	rcfg := beacon_router_configuration.RouterConfiguration{
@@ -79,21 +80,23 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	log.Info("[Phase1] Running Caplin")
 
 	// setup periodic logging and prometheus updates
-	go mem.LogMemStats(cliCtx.Context, log.Root())
-	go disk.UpdateDiskStats(cliCtx.Context, log.Root())
+	go mem.LogMemStats(ctx, log.Root())
+	go disk.UpdateDiskStats(ctx, log.Root())
 
 	// Either start from genesis or a checkpoint
-	ctx, cn := context.WithCancel(cliCtx.Context)
+	ctx, cn := context.WithCancel(ctx)
 	defer cn()
 
 	var executionEngine execution_client.ExecutionEngine
 	if cfg.RunEngineAPI {
-		cc, err := execution_client.NewExecutionClientRPC(cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
+		cc, err := execution_client.NewExecutionClientEngineRPC(cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort, nil)
 		if err != nil {
 			log.Error("could not start engine api", "err", err)
+		} else {
+			log.Info("Started Engine API RPC Client", "addr", cfg.EngineAPIAddr)
+			defer cc.Close()
+			executionEngine = cc
 		}
-		log.Info("Started Engine API RPC Client", "addr", cfg.EngineAPIAddr)
-		executionEngine = cc
 	}
 	chainName := cliCtx.String(utils.ChainFlag.Name)
 	_, _, networkId, err := clparams.GetConfigsByNetworkName(chainName)
@@ -110,11 +113,15 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		CaplinDiscoveryTCPPort:    uint64(cfg.ServerTcpPort),
 		BeaconAPIRouter:           rcfg,
 		NetworkId:                 networkId,
+		LocalDiscovery:            cfg.LocalDiscovery,
 		MevRelayUrl:               cfg.MevRelayUrl,
 		CustomConfigPath:          cfg.CustomConfig,
 		CustomGenesisStatePath:    cfg.CustomGenesisState,
 		MaxPeerCount:              cfg.MaxPeerCount,
+		SubscribeAllTopics:        cfg.SubscribeAllTopics,
 		MaxInboundTrafficPerPeer:  datasize.MB,
 		MaxOutboundTrafficPerPeer: datasize.MB,
-	}, cfg.Dirs, nil, nil, nil, blockSnapBuildSema)
+		BootstrapNodes:            cfg.Bootnodes,
+		StaticPeers:               cfg.StaticPeers,
+	}, cfg.Dirs, getters.NewExecutionEngineReader(ctx, executionEngine), nil, nil, blockSnapBuildSema)
 }

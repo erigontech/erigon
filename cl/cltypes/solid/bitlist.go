@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math/bits"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common/clonable"
@@ -55,6 +56,12 @@ func BitlistFromBytes(xs []byte, c int) *BitList {
 		l: len(xs),
 		c: c,
 	}
+}
+
+// SetLimit overrides the capacity (limit) used for HashSSZ computation.
+// This is needed for preset-aware hash computation where the limit differs between mainnet and minimal.
+func (u *BitList) SetLimit(limit int) {
+	u.c = limit
 }
 
 func (u *BitList) GetBitAt(i int) bool {
@@ -216,9 +223,9 @@ func (u *BitList) Bits() int {
 	// The most significant bit is present in the last byte in the array.
 	var last byte
 	var byteLen int
-	for i := len(u.u) - 1; i >= 0; i-- {
-		if u.u[i] != 0 {
-			last = u.u[i]
+	for i, b := range slices.Backward(u.u) {
+		if b != 0 {
+			last = b
 			byteLen = i + 1
 			break
 		}

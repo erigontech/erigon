@@ -26,13 +26,13 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -41,13 +41,13 @@ import (
 type TxLookupCfg struct {
 	prune       prune.Mode
 	tmpdir      string
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 }
 
 func StageTxLookupCfg(
 	prune prune.Mode,
 	tmpdir string,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 ) TxLookupCfg {
 	return TxLookupCfg{
 		prune:       prune,
@@ -133,7 +133,8 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 
 		for i, txn := range body.Transactions {
 			binary.BigEndian.PutUint64(data[8:], firstTxNumInBlock+uint64(i)+1)
-			if err := next(k, txn.Hash().Bytes(), data); err != nil {
+			txHash := txn.Hash()
+			if err := next(k, txHash[:], data); err != nil {
 				return err
 			}
 		}
@@ -201,6 +202,9 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 }
 
 func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {
+	if dbg.NoPrune() {
+		return s.Done(tx)
+	}
 	logPrefix := s.LogPrefix()
 	blockFrom := s.PruneProgress
 	if blockFrom == 0 {
@@ -248,12 +252,24 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	if err != nil {
 		return err
 	}
-	if prevStat != nil && prevStat.TxFrom == txFrom && prevStat.TxTo == txTo && prevStat.ValueProgress == prune.Done {
+	// A completed rotation that covers current txTo — nothing more to do.
+	if prevStat != nil && prevStat.TxTo >= txTo && prevStat.ValueProgress == prune.Done {
 		return nil
 	}
 	if prevStat == nil {
 		prevStat = &prune.Stat{}
 	}
+
+	// Rolling scan: preserve cursor position across txTo advances so each B-tree page
+	// is visited sequentially once per rotation instead of restarting from First() on
+	// every prune cycle. Only reset the cursor when a full rotation has completed.
+	if prevStat.ValueProgress == prune.Done {
+		prevStat.ValueProgress = prune.First
+		prevStat.LastPrunedValue = nil
+	}
+	// Sync range params so TableScanningPrune won't reset the cursor mid-rotation.
+	prevStat.TxFrom = txFrom
+	prevStat.TxTo = txTo
 
 	valsRwCursor, err := tx.RwCursor(kv.TxLookup)
 	if err != nil {
@@ -265,7 +281,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	case *mdbx2.MdbxCursor:
 		valsCursor = &mdbx2.MdbxCursorPseudoDupSort{MdbxCursor: c}
 	default:
-		return fmt.Errorf("unexpected cursor type %T for table %s", valsRwCursor, kv.TxLookup)
+		valsCursor = &kv.RwCursorPseudoDupSort{RwCursor: c}
 	}
 
 	logEvery := time.NewTicker(logInterval)
@@ -278,7 +294,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	pruneCtx, pruneCancel := context.WithTimeout(ctx, pruneTimeout)
 	defer pruneCancel()
 
-	pruneStat, err := prune.TableScanningPrune(pruneCtx, logPrefix, "txlookup", txFrom, txTo, 0, 1,
+	pruneStat, err := prune.TableScanningPrune(pruneCtx, logPrefix, "txlookup", txFrom, txTo, 1,
 		logEvery, logger, nil, valsCursor, false, prevStat, prune.ValueOffset8StorageMode)
 	if err != nil {
 		return fmt.Errorf("prune TxLookup: %w", err)
@@ -313,7 +329,8 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 		}
 
 		for _, txn := range body.Transactions {
-			if err := next(k, txn.Hash().Bytes(), nil); err != nil {
+			txHash := txn.Hash()
+			if err := next(k, txHash[:], nil); err != nil {
 				return err
 			}
 		}

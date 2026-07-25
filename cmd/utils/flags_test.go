@@ -21,8 +21,18 @@
 package utils
 
 import (
+	"context"
 	"reflect"
 	"testing"
+
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
+
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/p2p"
 )
 
 func Test_SplitTagsFlag(t *testing.T) {
@@ -64,4 +74,259 @@ func Test_SplitTagsFlag(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCobraFlags_BoolDefaultsArePreserved(t *testing.T) {
+	cmd := &cobra.Command{Use: "test"}
+	trueFlag := cli.BoolFlag{Name: "feature.enabled", Usage: "test", Value: true}
+	falseFlag := cli.BoolFlag{Name: "feature.disabled", Usage: "test", Value: false}
+
+	CobraFlags(cmd, []cli.Flag{&trueFlag, &falseFlag})
+
+	gotTrue, err := cmd.PersistentFlags().GetBool(trueFlag.Name)
+	require.NoError(t, err)
+	require.True(t, gotTrue)
+
+	gotFalse, err := cmd.PersistentFlags().GetBool(falseFlag.Name)
+	require.NoError(t, err)
+	require.False(t, gotFalse)
+}
+
+// A user-set --rpc.gascap must reach the config, not silently collapse to 0
+// (= infinite cap). rpc.gascap is registered as a UintFlag, so the accessor
+// behind RpcGasCap must be ctx.Uint; under urfave/cli v3 a mismatched read
+// yields 0.
+func TestRpcGasCap_UserValuePreserved(t *testing.T) {
+	// urfave/cli v3 flags carry parse state, so use a fresh copy per run.
+	gasCap := RpcGasCapFlag
+	app := &cli.Command{Flags: []cli.Flag{&gasCap}}
+	app.Action = func(_ context.Context, cmd *cli.Command) error {
+		require.True(t, cmd.IsSet(RpcGasCapFlag.Name))
+		require.Equal(t, uint64(30_000_000), RpcGasCap(cmd))
+		return nil
+	}
+	require.NoError(t, app.Run(context.Background(), []string{"erigon", "--rpc.gascap=30000000"}))
+}
+
+func TestResolveChainName(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"default (no flags) → mainnet", nil, "mainnet"},
+		{"--chain=sepolia", []string{"--chain=sepolia"}, "sepolia"},
+		{"--networkid=1 only → mainnet", []string{"--networkid=1"}, "mainnet"},
+		{"--networkid=11155111 only → sepolia (known id)", []string{"--networkid=11155111"}, "sepolia"},
+		{"--networkid=99999 only → empty (unknown id)", []string{"--networkid=99999"}, ""},
+		{"--networkid=1337 only → bor-devnet (registered id)", []string{"--networkid=1337"}, "bor-devnet"},
+		{"--networkid=99999 --chain=mainnet → mainnet (explicit chain wins)", []string{"--networkid=99999", "--chain=mainnet"}, "mainnet"},
+		{"--networkid=99999 --chain=sepolia → sepolia (explicit chain wins)", []string{"--networkid=99999", "--chain=sepolia"}, "sepolia"},
+		{"--networkid=1 --chain=sepolia → sepolia (explicit chain wins over mainnet id)", []string{"--networkid=1", "--chain=sepolia"}, "sepolia"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// urfave/cli v3 flags carry parse state (hasBeenSet), so use fresh
+			// instances per run instead of the shared package-global flags.
+			chainFlag := ChainFlag
+			networkIdFlag := NetworkIdFlag
+			app := &cli.Command{}
+			app.Flags = []cli.Flag{&chainFlag, &networkIdFlag}
+			app.Action = func(_ context.Context, ctx *cli.Command) error {
+				require.Equal(t, tt.want, resolveChainName(ctx))
+				return nil
+			}
+			require.NoError(t, app.Run(context.Background(), append([]string{"test"}, tt.args...)))
+		})
+	}
+}
+
+// TestExecPerfFlags_OverrideDbg verifies each --exec.* flag, when explicitly
+// set, flips the corresponding dbg package toggle. Also asserts the no-flag
+// path leaves dbg values untouched so env vars remain the source of truth.
+func TestExecPerfFlags_OverrideDbg(t *testing.T) {
+	// Snapshot and restore dbg values so tests don't leak into each other.
+	origIgnoreBAL := dbg.IgnoreBAL
+	origReadAhead := dbg.ReadAhead
+	origUseStateCache := dbg.UseStateCache
+	origExec3Workers := dbg.Exec3Workers
+	origNoPrune := dbg.NoPrune()
+	origNoMerge := dbg.NoMerge()
+	origNoBackgroundMaintenance := dbg.NoBackgroundMaintenance()
+	t.Cleanup(func() {
+		dbg.SetIgnoreBAL(origIgnoreBAL)
+		dbg.SetReadAhead(origReadAhead)
+		dbg.SetUseStateCache(origUseStateCache)
+		dbg.SetExec3Workers(origExec3Workers)
+		dbg.SetNoPrune(origNoPrune)
+		dbg.SetNoMerge(origNoMerge)
+		dbg.SetNoBackgroundMaintenance(origNoBackgroundMaintenance)
+	})
+
+	apply := func(_ context.Context, ctx *cli.Command) error {
+		if ctx.IsSet(ExecBatchedIOFlag.Name) {
+			v := ctx.Bool(ExecBatchedIOFlag.Name)
+			dbg.SetReadAhead(v)
+			dbg.SetIgnoreBAL(!v)
+		}
+		if ctx.IsSet(ExecStateCacheFlag.Name) {
+			dbg.SetUseStateCache(ctx.Bool(ExecStateCacheFlag.Name))
+		}
+		if ctx.IsSet(ExecWorkersFlag.Name) {
+			dbg.SetExec3Workers(ctx.Int(ExecWorkersFlag.Name))
+		}
+		if ctx.IsSet(ExecSerialFlag.Name) && ctx.Bool(ExecSerialFlag.Name) {
+			dbg.SetExec3Workers(1)
+		}
+		if ctx.IsSet(ExecNoMergeFlag.Name) {
+			dbg.SetNoMerge(ctx.Bool(ExecNoMergeFlag.Name))
+		}
+		if ctx.IsSet(ExecNoPruneFlag.Name) {
+			dbg.SetNoPrune(ctx.Bool(ExecNoPruneFlag.Name))
+		}
+		if ctx.IsSet(ExecNoBackgroundMaintenanceFlag.Name) {
+			dbg.SetNoBackgroundMaintenance(ctx.Bool(ExecNoBackgroundMaintenanceFlag.Name))
+		}
+		return nil
+	}
+
+	run := func(args ...string) {
+		// Fresh flag instances per run (v3 flags carry parse state across Run calls).
+		batchedIO, stateCache, workers := ExecBatchedIOFlag, ExecStateCacheFlag, ExecWorkersFlag
+		serial, noMerge, noPrune := ExecSerialFlag, ExecNoMergeFlag, ExecNoPruneFlag
+		noBgMaint := ExecNoBackgroundMaintenanceFlag
+		app := &cli.Command{}
+		app.Flags = []cli.Flag{
+			&batchedIO, &stateCache, &workers,
+			&serial, &noMerge, &noPrune, &noBgMaint,
+		}
+		app.Action = apply
+		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
+	}
+
+	t.Run("no flags set leaves dbg untouched", func(t *testing.T) {
+		dbg.SetIgnoreBAL(false)
+		dbg.SetReadAhead(true)
+		dbg.SetUseStateCache(true)
+		dbg.SetExec3Workers(42)
+		dbg.SetNoMerge(false)
+		dbg.SetNoPrune(false)
+		dbg.SetNoBackgroundMaintenance(false)
+		run()
+		require.Equal(t, false, dbg.IgnoreBAL)
+		require.Equal(t, true, dbg.ReadAhead)
+		require.Equal(t, true, dbg.UseStateCache)
+		require.Equal(t, 42, dbg.Exec3Workers)
+		require.Equal(t, false, dbg.NoMerge())
+		require.Equal(t, false, dbg.NoPrune())
+		require.Equal(t, false, dbg.NoBackgroundMaintenance())
+	})
+
+	t.Run("batched-io=false disables read-ahead and sets IgnoreBAL", func(t *testing.T) {
+		dbg.SetIgnoreBAL(false)
+		dbg.SetReadAhead(true)
+		run("--exec.batched-io=false")
+		require.True(t, dbg.IgnoreBAL)
+		require.False(t, dbg.ReadAhead)
+	})
+
+	t.Run("batched-io=true enables read-ahead and clears IgnoreBAL", func(t *testing.T) {
+		dbg.SetIgnoreBAL(true)
+		dbg.SetReadAhead(false)
+		run("--exec.batched-io=true")
+		require.False(t, dbg.IgnoreBAL)
+		require.True(t, dbg.ReadAhead)
+	})
+
+	t.Run("state-cache=false flips UseStateCache", func(t *testing.T) {
+		dbg.SetUseStateCache(true)
+		run("--exec.state-cache=false")
+		require.False(t, dbg.UseStateCache)
+	})
+
+	t.Run("workers=7 sets Exec3Workers", func(t *testing.T) {
+		dbg.SetExec3Workers(1)
+		run("--exec.workers=7")
+		require.Equal(t, 7, dbg.Exec3Workers)
+	})
+
+	t.Run("serial=true clamps Exec3Workers to 1", func(t *testing.T) {
+		dbg.SetExec3Workers(8)
+		run("--exec.serial=true")
+		require.Equal(t, 1, dbg.Exec3Workers)
+	})
+
+	t.Run("serial=true wins over --exec.workers", func(t *testing.T) {
+		dbg.SetExec3Workers(1)
+		// flags are applied in declaration order (workers first, then serial),
+		// so serial should override workers regardless of CLI argument order.
+		run("--exec.workers=12", "--exec.serial=true")
+		require.Equal(t, 1, dbg.Exec3Workers)
+	})
+
+	t.Run("serial=false leaves Exec3Workers untouched", func(t *testing.T) {
+		dbg.SetExec3Workers(8)
+		run("--exec.serial=false")
+		require.Equal(t, 8, dbg.Exec3Workers)
+	})
+
+	t.Run("no-merge and no-prune set to true", func(t *testing.T) {
+		dbg.SetNoMerge(false)
+		dbg.SetNoPrune(false)
+		run("--exec.no-merge=true", "--exec.no-prune=true")
+		require.True(t, dbg.NoMerge())
+		require.True(t, dbg.NoPrune())
+	})
+
+	t.Run("no-background-maintenance flips NoBackgroundMaintenance", func(t *testing.T) {
+		dbg.SetNoBackgroundMaintenance(false)
+		run("--exec.no-background-maintenance=true")
+		require.True(t, dbg.NoBackgroundMaintenance())
+	})
+}
+
+func TestNewP2PConfig_DiscoveryDefaults(t *testing.T) {
+	newCfg := func(nodiscover bool) *p2p.Config {
+		cfg, err := NewP2PConfig(nodiscover, datadir.New(t.TempDir()), "", "none", 100, 1000, "test", nil, nil, 30303, direct.ETH68, false, false)
+		require.NoError(t, err)
+		return cfg
+	}
+
+	t.Run("discovery enabled by default", func(t *testing.T) {
+		cfg := newCfg(false)
+		require.False(t, cfg.NoDiscovery)
+		require.True(t, cfg.DiscoveryV5)
+	})
+
+	t.Run("nodiscover disables discovery", func(t *testing.T) {
+		cfg := newCfg(true)
+		require.True(t, cfg.NoDiscovery)
+		require.False(t, cfg.DiscoveryV5)
+	})
+}
+
+func TestCommitmentPlainValuesFromCtx(t *testing.T) {
+	parse := func(args ...string) *bool {
+		var got *bool
+		flag := cli.BoolFlag{Name: CommitmentPlainValuesFlag.Name}
+		app := &cli.Command{
+			Flags: []cli.Flag{&flag},
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				got = CommitmentPlainValuesFromCtx(cmd)
+				return nil
+			},
+		}
+		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
+		return got
+	}
+
+	require.Nil(t, parse(), "unset => nil")
+
+	gotTrue := parse("--commitment.plainValues")
+	require.NotNil(t, gotTrue)
+	require.True(t, *gotTrue)
+
+	gotFalse := parse("--commitment.plainValues=false")
+	require.NotNil(t, gotFalse)
+	require.False(t, *gotFalse)
 }

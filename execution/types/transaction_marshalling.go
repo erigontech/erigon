@@ -223,6 +223,9 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 			return nil, err
 		}
 	}
+	if txType > 0xff {
+		return nil, fmt.Errorf("unknown transaction type: %v", txType)
+	}
 	switch byte(txType) {
 	case LegacyTxType:
 		tx := &LegacyTx{}
@@ -255,6 +258,9 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 		}
 		return tx, nil
 	default:
+		if spec, ok := registeredTxType(byte(txType)); ok && uint64(txType) < 0x80 && spec.UnmarshalJSON != nil {
+			return spec.UnmarshalJSON(input)
+		}
 		return nil, fmt.Errorf("unknown transaction type: %v", txType)
 	}
 }
@@ -506,10 +512,11 @@ func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
 	if err := tx.unmarshalJson(dec); err != nil {
 		return err
 	}
-	tx.Authorizations = make([]Authorization, len(*dec.Authorizations))
-	for i, auth := range *dec.Authorizations {
+	auths := *dec.Authorizations
+	tx.Authorizations = make([]Authorization, len(auths))
+	for i := range auths {
 		var err error
-		tx.Authorizations[i], err = auth.ToAuthorization()
+		tx.Authorizations[i], err = auths[i].ToAuthorization()
 		if err != nil {
 			return err
 		}

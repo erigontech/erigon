@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e # Enable exit on error
 
+source "$(dirname "$0")/rpc_version.env"
+if [ -z "$RPC_VERSION" ]; then
+  echo "Error: RPC_VERSION is not set in rpc_version.env"
+  exit 1
+fi
+
 # The workspace directory, no default because run_rpc_tests has it
 WORKSPACE="$1"
 # The result directory, no default because run_rpc_tests has it
@@ -19,9 +25,6 @@ fi
 # Disabled tests for Ethereum mainnet
 DISABLED_TEST_LIST=(
    debug_traceBlockByNumber/test_30.json # huge JSON response => slow diff
-   debug_traceBlockByNumber/test_43.json # flaky test
-   debug_traceCall/test_22.json
-   debug_traceCall/test_38.json # see https://github.com/erigontech/erigon-qa/issues/274
    debug_traceCallMany
    erigon_
    eth_callBundle
@@ -34,4 +37,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.123.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "latest" "$REFERENCE_HOST" "do-not-compare-error-message" "$DUMP_RESPONSE"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet "$RPC_VERSION" "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "latest" "$REFERENCE_HOST" "do-not-compare-error-message" "$DUMP_RESPONSE"

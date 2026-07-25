@@ -55,6 +55,10 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			params:   []byte("[5]"),
 			expected: `{"jsonrpc":"2.0","id":1,"result":{"structLogs":{}},"error":{"code":-32000,"message":"id 4"}}`,
 		},
+		"err_with_unclosed_result_object": {
+			params:   []byte("[6]"),
+			expected: `{"jsonrpc":"2.0","id":1,"result":{"structLogs":[]},"error":{"code":-32000,"message":"id 6"}}`,
+		},
 	}
 
 	for name, testParams := range tests {
@@ -94,6 +98,14 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 					stream.WriteObjectEnd()
 					return errors.New("id 4")
 				}
+				if id == 6 {
+					stream.WriteObjectStart()
+					stream.WriteObjectField("structLogs")
+					stream.WriteEmptyArray()
+					// intentionally leave the result object open: the tracer erroring out
+					// mid-write must not leave the response's "result" object unclosed.
+					return errors.New("id 6")
+				}
 				return nil
 			}
 
@@ -125,4 +137,43 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 		})
 	}
 
+}
+
+// TestRunMethodFlushHookNilFunc pins the invariant that runMethod must not panic when the
+// gzip-streaming hook stored on the context is a typed nil func(), not just an untyped nil.
+// The normal masking path (withoutGzipStreamingHook) stores an untyped nil so the type
+// assertion fails outright, but runMethod's guard should not depend on callers always doing
+// that correctly.
+func TestRunMethodFlushHookNilFunc(t *testing.T) {
+	msg := jsonrpcMessage{
+		Version: "2.0",
+		ID:      []byte{49},
+		Method:  "test_test",
+		Params:  []byte("[]"),
+	}
+
+	dummyFunc := func(stream jsonstream.Stream) error {
+		stream.WriteEmptyObject()
+		return nil
+	}
+
+	cb := &callback{
+		fn:         reflect.ValueOf(dummyFunc),
+		streamable: true,
+	}
+
+	args, err := parsePositionalArguments(msg.Params, cb.argTypes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.WithValue(context.Background(), httpFlusherContextKey{}, (func())(nil))
+
+	var buf bytes.Buffer
+	stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+
+	h := handler{}
+	assert.NotPanics(t, func() {
+		h.runMethod(ctx, &msg, cb, args, stream)
+	})
 }

@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -184,31 +183,33 @@ func readProtocolHandshake(rw MsgReader) (*protoHandshake, error) {
 	return &hs, nil
 }
 
+// maxDisconnectPayloadSize bounds how much of a disconnect message is read. A
+// well-formed reason is a few bytes; the cap stops a peer from forcing a large
+// allocation with an oversized final message.
+const maxDisconnectPayloadSize = 100
+
 func DisconnectMessagePayloadDecode(reader io.Reader) (DiscReason, error) {
-	var buffer bytes.Buffer
-	_, err := buffer.ReadFrom(reader)
+	data, err := io.ReadAll(io.LimitReader(reader, maxDisconnectPayloadSize))
 	if err != nil {
 		return DiscRequested, err
 	}
-	data := buffer.Bytes()
 	if len(data) == 0 {
 		return DiscRequested, nil
 	}
 
+	// Peers encode the reason as a single-element list [reason] or, against the
+	// spec, as a bare integer, and some send it non-canonically. None of this is
+	// actionable on a closing connection, so decode leniently and fall back to
+	// DiscRequested rather than surfacing an error.
 	var reasonList struct{ Reason DiscReason }
-	err = rlp.DecodeBytes(data, &reasonList)
-
-	// en empty list
-	if (err != nil) && strings.Contains(err.Error(), "rlp: too few elements") {
-		return DiscRequested, nil
+	if rlp.DecodeBytes(data, &reasonList) == nil {
+		return reasonList.Reason, nil
 	}
-
-	// not a list, try to decode as a plain integer
-	if (err != nil) && strings.Contains(err.Error(), "rlp: expected input list") {
-		err = rlp.DecodeBytes(data, &reasonList.Reason)
+	var reason DiscReason
+	if rlp.DecodeBytes(data, &reason) == nil {
+		return reason, nil
 	}
-
-	return reasonList.Reason, err
+	return DiscRequested, nil
 }
 
 func DisconnectMessagePayloadEncode(writer io.Writer, reason DiscReason) error {

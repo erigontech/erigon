@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e # Enable exit on error
 
+source "$(dirname "$0")/rpc_version.env"
+if [ -z "$RPC_VERSION" ]; then
+  echo "Error: RPC_VERSION is not set in rpc_version.env"
+  exit 1
+fi
+
 # The workspace directory, no default because run_rpc_tests has it
 WORKSPACE="$1"
 # The result directory, no default because run_rpc_tests has it
@@ -11,8 +17,6 @@ DISABLED_TEST_LIST=(
   # Failing after the PR https://github.com/erigontech/erigon/pull/13617 that fixed this incompatibility
   # issues https://hive.pectra-devnet-5.ethpandaops.io/suite.html?suiteid=1738266984-51ae1a2f376e5de5e9ba68f034f80e32.json&suitename=rpc-compat
   net_listening/test_1.json
-  # Temporary disable required block 24298763
-  debug_traceBlockByNumber/test_51.json
   # to investigate
   engine_exchangeCapabilities/test_1.json
   engine_exchangeTransitionConfigurationV1/test_01.json
@@ -29,9 +33,6 @@ DISABLED_TEST_LIST=(
   eth_getWork/test_01.json
   eth_mining/test_01.json
   eth_protocolVersion/test_1.json
-  eth_simulateV1/test_23.json
-  eth_simulateV1/test_24.json
-  eth_simulateV1/test_26.json
   eth_submitHashrate/test_1.json
   eth_submitWork/test_1.json
   net_peerCount/test_1.json
@@ -44,4 +45,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.123.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
+RPC_TRANSPORT_TYPES="http,http_comp,websocket" "$(dirname "$0")/run_rpc_tests.sh" mainnet "$RPC_VERSION" "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"

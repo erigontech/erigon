@@ -27,6 +27,24 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/wit"
 )
 
+type mockHeaderReader struct {
+	headers map[common.Hash]*types.Header
+}
+
+func newMockHeaderReader() *mockHeaderReader {
+	return &mockHeaderReader{
+		headers: make(map[common.Hash]*types.Header),
+	}
+}
+
+func (m *mockHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	return m.headers[hash]
+}
+
+func (m *mockHeaderReader) addHeader(header *types.Header) {
+	m.headers[header.Hash()] = header
+}
+
 func addTestWitnessData(db kv.TemporalRwDB, hash common.Hash, witnessData []byte, blockNumber uint64) error {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -72,7 +90,16 @@ func addTestWitnessData(db kv.TemporalRwDB, hash common.Hash, witnessData []byte
 func createTestWitness(t *testing.T, header *types.Header) *stateless.Witness {
 	t.Helper()
 
-	witness, err := stateless.NewWitness(header, nil)
+	parentHeader := &types.Header{
+		Number: *uint256.NewInt(header.Number.Uint64() - 1),
+		Root:   common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"),
+	}
+	header.ParentHash = parentHeader.Hash()
+
+	headerReader := newMockHeaderReader()
+	headerReader.addHeader(parentHeader)
+
+	witness, err := stateless.NewWitness(header, headerReader)
 	require.NoError(t, err)
 
 	testState := map[string]struct{}{
@@ -619,4 +646,107 @@ func TestWitnessExactPageSize(t *testing.T) {
 
 	err = multiClient.getBlockWitnesses(ctx, inboundMsg, mockSentryClient)
 	require.NoError(t, err)
+}
+
+// Regression for a single-packet DoS: an inflated TotalPages claim used to
+// drive the missing-pages loop into allocating gigabytes.
+func TestAddBlockWitnessesRejectsInflatedTotalPages(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	ctx := context.Background()
+	mockSentryClient := direct.NewMockSentryClient(ctrl)
+	multiClient, _ := createTestMultiClient(t)
+
+	t.Run("TotalPages above cap is rejected", func(t *testing.T) {
+		payload, err := rlp.EncodeToBytes(&wit.WitnessPacketRLPPacket{
+			RequestId: 1,
+			WitnessPacketResponse: wit.WitnessPacketResponse{{
+				Data:       []byte{0xDE, 0xAD},
+				Hash:       common.Hash{0x42},
+				Page:       0,
+				TotalPages: 100_000_000,
+			}},
+		})
+		require.NoError(t, err)
+
+		inbound := &sentryproto.InboundMessage{
+			Id:     sentryproto.MessageId_BLOCK_WITNESS_W0,
+			Data:   payload,
+			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01}),
+		}
+
+		err = multiClient.handleInboundMessage(ctx, inbound, mockSentryClient)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "TotalPages")
+	})
+
+	t.Run("inconsistent TotalPages across pages for same hash is rejected", func(t *testing.T) {
+		hash := common.Hash{0x99}
+		payload, err := rlp.EncodeToBytes(&wit.WitnessPacketRLPPacket{
+			RequestId: 2,
+			WitnessPacketResponse: wit.WitnessPacketResponse{
+				{Data: []byte{0x01}, Hash: hash, Page: 0, TotalPages: 2},
+				{Data: []byte{0x02}, Hash: hash, Page: 1, TotalPages: 3},
+			},
+		})
+		require.NoError(t, err)
+
+		inbound := &sentryproto.InboundMessage{
+			Id:     sentryproto.MessageId_BLOCK_WITNESS_W0,
+			Data:   payload,
+			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x02}),
+		}
+
+		err = multiClient.handleInboundMessage(ctx, inbound, mockSentryClient)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "inconsistent TotalPages")
+	})
+
+	t.Run("Page >= TotalPages is skipped (peer-has-no-witness sentinel)", func(t *testing.T) {
+		payload, err := rlp.EncodeToBytes(&wit.WitnessPacketRLPPacket{
+			RequestId: 3,
+			WitnessPacketResponse: wit.WitnessPacketResponse{{
+				Data:       nil,
+				Hash:       common.Hash{0x33},
+				Page:       0,
+				TotalPages: 0,
+			}},
+		})
+		require.NoError(t, err)
+
+		inbound := &sentryproto.InboundMessage{
+			Id:     sentryproto.MessageId_BLOCK_WITNESS_W0,
+			Data:   payload,
+			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x03}),
+		}
+
+		err = multiClient.handleInboundMessage(ctx, inbound, mockSentryClient)
+		require.NoError(t, err)
+	})
+
+	t.Run("TotalPages at cap is accepted", func(t *testing.T) {
+		payload, err := rlp.EncodeToBytes(&wit.WitnessPacketRLPPacket{
+			RequestId: 4,
+			WitnessPacketResponse: wit.WitnessPacketResponse{{
+				Data:       []byte{0xAB},
+				Hash:       common.Hash{0x44},
+				Page:       0,
+				TotalPages: wit.MaxWitnessPages,
+			}},
+		})
+		require.NoError(t, err)
+
+		inbound := &sentryproto.InboundMessage{
+			Id:     sentryproto.MessageId_BLOCK_WITNESS_W0,
+			Data:   payload,
+			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x04}),
+		}
+
+		mockSentryClient.EXPECT().
+			SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(&sentryproto.SentPeers{}, nil).
+			Times(1)
+
+		err = multiClient.handleInboundMessage(ctx, inbound, mockSentryClient)
+		require.NoError(t, err)
+	})
 }

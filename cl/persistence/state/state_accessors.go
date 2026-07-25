@@ -57,6 +57,21 @@ func SetStateProcessingProgress(tx kv.RwTx, progress uint64) error {
 	return tx.Put(kv.StatesProcessingProgress, kv.StatesProcessingKey, base_encoding.Encode64ToBytes4(progress))
 }
 
+func ReadStatePruneProgress(tx kv.Tx, table string) (uint64, error) {
+	v, err := tx.GetOne(kv.StatesPruneProgress, []byte(table))
+	if err != nil {
+		return 0, err
+	}
+	if len(v) == 0 {
+		return 0, nil
+	}
+	return base_encoding.Decode64FromBytes4(v), nil
+}
+
+func SetStatePruneProgress(tx kv.RwTx, table string, slot uint64) error {
+	return tx.Put(kv.StatesPruneProgress, []byte(table), base_encoding.Encode64ToBytes4(slot))
+}
+
 func ReadSlotData(getFn GetValFn, slot uint64, cfg *clparams.BeaconChainConfig) (*SlotData, error) {
 	sd := &SlotData{}
 	v, err := getFn(kv.SlotData, base_encoding.Encode64ToBytes4(slot))
@@ -109,8 +124,10 @@ func ReadNextSyncCommittee(getFn GetValFn, slot uint64) (committee *solid.SyncCo
 	if len(v) == 0 {
 		return nil, nil
 	}
-	committee = &solid.SyncCommittee{}
-	copy(committee[:], v)
+	committee = solid.NewSyncCommitteeWithSize(len(v)/48 - 1)
+	if err = committee.DecodeSSZ(v, 0); err != nil {
+		return nil, err
+	}
 	return
 }
 
@@ -123,8 +140,10 @@ func ReadCurrentSyncCommittee(getFn GetValFn, slot uint64) (committee *solid.Syn
 	if len(v) == 0 {
 		return nil, nil
 	}
-	committee = &solid.SyncCommittee{}
-	copy(committee[:], v)
+	committee = solid.NewSyncCommitteeWithSize(len(v)/48 - 1)
+	if err = committee.DecodeSSZ(v, 0); err != nil {
+		return nil, err
+	}
 	return
 }
 

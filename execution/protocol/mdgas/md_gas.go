@@ -23,17 +23,11 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
-// MdGas represents multi-dimensional gas
+// MdGas represents multi-dimensional gas (regular + state) for reservoirs
+// and leftover balances. Both fields are non-negative by construction.
 type MdGas struct {
 	Regular uint64
 	State   uint64
-}
-
-func (g MdGas) Minus(other MdGas) MdGas {
-	return MdGas{
-		Regular: g.Regular - other.Regular,
-		State:   g.State - other.State,
-	}
 }
 
 func (g MdGas) Plus(other MdGas) MdGas {
@@ -45,6 +39,46 @@ func (g MdGas) Plus(other MdGas) MdGas {
 
 func (g MdGas) Total() uint64 {
 	return g.Regular + g.State
+}
+
+func NewFullMdGas(regular, state, blob uint64) FullMdGas {
+	return FullMdGas{MdGas: MdGas{Regular: regular, State: state}, Blob: blob}
+}
+
+// FullMdGas extends MdGas with blob gas.
+type FullMdGas struct {
+	MdGas
+	Blob uint64
+}
+
+// MdGasUsage reports per-frame gas usage.
+type MdGasUsage struct {
+	Regular    uint64
+	State      int64 // can be negative due to state clearing (e.g. SSTORE clear)
+	StateSpill uint64
+}
+
+// PlusIntrinsic folds an intrinsic-gas MdGas into the frame-usage report,
+// preserving signed semantics on State so a net state refill stays
+// negative in the combined value.
+func (u MdGasUsage) PlusIntrinsic(igas MdGas) MdGasUsage {
+	return MdGasUsage{
+		Regular:    u.Regular + igas.Regular,
+		State:      u.State + int64(igas.State),
+		StateSpill: u.StateSpill,
+	}
+}
+
+// StateClamped returns max(0, State) as uint64. State is signed to model
+// EIP-8037 inline refunds; for block accounting (block_state_gas_used)
+// the spec uses max(0, tx_state_gas), so negative net state contributes 0
+// at the block level even though it does reduce the sender's tx_gas_used.
+func (u MdGasUsage) StateClamped() uint64 {
+	return uint64(max(0, u.State))
+}
+
+func (u MdGasUsage) Total() uint64 {
+	return u.Regular + u.StateClamped()
 }
 
 type MdGasType uint8

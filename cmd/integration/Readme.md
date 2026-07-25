@@ -30,9 +30,6 @@ integration stage_exec --prune.to=N
 # To remove all blocks (together with bodies/txs) from db 
 integration stage_headers --reset --datadir=<my_datadir> --chain=<my_chain>
 
-# Exec blocks, but don't commit changes (loose them)
-integration stage_exec --no-commit
-
 # Run txn replay with domains [requires 6th stage to be done before run]
 integration read_domains --chain sepolia account <addr> <addr> ... # read values for given accounts
 ```
@@ -142,6 +139,19 @@ integration stage_custom_trace --domain=receipt,rcache,logtopics,logaddrs,traces
 integration stage_custom_trace --domain=receipt,rcache,logtopics,logaddrs,tracesfrom,tracesto
 ```
 
+## How to remove history snapshots only (keep domain data)
+
+```sh
+# Remove all history files (SnapHistory + SnapIdx + SnapAccessors) without touching domain data (.kv files):
+erigon snapshots rm-state --only-history
+
+# Remove a specific step range of history files only:
+erigon snapshots rm-state --only-history --step=0-900
+
+# Dry-run first to see what would be deleted:
+erigon snapshots rm-state --only-history --step=0-900 --dry-run
+```
+
 ## How to re-gen bor checkpoints
 
 ```sh
@@ -149,6 +159,12 @@ rm -rf datadir/heimdall
 rm -rf datadir/snapshots/*borch*
 # Start erigon, it will gen. Then:
 erigon snapshots integrity --datadir /erigon-data/ --check=BorCheckpoints
+```
+
+## Compact chaindata in-place
+
+```sh
+src=<datadir>/chaindata && ./build/bin/mdbx_copy -c -u "$src" "${src}/mdbx.dat.tmp" && mv "${src}/mdbx.dat.tmp" "${src}/mdbx.dat" || rm -f "${src}/mdbx.dat.tmp"
 ```
 
 ## See tables size

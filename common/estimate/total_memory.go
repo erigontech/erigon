@@ -18,20 +18,29 @@ package estimate
 
 import (
 	"runtime/debug"
+	"sync"
 
 	"github.com/pbnjay/memory"
 )
 
+var (
+	totalMemoryOnce   sync.Once
+	totalMemoryCached uint64
+)
+
 func TotalMemory() uint64 {
-	mem := memory.TotalMemory()
+	totalMemoryOnce.Do(func() {
+		mem := memory.TotalMemory()
 
-	if cgroupsMemLimit, err := cgroupsMemoryLimit(); (err == nil) && (cgroupsMemLimit > 0) {
-		mem = min(mem, cgroupsMemLimit)
-	}
+		if cgroupsMemLimit, err := cgroupsMemoryLimit(); (err == nil) && (cgroupsMemLimit > 0) {
+			mem = min(mem, cgroupsMemLimit)
+		}
 
-	if goMemLimit := debug.SetMemoryLimit(-1); goMemLimit > 0 {
-		mem = min(mem, uint64(goMemLimit))
-	}
+		if goMemLimit := debug.SetMemoryLimit(-1); goMemLimit > 0 {
+			mem = min(mem, uint64(goMemLimit))
+		}
 
-	return mem
+		totalMemoryCached = mem
+	})
+	return totalMemoryCached
 }

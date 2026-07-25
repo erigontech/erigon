@@ -173,7 +173,6 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
 	}
-	defer c.Close()
 	args.BufferType = c.bufType
 
 	if !c.allFlushed {

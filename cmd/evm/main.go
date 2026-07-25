@@ -21,11 +21,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"os"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/evm/internal/t8ntool"
 	"github.com/erigontech/erigon/cmd/utils/flags"
@@ -95,6 +96,10 @@ var (
 		Name:  "bench",
 		Usage: "benchmark the execution",
 	}
+	TimeFlag = cli.BoolFlag{
+		Name:  "time",
+		Usage: "record per-test wall time and memstats on a single execution (cheaper than --bench)",
+	}
 	CreateFlag = cli.BoolFlag{
 		Name:  "create",
 		Usage: "indicates the action should be create rather than call",
@@ -130,6 +135,20 @@ var (
 	DisableReturnDataFlag = cli.BoolFlag{
 		Name:  "noreturndata",
 		Usage: "disable return data output",
+	}
+	RunFlag = cli.StringFlag{
+		Name:  "run",
+		Value: ".*",
+		Usage: "Run only those tests matching the regular expression.",
+	}
+	WorkersFlag = cli.Uint64Flag{
+		Name:  "workers",
+		Value: 1,
+		Usage: "Number of workers to execute tests in parallel (must be >= 1)",
+	}
+	JSONOutputFlag = cli.BoolFlag{
+		Name:  "jsonout",
+		Usage: "Output results as JSON array instead of human-readable format",
 	}
 )
 
@@ -187,13 +206,15 @@ func init() {
 		&disasmCommand,
 		&runCommand,
 		&blockTestCommand,
+		&engineXTestCommand,
+		&zkevmTestCommand,
 		&stateTestCommand,
 		&stateTransitionCommand,
 	}
 }
 
 func main() {
-	if err := app.Run(os.Args); err != nil {
+	if err := app.Run(context.Background(), os.Args); err != nil {
 		code := 1
 		if ec, ok := err.(*t8ntool.NumberedError); ok {
 			code = ec.ExitCode()

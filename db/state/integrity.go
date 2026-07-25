@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -31,7 +32,7 @@ func (at *AggregatorRoTx) IntegrityKey(domain kv.Domain, k []byte) error {
 	}
 	return nil
 }
-func (at *AggregatorRoTx) IntegirtyInvertedIndexKey(domain kv.Domain, k []byte) error {
+func (at *AggregatorRoTx) IntegrityInvertedIndexKey(domain kv.Domain, k []byte) error {
 	return at.d[domain].IntegrityKey(k)
 }
 
@@ -43,12 +44,12 @@ func (at *AggregatorRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.
 			return err
 		}
 	case kv.StorageHistoryIdx:
-		err := at.d[kv.CodeDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
+		err := at.d[kv.StorageDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
 	case kv.CodeHistoryIdx:
-		err := at.d[kv.StorageDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
+		err := at.d[kv.CodeDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
@@ -79,76 +80,86 @@ func (at *AggregatorRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.
 
 func (dt *DomainRoTx) IntegrityDomainFilesWithKey(k []byte) (res []string, err error) {
 	hi, lo := dt.ht.iit.hashKey(k)
-	for i := len(dt.files) - 1; i >= 0; i-- {
+	for i, f := range slices.Backward(dt.files) {
 		_, ok, _, err := dt.getLatestFromFile(i, k, hi, lo)
 		if err != nil {
 			return res, err
 		}
 		if ok {
-			res = append(res, dt.files[i].src.decompressor.FileName())
+			res = append(res, f.src.decompressor.FileName())
 		}
 	}
 	return res, nil
 }
 func (dt *DomainRoTx) IntegrityKey(k []byte) error {
-	dt.ht.iit.ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
-			if item.decompressor == nil {
+	for _, f := range dt.ht.iit.files {
+		item := f.src
+		if item == nil || item.decompressor == nil {
+			continue
+		}
+		accessor := item.index
+		needClose := false
+		if accessor == nil {
+			fPath, _, _, err := version.FindFilesWithVersionsByPattern(dt.d.efAccessorFilePathMask(item.StepRange(dt.stepSize)))
+			if err != nil {
+				panic(err)
+			}
+
+			exists, err := dir.FileExist(fPath)
+			if err != nil {
+				_, fName := filepath.Split(fPath)
+				dt.d.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 				continue
 			}
-			accessor := item.index
-			if accessor == nil {
-				fPath, _, _, err := version.FindFilesWithVersionsByPattern(dt.d.efAccessorFilePathMask(item.StepRange(dt.stepSize)))
-				if err != nil {
-					panic(err)
-				}
-
-				exists, err := dir.FileExist(fPath)
+			if exists {
+				var err error
+				accessor, err = dt.d.openHashMapAccessor(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					dt.d.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					continue
 				}
-				if exists {
-					var err error
-					accessor, err = dt.d.openHashMapAccessor(fPath)
-					if err != nil {
-						_, fName := filepath.Split(fPath)
-						dt.d.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
-						continue
-					}
-					defer accessor.Close()
-				} else {
-					continue
-				}
-			}
-
-			offset, ok := accessor.GetReaderFromPool().Lookup(k)
-			if !ok {
+			} else {
 				continue
 			}
-			g := item.decompressor.MakeGetter()
-			g.Reset(offset)
-			key, _ := g.NextUncompressed()
-			if !bytes.Equal(k, key) {
-				continue
-			}
-			eliasVal, _ := g.NextUncompressed()
-			r := multiencseq.ReadMultiEncSeq(item.startTxNum, eliasVal)
-			last2 := uint64(0)
-			if r.Count() > 2 {
-				last2 = r.Get(r.Count() - 2)
-			}
-			log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d", item.decompressor.FileName(), r.Min(), r.Max(), last2, stream.ToArrU64Must(r.Iterator(0))))
+			needClose = true
 		}
-		return true
-	})
+
+		reader := accessor.Reader()
+		offset, ok := reader.Lookup(k)
+		reader.Close()
+		if !ok {
+			if needClose {
+				accessor.Close()
+			}
+			continue
+		}
+		g := item.decompressor.MakeGetter()
+		g.Reset(offset)
+		key, _ := g.NextUncompressed()
+		if !bytes.Equal(k, key) {
+			if needClose {
+				accessor.Close()
+			}
+			continue
+		}
+		eliasVal, _ := g.NextUncompressed()
+		r := multiencseq.ReadMultiEncSeq(item.startTxNum, eliasVal)
+		last2 := uint64(0)
+		if r.Count() > 2 {
+			last2 = r.Get(r.Count() - 2)
+		}
+		log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d", item.decompressor.FileName(), r.Min(), r.Max(), last2, stream.ToArrU64Must(r.Iterator(0))))
+		if needClose {
+			accessor.Close()
+		}
+	}
 	return nil
 }
 
 func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.Context, failFast bool, fromStep uint64) error {
 	fromTxNum := fromStep * iit.ii.stepSize
-	g := &errgroup.Group{}
+	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(estimate.AlmostAllCPUs())
 
 	logEvery := time.NewTicker(30 * time.Second)

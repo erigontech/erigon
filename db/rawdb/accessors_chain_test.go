@@ -18,11 +18,9 @@ package rawdb_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"math/big"
 	"testing"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -37,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -45,6 +42,19 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func newTestLegacyTx(nonce uint64, to common.Address, value uint256.Int, gasLimit uint64, gasPrice uint256.Int) *types.LegacyTx {
+	toAddr := to
+	return &types.LegacyTx{
+		CommonTx: types.CommonTx{
+			Nonce:    nonce,
+			To:       &toAddr,
+			Value:    value,
+			GasLimit: gasLimit,
+		},
+		GasPrice: gasPrice,
+	}
+}
 
 func TestWriteRawTransactions(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
@@ -184,7 +194,7 @@ func TestWriteTransactions_SequentialTxnIDs(t *testing.T) {
 	defer tx.Rollback()
 
 	txs := make([]types.Transaction, 5)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		txs[i] = types.NewTransaction(uint64(i), common.HexToAddress("0x1234"), uint256.NewInt(uint64(i*100)), 21000, uint256.NewInt(1000000000), []byte{})
 	}
 
@@ -194,7 +204,7 @@ func TestWriteTransactions_SequentialTxnIDs(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify each transaction was stored with the correct sequential ID
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		expectedTxnID := baseTxnID.At(i)
 		key := make([]byte, 8)
 		binary.BigEndian.PutUint64(key, expectedTxnID)
@@ -242,7 +252,7 @@ func TestWriteTransactions_UniqueKeys(t *testing.T) {
 	defer tx.Rollback()
 
 	txs := make([]types.Transaction, 5)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		txs[i] = types.NewTransaction(uint64(i), common.HexToAddress("0x1234"), uint256.NewInt(uint64(i*100)), 21000, uint256.NewInt(1000000000), []byte{})
 	}
 
@@ -254,7 +264,7 @@ func TestWriteTransactions_UniqueKeys(t *testing.T) {
 	usedKeys := make(map[string]bool)
 	keysList := make([][]byte, 0, 5)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		expectedTxnID := baseTxnID.At(i)
 		key := make([]byte, 8)
 		binary.BigEndian.PutUint64(key, expectedTxnID)
@@ -482,7 +492,7 @@ func TestBlockStorage(t *testing.T) {
 	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved header mismatch: have %v, want %v", entry, block.Header())
 	}
-	if err := rawdb.TruncateBlocks(context.Background(), tx, 2); err != nil {
+	if err := rawdb.TruncateBlocks(t.Context(), tx, 2); err != nil {
 		t.Fatal(err)
 	}
 	if entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64()); entry == nil {
@@ -491,7 +501,7 @@ func TestBlockStorage(t *testing.T) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, block.Body())
 	}
 	// Delete the block and verify the execution
-	if err := rawdb.TruncateBlocks(context.Background(), tx, block.NumberU64()); err != nil {
+	if err := rawdb.TruncateBlocks(t.Context(), tx, block.NumberU64()); err != nil {
 		t.Fatal(err)
 	}
 	//if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
@@ -618,7 +628,7 @@ func TestTdStorage(t *testing.T) {
 	defer tx.Rollback()
 
 	// Create a test TD to move around the database and make sure it's really new
-	hash, td := common.Hash{}, big.NewInt(314)
+	hash, td := common.Hash{}, uint256.NewInt(314)
 	entry, err := rawdb.ReadTd(tx, hash, 0)
 	if err != nil {
 		t.Fatalf("ReadTd failed: %v", err)
@@ -627,7 +637,7 @@ func TestTdStorage(t *testing.T) {
 		t.Fatalf("Non existent TD returned: %v", entry)
 	}
 	// Write and verify the TD in the database
-	err = rawdb.WriteTd(tx, hash, 0, td)
+	err = rawdb.WriteTd(tx, hash, 0, *td)
 	if err != nil {
 		t.Fatalf("WriteTd failed: %v", err)
 	}
@@ -737,8 +747,7 @@ func TestHeadStorage(t *testing.T) {
 		t.Skip("slow test")
 	}
 	t.Parallel()
-	m := execmoduletester.New(t)
-	m.DB.(state.HasAgg).Agg().(*state.Aggregator).EnableDomain(kv.RCacheDomain)
+	m := execmoduletester.New(t, execmoduletester.WithEnableDomain(kv.RCacheDomain))
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -765,8 +774,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		t.Skip("slow test")
 	}
 	t.Parallel()
-	m := execmoduletester.New(t)
-	m.DB.(state.HasAgg).Agg().(*state.Aggregator).EnableDomain(kv.RCacheDomain)
+	m := execmoduletester.New(t, execmoduletester.WithEnableDomain(kv.RCacheDomain))
 	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -776,8 +784,8 @@ func TestBlockReceiptStorage(t *testing.T) {
 	ctx := m.Ctx
 
 	// Create a live block since we need metadata to reconstruct the receipt
-	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), &u256.Num1, 1, &u256.Num1, nil)
-	tx2 := types.NewTransaction(2, common.HexToAddress("0x2"), &u256.Num2, 2, &u256.Num2, nil)
+	tx1 := newTestLegacyTx(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1)
+	tx2 := newTestLegacyTx(2, common.HexToAddress("0x2"), u256.Num2, 2, u256.Num2)
 
 	header := &types.Header{Number: *common.Num1}
 	body := &types.Body{Transactions: types.Transactions{tx1, tx2}}
@@ -800,8 +808,9 @@ func TestBlockReceiptStorage(t *testing.T) {
 	}
 	receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
 
+	receipt2PostState := common.Hash{2}
 	receipt2 := &types.Receipt{
-		PostState:         common.Hash{2}.Bytes(),
+		PostState:         receipt2PostState[:],
 		CumulativeGasUsed: 2,
 		Logs: []*types.Log{
 			{Address: common.BytesToAddress([]byte{0x22})},
@@ -829,10 +838,10 @@ func TestBlockReceiptStorage(t *testing.T) {
 	var txNum uint64
 	{
 		blockNum := header.Number.Uint64()
-		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+		sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 		require.NoError(err)
 		defer sd.Close()
-		base, err := txNumReader.Min(context.Background(), tx, 1)
+		base, err := txNumReader.Min(t.Context(), tx, 1)
 		require.NoError(err)
 		// Insert the receipt slice into the database and check presence
 		txNum = base
@@ -872,6 +881,108 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NotNil(b)
 }
 
+func TestReadReceiptsCacheV2BadTxIndex(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithEnableDomain(kv.RCacheDomain))
+	tx, err := m.DB.BeginTemporalRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	br := m.BlockReader
+	txNumReader := br.TxnumReader()
+	ctx := m.Ctx
+
+	tx1 := newTestLegacyTx(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1)
+	tx2 := newTestLegacyTx(2, common.HexToAddress("0x2"), u256.Num2, 2, u256.Num2)
+
+	header := &types.Header{Number: *common.Num1}
+	hash := header.Hash()
+	body := &types.Body{Transactions: types.Transactions{tx1, tx2}}
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, header.Number.Uint64()))
+	require.NoError(t, rawdb.WriteHeader(tx, header))
+	require.NoError(t, rawdb.WriteBody(tx, hash, 1, body))
+	require.NoError(t, rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
+
+	badReceipt := &types.Receipt{
+		Status:            types.ReceiptStatusSuccessful,
+		CumulativeGasUsed: 1,
+		GasUsed:           1,
+		BlockNumber:       &header.Number,
+		BlockHash:         hash,
+		TransactionIndex:  3_468_750_000,
+	}
+
+	blockNum := header.Number.Uint64()
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	base, err := txNumReader.Min(t.Context(), tx, blockNum)
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base))
+	require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), badReceipt, base+1))
+	require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base+2))
+	_, err = sd.ComputeCommitment(ctx, tx, true, blockNum, base+2, "flush-commitment", nil)
+	require.NoError(t, err)
+	require.NoError(t, sd.Flush(ctx, tx))
+
+	b, _, err := br.BlockWithSenders(ctx, tx, hash, 1)
+	require.NoError(t, err)
+	require.NotNil(t, b)
+	rs, err := rawdb.ReadReceiptsCacheV2(tx, b, txNumReader)
+	require.NoError(t, err)
+	require.Empty(t, rs)
+}
+
+func TestReadReceiptsCacheV2UnorderedTxIndex(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithEnableDomain(kv.RCacheDomain))
+	tx, err := m.DB.BeginTemporalRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	br := m.BlockReader
+	txNumReader := br.TxnumReader()
+	ctx := m.Ctx
+
+	tx1 := newTestLegacyTx(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1)
+	tx2 := newTestLegacyTx(2, common.HexToAddress("0x2"), u256.Num2, 2, u256.Num2)
+
+	header := &types.Header{Number: *common.Num1}
+	hash := header.Hash()
+	body := &types.Body{Transactions: types.Transactions{tx1, tx2}}
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, header.Number.Uint64()))
+	require.NoError(t, rawdb.WriteHeader(tx, header))
+	require.NoError(t, rawdb.WriteBody(tx, hash, 1, body))
+	require.NoError(t, rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
+
+	receipt1 := &types.Receipt{
+		Status:            types.ReceiptStatusSuccessful,
+		CumulativeGasUsed: 1,
+		GasUsed:           1,
+		BlockNumber:       &header.Number,
+		BlockHash:         hash,
+		TransactionIndex:  1,
+	}
+
+	blockNum := header.Number.Uint64()
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	base, err := txNumReader.Min(t.Context(), tx, blockNum)
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base))
+	require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), receipt1, base+1))
+	require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base+2))
+	_, err = sd.ComputeCommitment(ctx, tx, true, blockNum, base+2, "flush-commitment", nil)
+	require.NoError(t, err)
+	require.NoError(t, sd.Flush(ctx, tx))
+
+	b, _, err := br.BlockWithSenders(ctx, tx, hash, 1)
+	require.NoError(t, err)
+	require.NotNil(t, b)
+	rs, err := rawdb.ReadReceiptsCacheV2(tx, b, txNumReader)
+	require.NoError(t, err)
+	require.Empty(t, rs)
+}
+
 // Tests block storage and retrieval operations with withdrawals.
 func TestBlockWithdrawalsStorage(t *testing.T) {
 	if testing.Short() {
@@ -884,7 +995,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 	br, bw := m.BlocksIO()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// create fake withdrawals
 	w := types.Withdrawal{
@@ -945,7 +1056,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved header mismatch: have %v, want %v", entry, block.Header())
 	}
-	if err := rawdb.TruncateBlocks(context.Background(), tx, 2); err != nil {
+	if err := rawdb.TruncateBlocks(t.Context(), tx, 2); err != nil {
 		t.Fatal(err)
 	}
 	entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
@@ -977,7 +1088,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.Equal(uint64(1001), rw2.Amount)
 
 	// Delete the block and verify the execution
-	if err := rawdb.TruncateBlocks(context.Background(), tx, block.NumberU64()); err != nil {
+	if err := rawdb.TruncateBlocks(t.Context(), tx, block.NumberU64()); err != nil {
 		t.Fatal(err)
 	}
 	//if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
@@ -1061,7 +1172,10 @@ func TestBlockAccessListStorage(t *testing.T) {
 
 	decoded, err = types.DecodeBlockAccessListBytes(data)
 	require.NoError(t, err)
-	require.Nil(t, decoded)
+	// EIP-7928: Decoding 0xc0 (empty RLP list) should return an initialized empty slice,
+	// rather than nil, to distinguish a valid empty BAL from a missing/pruned one.
+	require.NotNil(t, decoded)
+	require.Empty(t, decoded)
 	require.NoError(t, decoded.Validate())
 	require.Equal(t, empty.BlockAccessListHash, decoded.Hash())
 }
@@ -1202,7 +1316,7 @@ func checkReceiptsRLP(have, want types.Receipts) error {
 	if len(have) != len(want) {
 		return fmt.Errorf("receipts sizes mismatch: have %d, want %d", len(have), len(want))
 	}
-	for i := 0; i < len(want); i++ {
+	for i := range want {
 		rlpHave, err := rlp.EncodeToBytes(have[i])
 		if err != nil {
 			return err
@@ -1216,4 +1330,28 @@ func checkReceiptsRLP(have, want types.Receipts) error {
 		}
 	}
 	return nil
+}
+
+// Bodies count two system txn slots that have no kv.EthTx entries, and side-chain
+// blocks share the same monotonic txn-id space. A reader that seeks from the system
+// slot and takes TxCount raw entries therefore drifts past its block and returns
+// another chain's transactions.
+func TestRawTransactionsRangeExcludesForeignTxns(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+	require := require.New(t)
+	genesisHash := common.Hash{0x0e}
+	require.NoError(rawdb.WriteBodyForStorage(tx, genesisHash, 0, &types.BodyForStorage{BaseTxnID: 0, TxCount: 2}))
+	require.NoError(rawdb.WriteCanonicalHash(tx, genesisHash, 0))
+	sideHash := common.Hash{0xaa}
+	txSide := []byte{0xa1}
+	require.NoError(rawdb.WriteBodyForStorage(tx, sideHash, 1, &types.BodyForStorage{BaseTxnID: 2, TxCount: 3}))
+	require.NoError(rawdb.WriteRawTransactions(tx, [][]byte{txSide}, 2))
+	canonHash := common.Hash{0xbb}
+	txCanon := []byte{0xb1}
+	require.NoError(rawdb.WriteBodyForStorage(tx, canonHash, 1, &types.BodyForStorage{BaseTxnID: 5, TxCount: 3}))
+	require.NoError(rawdb.WriteRawTransactions(tx, [][]byte{txCanon}, 5))
+	require.NoError(rawdb.WriteCanonicalHash(tx, canonHash, 1))
+	txs, err := rawdb.RawTransactionsRange(tx, 0, 1)
+	require.NoError(err)
+	require.Equal([][]byte{txCanon}, txs)
 }

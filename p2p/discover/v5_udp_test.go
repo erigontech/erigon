@@ -21,6 +21,7 @@ package discover
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
 	"fmt"
@@ -49,7 +50,7 @@ func TestUDPv5_lookupE2E(t *testing.T) {
 
 	const N = 5
 	var nodes []*UDPv5
-	for i := 0; i < N; i++ {
+	for range N {
 		var cfg Config
 		if len(nodes) > 0 {
 			bn := nodes[0].Self()
@@ -95,11 +96,70 @@ func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 	realaddr := socket.LocalAddr().(*net.UDPAddr)
 	ln.SetStaticIP(realaddr.IP)
 	ln.SetFallbackUDP(realaddr.Port)
-	udp, err := ListenV5(socket, ln, cfg)
+	udp, err := ListenV5(t.Context(), socket, ln, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return udp
+}
+
+// This test checks that cancelling the context passed to ListenV5 shuts the transport
+// down completely, without an explicit Close.
+func TestUDPv5_listenCtxCancel(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	db, _ := enode.OpenDB("")
+	defer db.Close()
+	key := newkey()
+	udp, err := ListenV5(ctx, newpipe(), enode.NewLocalNode(db, key), Config{
+		PrivateKey:   key,
+		Log:          testlog.Logger(t, log.LvlInfo),
+		ValidSchemes: enode.ValidSchemesForTesting,
+		PingInterval: 1000 * time.Hour,
+	})
+	require.NoError(t, err)
+	defer udp.Close()
+
+	cancel()
+
+	// tab.closed is the last thing Close does, so observing it proves the whole
+	// shutdown ran: the socket is closed, readLoop and dispatch have exited, and
+	// the table loop has stopped.
+	select {
+	case <-udp.tab.closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelling the listen context did not shut the transport down")
+	}
+}
+
+// This test checks that trace logging follows the configured log level.
+func TestUDPv5_traceFollowsLogLevel(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		level log.Lvl
+		want  bool
+	}{
+		{log.LvlTrace, true},
+		{log.LvlInfo, false},
+	} {
+		t.Run(tc.level.String(), func(t *testing.T) {
+			db, _ := enode.OpenDB("")
+			defer db.Close()
+			key := newkey()
+			udp, err := ListenV5(t.Context(), newpipe(), enode.NewLocalNode(db, key), Config{
+				PrivateKey:   key,
+				Log:          testlog.Logger(t, tc.level),
+				ValidSchemes: enode.ValidSchemesForTesting,
+				PingInterval: 1000 * time.Hour,
+			})
+			require.NoError(t, err)
+			defer udp.Close()
+
+			require.Equal(t, tc.want, udp.trace)
+		})
+	}
 }
 
 // This test checks that incoming PING calls are handled correctly.
@@ -258,6 +318,30 @@ func TestUDPv5_findnodeHandling(t *testing.T) {
 	nodes = append(nodes, nodes249...)
 	nodes = append(nodes, nodes248[:10]...)
 	test.expectNodes([]byte{5}, 1, nodes)
+}
+
+// TestUDPv5_findnodeLivenessCheck verifies that collectTableNodes does not
+// return nodes that have not passed a liveness check.
+func TestUDPv5_findnodeLivenessCheck(t *testing.T) {
+	t.Parallel()
+	test := newUDPV5Test(t)
+	defer test.close()
+
+	// Insert nodes that have NOT been validated live (setLive=false).
+	nodes253 := nodesAtDistance(test.table.self().ID(), 253, 5)
+	fillTable(test.table, nodes253, false)
+
+	// FINDNODE at distance 253 should return no nodes because none are live.
+	test.packetIn(&v5wire.Findnode{ReqID: []byte{0}, Distances: []uint{253}})
+	test.expectNodes([]byte{0}, 1, nil)
+
+	// Now insert live nodes at distance 249.
+	nodes249 := nodesAtDistance(test.table.self().ID(), 249, 3)
+	fillTable(test.table, nodes249, true)
+
+	// FINDNODE at 253 still returns nothing (non-live), but 249 returns the live nodes.
+	test.packetIn(&v5wire.Findnode{ReqID: []byte{1}, Distances: []uint{253, 249}})
+	test.expectNodes([]byte{1}, 1, nodes249)
 }
 
 func (test *udpV5Test) expectNodes(wantReqID []byte, wantTotal uint8, wantNodes []*enode.Node) {
@@ -874,7 +958,7 @@ type testCodecFrame struct {
 	Packet  rlp.RawValue
 }
 
-func (c *testCodec) Encode(toID enode.ID, addr string, p v5wire.Packet, _ *v5wire.Whoareyou) ([]byte, v5wire.Nonce, error) {
+func (c *testCodec) Encode(toID enode.ID, addr netip.AddrPort, p v5wire.Packet, _ *v5wire.Whoareyou) ([]byte, v5wire.Nonce, error) {
 
 	if wp, ok := p.(*v5wire.Whoareyou); ok && len(wp.ChallengeData) > 0 {
 		// To match the behavior of v5wire.Codec, we return the cached encoding of
@@ -903,11 +987,11 @@ func (c *testCodec) Encode(toID enode.ID, addr string, p v5wire.Packet, _ *v5wir
 	return frame, authTag, err
 }
 
-func (c *testCodec) CurrentChallenge(id enode.ID, addr string) *v5wire.Whoareyou {
+func (c *testCodec) CurrentChallenge(id enode.ID, addr netip.AddrPort) *v5wire.Whoareyou {
 	return c.sentChallenges[id]
 }
 
-func (c *testCodec) Decode(input []byte, addr string) (enode.ID, *enode.Node, v5wire.Packet, error) {
+func (c *testCodec) Decode(input []byte, addr netip.AddrPort) (enode.ID, *enode.Node, v5wire.Packet, error) {
 	frame, p, err := c.decodeFrame(input)
 	if err != nil {
 		return enode.ID{}, nil, nil, err
@@ -915,7 +999,7 @@ func (c *testCodec) Decode(input []byte, addr string) (enode.ID, *enode.Node, v5
 	return frame.NodeID, nil, p, nil
 }
 
-func (c *testCodec) SessionNode(id enode.ID, addr string) *enode.Node {
+func (c *testCodec) SessionNode(id enode.ID, addr netip.AddrPort) *enode.Node {
 	return c.test.nodesByID[id].Node()
 }
 
@@ -953,7 +1037,7 @@ func newUDPV5Test(t *testing.T) *udpV5Test {
 	ln := enode.NewLocalNode(test.db, test.localkey)
 	ln.SetStaticIP(net.IP{10, 0, 0, 1})
 	ln.SetFallbackUDP(30303)
-	test.udp, _ = ListenV5(test.pipe, ln, Config{
+	test.udp, _ = ListenV5(t.Context(), test.pipe, ln, Config{
 		PrivateKey:   test.localkey,
 		Log:          testlog.Logger(t, log.LvlTrace),
 		ValidSchemes: enode.ValidSchemesForTesting,
@@ -979,7 +1063,7 @@ func (test *udpV5Test) packetInFrom(key *ecdsa.PrivateKey, addr netip.AddrPort, 
 
 	ln := test.getNode(key, addr)
 	codec := &testCodec{test: test, id: ln.ID()}
-	enc, _, err := codec.Encode(test.udp.Self().ID(), addr.String(), packet, nil)
+	enc, _, err := codec.Encode(test.udp.Self().ID(), addr, packet, nil)
 	if err != nil {
 		test.t.Errorf("%s encode error: %v", packet.Name(), err)
 	}

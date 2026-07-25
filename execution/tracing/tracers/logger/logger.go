@@ -25,6 +25,7 @@ import (
 	"maps"
 	"math/big"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -52,12 +53,12 @@ func (s Storage) Copy() Storage {
 
 // LogConfig are the configuration options for structured logger the EVM
 type LogConfig struct {
-	DisableMemory     bool `json:"disableMemory"`     // disable memory capture
-	DisableStack      bool `json:"disableStack"`      // disable stack capture
-	DisableStorage    bool `json:"disableStorage"`    // disable storage capture
-	DisableReturnData bool `json:"disableReturnData"` // disable return data capture
-	Debug             bool `json:"debug"`             // print output during capture end
-	Limit             int  `json:"limit"`             // maximum length of output, but zero means unlimited
+	EnableMemory     bool `json:"enableMemory"`     // enable memory capture
+	DisableStack     bool `json:"disableStack"`     // disable stack capture
+	DisableStorage   bool `json:"disableStorage"`   // disable storage capture
+	EnableReturnData bool `json:"enableReturnData"` // enable return data capture
+	Debug            bool `json:"debug"`            // print output during capture end
+	Limit            int  `json:"limit"`            // maximum length of output, but zero means unlimited
 	// Chain overrides, can be used to execute a trace using future fork rules
 	Overrides *chain.Config `json:"overrides,omitempty"`
 }
@@ -71,7 +72,7 @@ type StructLog struct {
 	Op            vm.OpCode                   `json:"op"`
 	Gas           uint64                      `json:"gas"`
 	GasCost       uint64                      `json:"gasCost"`
-	Memory        []byte                      `json:"memory"`
+	Memory        []byte                      `json:"memory,omitempty"`
 	MemorySize    int                         `json:"memSize"`
 	Stack         []*big.Int                  `json:"stack"`
 	ReturnData    []byte                      `json:"returnData"`
@@ -88,8 +89,8 @@ type structLogMarshaling struct {
 	GasCost     math.HexOrDecimal64
 	Memory      hexutil.Bytes
 	ReturnData  hexutil.Bytes
-	OpName      string `json:"opName"` // adds call to OpName() in MarshalJSON
-	ErrorString string `json:"error"`  // adds call to ErrorString() in MarshalJSON
+	OpName      string `json:"opName"`          // adds call to OpName() in MarshalJSON
+	ErrorString string `json:"error,omitempty"` // adds call to ErrorString() in MarshalJSON
 }
 
 // OpName formats the operand name in a human-readable format.
@@ -149,11 +150,12 @@ func NewStructLogger(cfg *LogConfig) *StructLogger {
 
 func (l *StructLogger) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnTxStart: l.OnTxStart,
-		OnTxEnd:   l.OnTxEnd,
-		OnExit:    l.OnExit,
-		OnOpcode:  l.OnOpcode,
-		Flush:     l.Flush,
+		OnTxStart:           l.OnTxStart,
+		OnSystemCallStartV2: l.OnSystemCallStartV2,
+		OnTxEnd:             l.OnTxEnd,
+		OnExit:              l.OnExit,
+		OnOpcode:            l.OnOpcode,
+		Flush:               l.Flush,
 	}
 }
 
@@ -166,6 +168,10 @@ func (l *StructLogger) Tracer() *tracers.Tracer {
 }
 
 func (l *StructLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
+	l.env = env
+}
+
+func (l *StructLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
@@ -194,7 +200,7 @@ func (l *StructLogger) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope 
 
 	// Copy a snapshot of the current memory state to a new buffer
 	var mem []byte
-	if !l.cfg.DisableMemory {
+	if l.cfg.EnableMemory {
 		mem = make([]byte, len(memory))
 		copy(mem, memory)
 	}
@@ -236,12 +242,12 @@ func (l *StructLogger) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope 
 		storage = l.storage[contractAddr].Copy()
 	}
 	var rdata []byte
-	if !l.cfg.DisableReturnData {
+	if l.cfg.EnableReturnData {
 		rdata = make([]byte, len(rData))
 		copy(rdata, rData)
 	}
 	// create a new snapshot of the EVM.
-	log := StructLog{pc, op, gas, cost, mem, len(memory), stck, rdata, storage, depth, l.env.IntraBlockState.GetRefund().Total(), err}
+	log := StructLog{pc, op, gas, cost, mem, len(memory), stck, rdata, storage, depth, l.env.IntraBlockState.GetRefund(), err}
 	l.logs = append(l.logs, log)
 }
 
@@ -296,7 +302,8 @@ func (l *StructLogger) Flush(tx types.Transaction) {
 // FormatLogs formats EVM returned structured logs for json output
 func FormatLogs(logs []StructLog) []StructLogRes {
 	formatted := make([]StructLogRes, len(logs))
-	for index, trace := range logs {
+	for index := range logs {
+		trace := &logs[index]
 		formatted[index] = StructLogRes{
 			Pc:      trace.Pc,
 			Op:      trace.Op.String(),
@@ -332,7 +339,8 @@ func FormatLogs(logs []StructLog) []StructLogRes {
 
 // WriteTrace writes a formatted trace to the given writer
 func WriteTrace(writer io.Writer, logs []StructLog) {
-	for _, log := range logs {
+	for i := range logs {
+		log := &logs[i]
 		fmt.Fprintf(writer, "%-16spc=%08d gas=%v cost=%v", log.Op, log.Pc, log.Gas, log.GasCost)
 		if log.Err != nil {
 			fmt.Fprintf(writer, " ERROR: %v", log.Err)
@@ -341,8 +349,8 @@ func WriteTrace(writer io.Writer, logs []StructLog) {
 
 		if len(log.Stack) > 0 {
 			fmt.Fprintln(writer, "Stack:")
-			for i := len(log.Stack) - 1; i >= 0; i-- {
-				fmt.Fprintf(writer, "%08d  %x\n", len(log.Stack)-i-1, math.PaddedBigBytes(log.Stack[i], 32))
+			for i, val := range slices.Backward(log.Stack) {
+				fmt.Fprintf(writer, "%08d  %x\n", len(log.Stack)-i-1, math.PaddedBigBytes(val, 32))
 			}
 		}
 		if len(log.Memory) > 0 {
@@ -395,15 +403,20 @@ func NewMarkdownLogger(cfg *LogConfig, writer io.Writer) *mdLogger {
 
 func (t *mdLogger) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnTxStart: t.OnTxStart,
-		OnEnter:   t.OnEnter,
-		OnExit:    t.OnExit,
-		OnOpcode:  t.OnOpcode,
-		OnFault:   t.OnFault,
+		OnTxStart:           t.OnTxStart,
+		OnSystemCallStartV2: t.OnSystemCallStartV2,
+		OnEnter:             t.OnEnter,
+		OnExit:              t.OnExit,
+		OnOpcode:            t.OnOpcode,
+		OnFault:             t.OnFault,
 	}
 }
 
 func (t *mdLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
+	t.env = env
+}
+
+func (t *mdLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	t.env = env
 }
 

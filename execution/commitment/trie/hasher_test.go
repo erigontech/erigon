@@ -24,14 +24,15 @@ import (
 )
 
 func TestValue(t *testing.T) {
-	t.Skip("should be restored. skipped for Erigon")
-
 	h := newHasher(false)
 	var hn common.Hash
-	h.hash(ValueNode("BLAH"), false, hn[:])
-	expected := "0x0"
-	actual := fmt.Sprintf("0x%x", hn[:])
-	if actual != expected {
-		t.Errorf("Expected %s, got %x", expected, actual)
+	// A short value node is stored inline as its RLP encoding, not hashed.
+	n, err := h.hash(ValueNode("BLAH"), false, hn[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := "8584424c4148"
+	if actual := fmt.Sprintf("%x", hn[:n]); actual != expected {
+		t.Errorf("expected %s, got %s", expected, actual)
 	}
 }

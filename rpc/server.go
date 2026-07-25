@@ -33,6 +33,8 @@ import (
 
 const MetadataApi = "rpc"
 
+const minBatchConcurrency uint = 1
+
 // CodecOption specifies which type of messages a codec supports.
 //
 // Deprecated: this option is no longer honored by Server.
@@ -65,6 +67,9 @@ type Server struct {
 
 // NewServer creates a new server instance with no registered handlers.
 func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disableStreaming bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *Server {
+	if batchConcurrency == 0 {
+		batchConcurrency = minBatchConcurrency
+	}
 	server := &Server{services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet[ServerCodec](), batchConcurrency: batchConcurrency,
 		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold}
 	server.run.Store(true)
@@ -99,6 +104,13 @@ func (s *Server) RegisterName(name string, receiver any) error {
 //
 // Note that codec options are no longer supported.
 func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
+	s.ServeCodecWithContext(context.Background(), codec, options)
+}
+
+// ServeCodecWithContext is like ServeCodec but uses connCtx as the base context for all
+// handler goroutines spawned for this connection. Values set on connCtx (e.g.
+// kv.WithNonBlockingAcquire) propagate to every method call on the connection.
+func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCodec, options CodecOption) {
 	defer codec.Close()
 
 	// Don't serve if server is stopped.
@@ -110,7 +122,7 @@ func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
 	s.codecs.Add(codec)
 	defer s.codecs.Remove(codec)
 
-	c := initClient(codec, s.idgen, &s.services, s.batchLimit, s.logger)
+	c := initClientWithBaseCtx(connCtx, codec, s.idgen, &s.services, s.batchLimit, s.logger)
 	<-codec.closed()
 	c.Close()
 }

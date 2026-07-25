@@ -1,14 +1,12 @@
 package state
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
@@ -163,9 +161,9 @@ func TestIntegrateDirtyFile(t *testing.T) {
 	err := repo.OpenFolder()
 	require.NoError(t, err)
 
-	filesItem := newFilesItemWithSnapConfig(0, 1024, repo.cfg)
+	filesItem := newFilesItem(0, 1024)
 	filename, _ := repo.schema.DataFile(version.V1_0, 0, 1024)
-	comp, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+	comp, err := seg.NewCompressor(t.Context(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	defer comp.Close()
 	comp.DisableFsync()
@@ -363,8 +361,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 	accountsR.integrity = NewDependencyIntegrityChecker(log.New())
 	accountsR.integrity.AddDependency(FromDomain(kv.AccountsDomain), &DependentInfo{
 		entity: FromDomain(kv.CommitmentDomain),
-		//filesGetter: ,
-		filesGetter: func() *btree.BTreeG[*FilesItem] {
+		filesGetter: func() *DirtyFiles {
 			return commitmentR.dirtyFiles
 		},
 		accessors: commitmentR.accessors,
@@ -498,7 +495,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		items := repo.FilesInRange(mr, vf) // vf passed should ideally from rotx, but doesn't matter here
 		require.Len(t, items, nFilesInRange)
 
-		merged := newFilesItemWithSnapConfig(mr.from, mr.to, repo.cfg)
+		merged := newFilesItem(mr.from, mr.to)
 		repo.IntegrateDirtyFile(merged)
 		dirEntries, err := filesFromDir(repo.schema.DataDirectory())
 		require.NoError(t, err)
@@ -543,15 +540,6 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 
 	//0-1....12-13, 13-15, 15-16 => 0-16
 	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 15}, {15, 16}}, true, 15, 1, 1)
-}
-
-func TestSegMetadata_Marshal_UM(t *testing.T) {
-	metadata := NumMetadata{First: Num(89), Last: Num(120), Count: 28}
-	data, err := metadata.Marshal()
-	require.NoError(t, err)
-	metadata2 := NumMetadata{}
-	require.NoError(t, metadata2.Unmarshal(data))
-	require.Equal(t, metadata, metadata2)
 }
 
 // /////////////////////////////////////// helpers and utils
@@ -681,7 +669,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 	// 1. account domain, history and ii
 	fileGen := func(filename string) {
 		if strings.HasSuffix(filename, ".ef") || strings.HasSuffix(filename, ".v") || strings.HasSuffix(filename, ".kv") {
-			seg, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+			seg, err := seg.NewCompressor(t.Context(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
 			defer seg.Close()
 			seg.DisableFsync()
@@ -699,7 +687,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 
 		if strings.HasSuffix(filename, ".bt") {
 			sampleFile := filename + ".sample"
-			seg2, err := seg.NewCompressor(context.Background(), t.Name(), sampleFile, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+			seg2, err := seg.NewCompressor(t.Context(), t.Name(), sampleFile, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
 			defer seg2.Close()
 			seg2.DisableFsync()
@@ -716,7 +704,8 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			defer dir.RemoveFile(sampleFile)
 
 			r := seg.NewReader(seg3.MakeGetter(), seg.CompressNone)
-			bti, err := btindex.CreateBtreeIndexWithDecompressor(filename, 128, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+			kveiFile := strings.TrimSuffix(filename, ".bt") + ".kvei"
+			bti, err := btindex.CreateBtreeIndexWithDecompressor(filename, kveiFile, 128, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -731,7 +720,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 		}
 
 		if strings.HasSuffix(filename, ".kvei") {
-			filter, err := existence.NewFilter(0, filename, false)
+			filter, err := existence.NewFilter(0, filename)
 			require.NoError(t, err)
 			defer filter.Close()
 			filter.DisableFsync()
@@ -762,7 +751,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			if err = rs.AddKey([]byte("first_key"), 0); err != nil {
 				t.Error(err)
 			}
-			if err = rs.Build(context.Background()); err != nil {
+			if err = rs.Build(t.Context()); err != nil {
 				t.Errorf("test is expected to fail, too few keys added")
 			}
 			rs.Close()

@@ -17,12 +17,13 @@
 package handler
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -239,8 +240,8 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 			Reward:         reward,
 		})
 	}
-	sort.Slice(rewards, func(i, j int) bool {
-		return rewards[i].ValidatorIndex < rewards[j].ValidatorIndex
+	slices.SortFunc(rewards, func(a, b syncCommitteeReward) int {
+		return cmp.Compare(a.ValidatorIndex, b.ValidatorIndex)
 	})
 	return newBeaconResponse(rewards).WithFinalized(isFinalized).WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root)), nil
 }

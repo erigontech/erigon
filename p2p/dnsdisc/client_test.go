@@ -22,8 +22,8 @@ package dnsdisc
 import (
 	"context"
 	"crypto/ecdsa"
-	"errors"
 	"maps"
+	"net"
 	"reflect"
 	"testing"
 	"time"
@@ -416,7 +416,7 @@ func makeTestTree(domain string, nodes []*enode.Node, links []string) (*Tree, st
 // testKeys creates deterministic private keys for testing.
 func testKeys(n int) []*ecdsa.PrivateKey {
 	keys := make([]*ecdsa.PrivateKey, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		key, err := crypto.GenerateKey()
 		if err != nil {
 			panic("can't generate key: " + err.Error())
@@ -461,11 +461,11 @@ func (mr mapResolver) add(m map[string]string) {
 	maps.Copy(mr, m)
 }
 
-func (mr mapResolver) LookupTXT(ctx context.Context, name string) ([]string, error) {
+func (mr mapResolver) LookupTXT(_ context.Context, name string) ([]string, time.Duration, error) {
 	if record, ok := mr[name]; ok {
-		return []string{record}, nil
+		return []string{record}, 300 * time.Second, nil
 	}
-	return nil, errors.New("not found")
+	return nil, 0, &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}
 }
 
 func parseNodes(rec []string) []*enode.Node {

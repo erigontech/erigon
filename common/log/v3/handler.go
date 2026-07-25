@@ -36,10 +36,13 @@ type Handler interface {
 // to easily begin writing log records to other
 // outputs.
 //
-// StreamHandler wraps itself with LazyHandler and SyncHandler
-// to evaluate Lazy objects and perform safe concurrent writes.
+// StreamHandler wraps itself with LazyHandler to evaluate Lazy objects.
+// StreamHandler does not add any synchronization of its own, so
+// concurrent use is only safe when the provided Format allocates
+// per-call buffers (all built-in formats do) and the underlying
+// io.Writer supports concurrent Write calls (e.g. *os.File).
 func StreamHandler(wr io.Writer, fmtr Format) Handler {
-	return LazyHandler(SyncHandler(streamHandler{wr: wr, fmtr: fmtr}))
+	return LazyHandler(streamHandler{wr: wr, fmtr: fmtr})
 }
 
 type streamHandler struct {
@@ -98,13 +101,17 @@ func FileHandler(path string, fmtr Format, maxFileSize uint64) (Handler, error) 
 }
 
 type rotatingWriter struct {
+	mu         sync.Mutex
 	file       *os.File
 	logMaxSize uint64
 }
 
 // Write checks if current log size + expected write size is larger than limit.
 // If limit outreached, file is truncated then write is called.
+// Mutex is required because the operation is multi-step (stat+truncate+write+sync).
 func (r *rotatingWriter) Write(p []byte) (n int, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	info, err := r.file.Stat()
 	if err != nil {
 		return 0, fmt.Errorf("rotating log %q stat: %w", r.file.Name(), err)
@@ -125,6 +132,8 @@ func (r *rotatingWriter) Write(p []byte) (n int, err error) {
 }
 
 func (r *rotatingWriter) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.file.Close()
 }
 

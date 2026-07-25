@@ -32,6 +32,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
@@ -537,6 +539,65 @@ func randomID() (id enode.ID) {
 		id[i] = byte(rand.Intn(255))
 	}
 	return id
+}
+
+// TestServerInboundUsesStaticEnode covers the inbound-stub-enode bug:
+// a peer that's been registered as a static peer should keep its full
+// ENR record after an inbound connection completes, not be silently
+// downgraded to a stub enode containing only pubkey + remote addr.
+//
+// Without the fix at server.setupConn, the acceptor side of an inbound
+// handshake constructs a fresh enode via nodeFromConn, dropping every
+// custom ENR entry the dialer originally advertised. With the fix the
+// acceptor consults the static-peer table and reuses the registered
+// enode, preserving entries needed by downstream consumers (e.g.
+// chain.toml.v2 InfoHash, BT torrent port).
+func TestServerInboundUsesStaticEnode(t *testing.T) {
+	logger := log.New()
+
+	// The remote peer's key. The static-peer enode advertises a custom
+	// "ct" (chain-toml v2 stand-in) entry that should survive the
+	// inbound handshake.
+	remoteKey := newkey()
+	remoteCustom := enr.WithEntry("ct", uint64(0xabcdef))
+
+	var rec enr.Record
+	rec.Set(enode.Secp256k1(remoteKey.PublicKey))
+	rec.Set(enr.IP(net.IP{127, 0, 0, 1}))
+	rec.Set(enr.TCP(0))
+	rec.Set(remoteCustom)
+	rec.SetSeq(1)
+	require.NoError(t, enode.SignV4(&rec, remoteKey))
+	staticEnode, err := enode.New(enode.ValidSchemes, &rec)
+	require.NoError(t, err)
+
+	connected := make(chan *Peer, 1)
+	srv := startTestServer(t, &remoteKey.PublicKey, func(p *Peer) {
+		connected <- p
+	}, logger)
+	defer srv.Stop()
+
+	// Register the remote as a static peer with its full enode (custom
+	// ENR entry intact). The acceptor's setupConn is expected to look
+	// this up by pubkey when the inbound handshake produces no
+	// dialDest.
+	srv.AddPeer(staticEnode)
+
+	// Drive an inbound connection.
+	conn, err := net.DialTimeout("tcp", srv.ListenAddr, 5*time.Second)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	select {
+	case peer := <-connected:
+		var got uint64
+		err := peer.Node().Record().Load(enr.WithEntry("ct", &got))
+		if err != nil || got != 0xabcdef {
+			t.Fatalf("inbound peer enode lost custom ENR entry: err=%v got=%x", err, got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not accept within two seconds")
+	}
 }
 
 // This test checks that inbound connections are throttled by IP.

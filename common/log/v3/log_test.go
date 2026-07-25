@@ -180,6 +180,29 @@ func TestLogfmt(t *testing.T) {
 	}
 }
 
+func TestTerminalFormatNoColor(t *testing.T) {
+	t.Parallel()
+
+	l, buf := testFormatter(TerminalFormatNoColor())
+	l.Info("some message", "x", 1, "y", "foo")
+
+	// skip the "[INFO] [timestamp] " prefix: "[INFO] " is 7 chars, timestamp
+	// "[01-02|15:04:05.000] " is 21 chars, total 28.
+	const prefixLen = 7 + 21
+	if buf.Len() < prefixLen {
+		t.Fatalf("output too short: %q", buf.String())
+	}
+	if got, want := string(buf.Bytes()[:7]), "[INFO] "; got != want {
+		t.Fatalf("level prefix: got %q, want %q", got, want)
+	}
+	got := buf.Bytes()[prefixLen:]
+	// short messages are right-padded to termMsgJust (40) chars
+	expected := []byte("some message                             x=1 y=foo\n")
+	if !bytes.Equal(got, expected) {
+		t.Fatalf("Got %q, expected %q", got, expected)
+	}
+}
+
 func TestMultiHandler(t *testing.T) {
 	t.Parallel()
 
@@ -288,12 +311,11 @@ func TestLvlFilterHandler(t *testing.T) {
 }
 
 func TestNetHandler(t *testing.T) {
-	t.Skip()
 	t.Parallel()
 
 	l, err := net.Listen("tcp", "localhost:0") //nolint:noctx
 	if err != nil {
-		t.Fatalf("Failed to listen: %v", l)
+		t.Fatalf("Failed to listen: %v", err)
 	}
 
 	errs := make(chan error)
@@ -528,7 +550,6 @@ func TestCallerFuncHandler(t *testing.T) {
 
 // https://github.com/inconshreveable/log15/issues/27
 func TestCallerStackHandler(t *testing.T) {
-	t.Skip("fix me")
 	t.Parallel()
 
 	l := New()
@@ -595,14 +616,12 @@ func TestConcurrent(t *testing.T) {
 	var res [goroutines]int
 	l.SetHandler(SyncHandler(concurrentCaptureTestHandler{res: res[:], ctxLen: ctxLen}))
 	var wg sync.WaitGroup
-	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
-		go func(idx int) {
-			defer wg.Done()
-			for j := 0; j < 10000; j++ {
+	for idx := range goroutines {
+		wg.Go(func() {
+			for range 10000 {
 				l.Info("test message", "goroutine_idx", idx)
 			}
-		}(i)
+		})
 	}
 	wg.Wait()
 	for _, val := range res[:] {

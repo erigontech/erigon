@@ -39,6 +39,50 @@ func KeyToHexNibbleHash(key []byte) []byte {
 	return nibblized
 }
 
+// expandNibbles writes each byte of src as two nibbles (src[i] -> dst[2i], dst[2i+1]).
+// src and dst must not overlap.
+func expandNibbles(src, dst []byte) {
+	_ = dst[len(src)*2-1] // bounds-check elimination
+	for i, b := range src {
+		dst[i*2] = (b >> 4) & 0xf
+		dst[i*2+1] = b & 0xf
+	}
+}
+
+// addrHashCache memoizes the nibblized keccak(addr) prefix of the most recent
+// storage key's address, so a run of slots under one address (whale storage)
+// reuses the 64-nibble prefix instead of re-hashing the address. keccak(addr)
+// is immutable, so a hit is always correct and a miss simply recomputes.
+type addrHashCache struct {
+	addr  [20]byte
+	nibs  [64]byte
+	valid bool
+}
+
+func (c *addrHashCache) reset() { c.valid = false }
+
+// keyToHexNibbleHashCached returns the same bytes as KeyToHexNibbleHash, reusing
+// c's cached address prefix across consecutive storage keys that share an address.
+func keyToHexNibbleHashCached(key []byte, c *addrHashCache) []byte {
+	if len(key) <= length.Addr { // account key: no reusable prefix
+		return KeyToHexNibbleHash(key)
+	}
+	nibblized := make([]byte, 128)
+	addr := [20]byte(key[:length.Addr])
+	if c.valid && c.addr == addr {
+		copy(nibblized[:64], c.nibs[:])
+	} else {
+		h := keccak.Sum256(key[:length.Addr])
+		expandNibbles(h[:], nibblized[:64])
+		c.addr = addr
+		copy(c.nibs[:], nibblized[:64])
+		c.valid = true
+	}
+	h := keccak.Sum256(key[length.Addr:])
+	expandNibbles(h[:], nibblized[64:])
+	return nibblized
+}
+
 func KeyToNibblizedHash(key []byte) []byte {
 	nibblized := make([]byte, 64) // nibblized hash
 	hashed := nibblized[32:]
@@ -51,77 +95,16 @@ func KeyToNibblizedHash(key []byte) []byte {
 	return nibblized
 }
 
-// HexNibblesToCompactBytes Converts slice of hex nibbles into regular bytes form, combining two nibbles into one byte.
-func HexNibblesToCompactBytes(key []byte) []byte {
-	var compactZeroByte byte
-	keyLen := len(key)
-	if HasTerm(key) { // trim terminator if needed
-		keyLen--
-		compactZeroByte = 0x20
+// NibblesToString returns a hex string representation of a nibble sequence.
+// Each nibble (0-15) is printed as a single hex character. Works for both
+// even and odd length sequences.
+func NibblesToString(nibbles []byte) string {
+	var b strings.Builder
+	b.Grow(len(nibbles))
+	for _, n := range nibbles {
+		b.WriteByte("0123456789abcdef"[n&0x0F])
 	}
-	var firstNibble byte
-	if len(key) > 0 {
-		firstNibble = key[0]
-	}
-
-	// decode first byte
-	var keyIndex int
-	if keyLen&1 == 1 { // check if key length is odd
-		compactZeroByte |= 0x10 | firstNibble // Odd: (1<<4) + first nibble
-		keyIndex++
-	}
-
-	bufLen := keyLen/2 + 1 // always > 0
-	buf := make([]byte, bufLen)
-	buf[0] = compactZeroByte
-
-	// decode the rest of the key
-	for bufIndex := 1; keyIndex < keyLen; keyIndex, bufIndex = keyIndex+2, bufIndex+1 {
-		if keyIndex == keyLen-1 {
-			buf[bufIndex] = buf[bufIndex] & 0xf
-		} else {
-			buf[bufIndex] = key[keyIndex+1]
-		}
-		buf[bufIndex] |= key[keyIndex] << 4
-	}
-	return buf
-}
-
-// uncompactNibbles converts a slice of bytes representing nibbles in regular form into 1-nibble-per-byte form.
-func uncompactNibbles(key []byte) []byte {
-	if len(key) == 0 {
-		return nil
-	}
-	terminating := key[0]&0x20 == 0x20
-	odd := key[0]&0x10 == 0x10
-	buf := make([]byte, 0, len(key)*2)
-	if odd {
-		buf = append(buf, key[0]&0x0f)
-	}
-	key = key[1:]
-	for _, b := range key {
-		buf = append(buf, b>>4, b&0x0f)
-	}
-	if terminating {
-		buf = append(buf, terminatorHexByte)
-	}
-	return buf
-}
-
-// HasTerm returns whether a hex nibble key has the terminator flag.
-func HasTerm(s []byte) bool {
-	return len(s) > 0 && s[len(s)-1] == terminatorHexByte
-}
-
-// returns the length of the common prefix of two byte slices
-func commonPrefixLen(b1, b2 []byte) int {
-	var i int
-	for i = 0; i < len(b1) && i < len(b2); i++ {
-		if b1[i] != b2[i] {
-			break
-		}
-	}
-	return i
+	return b.String()
 }
 
 // CompactKey takes a slice of nibbles and compacts them into the original byte slice.
@@ -134,7 +117,7 @@ func CompactKey(nibbles []byte) ([]byte, error) {
 	}
 
 	key := make([]byte, len(nibbles)/2)
-	for i := 0; i < len(key); i++ {
+	for i := range key {
 		highNibble := nibbles[i*2]
 		lowNibble := nibbles[i*2+1]
 
@@ -151,7 +134,7 @@ func CompactKey(nibbles []byte) ([]byte, error) {
 // updatedNibs returns a string of nibbles that are set in the given number.
 func updatedNibs(num uint16) string {
 	var nibbles []string
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		if num&(1<<i) != 0 {
 			nibbles = append(nibbles, fmt.Sprintf("%X", i))
 		}

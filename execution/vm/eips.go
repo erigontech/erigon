@@ -95,11 +95,15 @@ func enable1884(jt *JumpTable) {
 }
 
 func opSelfBalance(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error) {
-	balance, err := evm.IntraBlockState().GetBalance(callContext.Contract.Address())
-	if err != nil {
-		return pc, nil, err
+	if !callContext.Contract.selfBalanceCached {
+		balance, err := evm.IntraBlockState().GetBalance(callContext.Contract.addr)
+		if err != nil {
+			return pc, nil, err
+		}
+		callContext.Contract.selfBalance = balance
+		callContext.Contract.selfBalanceCached = true
 	}
-	callContext.Stack.push(balance)
+	callContext.Stack.push(callContext.Contract.selfBalance)
 	return pc, nil, nil
 }
 
@@ -117,7 +121,7 @@ func enable1344(jt *JumpTable) {
 
 // opChainID implements CHAINID opcode
 func opChainID(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error) {
-	chainId, _ := uint256.FromBig(evm.ChainRules().ChainID)
+	chainId := evm.ChainRules().ChainID
 	callContext.Stack.push(*chainId)
 	return pc, nil, nil
 }
@@ -207,7 +211,7 @@ func opTload(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	loc := scope.Stack.peek()
 	key := accounts.InternKey(loc.Bytes32())
 	val := evm.IntraBlockState().GetTransientState(scope.Contract.Address(), key)
-	loc.SetBytes(val.Bytes())
+	*loc = val
 	return pc, nil, nil
 }
 
@@ -269,7 +273,7 @@ func opBlobHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	idx := scope.Stack.peek()
 	if idx.LtUint64(uint64(len(evm.BlobHashes))) {
 		hash := evm.BlobHashes[idx.Uint64()]
-		idx.SetBytes(hash.Bytes())
+		idx.SetBytes(hash[:])
 	} else {
 		idx.Clear()
 	}
@@ -383,7 +387,13 @@ func enable7843(jt *JumpTable) {
 // enable8037 applies EIP-8037 (State Creation Gas Cost Increase)
 func enable8037(jt *JumpTable) {
 	jt[CREATE].constantGas = params.CreateGasEIP8037
-	jt[CREATE].dynamicGas = gasCreateEip8037
 	jt[CREATE2].constantGas = params.Create2GasEIP8037
-	jt[CREATE2].dynamicGas = gasCreate2Eip8037
+}
+
+// enable8038 applies EIP-8038 (State-access gas cost update)
+func enable8038(jt *JumpTable) {
+	jt[EXTCODESIZE].constantGas = params.ExtCodeWarmAccessGasEIP8038
+	jt[EXTCODECOPY].constantGas = params.ExtCodeWarmAccessGasEIP8038
+	jt[CREATE].constantGas = params.CreateAccessEIP8038
+	jt[CREATE2].constantGas = params.CreateAccessEIP8038
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -84,4 +85,20 @@ func TestOperationsPool(t *testing.T) {
 	require.Len(t, pools.BLSToExecutionChangesPool.Raw(), 1)
 
 	require.Len(t, pools.ProposerSlashingsPool.Raw(), 1)
+}
+
+func TestEpbsPoolGetPreferenceExactLookup(t *testing.T) {
+	p := NewEpbsPool()
+	slot := uint64(10)
+	root := common.Hash{0x01}
+	otherRoot := common.Hash{0x02}
+	want := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{ProposalSlot: slot, DependentRoot: root}}
+	p.ProposerPreferences.Add(ProposerPreferencesKey{Slot: slot, DependentRoot: root}, want)
+
+	got, ok := p.GetPreference(slot, root)
+	require.True(t, ok)
+	require.Equal(t, want, got)
+
+	_, ok = p.GetPreference(slot, otherRoot)
+	require.False(t, ok)
 }

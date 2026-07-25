@@ -18,6 +18,7 @@ package state_accessors
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 
@@ -287,13 +288,16 @@ func NewStaticValidatorTable() *StaticValidatorTable {
 func (s *StaticValidatorTable) AddValidator(v solid.Validator, validatorIndex, slot uint64) error {
 	s.sync.Lock()
 	defer s.sync.Unlock()
-	if slot <= s.slot && s.slot != 0 {
+	// Idempotency is by index, not slot: guarding on slot leaves a table restored
+	// short (fewer entries than the set) permanently unfillable, since the genesis
+	// re-adds all arrive at slot 0.
+	if validatorIndex < uint64(len(s.validatorTable)) {
 		return nil
 	}
-	s.validatorTable = append(s.validatorTable, NewStaticValidatorFromValidator(v, slot))
-	if validatorIndex != uint64(len(s.validatorTable))-1 {
-		return errors.New("validator index mismatch")
+	if validatorIndex != uint64(len(s.validatorTable)) {
+		return fmt.Errorf("validator index gap: index %d with table length %d", validatorIndex, len(s.validatorTable))
 	}
+	s.validatorTable = append(s.validatorTable, NewStaticValidatorFromValidator(v, slot))
 	return nil
 }
 
@@ -456,4 +460,10 @@ func (s *StaticValidatorTable) Slot() uint64 {
 	s.sync.RLock()
 	defer s.sync.RUnlock()
 	return s.slot
+}
+
+func (s *StaticValidatorTable) Length() int {
+	s.sync.RLock()
+	defer s.sync.RUnlock()
+	return len(s.validatorTable)
 }

@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"net"
 	"strings"
@@ -45,36 +46,72 @@ import (
 type Client struct {
 	cfg          Config
 	clock        mclock.Clock
-	entries      *lru.Cache[string, entry]
+	entries      *lru.Cache[string, cachedEntry]
+	negCache     *lru.Cache[string, negCacheEntry]
 	ratelimit    *rate.Limiter
 	singleflight singleflight.Group
+}
+
+// cachedEntry is a positive cache entry for an ENR tree record. The expiry
+// field holds the absolute time after which the entry must be re-fetched;
+// math.MaxInt64 means "never expires" (used when the TTL is zero or unknown).
+type cachedEntry struct {
+	e      entry
+	expiry mclock.AbsTime
+}
+
+// negCacheEntry is a negative cache entry for a root DNS lookup that failed.
+// It prevents hammering the DNS server for names that don't exist or are
+// temporarily unavailable.
+type negCacheEntry struct {
+	expiry mclock.AbsTime
+	err    error
+}
+
+// rootResult carries both the parsed root entry and the DNS TTL returned by
+// the resolver so that callers can schedule the next re-check accordingly.
+type rootResult struct {
+	root rootEntry
+	ttl  time.Duration
 }
 
 // Config holds configuration options for the client.
 type Config struct {
 	Timeout         time.Duration      // timeout used for DNS lookups (default 5s)
-	RecheckInterval time.Duration      // time between tree root update checks (default 30min)
+	SyncTimeout     time.Duration      // total timeout for a full tree sync (default 5min)
+	RecheckInterval time.Duration      // maximum time between tree root update checks (default 30min)
 	CacheLimit      int                // maximum number of cached records (default 1000)
 	RateLimit       float64            // maximum DNS requests / second (default 3)
+	NegTTLTransient time.Duration      // negative cache TTL for transient DNS errors (default 30s)
+	NegTTLNXDomain  time.Duration      // negative cache TTL for NXDOMAIN responses (default 5min)
 	ValidSchemes    enr.IdentityScheme // acceptable ENR identity schemes (default enode.ValidSchemes)
 	Resolver        Resolver           // the DNS resolver to use (defaults to system DNS)
 	Logger          log.Logger         // destination of client log messages (defaults to root logger)
 }
 
-// Resolver is a DNS resolver that can query TXT records.
+// Resolver is a DNS resolver that can query TXT records.  The second return
+// value is the minimum TTL of all TXT records in the answer; callers should
+// use it to schedule cache expiry.  A zero TTL means the resolver does not
+// provide TTL information.
 type Resolver interface {
-	LookupTXT(ctx context.Context, domain string) ([]string, error)
+	LookupTXT(ctx context.Context, domain string) (records []string, minTTL time.Duration, err error)
 }
 
 func (cfg Config) withDefaults() Config {
 	const (
-		defaultTimeout   = 5 * time.Second
-		defaultRecheck   = 30 * time.Minute
-		defaultRateLimit = 3
-		defaultCache     = 1000
+		defaultTimeout         = 5 * time.Second
+		defaultSyncTimeout     = 5 * time.Minute
+		defaultRecheck         = 30 * time.Minute
+		defaultRateLimit       = 3
+		defaultCache           = 1000
+		defaultNegTTLTransient = 30 * time.Second
+		defaultNegTTLNXDomain  = 5 * time.Minute
 	)
 	if cfg.Timeout == 0 {
 		cfg.Timeout = defaultTimeout
+	}
+	if cfg.SyncTimeout == 0 {
+		cfg.SyncTimeout = defaultSyncTimeout
 	}
 	if cfg.RecheckInterval == 0 {
 		cfg.RecheckInterval = defaultRecheck
@@ -85,11 +122,17 @@ func (cfg Config) withDefaults() Config {
 	if cfg.RateLimit == 0 {
 		cfg.RateLimit = defaultRateLimit
 	}
+	if cfg.NegTTLTransient == 0 {
+		cfg.NegTTLTransient = defaultNegTTLTransient
+	}
+	if cfg.NegTTLNXDomain == 0 {
+		cfg.NegTTLNXDomain = defaultNegTTLNXDomain
+	}
 	if cfg.ValidSchemes == nil {
 		cfg.ValidSchemes = enode.ValidSchemes
 	}
 	if cfg.Resolver == nil {
-		cfg.Resolver = new(net.Resolver)
+		cfg.Resolver = newSystemTTLResolver()
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = log.Root()
@@ -102,13 +145,18 @@ func NewClient(cfg Config) *Client {
 	cfg = cfg.withDefaults()
 	rlimit := rate.NewLimiter(rate.Limit(cfg.RateLimit), 10)
 
-	entries, err := lru.New[string, entry](cfg.CacheLimit)
+	entries, err := lru.New[string, cachedEntry](cfg.CacheLimit)
 	if err != nil {
 		log.Warn("[p2p] can't create lru", "err", err)
+	}
+	negCache, err := lru.New[string, negCacheEntry](cfg.CacheLimit)
+	if err != nil {
+		log.Warn("[p2p] can't create neg-cache lru", "err", err)
 	}
 	return &Client{
 		cfg:       cfg,
 		entries:   entries,
+		negCache:  negCache,
 		clock:     mclock.System{},
 		ratelimit: rlimit,
 	}
@@ -141,22 +189,56 @@ func (c *Client) NewIterator(urls ...string) (enode.Iterator, error) {
 	return it, nil
 }
 
-// resolveRoot retrieves a root entry via DNS.
-func (c *Client) resolveRoot(ctx context.Context, loc *linkEntry) (rootEntry, error) {
-	e, err, _ := c.singleflight.Do(loc.str, func() (any, error) {
-		txts, err := c.cfg.Resolver.LookupTXT(ctx, loc.domain)
+// resolveRoot retrieves a root entry via DNS.  It returns the parsed root
+// together with the TTL reported by the resolver so that the caller can
+// schedule the next re-check accordingly.
+//
+// Negative results (NXDOMAIN and transient errors) are cached for a short
+// period to avoid hammering the DNS server when the tree is temporarily
+// unavailable.  The check is performed inside the singleflight closure to
+// avoid TOCTOU races between concurrent callers.
+func (c *Client) resolveRoot(ctx context.Context, loc *linkEntry) (rootEntry, time.Duration, error) {
+	ri, err, _ := c.singleflight.Do(loc.str, func() (any, error) {
+		// Check negative cache first (inside singleflight to avoid TOCTOU).
+		if neg, ok := c.negCache.Get(loc.str); ok {
+			if c.clock.Now() < neg.expiry {
+				return rootResult{}, neg.err
+			}
+			c.negCache.Remove(loc.str)
+		}
+
+		txts, ttl, err := c.cfg.Resolver.LookupTXT(ctx, loc.domain)
 		c.cfg.Logger.Trace("Updating DNS discovery root", "tree", loc.domain, "err", err)
 		if err != nil {
-			return rootEntry{}, err
+			// Store a negative cache entry so we don't hammer DNS on repeated
+			// failures.  NXDOMAIN is cached longer than transient errors.
+			negTTL := c.cfg.NegTTLTransient
+			if isNXDomain(err) {
+				negTTL = c.cfg.NegTTLNXDomain
+			}
+			c.negCache.Add(loc.str, negCacheEntry{
+				expiry: c.clock.Now().Add(negTTL),
+				err:    err,
+			})
+			return rootResult{}, err
 		}
+
 		for _, txt := range txts {
 			if strings.HasPrefix(txt, rootPrefix) {
-				return parseAndVerifyRoot(txt, loc)
+				root, parseErr := parseAndVerifyRoot(txt, loc)
+				if parseErr != nil {
+					return rootResult{}, parseErr
+				}
+				return rootResult{root: root, ttl: ttl}, nil
 			}
 		}
-		return rootEntry{}, nameError{loc.domain, errNoRoot}
+		return rootResult{}, nameError{loc.domain, errNoRoot}
 	})
-	return e.(rootEntry), err
+	if err != nil {
+		return rootEntry{}, 0, err
+	}
+	rr := ri.(rootResult)
+	return rr.root, rr.ttl, nil
 }
 
 func parseAndVerifyRoot(txt string, loc *linkEntry) (rootEntry, error) {
@@ -171,7 +253,7 @@ func parseAndVerifyRoot(txt string, loc *linkEntry) (rootEntry, error) {
 }
 
 // resolveEntry retrieves an entry from the cache or fetches it from the network
-// if it isn't cached.
+// if it isn't cached (or the cached copy has expired).
 func (c *Client) resolveEntry(ctx context.Context, domain, hash string) (entry, error) {
 	// The rate limit always applies, even when the result might be cached. This is
 	// important because it avoids hot-spinning in consumers of node iterators created on
@@ -180,16 +262,27 @@ func (c *Client) resolveEntry(ctx context.Context, domain, hash string) (entry, 
 		return nil, err
 	}
 	cacheKey := truncateHash(hash)
-	if e, ok := c.entries.Get(cacheKey); ok {
-		return e, nil
+	if ce, ok := c.entries.Get(cacheKey); ok {
+		if c.clock.Now() < ce.expiry {
+			return ce.e, nil
+		}
+		// Entry has expired; evict and re-fetch.
+		c.entries.Remove(cacheKey)
 	}
 
 	ei, err, _ := c.singleflight.Do(cacheKey, func() (any, error) {
-		e, err := c.doResolveEntry(ctx, domain, hash)
+		e, ttl, err := c.doResolveEntry(ctx, domain, hash)
 		if err != nil {
 			return nil, err
 		}
-		c.entries.Add(cacheKey, e)
+		var expiry mclock.AbsTime
+		if ttl > 0 {
+			expiry = c.clock.Now().Add(ttl)
+		} else {
+			// No TTL information — cache indefinitely, LRU manages eviction.
+			expiry = mclock.AbsTime(math.MaxInt64)
+		}
+		c.entries.Add(cacheKey, cachedEntry{e: e, expiry: expiry})
 		return e, nil
 	})
 	e, _ := ei.(entry)
@@ -197,16 +290,16 @@ func (c *Client) resolveEntry(ctx context.Context, domain, hash string) (entry, 
 }
 
 // doResolveEntry fetches an entry via DNS.
-func (c *Client) doResolveEntry(ctx context.Context, domain, hash string) (entry, error) {
+func (c *Client) doResolveEntry(ctx context.Context, domain, hash string) (entry, time.Duration, error) {
 	wantHash, err := b32format.DecodeString(hash)
 	if err != nil {
-		return nil, errors.New("invalid base32 hash")
+		return nil, 0, errors.New("invalid base32 hash")
 	}
 	name := hash + "." + domain
-	txts, err := c.cfg.Resolver.LookupTXT(ctx, hash+"."+domain)
+	txts, ttl, err := c.cfg.Resolver.LookupTXT(ctx, hash+"."+domain)
 	c.cfg.Logger.Trace("DNS discovery lookup", "name", name, "err", err)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	for _, txt := range txts {
 		e, err := parseEntry(txt, c.cfg.ValidSchemes)
@@ -218,9 +311,17 @@ func (c *Client) doResolveEntry(ctx context.Context, domain, hash string) (entry
 		} else if err != nil {
 			err = nameError{name, err}
 		}
-		return e, err
+		return e, ttl, err
 	}
-	return nil, nameError{name, errNoEntry}
+	return nil, 0, nameError{name, errNoEntry}
+}
+
+// isNXDomain reports whether err represents a definitive "name does not exist"
+// DNS response (NXDOMAIN).  These should be cached longer than transient
+// errors because the absence is authoritative.
+func isNXDomain(err error) bool {
+	var dnsErr *net.DNSError
+	return errors.As(err, &dnsErr) && dnsErr.IsNotFound
 }
 
 // randomIterator traverses a set of trees and returns nodes found in them.
