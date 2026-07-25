@@ -133,7 +133,7 @@ type accessOptions struct {
 	revertable bool
 }
 
-type AccessSet map[accounts.Address]*accessOptions
+type AccessSet map[accounts.Address]accessOptions
 
 func (aa AccessSet) Merge(other AccessSet) AccessSet {
 	if len(other) == 0 {
@@ -2808,10 +2808,10 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 	}
 	if opts, ok := sdb.versionedReads.access[addr]; ok {
 		if opts.revertable && !revertable {
-			opts.revertable = false
+			sdb.versionedReads.access[addr] = accessOptions{revertable: false}
 		}
 	} else {
-		sdb.versionedReads.access[addr] = &accessOptions{revertable}
+		sdb.versionedReads.access[addr] = accessOptions{revertable}
 	}
 }
 

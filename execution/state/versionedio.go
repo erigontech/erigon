@@ -2454,7 +2454,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			// a gas-calculation read. This is used to distinguish real state
 			// access from incidental reads (e.g. Empty() in gas calc) for
 			// the system address filter.
-			if isUserTx && opts != nil && !opts.revertable {
+			if isUserTx && !opts.revertable {
 				account.nonRevertableUserAccess = true
 			}
 		}
