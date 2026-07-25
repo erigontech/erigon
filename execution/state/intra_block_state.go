@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -162,7 +161,7 @@ type IntraBlockState struct {
 
 	txIndex  int
 	blockNum uint64
-	logs     []types.Logs
+	logs     [][]types.Log
 	logSize  uint
 
 	// Per-transaction access list
@@ -241,7 +240,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		stateObjects:      map[accounts.Address]*stateObject{},
 		stateObjectsDirty: map[accounts.Address]struct{}{},
 		nilAccounts:       map[accounts.Address]struct{}{},
-		logs:              []types.Logs{},
+		logs:              [][]types.Log{},
 		journal:           newJournal(),
 		accessList:        accessList{addresses: make(map[accounts.Address]int)},
 		transientStorage:  newTransientStorage(),
@@ -388,7 +387,7 @@ func (sdb *IntraBlockState) Reset() {
 	clear(sdb.stateObjects)
 	clear(sdb.stateObjectsDirty)
 	for i := range sdb.logs {
-		clear(sdb.logs[i]) // free pointers
+		clear(sdb.logs[i]) // zero structs so their Topics/Data slices can be GC'd
 		sdb.logs[i] = sdb.logs[i][:0]
 	}
 	clear(sdb.balanceInc)
@@ -451,7 +450,7 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 	}
 }
 
-func (sdb *IntraBlockState) AddLog(log *types.Log) {
+func (sdb *IntraBlockState) AddLog(log types.Log) {
 	sdb.journal.addLogChange(sdb.txIndex)
 	log.TxIndex = hexutil.Uint(sdb.txIndex)
 	log.Index = hexutil.Uint(sdb.logSize)
@@ -465,27 +464,34 @@ func (sdb *IntraBlockState) AddLog(log *types.Log) {
 		}
 		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, log.Index, log.Address, topics, log.Data)
 	}
-	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
-		sdb.tracingHooks.OnLog(log)
-	}
 	sdb.logSize++
-	for len(sdb.logs) <= sdb.txIndex+1 {
+	ti := sdb.txIndex + 1
+	for len(sdb.logs) <= ti {
 		sdb.logs = append(sdb.logs, nil)
 	}
-	sdb.logs[sdb.txIndex+1] = append(sdb.logs[sdb.txIndex+1], log)
+	sdb.logs[ti] = append(sdb.logs[ti], log)
+	// The pointer is valid only for the duration of the callback: the buffer is
+	// append-grown and reused across txs, so OnLog must not retain it.
+	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
+		sdb.tracingHooks.OnLog(&sdb.logs[ti][len(sdb.logs[ti])-1])
+	}
 }
 
 func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs {
 	if txIndex+1 >= len(sdb.logs) {
 		return nil
 	}
-	logs := sdb.logs[txIndex+1]
-	for _, l := range logs {
-		l.TxHash = txnHash
-		l.BlockNumber = hexutil.Uint64(blockNumber)
-		l.BlockHash = blockHash
+	src := sdb.logs[txIndex+1]
+	backing := make([]types.Log, len(src))
+	logs := make(types.Logs, len(src))
+	for i := range src {
+		src[i].TxHash = txnHash
+		src[i].BlockNumber = hexutil.Uint64(blockNumber)
+		src[i].BlockHash = blockHash
+		backing[i] = src[i]
+		logs[i] = &backing[i]
 	}
-	return slices.Clone(logs)
+	return logs
 }
 
 // GetRawLogs - is like GetLogs, but allow postpone calculation of `txn.Hash()`.
@@ -494,13 +500,31 @@ func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 	if txIndex+1 >= len(sdb.logs) {
 		return nil
 	}
-	return slices.Clone(sdb.logs[txIndex+1])
+	src := sdb.logs[txIndex+1]
+	backing := make([]types.Log, len(src))
+	copy(backing, src)
+	logs := make(types.Logs, len(src))
+	for i := range backing {
+		logs[i] = &backing[i]
+	}
+	return logs
 }
 
 func (sdb *IntraBlockState) Logs() types.Logs {
-	var logs types.Logs
+	var total int
 	for _, lgs := range sdb.logs {
-		logs = append(logs, lgs...)
+		total += len(lgs)
+	}
+	if total == 0 {
+		return nil
+	}
+	backing := make([]types.Log, 0, total)
+	for _, lgs := range sdb.logs {
+		backing = append(backing, lgs...)
+	}
+	logs := make(types.Logs, total)
+	for i := range backing {
+		logs[i] = &backing[i]
 	}
 	return logs
 }

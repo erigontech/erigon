@@ -1515,7 +1515,7 @@ func makeLog(size int) executionFunc {
 		}
 
 		d := scope.Memory.GetCopy(mStart.Uint64(), mSize.Uint64())
-		evm.IntraBlockState().AddLog(&types.Log{
+		evm.IntraBlockState().AddLog(types.Log{
 			Address: scope.Contract.Address().Value(),
 			Topics:  topics,
 			Data:    d,
