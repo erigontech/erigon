@@ -1330,7 +1330,8 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	}
 	msgs := make([]*types.Message, len(callParams))
 	txns := make([]types.Transaction, len(callParams))
-	for i, args := range callParams {
+	for i := range callParams {
+		args := &callParams[i]
 		msgs[i], err = args.ToMessage(api.gasCap, baseFee)
 		if err != nil {
 			return nil, fmt.Errorf("convert callParam to msg: %w", err)

@@ -50,7 +50,8 @@ func whaleSurvivorCorpus(keepWholeNibble bool) (pk [][]byte, upds []Update, k2 [
 	u2[0].Balance.SetUint64(99)
 	u2[0].Nonce = 7
 	for x := range 16 {
-		for i, kv := range groups[x] {
+		for i := range groups[x] {
+			kv := &groups[x][i]
 			if x == surv && (keepWholeNibble || i == 0) {
 				continue // keep the survivor(s)
 			}
