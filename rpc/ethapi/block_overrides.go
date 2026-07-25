@@ -96,7 +96,8 @@ func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext, config
 			return errors.New("BlockOverrides.BlobBaseFee uint256 overflow")
 		}
 	}
-	if config != nil {
+	// NewRules keys only on block number and time.
+	if config != nil && (overrides.Number != nil || overrides.Time != nil) {
 		context.Rules = evmtypes.NewRules(context, config)
 	}
 	return nil
@@ -186,7 +187,8 @@ func (overrides *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockCo
 	if overrides.BlockHash != nil {
 		maps.Copy(blockHashOverrides, *overrides.BlockHash)
 	}
-	if config != nil {
+	// NewRules keys only on block number and time.
+	if config != nil && (overrides.Number != nil || overrides.Time != nil) {
 		blockCtx.Rules = evmtypes.NewRules(blockCtx, config)
 	}
 }

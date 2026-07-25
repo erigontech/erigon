@@ -105,13 +105,16 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 			blockCtx.BaseFee = uint256.Int{}
 		}
 	}
+	if blockCtx.Rules == nil {
+		blockCtx.Rules = evmtypes.NewRules(&blockCtx, chainConfig)
+	}
 	evm := &EVM{
 		Context:         blockCtx,
 		TxContext:       txCtx,
 		intraBlockState: ibs,
 		config:          vmConfig,
 		chainConfig:     chainConfig,
-		chainRules:      evmtypes.NewRules(&blockCtx, chainConfig),
+		chainRules:      blockCtx.Rules,
 	}
 	evm.jt = jumpTable(evm.chainRules, vmConfig)
 
