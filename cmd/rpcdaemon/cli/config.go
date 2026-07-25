@@ -782,7 +782,15 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	} else {
 		logger.Info("RPC admission control enabled", "max_concurrent_requests", rpcConcurrencyLimit, "db.read.concurrency", cfg.DBReadConcurrency)
 	}
-	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, rpcConcurrencyLimit, true)
+	sszqlHandler := sszql.SSZQueryHandler()
+	rpcAndSSZQL := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/eth/") && strings.HasSuffix(r.URL.Path, "/query") {
+			sszqlHandler.ServeHTTP(w, r)
+			return
+		}
+		srv.ServeHTTP(w, r)
+	})
+	httpHandler := node.NewHTTPHandlerStack(rpcAndSSZQL, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, rpcConcurrencyLimit, true)
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
 		wsHandler = node.NewWSConnectionLimiter(int64(cfg.WsMaxConnections),
@@ -966,12 +974,6 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 		}
 		if cfg.WebsocketEnabled && wsHandler != nil && isWebsocket(r) {
 			wsHandler.ServeHTTP(w, r)
-			return
-		}
-
-		// TODO: add cli args options for enabling sszql, then implement conditional serving
-		if strings.HasPrefix(r.URL.Path, "/eth/") && strings.HasSuffix(r.URL.Path, "/query") {
-			sszql.SSZQueryHandler().ServeHTTP(w, r)
 			return
 		}
 
