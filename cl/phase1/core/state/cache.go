@@ -111,7 +111,9 @@ func (b *CachingBeaconState) _updateProposerIndex() (err error) {
 	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
 
 	// Add slot to the end of the input.
-	inputWithSlot := append(input[:], slotByteArray...)
+	inputWithSlot := make([]byte, 0, len(input)+len(slotByteArray))
+	inputWithSlot = append(inputWithSlot, input[:]...)
+	inputWithSlot = append(inputWithSlot, slotByteArray...)
 
 	// Calculate the hash.
 	hash.Write(inputWithSlot)

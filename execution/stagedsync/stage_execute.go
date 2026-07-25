@@ -378,10 +378,96 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return nil
 	}
 
-	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel || cfg.experimentalBAL, to, logger); err != nil {
+	// Stage coordination hoisted out of the exec core: resolve the start point
+	// and exec window from committed domains + the txNum index before handing a
+	// resolved execRange to ExecV3.
+	initialTxNum, blockNum, err := doms.SeekCommitment(ctx, rwTx)
+	if err != nil {
 		return err
 	}
-	return nil
+
+	if s.SyncMode() == stages.ModeApplyingBlocks {
+		agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
+		if s.CurrentSyncCycle.IsInitialCycle {
+			agg.PresetNonChainTipConcurrency()
+		} else {
+			agg.PresetChainTipConcurrency()
+		}
+	}
+
+	if to < blockNum {
+		return nil
+	}
+
+	inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, err := restoreTxNum(ctx, &cfg, rwTx, initialTxNum, to)
+	if err != nil {
+		return err
+	}
+
+	if maxTxNum == 0 {
+		// nothing to exec, make sure the stage is in sync with the sd
+		if s.BlockNumber < blockNum {
+			return s.Update(rwTx, blockNum)
+		}
+		return nil
+	}
+
+	rng := execRange{
+		blockNum:                 blockNum,
+		initialTxNum:             initialTxNum,
+		inputTxNum:               inputTxNum,
+		offsetFromBlockBeginning: offsetFromBlockBeginning,
+		maxBlockNum:              to,
+	}
+
+	if !(dbg.Exec3Parallel || cfg.experimentalBAL) {
+		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
+	}
+
+	out, execErr := ExecV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
+
+	// Stage progress: target the SharedDomains overlay (not replaced during exec)
+	// when present, else the live post-exec applyTx (parallel exec may have rolled
+	// the passed-in rwTx via Flush/CommitAndBegin).
+	if (execErr == nil || errors.Is(execErr, &ErrLoopExhausted{})) && out.applyTx != nil {
+		if overlay := doms.BlockOverlay(); overlay != nil {
+			if err := s.Update(overlay, out.lastCommittedBlockNum); err != nil {
+				return err
+			}
+		} else if err := s.Update(out.applyTx, out.lastCommittedBlockNum); err != nil {
+			return err
+		}
+	}
+
+	return unwindOnExecError(execErr, out, cfg, s, u, logger)
+}
+
+// unwindOnExecError performs the bad-block unwind at the stage boundary after
+// parallel exec reports an invalid block. A non-initial-cycle wrong trie root
+// binary-searches from the implicated block (out.failedBlock/Hash); any other
+// invalid block unwinds to the last executed header minus one. Under
+// badBlockHalt (in-memory fork validation) or a non-invalid error it unwinds
+// nothing and returns execErr unchanged for the caller to propagate.
+func unwindOnExecError(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
+	if !errors.Is(execErr, rules.ErrInvalidBlock) || cfg.badBlockHalt || u == nil {
+		return execErr
+	}
+
+	if errors.Is(execErr, ErrWrongTrieRoot) && !s.CurrentSyncCycle.IsInitialCycle {
+		return handleIncorrectRootHashError(out.failedBlock, out.failedHash, out.applyTx, cfg, s, logger, u)
+	}
+
+	if out.lastHeader != nil {
+		unwindTo := uint64(0)
+		if out.lastHeader.Number.Uint64() > 0 {
+			unwindTo = out.lastHeader.Number.Uint64() - 1
+		}
+		if err := u.UnwindTo(unwindTo, BadBlock(out.lastHeader.Hash(), execErr), out.applyTx); err != nil {
+			return err
+		}
+	}
+
+	return execErr
 }
 
 // unwindDomsToBlock drops in-mem state of blocks (unwindToBlock, ∞) and

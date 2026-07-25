@@ -871,7 +871,9 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 	}
 	for addr, keys := range a.Storage {
 		for key := range keys {
-			plainKey := append(addr[:], key[:]...)
+			plainKey := make([]byte, 0, len(addr)+len(key))
+			plainKey = append(plainKey, addr[:]...)
+			plainKey = append(plainKey, key[:]...)
 			postEnc, _, _ := post.Read(kv.StorageDomain, plainKey, stepSize)
 			if len(postEnc) == 0 {
 				preEnc, _, _ := pre.Read(kv.StorageDomain, plainKey, stepSize)

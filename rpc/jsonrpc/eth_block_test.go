@@ -89,7 +89,7 @@ func newBlockAccessListRPCFixture(t *testing.T) (*blockgen.ChainPack, *rpc.Clien
 	m, chainPack := rpcdaemontest.CreateTestBlockAccessListExecModule(t)
 	base := newBaseApiForTest(m)
 	ethAPI := newEthApiForTest(base, m.DB, nil, nil)
-	debugAPI := NewPrivateDebugAPI(base, m.DB, nil, 0, false)
+	debugAPI := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
 	server := rpc.NewServer(50, false, false, true, log.New(), 100)
 	require.NoError(t, server.RegisterName("eth", EthAPI(ethAPI)))
 	require.NoError(t, server.RegisterName("debug", PrivateDebugAPI(debugAPI)))

@@ -772,7 +772,9 @@ func TestMatchCmpCompressedBinaryKeys(t *testing.T) {
 		copy(bigger, k)
 		bigger[len(bigger)-1] = 0xff
 		if bytes.Compare(bigger, k) <= 0 {
-			bigger = append(k, 0xff)
+			bigger = make([]byte, len(k)+1)
+			copy(bigger, k)
+			bigger[len(k)] = 0xff
 		}
 		cmp = g.MatchCmp(bigger)
 		require.Equal(t, 1, cmp, "expected buf > word for key %x vs %x", bigger, k)

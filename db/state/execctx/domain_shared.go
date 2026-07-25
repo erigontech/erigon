@@ -203,7 +203,11 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		stepSize: tx.Debug().StepSize(),
 	}
 
-	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
+	if o.mem != nil {
+		sd.mem = o.mem
+	} else {
+		sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
+	}
 	// Fetch the aggregator-scope branch cache (lives on the commitment
 	// Domain, shared across all SharedDomains derived from this
 	// aggregator). The duck-typed BranchCacheProvider lookup avoids
