@@ -81,6 +81,39 @@ func benchConfig(b *testing.B, gasLimit uint64) (*runtime.Config, *state.IntraBl
 	return cfg, statedb
 }
 
+// benchConfigVersioned mirrors benchConfig but routes state reads through the
+// parallel executor's OCC path: a VersionedStateReader that consults the
+// VersionMap and records every account/storage read into a ReadSet, exactly as
+// exec3_parallel wires up a task. benchConfig only attaches a VersionMap to the
+// write side (reads go straight through NewReaderV3), so it does not measure the
+// per-read overhead ParallelExec — now the default — pays on every SLOAD.
+func benchConfigVersioned(b *testing.B, gasLimit uint64) (*runtime.Config, *state.IntraBlockState) {
+	b.Helper()
+
+	db := testutil.TemporalDB(b)
+	tx, domains := testutil.TemporalTxSD(b, db)
+
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(b, err)
+
+	versionMap := state.NewVersionMap(nil)
+	statedb := state.New(state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, state.NewReaderV3(domains.AsGetter(tx))))
+	statedb.SetVersionMap(versionMap)
+
+	cfg := &runtime.Config{
+		ChainConfig: cancunConfig(),
+		Origin:      addrSender,
+		Coinbase:    accounts.ZeroAddress,
+		BlockNumber: 1,
+		Time:        1,
+		GasLimit:    gasLimit,
+		Difficulty:  uint256.NewInt(0),
+		State:       statedb,
+	}
+
+	return cfg, statedb
+}
+
 // deployContract deploys code at the given address in the state.
 func deployContract(statedb *state.IntraBlockState, addr accounts.Address, code []byte) {
 	statedb.CreateAccount(addr, true)
