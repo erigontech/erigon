@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -224,7 +226,7 @@ func (p *Provider) rebuildBlockStraddles(ctx context.Context, tx kv.RwTx, toBloc
 			p.logger.Warn("[storage] Provider.Unwind: leftover-seed skipping transactions (no straddle .seg for this range — prune=minimal or asymmetric preverified)",
 				"toBlock", toBlock, "newToBlock", newToBlock, "headersRange", fmt.Sprintf("[%d,%d)", hFI.From, hFI.To))
 		}
-		if err := seedLeftoverBlocks(ctx, tx, p.snapDir, *hFI, *bFI, tFI, newToBlock, toBlock); err != nil {
+		if err := seedLeftoverBlocks(ctx, tx, p.snapDir, *hFI, *bFI, tFI, newToBlock, toBlock, p.BlockReader); err != nil {
 			return nil, nil, fmt.Errorf("seedLeftoverBlocks([%d, %d]): %w", newToBlock, toBlock, err)
 		}
 	}
@@ -237,6 +239,79 @@ func (p *Provider) rebuildBlockStraddles(ctx context.Context, tx kv.RwTx, toBloc
 // Avoids importing the snapshot package here.
 type storageSnapshotFileRef struct {
 	Name string
+}
+
+// computeTDAnchor returns TD at (fileFrom-1) — the block just before the
+// straddle file's first block — so seedLeftoverBlocks can accumulate
+// TD forward across the file walk.
+//
+// Fast path: read TD directly from kv.HeaderTD via ReadCanonicalHash +
+// ReadTd. Works when the anchor block is above pruneCanonicalMarkers's
+// threshold.
+//
+// Fallback: pruneCanonicalMarkers deleted TD (and canonical) for a range
+// below the growing threshold. Walk downward via cursor to find the
+// nearest surviving TD entry below fileFrom, then walk headers back
+// upward via blockReader.HeaderByNumber (which reads directly from
+// frozen .seg files and ignores the pruned canonical marker), summing
+// difficulty to reach TD[fileFrom-1].
+func computeTDAnchor(ctx context.Context, tx kv.Tx, blockReader *freezeblocks.BlockReader, fileFrom uint64) (uint256.Int, error) {
+	var td uint256.Int
+	if fileFrom == 0 {
+		return td, nil
+	}
+	anchorBlock := fileFrom - 1
+
+	// Fast path: TD[anchorBlock] present in DB.
+	if hash, err := rawdb.ReadCanonicalHash(tx, anchorBlock); err == nil && hash != (common.Hash{}) {
+		if v, err := rawdb.ReadTd(tx, hash, anchorBlock); err == nil && v != nil {
+			return *v, nil
+		}
+	}
+
+	// Fallback: walk cursor to find the highest present TD < fileFrom.
+	c, err := tx.Cursor(kv.HeaderTD)
+	if err != nil {
+		return td, fmt.Errorf("open kv.HeaderTD cursor: %w", err)
+	}
+	defer c.Close()
+	var haveAnchor bool
+	var scanBlock uint64
+	for k, v, err := c.First(); k != nil && err == nil; k, v, err = c.Next() {
+		if len(k) < 8 {
+			continue
+		}
+		bn := binary.BigEndian.Uint64(k[:8])
+		if bn >= fileFrom {
+			break
+		}
+		if err := rlp.DecodeBytes(v, &td); err != nil {
+			return td, fmt.Errorf("decode TD at anchor block %d: %w", bn, err)
+		}
+		scanBlock = bn
+		haveAnchor = true
+	}
+	if !haveAnchor {
+		return td, fmt.Errorf("no TD anchor available below block %d (kv.HeaderTD empty in that range)", fileFrom)
+	}
+
+	// Walk headers [scanBlock+1, anchorBlock] via blockReader, summing
+	// difficulty into td. blockReader.HeaderByNumber reads frozen headers
+	// directly from .seg files, so it works even when the intervening
+	// canonical markers were pruned.
+	for n := scanBlock + 1; n <= anchorBlock; n++ {
+		h, err := blockReader.HeaderByNumber(ctx, tx, n)
+		if err != nil {
+			return td, fmt.Errorf("HeaderByNumber(%d) for anchor walk: %w", n, err)
+		}
+		if h == nil {
+			return td, fmt.Errorf("HeaderByNumber(%d) returned nil during anchor walk (pruned canonical + not-in-files?)", n)
+		}
+		if _, ovf := td.AddOverflow(&td, &h.Difficulty); ovf {
+			return td, fmt.Errorf("TD accumulator overflows uint256 at anchor block %d", n)
+		}
+	}
+	return td, nil
 }
 
 // seedLeftoverBlocks writes block-data for [fromBlock, toBlockInclusive]
@@ -260,7 +335,7 @@ type storageSnapshotFileRef struct {
 //
 // fromBlock + toBlockInclusive must lie within the headers straddle
 // file's range [oldHeadersFI.From, oldHeadersFI.To). Caller validates.
-func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHeadersFI, oldBodiesFI snaptype.FileInfo, oldTxFI *snaptype.FileInfo, fromBlock, toBlockInclusive uint64) error {
+func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHeadersFI, oldBodiesFI snaptype.FileInfo, oldTxFI *snaptype.FileInfo, fromBlock, toBlockInclusive uint64, blockReader *freezeblocks.BlockReader) error {
 	if fromBlock > toBlockInclusive {
 		return nil
 	}
@@ -272,6 +347,22 @@ func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHead
 	}
 	if oldTxFI != nil && (oldTxFI.From != oldHeadersFI.From || oldTxFI.To != oldHeadersFI.To) {
 		return fmt.Errorf("seedLeftoverBlocks: tx range [%d, %d) does not match headers [%d, %d)", oldTxFI.From, oldTxFI.To, oldHeadersFI.From, oldHeadersFI.To)
+	}
+
+	// TD anchor + walk-forward accumulator. The rule (from FillDBFromSnapshots)
+	// is TD[N] = TD[N-1] + header[N].Difficulty. We must write TD alongside
+	// canonical for every seeded block, otherwise Caplin's BlockCollector.Flush
+	// hits parent's-total-difficulty-not-found on the very next block after
+	// the mode-B target. blockReader==nil is the test-scaffold case: unit
+	// tests that don't set up frozen headers pass nil and skip TD writes.
+	// Production always passes p.BlockReader.
+	var td uint256.Int
+	if blockReader != nil {
+		var err error
+		td, err = computeTDAnchor(ctx, tx, blockReader, oldHeadersFI.From)
+		if err != nil {
+			return fmt.Errorf("seedLeftoverBlocks: compute TD anchor for block %d: %w", oldHeadersFI.From-1, err)
+		}
 	}
 
 	hPath := filepath.Join(snapDir, oldHeadersFI.Name())
@@ -309,6 +400,11 @@ func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHead
 	// in [oldHeadersFI.From, fromBlock) we read bodies (need TxCount
 	// to advance tx getter) but don't write to DB. For blocks in
 	// [fromBlock, toBlockInclusive] we read all three + write.
+	//
+	// Decode the header on every iteration (not just writeThisBlock)
+	// so `td` accumulates through the [oldHeadersFI.From, fromBlock)
+	// prefix — otherwise the anchor lands at oldHeadersFI.From-1 and
+	// TD at fromBlock would be off by the intervening difficulties.
 	var hBuf, bBuf, tBuf []byte
 	for n := oldHeadersFI.From; n <= toBlockInclusive; n++ {
 		if !hg.HasNext() {
@@ -325,6 +421,17 @@ func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHead
 			return fmt.Errorf("seedLeftoverBlocks: decode body at block %d: %w", n, err)
 		}
 
+		if len(hBuf) < 1 {
+			return fmt.Errorf("seedLeftoverBlocks: empty header entry at block %d", n)
+		}
+		header := new(types.Header)
+		if err := rlp.DecodeBytes(hBuf[1:], header); err != nil {
+			return fmt.Errorf("seedLeftoverBlocks: decode header at block %d: %w", n, err)
+		}
+		if _, ovf := td.AddOverflow(&td, &header.Difficulty); ovf {
+			return fmt.Errorf("seedLeftoverBlocks: TD accumulator overflows uint256 at block %d", n)
+		}
+
 		writeThisBlock := n >= fromBlock
 
 		// Resolve canonical hash: prefer the writable-DB entry (preserved
@@ -335,18 +442,11 @@ func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHead
 		// WriteCanonicalHash seeds the DB so downstream reads succeed.
 		var hash common.Hash
 		if writeThisBlock {
-			if len(hBuf) < 1 {
-				return fmt.Errorf("seedLeftoverBlocks: empty header entry at block %d", n)
-			}
 			h, err := rawdb.ReadCanonicalHash(tx, n)
 			if err != nil {
 				return fmt.Errorf("seedLeftoverBlocks: ReadCanonicalHash(%d): %w", n, err)
 			}
 			if h == (common.Hash{}) {
-				header := new(types.Header)
-				if err := rlp.DecodeBytes(hBuf[1:], header); err != nil {
-					return fmt.Errorf("seedLeftoverBlocks: decode header at block %d for canonical-hash fallback: %w", n, err)
-				}
 				h = header.Hash()
 				if err := rawdb.WriteCanonicalHash(tx, h, n); err != nil {
 					return fmt.Errorf("seedLeftoverBlocks: WriteCanonicalHash(%d): %w", n, err)
@@ -364,6 +464,18 @@ func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHead
 			// Body: write the BodyForStorage RLP directly to kv.BlockBody.
 			if err := rawdb.WriteBodyForStorage(tx, hash, n, body); err != nil {
 				return fmt.Errorf("seedLeftoverBlocks: WriteBodyForStorage(%d): %w", n, err)
+			}
+
+			// TD: seedLeftoverBlocks wrote canonical but not TD prior to this
+			// change; that broke the invariant "canonical block ⇔ HeaderTD
+			// entry" and Caplin's BlockCollector.Flush parent-TD lookup wedged
+			// once the mode-B target sat below the pruneCanonicalMarkers
+			// threshold. Gated on blockReader != nil because unit tests don't
+			// wire one and only cover the header/body/canonical/tx pathways.
+			if blockReader != nil {
+				if err := rawdb.WriteTd(tx, hash, n, td); err != nil {
+					return fmt.Errorf("seedLeftoverBlocks: WriteTd(%d): %w", n, err)
+				}
 			}
 		}
 

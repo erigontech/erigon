@@ -289,7 +289,7 @@ func TestSeedLeftoverBlocks_WritesHeadersBodiesTxsSenders(t *testing.T) {
 		seedFrom = uint64(2_000_005)
 		seedTo   = uint64(2_000_007)
 	)
-	require.NoError(t, seedLeftoverBlocks(ctx, rwTx, snapDir, hFI, bFI, &tFI, seedFrom, seedTo))
+	require.NoError(t, seedLeftoverBlocks(ctx, rwTx, snapDir, hFI, bFI, &tFI, seedFrom, seedTo, nil))
 
 	// kv.Headers populated for seeded range; NOT for blocks below seedFrom.
 	for n := seedFrom; n <= seedTo; n++ {
@@ -406,7 +406,7 @@ func TestSeedLeftoverBlocks_NoDBCanonicalHash_FallsBackToHeaderHash(t *testing.T
 		seedFrom = uint64(2_000_005)
 		seedTo   = uint64(2_000_007)
 	)
-	require.NoError(t, seedLeftoverBlocks(ctx, rwTx, snapDir, hFI, bFI, &tFI, seedFrom, seedTo))
+	require.NoError(t, seedLeftoverBlocks(ctx, rwTx, snapDir, hFI, bFI, &tFI, seedFrom, seedTo, nil))
 
 	// Compute the expected hash the same way the fallback does:
 	// decode the header (matches makeBlockSnapshotTriple's shape) and
@@ -490,7 +490,7 @@ func TestSeedLeftoverBlocks_MissingTxStraddle_SeedsHeadersBodiesOnly(t *testing.
 		seedFrom = uint64(2_000_005)
 		seedTo   = uint64(2_000_007)
 	)
-	require.NoError(t, seedLeftoverBlocks(ctx, rwTx, snapDir, hFI, bFI, nil, seedFrom, seedTo))
+	require.NoError(t, seedLeftoverBlocks(ctx, rwTx, snapDir, hFI, bFI, nil, seedFrom, seedTo, nil))
 
 	for n := seedFrom; n <= seedTo; n++ {
 		key := make([]byte, 8+32)
