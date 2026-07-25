@@ -14,26 +14,23 @@ type Proof string
 
 type Leaf string
 
-type Result struct {
-	// TODO: decide and implement actual fields later. probably have to create more result types depending on what's been queried for.
-	Dummy string `json:"dummy"`
-}
+type Result string
 
-type Aliases struct {
-	Path    Path   `json:"path"`
-	Filters Filter `json:"filter,omitempty"`
-	Alias   string `json:"alias"`
+type Alias struct {
+	Path   Path   `json:"path"`
+	Filter Filter `json:"filter,omitempty"`
+	Alias  string `json:"alias"`
 }
 
 type SSZQuery struct {
 	Anchor    Anchor `json:"anchor"`
 	Path      Path   `json:"path"`
-	Filters   Filter `json:"filter,omitempty"`
+	Filter    Filter `json:"filter,omitempty"`
 	Summaries bool   `json:"summaries,omitempty"`
 }
 
 type SSZQLRequest struct {
-	Aliases       []Aliases  `json:"aliases,omitempty"`
+	Aliases       []Alias    `json:"aliases,omitempty"`
 	Queries       []SSZQuery `json:"queries"`
 	IncludeProofs bool       `json:"include_proof,omitempty"`
 	Multiproof    bool       `json:"multiproof,omitempty"`
@@ -45,10 +42,10 @@ type AliasResponse struct {
 }
 
 type SSZQLResponse struct {
+	Aliases  []AliasResponse `json:"aliases,omitempty"`
 	Paths    []Path          `json:"paths"`
 	Gindices []Gindex        `json:"gindices"`
-	Proofs   []Proof         `json:"proofs,omitempty"`
 	Leaves   []Leaf          `json:"leaves"`
 	Results  []Result        `json:"results"`
-	Aliases  []AliasResponse `json:"aliases,omitempty"`
+	Proofs   []Proof         `json:"proofs,omitempty"`
 }
