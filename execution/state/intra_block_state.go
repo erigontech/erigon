@@ -161,7 +161,7 @@ type IntraBlockState struct {
 
 	txIndex  int
 	blockNum uint64
-	logs     [][]types.Log
+	logs     [][]EvmLog
 	logSize  uint
 
 	// Per-transaction access list
@@ -240,7 +240,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		stateObjects:      map[accounts.Address]*stateObject{},
 		stateObjectsDirty: map[accounts.Address]struct{}{},
 		nilAccounts:       map[accounts.Address]struct{}{},
-		logs:              [][]types.Log{},
+		logs:              [][]EvmLog{},
 		journal:           newJournal(),
 		accessList:        accessList{addresses: make(map[accounts.Address]int)},
 		transientStorage:  newTransientStorage(),
@@ -450,7 +450,7 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 	}
 }
 
-func (sdb *IntraBlockState) allocLog() *types.Log {
+func (sdb *IntraBlockState) allocLog() *EvmLog {
 	sdb.journal.addLogChange(sdb.txIndex)
 	ti := sdb.txIndex + 1
 	if len(sdb.logs) <= ti { // no slot for this tx yet
@@ -468,15 +468,15 @@ func (sdb *IntraBlockState) allocLog() *types.Log {
 	n := len(buf)
 	if n < cap(buf) {
 		buf = buf[:n+1]
-		buf[n] = types.Log{} // clear a reused slot (may hold a reverted entry)
+		buf[n] = EvmLog{} // clear a reused slot (may hold a reverted entry)
 	} else {
-		buf = append(buf, types.Log{})
+		buf = append(buf, EvmLog{})
 	}
 	sdb.logs[ti] = buf
 	lp := &buf[n]
-	lp.TxIndex = hexutil.Uint(sdb.txIndex)
-	lp.Index = hexutil.Uint(sdb.logSize)
-	lp.BlockNumber = hexutil.Uint64(sdb.blockNum)
+	lp.TxIndex = uint(sdb.txIndex)
+	lp.Index = uint(sdb.logSize)
+	lp.BlockNumber = sdb.blockNum
 	sdb.logSize++
 	return lp
 }
@@ -485,9 +485,8 @@ func (sdb *IntraBlockState) allocLog() *types.Log {
 // dataSize bytes (owned by the IBS — later served from an arena), invokes fill
 // to populate the consensus fields in place (fill copies into log.Data), then
 // runs the OnLog tracing hook. The pointer passed to fill is valid only until
-// the next log is added; the hook receives a stable heap copy (tracers may
-// retain it), and any mutation the hook makes is kept.
-func (sdb *IntraBlockState) AllocLogFunc(dataSize int, fill func(log *types.Log)) {
+// the next log is added.
+func (sdb *IntraBlockState) AllocLogFunc(dataSize int, fill func(log *EvmLog)) {
 	lp := sdb.allocLog()
 	if dataSize > 0 {
 		lp.Data = make(hexutil.Bytes, dataSize)
@@ -496,13 +495,14 @@ func (sdb *IntraBlockState) AllocLogFunc(dataSize int, fill func(log *types.Log)
 	sdb.finishLog(lp)
 }
 
-// finishLog runs the trace print and OnLog hook after a log's consensus fields
-// are populated. The hook gets a stable heap copy because tracers may retain the
-// pointer past the callback; any mutation it makes is written back to the entry.
-func (sdb *IntraBlockState) finishLog(lp *types.Log) {
+// finishLog runs the trace print and OnLog hook after a log's fields are
+// populated. The hook takes a *types.Log, so it is materialized here (only when
+// a tracer is attached); that owned copy is also what a tracer may safely retain
+// past the callback. Fields a hook mutates are written back to the entry.
+func (sdb *IntraBlockState) finishLog(lp *EvmLog) {
 	if dbg.TraceLogs && (sdb.trace || dbg.TraceAccount(accounts.InternAddress(lp.Address).Handle())) {
 		var topics string
-		for i := 0; i < 4 && i < len(lp.Topics); i++ {
+		for i := 0; i < int(lp.NumTopics); i++ {
 			topics += "[" + hex.EncodeToString(lp.Topics[i][:]) + "]"
 		}
 		if topics == "" {
@@ -511,16 +511,19 @@ func (sdb *IntraBlockState) finishLog(lp *types.Log) {
 		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, lp.Index, lp.Address, topics, lp.Data)
 	}
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
-		cp := *lp
-		sdb.tracingHooks.OnLog(&cp)
-		*lp = cp
+		tl := lp.toTypesLog()
+		sdb.tracingHooks.OnLog(&tl)
+		lp.Address = tl.Address
+		lp.Data = tl.Data
+		lp.Removed = tl.Removed
 	}
 }
 
 func (sdb *IntraBlockState) AddLog(log types.Log) {
 	lp := sdb.allocLog()
 	lp.Address = log.Address
-	lp.Topics = log.Topics
+	lp.NumTopics = uint8(min(len(log.Topics), len(lp.Topics)))
+	copy(lp.Topics[:], log.Topics)
 	lp.Data = log.Data
 	lp.Removed = log.Removed
 	sdb.finishLog(lp)
@@ -530,15 +533,11 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumbe
 	if txIndex+1 >= len(sdb.logs) {
 		return nil
 	}
-	src := sdb.logs[txIndex+1]
-	backing := make([]types.Log, len(src))
-	logs := make(types.Logs, len(src))
-	for i := range src {
-		src[i].TxHash = txnHash
-		src[i].BlockNumber = hexutil.Uint64(blockNumber)
-		src[i].BlockHash = blockHash
-		backing[i] = src[i]
-		logs[i] = &backing[i]
+	logs, backing := materializeLogs(sdb.logs[txIndex+1])
+	for i := range backing {
+		backing[i].TxHash = txnHash
+		backing[i].BlockHash = blockHash
+		backing[i].BlockNumber = hexutil.Uint64(blockNumber)
 	}
 	return logs
 }
@@ -549,32 +548,43 @@ func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 	if txIndex+1 >= len(sdb.logs) {
 		return nil
 	}
-	src := sdb.logs[txIndex+1]
-	backing := make([]types.Log, len(src))
-	copy(backing, src)
-	logs := make(types.Logs, len(src))
-	for i := range backing {
-		logs[i] = &backing[i]
-	}
+	logs, _ := materializeLogs(sdb.logs[txIndex+1])
 	return logs
 }
 
 func (sdb *IntraBlockState) Logs() types.Logs {
-	var total int
+	var total, totalTopics int
 	for _, lgs := range sdb.logs {
 		total += len(lgs)
+		for i := range lgs {
+			totalTopics += int(lgs[i].NumTopics)
+		}
 	}
 	if total == 0 {
 		return nil
 	}
+	topicsBuf := make([]common.Hash, totalTopics)
 	backing := make([]types.Log, total)
 	logs := make(types.Logs, total)
-	i := 0
+	li, off := 0, 0
 	for _, lgs := range sdb.logs {
 		for j := range lgs {
-			backing[i] = lgs[j]
-			logs[i] = &backing[i]
-			i++
+			s := &lgs[j]
+			n := int(s.NumTopics)
+			t := topicsBuf[off : off+n : off+n]
+			copy(t, s.Topics[:n])
+			off += n
+			backing[li] = types.Log{
+				Address:     s.Address,
+				Topics:      t,
+				Data:        s.Data,
+				BlockNumber: hexutil.Uint64(s.BlockNumber),
+				TxIndex:     hexutil.Uint(s.TxIndex),
+				Index:       hexutil.Uint(s.Index),
+				Removed:     s.Removed,
+			}
+			logs[li] = &backing[li]
+			li++
 		}
 	}
 	return logs
