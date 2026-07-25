@@ -58,6 +58,12 @@ If the filename is omitted, data is read from stdin.`)
 func main() {
 	flag.Parse()
 
+	if flag.NArg() > 1 {
+		fmt.Fprintln(os.Stderr, "Error: too many arguments")
+		flag.Usage()
+		os.Exit(2)
+	}
+
 	var r *inStream
 	switch {
 	case *hexMode != "":
@@ -70,7 +76,7 @@ func main() {
 	case flag.NArg() == 0:
 		r = newInStream(bufio.NewReader(os.Stdin), 0)
 
-	case flag.NArg() == 1:
+	default:
 		fd, err := os.Open(flag.Arg(0))
 		if err != nil {
 			die(err)
@@ -82,11 +88,6 @@ func main() {
 			size = finfo.Size()
 		}
 		r = newInStream(bufio.NewReader(fd), size)
-
-	default:
-		fmt.Fprintln(os.Stderr, "Error: too many arguments")
-		flag.Usage()
-		os.Exit(2)
 	}
 
 	out := os.Stdout
