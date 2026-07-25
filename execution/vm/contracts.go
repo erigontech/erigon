@@ -52,23 +52,52 @@ import (
 	"golang.org/x/crypto/ripemd160"
 )
 
-// PrecompiledContract is the basic interface for native Go contracts. The implementation
-// requires a deterministic gas count based on the input size of the Run method of the
-// contract.
-type PrecompiledContract interface {
-	RequiredGas(input []byte) uint64  // RequiredPrice calculates the contract gas use
-	Run(input []byte) ([]byte, error) // Run runs the precompiled contract
-	Name() string
-}
-
-// PrecompiledContracts contains the precompiled contracts supported at the given fork.
-type PrecompiledContracts map[accounts.Address]PrecompiledContract
+// PrecompiledContract and PrecompiledContracts are defined in the chain package
+// so a chain's precompile set can be carried on chain.Config/Rules without an
+// import cycle. They are aliased here so existing references keep working.
+type (
+	PrecompiledContract  = chain.PrecompiledContract
+	PrecompiledContracts = chain.PrecompiledContracts
+)
 
 func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 	return maps.Clone(Precompiles(chainRules))
 }
 
+// NewChainPrecompiles builds a chain's immutable precompile set: for every fork
+// the base precompiles are cloned and any custom precompiles overlaid. The
+// result is owned by the chain (assign to chain.Config.Precompiles before
+// execution), so chains never share mutable precompile state.
+func NewChainPrecompiles(custom PrecompiledContracts) *chain.ChainPrecompiles {
+	bases := map[chain.PrecompileForkId]PrecompiledContracts{
+		chain.PrecompilesHomestead: PrecompiledContractsHomestead,
+		chain.PrecompilesByzantium: PrecompiledContractsByzantium,
+		chain.PrecompilesIstanbul:  PrecompiledContractsIstanbul,
+		chain.PrecompilesBerlin:    PrecompiledContractsBerlin,
+		chain.PrecompilesCancun:    PrecompiledContractsCancun,
+		chain.PrecompilesNapoli:    PrecompiledContractsNapoli,
+		chain.PrecompilesPrague:    PrecompiledContractsPrague,
+		chain.PrecompilesBhilai:    PrecompiledContractsBhilai,
+		chain.PrecompilesOsaka:     PrecompiledContractsOsaka,
+	}
+	byFork := make(map[chain.PrecompileForkId]PrecompiledContracts, len(bases))
+	for fork, base := range bases {
+		merged := maps.Clone(base)
+		for addr, p := range custom {
+			merged[addr] = p
+		}
+		byFork[fork] = merged
+	}
+	return chain.NewChainPrecompiles(byFork)
+}
+
+// Precompiles returns the precompiled contracts active under the given rules.
+// A chain with its own set (chain.Config.Precompiles, built once at init) owns
+// an isolated map; otherwise the built-in defaults for the fork are returned.
 func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+	if chainRules.Precompiles != nil {
+		return chainRules.Precompiles.Contracts(chainRules)
+	}
 	switch {
 	case chainRules.IsOsaka:
 		return PrecompiledContractsOsaka
@@ -270,8 +299,13 @@ func init() {
 	}
 }
 
-// ActivePrecompiles returns the precompiles enabled with the current configuration.
+// ActivePrecompiles returns the precompile addresses active under the given
+// rules. A chain with its own set returns its precomputed list; otherwise the
+// shared default list for the fork is returned. Neither path allocates.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
+	if rules.Precompiles != nil {
+		return rules.Precompiles.Addresses(rules)
+	}
 	switch {
 	case rules.IsOsaka:
 		return PrecompiledAddressesOsaka

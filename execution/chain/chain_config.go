@@ -130,6 +130,15 @@ type Config struct {
 
 	// Account Abstraction
 	AllowAA bool
+
+	// Precompiles, when set, is the chain's own precompile set, built once at
+	// chain initialization (see vm.NewChainPrecompiles) and immutable thereafter.
+	// Each chain owns an isolated set, so multiple chains in one process never
+	// share precompile state. Nil means the built-in default precompiles are used.
+	//
+	// Not serialized, and skipped by copier (it is a shared immutable pointer):
+	// embedders must set it on the Config used for execution, after any copy.
+	Precompiles *ChainPrecompiles `json:"-" copier:"-"`
 }
 
 // IsEIPDisabled returns true if the given EIP number is in the DisabledEIPs list.
@@ -801,6 +810,10 @@ type Rules struct {
 	IsPrague, IsOsaka, IsAmsterdam                    bool
 	DisabledEIPs                                      []int
 	IsAura                                            bool
+
+	// Precompiles is the chain's precompile set, copied from Config by
+	// BlockContext.Rules. Nil means the built-in default precompiles are used.
+	Precompiles *ChainPrecompiles
 }
 
 // IsEIPDisabled returns true if the given EIP number has been disabled for this chain.
