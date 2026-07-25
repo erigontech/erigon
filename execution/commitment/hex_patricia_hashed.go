@@ -2101,10 +2101,8 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 			if hph.traceW != nil {
 				fmt.Fprintf(hph.traceW, "deleteCell setting (%d, %x)\n", row, nibble)
 			}
-		} else {
-			if hph.traceW != nil {
-				fmt.Fprintf(hph.traceW, "deleteCell ignoring (%d, %x)\n", row, nibble)
-			}
+		} else if hph.traceW != nil {
+			fmt.Fprintf(hph.traceW, "deleteCell ignoring (%d, %x)\n", row, nibble)
 		}
 	}
 	cell.reset()
@@ -2229,10 +2227,8 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 		if hph.traceW != nil {
 			fmt.Fprintf(hph.traceW, "set downHasheKey=[%x]\n", cell.hashedExtension[:cell.hashedExtLen])
 		}
-	} else {
-		if hph.traceW != nil {
-			fmt.Fprintf(hph.traceW, "keep downHasheKey=[%x]\n", cell.hashedExtension[:cell.hashedExtLen])
-		}
+	} else if hph.traceW != nil {
+		fmt.Fprintf(hph.traceW, "keep downHasheKey=[%x]\n", cell.hashedExtension[:cell.hashedExtLen])
 	}
 	if int16(len(plainKey)) == hph.accountKeyLen {
 		cell.accountAddrLen = int16(len(plainKey))

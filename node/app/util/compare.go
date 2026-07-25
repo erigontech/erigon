@@ -80,30 +80,24 @@ func Compare(a, b any) int {
 		}
 
 		return -1
-	} else {
-		if b == nil {
-			return 1
-		}
+	} else if b == nil {
+		return 1
 	}
 
 	if acomp, ok := a.(Comparable); ok {
 		if bcomp, ok := b.(Comparable); ok {
 			return acomp.CompareTo(bcomp)
+		} else if reflect.ValueOf(reflect.TypeOf(a)).Pointer()-reflect.ValueOf(reflect.TypeOf(b)).Pointer() > 0 {
+			return 1
 		} else {
-			if reflect.ValueOf(reflect.TypeOf(a)).Pointer()-reflect.ValueOf(reflect.TypeOf(b)).Pointer() > 0 {
-				return 1
-			}
-
 			return -1
 		}
-	} else {
-		if _, ok := b.(Comparable); ok {
-			if reflect.ValueOf(reflect.TypeOf(a)).Pointer()-reflect.ValueOf(reflect.TypeOf(b)).Pointer() > 0 {
-				return 1
-			}
-
-			return -1
+	} else if _, ok := b.(Comparable); ok {
+		if reflect.ValueOf(reflect.TypeOf(a)).Pointer()-reflect.ValueOf(reflect.TypeOf(b)).Pointer() > 0 {
+			return 1
 		}
+
+		return -1
 	}
 
 	if _, ok := a.(string); ok {

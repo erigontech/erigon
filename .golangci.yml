@@ -50,7 +50,6 @@ linters:
       enabled-checks:
         - ruleguard
       disabled-checks:
-        - elseif
         - dupBranchBody
         - assignOp
         - singleCaseSwitch
