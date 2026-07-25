@@ -27,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -1513,17 +1512,12 @@ func makeLog(size int) executionFunc {
 			addr := stack.pop()
 			topics[i] = addr.Bytes32()
 		}
-
-		d := scope.Memory.GetCopy(mStart.Uint64(), mSize.Uint64())
-		evm.IntraBlockState().AddLog(types.Log{
-			Address: scope.Contract.Address().Value(),
-			Topics:  topics,
-			Data:    d,
-			// This is a non-consensus field, but assigned here because
-			// execution/state doesn't know the current block number.
-			BlockNumber: hexutil.Uint64(evm.Context.BlockNumber),
+		mem := scope.Memory.GetPtr(mStart.Uint64(), mSize.Uint64())
+		evm.IntraBlockState().AllocLogFunc(len(mem), func(log *types.Log) {
+			log.Address = scope.Contract.Address().Value()
+			log.Topics = topics
+			copy(log.Data, mem)
 		})
-
 		return pc, nil, nil
 	}
 }

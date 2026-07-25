@@ -65,3 +65,28 @@ func TestAddLogOnLogPointerStability(t *testing.T) {
 	require.Equal(t, common.Address{0x11}, first.Address)
 	require.Equal(t, []byte{0xbe, 0xef}, []byte(first.Data))
 }
+
+// TestAllocLogPreservesCapacityAcrossRevert pins that fully reverting a tx's
+// logs (which truncates the outer buffer) and then logging again reuses the
+// inner buffer's capacity instead of dropping it — the same capacity Reset
+// preserves.
+func TestAllocLogPreservesCapacityAcrossRevert(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	ibs.SetTxContext(1, 0)
+	snap := ibs.PushSnapshot()
+	for i := range 8 {
+		ibs.AddLog(types.Log{Address: common.Address{byte(i)}})
+	}
+	require.Len(t, ibs.logs, 2)
+	capBefore := cap(ibs.logs[1])
+	require.GreaterOrEqual(t, capBefore, 8)
+
+	ibs.RevertToSnapshot(snap, nil)
+	require.Len(t, ibs.logs, 1) // the tx's slot was truncated off the outer buffer
+
+	ibs.AddLog(types.Log{Address: common.Address{0xff}})
+	require.Len(t, ibs.logs, 2)
+	require.Equal(t, capBefore, cap(ibs.logs[1]), "inner log buffer capacity must survive revert+relog")
+}

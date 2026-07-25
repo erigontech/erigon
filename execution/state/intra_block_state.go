@@ -450,33 +450,80 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 	}
 }
 
-func (sdb *IntraBlockState) AddLog(log types.Log) {
+func (sdb *IntraBlockState) allocLog() *types.Log {
 	sdb.journal.addLogChange(sdb.txIndex)
-	log.TxIndex = hexutil.Uint(sdb.txIndex)
-	log.Index = hexutil.Uint(sdb.logSize)
-	if dbg.TraceLogs && (sdb.trace || dbg.TraceAccount(accounts.InternAddress(log.Address).Handle())) {
+	ti := sdb.txIndex + 1
+	if len(sdb.logs) <= ti { // no slot for this tx yet
+		if ti < cap(sdb.logs) {
+			// Fits in capacity: reuse the buffers a reverted tx left behind in the
+			// backing array (they're empty) instead of dropping them via append(nil).
+			sdb.logs = sdb.logs[:ti+1]
+		} else {
+			for len(sdb.logs) <= ti {
+				sdb.logs = append(sdb.logs, nil)
+			}
+		}
+	}
+	buf := sdb.logs[ti]
+	n := len(buf)
+	if n < cap(buf) {
+		buf = buf[:n+1]
+		buf[n] = types.Log{} // clear a reused slot (may hold a reverted entry)
+	} else {
+		buf = append(buf, types.Log{})
+	}
+	sdb.logs[ti] = buf
+	lp := &buf[n]
+	lp.TxIndex = hexutil.Uint(sdb.txIndex)
+	lp.Index = hexutil.Uint(sdb.logSize)
+	lp.BlockNumber = hexutil.Uint64(sdb.blockNum)
+	sdb.logSize++
+	return lp
+}
+
+// AllocLogFunc allocates a log entry with its Data field pre-allocated to
+// dataSize bytes (owned by the IBS — later served from an arena), invokes fill
+// to populate the consensus fields in place (fill copies into log.Data), then
+// runs the OnLog tracing hook. The pointer passed to fill is valid only until
+// the next log is added; the hook receives a stable heap copy (tracers may
+// retain it), and any mutation the hook makes is kept.
+func (sdb *IntraBlockState) AllocLogFunc(dataSize int, fill func(log *types.Log)) {
+	lp := sdb.allocLog()
+	if dataSize > 0 {
+		lp.Data = make(hexutil.Bytes, dataSize)
+	}
+	fill(lp)
+	sdb.finishLog(lp)
+}
+
+// finishLog runs the trace print and OnLog hook after a log's consensus fields
+// are populated. The hook gets a stable heap copy because tracers may retain the
+// pointer past the callback; any mutation it makes is written back to the entry.
+func (sdb *IntraBlockState) finishLog(lp *types.Log) {
+	if dbg.TraceLogs && (sdb.trace || dbg.TraceAccount(accounts.InternAddress(lp.Address).Handle())) {
 		var topics string
-		for i := 0; i < 4 && i < len(log.Topics); i++ {
-			topics += "[" + hex.EncodeToString(log.Topics[i][:]) + "]"
+		for i := 0; i < 4 && i < len(lp.Topics); i++ {
+			topics += "[" + hex.EncodeToString(lp.Topics[i][:]) + "]"
 		}
 		if topics == "" {
 			topics = "[]"
 		}
-		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, log.Index, log.Address, topics, log.Data)
+		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, lp.Index, lp.Address, topics, lp.Data)
 	}
-	sdb.logSize++
-	// OnLog may retain the pointer beyond the callback, so pass a stable heap copy
-	// rather than a pointer into the reused logs buffer, then keep any mutation it made.
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
-		lp := log
-		sdb.tracingHooks.OnLog(&lp)
-		log = lp
+		cp := *lp
+		sdb.tracingHooks.OnLog(&cp)
+		*lp = cp
 	}
-	ti := sdb.txIndex + 1
-	for len(sdb.logs) <= ti {
-		sdb.logs = append(sdb.logs, nil)
-	}
-	sdb.logs[ti] = append(sdb.logs[ti], log)
+}
+
+func (sdb *IntraBlockState) AddLog(log types.Log) {
+	lp := sdb.allocLog()
+	lp.Address = log.Address
+	lp.Topics = log.Topics
+	lp.Data = log.Data
+	lp.Removed = log.Removed
+	sdb.finishLog(lp)
 }
 
 func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs {
