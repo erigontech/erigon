@@ -150,6 +150,13 @@ func (m *Memory) GetCopy(offset, size uint64) (cpy []byte) {
 	return
 }
 
+func (m *Memory) GetCopyTo(offset, size uint64, to []byte) {
+	if size == 0 {
+		return
+	}
+	copy(to, m.store[offset:offset+size])
+}
+
 // GetPtr returns the offset + size
 func (m *Memory) GetPtr(offset, size uint64) []byte {
 	if size == 0 {

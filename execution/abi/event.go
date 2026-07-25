@@ -64,20 +64,15 @@ func NewEvent(name, rawName string, anonymous bool, inputs Arguments) Event {
 	// and precompute string and sig representation.
 	names := make([]string, len(inputs))
 	types := make([]string, len(inputs))
-	for i, input := range inputs {
+	for i := range inputs {
+		input := &inputs[i]
 		if input.Name == "" {
-			inputs[i] = Argument{
-				Name:    fmt.Sprintf("arg%d", i),
-				Indexed: input.Indexed,
-				Type:    input.Type,
-			}
-		} else {
-			inputs[i] = input
+			input.Name = fmt.Sprintf("arg%d", i)
 		}
 		// string representation
-		names[i] = fmt.Sprintf("%v %v", input.Type, inputs[i].Name)
+		names[i] = fmt.Sprintf("%v %v", input.Type, input.Name)
 		if input.Indexed {
-			names[i] = fmt.Sprintf("%v indexed %v", input.Type, inputs[i].Name)
+			names[i] = fmt.Sprintf("%v indexed %v", input.Type, input.Name)
 		}
 		// sig representation
 		types[i] = input.Type.String()
