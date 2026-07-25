@@ -174,8 +174,8 @@ func (s *CaplinSnapshots) OpenList(fileNames []string, optimistic bool) error {
 		return fmt.Errorf("read idx files %s: %w", s.dir, err)
 	}
 	dirEntries := make([]string, 0, len(idxFiles))
-	for _, f := range idxFiles {
-		dirEntries = append(dirEntries, f.Name())
+	for i := range idxFiles {
+		dirEntries = append(dirEntries, idxFiles[i].Name())
 	}
 
 	var segmentsMax uint64
@@ -259,7 +259,8 @@ func (s *CaplinSnapshots) OpenFolder() error {
 		return err
 	}
 	list := make([]string, 0, len(files))
-	for _, f := range files {
+	for i := range files {
+		f := &files[i]
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
