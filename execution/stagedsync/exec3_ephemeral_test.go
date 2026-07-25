@@ -15,8 +15,10 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -60,13 +62,30 @@ func fixturePath(tb testing.TB) string {
 	return filepath.Join("..", "tests", "blockreplay", "testdata", "block-25604144.gob")
 }
 
-// ephemeralReplayParallel runs a captured block through the real parallel ExecV3
-// with no MDBX behind the state: SharedDomains is backed by a witness mem batch
-// (the flat pre-state) and blocks/headers come from an in-memory block reader.
-// Commitment is skipped (DISCARD_COMMITMENT) since the witness read-set is not a
-// full trie; receipts/gas/bloom are validated inside the apply loop, so a nil
-// return means the parallel path reproduced the block.
-func ephemeralReplayParallel(tb testing.TB, fx *blockreplay.Fixture, expected *blockreplay.Outputs) error {
+const ephemeralSeedTxNum = uint64(1) << 20
+
+// ephemeralReplay holds the one-time setup for replaying a fixture's block
+// through parallel ExecV3 with no MDBX behind the state. Only the per-run
+// SharedDomains is rebuilt each iteration (its witness mem batch accumulates the
+// block's writes), so a benchmark can time newDomains/verify separately from the
+// ExecV3 call itself.
+type ephemeralReplay struct {
+	ctx        context.Context
+	logger     log.Logger
+	db         kv.TemporalRwDB
+	cfg        ExecuteBlockCfg
+	rng        execRange
+	block      *types.Block
+	parent     *types.Header
+	num        uint64
+	inputTxNum uint64
+}
+
+// setupEphemeralReplay builds everything reusable across runs: the disposable
+// temporal DB (page-cache resident, state served from the witness mem batch),
+// the in-memory block reader, engine, and exec config. Returns a close func for
+// the engine.
+func setupEphemeralReplay(tb testing.TB, fx *blockreplay.Fixture) (*ephemeralReplay, func()) {
 	tb.Helper()
 	ctx := context.Background()
 	logger := log.New()
@@ -77,22 +96,11 @@ func ephemeralReplayParallel(tb testing.TB, fx *blockreplay.Fixture, expected *b
 	require.NoError(tb, err)
 	parent, err := fx.ParentHeader()
 	require.NoError(tb, err)
-	num := block.NumberU64()
-
-	tx, err := db.BeginTemporalRw(ctx)
-	require.NoError(tb, err)
-	defer tx.Rollback()
-
-	const seedTxNum = uint64(1) << 20
-	doms, err := blockreplay.NewWitnessDomains(ctx, tx, fx, seedTxNum, logger)
-	require.NoError(tb, err)
-	defer doms.Close()
 
 	br, err := blockreplay.NewMemBlockReader(fx)
 	require.NoError(tb, err)
 
 	engine := merge.New(ethash.NewFaker())
-	defer engine.Close()
 
 	syncCfg := ethconfig.Defaults.Sync
 	if syncCfg.ExecWorkerCount < 2 {
@@ -108,55 +116,82 @@ func ephemeralReplayParallel(tb testing.TB, fx *blockreplay.Fixture, expected *b
 		chainspec.Mainnet.Config, engine, &vm.Config{}, nil, false, false,
 		dirs, br, chainspec.Mainnet.Genesis, syncCfg, false, nil)
 
-	inputTxNum := seedTxNum + 1
-	doms.SetTxNum(inputTxNum)
-
-	rng := execRange{
-		blockNum:                 num,
-		initialTxNum:             seedTxNum,
-		inputTxNum:               inputTxNum,
-		offsetFromBlockBeginning: 0,
-		maxBlockNum:              num,
+	num := block.NumberU64()
+	inputTxNum := ephemeralSeedTxNum + 1
+	r := &ephemeralReplay{
+		ctx: ctx, logger: logger, db: db, cfg: cfg,
+		block: block, parent: parent, num: num, inputTxNum: inputTxNum,
+		rng: execRange{
+			blockNum:     num,
+			initialTxNum: ephemeralSeedTxNum,
+			inputTxNum:   inputTxNum,
+			maxBlockNum:  num,
+		},
 	}
-	src := &singleBlockSource{block: block, num: num, parent: parent}
+	return r, func() { engine.Close() }
+}
 
-	if _, execErr := ExecV3(ctx, cfg, doms, tx, stages.ModeApplyingBlocks, false, "replay", rng, src, logger); execErr != nil {
-		return execErr
+// newDomains builds a fresh witness-backed SharedDomains for one run. Not part
+// of the ExecV3 measurement.
+func (r *ephemeralReplay) newDomains(tb testing.TB, fx *blockreplay.Fixture) (kv.TemporalRwTx, *execctx.SharedDomains) {
+	tb.Helper()
+	tx, err := r.db.BeginTemporalRw(r.ctx)
+	require.NoError(tb, err)
+	doms, err := blockreplay.NewWitnessDomains(r.ctx, tx, fx, ephemeralSeedTxNum, r.logger)
+	require.NoError(tb, err)
+	doms.SetTxNum(r.inputTxNum)
+	return tx, doms
+}
+
+// exec runs the block once through parallel ExecV3. This is the only thing a
+// benchmark should time. Receipts/gas/bloom are validated inside the apply loop.
+func (r *ephemeralReplay) exec(tx kv.TemporalRwTx, doms *execctx.SharedDomains) error {
+	src := &singleBlockSource{block: r.block, num: r.num, parent: r.parent}
+	_, err := ExecV3(r.ctx, r.cfg, doms, tx, stages.ModeApplyingBlocks, false, "replay", r.rng, src, r.logger)
+	return err
+}
+
+// verify checks the post-state (Flush -> outputs read via the domains) against
+// the authoritative canonical outputs — the data, not the trie root.
+func (r *ephemeralReplay) verify(tx kv.TemporalRwTx, doms *execctx.SharedDomains, expected *blockreplay.Outputs) error {
+	got, err := blockreplay.CollectOutputs(state.NewReaderV3(doms.AsGetter(tx)), expected)
+	if err != nil {
+		return err
 	}
-
-	// Flush -> outputs: post-state is received through the standard reader over
-	// the post-execution domains. Check the data (accounts/storage/code, not the
-	// trie root) against the serial reference so we know exec was correct.
-	if expected != nil {
-		got, err := blockreplay.CollectOutputs(state.NewReaderV3(doms.AsGetter(tx)), expected)
-		if err != nil {
-			return err
-		}
-		if diffs := expected.Diff(got); len(diffs) > 0 {
-			return fmt.Errorf("post-state mismatch (%d differences), first: %s", len(diffs), diffs[0])
-		}
+	if diffs := expected.Diff(got); len(diffs) > 0 {
+		return fmt.Errorf("post-state mismatch (%d differences), first: %s", len(diffs), diffs[0])
 	}
 	return nil
 }
 
+// BenchmarkEphemeralParallelReplay times ONLY the parallel ExecV3 call: setup,
+// the per-run witness SharedDomains, and the post-state check are excluded via
+// StopTimer/StartTimer. Each run is checked against the fixture's authoritative
+// canonical outputs, so the measurement is of verified-correct execution.
 func BenchmarkEphemeralParallelReplay(b *testing.B) {
 	if !dbg.DiscardCommitment() {
 		b.Fatal("set DISCARD_COMMITMENT=true: the witness carries no commitment trie")
 	}
 	fx, err := blockreplay.Load(fixturePath(b))
 	require.NoError(b, err)
-
-	// The reference post-state is the block's authoritative canonical output,
-	// captured from the node into the fixture — not re-derived by any executor.
-	// Each parallel replay is checked against it, so we profile verified-correct
-	// execution.
 	require.NotNil(b, fx.Outputs, "fixture missing captured outputs; recapture with `integration capture_block`")
 	expected := fx.Outputs
 
+	r, closeFn := setupEphemeralReplay(b, fx)
+	defer closeFn()
+
 	b.ResetTimer()
 	for range b.N {
-		if err := ephemeralReplayParallel(b, fx, expected); err != nil {
-			b.Fatal(err)
-		}
+		b.StopTimer()
+		tx, doms := r.newDomains(b, fx)
+		b.StartTimer()
+
+		execErr := r.exec(tx, doms)
+
+		b.StopTimer()
+		require.NoError(b, execErr)
+		require.NoError(b, r.verify(tx, doms, expected))
+		doms.Close()
+		tx.Rollback()
 	}
 }
