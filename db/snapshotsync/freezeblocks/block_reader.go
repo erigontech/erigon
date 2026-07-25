@@ -573,20 +573,14 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 				h = rawdb.ReadHeader(tx, blockHash, blockHeight)
 				if h != nil {
 					return h, nil
-				} else {
-					if dbgLogs {
-						log.Info(dbgPrefix + "not found in db")
-					}
+				} else if dbgLogs {
+					log.Info(dbgPrefix + "not found in db")
 				}
-			} else {
-				if dbgLogs {
-					log.Info(dbgPrefix + "canonical hash is empty")
-				}
+			} else if dbgLogs {
+				log.Info(dbgPrefix + "canonical hash is empty")
 			}
-		} else {
-			if dbgLogs {
-				log.Info(dbgPrefix + "tx is nil")
-			}
+		} else if dbgLogs {
+			log.Info(dbgPrefix + "tx is nil")
 		}
 		return nil, nil
 	}

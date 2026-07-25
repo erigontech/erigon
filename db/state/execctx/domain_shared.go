@@ -1127,10 +1127,8 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			wm.UpdateCacheReads(domain, start)
 		}
 		return v, step, nil
-	} else {
-		if step < maxStep {
-			maxStep = step
-		}
+	} else if step < maxStep {
+		maxStep = step
 	}
 
 	// Check parent's mem batch (read-through chaining for child SDs)
@@ -1140,10 +1138,8 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 				wm.UpdateCacheReads(domain, start)
 			}
 			return v, step, nil
-		} else {
-			if step < maxStep {
-				maxStep = step
-			}
+		} else if step < maxStep {
+			maxStep = step
 		}
 	}
 
