@@ -359,7 +359,7 @@ func FinalizeBlockExecution(
 	// (ExecuteBlockEphemerally, RPC) keep the so.data CommitBlock.
 	if !ibs.IsVersioned() {
 		blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
-		if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
+		if err := ibs.CommitBlock(blockContext.Rules, stateWriter); err != nil {
 			return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 		}
 	}
@@ -381,5 +381,5 @@ func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader
 		stateWriter = state.NewNoopWriter()
 	}
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
-	return ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
+	return ibs.FinalizeTx(blockContext.Rules, stateWriter)
 }

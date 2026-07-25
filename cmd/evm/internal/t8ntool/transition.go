@@ -320,7 +320,7 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	defer sd.Close()
 
 	blockNum, txNum := uint64(0), uint64(0)
-	reader, writer := MakePreState((&evmtypes.BlockContext{}).Rules(chainConfig), tx, sd, prestate.Pre, blockNum, txNum)
+	reader, writer := MakePreState(evmtypes.NewRules(&evmtypes.BlockContext{}, chainConfig), tx, sd, prestate.Pre, blockNum, txNum)
 	blockNum, txNum = uint64(1), uint64(2)
 
 	// Merge engine can be used for pre-merge blocks as well, as it

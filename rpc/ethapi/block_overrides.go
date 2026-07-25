@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -53,7 +54,7 @@ type BlockOverrides struct {
 // Override applies overrides to an EVM block context used in single-call
 // methods (eth_call, eth_estimateGas). BeaconRoot and Withdrawals are
 // rejected because they are not meaningful in a single-call context.
-func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext) error {
+func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext, config *chain.Config) error {
 	if overrides == nil {
 		return nil
 	}
@@ -94,6 +95,9 @@ func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext) error 
 		if overflow := context.BlobBaseFee.SetFromBig(overrides.BlobBaseFee.ToInt()); overflow {
 			return errors.New("BlockOverrides.BlobBaseFee uint256 overflow")
 		}
+	}
+	if config != nil {
+		context.Rules = evmtypes.NewRules(context, config)
 	}
 	return nil
 }
@@ -151,7 +155,7 @@ func (overrides *BlockOverrides) OverrideHeader(header *types.Header) *types.Hea
 // simulation (eth_simulateV1, eth_callMany). Unlike Override, it does not
 // reject BeaconRoot or Withdrawals — those are handled at the block-assembly
 // level by the caller.
-func (overrides *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockContext, blockHashOverrides BlockHashOverrides) {
+func (overrides *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockContext, blockHashOverrides BlockHashOverrides, config *chain.Config) {
 	if overrides == nil {
 		return
 	}
@@ -181,5 +185,8 @@ func (overrides *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockCo
 	}
 	if overrides.BlockHash != nil {
 		maps.Copy(blockHashOverrides, *overrides.BlockHash)
+	}
+	if config != nil {
+		blockCtx.Rules = evmtypes.NewRules(blockCtx, config)
 	}
 }

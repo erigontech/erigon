@@ -75,7 +75,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 
 	// Derive chain rules from the block context (matches how callBlock does it).
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader, cfg)
-	rules := blockCtx.Rules(cfg)
+	rules := blockCtx.Rules
 
 	// Build msgs and callParams — identical inputs for both paths.
 	msgs := make([]*types.Message, len(txs))

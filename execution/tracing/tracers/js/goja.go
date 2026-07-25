@@ -243,7 +243,7 @@ func (t *jsTracer) onExecutionStart(env *tracing.VMContext, gasLimit uint64) {
 		BlockNumber: env.BlockNumber,
 		Time:        env.Time,
 	}
-	rules := blockContext.Rules(env.ChainConfig)
+	rules := evmtypes.NewRules(&blockContext, env.ChainConfig)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 	t.ctx["block"] = t.vm.ToValue(t.env.BlockNumber)
 	t.ctx["gas"] = t.vm.ToValue(gasLimit)

@@ -616,7 +616,7 @@ func (api *BaseAPI) buildAccessedState(
 
 	// Create EVM block context
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader, chainConfig)
-	blockRules := blockCtx.Rules(chainConfig)
+	blockRules := blockCtx.Rules
 	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
 
 	// Track accessed block hashes for BLOCKHASH opcode
@@ -1908,7 +1908,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	// This ensures gas fees go to the correct address based on the block header
 	coinbase := accounts.InternAddress(header.Coinbase)
 	blockCtx := protocol.NewEVMBlockContext(header, result.getHashFn, nil, coinbase, chainConfig)
-	blockRules := blockCtx.Rules(chainConfig)
+	blockRules := blockCtx.Rules
 	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
 
 	// Run block initialization (e.g. EIP-2935 blockhash contract, EIP-4788 beacon root)

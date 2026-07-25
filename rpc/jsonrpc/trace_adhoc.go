@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -259,11 +260,12 @@ func overrideBaseFee(traceConfig *config.TraceConfig, baseFee *uint256.Int) (*ui
 }
 
 // overrideBlockContext applies traceConfig's BlockOverrides (if any) to blockCtx.
-func overrideBlockContext(traceConfig *config.TraceConfig, blockCtx *evmtypes.BlockContext) error {
+// config may be nil when blockCtx is a throwaway used only to validate overrides.
+func overrideBlockContext(traceConfig *config.TraceConfig, blockCtx *evmtypes.BlockContext, config *chain.Config) error {
 	if traceConfig == nil {
 		return nil
 	}
-	return traceConfig.BlockOverrides.Override(blockCtx)
+	return traceConfig.BlockOverrides.Override(blockCtx, config)
 }
 
 func parseOeTracerConfig(traceConfig *config.TraceConfig) (OeTracerConfig, error) {
@@ -1182,7 +1184,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	blockCtx.GasLimit = math.MaxUint64
 	blockCtx.MaxGasLimit = true
-	if err := blockOverrides.Override(&blockCtx); err != nil {
+	if err := blockOverrides.Override(&blockCtx, chainConfig); err != nil {
 		return nil, err
 	}
 
@@ -1199,7 +1201,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	var precompiles vm.PrecompiledContracts
 	if traceConfig != nil && traceConfig.StateOverrides != nil {
-		rules := blockCtx.Rules(chainConfig)
+		rules := blockCtx.Rules
 		precompiles = vm.ActivePrecompiledContracts(rules)
 		if err := traceConfig.StateOverrides.Override(ibs, precompiles, rules); err != nil {
 			return nil, err
@@ -1421,7 +1423,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	}
 
 	blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
-	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+	if err := overrideBlockContext(traceConfig, &blockCtx, chainConfig); err != nil {
 		return nil, nil, err
 	}
 	var tracer *tracers.Tracer
@@ -1549,7 +1551,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
 		}
 
-		chainRules := blockCtx.Rules(chainConfig)
+		chainRules := blockCtx.Rules
 		traceResult.Output = common.Copy(execResult.ReturnData)
 		if traceTypeStateDiff {
 			initialIbs := state.New(cloneReader)
@@ -1642,7 +1644,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	}
 
 	blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
-	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+	if err := overrideBlockContext(traceConfig, &blockCtx, chainConfig); err != nil {
 		return nil, err
 	}
 
@@ -1753,7 +1755,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 	}
 
-	chainRules := blockCtx.Rules(chainConfig)
+	chainRules := blockCtx.Rules
 	traceResult.Output = common.Copy(execResult.ReturnData)
 	if traceTypeStateDiff {
 		initialIbs := state.New(cloneReader)
@@ -1875,7 +1877,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 
 	signer := types.MakeSigner(chainConfig, header.Number.Uint64(), header.Time)
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
-	rules := blockCtx.Rules(chainConfig)
+	rules := blockCtx.Rules
 
 	msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
 	if err != nil {

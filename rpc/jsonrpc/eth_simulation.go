@@ -547,7 +547,7 @@ func (s *simulator) simulateBlock(
 	// Create a custom block context and apply any custom block overrides
 	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.newSimulatedCanonicalReader(ancestors), s.chainConfig,
 		bsc.BlockOverrides, blockHashOverrides)
-	rules := blockCtx.Rules(s.chainConfig)
+	rules := blockCtx.Rules
 
 	// Determine the active precompiled contracts for this block.
 	activePrecompiles := vm.ActivePrecompiledContracts(rules)

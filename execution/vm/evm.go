@@ -111,7 +111,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 		intraBlockState: ibs,
 		config:          vmConfig,
 		chainConfig:     chainConfig,
-		chainRules:      blockCtx.Rules(chainConfig),
+		chainRules:      evmtypes.NewRules(&blockCtx, chainConfig),
 	}
 	evm.jt = jumpTable(evm.chainRules, vmConfig)
 

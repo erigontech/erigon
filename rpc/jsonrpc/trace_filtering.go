@@ -365,7 +365,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		return err
 	}
 
-	if err := overrideBlockContext(traceConfig, &evmtypes.BlockContext{}); err != nil {
+	if err := overrideBlockContext(traceConfig, &evmtypes.BlockContext{}, nil); err != nil {
 		return err
 	}
 
@@ -479,11 +479,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 			lastBlockHash = lastHeader.Hash()
 			blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
-			if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+			if err := overrideBlockContext(traceConfig, &blockCtx, chainConfig); err != nil {
 				return err
 			}
 			lastSigner = types.MakeSigner(chainConfig, blockCtx.BlockNumber, blockCtx.Time)
-			lastRules = blockCtx.Rules(chainConfig)
+			lastRules = blockCtx.Rules
 			lastBaseFee = blockCtx.BaseFee
 		}
 		if isFnalTxn {
@@ -621,7 +621,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ibs := state.New(cachedReader)
 
 		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
-		if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+		if err := overrideBlockContext(traceConfig, &blockCtx, chainConfig); err != nil {
 			return err
 		}
 		evmTxCtx := protocol.NewEVMTxContext(msg)
@@ -787,10 +787,10 @@ func (api *TraceAPIImpl) callBlock(
 	header := block.Header()
 	engine := api.engine()
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
-	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+	if err := overrideBlockContext(traceConfig, &blockCtx, cfg); err != nil {
 		return nil, nil, nil, err
 	}
-	rules := blockCtx.Rules(cfg)
+	rules := blockCtx.Rules
 	signer := types.MakeSigner(cfg, blockCtx.BlockNumber, blockCtx.Time)
 	txs := block.Transactions()
 	var borStateSyncTxn types.Transaction
@@ -1021,11 +1021,11 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 			// blockCtx captures workerTx in its GetHash closure, so it cannot
 			// be shared across workers (each needs its own copy).
 			blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, workerTx, api._blockReader, chainConfig)
-			if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+			if err := overrideBlockContext(traceConfig, &blockCtx, chainConfig); err != nil {
 				errOnce.Do(func() { firstErr = err; cancel() })
 				return
 			}
-			chainRules := blockCtx.Rules(chainConfig)
+			chainRules := blockCtx.Rules
 			oeConfig, err := parseOeTracerConfig(traceConfig)
 			if err != nil {
 				errOnce.Do(func() { firstErr = err; cancel() })
@@ -1119,10 +1119,10 @@ func (api *TraceAPIImpl) callTransaction(
 	parentNo := rpc.BlockNumber(pNo)
 	engine := api.engine()
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
-	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+	if err := overrideBlockContext(traceConfig, &blockCtx, cfg); err != nil {
 		return nil, err
 	}
-	rules := blockCtx.Rules(cfg)
+	rules := blockCtx.Rules
 	signer := types.MakeSigner(cfg, blockCtx.BlockNumber, blockCtx.Time)
 	var txn types.Transaction
 	var borStateSyncTxnHash common.Hash

@@ -228,7 +228,7 @@ func (t *flatCallTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 		Time:        env.Time,
 	}
 	// Update list of precompiles based on current block
-	rules := blockContext.Rules(env.ChainConfig)
+	rules := evmtypes.NewRules(&blockContext, env.ChainConfig)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 }
 

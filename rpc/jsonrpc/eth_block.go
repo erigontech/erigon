@@ -133,7 +133,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	signer := types.MakeSigner(chainConfig, blockNumber, timestamp)
 	blockCtx := transactions.NewEVMBlockContext(engine, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
-	rules := blockCtx.Rules(chainConfig)
+	rules := blockCtx.Rules
 	firstMsg, err := txs[0].AsMessage(*signer, header.BaseFee, rules)
 	if err != nil {
 		return nil, err

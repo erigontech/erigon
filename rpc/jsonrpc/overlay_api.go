@@ -462,7 +462,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress, chainConfig)
 
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
-	rules := blockCtx.Rules(chainConfig)
+	rules := blockCtx.Rules
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.

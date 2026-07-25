@@ -87,7 +87,7 @@ func DoCall(
 	}
 	blockCtx := NewEVMBlockContext(engine, effectiveHeader, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 	if blockOverrides != nil {
-		if err := blockOverrides.Override(&blockCtx); err != nil {
+		if err := blockOverrides.Override(&blockCtx, chainConfig); err != nil {
 			return nil, err
 		}
 	}
@@ -110,7 +110,7 @@ func DoCall(
 
 	// Override the fields of specified contracts before execution.
 	if stateOverrides != nil {
-		rules := blockCtx.Rules(chainConfig)
+		rules := blockCtx.Rules
 		precompiles := vm.ActivePrecompiledContracts(rules)
 		if err := stateOverrides.Override(state, precompiles, rules); err != nil {
 			return nil, err
@@ -136,7 +136,7 @@ func NewEVMBlockContextWithOverrides(ctx context.Context, engine rules.EngineRea
 	blockHashFunc := MakeBlockHashProvider(ctx, tx, reader, blockHashOverrides)
 	blockContext := protocol.NewEVMBlockContext(header, blockHashFunc, engine, accounts.NilAddress /* author */, config)
 	if blockOverrides != nil {
-		blockOverrides.OverrideBlockContext(&blockContext, blockHashOverrides)
+		blockOverrides.OverrideBlockContext(&blockContext, blockHashOverrides, config)
 	}
 	return blockContext
 }
@@ -274,7 +274,7 @@ func NewReusableCaller(
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 
 	if blockOverrides != nil {
-		if err := blockOverrides.Override(&blockCtx); err != nil {
+		if err := blockOverrides.Override(&blockCtx, chainConfig); err != nil {
 			return nil, err
 		}
 	}
@@ -289,7 +289,7 @@ func NewReusableCaller(
 		callTimeout:    callTimeout,
 		stateReader:    stateReader,
 		stateOverrides: stateOverrides,
-		rules:          blockCtx.Rules(chainConfig),
+		rules:          blockCtx.Rules,
 		message:        msg,
 	}, nil
 }

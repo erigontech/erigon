@@ -969,7 +969,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	// Retrieve the precompiles since they don't need to be added to the access list
 	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
-	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
+	precompiles := vm.ActivePrecompiles(blockCtx.Rules)
 	excl := make(map[common.Address]struct{})
 	// Exclude 'from' and precompiles — they are pre-warmed by EIP-2929.
 	// 'to' is intentionally not excluded: its storage slots must appear in the
@@ -990,7 +990,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 		var data bytes.Buffer
 		var buf [32]byte
-		rules := blockCtx.Rules(chainConfig)
+		rules := blockCtx.Rules
 		for _, jsonAuth := range args.AuthorizationList {
 			auth, err := jsonAuth.ToAuthorization()
 			if err != nil {
@@ -1021,7 +1021,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		ibs := state.New(stateReader)
 		// Override the fields of specified contracts before execution.
 		if stateOverrides != nil {
-			if err := stateOverrides.Override(ibs, nil, blockCtx.Rules(chainConfig)); err != nil {
+			if err := stateOverrides.Override(ibs, nil, blockCtx.Rules); err != nil {
 				return nil, err
 			}
 		}

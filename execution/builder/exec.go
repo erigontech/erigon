@@ -237,7 +237,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	// is applied in order so the next phase's stateReader fallback sees it.
 	if ibs.IsVersioned() {
 		blockCtx := protocol.NewEVMBlockContext(current.Header, protocol.GetHashFn(current.Header, nil), cfg.engine, accounts.NilAddress, cfg.chainConfig)
-		blockRules := blockCtx.Rules(cfg.chainConfig)
+		blockRules := blockCtx.Rules
 		var domainKeysErr error
 		domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
 			av := addr.Value()
