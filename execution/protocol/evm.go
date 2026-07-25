@@ -106,6 +106,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		BlobBaseFee:      blobBaseFee,
 		SlotNumber:       slotNumber,
 	}
+	blockContext.Rules = evmtypes.NewRules(&blockContext, config)
 	return blockContext
 }
 

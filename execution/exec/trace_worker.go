@@ -92,7 +92,7 @@ func (e *TraceWorker) ChangeBlock(header *types.Header) {
 	e.blockCtx = &blockCtx
 	e.blockHash = header.Hash()
 	e.header = header
-	e.rules = blockCtx.Rules(e.chainConfig)
+	e.rules = blockCtx.Rules
 	e.signer = types.MakeSigner(e.chainConfig, e.blockNum, header.Time)
 }
 

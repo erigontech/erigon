@@ -41,7 +41,7 @@ func TestBlockContextRulesL2Oracle(t *testing.T) {
 	c := chain.Config{L2: fakeL2Config{}}
 	bc := BlockContext{L2Version: 20}
 
-	rules := bc.Rules(&c)
+	rules := NewRules(&bc, &c)
 
 	assert.Equal(t, uint64(20), rules.L2Version)
 	assert.True(t, rules.IsCancun)
@@ -51,7 +51,7 @@ func TestBlockContextRulesNoL2(t *testing.T) {
 	var c chain.Config
 	bc := BlockContext{L2Version: 20}
 
-	rules := bc.Rules(&c)
+	rules := NewRules(&bc, &c)
 
 	assert.Equal(t, uint64(0), rules.L2Version)
 	assert.False(t, rules.IsCancun)

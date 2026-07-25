@@ -372,7 +372,11 @@ func (t *TxTask) BlockGasLimit() uint64 {
 
 func (t *TxTask) Rules() *chain.Rules {
 	if t.rules == nil {
-		t.rules = t.EvmBlockContext.Rules(t.Config)
+		if t.EvmBlockContext.Rules != nil {
+			t.rules = t.EvmBlockContext.Rules
+		} else {
+			t.rules = evmtypes.NewRules(&t.EvmBlockContext, t.Config)
+		}
 	}
 
 	return t.rules

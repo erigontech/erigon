@@ -53,6 +53,11 @@ type BlockContext struct {
 	// L2Version is populated by the chain's engine/block-context construction
 	// for L2 chains; zero otherwise.
 	L2Version uint64
+
+	// Rules is the fork rule-set resolved once at construction from
+	// BlockNumber/Time/L2Version. Any mutation of those fields (the block
+	// override helpers) must refresh it via NewRules.
+	Rules *chain.Rules
 }
 
 // TxContext provides the EVM with information about a transaction.

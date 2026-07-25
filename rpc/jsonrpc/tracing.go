@@ -113,12 +113,12 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 
 	var precompiles vm.PrecompiledContracts
 	if config.BlockOverrides != nil {
-		if err := config.BlockOverrides.Override(&blockCtx); err != nil {
+		if err := config.BlockOverrides.Override(&blockCtx, chainConfig); err != nil {
 			return err
 		}
 	}
 	if config.StateOverrides != nil {
-		rules = blockCtx.Rules(chainConfig)
+		rules = blockCtx.Rules
 		precompiles = vm.ActivePrecompiledContracts(rules)
 		if err := config.StateOverrides.Override(ibs, precompiles, rules); err != nil {
 			return err
@@ -309,12 +309,12 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	var precompiles vm.PrecompiledContracts
 	if config != nil {
 		if config.BlockOverrides != nil {
-			if err := config.BlockOverrides.Override(&blockCtx); err != nil {
+			if err := config.BlockOverrides.Override(&blockCtx, chainConfig); err != nil {
 				return err
 			}
 		}
 		if config.StateOverrides != nil {
-			rules = blockCtx.Rules(chainConfig)
+			rules = blockCtx.Rules
 			precompiles = vm.ActivePrecompiledContracts(rules)
 			if err := config.StateOverrides.Override(ibs, precompiles, rules); err != nil {
 				return err
@@ -425,7 +425,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 	if config != nil {
 		if config.BlockOverrides != nil {
-			err := config.BlockOverrides.Override(&blockCtx)
+			err := config.BlockOverrides.Override(&blockCtx, chainConfig)
 			if err != nil {
 				return err
 			}
@@ -433,7 +433,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 
 		// Override the state before block execution.
 		if config.StateOverrides != nil {
-			rules := blockCtx.Rules(chainConfig)
+			rules := blockCtx.Rules
 			precompiles = vm.ActivePrecompiledContracts(rules)
 			if err := config.StateOverrides.Override(ibs, precompiles, rules); err != nil {
 				return err
@@ -527,7 +527,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	// Use OverrideBlockContext (not Override) so that BlockHash overrides are also merged
 	// into overrideBlockHash and honoured by the getHash closure above.
 	if config.BlockOverrides != nil {
-		config.BlockOverrides.OverrideBlockContext(&blockCtx, overrideBlockHash)
+		config.BlockOverrides.OverrideBlockContext(&blockCtx, overrideBlockHash, chainConfig)
 	}
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
@@ -547,7 +547,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	for bundleIndex, bundle := range bundles {
 		stream.WriteArrayStart()
 		// first change block context
-		bundle.BlockOverride.OverrideBlockContext(&blockCtx, overrideBlockHash)
+		bundle.BlockOverride.OverrideBlockContext(&blockCtx, overrideBlockHash, chainConfig)
 		// do not reset ibs, because we want to keep the overrides and state change
 		// ibs.Reset()
 		for txnIndex, txn := range bundle.Transactions {

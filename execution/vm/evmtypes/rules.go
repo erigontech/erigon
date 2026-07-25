@@ -22,8 +22,9 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 )
 
-// Rules ensures c's ChainID is not nil and returns a new Rules instance
-func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
+// NewRules ensures c's ChainID is not nil and returns a new Rules instance
+// resolved for bc's block number, time and L2 version.
+func NewRules(bc *BlockContext, c *chain.Config) *chain.Rules {
 	chainID := c.ChainID
 	if chainID == nil {
 		chainID = new(uint256.Int)

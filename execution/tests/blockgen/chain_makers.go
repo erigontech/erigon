@@ -629,7 +629,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 
 			// Write state changes to db
 			blockContext := protocol.NewEVMBlockContext(b.header, protocol.GetHashFn(b.header, nil), b.engine, accounts.NilAddress, config)
-			blockRules := blockContext.Rules(config)
+			blockRules := blockContext.Rules
 			if b.versionMap != nil && b.blockIO != nil {
 				// Commit from the versionMap write-set via WriteSet.Normalize/Apply
 				// — the same path the parallel executor uses — instead of so.data

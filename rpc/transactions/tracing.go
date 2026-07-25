@@ -84,7 +84,7 @@ func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header 
 	}
 
 	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, accounts.NilAddress, cfg)
-	rules := blockContext.Rules(cfg)
+	rules := blockContext.Rules
 
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, header.Number.Uint64(), header.Time)

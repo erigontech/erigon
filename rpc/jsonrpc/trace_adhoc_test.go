@@ -416,7 +416,7 @@ func TestOeTracer(t *testing.T) {
 				baseFee := test.Context.BaseFee
 				context.BaseFee = *baseFee
 			}
-			rules := context.Rules(test.Genesis.Config)
+			rules := evmtypes.NewRules(&context, test.Genesis.Config)
 
 			m := execmoduletester.New(t)
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)

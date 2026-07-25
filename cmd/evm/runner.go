@@ -338,7 +338,7 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 				BlockNumber: runtimeConfig.BlockNumber,
 				Time:        runtimeConfig.Time,
 			}
-			rules = blockContext.Rules(chainConfig)
+			rules = evmtypes.NewRules(&blockContext, chainConfig)
 		}
 		if err = statedb.CommitBlock(rules, state.NewNoopWriter()); err != nil {
 			fmt.Println("Could not commit state: ", err)

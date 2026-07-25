@@ -350,7 +350,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 			return nil, common.Hash{}, 0, err
 		}
 	}
-	chainRules := blockContext.Rules(config)
+	chainRules := blockContext.Rules
 
 	// EEST fixtures carry the signed RLP-encoded tx in `post.txbytes`; running
 	// it through the production AsMessage path means we test real validation

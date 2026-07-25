@@ -11,6 +11,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -29,7 +30,7 @@ func hash(b byte) *common.Hash        { h := common.Hash{b}; return &h }
 func TestOverride_NilReceiver(t *testing.T) {
 	var o *BlockOverrides
 	ctx := evmtypes.BlockContext{GasLimit: 1}
-	require.NoError(t, o.Override(&ctx))
+	require.NoError(t, o.Override(&ctx, nil))
 	assert.Equal(t, uint64(1), ctx.GasLimit, "nil receiver must be a no-op")
 }
 
@@ -49,7 +50,7 @@ func TestOverride_AllFields(t *testing.T) {
 	}
 
 	ctx := evmtypes.BlockContext{}
-	require.NoError(t, o.Override(&ctx))
+	require.NoError(t, o.Override(&ctx, nil))
 
 	assert.Equal(t, uint64(100), ctx.BlockNumber)
 	assert.Equal(t, *uint256.NewInt(200), ctx.Difficulty)
@@ -67,7 +68,7 @@ func TestOverride_NilFieldsAreNoOp(t *testing.T) {
 		Time:        42,
 		GasLimit:    1_000_000,
 	}
-	require.NoError(t, (&BlockOverrides{}).Override(&ctx))
+	require.NoError(t, (&BlockOverrides{}).Override(&ctx, nil))
 	assert.Equal(t, uint64(99), ctx.BlockNumber)
 	assert.Equal(t, uint64(42), ctx.Time)
 	assert.Equal(t, uint64(1_000_000), ctx.GasLimit)
@@ -75,7 +76,7 @@ func TestOverride_NilFieldsAreNoOp(t *testing.T) {
 
 func TestOverride_RejectsBeaconRoot(t *testing.T) {
 	o := BlockOverrides{BeaconRoot: hash(0x01)}
-	err := o.Override(&evmtypes.BlockContext{})
+	err := o.Override(&evmtypes.BlockContext{}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "beaconRoot")
 }
@@ -83,7 +84,7 @@ func TestOverride_RejectsBeaconRoot(t *testing.T) {
 func TestOverride_RejectsWithdrawals(t *testing.T) {
 	ws := types.Withdrawals{}
 	o := BlockOverrides{Withdrawals: &ws}
-	err := o.Override(&evmtypes.BlockContext{})
+	err := o.Override(&evmtypes.BlockContext{}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "withdrawals")
 }
@@ -92,7 +93,7 @@ func TestOverride_BaseFeeOverflow(t *testing.T) {
 	// value larger than 2^256-1 → overflow
 	tooBig := new(big.Int).Lsh(big.NewInt(1), 256) // 2^256
 	o := BlockOverrides{BaseFeePerGas: (*hexutil.Big)(tooBig)}
-	err := o.Override(&evmtypes.BlockContext{})
+	err := o.Override(&evmtypes.BlockContext{}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "BaseFee")
 }
@@ -100,7 +101,7 @@ func TestOverride_BaseFeeOverflow(t *testing.T) {
 func TestOverride_BlobBaseFeeOverflow(t *testing.T) {
 	tooBig := new(big.Int).Lsh(big.NewInt(1), 256)
 	o := BlockOverrides{BlobBaseFee: (*hexutil.Big)(tooBig)}
-	err := o.Override(&evmtypes.BlockContext{})
+	err := o.Override(&evmtypes.BlockContext{}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "BlobBaseFee")
 }
@@ -113,7 +114,7 @@ func TestOverride_PartialOverrideDoesNotTouchOtherFields(t *testing.T) {
 	}
 	// only override GasLimit
 	o := BlockOverrides{GasLimit: u64Hex(30_000_000)}
-	require.NoError(t, o.Override(&ctx))
+	require.NoError(t, o.Override(&ctx, nil))
 	assert.Equal(t, uint64(10), ctx.BlockNumber, "BlockNumber must be unchanged")
 	assert.Equal(t, uint64(99), ctx.Time, "Time must be unchanged")
 	assert.Equal(t, uint64(30_000_000), ctx.GasLimit)
@@ -142,7 +143,7 @@ func TestOverride_GasLimitAndMaxGasLimit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := evmtypes.BlockContext{GasLimit: math.MaxUint64, MaxGasLimit: true}
-			require.NoError(t, tt.overrides.Override(&ctx))
+			require.NoError(t, tt.overrides.Override(&ctx, nil))
 			assert.Equal(t, tt.wantGasLimit, ctx.GasLimit)
 			assert.Equal(t, tt.wantMaxGasLimit, ctx.MaxGasLimit)
 		})
@@ -276,7 +277,7 @@ func TestOverrideBlockContext_NilReceiver(t *testing.T) {
 	var o *BlockOverrides
 	ctx := evmtypes.BlockContext{GasLimit: 1}
 	overrides := BlockHashOverrides{}
-	require.NotPanics(t, func() { o.OverrideBlockContext(&ctx, overrides) })
+	require.NotPanics(t, func() { o.OverrideBlockContext(&ctx, overrides, nil) })
 	assert.Equal(t, uint64(1), ctx.GasLimit, "nil receiver must be a no-op")
 }
 
@@ -296,7 +297,7 @@ func TestOverrideBlockContext_AllFields(t *testing.T) {
 	}
 
 	ctx := evmtypes.BlockContext{}
-	o.OverrideBlockContext(&ctx, BlockHashOverrides{})
+	o.OverrideBlockContext(&ctx, BlockHashOverrides{}, nil)
 
 	assert.Equal(t, uint64(10), ctx.BlockNumber)
 	assert.Equal(t, *uint256.NewInt(20), ctx.Difficulty)
@@ -314,7 +315,7 @@ func TestOverrideBlockContext_NilFieldsAreNoOp(t *testing.T) {
 		Time:        88,
 		GasLimit:    99,
 	}
-	(&BlockOverrides{}).OverrideBlockContext(&ctx, BlockHashOverrides{})
+	(&BlockOverrides{}).OverrideBlockContext(&ctx, BlockHashOverrides{}, nil)
 	assert.Equal(t, uint64(77), ctx.BlockNumber)
 	assert.Equal(t, uint64(88), ctx.Time)
 	assert.Equal(t, uint64(99), ctx.GasLimit)
@@ -326,7 +327,7 @@ func TestOverrideBlockContext_BlockHash(t *testing.T) {
 	blockHashes := map[uint64]common.Hash{100: h1}
 	o := BlockOverrides{BlockHash: &map[uint64]common.Hash{101: h2}}
 
-	o.OverrideBlockContext(&evmtypes.BlockContext{}, BlockHashOverrides(blockHashes))
+	o.OverrideBlockContext(&evmtypes.BlockContext{}, BlockHashOverrides(blockHashes), nil)
 
 	assert.Equal(t, h1, blockHashes[100], "existing entry must be preserved")
 	assert.Equal(t, h2, blockHashes[101], "new entry from override must be present")
@@ -338,7 +339,7 @@ func TestOverrideBlockContext_BlockHashOverwritesExisting(t *testing.T) {
 	blockHashes := map[uint64]common.Hash{200: orig}
 	o := BlockOverrides{BlockHash: &map[uint64]common.Hash{200: replacement}}
 
-	o.OverrideBlockContext(&evmtypes.BlockContext{}, BlockHashOverrides(blockHashes))
+	o.OverrideBlockContext(&evmtypes.BlockContext{}, BlockHashOverrides(blockHashes), nil)
 
 	assert.Equal(t, replacement, blockHashes[200], "override must replace existing entry")
 }
@@ -352,7 +353,7 @@ func TestOverrideBlockContext_BeaconRootAndWithdrawalsDoNotPanic(t *testing.T) {
 		Withdrawals: &ws,
 	}
 	require.NotPanics(t, func() {
-		o.OverrideBlockContext(&evmtypes.BlockContext{}, BlockHashOverrides{})
+		o.OverrideBlockContext(&evmtypes.BlockContext{}, BlockHashOverrides{}, nil)
 	})
 }
 
@@ -363,8 +364,30 @@ func TestOverrideBlockContext_PartialOverrideDoesNotTouchOtherFields(t *testing.
 		GasLimit:    555,
 	}
 	o := BlockOverrides{Time: u64Hex(999)}
-	o.OverrideBlockContext(&ctx, BlockHashOverrides{})
+	o.OverrideBlockContext(&ctx, BlockHashOverrides{}, nil)
 	assert.Equal(t, uint64(5), ctx.BlockNumber, "BlockNumber must be unchanged")
 	assert.Equal(t, uint64(999), ctx.Time)
 	assert.Equal(t, uint64(555), ctx.GasLimit, "GasLimit must be unchanged")
+}
+
+// A time override that crosses a fork boundary must refresh the precomputed
+// Rules field; a stale rule-set would apply the wrong fork during simulation.
+func TestOverrideBlockContext_RefreshesRulesAcrossFork(t *testing.T) {
+	config := &chain.Config{ChainID: uint256.NewInt(1), CancunTime: common.NewUint64(100)}
+	ctx := evmtypes.BlockContext{Time: 50}
+	ctx.Rules = evmtypes.NewRules(&ctx, config)
+	require.False(t, ctx.Rules.IsCancun, "precondition: pre-Cancun block")
+
+	(&BlockOverrides{Time: u64Hex(200)}).OverrideBlockContext(&ctx, BlockHashOverrides{}, config)
+	assert.True(t, ctx.Rules.IsCancun, "Rules must reflect the overridden time")
+}
+
+func TestOverride_RefreshesRulesAcrossFork(t *testing.T) {
+	config := &chain.Config{ChainID: uint256.NewInt(1), CancunTime: common.NewUint64(100)}
+	ctx := evmtypes.BlockContext{Time: 50}
+	ctx.Rules = evmtypes.NewRules(&ctx, config)
+	require.False(t, ctx.Rules.IsCancun, "precondition: pre-Cancun block")
+
+	require.NoError(t, (&BlockOverrides{Time: u64Hex(200)}).Override(&ctx, config))
+	assert.True(t, ctx.Rules.IsCancun, "Rules must reflect the overridden time")
 }

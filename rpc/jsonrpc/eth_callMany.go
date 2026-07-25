@@ -212,7 +212,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// after replaying the txns, we want to overload the state
 	// overload state
 	if stateOverride != nil {
-		err = stateOverride.Override(evm.IntraBlockState(), nil, blockCtx.Rules(chainConfig))
+		err = stateOverride.Override(evm.IntraBlockState(), nil, blockCtx.Rules)
 		if err != nil {
 			return nil, err
 		}
@@ -222,7 +222,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	for _, bundle := range bundles {
 		// first change blockContext
-		bundle.BlockOverride.OverrideBlockContext(&blockCtx, ethapi.BlockHashOverrides(overrideBlockHash))
+		bundle.BlockOverride.OverrideBlockContext(&blockCtx, ethapi.BlockHashOverrides(overrideBlockHash), chainConfig)
 		results := []map[string]any{}
 		for _, txn := range bundle.Transactions {
 			if txn.Gas == nil || *(txn.Gas) == 0 {

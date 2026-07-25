@@ -161,7 +161,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				baseFee := test.Context.BaseFee
 				context.BaseFee = *baseFee
 			}
-			rules := context.Rules(test.Genesis.Config)
+			rules := evmtypes.NewRules(&context, test.Genesis.Config)
 
 			m := execmoduletester.New(t)
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
@@ -302,7 +302,7 @@ func TestCallTracerWithLogPositionAfterRevert(t *testing.T) {
 			Balance: big.NewInt(500000000000000),
 		},
 	}
-	rules := context.Rules(chainspec.Mainnet.Config)
+	rules := evmtypes.NewRules(&context, chainspec.Mainnet.Config)
 	m := execmoduletester.New(t)
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
@@ -396,7 +396,7 @@ func TestCallTracerWithLogPositionMixedSubcalls(t *testing.T) {
 			Balance: big.NewInt(500000000000000),
 		},
 	}
-	rules := context.Rules(chainspec.Mainnet.Config)
+	rules := evmtypes.NewRules(&context, chainspec.Mainnet.Config)
 	m := execmoduletester.New(t)
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
@@ -504,7 +504,7 @@ func TestCallTracerWithLogPositionInCreate(t *testing.T) {
 			Balance: big.NewInt(500000000000000),
 		},
 	}
-	rules := context.Rules(chainspec.Mainnet.Config)
+	rules := evmtypes.NewRules(&context, chainspec.Mainnet.Config)
 	m := execmoduletester.New(t)
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
@@ -586,7 +586,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		Difficulty:  *test.Context.Difficulty,
 		GasLimit:    uint64(test.Context.GasLimit),
 	}
-	rules := context.Rules(test.Genesis.Config)
+	rules := evmtypes.NewRules(&context, test.Genesis.Config)
 	msg, err := tx.AsMessage(*signer, nil, rules)
 	if err != nil {
 		b.Fatalf("failed to prepare transaction for tracing: %v", err)
@@ -672,7 +672,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 			Balance: big.NewInt(500000000000000),
 		},
 	}
-	rules := context.Rules(chainspec.Mainnet.Config)
+	rules := evmtypes.NewRules(&context, chainspec.Mainnet.Config)
 	m := execmoduletester.New(t)
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)

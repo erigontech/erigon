@@ -139,7 +139,7 @@ func TestEIP2200(t *testing.T) {
 					return nil
 				},
 			}
-			_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), w)
+			_ = s.CommitBlock(evmtypes.NewRules(&vmctx, chain.TestChainBerlinConfig), w)
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, vm.Config{ExtraEips: []int{2200}})
 			mdGas := mdgas.MdGas{
 				Regular: tt.gaspool,
@@ -239,7 +239,7 @@ func TestEIP8038SStore(t *testing.T) {
 					return nil
 				},
 			}
-			_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
+			_ = s.CommitBlock(evmtypes.NewRules(&vmctx, chain.AllProtocolChanges), w)
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{})
 			pool := mdgas.MdGas{Regular: 10_000_000, State: 10_000_000}
 			_, gas, _, err := vmenv.Call(accounts.ZeroAddress, address, nil, pool, uint256.Int{}, false /* bailout */)
@@ -309,7 +309,7 @@ func TestCallNewAccountSpillBefore63of64(t *testing.T) {
 					return nil
 				},
 			}
-			_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
+			_ = s.CommitBlock(evmtypes.NewRules(&vmctx, chain.AllProtocolChanges), w)
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{})
 			ret, gas, _, err := vmenv.Call(accounts.ZeroAddress, caller, nil, tt.pool, uint256.Int{}, false /* bailout */)
 			require.NoError(t, err, "outer frame must not OOG: NEW_ACCOUNT spill must precede the 63/64 computation")
@@ -369,7 +369,7 @@ func TestCreateGas(t *testing.T) {
 		//
 		// TODO revis BlockContext and add test for eip8037?
 		//
-		_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), stateWriter)
+		_ = s.CommitBlock(evmtypes.NewRules(&vmctx, chain.TestChainBerlinConfig), stateWriter)
 		config := vm.Config{}
 		if tt.eip3860 {
 			config.ExtraEips = []int{3860}
@@ -421,7 +421,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 			return transferErr
 		},
 	}
-	_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), w)
+	_ = s.CommitBlock(evmtypes.NewRules(&vmctx, chain.TestChainBerlinConfig), w)
 
 	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, vm.Config{})
 	_, _, _, err = vmenv.Call(params.SystemAddress, address, nil, mdgas.MdGas{Regular: math.MaxUint64}, uint256.Int{}, false /* bailout */)
