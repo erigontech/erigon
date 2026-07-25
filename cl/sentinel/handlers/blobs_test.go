@@ -182,8 +182,8 @@ func TestBlobsByRangeHandler(t *testing.T) {
 		t.Fatal("Stream is not empty")
 	}
 
-	defer indiciesDB.Close()
-	defer tx.Rollback()
+	indiciesDB.Close()
+	tx.Rollback()
 }
 
 func TestBlobsByIdentifiersHandler(t *testing.T) {
@@ -306,6 +306,6 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 		t.Fatal("Stream is not empty")
 	}
 
-	defer indiciesDB.Close()
-	defer tx.Rollback()
+	indiciesDB.Close()
+	tx.Rollback()
 }

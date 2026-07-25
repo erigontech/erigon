@@ -292,7 +292,8 @@ func (hi *HistoryRangeAsOfDB) advanceLargeVals() error {
 			return nil
 		}
 
-		seek = append(next, hi.startTxKey[:]...)
+		seek = next
+		seek = append(seek, hi.startTxKey[:]...)
 	}
 	for k, v, err := hi.valsC.Seek(seek); k != nil; k, v, err = hi.valsC.Seek(seek) {
 		if err != nil {
@@ -579,7 +580,8 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			return nil
 		}
 
-		seek = append(next, hi.startTxKey[:]...)
+		seek = next
+		seek = append(seek, hi.startTxKey[:]...)
 	}
 	for k, v, err := hi.valsC.Seek(seek); k != nil; k, v, err = hi.valsC.Seek(seek) {
 		if err != nil {
@@ -591,7 +593,8 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 				hi.nextKey = nil
 				return nil
 			}
-			seek = append(next, hi.startTxKey[:]...)
+			seek = next
+			seek = append(seek, hi.startTxKey[:]...)
 			continue
 		}
 		if hi.nextKey != nil && bytes.Equal(k[:len(k)-8], hi.nextKey) && bytes.Equal(v, hi.nextVal) {

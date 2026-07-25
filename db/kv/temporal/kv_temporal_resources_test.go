@@ -52,5 +52,5 @@ func TestTemporalTx_AbandonedIteratorsRollbackCleanly(t *testing.T) {
 	// The db is still usable, so nothing was left pinned by the abandoned iterators.
 	ttx2, err := temporalDb.BeginTemporalRo(ctx)
 	require.NoError(t, err)
-	defer ttx2.Rollback()
+	defer ttx2.Rollback() //nolint:gocritic // ruleguard requires defer
 }

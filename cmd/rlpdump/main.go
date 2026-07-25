@@ -204,7 +204,8 @@ func textToRlp(r io.Reader) ([]byte, error) {
 			obj = make([]any, 0)
 		case "]", "],": // list end
 			parent := stack.Remove(stack.Front()).([]any)
-			obj = append(parent, obj)
+			parent = append(parent, obj)
+			obj = parent
 		case "[],": // empty list
 			obj = append(obj, make([]any, 0))
 		default: // element

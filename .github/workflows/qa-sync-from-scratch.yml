@@ -1,5 +1,4 @@
-name: QA - Sync from scratch
-
+name: QA - Sync from scratch (archive node)
 on:
   push:
     branches:
@@ -84,7 +83,7 @@ jobs:
 
         # Run Erigon, wait sync and check ability to maintain sync
         python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-          "$GITHUB_WORKSPACE/build/bin" $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN
+          "$GITHUB_WORKSPACE/build/bin" $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN archive_node
 
         # Capture monitoring script exit status
         test_exit_status=$?
@@ -108,7 +107,7 @@ jobs:
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v7
       with:
-        name: torrent-client-status-${{ env.CHAIN }}
+        name: torrent-client-status-${{ env.CHAIN }}-archive
         path: torrent-client-status.txt
 
     - name: Save test results
@@ -130,7 +129,7 @@ jobs:
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v7
       with:
-        name: test-results-${{ env.CHAIN }}
+        name: test-results-${{ env.CHAIN }}-archive
         path: |
           ${{ github.workspace }}/result-${{ env.CHAIN }}.json
           ${{ github.workspace }}/erigon_data/logs/
@@ -139,14 +138,14 @@ jobs:
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v7
       with:
-        name: metric-plots-${{ env.CHAIN }}
+        name: metric-plots-${{ env.CHAIN }}-archive
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
     - name: Upload FD Leak Analysis
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v7
       with:
-        name: fd-leak-analysis-${{ env.CHAIN }}
+        name: fd-leak-analysis-${{ env.CHAIN }}-archive
         path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
 
     - name: Restore rpc-tests cache

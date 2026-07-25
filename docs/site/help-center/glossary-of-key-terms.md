@@ -26,7 +26,7 @@ This glossary provides concise definitions for essential terms related to the Er
 * **MDBX:** The high-performance, key-value database that Erigon uses to store blockchain data. It is a more efficient and scalable alternative to the databases used by other clients.
 * **Merkle Patricia Trie:** A data structure used by most Ethereum clients (like Geth) to store the blockchain state. It is highly secure but can be less space-efficient than MDBX.
 * **Mempool:** A pool of unconfirmed transactions that have been submitted to the network but have not yet been included in a block.
-* **MCP Server:** The Model Context Protocol server built into Erigon that exposes blockchain data to AI assistants. See [MCP Server](/fundamentals/mcp) (v3.4 only).
+* **MCP Server:** The Model Context Protocol server built into Erigon that exposes blockchain data to AI assistants. See [MCP Server](/fundamentals/mcp) (v3.4+).
 * **Node:** A piece of software that runs on a computer and interacts with the blockchain network. It can be a full node, light node, or validator node.
 * **OOM-kill:** An event where the operating system's "Out of Memory" killer terminates a process (e.g., Erigon) that is consuming too much memory. See [Hardware Requirements](/get-started/hardware-requirements) for recommended RAM specs.
 * **Peer:** Another node on the network that your client is connected to. The more healthy peers you have, the more reliable your connection is. See [Default Ports](/fundamentals/default-ports) for P2P port configuration.
