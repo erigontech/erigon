@@ -560,7 +560,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				return false, err
 			}
 			if err := se.rs.ApplyTxIndexes(se.applyTx, txTask.TxNum, applyReceipt, se.blobGasUsed,
-				result.Logs, result.TraceFroms, result.TraceTos); err != nil {
+				result.Logs, result.TraceFroms, result.TraceTos,
+				txTask.BlockNumber(), txTask.BlockTime(), txTask.Rules().ChainID, txTask.IsBlockEnd()); err != nil {
 				return false, err
 			}
 			if err := se.rs.CommitStepBoundary(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum); err != nil {

@@ -2745,7 +2745,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// Doing this in the apply loop instead used to race with the next
 			// tx / block-end ApplyStateWrites on SharedDomains.mem.
 			if err := pe.rs.ApplyTxIndexes(applyTx, applyResult.txNum, applyResult.receipt, applyResult.blobGasUsed,
-				applyResult.logs, applyResult.traceFroms, applyResult.traceTos); err != nil {
+				applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
+				applyResult.blockNum, 0 /*blockTime: parallel path resolves lazily*/, applyResult.rules.ChainID, applyResult.isFinalize); err != nil {
 				return nil, fmt.Errorf("ApplyTxIndexes block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
 			}
 

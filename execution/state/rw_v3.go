@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execobserver"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
@@ -412,11 +413,42 @@ func (rs *StateV3) ApplyTxIndexes(
 	logs []*types.Log,
 	traceFroms map[accounts.Address]struct{},
 	traceTos map[accounts.Address]struct{},
+	blockNum uint64,
+	blockTime uint64,
+	chainID *uint256.Int,
+	isBlockEnd bool,
 	skipReceiptCache ...bool,
 ) error {
 	skip := len(skipReceiptCache) > 0 && skipReceiptCache[0]
 	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, cummulativeBlobGas, logs, traceFroms, traceTos, false, skip); err != nil {
 		return fmt.Errorf("StateV3.ApplyTxIndexes: %w", err)
+	}
+	// Extension point: hand the same per-tx logs + trace senders/callers that were
+	// just indexed to any registered custom indexers (execobserver). Gated on
+	// HasObservers so the default, no-observer erigon build pays nothing.
+	if execobserver.HasObservers() {
+		ev := execobserver.TxEvent{
+			ChainID: chainID, BlockNum: blockNum, BlockTime: blockTime, TxNum: txNum,
+			Logs: logs, IsBlockEnd: isBlockEnd, Tx: roTx,
+		}
+		if len(traceFroms) > 0 {
+			ev.Senders = make([]common.Address, 0, len(traceFroms))
+			for a := range traceFroms {
+				ev.Senders = append(ev.Senders, a.Value())
+			}
+		}
+		if len(traceTos) > 0 {
+			ev.Callers = make([]common.Address, 0, len(traceTos))
+			for a := range traceTos {
+				ev.Callers = append(ev.Callers, a.Value())
+			}
+		}
+		execobserver.NotifyTx(ev)
+		if isBlockEnd {
+			execobserver.NotifyBlockEnd(execobserver.BlockEvent{
+				ChainID: chainID, BlockNum: blockNum, BlockTime: blockTime, TxNum: txNum, Tx: roTx,
+			})
+		}
 	}
 	return nil
 }
