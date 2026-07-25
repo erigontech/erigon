@@ -1895,10 +1895,10 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		}
 		if restorePrevRange {
 			for k := range r.domain {
-				dr := &r.domain[k]
+				prevValues := r.domain[k].values
 				r.domain[k].values = MergeRange{}
 				at.a.logger.Debug("findMergeRange: commitment range is different than accounts or storage, cancel kv merge",
-					at.d[k].d.FilenameBase, dr.values.String("", at.StepSize()))
+					at.d[k].d.FilenameBase, prevValues.String("", at.StepSize()))
 			}
 		}
 	}
