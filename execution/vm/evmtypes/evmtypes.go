@@ -131,7 +131,7 @@ type IntraBlockState interface {
 	SubBalance(accounts.Address, uint256.Int, tracing.BalanceChangeReason) error
 	AddBalance(accounts.Address, uint256.Int, tracing.BalanceChangeReason) error
 	GetBalance(accounts.Address) (uint256.Int, error)
-	AddLog(*types.Log)
+	AddLog(types.Log)
 	SetHooks(hooks *tracing.Hooks)
 	Trace() bool
 	BlockNumber() uint64

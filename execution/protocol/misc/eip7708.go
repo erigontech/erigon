@@ -38,9 +38,9 @@ var (
 
 // EthTransferLog creates and ETH transfer log according to EIP-7708.
 // Specification: https://eips.ethereum.org/EIPS/eip-7708
-func EthTransferLog(from, to common.Address, amount uint256.Int) *types.Log {
+func EthTransferLog(from, to common.Address, amount uint256.Int) types.Log {
 	amount32 := amount.Bytes32()
-	return &types.Log{
+	return types.Log{
 		Address: params.SystemAddress.Value(),
 		Topics: []common.Hash{
 			EthTransferLogEvent,
