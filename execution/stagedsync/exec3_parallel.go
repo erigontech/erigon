@@ -86,6 +86,10 @@ When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rota
 
 type parallelExecutor struct {
 	txExecutor
+	// failedBlock/failedHash record the implicated block when execution fails
+	// (wrong-root or invalid block), so the stage wrapper can target the unwind.
+	failedBlock uint64
+	failedHash  common.Hash
 	execWorkers []*exec.Worker
 	stopWorkers func()
 	waitWorkers func()
@@ -214,7 +218,7 @@ func (pe *parallelExecutor) clearChangesetAccumulator() {
 	pe.currentChangeSetBlock = 0
 }
 
-func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
+func (pe *parallelExecutor) exec(ctx context.Context,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
@@ -224,13 +228,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		outErr    error
 	)
 	pprof.Do(ctx, pprof.Labels("phase", "pe-exec"), func(lctx context.Context) {
-		outHeader, outTx, outErr = pe.execImpl(lctx, execStage, u, startBlockNum, offsetFromBlockBeginning,
+		outHeader, outTx, outErr = pe.execImpl(lctx, startBlockNum, offsetFromBlockBeginning,
 			maxBlockNum, blockLimit, initialTxNum, inputTxNum, initialCycle, rwTx, stepsInDb, accumulator, readAhead, logEvery)
 	})
 	return outHeader, outTx, outErr
 }
 
-func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState, u Unwinder,
+func (pe *parallelExecutor) execImpl(ctx context.Context,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
@@ -244,6 +248,15 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	// Both are fed by the fan-out in the execLoop's blockExecutor.
 	applyResults := make(chan applyResult, 2_048)
 	commitResults := make(chan applyResult, 2_048)
+	// Exec-only (DISCARD_COMMITMENT): nil the commit stream. The exec loop's
+	// fan-out (sendResult) and the batch-commit trigger both no-op on a nil
+	// channel, so no commitment work runs; the calculator sees a nil input,
+	// exits immediately, and closes rootResults, which the apply loop's normal
+	// close-handling absorbs. Used by ephemeral single-block replay over a flat
+	// witness (no trie). Real staged sync leaves this non-nil.
+	if dbg.DiscardCommitment() {
+		commitResults = nil
+	}
 	// Only wire the BAL fold-ahead pipeline when BAL-driven commitment is on.
 	// A nil channel leaves the per-block alloc+send and calculator select arm
 	// inert (the receive on nil blocks forever, so the loop stays gated on cc.in).
@@ -260,17 +273,23 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		if blockLimit > 0 {
 			lastBlock = min(startBlockNum+blockLimit-1, maxBlockNum)
 		}
-		log.Info(fmt.Sprintf("[%s] parallel starting", execStage.LogPrefix()),
+		log.Info(fmt.Sprintf("[%s] parallel starting", pe.logPrefix),
 			"from", startBlockNum, "to", maxBlockNum, "limit", lastBlock, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle,
 			"isForkValidation", pe.isForkValidation, "isApplyingBlocks", pe.isApplyingBlocks)
 	}
 
 	// restoreTxNum must run before pe.run() so that doms.SetTxNum() completes
-	// before any goroutine reads txNum (via AsGetter/GetLatest).
-	restoredTxNum, _, _, _, err := restoreTxNum(ctx, &pe.cfg, rwTx, inputTxNum, maxBlockNum)
-	if err != nil {
-		return nil, rwTx, err
+	// before any goroutine reads txNum (via AsGetter/GetLatest). With an injected
+	// block source (ephemeral replay) the caller owns range resolution and there
+	// is no TxNums index to consult, so the passed-in inputTxNum is used as-is.
+	restoredTxNum := inputTxNum
+	if pe.blockSrc == nil {
+		var err error
+		restoredTxNum, _, _, _, err = restoreTxNum(ctx, &pe.cfg, rwTx, inputTxNum, maxBlockNum)
+		if err != nil {
+			return nil, rwTx, err
+		}
 	}
 
 	// Set accumulator before pe.run() so execLoop sees it without a race.
@@ -369,11 +388,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	execErr := func() (err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				pe.logger.Warn("["+execStage.LogPrefix()+"] rw panic", "rec", rec, "stack", dbg.Stack())
+				pe.logger.Warn("["+pe.logPrefix+"] rw panic", "rec", rec, "stack", dbg.Stack())
 			} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
-				pe.logger.Warn("["+execStage.LogPrefix()+"] rw exit", "err", err, "stack", dbg.Stack())
+				pe.logger.Warn("["+pe.logPrefix+"] rw exit", "err", err, "stack", dbg.Stack())
 			} else {
-				pe.logger.Debug("[" + execStage.LogPrefix() + "] rw exit")
+				pe.logger.Debug("[" + pe.logPrefix + "] rw exit")
 			}
 		}()
 
@@ -569,12 +588,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					// not whatever block exec had last applied when the wrong-root
 					// arrived. initialCycle has no reorg: the error is fatal.
 					if fail.set {
-						if !fail.exec && errors.Is(fail.err, ErrWrongTrieRoot) && !initialCycle {
-							if err := handleIncorrectRootHashError(fail.block, fail.blockHash, rwTx, pe.cfg, execStage, pe.logger, u); err != nil {
-								return err
-							}
-							return nil
-						}
+						// Unwind handling is hoisted to SpawnExecuteBlocksStage. Record the
+						// implicated block (not the last-applied one) so the stage can target
+						// the unwind correctly, then surface the failure.
+						pe.failedBlock, pe.failedHash = fail.block, fail.blockHash
 						return fail.err
 					}
 					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
@@ -713,7 +730,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 
 					}
 
-					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && !execStage.CurrentSyncCycle.IsInitialCycle && applyResult.Header != nil {
+					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && !initialCycle && applyResult.Header != nil &&
+						pe.cfg.notifications != nil && pe.cfg.notifications.RecentReceipts != nil {
 						pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, applyResult.Txs, applyResult.Header)
 					}
 
@@ -856,39 +874,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 			} else {
 				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr)
 			}
-			if errors.Is(execErr, rules.ErrInvalidBlock) {
-				if pe.cfg.badBlockHalt {
-					return nil, rwTx, execErr
-				}
-				if u != nil && lastHeader != nil {
-					unwindTo := uint64(0)
-					if lastHeader.Number.Uint64() > 0 {
-						unwindTo = lastHeader.Number.Uint64() - 1
-					}
-					if err := u.UnwindTo(unwindTo, BadBlock(lastHeader.Hash(), execErr), rwTx); err != nil {
-						return nil, rwTx, err
-					}
-				}
-			}
 			return nil, rwTx, execErr
-		}
-	}
-
-	// Do NOT flush here — the stageloop owns flush/commit lifecycle.
-	// pe.exec() returns with sd.mem containing the batch's writes.
-	// The stageloop will flush, commit the rwTx, and create a new sd.
-	//
-	// But DO update stage progress so the stageloop knows we advanced.
-	if (execErr == nil || errors.Is(execErr, &ErrLoopExhausted{})) && rwTx != nil {
-		overlay := pe.doms.BlockOverlay()
-		if overlay != nil {
-			if err = execStage.Update(overlay, pe.lastCommittedBlockNum.Load()); err != nil {
-				return nil, rwTx, err
-			}
-		} else {
-			if err = execStage.Update(rwTx, pe.lastCommittedBlockNum.Load()); err != nil {
-				return nil, rwTx, err
-			}
 		}
 	}
 
