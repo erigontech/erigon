@@ -39,18 +39,20 @@ func TestAddLogOnLogPointerStability(t *testing.T) {
 		OnLog: func(l *types.Log) {
 			retained = l
 			l.Data = []byte{0xbe, 0xef}
+			l.Topics = []common.Hash{{0xca, 0xfe}}
 		},
 	})
 
 	ibs.SetTxContext(1, 0)
-	ibs.AddLog(types.Log{Address: common.Address{0x11}, Data: []byte{0x01}})
+	ibs.AddLog(types.Log{Address: common.Address{0x11}, Topics: []common.Hash{{0x01}}, Data: []byte{0x01}})
 	require.NotNil(t, retained)
 	first := retained
 
-	// (a) the hook's mutation reaches the stored log.
+	// (a) the hook's Data and Topics mutations reach the stored log.
 	raw := ibs.GetRawLogs(0)
 	require.Len(t, raw, 1)
 	require.Equal(t, []byte{0xbe, 0xef}, []byte(raw[0].Data))
+	require.Equal(t, []common.Hash{{0xca, 0xfe}}, raw[0].Topics)
 
 	// (b) churn the internal buffer: many appends (forcing growth) then Reset,
 	// which reuses the backing. A pointer into the buffer would be corrupted;

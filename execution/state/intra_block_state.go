@@ -514,6 +514,7 @@ func (sdb *IntraBlockState) finishLog(lp *EvmLog) {
 		tl := lp.toTypesLog()
 		sdb.tracingHooks.OnLog(&tl)
 		lp.Address = tl.Address
+		lp.setTopics(tl.Topics)
 		lp.Data = tl.Data
 		lp.Removed = tl.Removed
 	}
@@ -522,8 +523,7 @@ func (sdb *IntraBlockState) finishLog(lp *EvmLog) {
 func (sdb *IntraBlockState) AddLog(log types.Log) {
 	lp := sdb.allocLog()
 	lp.Address = log.Address
-	lp.NumTopics = uint8(min(len(log.Topics), len(lp.Topics)))
-	copy(lp.Topics[:], log.Topics)
+	lp.setTopics(log.Topics)
 	lp.Data = log.Data
 	lp.Removed = log.Removed
 	sdb.finishLog(lp)

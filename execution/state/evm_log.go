@@ -37,6 +37,13 @@ type EvmLog struct {
 	Removed     bool
 }
 
+// setTopics copies a topics slice into the inline array. Topics beyond the 4th
+// are dropped — consensus caps LOG at 4 topics, and no callers exceed it.
+func (l *EvmLog) setTopics(topics []common.Hash) {
+	l.NumTopics = uint8(min(len(topics), len(l.Topics)))
+	copy(l.Topics[:], topics)
+}
+
 // toTypesLog materializes a single owned types.Log, allocating its Topics slice.
 func (l *EvmLog) toTypesLog() types.Log {
 	return types.Log{
