@@ -2832,10 +2832,11 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 	}
 	if opts, ok := sdb.versionedReads.access[addr]; ok {
 		if opts.revertable && !revertable {
-			sdb.versionedReads.access[addr] = accessOptions{revertable: false}
+			opts.revertable = false
+			sdb.versionedReads.access[addr] = opts
 		}
 	} else {
-		sdb.versionedReads.access[addr] = accessOptions{revertable}
+		sdb.versionedReads.access[addr] = accessOptions{revertable: revertable}
 	}
 }
 
