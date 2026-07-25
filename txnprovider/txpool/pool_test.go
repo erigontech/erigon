@@ -2340,3 +2340,80 @@ func TestQueuedTxnPromotedAfterStaleAddLocal(t *testing.T) {
 	asrt.Equal(1, pending, "queued tx must be promoted after re-evaluation")
 	asrt.Equal(0, queued, "queued must be empty after promotion")
 }
+
+func TestOnTransactionValidated(t *testing.T) {
+	asrt := assert.New(t)
+	req := require.New(t)
+	logger := log.New()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	ch := make(chan Announcements, 100)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	cfg := txpoolcfg.DefaultConfig
+
+	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewSimple(), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	req.NoError(err)
+	req.NotNil(pool)
+
+	var addr1 [20]byte
+	addr1[0] = 1
+	h0 := gointerfaces.ConvertHashToH256([32]byte{})
+
+	// Write sender state: nonce=0, 1 ETH balance.
+	writeTestSenderState(t, ctx, coreDB, logger, addr1, accounts3.SerialiseV3(&accounts3.Account{
+		Nonce: 0, Balance: *uint256.NewInt(1 * common.Ether),
+		CodeHash: accounts.EmptyCodeHash, Incarnation: 1,
+	}), 0)
+
+	initChange := &remoteproto.StateChangeBatch{
+		StateVersionId: 0, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 0, BlockHash: h0}},
+	}
+	initChange.ChangeBatch[0].Changes = append(initChange.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr1),
+		Data: accounts3.SerialiseV3(&accounts3.Account{
+			Nonce: 0, Balance: *uint256.NewInt(1 * common.Ether),
+			CodeHash: accounts.EmptyCodeHash, Incarnation: 1,
+		}),
+	})
+	req.NoError(pool.OnNewBlock(ctx, initChange, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	// Add T1 (nonce=0) and T2 (nonce=1) to pending.
+	T1 := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	T1.IDHash[0] = 0xAA
+	T2 := newTestTxnSlot(1, 0, 300_000, 300_000, 100_000)
+	T2.IDHash[0] = 0xBB
+	var slots TxnSlots
+	slots.Append(T1, addr1[:], true)
+	slots.Append(T2, addr1[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, slots)
+	req.NoError(err)
+	for _, r := range reasons {
+		asrt.Equal(txpoolcfg.Success, r, r.String())
+	}
+	pending, _, _ := pool.CountContent()
+	asrt.Equal(2, pending, "both T1 and T2 should be in pending")
+
+	// OnTransactionValidated with T1's hash — should remove T1 (and T2
+	// since removeMined removes all txs with nonce <= the mined nonce).
+	hash1 := common.Hash{0xAA}
+	pool.OnTransactionValidated([]common.Hash{hash1})
+
+	pending, baseFeeCount, queued := pool.CountContent()
+	total := pending + baseFeeCount + queued
+	asrt.Equal(1, total, "T1 should be removed; T2 (nonce=1) remains (nonce > mined nonce 0)")
+
+	// Remove T2 as well.
+	hash2 := common.Hash{0xBB}
+	pool.OnTransactionValidated([]common.Hash{hash2})
+
+	pending, baseFeeCount, queued = pool.CountContent()
+	total = pending + baseFeeCount + queued
+	asrt.Equal(0, total, "all txs should be removed")
+
+	// Unknown hash — should be a noop (no panic).
+	pool.OnTransactionValidated([]common.Hash{{0xFF}})
+}

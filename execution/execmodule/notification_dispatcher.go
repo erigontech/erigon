@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execobserver"
 	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -123,6 +124,18 @@ func (d *Dispatcher) Dispatch(
 		}
 	}
 
+	// Fork-choice-update boundary: signal custom indexers (execobserver) to flush
+	// their staged writes atomically up to the committed head, so an index never
+	// reflects a block the chain didn't commit. Gated so the default build is inert.
+	if execobserver.HasObservers() && d.chainConfig != nil && d.chainConfig.ChainID != nil {
+		isUnwind := prevUnwindPoint != nil && *prevUnwindPoint != 0 && (*prevUnwindPoint) < finishProgressBefore
+		execobserver.NotifyCommit(execobserver.CommitEvent{
+			ChainID:  d.chainConfig.ChainID.Uint64(),
+			Head:     finishProgressAfter,
+			IsUnwind: isUnwind,
+		})
+	}
+
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	if accumulator != nil && currentHeader != nil {
 		if changes := accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < currentHeader.Number.Uint64() {
@@ -146,6 +159,14 @@ func (d *Dispatcher) Dispatch(
 		accumulator.SendAndReset(ctx, d.stateChangeConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
 	}
 	return nil
+}
+
+// OnTransactionValidated forwards the intra-block notification to Events.
+// Noop when events is nil or no subscribers exist.
+func (d *Dispatcher) OnTransactionValidated(txHashes []common.Hash) {
+	if d.events != nil {
+		d.events.OnTransactionValidated(txHashes)
+	}
 }
 
 // PublishOverlay sends the SharedDomains to in-process subscribers via Events.

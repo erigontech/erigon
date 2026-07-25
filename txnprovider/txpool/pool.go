@@ -2102,6 +2102,27 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 	return nil
 }
 
+// OnTransactionValidated removes txs that have been validated in a
+// DAG round (intra-block). This is the lightweight counterpart to OnNewBlock
+// which runs at slot boundaries. By removing validated txs the pool prevents
+// cancellation via replacement transactions.
+func (p *TxPool) OnTransactionValidated(txHashes []common.Hash) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	var toRemove []*TxnSlot
+	for _, h := range txHashes {
+		if mt, ok := p.byHash[string(h[:])]; ok {
+			toRemove = append(toRemove, mt.TxnSlot)
+		}
+	}
+	if len(toRemove) > 0 {
+		if err := p.removeMined(p.all, toRemove); err != nil {
+			p.logger.Warn("OnTransactionValidated: removeMined failed", "err", err)
+		}
+	}
+}
+
 // onSenderStateChange is the function that recalculates ephemeral fields of transactions and determines
 // which sub pool they will need to go to. Since this depends on other transactions from the same sender by with lower
 // nonces, and also affect other transactions from the same sender with higher nonce, it loops through all transactions

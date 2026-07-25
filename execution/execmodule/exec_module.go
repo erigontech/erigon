@@ -569,6 +569,17 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// Record tx hashes for flashblock prefix detection on subsequent updates.
 	if status == engine_types.ValidStatus && body != nil {
 		e.forkValidator.RecordFlashblockTxHashes(body.Transactions)
+
+		// Intra-block notification: tell subscribers these txs are validated.
+		// Noop when no subscribers (standard Ethereum). In flashblock mode
+		// a subscriber removes the txs from the txpool.
+		if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil && len(body.Transactions) > 0 {
+			txHashes := make([]common.Hash, len(body.Transactions))
+			for i, tx := range body.Transactions {
+				txHashes[i] = tx.Hash()
+			}
+			dispatcher.OnTransactionValidated(txHashes)
+		}
 	}
 
 	// Clear state cache on invalid block

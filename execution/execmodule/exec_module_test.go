@@ -1436,6 +1436,141 @@ func drainHeaders(t *testing.T, ch <-chan [][]byte, timeout time.Duration) {
 	require.Greater(t, count, 0, "should have received header notifications")
 }
 
+// TestFlashblockTxValidatedNotification exercises the full flashblock
+// notification path with varying transaction counts per block:
+//
+//	ValidateChain → Dispatcher.OnTransactionValidated → Events → subscriber
+//
+// This simulates the cocoon DAG flow where each round validates a different
+// number of txs. Five blocks are generated with tx counts [1, 3, 0, 2, 4].
+// After each ValidateChain call the test verifies the subscriber received
+// exactly the right hashes (or nothing for the empty block).
+func TestFlashblockTxValidatedNotification(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+	)
+	exec := m.ExecModule
+
+	txValidatedCh, unsub := m.Notifications.Events.AddTransactionValidatedSubscription()
+	defer unsub()
+
+	// Blocks with tx counts: 1, 3, 0, 2, 4 — exercises single, multi,
+	// empty, and varying sizes across successive ValidateChain calls.
+	txCounts := []int{1, 3, 0, 2, 4}
+	nonce := uint64(0)
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(txCounts), func(i int, b *blockgen.BlockGen) {
+		for range txCounts[i] {
+			tx, txErr := types.SignTx(
+				types.NewTransaction(nonce, senderAddr, uint256.NewInt(0), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+				*types.LatestSignerForChainID(nil),
+				privKey,
+			)
+			require.NoError(t, txErr)
+			b.AddTx(tx)
+			nonce++
+		}
+	})
+	require.NoError(t, err)
+
+	// Build per-block expected tx hashes.
+	expectedPerBlock := make([][]common.Hash, len(chainPack.Blocks))
+	for i, block := range chainPack.Blocks {
+		for _, tx := range block.Transactions() {
+			expectedPerBlock[i] = append(expectedPerBlock[i], tx.Hash())
+		}
+		require.Len(t, expectedPerBlock[i], txCounts[i], "block %d tx count mismatch", i)
+	}
+
+	// Insert + validate + FCU one block at a time. After each ValidateChain
+	// verify the subscriber got exactly the right hashes for that block.
+	for i, block := range chainPack.Blocks {
+		insertRes, iErr := insertBlocks(ctx, exec, []*types.Block{block})
+		require.NoError(t, iErr)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+
+		vr, vErr := validateChain(ctx, exec, block.Header())
+		require.NoError(t, vErr)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus,
+			"block %d validation failed: %s", i, vr.ValidationError)
+
+		if txCounts[i] == 0 {
+			// Empty block — no event should fire. Short non-blocking check.
+			select {
+			case hashes := <-txValidatedCh:
+				t.Fatalf("block %d: expected no event for empty block, got %d hashes", i, len(hashes))
+			default:
+			}
+		} else {
+			var got []common.Hash
+			timeout := time.NewTimer(2 * time.Second)
+			for len(got) < txCounts[i] {
+				select {
+				case hashes := <-txValidatedCh:
+					got = append(got, hashes...)
+				case <-timeout.C:
+					t.Fatalf("block %d: timed out waiting for OnTransactionValidated: got %d/%d",
+						i, len(got), txCounts[i])
+				}
+			}
+			timeout.Stop()
+			require.Equal(t, expectedPerBlock[i], got, "block %d: tx hashes mismatch", i)
+		}
+
+		// FCU to advance canonical head so next block can validate.
+		ur, uErr := updateForkChoice(ctx, exec, block.Header())
+		require.NoError(t, uErr)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, ur.Status)
+	}
+}
+
+// TestFlashblockTxValidatedNoSubscribers verifies that ValidateChain
+// doesn't panic or block when no subscribers exist for the tx-validated
+// event. This is the standard Ethereum case (noop path).
+func TestFlashblockTxValidatedNoSubscribers(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+	)
+
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+		tx, txErr := types.SignTx(
+			types.NewTransaction(0, senderAddr, uint256.NewInt(0), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, txErr)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+
+	// No subscribers — ValidateChain must not panic or block.
+	err = insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks)
+	require.NoError(t, err)
+}
+
 // TestAssembleBlockStateGasLimit verifies that the builder respects the EIP-8037
 // block validity invariant: gas_used = max(regular, state) <= gas_limit.
 //

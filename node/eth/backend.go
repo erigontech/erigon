@@ -1599,6 +1599,19 @@ func (s *Ethereum) TxpoolServer() txpoolproto.TxpoolServer {
 	return s.txPoolGrpcServer
 }
 
+// TxPool returns the underlying TxPool for in-process consumers that need
+// direct access (e.g. OnTransactionValidated for flashblock processing).
+func (s *Ethereum) TxPool() *txpool.TxPool {
+	return s.txPool
+}
+
+// BlockBuilderTxNotify returns the channel that fires when new transactions
+// are promoted to pending in the txpool. Used by flashblock/rollup drivers
+// to trigger on-demand block production.
+func (s *Ethereum) BlockBuilderTxNotify() <-chan struct{} {
+	return s.blockBuilderNotifyNewTxns
+}
+
 func (s *Ethereum) ExecutionModule() *execmodule.ExecModule {
 	return s.execModule
 }

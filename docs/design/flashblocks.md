@@ -248,26 +248,6 @@ not depend on or conflict with the rename.
 - New payload status: "accepted, awaiting more" (or equivalent signal
   that the block is not yet sealed)
 
-## Staging
-
-### Step 1 (this commit)
-
-- VersionedIO/VersionMap fields in SharedDomains
-- newPayload update semantics (same block number = update)
-- hasMore / partial completion signalling
-- Parallel executor used in both assembly and validation
-- Executor owns extend/restart/reset decisions
-
-### Step 2 (separate, depends on SD lifecycle analysis)
-
-- SD carry-forward from assembly into validation (skip re-execution
-  for locally-assembled blocks)
-- Requires tracing SD lifecycle through ValidateChain →
-  updateForkChoice → enqueueCommit → commitWorker to understand
-  what assumptions are baked in
-- Only viable if the exec module's generation chain can adopt an SD
-  created during assembly without flow disruption
-
 ## Not in scope
 
 - Multi-validator DAG transport (Phase 3)

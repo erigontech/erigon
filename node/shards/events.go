@@ -54,6 +54,7 @@ type Events struct {
 	hasLogSubscriptions         bool
 	receiptsSubscriptions       map[int]chan []*notifications.ReceiptNotification
 	hasReceiptSubscriptions     bool
+	txValidatedSubscriptions    map[int]chan []common.Hash
 	lock                        sync.RWMutex
 
 	// latestSD holds the most recently published SharedDomains from FCU.
@@ -73,6 +74,7 @@ func NewEvents() *Events {
 		newSnapshotSubscription:     map[int]chan struct{}{},
 		retirementStartSubscription: map[int]chan bool{},
 		retirementDoneSubscription:  map[int]chan struct{}{},
+		txValidatedSubscriptions:    map[int]chan []common.Hash{},
 	}
 }
 
@@ -292,6 +294,36 @@ func (e *Events) OnRetirementDone() {
 	defer e.lock.Unlock()
 	for _, ch := range e.retirementDoneSubscription {
 		common.PrioritizedSend(ch, struct{}{})
+	}
+}
+
+// AddTransactionValidatedSubscription subscribes to intra-block transaction
+// validation events. These fire after ValidateChain confirms txs are part of
+// the block being validated — distinct from the slot-boundary OnNewBlock.
+// By default no subscribers exist (noop); in flashblock processing a
+// subscriber removes validated txs from the txpool.
+func (e *Events) AddTransactionValidatedSubscription() (chan []common.Hash, func()) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	ch := make(chan []common.Hash, 8)
+	e.id++
+	id := e.id
+	e.txValidatedSubscriptions[id] = ch
+	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
+		delete(e.txValidatedSubscriptions, id)
+		close(ch)
+	}
+}
+
+// OnTransactionValidated fires the intra-block notification after
+// ValidateChain confirms txs are validated. Noop when no subscribers.
+func (e *Events) OnTransactionValidated(txHashes []common.Hash) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for _, ch := range e.txValidatedSubscriptions {
+		common.PrioritizedSend(ch, txHashes)
 	}
 }
 
