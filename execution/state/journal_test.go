@@ -87,7 +87,7 @@ func TestJournalDirtySymmetry(t *testing.T) {
 		covered[tc.kind] = true
 	}
 
-	for k := entryKind(0); k < kindEnd; k++ {
+	for k := range kindEnd {
 		if !covered[k] {
 			t.Errorf("kind %d has no constructor case — add one so its dirty accounting stays pinned", k)
 		}
