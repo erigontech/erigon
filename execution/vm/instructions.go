@@ -975,10 +975,9 @@ func opSwap16(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 
 func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	var (
-		value  = scope.Stack.pop()
-		offset = scope.Stack.pop()
-		size   = scope.Stack.pop()
-		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+		value        = scope.Stack.pop()
+		offset, size = scope.Stack.pop2uint64()
+		input        = scope.Memory.GetCopy(offset, size)
 	)
 	return execCreate(pc, evm, scope, value, input, nil)
 }
@@ -1087,10 +1086,12 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	temp := stack.pop()
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
-	addr, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
+	addr, value := stack.pop(), stack.pop()
+	inOffset, inSize := stack.pop2uint64()
+	retOffset, retSize := stack.pop2uint64()
 	toAddr := accounts.InternAddress(addr.Bytes20())
 	// Get the arguments from the memory.
-	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+	args := scope.Memory.GetPtr(inOffset, inSize)
 
 	if !value.IsZero() {
 		if evm.readOnly {
@@ -1116,7 +1117,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
 		ret = common.Copy(ret)
-		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
+		scope.Memory.Set(retOffset, retSize, ret)
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
@@ -1151,10 +1152,12 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	temp := stack.pop()
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
-	addr, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
+	addr, value := stack.pop(), stack.pop()
+	inOffset, inSize := stack.pop2uint64()
+	retOffset, retSize := stack.pop2uint64()
 	toAddr := accounts.InternAddress(addr.Bytes20())
 	// Get arguments from the memory.
-	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+	args := scope.Memory.GetPtr(inOffset, inSize)
 
 	if !value.IsZero() {
 		gas.Regular += params.CallStipend
@@ -1171,7 +1174,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
 		ret = common.Copy(ret)
-		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
+		scope.Memory.Set(retOffset, retSize, ret)
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
@@ -1200,10 +1203,12 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	temp := stack.pop()
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
-	addr, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
+	addr := stack.pop()
+	inOffset, inSize := stack.pop2uint64()
+	retOffset, retSize := stack.pop2uint64()
 	toAddr := accounts.InternAddress(addr.Bytes20())
 	// Get arguments from the memory.
-	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+	args := scope.Memory.GetPtr(inOffset, inSize)
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
@@ -1216,7 +1221,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
 		ret = common.Copy(ret)
-		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
+		scope.Memory.Set(retOffset, retSize, ret)
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
@@ -1245,10 +1250,12 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	temp := stack.pop()
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
-	addr, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
+	addr := stack.pop()
+	inOffset, inSize := stack.pop2uint64()
+	retOffset, retSize := stack.pop2uint64()
 	toAddr := accounts.InternAddress(addr.Bytes20())
 	// Get arguments from the memory.
-	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+	args := scope.Memory.GetPtr(inOffset, inSize)
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
@@ -1260,7 +1267,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	}
 	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
-		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
+		scope.Memory.Set(retOffset, retSize, ret)
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
