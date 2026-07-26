@@ -68,8 +68,8 @@ func (e *GenesisMismatchError) Error() string {
 		advice = fmt.Sprintf(" (try with flag --chain=%s)", specs[0].Name)
 	} else if len(specs) > 1 {
 		names := make([]string, len(specs))
-		for i, s := range specs {
-			names[i] = s.Name
+		for i := range specs {
+			names[i] = specs[i].Name
 		}
 		advice = fmt.Sprintf(" (try with flag --chain=<%s>)", strings.Join(names, "|"))
 	}

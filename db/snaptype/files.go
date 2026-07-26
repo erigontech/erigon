@@ -58,11 +58,12 @@ func IdxFileMask(from, to uint64, fType string) string {
 }
 
 func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
-	for _, f := range in {
+	for i := range in {
+		f := &in[i]
 		if f.Ext != expectExt { // filter out only compressed files
 			continue
 		}
-		out = append(out, f)
+		out = append(out, *f)
 	}
 
 	slices.SortFunc(out, func(a, b FileInfo) int {
