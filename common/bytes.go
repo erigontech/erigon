@@ -38,7 +38,7 @@ func ByteCount(b uint64) string {
 
 }
 
-var Copy = bytes.Clone
+func Copy(b []byte) []byte { return bytes.Clone(b) }
 
 func EnsureEnoughSize(in []byte, size int) []byte {
 	if cap(in) < size {
