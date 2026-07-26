@@ -111,13 +111,17 @@ func (a Address) Cmp(o Address) int {
 	return a.Value().Cmp(o.Value())
 }
 
-type StorageKey unique.Handle[common.Hash]
+// StorageKey is the slot key carried through the EVM and state machinery. This
+// experiment branch stores the hash by value instead of interning it, so NilKey
+// and ZeroKey are the same value: callers that distinguished "no key" from slot
+// zero must discriminate on the access path instead.
+type StorageKey common.Hash
 
 var ZeroKey = InternKey(common.Hash{})
 var NilKey = StorageKey{}
 
 func InternKey(k common.Hash) StorageKey {
-	return StorageKey(unique.Make(k))
+	return StorageKey(k)
 }
 
 func (k StorageKey) IsNil() bool {
@@ -125,10 +129,7 @@ func (k StorageKey) IsNil() bool {
 }
 
 func (k StorageKey) Value() common.Hash {
-	if k == NilKey {
-		return common.Hash{}
-	}
-	return unique.Handle[common.Hash](k).Value()
+	return common.Hash(k)
 }
 
 func (k StorageKey) String() string {

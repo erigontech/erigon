@@ -63,20 +63,17 @@ type CallContext struct {
 	input         []byte
 	Memory        Memory
 
-	// Intern memo for the top-of-stack key/address, keyed by the raw stack word
-	// it was built from. A nil handle means no memo — slot 0 is a legitimate
-	// key, so the source word cannot double as the validity flag.
-	// The handles hold pointers, so they must precede Stack; the source words
-	// are read only by storage and account opcodes, so they sit past Stack to
-	// keep the prefix every dispatch touches small.
-	cachedKey  accounts.StorageKey
+	// Intern memo for the top-of-stack address, keyed by the raw stack word it
+	// was built from. A nil handle means no memo. The handle holds a pointer, so
+	// it must precede Stack; the source word is read only by account opcodes, so
+	// it sits past Stack to keep the prefix every dispatch touches small.
 	cachedAddr accounts.Address
 
 	// Pins Stack at the offset it had before these fields existed. CallContext
 	// is pool-allocated page-aligned, so Stack.data's cache-line alignment
 	// follows this offset; shifting it moves benchmarks several percent either
 	// way with no logic change.
-	_ [24]byte
+	_ [32]byte
 
 	// Contract carries pointers, so it must precede the pointer-free Stack:
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
@@ -84,20 +81,13 @@ type CallContext struct {
 	Contract Contract
 	Stack    Stack
 
-	cachedKeySrc  uint256.Int
 	cachedAddrSrc uint256.Int
 }
 
-// peekStorageKey returns the top-of-stack value as an interned StorageKey,
-// memoized on the stack word itself so a repeated key skips unique.Make.
+// peekStorageKey returns the top-of-stack value as a StorageKey. The key is a
+// value, so there is nothing to memoize: it is just the word in big-endian.
 func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
-	top := ctx.Stack.peek()
-	if ctx.cachedKey != accounts.NilKey && *top == ctx.cachedKeySrc {
-		return ctx.cachedKey
-	}
-	ctx.cachedKeySrc = *top
-	ctx.cachedKey = accounts.InternKey(top.Bytes32())
-	return ctx.cachedKey
+	return accounts.InternKey(ctx.Stack.peek().Bytes32())
 }
 
 // peekAddress returns the top-of-stack value as an interned Address, memoized
@@ -137,9 +127,8 @@ func (c *CallContext) put() {
 	c.Memory.reset()
 	c.Stack.Reset()
 	c.stateGasSpill = 0
-	// Zero the handles to release their canonMap pins while the context is
-	// idle in the pool; unique.Handle values keep interned entries alive.
-	c.cachedKey = accounts.NilKey
+	// Zero the handle to release its canonMap pin while the context is idle in
+	// the pool; unique.Handle values keep interned entries alive.
 	c.cachedAddr = accounts.NilAddress
 	c.input = nil
 	c.Contract = Contract{}
