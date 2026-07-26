@@ -474,11 +474,8 @@ func (sdb *IntraBlockState) allocLog() *EvmLog {
 	return &buf[n]
 }
 
-// AllocLogFunc allocates a log entry with its Data field pre-allocated to
-// dataSize bytes (owned by the IBS — later served from an arena), invokes fill
-// to populate the consensus fields in place (fill copies into log.Data), then
-// runs the OnLog tracing hook. The pointer passed to fill is valid only until
-// the next log is added.
+// AllocLogFunc allocates a log entry, invokes `fill` to populate the consensus fields in place, then
+// runs the OnLog tracing hook.
 func (sdb *IntraBlockState) AllocLogFunc(dataSize int, fill func(log *EvmLog)) {
 	lp := sdb.allocLog()
 	if dataSize > 0 {
@@ -488,10 +485,7 @@ func (sdb *IntraBlockState) AllocLogFunc(dataSize int, fill func(log *EvmLog)) {
 	sdb.finishLog(lp)
 }
 
-// finishLog runs the trace print and OnLog hook after a log's fields are
-// populated. The hook takes a *types.Log, so it is materialized here (only when
-// a tracer is attached); that owned copy is also what a tracer may safely retain
-// past the callback. Fields a hook mutates are written back to the entry.
+// finishLog runs OnLog hook after a log's fields are populated
 func (sdb *IntraBlockState) finishLog(lp *EvmLog) {
 	if dbg.TraceLogs && (sdb.trace || dbg.TraceAccount(accounts.InternAddress(lp.Address).Handle())) {
 		var topics string
