@@ -2483,11 +2483,13 @@ type blockExecutor struct {
 	// readers gate on it; -1 means none flushed yet.
 	coinbaseFlushedUpTo int
 
-	// writeChanged marks a tx whose re-executed write-set differs from the
-	// incarnation its dependents were validated against (DEP_ORDER_VAL). Set at
-	// result arrival; consumed once the tx's new writes are flushed during
-	// validation, triggering in-place re-validation of its committed dependents.
-	writeChanged map[int]bool
+	// writeChangedPrev holds the PREVIOUS write-set of a tx whose re-executed
+	// write-set differs from the incarnation its dependents were validated
+	// against (DEP_ORDER_VAL). Set at result arrival; consumed once the tx's new
+	// writes are flushed during validation, when its committed dependents are
+	// re-validated. The old write-set is needed alongside the new one so a
+	// dependent that read a key the new incarnation DROPPED is still re-checked.
+	writeChangedPrev map[int]*state.WriteSet
 }
 
 // countReadyEarly returns how many exec-complete, not-yet-validated txs have all
@@ -2626,7 +2628,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		blockStateCache:     state.NewBlockStateCache(),
 		exhausted:           exhausted,
 		coinbaseFlushedUpTo: -1,
-		writeChanged:        map[int]bool{},
+		writeChangedPrev:    map[int]*state.WriteSet{},
 	}
 }
 
@@ -2904,16 +2906,27 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 	return nil, nil
 }
 
-// revalidateCommittedDependents re-checks every committed-but-not-published tx
-// after changedTx (whose write-set just changed via re-execution or a validation
-// failure) against the current versionMap, in place: a still-valid tx stays
-// committed so maxValidated does not regress; one that now fails is un-committed
-// and re-queued for re-execution, propagating the cascade to its dependents on
-// the next result. Published txs are excluded — final and already streamed to
-// commitment.
-func (be *blockExecutor) revalidateCommittedDependents(changedTx int) *blockResult {
+// revalidateCommittedDependents re-checks the committed-but-not-published
+// dependents of changedTx (whose write-set just changed via re-execution or a
+// validation failure) against the current versionMap, in place: a still-valid tx
+// stays committed so maxValidated does not regress; one that now fails is
+// un-committed and re-queued for re-execution, propagating the cascade to its
+// dependents on the next result. Published txs are excluded — final and already
+// streamed to commitment.
+//
+// A dependent is any committed tx that reads a key in changedTx's OLD ∪ NEW
+// write-set: NEW covers keys the new incarnation added or revalued; OLD covers
+// keys it dropped (a reader of a dropped key would otherwise be missed). This
+// keeps the ValidateVersion cost off txs changedTx can't affect. oldWrites is
+// nil for a validation failure (no prior incarnation to compare).
+func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites *state.WriteSet) *blockResult {
+	newWrites := be.blockIO.WriteSet(changedTx)
 	for tx := changedTx + 1; tx < len(be.tasks); tx++ {
 		if !be.validateTasks.checkComplete(tx) || be.publishTasks.checkComplete(tx) {
+			continue
+		}
+		rs := be.blockIO.ReadSet(tx)
+		if !state.HasReadDep(newWrites, rs) && !(oldWrites != nil && state.HasReadDep(oldWrites, rs)) {
 			continue
 		}
 		txResult := be.finalizedResults[tx]
@@ -3012,10 +3025,11 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			be.validateTasks.markComplete(tx)
 			be.finalizedResults[tx] = txResult
 			// This tx's writes (now flushed) differ from the incarnation its
-			// committed dependents were validated against — re-check them.
-			if be.writeChanged[tx] {
-				delete(be.writeChanged, tx)
-				if r := be.revalidateCommittedDependents(tx); r != nil {
+			// committed dependents were validated against — re-check them against
+			// both the old and new write-sets.
+			if prev, ok := be.writeChangedPrev[tx]; ok {
+				delete(be.writeChangedPrev, tx)
+				if r := be.revalidateCommittedDependents(tx, prev); r != nil {
 					return r, nil
 				}
 			}
@@ -3028,7 +3042,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx])
 		}
 		be.validateTasks.clearInProgress(tx)
-		if r := be.revalidateCommittedDependents(tx); r != nil {
+		if r := be.revalidateCommittedDependents(tx, nil); r != nil {
 			return r, nil
 		}
 		be.execTasks.clearComplete(tx)
@@ -3192,7 +3206,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if depOrderVal {
 					// Defer dependent re-validation until this tx's new writes are
 					// flushed during validation (they aren't in the versionMap yet).
-					be.writeChanged[tx] = true
+					// Keep the earliest prev write-set across repeated re-executions
+					// before a validation — that's the incarnation dependents last
+					// saw, whose dropped keys the new set must still be checked for.
+					if _, ok := be.writeChangedPrev[tx]; !ok {
+						be.writeChangedPrev[tx] = prevWrites
+					}
 				} else {
 					be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
 				}
