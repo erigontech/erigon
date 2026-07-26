@@ -359,6 +359,41 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 	return nil
 }
 
+// workerProbe (WORKER_PROBE=true) attributes each worker's wall between three
+// phases: Next() (waiting for / pulling the next task = hand-off + dispatch
+// starvation), RunTxTask (execution), results.Add (result delivery / backpressure).
+// Aggregated across all workers; read + reset per block by the np-phase log.
+var workerProbe = dbg.EnvBool("WORKER_PROBE", false)
+var workerNextNanos, workerExecNanos, workerAddNanos, workerNextCount atomic.Int64
+
+// WorkerProbeSnapshot returns the accumulated per-phase worker nanoseconds and
+// the Next() call count, then resets them.
+func WorkerProbeSnapshot() (nextNs, execNs, addNs, count int64) {
+	nextNs = workerNextNanos.Swap(0)
+	execNs = workerExecNanos.Swap(0)
+	addNs = workerAddNanos.Swap(0)
+	count = workerNextCount.Swap(0)
+	return
+}
+
+// foldReadMetrics folds this task's reads into the per-batch log aggregate and
+// the retained collector accumulator, then resets. Off the hot path (the result
+// is already queued). The collector hand-off is a non-blocking TrySend: on a full
+// buffer it is skipped and collectorAcc keeps growing (retried next task), so
+// execution never blocks and no count is lost. No-op when read metrics are off.
+func (rw *Worker) foldReadMetrics() {
+	if !dbg.KVReadLevelledMetrics || rw.rs == nil {
+		return
+	}
+	doms := rw.rs.Domains()
+	doms.LogMergeMetrics(rw.readMetrics)
+	rw.collectorAcc.Merge(rw.readMetrics)
+	rw.readMetrics.Reset()
+	if c := doms.Collector(); c != nil && c.TrySend(kvmetrics.SourceExec, rw.collectorAcc) {
+		rw.collectorAcc = kvmetrics.NewDomainMetrics()
+	}
+}
+
 func (rw *Worker) Run() (err error) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(rw.ctx, pprof.Labels("sub", "exec-worker")))
 	defer func() {
@@ -377,7 +412,35 @@ func (rw *Worker) Run() (err error) {
 		}
 	}()
 
-	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
+	if !workerProbe {
+		for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
+			result := func() (result *TxResult) {
+				defer func() {
+					if rec := recover(); rec != nil {
+						result = &TxResult{
+							Task: txTask,
+							Err:  fmt.Errorf("exec task panic: %s, %s", rec, dbg.Stack()),
+						}
+					}
+				}()
+				return rw.RunTxTask(txTask)
+			}()
+			if err := rw.results.Add(rw.ctx, result); err != nil {
+				return err
+			}
+			rw.foldReadMetrics()
+		}
+		return nil
+	}
+	for {
+		t0 := time.Now()
+		txTask, ok := rw.in.Next(rw.ctx)
+		workerNextNanos.Add(time.Since(t0).Nanoseconds())
+		workerNextCount.Add(1)
+		if !ok {
+			break
+		}
+		t1 := time.Now()
 		result := func() (result *TxResult) {
 			defer func() {
 				if rec := recover(); rec != nil {
@@ -389,24 +452,13 @@ func (rw *Worker) Run() (err error) {
 			}()
 			return rw.RunTxTask(txTask)
 		}()
+		workerExecNanos.Add(time.Since(t1).Nanoseconds())
+		t2 := time.Now()
 		if err := rw.results.Add(rw.ctx, result); err != nil {
 			return err
 		}
-		// Fold this task's reads into the per-batch log aggregate and the
-		// retained collector accumulator, then reset. Off the hot path (the
-		// result is already queued). The collector hand-off is a non-blocking
-		// TrySend: on a full buffer it is skipped and collectorAcc keeps growing
-		// (retried next task), so execution never blocks and no count is lost.
-		// Skipped entirely when read metrics are off.
-		if dbg.KVReadLevelledMetrics && rw.rs != nil {
-			doms := rw.rs.Domains()
-			doms.LogMergeMetrics(rw.readMetrics)
-			rw.collectorAcc.Merge(rw.readMetrics)
-			rw.readMetrics.Reset()
-			if c := doms.Collector(); c != nil && c.TrySend(kvmetrics.SourceExec, rw.collectorAcc) {
-				rw.collectorAcc = kvmetrics.NewDomainMetrics()
-			}
-		}
+		workerAddNanos.Add(time.Since(t2).Nanoseconds())
+		rw.foldReadMetrics()
 	}
 	// Worker is done: flush whatever the collector buffer was too full to take
 	// during the run. Blocking is fine here (off the hot path, at teardown), and

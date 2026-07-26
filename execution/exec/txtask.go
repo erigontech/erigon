@@ -977,6 +977,15 @@ func NewResultsQueue(channelLimit, heapLimit int) *ResultsQueue {
 
 func (q ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].Version().TxNum }
 
+// BufferedLen is the number of completed results buffered in the in-order heap
+// (produced by workers but not yet drained via PopNext). A large value means
+// workers are completing work that is stuck behind the in-order gate.
+func (q ResultsQueue) BufferedLen() int {
+	q.RLock()
+	defer q.RUnlock()
+	return q.results.Len()
+}
+
 type ResultsQueueIter struct {
 	*PriorityQueueIter[*TxResult]
 }

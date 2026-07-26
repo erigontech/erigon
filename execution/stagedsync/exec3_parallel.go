@@ -1003,6 +1003,12 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	// validate + blockStateCache apply + ApplyTxIndexes). Reset per completed block.
 	var npWait, npProc time.Duration
 	var npWaitStart, npProcStart time.Time
+	// Idle diagnosis: sample the worker in-queue depth (tasks queued but not
+	// taken) and the results heap depth (completed but stuck behind the in-order
+	// gate) once per loop iteration. Distinguishes dispatch starvation (in-queue
+	// ~0) from in-order-gate pileup (results heap deep).
+	var inQSum, rwsQSum, qSamples int64
+	var inQMax, rwsQMax int
 
 	for {
 		err := func() error {
@@ -1045,6 +1051,18 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			pendingCh = pe.execRequests
 		}
 
+		if logNpPhases {
+			il, rl := pe.in.Len(), pe.rws.BufferedLen()
+			inQSum += int64(il)
+			rwsQSum += int64(rl)
+			qSamples++
+			if il > inQMax {
+				inQMax = il
+			}
+			if rl > rwsQMax {
+				rwsQMax = rl
+			}
+		}
 		if logNpPhases {
 			npWaitStart = time.Now()
 		}
@@ -1148,6 +1166,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				}
 				if logNpPhases {
 					busy := time.Duration(blockExecutor.execCpuNanos.Load())
+					wkNextNs, wkExecNs, wkAddNs, wkNextCnt := exec.WorkerProbeSnapshot()
 					wall := npWait + npProc
 					var occ float64
 					if wall > 0 && pe.workerCount > 0 {
@@ -1164,7 +1183,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"stateWritesMs", blockExecutor.stateWritesNanos/1e6, "finalizeMs", blockExecutor.finalizeNanos/1e6,
 						"normalizeMs", blockExecutor.normalizeNanos/1e6, "scheduleMs", blockExecutor.scheduleNanos/1e6,
 						"blockEndApplyMs", fmt.Sprintf("%.1f", float64(blockResult.flushDur.Nanoseconds())/1e6),
-						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
+						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3),
+						"inQavg", inQSum/max(1, qSamples), "inQmax", inQMax,
+						"rwsQavg", rwsQSum/max(1, qSamples), "rwsQmax", rwsQMax,
+						"wkNextMs", wkNextNs/1e6, "wkExecMs", wkExecNs/1e6, "wkAddMs", wkAddNs/1e6, "wkNextCnt", wkNextCnt)
+					inQSum, rwsQSum, qSamples, inQMax, rwsQMax = 0, 0, 0, 0, 0
 					npWait, npProc = 0, 0
 				}
 				// Snapshot the just-completed block's changeset BEFORE sending the
