@@ -121,7 +121,7 @@ func captureOnOpcodes(t *testing.T, cfg *LogConfig, n int) []map[string]json.Raw
 	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
 
 	scope := &mockOpContext{}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
 	}
 
@@ -190,7 +190,7 @@ func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
 	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
 
 	scope := &mockOpContext{}
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
 	}
 	stream.WriteArrayEnd()
