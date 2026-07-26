@@ -2485,27 +2485,35 @@ func (be *blockExecutor) countReadyEarly() int {
 		if !be.execTasks.checkComplete(tx) || be.validateTasks.checkComplete(tx) {
 			continue
 		}
-		rs := be.blockIO.ReadSet(tx)
-		ready := true
-		rs.RangeHeaders(func(_ state.AccountPath, hdr state.ReadHeader) bool {
-			if hdr.Source != state.MapRead {
-				return true
-			}
-			p := hdr.Version.TxIndex
-			if p < 0 || p >= tx {
-				return true
-			}
-			if !be.validateTasks.checkComplete(p) {
-				ready = false
-				return false
-			}
-			return true
-		})
-		if ready {
+		if be.depsValidated(tx) {
 			n++
 		}
 	}
 	return n
+}
+
+// depsValidated reports whether every versionMap (MapRead) predecessor tx reads
+// has already been validated — i.e. its read-dependencies are settled and it can
+// be validated out of contiguous order. Reads sourced from anywhere other than
+// the versionMap, or naming a predecessor outside [0, tx), impose no constraint.
+func (be *blockExecutor) depsValidated(tx int) bool {
+	rs := be.blockIO.ReadSet(tx)
+	ready := true
+	rs.RangeHeaders(func(_ state.AccountPath, hdr state.ReadHeader) bool {
+		if hdr.Source != state.MapRead {
+			return true
+		}
+		p := hdr.Version.TxIndex
+		if p < 0 || p >= tx {
+			return true
+		}
+		if !be.validateTasks.checkComplete(p) {
+			ready = false
+			return false
+		}
+		return true
+	})
+	return ready
 }
 
 // sendResult fans out an applyResult to both the apply loop and

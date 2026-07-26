@@ -76,6 +76,35 @@ func (m *execStatusList) takeNextPending() int {
 	return x
 }
 
+// takePendingWhere removes and returns every pending tx satisfying pred, in
+// ascending order, marking each in-progress. Unlike takeNextPending (min-only,
+// contiguous), this lets validation select a non-contiguous ready subset for
+// dependency-ordered validation. Returns nil when nothing matches.
+func (m *execStatusList) takePendingWhere(pred func(tx int) bool) []int {
+	if len(m.pending) == 0 {
+		return nil
+	}
+	var taken []int
+	kept := m.pending[:0]
+	for _, tx := range m.pending {
+		if pred(tx) {
+			taken = append(taken, tx)
+			m.ensureLen(tx)
+			if !m.inProgress[tx] {
+				m.inProgress[tx] = true
+				m.inProgressCnt++
+			}
+			if tx < m.minInProgressHint {
+				m.minInProgressHint = tx
+			}
+		} else {
+			kept = append(kept, tx)
+		}
+	}
+	m.pending = kept
+	return taken
+}
+
 func (m execStatusList) maxComplete() int {
 	return m.completeUpTo - 1
 }
