@@ -19,7 +19,9 @@ package snapshotauth
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/sha256"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -487,16 +489,11 @@ func TestVerify_ParentDepthCapZero(t *testing.T) {
 }
 
 // TestVerify_LeafNotSelfIssued documents the responsibility boundary:
-// snapshotauth's Verify checks signature + chain-integrity
-// (parent.Audience == child.Issuer) but does NOT enforce that a leaf is
-// self-issued (issuer == audience). Content UCANs in the V2 manifest
-// flow are minted self-issued by MintContentUCAN, but that invariant
-// is established at mint time, not policed by the chain verifier — any
-// consumer that interprets a leaf's audience as the publisher identity
-// must verify self-issue itself.
-//
-// Pins current behavior. If a future change adds self-issue enforcement
-// inside snapshotauth Verify, update this test to assert rejection.
+// for non-Content leaves (no chain.v2:hash: cap) snapshotauth does NOT
+// enforce issuer == audience. The check kicks in only when the leaf
+// carries a content-hash cap — see TestVerify_ContentUCANLeaf_*
+// below. Any consumer that interprets a non-Content leaf's audience as
+// the publisher identity must verify self-issue itself.
 func TestVerify_LeafNotSelfIssued(t *testing.T) {
 	rootKey := newKey(t)
 	operatorA := newKey(t)
@@ -520,6 +517,64 @@ func TestVerify_LeafNotSelfIssued(t *testing.T) {
 	require.NoError(t, err, "snapshotauth does NOT enforce leaf self-issue; this is a caller invariant")
 	require.NotEqual(t, res.Leaf.Issuer, res.Leaf.Audience,
 		"leaf is not self-issued — caller must check this if it relies on it")
+}
+
+// TestVerify_ContentUCANLeaf_NotSelfIssued_Rejected pins the
+// defense-in-depth rule: a leaf that carries a chain.v2:hash:<hex> cap
+// declares itself a Content UCAN. Content UCANs must be self-issued by
+// contract (MintContentUCAN). If a chain reaches Verify with a
+// content-hash leaf whose issuer != audience, Verify must reject —
+// otherwise a consumer that reads leaf.Audience to derive publisher
+// identity could be tricked by a crafted UCAN.
+func TestVerify_ContentUCANLeaf_NotSelfIssued_Rejected(t *testing.T) {
+	rootKey := newKey(t)
+	operatorA := newKey(t)
+	operatorB := newKey(t)
+
+	contentCap := ContentHashCapability(strings.Repeat("cd", sha256.Size))
+
+	// Authority: root → operatorA. Includes the exact content-hash cap
+	// so subset attenuation would pass (attacker's crafted chain would
+	// need this shape to reach the self-issue check at all).
+	authority := mustSignedDelegation(t, rootKey, operatorA,
+		[]string{string(CapAdvertise), string(CapDelegate), contentCap}, 2, nil)
+	authorityEnc := mustEncoded(t, authority)
+
+	// Leaf: issued by operatorA, audience = operatorB (NOT self-issued),
+	// carries the content-hash cap.
+	leafDel := mustSignedDelegation(t, operatorA, operatorB,
+		[]string{contentCap}, 0, authorityEnc)
+	leafEnc := mustEncoded(t, leafDel)
+
+	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, rootKey)}})
+	_, err := v.Verify(leafEnc, compressed(t, operatorB),
+		nil, time.Now(), parentResolver(authorityEnc))
+	require.Error(t, err, "Content UCAN leaf with issuer != audience must be rejected")
+	require.Contains(t, err.Error(), "self")
+}
+
+// TestVerify_ContentUCANLeaf_SelfIssued_Accepted is the regression
+// counterpart to the rejection test: a properly-minted Content UCAN
+// (self-issued) must continue to Verify.
+func TestVerify_ContentUCANLeaf_SelfIssued_Accepted(t *testing.T) {
+	rootKey := newKey(t)
+	operator := newKey(t)
+
+	contentCap := ContentHashCapability(strings.Repeat("ef", sha256.Size))
+
+	authority := mustSignedDelegation(t, rootKey, operator,
+		[]string{string(CapAdvertise), string(CapDelegate), contentCap}, 2, nil)
+	authorityEnc := mustEncoded(t, authority)
+
+	// Leaf: issuer == audience == operator (self-issued).
+	leafDel := mustSignedDelegation(t, operator, operator,
+		[]string{contentCap}, 0, authorityEnc)
+	leafEnc := mustEncoded(t, leafDel)
+
+	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, rootKey)}})
+	_, err := v.Verify(leafEnc, compressed(t, operator),
+		nil, time.Now(), parentResolver(authorityEnc))
+	require.NoError(t, err, "self-issued Content UCAN must Verify")
 }
 
 func mustSignedDelegation(t *testing.T, issuerKey, audienceKey *ecdsa.PrivateKey, caps []string, depth uint16, parent []byte) *Delegation {

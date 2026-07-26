@@ -213,6 +213,15 @@ func (v *Verifier) Verify(leafCBOR []byte, audience []byte, requireCaps []string
 		}
 	}
 
+	// Defense-in-depth: a leaf carrying a chain.v2:hash: cap declares
+	// itself a Content UCAN, which by contract is self-issued
+	// (MintContentUCAN). A consumer that reads leaf.Audience to derive
+	// publisher identity would be fooled by a crafted UCAN with
+	// issuer != audience, so reject that shape here.
+	if leafHasContentHashCap(leaf) && !equalBytes(leaf.Issuer, leaf.Audience) {
+		return nil, fmt.Errorf("Content UCAN leaf must be self-issued (issuer == audience)")
+	}
+
 	return &VerifyResult{
 		Leaf:        leaf,
 		Chain:       chain,
@@ -271,6 +280,15 @@ func capabilitiesAreSubset(child, parent []string) bool {
 func hasCapability(caps []string, want string) bool {
 	for _, c := range caps {
 		if c == want {
+			return true
+		}
+	}
+	return false
+}
+
+func leafHasContentHashCap(d *Delegation) bool {
+	for _, c := range d.Capabilities {
+		if _, ok := ParseContentHashCapability(c); ok {
 			return true
 		}
 	}
