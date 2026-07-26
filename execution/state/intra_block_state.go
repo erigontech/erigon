@@ -161,7 +161,7 @@ type IntraBlockState struct {
 
 	txIndex  int
 	blockNum uint64
-	logs     [][]EvmLog
+	logs     []types.Logs
 
 	// Per-transaction access list
 	accessList accessList
@@ -239,7 +239,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		stateObjects:      map[accounts.Address]*stateObject{},
 		stateObjectsDirty: map[accounts.Address]struct{}{},
 		nilAccounts:       map[accounts.Address]struct{}{},
-		logs:              [][]EvmLog{},
+		logs:              []types.Logs{},
 		journal:           newJournal(),
 		accessList:        accessList{addresses: make(map[accounts.Address]int)},
 		transientStorage:  newTransientStorage(),
@@ -386,8 +386,7 @@ func (sdb *IntraBlockState) Reset() {
 	clear(sdb.stateObjects)
 	clear(sdb.stateObjectsDirty)
 	for i := range sdb.logs {
-		clear(sdb.logs[i]) // free pointers
-		sdb.logs[i] = sdb.logs[i][:0]
+		sdb.logs[i] = sdb.logs[i][:0] // keep entries for reuse (0-alloc experiment; unsafe with shared receipts)
 	}
 	clear(sdb.balanceInc)
 	sdb.journal.Reset()
@@ -448,13 +447,11 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 	}
 }
 
-func (sdb *IntraBlockState) allocLog() *EvmLog {
+func (sdb *IntraBlockState) allocLog(numTopics, dataSize int) *types.Log {
 	sdb.journal.addLogChange(sdb.txIndex)
 	ti := sdb.txIndex + 1
 	if len(sdb.logs) <= ti { // no slot for this tx yet
 		if ti < cap(sdb.logs) {
-			// Fits in capacity: reuse the buffers a reverted tx left behind in the
-			// backing array (they're empty) instead of dropping them via append(nil).
 			sdb.logs = sdb.logs[:ti+1]
 		} else {
 			for len(sdb.logs) <= ti {
@@ -466,30 +463,49 @@ func (sdb *IntraBlockState) allocLog() *EvmLog {
 	n := len(buf)
 	if n < cap(buf) {
 		buf = buf[:n+1]
-		buf[n] = EvmLog{} // clear a reused slot (may hold a reverted entry)
 	} else {
-		buf = append(buf, EvmLog{})
+		buf = append(buf, nil)
+	}
+	lp := buf[n] // a prior block's entry to reuse, or nil for a fresh slot
+	if lp == nil {
+		lp = &types.Log{}
+		buf[n] = lp
 	}
 	sdb.logs[ti] = buf
-	return &buf[n]
-}
 
-// AllocLogFunc allocates a log entry, invokes `fill` to populate the consensus fields in place, then
-// runs the OnLog tracing hook.
-func (sdb *IntraBlockState) AllocLogFunc(dataSize int, fill func(log *EvmLog)) {
-	lp := sdb.allocLog()
-	if dataSize > 0 {
+	// Re-slice a reused entry's backing if it fits, else allocate. A fresh entry
+	// has nil Topics/Data, so both fall to make.
+	if cap(lp.Topics) >= numTopics {
+		lp.Topics = lp.Topics[:numTopics]
+	} else {
+		lp.Topics = make([]common.Hash, numTopics)
+	}
+	if cap(lp.Data) >= dataSize {
+		lp.Data = lp.Data[:dataSize]
+	} else {
 		lp.Data = make(hexutil.Bytes, dataSize)
 	}
-	fill(lp)
-	sdb.finishLog(lp)
+	lp.Removed = false // Address set by caller
+	// lp.TxHash, lp.BlockHash, lp.Removed = common.Hash{}, common.Hash{}, false // Address set by caller
+	lp.TxIndex = hexutil.Uint(sdb.txIndex)
+	lp.BlockNumber = hexutil.Uint64(sdb.blockNum)
+	return lp
 }
 
-// finishLog runs OnLog hook after a log's fields are populated
-func (sdb *IntraBlockState) finishLog(lp *EvmLog) {
+func (sdb *IntraBlockState) AllocLog(numTopics, dataSize int) *types.Log {
+	return sdb.allocLog(numTopics, dataSize)
+}
+
+func (sdb *IntraBlockState) NotifyLog(lp *types.Log) {
+	sdb.notifyLog(lp)
+}
+
+// notifyLog runs OnLog hook after a log's fields are populated. lp is a fresh,
+// owned *types.Log, so the hook can retain it directly.
+func (sdb *IntraBlockState) notifyLog(lp *types.Log) {
 	if dbg.TraceLogs && (sdb.trace || dbg.TraceAccount(accounts.InternAddress(lp.Address).Handle())) {
 		var topics string
-		for i := 0; i < int(lp.NumTopics); i++ {
+		for i := 0; i < 4 && i < len(lp.Topics); i++ {
 			topics += "[" + hex.EncodeToString(lp.Topics[i][:]) + "]"
 		}
 		if topics == "" {
@@ -498,32 +514,34 @@ func (sdb *IntraBlockState) finishLog(lp *EvmLog) {
 		fmt.Printf("%d (%d.%d) Log: Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, lp.Address, topics, lp.Data)
 	}
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
-		tl := lp.toTypesLog(sdb.blockNum, uint(sdb.txIndex))
-		sdb.tracingHooks.OnLog(&tl)
-		lp.Address = tl.Address
-		lp.setTopics(tl.Topics)
-		lp.Data = tl.Data
-		lp.Removed = tl.Removed
+		// lp is a reused buffer entry, so hand the hook an owned copy it can
+		// safely retain, then keep any mutation it made.
+		cp := lp.Copy()
+		sdb.tracingHooks.OnLog(cp)
+		*lp = *cp
 	}
 }
 
-func (sdb *IntraBlockState) AddLog(log types.Log) {
-	lp := sdb.allocLog()
+func (sdb *IntraBlockState) AddLog(log *types.Log) {
+	lp := sdb.allocLog(0, 0)
 	lp.Address = log.Address
-	lp.setTopics(log.Topics)
+	lp.Topics = log.Topics
 	lp.Data = log.Data
 	lp.Removed = log.Removed
-	sdb.finishLog(lp)
+	sdb.notifyLog(lp)
 }
 
+// GetLogs deep-copies the tx's logs (types.Logs.Copy batches Topics/Data via
+// CopyTo), so the result is safe to hold after the emit buffer is reused.
 func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs {
 	if txIndex+1 >= len(sdb.logs) {
 		return nil
 	}
-	logs, backing := MaterializeLogs(sdb.logs[txIndex+1], blockNumber, uint(txIndex))
-	for i := range backing {
-		backing[i].TxHash = txnHash
-		backing[i].BlockHash = blockHash
+	logs := sdb.logs[txIndex+1].Copy()
+	for _, l := range logs {
+		l.TxHash = txnHash
+		l.BlockHash = blockHash
+		l.BlockNumber = hexutil.Uint64(blockNumber)
 	}
 	return logs
 }
@@ -534,63 +552,26 @@ func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 	if txIndex+1 >= len(sdb.logs) {
 		return nil
 	}
-	logs, _ := MaterializeLogs(sdb.logs[txIndex+1], sdb.blockNum, uint(txIndex))
-	return logs
-}
-
-// GetRawEvmLogs returns a detached copy of the tx's EVM-internal log entries,
-// deferring the (allocating) materialization into types.Log to the receipt
-// layer (see MaterializeLogs). The copy is safe to hold past Reset because
-// EvmLog.Data is owned and its topics are inline.
-func (sdb *IntraBlockState) GetRawEvmLogs(txIndex int) []EvmLog {
-	if txIndex+1 >= len(sdb.logs) {
-		return nil
-	}
-	src := sdb.logs[txIndex+1]
-	if len(src) == 0 {
-		return nil
-	}
-	out := make([]EvmLog, len(src))
-	copy(out, src)
-	return out
+	return sdb.logs[txIndex+1].Copy()
 }
 
 func (sdb *IntraBlockState) Logs() types.Logs {
-	var total, totalTopics int
+	var all types.Logs
 	for _, lgs := range sdb.logs {
-		total += len(lgs)
-		for i := range lgs {
-			totalTopics += int(lgs[i].NumTopics)
-		}
+		all = append(all, lgs...)
 	}
-	if total == 0 {
-		return nil
+	return all.Copy()
+}
+
+// LogsRootHash returns the RLP hash of the tx's logs. Unlike Logs() it reads the
+// buffer entries directly (only their pointers are gathered, no deep copy),
+// which is safe because RlpHash only reads them.
+func (sdb *IntraBlockState) LogsRootHash() common.Hash {
+	var all types.Logs
+	for _, lgs := range sdb.logs {
+		all = append(all, lgs...)
 	}
-	topicsBuf := make([]common.Hash, totalTopics)
-	backing := make([]types.Log, total)
-	logs := make(types.Logs, total)
-	li, off := 0, 0
-	for ti := range sdb.logs {
-		lgs := sdb.logs[ti]
-		for j := range lgs {
-			s := &lgs[j]
-			n := int(s.NumTopics)
-			t := topicsBuf[off : off+n : off+n]
-			copy(t, s.Topics[:n])
-			off += n
-			backing[li] = types.Log{
-				Address:     s.Address,
-				Topics:      t,
-				Data:        s.Data,
-				BlockNumber: hexutil.Uint64(sdb.blockNum),
-				TxIndex:     hexutil.Uint(ti - 1), // slot ti holds tx ti-1's logs
-				Removed:     s.Removed,
-			}
-			logs[li] = &backing[li]
-			li++
-		}
-	}
-	return logs
+	return types.RlpHash(all)
 }
 
 // AddRefund adds gas to the refund counter

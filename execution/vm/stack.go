@@ -72,6 +72,11 @@ func (st *Stack) popRef() *uint256.Int {
 	return &st.data[st.top]
 }
 
+func (st *Stack) popHash() [32]byte {
+	st.top--
+	return st.data[st.top].Bytes32()
+}
+
 func (st *Stack) Cap() int {
 	return stackLimit
 }

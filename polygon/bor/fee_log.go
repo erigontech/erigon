@@ -56,7 +56,7 @@ func addTransferLog(
 	output2.WriteToSlice(data[128:])
 
 	// add transfer log
-	state.AddLog(types.Log{
+	state.AddLog(&types.Log{
 		Address: feeAddress,
 		Topics: []common.Hash{
 			eventSig,

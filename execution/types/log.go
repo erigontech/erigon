@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -255,11 +254,25 @@ func (logs Logs) Copy() Logs {
 	if logs == nil {
 		return nil
 	}
-	logsCopy := make(Logs, len(logs))
-	for i, log := range logs {
-		logsCopy[i] = log.Copy()
+	var nt, nd int
+	for _, l := range logs {
+		nt += len(l.Topics)
+		nd += len(l.Data)
 	}
-	return logsCopy
+	topicsBuf := make([]common.Hash, nt)
+	dataBuf := make([]byte, nd)
+	backing := make([]Log, len(logs))
+	out := make(Logs, len(logs))
+	to, do := 0, 0
+	for i := range logs {
+		lt, ld := len(logs[i].Topics), len(logs[i].Data)
+		backing[i].Topics = topicsBuf[to : to+lt : to+lt]
+		backing[i].Data = dataBuf[do : do+ld : do+ld]
+		to, do = to+lt, do+ld
+		logs[i].CopyTo(&backing[i])
+		out[i] = &backing[i]
+	}
+	return out
 }
 
 // ToRPCTransactionLog converts types.Log in a RPCLog.
@@ -395,17 +408,20 @@ func (l *Log) Copy() *Log {
 	if l == nil {
 		return nil
 	}
-	return &Log{
-		Address:     l.Address,
-		Topics:      slices.Clone(l.Topics),
-		Data:        slices.Clone(l.Data),
-		BlockNumber: l.BlockNumber,
-		TxHash:      l.TxHash,
-		TxIndex:     l.TxIndex,
-		BlockHash:   l.BlockHash,
-		Index:       l.Index,
-		Removed:     l.Removed,
+	dst := &Log{
+		Topics: make([]common.Hash, len(l.Topics)),
+		Data:   make(hexutil.Bytes, len(l.Data)),
 	}
+	l.CopyTo(dst)
+	return dst
+}
+
+// CopyTo
+func (l *Log) CopyTo(dst *Log) {
+	t, d := dst.Topics, dst.Data
+	*dst = *l
+	dst.Topics = t[:copy(t, l.Topics)]
+	dst.Data = d[:copy(d, l.Data)]
 }
 
 // LogForStorage is a wrapper around a Log that flattens and parses the entire content of
