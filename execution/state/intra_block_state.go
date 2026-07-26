@@ -379,39 +379,40 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
 func (sdb *IntraBlockState) Reset() {
-	//clear(sdb.nilAccounts)
-	//for _, so := range sdb.stateObjects {
-	//	so.release()
-	//}
-	//clear(sdb.stateObjects)
-	//clear(sdb.stateObjectsDirty)
+	clear(sdb.nilAccounts)
+	for _, so := range sdb.stateObjects {
+		so.release()
+	}
+	clear(sdb.stateObjects)
+	clear(sdb.stateObjectsDirty)
 	for i := range sdb.logs {
 		sdb.logs[i] = sdb.logs[i][:0] // keep entries for reuse (0-alloc experiment; unsafe with shared receipts)
 	}
-	//clear(sdb.balanceInc)
+	clear(sdb.balanceInc)
 	sdb.journal.Reset()
-	//sdb.revisions = sdb.revisions.put()
+	sdb.revisions = sdb.revisions.put()
 	sdb.refund = uint64(0)
 	sdb.txIndex = 0
 	sdb.sdProbeEpoch++
-	//sdb.accessList.Reset()
-	//clear(sdb.transientStorage)
+	sdb.logSize = 0
+	sdb.accessList.Reset()
+	clear(sdb.transientStorage)
 	sdb.versionMap = nil
 	// noMaterialize is meaningful only alongside a versionMap; clear it with the
 	// map so a reused IBS can't run unversioned with the stateObject cache still
 	// suppressed (which would silently drop writes). The versioned worker re-sets
 	// both right after Reset; the block assembler never calls Reset mid-block.
 	sdb.noMaterialize = false
-	//clear(sdb.committedBase)
+	clear(sdb.committedBase)
 	// Read side rebinds to a fresh empty set: VersionedReads() at end of
 	// tx hands the per-path maps to result.TxIn, so rebinding leaves the
 	// handed-over maps intact while the next tx lazily reallocs.
-	//sdb.versionedReads = ReadSet{}
+	sdb.versionedReads = ReadSet{}
 	// Write side: VersionedWrites() returns Cloned snapshots, so the
 	// originals in sdb.versionedWrites are no longer referenced after the
 	// boundary call.  Walk the per-path maps and return every VW to its
 	// typed pool before resetting.
-	//sdb.versionedWrites.ReleaseAndReset()
+	sdb.versionedWrites.ReleaseAndReset()
 	sdb.recordAccess = false
 	sdb.accountReadDuration = 0
 	sdb.accountReadCount = 0
