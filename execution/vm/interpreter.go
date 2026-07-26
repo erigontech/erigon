@@ -63,49 +63,53 @@ type CallContext struct {
 	input         []byte
 	Memory        Memory
 
-	// Opcode-scoped key/address intern cache. cacheGen is incremented once per
-	// opcode dispatch in the interpreter loop; cachedKeyGen/cachedAddrGen hold
-	// the generation at which the entry was populated. An entry is valid only
-	// when its gen equals cacheGen, giving the gas phase and execute phase of
-	// the same opcode a shared interned value without a second unique.Make call.
-	// Placed before Stack so these fields stay in L1D rather than being pushed
-	// out by Stack.data (32 KB).
-	cacheGen      uint64
-	cachedKeyGen  uint64
-	cachedAddrGen uint64
-	cachedKey     accounts.StorageKey
-	cachedAddr    accounts.Address
+	// Intern memo for the top-of-stack key/address, keyed by the raw stack word
+	// it was built from. A nil handle means no memo — slot 0 is a legitimate
+	// key, so the source word cannot double as the validity flag.
+	// The handles hold pointers, so they must precede Stack; the source words
+	// are read only by storage and account opcodes, so they sit past Stack to
+	// keep the prefix every dispatch touches small.
+	cachedKey  accounts.StorageKey
+	cachedAddr accounts.Address
+
+	// Pins Stack at the offset it had before these fields existed. CallContext
+	// is pool-allocated page-aligned, so Stack.data's cache-line alignment
+	// follows this offset; shifting it moves benchmarks several percent either
+	// way with no logic change.
+	_ [24]byte
 
 	// Contract carries pointers, so it must precede the pointer-free Stack:
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
 	// Stack.data is 32 KB it can skip entirely.
 	Contract Contract
 	Stack    Stack
+
+	cachedKeySrc  uint256.Int
+	cachedAddrSrc uint256.Int
 }
 
-// peekStorageKey returns the top-of-stack value as an interned StorageKey.
-// The result is cached for the lifetime of one opcode dispatch (gas phase +
-// execute phase share the same cacheGen), so unique.Make is called at most
-// once per opcode. Callers must invoke this before any stack mutation
-// (pop/push/swap) within the same dispatch — the cache is keyed by generation
-// only and will not detect a changed stack top within the same opcode.
+// peekStorageKey returns the top-of-stack value as an interned StorageKey,
+// memoized on the stack word itself so a repeated key skips unique.Make.
 func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
-	if ctx.cachedKeyGen == ctx.cacheGen {
+	top := ctx.Stack.peek()
+	if ctx.cachedKey != accounts.NilKey && *top == ctx.cachedKeySrc {
 		return ctx.cachedKey
 	}
-	ctx.cachedKey = accounts.InternKey(ctx.Stack.peek().Bytes32())
-	ctx.cachedKeyGen = ctx.cacheGen
+	ctx.cachedKeySrc = *top
+	ctx.cachedKey = accounts.InternKey(top.Bytes32())
 	return ctx.cachedKey
 }
 
-// peekAddress returns the top-of-stack value as an interned Address.
-// Cached like peekStorageKey; same constraint: call before any stack mutation.
+// peekAddress returns the top-of-stack value as an interned Address, memoized
+// like peekStorageKey. Keyed on the whole word rather than its low 20 bytes,
+// so two words sharing an address miss instead of hitting.
 func (ctx *CallContext) peekAddress() accounts.Address {
-	if ctx.cachedAddrGen == ctx.cacheGen {
+	top := ctx.Stack.peek()
+	if ctx.cachedAddr != accounts.NilAddress && *top == ctx.cachedAddrSrc {
 		return ctx.cachedAddr
 	}
-	ctx.cachedAddr = accounts.InternAddress(ctx.Stack.peek().Bytes20())
-	ctx.cachedAddrGen = ctx.cacheGen
+	ctx.cachedAddrSrc = *top
+	ctx.cachedAddr = accounts.InternAddress(top.Bytes20())
 	return ctx.cachedAddr
 }
 
@@ -132,12 +136,7 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 func (c *CallContext) put() {
 	c.Memory.reset()
 	c.Stack.Reset()
-	c.cacheGen = 0
 	c.stateGasSpill = 0
-	// Use sentinel values so that a peek call before the first cacheGen++ is
-	// always a miss rather than returning a stale handle from a prior use.
-	c.cachedKeyGen = ^uint64(0)
-	c.cachedAddrGen = ^uint64(0)
 	// Zero the handles to release their canonMap pins while the context is
 	// idle in the pool; unique.Handle values keep interned entries alive.
 	c.cachedKey = accounts.NilKey
@@ -464,7 +463,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	_ = jt[0] // nil-check the jump table out of the loop
 
 	for {
-		callContext.cacheGen++
 		if debug {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas

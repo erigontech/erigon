@@ -168,6 +168,70 @@ func BenchmarkTransientStorage(b *testing.B) {
 	}
 }
 
+// BenchmarkStorageKeyReuse measures storage ops that revisit the same slot key,
+// which is what the top-of-stack intern memo can serve without a unique.Make:
+// hot-slot re-reads, and the SLOAD-then-SSTORE pair of a balance update.
+// The alternating arm is the memo's worst case — every peek sees a new key.
+func BenchmarkStorageKeyReuse(b *testing.B) {
+	const n = 100
+
+	b.Run("sload-same-slot", func(b *testing.B) {
+		p, lbl := program.New().Jumpdest()
+		for range n {
+			p.Push(7).Op(vm.SLOAD, vm.POP)
+		}
+		code := p.Jump(lbl).Bytes()
+
+		b.ReportAllocs()
+		cfg, statedb := benchConfig(b, 100_000_000)
+		deployContract(statedb, addrContract, code)
+		setStorage(statedb, addrContract, map[uint256.Int]uint256.Int{*uint256.NewInt(7): *uint256.NewInt(0xDEAD)})
+		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+		for b.Loop() {
+			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+		}
+	})
+
+	b.Run("sload-alternating-slots", func(b *testing.B) {
+		p, lbl := program.New().Jumpdest()
+		for i := range n {
+			p.Push(7+i%2).Op(vm.SLOAD, vm.POP)
+		}
+		code := p.Jump(lbl).Bytes()
+
+		b.ReportAllocs()
+		cfg, statedb := benchConfig(b, 100_000_000)
+		deployContract(statedb, addrContract, code)
+		setStorage(statedb, addrContract, map[uint256.Int]uint256.Int{
+			*uint256.NewInt(7): *uint256.NewInt(0xDEAD),
+			*uint256.NewInt(8): *uint256.NewInt(0xBEEF),
+		})
+		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+		for b.Loop() {
+			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+		}
+	})
+
+	// SLOAD k then SSTORE k with the value unchanged: the read-modify-write
+	// shape of an ERC-20 balance update, minus the arithmetic.
+	b.Run("sload-sstore-same-slot", func(b *testing.B) {
+		p, lbl := program.New().Jumpdest()
+		for range n {
+			p.Push(7).Op(vm.SLOAD).Push(7).Op(vm.SSTORE)
+		}
+		code := p.Jump(lbl).Bytes()
+
+		b.ReportAllocs()
+		cfg, statedb := benchConfig(b, 100_000_000)
+		deployContract(statedb, addrContract, code)
+		setStorage(statedb, addrContract, map[uint256.Int]uint256.Int{*uint256.NewInt(7): *uint256.NewInt(0xDEAD)})
+		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+		for b.Loop() {
+			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+		}
+	})
+}
+
 // BenchmarkStorageDiversity measures many unique cold slot accesses (simulates balances mapping).
 // Uses PushSnapshot/RevertToSnapshot to ensure slots are cold each iteration.
 func BenchmarkStorageDiversity(b *testing.B) {
