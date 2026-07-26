@@ -867,6 +867,22 @@ func TestTransactionResolver_CreatedContract(t *testing.T) {
 			t.Errorf("expected nil createdContract, got %+v", got)
 		}
 	})
+
+	t.Run("honors the block argument", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &transactionResolver{&Resolver{GraphQLAPI: mock}}
+		obj := &model.Transaction{
+			Block:           &model.Block{Number: 42},
+			CreatedContract: &model.Account{Address: contractAddr, BlockNum: 42},
+		}
+		override := uint64(7)
+		if _, err := r.CreatedContract(context.Background(), obj, &override); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mock.accountInfoBlockNum != rpc.BlockNumber(7) {
+			t.Errorf("expected override block 7, got %d", mock.accountInfoBlockNum)
+		}
+	})
 }
 
 func TestLogResolver_Account(t *testing.T) {
