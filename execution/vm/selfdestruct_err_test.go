@@ -48,10 +48,6 @@ func TestOpSelfdestruct_PropagatesBalanceError(t *testing.T) {
 
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, Config{})
 	scope := &CallContext{Contract: *NewContract(self, self, self, uint256.Int{})}
-	// The interpreter bumps cacheGen before each dispatch; without it the
-	// zero-valued gen collides with cachedAddrGen and peekAddress returns a
-	// stale address instead of reading the stack.
-	scope.cacheGen++
 	benVal := beneficiary.Value()
 	scope.Stack.push(*new(uint256.Int).SetBytes(benVal[:]))
 
