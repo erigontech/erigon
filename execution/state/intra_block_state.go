@@ -522,7 +522,7 @@ func (sdb *IntraBlockState) notifyLog(lp *types.Log) {
 	}
 }
 
-func (sdb *IntraBlockState) AddLog(log types.Log) {
+func (sdb *IntraBlockState) AddLog(log *types.Log) {
 	lp := sdb.allocLog(0, 0)
 	lp.Address = log.Address
 	lp.Topics = log.Topics

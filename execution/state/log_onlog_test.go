@@ -44,7 +44,7 @@ func TestAddLogOnLogPointerStability(t *testing.T) {
 	})
 
 	ibs.SetTxContext(1, 0)
-	ibs.AddLog(types.Log{Address: common.Address{0x11}, Topics: []common.Hash{{0x01}}, Data: []byte{0x01}})
+	ibs.AddLog(&types.Log{Address: common.Address{0x11}, Topics: []common.Hash{{0x01}}, Data: []byte{0x01}})
 	require.NotNil(t, retained)
 	first := retained
 
@@ -79,7 +79,7 @@ func TestAllocLogPreservesCapacityAcrossRevert(t *testing.T) {
 	ibs.SetTxContext(1, 0)
 	snap := ibs.PushSnapshot()
 	for i := range 8 {
-		ibs.AddLog(types.Log{Address: common.Address{byte(i)}})
+		ibs.AddLog(&types.Log{Address: common.Address{byte(i)}})
 	}
 	require.Len(t, ibs.logs, 2)
 	capBefore := cap(ibs.logs[1])
@@ -88,7 +88,7 @@ func TestAllocLogPreservesCapacityAcrossRevert(t *testing.T) {
 	ibs.RevertToSnapshot(snap, nil)
 	require.Len(t, ibs.logs, 1) // the tx's slot was truncated off the outer buffer
 
-	ibs.AddLog(types.Log{Address: common.Address{0xff}})
+	ibs.AddLog(&types.Log{Address: common.Address{0xff}})
 	require.Len(t, ibs.logs, 2)
 	require.Equal(t, capBefore, cap(ibs.logs[1]), "inner log buffer capacity must survive revert+relog")
 }
