@@ -633,6 +633,65 @@ func TestStaticCallTraceReadsStackTop(t *testing.T) {
 	}
 }
 
+// CREATE2 must be wired to stCreate2 (not stCreate), which labels the op
+// "CREATE2" and includes the salt operand it reads from the fourth slot.
+func TestCreate2TraceWiring(t *testing.T) {
+	jt := newAmsterdamInstructionSet()
+	callContext := &CallContext{}
+	callContext.Memory.Resize(64)
+	callContext.Memory.Set(0, 4, []byte{0xde, 0xad, 0xbe, 0xef})
+
+	// CREATE2 operands, top-down: endowment, offset, size, salt
+	callContext.Stack.push(*uint256.NewInt(0xcafe)) // salt
+	callContext.Stack.push(*uint256.NewInt(4))      // size
+	callContext.Stack.push(uint256.Int{})           // offset
+	callContext.Stack.push(*uint256.NewInt(7))      // endowment
+
+	got := jt[CREATE2].string(0, callContext)
+	if !strings.HasPrefix(got, "CREATE2 ") {
+		t.Fatalf("CREATE2 traced with wrong formatter: got %q", got)
+	}
+	if !strings.Contains(got, "51966") || !strings.Contains(got, "deadbeef") {
+		t.Fatalf("CREATE2 trace missing salt/input: got %q, want salt 51966 and deadbeef", got)
+	}
+}
+
+func TestStackPopHelpers(t *testing.T) {
+	st := &Stack{}
+
+	// pop2uint64 returns the low 64 bits of (top, next) and shrinks by two.
+	st.push(*uint256.NewInt(0xAAAA)) // next
+	st.push(*uint256.NewInt(0xBBBB)) // top
+	if x, y := st.pop2uint64(); x != 0xBBBB || y != 0xAAAA {
+		t.Fatalf("pop2uint64 = (%#x, %#x), want (0xbbbb, 0xaaaa)", x, y)
+	}
+	if st.len() != 0 {
+		t.Fatalf("pop2uint64 len = %d, want 0", st.len())
+	}
+
+	// popRef returns a pointer to the just-popped slot, shrinks by one, and the
+	// pointed-to value stays valid until the next push reuses that slot.
+	st.push(*uint256.NewInt(1)) // stays below
+	st.push(*uint256.NewInt(2)) // popped by popRef
+	ref := st.popRef()
+	if st.len() != 1 {
+		t.Fatalf("popRef len = %d, want 1", st.len())
+	}
+	if ref.Uint64() != 2 {
+		t.Fatalf("popRef value = %d, want 2", ref.Uint64())
+	}
+	if got := st.peek().Uint64(); got != 1 {
+		t.Fatalf("popRef disturbed slot below: peek = %d, want 1", got)
+	}
+	if ref.Uint64() != 2 {
+		t.Fatalf("popRef pointer invalidated before push: got %d, want 2", ref.Uint64())
+	}
+	st.push(*uint256.NewInt(9))
+	if ref.Uint64() != 9 {
+		t.Fatalf("push did not reuse popRef slot: ref = %d, want 9", ref.Uint64())
+	}
+}
+
 func TestOpTstore(t *testing.T) {
 	t.Parallel()
 	var (
