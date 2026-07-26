@@ -87,16 +87,6 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 //   - code+storage cleanup before recreation — from UpdateAccountData when
 //     original.Incarnation > account.Incarnation (followed by account fields)
 func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache, trace bool) error {
-	// Full-direct apply: writes go straight to the domains in txIndex order (the
-	// serial apply spine is already ordered), so the block-state write buffer +
-	// writeLog + Flush are bypassed — a step toward deleting BlockStateCache. The
-	// pre-tx base is read from the domain (the in-order apply has populated it
-	// with every prior tx). Composing that base from the versionMap instead is the
-	// on-model goal but currently mis-applies for committed accounts that were
-	// written-but-not-origin-seeded — see the seed-on-write completeness gap.
-	if vmapAddrOrigin {
-		blockCache = nil
-	}
 	if writes != nil && !writes.IsEmpty() {
 		type addrState struct {
 			balance        *uint256.Int

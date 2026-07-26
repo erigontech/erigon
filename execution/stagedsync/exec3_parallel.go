@@ -1800,6 +1800,26 @@ var useVersionMapCommitView = dbg.EnvBool("VMAP_COMMIT_VIEW", false)
 // critical: off by default until gated by eest + a tip re-exec.
 var rawViewCollapse = dbg.EnvBool("RAW_VIEW_COLLAPSE", false)
 
+// vmapFold defers state apply out of the per-tx drain: instead of applying each
+// tx's writes into the BlockStateCache and flushing that at block end, the
+// versionMap (which already holds every write via FlushVersionedWrites) IS the
+// buffer, and a single block-end fold replays the block's writes straight to the
+// domains. Requires VMAP_ADDR_ORIGIN (so apply composes its base from the
+// versionMap, not the app store) and RAW_VIEW_COLLAPSE (so result.writes is the
+// versionMap view). Off by default; the precondition for running apply parallel
+// with commitment and for deleting BlockStateCache.
+var vmapFold = dbg.EnvBool("VMAP_FOLD", false) && dbg.EnvBool("VMAP_ADDR_ORIGIN", false) && rawViewCollapse
+
+// foldEntry is one deferred apply captured under vmapFold: a tx's (or finalize's)
+// write-view plus the txNum/rules it must be applied at. Replayed in order by the
+// block-end fold.
+type foldEntry struct {
+	writes   state.WriteSetView
+	blockNum uint64
+	txNum    uint64
+	rules    *chain.Rules
+}
+
 // blockRequest is the commitment calculator's per-block heads-up, sent by the
 // dispatch layer on its own channel — ahead of, and separate from, the
 // block's txResult/blockResult stream so it is never trapped behind a prior
@@ -2402,6 +2422,11 @@ type blockExecutor struct {
 	// blockStateCache provides a stable pre-block snapshot of account data
 	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
 	blockStateCache *state.BlockStateCache
+
+	// foldWrites accumulates the block's per-tx (and finalize) write-views in
+	// txIndex order under vmapFold. The block-end fold replays them straight to
+	// the domains, replacing the per-tx BlockStateCache apply + block-end Flush.
+	foldWrites []foldEntry
 
 	// execCpuNanos sums exec CPU across ALL incarnations (NEWPAYLOAD_PHASES only)
 	// for worker-occupancy attribution vs the npWait/npProc wall.
@@ -3075,12 +3100,23 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 			}
 
-			// Apply state writes to sd.mem and block cache.
+			// Apply state writes to sd.mem and block cache. Under vmapFold the
+			// versionMap already holds the writes (FlushVersionedWrites); defer
+			// them to the block-end fold instead of applying per-tx here.
 			var stateWritesStart time.Time
 			if depShapeEnabled {
 				stateWritesStart = time.Now()
 			}
-			if err := pe.rs.ApplyStateWrites(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
+			if vmapFold {
+				if applyResult.writes != nil && !applyResult.writes.IsEmpty() {
+					be.foldWrites = append(be.foldWrites, foldEntry{
+						writes:   applyResult.writes,
+						blockNum: applyResult.blockNum,
+						txNum:    applyResult.txNum,
+						rules:    applyResult.rules,
+					})
+				}
+			} else if err := pe.rs.ApplyStateWrites(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
 				nil, applyResult.rules, be.blockStateCache); err != nil {
 				return nil, err
 			}
@@ -3272,8 +3308,18 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 				be.applyCount += finalizeWrites.Count()
 
-				// Apply finalize writes to the BlockStateCache.
-				if err := pe.rs.ApplyStateWrites(ctx, applyTx, be.blockNum, finalVersion.TxNum,
+				// Apply finalize writes. Under vmapFold defer to the block-end fold,
+				// appended last so it replays after every regular tx.
+				if vmapFold {
+					if finalizeWrites != nil && !finalizeWrites.IsEmpty() {
+						be.foldWrites = append(be.foldWrites, foldEntry{
+							writes:   finalizeWrites,
+							blockNum: be.blockNum,
+							txNum:    finalVersion.TxNum,
+							rules:    lastResult.Rules(),
+						})
+					}
+				} else if err := pe.rs.ApplyStateWrites(ctx, applyTx, be.blockNum, finalVersion.TxNum,
 					finalizeWrites, nil, lastResult.Rules(), be.blockStateCache); err != nil {
 					return nil, err
 				}
@@ -3301,8 +3347,19 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 
 		// Flush block state cache to sd.mem — all writes (per-TX + finalize) are now visible.
+		// Under vmapFold the BlockStateCache is unused; the deferred per-tx/finalize
+		// write-views are replayed straight to the domains, in txIndex order, as the
+		// single block-end fold — the versionMap is the buffer the cache used to be.
 		flushStart := time.Now()
-		if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx); err != nil {
+		if vmapFold {
+			for i := range be.foldWrites {
+				fe := &be.foldWrites[i]
+				if err := pe.rs.ApplyStateWrites(ctx, applyTx, fe.blockNum, fe.txNum, fe.writes,
+					nil, fe.rules, nil); err != nil {
+					return nil, fmt.Errorf("[parallel] block-end fold apply block=%d txNum=%d: %w", fe.blockNum, fe.txNum, err)
+				}
+			}
+		} else if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx); err != nil {
 			return nil, err
 		}
 		flushDur := time.Since(flushStart)
