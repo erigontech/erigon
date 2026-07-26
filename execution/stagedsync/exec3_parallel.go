@@ -2905,18 +2905,14 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 }
 
 // revalidateCommittedDependents re-checks every committed-but-not-published tx
-// at or after txFrom after a predecessor's write-set changed (re-execution or a
-// validation failure). Under dependency-ordered validation a stale dependent can
-// sit well past the contiguous prefix, so the whole tail is scanned (published
-// txs excluded — they are final and already streamed to commitment).
-//
-// Crucially it re-validates IN PLACE: a still-valid dependent stays committed,
-// so maxValidated does not regress and scheduleExecution's deferred-drain keeps
-// making progress. Only a dependent that now genuinely fails is un-committed and
-// re-queued for re-execution — which, when its own writes change, propagates the
-// cascade to its dependents on the next result.
-func (be *blockExecutor) revalidateCommittedDependents(txFrom int) *blockResult {
-	for tx := txFrom; tx < len(be.tasks); tx++ {
+// after changedTx (whose write-set just changed via re-execution or a validation
+// failure) against the current versionMap, in place: a still-valid tx stays
+// committed so maxValidated does not regress; one that now fails is un-committed
+// and re-queued for re-execution, propagating the cascade to its dependents on
+// the next result. Published txs are excluded — final and already streamed to
+// commitment.
+func (be *blockExecutor) revalidateCommittedDependents(changedTx int) *blockResult {
+	for tx := changedTx + 1; tx < len(be.tasks); tx++ {
 		if !be.validateTasks.checkComplete(tx) || be.publishTasks.checkComplete(tx) {
 			continue
 		}
@@ -3019,7 +3015,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			// committed dependents were validated against — re-check them.
 			if be.writeChanged[tx] {
 				delete(be.writeChanged, tx)
-				if r := be.revalidateCommittedDependents(tx + 1); r != nil {
+				if r := be.revalidateCommittedDependents(tx); r != nil {
 					return r, nil
 				}
 			}
@@ -3032,7 +3028,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx])
 		}
 		be.validateTasks.clearInProgress(tx)
-		if r := be.revalidateCommittedDependents(tx + 1); r != nil {
+		if r := be.revalidateCommittedDependents(tx); r != nil {
 			return r, nil
 		}
 		be.execTasks.clearComplete(tx)
@@ -3519,7 +3515,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		txTask := be.tasks[len(be.tasks)-1].Task
 
 		var blockReceipts types.Receipts
-		for _, txResult := range be.results {
+		for i := range be.results {
+			// Prefer the finalized snapshot: under dependency-ordered validation a
+			// worker may overwrite be.results[i] with a later speculative
+			// incarnation (no receipt) after finalize set the receipt on
+			// finalizedResults[i]. Falls back to be.results[i] when unfinalized.
+			txResult := be.finalizedResults[i]
+			if txResult == nil {
+				txResult = be.results[i]
+			}
 			if receipt := txResult.Receipt; receipt != nil {
 				blockReceipts = append(blockReceipts, receipt)
 			}
@@ -3743,10 +3747,13 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	drainMaxValidated := be.validateTasks.maxComplete()
 	drainMinIP := be.execTasks.minInProgress()
 	be.execTasks.drainDeferredIfReady(func(tx int) bool {
-		if relaxDispatch {
-			// Relaxed order: re-queue as soon as actual blockers clear, not when
-			// the immediate predecessor validates. Keep the in-flight guard so a
-			// lower-indexed worker's floor writes are still visible on re-read.
+		if relaxDispatch || depOrderVal {
+			// Dependency-driven drain: re-queue as soon as the tx's actual blockers
+			// clear, not when the contiguous prefix reaches tx-1. The contiguous
+			// maxValidated gate deadlocks dependency-ordered validation — a real
+			// invalidation regresses it and permanently strands deferred txs whose
+			// true dependencies are already satisfied. The in-flight guard stays so
+			// a lower-indexed worker's floor writes are still visible on re-read.
 			return !be.execTasks.isBlocked(tx) && (drainMinIP < 0 || drainMinIP >= tx)
 		}
 		return drainMaxValidated >= tx-1 && (drainMinIP < 0 || drainMinIP >= tx)
