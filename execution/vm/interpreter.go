@@ -63,25 +63,18 @@ type CallContext struct {
 	input         []byte
 	Memory        Memory
 
-	// Intern memo for the top-of-stack address, keyed by the raw stack word it
-	// was built from. A nil handle means no memo. The handle holds a pointer, so
-	// it must precede Stack; the source word is read only by account opcodes, so
-	// it sits past Stack to keep the prefix every dispatch touches small.
-	cachedAddr accounts.Address
-
-	// Pins Stack at the offset it had before these fields existed. CallContext
-	// is pool-allocated page-aligned, so Stack.data's cache-line alignment
-	// follows this offset; shifting it moves benchmarks several percent either
-	// way with no logic change.
-	_ [32]byte
+	// Pins Stack at offset 264, the offset it has on the interned branches.
+	// CallContext is pool-allocated page-aligned, so Stack.data's cache-line
+	// alignment follows this offset; shifting it moves benchmarks several
+	// percent either way with no logic change. TestCallContextStackOffset
+	// fails if an edit here moves it.
+	_ [8]byte
 
 	// Contract carries pointers, so it must precede the pointer-free Stack:
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
 	// Stack.data is 32 KB it can skip entirely.
 	Contract Contract
 	Stack    Stack
-
-	cachedAddrSrc uint256.Int
 }
 
 // peekStorageKey returns the top-of-stack value as a StorageKey. The key is a
@@ -90,17 +83,10 @@ func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
 	return accounts.InternKey(ctx.Stack.peek().Bytes32())
 }
 
-// peekAddress returns the top-of-stack value as an interned Address, memoized
-// like peekStorageKey. Keyed on the whole word rather than its low 20 bytes,
-// so two words sharing an address miss instead of hitting.
+// peekAddress returns the top-of-stack value as an Address, by value like
+// peekStorageKey.
 func (ctx *CallContext) peekAddress() accounts.Address {
-	top := ctx.Stack.peek()
-	if ctx.cachedAddr != accounts.NilAddress && *top == ctx.cachedAddrSrc {
-		return ctx.cachedAddr
-	}
-	ctx.cachedAddrSrc = *top
-	ctx.cachedAddr = accounts.InternAddress(top.Bytes20())
-	return ctx.cachedAddr
+	return accounts.InternAddress(ctx.Stack.peek().Bytes20())
 }
 
 var contextPool = sync.Pool{
@@ -127,9 +113,6 @@ func (c *CallContext) put() {
 	c.Memory.reset()
 	c.Stack.Reset()
 	c.stateGasSpill = 0
-	// Zero the handle to release its canonMap pin while the context is idle in
-	// the pool; unique.Handle values keep interned entries alive.
-	c.cachedAddr = accounts.NilAddress
 	c.input = nil
 	c.Contract = Contract{}
 	contextPool.Put(c)

@@ -24,32 +24,36 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 )
 
-type Address unique.Handle[common.Address]
+// Address is the account identifier carried through the EVM and state
+// machinery. This experiment branch stores it by value instead of interning it.
+// The nil marker cannot be a reserved address value — a transfer to 0x0 is
+// legal and a nil recipient means contract creation — so it is a separate flag.
+type Address struct {
+	addr common.Address
+	set  bool
+}
 
 var ZeroAddress = InternAddress(common.Address{})
 var NilAddress = Address{}
 
 func InternAddress(a common.Address) Address {
-	return Address(unique.Make(a))
+	return Address{addr: a, set: true}
 }
 
 func (a Address) IsNil() bool {
-	return a == NilAddress
+	return !a.set
 }
 
 func (a Address) IsZero() bool {
-	return a == NilAddress || a == ZeroAddress
+	return !a.set || a.addr == common.Address{}
 }
 
 func (a Address) Value() common.Address {
-	if a == NilAddress {
-		return common.Address{}
-	}
-	return unique.Handle[common.Address](a).Value()
+	return a.addr
 }
 
-func (a Address) Handle() unique.Handle[common.Address] {
-	return unique.Handle[common.Address](a)
+func (a Address) Handle() common.Address {
+	return a.addr
 }
 
 func (a Address) String() string {

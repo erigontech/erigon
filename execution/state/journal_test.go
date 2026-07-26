@@ -13,11 +13,12 @@ import (
 // TestJournalEntrySize guards the compact union against accidental bloat,
 // e.g. inlining rare *stateObject/[]byte fields that belong in journalExtra.
 //
-// The budget is 96 rather than 72 on this experiment branch because the
-// embedded StorageKey is a 32-byte hash instead of an 8-byte intern handle.
+// The budget is 112 rather than 72 on this experiment branch because the
+// embedded StorageKey is a 32-byte hash and the embedded Address a 21-byte
+// value, instead of 8-byte intern handles.
 func TestJournalEntrySize(t *testing.T) {
-	if got := unsafe.Sizeof(journalEntry{}); got > 96 {
-		t.Fatalf("journalEntry grew to %d B (want <= 96)", got)
+	if got := unsafe.Sizeof(journalEntry{}); got > 112 {
+		t.Fatalf("journalEntry grew to %d B (want <= 112)", got)
 	}
 }
 
