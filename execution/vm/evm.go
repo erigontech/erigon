@@ -95,7 +95,8 @@ type EVM struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
-	storageKeys *storageKeyCache
+	storageKeys     *storageKeyCache
+	storageKeyCount int
 }
 
 // storageKeyCacheSize must comfortably exceed the number of slots a contract
@@ -137,16 +138,18 @@ func (c *storageKeyCache) fill(i uint64, word *uint256.Int) accounts.StorageKey 
 	return h
 }
 
+// storageKeyCacheWarmup is how many keys an EVM resolves before it builds the
+// table. Zeroing 40 KB costs about as much as 80 interns, and only repetition
+// ever earns that back: a frame that touches a few distinct slots and exits —
+// an RPC call, a system call, a plain transfer — would never recover it.
+const storageKeyCacheWarmup = 256
+
 // internStorageKey returns word interned as a StorageKey, avoiding unique.Make
 // when the same word was interned before.
-//
-// The cache is allocated on the first storage key an EVM resolves: it is 40 KB,
-// and the short-lived EVMs built per RPC call or system call would otherwise pay
-// for a table they never read.
 func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
 	c := evm.storageKeys
 	if c == nil {
-		return evm.internFirstStorageKey(word)
+		return evm.internUncached(word)
 	}
 	i := slotIndex(word)
 	if h := c.handles[i]; h != accounts.NilKey && c.words[i] == *word {
@@ -155,7 +158,11 @@ func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
 	return c.fill(i, word)
 }
 
-func (evm *EVM) internFirstStorageKey(word *uint256.Int) accounts.StorageKey {
+func (evm *EVM) internUncached(word *uint256.Int) accounts.StorageKey {
+	if evm.storageKeyCount < storageKeyCacheWarmup {
+		evm.storageKeyCount++
+		return accounts.InternKey(word.Bytes32())
+	}
 	evm.storageKeys = new(storageKeyCache)
 	return evm.storageKeys.fill(slotIndex(word), word)
 }
