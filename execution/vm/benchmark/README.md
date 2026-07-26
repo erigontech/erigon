@@ -68,6 +68,7 @@ Targets SLOAD/SSTORE which account for 6% of DeFi gas.
 - `BenchmarkSLOADWarm` — warm SLOAD loops (100 gas each)
 - `BenchmarkSSTORE` — zero-to-nonzero (20K), nonzero-to-nonzero (5K), nonzero-to-zero (refund)
 - `BenchmarkTransientStorage` — TLOAD/TSTORE (EIP-1153)
+- `BenchmarkStorageKeyReuse` — repeated vs alternating slot keys, SLOAD+SSTORE pairs
 - `BenchmarkStorageDiversity` — 100/1000 unique slot accesses
 
 Hot paths: `IntraBlockState.GetState()`, dirty/origin/DB cache hierarchy.
@@ -90,6 +91,13 @@ Targets opcode dispatch overhead in `interpreter.go:Run()`.
 - `BenchmarkMemoryOps` — MSTORE/MLOAD fixed + growing memory
 - `BenchmarkKeccak256` — SHA3 at 32B/256B/4KB input sizes
 - `BenchmarkMixedCompute` — realistic opcode mix (60% stack, 20% arith, 10% mem, 10% control)
+
+### E: Compute-Heavy Contract (`bench_snailtracer_test.go`)
+
+The cross-client reference workload for interpreter throughput: one long frame of
+arithmetic, memory and jumps with almost no state access.
+
+- `BenchmarkSnailtracer` — renders one pixel with the Snailtracer ray tracer
 
 ## Running
 

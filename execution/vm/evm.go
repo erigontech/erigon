@@ -95,46 +95,69 @@ type EVM struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
-	storageKeys storageKeyCache
+	storageKeys *storageKeyCache
 }
 
-// storageKeyCacheSize must stay a power of two and comfortably exceed a
-// contract's live slot count, or conflict misses dominate: a 336-slot working
-// set still loses half its lookups at 512 entries.
+// storageKeyCacheSize must comfortably exceed the number of slots a contract
+// keeps live, or conflict misses dominate: halving it costs far more hits than
+// the proportion of entries removed.
 const storageKeyCacheSize = 1024
+
+// slotIndex masks rather than divides, so the size has to be a power of two.
+var _ [0]struct{} = [storageKeyCacheSize & (storageKeyCacheSize - 1)]struct{}{}
 
 // storageKeyCache memoizes InternKey by the stack word the key was built from.
 // It never goes stale — interning is a pure function and a handle keeps its
 // entry alive — so it is neither cleared between transactions nor invalidated.
 //
 // The word is stored rather than recovered from the handle: comparing it needs
-// no big-endian conversion and no load through the intern table, which both
-// halves the cost of a hit and keeps the lookup inlinable.
+// no big-endian conversion and no load through the intern table, which roughly
+// halves the cost of a hit.
+//
+// The handles hold pointers, so they precede the pointer-free words: the GC
+// scans a struct only up to its last pointer word, and the words are 32 KB it
+// can then skip.
 type storageKeyCache struct {
-	words   [storageKeyCacheSize]uint256.Int
 	handles [storageKeyCacheSize]accounts.StorageKey
+	words   [storageKeyCacheSize]uint256.Int
+}
+
+// slotIndex mixes all four limbs: keccak-derived slots differ across the whole
+// word while array and scalar slots differ only in the lowest, so indexing on
+// one limb collides badly for one of the two.
+func slotIndex(word *uint256.Int) uint64 {
+	return (word[0] ^ word[1] ^ word[2] ^ word[3]) & (storageKeyCacheSize - 1)
+}
+
+// fill interns word and records it at i. A nil handle marks an unused entry,
+// since the zero word is a legitimate key.
+func (c *storageKeyCache) fill(i uint64, word *uint256.Int) accounts.StorageKey {
+	h := accounts.InternKey(word.Bytes32())
+	c.words[i], c.handles[i] = *word, h
+	return h
 }
 
 // internStorageKey returns word interned as a StorageKey, avoiding unique.Make
 // when the same word was interned before.
 //
-// The index mixes all four limbs: keccak-derived slots differ across the whole
-// word while array and scalar slots differ only in the lowest, so indexing on
-// one limb collides badly for one of the two.
-//
-// A nil handle marks an unused entry, since the zero word is a legitimate key.
+// The cache is allocated on the first storage key an EVM resolves: it is 40 KB,
+// and the short-lived EVMs built per RPC call or system call would otherwise pay
+// for a table they never read.
 func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
-	i := (word[0] ^ word[1] ^ word[2] ^ word[3]) & (storageKeyCacheSize - 1)
-	if h := evm.storageKeys.handles[i]; h != accounts.NilKey && evm.storageKeys.words[i] == *word {
+	c := evm.storageKeys
+	if c == nil {
+		return evm.internFirstStorageKey(word)
+	}
+	i := slotIndex(word)
+	if h := c.handles[i]; h != accounts.NilKey && c.words[i] == *word {
 		return h
 	}
-	return evm.internStorageKeyMiss(i, word)
+	return c.fill(i, word)
 }
 
-func (evm *EVM) internStorageKeyMiss(i uint64, word *uint256.Int) accounts.StorageKey {
-	h := accounts.InternKey(word.Bytes32())
-	evm.storageKeys.words[i], evm.storageKeys.handles[i] = *word, h
-	return h
+func (evm *EVM) internFirstStorageKey(word *uint256.Int) accounts.StorageKey {
+	evm.storageKeys = new(storageKeyCache)
+	return evm.storageKeys.fill(slotIndex(word), word)
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
