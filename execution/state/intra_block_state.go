@@ -2828,12 +2828,8 @@ func (sdb *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
 }
 
 func (sdb *IntraBlockState) AccessedAddr(addr accounts.Address) bool {
-	acc := sdb.versionedReads.access
-	if acc != nil {
-		_, ok := acc[addr]
-		return ok
-	}
-	return false
+	_, ok := sdb.versionedReads.access[addr]
+	return ok
 }
 
 func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts.Account, source ReadSource, version Version) {
