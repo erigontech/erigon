@@ -1186,7 +1186,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3),
 						"inQavg", inQSum/max(1, qSamples), "inQmax", inQMax,
 						"rwsQavg", rwsQSum/max(1, qSamples), "rwsQmax", rwsQMax,
-						"wkNextMs", wkNextNs/1e6, "wkExecMs", wkExecNs/1e6, "wkAddMs", wkAddNs/1e6, "wkNextCnt", wkNextCnt)
+						"wkNextMs", wkNextNs/1e6, "wkExecMs", wkExecNs/1e6, "wkAddMs", wkAddNs/1e6, "wkNextCnt", wkNextCnt,
+						"maxReadyEarly", blockExecutor.maxReadyEarly)
 					inQSum, rwsQSum, qSamples, inQMax, rwsQMax = 0, 0, 0, 0, 0
 					npWait, npProc = 0, 0
 				}
@@ -2457,6 +2458,45 @@ type blockExecutor struct {
 	// execCpuNanos sums exec CPU across ALL incarnations (NEWPAYLOAD_PHASES only)
 	// for worker-occupancy attribution vs the npWait/npProc wall.
 	execCpuNanos atomic.Int64
+
+	// maxReadyEarly (diagnostic) is the peak count of exec-complete, not-yet-
+	// validated txs whose read-dependencies are ALL already validated — the set
+	// dependency-ordered validation could commit now but the contiguous
+	// maxComplete/maxValidated gate blocks. Sizes the early-validation opportunity.
+	maxReadyEarly int
+}
+
+// countReadyEarly returns how many exec-complete, not-yet-validated txs have all
+// their read-dependencies (MapRead predecessors) already validated — i.e. txs
+// that dependency-ordered validation could validate/commit immediately but the
+// contiguous in-order gate currently defers. Diagnostic only.
+func (be *blockExecutor) countReadyEarly() int {
+	n := 0
+	for tx := 0; tx < len(be.tasks); tx++ {
+		if !be.execTasks.checkComplete(tx) || be.validateTasks.checkComplete(tx) {
+			continue
+		}
+		rs := be.blockIO.ReadSet(tx)
+		ready := true
+		rs.RangeHeaders(func(_ state.AccountPath, hdr state.ReadHeader) bool {
+			if hdr.Source != state.MapRead {
+				return true
+			}
+			p := hdr.Version.TxIndex
+			if p < 0 || p >= tx {
+				return true
+			}
+			if !be.validateTasks.checkComplete(p) {
+				ready = false
+				return false
+			}
+			return true
+		})
+		if ready {
+			n++
+		}
+	}
+	return n
 }
 
 // sendResult fans out an applyResult to both the apply loop and
@@ -3048,6 +3088,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	if depShapeEnabled {
 		be.valLoopNanos += time.Since(valLoopStart).Nanoseconds()
+		if re := be.countReadyEarly(); re > be.maxReadyEarly {
+			be.maxReadyEarly = re
+		}
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
