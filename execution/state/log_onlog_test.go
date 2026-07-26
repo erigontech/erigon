@@ -58,11 +58,11 @@ func TestAddLogOnLogPointerStability(t *testing.T) {
 	// which reuses the backing. A pointer into the buffer would be corrupted;
 	// the stable heap copy handed to OnLog must not be.
 	for i := range 1000 {
-		ibs.AddLog(types.Log{Address: common.Address{0x22}, Data: []byte{byte(i)}})
+		ibs.AddLog(&types.Log{Address: common.Address{0x22}, Data: []byte{byte(i)}})
 	}
 	ibs.Reset()
 	ibs.SetTxContext(2, 0)
-	ibs.AddLog(types.Log{Address: common.Address{0x33}, Data: []byte{0x99}})
+	ibs.AddLog(&types.Log{Address: common.Address{0x33}, Data: []byte{0x99}})
 
 	require.Equal(t, common.Address{0x11}, first.Address)
 	require.Equal(t, []byte{0xbe, 0xef}, []byte(first.Data))
