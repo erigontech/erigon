@@ -96,6 +96,10 @@ func (ctx *CallContext) peekStorageKey(evm *EVM) accounts.StorageKey {
 	if ctx.cachedKey != accounts.NilKey && *top == ctx.cachedKeySrc {
 		return ctx.cachedKey
 	}
+	return ctx.memoStorageKey(evm, top)
+}
+
+func (ctx *CallContext) memoStorageKey(evm *EVM, top *uint256.Int) accounts.StorageKey {
 	ctx.cachedKeySrc = *top
 	ctx.cachedKey = evm.internStorageKey(top)
 	return ctx.cachedKey

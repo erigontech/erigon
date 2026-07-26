@@ -106,7 +106,12 @@ const storageKeyCacheSize = 1024
 // storageKeyCache memoizes InternKey by the stack word the key was built from.
 // It never goes stale — interning is a pure function and a handle keeps its
 // entry alive — so it is neither cleared between transactions nor invalidated.
+//
+// The word is stored rather than recovered from the handle: comparing it needs
+// no big-endian conversion and no load through the intern table, which both
+// halves the cost of a hit and keeps the lookup inlinable.
 type storageKeyCache struct {
+	words   [storageKeyCacheSize]uint256.Int
 	handles [storageKeyCacheSize]accounts.StorageKey
 }
 
@@ -116,14 +121,19 @@ type storageKeyCache struct {
 // The index mixes all four limbs: keccak-derived slots differ across the whole
 // word while array and scalar slots differ only in the lowest, so indexing on
 // one limb collides badly for one of the two.
+//
+// A nil handle marks an unused entry, since the zero word is a legitimate key.
 func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
 	i := (word[0] ^ word[1] ^ word[2] ^ word[3]) & (storageKeyCacheSize - 1)
-	b := word.Bytes32()
-	if h := evm.storageKeys.handles[i]; h != accounts.NilKey && h.Value() == b {
+	if h := evm.storageKeys.handles[i]; h != accounts.NilKey && evm.storageKeys.words[i] == *word {
 		return h
 	}
-	h := accounts.InternKey(b)
-	evm.storageKeys.handles[i] = h
+	return evm.internStorageKeyMiss(i, word)
+}
+
+func (evm *EVM) internStorageKeyMiss(i uint64, word *uint256.Int) accounts.StorageKey {
+	h := accounts.InternKey(word.Bytes32())
+	evm.storageKeys.words[i], evm.storageKeys.handles[i] = *word, h
 	return h
 }
 
