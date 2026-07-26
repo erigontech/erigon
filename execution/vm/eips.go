@@ -302,14 +302,11 @@ func enable5656(jt *JumpTable) {
 
 // opMcopy implements the MCOPY opcode (https://eips.ethereum.org/EIPS/eip-5656)
 func opMcopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	var (
-		dst    = scope.Stack.pop()
-		src    = scope.Stack.pop()
-		length = scope.Stack.pop()
-	)
 	// These values are checked for overflow during memory expansion calculation
 	// (the memorySize function on the opcode).
-	scope.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
+	dst, src := scope.Stack.pop2uint64()
+	length := scope.Stack.popRef().Uint64()
+	scope.Memory.Copy(dst, src, length)
 	return pc, nil, nil
 }
 

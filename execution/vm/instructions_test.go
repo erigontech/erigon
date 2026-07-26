@@ -572,6 +572,67 @@ func BenchmarkOpMstore(bench *testing.B) {
 	}
 }
 
+func BenchmarkOpMstore8(bench *testing.B) {
+	var (
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+		callContext = &CallContext{}
+	)
+
+	callContext.Memory.Resize(64)
+	pc := uint64(0)
+	memStart := uint256.Int{}
+	value := *new(uint256.Int).SetUint64(0x1337)
+
+	for bench.Loop() {
+		callContext.Stack.push(value)
+		callContext.Stack.push(memStart)
+		opMstore8(pc, evm, callContext)
+	}
+}
+
+func BenchmarkOpReturn(bench *testing.B) {
+	var (
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+		callContext = &CallContext{}
+	)
+
+	callContext.Memory.Resize(64)
+	pc := uint64(0)
+	size := *new(uint256.Int).SetUint64(32)
+	offset := uint256.Int{}
+
+	for bench.Loop() {
+		callContext.Stack.push(size)
+		callContext.Stack.push(offset)
+		_, retSink, _ = opReturn(pc, evm, callContext)
+	}
+}
+
+var retSink []byte
+
+// The CALL/CREATE trace formatters must read the operands the op is about to
+// pop (top-relative), not fixed slots near the array's capacity.
+func TestStaticCallTraceReadsStackTop(t *testing.T) {
+	callContext := &CallContext{}
+	callContext.Memory.Resize(64)
+	callContext.Memory.Set(0, 4, []byte{0xde, 0xad, 0xbe, 0xef})
+	wantAddr := common.HexToAddress("0x1122334455667788990011223344556677889900")
+
+	// STATICCALL operands, top-down: gas, addr, inOffset, inSize, retOffset, retSize
+	callContext.Stack.push(uint256.Int{})                           // retSize
+	callContext.Stack.push(uint256.Int{})                           // retOffset
+	callContext.Stack.push(*uint256.NewInt(4))                      // inSize
+	callContext.Stack.push(uint256.Int{})                           // inOffset
+	callContext.Stack.push(*new(uint256.Int).SetBytes(wantAddr[:])) // addr
+	callContext.Stack.push(*uint256.NewInt(21000))                  // gas
+
+	got := stStaticCall(0, callContext)
+	wantHex := fmt.Sprintf("%x", wantAddr)
+	if !strings.Contains(got, wantHex) || !strings.Contains(got, "deadbeef") {
+		t.Fatalf("trace read wrong stack slots: got %q, want addr %s and args deadbeef", got, wantHex)
+	}
+}
+
 func TestOpTstore(t *testing.T) {
 	t.Parallel()
 	var (
@@ -620,6 +681,7 @@ func BenchmarkOpKeccak256(bench *testing.B) {
 		callContext.Stack.push(*uint256.NewInt(32))
 		callContext.Stack.push(start)
 		opKeccak256(pc, evm, callContext)
+		callContext.Stack.pop()
 	}
 }
 
