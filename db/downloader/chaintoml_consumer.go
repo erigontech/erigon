@@ -283,6 +283,31 @@ func isAcceptedChainTomlName(name string) bool {
 	return chainTomlV2NameRE.MatchString(name)
 }
 
+// hasAnyLocalSnapshot reports whether snapDir contains at least one
+// snapshot artefact — a .seg block file, a .kv/.v state file, a salt
+// file, or a meta file. Used to distinguish "cold-start with nothing on
+// disk yet" from "already-syncing with local files present" when
+// deciding whether a 0-newCount peer-manifest apply is enough to
+// signal manifestReady.
+func (d *Downloader) hasAnyLocalSnapshot() bool {
+	entries, err := os.ReadDir(d.snapDir())
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		n := e.Name()
+		if strings.HasSuffix(n, ".seg") || strings.HasSuffix(n, ".kv") ||
+			strings.HasSuffix(n, ".v") || strings.HasSuffix(n, ".ef") ||
+			strings.HasPrefix(n, "salt-") || strings.HasPrefix(n, "erigondb.") {
+			return true
+		}
+	}
+	return false
+}
+
 // addTorrentPeerFromENR extracts the BT port and IP from a peer's ENR record
 // and adds them as a direct torrent peer. The IP defaults to the node's
 // advertised IP if not separately specified.
@@ -825,11 +850,18 @@ func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, n
 	}
 
 	// Signal that the P2P manifest is ready so the snapshot stage can proceed.
-	// Readiness depends on a successful discovery+download+apply cycle, even if it
-	// added zero new entries (e.g. the manifest was empty or already fully merged).
-	// Otherwise --snap.p2p-manifest nodes can hang forever when peers' manifests
-	// don't add anything new.
-	if d.manifestReady != nil {
+	// A successful discovery+download+apply cycle that adds 0 new entries is
+	// legitimate when the follower already has a local set: either the peer's
+	// manifest is empty or its entries are fully merged. In both cases the
+	// follower can proceed with whatever files it already holds.
+	//
+	// The "0 new AND 0 local" case is different: the follower has no files
+	// AND the peer's manifest didn't add any. Closing here would let OtterSync
+	// run with an empty file set and downstream stages crash (observed:
+	// "salt not found on ReloadSalt" on a cold-start fork follower whose
+	// initiator's manifest happened to apply as 0 new entries). Wait for the
+	// next tick and try another peer instead.
+	if d.manifestReady != nil && (newCount > 0 || d.hasAnyLocalSnapshot()) {
 		firstClose := false
 		select {
 		case <-d.manifestReady:

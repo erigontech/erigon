@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
@@ -384,6 +386,40 @@ func TestClassifyRetiredEntries(t *testing.T) {
 		require.Empty(t, got.MergedOut)
 		require.Equal(t, []string{"random-config.toml"}, got.Removed)
 	})
+}
+
+// TestDownloader_HasAnyLocalSnapshot pins the cold-start / warm-start
+// distinction the manifestReady close-gate depends on. Under the new
+// gate a follower with an empty snap dir must NOT signal manifestReady
+// on a 0-newCount peer-manifest apply: doing so lets OtterSync
+// proceed with no files and downstream stages crash with
+// "salt not found on ReloadSalt" (observed on a cold-start fork
+// follower). hasAnyLocalSnapshot draws the line.
+func TestDownloader_HasAnyLocalSnapshot(t *testing.T) {
+	cases := []struct {
+		name  string
+		files []string
+		want  bool
+	}{
+		{"empty dir", nil, false},
+		{"unrelated files only", []string{"README.md", "notes.txt", "chain.json"}, false},
+		{"seg file present", []string{"v1.0-000000-000500-headers.seg"}, true},
+		{"kv file present", []string{"v1.0-accounts.0-2048.kv"}, true},
+		{"v file present", []string{"v1.0-accounts.0-2048.v"}, true},
+		{"ef file present", []string{"v1.0-accounts.0-2048.ef"}, true},
+		{"salt file present", []string{"salt-blocks.txt"}, true},
+		{"erigondb file present", []string{"erigondb.toml"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, f := range tc.files {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644))
+			}
+			d := &Downloader{cfg: &downloadercfg.Cfg{Dirs: datadir.Dirs{Snap: dir}}}
+			require.Equal(t, tc.want, d.hasAnyLocalSnapshot())
+		})
+	}
 }
 
 // TestIsAcceptedChainTomlName pins the shape check the peer-manifest
