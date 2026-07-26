@@ -38,6 +38,7 @@ func ByteCount(b uint64) string {
 
 }
 
+//go:fix inline
 func Copy(b []byte) []byte { return bytes.Clone(b) }
 
 func EnsureEnoughSize(in []byte, size int) []byte {

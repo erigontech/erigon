@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -681,7 +682,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
 			ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
 		}
-		traceResult.Output = common.Copy(execResult.ReturnData)
+		traceResult.Output = bytes.Clone(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
 			if first {
 				first = false
@@ -1086,7 +1087,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 					return
 				}
 
-				traceResult.Output = common.Copy(execResult.ReturnData)
+				traceResult.Output = bytes.Clone(execResult.ReturnData)
 				results[job.txIndex] = traceResult
 			}
 		})

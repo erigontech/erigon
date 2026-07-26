@@ -195,7 +195,7 @@ func ExecuteBlockEphemerally(
 		TxRoot:      types.DeriveSha(includedTxs),
 		ReceiptRoot: receiptSha,
 		Bloom:       bloom,
-		LogsHash:    rlpHash(blockLogs),
+		LogsHash:    types.RlpHash(blockLogs),
 		Receipts:    receipts,
 		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty.ToBig()),
 		GasUsed:     math.HexOrDecimal64(blockGasUsed),
@@ -226,8 +226,6 @@ func ExecuteBlockEphemerally(
 
 	return execRs, nil
 }
-
-var rlpHash = types.RlpHash
 
 func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	isBor := chainConfig.Bor != nil
