@@ -32,6 +32,13 @@ import (
 type accessList struct {
 	addresses map[accounts.Address]int
 	slots     []map[accounts.StorageKey]struct{}
+
+	// Memo of the last resolved (address -> slot set); nil lastSlots means empty.
+	// A call frame runs every SLOAD/SSTORE against one address, so consecutive
+	// storage ops reuse it instead of re-reading addresses. Must be dropped
+	// whenever a slot map can be handed to a different address.
+	lastAddr  accounts.Address
+	lastSlots map[accounts.StorageKey]struct{}
 }
 
 // newAccessList creates a new accessList.
@@ -50,6 +57,19 @@ func (al *accessList) Reset() {
 	}
 	al.slots = al.slots[:0]
 	clear(al.addresses)
+	al.dropMemo()
+}
+
+func (al *accessList) dropMemo() {
+	al.lastAddr = accounts.NilAddress
+	al.lastSlots = nil
+}
+
+func (al *accessList) memoized(address accounts.Address) map[accounts.StorageKey]struct{} {
+	if al.lastSlots != nil && al.lastAddr == address {
+		return al.lastSlots
+	}
+	return nil
 }
 
 // ContainsAddress returns true if the address is in the access list.
@@ -61,6 +81,10 @@ func (al *accessList) ContainsAddress(address accounts.Address) bool {
 // Contains checks if a slot within an account is present in the access list, returning
 // separate flags for the presence of the account and the slot respectively.
 func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKey) (addressPresent bool, slotPresent bool) {
+	if slotmap := al.memoized(address); slotmap != nil {
+		_, slotPresent = slotmap[slot]
+		return true, slotPresent
+	}
 	idx, ok := al.addresses[address]
 	if !ok {
 		return false, false
@@ -68,7 +92,9 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 	if idx == -1 {
 		return true, false
 	}
-	_, slotPresent = al.slots[idx][slot]
+	slotmap := al.slots[idx]
+	al.lastAddr, al.lastSlots = address, slotmap
+	_, slotPresent = slotmap[slot]
 	return true, slotPresent
 }
 
@@ -100,6 +126,13 @@ func (al *accessList) AddAddress(address accounts.Address) bool {
 // - slot added
 // For any 'true' value returned, a corresponding journal entry must be made.
 func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
+	if slotmap := al.memoized(address); slotmap != nil {
+		if _, ok := slotmap[slot]; ok {
+			return false, false
+		}
+		slotmap[slot] = struct{}{}
+		return false, true
+	}
 	idx, addrPresent := al.addresses[address]
 	if !addrPresent || idx == -1 {
 		// Address not present, or addr present but no slots yet.
@@ -115,9 +148,11 @@ func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey
 		}
 		slotmap[slot] = struct{}{}
 		al.slots = append(al.slots, slotmap)
+		al.lastAddr, al.lastSlots = address, slotmap
 		return !addrPresent, true
 	}
 	slotmap := al.slots[idx]
+	al.lastAddr, al.lastSlots = address, slotmap
 	if _, ok := slotmap[slot]; !ok {
 		slotmap[slot] = struct{}{}
 		return false, true
@@ -147,6 +182,8 @@ func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.Storage
 		}
 		al.slots = al.slots[:idx]
 		al.addresses[address] = -1
+		// The truncated map is now free for a different address to claim.
+		al.dropMemo()
 	}
 }
 
