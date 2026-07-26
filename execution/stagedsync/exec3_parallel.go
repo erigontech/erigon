@@ -2482,6 +2482,12 @@ type blockExecutor struct {
 	// calcFees sweep has flushed to the versionMap (DEP_ORDER_VAL). Coinbase
 	// readers gate on it; -1 means none flushed yet.
 	coinbaseFlushedUpTo int
+
+	// writeChanged marks a tx whose re-executed write-set differs from the
+	// incarnation its dependents were validated against (DEP_ORDER_VAL). Set at
+	// result arrival; consumed once the tx's new writes are flushed during
+	// validation, triggering in-place re-validation of its committed dependents.
+	writeChanged map[int]bool
 }
 
 // countReadyEarly returns how many exec-complete, not-yet-validated txs have all
@@ -2620,6 +2626,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		blockStateCache:     state.NewBlockStateCache(),
 		exhausted:           exhausted,
 		coinbaseFlushedUpTo: -1,
+		writeChanged:        map[int]bool{},
 	}
 }
 
@@ -2850,36 +2857,12 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 		txTask := be.tasks[tx].Task
 		txVersion := txResult.Task.Version()
 
-		// Authoritative re-validation: finalize/publish is the legit final total
-		// order. Every predecessor < tx is already finalized (final), so the
-		// versionMap now holds their final writes. Dependency-ordered validation
-		// committed tx speculatively (its base/UnknownDep reads weren't gated on
-		// all predecessors); re-validate here against the final prefix to catch a
-		// read a since-finalized predecessor changed. On failure, re-gate tx for
-		// re-execution and stop finalizing — the frontier cannot advance past it.
-		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() {
-			if be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-				func(readVersion, writtenVersion state.Version) state.VersionValidity {
-					if readVersion != writtenVersion {
-						return state.VersionInvalid
-					}
-					return state.VersionValid
-				}, false, "") != state.VersionValid {
-				be.cntValidationFail++
-				be.execFailed[tx]++
-				be.validateTasks.clearComplete(tx)
-				be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
-				be.execTasks.clearComplete(tx)
-				be.execTasks.pushDeferred(tx)
-				be.preValidated[tx] = false
-				be.txIncarnations[tx]++
-				if r := be.tooManyRetries(tx, txVersion.TxIndex, "finalize-revalidate", nil); r != nil {
-					return r, nil
-				}
-				return nil, nil
-			}
-		}
-
+		// No re-validation here: publish/finalize runs the contiguous committed
+		// prefix, so every predecessor < tx is already committed (final) when tx
+		// is finalized — tx's inputs are authoritative by construction. Staleness
+		// from a predecessor whose writes changed is caught earlier, before the
+		// committed prefix can reach tx, by the write-change re-validation of tx's
+		// dependents in nextResult.
 		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil {
 			taskVer, ok := txResult.Task.(*taskVersion)
 			if !ok {
@@ -2919,6 +2902,50 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 		}
 	}
 	return nil, nil
+}
+
+// revalidateCommittedDependents re-checks every committed-but-not-published tx
+// at or after txFrom after a predecessor's write-set changed (re-execution or a
+// validation failure). Under dependency-ordered validation a stale dependent can
+// sit well past the contiguous prefix, so the whole tail is scanned (published
+// txs excluded — they are final and already streamed to commitment).
+//
+// Crucially it re-validates IN PLACE: a still-valid dependent stays committed,
+// so maxValidated does not regress and scheduleExecution's deferred-drain keeps
+// making progress. Only a dependent that now genuinely fails is un-committed and
+// re-queued for re-execution — which, when its own writes change, propagates the
+// cascade to its dependents on the next result.
+func (be *blockExecutor) revalidateCommittedDependents(txFrom int) *blockResult {
+	for tx := txFrom; tx < len(be.tasks); tx++ {
+		if !be.validateTasks.checkComplete(tx) || be.publishTasks.checkComplete(tx) {
+			continue
+		}
+		txResult := be.finalizedResults[tx]
+		if txResult == nil {
+			continue
+		}
+		txVersion := txResult.Task.Version()
+		if be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
+			func(rv, wv state.Version) state.VersionValidity {
+				if rv != wv {
+					return state.VersionInvalid
+				}
+				return state.VersionValid
+			}, false, "") == state.VersionValid {
+			continue
+		}
+		be.cntValidationFail++
+		be.execFailed[tx]++
+		be.validateTasks.clearComplete(tx)
+		be.execTasks.clearComplete(tx)
+		be.execTasks.pushDeferred(tx)
+		be.preValidated[tx] = false
+		be.txIncarnations[tx]++
+		if r := be.tooManyRetries(tx, txVersion.TxIndex, "dep-revalidate", nil); r != nil {
+			return r
+		}
+	}
+	return nil
 }
 
 // runDepOrderValidation is the DEP_ORDER_VAL validation pass. It first finalizes
@@ -2988,6 +3015,14 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 		if valid {
 			be.validateTasks.markComplete(tx)
 			be.finalizedResults[tx] = txResult
+			// This tx's writes (now flushed) differ from the incarnation its
+			// committed dependents were validated against — re-check them.
+			if be.writeChanged[tx] {
+				delete(be.writeChanged, tx)
+				if r := be.revalidateCommittedDependents(tx + 1); r != nil {
+					return r, nil
+				}
+			}
 			continue
 		}
 
@@ -2996,8 +3031,10 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 		if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
 			fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx])
 		}
-		be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
 		be.validateTasks.clearInProgress(tx)
+		if r := be.revalidateCommittedDependents(tx + 1); r != nil {
+			return r, nil
+		}
 		be.execTasks.clearComplete(tx)
 		be.execTasks.pushDeferred(tx)
 		be.preValidated[tx] = false
@@ -3156,7 +3193,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.blockIO.RecordWrites(txVersion, res.TxOut)
 
 			if hasWriteChange {
-				be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
+				if depOrderVal {
+					// Defer dependent re-validation until this tx's new writes are
+					// flushed during validation (they aren't in the versionMap yet).
+					be.writeChanged[tx] = true
+				} else {
+					be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
+				}
 			}
 		}
 
