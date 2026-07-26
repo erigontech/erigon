@@ -228,6 +228,14 @@ func logDepShape(logger log.Logger, blockNum uint64, blockIO *state.VersionedIO,
 		"achieved", fmt.Sprintf("%.2f", achieved),
 		"windowConc", fmt.Sprintf("%.2f", windowConc),
 		"peakConc", peakConc,
+		"concShape", fmt.Sprintf("%v", func() []string {
+			b := concurrencyBuckets(stats, 10)
+			s := make([]string, len(b))
+			for i, v := range b {
+				s[i] = fmt.Sprintf("%.1f", v)
+			}
+			return s
+		}()),
 		"workerWinMs", fmt.Sprintf("%.1f", float64(windowNanos)/1e6),
 		"critPathTxs", m.criticalPathTxs,
 		"depEdges", m.depEdges,
@@ -302,6 +310,47 @@ func workerWindowConcurrency(stats map[int]ExecutionStat, totalExecNanos int64) 
 		}
 	}
 	return avg, peak, windowNanos
+}
+
+// concurrencyBuckets splits the worker-active window into n equal time buckets
+// and returns the average concurrency in each (Σ interval-overlap / bucketWidth).
+// Reveals the temporal shape — a front-loaded burst then a low-concurrency tail
+// vs uniform concurrency.
+func concurrencyBuckets(stats map[int]ExecutionStat, n int) []float64 {
+	var minStart, maxEnd int64
+	first := true
+	for _, s := range stats {
+		if s.StartNanos == 0 || s.EndNanos <= s.StartNanos {
+			continue
+		}
+		if first || s.StartNanos < minStart {
+			minStart = s.StartNanos
+		}
+		if first || s.EndNanos > maxEnd {
+			maxEnd = s.EndNanos
+		}
+		first = false
+	}
+	out := make([]float64, n)
+	span := maxEnd - minStart
+	if span <= 0 {
+		return out
+	}
+	bw := float64(span) / float64(n)
+	for _, s := range stats {
+		if s.StartNanos == 0 || s.EndNanos <= s.StartNanos {
+			continue
+		}
+		for b := 0; b < n; b++ {
+			lo := minStart + int64(float64(b)*bw)
+			hi := minStart + int64(float64(b+1)*bw)
+			ov := min(s.EndNanos, hi) - max(s.StartNanos, lo)
+			if ov > 0 {
+				out[b] += float64(ov) / bw
+			}
+		}
+	}
+	return out
 }
 
 func perDimString(perPath map[state.AccountPath]int64) string {

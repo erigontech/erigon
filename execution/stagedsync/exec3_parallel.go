@@ -1833,6 +1833,15 @@ var rawViewCollapse = dbg.EnvBool("RAW_VIEW_COLLAPSE", false)
 // spine → more parallelism" hypothesis.
 var spineDelayUs = dbg.EnvInt("SPINE_DELAY_US", 0)
 
+// relaxDispatch (prototype, default OFF) relaxes the deferred-tx re-dispatch gate
+// from strict predecessor order (maxValidated >= tx-1) to actual observed
+// dependencies (!isBlocked). A deferred tx that no longer has unresolved blockers
+// is re-queued immediately rather than waiting for its immediate predecessor to
+// validate — keeping otherwise-idle workers fed with runnable work. Correctness
+// is still enforced by the versionMap OCC validation (premature re-runs abort and
+// re-defer); this only changes WHEN a re-try is offered to a worker.
+var relaxDispatch = dbg.EnvBool("RELAX_DISPATCH", false)
+
 func injectSpineDelay() {
 	if spineDelayUs <= 0 {
 		return
@@ -3394,6 +3403,12 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	drainMaxValidated := be.validateTasks.maxComplete()
 	drainMinIP := be.execTasks.minInProgress()
 	be.execTasks.drainDeferredIfReady(func(tx int) bool {
+		if relaxDispatch {
+			// Relaxed order: re-queue as soon as actual blockers clear, not when
+			// the immediate predecessor validates. Keep the in-flight guard so a
+			// lower-indexed worker's floor writes are still visible on re-read.
+			return !be.execTasks.isBlocked(tx) && (drainMinIP < 0 || drainMinIP >= tx)
+		}
 		return drainMaxValidated >= tx-1 && (drainMinIP < 0 || drainMinIP >= tx)
 	})
 

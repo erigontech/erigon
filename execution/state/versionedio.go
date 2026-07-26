@@ -168,6 +168,44 @@ func (s *ReadSet) SetStorage(addr accounts.Address, key accounts.StorageKey, tr 
 	inner[key] = tr
 }
 
+// ReadsAccount reports whether this read-set accessed any account-level field
+// (whole-account, balance, nonce, incarnation, code*, self-destruct, create) of
+// addr. Used to detect a coinbase access: under dependency-ordered validation a
+// tx that reads the coinbase is implicitly dependent on all prior txs (every tx
+// credits fees to the coinbase), so it must fall back to the total-order gate —
+// a constraint that total ordering fulfils implicitly today and must become
+// explicit once validation is dependency-ordered.
+func (s *ReadSet) ReadsAccount(addr accounts.Address) bool {
+	if _, ok := s.address[addr]; ok {
+		return true
+	}
+	if _, ok := s.balance[addr]; ok {
+		return true
+	}
+	if _, ok := s.nonce[addr]; ok {
+		return true
+	}
+	if _, ok := s.incarnation[addr]; ok {
+		return true
+	}
+	if _, ok := s.codeHash[addr]; ok {
+		return true
+	}
+	if _, ok := s.code[addr]; ok {
+		return true
+	}
+	if _, ok := s.codeSize[addr]; ok {
+		return true
+	}
+	if _, ok := s.selfDestruct[addr]; ok {
+		return true
+	}
+	if _, ok := s.createContract[addr]; ok {
+		return true
+	}
+	return false
+}
+
 func (s *ReadSet) GetAddress(addr accounts.Address) (VersionedRead[AccountView], bool) {
 	tr, ok := s.address[addr]
 	return tr, ok
