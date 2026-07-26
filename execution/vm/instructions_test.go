@@ -610,6 +610,33 @@ func BenchmarkOpReturn(bench *testing.B) {
 
 var retSink []byte
 
+func BenchmarkOpPush1(bench *testing.B) {
+	var (
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+		callContext = &CallContext{}
+	)
+	callContext.Contract.Code = bytes.Repeat([]byte{0x60, 0x42}, 16)
+	pc := uint64(0)
+	for bench.Loop() {
+		opPush1(pc, evm, callContext)
+		callContext.Stack.pop()
+	}
+}
+
+func BenchmarkOpPush32(bench *testing.B) {
+	var (
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+		callContext = &CallContext{}
+	)
+	callContext.Contract.Code = bytes.Repeat([]byte{0xab}, 40)
+	push32 := makePush(33, 32)
+	pc := uint64(0)
+	for bench.Loop() {
+		push32(pc, evm, callContext)
+		callContext.Stack.pop()
+	}
+}
+
 // The CALL/CREATE trace formatters must read the operands the op is about to
 // pop (top-relative), not fixed slots near the array's capacity.
 func TestStaticCallTraceReadsStackTop(t *testing.T) {

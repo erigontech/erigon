@@ -51,6 +51,17 @@ func (st *Stack) push(d uint256.Int) {
 	st.top++
 }
 
+// pushRef grows the stack by one and returns a pointer to the new top slot so
+// the caller can build the value in place instead of constructing a temporary
+// and copying it in. The slot holds stale data from a prior use, so the caller
+// must fully overwrite it — a Set*/Clear that writes all four words, never a
+// partial update.
+func (st *Stack) pushRef() *uint256.Int {
+	ref := &st.data[st.top]
+	st.top++
+	return ref
+}
+
 func (st *Stack) pop() (ret uint256.Int) {
 	st.top--
 	ret = st.data[st.top]
