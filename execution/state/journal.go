@@ -110,7 +110,6 @@ func (j *journal) release() {
 	journalPool.Put(j)
 }
 func (j *journal) Reset() {
-	clear(j.entries)
 	j.entries = j.entries[:0]
 	clear(j.dirties)
 }
@@ -141,7 +140,6 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 			}
 		}
 	}
-	clear(j.entries[snapshot:]) // release the reverted entries' extra pointers
 	j.entries = j.entries[:snapshot]
 }
 
