@@ -71,6 +71,38 @@ type TxContext struct {
 	BlobHashes []common.Hash    // Provides versioned blob hashes for BLOBHASH
 }
 
+//type ExecutionResult struct {
+//	Kind            ResultKind
+//	Reason          vm.InstructionResult
+//	GasUsed         uint64
+//	GasRefund       int64
+//	Output          types.Bytes
+//	Logs            []state.Log
+//	CreatedAddr     *types.Address // Only for successful CREATE
+//	ValidationError bool           // True if failure was during tx validation (before execution)
+//}
+
+//type ExecutionResult struct {
+//	StateRoot            common.Hash           `json:"stateRoot"`
+//	TxRoot               common.Hash           `json:"txRoot"`
+//	ReceiptRoot          common.Hash           `json:"receiptsRoot"`
+//	LogsHash             common.Hash           `json:"logsHash"`
+//	Bloom                types.Bloom           `json:"logsBloom"        gencodec:"required"`
+//	Receipts             types.Receipts        `json:"receipts"`
+//	Rejected             []*rejectedTx         `json:"rejected,omitempty"`
+//	Difficulty           *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
+//	GasUsed              math.HexOrDecimal64   `json:"gasUsed"`
+//	BaseFee              *math.HexOrDecimal256 `json:"currentBaseFee,omitempty"`
+//	WithdrawalsRoot      *common.Hash          `json:"withdrawalsRoot,omitempty"`
+//	CurrentExcessBlobGas *math.HexOrDecimal64  `json:"currentExcessBlobGas,omitempty"`
+//	CurrentBlobGasUsed   *math.HexOrDecimal64  `json:"blobGasUsed,omitempty"`
+//	RequestsHash         *common.Hash          `json:"requestsHash,omitempty"`
+//	Requests             [][]byte              `json:"requests"`
+//
+//	BlockAccessList     hexutil.Bytes `json:"blockAccessList,omitempty"`
+//	BlockAccessListHash *common.Hash  `json:"blockAccessListHash,omitempty"`
+//}
+
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
