@@ -26,7 +26,7 @@ exec "$BIN" \
   --prune.mode=minimal \
   --snap.p2p-manifest \
   --snap.lifecycle-driven-by-storage \
-  --http.api=eth,erigon,engine,debug,net,web3,trace,txpool \
+  --http.api=eth,erigon,engine,debug,net,web3,trace,txpool,admin \
   --http.port=19745 --authrpc.port=19751 --private.api.addr=127.0.0.1:11790 \
   --torrent.port=43669 --port=31803 \
   --caplin.discovery.port=4950 --caplin.discovery.tcpport=4951 \
