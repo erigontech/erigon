@@ -610,31 +610,27 @@ func BenchmarkOpReturn(bench *testing.B) {
 
 var retSink []byte
 
-func BenchmarkOpPush1(bench *testing.B) {
-	var (
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
-		callContext = &CallContext{}
-	)
-	callContext.Contract.Code = bytes.Repeat([]byte{0x60, 0x42}, 16)
+// benchPush dispatches through the jump table (indirect call, as the real
+// interpreter does) so the op is not inlined into the loop, and rebalances with
+// a bare top-- to isolate the push cost.
+func benchPush(bench *testing.B, op OpCode, code []byte) {
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+	callContext := &CallContext{}
+	callContext.Contract.Code = code
+	execute := newAmsterdamInstructionSet()[op].execute
 	pc := uint64(0)
 	for bench.Loop() {
-		opPush1(pc, evm, callContext)
-		callContext.Stack.pop()
+		execute(pc, evm, callContext)
+		callContext.Stack.top--
 	}
 }
 
+func BenchmarkOpPush1(bench *testing.B) {
+	benchPush(bench, PUSH1, bytes.Repeat([]byte{0x60, 0x42}, 16))
+}
+
 func BenchmarkOpPush32(bench *testing.B) {
-	var (
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
-		callContext = &CallContext{}
-	)
-	callContext.Contract.Code = bytes.Repeat([]byte{0xab}, 40)
-	push32 := makePush(33, 32)
-	pc := uint64(0)
-	for bench.Loop() {
-		push32(pc, evm, callContext)
-		callContext.Stack.pop()
-	}
+	benchPush(bench, PUSH32, bytes.Repeat([]byte{0xab}, 40))
 }
 
 // The CALL/CREATE trace formatters must read the operands the op is about to
