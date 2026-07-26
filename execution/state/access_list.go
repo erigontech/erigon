@@ -92,8 +92,9 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 	if idx == -1 {
 		return true, false
 	}
-	al.lastAddr, al.lastSlots = address, al.slots[idx]
-	_, slotPresent = al.slots[idx][slot]
+	slotmap := al.slots[idx]
+	al.lastAddr, al.lastSlots = address, slotmap
+	_, slotPresent = slotmap[slot]
 	return true, slotPresent
 }
 
