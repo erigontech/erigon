@@ -261,11 +261,11 @@ func overrideBaseFee(traceConfig *config.TraceConfig, baseFee *uint256.Int) (*ui
 
 // overrideBlockContext applies traceConfig's BlockOverrides (if any) to blockCtx.
 // config may be nil when blockCtx is a throwaway used only to validate overrides.
-func overrideBlockContext(traceConfig *config.TraceConfig, blockCtx *evmtypes.BlockContext, config *chain.Config) error {
+func overrideBlockContext(traceConfig *config.TraceConfig, blockCtx *evmtypes.BlockContext, chainConfig *chain.Config) error {
 	if traceConfig == nil {
 		return nil
 	}
-	return traceConfig.BlockOverrides.Override(blockCtx, config)
+	return traceConfig.BlockOverrides.Override(blockCtx, chainConfig)
 }
 
 func parseOeTracerConfig(traceConfig *config.TraceConfig) (OeTracerConfig, error) {
