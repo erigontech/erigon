@@ -358,7 +358,7 @@ func opSAR(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 }
 
 func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	offset, size := scope.Stack.pop(), scope.Stack.peek()
+	offset, size := scope.Stack.popRef(), scope.Stack.peek()
 	data := scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 
 	hash := crypto.Keccak256Hash(data)
@@ -762,8 +762,8 @@ func stMload(_ uint64, scope *CallContext) string {
 }
 
 func opMstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	mStart, val := scope.Stack.pop(), scope.Stack.pop()
-	scope.Memory.Set32(mStart.Uint64(), &val)
+	mStart, val := scope.Stack.popRef(), scope.Stack.popRef()
+	scope.Memory.Set32(mStart.Uint64(), val)
 	return pc, nil, nil
 }
 
