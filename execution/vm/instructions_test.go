@@ -572,6 +572,44 @@ func BenchmarkOpMstore(bench *testing.B) {
 	}
 }
 
+func BenchmarkOpMstore8(bench *testing.B) {
+	var (
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+		callContext = &CallContext{}
+	)
+
+	callContext.Memory.Resize(64)
+	pc := uint64(0)
+	memStart := uint256.Int{}
+	value := *new(uint256.Int).SetUint64(0x1337)
+
+	for bench.Loop() {
+		callContext.Stack.push(value)
+		callContext.Stack.push(memStart)
+		opMstore8(pc, evm, callContext)
+	}
+}
+
+func BenchmarkOpReturn(bench *testing.B) {
+	var (
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+		callContext = &CallContext{}
+	)
+
+	callContext.Memory.Resize(64)
+	pc := uint64(0)
+	size := *new(uint256.Int).SetUint64(32)
+	offset := uint256.Int{}
+
+	for bench.Loop() {
+		callContext.Stack.push(size)
+		callContext.Stack.push(offset)
+		_, retSink, _ = opReturn(pc, evm, callContext)
+	}
+}
+
+var retSink []byte
+
 func TestOpTstore(t *testing.T) {
 	t.Parallel()
 	var (
