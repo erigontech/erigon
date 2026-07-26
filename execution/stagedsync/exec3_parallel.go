@@ -1843,6 +1843,15 @@ var spineDelayUs = dbg.EnvInt("SPINE_DELAY_US", 0)
 // re-defer); this only changes WHEN a re-try is offered to a worker.
 var relaxDispatch = dbg.EnvBool("RELAX_DISPATCH", false)
 
+// depOrderVal (prototype, default OFF) makes ValidateVersion + state-commit
+// dependency-ordered instead of gated on the contiguous maxComplete prefix: a tx
+// validates as soon as it is exec-complete and its read-dependencies are all
+// validated. The cheap in-order calcFees coinbase chain stays a separate in-order
+// sweep (its writes un-merged from per-tx commit); a tx that reads the coinbase
+// (ReadsAccount) falls back to the all-prior gate. Publish stays on the
+// contiguous maxValidated = the final total-ordered pass.
+var depOrderVal = dbg.EnvBool("DEP_ORDER_VAL", false)
+
 func injectSpineDelay() {
 	if spineDelayUs <= 0 {
 		return
