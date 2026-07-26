@@ -930,7 +930,7 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *cha
 	var produced []string
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg) {
 		segEnd := chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg)
-		lastTxNum, segFiles, err := dumpBlocksRange(ctx, i, segEnd, tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger, inProgress)
+		lastTxNum, segFiles, err := dumpBlocksRange(ctx, i, segEnd, tmpDir, snapDir, firstTxNum, chainDB, chainConfig, blockReader, workers, lvl, logger, inProgress)
 		if err != nil {
 			return produced, err
 		}
@@ -940,7 +940,7 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *cha
 	return produced, nil
 }
 
-func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, inProgress *snapshotsync.RoSnapshots) (lastTxNum uint64, producedFiles []string, err error) {
+func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, blockReader services.FullBlockReader, workers int, lvl log.Lvl, logger log.Logger, inProgress *snapshotsync.RoSnapshots) (lastTxNum uint64, producedFiles []string, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -951,8 +951,11 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	}
 
 	hdrFI := snaptype2.Headers.FileInfo(snapDir, blockFrom, blockTo)
+	headersDump := func(ctx context.Context, db kv.RoDB, cc *chain.Config, from, to uint64, fk firstKeyGetter, collect func([]byte) error, w int, l log.Lvl, lg log.Logger) (uint64, error) {
+		return DumpHeadersRaw(ctx, db, cc, from, to, fk, collect, w, l, lg, false, blockReader)
+	}
 	if _, err = dumpRange(ctx, hdrFI,
-		DumpHeaders, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger, inProgress); err != nil {
+		headersDump, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger, inProgress); err != nil {
 		return 0, nil, err
 	}
 	producedFiles = append(producedFiles, hdrFI.Name())
@@ -1258,11 +1261,11 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 }
 
 func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-	return DumpHeadersRaw(ctx, db, nil, blockFrom, blockTo, nil, collect, workers, lvl, logger, false)
+	return DumpHeadersRaw(ctx, db, nil, blockFrom, blockTo, nil, collect, workers, lvl, logger, false, nil)
 }
 
 // DumpHeadersRaw - [from, to)
-func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, test bool) (uint64, error) {
+func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, test bool, blockReader services.FullBlockReader) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -1280,11 +1283,24 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom,
 			if err != nil {
 				return err
 			}
-			if h == emptyHash {
-				return fmt.Errorf("header not found: %d", blockNum)
+			if h != emptyHash {
+				prevHash = h
+				return nil
 			}
-			prevHash = h
-			return nil
+			// Canonical for blockNum was pruned from MDBX (pruneCanonicalMarkers
+			// under --prune.mode=minimal). The header still lives in a frozen
+			// .seg file — read it there so the parent-hash anchor is available.
+			if blockReader != nil {
+				parent, err := blockReader.HeaderByNumber(ctx, tx, blockNum)
+				if err != nil {
+					return err
+				}
+				if parent != nil {
+					prevHash = parent.Hash()
+					return nil
+				}
+			}
+			return fmt.Errorf("header not found: %d", blockNum)
 		}); err != nil {
 			return 0, err
 		}

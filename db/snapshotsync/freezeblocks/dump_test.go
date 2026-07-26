@@ -173,7 +173,7 @@ func TestDump(t *testing.T) {
 				}
 				nonceList = append(nonceList, h.Number.Uint64())
 				return nil
-			}, 1, log.LvlInfo, log.New(), true)
+			}, 1, log.LvlInfo, log.New(), true, nil)
 			require.NoError(err)
 			require.Equal(nonceRange(0, test.chainSize), nonceList)
 		})
@@ -187,7 +187,7 @@ func TestDump(t *testing.T) {
 				}
 				nonceList = append(nonceList, h.Number.Uint64())
 				return nil
-			}, 1, log.LvlInfo, log.New(), true)
+			}, 1, log.LvlInfo, log.New(), true, nil)
 			require.NoError(err)
 			require.Equal(nonceRange(2, test.chainSize-1), nonceList)
 		})
