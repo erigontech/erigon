@@ -57,6 +57,21 @@ func (st *Stack) pop() (ret uint256.Int) {
 	return
 }
 
+// pop2uint64 pops the top two items as their low 64 bits (x topmost) — for
+// opcodes that need only the low word (memory offsets/sizes).
+func (st *Stack) pop2uint64() (x, y uint64) {
+	st.top -= 2
+	return st.data[st.top+1].Uint64(), st.data[st.top].Uint64()
+}
+
+// popRef pops the top item and returns a pointer to it. The pointed-to value
+// stays valid until the next push, so it can still be read as an operand while
+// a following peek() overwrites the slot below it with the result.
+func (st *Stack) popRef() *uint256.Int {
+	st.top--
+	return &st.data[st.top]
+}
+
 func (st *Stack) Cap() int {
 	return stackLimit
 }

@@ -37,8 +37,8 @@ import (
 )
 
 func opAdd(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.pop(), scope.Stack.peek()
-	y.Add(&x, y)
+	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	y.Add(x, y)
 	return pc, nil, nil
 }
 
@@ -48,8 +48,8 @@ func stAdd(_ uint64, scope *CallContext) string {
 }
 
 func opSub(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.pop(), scope.Stack.peek()
-	y.Sub(&x, y)
+	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	y.Sub(x, y)
 	return pc, nil, nil
 }
 
@@ -59,8 +59,8 @@ func stSub(_ uint64, scope *CallContext) string {
 }
 
 func opMul(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.pop(), scope.Stack.peek()
-	y.Mul(&x, y)
+	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	y.Mul(x, y)
 	return pc, nil, nil
 }
 
@@ -70,8 +70,8 @@ func stMul(_ uint64, scope *CallContext) string {
 }
 
 func opDiv(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.pop(), scope.Stack.peek()
-	y.Div(&x, y)
+	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	y.Div(x, y)
 	return pc, nil, nil
 }
 
@@ -81,8 +81,8 @@ func stDiv(_ uint64, scope *CallContext) string {
 }
 
 func opSdiv(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.pop(), scope.Stack.peek()
-	y.SDiv(&x, y)
+	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	y.SDiv(x, y)
 	return pc, nil, nil
 }
 
@@ -92,8 +92,8 @@ func stSdiv(_ uint64, scope *CallContext) string {
 }
 
 func opMod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.pop(), scope.Stack.peek()
-	y.Mod(&x, y)
+	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	y.Mod(x, y)
 	return pc, nil, nil
 }
 
@@ -103,8 +103,8 @@ func stMod(_ uint64, scope *CallContext) string {
 }
 
 func opSmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.pop(), scope.Stack.peek()
-	y.SMod(&x, y)
+	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	y.SMod(x, y)
 	return pc, nil, nil
 }
 
@@ -114,7 +114,7 @@ func stSmod(_ uint64, scope *CallContext) string {
 }
 
 func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	base, exponent := scope.Stack.pop(), scope.Stack.peek()
+	base, exponent := scope.Stack.popRef(), scope.Stack.peek()
 	switch {
 	case exponent.IsZero():
 		// x ^ 0 == 1
@@ -124,7 +124,7 @@ func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		exponent.Clear()
 	case exponent.LtUint64(2): // exponent == 1
 		// x ^ 1 == x
-		exponent.Set(&base)
+		exponent.Set(base)
 	case base.LtUint64(2): // base == 1
 		// 1 ^ y == 1
 		exponent.SetOne()
@@ -137,14 +137,14 @@ func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 			exponent.Clear()
 		}
 	default:
-		exponent.Exp(&base, exponent)
+		exponent.Exp(base, exponent)
 	}
 	return pc, nil, nil
 }
 
 func opSignExtend(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	back, num := scope.Stack.pop(), scope.Stack.peek()
-	num.ExtendSign(num, &back)
+	back, num := scope.Stack.popRef(), scope.Stack.peek()
+	num.ExtendSign(num, back)
 	return pc, nil, nil
 }
 
@@ -160,7 +160,7 @@ func stNot(_ uint64, scope *CallContext) string {
 }
 
 func opLt(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.pop(), scope.Stack.peek()
+	x, y := scope.Stack.popRef(), scope.Stack.peek()
 	if x.Lt(y) {
 		y.SetOne()
 	} else {
@@ -175,7 +175,7 @@ func stLt(_ uint64, scope *CallContext) string {
 }
 
 func opGt(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.pop(), scope.Stack.peek()
+	x, y := scope.Stack.popRef(), scope.Stack.peek()
 	if x.Gt(y) {
 		y.SetOne()
 	} else {
@@ -190,7 +190,7 @@ func stGt(_ uint64, scope *CallContext) string {
 }
 
 func opSlt(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.pop(), scope.Stack.peek()
+	x, y := scope.Stack.popRef(), scope.Stack.peek()
 	if x.Slt(y) {
 		y.SetOne()
 	} else {
@@ -205,7 +205,7 @@ func stSlt(_ uint64, scope *CallContext) string {
 }
 
 func opSgt(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.pop(), scope.Stack.peek()
+	x, y := scope.Stack.popRef(), scope.Stack.peek()
 	if x.Sgt(y) {
 		y.SetOne()
 	} else {
@@ -220,7 +220,7 @@ func stSgt(_ uint64, scope *CallContext) string {
 }
 
 func opEq(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.pop(), scope.Stack.peek()
+	x, y := scope.Stack.popRef(), scope.Stack.peek()
 	if x.Eq(y) {
 		y.SetOne()
 	} else {
@@ -250,8 +250,8 @@ func stIsZero(_ uint64, scope *CallContext) string {
 }
 
 func opAnd(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.pop(), scope.Stack.peek()
-	y.And(&x, y)
+	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	y.And(x, y)
 	return pc, nil, nil
 }
 
@@ -261,8 +261,8 @@ func stAnd(_ uint64, scope *CallContext) string {
 }
 
 func opOr(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.pop(), scope.Stack.peek()
-	y.Or(&x, y)
+	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	y.Or(x, y)
 	return pc, nil, nil
 }
 
@@ -272,8 +272,8 @@ func stOr(_ uint64, scope *CallContext) string {
 }
 
 func opXor(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.pop(), scope.Stack.peek()
-	y.Xor(&x, y)
+	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	y.Xor(x, y)
 	return pc, nil, nil
 }
 
@@ -283,14 +283,14 @@ func stXor(_ uint64, scope *CallContext) string {
 }
 
 func opByte(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	th, val := scope.Stack.pop(), scope.Stack.peek()
-	val.Byte(&th)
+	th, val := scope.Stack.popRef(), scope.Stack.peek()
+	val.Byte(th)
 	return pc, nil, nil
 }
 
 func opAddmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y, z := scope.Stack.pop(), scope.Stack.pop(), scope.Stack.peek()
-	z.AddMod(&x, &y, z)
+	x, y, z := scope.Stack.popRef(), scope.Stack.popRef(), scope.Stack.peek()
+	z.AddMod(x, y, z)
 	return pc, nil, nil
 }
 
@@ -300,8 +300,8 @@ func stAddmod(_ uint64, scope *CallContext) string {
 }
 
 func opMulmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y, z := scope.Stack.pop(), scope.Stack.pop(), scope.Stack.peek()
-	z.MulMod(&x, &y, z)
+	x, y, z := scope.Stack.popRef(), scope.Stack.popRef(), scope.Stack.peek()
+	z.MulMod(x, y, z)
 	return pc, nil, nil
 }
 
@@ -315,7 +315,7 @@ func stMulmod(_ uint64, scope *CallContext) string {
 // and pushes on the stack arg2 shifted to the left by arg1 number of bits.
 func opSHL(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	// Note, second operand is left in the stack; accumulate result into it, and no need to push it afterwards
-	shift, value := scope.Stack.pop(), scope.Stack.peek()
+	shift, value := scope.Stack.popRef(), scope.Stack.peek()
 	if shift.LtUint64(256) {
 		value.Lsh(value, uint(shift.Uint64()))
 	} else {
@@ -329,7 +329,7 @@ func opSHL(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 // and pushes on the stack arg2 shifted to the right by arg1 number of bits with zero fill.
 func opSHR(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	// Note, second operand is left in the stack; accumulate result into it, and no need to push it afterwards
-	shift, value := scope.Stack.pop(), scope.Stack.peek()
+	shift, value := scope.Stack.popRef(), scope.Stack.peek()
 	if shift.LtUint64(256) {
 		value.Rsh(value, uint(shift.Uint64()))
 	} else {
@@ -342,7 +342,7 @@ func opSHR(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 // The SAR instruction (arithmetic shift right) pops 2 values from the stack, first arg1 and then arg2,
 // and pushes on the stack arg2 shifted to the right by arg1 number of bits with sign extension.
 func opSAR(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	shift, value := scope.Stack.pop(), scope.Stack.peek()
+	shift, value := scope.Stack.popRef(), scope.Stack.peek()
 	if shift.GtUint64(255) {
 		if value.Sign() >= 0 {
 			value.Clear()
@@ -773,8 +773,8 @@ func stMstore(_ uint64, scope *CallContext) string {
 }
 
 func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	off, val := scope.Stack.pop(), scope.Stack.pop()
-	scope.Memory.store[off.Uint64()] = byte(val.Uint64())
+	off, val := scope.Stack.pop2uint64()
+	scope.Memory.store[off] = byte(val)
 	return pc, nil, nil
 }
 
@@ -998,9 +998,9 @@ func stCreate(_ uint64, scope *CallContext) string {
 func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	var (
 		endowment    = scope.Stack.pop()
-		offset, size = scope.Stack.pop(), scope.Stack.pop()
+		offset, size = scope.Stack.pop2uint64()
 		salt         = scope.Stack.pop()
-		input        = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+		input        = scope.Memory.GetCopy(offset, size)
 	)
 	return execCreate(pc, evm, scope, endowment, input, &salt)
 }
@@ -1282,14 +1282,14 @@ func stStaticCall(_ uint64, scope *CallContext) string {
 }
 
 func opReturn(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	offset, size := scope.Stack.pop(), scope.Stack.pop()
-	ret := scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+	offset, size := scope.Stack.pop2uint64()
+	ret := scope.Memory.GetCopy(offset, size)
 	return pc, ret, errStopToken
 }
 
 func opRevert(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	offset, size := scope.Stack.pop(), scope.Stack.pop()
-	ret := scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+	offset, size := scope.Stack.pop2uint64()
+	ret := scope.Memory.GetCopy(offset, size)
 	evm.returnData = ret
 	return pc, ret, ErrExecutionReverted
 }
@@ -1508,13 +1508,13 @@ func makeLog(size int) executionFunc {
 		}
 		topics := make([]common.Hash, size)
 		stack := &scope.Stack
-		mStart, mSize := stack.pop(), stack.pop()
+		mStart, mSize := stack.pop2uint64()
 		for i := range size {
 			addr := stack.pop()
 			topics[i] = addr.Bytes32()
 		}
 
-		d := scope.Memory.GetCopy(mStart.Uint64(), mSize.Uint64())
+		d := scope.Memory.GetCopy(mStart, mSize)
 		evm.IntraBlockState().AddLog(&types.Log{
 			Address: scope.Contract.Address().Value(),
 			Topics:  topics,
