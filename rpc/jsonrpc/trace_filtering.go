@@ -574,7 +574,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		}
 		txIndexU64 := uint64(txIndex)
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNum, txIndex)
+		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNum, txIndex)
 		if err != nil {
 			if first {
 				first = false
@@ -586,7 +586,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectEnd()
 			continue
 		}
-		if txn == nil {
+		if !ok {
 			continue //guess block doesn't have transactions
 		}
 		txHash := txn.Hash()
@@ -1141,12 +1141,13 @@ func (api *TraceAPIImpl) callTransaction(
 		}
 		txn = bortypes.NewBorTransaction()
 	} else {
+		var ok bool
 		var err error
-		txn, err = api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNumber, txIndex)
+		txn, ok, err = api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNumber, txIndex)
 		if err != nil {
 			return nil, err
 		}
-		if txn == nil {
+		if !ok {
 			return nil, fmt.Errorf("transaction not found at block %d, index %d", blockNumber, txIndex)
 		}
 	}
