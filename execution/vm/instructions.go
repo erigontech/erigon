@@ -1517,8 +1517,7 @@ func makeLog(size int) executionFunc {
 		stack := &scope.Stack
 		mStart, mSize := stack.pop2uint64()
 		for i := range size {
-			addr := stack.pop()
-			topics[i] = addr.Bytes32()
+			topics[i] = stack.popRef().Bytes32()
 		}
 
 		d := scope.Memory.GetCopy(mStart, mSize)
