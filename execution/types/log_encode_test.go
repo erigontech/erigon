@@ -38,6 +38,10 @@ func logEncodingSamples() map[string]*Log {
 			Address: common.HexToAddress("0x2"),
 			Data:    []byte{0x01},
 		},
+		"single byte data above threshold": {
+			Address: common.HexToAddress("0x2"),
+			Data:    []byte{0xff},
+		},
 		"four topics, long data": {
 			Address: common.HexToAddress("0x3"),
 			Topics: []common.Hash{
