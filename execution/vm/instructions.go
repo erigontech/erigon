@@ -779,7 +779,7 @@ func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err error) {
 	loc := scope.Stack.peek()
-	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey(evm))
+	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey())
 	return pc, nil, err
 }
 
@@ -792,7 +792,7 @@ func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
 	}
-	key := scope.peekStorageKey(evm)
+	key := scope.peekStorageKey()
 	scope.Stack.pop()
 	val := scope.Stack.pop()
 	return pc, nil, evm.IntraBlockState().SetState(scope.Contract.Address(), key, val)
