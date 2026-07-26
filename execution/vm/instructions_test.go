@@ -619,7 +619,7 @@ func BenchmarkOpPush1(bench *testing.B) {
 	pc := uint64(0)
 	for bench.Loop() {
 		opPush1(pc, evm, callContext)
-		callContext.Stack.pop()
+		callContext.Stack.top-- // rebalance without pop's value copy, to isolate push cost
 	}
 }
 
@@ -633,7 +633,7 @@ func BenchmarkOpPush32(bench *testing.B) {
 	pc := uint64(0)
 	for bench.Loop() {
 		push32(pc, evm, callContext)
-		callContext.Stack.pop()
+		callContext.Stack.top-- // rebalance without pop's value copy, to isolate push cost
 	}
 }
 
