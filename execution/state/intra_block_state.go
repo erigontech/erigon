@@ -2827,19 +2827,13 @@ func (sdb *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
 	})
 }
 
-// AccessedAddresses returns and resets the set of addresses touched during the current transaction.
-func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
-	access := sdb.versionedReads.access
-	if len(access) == 0 {
-		sdb.recordAccess = false
-		sdb.versionedReads.access = nil
-		return nil
+func (sdb *IntraBlockState) AccessedAddr(addr accounts.Address) bool {
+	acc := sdb.versionedReads.access
+	if acc != nil {
+		_, ok := acc[addr]
+		return ok
 	}
-	out := make(AccessSet, len(access))
-	maps.Copy(out, access)
-	sdb.recordAccess = false
-	sdb.versionedReads.access = nil
-	return out
+	return false
 }
 
 func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts.Account, source ReadSource, version Version) {
