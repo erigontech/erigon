@@ -64,9 +64,10 @@ func (st *Stack) pop2uint64() (x, y uint64) {
 	return st.data[st.top+1].Uint64(), st.data[st.top].Uint64()
 }
 
-// popRef pops the top item and returns a pointer to it. The pointed-to value
-// stays valid until the next push, so it can still be read as an operand while
-// a following peek() overwrites the slot below it with the result.
+// popRef pops the top item and returns a pointer to its slot. The value stays
+// valid until the stack next grows (push or dup reuse that slot), so it can be
+// read as an operand while a following peek() writes the result into the slot
+// below it.
 func (st *Stack) popRef() *uint256.Int {
 	st.top--
 	return &st.data[st.top]
