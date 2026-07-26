@@ -681,6 +681,7 @@ func BenchmarkOpKeccak256(bench *testing.B) {
 		callContext.Stack.push(*uint256.NewInt(32))
 		callContext.Stack.push(start)
 		opKeccak256(pc, evm, callContext)
+		callContext.Stack.pop()
 	}
 }
 
