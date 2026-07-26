@@ -2831,6 +2831,188 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 	return nil, nil
 }
 
+// advanceCoinbaseAndFinalize runs the in-order tail for dependency-ordered
+// validation over the contiguous validated prefix that has not yet been
+// finalized. For each tx it computes the calcFees coinbase credit (flushing the
+// tip to the versionMap and advancing coinbaseFlushedUpTo — coinbase readers
+// gate on this), then runs the finalize tail (receipt cumulative-gas, gas
+// accounting, normalization, publish queue). calcFees needs the tx validated so
+// its FeeTipped is final; the finalize tail needs its predecessor's receipt —
+// both hold on the contiguous validated prefix.
+func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyTx kv.TemporalTx, stateReader *state.StateReader) (*blockResult, error) {
+	maxValidated := be.validateTasks.maxComplete()
+	for tx := be.coinbaseFlushedUpTo + 1; tx <= maxValidated; tx++ {
+		// Use the validated snapshot, not be.results[tx]: validate and finalize
+		// are separate passes under dependency-ordered validation, so a
+		// concurrent worker may have overwritten be.results[tx] with a later
+		// incarnation in between.
+		txResult := be.finalizedResults[tx]
+		txTask := be.tasks[tx].Task
+		txVersion := txResult.Task.Version()
+
+		// Authoritative re-validation: finalize/publish is the legit final total
+		// order. Every predecessor < tx is already finalized (final), so the
+		// versionMap now holds their final writes. Dependency-ordered validation
+		// committed tx speculatively (its base/UnknownDep reads weren't gated on
+		// all predecessors); re-validate here against the final prefix to catch a
+		// read a since-finalized predecessor changed. On failure, re-gate tx for
+		// re-execution and stop finalizing — the frontier cannot advance past it.
+		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() {
+			if be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
+				func(readVersion, writtenVersion state.Version) state.VersionValidity {
+					if readVersion != writtenVersion {
+						return state.VersionInvalid
+					}
+					return state.VersionValid
+				}, false, "") != state.VersionValid {
+				be.cntValidationFail++
+				be.execFailed[tx]++
+				be.validateTasks.clearComplete(tx)
+				be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
+				be.execTasks.clearComplete(tx)
+				be.execTasks.pushDeferred(tx)
+				be.preValidated[tx] = false
+				be.txIncarnations[tx]++
+				if r := be.tooManyRetries(tx, txVersion.TxIndex, "finalize-revalidate", nil); r != nil {
+					return r, nil
+				}
+				return nil, nil
+			}
+		}
+
+		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil {
+			taskVer, ok := txResult.Task.(*taskVersion)
+			if !ok {
+				return nil, fmt.Errorf("apply loop: unexpected task type for tx %d: result.Task=%T", tx, txResult.Task)
+			}
+			if *stateReader == nil {
+				if txTask.IsHistoric() {
+					*stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
+				} else {
+					*stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
+				}
+			}
+			var calcFeesStart time.Time
+			if depShapeEnabled {
+				calcFeesStart = time.Now()
+			}
+			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules())
+			if depShapeEnabled {
+				be.calcFeesNanos += time.Since(calcFeesStart).Nanoseconds()
+			}
+			if err != nil {
+				return nil, err
+			}
+			if !tipWrites.IsEmpty() {
+				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
+				merged := MergeVersionedWrites(existingWrites, tipWrites)
+				be.blockIO.RecordWrites(txVersion, merged)
+				// Flush the tip so coinbase readers gated on coinbaseFlushedUpTo
+				// see the accumulated fee credit in the versionMap.
+				be.versionMap.FlushVersionedWrites(tipWrites, true, "")
+			}
+		}
+		be.coinbaseFlushedUpTo = tx
+
+		if r, ferr := be.finalizeValidatedTx(pe, applyTx, tx, txTask, txResult, txVersion, stateReader); ferr != nil || r != nil {
+			return r, ferr
+		}
+	}
+	return nil, nil
+}
+
+// runDepOrderValidation is the DEP_ORDER_VAL validation pass. It first finalizes
+// the contiguous validated-but-not-yet-finalized prefix (calcFees coinbase sweep
+// + finalize tail), then selects the dependency-ready txs — read-deps validated,
+// coinbase readers gated on the coinbase-flush frontier — and validates them out
+// of contiguous order, committing each (flush + markComplete) or cascading a
+// re-validation of successors on failure. A final finalize pass picks up the
+// prefix just extended by these validations.
+//
+// Unlike the contiguous path it does NOT use the VersionTooEarly gate (tx-1 >
+// maxValidated): that gate is inherently in-order and would block every
+// out-of-order tx. Read stability for base/UnknownDep reads is instead enforced
+// by the write-change re-validation in nextResult — a predecessor whose writes
+// change re-queues its successors for validation.
+func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.TemporalTx, stateReader *state.StateReader) (*blockResult, error) {
+	if r, ferr := be.advanceCoinbaseAndFinalize(pe, applyTx, stateReader); ferr != nil || r != nil {
+		return r, ferr
+	}
+
+	coinbase := be.coinbase
+	toValidate := be.validateTasks.takePendingWhere(func(t int) bool {
+		return be.readyForDepOrderValidation(t, coinbase, be.coinbaseFlushedUpTo)
+	})
+
+	for _, tx := range toValidate {
+		be.cntTotalValidations++
+		txResult := be.results[tx]
+		txVersion := txResult.Task.Version()
+
+		var trace bool
+		var tracePrefix string
+		if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
+			tracePrefix = fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
+		}
+
+		var validateStart time.Time
+		if depShapeEnabled {
+			validateStart = time.Now()
+		}
+		validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
+			func(readVersion, writtenVersion state.Version) state.VersionValidity {
+				if readVersion != writtenVersion {
+					return state.VersionInvalid
+				}
+				return state.VersionValid
+			}, trace, tracePrefix)
+		if depShapeEnabled {
+			be.validateNanos += time.Since(validateStart).Nanoseconds()
+		}
+		be.versionMap.SetTrace(false)
+
+		valid := validity == state.VersionValid
+
+		be.versionMap.SetTrace(trace)
+		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
+		var flushStart time.Time
+		if depShapeEnabled {
+			flushStart = time.Now()
+		}
+		be.versionMap.FlushVersionedWrites(writeSet, valid, tracePrefix)
+		if depShapeEnabled {
+			be.flushNanos += time.Since(flushStart).Nanoseconds()
+		}
+		be.versionMap.SetTrace(false)
+
+		if valid {
+			be.validateTasks.markComplete(tx)
+			be.finalizedResults[tx] = txResult
+			continue
+		}
+
+		be.cntValidationFail++
+		be.execFailed[tx]++
+		if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
+			fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx])
+		}
+		be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
+		be.validateTasks.clearInProgress(tx)
+		be.execTasks.clearComplete(tx)
+		be.execTasks.pushDeferred(tx)
+		be.preValidated[tx] = false
+		be.txIncarnations[tx]++
+		if r := be.tooManyRetries(tx, txVersion.TxIndex, "validator-invalid", nil); r != nil {
+			return r, nil
+		}
+	}
+
+	if r, ferr := be.advanceCoinbaseAndFinalize(pe, applyTx, stateReader); ferr != nil || r != nil {
+		return r, ferr
+	}
+	return nil, nil
+}
+
 func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, res *exec.TxResult, applyTx kv.TemporalTx) (result *blockResult, err error) {
 	task, ok := res.Task.(*taskVersion)
 
@@ -2839,6 +3021,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	tx := task.index
+	if be.coinbase.IsNil() && !res.Coinbase.IsNil() {
+		be.coinbase = res.Coinbase
+	}
 	be.results[tx] = &execResult{TxResult: res}
 	if res.Err != nil {
 		if execErr, ok := res.Err.(protocol.ErrExecAbortError); ok {
@@ -2994,156 +3179,163 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	// do validations ...
-	maxComplete := be.execTasks.maxComplete()
-	toValidate := make(sort.IntSlice, 0, 2)
-
-	for be.validateTasks.minPending() <= maxComplete && be.validateTasks.minPending() >= 0 {
-		toValidate = append(toValidate, be.validateTasks.takeNextPending())
-	}
-
-	cntInvalid := 0
 	var stateReader state.StateReader
 
 	var valLoopStart time.Time
 	if depShapeEnabled {
 		valLoopStart = time.Now()
 	}
-	for i := 0; i < len(toValidate); i++ {
 
-		be.cntTotalValidations++
+	if depOrderVal {
+		if r, derr := be.runDepOrderValidation(pe, applyTx, &stateReader); derr != nil || r != nil {
+			return r, derr
+		}
+	} else {
+		maxComplete := be.execTasks.maxComplete()
+		toValidate := make(sort.IntSlice, 0, 2)
 
-		tx := toValidate[i]
-		txTask := be.tasks[tx].Task
-		txResult := be.results[tx]
-		// txResult.Task is the *taskVersion wrapper from this scheduled run,
-		// carrying the current Incarnation. be.tasks[tx].Task is the bare
-		// TxTask whose Version().Incarnation never advances past 0.
-		txVersion := txResult.Task.Version()
-
-		var trace bool
-		var tracePrefix string
-
-		if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
-			tracePrefix = fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
+		for be.validateTasks.minPending() <= maxComplete && be.validateTasks.minPending() >= 0 {
+			toValidate = append(toValidate, be.validateTasks.takeNextPending())
 		}
 
-		// Credit tip pre-validate for regular TXs so the validator sees the
-		// post-tip coinbase write. Caveat: the tip write is stamped at the
-		// same (TxIndex, Incarnation) as the worker's coinbase write, so a
-		// downstream tx that read coinbase via versionMap between the worker
-		// write and the tip write records the same Version the validator
-		// observes — the version-only validator will NOT catch that case.
-		// In practice this is unusual: only sender==coinbase produces a
-		// worker coinbase write, and downstream BALANCE(coinbase) reads
-		// across this window are rare. Value-aware validation would close
-		// the gap if it surfaces.
-		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult != nil && txResult.Err == nil {
-			taskVer, ok := txResult.Task.(*taskVersion)
-			if !ok {
-				return nil, fmt.Errorf("apply loop: unexpected task type for tx %d: result.Task=%T", tx, txResult.Task)
+		cntInvalid := 0
+		for i := 0; i < len(toValidate); i++ {
+
+			be.cntTotalValidations++
+
+			tx := toValidate[i]
+			txTask := be.tasks[tx].Task
+			txResult := be.results[tx]
+			// txResult.Task is the *taskVersion wrapper from this scheduled run,
+			// carrying the current Incarnation. be.tasks[tx].Task is the bare
+			// TxTask whose Version().Incarnation never advances past 0.
+			txVersion := txResult.Task.Version()
+
+			var trace bool
+			var tracePrefix string
+
+			if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
+				tracePrefix = fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
 			}
-			if stateReader == nil {
-				if txTask.IsHistoric() {
-					stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
-				} else {
-					stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
+
+			// Credit tip pre-validate for regular TXs so the validator sees the
+			// post-tip coinbase write. Caveat: the tip write is stamped at the
+			// same (TxIndex, Incarnation) as the worker's coinbase write, so a
+			// downstream tx that read coinbase via versionMap between the worker
+			// write and the tip write records the same Version the validator
+			// observes — the version-only validator will NOT catch that case.
+			// In practice this is unusual: only sender==coinbase produces a
+			// worker coinbase write, and downstream BALANCE(coinbase) reads
+			// across this window are rare. Value-aware validation would close
+			// the gap if it surfaces.
+			if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult != nil && txResult.Err == nil {
+				taskVer, ok := txResult.Task.(*taskVersion)
+				if !ok {
+					return nil, fmt.Errorf("apply loop: unexpected task type for tx %d: result.Task=%T", tx, txResult.Task)
 				}
-			}
-			var calcFeesStart time.Time
-			if depShapeEnabled {
-				calcFeesStart = time.Now()
-			}
-			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, stateReader, txTask.Rules())
-			if depShapeEnabled {
-				be.calcFeesNanos += time.Since(calcFeesStart).Nanoseconds()
-			}
-			if err != nil {
-				return nil, err
-			}
-			if !tipWrites.IsEmpty() {
-				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-				merged := MergeVersionedWrites(existingWrites, tipWrites)
-				be.blockIO.RecordWrites(txVersion, merged)
-			}
-		}
-
-		var validateStart time.Time
-		if depShapeEnabled {
-			validateStart = time.Now()
-		}
-		validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-			func(readVersion, writtenVersion state.Version) state.VersionValidity {
-				vv := state.VersionValid
-
-				if readVersion != writtenVersion {
-					vv = state.VersionInvalid
-				} else if writtenVersion.TxIndex == state.UnknownDep && tx-1 > be.validateTasks.maxComplete() {
-					vv = state.VersionTooEarly
+				if stateReader == nil {
+					if txTask.IsHistoric() {
+						stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
+					} else {
+						stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
+					}
 				}
-
-				return vv
-			}, trace, tracePrefix)
-		if depShapeEnabled {
-			be.validateNanos += time.Since(validateStart).Nanoseconds()
-		}
-		be.versionMap.SetTrace(false)
-
-		if validity == state.VersionTooEarly {
-			cntInvalid++
-			continue
-		}
-
-		// The validator verdict is the single source of truth (issue #21319):
-		// a result is committed only if validation explicitly passed it.
-		valid := validity == state.VersionValid
-
-		be.versionMap.SetTrace(trace)
-		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
-		var flushStart time.Time
-		if depShapeEnabled {
-			flushStart = time.Now()
-		}
-		be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)
-		if depShapeEnabled {
-			be.flushNanos += time.Since(flushStart).Nanoseconds()
-		}
-		be.versionMap.SetTrace(false)
-
-		if valid {
-			if cntInvalid == 0 {
-				var commitStart time.Time
+				var calcFeesStart time.Time
 				if depShapeEnabled {
-					commitStart = time.Now()
+					calcFeesStart = time.Now()
 				}
-				be.validateTasks.markComplete(tx)
-
-				if r, ferr := be.finalizeValidatedTx(pe, applyTx, tx, txTask, txResult, txVersion, &stateReader); ferr != nil || r != nil {
-					return r, ferr
-				}
+				tipWrites, err := txResult.calcFees(taskVer, be.versionMap, stateReader, txTask.Rules())
 				if depShapeEnabled {
-					be.commitNanos += time.Since(commitStart).Nanoseconds()
+					be.calcFeesNanos += time.Since(calcFeesStart).Nanoseconds()
+				}
+				if err != nil {
+					return nil, err
+				}
+				if !tipWrites.IsEmpty() {
+					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
+					merged := MergeVersionedWrites(existingWrites, tipWrites)
+					be.blockIO.RecordWrites(txVersion, merged)
 				}
 			}
-		} else {
-			cntInvalid++
-			be.cntValidationFail++
-			be.execFailed[tx]++
 
-			if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
-				fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx])
+			var validateStart time.Time
+			if depShapeEnabled {
+				validateStart = time.Now()
+			}
+			validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
+				func(readVersion, writtenVersion state.Version) state.VersionValidity {
+					vv := state.VersionValid
+
+					if readVersion != writtenVersion {
+						vv = state.VersionInvalid
+					} else if writtenVersion.TxIndex == state.UnknownDep && tx-1 > be.validateTasks.maxComplete() {
+						vv = state.VersionTooEarly
+					}
+
+					return vv
+				}, trace, tracePrefix)
+			if depShapeEnabled {
+				be.validateNanos += time.Since(validateStart).Nanoseconds()
+			}
+			be.versionMap.SetTrace(false)
+
+			if validity == state.VersionTooEarly {
+				cntInvalid++
+				continue
 			}
 
-			// 'create validation tasks for all transactions > tx ...'
-			be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
-			be.validateTasks.clearInProgress(tx) // clear in progress - pending will be added again once new incarnation executes
-			be.execTasks.clearComplete(tx)
-			// Defer: validator-invalid may be race-induced (worker raced an
-			// exec-loop flush). Drain predicate in scheduleExecution waits.
-			be.execTasks.pushDeferred(tx)
-			be.preValidated[tx] = false
-			be.txIncarnations[tx]++
-			if r := be.tooManyRetries(tx, txVersion.TxIndex, "validator-invalid", nil); r != nil {
-				return r, nil
+			// The validator verdict is the single source of truth (issue #21319):
+			// a result is committed only if validation explicitly passed it.
+			valid := validity == state.VersionValid
+
+			be.versionMap.SetTrace(trace)
+			writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
+			var flushStart time.Time
+			if depShapeEnabled {
+				flushStart = time.Now()
+			}
+			be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)
+			if depShapeEnabled {
+				be.flushNanos += time.Since(flushStart).Nanoseconds()
+			}
+			be.versionMap.SetTrace(false)
+
+			if valid {
+				if cntInvalid == 0 {
+					var commitStart time.Time
+					if depShapeEnabled {
+						commitStart = time.Now()
+					}
+					be.validateTasks.markComplete(tx)
+
+					if r, ferr := be.finalizeValidatedTx(pe, applyTx, tx, txTask, txResult, txVersion, &stateReader); ferr != nil || r != nil {
+						return r, ferr
+					}
+					if depShapeEnabled {
+						be.commitNanos += time.Since(commitStart).Nanoseconds()
+					}
+				}
+			} else {
+				cntInvalid++
+				be.cntValidationFail++
+				be.execFailed[tx]++
+
+				if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
+					fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx])
+				}
+
+				// 'create validation tasks for all transactions > tx ...'
+				be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
+				be.validateTasks.clearInProgress(tx) // clear in progress - pending will be added again once new incarnation executes
+				be.execTasks.clearComplete(tx)
+				// Defer: validator-invalid may be race-induced (worker raced an
+				// exec-loop flush). Drain predicate in scheduleExecution waits.
+				be.execTasks.pushDeferred(tx)
+				be.preValidated[tx] = false
+				be.txIncarnations[tx]++
+				if r := be.tooManyRetries(tx, txVersion.TxIndex, "validator-invalid", nil); r != nil {
+					return r, nil
+				}
 			}
 		}
 	}
