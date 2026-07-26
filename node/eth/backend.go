@@ -1058,6 +1058,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					localGenesisFork, backend.genesisHash, localH, localT))
 			}
 
+			// Consumer-side fork post-cut reject: on a fork chain, drop
+			// any peer manifest that carries pre-cut entries. Empty
+			// stepToBlock matches the publisher-side default at
+			// SetForkCutBlock above; unmapped state files classify as
+			// straddle → reject. Nil on root chains (CutBlock == 0).
+			mx.SetForkPostCutValidator(manifestexchange.BuildForkPostCutValidator(chainConfig.CutBlock, nil))
+
 			// Consumer-side UCAN trust gate
 			// (docs/plans/20260520-chaintoml-ucan-flow-spec.md). Trust
 			// roots come from the compiled-in per-chain default
