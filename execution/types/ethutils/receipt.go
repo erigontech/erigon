@@ -69,8 +69,8 @@ func MarshalReceipt(
 	if withBlockTimestamp {
 		if receipt.Logs != nil {
 			rpcLogs := make([]*types.RPCLog, 0, len(receipt.Logs))
-			for _, l := range receipt.Logs {
-				rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(l, header, txnHash, uint64(receipt.TransactionIndex)))
+			for i := range receipt.Logs {
+				rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(&receipt.Logs[i], header, txnHash, uint64(receipt.TransactionIndex)))
 			}
 			logsToMarshal = rpcLogs
 		} else {
@@ -78,7 +78,7 @@ func MarshalReceipt(
 		}
 	} else {
 		if receipt.Logs == nil {
-			logsToMarshal = make([]*types.Log, 0)
+			logsToMarshal = types.Logs{}
 		} else {
 			logsToMarshal = receipt.Logs
 		}

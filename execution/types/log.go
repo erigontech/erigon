@@ -167,7 +167,7 @@ func (l *ErigonLog) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
-type Logs []*Log
+type Logs []Log
 
 type ErigonLog struct {
 	Log
@@ -179,9 +179,9 @@ type ErigonLogs []*ErigonLog
 // ToErigonLogs converts Logs to ErigonLogs, adding a timestamp to each entry.
 func (logs Logs) ToErigonLogs(timestamp uint64) ErigonLogs {
 	result := make(ErigonLogs, len(logs))
-	for i, l := range logs {
+	for i := range logs {
 		result[i] = &ErigonLog{
-			Log:       *l,
+			Log:       logs[i],
 			Timestamp: hexutil.Uint64(timestamp),
 		}
 	}
@@ -255,9 +255,10 @@ func (logs Logs) Copy() Logs {
 	if logs == nil {
 		return nil
 	}
-	logsCopy := make(Logs, len(logs))
-	for i, log := range logs {
-		logsCopy[i] = log.Copy()
+	logsCopy := slices.Clone(logs)
+	for i := range logsCopy {
+		logsCopy[i].Topics = slices.Clone(logs[i].Topics)
+		logsCopy[i].Data = slices.Clone(logs[i].Data)
 	}
 	return logsCopy
 }
@@ -289,9 +290,10 @@ func BuildTopicMap(topics [][]common.Hash) []map[common.Hash]struct{} {
 // FilterWithTopicMap filters logs using a pre-built topic map. Use this when filtering
 // in a loop with the same topics to avoid rebuilding the map on every call.
 func (logs Logs) FilterWithTopicMap(addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, maxLogs uint64) Logs {
-	o := make(Logs, 0, len(logs))
+	o := Logs{}
 	var logCount uint64
-	for _, v := range logs {
+	for i := range logs {
+		v := &logs[i]
 		if len(addrMap) != 0 {
 			if _, ok := addrMap[v.Address]; !ok {
 				continue
@@ -311,7 +313,10 @@ func (logs Logs) FilterWithTopicMap(addrMap map[common.Address]struct{}, topicMa
 			}
 		}
 		if found {
-			o = append(o, v)
+			if cap(o) == 0 {
+				o = make(Logs, 0, len(logs)-i)
+			}
+			o = append(o, *v)
 		}
 		logCount++
 		if maxLogs != 0 && logCount >= maxLogs {
@@ -326,29 +331,27 @@ func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.H
 }
 
 func (logs Logs) ContainingTopics(addrMap map[common.Address]struct{}, topicsMap map[common.Hash]struct{}, maxLogs uint64) Logs {
-	o := make(Logs, 0, len(logs))
+	o := Logs{}
 	var logCount uint64
 
-	for _, v := range logs {
-		found := false
+	for i := range logs {
+		v := &logs[i]
 
 		// check address if addrMap is not empty
 		if _, requested := addrMap[v.Address]; !requested && len(addrMap) > 0 {
 			continue // not there? skip this log
 		}
 		//topicsMap len zero match any topics
-		if len(topicsMap) == 0 {
-			o = append(o, v)
-		} else {
-			for i := range v.Topics {
-				//Contain any topics that matched
-				if _, ok := topicsMap[v.Topics[i]]; ok {
-					found = true
-				}
+		found := len(topicsMap) == 0
+		for j := 0; !found && j < len(v.Topics); j++ {
+			//Contain any topics that matched
+			_, found = topicsMap[v.Topics[j]]
+		}
+		if found {
+			if cap(o) == 0 {
+				o = make(Logs, 0, len(logs)-i)
 			}
-			if found {
-				o = append(o, v)
-			}
+			o = append(o, *v)
 		}
 		logCount += 1
 		if maxLogs != 0 && logCount >= maxLogs {

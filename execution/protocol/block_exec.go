@@ -203,14 +203,14 @@ func ExecuteBlockEphemerally(
 	}
 
 	if chainConfig.Bor != nil {
-		var logs []*types.Log
+		var logs types.Logs
 		for _, receipt := range receipts {
 			logs = append(logs, receipt.Logs...)
 		}
 
 		stateSyncReceipt := &types.Receipt{}
 		if chainConfig.Rules == chain.BorRules && len(blockLogs) > 0 {
-			slices.SortStableFunc(blockLogs, func(i, j *types.Log) int { return cmp.Compare(i.Index, j.Index) })
+			slices.SortStableFunc(blockLogs, func(i, j types.Log) int { return cmp.Compare(i.Index, j.Index) })
 
 			if len(blockLogs) > len(logs) {
 				stateSyncReceipt.Logs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`

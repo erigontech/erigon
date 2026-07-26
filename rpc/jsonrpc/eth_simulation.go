@@ -815,7 +815,7 @@ func (s *simulator) simulateCall(
 	receipt := protocol.MakeReceipt(&header.Number, common.Hash{}, msg, txn, *cumulativeGasUsed, result, intraBlockState, evm)
 	*cumulativeBlobGasUsed += receipt.BlobGasUsed
 
-	var logs []*types.Log
+	var logs types.Logs
 	if s.traceTransfers {
 		logs = logTracer.Logs()
 	} else {
@@ -824,9 +824,9 @@ func (s *simulator) simulateCall(
 
 	callResult := CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed), MaxUsedGas: hexutil.Uint64(result.MaxGasUsed)}
 	callResult.Logs = make([]*types.RPCLog, 0, len(logs))
-	for _, l := range logs {
+	for i := range logs {
 		rpcLog := &types.RPCLog{
-			Log:            *l,
+			Log:            logs[i],
 			BlockTimestamp: hexutil.Uint64(header.Time),
 		}
 		callResult.Logs = append(callResult.Logs, rpcLog)

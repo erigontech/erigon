@@ -109,7 +109,7 @@ type TxResult struct {
 	TxOut             *state.WriteSet
 
 	Receipt *types.Receipt
-	Logs    []*types.Log
+	Logs    types.Logs
 
 	TraceFroms map[accounts.Address]struct{}
 	TraceTos   map[accounts.Address]struct{}
@@ -155,30 +155,31 @@ func (r *TxResult) CreateNextReceipt(prev *types.Receipt) (*types.Receipt, error
 }
 
 func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLogIndex uint32) (*types.Receipt, error) {
+	blockNum := r.Version().BlockNum
+	blockHash := r.BlockHash()
+	txHash := r.TxHash()
+
 	logIndex := firstLogIndex
 	for i := range r.Logs {
 		r.Logs[i].Index = hexutil.Uint(logIndex)
+		r.Logs[i].TxHash = txHash
+		r.Logs[i].BlockNumber = hexutil.Uint64(blockNum)
+		r.Logs[i].BlockHash = blockHash
 		logIndex++
 	}
 
-	blockNum := r.Version().BlockNum
 	receipt := &types.Receipt{
 		BlockNumber:              uint256.NewInt(blockNum),
-		BlockHash:                r.BlockHash(),
+		BlockHash:                blockHash,
 		TransactionIndex:         uint(txIndex),
 		Type:                     r.TxType(),
 		GasUsed:                  r.ExecutionResult.ReceiptGasUsed,
 		CumulativeGasUsed:        cumulativeGasUsed,
-		TxHash:                   r.TxHash(),
+		TxHash:                   txHash,
 		Logs:                     r.Logs,
 		FirstLogIndexWithinBlock: firstLogIndex,
 	}
 
-	for _, l := range receipt.Logs {
-		l.TxHash = receipt.TxHash
-		l.BlockNumber = hexutil.Uint64(blockNum)
-		l.BlockHash = receipt.BlockHash
-	}
 	if r.ExecutionResult.Failed() {
 		receipt.Status = types.ReceiptStatusFailed
 	} else {

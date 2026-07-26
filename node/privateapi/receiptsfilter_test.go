@@ -97,7 +97,7 @@ func createReceiptNotification(txHash common.Hash) *notifications.ReceiptNotific
 			Status:            1,
 			CumulativeGasUsed: 21000,
 			GasUsed:           21000,
-			Logs:              []*types.Log{},
+			Logs:              types.Logs{},
 		},
 	}
 }

@@ -104,11 +104,11 @@ func TestBloomOr(t *testing.T) {
 		t.Fatal("Or should not mutate the source bloom")
 	}
 
-	r1 := &Receipt{Logs: []*Log{{
+	r1 := &Receipt{Logs: []Log{{
 		Address: common.HexToAddress("0x1111111111111111111111111111111111111111"),
 		Topics:  []common.Hash{common.HexToHash("0x01")},
 	}}}
-	r2 := &Receipt{Logs: []*Log{{
+	r2 := &Receipt{Logs: []Log{{
 		Address: common.HexToAddress("0x2222222222222222222222222222222222222222"),
 		Topics:  []common.Hash{common.HexToHash("0x02"), common.HexToHash("0x03")},
 	}}}
@@ -150,7 +150,7 @@ func BenchmarkCreateBloom(b *testing.B) {
 		&Receipt{
 			Status:            ReceiptStatusFailed,
 			CumulativeGasUsed: 1,
-			Logs: []*Log{
+			Logs: []Log{
 				{Address: common.BytesToAddress([]byte{0x11})},
 				{Address: common.BytesToAddress([]byte{0x01, 0x11})},
 			},
@@ -161,7 +161,7 @@ func BenchmarkCreateBloom(b *testing.B) {
 		&Receipt{
 			PostState:         postState[:],
 			CumulativeGasUsed: 3,
-			Logs: []*Log{
+			Logs: []Log{
 				{Address: common.BytesToAddress([]byte{0x22})},
 				{Address: common.BytesToAddress([]byte{0x02, 0x22})},
 			},

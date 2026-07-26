@@ -419,7 +419,7 @@ func (rs *StateV3) ApplyTxIndexes(
 	txNum uint64,
 	receipt *types.Receipt,
 	cummulativeBlobGas uint64,
-	logs []*types.Log,
+	logs types.Logs,
 	traceFroms map[accounts.Address]struct{},
 	traceTos map[accounts.Address]struct{},
 	skipReceiptCache ...bool,
@@ -446,7 +446,7 @@ func (rs *StateV3) CommitStepBoundary(ctx context.Context, roTx kv.TemporalTx, b
 	return nil
 }
 
-func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, cummulativeBlobGas uint64, logs []*types.Log, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}, historyExecution bool, skipReceiptCache bool) error {
+func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, cummulativeBlobGas uint64, logs types.Logs, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}, historyExecution bool, skipReceiptCache bool) error {
 	domains := rs.domains
 	for addr := range traceFroms {
 		addrValue := addr.Value()
@@ -462,7 +462,8 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 		}
 	}
 
-	for _, lg := range logs {
+	for k := range logs {
+		lg := &logs[k]
 		if err := domains.IndexAdd(kv.LogAddrIdx, lg.Address[:], txNum); err != nil {
 			return err
 		}

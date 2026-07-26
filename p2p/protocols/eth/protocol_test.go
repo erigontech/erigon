@@ -176,7 +176,7 @@ func TestEth66Messages(t *testing.T) {
 			{
 				Status:            types.ReceiptStatusFailed,
 				CumulativeGasUsed: 1,
-				Logs: []*types.Log{
+				Logs: types.Logs{
 					{
 						Address: common.BytesToAddress([]byte{0x11}),
 						Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},

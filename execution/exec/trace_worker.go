@@ -97,7 +97,7 @@ func (e *TraceWorker) ChangeBlock(header *types.Header) {
 }
 
 func (e *TraceWorker) GetRawLogs(txIdx int) types.Logs { return e.ibs.GetRawLogs(txIdx) }
-func (e *TraceWorker) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) []*types.Log {
+func (e *TraceWorker) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs {
 	return e.ibs.GetLogs(txIndex, txnHash, blockNumber, blockHash)
 }
 

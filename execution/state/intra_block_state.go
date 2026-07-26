@@ -388,7 +388,7 @@ func (sdb *IntraBlockState) Reset() {
 	clear(sdb.stateObjects)
 	clear(sdb.stateObjectsDirty)
 	for i := range sdb.logs {
-		clear(sdb.logs[i]) // free pointers
+		clear(sdb.logs[i]) // drop Topics/Data references so the retained capacity holds no payload
 		sdb.logs[i] = sdb.logs[i][:0]
 	}
 	clear(sdb.balanceInc)
@@ -472,7 +472,7 @@ func (sdb *IntraBlockState) AddLog(log *types.Log) {
 	for len(sdb.logs) <= sdb.txIndex+1 {
 		sdb.logs = append(sdb.logs, nil)
 	}
-	sdb.logs[sdb.txIndex+1] = append(sdb.logs[sdb.txIndex+1], log)
+	sdb.logs[sdb.txIndex+1] = append(sdb.logs[sdb.txIndex+1], *log)
 }
 
 func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs {
@@ -480,10 +480,10 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumbe
 		return nil
 	}
 	logs := sdb.logs[txIndex+1]
-	for _, l := range logs {
-		l.TxHash = txnHash
-		l.BlockNumber = hexutil.Uint64(blockNumber)
-		l.BlockHash = blockHash
+	for i := range logs {
+		logs[i].TxHash = txnHash
+		logs[i].BlockNumber = hexutil.Uint64(blockNumber)
+		logs[i].BlockHash = blockHash
 	}
 	return slices.Clone(logs)
 }

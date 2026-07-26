@@ -125,8 +125,8 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 		}
 	case rpchelper.FilterTypeLogs:
 		if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
-			for _, v := range logs {
-				stub = append(stub, v)
+			for i := range logs {
+				stub = append(stub, &logs[i])
 			}
 		}
 	}
@@ -136,7 +136,7 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 // GetFilterLogs implements eth_getFilterLogs.
 // Polling method for a previously created filter
 // returns an array of logs which have occurred since the last poll.
-func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log, error) {
+func (api *APIImpl) GetFilterLogs(_ context.Context, index string) (types.Logs, error) {
 	if api.filters == nil {
 		return nil, rpc.ErrNotificationsUnsupported
 	}
@@ -147,7 +147,7 @@ func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log
 	if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
 		return logs, nil
 	}
-	return []*types.Log{}, nil
+	return types.Logs{}, nil
 }
 
 // subscribeRPC runs the shared subscription skeleton: guard checks, subscription

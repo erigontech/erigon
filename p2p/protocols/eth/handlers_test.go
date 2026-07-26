@@ -38,7 +38,7 @@ func makeReceipt(cumulativeGas uint64, logDataSize int) *types.Receipt {
 		CumulativeGasUsed: cumulativeGas,
 	}
 	if logDataSize > 0 {
-		r.Logs = []*types.Log{{
+		r.Logs = types.Logs{{
 			Address: common.BytesToAddress([]byte{0x01}),
 			Topics:  []common.Hash{common.HexToHash("aa")},
 			Data:    make([]byte, logDataSize),

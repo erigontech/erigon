@@ -248,8 +248,8 @@ func TestFilterLogsTopics(t *testing.T) {
 }
 
 func testFLExtractAddress(xs Logs) (o []common.Address) {
-	for _, v := range xs {
-		o = append(o, v.Address)
+	for i := range xs {
+		o = append(o, xs[i].Address)
 	}
 	return
 }
