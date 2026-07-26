@@ -17,7 +17,10 @@
 package snapshotauth
 
 import (
+	"bytes"
 	"crypto/ecdsa"
+	"crypto/sha256"
+	"strings"
 	"testing"
 	"time"
 
@@ -376,4 +379,247 @@ func TestForkAuthorityCascade_EarliestRejection_SignatureBeforeTime(t *testing.T
 	// Verifier.Verify orders signature BEFORE time-window per chain.go.
 	require.Contains(t, err.Error(), "signature failure",
 		"signature is earlier than time-window in the cascade; signature must reject first")
+}
+
+// TestForkAuthorityCascade_EarliestRejection_TrustRootBeforeSignature
+// pins the ordering between root-issuer match (chain.go:177) and
+// signature verify (chain.go:183). A UCAN signed by an unknown key
+// AND with a mangled signature must reject at the trust-root step —
+// there's no point burning EC work on a chain that can't reach a root.
+func TestForkAuthorityCascade_EarliestRejection_TrustRootBeforeSignature(t *testing.T) {
+	f := mintForkFixture(t)
+	imposter := newKey(t)
+	encoded, err := MintForkAuthorityUCAN(imposter, &f.operator.PublicKey, f.parentPub, f.notBefore, f.expires, nil)
+	require.NoError(t, err)
+	// Also flip the signature.
+	d, err := Decode(encoded)
+	require.NoError(t, err)
+	d.Signature = append([]byte{}, d.Signature...)
+	d.Signature[0] ^= 0xFF
+	tampered, err := d.Encode()
+	require.NoError(t, err)
+
+	_, err = runFullCascade(t, f, tampered)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not match any configured trust root",
+		"trust-root match runs before signature; must reject there first")
+}
+
+// TestForkAuthorityCascade_EarliestRejection_AudienceBeforeTrustRoot
+// pins ordering: leaf audience mismatch (chain.go:139) runs before the
+// chain is walked at all, so it must reject before any trust-root work
+// even if the trust root also mismatches.
+func TestForkAuthorityCascade_EarliestRejection_AudienceBeforeTrustRoot(t *testing.T) {
+	f := mintForkFixture(t)
+	imposter := newKey(t)
+	// Mint by imposter (unknown root) — but query with wrong audience.
+	encoded, err := MintForkAuthorityUCAN(imposter, &f.operator.PublicKey, f.parentPub, f.notBefore, f.expires, nil)
+	require.NoError(t, err)
+	other := newKey(t)
+	res, err := f.verifier.Verify(encoded, compressed(t, other), f.requiredCaps, f.now, nil)
+	require.Nil(t, res)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "audience does not match",
+		"leaf audience mismatch runs before any chain walking or trust-root work")
+}
+
+// === Depth-2 chain: Fork Authority → sub-delegation to a serving node ===
+//
+// A depth-2 fork chain re-delegates from the fork authority operator
+// to another node (e.g. an untrusted publisher granted serve-only
+// authority). res.Chain is [ForkAuthority, SubDelegation] with the
+// sub-delegation as res.Leaf.
+//
+// Content UCANs are verified out-of-band (manifest_exchange/provider.go
+// line 715+), not through Verifier.Verify, so they're not tested here.
+
+// mintForkSubDelegation issues a leaf sub-delegation off the honest
+// fork-authority fixture. leaf caps are a strict subset of the fork
+// authority's caps so attenuation passes.
+func mintForkSubDelegation(t *testing.T, f forkFixture, subAudience *ecdsa.PrivateKey, caps []string) []byte {
+	t.Helper()
+	leaf, err := New(&f.operator.PublicKey, &subAudience.PublicKey,
+		caps, f.notBefore, f.expires, 0, f.encoded)
+	require.NoError(t, err)
+	require.NoError(t, leaf.Sign(f.operator))
+	encoded, err := leaf.Encode()
+	require.NoError(t, err)
+	return encoded
+}
+
+// runFullChainCascade verifies a depth-2 fork chain: sub-delegation
+// leaf; ExtractForkedFromCapability walks the chain (fork:from: sits
+// on chain[0], the fork authority, not the leaf).
+func runFullChainCascade(t *testing.T, f forkFixture, subAudience []byte, leafCBOR []byte, requiredCaps []string) error {
+	t.Helper()
+	res, err := f.verifier.Verify(leafCBOR, subAudience, requiredCaps, f.now, parentResolver(f.encoded))
+	if err != nil {
+		return err
+	}
+	var found []byte
+	for _, link := range res.Chain {
+		if pub, ok := ExtractForkedFromCapability(link); ok {
+			found = pub
+			break
+		}
+	}
+	if found == nil {
+		return errForkedFromMissing
+	}
+	if !AcceptSet(found, f.acceptSet) {
+		return errParentNotInAcceptSet
+	}
+	return nil
+}
+
+// TestForkChainCascade_HappyPath_SubDelegation pins the depth-2
+// baseline: honest fork authority + honest sub-delegation → passes
+// end-to-end, fork:from: found by walking the chain.
+func TestForkChainCascade_HappyPath_SubDelegation(t *testing.T) {
+	f := mintForkFixture(t)
+	sub := newKey(t)
+	leaf := mintForkSubDelegation(t, f, sub, []string{string(CapAdvertise), string(CapServe)})
+	require.NoError(t, runFullChainCascade(t, f, compressed(t, sub), leaf,
+		[]string{string(CapAdvertise), string(CapServe)}))
+}
+
+// TestForkChainCascade_TamperedLeafSignatureRejects mutates the
+// sub-delegation bytes after signing. Verifier's per-link signature
+// check catches it.
+func TestForkChainCascade_TamperedLeafSignatureRejects(t *testing.T) {
+	f := mintForkFixture(t)
+	sub := newKey(t)
+	leaf := mintForkSubDelegation(t, f, sub, []string{string(CapAdvertise)})
+	d, err := Decode(leaf)
+	require.NoError(t, err)
+	d.Signature = append([]byte{}, d.Signature...)
+	d.Signature[0] ^= 0xFF
+	tampered, err := d.Encode()
+	require.NoError(t, err)
+
+	err = runFullChainCascade(t, f, compressed(t, sub), tampered, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "signature failure",
+		"leaf signature tampering must reject at the per-link signature step")
+}
+
+// TestForkChainCascade_ParentSubstitutionRejects covers the parent-hash
+// binding: the leaf pins the exact Fork Authority bytes via
+// ParentHash. A resolver that returns different bytes for that hash
+// must fail the hash-equality check inside Verify. Force this by
+// making the resolver return an unrelated blob when asked for the
+// pinned parent hash.
+func TestForkChainCascade_ParentSubstitutionRejects(t *testing.T) {
+	f := mintForkFixture(t)
+	sub := newKey(t)
+	leaf := mintForkSubDelegation(t, f, sub, []string{string(CapAdvertise)})
+
+	// Build an alternate fork authority (different bytes) and a
+	// resolver that answers the honest fork authority's hash with the
+	// alternate's bytes.
+	other := mintForkFixture(t)
+	honestHash := HashOf(f.encoded)
+	swapResolver := func(h []byte) ([]byte, error) {
+		if bytes.Equal(h, honestHash) {
+			return other.encoded, nil
+		}
+		return nil, nil
+	}
+
+	res, err := f.verifier.Verify(leaf, compressed(t, sub), nil, f.now, swapResolver)
+	require.Nil(t, res)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not hash to the child's ParentHash",
+		"a substituted parent whose bytes don't hash to the pinned ParentHash must reject at the hash-equality check")
+}
+
+// TestForkChainCascade_CapabilityAttenuationBreak covers a
+// sub-delegation whose caps are NOT a subset of the fork authority's.
+// The fork authority does not grant `chain.v2:hash:<hex>` (that's a
+// Content-UCAN-only cap), so a sub-delegation attempting to carry one
+// via manually-constructed bytes must reject at subset check.
+func TestForkChainCascade_CapabilityAttenuationBreak(t *testing.T) {
+	f := mintForkFixture(t)
+	sub := newKey(t)
+	// leaf.Issuer must equal parent.Audience (= f.operator) so chain
+	// integrity check passes and attenuation is the layer that trips.
+	// Leaf carries a content-hash cap the fork authority does not.
+	leaf := &Delegation{
+		Version:      CurrentVersion,
+		Issuer:       compressed(t, f.operator),
+		Audience:     compressed(t, sub),
+		ParentHash:   HashOf(f.encoded),
+		Capabilities: []string{ContentHashCapability(strings.Repeat("cd", sha256.Size))},
+		NotBefore:    f.notBefore.Unix(),
+		Expires:      f.expires.Unix(),
+		DepthCap:     0,
+	}
+	require.NoError(t, leaf.Sign(f.operator))
+	leafEnc, err := leaf.Encode()
+	require.NoError(t, err)
+
+	err = runFullChainCascade(t, f, compressed(t, sub), leafEnc, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "capability attenuation violated",
+		"child cap not present in parent must reject at subset check")
+}
+
+// TestForkChainCascade_ChainIntegrityBreak_IssuerMismatch covers
+// parent.Audience != child.Issuer. Craft a leaf whose Issuer is not
+// the fork operator (i.e. not the audience the fork authority
+// endorsed). Per-link signature still verifies (some key signed
+// something) but chain integrity check rejects.
+func TestForkChainCascade_ChainIntegrityBreak_IssuerMismatch(t *testing.T) {
+	f := mintForkFixture(t)
+	imposter := newKey(t)
+	sub := newKey(t)
+	forgedLeaf, err := New(&imposter.PublicKey, &sub.PublicKey,
+		[]string{string(CapAdvertise)}, f.notBefore, f.expires, 0, f.encoded)
+	require.NoError(t, err)
+	require.NoError(t, forgedLeaf.Sign(imposter))
+	leafEnc, err := forgedLeaf.Encode()
+	require.NoError(t, err)
+
+	res, err := f.verifier.Verify(leafEnc, compressed(t, sub), nil, f.now, parentResolver(f.encoded))
+	require.Nil(t, res)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "chain integrity break",
+		"child.Issuer != parent.Audience must reject at chain-integrity check")
+}
+
+// TestForkChainCascade_ParentLacksDelegate covers a fork authority
+// UCAN that verifies but does NOT grant CapDelegate — so it cannot
+// have children. This shouldn't happen with MintForkAuthorityUCAN,
+// which always grants delegate, but a hand-constructed fork authority
+// might omit it. Any sub-delegation must reject at the parent-lacks-
+// delegate check (chain.go:204).
+func TestForkChainCascade_ParentLacksDelegate(t *testing.T) {
+	trustRoot := newKey(t)
+	operator := newKey(t)
+	sub := newKey(t)
+	parentPub := compressed(t, newKey(t))
+	forkCap, err := ForkedFromCapability(parentPub)
+	require.NoError(t, err)
+	// Manually-minted fork authority WITHOUT CapDelegate.
+	forkAuthWithoutDelegate, err := New(&trustRoot.PublicKey, &operator.PublicKey,
+		[]string{string(CapAdvertise), string(CapServe), forkCap},
+		time.Time{}, time.Time{}, 16, nil)
+	require.NoError(t, err)
+	require.NoError(t, forkAuthWithoutDelegate.Sign(trustRoot))
+	faEnc, err := forkAuthWithoutDelegate.Encode()
+	require.NoError(t, err)
+
+	leaf, err := New(&operator.PublicKey, &sub.PublicKey,
+		[]string{string(CapAdvertise)}, time.Time{}, time.Time{}, 0, faEnc)
+	require.NoError(t, err)
+	require.NoError(t, leaf.Sign(operator))
+	leafEnc, err := leaf.Encode()
+	require.NoError(t, err)
+
+	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, trustRoot)}})
+	res, err := v.Verify(leafEnc, compressed(t, sub), nil, time.Now(), parentResolver(faEnc))
+	require.Nil(t, res)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "lacks snapshot:delegate",
+		"a parent without CapDelegate cannot re-delegate")
 }
