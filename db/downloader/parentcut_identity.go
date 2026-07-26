@@ -54,9 +54,9 @@ type ExpectedParentIdentity struct {
 // Sentinel errors so callers can distinguish which check failed and
 // react appropriately (log, reject, prompt).
 var (
-	ErrParentGenesisHashMismatch = errors.New("parent genesis hash on manifest does not match local registry")
+	ErrParentGenesisHashMismatch  = errors.New("parent genesis hash on manifest does not match local registry")
 	ErrParentGenesisHashMalformed = errors.New("parent genesis hash on manifest is not decodable hex")
-	ErrParentForkIDMismatch = errors.New("parent fork ID recomputed from manifest schedule does not match local registry at cut block")
+	ErrParentForkIDMismatch       = errors.New("parent fork ID recomputed from manifest schedule does not match local registry at cut block")
 )
 
 // ExpectedParentIdentityForChain resolves the ExpectedParentIdentity a

@@ -26,13 +26,13 @@ import (
 
 // forkAcceptFixture wires a fork-follower's full-pipeline setup.
 type forkAcceptFixture struct {
-	forkTrustRoot   *ecdsa.PrivateKey
-	operator        *ecdsa.PrivateKey
-	parentTrustRoot *ecdsa.PrivateKey
+	forkTrustRoot     *ecdsa.PrivateKey
+	operator          *ecdsa.PrivateKey
+	parentTrustRoot   *ecdsa.PrivateKey
 	forkAuthorityUCAN []byte
-	parentUCAN      []byte
-	acceptor        *ForkAuthorityAccept
-	now             time.Time
+	parentUCAN        []byte
+	acceptor          *ForkAuthorityAccept
+	now               time.Time
 }
 
 // buildForkAcceptFixture produces a depth-1 fork configured for a
