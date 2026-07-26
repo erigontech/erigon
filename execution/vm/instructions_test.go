@@ -563,7 +563,7 @@ func BenchmarkOpMstore(bench *testing.B) {
 	callContext.Memory.Resize(64)
 	pc := uint64(0)
 	memStart := uint256.Int{}
-	value := *new(uint256.Int).SetUint64(0x1337)
+	value := *uint256.NewInt(0x1337)
 
 	for bench.Loop() {
 		callContext.Stack.push(value)
@@ -581,7 +581,7 @@ func BenchmarkOpMstore8(bench *testing.B) {
 	callContext.Memory.Resize(64)
 	pc := uint64(0)
 	memStart := uint256.Int{}
-	value := *new(uint256.Int).SetUint64(0x1337)
+	value := *uint256.NewInt(0x1337)
 
 	for bench.Loop() {
 		callContext.Stack.push(value)
@@ -598,7 +598,7 @@ func BenchmarkOpReturn(bench *testing.B) {
 
 	callContext.Memory.Resize(64)
 	pc := uint64(0)
-	size := *new(uint256.Int).SetUint64(32)
+	size := *uint256.NewInt(32)
 	offset := uint256.Int{}
 
 	for bench.Loop() {
