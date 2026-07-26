@@ -89,8 +89,8 @@ type CallContext struct {
 }
 
 // peekStorageKey returns the top-of-stack value as an interned StorageKey.
-// The one-entry memo serves the gas phase and execute phase of the same opcode
-// without touching evm's larger cache; distinct keys fall through to it.
+// The one-entry memo answers the gas phase and execute phase of the same opcode;
+// a key it does not hold is resolved through evm's larger intern cache.
 func (ctx *CallContext) peekStorageKey(evm *EVM) accounts.StorageKey {
 	top := ctx.Stack.peek()
 	if ctx.cachedKey != accounts.NilKey && *top == ctx.cachedKeySrc {

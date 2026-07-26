@@ -194,6 +194,57 @@ func TestAccessList(t *testing.T) {
 	}
 }
 
+// The slot-set memo caches a map by address. Reset and the LIFO truncation in
+// DeleteSlot both free a map for a different address to claim, so each must
+// invalidate the memo or the previous owner keeps reading and writing slots
+// through it — warm/cold gas would then be charged against a foreign slot set.
+func TestAccessListMemoDroppedOnSlotMapReuse(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0xaa"))
+	b := accounts.InternAddress(common.HexToAddress("0xbb"))
+	k1 := accounts.InternKey(common.HexToHash("0x01"))
+	k2 := accounts.InternKey(common.HexToHash("0x02"))
+	k3 := accounts.InternKey(common.HexToHash("0x03"))
+
+	t.Run("after revert truncates", func(t *testing.T) {
+		al := newAccessList()
+		al.AddSlot(a, k1)
+		al.DeleteSlot(a, k1)
+		al.AddSlot(a, k2)
+		al.AddSlot(b, k3)
+
+		addrPresent, slotPresent := al.Contains(a, k2)
+		require.True(t, addrPresent)
+		require.True(t, slotPresent)
+		_, slotPresent = al.Contains(b, k2)
+		require.False(t, slotPresent)
+	})
+
+	t.Run("after reset", func(t *testing.T) {
+		al := newAccessList()
+		al.AddSlot(a, k1)
+		al.Reset()
+		al.AddSlot(a, k2)
+		al.AddSlot(b, k3)
+
+		require.True(t, al.ContainsAddress(a))
+		_, slotPresent := al.Contains(b, k2)
+		require.False(t, slotPresent)
+	})
+
+	t.Run("survives a revert that keeps the map", func(t *testing.T) {
+		al := newAccessList()
+		al.AddSlot(a, k1)
+		al.AddSlot(a, k2)
+		al.DeleteSlot(a, k2)
+
+		addrPresent, slotPresent := al.Contains(a, k1)
+		require.True(t, addrPresent)
+		require.True(t, slotPresent)
+		_, slotPresent = al.Contains(a, k2)
+		require.False(t, slotPresent)
+	})
+}
+
 func BenchmarkAccessListReset(b *testing.B) {
 	sender := accounts.InternAddress(common.HexToAddress("0x1111"))
 	dst := accounts.InternAddress(common.HexToAddress("0x2222"))

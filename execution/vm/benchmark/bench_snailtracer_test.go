@@ -35,6 +35,8 @@ func BenchmarkSnailtracer(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		prepareAndCall(cfg, addrContract, input) //nolint:errcheck
+		if _, _, err := prepareAndCall(cfg, addrContract, input); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
