@@ -288,10 +288,14 @@ func BenchmarkAccessListSlots(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				if i%(nAddrs*nSlots) == 0 {
+				// Walk all nAddrs*nSlots pairs exactly once per Reset window,
+				// keeping runs of runLen ops on one address. Deriving the slot
+				// from i alone would repeat 64 pairs four times instead.
+				w := i % (nAddrs * nSlots)
+				if w == 0 {
 					al.Reset()
 				}
-				al.AddSlot(addrs[(i/runLen)%nAddrs], keys[i%nSlots])
+				al.AddSlot(addrs[(w/runLen)%nAddrs], keys[(w/(runLen*nAddrs))*runLen+w%runLen])
 			}
 		})
 

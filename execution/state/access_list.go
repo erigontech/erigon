@@ -33,10 +33,10 @@ type accessList struct {
 	addresses map[accounts.Address]int
 	slots     []map[accounts.StorageKey]struct{}
 
-	// Memo of the last resolved (address -> slot set); nil lastSlots means empty.
-	// A call frame runs every SLOAD/SSTORE against one address, so consecutive
-	// storage ops reuse it instead of re-reading addresses. Must be dropped
-	// whenever a slot map can be handed to a different address.
+	// Memo of the last resolved (address -> slot set); a nil lastSlots means no
+	// memo. Must be dropped whenever a slot map can be handed to a different
+	// address, or the memo would keep writing slots into a map that address no
+	// longer owns.
 	lastAddr  accounts.Address
 	lastSlots map[accounts.StorageKey]struct{}
 }
@@ -66,7 +66,7 @@ func (al *accessList) dropMemo() {
 }
 
 func (al *accessList) memoized(address accounts.Address) map[accounts.StorageKey]struct{} {
-	if al.lastSlots != nil && al.lastAddr == address {
+	if al.lastAddr == address {
 		return al.lastSlots
 	}
 	return nil

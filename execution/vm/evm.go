@@ -95,6 +95,36 @@ type EVM struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
+	storageKeys storageKeyCache
+}
+
+// storageKeyCacheSize must stay a power of two and comfortably exceed a
+// contract's live slot count, or conflict misses dominate: a 336-slot working
+// set still loses half its lookups at 512 entries.
+const storageKeyCacheSize = 1024
+
+// storageKeyCache memoizes InternKey by the stack word the key was built from.
+// It never goes stale — interning is a pure function and a handle keeps its
+// entry alive — so it is neither cleared between transactions nor invalidated.
+type storageKeyCache struct {
+	handles [storageKeyCacheSize]accounts.StorageKey
+}
+
+// internStorageKey returns word interned as a StorageKey, avoiding unique.Make
+// when the same word was interned before.
+//
+// The index mixes all four limbs: keccak-derived slots differ across the whole
+// word while array and scalar slots differ only in the lowest, so indexing on
+// one limb collides badly for one of the two.
+func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
+	i := (word[0] ^ word[1] ^ word[2] ^ word[3]) & (storageKeyCacheSize - 1)
+	b := word.Bytes32()
+	if h := evm.storageKeys.handles[i]; h != accounts.NilKey && h.Value() == b {
+		return h
+	}
+	h := accounts.InternKey(b)
+	evm.storageKeys.handles[i] = h
+	return h
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
