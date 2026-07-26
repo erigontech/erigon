@@ -95,6 +95,46 @@ type EVM struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
+	storageKeys storageKeyCache
+}
+
+// storageKeyCacheSize must stay a power of two and comfortably exceed a
+// contract's live slot count, or conflict misses dominate: a 336-slot working
+// set still loses half its lookups at 512 entries.
+const storageKeyCacheSize = 1024
+
+// storageKeyCache memoizes InternKey by the stack word the key was built from.
+// It never goes stale — interning is a pure function and a handle keeps its
+// entry alive — so it is neither cleared between transactions nor invalidated.
+//
+// The word is stored rather than recovered from the handle: comparing it needs
+// no big-endian conversion and no load through the intern table, which both
+// halves the cost of a hit and keeps the lookup inlinable.
+type storageKeyCache struct {
+	words   [storageKeyCacheSize]uint256.Int
+	handles [storageKeyCacheSize]accounts.StorageKey
+}
+
+// internStorageKey returns word interned as a StorageKey, avoiding unique.Make
+// when the same word was interned before.
+//
+// The index mixes all four limbs: keccak-derived slots differ across the whole
+// word while array and scalar slots differ only in the lowest, so indexing on
+// one limb collides badly for one of the two.
+//
+// A nil handle marks an unused entry, since the zero word is a legitimate key.
+func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
+	i := (word[0] ^ word[1] ^ word[2] ^ word[3]) & (storageKeyCacheSize - 1)
+	if h := evm.storageKeys.handles[i]; h != accounts.NilKey && evm.storageKeys.words[i] == *word {
+		return h
+	}
+	return evm.internStorageKeyMiss(i, word)
+}
+
+func (evm *EVM) internStorageKeyMiss(i uint64, word *uint256.Int) accounts.StorageKey {
+	h := accounts.InternKey(word.Bytes32())
+	evm.storageKeys.words[i], evm.storageKeys.handles[i] = *word, h
+	return h
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should

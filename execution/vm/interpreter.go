@@ -88,15 +88,20 @@ type CallContext struct {
 	cachedAddrSrc uint256.Int
 }
 
-// peekStorageKey returns the top-of-stack value as an interned StorageKey,
-// memoized on the stack word itself so a repeated key skips unique.Make.
-func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
+// peekStorageKey returns the top-of-stack value as an interned StorageKey.
+// The one-entry memo serves the gas phase and execute phase of the same opcode
+// without touching evm's larger cache; distinct keys fall through to it.
+func (ctx *CallContext) peekStorageKey(evm *EVM) accounts.StorageKey {
 	top := ctx.Stack.peek()
 	if ctx.cachedKey != accounts.NilKey && *top == ctx.cachedKeySrc {
 		return ctx.cachedKey
 	}
+	return ctx.memoStorageKey(evm, top)
+}
+
+func (ctx *CallContext) memoStorageKey(evm *EVM, top *uint256.Int) accounts.StorageKey {
 	ctx.cachedKeySrc = *top
-	ctx.cachedKey = accounts.InternKey(top.Bytes32())
+	ctx.cachedKey = evm.internStorageKey(top)
 	return ctx.cachedKey
 }
 
