@@ -385,3 +385,33 @@ func TestClassifyRetiredEntries(t *testing.T) {
 		require.Equal(t, []string{"random-config.toml"}, got.Removed)
 	})
 }
+
+// TestIsAcceptedChainTomlName pins the shape check the peer-manifest
+// downloader applies to a torrent's info.Name: accept legacy V1
+// "chain.toml" and V2 per-node "chain.v2.<enr-fp>.<genID>.toml"; reject
+// anything else. A follower failing this check cannot fetch its
+// peer's manifest, which was the observed failure when a V2 publisher
+// advertised a V2-named torrent to a V1-only consumer.
+func TestIsAcceptedChainTomlName(t *testing.T) {
+	cases := []struct {
+		name   string
+		accept bool
+	}{
+		{"chain.toml", true},
+		{"chain.v2.0123456789abcdef.fedcba9876543210.toml", true},
+		{"chain.v2.aaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbb.toml", true},
+		{"", false},
+		{"chain.v2.toml", false},
+		{"chain.v2.short.deadbeefdeadbeef.toml", false},
+		{"chain.v2.0123456789abcdef.deadbeef.toml", false},
+		{"chain.v3.0123456789abcdef.fedcba9876543210.toml", false},
+		{"chain.v2.0123456789ABCDEF.fedcba9876543210.toml", false},
+		{"chain.v2.0123456789abcdef.fedcba9876543210.ucan", false},
+		{"malicious.tar.gz", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.accept, isAcceptedChainTomlName(tc.name))
+		})
+	}
+}

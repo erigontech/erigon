@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -235,9 +236,11 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 	}
 
 	// Validate the torrent's metainfo — a malicious peer could advertise an
-	// info-hash whose torrent is a multi-file bundle or names a file other
-	// than chain.toml. Reject both: consumers should only download manifests
-	// that match the expected single-file shape.
+	// info-hash whose torrent is a multi-file bundle or names a file that
+	// isn't a chain.toml artefact. Reject both. Accept legacy V1 flat
+	// "chain.toml" and V2 per-node "chain.v2.<enr-fp>.<genID>.toml"; the
+	// former is what pre-V2 publishers emit, the latter what
+	// RollingV2Publisher writes.
 	info := t.Info()
 	if info == nil {
 		return nil, fmt.Errorf("chain.toml torrent info missing")
@@ -245,8 +248,8 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 	if len(info.Files) != 0 {
 		return nil, fmt.Errorf("chain.toml torrent is multi-file (%d files), expected single file", len(info.Files))
 	}
-	if info.Name != ChainTomlFileName {
-		return nil, fmt.Errorf("chain.toml torrent names %q, expected %q", info.Name, ChainTomlFileName)
+	if !isAcceptedChainTomlName(info.Name) {
+		return nil, fmt.Errorf("chain.toml torrent names %q, expected %q or chain.v2.<enr-fp>.<genID>.toml", info.Name, ChainTomlFileName)
 	}
 
 	t.DownloadAll()
@@ -257,15 +260,27 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 		return nil, fmt.Errorf("downloading chain.toml torrent: %w", dlCtx.Err())
 	}
 
-	// Read the downloaded chain.toml file. The validation above guarantees
-	// the torrent wrote to this path.
-	filePath := ChainTomlPath(snapDir)
+	// Read the downloaded file at its actual name — V1 writes to
+	// chain.toml, V2 to chain.v2.<enr-fp>.<genID>.toml. info.Name above
+	// is the on-disk basename the torrent client wrote.
+	filePath := filepath.Join(snapDir, info.Name)
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("reading downloaded chain.toml: %w", err)
 	}
 
 	return data, nil
+}
+
+// isAcceptedChainTomlName reports whether a torrent's info.Name matches
+// one of the chain.toml artefact shapes the consumer accepts. Kept as
+// a pure function so name-match logic is unit-testable without
+// standing up a torrent client.
+func isAcceptedChainTomlName(name string) bool {
+	if name == ChainTomlFileName {
+		return true
+	}
+	return chainTomlV2NameRE.MatchString(name)
 }
 
 // addTorrentPeerFromENR extracts the BT port and IP from a peer's ENR record
