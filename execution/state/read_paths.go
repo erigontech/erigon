@@ -1266,8 +1266,15 @@ func refreshCodeHash(s *IntraBlockState, addr accounts.Address, currentHash acco
 
 // readState reads a storage slot; it is readStateForSet without the
 // SetState-only "clean" bool.
+//
+// The GetState trace lives here rather than in the caller: readState is already
+// past the inliner's budget, so the formatting is free here and would otherwise
+// keep GetState — the SLOAD path — from inlining.
 func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, error) {
 	v, source, version, _, err := readStateForSet(s, addr, key)
+	if dbg.TraceTransactionIO && (s.trace || (dbg.TraceAccount(addr.Handle()) && traceKey(key))) {
+		fmt.Printf("%d (%d.%d) GetState (%s) %x, %x=%s\n", s.blockNum, s.txIndex, s.version, source, addr, key, v.Hex()[2:])
+	}
 	return v, source, version, err
 }
 
