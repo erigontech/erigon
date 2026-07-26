@@ -1518,7 +1518,7 @@ func makeLog(size int) executionFunc {
 		log := ibs.AllocLog(size, len(mem))
 		log.Address = scope.Contract.Address().Value()
 		for i := range size {
-			log.Topics[i] = stack.popHash()
+			log.Topics[i] = stack.popRef().Bytes32()
 		}
 		copy(log.Data, mem)
 		ibs.NotifyLog(log)
