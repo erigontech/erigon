@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/datadir"
@@ -232,4 +233,72 @@ func TestCallMany(t *testing.T) {
 	if addr1Balance != 100 || addr2Balance != 0 {
 		t.Errorf("eth_callMany: %s", "balanceUnmatch")
 	}
+}
+
+// TestCallManyBundleAdvanceRefreshesForkRules pins that the per-bundle
+// BlockNumber/Time advance re-derives the fork rules. NewEVM reuses a non-nil
+// BlockContext.Rules, so a stale one silently executes later bundles under the
+// first bundle's fork. London is activated at the bundle-2 block number and the
+// call runs BASEFEE, which does not exist before London.
+func TestCallManyBundleAdvanceRefreshesForkRules(t *testing.T) {
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	address := crypto.PubkeyToAddress(key.PublicKey)
+
+	// London must be set before genesis: the API reads chain config from the DB,
+	// so mutating this struct afterwards would not reach it.
+	londonBlock := uint64(2)
+	cfg := &chain.Config{
+		ChainID:               uint256.NewInt(1337),
+		Rules:                 chain.EtHashRules,
+		HomesteadBlock:        common.NewUint64(0),
+		TangerineWhistleBlock: common.NewUint64(0),
+		SpuriousDragonBlock:   common.NewUint64(0),
+		ByzantiumBlock:        common.NewUint64(0),
+		ConstantinopleBlock:   common.NewUint64(0),
+		PetersburgBlock:       common.NewUint64(0),
+		IstanbulBlock:         common.NewUint64(0),
+		MuirGlacierBlock:      common.NewUint64(0),
+		BerlinBlock:           common.NewUint64(0),
+		LondonBlock:           &londonBlock,
+		Ethash:                new(chain.EthashConfig),
+	}
+
+	alloc := types.GenesisAlloc{address: {Balance: big.NewInt(9000000000000000000)}}
+	contractBackend := backends.NewSimulatedBackendWithConfig(t, alloc, cfg, 10000000)
+	defer contractBackend.Close()
+	contractBackend.Commit()
+
+	head, err := contractBackend.HeaderByNumber(context.Background(), nil)
+	require.NoError(t, err)
+	// Bundle 1 executes at this number and bundle 2 at +1, straddling London.
+	require.Equal(t, londonBlock-1, head.Number.Uint64(), "bundle 1 must start one block below London")
+
+	// BASEFEE; PUSH1 0; MSTORE; PUSH1 32; PUSH1 0; RETURN
+	basefeeCode := hexutil.Bytes([]byte{0x48, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3})
+	gas := hexutil.Uint64(200_000)
+	gasPrice := (*hexutil.Big)(big.NewInt(1e9))
+	call := ethapi.CallArgs{From: &address, Data: &basefeeCode, Gas: &gas, GasPrice: gasPrice}
+
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := newEthApiForTest(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), contractBackend.Engine(), nil,
+		&rpccfg.BaseApiConfig{Dirs: datadir.New(t.TempDir())}), contractBackend.DB(), nil, nil)
+
+	timeout := int64(50000)
+	txIndex := -1
+	res, err := api.CallMany(context.Background(),
+		[]Bundle{{Transactions: []ethapi.CallArgs{call}}, {Transactions: []ethapi.CallArgs{call}}},
+		StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex},
+		nil, &timeout)
+	require.NoError(t, err)
+	require.Len(t, res, 2)
+	require.Len(t, res[0], 1)
+	require.Len(t, res[1], 1)
+
+	// bundle 1 is pre-London, so BASEFEE is not a defined opcode there
+	require.Contains(t, res[0][0], "error", "bundle 1 should fail pre-London, got %v", res[0][0])
+
+	// bundle 2 crossed into London via the advance, so BASEFEE must be valid
+	require.NotContains(t, res[1][0], "error",
+		"bundle 2 ran under bundle 1's stale pre-London rules: %v", res[1][0])
+	require.Contains(t, res[1][0], "value")
 }

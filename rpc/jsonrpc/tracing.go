@@ -570,7 +570,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 				return err
 			}
 
-			_ = ibs.FinalizeTx(rules, state.NewNoopWriter())
+			_ = ibs.FinalizeTx(blockCtx.Rules, state.NewNoopWriter())
 
 			if txnIndex < len(bundle.Transactions)-1 {
 				stream.WriteMore()
@@ -583,6 +583,9 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		}
 		blockCtx.BlockNumber++
 		blockCtx.Time++
+		// NewEVM reuses a non-nil Rules, so advancing number/time must refresh it
+		// or the next bundle executes under the previous bundle's fork rules.
+		blockCtx.Rules = evmtypes.NewRules(&blockCtx, chainConfig)
 	}
 	stream.WriteArrayEnd()
 	return nil

@@ -240,7 +240,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 				return nil, err
 			}
 
-			_ = st.FinalizeTx(rules, state.NewNoopWriter())
+			_ = st.FinalizeTx(blockCtx.Rules, state.NewNoopWriter())
 
 			// If the timer caused an abort, return an appropriate error message
 			if evm.Cancelled() {
@@ -266,6 +266,9 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 		blockCtx.BlockNumber++
 		blockCtx.Time++
+		// NewEVM reuses a non-nil Rules, so advancing number/time must refresh it
+		// or the next bundle executes under the previous bundle's fork rules.
+		blockCtx.Rules = evmtypes.NewRules(&blockCtx, chainConfig)
 		ret = append(ret, results)
 	}
 
