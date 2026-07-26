@@ -629,6 +629,10 @@ func BenchmarkOpPush1(bench *testing.B) {
 	benchPush(bench, PUSH1, bytes.Repeat([]byte{0x60, 0x42}, 16))
 }
 
+func BenchmarkOpPush2(bench *testing.B) {
+	benchPush(bench, PUSH2, bytes.Repeat([]byte{0xab}, 8))
+}
+
 func BenchmarkOpPush32(bench *testing.B) {
 	benchPush(bench, PUSH32, bytes.Repeat([]byte{0xab}, 40))
 }

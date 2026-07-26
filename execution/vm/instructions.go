@@ -1530,11 +1530,10 @@ func makeLog(size int) executionFunc {
 func opPush1(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	codeLen := uint64(len(scope.Contract.Code))
 	pc++
-	integer := scope.Stack.pushRef()
 	if pc < codeLen {
-		integer.SetUint64(uint64(scope.Contract.Code[pc]))
+		scope.Stack.push(uint256.Int{uint64(scope.Contract.Code[pc])})
 	} else {
-		integer.Clear()
+		scope.Stack.push(uint256.Int{})
 	}
 	return pc, nil, nil
 }
