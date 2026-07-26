@@ -17,6 +17,8 @@
 package state
 
 import (
+	"fmt"
+	"math/big"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -239,4 +241,71 @@ func BenchmarkAccessListReset(b *testing.B) {
 			populate(al)
 		}
 	})
+}
+
+// BenchmarkAccessListSlots measures the per-opcode access-list traffic: every
+// SLOAD and SSTORE calls AddSlot, and a re-read of an already-warm slot is the
+// dominant case in storage-heavy contracts.
+//
+// runLen is how many consecutive storage ops target the same address before
+// execution moves to another one. A call frame only ever touches its own
+// storage, so runLen models frame length: 1 is a proxy chain doing one SLOAD
+// per frame, 64 is a loop inside a single contract.
+func BenchmarkAccessListSlots(b *testing.B) {
+	const nAddrs, nSlots = 4, 64
+	addrs := make([]accounts.Address, nAddrs)
+	for i := range addrs {
+		addrs[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+	}
+	keys := make([]accounts.StorageKey, nSlots)
+	for i := range keys {
+		keys[i] = accounts.InternKey(common.BigToHash(big.NewInt(int64(i + 1))))
+	}
+	populated := func() *accessList {
+		al := newAccessList()
+		for _, a := range addrs {
+			for _, k := range keys {
+				al.AddSlot(a, k)
+			}
+		}
+		return al
+	}
+
+	for _, runLen := range []int{1, 4, 16, 64} {
+		name := fmt.Sprintf("run%d", runLen)
+
+		b.Run("warm-hit/"+name, func(b *testing.B) {
+			al := populated()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				al.AddSlot(addrs[(i/runLen)%nAddrs], keys[i%nSlots])
+			}
+		})
+
+		b.Run("cold-insert/"+name, func(b *testing.B) {
+			al := newAccessList()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				// Walk all nAddrs*nSlots pairs exactly once per Reset window,
+				// keeping runs of runLen ops on one address. Deriving the slot
+				// from i alone would repeat 64 pairs four times instead.
+				w := i % (nAddrs * nSlots)
+				if w == 0 {
+					al.Reset()
+				}
+				al.AddSlot(addrs[(w/runLen)%nAddrs], keys[(w/(runLen*nAddrs))*runLen+w%runLen])
+			}
+		})
+
+		b.Run("contains/"+name, func(b *testing.B) {
+			al := populated()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				al.Contains(addrs[(i/runLen)%nAddrs], keys[i%nSlots])
+			}
+		})
+	}
 }
