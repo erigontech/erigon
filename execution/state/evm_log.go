@@ -26,15 +26,17 @@ import (
 // Topics live inline as a fixed array (LOG emits at most 4), so a log emitted
 // during execution needs no per-log topics allocation. It is materialized into
 // a types.Log only at the receipt/tracing boundary (see materializeLogs).
+//
+// The derived fields (BlockNumber, TxIndex, Index) are not stored: the receipt
+// layer recomputes them from block/tx context and the cumulative log index
+// (see CreateReceipt / Receipt.DeriveFields), so materialization fills them from
+// context instead.
 type EvmLog struct {
-	Data        hexutil.Bytes
-	Topics      [4]common.Hash
-	Address     common.Address
-	BlockNumber uint64
-	TxIndex     uint
-	Index       uint
-	NumTopics   uint8
-	Removed     bool
+	Data      hexutil.Bytes
+	Topics    [4]common.Hash
+	Address   common.Address
+	NumTopics uint8
+	Removed   bool
 }
 
 // setTopics copies a topics slice into the inline array. Topics beyond the 4th
@@ -44,23 +46,24 @@ func (l *EvmLog) setTopics(topics []common.Hash) {
 	copy(l.Topics[:], topics)
 }
 
-// toTypesLog materializes a single owned types.Log, allocating its Topics slice.
-func (l *EvmLog) toTypesLog() types.Log {
+// toTypesLog materializes a single owned types.Log with the given derived fields,
+// allocating its Topics slice.
+func (l *EvmLog) toTypesLog(blockNum uint64, txIndex uint) types.Log {
 	return types.Log{
 		Address:     l.Address,
 		Topics:      append([]common.Hash(nil), l.Topics[:l.NumTopics]...),
 		Data:        l.Data,
-		BlockNumber: hexutil.Uint64(l.BlockNumber),
-		TxIndex:     hexutil.Uint(l.TxIndex),
-		Index:       hexutil.Uint(l.Index),
+		BlockNumber: hexutil.Uint64(blockNum),
+		TxIndex:     hexutil.Uint(txIndex),
 		Removed:     l.Removed,
 	}
 }
 
 // materializeLogs converts an EVM-internal log slice into owned types.Log
-// values. Topics for the whole slice share one backing allocation, sub-sliced
-// per log — so a tx emitting N logs pays one topics allocation, not N.
-func materializeLogs(src []EvmLog) (types.Logs, []types.Log) {
+// values with derived block/tx context. Topics for the whole slice share one
+// backing allocation, sub-sliced per log — so a tx emitting N logs pays one
+// topics allocation, not N. Index is left 0; the receipt layer sets it.
+func materializeLogs(src []EvmLog, blockNum uint64, txIndex uint) (types.Logs, []types.Log) {
 	if len(src) == 0 {
 		return nil, nil
 	}
@@ -82,9 +85,8 @@ func materializeLogs(src []EvmLog) (types.Logs, []types.Log) {
 			Address:     s.Address,
 			Topics:      t,
 			Data:        s.Data,
-			BlockNumber: hexutil.Uint64(s.BlockNumber),
-			TxIndex:     hexutil.Uint(s.TxIndex),
-			Index:       hexutil.Uint(s.Index),
+			BlockNumber: hexutil.Uint64(blockNum),
+			TxIndex:     hexutil.Uint(txIndex),
 			Removed:     s.Removed,
 		}
 		logs[i] = &backing[i]

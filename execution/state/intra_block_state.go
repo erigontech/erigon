@@ -162,7 +162,6 @@ type IntraBlockState struct {
 	txIndex  int
 	blockNum uint64
 	logs     [][]EvmLog
-	logSize  uint
 
 	// Per-transaction access list
 	accessList accessList
@@ -396,7 +395,6 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.refund = uint64(0)
 	sdb.txIndex = 0
 	sdb.sdProbeEpoch++
-	sdb.logSize = 0
 	sdb.accessList.Reset()
 	clear(sdb.transientStorage)
 	sdb.versionMap = nil
@@ -473,19 +471,11 @@ func (sdb *IntraBlockState) allocLog() *EvmLog {
 		buf = append(buf, EvmLog{})
 	}
 	sdb.logs[ti] = buf
-	lp := &buf[n]
-	lp.TxIndex = uint(sdb.txIndex)
-	lp.Index = uint(sdb.logSize)
-	lp.BlockNumber = sdb.blockNum
-	sdb.logSize++
-	return lp
+	return &buf[n]
 }
 
-// AllocLogFunc allocates a log entry with its Data field pre-allocated to
-// dataSize bytes (owned by the IBS — later served from an arena), invokes fill
-// to populate the consensus fields in place (fill copies into log.Data), then
-// runs the OnLog tracing hook. The pointer passed to fill is valid only until
-// the next log is added.
+// AllocLogFunc allocates a log entry, invokes `fill` to populate the consensus fields in place, then
+// runs the OnLog tracing hook.
 func (sdb *IntraBlockState) AllocLogFunc(dataSize int, fill func(log *EvmLog)) {
 	lp := sdb.allocLog()
 	if dataSize > 0 {
@@ -495,10 +485,7 @@ func (sdb *IntraBlockState) AllocLogFunc(dataSize int, fill func(log *EvmLog)) {
 	sdb.finishLog(lp)
 }
 
-// finishLog runs the trace print and OnLog hook after a log's fields are
-// populated. The hook takes a *types.Log, so it is materialized here (only when
-// a tracer is attached); that owned copy is also what a tracer may safely retain
-// past the callback. Fields a hook mutates are written back to the entry.
+// finishLog runs OnLog hook after a log's fields are populated
 func (sdb *IntraBlockState) finishLog(lp *EvmLog) {
 	if dbg.TraceLogs && (sdb.trace || dbg.TraceAccount(accounts.InternAddress(lp.Address).Handle())) {
 		var topics string
@@ -508,10 +495,10 @@ func (sdb *IntraBlockState) finishLog(lp *EvmLog) {
 		if topics == "" {
 			topics = "[]"
 		}
-		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, lp.Index, lp.Address, topics, lp.Data)
+		fmt.Printf("%d (%d.%d) Log: Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, lp.Address, topics, lp.Data)
 	}
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
-		tl := lp.toTypesLog()
+		tl := lp.toTypesLog(sdb.blockNum, uint(sdb.txIndex))
 		sdb.tracingHooks.OnLog(&tl)
 		lp.Address = tl.Address
 		lp.setTopics(tl.Topics)
@@ -533,11 +520,10 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumbe
 	if txIndex+1 >= len(sdb.logs) {
 		return nil
 	}
-	logs, backing := materializeLogs(sdb.logs[txIndex+1])
+	logs, backing := materializeLogs(sdb.logs[txIndex+1], blockNumber, uint(txIndex))
 	for i := range backing {
 		backing[i].TxHash = txnHash
 		backing[i].BlockHash = blockHash
-		backing[i].BlockNumber = hexutil.Uint64(blockNumber)
 	}
 	return logs
 }
@@ -548,7 +534,7 @@ func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 	if txIndex+1 >= len(sdb.logs) {
 		return nil
 	}
-	logs, _ := materializeLogs(sdb.logs[txIndex+1])
+	logs, _ := materializeLogs(sdb.logs[txIndex+1], sdb.blockNum, uint(txIndex))
 	return logs
 }
 
@@ -567,7 +553,8 @@ func (sdb *IntraBlockState) Logs() types.Logs {
 	backing := make([]types.Log, total)
 	logs := make(types.Logs, total)
 	li, off := 0, 0
-	for _, lgs := range sdb.logs {
+	for ti := range sdb.logs {
+		lgs := sdb.logs[ti]
 		for j := range lgs {
 			s := &lgs[j]
 			n := int(s.NumTopics)
@@ -578,9 +565,8 @@ func (sdb *IntraBlockState) Logs() types.Logs {
 				Address:     s.Address,
 				Topics:      t,
 				Data:        s.Data,
-				BlockNumber: hexutil.Uint64(s.BlockNumber),
-				TxIndex:     hexutil.Uint(s.TxIndex),
-				Index:       hexutil.Uint(s.Index),
+				BlockNumber: hexutil.Uint64(sdb.blockNum),
+				TxIndex:     hexutil.Uint(ti - 1), // slot ti holds tx ti-1's logs
 				Removed:     s.Removed,
 			}
 			logs[li] = &backing[li]
