@@ -146,6 +146,11 @@ func New(issuerPub, audiencePub *ecdsa.PublicKey, capabilities []string, notBefo
 	if len(caps) == 0 {
 		return nil, errors.New("delegation must grant at least one capability")
 	}
+	for _, c := range caps {
+		if err := validateCapability(c); err != nil {
+			return nil, fmt.Errorf("delegation capability: %w", err)
+		}
+	}
 	d := &Delegation{
 		Version:      CurrentVersion,
 		Issuer:       issuerCompressed,

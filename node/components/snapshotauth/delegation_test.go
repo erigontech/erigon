@@ -18,6 +18,7 @@ package snapshotauth
 
 import (
 	"crypto/ecdsa"
+	"strings"
 	"testing"
 	"time"
 
@@ -316,6 +317,71 @@ func TestDecode_RejectsShortAudiencePubkey(t *testing.T) {
 	_, err = Decode(encoded)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "audience pubkey length")
+}
+
+// TestNew_RejectsUnknownCapability closes the programmatic entry point:
+// ParseCapabilities already rejects unknown fixed caps at CLI parse time,
+// but New() is the API mint sites use directly. A typo like
+// "snapshot:advertise-typo" or a bogus prefix like "chain.foo:bar:hex"
+// must be caught at issue time, not at Verify.
+func TestNew_RejectsUnknownCapability(t *testing.T) {
+	issuer := newKey(t)
+	audience := newKey(t)
+
+	cases := []struct {
+		name string
+		caps []string
+	}{
+		{"fixed cap typo", []string{"snapshot:advertize"}},
+		{"unknown fixed cap", []string{"snapshot:bogus"}},
+		{"unknown prefix", []string{"chain.foo:bar:cafebabe"}},
+		{"content hash missing hex", []string{"chain.v2:hash:"}},
+		{"content hash non-hex", []string{"chain.v2:hash:ZZZ"}},
+		{"forked-from wrong length", []string{"fork:from:deadbeef"}},
+		{"mixed valid + typo", []string{string(CapAdvertise), "snapshot:advertize"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := New(&issuer.PublicKey, &audience.PublicKey,
+				tc.caps, time.Time{}, time.Time{}, 1, nil)
+			require.Error(t, err, "New() must reject %v", tc.caps)
+		})
+	}
+}
+
+// TestNew_AcceptsRecognisedCapabilities complements the rejection test:
+// the fixed caps and both dynamic prefix caps (content-hash, forked-from)
+// must remain acceptable programmatically because Mint* callers rely on
+// New() to construct UCANs carrying them.
+func TestNew_AcceptsRecognisedCapabilities(t *testing.T) {
+	issuer := newKey(t)
+	audience := newKey(t)
+
+	validHash := strings.Repeat("ab", 32)
+
+	pub, err := compressedPubKey(&audience.PublicKey)
+	require.NoError(t, err)
+	forkCap, err := ForkedFromCapability(pub)
+	require.NoError(t, err)
+
+	cases := []struct {
+		name string
+		caps []string
+	}{
+		{"advertise", []string{string(CapAdvertise)}},
+		{"serve", []string{string(CapServe)}},
+		{"delegate", []string{string(CapDelegate)}},
+		{"content-hash", []string{ContentHashCapability(validHash)}},
+		{"forked-from", []string{forkCap}},
+		{"combo", []string{string(CapAdvertise), string(CapDelegate), forkCap}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := New(&issuer.PublicKey, &audience.PublicKey,
+				tc.caps, time.Time{}, time.Time{}, 1, nil)
+			require.NoError(t, err, "New() must accept %v", tc.caps)
+		})
+	}
 }
 
 func newKey(t *testing.T) *ecdsa.PrivateKey {

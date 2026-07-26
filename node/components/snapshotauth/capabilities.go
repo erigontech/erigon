@@ -17,6 +17,7 @@
 package snapshotauth
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -79,7 +80,9 @@ var AllCapabilities = []Capability{
 // ParseCapabilities parses a comma-separated list of capability
 // strings, returning the canonical (sorted, de-duplicated) form. An
 // unrecognised value is reported as an error so a CLI typo is caught
-// at issue time rather than verify time.
+// at issue time rather than verify time. This is the CLI-facing entry
+// point; it only accepts the fixed AllCapabilities set because
+// prefix-based caps (content-hash, forked-from) are not human-entered.
 func ParseCapabilities(s string) ([]string, error) {
 	if strings.TrimSpace(s) == "" {
 		return nil, fmt.Errorf("capability list is empty")
@@ -104,6 +107,35 @@ func ParseCapabilities(s string) ([]string, error) {
 		return nil, fmt.Errorf("capability list resolved to empty after trimming")
 	}
 	return canonicalCapabilities(out), nil
+}
+
+// validateCapability accepts the programmatic superset that Mint*
+// callers construct via New: fixed AllCapabilities plus the two dynamic
+// prefix caps (chain.v2:hash:<64-hex>, fork:from:<pubkey-hex>). Rejects
+// typos and malformed prefix payloads at mint time so a bad cap can't
+// slip past to Verify.
+func validateCapability(c string) error {
+	if c == "" {
+		return fmt.Errorf("empty capability")
+	}
+	for _, k := range AllCapabilities {
+		if c == string(k) {
+			return nil
+		}
+	}
+	if hashHex, ok := ParseContentHashCapability(c); ok {
+		if len(hashHex) != 2*sha256.Size {
+			return fmt.Errorf("content-hash capability %q: hash must be %d lowercase hex chars", c, 2*sha256.Size)
+		}
+		if _, err := hex.DecodeString(hashHex); err != nil {
+			return fmt.Errorf("content-hash capability %q: hash is not valid hex", c)
+		}
+		return nil
+	}
+	if _, ok := ParseForkedFromCapability(c); ok {
+		return nil
+	}
+	return fmt.Errorf("unknown capability %q", c)
 }
 
 // ContentHashCapability builds the Content-UCAN capability binding an
