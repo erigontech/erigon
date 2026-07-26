@@ -985,9 +985,9 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 func stCreate(_ uint64, scope *CallContext) string {
 	stack := &scope.Stack
 	var (
-		value  = stack.data[len(stack.data)-1]
-		offset = stack.data[len(stack.data)-2]
-		size   = stack.data[len(stack.data)-3]
+		value  = stack.data[stack.top-1]
+		offset = stack.data[stack.top-2]
+		size   = stack.data[stack.top-3]
 		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
 	)
 
@@ -1070,9 +1070,9 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 func stCreate2(_ uint64, scope *CallContext) string {
 	stack := &scope.Stack
 	var (
-		endowment    = stack.data[len(stack.data)-1]
-		offset, size = stack.data[len(stack.data)-2], stack.data[len(stack.data)-3]
-		salt         = stack.data[len(stack.data)-4]
+		endowment    = stack.data[stack.top-1]
+		offset, size = stack.data[stack.top-2], stack.data[stack.top-3]
+		salt         = stack.data[stack.top-4]
 		input        = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
 	)
 
@@ -1137,7 +1137,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 
 func stCall(_ uint64, scope *CallContext) string {
 	stack := &scope.Stack
-	addr, _, inOffset, inSize := stack.data[len(stack.data)-2], stack.data[len(stack.data)-3], stack.data[len(stack.data)-4], stack.data[len(stack.data)-5]
+	addr, _, inOffset, inSize := stack.data[stack.top-2], stack.data[stack.top-3], stack.data[stack.top-4], stack.data[stack.top-5]
 	toAddr := common.Address(addr.Bytes20())
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
@@ -1188,7 +1188,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 
 func stCallCode(_ uint64, scope *CallContext) string {
 	stack := &scope.Stack
-	addr, _, inOffset, inSize := stack.data[len(stack.data)-2], stack.data[len(stack.data)-3], stack.data[len(stack.data)-4], stack.data[len(stack.data)-5]
+	addr, _, inOffset, inSize := stack.data[stack.top-2], stack.data[stack.top-3], stack.data[stack.top-4], stack.data[stack.top-5]
 	toAddr := common.Address(addr.Bytes20())
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
@@ -1235,7 +1235,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 
 func stDelegateCall(_ uint64, scope *CallContext) string {
 	stack := &scope.Stack
-	addr, inOffset, inSize := stack.data[len(stack.data)-2], stack.data[len(stack.data)-3], stack.data[len(stack.data)-4]
+	addr, inOffset, inSize := stack.data[stack.top-2], stack.data[stack.top-3], stack.data[stack.top-4]
 	toAddr := common.Address(addr.Bytes20())
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
@@ -1280,7 +1280,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 
 func stStaticCall(_ uint64, scope *CallContext) string {
 	stack := &scope.Stack
-	addr, inOffset, inSize := stack.data[len(stack.data)-2], stack.data[len(stack.data)-3], stack.data[len(stack.data)-4]
+	addr, inOffset, inSize := stack.data[stack.top-2], stack.data[stack.top-3], stack.data[stack.top-4]
 	toAddr := common.Address(addr.Bytes20())
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
