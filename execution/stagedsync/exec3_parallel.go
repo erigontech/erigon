@@ -2473,6 +2473,15 @@ type blockExecutor struct {
 	// dependency-ordered validation could commit now but the contiguous
 	// maxComplete/maxValidated gate blocks. Sizes the early-validation opportunity.
 	maxReadyEarly int
+
+	// coinbase is the block's fee recipient, cached from the first tx result;
+	// dependency-ordered validation needs it to gate coinbase readers.
+	coinbase accounts.Address
+
+	// coinbaseFlushedUpTo is the contiguous tx prefix whose fee tips the
+	// calcFees sweep has flushed to the versionMap (DEP_ORDER_VAL). Coinbase
+	// readers gate on it; -1 means none flushed yet.
+	coinbaseFlushedUpTo int
 }
 
 // countReadyEarly returns how many exec-complete, not-yet-validated txs have all
@@ -2497,8 +2506,9 @@ func (be *blockExecutor) countReadyEarly() int {
 // exec-complete, not already validated, and have all its versionMap
 // predecessors validated. A tx that reads the coinbase account is implicitly
 // dependent on every prior tx (each credits fees to the coinbase), so it stays
-// gated on the contiguous validated prefix reaching its immediate predecessor.
-func (be *blockExecutor) readyForDepOrderValidation(tx int, coinbase accounts.Address) bool {
+// gated on the coinbase-flush frontier (the contiguous prefix whose fee tips
+// the calcFees sweep has flushed to the versionMap) reaching tx-1.
+func (be *blockExecutor) readyForDepOrderValidation(tx int, coinbase accounts.Address, coinbaseFlushedUpTo int) bool {
 	if !be.execTasks.checkComplete(tx) || be.validateTasks.checkComplete(tx) {
 		return false
 	}
@@ -2507,7 +2517,7 @@ func (be *blockExecutor) readyForDepOrderValidation(tx int, coinbase accounts.Ad
 	}
 	rs := be.blockIO.ReadSet(tx)
 	if rs.ReadsAccount(coinbase) {
-		return be.validateTasks.maxComplete() >= tx-1
+		return coinbaseFlushedUpTo >= tx-1
 	}
 	return true
 }
@@ -2593,22 +2603,23 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, commitResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
 	return &blockExecutor{
-		blockNum:         blockNum,
-		blockHash:        blockHash,
-		begin:            time.Now(),
-		stats:            map[int]ExecutionStat{},
-		finalizedResults: map[int]*execResult{},
-		settledInput:     map[int]bool{},
-		estimateDeps:     map[int][]int{},
-		preValidated:     map[int]bool{},
-		blockIO:          &state.VersionedIO{},
-		versionMap:       state.NewVersionMap(accessList),
-		profile:          profile,
-		applyResults:     applyResults,
-		commitResults:    commitResults,
-		gasPool:          gasPool,
-		blockStateCache:  state.NewBlockStateCache(),
-		exhausted:        exhausted,
+		blockNum:            blockNum,
+		blockHash:           blockHash,
+		begin:               time.Now(),
+		stats:               map[int]ExecutionStat{},
+		finalizedResults:    map[int]*execResult{},
+		settledInput:        map[int]bool{},
+		estimateDeps:        map[int][]int{},
+		preValidated:        map[int]bool{},
+		blockIO:             &state.VersionedIO{},
+		versionMap:          state.NewVersionMap(accessList),
+		profile:             profile,
+		applyResults:        applyResults,
+		commitResults:       commitResults,
+		gasPool:             gasPool,
+		blockStateCache:     state.NewBlockStateCache(),
+		exhausted:           exhausted,
+		coinbaseFlushedUpTo: -1,
 	}
 }
 

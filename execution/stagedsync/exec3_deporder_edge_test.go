@@ -36,12 +36,16 @@ func beForSelection(reads map[int]state.ReadSet, execComplete, validated []int) 
 
 var coinbaseAddr = addr(0xc0)
 
+// noCoinbaseGate is a coinbase-flush frontier high enough that the coinbase
+// gate never blocks — used by tests whose txs don't read the coinbase.
+const noCoinbaseGate = 1 << 30
+
 func TestReady_NotExecCompleteOrAlreadyValidated(t *testing.T) {
 	be := beForSelection(nil, []int{0}, []int{0})
-	require.False(t, be.readyForDepOrderValidation(0, coinbaseAddr), "already-validated tx is not re-selected")
+	require.False(t, be.readyForDepOrderValidation(0, coinbaseAddr, noCoinbaseGate), "already-validated tx is not re-selected")
 
 	be2 := beForSelection(nil, nil, nil)
-	require.False(t, be2.readyForDepOrderValidation(0, coinbaseAddr), "not-exec-complete tx is not selectable")
+	require.False(t, be2.readyForDepOrderValidation(0, coinbaseAddr, noCoinbaseGate), "not-exec-complete tx is not selectable")
 }
 
 func TestReady_NonCoinbase_DeepButShallowDeps(t *testing.T) {
@@ -51,7 +55,7 @@ func TestReady_NonCoinbase_DeepButShallowDeps(t *testing.T) {
 	be := beForSelection(map[int]state.ReadSet{
 		200: mapReadOn(addr(0xaa), 1),
 	}, []int{200}, []int{1})
-	require.True(t, be.readyForDepOrderValidation(200, coinbaseAddr),
+	require.True(t, be.readyForDepOrderValidation(200, coinbaseAddr, noCoinbaseGate),
 		"a shallow dep on a validated predecessor is enough regardless of index distance")
 }
 
@@ -59,34 +63,33 @@ func TestReady_NonCoinbase_BlockedByUnvalidatedDep(t *testing.T) {
 	be := beForSelection(map[int]state.ReadSet{
 		5: mapReadOn(addr(0xaa), 3),
 	}, []int{5}, nil) // tx3 not validated
-	require.False(t, be.readyForDepOrderValidation(5, coinbaseAddr),
+	require.False(t, be.readyForDepOrderValidation(5, coinbaseAddr, noCoinbaseGate),
 		"unvalidated versionMap predecessor blocks selection")
 }
 
 func TestReady_CoinbaseReader_StaysAllPriorGated(t *testing.T) {
 	// tx5 reads the coinbase and its explicit dep (tx1) is validated, so
 	// depsValidated is true — but the coinbase read makes it implicitly
-	// dependent on ALL prior txs, so it must wait for the contiguous
-	// maxValidated to reach tx4.
+	// dependent on ALL prior txs, so it must wait for the coinbase-flush
+	// frontier to reach tx4.
 	reads := map[int]state.ReadSet{5: mapReadOn(coinbaseAddr, 1)}
 
-	be := beForSelection(reads, []int{5}, []int{0, 1}) // maxValidated == 1 (2..4 unvalidated)
-	require.False(t, be.readyForDepOrderValidation(5, coinbaseAddr),
-		"coinbase reader blocked until all prior txs validated")
+	be := beForSelection(reads, []int{5}, []int{1})
+	require.False(t, be.readyForDepOrderValidation(5, coinbaseAddr, 1),
+		"coinbase reader blocked until fee tips of all prior txs are flushed")
 
-	beReady := beForSelection(reads, []int{5}, []int{0, 1, 2, 3, 4}) // maxValidated == 4 == tx-1
-	require.True(t, beReady.readyForDepOrderValidation(5, coinbaseAddr),
-		"coinbase reader selectable once every prior tx is validated")
+	require.True(t, be.readyForDepOrderValidation(5, coinbaseAddr, 4),
+		"coinbase reader selectable once the coinbase-flush frontier reaches tx-1")
 }
 
 func TestReady_SingleTxBlock_Tx0(t *testing.T) {
 	// tx0 has no predecessors. Whether or not it reads the coinbase, the
-	// all-prior gate (maxValidated >= -1) is trivially satisfied.
+	// all-prior gate (frontier >= -1) is trivially satisfied.
 	be := beForSelection(nil, []int{0}, nil)
-	require.True(t, be.readyForDepOrderValidation(0, coinbaseAddr), "tx0 with no reads is immediately ready")
+	require.True(t, be.readyForDepOrderValidation(0, coinbaseAddr, -1), "tx0 with no reads is immediately ready")
 
 	beCb := beForSelection(map[int]state.ReadSet{0: mapReadOn(coinbaseAddr, -1)}, []int{0}, nil)
-	require.True(t, beCb.readyForDepOrderValidation(0, coinbaseAddr), "tx0 reading coinbase is still ready (no priors)")
+	require.True(t, beCb.readyForDepOrderValidation(0, coinbaseAddr, -1), "tx0 reading coinbase is still ready (no priors)")
 }
 
 func TestReady_CascadeReValidation_PredecessorInvalidated(t *testing.T) {
@@ -97,10 +100,10 @@ func TestReady_CascadeReValidation_PredecessorInvalidated(t *testing.T) {
 	be := beForSelection(map[int]state.ReadSet{
 		3: mapReadOn(addrA, 1),
 	}, []int{1, 3}, []int{1})
-	require.True(t, be.readyForDepOrderValidation(3, coinbaseAddr), "predecessor validated → ready")
+	require.True(t, be.readyForDepOrderValidation(3, coinbaseAddr, noCoinbaseGate), "predecessor validated → ready")
 
 	be.validateTasks.clearComplete(1) // tx1 invalidated / must re-run
-	require.False(t, be.readyForDepOrderValidation(3, coinbaseAddr),
+	require.False(t, be.readyForDepOrderValidation(3, coinbaseAddr, noCoinbaseGate),
 		"once the predecessor is un-validated, the dependent must not be committed on it")
 }
 
@@ -120,10 +123,10 @@ func TestReady_SelfDestructRecreate_GatedByMapReadPredecessor(t *testing.T) {
 	reads := map[int]state.ReadSet{7: mapReadOn(x, 4)}
 
 	blocked := beForSelection(reads, []int{7}, nil)
-	require.False(t, blocked.readyForDepOrderValidation(7, coinbaseAddr), "gated until the recreate tx validates")
+	require.False(t, blocked.readyForDepOrderValidation(7, coinbaseAddr, noCoinbaseGate), "gated until the recreate tx validates")
 
 	ready := beForSelection(reads, []int{7}, []int{4})
-	require.True(t, ready.readyForDepOrderValidation(7, coinbaseAddr), "selectable once the recreate tx is validated")
+	require.True(t, ready.readyForDepOrderValidation(7, coinbaseAddr, noCoinbaseGate), "selectable once the recreate tx is validated")
 }
 
 // sanity: coinbaseAddr must be a non-nil, distinct account so ReadsAccount can
