@@ -265,7 +265,7 @@ func (je *journalEntry) dirtied() (accounts.Address, bool) {
 	case kindCreateObject, kindResetObject, kindSelfdestruct, kindBalance, kindBalanceIncrease, kindNonce, kindStorage, kindFakeStorage, kindCode, kindTouch:
 		return je.account, true
 	}
-	panic(fmt.Sprintf("dirtied: unknown journal entry kind %d", je.kind))
+	panic("dirtied: unknown journal entry kind")
 }
 
 var ripemd = accounts.InternAddress(common.HexToAddress("0000000000000000000000000000000000000003"))
