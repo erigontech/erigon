@@ -59,11 +59,8 @@ func (l *EvmLog) toTypesLog(blockNum uint64, txIndex uint) types.Log {
 	}
 }
 
-// materializeLogs converts an EVM-internal log slice into owned types.Log
-// values with derived block/tx context. Topics for the whole slice share one
-// backing allocation, sub-sliced per log — so a tx emitting N logs pays one
-// topics allocation, not N. Index is left 0; the receipt layer sets it.
-func materializeLogs(src []EvmLog, blockNum uint64, txIndex uint) (types.Logs, []types.Log) {
+// MaterializeLogs converts an EVM-internal log slice into owned types.Log
+func MaterializeLogs(src []EvmLog, blockNum uint64, txIndex uint) (types.Logs, []types.Log) {
 	if len(src) == 0 {
 		return nil, nil
 	}

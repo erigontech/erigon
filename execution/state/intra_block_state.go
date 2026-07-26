@@ -386,7 +386,7 @@ func (sdb *IntraBlockState) Reset() {
 	clear(sdb.stateObjects)
 	clear(sdb.stateObjectsDirty)
 	for i := range sdb.logs {
-		clear(sdb.logs[i]) // zero structs so their Topics/Data slices can be GC'd
+		clear(sdb.logs[i]) // free pointers
 		sdb.logs[i] = sdb.logs[i][:0]
 	}
 	clear(sdb.balanceInc)
@@ -520,7 +520,7 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumbe
 	if txIndex+1 >= len(sdb.logs) {
 		return nil
 	}
-	logs, backing := materializeLogs(sdb.logs[txIndex+1], blockNumber, uint(txIndex))
+	logs, backing := MaterializeLogs(sdb.logs[txIndex+1], blockNumber, uint(txIndex))
 	for i := range backing {
 		backing[i].TxHash = txnHash
 		backing[i].BlockHash = blockHash
@@ -534,8 +534,25 @@ func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 	if txIndex+1 >= len(sdb.logs) {
 		return nil
 	}
-	logs, _ := materializeLogs(sdb.logs[txIndex+1], sdb.blockNum, uint(txIndex))
+	logs, _ := MaterializeLogs(sdb.logs[txIndex+1], sdb.blockNum, uint(txIndex))
 	return logs
+}
+
+// GetRawEvmLogs returns a detached copy of the tx's EVM-internal log entries,
+// deferring the (allocating) materialization into types.Log to the receipt
+// layer (see MaterializeLogs). The copy is safe to hold past Reset because
+// EvmLog.Data is owned and its topics are inline.
+func (sdb *IntraBlockState) GetRawEvmLogs(txIndex int) []EvmLog {
+	if txIndex+1 >= len(sdb.logs) {
+		return nil
+	}
+	src := sdb.logs[txIndex+1]
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]EvmLog, len(src))
+	copy(out, src)
+	return out
 }
 
 func (sdb *IntraBlockState) Logs() types.Logs {
