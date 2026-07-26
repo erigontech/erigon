@@ -462,6 +462,87 @@ func TestCanonicalValidatorRejectsFullyFiltered(t *testing.T) {
 // configured, each received peer manifest's bytes are persisted as
 // chain.<peer_id>.toml. Lets the node survive restarts without
 // re-fetching every peer's manifest from scratch.
+// TestForkPostCutValidator_RejectsPreCutEntries pins the consumer-side
+// pre-cut rejection: a fork follower configured with cutBlock > 0
+// drops any peer manifest carrying pre-cut block files. The default
+// seeded manifest carries v1.0-000000-000500-headers.seg (range
+// 0..500, entirely below cutBlock=20M), which classifies as pre-cut.
+func TestForkPostCutValidator_RejectsPreCutEntries(t *testing.T) {
+	e := newEnv(t)
+	e.p.SetForkPostCutValidator(BuildForkPostCutValidator(20_000_000, nil))
+
+	seedDir := t.TempDir()
+	inv := makeInventory(t)
+	seedPath, hash := seedPeerManifest(t, seedDir, inv)
+	e.fetcher.register(hash, seedPath)
+
+	peer := makePeerNode(t, &enr.ChainToml{
+		AuthoritativeBlocks: 100,
+		KnownBlocks:         100,
+		InfoHash:            hash,
+	})
+	e.sentry.PublishPeerConnected(peer)
+
+	time.Sleep(200 * time.Millisecond)
+	require.Zero(t, e.receivedCount(),
+		"pre-cut fork manifest must be dropped; no PeerManifestReceived publish")
+}
+
+// TestForkPostCutValidator_AllowsCleanPostCutManifest pins the
+// happy-path: with the validator installed, a peer manifest whose
+// entries are all post-cut passes through unchanged.
+func TestForkPostCutValidator_AllowsCleanPostCutManifest(t *testing.T) {
+	e := newEnv(t)
+	// cutBlock=1000; the seeded post-cut file starts at block 20000.
+	e.p.SetForkPostCutValidator(BuildForkPostCutValidator(1000, nil))
+
+	seedDir := t.TempDir()
+	inv := snapshot.NewInventory()
+	inv.AddFile(&snapshot.FileEntry{
+		Name:        "v1.0-020000-020500-headers.seg",
+		TorrentHash: [20]byte{0xaa, 0xbb, 0xcc, 0xdd},
+		Local:       true,
+		Trust:       snapshot.TrustVerified,
+	})
+	seedPath, hash := seedPeerManifest(t, seedDir, inv)
+	e.fetcher.register(hash, seedPath)
+
+	peer := makePeerNode(t, &enr.ChainToml{
+		AuthoritativeBlocks: 100,
+		KnownBlocks:         100,
+		InfoHash:            hash,
+	})
+	e.sentry.PublishPeerConnected(peer)
+
+	waitFor(t, func() bool { return e.receivedCount() == 1 },
+		2*time.Second, "clean post-cut manifest published")
+}
+
+// TestForkPostCutValidator_NotInstalledIsBackCompat pins the root-chain
+// default: no validator installed → pre-cut entries pass through as
+// they did before this wire-up. Root-chain followers never have a cut
+// coordinate and MUST NOT drop peer manifests as a side effect.
+func TestForkPostCutValidator_NotInstalledIsBackCompat(t *testing.T) {
+	e := newEnv(t)
+	require.Nil(t, BuildForkPostCutValidator(0, nil),
+		"cutBlock=0 must build a nil validator (root-chain semantics)")
+
+	seedDir := t.TempDir()
+	inv := makeInventory(t)
+	seedPath, hash := seedPeerManifest(t, seedDir, inv)
+	e.fetcher.register(hash, seedPath)
+
+	peer := makePeerNode(t, &enr.ChainToml{
+		AuthoritativeBlocks: 100,
+		KnownBlocks:         100,
+		InfoHash:            hash,
+	})
+	e.sentry.PublishPeerConnected(peer)
+
+	waitFor(t, func() bool { return e.receivedCount() == 1 },
+		2*time.Second, "root-chain follower publishes without validator")
+}
+
 func TestCacheDirWritesPeerManifest(t *testing.T) {
 	e := newEnv(t)
 	cacheDir := t.TempDir()

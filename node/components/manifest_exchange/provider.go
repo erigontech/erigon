@@ -120,6 +120,11 @@ type Provider struct {
 	// identification (docs/plans/20260522-fork-identification-impl.md);
 	// see fork-spec.md § Identification.
 	forkIDFilter ForkIDFilterFn
+
+	// forkPostCutValidator, if set, rejects peer manifests carrying
+	// pre-cut or straddle entries — a fork publisher may only speak
+	// about post-cut files. Nil on root chains.
+	forkPostCutValidator ForkPostCutValidatorFn
 }
 
 // CanonicalValidatorFn is invoked on each received peer manifest to
@@ -169,6 +174,27 @@ func (p *Provider) SetForkIDFilter(fn ForkIDFilterFn) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.forkIDFilter = fn
+}
+
+// ForkPostCutValidatorFn validates that a received peer manifest
+// carries only entries a fork publisher can legitimately speak about
+// (post-cut only). Returning a non-nil error rejects the manifest;
+// the peer is blacklisted like any other UCAN-gate rejection. Used
+// only by fork followers; root-chain followers pass nil.
+type ForkPostCutValidatorFn func(*downloader.ChainTomlV2) error
+
+// SetForkPostCutValidator installs the consumer-side pre-cut rejection
+// gate for fork chains. A fork publisher must not advertise pre-cut
+// files (they belong to parent canonicity); this validator enforces
+// that on the consumer side. Pass nil to disable (root chains, or
+// fork chains that opt out). Build with BuildForkPostCutValidator.
+func (p *Provider) SetForkPostCutValidator(fn ForkPostCutValidatorFn) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.forkPostCutValidator = fn
 }
 
 // SetCacheDir configures the on-disk cache directory for validated
@@ -568,10 +594,22 @@ func (p *Provider) fetchAndPublish(ctx context.Context, peerID string, infoHash,
 	// the local node's. Cheapest gate; see fork-spec.md § Identification.
 	p.mu.Lock()
 	forkIDFilter := p.forkIDFilter
+	forkPostCutValidator := p.forkPostCutValidator
 	p.mu.Unlock()
 	if forkIDFilter != nil {
 		if err := forkIDFilter(manifest); err != nil {
 			logger.Warn("[manifest_exchange] peer manifest dropped — fork-ID incompatible",
+				"peer", peerID, "err", err)
+			return
+		}
+	}
+
+	// Fork post-cut reject: a fork publisher must not advertise pre-cut
+	// files (they belong to parent canonicity). Runs before the trust
+	// gate so a malformed manifest costs no UCAN work.
+	if forkPostCutValidator != nil {
+		if err := forkPostCutValidator(manifest); err != nil {
+			logger.Warn("[manifest_exchange] peer manifest dropped — fork post-cut violation",
 				"peer", peerID, "err", err)
 			return
 		}
