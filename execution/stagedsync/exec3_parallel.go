@@ -2920,12 +2920,15 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 // keeps the ValidateVersion cost off txs changedTx can't affect. oldWrites is
 // nil for a validation failure (no prior incarnation to compare).
 func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites *state.WriteSet) *blockResult {
-	newWrites := be.blockIO.WriteSet(changedTx)
+	// be.tasks / the status lists are keyed by task index; be.blockIO is keyed by
+	// the block-level TxIndex. They differ by the block's leading system tx, so
+	// blockIO reads must map through be.tasks[i].Task.Version().TxIndex.
+	newWrites := be.blockIO.WriteSet(be.tasks[changedTx].Task.Version().TxIndex)
 	for tx := changedTx + 1; tx < len(be.tasks); tx++ {
 		if !be.validateTasks.checkComplete(tx) || be.publishTasks.checkComplete(tx) {
 			continue
 		}
-		rs := be.blockIO.ReadSet(tx)
+		rs := be.blockIO.ReadSet(be.tasks[tx].Task.Version().TxIndex)
 		if !state.HasReadDep(newWrites, rs) && !(oldWrites != nil && state.HasReadDep(oldWrites, rs)) {
 			continue
 		}
@@ -3024,14 +3027,18 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 		if valid {
 			be.validateTasks.markComplete(tx)
 			be.finalizedResults[tx] = txResult
-			// This tx's writes (now flushed) differ from the incarnation its
-			// committed dependents were validated against — re-check them against
-			// both the old and new write-sets.
-			if prev, ok := be.writeChangedPrev[tx]; ok {
+			// This tx's writes are now flushed to the versionMap. A committed
+			// dependent may have validated earlier against the pre-flush state:
+			// reading one of these keys from base (missing this tx's first write)
+			// or against an older incarnation (writeChangedPrev carries that set).
+			// Re-check every committed dependent against the new write-set, and the
+			// old one when a prior incarnation existed.
+			prev, ok := be.writeChangedPrev[tx]
+			if ok {
 				delete(be.writeChangedPrev, tx)
-				if r := be.revalidateCommittedDependents(tx, prev); r != nil {
-					return r, nil
-				}
+			}
+			if r := be.revalidateCommittedDependents(tx, prev); r != nil {
+				return r, nil
 			}
 			continue
 		}

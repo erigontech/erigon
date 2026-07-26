@@ -1674,6 +1674,12 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 	be.finalizedResults[0] = &execResult{TxResult: &exec.TxResult{Task: tVersion0}}
 	be.execTasks.setComplete(0)
 	be.execTasks.setInProgress(1)
+	// Dependency-ordered validation finalizes over the contiguous validated
+	// prefix: mark tx 0 validated and its coinbase tip flushed so tx 1 reaches
+	// the same finalize tail (and the same prev-receipt check) the contiguous
+	// path drives it to.
+	be.validateTasks.setComplete(0)
+	be.coinbaseFlushedUpTo = 0
 
 	txResult1 := &exec.TxResult{
 		Task: tVersion1,
