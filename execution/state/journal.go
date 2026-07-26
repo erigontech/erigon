@@ -110,6 +110,7 @@ func (j *journal) release() {
 	journalPool.Put(j)
 }
 func (j *journal) Reset() {
+	clear(j.entries)
 	j.entries = j.entries[:0]
 	clear(j.dirties)
 }
@@ -236,8 +237,7 @@ func (j *journal) refundChange(prev uint64) {
 }
 
 func (j *journal) addLogChange(txIndex int) {
-	// kindAddLog never dirties an account, so skip append's dirtied() bookkeeping.
-	j.entries = append(j.entries, journalEntry{kind: kindAddLog, aux: uint64(txIndex)})
+	j.append(journalEntry{kind: kindAddLog, aux: uint64(txIndex)})
 }
 
 func (j *journal) touchAccount(account accounts.Address, wasCommitted bool, prev uint256.Int) {
