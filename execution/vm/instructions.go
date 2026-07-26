@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -1505,17 +1504,16 @@ func makeLog(size int) executionFunc {
 		if evm.readOnly {
 			return pc, nil, ErrWriteProtection
 		}
-		stack := &scope.Stack
+		stack, ibs := &scope.Stack, evm.IntraBlockState()
 		mStart, mSize := stack.pop(), stack.pop()
 		mem := scope.Memory.GetPtr(mStart.Uint64(), mSize.Uint64())
-		evm.IntraBlockState().AllocLogFunc(len(mem), func(log *state.EvmLog) {
-			log.Address = scope.Contract.Address().Value()
-			log.NumTopics = uint8(size)
-			for i := range size {
-				log.Topics[i] = stack.popHash()
-			}
-			copy(log.Data, mem)
-		})
+		log := ibs.AllocLog(size, len(mem))
+		log.Address = scope.Contract.Address().Value()
+		for i := range size {
+			log.Topics[i] = stack.popHash()
+		}
+		copy(log.Data, mem)
+		ibs.NotifyLog(log)
 		return pc, nil, nil
 	}
 }
