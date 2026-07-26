@@ -56,6 +56,10 @@ func (st *Stack) pop() (ret uint256.Int) {
 	ret = st.data[st.top]
 	return
 }
+func (st *Stack) popHash() [32]byte {
+	st.top--
+	return st.data[st.top].Bytes32()
+}
 
 func (st *Stack) Cap() int {
 	return stackLimit

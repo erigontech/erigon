@@ -1512,8 +1512,7 @@ func makeLog(size int) executionFunc {
 			log.Address = scope.Contract.Address().Value()
 			log.NumTopics = uint8(size)
 			for i := range size {
-				addr := stack.pop()
-				log.Topics[i] = addr.Bytes32()
+				log.Topics[i] = stack.popHash()
 			}
 			copy(log.Data, mem)
 		})
