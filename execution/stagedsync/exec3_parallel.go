@@ -2492,6 +2492,26 @@ func (be *blockExecutor) countReadyEarly() int {
 	return n
 }
 
+// readyForDepOrderValidation decides whether tx may be validated out of
+// contiguous order under dependency-ordered validation. It must be
+// exec-complete, not already validated, and have all its versionMap
+// predecessors validated. A tx that reads the coinbase account is implicitly
+// dependent on every prior tx (each credits fees to the coinbase), so it stays
+// gated on the contiguous validated prefix reaching its immediate predecessor.
+func (be *blockExecutor) readyForDepOrderValidation(tx int, coinbase accounts.Address) bool {
+	if !be.execTasks.checkComplete(tx) || be.validateTasks.checkComplete(tx) {
+		return false
+	}
+	if !be.depsValidated(tx) {
+		return false
+	}
+	rs := be.blockIO.ReadSet(tx)
+	if rs.ReadsAccount(coinbase) {
+		return be.validateTasks.maxComplete() >= tx-1
+	}
+	return true
+}
+
 // depsValidated reports whether every versionMap (MapRead) predecessor tx reads
 // has already been validated — i.e. its read-dependencies are settled and it can
 // be validated out of contiguous order. Reads sourced from anywhere other than
