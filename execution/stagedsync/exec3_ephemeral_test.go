@@ -89,6 +89,7 @@ func setupEphemeralReplay(tb testing.TB, fx *blockreplay.Fixture) (*ephemeralRep
 	tb.Helper()
 	ctx := context.Background()
 	logger := log.New()
+	logger.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	dirs := datadir.New(tb.TempDir())
 	db := temporaltest.NewTestDB(tb, dirs)
 

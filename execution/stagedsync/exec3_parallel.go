@@ -1147,8 +1147,22 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.blockExecMetrics.BlockCount.Add(1)
 				}
 				if logNpPhases {
+					busy := time.Duration(blockExecutor.execCpuNanos.Load())
+					wall := npWait + npProc
+					var occ float64
+					if wall > 0 && pe.workerCount > 0 {
+						occ = float64(busy) / (float64(pe.workerCount) * float64(wall))
+					}
 					pe.logger.Info("[np-phase] execloop", "blk", blockResult.BlockNum,
-						"wait", npWait, "process", npProc)
+						"wait", npWait, "process", npProc,
+						"busy", busy, "workers", pe.workerCount, "occ", fmt.Sprintf("%.2f", occ),
+						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
+						"spec", blockExecutor.cntSpecExec, "abort", blockExecutor.cntAbort,
+						"valFail", blockExecutor.cntValidationFail,
+						"valLoopMs", blockExecutor.valLoopNanos/1e6, "calcFeesMs", blockExecutor.calcFeesNanos/1e6,
+						"validateMs", blockExecutor.validateNanos/1e6, "flushMs", blockExecutor.flushNanos/1e6,
+						"stateWritesMs", blockExecutor.stateWritesNanos/1e6, "finalizeMs", blockExecutor.finalizeNanos/1e6,
+						"normalizeMs", blockExecutor.normalizeNanos/1e6, "scheduleMs", blockExecutor.scheduleNanos/1e6)
 					npWait, npProc = 0, 0
 				}
 				// Snapshot the just-completed block's changeset BEFORE sending the
@@ -1929,6 +1943,10 @@ func (result *execResult) calcFees(
 	if err != nil {
 		return nil, err
 	}
+	// The tip credits only the coinbase's Balance via vsReader (no seeding read),
+	// so seed its whole-account origin into the versionMap — else the apply compose
+	// has no base and wipes the coinbase's committed nonce/code/balance.
+	state.SeedOrigin(vm, result.Coinbase, coinbaseAcc)
 	var newCoinbaseBalance uint256.Int
 	if coinbaseAcc != nil {
 		newCoinbaseBalance = coinbaseAcc.Balance
@@ -1942,6 +1960,7 @@ func (result *execResult) calcFees(
 		if err != nil {
 			return nil, err
 		}
+		state.SeedOrigin(vm, burntAddr, burntAcc)
 		if burntAcc != nil {
 			newBurntBalance = burntAcc.Balance
 		}
@@ -2163,11 +2182,12 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 
 type taskVersion struct {
 	*execTask
-	version    state.Version
-	versionMap *state.VersionMap
-	profile    bool
-	stats      map[int]ExecutionStat
-	statsMutex *sync.Mutex
+	version      state.Version
+	versionMap   *state.VersionMap
+	profile      bool
+	stats        map[int]ExecutionStat
+	statsMutex   *sync.Mutex
+	execCpuNanos *atomic.Int64
 }
 
 func (ev *taskVersion) Trace() bool {
@@ -2185,7 +2205,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	calcFees bool) (result *exec.TxResult) {
 
 	var start time.Time
-	if ev.profile || depShapeEnabled {
+	if ev.profile || depShapeEnabled || logNpPhases {
 		start = time.Now()
 	}
 
@@ -2196,6 +2216,13 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 
 	result = ev.execTask.Execute(evm, engine, genesis, ibs, stateWriter,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
+
+	// Occupancy accounting: sum every incarnation's exec CPU (including aborts)
+	// so occupancy = execCpuNanos / (workerCount × wall) reveals whether workers
+	// are starved (idle → dispatch/order artifact) or saturated (compute-bound).
+	if logNpPhases && ev.execCpuNanos != nil {
+		ev.execCpuNanos.Add(time.Since(start).Nanoseconds())
+	}
 
 	if ibs.HadInvalidRead() || result.Err != nil {
 		result.Err = wrapAsExecAbort(result.Err, ibs.DepTxIndex())
@@ -2375,6 +2402,10 @@ type blockExecutor struct {
 	// blockStateCache provides a stable pre-block snapshot of account data
 	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
 	blockStateCache *state.BlockStateCache
+
+	// execCpuNanos sums exec CPU across ALL incarnations (NEWPAYLOAD_PHASES only)
+	// for worker-occupancy attribution vs the npWait/npProc wall.
+	execCpuNanos atomic.Int64
 }
 
 // sendResult fans out an applyResult to both the apply loop and
@@ -3157,8 +3188,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			ibs := state.New(reader)
 			defer ibs.Release(false)
 			ibs.SetVersion(finalVersion.Incarnation)
-			localVersionMap := state.NewVersionMap(nil)
-			ibs.SetVersionMap(localVersionMap)
+			ibs.SetVersionMap(be.versionMap)
 			ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
 
 			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
@@ -3373,11 +3403,12 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			}
 
 			tv := &taskVersion{
-				execTask:   execTask,
-				versionMap: be.versionMap,
-				profile:    be.profile,
-				stats:      be.stats,
-				statsMutex: &be.Mutex,
+				execTask:     execTask,
+				versionMap:   be.versionMap,
+				profile:      be.profile,
+				stats:        be.stats,
+				statsMutex:   &be.Mutex,
+				execCpuNanos: &be.execCpuNanos,
 			}
 
 			if incarnation == 0 {

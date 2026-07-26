@@ -1,10 +1,27 @@
 package blockreplay
 
 import (
+	"os"
+	"strconv"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
 )
+
+// witnessReadNanos busy-spins a modelled cold-domain/file read latency on every
+// GetLatest that falls through to the flat witness (i.e. a versionMap/mem miss —
+// the reads that cost ~90µs in production). Zero = pure-compute (default). Set
+// WITNESS_READ_NANOS to model read-bound parallelism (the production case, where
+// workers overlap IO). Env-gated so default behaviour is unchanged.
+var witnessReadNanos = func() int64 {
+	if v := os.Getenv("WITNESS_READ_NANOS"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	return 0
+}()
 
 // witnessMemBatch is the kv.TemporalMemBatch seam SharedDomains reads through,
 // backed by a flat witness instead of a temporal source. Before Seal, DomainPut
@@ -57,6 +74,7 @@ func (w *witnessMemBatch) GetLatest(domain kv.Domain, key []byte) ([]byte, kv.St
 	}
 	if m := w.witness[domain]; m != nil {
 		if v, ok := m[string(key)]; ok {
+			spin(witnessReadNanos)
 			return v, 0, true
 		}
 	}

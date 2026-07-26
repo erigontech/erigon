@@ -177,4 +177,24 @@ func (v *VersionedAccountView) Empty() bool {
 	return v.GetNonce() == 0 && bal.IsZero() && v.IsEmptyCodeHash()
 }
 
+// Account composes the whole account at txIdx from the versionMap (seeded origin
+// base plus field cells below txIdx), or nil if it does not exist there. Used as
+// the apply base — stateObject-free. Correct only when every account written this
+// block has its origin seeded (see seedOrigin + the calcFees coinbase/burnt seed).
+func (v *VersionedAccountView) Account() *accounts.Account {
+	if !v.exists() {
+		return nil
+	}
+	v.ensureBase()
+	acc := accounts.NewAccount()
+	if v.baseAcc != nil {
+		acc = *v.baseAcc
+	}
+	acc.Balance = v.GetBalance()
+	acc.Nonce = v.GetNonce()
+	acc.Incarnation = v.GetIncarnation()
+	acc.CodeHash = v.GetCodeHash()
+	return &acc
+}
+
 var _ accounts.AccountView = (*VersionedAccountView)(nil)

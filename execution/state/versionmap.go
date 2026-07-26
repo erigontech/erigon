@@ -16,7 +16,7 @@ type statusFlag uint
 
 const FlagDone statusFlag = 0
 const FlagEstimate statusFlag = 1
-const UnknownDep = -2
+const UnknownDep = -3
 
 type AccountPath int8
 
@@ -979,6 +979,19 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
+			// An AddressPath read resolved to the seeded origin (-1) is the committed
+			// baseline, equivalent to a storage read of a non-existent cell; re-run the
+			// create/destruct cross-checks the storage-read path does so a concurrent
+			// lower-tx create or SELFDESTRUCT still invalidates it.
+			if valid == VersionValid && vmapAddrOrigin && path == AddressPath && rr.Version().TxIndex == originTxIndex {
+				valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, StorageRead,
+					version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
+				if valid == VersionValid {
+					if _, incRR, ok := vm.ReadIncarnation(addr, txIndex); ok && incRR.Status() == MVReadResultDone {
+						valid = VersionInvalid
+					}
+				}
+			}
 		}
 		// A later tx self-destructed the account (no revival), so a read predating
 		// the destruct is stale; checkVersion alone misses it because the SD doesn't

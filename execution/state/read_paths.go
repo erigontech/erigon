@@ -18,6 +18,23 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+// vmapAddrOrigin (A/B gate, temporary): on the first cold read of an account,
+// readAccountInternal reads the whole committed account once and seeds it into
+// the versionMap AddressPath at originTxIndex, so subsequent reads and apply
+// resolve the base from the versionMap instead of re-reading the app store
+// (SharedDomain). Step 1 of collapsing the block cache into the versionMap.
+// Removed once proven.
+var vmapAddrOrigin = dbg.EnvBool("VMAP_ADDR_ORIGIN", false)
+
+// originTxIndex is the versionMap index of the pre-block committed base ("origin"
+// = all account fields read at once, the old stateObject.original). It is the
+// highest slot below every real task index: the lowest task is the block-begin
+// system task at -1, whose read floor (Descend at txIndex-1) is -2, so the origin
+// must be <= -2 for that task to read it; and UnknownDep sits one below (-3) so
+// readFloor never confuses the origin cell with a missing one. Being below any
+// SELFDESTRUCT index, the revival/lifecycle checks treat it as an inert baseline.
+const originTxIndex = -2
+
 // codeSizeFromStateObject is the per-stateObject code-size fetch used by
 // readCodeSize: cached so.code first, else a single code read that populates
 // the cache.
@@ -224,6 +241,13 @@ type readPathResult struct {
 	vwStorage        *VersionedWrite[uint256.Int]
 
 	so *stateObject // outcomeStorageRead / outcomeLegacyStorage
+
+	// account carries the composed base account for the four account-field paths
+	// (Balance/Nonce/Incarnation/CodeHash) when it resolved from the versionMap
+	// (origin or an in-block create cell), so the wrapper extracts the field
+	// directly — no stateObject allocation. Set only for a live account; the
+	// wrapper normalizes CodeHash (empty→EmptyCodeHash) to match newObject.
+	account *accounts.Account
 
 	// Typed map-read values: the wrapper reads its path's field directly,
 	// avoiding the any-box (a heap alloc per non-storage read) the generic
@@ -652,7 +676,10 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			if readAccount != nil {
 				hdr.Source = accSource
 				hdr.Version = accVersion
-				so = newObject(s, addr, readAccount, readAccount)
+				// Carry the composed account so the wrapper reads the field directly,
+				// with no stateObject alloc. readAccountInternal returns non-nil only
+				// for a live account (destructed origins return nil), so no deleted check.
+				r.account = readAccount
 			}
 		}
 		// Cold committed storage read: resolve directly from the state reader
@@ -723,7 +750,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				return
 			}
 		}
-		if so == nil {
+		if so == nil && r.account == nil {
 			hdr.Source = StorageRead
 			obj, err := s.getStateObject(addr, true)
 			if err != nil {
@@ -781,11 +808,27 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		return nil, r.source, r.version, nil
 	case outcomeMapDone:
 		acc := r.mapAddressVal
+		// A hit on the seeded origin is the committed base; apply the same in-block
+		// destruct gate a fresh committed read would. A destructed origin reads as
+		// absent and is NOT recorded as an AddressPath read — matching the legacy
+		// path, whose self-destruct dependency travels on the field reads. Recording
+		// it would trip the origin cross-check (an Incarnation cell from the destruct
+		// exists) and invalidate the tx forever.
+		if vmapAddrOrigin && r.version.TxIndex == originTxIndex && gateOriginAccount(s, addr, acc) == nil {
+			return nil, r.source, r.version, nil
+		}
 		if r.recordVR {
 			s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{r.hdr, NewAccountView(acc)})
 		}
 		return acc, r.source, r.version, nil
 	case outcomeReturnZero, outcomeReturnDefault:
+		// versionMap miss.  Under vmapAddrOrigin this is the single point where
+		// the committed whole-account origin enters the execution store.
+		if vmapAddrOrigin {
+			if acc, src, ver, seeded, err := seedOrigin(s, addr); seeded {
+				return acc, src, ver, err
+			}
+		}
 		// outcomeReturnDefault from the skipStorage branch may carry
 		// recordVR=true.  The AddressPath defaultV is nil.
 		if r.recordVR {
@@ -795,6 +838,74 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 	default:
 		panic(fmt.Sprintf("readAccountInternal: unexpected outcome %d for %x", r.outcome, addr))
 	}
+}
+
+// SeedOrigin publishes acc as addr's committed origin in the versionMap (at
+// originTxIndex), for the one write path that obtains a committed account outside
+// the IntraBlockState read path: the block-fee tip (calcFees) credits the
+// coinbase and burnt-fee contract's Balance via a versionedStateReader, without a
+// seeding read. Without this their whole-account base (nonce/code/committed
+// balance) is absent from the versionMap and the apply compose wipes it. No-op
+// unless the origin gate is on and the account exists.
+func SeedOrigin(vm *VersionMap, addr accounts.Address, acc *accounts.Account) {
+	if !vmapAddrOrigin || vm == nil || acc == nil {
+		return
+	}
+	origin := *acc
+	vm.WriteAddress(addr, Version{TxIndex: originTxIndex}, &origin, true)
+}
+
+// gateOriginAccount applies the in-block lifecycle gate to a committed-origin
+// account (versionMap AddressPath at originTxIndex): if a prior tx destroyed it
+// with no revival, it reads as absent. In-block-created accounts (AddressPath at
+// index >= 0) are not gated here — their lifecycle is carried by their own cells.
+func gateOriginAccount(s *IntraBlockState, addr accounts.Address, acc *accounts.Account) *accounts.Account {
+	if acc == nil {
+		return nil
+	}
+	if destroyed, _, revived := s.versionMap.AccountLifecycle(addr, s.txIndex); destroyed && !revived {
+		return nil
+	}
+	return acc
+}
+
+// seedOrigin handles an AddressPath versionMap miss under vmapAddrOrigin: it reads
+// the committed pre-block account once (the "origin" = all fields at once), seeds
+// it into the versionMap at originTxIndex so later reads and apply resolve the
+// base from the execution store, and records this read at originTxIndex so the
+// tx's own re-reads agree (no self-dependency). seeded=false means the account
+// does not exist committed, so the caller falls back to the legacy miss record.
+func seedOrigin(s *IntraBlockState, addr accounts.Address) (acc *accounts.Account, src ReadSource, ver Version, seeded bool, err error) {
+	if s.versionMap == nil {
+		return nil, UnknownSource, UnknownVersion, false, nil
+	}
+	var readStart time.Time
+	if dbg.KVReadLevelledMetrics {
+		readStart = time.Now()
+	}
+	committed, err := s.stateReader.ReadAccountData(addr)
+	if dbg.KVReadLevelledMetrics {
+		s.accountReadDuration += time.Since(readStart)
+		s.accountReadCount++
+	}
+	if err != nil {
+		return nil, StorageRead, UnknownVersion, true, err
+	}
+	if committed == nil {
+		return nil, UnknownSource, UnknownVersion, false, nil
+	}
+	origin := *committed
+	s.versionMap.WriteAddress(addr, Version{TxIndex: originTxIndex}, &origin, true)
+	ver = Version{TxIndex: originTxIndex}
+	// A destructed origin reads as absent and is NOT recorded as an AddressPath
+	// read (the self-destruct dependency travels on the field reads, as in the
+	// legacy path). Only an alive origin is recorded, so its cross-check catches a
+	// later lower-tx destruct.
+	if gateOriginAccount(s, addr, &origin) == nil {
+		return nil, MapRead, ver, true, nil
+	}
+	s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader{Source: MapRead, Version: ver}, NewAccountView(&origin)})
+	return &origin, MapRead, ver, true, nil
 }
 
 // warmSource reports whether a recorded read source is a plain committed/map
@@ -836,7 +947,9 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
 		var v uint256.Int
-		if r.so != nil && !r.so.deleted {
+		if r.account != nil {
+			v = r.account.Balance
+		} else if r.so != nil && !r.so.deleted {
 			v = r.so.Balance()
 		}
 		if r.recordVR {
@@ -924,7 +1037,9 @@ func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, V
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
 		var v uint64
-		if r.so != nil && !r.so.deleted {
+		if r.account != nil {
+			v = r.account.Nonce
+		} else if r.so != nil && !r.so.deleted {
 			v = r.so.Nonce()
 		}
 		if r.recordVR {
@@ -1003,7 +1118,9 @@ func readIncarnation(s *IntraBlockState, addr accounts.Address) (uint64, ReadSou
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
 		var v uint64
-		if r.so != nil && !r.so.deleted {
+		if r.account != nil {
+			v = r.account.Incarnation
+		} else if r.so != nil && !r.so.deleted {
 			v = r.so.data.Incarnation
 		}
 		if r.recordVR {
@@ -1208,7 +1325,13 @@ func readCodeHash(s *IntraBlockState, addr accounts.Address) (accounts.CodeHash,
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
 		var v accounts.CodeHash
-		if r.so != nil && !r.so.deleted {
+		if r.account != nil {
+			// Match newObject: an empty CodeHash normalizes to EmptyCodeHash.
+			v = r.account.CodeHash
+			if v.IsEmpty() {
+				v = accounts.EmptyCodeHash
+			}
+		} else if r.so != nil && !r.so.deleted {
 			v = r.so.data.CodeHash
 		} else {
 			v = accounts.NilCodeHash

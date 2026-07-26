@@ -87,6 +87,16 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 //   - code+storage cleanup before recreation — from UpdateAccountData when
 //     original.Incarnation > account.Incarnation (followed by account fields)
 func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache, trace bool) error {
+	// Full-direct apply: writes go straight to the domains in txIndex order (the
+	// serial apply spine is already ordered), so the block-state write buffer +
+	// writeLog + Flush are bypassed — a step toward deleting BlockStateCache. The
+	// pre-tx base is read from the domain (the in-order apply has populated it
+	// with every prior tx). Composing that base from the versionMap instead is the
+	// on-model goal but currently mis-applies for committed accounts that were
+	// written-but-not-origin-seeded — see the seed-on-write completeness gap.
+	if vmapAddrOrigin {
+		blockCache = nil
+	}
 	if writes != nil && !writes.IsEmpty() {
 		type addrState struct {
 			balance        *uint256.Int
@@ -275,7 +285,28 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				// destruction cleared every field, so nothing may be resurrected.
 				acc := accounts.NewAccount()
 				if !d.selfDestruct {
-					if blockCache != nil {
+					if vw, ok := writes.(*versionMapWriteView); vmapAddrOrigin && ok {
+						// Execution-store base: the pre-tx account composed from the
+						// versionMap (seeded origin + prior txs' field cells). One-way
+						// fold — no app-store read, no block cache, no stateObject. Every
+						// account written this block has a seeded origin (seedOrigin on
+						// read; the calcFees seed for the coinbase/burnt tip written
+						// without a read), so the compose is complete.
+						if base := NewVersionedAccountView(addr, vw.txIdx, vw.vm, nil).Account(); base != nil {
+							acc = *base
+						} else if dbg.EnvBool("VMAP_NOBASE_ASSERT", false) {
+							// A missing compose base is correct for a new account but wrong
+							// for a committed one whose origin was never seeded; the domain
+							// read (only on this rare no-base path) distinguishes them.
+							if enc0, err := getLatestAcct(address[:]); err == nil && len(enc0) > 0 {
+								var da accounts.Account
+								if accounts.DeserialiseV3(&da, enc0) == nil && (da.Nonce != 0 || !da.Balance.IsZero() || !da.IsEmptyCodeHash()) {
+									fmt.Printf("VMAP-NOBASE-MISS addr=%x txIdx=%d nonce=%d bal=%d ch=%x create=%v\n",
+										addr, vw.txIdx, da.Nonce, &da.Balance, da.CodeHash, d.createContract)
+								}
+							}
+						}
+					} else if blockCache != nil {
 						// Prefer values we already hold over a fresh domain read:
 						// current (this block's writes) → committed (the pre-block
 						// account CachedReaderV3 cached when it was read during exec)
@@ -293,6 +324,21 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 						}
 					} else if enc0, err := getLatestAcct(address[:]); err == nil && len(enc0) > 0 {
 						_ = accounts.DeserialiseV3(&acc, enc0)
+					}
+				}
+				// derive-and-verify (tripwire, no behavior change): createContract ⟺
+				// this tx bumped Incarnation (new > base incarnation). Proves the
+				// CreateContractPath cell is redundant with the incarnation write
+				// before the path is dropped. acc is the pre-overlay base here.
+				if vmapAddrOrigin {
+					derivedCreateContract := d.incarnation != nil && *d.incarnation > acc.Incarnation
+					if derivedCreateContract != d.createContract {
+						ni := int64(-1)
+						if d.incarnation != nil {
+							ni = int64(*d.incarnation)
+						}
+						fmt.Printf("CC-DERIVE-MISMATCH addr=%x baseInc=%d newInc=%d derived=%v actual=%v selfDestruct=%v codeWritten=%v\n",
+							addr, acc.Incarnation, ni, derivedCreateContract, d.createContract, d.selfDestruct, d.codeWritten)
 					}
 				}
 				if d.balance != nil {
