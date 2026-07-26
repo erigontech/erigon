@@ -22,8 +22,15 @@ package state
 import (
 	"maps"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+// slotSet maps the raw stack word to the interned key rather than being a set of
+// keys, so a warm slot yields its handle without re-interning: a slot is
+// interned only the first time a transaction touches it.
+type slotSet = map[uint256.Int]accounts.StorageKey
 
 // accessList tracks addresses and storage slots accessed during a transaction.
 // addresses maps each address to its index in slots (-1 if address-only, no slots).
@@ -31,14 +38,23 @@ import (
 // reused across transactions via Reset, eliminating per-tx slot-map allocations.
 type accessList struct {
 	addresses map[accounts.Address]int
-	slots     []map[accounts.StorageKey]struct{}
+	slots     []slotSet
 
 	// Memo of the last resolved (address -> slot set); a nil lastSlots means no
 	// memo. Must be dropped whenever a slot map can be handed to a different
 	// address, or the memo would keep writing slots into a map that address no
 	// longer owns.
 	lastAddr  accounts.Address
-	lastSlots map[accounts.StorageKey]struct{}
+	lastSlots slotSet
+}
+
+// keyWord recovers the stack word an interned key was built from, for the
+// handle-taking entry points that sit off the interpreter's hot path.
+func keyWord(key accounts.StorageKey) uint256.Int {
+	h := key.Value()
+	var w uint256.Int
+	w.SetBytes32(h[:])
+	return w
 }
 
 // newAccessList creates a new accessList.
@@ -65,7 +81,7 @@ func (al *accessList) dropMemo() {
 	al.lastSlots = nil
 }
 
-func (al *accessList) memoized(address accounts.Address) map[accounts.StorageKey]struct{} {
+func (al *accessList) memoized(address accounts.Address) slotSet {
 	if al.lastAddr == address {
 		return al.lastSlots
 	}
@@ -81,8 +97,9 @@ func (al *accessList) ContainsAddress(address accounts.Address) bool {
 // Contains checks if a slot within an account is present in the access list, returning
 // separate flags for the presence of the account and the slot respectively.
 func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKey) (addressPresent bool, slotPresent bool) {
+	word := keyWord(slot)
 	if slotmap := al.memoized(address); slotmap != nil {
-		_, slotPresent = slotmap[slot]
+		_, slotPresent = slotmap[word]
 		return true, slotPresent
 	}
 	idx, ok := al.addresses[address]
@@ -92,7 +109,7 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 	if idx == -1 {
 		return true, false
 	}
-	_, slotPresent = al.slots[idx][slot]
+	_, slotPresent = al.slots[idx][word]
 	return true, slotPresent
 }
 
@@ -100,7 +117,7 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 func (al *accessList) Copy() *accessList {
 	cp := &accessList{
 		addresses: maps.Clone(al.addresses),
-		slots:     make([]map[accounts.StorageKey]struct{}, len(al.slots)),
+		slots:     make([]slotSet, len(al.slots)),
 	}
 	for i, slotMap := range al.slots {
 		cp.slots[i] = maps.Clone(slotMap)
@@ -118,18 +135,44 @@ func (al *accessList) AddAddress(address accounts.Address) bool {
 	return true
 }
 
-// AddSlot adds the specified (addr, slot) combo to the access list.
+// AddSlot adds the specified (addr, slot) combo to the access list, for callers
+// that already hold an interned key. The interpreter uses AddSlotWord instead.
+func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
+	word := keyWord(slot)
+	_, addrChange, slotChange = al.addSlot(address, &word, slot)
+	return addrChange, slotChange
+}
+
+// AddSlotWord adds the (addr, word) combo to the access list and returns word
+// interned as a StorageKey. A slot already in the list returns the handle it was
+// added with, so no interning happens.
+//
 // Return values are:
+// - the interned key
 // - address added
 // - slot added
 // For any 'true' value returned, a corresponding journal entry must be made.
-func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
-	if slotmap := al.memoized(address); slotmap != nil {
-		if _, ok := slotmap[slot]; ok {
-			return false, false
+func (al *accessList) AddSlotWord(address accounts.Address, word *uint256.Int) (key accounts.StorageKey, addrChange bool, slotChange bool) {
+	return al.addSlot(address, word, accounts.NilKey)
+}
+
+// addSlot inserts word under address. known is the pre-interned key when the
+// caller already has one, NilKey when the key must be interned on insert.
+func (al *accessList) addSlot(address accounts.Address, word *uint256.Int, known accounts.StorageKey) (key accounts.StorageKey, addrChange bool, slotChange bool) {
+	intern := func() accounts.StorageKey {
+		if known != accounts.NilKey {
+			return known
 		}
-		slotmap[slot] = struct{}{}
-		return false, true
+		return accounts.InternKey(word.Bytes32())
+	}
+
+	if slotmap := al.memoized(address); slotmap != nil {
+		if key, ok := slotmap[*word]; ok {
+			return key, false, false
+		}
+		key = intern()
+		slotmap[*word] = key
+		return key, false, true
 	}
 	idx, addrPresent := al.addresses[address]
 	if !addrPresent || idx == -1 {
@@ -137,25 +180,27 @@ func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey
 		// Reuse a cleared slot map from the backing array if available.
 		newIdx := len(al.slots)
 		al.addresses[address] = newIdx
-		var slotmap map[accounts.StorageKey]struct{}
+		var slotmap slotSet
 		if newIdx < cap(al.slots) {
 			slotmap = al.slots[:cap(al.slots)][newIdx]
 		}
 		if slotmap == nil {
-			slotmap = make(map[accounts.StorageKey]struct{})
+			slotmap = make(slotSet)
 		}
-		slotmap[slot] = struct{}{}
+		key = intern()
+		slotmap[*word] = key
 		al.slots = append(al.slots, slotmap)
 		al.lastAddr, al.lastSlots = address, slotmap
-		return !addrPresent, true
+		return key, !addrPresent, true
 	}
 	slotmap := al.slots[idx]
 	al.lastAddr, al.lastSlots = address, slotmap
-	if _, ok := slotmap[slot]; !ok {
-		slotmap[slot] = struct{}{}
-		return false, true
+	if key, ok := slotmap[*word]; ok {
+		return key, false, false
 	}
-	return false, false
+	key = intern()
+	slotmap[*word] = key
+	return key, false, true
 }
 
 // DeleteSlot removes an (address, slot)-tuple from the access list.
@@ -171,7 +216,8 @@ func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.Storage
 		panic("reverting slot change, address has no slots")
 	}
 	slotmap := al.slots[idx]
-	delete(slotmap, slot)
+	word := keyWord(slot)
+	delete(slotmap, word)
 	// Since additions and rollbacks are always in LIFO order, when a slot map
 	// becomes empty it must be the last one appended — truncate the slice.
 	if len(slotmap) == 0 {

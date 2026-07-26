@@ -2790,6 +2790,20 @@ func (sdb *IntraBlockState) AddSlotToAccessList(addr accounts.Address, slot acco
 	return addrMod, slotMod
 }
 
+// AddSlotToAccessListWord adds the given (address, stack word)-tuple to the
+// access list and returns the word interned as a StorageKey. A warm slot returns
+// the handle it was added with, so the caller pays no interning cost.
+func (sdb *IntraBlockState) AddSlotToAccessListWord(addr accounts.Address, word *uint256.Int) (key accounts.StorageKey, addrMod, slotMod bool) {
+	key, addrMod, slotMod = sdb.accessList.AddSlotWord(addr, word)
+	if addrMod {
+		sdb.journal.accessListAddAccountChange(addr)
+	}
+	if slotMod {
+		sdb.journal.accessListAddSlotChange(addr, key)
+	}
+	return key, addrMod, slotMod
+}
+
 // AddressInAccessList returns true if the given address is in the access list.
 func (sdb *IntraBlockState) AddressInAccessList(addr accounts.Address) bool {
 	return sdb.accessList.ContainsAddress(addr)

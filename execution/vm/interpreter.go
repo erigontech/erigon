@@ -100,6 +100,12 @@ func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
 	return ctx.cachedKey
 }
 
+// memoStorageKey records a key the gas phase already resolved through the access
+// list, so the execute phase's peekStorageKey hits the memo instead of interning.
+func (ctx *CallContext) memoStorageKey(word *uint256.Int, key accounts.StorageKey) {
+	ctx.cachedKeySrc, ctx.cachedKey = *word, key
+}
+
 // peekAddress returns the top-of-stack value as an interned Address, memoized
 // like peekStorageKey. Keyed on the whole word rather than its low 20 bytes,
 // so two words sharing an address miss instead of hitting.
