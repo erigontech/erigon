@@ -60,9 +60,13 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 
 		slot := callContext.peekStorageKey()
 		access := params.WarmStorageReadCostEIP2929
-		_, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), slot)
-		if slotMod {
-			access = coldAccess
+		warm := evm.IntraBlockState().SlotKnownWarm(callContext.Address(), slot)
+		if !warm {
+			_, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), slot)
+			warm = !slotMod
+			if slotMod {
+				access = coldAccess
+			}
 		}
 		var value uint256.Int
 		value.Set(callContext.Stack.Back(1))
@@ -72,7 +76,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		// matches the glamsterdam-devnet-6 fixtures; EELS later reordered
 		// get_storage vs charge_gas.
 		current, _ := evm.IntraBlockState().GetState(callContext.Address(), slot)
-		if slotMod && callContext.gas < access {
+		if !warm && callContext.gas < access {
 			return mdgas.MdGas{}, ErrOutOfGas
 		}
 
@@ -118,7 +122,11 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 func gasSLoadEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
 	// If the caller cannot afford the cost, this change will be rolled back
 	// If he does afford it, we can skip checking the same thing later on, during execution
-	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), callContext.peekStorageKey()); slotMod {
+	addr, slot := callContext.Address(), callContext.peekStorageKey()
+	if evm.IntraBlockState().SlotKnownWarm(addr, slot) {
+		return mdgas.MdGas{Regular: params.WarmStorageReadCostEIP2929}, nil
+	}
+	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(addr, slot); slotMod {
 		return mdgas.MdGas{Regular: coldStorageAccessCost(evm.chainRules)}, nil
 	}
 	return mdgas.MdGas{Regular: params.WarmStorageReadCostEIP2929}, nil

@@ -283,6 +283,17 @@ func BenchmarkAccessListSlots(b *testing.B) {
 			}
 		})
 
+		// Same slot re-read for the whole run: a loop hammering one storage
+		// slot, the pattern SLOAD hot loops produce.
+		b.Run("warm-hit-hot/"+name, func(b *testing.B) {
+			al := populated()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				al.AddSlot(addrs[(i/runLen)%nAddrs], keys[(i/runLen)%nSlots])
+			}
+		})
+
 		b.Run("cold-insert/"+name, func(b *testing.B) {
 			al := newAccessList()
 			b.ReportAllocs()
@@ -336,4 +347,25 @@ func TestAccessListMemoDroppedOnSlotMapReuse(t *testing.T) {
 
 	_, leaked := al.Contains(addrB, slot2)
 	require.False(t, leaked, "addrA's slot leaked into addrB's reused slot map")
+}
+
+// TestAccessListWarmSlotMemoDroppedOnDelete pins lastWarmSlot invalidation for
+// a DeleteSlot that leaves the slot map non-empty (no truncation): the reverted
+// slot must not keep reading as warm through the memo.
+func TestAccessListWarmSlotMemoDroppedOnDelete(t *testing.T) {
+	t.Parallel()
+	addrA := accounts.InternAddress(common.HexToAddress("0xaa"))
+	slot1 := accounts.InternKey(common.HexToHash("0x01"))
+	slot2 := accounts.InternKey(common.HexToHash("0x02"))
+
+	al := newAccessList()
+	al.AddSlot(addrA, slot1)
+	al.AddSlot(addrA, slot2) // memoizes slot2 as the last warm slot
+	al.DeleteSlot(addrA, slot2)
+
+	_, slotPresent := al.Contains(addrA, slot2)
+	require.False(t, slotPresent, "reverted slot still warm via stale lastWarmSlot memo")
+
+	_, slotChange := al.AddSlot(addrA, slot2)
+	require.True(t, slotChange, "re-adding a reverted slot must report a change for the journal")
 }

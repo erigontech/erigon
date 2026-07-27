@@ -33,11 +33,13 @@ type accessList struct {
 	addresses map[accounts.Address]int
 	slots     []map[accounts.StorageKey]struct{}
 
-	// Memo of the last resolved (address -> slot set)
-	// Means calling `AddSlot` on same addr will make 1 less map-lookup.
-	// nil lastSlots means no memo
-	lastAddr  accounts.Address
-	lastSlots map[accounts.StorageKey]struct{}
+	// Memo of the last resolved (address -> slot set) and the last slot known
+	// warm within it: repeated AddSlot on the same addr skips the addresses
+	// lookup, and on the same (addr, slot) skips both map lookups.
+	// lastAddr == NilAddress means no memo.
+	lastAddr     accounts.Address
+	lastSlots    map[accounts.StorageKey]struct{}
+	lastWarmSlot accounts.StorageKey
 }
 
 // newAccessList creates a new accessList.
@@ -62,13 +64,7 @@ func (al *accessList) Reset() {
 func (al *accessList) dropMemo() {
 	al.lastAddr = accounts.NilAddress
 	al.lastSlots = nil
-}
-
-func (al *accessList) memoized(address accounts.Address) map[accounts.StorageKey]struct{} {
-	if al.lastAddr == address {
-		return al.lastSlots
-	}
-	return nil
+	al.lastWarmSlot = accounts.StorageKey{}
 }
 
 // ContainsAddress returns true if the address is in the access list.
@@ -80,8 +76,11 @@ func (al *accessList) ContainsAddress(address accounts.Address) bool {
 // Contains checks if a slot within an account is present in the access list, returning
 // separate flags for the presence of the account and the slot respectively.
 func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKey) (addressPresent bool, slotPresent bool) {
-	if slotmap := al.memoized(address); slotmap != nil {
-		_, slotPresent = slotmap[slot]
+	if al.lastAddr == address {
+		if slot == al.lastWarmSlot {
+			return true, true
+		}
+		_, slotPresent = al.lastSlots[slot]
 		return true, slotPresent
 	}
 	idx, ok := al.addresses[address]
@@ -123,13 +122,24 @@ func (al *accessList) AddAddress(address accounts.Address) bool {
 // - slot added
 // For any 'true' value returned, a corresponding journal entry must be made.
 func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
-	if slotmap := al.memoized(address); slotmap != nil {
-		if _, ok := slotmap[slot]; ok {
+	if al.lastAddr == address {
+		if slot == al.lastWarmSlot {
 			return false, false
 		}
-		slotmap[slot] = struct{}{}
+		// Probe-then-insert: a plain read on the warm case beats mapassign's
+		// write bookkeeping, and warm re-reads dominate cold inserts.
+		if _, ok := al.lastSlots[slot]; ok {
+			al.lastWarmSlot = slot
+			return false, false
+		}
+		al.lastSlots[slot] = struct{}{}
+		al.lastWarmSlot = slot
 		return false, true
 	}
+	return al.addSlotSlow(address, slot)
+}
+
+func (al *accessList) addSlotSlow(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
 	idx, addrPresent := al.addresses[address]
 	if !addrPresent || idx == -1 {
 		// Address not present, or addr present but no slots yet.
@@ -145,16 +155,16 @@ func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey
 		}
 		slotmap[slot] = struct{}{}
 		al.slots = append(al.slots, slotmap)
-		al.lastAddr, al.lastSlots = address, slotmap
+		al.lastAddr, al.lastSlots, al.lastWarmSlot = address, slotmap, slot
 		return !addrPresent, true
 	}
 	slotmap := al.slots[idx]
-	al.lastAddr, al.lastSlots = address, slotmap
-	if _, ok := slotmap[slot]; !ok {
-		slotmap[slot] = struct{}{}
-		return false, true
+	al.lastAddr, al.lastSlots, al.lastWarmSlot = address, slotmap, slot
+	if _, ok := slotmap[slot]; ok {
+		return false, false
 	}
-	return false, false
+	slotmap[slot] = struct{}{}
+	return false, true
 }
 
 // DeleteSlot removes an (address, slot)-tuple from the access list.
@@ -171,6 +181,7 @@ func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.Storage
 	}
 	slotmap := al.slots[idx]
 	delete(slotmap, slot)
+	al.dropMemo()
 	// Since additions and rollbacks are always in LIFO order, when a slot map
 	// becomes empty it must be the last one appended — truncate the slice.
 	if len(slotmap) == 0 {
@@ -179,7 +190,6 @@ func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.Storage
 		}
 		al.slots = al.slots[:idx]
 		al.addresses[address] = -1
-		al.dropMemo()
 	}
 }
 
