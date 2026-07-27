@@ -624,7 +624,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	return result
 }
 
-func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
+func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, runLoops bool, chainDb kv.TemporalRoDB,
 	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *QueueWithRetry, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
 	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func(), err error) {
 	reconWorkers = make([]*Worker, workerCount)
@@ -649,10 +649,15 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 		}
 	}
 	if background {
-		for i := range workerCount {
-			g.Go(func() error {
-				return reconWorkers[i].Run()
-			})
+		// runLoops=false: create the worker contexts (each with its own roTx via
+		// ResetState) but don't start the pull loops, so a caller can drive them
+		// directly (goroutine-per-task) instead of via the in-queue.
+		if runLoops {
+			for i := range workerCount {
+				g.Go(func() error {
+					return reconWorkers[i].Run()
+				})
+			}
 		}
 		wait = func() { g.Wait() }
 	}

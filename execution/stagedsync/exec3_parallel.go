@@ -103,9 +103,17 @@ type parallelExecutor struct {
 	// cancelWorkers stops the OCC worker pool via workersCtx (a child of the
 	// coordination context). It is the explicit, ordered halt the exec loop calls
 	// once it has produced everything up to the coalesce block.
-	cancelWorkers  context.CancelFunc
-	in             *exec.QueueWithRetry
-	rws            *exec.ResultsQueue
+	cancelWorkers context.CancelFunc
+	in            *exec.QueueWithRetry
+	rws           *exec.ResultsQueue
+	// Step 1 of the worker refactor (GOROUTINE_PER_TASK): dispatch runs a task on
+	// a semaphore-held worker context and pushes to rws directly, instead of the
+	// worker pull-loops draining pe.in. runSem holds the idle worker contexts;
+	// runWG tracks in-flight task goroutines for teardown. Results flow (rws) is
+	// deliberately unchanged here — that's a separate later step.
+	runSem         chan *exec.Worker
+	runWG          sync.WaitGroup
+	workersCtx     context.Context
 	workerCount    int
 	blockExecutors map[uint64]*blockExecutor
 	// applyResultsCh and commitResultsCh are set before execLoop starts.
@@ -1712,10 +1720,11 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 
 	workersCtx, cancelWorkers := context.WithCancel(execLoopCtx)
 	pe.cancelWorkers = cancelWorkers
+	pe.workersCtx = workersCtx
 
 	var err error
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers, err = exec.NewWorkersPool(
-		workersCtx, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
+		workersCtx, nil, true, !goroutinePerTask, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
 		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger)
 
@@ -1727,12 +1736,27 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		defer pe.rws.Close()
 		defer pe.in.Release()
 		pe.resetWorkers(workersCtx, pe.rs, nil)
+		if goroutinePerTask {
+			// Hand the reset worker contexts to the dispatcher as a semaphore
+			// (see dispatchRun). Pull loops are not started (runLoops=false).
+			pe.runSem = make(chan *exec.Worker, len(pe.execWorkers))
+			for _, w := range pe.execWorkers {
+				pe.runSem <- w
+			}
+		}
 		return pe.execLoop(execLoopCtx)
 	})
 
 	return execLoopCtx, func(cause error) {
 		execLoopCtxCancel(cause)
 		cancelWorkers()
+
+		// Drain in-flight dispatch goroutines before tearing down worker
+		// contexts: cancelWorkers unblocks any waiting on runSem / rws.Add, so
+		// this returns promptly and no goroutine touches a worker after teardown.
+		if goroutinePerTask {
+			pe.runWG.Wait()
+		}
 
 		pe.in.Release()
 		pe.stopWorkers()
@@ -1855,6 +1879,32 @@ var relaxDispatch = dbg.EnvBool("RELAX_DISPATCH", false)
 // (ReadsAccount) falls back to the all-prior gate. Publish stays on the
 // contiguous maxValidated = the final total-ordered pass.
 var depOrderVal = dbg.EnvBool("DEP_ORDER_VAL", false)
+
+// goroutinePerTask is Step 1 of the worker refactor: dispatch runs each task on
+// a semaphore-held worker context (dispatchRun) instead of enqueuing to pe.in
+// for the worker pull-loops to drain. Results still flow through pe.rws
+// unchanged (that is a separate later step).
+var goroutinePerTask = dbg.EnvBool("GOROUTINE_PER_TASK", false)
+
+// dispatchRun executes a task on a free worker context in its own goroutine and
+// pushes the result to pe.rws — the same result path the pull-loop workers use.
+// Bounded by runSem (one slot per worker context); the goroutine blocks until a
+// context is free, so at most len(runSem) tasks execute concurrently.
+func (pe *parallelExecutor) dispatchRun(t exec.Task) {
+	pe.runWG.Add(1)
+	go func() {
+		defer pe.runWG.Done()
+		var w *exec.Worker
+		select {
+		case w = <-pe.runSem:
+		case <-pe.workersCtx.Done():
+			return
+		}
+		defer func() { pe.runSem <- w }()
+		result := w.RunTxTask(t)
+		_ = pe.rws.Add(pe.workersCtx, result)
+	}()
+}
 
 func injectSpineDelay() {
 	if spineDelayUs <= 0 {
@@ -3847,7 +3897,9 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 
 			if incarnation == 0 {
 				tv.version = execTask.Version()
-				if !pe.in.TryAdd(tv) {
+				if goroutinePerTask {
+					pe.dispatchRun(tv)
+				} else if !pe.in.TryAdd(tv) {
 					holdBack = append(holdBack, nextTx)
 					break
 				}
@@ -3856,7 +3908,11 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 				version := execTask.Version()
 				version.Incarnation = incarnation
 				tv.version = version
-				pe.in.ReTry(tv)
+				if goroutinePerTask {
+					pe.dispatchRun(tv)
+				} else {
+					pe.in.ReTry(tv)
+				}
 			}
 
 			// Commit side-effects only after successful enqueue. Record whether
