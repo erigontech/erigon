@@ -95,9 +95,8 @@ func Compare(a, b any) int {
 	} else if _, ok := b.(Comparable); ok {
 		if reflect.ValueOf(reflect.TypeOf(a)).Pointer() > reflect.ValueOf(reflect.TypeOf(b)).Pointer() {
 			return 1
-		} else {
-			return -1
 		}
+		return -1
 	}
 
 	if _, ok := a.(string); ok {
