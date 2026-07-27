@@ -360,13 +360,11 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 				var receipt *types.Receipt
 				if !txTask.IsBlockEnd() {
 					receipt = result.Receipt
-				} else {
-					if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
-						// issue: https://github.com/erigontech/erigon/issues/16037
-						receipt = blockResult.Receipts[txTask.TxIndex-1]
-						if receipt == nil {
-							return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
-						}
+				} else if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
+					// issue: https://github.com/erigontech/erigon/issues/16037
+					receipt = blockResult.Receipts[txTask.TxIndex-1]
+					if receipt == nil {
+						return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
 					}
 				}
 				if err := rawdb.WriteReceiptCacheV2(putter, receipt, txTask.TxNum); err != nil {
@@ -383,8 +381,8 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 			}
 			if produce.LogTopic {
 				for _, lg := range result.Logs {
-					for _, topic := range lg.Topics {
-						if err := doms.IndexAdd(kv.LogTopicIdx, topic[:], txTask.TxNum); err != nil {
+					for i := range lg.Topics {
+						if err := doms.IndexAdd(kv.LogTopicIdx, lg.Topics[i][:], txTask.TxNum); err != nil {
 							return err
 						}
 					}

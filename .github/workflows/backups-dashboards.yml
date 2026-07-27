@@ -20,7 +20,10 @@ on:
         type: string
         default: main
         description: 'The branch to pull the backup script from (default: main)'
-  
+
+permissions:
+  contents: read
+
 jobs:
   # 
   # NOTE: This workflow splits the backup process in 2 jobs to spot any pulling issue early on

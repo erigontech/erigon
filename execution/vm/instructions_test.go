@@ -128,7 +128,7 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 		if callContext.Stack.top != 1 {
 			t.Errorf("Expected one item on stack after %v, got %d: ", name, callContext.Stack.top)
 		}
-		actual := callContext.Stack.pop()
+		actual := callContext.Stack.popCopy()
 
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %v %d, %v(%x, %x): expected  %x, got %x", name, i, name, x, y, expected, &actual)
@@ -244,7 +244,7 @@ func TestAddMod(t *testing.T) {
 		callContext.Stack.push(y)
 		callContext.Stack.push(x)
 		opAddmod(pc, evm, callContext)
-		actual := callContext.Stack.pop()
+		actual := callContext.Stack.popCopy()
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %d, expected  %x, got %x", i, expected, actual)
 		}
@@ -318,7 +318,7 @@ func opBenchmark(b *testing.B, op executionFunc, args ...string) {
 			callContext.Stack.push(a)
 		}
 		op(pc, evm, callContext)
-		callContext.Stack.pop()
+		callContext.Stack.popCopy()
 	}
 }
 
@@ -563,12 +563,185 @@ func BenchmarkOpMstore(bench *testing.B) {
 	callContext.Memory.Resize(64)
 	pc := uint64(0)
 	memStart := uint256.Int{}
-	value := *new(uint256.Int).SetUint64(0x1337)
+	value := *uint256.NewInt(0x1337)
 
 	for bench.Loop() {
 		callContext.Stack.push(value)
 		callContext.Stack.push(memStart)
 		opMstore(pc, evm, callContext)
+	}
+}
+
+func BenchmarkOpMstore8(bench *testing.B) {
+	var (
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+		callContext = &CallContext{}
+	)
+
+	callContext.Memory.Resize(64)
+	pc := uint64(0)
+	memStart := uint256.Int{}
+	value := *uint256.NewInt(0x1337)
+
+	for bench.Loop() {
+		callContext.Stack.push(value)
+		callContext.Stack.push(memStart)
+		opMstore8(pc, evm, callContext)
+	}
+}
+
+func BenchmarkOpReturn(bench *testing.B) {
+	var (
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+		callContext = &CallContext{}
+	)
+
+	callContext.Memory.Resize(64)
+	pc := uint64(0)
+	size := *uint256.NewInt(32)
+	offset := uint256.Int{}
+
+	for bench.Loop() {
+		callContext.Stack.push(size)
+		callContext.Stack.push(offset)
+		_, retSink, _ = opReturn(pc, evm, callContext)
+	}
+}
+
+var retSink []byte
+
+// benchPush dispatches through the jump table (indirect call, as the real
+// interpreter does) so the op is not inlined into the loop, and rebalances with
+// a bare top-- to isolate the push cost.
+func benchPush(bench *testing.B, op OpCode, code []byte) {
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+	callContext := &CallContext{}
+	callContext.Contract.Code = code
+	execute := newAmsterdamInstructionSet()[op].execute
+	pc := uint64(0)
+	for bench.Loop() {
+		execute(pc, evm, callContext)
+		callContext.Stack.top--
+	}
+}
+
+func BenchmarkOpPush1(bench *testing.B) {
+	benchPush(bench, PUSH1, bytes.Repeat([]byte{0x60, 0x42}, 16))
+}
+
+func BenchmarkOpPush2(bench *testing.B) {
+	benchPush(bench, PUSH2, bytes.Repeat([]byte{0xab}, 8))
+}
+
+func BenchmarkOpPush32(bench *testing.B) {
+	benchPush(bench, PUSH32, bytes.Repeat([]byte{0xab}, 40))
+}
+
+// The CALL/CREATE trace formatters must read the operands the op is about to
+// pop (top-relative), not fixed slots near the array's capacity.
+func TestStaticCallTraceReadsStackTop(t *testing.T) {
+	callContext := &CallContext{}
+	callContext.Memory.Resize(64)
+	callContext.Memory.Set(0, 4, []byte{0xde, 0xad, 0xbe, 0xef})
+	wantAddr := common.HexToAddress("0x1122334455667788990011223344556677889900")
+
+	// STATICCALL operands, top-down: gas, addr, inOffset, inSize, retOffset, retSize
+	callContext.Stack.push(uint256.Int{})                           // retSize
+	callContext.Stack.push(uint256.Int{})                           // retOffset
+	callContext.Stack.push(*uint256.NewInt(4))                      // inSize
+	callContext.Stack.push(uint256.Int{})                           // inOffset
+	callContext.Stack.push(*new(uint256.Int).SetBytes(wantAddr[:])) // addr
+	callContext.Stack.push(*uint256.NewInt(21000))                  // gas
+
+	got := stStaticCall(0, callContext)
+	wantHex := fmt.Sprintf("%x", wantAddr)
+	if !strings.Contains(got, wantHex) || !strings.Contains(got, "deadbeef") {
+		t.Fatalf("trace read wrong stack slots: got %q, want addr %s and args deadbeef", got, wantHex)
+	}
+}
+
+// CREATE2 must be wired to stCreate2 (not stCreate), which labels the op
+// "CREATE2" and includes the salt operand it reads from the fourth slot.
+func TestCreate2TraceWiring(t *testing.T) {
+	jt := newAmsterdamInstructionSet()
+	callContext := &CallContext{}
+	callContext.Memory.Resize(64)
+	callContext.Memory.Set(0, 4, []byte{0xde, 0xad, 0xbe, 0xef})
+
+	// CREATE2 operands, top-down: endowment, offset, size, salt
+	callContext.Stack.push(*uint256.NewInt(0xcafe)) // salt
+	callContext.Stack.push(*uint256.NewInt(4))      // size
+	callContext.Stack.push(uint256.Int{})           // offset
+	callContext.Stack.push(*uint256.NewInt(7))      // endowment
+
+	got := jt[CREATE2].string(0, callContext)
+	if !strings.HasPrefix(got, "CREATE2 ") {
+		t.Fatalf("CREATE2 traced with wrong formatter: got %q", got)
+	}
+	if !strings.Contains(got, "51966") || !strings.Contains(got, "deadbeef") {
+		t.Fatalf("CREATE2 trace missing salt/input: got %q, want salt 51966 and deadbeef", got)
+	}
+}
+
+func TestStackPopHelpers(t *testing.T) {
+	st := &Stack{}
+
+	// pop2Uint64 returns the low 64 bits of (top, next) and shrinks by two.
+	st.push(*uint256.NewInt(0xAAAA)) // next
+	st.push(*uint256.NewInt(0xBBBB)) // top
+	if x, y := st.pop2Uint64(); x != 0xBBBB || y != 0xAAAA {
+		t.Fatalf("pop2Uint64 = (%#x, %#x), want (0xbbbb, 0xaaaa)", x, y)
+	}
+	if st.len() != 0 {
+		t.Fatalf("pop2Uint64 len = %d, want 0", st.len())
+	}
+
+	// popRef returns a pointer to the just-popped slot, shrinks by one, and the
+	// pointed-to value stays valid until the next push reuses that slot.
+	st.push(*uint256.NewInt(1)) // stays below
+	st.push(*uint256.NewInt(2)) // popped by popRef
+	ref := st.pop()
+	if st.len() != 1 {
+		t.Fatalf("popRef len = %d, want 1", st.len())
+	}
+	if ref.Uint64() != 2 {
+		t.Fatalf("popRef value = %d, want 2", ref.Uint64())
+	}
+	if got := st.peek().Uint64(); got != 1 {
+		t.Fatalf("popRef disturbed slot below: peek = %d, want 1", got)
+	}
+	if ref.Uint64() != 2 {
+		t.Fatalf("popRef pointer invalidated before push: got %d, want 2", ref.Uint64())
+	}
+	st.push(*uint256.NewInt(9))
+	if ref.Uint64() != 9 {
+		t.Fatalf("push did not reuse popRef slot: ref = %d, want 9", ref.Uint64())
+	}
+
+	// popRef2Peek1 returns (top, next, third), shrinks by two, and leaves the
+	// third slot as the new top so the result can be built in place.
+	st.Reset()
+	st.push(*uint256.NewInt(3)) // third: stays as new top
+	st.push(*uint256.NewInt(2)) // next
+	st.push(*uint256.NewInt(1)) // top
+	x, y, z := st.pop2Peek1()
+	if x.Uint64() != 1 || y.Uint64() != 2 || z.Uint64() != 3 {
+		t.Fatalf("popRef2Peek1 = (%d, %d, %d), want (1, 2, 3)", x.Uint64(), y.Uint64(), z.Uint64())
+	}
+	if st.len() != 1 {
+		t.Fatalf("popRef2Peek1 len = %d, want 1", st.len())
+	}
+	if st.peek() != z {
+		t.Fatalf("popRef2Peek1 left wrong slot on top: peek = %p, want %p", st.peek(), z)
+	}
+
+	// dup takes a depth below the top: dup(0) duplicates the top item.
+	st.Reset()
+	st.push(*uint256.NewInt(7)) // depth 1
+	st.push(*uint256.NewInt(8)) // depth 0
+	st.dup(1)
+	if st.len() != 3 || st.peek().Uint64() != 7 {
+		t.Fatalf("dup(1) = (len %d, top %d), want (3, 7)", st.len(), st.peek().Uint64())
 	}
 }
 
@@ -582,6 +755,7 @@ func TestOpTstore(t *testing.T) {
 		callContext = &CallContext{Contract: *NewContract(caller, caller, to, uint256.Int{})}
 		value       = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)
+	defer state.Release(false)
 
 	pc := uint64(0)
 	// push the value to the stack
@@ -619,6 +793,7 @@ func BenchmarkOpKeccak256(bench *testing.B) {
 		callContext.Stack.push(*uint256.NewInt(32))
 		callContext.Stack.push(start)
 		opKeccak256(pc, evm, callContext)
+		callContext.Stack.pop()
 	}
 }
 
@@ -868,7 +1043,7 @@ func TestOpCLZ(t *testing.T) {
 			if gotLen := callContext.Stack.len(); gotLen != 1 {
 				t.Fatalf("stack length = %d; want 1", gotLen)
 			}
-			result := callContext.Stack.pop()
+			result := callContext.Stack.popCopy()
 
 			if got := result.Uint64(); got != tc.want {
 				t.Fatalf("clz(%q) = %d; want %d", tc.inputHex, got, tc.want)
@@ -937,7 +1112,7 @@ func TestPush(t *testing.T) {
 	} {
 		pc := uint64(i)
 		push32(pc, evm, callContext)
-		res := callContext.Stack.pop()
+		res := callContext.Stack.popCopy()
 		if have := res.Hex(); have != want {
 			t.Fatalf("case %d, have %v want %v", i, have, want)
 		}

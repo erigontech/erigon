@@ -97,9 +97,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	}
 	change := msg.SignedBLSToExecutionChange.Message
 
-	var (
-		wc, genesisValidatorRoot common.Hash
-	)
+	var wc, genesisValidatorRoot common.Hash
 	if err := s.syncedDataManager.ViewHeadState(func(stateReader *state.CachingBeaconState) error {
 		// [IGNORE] current_epoch >= CAPELLA_FORK_EPOCH, where current_epoch is defined by the current wall-clock time.
 		if stateReader.Version() < clparams.CapellaVersion {

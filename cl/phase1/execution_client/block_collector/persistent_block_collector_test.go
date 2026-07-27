@@ -103,13 +103,15 @@ func newFlushTestHarness(t *testing.T, frozen uint64) *flushTestHarness {
 		func(_ context.Context, blocks []*types.Block, _ [][]byte) error {
 			h.inserted = append(h.inserted, blocks...)
 			return nil
-		}).AnyTimes()
+		},
+	).AnyTimes()
 	engine.EXPECT().CurrentHeader(gomock.Any()).Return(nil, nil).AnyTimes()
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, _, _, head common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
 			h.fcuHeads = append(h.fcuHeads, head)
 			return nil, nil
-		}).AnyTimes()
+		},
+	).AnyTimes()
 
 	persistDir := filepath.Join(t.TempDir(), "collector")
 	c := NewPersistentBlockCollector(log.New(), engine, &clparams.MainnetBeaconConfig, persistDir)

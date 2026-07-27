@@ -17,6 +17,9 @@ on:
         default: 'not_yet_defined'
         description: 'Docker image tag to remove from hub.docker.com. Works only for erigontech/erigon'
 
+permissions:
+  contents: read
+
 jobs:
 
   build-release:

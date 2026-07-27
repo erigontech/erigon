@@ -33,6 +33,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   tip-tracking-with-load-test:
     name: Tip-tracking with load ${{ matrix.client }}

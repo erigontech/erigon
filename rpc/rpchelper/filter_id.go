@@ -32,6 +32,7 @@ type (
 	PendingTxsSubID   SubscriptionID
 	LogsSubID         SubscriptionID
 	ReceiptsSubID     SubscriptionID
+	SyncingSubID      SubscriptionID
 )
 
 var globalSubscriptionId atomic.Uint64

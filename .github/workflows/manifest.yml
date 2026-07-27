@@ -19,6 +19,9 @@ on:
       - ready_for_review
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   ManifestCheck:
     # != true rather than == false: outside a pull_request event,
@@ -39,9 +42,10 @@ jobs:
           minor=$(sed -n 's/^go \([0-9]*\.[0-9]*\).*/\1/p' go.mod)
           echo "version=${minor}.x" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ steps.goversion.outputs.version }}
+          cache: false
       - run: make downloader
       - run: echo $ModModified
       - run: ./build/bin/downloader manifest-verify --chain mainnet     --webseed 'https://erigon34-v1-snapshots-mainnet.erigon.network'

@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/mvcc"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
@@ -955,7 +956,7 @@ func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *Files
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(dt.d.dirs.Snap)...)
 	}
-	retire(dt.d.dirtyFiles, outs, dt.d.FilenameBase, retireReasonMerged, dt.d.logger)
+	retire(mvcc.RetireReasonMerged, dt.d.dirtyFiles, outs, dt.d.FilenameBase, dt.d.logger)
 	retired = append(retired, outs...)
 	return deleted, retired
 }
@@ -974,7 +975,7 @@ func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *FilesItem) (deleted []
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(ht.h.dirs.Snap)...)
 	}
-	retire(ht.h.dirtyFiles, outs, ht.h.FilenameBase, retireReasonMerged, ht.h.logger)
+	retire(mvcc.RetireReasonMerged, ht.h.dirtyFiles, outs, ht.h.FilenameBase, ht.h.logger)
 	retired = append(retired, outs...)
 	return deleted, retired
 }
@@ -988,7 +989,7 @@ func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *FilesItem) (deleted []stri
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(iit.ii.dirs.Snap)...)
 	}
-	retire(iit.ii.dirtyFiles, outs, iit.ii.FilenameBase, retireReasonMerged, iit.ii.logger)
+	retire(mvcc.RetireReasonMerged, iit.ii.dirtyFiles, outs, iit.ii.FilenameBase, iit.ii.logger)
 	retired = append(retired, outs...)
 	return deleted, retired
 }
@@ -1076,7 +1077,8 @@ func NewRanges(domain [kv.DomainLen]DomainRanges, invertedIndex [kv.StandaloneId
 
 func (r Ranges) String() string {
 	ss := []string{}
-	for _, d := range &r.domain {
+	for i := range r.domain {
+		d := &r.domain[i]
 		if d.any() {
 			ss = append(ss, fmt.Sprintf("%s(%s)", d.name, d.String()))
 		}
@@ -1092,7 +1094,8 @@ func (r Ranges) String() string {
 }
 
 func (r Ranges) any() bool {
-	for _, d := range &r.domain {
+	for i := range r.domain {
+		d := &r.domain[i]
 		if d.any() {
 			return true
 		}
@@ -1106,7 +1109,8 @@ func (r Ranges) any() bool {
 }
 
 func (r Ranges) anyDomainValues() bool {
-	for _, d := range &r.domain {
+	for i := range r.domain {
+		d := &r.domain[i]
 		if d.values.needMerge {
 			return true
 		}
