@@ -962,11 +962,9 @@ func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, body cltypes.Gene
 		if body.GetBlobKzgCommitments().Len() > int(blobParameters.MaxBlobsPerBlock) {
 			return errors.New("ProcessExecutionPayload: too many blob commitments")
 		}
-	} else {
+	} else if body.GetBlobKzgCommitments().Len() > int(s.BeaconConfig().MaxBlobsPerBlockByVersion(s.Version())) {
 		// assert len(body.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
-		if body.GetBlobKzgCommitments().Len() > int(s.BeaconConfig().MaxBlobsPerBlockByVersion(s.Version())) {
-			return errors.New("ProcessExecutionPayload: too many blob commitments")
-		}
+		return errors.New("ProcessExecutionPayload: too many blob commitments")
 	}
 
 	s.SetLatestExecutionPayloadHeader(payloadHeader)

@@ -17,9 +17,8 @@
 package commitment
 
 import (
+	"bytes"
 	"fmt"
-
-	"github.com/erigontech/erigon/common"
 )
 
 // witnessNodeSet collects consensus trie nodes emitted during a witness fold,
@@ -35,7 +34,7 @@ func (s *witnessNodeSet) onNode(rlp, hash []byte) {
 	if _, ok := s.byHash[k]; ok {
 		return
 	}
-	s.byHash[k] = common.Copy(rlp)
+	s.byHash[k] = bytes.Clone(rlp)
 }
 
 // nodes returns the captured nodes root first, per the RLPDecode contract that
