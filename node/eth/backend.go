@@ -868,8 +868,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				// publish shouldn't advertise files we can't self-serve;
 				// RollingV2Publisher.ManifestSelfCheck covers that safety
 				// on every publish independent of this startup gate.
+				//
+				// Restrict the bypass to permissioned publishers — an
+				// explicit --snapshot.delegation attests the operator has
+				// an Authority UCAN chained to a trust root. Any node
+				// running --chain=<fork> without that credential keeps
+				// the gate ON, so an unauthenticated fork participant
+				// can't pollute the canonical view with early ENR
+				// advertisements before its files pass local validation.
 				isForkInitiator := chainConfig.Parent != ""
-				if !isForkInitiator {
+				isPermissioned := config.Snapshot.DelegationPath != ""
+				if !(isForkInitiator && isPermissioned) {
 					dl.EnableV2PublishGate()
 					firstPublishReady := flow.FirstPublishGateChannel(bus)
 					go func() {
