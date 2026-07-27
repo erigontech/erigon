@@ -734,6 +734,15 @@ func TestStackPopHelpers(t *testing.T) {
 	if st.peek() != z {
 		t.Fatalf("popRef2Peek1 left wrong slot on top: peek = %p, want %p", st.peek(), z)
 	}
+
+	// dup takes a depth below the top: dup(0) duplicates the top item.
+	st.Reset()
+	st.push(*uint256.NewInt(7)) // depth 1
+	st.push(*uint256.NewInt(8)) // depth 0
+	st.dup(1)
+	if st.len() != 3 || st.peek().Uint64() != 7 {
+		t.Fatalf("dup(1) = (len %d, top %d), want (3, 7)", st.len(), st.peek().Uint64())
+	}
 }
 
 func TestOpTstore(t *testing.T) {

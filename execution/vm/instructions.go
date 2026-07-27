@@ -1430,8 +1430,7 @@ func opDupN(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		return pc, nil, &ErrStackUnderflow{stackLen: scope.Stack.len(), required: n}
 	}
 
-	//The n‘th stack item is duplicated at the top of the stack.
-	scope.Stack.dup(n)
+	scope.Stack.dup(n - 1)
 	return pc, nil, nil
 }
 
@@ -1591,8 +1590,9 @@ func makePushStringer(size uint64, pushByteSize int) stringer {
 
 // make dup instruction function
 func makeDup(size int) executionFunc {
+	depth := size - 1
 	return func(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-		scope.Stack.dup(size)
+		scope.Stack.dup(depth)
 		return pc, nil, nil
 	}
 }
