@@ -17,6 +17,7 @@
 package protocol
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -30,6 +31,8 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
+	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -296,7 +299,7 @@ func TestEIP2780AuthorizationOutOfGasRollsBack(t *testing.T) {
 
 	result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
 	require.NoError(t, err)
-	require.ErrorIs(t, result.Err, vm.ErrPreExecutionOutOfGas)
+	require.ErrorIs(t, result.Err, vm.ErrRuntimeOutOfGas)
 	require.Equal(t, gasLimit, result.ReceiptGasUsed)
 	require.Equal(t, gasLimit, result.BlockRegularGasUsed)
 	require.Zero(t, result.BlockStateGasUsed)
@@ -307,6 +310,69 @@ func TestEIP2780AuthorizationOutOfGasRollsBack(t *testing.T) {
 	_, ok, err := ibs.GetDelegatedDesignation(authority)
 	require.NoError(t, err)
 	require.False(t, ok)
+}
+
+func TestEIP2780AuthorizationOutOfGasProducesCallTrace(t *testing.T) {
+	const blockGasLimit = 1_000_000
+
+	auth, authority := eip2780TestAuthorization()
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	gasLimit := params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780 + params.RegularPerAuthBaseCostEIP8038 + params.AccountWriteCostEIP8038 + params.StateGasAuthBase - 1
+
+	for _, tracerName := range []string{"callTracer", "flatCallTracer"} {
+		t.Run(tracerName, func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Release(false)
+			require.NoError(t, ibs.SetNonce(authority, auth.Nonce, tracing.NonceChangeUnspecified))
+
+			tracer, err := tracers.New(tracerName, &tracers.Context{}, json.RawMessage("{}"))
+			require.NoError(t, err)
+			ibs.SetHooks(tracer.Hooks)
+			blockCtx := evmtypes.BlockContext{
+				CanTransfer: CanTransfer,
+				Transfer:    misc.Transfer,
+				GasLimit:    blockGasLimit,
+			}
+			evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, eip2780TestConfig(t), vm.Config{
+				NoBaseFee: true,
+				Tracer:    tracer.Hooks,
+			})
+			msg := newSimpleTransferMsg(sender, recipient, gasLimit, true)
+			msg.SetAuthorizations([]types.Authorization{auth})
+			tx := types.NewTransaction(0, recipient.Value(), uint256.NewInt(0), gasLimit, uint256.NewInt(0), nil)
+
+			tracer.OnTxStart(evm.GetVMContext(), tx, sender)
+			result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
+			require.NoError(t, err)
+			require.ErrorIs(t, result.Err, vm.ErrRuntimeOutOfGas)
+			tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
+
+			trace, err := tracer.GetResult()
+			require.NoError(t, err)
+			require.Contains(t, string(trace), `"error":"runtime: out of gas"`)
+		})
+	}
+}
+
+func TestEIP2780RecipientStartsWarm(t *testing.T) {
+	const blockGasLimit = 1_000_000
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Release(false)
+	require.NoError(t, ibs.SetCode(recipient, []byte{byte(vm.ADDRESS), byte(vm.BALANCE), byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+
+	evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
+	msg := newSimpleTransferMsg(sender, recipient, 100_000, true)
+	result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	require.Equal(t,
+		params.TxBaseEIP2780+params.ColdAccountAccessEIP2780+vm.GasQuickStep+params.WarmStorageReadCostEIP2929,
+		result.BlockRegularGasUsed,
+	)
 }
 
 func TestEIP2780DelegationTargetAccessUsesWarmCost(t *testing.T) {
@@ -372,7 +438,7 @@ func TestEIP2780DelegationTargetIsNotReadWhenAccessChargeRunsOutOfGas(t *testing
 
 	result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
 	require.NoError(t, err)
-	require.ErrorIs(t, result.Err, vm.ErrPreExecutionOutOfGas)
+	require.ErrorIs(t, result.Err, vm.ErrRuntimeOutOfGas)
 	require.Contains(t, reader.accesses, recipient)
 	require.NotContains(t, reader.accesses, delegatedTo)
 }
@@ -441,7 +507,7 @@ func TestEIP2780ContractCreationRuntimeOutOfGasKeepsSenderNonce(t *testing.T) {
 
 	result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
 	require.NoError(t, err)
-	require.ErrorIs(t, result.Err, vm.ErrPreExecutionOutOfGas)
+	require.ErrorIs(t, result.Err, vm.ErrRuntimeOutOfGas)
 	require.Equal(t, gasLimit, result.ReceiptGasUsed)
 	require.Equal(t, gasLimit, result.BlockRegularGasUsed)
 	require.Zero(t, result.BlockStateGasUsed)

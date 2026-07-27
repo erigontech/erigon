@@ -391,7 +391,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	if depth == 0 && evm.chainRules.IsAmsterdam && typ == CALL && err == nil {
 		gasRemaining, topLvlFrameStateGas, topLvlFrameStateGasSpill, err = evm.chargeTopLevelFrameGas(gasRemaining, addr, topLevelNewAccount, isPrecompile)
 		if errors.Is(err, ErrOutOfGas) {
-			err = ErrPreExecutionOutOfGas
+			err = ErrRuntimeOutOfGas
 		}
 		if err != nil && !errors.Is(err, ErrOutOfGas) {
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, err
@@ -634,7 +634,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 				evm.config.Tracer.OnGasChange(gasRemaining.Regular, 0, tracing.GasChangeCallFailedExecution)
 			}
 			gasRemaining = mdgas.MdGas{State: gas.State}
-			err = ErrPreExecutionOutOfGas
+			err = ErrRuntimeOutOfGas
 			return nil, accounts.NilAddress, gasRemaining, mdgas.MdGasUsage{}, wasBalanceOnly, err
 		}
 		gasRemaining = charged
