@@ -95,9 +95,9 @@ func (n *Notifications) BuildSyncingReply(tx kv.Getter, frozenBlocks uint64) (*r
 	// While snapshots are still downloading (before execution has advanced) map
 	// the byte-completion ratio onto the block-based fields so dashboards show
 	// smooth progress: currentBlock = ratio * blocks_to_be_downloaded.
-	if total := n.snapDownloadTotal.Load(); total > 0 && currentBlock == 0 {
-		target := max(n.snapDownloadTarget.Load(), highestBlock)
-		ratio := float64(n.snapDownloadDone.Load()) / float64(total)
+	if snap := n.snapDownload.Load(); snap != nil && currentBlock == 0 {
+		target := max(snap.targetBlock, highestBlock)
+		ratio := float64(snap.done) / float64(snap.total)
 		reply.CurrentBlock = uint64(ratio * float64(target))
 		reply.LastNewBlockSeen = target
 		return reply, nil

@@ -122,6 +122,45 @@ func TestBuildSyncingReplySnapshotDownloadCompletePinsFullProgress(t *testing.T)
 	require.Equal(t, uint64(20_000_000), reply.LastNewBlockSeen)
 }
 
+// The downloader recomputes its byte total every cycle and it grows as torrent
+// metadata arrives, so consecutive samples differ in both fields. A reader must
+// never combine the total of one sample with the completed bytes of the next:
+// that overshoots the target, i.e. currentBlock > highestBlock.
+func TestBuildSyncingReplySnapshotDownloadProgressIsPublishedAtomically(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 0))
+
+	n := NewNotifications(nil)
+	const target = 20_000_000
+
+	stop, writerDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			n.SetSnapshotDownloadProgress(99, 100, target)
+			n.SetSnapshotDownloadProgress(150, 200, target)
+		}
+	}()
+	defer func() {
+		close(stop)
+		<-writerDone
+	}()
+
+	for range 20_000 {
+		reply, err := n.BuildSyncingReply(tx, 0)
+		require.NoError(t, err)
+		require.LessOrEqual(t, reply.CurrentBlock, reply.LastNewBlockSeen)
+	}
+}
+
 func drainSyncStateEvents(ch chan *remoteproto.SyncingReply) []*remoteproto.SyncingReply {
 	var got []*remoteproto.SyncingReply
 	for {
