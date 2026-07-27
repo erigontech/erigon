@@ -94,14 +94,35 @@ func TestShardedLRUMoreShardsThanSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Shard count capped at size (50) then rounded down to a power of two = 32,
-	// not collapsed to a single shard.
-	if len(l.shards) != 32 {
-		t.Fatalf("shard count = %d want 32", len(l.shards))
+	// 50/2 = 25 shards max to keep per-shard capacity >= 2, rounded down to 16.
+	if len(l.shards) != 16 {
+		t.Fatalf("shard count = %d want 16", len(l.shards))
 	}
 	l.Set([]byte("k"), 42)
 	if v, ok := l.Get([]byte("k")); !ok || v != 42 {
 		t.Fatalf("Get after Set = %d,%v want 42,true", v, ok)
+	}
+}
+
+// TestShardedLRUMinShardCapacity pins that for size >= 2 no shard is built with
+// capacity 1, where two colliding keys would evict each other.
+func TestShardedLRUMinShardCapacity(t *testing.T) {
+	for _, tc := range []struct{ size, shards int }{
+		{100, 256},
+		{50, 256},
+		{512, 256},
+		{2, 256},
+		{1024, 16},
+	} {
+		l, err := NewShardedLRU[int](tc.size, tc.shards)
+		if err != nil {
+			t.Fatalf("size=%d shards=%d: %v", tc.size, tc.shards, err)
+		}
+		n := len(l.shards)
+		if smallest := tc.size / n; smallest < 2 {
+			t.Errorf("size=%d shards=%d: %d shards → smallest holds %d, want >= 2",
+				tc.size, tc.shards, n, smallest)
+		}
 	}
 }
 
