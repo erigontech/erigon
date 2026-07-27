@@ -38,20 +38,18 @@ type (
 
 type operation struct {
 	// execute is the operation function
-	execute     executionFunc
-	constantGas uint64
-	dynamicGas  gasFunc
-	// maxStack specifies the max length the stack can have for this operation
-	// to not overflow the stack.
-	maxStack int
-
-	// numPop tells how many stack items are required
-	numPop  int // δ in the Yellow Paper
-	numPush int // α in the Yellow Paper
-
+	execute    executionFunc
+	dynamicGas gasFunc
 	// memorySize returns the memory size required for the operation
 	memorySize memorySizeFunc
-	string     stringer
+
+	constantGas uint32
+	// maxStack specifies the max length the stack can have for this operation
+	// to not overflow the stack.
+	maxStack uint16
+	// numPop tells how many stack items are required
+	numPop  uint8 // δ in the Yellow Paper
+	numPush uint8 // α in the Yellow Paper
 }
 
 var (
@@ -77,8 +75,140 @@ var (
 //
 // Entries are stored by value: the interpreter reads several fields of the
 // selected operation per executed opcode, and a pointer table would make each
-// of those a dependent load off a separately-allocated struct.
+// of those a dependent load off a separately-allocated struct. Fields are
+// sized so an entry is 32 bytes — the whole table spans 8 KiB of L1 and
+// adjacent opcodes (PUSHn/DUPn/SWAPn runs) share cache lines.
 type JumpTable [256]operation
+
+// opStringers holds the per-opcode trace formatters, keyed by opcode and
+// fork-independent. Kept outside JumpTable because they are read only under
+// dbg.TraceInstructions and would double the hot entry size.
+//
+// A stringer may peek as many operands as its opcode pops. In forks where the
+// opcode is not defined the interpreter's stack validation does not guarantee
+// that depth, so init wraps each entry with a guard that falls back to the
+// bare opcode name.
+func init() {
+	for op, s := range &opStringers {
+		if s != nil {
+			opStringers[op] = stackGuardedStringer(OpCode(op), amsterdamInstructionSet[op].numPop, s)
+		}
+	}
+}
+
+func stackGuardedStringer(op OpCode, numPop uint8, s stringer) stringer {
+	return func(pc uint64, callContext *CallContext) string {
+		if callContext.Stack.len() < int(numPop) {
+			return op.String()
+		}
+		return s(pc, callContext)
+	}
+}
+
+var opStringers = [256]stringer{
+	ADD:            stAdd,
+	MUL:            stMul,
+	SUB:            stSub,
+	DIV:            stDiv,
+	SDIV:           stSdiv,
+	MOD:            stMod,
+	SMOD:           stSmod,
+	ADDMOD:         stAddmod,
+	MULMOD:         stMulmod,
+	LT:             stLt,
+	GT:             stGt,
+	SLT:            stSlt,
+	SGT:            stSgt,
+	EQ:             stEq,
+	ISZERO:         stIsZero,
+	AND:            stAnd,
+	XOR:            stXor,
+	OR:             stOr,
+	NOT:            stNot,
+	CALLER:         stCaller,
+	CALLDATALOAD:   stCallDataLoad,
+	CALLDATASIZE:   stCallDataSize,
+	CALLDATACOPY:   stCallDataCopy,
+	RETURNDATACOPY: stReturnDataCopy,
+	BLOCKHASH:      stBlockhash,
+	MLOAD:          stMload,
+	MSTORE:         stMstore,
+	SLOAD:          stSload,
+	SSTORE:         stSstore,
+	JUMP:           stJump,
+	JUMPI:          stJumpi,
+	PC:             stPc,
+	GAS:            stGas,
+	CREATE:         stCreate,
+	CREATE2:        stCreate,
+	CALL:           stCall,
+	STATICCALL:     stStaticCall,
+	DELEGATECALL:   stDelegateCall,
+	PUSH1:          stPush1,
+	PUSH2:          makePushStringer(2, 2),
+	PUSH3:          makePushStringer(3, 3),
+	PUSH4:          makePushStringer(4, 4),
+	PUSH5:          makePushStringer(5, 5),
+	PUSH6:          makePushStringer(6, 6),
+	PUSH7:          makePushStringer(7, 7),
+	PUSH8:          makePushStringer(8, 8),
+	PUSH9:          makePushStringer(9, 9),
+	PUSH10:         makePushStringer(10, 10),
+	PUSH11:         makePushStringer(11, 11),
+	PUSH12:         makePushStringer(12, 12),
+	PUSH13:         makePushStringer(13, 13),
+	PUSH14:         makePushStringer(14, 14),
+	PUSH15:         makePushStringer(15, 15),
+	PUSH16:         makePushStringer(16, 16),
+	PUSH17:         makePushStringer(17, 17),
+	PUSH18:         makePushStringer(18, 18),
+	PUSH19:         makePushStringer(19, 19),
+	PUSH20:         makePushStringer(20, 20),
+	PUSH21:         makePushStringer(21, 21),
+	PUSH22:         makePushStringer(22, 22),
+	PUSH23:         makePushStringer(23, 23),
+	PUSH24:         makePushStringer(24, 24),
+	PUSH25:         makePushStringer(25, 25),
+	PUSH26:         makePushStringer(26, 26),
+	PUSH27:         makePushStringer(27, 27),
+	PUSH28:         makePushStringer(28, 28),
+	PUSH29:         makePushStringer(29, 29),
+	PUSH30:         makePushStringer(30, 30),
+	PUSH31:         makePushStringer(31, 31),
+	PUSH32:         makePushStringer(32, 32),
+	DUP1:           makeDupStringer(1),
+	DUP2:           makeDupStringer(2),
+	DUP3:           makeDupStringer(3),
+	DUP4:           makeDupStringer(4),
+	DUP5:           makeDupStringer(5),
+	DUP6:           makeDupStringer(6),
+	DUP7:           makeDupStringer(7),
+	DUP8:           makeDupStringer(8),
+	DUP9:           makeDupStringer(9),
+	DUP10:          makeDupStringer(10),
+	DUP11:          makeDupStringer(11),
+	DUP12:          makeDupStringer(12),
+	DUP13:          makeDupStringer(13),
+	DUP14:          makeDupStringer(14),
+	DUP15:          makeDupStringer(15),
+	DUP16:          makeDupStringer(16),
+	SWAP1:          makeSwapStringer(1),
+	SWAP2:          makeSwapStringer(2),
+	SWAP3:          makeSwapStringer(3),
+	SWAP4:          makeSwapStringer(4),
+	SWAP5:          makeSwapStringer(5),
+	SWAP6:          makeSwapStringer(6),
+	SWAP7:          makeSwapStringer(7),
+	SWAP8:          makeSwapStringer(8),
+	SWAP9:          makeSwapStringer(9),
+	SWAP10:         makeSwapStringer(10),
+	SWAP11:         makeSwapStringer(11),
+	SWAP12:         makeSwapStringer(12),
+	SWAP13:         makeSwapStringer(13),
+	SWAP14:         makeSwapStringer(14),
+	SWAP15:         makeSwapStringer(15),
+	SWAP16:         makeSwapStringer(16),
+}
 
 func validateAndFillMaxStack(jt *JumpTable) {
 	for i := range jt {
@@ -219,18 +349,17 @@ func newConstantinopleInstructionSet() JumpTable {
 	}
 	instructionSet[EXTCODEHASH] = operation{
 		execute:     opExtCodeHash,
-		constantGas: params.ExtcodeHashGasConstantinople,
+		constantGas: uint32(params.ExtcodeHashGasConstantinople),
 		numPop:      1,
 		numPush:     1,
 	}
 	instructionSet[CREATE2] = operation{
 		execute:     opCreate2,
-		constantGas: params.Create2Gas,
+		constantGas: uint32(params.Create2Gas),
 		dynamicGas:  gasCreate2,
 		numPop:      4,
 		numPush:     1,
 		memorySize:  memoryCreate2,
-		string:      stCreate2,
 	}
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
@@ -242,12 +371,11 @@ func newByzantiumInstructionSet() JumpTable {
 	instructionSet := newSpuriousDragonInstructionSet()
 	instructionSet[STATICCALL] = operation{
 		execute:     opStaticCall,
-		constantGas: params.CallGasEIP150,
+		constantGas: uint32(params.CallGasEIP150),
 		dynamicGas:  gasStaticCall,
 		numPop:      6,
 		numPush:     1,
 		memorySize:  memoryStaticCall,
-		string:      stStaticCall,
 	}
 	instructionSet[RETURNDATASIZE] = operation{
 		execute:     opReturnDataSize,
@@ -262,7 +390,6 @@ func newByzantiumInstructionSet() JumpTable {
 		numPop:      3,
 		numPush:     0,
 		memorySize:  memoryReturnDataCopy,
-		string:      stReturnDataCopy,
 	}
 	instructionSet[REVERT] = operation{
 		execute:    opRevert,
@@ -287,13 +414,13 @@ func newSpuriousDragonInstructionSet() JumpTable {
 // EIP 150 a.k.a Tangerine Whistle
 func newTangerineWhistleInstructionSet() JumpTable {
 	instructionSet := newHomesteadInstructionSet()
-	instructionSet[BALANCE].constantGas = params.BalanceGasEIP150
-	instructionSet[EXTCODESIZE].constantGas = params.ExtcodeSizeGasEIP150
-	instructionSet[SLOAD].constantGas = params.SloadGasEIP150
-	instructionSet[EXTCODECOPY].constantGas = params.ExtcodeCopyBaseEIP150
-	instructionSet[CALL].constantGas = params.CallGasEIP150
-	instructionSet[CALLCODE].constantGas = params.CallGasEIP150
-	instructionSet[DELEGATECALL].constantGas = params.CallGasEIP150
+	instructionSet[BALANCE].constantGas = uint32(params.BalanceGasEIP150)
+	instructionSet[EXTCODESIZE].constantGas = uint32(params.ExtcodeSizeGasEIP150)
+	instructionSet[SLOAD].constantGas = uint32(params.SloadGasEIP150)
+	instructionSet[EXTCODECOPY].constantGas = uint32(params.ExtcodeCopyBaseEIP150)
+	instructionSet[CALL].constantGas = uint32(params.CallGasEIP150)
+	instructionSet[CALLCODE].constantGas = uint32(params.CallGasEIP150)
+	instructionSet[DELEGATECALL].constantGas = uint32(params.CallGasEIP150)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }
@@ -305,11 +432,10 @@ func newHomesteadInstructionSet() JumpTable {
 	instructionSet[DELEGATECALL] = operation{
 		execute:     opDelegateCall,
 		dynamicGas:  gasDelegateCall,
-		constantGas: params.CallGasFrontier,
+		constantGas: uint32(params.CallGasFrontier),
 		numPop:      6,
 		numPush:     1,
 		memorySize:  memoryDelegateCall,
-		string:      stDelegateCall,
 	}
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
@@ -330,63 +456,54 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      2,
 			numPush:     1,
-			string:      stAdd,
 		},
 		MUL: {
 			execute:     opMul,
 			constantGas: GasFastStep,
 			numPop:      2,
 			numPush:     1,
-			string:      stMul,
 		},
 		SUB: {
 			execute:     opSub,
 			constantGas: GasFastestStep,
 			numPop:      2,
 			numPush:     1,
-			string:      stSub,
 		},
 		DIV: {
 			execute:     opDiv,
 			constantGas: GasFastStep,
 			numPop:      2,
 			numPush:     1,
-			string:      stDiv,
 		},
 		SDIV: {
 			execute:     opSdiv,
 			constantGas: GasFastStep,
 			numPop:      2,
 			numPush:     1,
-			string:      stSdiv,
 		},
 		MOD: {
 			execute:     opMod,
 			constantGas: GasFastStep,
 			numPop:      2,
 			numPush:     1,
-			string:      stMod,
 		},
 		SMOD: {
 			execute:     opSmod,
 			constantGas: GasFastStep,
 			numPop:      2,
 			numPush:     1,
-			string:      stSmod,
 		},
 		ADDMOD: {
 			execute:     opAddmod,
 			constantGas: GasMidStep,
 			numPop:      3,
 			numPush:     1,
-			string:      stAddmod,
 		},
 		MULMOD: {
 			execute:     opMulmod,
 			constantGas: GasMidStep,
 			numPop:      3,
 			numPush:     1,
-			string:      stMulmod,
 		},
 		EXP: {
 			execute:    opExp,
@@ -405,70 +522,60 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      2,
 			numPush:     1,
-			string:      stLt,
 		},
 		GT: {
 			execute:     opGt,
 			constantGas: GasFastestStep,
 			numPop:      2,
 			numPush:     1,
-			string:      stGt,
 		},
 		SLT: {
 			execute:     opSlt,
 			constantGas: GasFastestStep,
 			numPop:      2,
 			numPush:     1,
-			string:      stSlt,
 		},
 		SGT: {
 			execute:     opSgt,
 			constantGas: GasFastestStep,
 			numPop:      2,
 			numPush:     1,
-			string:      stSgt,
 		},
 		EQ: {
 			execute:     opEq,
 			constantGas: GasFastestStep,
 			numPop:      2,
 			numPush:     1,
-			string:      stEq,
 		},
 		ISZERO: {
 			execute:     opIszero,
 			constantGas: GasFastestStep,
 			numPop:      1,
 			numPush:     1,
-			string:      stIsZero,
 		},
 		AND: {
 			execute:     opAnd,
 			constantGas: GasFastestStep,
 			numPop:      2,
 			numPush:     1,
-			string:      stAnd,
 		},
 		XOR: {
 			execute:     opXor,
 			constantGas: GasFastestStep,
 			numPop:      2,
 			numPush:     1,
-			string:      stXor,
 		},
 		OR: {
 			execute:     opOr,
 			constantGas: GasFastestStep,
 			numPop:      2,
 			numPush:     1,
-			string:      stOr,
 		},
 		NOT: {
 			execute:     opNot,
 			constantGas: GasFastestStep,
 			numPop:      1,
 			numPush:     1,
-			string:      stNot,
 		},
 		BYTE: {
 			execute:     opByte,
@@ -478,7 +585,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		KECCAK256: {
 			execute:     opKeccak256,
-			constantGas: params.Keccak256Gas,
+			constantGas: uint32(params.Keccak256Gas),
 			dynamicGas:  gasKeccak256,
 			numPop:      2,
 			numPush:     1,
@@ -492,7 +599,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		BALANCE: {
 			execute:     opBalance,
-			constantGas: params.BalanceGasFrontier,
+			constantGas: uint32(params.BalanceGasFrontier),
 			numPop:      1,
 			numPush:     1,
 		},
@@ -507,7 +614,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			numPop:      0,
 			numPush:     1,
-			string:      stCaller,
 		},
 		CALLVALUE: {
 			execute:     opCallValue,
@@ -520,14 +626,12 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      1,
 			numPush:     1,
-			string:      stCallDataLoad,
 		},
 		CALLDATASIZE: {
 			execute:     opCallDataSize,
 			constantGas: GasQuickStep,
 			numPop:      0,
 			numPush:     1,
-			string:      stCallDataSize,
 		},
 		CALLDATACOPY: {
 			execute:     opCallDataCopy,
@@ -536,7 +640,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop:      3,
 			numPush:     0,
 			memorySize:  memoryCallDataCopy,
-			string:      stCallDataCopy,
 		},
 		CODESIZE: {
 			execute:     opCodeSize,
@@ -560,13 +663,13 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		EXTCODESIZE: {
 			execute:     opExtCodeSize,
-			constantGas: params.ExtcodeSizeGasFrontier,
+			constantGas: uint32(params.ExtcodeSizeGasFrontier),
 			numPop:      1,
 			numPush:     1,
 		},
 		EXTCODECOPY: {
 			execute:     opExtCodeCopy,
-			constantGas: params.ExtcodeCopyBaseFrontier,
+			constantGas: uint32(params.ExtcodeCopyBaseFrontier),
 			dynamicGas:  gasExtCodeCopy,
 			numPop:      4,
 			numPush:     0,
@@ -577,7 +680,6 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasExtStep,
 			numPop:      1,
 			numPush:     1,
-			string:      stBlockhash,
 		},
 		COINBASE: {
 			execute:     opCoinbase,
@@ -622,7 +724,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop:      1,
 			numPush:     1,
 			memorySize:  memoryMLoad,
-			string:      stMload,
 		},
 		MSTORE: {
 			execute:     opMstore,
@@ -631,7 +732,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop:      2,
 			numPush:     0,
 			memorySize:  memoryMStore,
-			string:      stMstore,
 		},
 		MSTORE8: {
 			execute:     opMstore8,
@@ -643,38 +743,33 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		SLOAD: {
 			execute:     opSload,
-			constantGas: params.SloadGasFrontier,
+			constantGas: uint32(params.SloadGasFrontier),
 			numPop:      1,
 			numPush:     1,
-			string:      stSload,
 		},
 		SSTORE: {
 			execute:    opSstore,
 			dynamicGas: gasSStore,
 			numPop:     2,
 			numPush:    0,
-			string:     stSstore,
 		},
 		JUMP: {
 			execute:     opJump,
 			constantGas: GasMidStep,
 			numPop:      1,
 			numPush:     0,
-			string:      stJump,
 		},
 		JUMPI: {
 			execute:     opJumpi,
 			constantGas: GasSlowStep,
 			numPop:      2,
 			numPush:     0,
-			string:      stJumpi,
 		},
 		PC: {
 			execute:     opPc,
 			constantGas: GasQuickStep,
 			numPop:      0,
 			numPush:     1,
-			string:      stPc,
 		},
 		MSIZE: {
 			execute:     opMsize,
@@ -687,11 +782,10 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			numPop:      0,
 			numPush:     1,
-			string:      stGas,
 		},
 		JUMPDEST: {
 			execute:     opJumpdest,
-			constantGas: params.JumpdestGas,
+			constantGas: uint32(params.JumpdestGas),
 			numPop:      0,
 			numPush:     0,
 		},
@@ -700,448 +794,384 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      stPush1,
 		},
 		PUSH2: {
 			execute:     opPush2,
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(2, 2),
 		},
 		PUSH3: {
 			execute:     makePush(3, 3),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(3, 3),
 		},
 		PUSH4: {
 			execute:     makePush(4, 4),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(4, 4),
 		},
 		PUSH5: {
 			execute:     makePush(5, 5),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(5, 5),
 		},
 		PUSH6: {
 			execute:     makePush(6, 6),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(6, 6),
 		},
 		PUSH7: {
 			execute:     makePush(7, 7),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(7, 7),
 		},
 		PUSH8: {
 			execute:     makePush(8, 8),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(8, 8),
 		},
 		PUSH9: {
 			execute:     makePush(9, 9),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(9, 9),
 		},
 		PUSH10: {
 			execute:     makePush(10, 10),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(10, 10),
 		},
 		PUSH11: {
 			execute:     makePush(11, 11),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(11, 11),
 		},
 		PUSH12: {
 			execute:     makePush(12, 12),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(12, 12),
 		},
 		PUSH13: {
 			execute:     makePush(13, 13),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(13, 13),
 		},
 		PUSH14: {
 			execute:     makePush(14, 14),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(14, 14),
 		},
 		PUSH15: {
 			execute:     makePush(15, 15),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(15, 15),
 		},
 		PUSH16: {
 			execute:     makePush(16, 16),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(16, 16),
 		},
 		PUSH17: {
 			execute:     makePush(17, 17),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(17, 17),
 		},
 		PUSH18: {
 			execute:     makePush(18, 18),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(18, 18),
 		},
 		PUSH19: {
 			execute:     makePush(19, 19),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(19, 19),
 		},
 		PUSH20: {
 			execute:     makePush(20, 20),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(20, 20),
 		},
 		PUSH21: {
 			execute:     makePush(21, 21),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(21, 21),
 		},
 		PUSH22: {
 			execute:     makePush(22, 22),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(22, 22),
 		},
 		PUSH23: {
 			execute:     makePush(23, 23),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(23, 23),
 		},
 		PUSH24: {
 			execute:     makePush(24, 24),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(24, 24),
 		},
 		PUSH25: {
 			execute:     makePush(25, 25),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(25, 25),
 		},
 		PUSH26: {
 			execute:     makePush(26, 26),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(26, 26),
 		},
 		PUSH27: {
 			execute:     makePush(27, 27),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(27, 27),
 		},
 		PUSH28: {
 			execute:     makePush(28, 28),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(28, 28),
 		},
 		PUSH29: {
 			execute:     makePush(29, 29),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(29, 29),
 		},
 		PUSH30: {
 			execute:     makePush(30, 30),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(30, 30),
 		},
 		PUSH31: {
 			execute:     makePush(31, 31),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(31, 31),
 		},
 		PUSH32: {
 			execute:     makePush(32, 32),
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,
-			string:      makePushStringer(32, 32),
 		},
 		DUP1: {
 			execute:     makeDup(1),
 			constantGas: GasFastestStep,
 			numPop:      1,
 			numPush:     2,
-			string:      makeDupStringer(1),
 		},
 		DUP2: {
 			execute:     makeDup(2),
 			constantGas: GasFastestStep,
 			numPop:      2,
 			numPush:     3,
-			string:      makeDupStringer(2),
 		},
 		DUP3: {
 			execute:     makeDup(3),
 			constantGas: GasFastestStep,
 			numPop:      3,
 			numPush:     4,
-			string:      makeDupStringer(3),
 		},
 		DUP4: {
 			execute:     makeDup(4),
 			constantGas: GasFastestStep,
 			numPop:      4,
 			numPush:     5,
-			string:      makeDupStringer(4),
 		},
 		DUP5: {
 			execute:     makeDup(5),
 			constantGas: GasFastestStep,
 			numPop:      5,
 			numPush:     6,
-			string:      makeDupStringer(5),
 		},
 		DUP6: {
 			execute:     makeDup(6),
 			constantGas: GasFastestStep,
 			numPop:      6,
 			numPush:     7,
-			string:      makeDupStringer(6),
 		},
 		DUP7: {
 			execute:     makeDup(7),
 			constantGas: GasFastestStep,
 			numPop:      7,
 			numPush:     8,
-			string:      makeDupStringer(7),
 		},
 		DUP8: {
 			execute:     makeDup(8),
 			constantGas: GasFastestStep,
 			numPop:      8,
 			numPush:     9,
-			string:      makeDupStringer(8),
 		},
 		DUP9: {
 			execute:     makeDup(9),
 			constantGas: GasFastestStep,
 			numPop:      9,
 			numPush:     10,
-			string:      makeDupStringer(9),
 		},
 		DUP10: {
 			execute:     makeDup(10),
 			constantGas: GasFastestStep,
 			numPop:      10,
 			numPush:     11,
-			string:      makeDupStringer(10),
 		},
 		DUP11: {
 			execute:     makeDup(11),
 			constantGas: GasFastestStep,
 			numPop:      11,
 			numPush:     12,
-			string:      makeDupStringer(11),
 		},
 		DUP12: {
 			execute:     makeDup(12),
 			constantGas: GasFastestStep,
 			numPop:      12,
 			numPush:     13,
-			string:      makeDupStringer(12),
 		},
 		DUP13: {
 			execute:     makeDup(13),
 			constantGas: GasFastestStep,
 			numPop:      13,
 			numPush:     14,
-			string:      makeDupStringer(13),
 		},
 		DUP14: {
 			execute:     makeDup(14),
 			constantGas: GasFastestStep,
 			numPop:      14,
 			numPush:     15,
-			string:      makeDupStringer(14),
 		},
 		DUP15: {
 			execute:     makeDup(15),
 			constantGas: GasFastestStep,
 			numPop:      15,
 			numPush:     16,
-			string:      makeDupStringer(15),
 		},
 		DUP16: {
 			execute:     makeDup(16),
 			constantGas: GasFastestStep,
 			numPop:      16,
 			numPush:     17,
-			string:      makeDupStringer(16),
 		},
 		SWAP1: {
 			execute:     opSwap1,
 			constantGas: GasFastestStep,
 			numPop:      2,
 			numPush:     2,
-			string:      makeSwapStringer(1),
 		},
 		SWAP2: {
 			execute:     opSwap2,
 			constantGas: GasFastestStep,
 			numPop:      3,
 			numPush:     3,
-			string:      makeSwapStringer(2),
 		},
 		SWAP3: {
 			execute:     opSwap3,
 			constantGas: GasFastestStep,
 			numPop:      4,
 			numPush:     4,
-			string:      makeSwapStringer(3),
 		},
 		SWAP4: {
 			execute:     opSwap4,
 			constantGas: GasFastestStep,
 			numPop:      5,
 			numPush:     5,
-			string:      makeSwapStringer(4),
 		},
 		SWAP5: {
 			execute:     opSwap5,
 			constantGas: GasFastestStep,
 			numPop:      6,
 			numPush:     6,
-			string:      makeSwapStringer(5),
 		},
 		SWAP6: {
 			execute:     opSwap6,
 			constantGas: GasFastestStep,
 			numPop:      7,
 			numPush:     7,
-			string:      makeSwapStringer(6),
 		},
 		SWAP7: {
 			execute:     opSwap7,
 			constantGas: GasFastestStep,
 			numPop:      8,
 			numPush:     8,
-			string:      makeSwapStringer(7),
 		},
 		SWAP8: {
 			execute:     opSwap8,
 			constantGas: GasFastestStep,
 			numPop:      9,
 			numPush:     9,
-			string:      makeSwapStringer(8),
 		},
 		SWAP9: {
 			execute:     opSwap9,
 			constantGas: GasFastestStep,
 			numPop:      10,
 			numPush:     10,
-			string:      makeSwapStringer(9),
 		},
 		SWAP10: {
 			execute:     opSwap10,
 			constantGas: GasFastestStep,
 			numPop:      11,
 			numPush:     11,
-			string:      makeSwapStringer(10),
 		},
 		SWAP11: {
 			execute:     opSwap11,
 			constantGas: GasFastestStep,
 			numPop:      12,
 			numPush:     12,
-			string:      makeSwapStringer(11),
 		},
 		SWAP12: {
 			execute:     opSwap12,
 			constantGas: GasFastestStep,
 			numPop:      13,
 			numPush:     13,
-			string:      makeSwapStringer(12),
 		},
 		SWAP13: {
 			execute:     opSwap13,
 			constantGas: GasFastestStep,
 			numPop:      14,
 			numPush:     14,
-			string:      makeSwapStringer(13),
 		},
 		SWAP14: {
 			execute:     opSwap14,
 			constantGas: GasFastestStep,
 			numPop:      15,
 			numPush:     15,
-			string:      makeSwapStringer(14),
 		},
 		SWAP15: {
 			execute:     opSwap15,
 			constantGas: GasFastestStep,
 			numPop:      16,
 			numPush:     16,
-			string:      makeSwapStringer(15),
 		},
 		SWAP16: {
 			execute:     opSwap16,
 			constantGas: GasFastestStep,
 			numPop:      17,
 			numPush:     17,
-			string:      makeSwapStringer(16),
 		},
 		LOG0: {
 			execute:    makeLog(0),
@@ -1180,25 +1210,23 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		CREATE: {
 			execute:     opCreate,
-			constantGas: params.CreateGas,
+			constantGas: uint32(params.CreateGas),
 			dynamicGas:  gasCreate,
 			numPop:      3,
 			numPush:     1,
 			memorySize:  memoryCreate,
-			string:      stCreate,
 		},
 		CALL: {
 			execute:     opCall,
-			constantGas: params.CallGasFrontier,
+			constantGas: uint32(params.CallGasFrontier),
 			dynamicGas:  gasCall,
 			numPop:      7,
 			numPush:     1,
 			memorySize:  memoryCall,
-			string:      stCall,
 		},
 		CALLCODE: {
 			execute:     opCallCode,
-			constantGas: params.CallGasFrontier,
+			constantGas: uint32(params.CallGasFrontier),
 			dynamicGas:  gasCallCode,
 			numPop:      7,
 			numPush:     1,

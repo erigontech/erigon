@@ -79,9 +79,9 @@ func ActivateableEips() []string {
 // - Define SELFBALANCE, with cost GasFastStep (5)
 func enable1884(jt *JumpTable) {
 	// Gas cost changes
-	jt[SLOAD].constantGas = params.SloadGasEIP1884
-	jt[BALANCE].constantGas = params.BalanceGasEIP1884
-	jt[EXTCODEHASH].constantGas = params.ExtcodeHashGasEIP1884
+	jt[SLOAD].constantGas = uint32(params.SloadGasEIP1884)
+	jt[BALANCE].constantGas = uint32(params.BalanceGasEIP1884)
+	jt[EXTCODEHASH].constantGas = uint32(params.ExtcodeHashGasEIP1884)
 
 	// New opcode
 	jt[SELFBALANCE] = operation{
@@ -126,7 +126,7 @@ func opChainID(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, e
 
 // enable2200 applies EIP-2200 (Rebalance net-metered SSTORE)
 func enable2200(jt *JumpTable) {
-	jt[SLOAD].constantGas = params.SloadGasEIP2200
+	jt[SLOAD].constantGas = uint32(params.SloadGasEIP2200)
 	jt[SSTORE].dynamicGas = gasSStoreEIP2200
 }
 
@@ -138,33 +138,33 @@ func enable2929(jt *JumpTable) {
 	jt[SLOAD].constantGas = 0
 	jt[SLOAD].dynamicGas = gasSLoadEIP2929
 
-	jt[EXTCODECOPY].constantGas = params.WarmStorageReadCostEIP2929
+	jt[EXTCODECOPY].constantGas = uint32(params.WarmStorageReadCostEIP2929)
 	jt[EXTCODECOPY].dynamicGas = gasExtCodeCopyEIP2929
 
-	jt[EXTCODESIZE].constantGas = params.WarmStorageReadCostEIP2929
+	jt[EXTCODESIZE].constantGas = uint32(params.WarmStorageReadCostEIP2929)
 	jt[EXTCODESIZE].dynamicGas = gasEip2929AccountCheck
 
-	jt[EXTCODEHASH].constantGas = params.WarmStorageReadCostEIP2929
+	jt[EXTCODEHASH].constantGas = uint32(params.WarmStorageReadCostEIP2929)
 	jt[EXTCODEHASH].dynamicGas = gasEip2929AccountCheck
 
-	jt[BALANCE].constantGas = params.WarmStorageReadCostEIP2929
+	jt[BALANCE].constantGas = uint32(params.WarmStorageReadCostEIP2929)
 	jt[BALANCE].dynamicGas = gasEip2929AccountCheck
 
-	jt[CALL].constantGas = params.WarmStorageReadCostEIP2929
+	jt[CALL].constantGas = uint32(params.WarmStorageReadCostEIP2929)
 	jt[CALL].dynamicGas = gasCallEIP2929
 
-	jt[CALLCODE].constantGas = params.WarmStorageReadCostEIP2929
+	jt[CALLCODE].constantGas = uint32(params.WarmStorageReadCostEIP2929)
 	jt[CALLCODE].dynamicGas = gasCallCodeEIP2929
 
-	jt[STATICCALL].constantGas = params.WarmStorageReadCostEIP2929
+	jt[STATICCALL].constantGas = uint32(params.WarmStorageReadCostEIP2929)
 	jt[STATICCALL].dynamicGas = gasStaticCallEIP2929
 
-	jt[DELEGATECALL].constantGas = params.WarmStorageReadCostEIP2929
+	jt[DELEGATECALL].constantGas = uint32(params.WarmStorageReadCostEIP2929)
 	jt[DELEGATECALL].dynamicGas = gasDelegateCallEIP2929
 
 	// This was previously part of the dynamic cost, but we're using it as a constantGas
 	// factor here
-	jt[SELFDESTRUCT].constantGas = params.SelfdestructGasEIP150
+	jt[SELFDESTRUCT].constantGas = uint32(params.SelfdestructGasEIP150)
 	jt[SELFDESTRUCT].dynamicGas = gasSelfdestructEIP2929
 }
 
@@ -191,14 +191,14 @@ func enable3198(jt *JumpTable) {
 func enable1153(jt *JumpTable) {
 	jt[TLOAD] = operation{
 		execute:     opTload,
-		constantGas: params.WarmStorageReadCostEIP2929,
+		constantGas: uint32(params.WarmStorageReadCostEIP2929),
 		numPop:      1,
 		numPush:     1,
 	}
 
 	jt[TSTORE] = operation{
 		execute:     opTstore,
-		constantGas: params.WarmStorageReadCostEIP2929,
+		constantGas: uint32(params.WarmStorageReadCostEIP2929),
 		numPop:      2,
 		numPush:     0,
 	}
@@ -380,14 +380,14 @@ func enable7843(jt *JumpTable) {
 
 // enable8037 applies EIP-8037 (State Creation Gas Cost Increase)
 func enable8037(jt *JumpTable) {
-	jt[CREATE].constantGas = params.CreateGasEIP8037
-	jt[CREATE2].constantGas = params.Create2GasEIP8037
+	jt[CREATE].constantGas = uint32(params.CreateGasEIP8037)
+	jt[CREATE2].constantGas = uint32(params.Create2GasEIP8037)
 }
 
 // enable8038 applies EIP-8038 (State-access gas cost update)
 func enable8038(jt *JumpTable) {
-	jt[EXTCODESIZE].constantGas = params.ExtCodeWarmAccessGasEIP8038
-	jt[EXTCODECOPY].constantGas = params.ExtCodeWarmAccessGasEIP8038
-	jt[CREATE].constantGas = params.CreateAccessEIP8038
-	jt[CREATE2].constantGas = params.CreateAccessEIP8038
+	jt[EXTCODESIZE].constantGas = uint32(params.ExtCodeWarmAccessGasEIP8038)
+	jt[EXTCODECOPY].constantGas = uint32(params.ExtCodeWarmAccessGasEIP8038)
+	jt[CREATE].constantGas = uint32(params.CreateAccessEIP8038)
+	jt[CREATE2].constantGas = uint32(params.CreateAccessEIP8038)
 }
