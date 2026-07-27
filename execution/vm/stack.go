@@ -83,7 +83,6 @@ func (st *Stack) popRef() *uint256.Int {
 	return &st.data[st.top]
 }
 
-// drop discards the top item without reading it.
 // popRef1Peek1 pops the top item and returns it together with a pointer to the
 // new top: the operand and write target of a binary op. One range check covers
 // both slots. Same validity rule as popRef.
@@ -96,6 +95,7 @@ func (st *Stack) popRef1Peek1() (x, y *uint256.Int) {
 	return &st.data[t], &st.data[t-1]
 }
 
+// drop discards the top item without reading it.
 func (st *Stack) drop() {
 	st.top--
 }
