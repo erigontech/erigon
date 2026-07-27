@@ -364,6 +364,17 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 	return jt
 }
 
+// traceInstruction prints the dbg.TraceInstructions per-op line.
+func traceInstruction(evm *EVM, operation *operation, op OpCode, pc uint64, callGas, cost uint64, callContext *CallContext) {
+	var opstr string
+	if operation.string != nil {
+		opstr = operation.string(pc, callContext)
+	} else {
+		opstr = op.String()
+	}
+	fmt.Printf("%d (%d.%d) %5d %5d %s\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), pc, traceGas(op, callGas, cost), opstr)
+}
+
 // traceGas picks the figure the dev instruction trace should report: call
 // opcodes forward gas to the callee, so their charged cost is not the
 // interesting number.
@@ -459,7 +470,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 	// Hoist to locals so the compiler sees them as loop-invariant.
 	anyTrace := dbg.TraceDynamicGas || debug || trace
-	fast := !debug && !trace
 
 	jt := evm.jt
 	_ = jt[0] // nil-check the jump table out of the loop
@@ -474,42 +484,68 @@ run:
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(pc)
-		if fast {
-			// Devirtualized fast path for the hottest constant-gas opcodes:
-			// stack bounds and gas literals match the jump-table entries, and
-			// the direct calls let the compiler inline the op bodies.
-			switch op {
-			case ADD:
-				if sLen := callContext.Stack.len(); sLen < 2 {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
-				} else if sLen > int(params.StackLimit)+1 {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: int(params.StackLimit) + 1}
-				}
-				if callContext.gas < GasFastestStep {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-				callContext.gas -= GasFastestStep
-				pc, res, err = opAdd(pc, evm, callContext)
-				if err != nil {
-					break run
-				}
-				pc++
-				continue
-			case PUSH1:
-				if sLen := callContext.Stack.len(); sLen > int(params.StackLimit)-1 {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: int(params.StackLimit) - 1}
-				}
-				if callContext.gas < GasFastestStep {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-				callContext.gas -= GasFastestStep
-				pc, res, err = opPush1(pc, evm, callContext)
-				if err != nil {
-					break run
-				}
-				pc++
-				continue
+		// Devirtualized fast path for the hottest constant-gas opcodes. Each
+		// case mirrors the generic loop below phase for phase (cost, stack
+		// bounds, gas, debug and trace hooks), so the only variable versus the
+		// generic path is the dispatch itself: no table load, no metadata
+		// loads, and a direct (inlinable) call instead of an indirect one.
+		switch op {
+		case ADD:
+			cost = GasFastestStep
+			if sLen := callContext.Stack.len(); sLen < 2 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+			} else if sLen > int(params.StackLimit)+1 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: int(params.StackLimit) + 1}
 			}
+			if callContext.gas < GasFastestStep {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
+			}
+			callContext.gas -= GasFastestStep
+			if debug {
+				if tracer.OnGasChange != nil {
+					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
+				}
+				if tracer.OnOpcode != nil {
+					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
+					logged = true
+				}
+			}
+			if trace {
+				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
+			}
+			pc, res, err = opAdd(pc, evm, callContext)
+			if err != nil {
+				break run
+			}
+			pc++
+			continue
+		case PUSH1:
+			cost = GasFastestStep
+			if sLen := callContext.Stack.len(); sLen > int(params.StackLimit)-1 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: int(params.StackLimit) - 1}
+			}
+			if callContext.gas < GasFastestStep {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
+			}
+			callContext.gas -= GasFastestStep
+			if debug {
+				if tracer.OnGasChange != nil {
+					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
+				}
+				if tracer.OnOpcode != nil {
+					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
+					logged = true
+				}
+			}
+			if trace {
+				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
+			}
+			pc, res, err = opPush1(pc, evm, callContext)
+			if err != nil {
+				break run
+			}
+			pc++
+			continue
 		}
 		operation := jt[op]
 		cost = operation.constantGas // For tracing
@@ -602,14 +638,7 @@ run:
 		// TODO - move this to a trace & set in the worker
 
 		if trace {
-			var opstr string
-			if operation.string != nil {
-				opstr = operation.string(pc, callContext)
-			} else {
-				opstr = op.String()
-			}
-
-			fmt.Printf("%d (%d.%d) %5d %5d %s\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), pc, traceGas(op, callGas, cost), opstr)
+			traceInstruction(evm, operation, op, pc, callGas, cost, callContext)
 		}
 
 		// execute the operation
