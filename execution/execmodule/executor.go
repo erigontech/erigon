@@ -252,6 +252,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 				return nil, nil, err
 			}
 			newSD.SetInMemHistoryReads(inMemHistoryReads)
+			hook.NotifySyncState(newTx)
 			return newTx, newSD, nil
 		},
 		ShouldBreak: func(curTx kv.TemporalRwTx) (bool, error) {
@@ -276,13 +277,14 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			if err != nil {
 				return err
 			}
+			// Before UpdateHead, which publishes the sync state computed from it.
+			hook.LastNewBlockSeen(headersProgress)
 			if err = hook.SendNotifications(tx, finishStageBeforeSync); err != nil {
 				return err
 			}
 			if err = hook.UpdateHead(tx, finishStageBeforeSync, false); err != nil {
 				return err
 			}
-			hook.LastNewBlockSeen(headersProgress)
 			return nil
 		}); err != nil {
 			return err

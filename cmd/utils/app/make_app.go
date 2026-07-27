@@ -96,7 +96,9 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.Comma
 
 func appFlags(cliFlags []cli.Flag) []cli.Flag {
 
-	flags := append(cliFlags, debug.Flags...) // debug flags are required
+	flags := make([]cli.Flag, 0, len(cliFlags)+len(debug.Flags)+len(utils.MetricFlags)+len(logging.Flags)+1)
+	flags = append(flags, cliFlags...)
+	flags = append(flags, debug.Flags...) // debug flags are required
 	flags = append(flags, utils.MetricFlags...)
 	flags = append(flags, logging.Flags...)
 	flags = append(flags, &utils.ConfigFlag)

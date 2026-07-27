@@ -119,6 +119,7 @@ func BlobsBundleFromTransactions(txs types.Transactions) (*BlobsBundle, error) {
 			copy(pp, p[:])
 			bundle.Proofs = append(bundle.Proofs, pp)
 		}
+		//nolint:gocritic // rangeValCopy: iterating over 128KB blob byte array directly
 		for _, b := range blobTx.Blobs {
 			bp := make([]byte, len(b))
 			copy(bp, b[:])
