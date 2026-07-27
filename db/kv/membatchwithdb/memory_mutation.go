@@ -27,7 +27,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -585,10 +584,10 @@ func (m *MemoryMutation) DeleteRange(table string, from, to []byte) (uint64, err
 			return errStopIteration
 		}
 		if len(keys) == 0 || !bytes.Equal(keys[len(keys)-1], k) {
-			keys = append(keys, common.Copy(k))
+			keys = append(keys, bytes.Clone(k))
 		}
 		if perDup {
-			dups = append(dups, cursorEntry{keys[len(keys)-1], common.Copy(v)})
+			dups = append(dups, cursorEntry{keys[len(keys)-1], bytes.Clone(v)})
 		}
 		deleted++
 		return nil
@@ -662,6 +661,14 @@ func (m *MemoryMutation) BlockFilesRoTx() *blocksnapshots.View {
 		return p.BlockFilesRoTx()
 	}
 	return nil
+}
+
+func (m *MemoryMutation) ForceReopenUnderlyingFilesTx() {
+	p, ok := m.db.(kv.CanReopenUnderlyingFilesTx)
+	if !ok {
+		panic(fmt.Sprintf("snapshots stage requires a tx that can ForceReopenUnderlyingFilesTx, got %T", m.db))
+	}
+	p.ForceReopenUnderlyingFilesTx()
 }
 
 func (m *MemoryMutation) Count(bucket string) (uint64, error) {
@@ -884,8 +891,8 @@ func (m *MemoryMutation) Diff() (*MemoryDiff, error) {
 					return nil, err
 				}
 				memDiff.diff[t] = append(memDiff.diff[t], entry{
-					k: common.Copy(k),
-					v: common.Copy(v),
+					k: bytes.Clone(k),
+					v: bytes.Clone(v),
 				})
 			}
 		} else {
@@ -903,8 +910,8 @@ func (m *MemoryMutation) Diff() (*MemoryDiff, error) {
 					return nil, err
 				}
 				memDiff.diff[t] = append(memDiff.diff[t], entry{
-					k: common.Copy(k),
-					v: common.Copy(v),
+					k: bytes.Clone(k),
+					v: bytes.Clone(v),
 				})
 			}
 		}

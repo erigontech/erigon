@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"errors"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -137,7 +136,7 @@ func (m *memoryMutationCursor) Current() ([]byte, []byte, error) {
 	if m.isTableCleared() {
 		return m.memCursor.Current()
 	}
-	return common.Copy(m.currentPair.key), common.Copy(m.currentPair.value), nil
+	return bytes.Clone(m.currentPair.key), bytes.Clone(m.currentPair.value), nil
 }
 
 func (m *memoryMutationCursor) skipIntersection(memKey, memValue, dbKey, dbValue []byte, t NextType) (newDbKey []byte, newDbValue []byte, err error) {
@@ -281,16 +280,16 @@ func (m *memoryMutationCursor) SeekExact(seek []byte) ([]byte, []byte, error) {
 }
 
 func (m *memoryMutationCursor) Put(k, v []byte) error {
-	return m.mutation.Put(m.table, common.Copy(k), common.Copy(v))
+	return m.mutation.Put(m.table, bytes.Clone(k), bytes.Clone(v))
 }
 
 func (m *memoryMutationCursor) Append(k []byte, v []byte) error {
-	return m.mutation.Append(m.table, common.Copy(k), common.Copy(v))
+	return m.mutation.Append(m.table, bytes.Clone(k), bytes.Clone(v))
 
 }
 
 func (m *memoryMutationCursor) AppendDup(k []byte, v []byte) error {
-	return m.memCursor.AppendDup(common.Copy(k), common.Copy(v))
+	return m.memCursor.AppendDup(bytes.Clone(k), bytes.Clone(v))
 }
 
 func (m *memoryMutationCursor) PutNoDupData(key, value []byte) error {
@@ -340,7 +339,7 @@ func (m *memoryMutationCursor) DeleteCurrentMultiValBefore(v []byte) (uint64, er
 	if k == nil {
 		return 0, nil
 	}
-	key := common.Copy(k)
+	key := bytes.Clone(k)
 
 	// Not purely dupsort: one value per key, tracked via deletedEntries like
 	// DeleteCurrent does.
@@ -364,7 +363,7 @@ func (m *memoryMutationCursor) DeleteCurrentMultiValBefore(v []byte) (uint64, er
 		if v != nil && bytes.Compare(dv, v) >= 0 {
 			break
 		}
-		doomed = append(doomed, common.Copy(dv))
+		doomed = append(doomed, bytes.Clone(dv))
 		if _, dv, err = m.NextDup(); err != nil {
 			return 0, err
 		}

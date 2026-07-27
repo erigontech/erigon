@@ -17,6 +17,7 @@
 package test
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"math"
@@ -31,7 +32,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -797,7 +797,7 @@ func extractKVErrIterator(t *testing.T, it stream.KV) map[string][]byte {
 	for it.HasNext() {
 		k, v, err := it.Next()
 		require.NoError(t, err)
-		accounts[hex.EncodeToString(k)] = common.Copy(v)
+		accounts[hex.EncodeToString(k)] = bytes.Clone(v)
 	}
 
 	return accounts

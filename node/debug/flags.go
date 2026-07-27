@@ -300,9 +300,8 @@ func Setup(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logg
 	if pyroscopeEnabled {
 		tags := make(map[string]string)
 		for _, rawTag := range pyroscopeTags {
-			parts := strings.Split(rawTag, "=")
-			if len(parts) == 2 { // Ignore invalid tags
-				tags[parts[0]] = parts[1]
+			if k, v, ok := strings.Cut(rawTag, "="); ok && !strings.Contains(v, "=") { // Ignore invalid tags
+				tags[k] = v
 			}
 		}
 		if err := Handler.StartPyroscopeProfiler(

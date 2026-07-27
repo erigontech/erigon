@@ -141,8 +141,8 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("account changes payload exceeds maximum size (%d bytes)", size)
 	}
 
-	var address common.Address
-	if err := s.ReadBytes(address[:]); err != nil {
+	address, err := s.Addr()
+	if err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
 	ac.Address = accounts.InternAddress(address)

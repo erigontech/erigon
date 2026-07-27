@@ -50,7 +50,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 		case *ShortNode:
 			if fromLevel == 0 {
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
-					proof = append(proof, common.Copy(rlp))
+					proof = append(proof, bytes.Clone(rlp))
 				} else {
 					return nil, err
 				}
@@ -72,7 +72,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 		case *DuoNode:
 			if fromLevel == 0 {
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
-					proof = append(proof, common.Copy(rlp))
+					proof = append(proof, bytes.Clone(rlp))
 				} else {
 					return nil, err
 				}
@@ -94,7 +94,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 		case *FullNode:
 			if fromLevel == 0 {
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
-					proof = append(proof, common.Copy(rlp))
+					proof = append(proof, bytes.Clone(rlp))
 				} else {
 					return nil, err
 				}
@@ -143,7 +143,7 @@ func (t *Trie) WitnessNodesForKeys(hexKeys [][]byte) ([][]byte, error) {
 		if _, ok := seen[string(rlp)]; ok {
 			return nil
 		}
-		c := common.Copy(rlp)
+		c := bytes.Clone(rlp)
 		// c is appended to out and never mutated, so alias it as the set key
 		// instead of allocating a second copy of the same bytes.
 		seen[common.ToStringZeroCopy(c)] = struct{}{}
@@ -245,7 +245,7 @@ func WitnessNodesForKeysFromNodes(nodes, hexKeys [][]byte) ([][]byte, error) {
 		if _, ok := seen[string(rlp)]; ok {
 			return nil
 		}
-		c := common.Copy(rlp)
+		c := bytes.Clone(rlp)
 		seen[common.ToStringZeroCopy(c)] = struct{}{}
 		out = append(out, c)
 		return nil

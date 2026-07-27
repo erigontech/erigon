@@ -20,6 +20,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -229,7 +230,7 @@ func (d *Dumper) DumpToCollector(ctx context.Context, c DumpCollector, excludeCo
 				loc := k[20:]
 				account.Storage[common.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
 				h := crypto.Keccak256Hash(loc)
-				t.Update(h[:], common.Copy(vs))
+				t.Update(h[:], bytes.Clone(vs))
 			}
 			r.Close()
 

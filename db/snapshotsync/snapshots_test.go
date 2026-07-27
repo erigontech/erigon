@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/db/mvcc"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -369,7 +370,7 @@ func TestDeleteSnapshots(t *testing.T) {
 	}
 	require.NoError(s.OpenFolder())
 	for _, f := range retireFiles {
-		require.NoError(s.retireFiles(f))
+		require.NoError(s.retireFiles(mvcc.RetireReasonAged, f))
 		require.False(slices.Contains(s.Files(), f))
 	}
 }
@@ -389,14 +390,14 @@ func TestRetireFilesIsIdempotent(t *testing.T) {
 
 	fileName := snaptype.SegmentFileName(version.V1_0, 0, 10_000, snaptype2.Bodies.Enum())
 
-	require.NoError(s.retireFiles(fileName))
+	require.NoError(s.retireFiles(mvcc.RetireReasonAged, fileName))
 	require.False(slices.Contains(s.Files(), fileName))
 
 	require.NotPanics(func() {
-		require.NoError(s.retireFiles(fileName))
+		require.NoError(s.retireFiles(mvcc.RetireReasonAged, fileName))
 	})
 	require.NotPanics(func() {
-		require.NoError(s.retireFiles("v1.0-999999-1000000-bodies.seg"))
+		require.NoError(s.retireFiles(mvcc.RetireReasonAged, "v1.0-999999-1000000-bodies.seg"))
 	})
 }
 
@@ -428,14 +429,14 @@ func TestRetireFilesDetachesFromDirty(t *testing.T) {
 	require.Equal(2, s.dirty[txEnum].Len())
 	require.True(visibleHas(s, txEnum, 0, 10_000))
 
-	require.NoError(s.retireFiles(snaptype.SegmentFileName(version.V1_0, 0, 10_000, txEnum)))
+	require.NoError(s.retireFiles(mvcc.RetireReasonAged, snaptype.SegmentFileName(version.V1_0, 0, 10_000, txEnum)))
 
 	// Detached from dirty, not just hidden...
 	require.Equal(1, s.dirty[txEnum].Len())
 	require.False(visibleHas(s, txEnum, 0, 10_000))
 
 	// ...so a fresh recalc (no-arg RetireFiles rebuilds visible from dirty) can't resurface it.
-	require.NoError(s.retireFiles())
+	require.NoError(s.retireFiles(mvcc.RetireReasonAged))
 	require.False(visibleHas(s, txEnum, 0, 10_000))
 	require.True(visibleHas(s, txEnum, 10_000, 20_000))
 }
@@ -1150,7 +1151,7 @@ func TestRetireVsLiveViewDoesNotCrash(t *testing.T) {
 			subNames = append(subNames, snaptype.SegmentFileName(verOf(i), from, from+1_000, snT.Enum()))
 		}
 	}
-	require.NoError(s.retireFiles(subNames...))
+	require.NoError(s.retireFiles(mvcc.RetireReasonAged, subNames...))
 
 	// Closing the View must not crash.
 	defer func() {

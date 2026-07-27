@@ -43,9 +43,11 @@ import (
 	execparams "github.com/erigontech/erigon/execution/protocol/params"
 )
 
-const maxProposerPreferencesRequestItems = 2048
-const maxEpbsJSONSize = 1 << 20
-const maxExecutionPayloadEnvelopeRequestSize = int64(execparams.MaxRlpBlockSize) * 4
+const (
+	maxProposerPreferencesRequestItems     = 2048
+	maxEpbsJSONSize                        = 1 << 20
+	maxExecutionPayloadEnvelopeRequestSize = int64(execparams.MaxRlpBlockSize) * 4
+)
 
 func maxSignedExecutionPayloadBidSSZSize() int64 {
 	emptyBidSize := (&cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{}}).EncodingSizeSSZ()

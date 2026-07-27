@@ -108,6 +108,18 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	return cfg
 }
 
+// mustReopenUnderlyingFilesTx refreshes the tx's pinned block-files/aggregator
+// view so files opened earlier in this stage are visible to reads made through
+// this tx. Panics rather than silently skipping: a tx that can't reopen would
+// reintroduce stale-view bugs (e.g. minimal-mode history pruning downloading all files).
+func mustReopenUnderlyingFilesTx(tx kv.RwTx) {
+	reopener, ok := tx.(kv.CanReopenUnderlyingFilesTx)
+	if !ok {
+		panic(fmt.Sprintf("snapshots stage requires a tx that can ForceReopenUnderlyingFilesTx, got %T", tx))
+	}
+	reopener.ForceReopenUnderlyingFilesTx()
+}
+
 func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) (err error) {
 	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, logger); err != nil {
 		return err
@@ -216,6 +228,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
+	mustReopenUnderlyingFilesTx(tx)
+
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
@@ -281,13 +295,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	if err := buildOrDeferE3Accessors(ctx, s, cfg, agg, headersProgress); err != nil {
+	// a state file missing its accessor is excluded from the visible set, so E3 accessors
+	// must be rebuilt before execution — there is no background rebuild path
+	if err := cfg.db.Debug().BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers(), kv.SkipCoveredAccessors); err != nil {
 		return err
 	}
 
-	if temporal, ok := tx.(*temporal.RwTx); ok {
-		temporal.ForceReopenUnderlyingFilesTx() // otherwise next stages will not see just-indexed-files
-	}
+	mustReopenUnderlyingFilesTx(tx) // otherwise next stages will not see just-indexed-files
 
 	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
 	if cfg.notifier.Events != nil {
@@ -306,9 +320,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return fmt.Errorf("FillDBFromSnapshots: %w", err)
 	}
 
-	if temporal, ok := tx.(*temporal.RwTx); ok {
-		temporal.ForceReopenUnderlyingFilesTx() // otherwise next stages will not see just-indexed-files
-	}
+	mustReopenUnderlyingFilesTx(tx) // otherwise next stages will not see just-indexed-files
 
 	// In E3, the post-execution state is in domain files. After FillDBFromSnapshots,
 	// snapshot domain state may be ahead of the Execution stage progress (which is 0
@@ -360,29 +372,6 @@ func buildOrDeferE2Indices(ctx context.Context, s *StageState, cfg SnapshotsCfg,
 		}
 	} else {
 		log.Debug(fmt.Sprintf("[%s] Deferring E2 indexing to background", s.LogPrefix()), "reason", "restart", "headersProgress", headersProgress)
-	}
-	return nil
-}
-
-// buildOrDeferE3Accessors decides whether to build E3 state accessors synchronously
-// or defer them to background processing.
-// On restart (headersProgress > 0), E3 indexing is skipped at startup. Missing accessors
-// will be built in the background via BuildMissedAccessorsInBackground (called from
-// SnapshotsPrune on every sync cycle).
-// Unindexed state files are safely excluded from visible files by checkForVisibility
-// (which checks accessor presence), so queries correctly reflect only indexed data.
-// Note: unlike E2, there is no Bor exception — the background path calls
-// BuildMissedAccessors directly without any Bor-specific early-exit guards.
-func buildOrDeferE3Accessors(ctx context.Context, s *StageState, cfg SnapshotsCfg, agg *state.Aggregator, headersProgress uint64) error {
-	canDefer := headersProgress > 0
-
-	indexWorkers := estimate.IndexSnapshot.Workers()
-	if !canDefer {
-		if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
-			return err
-		}
-	} else {
-		log.Debug(fmt.Sprintf("[%s] Deferring E3 indexing to background", s.LogPrefix()), "reason", "restart", "headersProgress", headersProgress)
 	}
 	return nil
 }

@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -145,9 +146,9 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 
 	// 'trace_get' index starts at one (oddly)
 	firstIndex := int(indicies[0]) + 1
-	for i, trace := range traces {
+	for i := range traces {
 		if i == firstIndex {
-			return &trace, nil
+			return &traces[i], nil
 		}
 	}
 	return nil, err
@@ -681,7 +682,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
 			ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
 		}
-		traceResult.Output = common.Copy(execResult.ReturnData)
+		traceResult.Output = bytes.Clone(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
 			if first {
 				first = false
@@ -1009,10 +1010,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 	var firstErr error
 
 	for range numWorkers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			workerTx, err := api.kv.BeginTemporalRo(ctx)
 			if err != nil {
 				errOnce.Do(func() { firstErr = err; cancel() })
@@ -1042,6 +1040,8 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 					return
 				}
 
+				// Copy is needed since each worker has its own independent state.
+				// workerReader reads state up to but not including the current transaction.
 				workerReader := state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(job.txIndex))
 				workerIbs := state.New(workerReader)
 
@@ -1052,7 +1052,6 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				ot.compat = api.compatibility
 				ot.r = traceResult
 				ot.idx = []string{fmt.Sprintf("%d-", job.txIndex)}
-				// The parallel path only activates when !hasStateDiff && !hasVmTrace, so
 				// TraceTypeTrace is always active here; initialise traceAddr unconditionally.
 				ot.traceAddr = []int{}
 
@@ -1088,10 +1087,10 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 					return
 				}
 
-				traceResult.Output = common.Copy(execResult.ReturnData)
+				traceResult.Output = bytes.Clone(execResult.ReturnData)
 				results[job.txIndex] = traceResult
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -1147,6 +1146,9 @@ func (api *TraceAPIImpl) callTransaction(
 		txn, err = api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNumber, txIndex)
 		if err != nil {
 			return nil, err
+		}
+		if txn == nil {
+			return nil, fmt.Errorf("transaction not found at block %d, index %d", blockNumber, txIndex)
 		}
 	}
 

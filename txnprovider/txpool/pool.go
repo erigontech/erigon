@@ -462,7 +462,18 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		}
 	}
 
+	p.publishDepthMetrics()
 	return nil
+}
+
+// publishDepthMetrics republishes the sub-pool depth gauges. Called on every block
+// so the gauges track the pool at block cadence rather than the LogEvery tick (3
+// minutes on every node, per cmd/utils/flags.go). Caller must hold p.lock; the
+// writes are atomic stores and the Len reads are O(1).
+func (p *TxPool) publishDepthMetrics() {
+	pendingSubCounter.SetInt(p.pending.Len())
+	basefeeSubCounter.SetInt(p.baseFee.Len())
+	queuedSubCounter.SetInt(p.queued.Len())
 }
 
 func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
@@ -603,7 +614,7 @@ func (p *TxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	rlpTx, _, _, err := p.getRlpLocked(tx, hash)
-	return common.Copy(rlpTx), err
+	return bytes.Clone(rlpTx), err
 }
 
 func (p *TxPool) AppendAllAnnouncements(types []byte, sizes []uint32, hashes []byte) ([]byte, []uint32, []byte) {
@@ -686,7 +697,7 @@ func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTxn, error)
 	if len(v) == 0 {
 		return nil, nil
 	}
-	txnRlp := common.Copy(v[20:])
+	txnRlp := bytes.Clone(v[20:])
 	parseCtx := NewTxnParseContext(p.chainID)
 	parseCtx.WithSender(false)
 	txnSlot := &TxnSlot{}
@@ -2823,9 +2834,7 @@ func (p *TxPool) logStats() {
 		ctx = append(ctx, "cache_keys", cacheKeys)
 	}
 	p.logger.Info("[txpool] stat", ctx...)
-	pendingSubCounter.SetInt(p.pending.Len())
-	basefeeSubCounter.SetInt(p.baseFee.Len())
-	queuedSubCounter.SetInt(p.queued.Len())
+	p.publishDepthMetrics()
 }
 
 // Deprecated need switch to streaming-like

@@ -17,7 +17,7 @@
 package commitment
 
 import (
-	"github.com/erigontech/erigon/common"
+	"bytes"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -57,7 +57,7 @@ func (rc *RecordingContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 		return data, step, err
 	}
 	if data != nil {
-		rc.branches[string(common.Copy(prefix))] = common.Copy(data)
+		rc.branches[string(bytes.Clone(prefix))] = bytes.Clone(data)
 	}
 	return data, step, nil
 }
@@ -70,7 +70,7 @@ func (rc *RecordingContext) Account(plainKey []byte) (*Update, error) {
 	if u != nil {
 		var numBuf [10]byte
 		encoded := u.Encode(nil, numBuf[:])
-		rc.accounts[string(common.Copy(plainKey))] = encoded
+		rc.accounts[string(bytes.Clone(plainKey))] = encoded
 	}
 	return u, nil
 }
@@ -83,15 +83,15 @@ func (rc *RecordingContext) Storage(plainKey []byte) (*Update, error) {
 	if u != nil {
 		var numBuf [10]byte
 		encoded := u.Encode(nil, numBuf[:])
-		rc.storages[string(common.Copy(plainKey))] = encoded
+		rc.storages[string(bytes.Clone(plainKey))] = encoded
 	}
 	return u, nil
 }
 
 func (rc *RecordingContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
-	rc.putBranches[string(common.Copy(prefix))] = BranchWrite{
-		PrevData: common.Copy(prevData),
-		NewData:  common.Copy(data),
+	rc.putBranches[string(bytes.Clone(prefix))] = BranchWrite{
+		PrevData: bytes.Clone(prevData),
+		NewData:  bytes.Clone(data),
 	}
 	return rc.inner.PutBranch(prefix, data, prevData)
 }

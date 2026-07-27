@@ -115,6 +115,11 @@ type ReadSet struct {
 	codeHash       map[accounts.Address]VersionedRead[accounts.CodeHash]
 	codeSize       map[accounts.Address]VersionedRead[int]
 	storage        map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
+
+	// access carries EIP-7928 "address was accessed" marks (with the
+	// non-revertable "real EVM access" bit) on the read side, so the access set
+	// travels with the read-set rather than as a separate IntraBlockState cache.
+	access AccessSet
 }
 
 func readSetPut[T any](m *map[accounts.Address]VersionedRead[T], addr accounts.Address, tr VersionedRead[T]) {
@@ -408,6 +413,12 @@ func (s *ReadSet) mergeFrom(src ReadSet) {
 			s.SetStorage(a, k, tr)
 		}
 	}
+	if len(src.access) > 0 {
+		if s.access == nil {
+			s.access = make(AccessSet, len(src.access))
+		}
+		maps.Copy(s.access, src.access)
+	}
 }
 
 // Merge returns a new read set containing every entry of s then o.  On a
@@ -509,9 +520,9 @@ func (s ReadSet) eachHeader(yield func(ReadHeader) bool) {
 // Shared across every per-path write via embedding in VersionedWrite[T].
 type WriteHeader struct {
 	Address     accounts.Address
-	Path        AccountPath
 	Key         accounts.StorageKey
 	Version     Version
+	Path        AccountPath
 	Reason      tracing.BalanceChangeReason
 	NonceReason tracing.NonceChangeReason
 }
@@ -811,6 +822,97 @@ func (s *WriteSet) Filter(keep func(WriteHeader) bool) *WriteSet {
 	return out
 }
 
+// Finalize produces the committable write-set for a tx from the raw recorded
+// writes: it applies the EIP-6780 net-zero storage wipe, then returns the
+// filtered Snapshot. It operates on the write-set alone — no IntraBlockState —
+// so the parallel finalize can be driven straight from the recorded IO.
+func (s *WriteSet) Finalize() *WriteSet {
+	s.zeroSameTxCreateDestructStorage()
+	return s.Snapshot()
+}
+
+// zeroSameTxCreateDestructStorage implements EIP-6780 + EIP-7928: when a
+// contract is created and self-destructed in the same tx, its storage is wiped
+// at end-of-tx, so the BAL must record the dirty slots as reads (net-zero), not
+// changes. Zero the storage write values so AsBlockAccessList folds them away.
+// The create+destruct pair is detectable from the write-set itself
+// (createContract survives SELFDESTRUCT), so no stateObject is needed.
+func (s *WriteSet) zeroSameTxCreateDestructStorage() {
+	for addr, cc := range s.createContract {
+		if !cc.Val {
+			continue
+		}
+		if sd, ok := s.selfDestruct[addr]; !ok || !sd.Val {
+			continue
+		}
+		if inner, ok := s.storage[addr]; ok {
+			for _, vw := range inner {
+				vw.Val = uint256.Int{}
+			}
+		}
+	}
+}
+
+// Snapshot returns a frozen typed copy of the recorded writes. The journal keeps
+// the write-set in step with reverts, so every address present is a surviving
+// write — no dirty reconciliation is needed. Under self-destruct only
+// SelfDestruct/Balance/Incarnation/Storage/CreateContract are kept (the BAL needs
+// residual balance, resurrection needs the prior incarnation, the calculator
+// needs per-slot deletes, and fee finalization needs the creation marker);
+// Nonce/Code/CodeHash/CodeSize/Address drop.
+func (s *WriteSet) Snapshot() *WriteSet {
+	out := &WriteSet{}
+
+	addrs := make(map[accounts.Address]struct{})
+	for h := range s.AllHeaders() {
+		addrs[h.Address] = struct{}{}
+	}
+
+	for addr := range addrs {
+		sd := false
+		if vw, ok := s.selfDestruct[addr]; ok {
+			out.SetSelfDestruct(addr, cloneVW(vw))
+			sd = vw.Val
+		}
+		if vw, ok := s.balance[addr]; ok {
+			out.SetBalance(addr, cloneVW(vw))
+		}
+		if vw, ok := s.incarnation[addr]; ok {
+			out.SetIncarnation(addr, cloneVW(vw))
+		}
+		if inner, ok := s.storage[addr]; ok {
+			for k, vw := range inner {
+				out.SetStorage(addr, k, cloneVW(vw))
+			}
+		}
+		// CreateContract survives self-destruct: fee finalization and the BAL need
+		// the creation marker, and zeroSameTxCreateDestructStorage detects the
+		// create+destruct pair from it. ApplyVersionedWrites skips applying it under
+		// self-destruct, so keeping it here does not resurrect the account.
+		if vw, ok := s.createContract[addr]; ok {
+			out.SetCreateContract(addr, cloneVW(vw))
+		}
+		if !sd {
+			if vw, ok := s.address[addr]; ok {
+				out.SetAddress(addr, cloneVW(vw))
+			}
+			if vw, ok := s.nonce[addr]; ok {
+				out.SetNonce(addr, cloneVW(vw))
+			}
+			if vw, ok := s.code[addr]; ok {
+				out.SetCode(addr, cloneVW(vw))
+			}
+			if vw, ok := s.codeHash[addr]; ok {
+				out.SetCodeHash(addr, cloneVW(vw))
+			}
+			if vw, ok := s.codeSize[addr]; ok {
+				out.SetCodeSize(addr, cloneVW(vw))
+			}
+		}
+	}
+	return out
+}
+
 func (s *WriteSet) deleteAddr(addr accounts.Address) {
 	delete(s.address, addr)
 	delete(s.balance, addr)
@@ -822,6 +924,80 @@ func (s *WriteSet) deleteAddr(addr accounts.Address) {
 	delete(s.codeHash, addr)
 	delete(s.codeSize, addr)
 	delete(s.storage, addr)
+}
+
+// createWriteSnapshot holds a deep copy of the account-record writes that
+// createObject/createAccount overwrite when (re)creating an account. It lets a
+// reverted recreation restore the prior writes rather than leave them
+// overwritten — the record-level create journal entry maintaining its own
+// field-level writes.
+type createWriteSnapshot struct {
+	address        *VersionedWrite[*accounts.Account]
+	balance        *VersionedWrite[uint256.Int]
+	incarnation    *VersionedWrite[uint64]
+	selfDestruct   *VersionedWrite[bool]
+	createContract *VersionedWrite[bool]
+	codeHash       *VersionedWrite[accounts.CodeHash]
+}
+
+// snapshotCreateFields clones the account-record writes that a subsequent
+// createObject/createAccount will overwrite, so a reverted recreation can
+// restore them. Fields creation never writes (nonce/code/codeSize/storage) are
+// not captured — they survive the recreation untouched.
+func (s *WriteSet) snapshotCreateFields(addr accounts.Address) *createWriteSnapshot {
+	snap := &createWriteSnapshot{}
+	if vw, ok := s.address[addr]; ok {
+		snap.address = cloneVW(vw)
+	}
+	if vw, ok := s.balance[addr]; ok {
+		snap.balance = cloneVW(vw)
+	}
+	if vw, ok := s.incarnation[addr]; ok {
+		snap.incarnation = cloneVW(vw)
+	}
+	if vw, ok := s.selfDestruct[addr]; ok {
+		snap.selfDestruct = cloneVW(vw)
+	}
+	if vw, ok := s.createContract[addr]; ok {
+		snap.createContract = cloneVW(vw)
+	}
+	if vw, ok := s.codeHash[addr]; ok {
+		snap.codeHash = cloneVW(vw)
+	}
+	return snap
+}
+
+// restoreCreateFields reverts the account-record writes overwritten by a
+// recreation back to snap (nil entries in snap become deletions). Only the
+// fields creation writes are touched.
+func (s *WriteSet) restoreCreateFields(addr accounts.Address, snap *createWriteSnapshot) {
+	delete(s.address, addr)
+	delete(s.balance, addr)
+	delete(s.incarnation, addr)
+	delete(s.selfDestruct, addr)
+	delete(s.createContract, addr)
+	delete(s.codeHash, addr)
+	if snap == nil {
+		return
+	}
+	if snap.address != nil {
+		s.SetAddress(addr, snap.address)
+	}
+	if snap.balance != nil {
+		s.SetBalance(addr, snap.balance)
+	}
+	if snap.incarnation != nil {
+		s.SetIncarnation(addr, snap.incarnation)
+	}
+	if snap.selfDestruct != nil {
+		s.SetSelfDestruct(addr, snap.selfDestruct)
+	}
+	if snap.createContract != nil {
+		s.SetCreateContract(addr, snap.createContract)
+	}
+	if snap.codeHash != nil {
+		s.SetCodeHash(addr, snap.codeHash)
+	}
 }
 
 // DeleteAccountFields removes the Balance/Nonce/Incarnation/CodeHash writes for
@@ -1188,6 +1364,12 @@ func (s *WriteSet) DelNonce(addr accounts.Address) {
 		delete(s.nonce, addr)
 	}
 }
+func (s *WriteSet) DelIncarnation(addr accounts.Address) {
+	if vw, ok := s.incarnation[addr]; ok {
+		releaseVWIncarnation(vw)
+		delete(s.incarnation, addr)
+	}
+}
 func (s *WriteSet) DelSelfDestruct(addr accounts.Address) {
 	if vw, ok := s.selfDestruct[addr]; ok {
 		releaseVWSelfDestruct(vw)
@@ -1242,6 +1424,12 @@ func (s *WriteSet) updateStorage(addr accounts.Address, key accounts.StorageKey,
 
 func (s *WriteSet) updateNonce(addr accounts.Address, val uint64) {
 	if vw, ok := s.nonce[addr]; ok {
+		vw.Val = val
+	}
+}
+
+func (s *WriteSet) updateIncarnation(addr accounts.Address, val uint64) {
+	if vw, ok := s.incarnation[addr]; ok {
 		vw.Val = val
 	}
 }
@@ -1342,34 +1530,8 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		// stays 0 → empty-account prune); a later TX that tips the same
 		// coinbase re-creates it, and we must surface the re-created
 		// account so finalize accumulates the prior cumulative value.
-		if destructed, res, ok := vr.versionMap.ReadSelfDestruct(address, vr.txIndex); ok && res.Status() == MVReadResultDone {
-			if destructed {
-				destructTxIndex := res.DepIdx()
-				revived := false
-				revivalLimit := vr.txIndex - 1
-				// AddressPath uses >= to catch same-tx metamorphic SD+CREATE2; subfields use >.
-				if hi, ok := vr.versionMap.LatestTxIndex(address, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destructTxIndex {
-					revived = true
-				}
-				if !revived {
-					if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-						revived = true
-					}
-				}
-				if !revived {
-					if hi, ok := vr.versionMap.LatestTxIndex(address, NoncePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-						revived = true
-					}
-				}
-				if !revived {
-					if hi, ok := vr.versionMap.LatestTxIndex(address, CodeHashPath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-						revived = true
-					}
-				}
-				if !revived {
-					return nil, nil
-				}
-			}
+		if destroyed, _, revived := vr.versionMap.AccountLifecycle(address, vr.txIndex); destroyed && !revived {
+			return nil, nil
 		}
 		if acc, ok := versionedUpdateAddress(vr.versionMap, address, vr.txIndex); ok && acc != nil {
 			updated := vr.applyVersionedUpdates(address, *acc)
@@ -1983,16 +2145,14 @@ func (writes *WriteSet) SetAccountBalanceOrDelete(addr accounts.Address, acc *ac
 
 // note that TxIndex starts at -1 (the begin system tx)
 type VersionedIO struct {
-	inputs   []versionedReadSet
-	outputs  []*WriteSet // write sets that should be checked during validation
-	accessed []AccessSet
+	inputs  []versionedReadSet
+	outputs []*WriteSet // write sets that should be checked during validation
 }
 
 func NewVersionedIO(numTx int) *VersionedIO {
 	return &VersionedIO{
-		inputs:   make([]versionedReadSet, numTx+1),
-		outputs:  make([]*WriteSet, numTx+1),
-		accessed: make([]AccessSet, numTx+1),
+		inputs:  make([]versionedReadSet, numTx+1),
+		outputs: make([]*WriteSet, numTx+1),
 	}
 }
 
@@ -2000,7 +2160,7 @@ func (io *VersionedIO) Len() int {
 	if io == nil {
 		return 0
 	}
-	return max(len(io.inputs), max(len(io.outputs), len(io.accessed)))
+	return max(len(io.inputs), len(io.outputs))
 }
 
 func (io *VersionedIO) Inputs() []versionedReadSet {
@@ -2074,25 +2234,6 @@ func (io *VersionedIO) RecordWrites(txVersion Version, output *WriteSet) {
 	io.outputs[txId+1] = output
 }
 
-func (io *VersionedIO) RecordAccesses(txVersion Version, addresses AccessSet) {
-	if len(addresses) == 0 {
-		return
-	}
-	if len(io.accessed) <= txVersion.TxIndex+1 {
-		io.accessed = append(io.accessed, make([]AccessSet, txVersion.TxIndex+2-len(io.accessed))...)
-	}
-	dest := make(AccessSet, len(addresses))
-	maps.Copy(dest, addresses)
-	io.accessed[txVersion.TxIndex+1] = dest
-}
-
-func (io *VersionedIO) AccessedAddresses(txIndex int) AccessSet {
-	if len(io.accessed) <= txIndex+1 {
-		return nil
-	}
-	return io.accessed[txIndex+1]
-}
-
 func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 	mergedLen := max(io.Len(), other.Len())
 	merged := NewVersionedIO(mergedLen - 1)
@@ -2116,15 +2257,6 @@ func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 		} else if i < len(other.outputs) {
 			merged.outputs[i] = other.outputs[i].Merge(nil)
 		}
-		if i < len(io.accessed) {
-			if i < len(other.accessed) {
-				merged.accessed[i] = io.accessed[i].Merge(other.accessed[i])
-			} else {
-				merged.accessed[i] = io.accessed[i].Merge(nil)
-			}
-		} else if i < len(other.accessed) {
-			merged.accessed[i] = other.accessed[i].Merge(nil)
-		}
 	}
 	return merged
 }
@@ -2133,20 +2265,21 @@ func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 // version.TxIndex) into io at that index, accumulating into the slot rather
 // than overwriting it the way RecordReads does. The three per-tx slices grow in
 // lockstep so they stay equal length.
-func (io *VersionedIO) mergeTx(version Version, reads ReadSet, writes *WriteSet, accesses AccessSet) {
+func (io *VersionedIO) mergeTx(version Version, reads ReadSet, writes *WriteSet) {
 	idx := version.TxIndex + 1
-	n := max(idx+1, len(io.inputs), len(io.outputs), len(io.accessed))
+	n := max(idx+1, len(io.inputs), len(io.outputs))
 	if n > len(io.inputs) {
 		io.inputs = append(io.inputs, make([]versionedReadSet, n-len(io.inputs))...)
 	}
 	if n > len(io.outputs) {
 		io.outputs = append(io.outputs, make([]*WriteSet, n-len(io.outputs))...)
 	}
-	if n > len(io.accessed) {
-		io.accessed = append(io.accessed, make([]AccessSet, n-len(io.accessed))...)
-	}
-	if reads.Len() > 0 {
-		if io.inputs[idx].readSet.Len() == 0 {
+	// Fold the read set when it carries typed reads OR access-only marks: an
+	// access-only phase has Len()==0 but must still reach io.inputs for the
+	// EIP-7928 BAL. Len() itself stays access-free so the parallel executor's
+	// HasReads/ReadSetIncarnation/ReadCount keep their read-presence semantics.
+	if reads.Len() > 0 || len(reads.access) > 0 {
+		if io.inputs[idx].readSet.Len() == 0 && len(io.inputs[idx].readSet.access) == 0 {
 			// Production call sites merge each tx once into an empty slot; hand the
 			// read set over directly (like RecordReads) instead of deep-copying.
 			io.inputs[idx] = versionedReadSet{version.Incarnation, reads}
@@ -2156,9 +2289,6 @@ func (io *VersionedIO) mergeTx(version Version, reads ReadSet, writes *WriteSet,
 	}
 	if !writes.IsEmpty() {
 		io.outputs[idx] = io.outputs[idx].Merge(writes)
-	}
-	if len(accesses) > 0 {
-		io.accessed[idx] = io.accessed[idx].Merge(accesses)
 	}
 }
 
@@ -2312,7 +2442,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		}
 
 		isUserTx := txIndex >= 0
-		for addr, opts := range io.AccessedAddresses(txIndex) {
+		for addr, opts := range io.ReadSet(txIndex).access {
 			if addr.IsNil() {
 				continue
 			}
@@ -2682,9 +2812,9 @@ type DAG struct {
 }
 
 type TxDep struct {
-	Index         int
 	Reads         ReadSet
 	FullWriteList []*WriteSet
+	Index         int
 }
 
 func HasReadDep(txFrom *WriteSet, txTo ReadSet) bool {

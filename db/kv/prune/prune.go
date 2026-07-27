@@ -232,7 +232,7 @@ func TableScanningPrune(
 	}
 
 	if prevStat.KeyProgress != Done {
-		txnb := common.Copy(keyCursorPosition.StartKey)
+		txnb := bytes.Clone(keyCursorPosition.StartKey)
 		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
 		for ; txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
 			if err != nil {
@@ -240,7 +240,7 @@ func TableScanningPrune(
 			}
 			select {
 			case <-ctx.Done():
-				stat.LastPrunedKey = common.Copy(txnb)
+				stat.LastPrunedKey = bytes.Clone(txnb)
 				stat.KeyProgress = InProgress
 				return stat, nil
 			default:
@@ -349,7 +349,7 @@ func tableScanningPrune(
 		}
 
 		if ctx.Err() != nil {
-			return common.Copy(val), nil
+			return bytes.Clone(val), nil
 		}
 
 		// Different storage modes have different dup-iteration orders:
@@ -484,9 +484,9 @@ func tableScanningPrune(
 				time.Sleep(*throttling)
 			}
 			if ctx.Err() != nil {
-				stat.LastPrunedValue = common.Copy(val)
+				stat.LastPrunedValue = bytes.Clone(val)
 				stat.ValueProgress = InProgress
-				return common.Copy(val), nil
+				return bytes.Clone(val), nil
 			}
 		}
 	nextKey:
