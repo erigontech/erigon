@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -497,7 +498,7 @@ func TestMerkleizeVector_Direct(t *testing.T) {
 	t.Logf("hZero: %x", hZero)
 
 	// For proper merkleization, length should be next power of 2
-	vectorLength := merkle_tree.NextPowerOfTwo(3) // 3 -> 4
+	vectorLength := math.NextPowerOfTwo(3) // 3 -> 4
 
 	// Test 1: [h1, h1, hZero]
 	leaves1 := [][32]byte{h1, h1, hZero}

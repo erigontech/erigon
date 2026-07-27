@@ -23,8 +23,8 @@
     "@mdx-js/react": "^3.0.0",
     "clsx": "^2.0.0",
     "prism-react-renderer": "^2.3.0",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
     "@docusaurus/module-type-aliases": "3.10.2",
@@ -52,7 +52,7 @@
     "webpack": "5.105.0",
     "@babel/plugin-transform-modules-systemjs": "^7.29.4",
     "@babel/core": "^7.29.6",
-    "fast-uri": "^3.1.2",
+    "fast-uri": "^3.1.4",
     "http-proxy-middleware": "^2.0.10",
     "joi": "^17.13.4",
     "js-yaml": "^4.2.0",

@@ -10,7 +10,7 @@ func ProcessProposerLookahead(s abstract.BeaconState) error {
 	lastEpochStart := lookahead.Length() - int(s.BeaconConfig().SlotsPerEpoch)
 
 	// Shift out proposers in the first epoch
-	//copy(lookahead[:lastEpochStart], lookahead[s.BeaconConfig().SlotsPerEpoch:])
+	// copy(lookahead[:lastEpochStart], lookahead[s.BeaconConfig().SlotsPerEpoch:])
 	newLookahead := solid.NewUint64VectorSSZ(int(s.BeaconConfig().MinSeedLookahead+1) * int(s.BeaconConfig().SlotsPerEpoch))
 	for i := range lastEpochStart {
 		newLookahead.Set(i, lookahead.Get(i+int(s.BeaconConfig().SlotsPerEpoch)))
