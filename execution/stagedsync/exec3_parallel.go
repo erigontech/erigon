@@ -2345,10 +2345,9 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 	return be.deliver(ctx, be.commitResults, r, mustDeliver)
 }
 
-// deliver sends r to ch, preferring delivery over cancellation: a free (non-blocking)
-// send is taken even when ctx is already cancelled, since dropping a result surfaces as
-// a spurious ErrInvalidBlock. ctx.Done only breaks a full-buffer wait. mustDeliver blocks
-// unconditionally.
+// deliver sends r to ch using a two-phase select: first try a non-blocking send
+// (even if ctx is cancelled), then if the buffer is full wait for room or ctx.Done.
+// If mustDeliver is true, ctx is ignored and the send blocks until it succeeds.
 func (be *blockExecutor) deliver(ctx context.Context, ch chan<- applyResult, r applyResult, mustDeliver bool) error {
 	if ch == nil {
 		return nil
