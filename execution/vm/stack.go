@@ -45,9 +45,14 @@ func New() *Stack {
 	return stackPool.Get().(*Stack)
 }
 
+// slot masks an index into [0, stackLimit) so the compiler drops the bounds
+// check. Only reachable out of range if the interpreter's per-op numPop/maxStack
+// validation is wrong, and then it wraps instead of panicking.
+func slot(i int) int { return i & (stackLimit - 1) }
+
 func (st *Stack) push(d uint256.Int) {
 	// NOTE push limit (1024) is checked in baseCheck
-	st.data[st.top] = d
+	st.data[slot(st.top)] = d
 	st.top++
 }
 
@@ -56,14 +61,14 @@ func (st *Stack) push(d uint256.Int) {
 // and copying it in. The slot holds stale data from a prior use, so the caller
 // must fully overwrite it
 func (st *Stack) pushRef() *uint256.Int {
-	ref := &st.data[st.top]
+	ref := &st.data[slot(st.top)]
 	st.top++
 	return ref
 }
 
 func (st *Stack) pop() (ret uint256.Int) {
 	st.top--
-	ret = st.data[st.top]
+	ret = st.data[slot(st.top)]
 	return
 }
 
@@ -71,14 +76,14 @@ func (st *Stack) pop() (ret uint256.Int) {
 // opcodes that need only the low word (memory offsets/sizes).
 func (st *Stack) pop2uint64() (x, y uint64) {
 	st.top -= 2
-	return st.data[st.top+1].Uint64(), st.data[st.top].Uint64()
+	return st.data[slot(st.top+1)].Uint64(), st.data[slot(st.top)].Uint64()
 }
 
 // popRef pops the top item and returns a pointer to its slot. The value stays
 // valid until the stack next push/dup/swap
 func (st *Stack) popRef() *uint256.Int {
 	st.top--
-	return &st.data[st.top]
+	return &st.data[slot(st.top)]
 }
 
 // drop discards the top item without reading it.
@@ -89,7 +94,7 @@ func (st *Stack) drop() {
 func (st *Stack) pop3Ref() (x, y, z *uint256.Int) {
 	st.top -= 3
 	t := st.top
-	return &st.data[t+2], &st.data[t+1], &st.data[t]
+	return &st.data[slot(t+2)], &st.data[slot(t+1)], &st.data[slot(t)]
 }
 
 func (st *Stack) Cap() int {
@@ -97,23 +102,22 @@ func (st *Stack) Cap() int {
 }
 
 func (st *Stack) swap(n int) {
-	// `&(stackLimit-1)` mask trick allow drop all bounds-check here. It's safe because EVM.Run does `Stack.len()` checks
-	i, j := (st.top-n-1)&(stackLimit-1), (st.top-1)&(stackLimit-1)
+	i, j := slot(st.top-n-1), slot(st.top-1)
 	st.data[i], st.data[j] = st.data[j], st.data[i]
 }
 
 func (st *Stack) dup(n int) {
-	st.data[st.top&(stackLimit-1)] = st.data[(st.top-n)&(stackLimit-1)]
+	st.data[slot(st.top)] = st.data[slot(st.top-n)]
 	st.top++
 }
 
 func (st *Stack) peek() *uint256.Int {
-	return &st.data[st.top-1]
+	return &st.data[slot(st.top-1)]
 }
 
 // Back returns the n'th item in stack
 func (st *Stack) Back(n int) *uint256.Int {
-	return &st.data[st.top-n-1]
+	return &st.data[slot(st.top-n-1)]
 }
 
 func (st *Stack) Reset() {
