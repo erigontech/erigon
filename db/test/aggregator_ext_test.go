@@ -265,7 +265,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	require.NoError(t, commit(txNum))
 
 	half := txs / 2
-	for txNum = txNum + 1; txNum <= txs; txNum++ {
+	for txNum++; txNum <= txs; txNum++ {
 		addr, loc := keys[txNum-1-half][:length.Addr], keys[txNum-1-half][length.Addr:]
 
 		prev, _, err := tx.GetLatest(kv.AccountsDomain, keys[txNum-1-half])
