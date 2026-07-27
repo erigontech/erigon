@@ -84,14 +84,14 @@ func (st *Stack) popRef() *uint256.Int {
 }
 
 // drop discards the top item without reading it.
-// popRefPeek pops the top item and returns it together with a pointer to the
+// popRef1Peek1 pops the top item and returns it together with a pointer to the
 // new top: the operand and write target of a binary op. One range check covers
 // both slots. Same validity rule as popRef.
-func (st *Stack) popRefPeek() (x, y *uint256.Int) {
+func (st *Stack) popRef1Peek1() (x, y *uint256.Int) {
 	st.top--
 	t := st.top
 	if t-1 < 0 || t >= stackLimit {
-		panic("evm stack: popRefPeek index out of range")
+		panic("evm stack: popRef1Peek1 index out of range")
 	}
 	return &st.data[t], &st.data[t-1]
 }
