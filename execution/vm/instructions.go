@@ -1067,7 +1067,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	stack.drop() // gas operand, already consumed by the gas phase
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
-	addr, value := stack.pop(), stack.pop()
+	addr, value := stack.popRef2()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
 	toAddr := accounts.InternAddress(addr.Bytes20())
@@ -1089,7 +1089,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 
 	scope.stateGas = 0                             // pass reservoir to child via callGas; restoreChildGas returns it
 	newAccountCharged := evm.callNewAccountCharged // Captured before the call: nested CALL gas phases overwrite the flag.
-	ret, returnGas, childGasUsage, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
+	ret, returnGas, childGasUsage, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, *value, false /* bailout */)
 	res := stack.pushRef()
 	if err != nil {
 		res.Clear()
@@ -1132,7 +1132,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	stack.drop() // gas operand, already consumed by the gas phase
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
-	addr, value := stack.pop(), stack.pop()
+	addr, value := stack.popRef2()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
 	toAddr := accounts.InternAddress(addr.Bytes20())
@@ -1145,7 +1145,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
-	ret, returnGas, childGasUsage, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
+	ret, returnGas, childGasUsage, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, *value)
 	res := stack.pushRef()
 	if err != nil {
 		res.Clear()
@@ -1182,7 +1182,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	stack.drop() // gas operand, already consumed by the gas phase
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
-	addr := stack.pop()
+	addr := stack.popRef()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
 	toAddr := accounts.InternAddress(addr.Bytes20())
@@ -1228,7 +1228,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	stack.drop() // gas operand, already consumed by the gas phase
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
-	addr := stack.pop()
+	addr := stack.popRef()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
 	toAddr := accounts.InternAddress(addr.Bytes20())
