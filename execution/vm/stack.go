@@ -97,7 +97,6 @@ func (st *Stack) Cap() int {
 }
 
 func (st *Stack) swap(n int) {
-	// `&(stackLimit-1)` mask trick allow drop all bounds-check here. It's safe because EVM.Run does `Stack.len()` checks
 	i, j := st.top-n-1, st.top-1
 	st.data[i], st.data[j] = st.data[j], st.data[i]
 }
