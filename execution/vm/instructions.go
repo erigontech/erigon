@@ -28,12 +28,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -1483,33 +1481,6 @@ func opExchange(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 
 // following functions are used by the instruction jump  table
 
-// make log instruction function
-func makeLog(size int) executionFunc {
-	return func(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-		if evm.readOnly {
-			return pc, nil, ErrWriteProtection
-		}
-		topics := make([]common.Hash, size)
-		stack := &scope.Stack
-		mStart, mSize := stack.pop2Uint64()
-		for i := range size {
-			topics[i] = stack.pop().Bytes32()
-		}
-
-		d := scope.Memory.GetCopy(mStart, mSize)
-		evm.IntraBlockState().AddLog(&types.Log{
-			Address: scope.Contract.Address().Value(),
-			Topics:  topics,
-			Data:    d,
-			// This is a non-consensus field, but assigned here because
-			// execution/state doesn't know the current block number.
-			BlockNumber: hexutil.Uint64(evm.Context.BlockNumber),
-		})
-
-		return pc, nil, nil
-	}
-}
-
 // opPush1 is a specialized version of pushN
 func opPush1(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	codeLen := uint64(len(scope.Contract.Code))
@@ -1550,26 +1521,6 @@ func opPush2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	return pc, nil, nil
 }
 
-// make push instruction function
-func makePush(size uint64, pushByteSize int) executionFunc {
-	return func(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-		codeLen := len(scope.Contract.Code)
-
-		startMin := min(int(pc+1), codeLen)
-		endMin := min(startMin+pushByteSize, codeLen)
-
-		integer := scope.Stack.pushRef()
-		integer.SetBytes(scope.Contract.Code[startMin:endMin])
-		// Missing bytes: pushByteSize - len(pushData)
-		if missing := pushByteSize - (endMin - startMin); missing > 0 {
-			integer.ILsh(uint(8 * missing))
-		}
-
-		pc += size
-		return pc, nil, nil
-	}
-}
-
 func makePushStringer(size uint64, pushByteSize int) stringer {
 	return func(pc uint64, scope *CallContext) string {
 		codeLen := len(scope.Contract.Code)
@@ -1580,15 +1531,6 @@ func makePushStringer(size uint64, pushByteSize int) stringer {
 		integer := new(uint256.Int)
 		integer.SetBytes(common.RightPadBytes(scope.Contract.Code[startMin:endMin], pushByteSize))
 		return fmt.Sprintf("%s%d %d", "PUSH", size, integer)
-	}
-}
-
-// make dup instruction function
-func makeDup(size int) executionFunc {
-	depth := size - 1
-	return func(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-		scope.Stack.dup(depth)
-		return pc, nil, nil
 	}
 }
 

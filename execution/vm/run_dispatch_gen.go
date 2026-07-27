@@ -2228,7 +2228,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			}
 			pc, res, err = opPush2(pc, evm, callContext)
 		case OpCode(0x62): // PUSH3
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2249,9 +2248,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush3(pc, evm, callContext)
 		case OpCode(0x63): // PUSH4
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2272,9 +2270,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush4(pc, evm, callContext)
 		case OpCode(0x64): // PUSH5
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2295,9 +2292,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush5(pc, evm, callContext)
 		case OpCode(0x65): // PUSH6
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2318,9 +2314,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush6(pc, evm, callContext)
 		case OpCode(0x66): // PUSH7
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2341,9 +2336,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush7(pc, evm, callContext)
 		case OpCode(0x67): // PUSH8
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2364,9 +2358,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush8(pc, evm, callContext)
 		case OpCode(0x68): // PUSH9
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2387,9 +2380,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush9(pc, evm, callContext)
 		case OpCode(0x69): // PUSH10
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2410,9 +2402,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush10(pc, evm, callContext)
 		case OpCode(0x6A): // PUSH11
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2433,9 +2424,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush11(pc, evm, callContext)
 		case OpCode(0x6B): // PUSH12
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2456,9 +2446,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush12(pc, evm, callContext)
 		case OpCode(0x6C): // PUSH13
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2479,9 +2468,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush13(pc, evm, callContext)
 		case OpCode(0x6D): // PUSH14
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2502,9 +2490,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush14(pc, evm, callContext)
 		case OpCode(0x6E): // PUSH15
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2525,9 +2512,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush15(pc, evm, callContext)
 		case OpCode(0x6F): // PUSH16
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2548,9 +2534,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush16(pc, evm, callContext)
 		case OpCode(0x70): // PUSH17
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2571,9 +2556,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush17(pc, evm, callContext)
 		case OpCode(0x71): // PUSH18
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2594,9 +2578,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush18(pc, evm, callContext)
 		case OpCode(0x72): // PUSH19
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2617,9 +2600,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush19(pc, evm, callContext)
 		case OpCode(0x73): // PUSH20
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2640,9 +2622,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush20(pc, evm, callContext)
 		case OpCode(0x74): // PUSH21
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2663,9 +2644,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush21(pc, evm, callContext)
 		case OpCode(0x75): // PUSH22
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2686,9 +2666,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush22(pc, evm, callContext)
 		case OpCode(0x76): // PUSH23
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2709,9 +2688,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush23(pc, evm, callContext)
 		case OpCode(0x77): // PUSH24
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2732,9 +2710,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush24(pc, evm, callContext)
 		case OpCode(0x78): // PUSH25
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2755,9 +2732,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush25(pc, evm, callContext)
 		case OpCode(0x79): // PUSH26
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2778,9 +2754,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush26(pc, evm, callContext)
 		case OpCode(0x7A): // PUSH27
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2801,9 +2776,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush27(pc, evm, callContext)
 		case OpCode(0x7B): // PUSH28
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2824,9 +2798,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush28(pc, evm, callContext)
 		case OpCode(0x7C): // PUSH29
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2847,9 +2820,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush29(pc, evm, callContext)
 		case OpCode(0x7D): // PUSH30
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2870,9 +2842,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush30(pc, evm, callContext)
 		case OpCode(0x7E): // PUSH31
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2893,9 +2864,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush31(pc, evm, callContext)
 		case OpCode(0x7F): // PUSH32
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
@@ -2916,9 +2886,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opPush32(pc, evm, callContext)
 		case OpCode(0x80): // DUP1
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 1 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
@@ -2941,9 +2910,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opDup1(pc, evm, callContext)
 		case OpCode(0x81): // DUP2
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
@@ -2966,9 +2934,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opDup2(pc, evm, callContext)
 		case OpCode(0x82): // DUP3
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 3}
@@ -2991,9 +2958,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opDup3(pc, evm, callContext)
 		case OpCode(0x83): // DUP4
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 4 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 4}
@@ -3016,9 +2982,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opDup4(pc, evm, callContext)
 		case OpCode(0x84): // DUP5
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 5 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 5}
@@ -3041,9 +3006,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opDup5(pc, evm, callContext)
 		case OpCode(0x85): // DUP6
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 6 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 6}
@@ -3066,9 +3030,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opDup6(pc, evm, callContext)
 		case OpCode(0x86): // DUP7
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 7 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 7}
@@ -3091,9 +3054,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opDup7(pc, evm, callContext)
 		case OpCode(0x87): // DUP8
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 8 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 8}
@@ -3116,9 +3078,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opDup8(pc, evm, callContext)
 		case OpCode(0x88): // DUP9
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 9 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 9}
@@ -3141,9 +3102,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opDup9(pc, evm, callContext)
 		case OpCode(0x89): // DUP10
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 10 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 10}
@@ -3166,9 +3126,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opDup10(pc, evm, callContext)
 		case OpCode(0x8A): // DUP11
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 11 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 11}
@@ -3191,9 +3150,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opDup11(pc, evm, callContext)
 		case OpCode(0x8B): // DUP12
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 12 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 12}
@@ -3216,9 +3174,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opDup12(pc, evm, callContext)
 		case OpCode(0x8C): // DUP13
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 13 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 13}
@@ -3241,9 +3198,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opDup13(pc, evm, callContext)
 		case OpCode(0x8D): // DUP14
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 14 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 14}
@@ -3266,9 +3222,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opDup14(pc, evm, callContext)
 		case OpCode(0x8E): // DUP15
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 15 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 15}
@@ -3291,9 +3246,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opDup15(pc, evm, callContext)
 		case OpCode(0x8F): // DUP16
-			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 16 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 16}
@@ -3316,7 +3270,7 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opDup16(pc, evm, callContext)
 		case OpCode(0x90): // SWAP1
 			cost = 3
 			if sLen := stack.len(); sLen < 2 {
@@ -3721,7 +3675,7 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opLog0(pc, evm, callContext)
 		case OpCode(0xA1): // LOG1
 			operation := jt[op]
 			cost = 0
@@ -3774,7 +3728,7 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opLog1(pc, evm, callContext)
 		case OpCode(0xA2): // LOG2
 			operation := jt[op]
 			cost = 0
@@ -3827,7 +3781,7 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opLog2(pc, evm, callContext)
 		case OpCode(0xA3): // LOG3
 			operation := jt[op]
 			cost = 0
@@ -3880,7 +3834,7 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opLog3(pc, evm, callContext)
 		case OpCode(0xA4): // LOG4
 			operation := jt[op]
 			cost = 0
@@ -3933,7 +3887,7 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = operation.execute(pc, evm, callContext)
+			pc, res, err = opLog4(pc, evm, callContext)
 		case OpCode(0xE6): // DUPN
 			operation := jt[op]
 			cost = operation.constantGas
