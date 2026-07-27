@@ -57,14 +57,19 @@ type pendingPayloadAttestationJob struct {
 	creationTime time.Time
 }
 
+type payloadAttestationValidation struct {
+	done chan struct{}
+}
+
 const (
 	// seenPayloadAttestationCacheSize: PTC has 512 validators per slot.
 	// With clock disparity, we may see attestations for ~2 slots.
 	// 512 * 4 = 2048 provides safety margin.
-	seenPayloadAttestationCacheSize        = 2048
-	pendingPayloadAttestationExpiry        = 30 * time.Second
-	pendingPayloadAttestationCheckInterval = 100 * time.Millisecond
-	maxPendingAttestations                 = 2048
+	seenPayloadAttestationCacheSize            = 2048
+	pendingPayloadAttestationExpiry            = 30 * time.Second
+	pendingPayloadAttestationCheckInterval     = 100 * time.Millisecond
+	maxPendingAttestations                     = 2048
+	maxConcurrentPayloadAttestationValidations = 2
 )
 
 type payloadAttestationService struct {
@@ -80,6 +85,8 @@ type payloadAttestationService struct {
 	pendingAttestations sync.Map // pendingPayloadAttestationKey -> *pendingPayloadAttestationJob
 	pendingCount        atomic.Int32
 	pendingCond         *sync.Cond
+	validationSlots     chan struct{}
+	validationsInFlight sync.Map
 }
 
 // NewPayloadAttestationService creates a new payload attestation service.
@@ -102,6 +109,7 @@ func NewPayloadAttestationService(
 		emitters:              emitters,
 		seenAttestationsCache: seenCache,
 		pendingCond:           sync.NewCond(&sync.Mutex{}),
+		validationSlots:       make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 	}
 	go s.loop(ctx)
 	return s
@@ -167,6 +175,22 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 		return fmt.Errorf("%w: payload attestation slot %d does not match referenced block slot %d", ErrIgnore, slot, blockHeader.Slot)
 	}
 
+	finishValidation, alreadySeen, err := s.beginValidation(ctx, seenKey)
+	if err != nil {
+		return err
+	}
+	if alreadySeen {
+		return fmt.Errorf("%w: already seen payload attestation from validator %d for slot %d", ErrIgnore, validatorIndex, slot)
+	}
+	defer finishValidation()
+
+	select {
+	case s.validationSlots <- struct{}{}:
+		defer func() { <-s.validationSlots }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
 	// Process through forkchoice which handles:
 	// [IGNORE] block state not found
 	// [REJECT] validator is not in PTC
@@ -194,6 +218,27 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 		"blobDataAvailable", data.BlobDataAvailable)
 
 	return nil
+}
+
+func (s *payloadAttestationService) beginValidation(ctx context.Context, key seenPayloadAttestationKey) (func(), bool, error) {
+	for {
+		if s.seenAttestationsCache.Contains(key) {
+			return nil, true, nil
+		}
+		validation := &payloadAttestationValidation{done: make(chan struct{})}
+		existing, loaded := s.validationsInFlight.LoadOrStore(key, validation)
+		if !loaded {
+			return func() {
+				s.validationsInFlight.CompareAndDelete(key, validation)
+				close(validation.done)
+			}, false, nil
+		}
+		select {
+		case <-existing.(*payloadAttestationValidation).done:
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		}
+	}
 }
 
 // queuePendingAttestation adds an attestation to the pending queue for later processing.
