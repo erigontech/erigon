@@ -194,15 +194,20 @@ func TestBranchCache_Stats(t *testing.T) {
 	require.True(t, strings.HasPrefix(s, "branch-cache "))
 }
 
+// twoTailKeyCapacity guarantees per-shard capacity >= 2 across the 256 tail
+// shards, so two tail entries can never evict each other regardless of the
+// per-process maphash seed.
+const twoTailKeyCapacity = 2 * branchCacheTailShards
+
 // TestBranchCache_Unwind_DropsStaleAboveFloorLazily verifies Unwind drops
 // (lazily, on the next Get) every superseded-epoch entry whose txN is at or
 // above the unwind floor, while entries below the floor survive untouched.
 func TestBranchCache_Unwind_DropsStaleAboveFloorLazily(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(twoTailKeyCapacity)
 
 	rootKey := []byte{0x00}
-	tailKeyKeep := []byte{0xa0, 0xb0}
-	tailKeyDrop := []byte{0xa0, 0xb1}
+	tailKeyKeep := []byte{0x1a, 0xb0, 0x00} // odd flag, 5 nibbles → LRU tail
+	tailKeyDrop := []byte{0x1a, 0xb0, 0x01}
 
 	// txN=50 entries — below an unwind floor of 60, so they survive.
 	c.Put(rootKey, []byte("root-keep"), 0, 50)
@@ -218,35 +223,42 @@ func TestBranchCache_Unwind_DropsStaleAboveFloorLazily(t *testing.T) {
 	require.True(t, ok, "tail entry with txN=50 must survive floor=60")
 	_, _, ok = c.Get(tailKeyDrop)
 	require.False(t, ok, "tail entry with txN=100 must drop at floor=60")
+	require.Equal(t, uint64(2), c.tailHits.Load(), "both keys must exercise the LRU tail")
 }
 
-// TestBranchCache_Unwind_AcrossAllTiers verifies lazy invalidation reaches the
-// root slot, not just the LRU tail.
+// TestBranchCache_Unwind_AcrossAllTiers verifies lazy invalidation reaches
+// every tier: the root slot, the resident account trunk, and the LRU tail.
 func TestBranchCache_Unwind_AcrossAllTiers(t *testing.T) {
 	c := NewBranchCache(100)
 
 	rootKey := []byte{0x00}
-	tailKey := []byte{0xa0, 0xb0}
+	trunkKey := []byte{0xa0, 0xb0}      // odd flag, 3 nibbles → account trunk
+	tailKey := []byte{0x1a, 0xb0, 0x00} // odd flag, 5 nibbles → LRU tail
 
 	c.Put(rootKey, []byte("root"), 0, 100)
+	c.Put(trunkKey, []byte("trunk"), 0, 100)
 	c.Put(tailKey, []byte("tail"), 0, 100)
 
 	c.Unwind(50)
 
 	_, _, ok := c.Get(rootKey)
 	require.False(t, ok, "root entry at txN>=floor must drop")
+	_, _, ok = c.Get(trunkKey)
+	require.False(t, ok, "trunk entry at txN>=floor must drop")
 	_, _, ok = c.Get(tailKey)
 	require.False(t, ok, "tail entry at txN>=floor must drop")
+	require.Equal(t, uint64(1), c.trunkHits.Load(), "trunk key must route to the account trunk")
+	require.Equal(t, uint64(1), c.tailHits.Load(), "tail key must route to the LRU tail")
 }
 
 // TestBranchCache_Unwind_FloorBoundary verifies the >= rule at the floor: an
 // entry stamped exactly at the unwind floor belongs to a rolled-back block and
 // drops; an entry one txN below the floor survives.
 func TestBranchCache_Unwind_FloorBoundary(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(twoTailKeyCapacity)
 
-	belowKey := []byte{0xa0, 0xb0}
-	atKey := []byte{0xa0, 0xb1}
+	belowKey := []byte{0x1a, 0xb0, 0x00} // odd flag, 5 nibbles → LRU tail
+	atKey := []byte{0x1a, 0xb0, 0x01}
 	c.Put(belowKey, []byte("below"), 0, 99)
 	c.Put(atKey, []byte("at"), 0, 100)
 
@@ -256,6 +268,7 @@ func TestBranchCache_Unwind_FloorBoundary(t *testing.T) {
 	require.True(t, ok, "entry at txN=floor-1 must survive")
 	_, _, ok = c.Get(atKey)
 	require.False(t, ok, "entry at txN==floor must drop (rolled-back block)")
+	require.Equal(t, uint64(2), c.tailHits.Load(), "both keys must exercise the LRU tail")
 }
 
 // TestBranchCache_Unwind_CurrentEpochSurvives verifies the epoch disambiguates a
