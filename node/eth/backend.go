@@ -856,19 +856,34 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			// published. Only wired here, under the orchestrator-running
 			// branch — the only configuration where those events fire.
 			if dl := backend.components.Downloader.Downloader; dl != nil {
-				dl.EnableV2PublishGate()
-				firstPublishReady := flow.FirstPublishGateChannel(bus)
-				go func() {
-					select {
-					case <-ctx.Done():
-						return
-					case <-firstPublishReady:
-					}
-					dl.OpenV2PublishGate()
-					if err := dl.PublishLocalChainToml(); err != nil {
-						logger.Warn("[snapshot-flow] first gated chain.toml publish failed", "err", err)
-					}
-				}()
+				// A fork initiator boots from `snapshots fork-from` with a
+				// pre-populated snapshot dir + a locally-written chain.v2
+				// manifest set. Its "first publish" advertises info-hashes
+				// the swarm can already fetch; withholding the ENR entry
+				// until the InitialDownloadsComplete + InitialValidationComplete
+				// AND fires produces a bootstrap stall — consumers scan
+				// its peers and see zero chain-toml, so the canonical
+				// view can't converge. Gate is only useful for the
+				// fresh-sync-consumer trajectory where the first
+				// publish shouldn't advertise files we can't self-serve;
+				// RollingV2Publisher.ManifestSelfCheck covers that safety
+				// on every publish independent of this startup gate.
+				isForkInitiator := chainConfig.Parent != ""
+				if !isForkInitiator {
+					dl.EnableV2PublishGate()
+					firstPublishReady := flow.FirstPublishGateChannel(bus)
+					go func() {
+						select {
+						case <-ctx.Done():
+							return
+						case <-firstPublishReady:
+						}
+						dl.OpenV2PublishGate()
+						if err := dl.PublishLocalChainToml(); err != nil {
+							logger.Warn("[snapshot-flow] first gated chain.toml publish failed", "err", err)
+						}
+					}()
+				}
 			}
 
 			mx := &manifestexchange.Provider{}
