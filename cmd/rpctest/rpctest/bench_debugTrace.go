@@ -136,7 +136,8 @@ func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blo
 			continue
 		}
 
-		for idx, txn := range b.Result.Transactions {
+		for idx := range b.Result.Transactions {
+			txn := &b.Result.Transactions[idx]
 			if idx%30 != 0 {
 				continue
 			}
@@ -198,7 +199,8 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 		}
 		nBlocks++
 
-		for _, txn := range b.Result.Transactions {
+		for i := range b.Result.Transactions {
+			txn := &b.Result.Transactions[i]
 			nTransactions++
 
 			request := reqGen.debugTraceCall(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input, bn-1)

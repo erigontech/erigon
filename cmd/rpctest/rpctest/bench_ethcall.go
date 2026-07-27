@@ -57,9 +57,10 @@ func BenchEthCall(erigonURL, gethURL string, needCompare, latest bool, blockFrom
 			continue
 		}
 
-		for _, txn := range b.Result.Transactions {
+		for i := range b.Result.Transactions {
+			txn := &b.Result.Transactions[i]
 
-			nTransactions = nTransactions + 1
+			nTransactions++
 
 			var request string
 			var insertedOnlyIfSuccess bool

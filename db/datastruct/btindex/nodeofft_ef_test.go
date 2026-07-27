@@ -8,12 +8,12 @@
 package btindex
 
 import (
+	"bytes"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/seg"
 )
@@ -40,7 +40,7 @@ func Test_BtreeIndex_NodeOfftEF_V0_V2(t *testing.T) {
 	for gt.HasNext() {
 		k, _ := gt.Next(nil)
 		v, _ := gt.Next(nil)
-		truth[string(k)] = common.Copy(v)
+		truth[string(k)] = bytes.Clone(v)
 	}
 	d.Close()
 

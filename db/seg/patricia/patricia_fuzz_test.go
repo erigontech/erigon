@@ -63,7 +63,7 @@ func FuzzLongestMatch(f *testing.F) {
 		var data []byte
 		for i := 0; i < 4*(len(test)/4); i += 4 {
 			keyIdx := int(binary.BigEndian.Uint32(test[i : i+4]))
-			keyIdx = keyIdx % len(keys)
+			keyIdx %= len(keys)
 			key := []byte(keys[keyIdx])
 			data = append(data, key...)
 			for j := range key {

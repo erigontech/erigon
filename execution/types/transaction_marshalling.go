@@ -512,10 +512,11 @@ func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
 	if err := tx.unmarshalJson(dec); err != nil {
 		return err
 	}
-	tx.Authorizations = make([]Authorization, len(*dec.Authorizations))
-	for i, auth := range *dec.Authorizations {
+	auths := *dec.Authorizations
+	tx.Authorizations = make([]Authorization, len(auths))
+	for i := range auths {
 		var err error
-		tx.Authorizations[i], err = auth.ToAuthorization()
+		tx.Authorizations[i], err = auths[i].ToAuthorization()
 		if err != nil {
 			return err
 		}
