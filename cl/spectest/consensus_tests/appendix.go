@@ -161,16 +161,12 @@ func addSszTests() {
 		//	With("SyncCommitteeMessage", getSSZStaticConsensusTest(&cltypes.SyncCommitteeMessage{})).
 		With("Validator", getSSZStaticConsensusTest(solid.NewValidator())).
 		With("ExecutionPayloadHeader", sszStaticTestNewObjectByFunc(
-			func(v clparams.StateVersion) *cltypes.Eth1Header {
-				return cltypes.NewEth1Header(v)
-			}, withTestJson(),
+			cltypes.NewEth1Header, withTestJson(),
 		)).
 		With("SyncCommitteeContribution", sszStaticTestByEmptyObject(&cltypes.Contribution{})).
 		With("Withdrawal", sszStaticTestByEmptyObject(&cltypes.Withdrawal{}, withTestJson())).
 		With("LightClientHeader", sszStaticTestNewObjectByFunc(
-			func(v clparams.StateVersion) *cltypes.LightClientHeader {
-				return cltypes.NewLightClientHeader(v)
-			}, withTestJson(),
+			cltypes.NewLightClientHeader, withTestJson(),
 		)).
 		With("LightClientUpdate", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.LightClientUpdate {
@@ -193,9 +189,7 @@ func addSszTests() {
 			}, withTestJson(), runAfterVersion(clparams.ElectraVersion),
 		)).
 		With("IndexedAttestation", sszStaticTestNewObjectByFunc(
-			func(v clparams.StateVersion) *cltypes.IndexedAttestation {
-				return cltypes.NewIndexedAttestation(v)
-			}, withTestJson(),
+			cltypes.NewIndexedAttestation, withTestJson(),
 		)).
 		With("BeaconBlock", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.BeaconBlock {
@@ -203,9 +197,7 @@ func addSszTests() {
 			}, withTestJson(),
 		)).
 		With("AttesterSlashing", sszStaticTestNewObjectByFunc(
-			func(v clparams.StateVersion) *cltypes.AttesterSlashing {
-				return cltypes.NewAttesterSlashing(v)
-			}, withTestJson(),
+			cltypes.NewAttesterSlashing, withTestJson(),
 		)).
 		With("BeaconBlockBody", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.BeaconBody {
@@ -229,20 +221,14 @@ func addSszTests() {
 		With("DataColumnsByRootIdentifier", sszStaticTestByEmptyObject(&cltypes.DataColumnsByRootIdentifier{}, runAfterVersion(clparams.FuluVersion))).
 		With("MatrixEntry", sszStaticTestByEmptyObject(&cltypes.MatrixEntry{}, withTestJson(), runAfterVersion(clparams.FuluVersion))).
 		With("DataColumnSidecar", sszStaticTestNewObjectByFunc(
-			func(v clparams.StateVersion) *cltypes.DataColumnSidecar {
-				return cltypes.NewDataColumnSidecarWithVersion(v)
-			}, withTestJson(), runAfterVersion(clparams.FuluVersion),
+			cltypes.NewDataColumnSidecarWithVersion, withTestJson(), runAfterVersion(clparams.FuluVersion),
 		)).
 		// [New in Fulu] Partial data column types
 		With("PartialDataColumnHeader", sszStaticTestNewObjectByFunc(
-			func(v clparams.StateVersion) *cltypes.PartialDataColumnHeader {
-				return cltypes.NewPartialDataColumnHeader(v)
-			}, runAfterVersion(clparams.FuluVersion),
+			cltypes.NewPartialDataColumnHeader, runAfterVersion(clparams.FuluVersion),
 		)).
 		With("PartialDataColumnSidecar", sszStaticTestNewObjectByFunc(
-			func(v clparams.StateVersion) *cltypes.PartialDataColumnSidecar {
-				return cltypes.NewPartialDataColumnSidecar(v)
-			}, runAfterVersion(clparams.FuluVersion),
+			cltypes.NewPartialDataColumnSidecar, runAfterVersion(clparams.FuluVersion),
 		)).
 		With("PartialDataColumnPartsMetadata", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.PartialDataColumnPartsMetadata {
