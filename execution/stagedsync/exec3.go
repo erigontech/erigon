@@ -197,7 +197,7 @@ func ExecV3(ctx context.Context,
 	var lastCommittedBlockNum uint64
 
 	doms.EnableParaTrieDB(cfg.db)
-	doms.EnableTrieWarmup(true)
+	doms.EnableTrieWarmup(!dbg.EnvBool("DISABLE_TRIE_WARMUP", false))
 	doms.SetDeferCommitmentUpdates(false)
 	// Enable deferred commitment updates for fork validation and parallel initial sync.
 	// Deferred updates batch commitment calculations to block boundaries rather than

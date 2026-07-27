@@ -1738,7 +1738,15 @@ func (sd *SharedDomains) computeCommitment(ctx context.Context, tx kv.TemporalTx
 	if err != nil {
 		return nil, err
 	}
-	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)
+	if !dbg.EnvBool("COMMIT_TIMING", false) {
+		return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)
+	}
+	ccStart := time.Now()
+	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)
+	if sd.logger != nil {
+		sd.logger.Info("[commit-timing]", "blk", blockNum, "computeCommitment", time.Since(ccStart))
+	}
+	return rootHash, err
 }
 
 // EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
