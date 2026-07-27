@@ -808,7 +808,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 			require.NoError(t, err)
 
 			t.Logf("trieSequential root @%d hash %x\n", i, sequentialRoot)
-			rSeq = common.Copy(sequentialRoot)
+			rSeq = bytes.Clone(sequentialRoot)
 
 			updsOne.Close()
 
@@ -835,7 +835,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 		require.NoError(t, err)
 		t.Logf("trieBatch of %d root hash %x\n", len(updates), rh)
 
-		rBatch = common.Copy(rh)
+		rBatch = bytes.Clone(rh)
 		updsTwo.Close()
 	}
 	require.Equal(t, rBatch, rSeq, "sequential and trieBatch root should match")
@@ -908,7 +908,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 			require.NoError(t, err)
 
 			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
-			rSeq = common.Copy(sequentialRoot)
+			rSeq = bytes.Clone(sequentialRoot)
 
 			updsOne.Close()
 
@@ -921,7 +921,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 
 				err = sequential.SetState(prevState)
 				require.NoError(t, err)
-				somewhereRoot = common.Copy(sequentialRoot)
+				somewhereRoot = bytes.Clone(sequentialRoot)
 			}
 		}
 	}
@@ -943,7 +943,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 		require.NoError(t, err)
 		t.Logf("(second half) batch of %d root hash %x\n", len(updates)-somewhere, rh)
 
-		rBatch = common.Copy(rh)
+		rBatch = bytes.Clone(rh)
 		updsTwo.Close()
 	}
 	require.Equal(t, rBatch, rSeq, "sequential and batch root should match")
@@ -1139,7 +1139,7 @@ func TestCell_fillFromFields(t *testing.T) {
 	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 	require.NoError(t, err)
 
-	//original := common.Copy(enc)
+	//original := bytes.Clone(enc)
 	fmt.Printf("%s\n", enc.String())
 
 	tm, am, decRow, err := enc.decodeCells()
@@ -1336,7 +1336,7 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 	//	trieOne.keccak.Read(hashed)
 	//	prefixesCnt[string(hashed[:5])]++
 	//	if c := prefixesCnt[string(hashed[:5])]; c < 5 {
-	//		prefixes[string(hashed[:5])] = append(prefixes[string(hashed[:5])], common.Copy(noise))
+	//		prefixes[string(hashed[:5])] = append(prefixes[string(hashed[:5])], bytes.Clone(noise))
 	//	}
 	//}
 	//
@@ -1369,7 +1369,7 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 			require.NoError(t, err)
 
 			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
-			rSeq = common.Copy(sequentialRoot)
+			rSeq = bytes.Clone(sequentialRoot)
 
 			updsOne.Close()
 		}
@@ -1387,7 +1387,7 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 
 		updsTwo.Close()
 
-		rBatch = common.Copy(rh)
+		rBatch = bytes.Clone(rh)
 	}
 	require.Equal(t, rBatch, rSeq, "sequential and batch root should match")
 }

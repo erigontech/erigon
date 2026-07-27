@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 
@@ -1113,7 +1114,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	}
 	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = common.Copy(ret)
+		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -1168,7 +1169,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	}
 	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = common.Copy(ret)
+		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -1213,7 +1214,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	}
 	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = common.Copy(ret)
+		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
