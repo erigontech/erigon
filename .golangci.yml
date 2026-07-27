@@ -50,7 +50,6 @@ linters:
       enabled-checks:
         - ruleguard
       disabled-checks:
-        - captLocal
         - commentFormatting
         - ifElseChain
         - sloppyReassign
