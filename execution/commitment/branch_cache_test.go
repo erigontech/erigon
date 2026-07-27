@@ -232,7 +232,7 @@ func TestBranchCache_Unwind_AcrossAllTiers(t *testing.T) {
 	c := NewBranchCache(100)
 
 	rootKey := []byte{0x00}
-	trunkKey := []byte{0xa0, 0xb0}      // odd flag, 3 nibbles → account trunk
+	trunkKey := []byte{0xa0, 0xb0}      // 2 nibbles (even flag) → account trunk
 	tailKey := []byte{0x1a, 0xb0, 0x00} // odd flag, 5 nibbles → LRU tail
 
 	c.Put(rootKey, []byte("root"), 0, 100)
