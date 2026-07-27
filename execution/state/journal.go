@@ -75,21 +75,26 @@ type journalExtra struct {
 	prevhash             accounts.CodeHash    // kindCode
 	prevcode             []byte               // kindCode
 	prevBalanceVersioned uint256.Int          // kindSelfdestruct, when flagSelfdestructHadBalance is set
+	prevIncarnation      uint64               // kindSelfdestruct, when flagSelfdestructHadIncarnation is set
 }
 
 // journalEntry is a compact tagged union stored inline in journal.entries.
-// Fields are reused across kinds: value holds the reverted uint256, aux the
-// reverted scalar (nonce/refund/log index/incarnation), flags the booleans,
-// extra only what the infrequent kinds need.
+// Fields are reused across kinds: value holds the reverted uint256 — or, for
+// the kinds that revert a plain scalar (nonce/refund/log index), that scalar in
+// its low word via setScalar/scalar — flags the booleans, and extra only what
+// the infrequent kinds need.
 type journalEntry struct {
 	account accounts.Address
 	key     accounts.StorageKey
 	extra   *journalExtra
 	value   uint256.Int
-	aux     uint64
 	kind    entryKind
 	flags   uint8
 }
+
+func scalarValue(v uint64) uint256.Int { return uint256.Int{v} }
+
+func (je *journalEntry) scalar() uint64 { return je.value[0] }
 
 // journal contains the list of state modifications applied since the last state
 // commit. These are tracked to be able to be reverted in case of an execution
@@ -196,10 +201,13 @@ func (j *journal) selfdestructChangeVersioned(account accounts.Address, prev boo
 	if hadIncarnation {
 		flags |= flagSelfdestructHadIncarnation
 	}
-	e := journalEntry{kind: kindSelfdestruct, account: account, value: prevbalance, aux: prevIncarnation, flags: flags}
 	if hadBalance {
-		e.flags |= flagSelfdestructHadBalance
-		e.extra = &journalExtra{prevBalanceVersioned: prevBalanceVersioned}
+		flags |= flagSelfdestructHadBalance
+	}
+	e := journalEntry{kind: kindSelfdestruct, account: account, value: prevbalance, flags: flags}
+	// value already carries prevbalance here, so the incarnation goes out of line.
+	if hadIncarnation || hadBalance {
+		e.extra = &journalExtra{prevBalanceVersioned: prevBalanceVersioned, prevIncarnation: prevIncarnation}
 	}
 	j.append(e)
 }
@@ -217,7 +225,7 @@ func (j *journal) balanceIncreaseTransfer(bi *BalanceIncrease) {
 }
 
 func (j *journal) nonceChange(account accounts.Address, prev uint64, wasCommitted bool) {
-	j.append(journalEntry{kind: kindNonce, account: account, aux: prev, flags: commitFlag(wasCommitted)})
+	j.append(journalEntry{kind: kindNonce, account: account, value: scalarValue(prev), flags: commitFlag(wasCommitted)})
 }
 
 func (j *journal) storageChange(account accounts.Address, key accounts.StorageKey, prevalue uint256.Int, wasCommitted bool) {
@@ -233,11 +241,11 @@ func (j *journal) codeChange(account accounts.Address, prevcode []byte, prevhash
 }
 
 func (j *journal) refundChange(prev uint64) {
-	j.append(journalEntry{kind: kindRefund, aux: prev})
+	j.append(journalEntry{kind: kindRefund, value: scalarValue(prev)})
 }
 
 func (j *journal) addLogChange(txIndex int) {
-	j.append(journalEntry{kind: kindAddLog, aux: uint64(txIndex)})
+	j.append(journalEntry{kind: kindAddLog, value: scalarValue(uint64(txIndex))})
 }
 
 func (j *journal) touchAccount(account accounts.Address, wasCommitted bool, prev uint256.Int) {
@@ -343,7 +351,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			// it to its pre-destruct versioned value, or drop the write if the
 			// self-destruct created it.
 			if je.flags&flagSelfdestructHadIncarnation != 0 {
-				s.versionedWrites.updateIncarnation(je.account, je.aux)
+				s.versionedWrites.updateIncarnation(je.account, je.extra.prevIncarnation)
 			} else {
 				s.versionedWrites.DelIncarnation(je.account)
 			}
@@ -390,22 +398,23 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindNonce:
+		prevNonce := je.scalar()
 		if so, ok := s.stateObjects[je.account]; ok {
-			so.setNonce(je.aux)
+			so.setNonce(prevNonce)
 		} else if s.versionMap == nil {
 			obj, err := s.getStateObject(je.account, false)
 			if err != nil {
 				return err
 			}
 			if obj != nil {
-				obj.setNonce(je.aux)
+				obj.setNonce(prevNonce)
 			}
 		}
 		if s.versionMap != nil {
 			if je.committed() {
 				s.versionedWrites.DelNonce(je.account)
 			} else if _, ok := s.versionedWrites.GetNonce(je.account); ok {
-				s.versionedWrites.updateNonce(je.account, je.aux)
+				s.versionedWrites.updateNonce(je.account, prevNonce)
 			}
 		}
 		return nil
@@ -477,11 +486,11 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindRefund:
-		s.refund = je.aux
+		s.refund = je.scalar()
 		return nil
 
 	case kindAddLog:
-		txIndex := int(je.aux)
+		txIndex := int(je.scalar())
 		if txIndex+1 >= len(s.logs) {
 			panic(fmt.Sprintf("can't revert log index %v, max: %v", txIndex, len(s.logs)-1))
 		}

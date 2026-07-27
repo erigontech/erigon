@@ -12,9 +12,11 @@ import (
 
 // TestJournalEntrySize guards the compact union against accidental bloat,
 // e.g. inlining rare *stateObject/[]byte fields that belong in journalExtra.
+// One cache line is the limit that matters: at 72 B every other entry straddles
+// two lines, doubling the lines touched by the hot append.
 func TestJournalEntrySize(t *testing.T) {
-	if got := unsafe.Sizeof(journalEntry{}); got > 72 {
-		t.Fatalf("journalEntry grew to %d B (want <= 72)", got)
+	if got := unsafe.Sizeof(journalEntry{}); got > 64 {
+		t.Fatalf("journalEntry grew to %d B (want <= 64)", got)
 	}
 }
 
