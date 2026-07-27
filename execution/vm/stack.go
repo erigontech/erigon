@@ -71,7 +71,7 @@ func (st *Stack) pop() uint256.Int {
 func (st *Stack) pop2uint64() (x, y uint64) {
 	st.top -= 2
 	if st.top < 0 || st.top+1 >= stackLimit {
-		panic("evm stack: pop2uint64 index out of range")
+		panic("stack overflow")
 	}
 	return st.data[st.top+1].Uint64(), st.data[st.top].Uint64()
 }
@@ -90,7 +90,7 @@ func (st *Stack) popRef1Peek1() (x, y *uint256.Int) {
 	st.top--
 	t := st.top
 	if t-1 < 0 || t >= stackLimit {
-		panic("evm stack: popRef1Peek1 index out of range")
+		panic("stack overflow")
 	}
 	return &st.data[t], &st.data[t-1]
 }
@@ -100,11 +100,22 @@ func (st *Stack) drop() {
 	st.top--
 }
 
-func (st *Stack) pop3Ref() (x, y, z *uint256.Int) {
+// popRef2 pops the top two items and returns pointers to their slots, x
+// topmost. One range check covers both. Same validity rule as popRef.
+func (st *Stack) popRef2() (x, y *uint256.Int) {
+	st.top -= 2
+	t := st.top
+	if t < 0 || t+1 >= stackLimit {
+		panic("stack overflow")
+	}
+	return &st.data[t+1], &st.data[t]
+}
+
+func (st *Stack) popRef3() (x, y, z *uint256.Int) {
 	st.top -= 3
 	t := st.top
 	if t < 0 || t+2 >= stackLimit {
-		panic("evm stack: pop3Ref index out of range")
+		panic("stack overflow")
 	}
 	return &st.data[t+2], &st.data[t+1], &st.data[t]
 }
@@ -117,7 +128,7 @@ func (st *Stack) swap(n int) {
 	i, j := st.top-n-1, st.top-1
 	// Explicit range check: reducing amount of bounds check
 	if i < 0 || i >= stackLimit || j < 0 || j >= stackLimit {
-		panic("evm stack: swap index out of range")
+		panic("stack overflow")
 	}
 	st.data[i], st.data[j] = st.data[j], st.data[i]
 }
@@ -125,7 +136,7 @@ func (st *Stack) swap(n int) {
 func (st *Stack) dup(n int) {
 	i, j := st.top-n, st.top
 	if i < 0 || i >= stackLimit || j < 0 || j >= stackLimit {
-		panic("evm stack: dup index out of range")
+		panic("stack overflow")
 	}
 	st.data[j] = st.data[i]
 	st.top++

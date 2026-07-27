@@ -290,7 +290,8 @@ func opByte(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 }
 
 func opAddmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y, z := scope.Stack.popRef(), scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef2()
+	z := scope.Stack.peek()
 	z.AddMod(x, y, z)
 	return pc, nil, nil
 }
@@ -301,7 +302,8 @@ func stAddmod(_ uint64, scope *CallContext) string {
 }
 
 func opMulmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y, z := scope.Stack.popRef(), scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef2()
+	z := scope.Stack.peek()
 	z.MulMod(x, y, z)
 	return pc, nil, nil
 }
@@ -447,7 +449,7 @@ func stCallDataSize(_ uint64, scope *CallContext) string {
 }
 
 func opCallDataCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	memOffset, dataOffset, length := scope.Stack.pop3Ref()
+	memOffset, dataOffset, length := scope.Stack.popRef3()
 	dataOffset64, overflow := dataOffset.Uint64WithOverflow()
 	if overflow {
 		dataOffset64 = math.MaxUint64
@@ -478,7 +480,7 @@ func opReturnDataSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, 
 }
 
 func opReturnDataCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	memOffset, dataOffset, length := scope.Stack.pop3Ref()
+	memOffset, dataOffset, length := scope.Stack.popRef3()
 
 	offset64, overflow := dataOffset.Uint64WithOverflow()
 	if overflow {
@@ -547,7 +549,7 @@ func opCodeSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 }
 
 func opCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	memOffset, codeOffset, length := scope.Stack.pop3Ref()
+	memOffset, codeOffset, length := scope.Stack.popRef3()
 	uint64CodeOffset, overflow := codeOffset.Uint64WithOverflow()
 	if overflow {
 		uint64CodeOffset = math.MaxUint64
@@ -560,7 +562,7 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	addr := scope.peekAddress()
 	stack := &scope.Stack
 	stack.drop() // consume addr
-	memOffset, codeOffset, length := stack.pop3Ref()
+	memOffset, codeOffset, length := stack.popRef3()
 	// BAL: EXTCODECOPY is a real state access per EIP-7928.
 	evm.IntraBlockState().MarkAddressAccess(addr, false)
 	len64 := length.Uint64()
@@ -749,7 +751,7 @@ func stMload(_ uint64, scope *CallContext) string {
 }
 
 func opMstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	mStart, val := scope.Stack.popRef(), scope.Stack.popRef()
+	mStart, val := scope.Stack.popRef2()
 	scope.Memory.Set32(mStart.Uint64(), val)
 	return pc, nil, nil
 }
