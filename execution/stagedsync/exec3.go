@@ -528,6 +528,71 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
+func (te *txExecutor) buildBlockTasks(ctx context.Context, tx kv.Tx, blockNum uint64,
+	initialTxNum uint64, inputTxNum uint64, lastFrozenTxNum uint64, readAhead chan uint64,
+	getHeader func(hash common.Hash, number uint64) (*types.Header, error),
+	blockStateCache *state.BlockStateCache) (b *types.Block, txTasks []exec.Task, nextTxNum uint64, partialBlock bool, err error) {
+
+	select {
+	case readAhead <- blockNum:
+	default:
+	}
+
+	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+	if err != nil {
+		return nil, nil, inputTxNum, false, err
+	}
+	b, ok := te.cfg.readAheader.ReadBlockWithSenders(canonicalHash)
+	if b == nil || !ok {
+		b, err = exec.BlockWithSenders(ctx, te.cfg.db, tx, te.cfg.blockReader, blockNum)
+		if err != nil {
+			return nil, nil, inputTxNum, false, err
+		}
+	}
+	if b == nil {
+		return nil, nil, inputTxNum, false, fmt.Errorf("nil block %d", blockNum)
+	}
+	go warmTxsHashes(b)
+
+	txs := b.Transactions()
+	header := b.HeaderNoCopy()
+
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader),
+		te.cfg.engine, te.cfg.author, te.cfg.chainConfig)
+
+	for txIndex := -1; txIndex <= len(txs); txIndex++ {
+		if inputTxNum > 0 && inputTxNum <= initialTxNum {
+			partialBlock = true
+			inputTxNum++
+			continue
+		}
+
+		// Do not oversend, wait for the result heap to go under certain size
+		txTask := &exec.TxTask{
+			TxNum:           inputTxNum,
+			TxIndex:         txIndex,
+			Header:          header,
+			Uncles:          b.Uncles(),
+			Txs:             txs,
+			EvmBlockContext: blockContext,
+			Withdrawals:     b.Withdrawals(),
+			// use history reader instead of state reader to catch up to the tx where we left off
+			HistoryExecution: lastFrozenTxNum > 0 && inputTxNum <= lastFrozenTxNum,
+			Config:           te.cfg.chainConfig,
+			Engine:           te.cfg.engine,
+			Trace:            dbg.TraceTx(blockNum, txIndex),
+			Hooks:            te.hooks,
+			Logger:           te.logger,
+			BlockStateCache:  blockStateCache,
+		}
+
+		txTasks = append(txTasks, txTask)
+		inputTxNum++
+	}
+
+	return b, txTasks, inputTxNum, partialBlock, nil
+}
+
 func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults ...chan applyResult) error {
 	if te.execLoopGroup == nil {
 		return errors.New("no exec group")
@@ -589,27 +654,29 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 		}
 
 		for blockNum := startBlockNum; blockNum <= maxBlockNum; blockNum++ {
-			select {
-			case readAhead <- blockNum:
-			default:
-			}
+			// Per-block committed state cache for parallel workers' GetCommittedState.
+			blockStateCache := state.NewBlockStateCache()
 
-			var canonicalHash common.Hash
-			canonicalHash, err = rawdb.ReadCanonicalHash(blockTx, blockNum)
+			// buildBlockTasks advances inputTxNum, so capture the block's first txNum first.
+			blockStartTxNum := inputTxNum
+
+			var b *types.Block
+			var txTasks []exec.Task
+			// BlockContext: workers override GetHash with their own per-worker
+			// function (installWorkerGetHash) using their own roTx. The
+			// placeholder here uses execRoTx for the serial path fallback.
+			b, txTasks, inputTxNum, _, err = te.buildBlockTasks(ctx, blockTx, blockNum,
+				initialTxNum, inputTxNum, lastFrozenTxNum, readAhead,
+				func(hash common.Hash, number uint64) (h *types.Header, err error) {
+					h, err = te.cfg.blockReader.Header(ctx, blockTx, hash, number)
+					if h == nil && err == nil {
+						h = &types.Header{}
+					}
+					return h, err
+				}, blockStateCache)
 			if err != nil {
 				return err
 			}
-			b, ok := te.cfg.readAheader.ReadBlockWithSenders(canonicalHash)
-			if b == nil || !ok {
-				b, err = exec.BlockWithSenders(ctx, te.cfg.db, blockTx, te.cfg.blockReader, blockNum)
-			}
-			if err != nil {
-				return err
-			}
-			if b == nil {
-				return fmt.Errorf("nil block %d", blockNum)
-			}
-			go warmTxsHashes(b)
 
 			var dbBAL types.BlockAccessList
 			// Read BAL through blockTx (overlay or execRoTx) — do NOT open
@@ -629,54 +696,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 				}
 			}
 
-			txs := b.Transactions()
-			header := b.HeaderNoCopy()
-
-			// BlockContext: workers override GetHash with their own per-worker
-			// function (installWorkerGetHash) using their own roTx. The
-			// placeholder here uses execRoTx for the serial path fallback.
-			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header, err error) {
-				h, err = te.cfg.blockReader.Header(ctx, blockTx, hash, number)
-				if h == nil && err == nil {
-					h = &types.Header{}
-				}
-				return h, err
-			}), te.cfg.engine, te.cfg.author, te.cfg.chainConfig)
-
-			var txTasks []exec.Task
-			// Per-block committed state cache for parallel workers' GetCommittedState.
-			blockStateCache := state.NewBlockStateCache()
-
-			blockStartTxNum := inputTxNum
-			for txIndex := -1; txIndex <= len(txs); txIndex++ {
-				if inputTxNum > 0 && inputTxNum <= initialTxNum {
-					inputTxNum++
-					continue
-				}
-
-				// Do not oversend, wait for the result heap to go under certain size
-				txTask := &exec.TxTask{
-					TxNum:           inputTxNum,
-					TxIndex:         txIndex,
-					Header:          header,
-					Uncles:          b.Uncles(),
-					Txs:             txs,
-					EvmBlockContext: blockContext,
-					Withdrawals:     b.Withdrawals(),
-					// use history reader instead of state reader to catch up to the tx where we left off
-					HistoryExecution: lastFrozenTxNum > 0 && inputTxNum <= lastFrozenTxNum,
-					Config:           te.cfg.chainConfig,
-					Engine:           te.cfg.engine,
-					Trace:            dbg.TraceTx(blockNum, txIndex),
-					Hooks:            te.hooks,
-					Logger:           te.logger,
-					BlockStateCache:  blockStateCache,
-				}
-
-				txTasks = append(txTasks, txTask)
-				inputTxNum++
-			}
-
 			lastExecutedStep := kv.Step(inputTxNum / te.doms.StepSize())
 
 			// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
@@ -691,14 +710,14 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 			// Heads-up to the commitment calculator, ahead of the block's
 			// txResult/blockResult stream and on its own channel. inputTxNum
-			// has been advanced past this block's tasks by the loop above,
+			// has been advanced past this block's tasks by buildBlockTasks above,
 			// so inputTxNum-1 is the block's final txNum.
 			if blockRequests != nil {
 				select {
 				case blockRequests <- &blockRequest{
 					blockNum:   b.NumberU64(),
 					blockHash:  b.Hash(),
-					stateRoot:  header.Root,
+					stateRoot:  b.HeaderNoCopy().Root,
 					firstTxNum: blockStartTxNum,
 					lastTxNum:  inputTxNum - 1,
 					blockTime:  header.Time,
