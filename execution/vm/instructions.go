@@ -827,9 +827,9 @@ func opJumpi(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.Cancelled() {
 		return pc, nil, errStopToken
 	}
-	pos, cond := scope.Stack.pop(), scope.Stack.pop()
+	pos, cond := scope.Stack.popRef2()
 	if !cond.IsZero() {
-		if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
+		if valid, usedBitmap := scope.Contract.validJumpdest(*pos); !valid {
 			if usedBitmap {
 				if evm.config.TraceJumpDest {
 					log.Warn("Code Bitmap used for detecting invalid jump",
@@ -964,8 +964,9 @@ func opSwap16(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 
 func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	var (
-		value        = scope.Stack.pop()
-		offset, size = scope.Stack.pop2uint64()
+		v, o, sz     = scope.Stack.popRef3()
+		value        = *v
+		offset, size = o.Uint64(), sz.Uint64()
 		input        = scope.Memory.GetCopy(offset, size)
 	)
 	return execCreate(pc, evm, scope, value, input, nil)
@@ -985,8 +986,9 @@ func stCreate(_ uint64, scope *CallContext) string {
 
 func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	var (
-		endowment    = scope.Stack.pop()
-		offset, size = scope.Stack.pop2uint64()
+		v, o, sz     = scope.Stack.popRef3()
+		endowment    = *v
+		offset, size = o.Uint64(), sz.Uint64()
 		salt         = scope.Stack.pop()
 		input        = scope.Memory.GetCopy(offset, size)
 	)
