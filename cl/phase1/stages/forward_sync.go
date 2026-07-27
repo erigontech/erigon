@@ -296,7 +296,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	if startSlot < maxReorgRange {
 		startSlot = 0
 	} else {
-		startSlot = startSlot - maxReorgRange
+		startSlot -= maxReorgRange
 	}
 
 	finalizedSlot := cfg.forkChoice.FinalizedCheckpoint().Epoch * cfg.beaconCfg.SlotsPerEpoch

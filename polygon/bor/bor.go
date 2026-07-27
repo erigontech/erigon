@@ -772,16 +772,14 @@ func (c *Bor) Prepare(chain rules.ChainHeaderReader, header *types.Header, state
 	now := time.Now()
 	if header.Time < uint64(now.Unix()) {
 		header.Time = uint64(now.Unix())
-	} else {
+	} else if c.config.IsBhilai(number) && succession == 0 {
 		// For primary validators, wait until the current block production window
 		// starts. This prevents bor from starting to build next block before time
 		// as we'd like to wait for new transactions. Although this change doesn't
 		// need a check for hard fork as it doesn't change any consensus rules, we
 		// still keep it for safety and testing.
-		if c.config.IsBhilai(number) && succession == 0 {
-			startTime := time.Unix(int64(header.Time)-int64(c.config.CalculatePeriod(number)), 0)
-			time.Sleep(time.Until(startTime))
-		}
+		startTime := time.Unix(int64(header.Time)-int64(c.config.CalculatePeriod(number)), 0)
+		time.Sleep(time.Until(startTime))
 	}
 
 	return nil

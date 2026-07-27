@@ -133,7 +133,7 @@ type accessOptions struct {
 	revertable bool
 }
 
-type AccessSet map[accounts.Address]*accessOptions
+type AccessSet map[accounts.Address]accessOptions
 
 func (aa AccessSet) Merge(other AccessSet) AccessSet {
 	if len(other) == 0 {
@@ -559,18 +559,17 @@ func (sdb *IntraBlockState) Logs() types.Logs {
 	return sdb.rawLogs().Copy()
 }
 
-// LogsRootHash returns the RLP hash of every log in the block. Unlike Logs() it
-// hashes the buffer entries directly, which is safe because RlpHash only reads them.
-func (sdb *IntraBlockState) LogsRootHash() common.Hash {
-	return types.RlpHash(sdb.rawLogs())
-}
-
 func (sdb *IntraBlockState) rawLogs() types.Logs {
 	all := make(types.Logs, 0, sdb.logSize)
 	for _, lgs := range sdb.logs {
 		all = append(all, lgs...)
 	}
 	return all
+}
+
+// LogsRlpHash is rlpHash of Logs, without building the flattened slice.
+func (sdb *IntraBlockState) LogsRlpHash() common.Hash {
+	return types.RlpHashLogs(sdb.logs)
 }
 
 // AddRefund adds gas to the refund counter
@@ -2877,9 +2876,10 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 	if opts, ok := sdb.versionedReads.access[addr]; ok {
 		if opts.revertable && !revertable {
 			opts.revertable = false
+			sdb.versionedReads.access[addr] = opts
 		}
 	} else {
-		sdb.versionedReads.access[addr] = &accessOptions{revertable}
+		sdb.versionedReads.access[addr] = accessOptions{revertable: revertable}
 	}
 }
 
@@ -2894,19 +2894,9 @@ func (sdb *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
 	})
 }
 
-// AccessedAddresses returns and resets the set of addresses touched during the current transaction.
-func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
-	access := sdb.versionedReads.access
-	if len(access) == 0 {
-		sdb.recordAccess = false
-		sdb.versionedReads.access = nil
-		return nil
-	}
-	out := make(AccessSet, len(access))
-	maps.Copy(out, access)
-	sdb.recordAccess = false
-	sdb.versionedReads.access = nil
-	return out
+func (sdb *IntraBlockState) AccessedAddr(addr accounts.Address) bool {
+	_, ok := sdb.versionedReads.access[addr]
+	return ok
 }
 
 func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts.Account, source ReadSource, version Version) {
