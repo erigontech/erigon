@@ -61,10 +61,9 @@ func (st *Stack) pushRef() *uint256.Int {
 	return ref
 }
 
-func (st *Stack) pop() (ret uint256.Int) {
+func (st *Stack) pop() uint256.Int {
 	st.top--
-	ret = st.data[st.top]
-	return
+	return st.data[st.top]
 }
 
 // pop2uint64 pops the top two items as their low 64 bits (x topmost) — for
@@ -85,6 +84,18 @@ func (st *Stack) popRef() *uint256.Int {
 }
 
 // drop discards the top item without reading it.
+// popRefPeek pops the top item and returns it together with a pointer to the
+// new top: the operand and write target of a binary op. One range check covers
+// both slots. Same validity rule as popRef.
+func (st *Stack) popRefPeek() (x, y *uint256.Int) {
+	st.top--
+	t := st.top
+	if t-1 < 0 || t >= stackLimit {
+		panic("evm stack: popRefPeek index out of range")
+	}
+	return &st.data[t], &st.data[t-1]
+}
+
 func (st *Stack) drop() {
 	st.top--
 }

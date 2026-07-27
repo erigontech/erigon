@@ -38,7 +38,7 @@ import (
 )
 
 func opAdd(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRefPeek()
 	y.Add(x, y)
 	return pc, nil, nil
 }
@@ -49,7 +49,7 @@ func stAdd(_ uint64, scope *CallContext) string {
 }
 
 func opSub(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRefPeek()
 	y.Sub(x, y)
 	return pc, nil, nil
 }
@@ -60,7 +60,7 @@ func stSub(_ uint64, scope *CallContext) string {
 }
 
 func opMul(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRefPeek()
 	y.Mul(x, y)
 	return pc, nil, nil
 }
@@ -71,7 +71,7 @@ func stMul(_ uint64, scope *CallContext) string {
 }
 
 func opDiv(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRefPeek()
 	y.Div(x, y)
 	return pc, nil, nil
 }
@@ -82,7 +82,7 @@ func stDiv(_ uint64, scope *CallContext) string {
 }
 
 func opSdiv(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRefPeek()
 	y.SDiv(x, y)
 	return pc, nil, nil
 }
@@ -93,7 +93,7 @@ func stSdiv(_ uint64, scope *CallContext) string {
 }
 
 func opMod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRefPeek()
 	y.Mod(x, y)
 	return pc, nil, nil
 }
@@ -104,7 +104,7 @@ func stMod(_ uint64, scope *CallContext) string {
 }
 
 func opSmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRefPeek()
 	y.SMod(x, y)
 	return pc, nil, nil
 }
@@ -161,7 +161,7 @@ func stNot(_ uint64, scope *CallContext) string {
 }
 
 func opLt(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRefPeek()
 	if x.Lt(y) {
 		y.SetOne()
 	} else {
@@ -176,7 +176,7 @@ func stLt(_ uint64, scope *CallContext) string {
 }
 
 func opGt(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRefPeek()
 	if x.Gt(y) {
 		y.SetOne()
 	} else {
@@ -191,7 +191,7 @@ func stGt(_ uint64, scope *CallContext) string {
 }
 
 func opSlt(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRefPeek()
 	if x.Slt(y) {
 		y.SetOne()
 	} else {
@@ -206,7 +206,7 @@ func stSlt(_ uint64, scope *CallContext) string {
 }
 
 func opSgt(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRefPeek()
 	if x.Sgt(y) {
 		y.SetOne()
 	} else {
@@ -221,7 +221,7 @@ func stSgt(_ uint64, scope *CallContext) string {
 }
 
 func opEq(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRefPeek()
 	if x.Eq(y) {
 		y.SetOne()
 	} else {
@@ -251,7 +251,7 @@ func stIsZero(_ uint64, scope *CallContext) string {
 }
 
 func opAnd(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRefPeek()
 	y.And(x, y)
 	return pc, nil, nil
 }
@@ -262,7 +262,7 @@ func stAnd(_ uint64, scope *CallContext) string {
 }
 
 func opOr(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRefPeek()
 	y.Or(x, y)
 	return pc, nil, nil
 }
@@ -273,7 +273,7 @@ func stOr(_ uint64, scope *CallContext) string {
 }
 
 func opXor(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRefPeek()
 	y.Xor(x, y)
 	return pc, nil, nil
 }
