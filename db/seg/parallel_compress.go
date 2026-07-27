@@ -46,8 +46,8 @@ const posCounterSmall = 512
 // posCounter counts position-code frequencies. Positions are bounded by word
 // length, so nearly all increments hit the array; the map is the overflow path.
 type posCounter struct {
-	small [posCounterSmall]uint64
 	big   map[uint64]uint64
+	small [posCounterSmall]uint64
 }
 
 func (p *posCounter) add(k uint64) {

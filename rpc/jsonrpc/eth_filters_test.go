@@ -37,11 +37,12 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func newBaseApiWithFiltersForTest(f *rpchelper.Filters, stateCache *kvcache.Coherent, m *execmoduletester.ExecModuleTester) *BaseAPI {
-	return NewBaseApi(f, stateCache, m.BlockReader, m.Engine, nil, &BaseApiConfig{Dirs: m.Dirs})
+	return NewBaseApi(f, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 }
 
 func TestSubscriptionsRequireFiltersAndNotifier(t *testing.T) {

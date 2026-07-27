@@ -85,7 +85,7 @@ func storageRangeAt(ttx kv.TemporalTx, contractAddress common.Address, start []b
 func storageRangeAtErigon(ttx kv.TemporalTx, contractAddress common.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
 	result := StorageRangeResult{Storage: storageMap{}}
 
-	fromKey := append(common.Copy(contractAddress[:]), start...)
+	fromKey := append(bytes.Clone(contractAddress[:]), start...)
 	toKey, _ := kv.NextSubtree(contractAddress[:])
 
 	r, err := ttx.RangeAsOf(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, kv.Unlim) //no limit because need skip empty records
@@ -135,7 +135,7 @@ func storageRangeAtGethCompat(ttx kv.TemporalTx, contractAddress common.Address,
 
 	// Always scan all storage for this contract — we need to sort by hashed key
 	// to match Geth's trie-based iteration order.
-	fromKey := common.Copy(contractAddress[:])
+	fromKey := bytes.Clone(contractAddress[:])
 	toKey, _ := kv.NextSubtree(fromKey)
 
 	r, err := ttx.RangeAsOf(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, kv.Unlim)

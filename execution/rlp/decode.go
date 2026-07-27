@@ -715,10 +715,10 @@ func (s *Stream) Bytes() ([]byte, error) {
 // copies - any other reader, and single-byte values, which an RLP string does not
 // hold verbatim.
 func (s *Stream) ViewBytes() ([]byte, error) {
-	sr, viewable := s.r.(*sliceReader)
-	if !viewable {
+	if s.sliceRdr == nil {
 		return s.Bytes()
 	}
+	sr := &s.sliceRdr
 	kind, size, err := s.Kind()
 	if err != nil {
 		return nil, err
@@ -973,6 +973,28 @@ func (s *Stream) Addr() (a common.Address, err error) {
 	return a, nil
 }
 
+// ReadHash decodes an RLP string of exactly 32 bytes as a hash. Like Addr, it
+// reads through the stream's scratch buffer and never forces the destination
+// to escape to the heap.
+func (s *Stream) ReadHash() (h common.Hash, err error) {
+	kind, size, err := s.Kind()
+	switch {
+	case err != nil:
+		return h, err
+	case kind == List:
+		return h, ErrExpectedString
+	case kind == Byte:
+		return h, fmt.Errorf("input value has wrong size 1, want %d", len(h))
+	case size != uint64(len(h)):
+		return h, fmt.Errorf("input value has wrong size %d, want %d", size, len(h))
+	}
+	if err = s.readFull(s.uintbuf[:len(h)]); err != nil {
+		return h, err
+	}
+	copy(h[:], s.uintbuf[:len(h)])
+	return h, nil
+}
+
 // ReadUint256 decodes the next value as a uint256.
 func (s *Stream) ReadUint256(dst *uint256.Int) error {
 	var buffer []byte
@@ -1066,11 +1088,14 @@ func (s *Stream) Decode(val any) error {
 		return err
 	}
 
-	err = decoder(s, rval.Elem())
-	var decErr *decodeError
-	if errors.As(err, &decErr) && len(decErr.ctx) > 0 {
-		// Add decode target type to error so context has more meaning.
-		decErr.ctx = append(decErr.ctx, fmt.Sprint("(", rtyp.Elem(), ")"))
+	if err = decoder(s, rval.Elem()); err != nil {
+		// Declared in the error branch only: errors.As takes the target's address,
+		// which heap-allocates it on every call otherwise.
+		var decErr *decodeError
+		if errors.As(err, &decErr) && len(decErr.ctx) > 0 {
+			// Add decode target type to error so context has more meaning.
+			decErr.ctx = append(decErr.ctx, fmt.Sprint("(", rtyp.Elem(), ")"))
+		}
 	}
 	return err
 }
@@ -1106,6 +1131,14 @@ func (s *Stream) Reset(r io.Reader, inputLimit uint64) {
 	bufr, ok := r.(ByteReader)
 	if !ok {
 		bufr = bufio.NewReader(r)
+	}
+	// readFull fast-paths on sliceRdr: adopt a slice-backed reader, clear the
+	// field for any other so stale bytes can't be served.
+	if sr, ok := bufr.(*sliceReader); ok {
+		s.sliceRdr = *sr
+		bufr = &s.sliceRdr
+	} else {
+		s.sliceRdr = nil
 	}
 	s.r = bufr
 	// Reset the decoding context.
@@ -1241,6 +1274,14 @@ func (s *Stream) readFull(buf []byte) (err error) {
 	if err := s.willRead(uint64(len(buf))); err != nil {
 		return err
 	}
+	if s.sliceRdr != nil {
+		n := copy(buf, s.sliceRdr)
+		s.sliceRdr = s.sliceRdr[n:]
+		if n < len(buf) {
+			return io.ErrUnexpectedEOF
+		}
+		return nil
+	}
 	var nn, n int
 	for n < len(buf) && err == nil {
 		nn, err = s.r.Read(buf[n:])
@@ -1262,6 +1303,11 @@ func (s *Stream) readFull(buf []byte) (err error) {
 func (s *Stream) readByte() (byte, error) {
 	if err := s.willRead(1); err != nil {
 		return 0, err
+	}
+	if len(s.sliceRdr) > 0 {
+		b := s.sliceRdr[0]
+		s.sliceRdr = s.sliceRdr[1:]
+		return b, nil
 	}
 	b, err := s.r.ReadByte()
 	if errors.Is(err, io.EOF) {

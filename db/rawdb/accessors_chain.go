@@ -430,27 +430,27 @@ func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawVa
 	return bodyRlp
 }
 
-func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) (types.Transaction, error) {
+func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) (types.Transaction, bool, error) {
 	b, err := ReadBodyForStorageByKey(db, dbutils.BlockBodyKey(blockNum, blockHash))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if b == nil {
-		return nil, nil
+		return nil, false, nil
 	}
 
 	v, err := db.GetOne(kv.EthTx, hexutil.EncodeTs(b.BaseTxnID.At(txIdxInBlock)))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if len(v) == 0 {
-		return nil, nil
+		return nil, false, nil
 	}
 	txn, err := types.DecodeTransaction(v)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return txn, nil
+	return txn, true, nil
 }
 
 func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.Transaction, error) {
@@ -896,7 +896,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 		}
 		// Copying k because otherwise the same memory will be reused
 		// for the next key and Delete below will end up deleting 1 more record than required
-		kCopy := common.Copy(k)
+		kCopy := bytes.Clone(k)
 		if err = tx.Delete(kv.Senders, kCopy); err != nil {
 			return deleted, err
 		}
@@ -947,7 +947,7 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 		}
 		// Copying k because otherwise the same memory will be reused
 		// for the next key and Delete below will end up deleting 1 more record than required
-		kCopy := common.Copy(k)
+		kCopy := bytes.Clone(k)
 		if err := tx.Delete(kv.Senders, kCopy); err != nil {
 			return err
 		}
@@ -1004,6 +1004,7 @@ func ReadHeaderByHash(db kv.Getter, hash common.Hash) (*types.Header, error) {
 	return ReadHeader(db, hash, *number), nil
 }
 
+// DeleteNewerEpochs drops [blockNum, ∞)
 func DeleteNewerEpochs(tx kv.RwTx, number uint64) error {
 	if err := tx.ForEach(kv.PendingEpoch, hexutil.EncodeTs(number), func(k, v []byte) error {
 		return tx.Delete(kv.PendingEpoch, k)

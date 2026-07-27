@@ -1,0 +1,403 @@
+# VersionMap account-lifecycle paths — end-to-end review
+
+## Why this exists
+
+Profiling the 20× `warm-extcodehash` outlier (the biggest peer gap) pinned the cost to
+`Empty()` → `getVersionedAccount` → `refreshVersionedAccount` (a whole-account read +
+4-field refresh, each field re-probing SelfDestruct under the versionMap RWMutex): 25%
+refresh + 19% lock in that cell. The obvious "read the field per-field, skip the refresh"
+spot-fix turned out **not** to be semantically free: a protective test showed `Empty()`
+keys off **AddressPath** (does the record exist?), not the individual fields, so a naive
+per-field `Empty()` changes behaviour in the field-write-without-AddressPath edge.
+
+That coupling is the point. The parallel executor's versionMap carries **four synthetic
+account-lifecycle paths** that were added incrementally to make parallel match serial:
+
+| path | meaning | sole/primary writer | why added |
+|---|---|---|---|
+| `AddressPath` | record exists / was created (base account) | `createObject` | #19266 — record the *nil* read so OCC catches Tx0-creates / Tx1-assumed-absent |
+| `SelfDestructPath` | destroyed | `Selfdestruct` | ordered before BalancePath so same-tx SD zeroes balance |
+| `IncarnationPath` | re-created (incarnation bump) | Create / SD | precise "re-created" signal; BalancePath overfires for every gas payer |
+| `CreateContractPath` | contract-create flag | createObject path | EIP-6780 / metamorphic CREATE2 |
+
+vs. the real state fields: Balance, Nonce, Code, CodeHash, CodeSize, Storage.
+
+These four grew one bug at a time ("serial worked, parallel didn't"). Now that parallel is
+correct, the goal is to examine the lifecycle logic **for its own internal consistency** as
+one model — not more spot fixes — **without introducing regressions**. The perf wins
+(dropping the whole-account refresh, cheap per-field warm reads) should fall out of a
+cleaner lifecycle model rather than being bolted on.
+
+## End-to-end account-lifecycle flow (paths touched)
+
+- **Create** (CREATE / first transfer-in): `createObject` writes `AddressPath` (base
+  record) + `CodeHashPath` (invalidate stale pre-create GetCodeHash) + `IncarnationPath` /
+  `CreateContractPath`; later setters write `BalancePath`/`NoncePath` as deltas.
+- **Mutate existing** (balance transfer): reader = `AddressPath` base ⊕ field overlay
+  (`refreshVersionedAccount`); writer records **only** the touched field path. No AddressPath.
+- **Destroy**: writes `SelfDestructPath=true`, `IncarnationPath`, `BalancePath=0`. No
+  AddressPath. Cross-tx readers see nil via the SelfDestructPath gate in `getVersionedAccount`.
+- **Revive / metamorphic CREATE2**: re-writes `AddressPath` (same txIdx → `>=` revival
+  check; sub-fields use strict `>`).
+- **Read** (`GetBalance`/`Empty`/`Exist`): route through `AddressPath` first (existence +
+  base), then field overlay (GetBalance) or `data.Empty()` on the reconstructed account.
+  A nil AddressPath read is **recorded** so OCC can invalidate on a later create.
+
+## Are the four paths redundant / ordered? (enumeration finding)
+
+**They are designed as independent fields, but semantically encode one lifecycle.**
+The `AddressEntry` invariant (versionmap.go:86-96) is explicit: *"no consumer treats
+AddressEntry as a transactional whole… reads, writes, mark-estimate/complete, delete and
+validation all operate at (Path, Key) granularity."* So at the design level the four
+lifecycle paths are just four independent cells. But they jointly answer one question —
+what is this account's lifecycle state (exists? destroyed-at? re-created-at?) — and that
+interdependence is implemented as **scattered cross-checks**, not one model:
+
+- `validateReadImpl` (versionmap.go:897-958): a sub-field read with no cell folds onto
+  AddressPath; storage/property reads cross-validate against AddressPath **and**
+  SelfDestructPath; a nil-AddressPath read additionally checks IncarnationPath.
+- `getVersionedAccount` (intra_block_state.go:980-1008): SelfDestruct gate + revival.
+- `versionedStateReader.ReadAccountData` (versionedio.go:1346-1373): SelfDestruct gate + revival.
+- Enum order (versionmap.go:50-55): SelfDestructPath **before** BalancePath so `updateWrite`
+  zeroes the same-tx balance — a load-bearing processing order.
+
+**Internal inconsistency (concrete — a 2-vs-1, not three ways).** The two *readers* agree
+exactly: `getVersionedAccount:987-1004` and `versionedStateReader.ReadAccountData:1352-1369`
+both compute revived as `AddressPath >= destructTx` **OR** `{Balance,Nonce,CodeHash} > destructTx`.
+The *validator* `validateReadImpl:907` computes it as `{Balance,Nonce,CodeHash} > destructTx`
+only — it **omits the `AddressPath >=` arm**. The gap bites precisely in the same-tx
+metamorphic SD+CREATE2 case: a revival that re-writes AddressPath (and CodeHash) at the
+*same* txIdx as the destruct is caught by the readers' `AddressPath >=` but missed by the
+validator's strict `>` (CodeHash written *at* destructTx fails `> destructTx`). Readers then
+surface the revived account while the validator marks the read invalid → the divergence to
+characterize (is it benign conservative re-exec, or a spurious-abort/correctness issue?).
+This is the accretion — each arm added to fix one parallel-vs-serial bug in one path.
+
+**Pinned (revival_consistency_test.go).** Characterization confirms the divergence is *not*
+observable on any production history: a same-tx metamorphic SD+CREATE2 re-writes the read's
+own field (Balance/CodeHash) at the revival tx, so a stale pre-destruct read is invalidated by
+`checkVersion` before the revival arm matters — reader and validator agree. The verdicts only
+diverge in a synthetic AddressPath-*only* revival (no field co-write), which `createObject`
+never emits (it always co-writes CodeHash at 1664). So the validator's missing `AddressPath >=`
+arm is safe **only because of that co-write** — a fragile, load-bearing invariant the
+rationalization must keep (or make the AddressPath arm explicit at the validator).
+
+**Two distinct kinds of redundancy** (don't conflate them):
+1. *Lifecycle redundancy — traced, and the candidate cleared.* `CreateContractPath` looked
+   redundant vs `IncarnationPath` in the *validation* path (it only appears in exclusion lists,
+   versionmap.go:901, and `noValueRead`, versionmap.go:1050). But the trace (gap 3) shows it is
+   **not** redundant: it carries a distinct signal consumed on the **apply** side —
+   `rw_v3.go:206` uses `d.createContract` to `DomainDelPrefix(StorageDomain)`, clearing stale
+   storage before re-creation (mirroring `Writer.CreateContract`), and it marks contract
+   creation so a newly-deployed empty contract is not pruned (intra_block_state.go:1835). It is
+   contract-specific (a plain account create does not set it), whereas `IncarnationPath` is the
+   read-validation revival discriminator (validateReadImpl:950-958, distinct because
+   BalancePath "overfires for every gas payer"). All four lifecycle paths are non-redundant.
+2. *Code-family redundancy* — `CodePath`/`CodeHashPath`/`CodeSizePath` co-write as a trio
+   (one code change bumps all three) but are kept separate as a **read-cost** optimization
+   (answer EXTCODEHASH/EXTCODESIZE without loading bytes). This one is intentional and stays;
+   the lever is unifying the *write* stamp, not removing a path. See the state-field section.
+
+**Test coverage:** the individual scenarios are covered — versionmap_test.go,
+versionedio_test.go, versioned_read_paths_test.go, parallel_fixes_test.go (path-level) +
+the SD/recreate suite (state/database_test.go, tests/statedb_chain_test.go,
+tests/blockchain_test.go). Three **gaps** — the invariants to pin *before* touching anything:
+1. No single test pins the three revival sites (`getVersionedAccount:987`,
+   `versionedStateReader:1352`, `validateReadImpl:907`) against one lifecycle verdict — in
+   particular the readers-vs-validator `AddressPath >=` gap in same-tx metamorphic revival.
+   The exact consistency the rationalization must not break. (First test to add.)
+2. Code-trio value-vs-noValue split — **traced and pinned** (code_trio_validation_test.go):
+   the divergence is reachable only for a StorageRead-sourced collision (not MapRead) and is
+   benign (CodeHash tiebreaker keeps a still-matching cold read valid; Code/CodeSize are
+   conservatively invalidated). It is an intentional read-cost optimization, not a bug.
+3. `CreateContractPath` contribution — **traced and pinned** (create_contract_path_test.go):
+   contract creation records it, a plain account creation does not. The trace concluded it is
+   *not* redundant (distinct apply-side storage-clear role), so it is not a removal candidate;
+   the test guards against a "fold into IncarnationPath" simplification dropping the signal.
+
+**Direction:** replace the scattered independent-field cross-checks with **one authoritative
+lifecycle resolver** (`account lifecycle @ txIndex → {exists, destroyedAt, recreatedAt}`)
+that reads, `Empty`/`Exist`, and validation all consult with a single consistent revival
+definition. That (a) removes the three-way inconsistency, and (b) removes the per-read
+over-work (each read/Empty re-deriving lifecycle via ad-hoc probes → the profiled 25%/19%),
+with the no-regression suite as the gate.
+
+## The six state-field paths (enumeration — the rest of the picture)
+
+Beyond the four lifecycle paths, the map carries six real state fields. Enumerating each
+one's write sites, read function, validation class and revival participation exposes a
+**second, different kind of redundancy** (the code trio) and a validation-class asymmetry
+the lifecycle review must not disturb.
+
+| path | writers (intra_block_state.go) | read fn | in-mem refresh | validation class | revival participant |
+|---|---|---|---|---|---|
+| `BalancePath` | AddBalance/SubBalance/SetBalance (906/930), transfer (1141/1157), SD-zero (1383), create (1853) — **every gas payer** | `readBalance` | `refreshBalance` | **value** (`liveBalance`/`eqUint256`) | yes (revival probe 907) |
+| `NoncePath` | SetNonce (1173) | `readNonce` | `refreshNonce` | **value** (`liveNonce`/`eqUint64`) | yes (revival probe 907) |
+| `CodePath` | SetCode trio (1231), finalise trio (2914) | `readCode` | `refreshCode` | **noValue** (status only) | no (excluded at 901) |
+| `CodeHashPath` | SetCode trio (1232), finalise trio (2915), **create alone (1664)** | `readCodeHash` | `refreshCodeHash` | **value** (`liveCodeHash`/`eqCodeHash`) | yes (revival probe 907) |
+| `CodeSizePath` | SetCode trio (1233), finalise trio (2916) | `readCodeSize` | — (none) | **noValue** (status only) | no |
+| `StoragePath` | SetState (1293), SD/create clear (2014/2147) | `readState` | — (per-key) | **value** (`liveStorage`/`eqUint256`) | via AddressPath+SelfDestruct cross-validate (929-945) |
+
+Findings from the state-field enumeration:
+
+- **Code-family redundancy (a real, distinct redundancy).** `CodePath`, `CodeHashPath`,
+  `CodeSizePath` are *always written as a trio* (1231-1233, 2914-2916) — one code change
+  bumps all three. As lifecycle/versioning signals they are redundant (the hash alone
+  identifies the code; size is derivable from bytes). They are kept separate purely as a
+  **read-cost optimization**: EXTCODEHASH / EXTCODESIZE must answer without loading the full
+  code bytes. So — unlike `CreateContractPath` — this redundancy is *intentional and load-
+  bearing on the read side*; the rationalization should preserve the three read entry points
+  but can unify how a *write* stamps them (one code-write → one lifecycle bump).
+- **Validation-class asymmetry (traced, pinned in code_trio_validation_test.go).**
+  `CodeHashPath` is a **value path** (tiebreaker) but `CodePath`/`CodeSizePath` are
+  **noValueRead**. The split is observable **only for a StorageRead-sourced read** — a cold
+  read that saw no VM entry at exec time but now collides with a concurrent Done flush. For a
+  MapRead the tiebreaker is bypassed (validateReadImpl:894 uses `checkVersion` for every
+  path), so map reads show no asymmetry. In the StorageRead collision (no BAL) a still-matching
+  CodeHash read survives via the tiebreaker while the co-written Code/CodeSize reads invalidate.
+  The divergence is **benign** — the hash is unchanged so the read is accurate; the version/
+  status checks are conservative, never wrong — and it is exactly what lets an EXTCODEHASH-only
+  tx skip a re-execution on such a collision. Not a bug: an intentional read-cost optimization.
+- **`CodeHashPath` double role.** It is written both in the code trio *and* alone by
+  `createObject` (1664) to invalidate a stale pre-create `GetCodeHash`. That second write is
+  a lifecycle signal riding a state-field path — the one place a state field does lifecycle
+  work, and a candidate to fold into the lifecycle resolver.
+- **`refreshVersionedAccount` refreshes exactly {Balance, Nonce, Incarnation, CodeHash}**
+  (1019/1039/1059/1079), each taking the max version. These are precisely the value/revival
+  paths minus Storage. `Empty()` needs only Balance/Nonce/CodeHash; Incarnation is refreshed
+  but unused by Empty — the profiled waste. CodeSize/Code/SelfDestruct/CreateContract are
+  *not* in the whole-account refresh (they have their own read paths), confirming the refresh
+  is a partial, Empty-oriented reconstruction, not a true whole-account load.
+
+## Primary question: where does the parallel hierarchy use the IBS stateObject?
+
+The goal is to make the parallel-path stateObject **redundant**, so `so.data` never needs to
+be kept in sync with the versionMap cells — at which point `refreshVersionedAccount` (the sync)
+and the `stateObjects` cache can be dropped from the parallel path entirely. Map of the
+remaining touchpoints (versionMap != nil):
+
+- **Reads — already off the stateObject.** Every getter (`GetBalance/GetNonce/GetCode/
+  GetCodeHash/GetCodeSize/GetState`) has a `versionMap == nil` serial branch (stateObject) and
+  a parallel branch that goes straight to `readX`/`versionedReadCore`. `Empty`/`Exist` were the
+  last stragglers — moved onto per-field reads in Phase 1. **Nothing on the parallel read path
+  needs the stateObject.**
+- **Writes — still materialize it, but the value doesn't come from it.** `AddBalance/
+  SubBalance/SetNonce/SetCode/SetState/SelfDestruct` call `GetOrNewStateObject` (→
+  `getStateObject` → `getVersionedAccount` → `refreshVersionedAccount`: the sync), mutate
+  `so.data`, then `recordWrite*`. But the *input* to the write already comes from the versionMap
+  (`prev` in `SubBalance` is `getBalance`, a direct versionMap read), and the *output* is carried
+  by `recordWrite*` into the versioned write-set. The `so.data` mutation has **no parallel
+  reader**.
+- **The only remaining parallel consumers of `so.data`** are therefore: (a) `getStateObject`'s
+  own refresh-sync (self-referential — needed only to feed the mutation), and (b) the
+  **journal / RevertToSnapshot**, which snapshots and restores `so.data` for intra-tx revert.
+
+**Path to redundancy (Phase 2):** the write value is already sourced from the versionMap and
+recorded into the write-set independently of `so.data`, so the one load-bearing use is
+intra-tx revert. Move revert onto the versioned write-set/journal (not `so.data`); then
+`GetOrNewStateObject`'s materialization + `refreshVersionedAccount` sync are dead on the
+parallel path and can be removed, taking their reads/locks/allocs with them. (Matches the
+staged plan: the hard part is moving intra-tx revert/journal off `so.data`.)
+
+## Phase 2 execution plan (parallel stateObject removal)
+
+Goal: the parallel path never materializes/reconstructs the stateObject, so
+`refreshVersionedAccount` (the so.data↔versionMap sync) and the write-path
+`getStateObject` refresh are dead. Reads already bypass so.data; the write path is
+the remaining consumer. `balanceChange.revert` already reverts `versionedWrites`
+independently of so.data — the only coupling is the journal recording `prev` from
+so.data, which forces the refresh.
+
+### Corrected ordering (2026-07-07): commit path is the real blocker, migrate it first
+
+An initial attempt at the balance slice (decouple `AddBalance`/`SubBalance`/`SetBalance`
+from so.data, skip materialization for existing-alive accounts) produced wrong trie
+roots in `TestCreate2Revive`/`TestSelfDestructReceive`/`TestRecreateAndRewind`. A
+forced-materialize diagnostic confirmed the *sole* cause: the parallel **commit** path
+still reads so.data for part of the block. The premise "so.data has no reader on the
+write path" was wrong — the *commit* reads it.
+
+The parallel flow today carries **two commit representations**:
+
+- **Regular txs — already write-set-based.** `rawWrites = blockIO.WriteSet(txIndex)`
+  (the merged `versionedWrites`) → `normalizeWriteSet(...)` → `txResult.writes` →
+  `ApplyStateWrites`. so.data is not consulted. (exec3_parallel.go:2617)
+- **Block finalize (rewards / withdrawals / syscalls) — still so.data-based.** The
+  finalize task captures `ivw := ibs.VersionedWrites(true)` (recorded to blockIO,
+  flushed to the versionMap) **but then discards it as the commit source** and builds
+  `finalizeWrites` via `MakeWriteSet(collector)` → `updateAccount(so.data)`.
+  (exec3_parallel.go:2855) A finalize `AddBalance(coinbase, reward)` that takes a
+  no-materialize fast path leaves no stateObject → `MakeWriteSet` skips it → the reward
+  is dropped → wrong root.
+
+`MakeWriteSet`/`FinalizeTx` (so.data → `updateAccount` → stateWriter) are the legacy
+methods that keep the duality alive. They are still used by: parallel finalize
+(exec3_parallel.go:2855, 1633), the serial executor (exec3_serial.go:438,
+versionMap==nil — stays), historical/trace workers (txtask.go:537/619,
+historical_trace_worker.go:197), genesis write, and RPC state-test util. Plus
+`GetRemovedAccountsWithBalance` (EIP-7708) reads `obj.Balance()` from so.data.
+
+**Corrected order:**
+
+1. **Phase 2a — unify the parallel commit on the write-set.** Migrate the finalize-task
+   commit (exec3_parallel.go:2855) off `MakeWriteSet(collector)` onto the same
+   `normalizeWriteSet(ivw, ...)` → apply path the regular txs already use, so the whole
+   parallel flow commits purely from `versionedWrites`. `ivw` is already in hand at that
+   site. Replicate `MakeWriteSet`'s remaining semantics (EIP-161 empty-removal,
+   EIP-6780 same-tx-SD storage-zeroing, reverted-write reconciliation) via
+   `normalizeWriteSet`'s params (the regular-tx path is the template). Audit the other
+   so.data finalize/EIP-7708 consumers. **This must be green before 2b.**
+2. **Phase 2b — decouple the write-path setters** (balance/nonce/code/storage) from
+   so.data, per the slices below. Only safe once nothing reads so.data at commit.
+
+### Complete usage census (2026-07-08) — every so.data commit call site
+
+`EXEC3_PARALLEL` defaults **true** (dbg/experiments.go:84), so both block import
+(parallel executor) *and* block generation (chain_makers.go:455, `needsVersionMap =
+Exec3Parallel || AmsterdamTime`) run with a versionMap. That is why versionMap-gated
+write changes fire even in non-Amsterdam SD/recreate tests.
+
+**versionMap != nil (must be write-set-sourced):**
+- exec3_parallel.go:2855 — finalize task. **DONE** (d4dd1a4b46): `normalizeWriteSet(ivw)`.
+- exec3_parallel.go:1633 — `finalizeSystemTx`: `ApplyVersionedWrites(TxOut)` → so.data →
+  `FinalizeTx(collector)`. The **domain commit already comes from the returned write-set**
+  (`VersionedWrites(false)` → `addWrites` → `RecordWrites` → `normalizeWriteSet@2617`); the
+  `collector` output is **discarded** (caller ignores it, 2549 `_`). So so.data here is
+  vestigial for domains — the FinalizeTx call clears the journal and (redundantly) re-emits
+  to a dead collector. Low-risk to drop the so.data emit.
+- exec3_serial.go:438 — serial executor. Runs when `!parallel` (versionMap==nil normally),
+  BUT the same `MakeWriteSet` is reached with versionMap set via the worker path; the
+  domain commit for regular txs is `TxOut`→`normalizeWriteSet@2617`, and the worker's
+  `MakeWriteSet`→`CollectorWrites` (txtask.go:619) is filtered by the versionMap
+  (`filterWritesByVersionMap`) and feeds BlockStateCache/fee-adjust, **not** the primary
+  trie. So its so.data output is also non-authoritative for domains.
+- **Block production — the confirmed remaining blocker.** chain_makers.go:562 (test
+  generator) and builder/exec.go:153/225→block_exec.go:357 (production PoS assembler) set
+  a versionMap and commit the *block-producing* state via `CommitBlock`→`MakeWriteSet`→
+  so.data. The balance-slice diagnostic (finalize already migrated) still failed — traced
+  to the **generation** side producing a wrong expected-header root because its so.data
+  commit dropped the fast-path writes. These two must commit from the write-set.
+
+**versionMap == nil (stays on so.data):** exec3_serial serial-only blocks, all rpc/jsonrpc/*
+(trace/simulate/callMany/overlay/witness/receipts), cmd/evm (t8ntool/runner), genesiswrite,
+polygon/tracer, protocol/state_processor + block_exec (RPC callers), and every `*_test.go`
+that isn't exercising the parallel path.
+
+### Unification design (Mark: fold into normalizeWriteSet; do the whole surface)
+
+The clean end-state: one write-set → committed-state authority. Since block-production sites
+live outside `stagedsync` (can't call the unexported `normalizeWriteSet`), the plan:
+1. Relocate `normalizeWriteSet` (pure `WriteSet`+`vm`+`stateReader`+`domainStorageKeys` →
+   `WriteSet` transform) into package `state` so builder/blockgen/stagedsync all share it.
+2. Add a `WriteSet → StateWriter` adapter in `state` (emit `UpdateAccountData` /
+   `DeleteAccount` / `UpdateAccountCode` / `WriteAccountStorage` from the normalized set),
+   so the existing `stateWriter` contract is preserved but sourced from `versionedWrites`
+   instead of `so.data`.
+3. Route the versionMap!=nil commit sites (`CommitBlock`/`MakeWriteSet` in block production,
+   the vestigial system-tx emit) through `normalizeWriteSet` + the adapter; the serial /
+   RPC (versionMap==nil) sites keep the so.data path.
+4. Open coupling: `domainStorageKeys` (full SD storage cascade) needs domain prefix
+   iteration — block-production sites have domain access; thread it in as the executor does.
+
+Done: reads (getters), Empty/Exist (Phase 1), TouchAccount (increment 1 — existing
+accts compute emptiness via `emptyFromVersionedFields`, absent falls through to
+`GetOrNewStateObject` so `createObject` records AddressPath).
+
+Remaining, as **per-field vertical slices** (balance first, then nonce/code/storage),
+each gated by state -race + SD/recreate/OCC + hive engine-api + eest-devnet BAL:
+
+**Balance slice.** `AddBalance`/`SubBalance` already hold `prev` from `getBalance`
+(versionMap-direct). Replace the `GetOrNewStateObject` + `stateObject.SetBalance`
+with: append `balanceChange{prev, wasCommited}` + `OnBalanceChange(prev, update)`
+trace hook + `recordWriteBalance(update)` — no so.data. `SetBalance` reads current
+first for the journal `prev`. Revert stays as-is (materializes lazily only on the
+rare revert). **Subtlety:** `AddBalance`/`SetBalance` to an *absent* account must
+still `createObject` (AddressPath write for OCC create-detection) — existing accts
+skip materialization, absent keep it (mirror TouchAccount's split; needs an
+existence signal `getBalance` doesn't yet surface).
+
+**GetDelegatedDesignation.** Needs a code read with storage fallback AND no
+OCC-recording (refreshCode is no-record but skipStorage → misses cold code;
+readCode has fallback but records). Add a fallback+no-record code-read variant.
+
+Then delete the write-path `refreshVersionedAccount`.
+
+## Precise measurement (after Phase 2)
+
+The "structural OCC per-read tax" framing is currently an **inference** from the
+base-profile `versionedReadCore` decomposition, not a measurement of the changed
+warm path (the 53–265 ms cells are too thin for signal, and no geth comparison
+exists). Before optimizing the vio paths further: add fine-grained pprof labels
+(`vio-read`/`vio-write` or per-path) + extend `dbg.KVReadLevelledMetrics` into the
+versionedio read/write primitives, and use a higher-signal workload, so time
+attribution is measured rather than inferred.
+
+## Follow-on: versionMap RWMutex strategy (deferred)
+
+Profiling the warm-extcodehash cell focused on `sub:exec-worker` shows `VersionMap.mu`'s
+`sync.RWMutex` `readerCount` atomic as the top non-GC cost (`atomic.(*Int32).Add` 19% flat,
+~73% from `RLock`): 6 workers reading the map concurrently ping-pong one counter cache line.
+The RLock can't be elided (it guards concurrent btree mutation), only acquired less often.
+
+The shipped SD-probe memo removes ~80% of the SelfDestruct-probe locks. The remaining
+per-field `ReadX` acquisitions are the follow-on target, via one of:
+- **Batched read** — one `RLock` + one `vm.s[addr]` lookup for all account fields in a refresh
+  (transparent semantics; also cuts redundant map lookups).
+- **Sharding `VersionMap.mu`** by address hash — spreads the atomic across cache lines.
+
+**The load-bearing open question (the reason it's deferred):** `FlushVersionedWrites` takes
+one lock and writes all of a tx's paths atomically; its doc claims that atomicity prevents a
+reader seeing a partial flush (AddressPath but not the same-tx CodePath), which could make BAL
+hashes non-deterministic. **But** OCC validation runs in the verification thread on the same
+tx's read-set — a read that observed a partial flush should be caught there and re-executed,
+so the atomic-flush guarantee may not actually be required. Confirming this (with care) is the
+prerequisite for sharding, and it also relaxes the batched-read design. Do not weaken the
+flush lock without pinning that OCC-catches-partial-reads invariant as a test first.
+
+## Internal-consistency questions to resolve (the review)
+
+1. **Existence vs re-creation vs create-flag overlap.** AddressPath (exists), IncarnationPath
+   (re-created), CreateContractPath (contract-created) all signal facets of "the account came
+   into being." Do all three carry independent information the validator/revival logic needs,
+   or can the model be reduced? The `>=` (AddressPath) vs `>` (sub-fields) revival split is a
+   known subtlety (#21590) — is it consistent across every reader (`getVersionedAccount`,
+   `versionedStateReader.ReadAccountData`, `validateReadImpl`)?
+2. **Is `refreshVersionedAccount` (whole-account reconstruction) necessary at all** if reads
+   are per-field with AddressPath consulted only for existence? It exists to keep the
+   record-level stateObject consistent with per-field cells — the "unnecessary per-tx cache"
+   (Mark). A per-field read model that consults AddressPath *only* for the existence/empty
+   decision would remove the refresh without the whole-account overlay.
+3. **The recorded nil-AddressPath read** (#19266) is load-bearing for create/absent conflict
+   detection. Any per-field `Empty()`/read rewrite must preserve it (the invariant documented
+   at `intra_block_state.go:541-549`).
+4. **SelfDestruct probe per read.** `versionedReadCore` re-probes `ReadSelfDestruct` (RWMutex)
+   on every field read; it's a per-addr value stable within a tx. Once the lifecycle model is
+   settled, this is memoizable per-addr per-tx (the 19% lock lever) — but only after the
+   revival/`>=` interactions above are pinned.
+
+## Approach
+
+- **Understand → pin invariants as tests → rationalize → measure.** Before changing the
+  lifecycle logic, capture the current cross-tx invariants (create/absent race, SD-zero,
+  same-tx-SD-still-alive per EIP-6780, metamorphic revival) as focused tests using realistic
+  AddressPath+field writes (two-IBS-sharing-a-versionMap), so any rationalization that changes
+  behaviour fails loudly.
+- **No regressions is the hard gate:** the SD/recreate/OCC suite (`TestGeneratedTraceApiCollision`,
+  `TestRecreateAndRewind`, `TestSelfDestructReceive`, `TestDeleteRecreateSlotsAcrossManyBlocks`,
+  the versionmap validation tests) + hive engine-api + eest-devnet(BAL) + the perf cells
+  (`warm-extcodehash`, `*-contract`) re-measured on the harness.
+- The perf targets (drop the whole-account refresh, cheap per-field reads, memoized SD probe)
+  are the *outcome* of a consistent lifecycle model, validated against the above.
+
+## Perf baseline (before any change)
+`perf_results/rebaseline-postmerge-21536-100M-serial.csv` (merged binary vs B0).
+
+**Micro-bench caveat (corrected 2026-07-07):** `BenchmarkWarmExtCodeHash` (~471 ns/op, 408 B,
+7 allocs) does **not** exercise `refreshVersionedAccount`. With only field cells and an empty
+reader, `readAccount` returns nil and `Empty()` short-circuits on the absent path
+(`getVersionedAccount` returns before the refresh). Reproducing the warm-refresh path in a
+unit bench needs a populated reader/domains, not just versionMap cells — verified: writing
+AddressPath alone still reads empty. **The 20× warm-extcodehash gap must be profiled/measured
+on the benchmarkoor cell** (per the perf skill), not this micro-bench. The refresh/SD-probe
+over-work is real in the cell but small in absolute isolation; a production change to the hot
+OCC read path is not justified by the micro-bench and must be gated on a benchmarkoor A/B.

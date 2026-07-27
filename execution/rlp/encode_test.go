@@ -29,6 +29,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/erigontech/erigon/common/race"
+
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -547,4 +549,103 @@ func BenchmarkEncodeConcurrentInterface(b *testing.B) {
 		})
 	}
 	wg.Wait()
+}
+
+type ptrTestAddr [20]byte
+type ptrTestHash [32]byte
+
+type ptrTestInner struct {
+	Address ptrTestAddr
+	Topics  []ptrTestHash
+	Data    []byte
+}
+
+type ptrTestOuter struct {
+	Head    ptrTestHash
+	Num     uint64
+	Bloom   [256]byte
+	Inners  []*ptrTestInner
+	Payload []byte
+}
+
+// TestEncodeValueAndPointerAgree pins the invariant callers rely on when switching
+// rlp.Encode(w, x) to rlp.Encode(w, &x): a pointer encodes exactly as the value it
+// points at. Both forms box into `any`; the pointer form is cheaper because boxing a
+// pointer copies nothing and leaves the pointee addressable, sparing the encoder a
+// reflect.New copy of each [N]byte it holds.
+func TestEncodeValueAndPointerAgree(t *testing.T) {
+	inner := &ptrTestInner{
+		Address: ptrTestAddr{1, 2, 3},
+		Topics:  []ptrTestHash{{4}, {5}},
+		Data:    []byte("payload"),
+	}
+	cases := []any{
+		ptrTestHash{9, 9, 9},
+		ptrTestAddr{},
+		*inner,
+		ptrTestInner{},
+		ptrTestOuter{Head: ptrTestHash{7}, Num: 42, Inners: []*ptrTestInner{inner, {}}, Payload: make([]byte, 100)},
+		ptrTestOuter{},
+		[17]uint64{1, 2, 3},
+	}
+	for i, c := range cases {
+		var byValue, byPointer bytes.Buffer
+		if err := Encode(&byValue, c); err != nil {
+			t.Fatalf("case %d: encode value: %v", i, err)
+		}
+		// pointerTo yields a pointer to a copy, which must still encode identically.
+		pv := pointerTo(c)
+		if err := Encode(&byPointer, pv); err != nil {
+			t.Fatalf("case %d: encode pointer: %v", i, err)
+		}
+		if !bytes.Equal(byValue.Bytes(), byPointer.Bytes()) {
+			t.Errorf("case %d (%T): value=%x pointer=%x", i, c, byValue.Bytes(), byPointer.Bytes())
+		}
+	}
+}
+
+// TestEncodePointerAvoidsByteArrayCopies documents why the pointer form is preferred:
+// fields of a value boxed into an interface are not addressable, so every [N]byte
+// field costs a reflect.New copy that the pointer form avoids entirely.
+func TestEncodePointerAvoidsByteArrayCopies(t *testing.T) {
+	v := ptrTestOuter{Inners: []*ptrTestInner{{}}, Payload: make([]byte, 64)}
+
+	// Panic rather than drop the error: a failing Encode would otherwise report a
+	// misleadingly low allocation count. The panic path never runs when it succeeds.
+	mustEncode := func(val any) func() {
+		return func() {
+			if err := Encode(io.Discard, val); err != nil {
+				panic(err)
+			}
+		}
+	}
+	byValue := testing.AllocsPerRun(200, mustEncode(v))
+	byPointer := testing.AllocsPerRun(200, mustEncode(&v))
+	t.Logf("allocs/op: byValue=%v byPointer=%v", byValue, byPointer)
+
+	if byValue <= byPointer {
+		t.Errorf("expected the value form to allocate more than the pointer form, got value=%v pointer=%v", byValue, byPointer)
+	}
+	// encBuffer comes from a sync.Pool, which deliberately drops values under the
+	// race detector, so only the relative comparison above holds there.
+	//goland:noinspection GoBoolExpressions
+	if !race.Enabled && byPointer != 0 {
+		t.Errorf("pointer form should not allocate, got %v allocs/op", byPointer)
+	}
+}
+
+func pointerTo(v any) any {
+	switch t := v.(type) {
+	case ptrTestHash:
+		return &t
+	case ptrTestAddr:
+		return &t
+	case ptrTestInner:
+		return &t
+	case ptrTestOuter:
+		return &t
+	case [17]uint64:
+		return &t
+	}
+	panic("unhandled case")
 }

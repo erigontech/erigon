@@ -9,7 +9,7 @@ require (
 	github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268
 	github.com/erigontech/go-libdeflate v0.1.0
 	github.com/erigontech/mdbx-go v0.40.3
-	github.com/erigontech/secp256k1 v1.2.1-0.20260218182123-377cc1bd6410
+	github.com/erigontech/secp256k1 v1.3.0
 )
 
 require (
@@ -25,11 +25,11 @@ require (
 	github.com/alecthomas/kong v1.15.0
 	github.com/anacrolix/envpprof v1.5.0
 	github.com/anacrolix/generics v0.2.0
-	github.com/anacrolix/go-libutp v1.3.3-0.20251121015447-f294e5ed5b4d
+	github.com/anacrolix/go-libutp v1.5.0
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb
-	github.com/anacrolix/missinggo/v2 v2.10.0
+	github.com/anacrolix/missinggo/v2 v2.11.0
 	github.com/anacrolix/sync v0.5.5-0.20251119100342-d78dd1f686f1
-	github.com/anacrolix/torrent v1.61.1-0.20260616065448-83a4fbaf66d5
+	github.com/anacrolix/torrent v1.61.1-0.20260725072831-7571cc2ad332
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.3.0
@@ -55,7 +55,7 @@ require (
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/golang/snappy v1.0.0
 	github.com/google/btree v1.1.3
-	github.com/google/cel-go v0.26.1
+	github.com/google/cel-go v0.29.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/gofuzz v1.2.0
 	github.com/google/uuid v1.6.0
@@ -92,7 +92,7 @@ require (
 	github.com/prysmaticlabs/gohashtree v0.0.5-beta
 	github.com/puzpuzpuz/xsync/v4 v4.5.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23
-	github.com/quic-go/quic-go v0.59.1
+	github.com/quic-go/quic-go v0.60.0
 	github.com/rs/cors v1.11.1
 	github.com/shirou/gopsutil/v4 v4.26.4
 	github.com/spaolacci/murmur3 v1.1.0
@@ -159,7 +159,7 @@ require (
 	github.com/alingse/asasalint v0.0.11 // indirect
 	github.com/alingse/nilnesserr v0.2.0 // indirect
 	github.com/anacrolix/btree v0.1.1 // indirect
-	github.com/anacrolix/chansync v0.7.0 // indirect
+	github.com/anacrolix/chansync v0.8.0 // indirect
 	github.com/anacrolix/dht/v2 v2.23.1-0.20260525063928-ec3a9bd99456 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
@@ -168,7 +168,7 @@ require (
 	github.com/anacrolix/stm v0.5.0 // indirect
 	github.com/anacrolix/upnp v0.1.4 // indirect
 	github.com/anacrolix/utp v0.1.0 // indirect
-	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
+	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/ashanbrown/forbidigo/v2 v2.3.1 // indirect
 	github.com/ashanbrown/makezero/v2 v2.2.1 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
@@ -371,7 +371,7 @@ require (
 	github.com/quasilyte/regex/syntax v0.0.0-20210819130434-b3f0c404a727 // indirect
 	github.com/quasilyte/stdinfo v0.0.0-20220114132959-f7386bf02567 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
-	github.com/quic-go/webtransport-go v0.10.0 // indirect
+	github.com/quic-go/webtransport-go v0.11.1 // indirect
 	github.com/raeperd/recvcheck v0.2.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
@@ -397,7 +397,6 @@ require (
 	github.com/spf13/viper v1.21.0 // indirect
 	github.com/ssgreg/nlreturn/v2 v2.2.1 // indirect
 	github.com/stbenjam/no-sprintf-host-port v0.3.1 // indirect
-	github.com/stoewer/go-strcase v1.3.0 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tetafro/godot v1.5.6 // indirect

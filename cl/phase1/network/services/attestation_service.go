@@ -107,7 +107,7 @@ func NewAttestationService(
 		emitters:                 emitters,
 		batchSignatureVerifier:   batchSignatureVerifier,
 		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, epochDuration),
-		//attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
+		// attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
 	}
 
 	//go a.loop(ctx)

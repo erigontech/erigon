@@ -87,7 +87,8 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 			}
 		}
 
-		for i, txn := range b.Result.Transactions {
+		for i := range b.Result.Transactions {
+			txn := &b.Result.Transactions[i]
 			if txn.To != nil && txn.Gas.ToInt().Uint64() > 21000 {
 				storageCounter++
 				if storageCounter == 100 {

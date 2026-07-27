@@ -550,7 +550,7 @@ func TestMemStore_ConcurrentReadWrite(t *testing.T) {
 
 	// Pre-populate
 	for i := range 100 {
-		require.NoError(t, s.Put("test", []byte(fmt.Sprintf("key%04d", i)), []byte(fmt.Sprintf("val%04d", i))))
+		require.NoError(t, s.Put("test", fmt.Appendf(nil, "key%04d", i), fmt.Appendf(nil, "val%04d", i)))
 	}
 
 	var wg sync.WaitGroup
@@ -611,7 +611,7 @@ func TestMemStore_ConcurrentCursors(t *testing.T) {
 
 	// Pre-populate with sorted data
 	for i := range 200 {
-		require.NoError(t, s.Put("test", []byte(fmt.Sprintf("key%04d", i)), []byte(fmt.Sprintf("val%04d", i))))
+		require.NoError(t, s.Put("test", fmt.Appendf(nil, "key%04d", i), fmt.Appendf(nil, "val%04d", i)))
 	}
 
 	var wg sync.WaitGroup
@@ -691,7 +691,7 @@ func TestMemStore_ConcurrentRangeAndWrite(t *testing.T) {
 
 	// Pre-populate
 	for i := range 100 {
-		require.NoError(t, s.Put("test", []byte(fmt.Sprintf("key%04d", i)), []byte(fmt.Sprintf("val%04d", i))))
+		require.NoError(t, s.Put("test", fmt.Appendf(nil, "key%04d", i), fmt.Appendf(nil, "val%04d", i)))
 	}
 
 	var wg sync.WaitGroup
@@ -745,8 +745,8 @@ func TestMemStore_ConcurrentDupSort(t *testing.T) {
 	for i := range 10 {
 		for j := range 10 {
 			require.NoError(t, s.Put(table,
-				[]byte(fmt.Sprintf("key%02d", i)),
-				[]byte(fmt.Sprintf("val%02d", j))))
+				fmt.Appendf(nil, "key%02d", i),
+				fmt.Appendf(nil, "val%02d", j)))
 		}
 	}
 
@@ -775,8 +775,8 @@ func TestMemStore_ConcurrentDupSort(t *testing.T) {
 	wg.Go(func() {
 		for i := range 200 {
 			_ = s.Put(table,
-				[]byte(fmt.Sprintf("key%02d", i%10)),
-				[]byte(fmt.Sprintf("new%04d", i)))
+				fmt.Appendf(nil, "key%02d", i%10),
+				fmt.Appendf(nil, "new%04d", i))
 		}
 	})
 

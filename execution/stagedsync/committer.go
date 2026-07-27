@@ -14,12 +14,10 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // commitmentResult is the outcome of a single commitment computation.
@@ -532,7 +530,7 @@ func (cc *commitmentCalculator) foldBlockFromBAL(ctx context.Context, pb *pendin
 		StateRoot: req.stateRoot,
 		lastTxNum: req.lastTxNum,
 	}
-	// EIP-161 empty-removal inputs, matching normalizeWriteSet on the exec path.
+	// EIP-161 empty-removal inputs, matching Normalize on the exec path.
 	// IsEIP161Enabled (not IsSpuriousDragon) so a chain with EIP-161 in disabledEIPs
 	// keeps empty leaves in the fold exactly as exec does.
 	emptyRemoval := req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum)
@@ -980,40 +978,6 @@ func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
 // must not write the shared main accumulator).
 func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
 	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx}
-}
-
-// asOfStorageEnumerator lists the persisted storage slots under an address via
-// the calculator's stable roTx snapshot (the pre-cycle baseline the trie was
-// built from), so a self-destruct deletes the whole subtree. The exec loop's
-// DomainDelPrefix runs with inline TouchKey disabled in parallel mode, so this
-// is the parallel path's equivalent of serial's per-slot delete touches.
-type asOfStorageEnumerator struct {
-	reader *asOfStateReader
-}
-
-func (e *asOfStorageEnumerator) EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error {
-	addrVal := addr.Value()
-	toKey, _ := kv.NextSubtree(addrVal[:])
-	it, err := e.reader.roTx.RangeAsOf(kv.StorageDomain, addrVal[:], toKey, e.reader.txNum, order.Asc, kv.Unlim)
-	if err != nil {
-		return err
-	}
-	defer it.Close()
-	for it.HasNext() {
-		k, v, err := it.Next()
-		if err != nil {
-			return err
-		}
-		if len(v) == 0 || len(k) != 52 || !bytes.HasPrefix(k, addrVal[:]) {
-			continue
-		}
-		var h common.Hash
-		copy(h[:], k[20:])
-		if err := fn(accounts.InternKey(h)); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // Keep imports used.
