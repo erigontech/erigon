@@ -376,6 +376,30 @@ func traceInstruction(evm *EVM, operation *operation, op OpCode, pc uint64, call
 }
 
 // stackBoundsErr reconstructs which bound the failed range check violated.
+// stackBoundsErrConst is stackBoundsErr for call sites whose bounds are
+// compile-time constants.
+func stackBoundsErrConst(sLen, numPop, maxStack int) error {
+	if sLen < numPop {
+		return &ErrStackUnderflow{stackLen: sLen, required: numPop}
+	}
+	return &ErrStackOverflow{stackLen: sLen, limit: maxStack}
+}
+
+// opHook fires the per-opcode tracer hooks. Outlined so the loop's case
+// bodies stay small; reports whether OnOpcode fired.
+//
+//go:noinline
+func opHook(tracer *tracing.Hooks, hasGasChange, hasOpcode bool, pc uint64, op OpCode, gasCopy, cost uint64, opCtx tracing.OpContext, evm *EVM, err error) bool {
+	if hasGasChange {
+		tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
+	}
+	if hasOpcode {
+		tracer.OnOpcode(pc, byte(op), gasCopy, cost, opCtx, evm.returnData, evm.depth, VMErrorFromErr(err))
+		return true
+	}
+	return false
+}
+
 func stackBoundsErr(sLen int, operation *operation) error {
 	if sLen < operation.numPop {
 		return &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
@@ -478,6 +502,9 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 	// Hoist to locals so the compiler sees them as loop-invariant.
 	anyTrace := dbg.TraceDynamicGas || debug || trace
+	hasGasChange := debug && tracer.OnGasChange != nil
+	hasOpcode := debug && tracer.OnOpcode != nil
+	var opCtx tracing.OpContext = callContext
 	stack := &callContext.Stack
 
 	jt := evm.jt
@@ -501,23 +528,15 @@ run:
 		switch op {
 		case ADD:
 			cost = GasFastestStep
-			if sLen := callContext.Stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
-			} else if sLen > int(params.StackLimit)+1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: int(params.StackLimit) + 1}
+			if sLen := callContext.Stack.len(); uint(sLen-2) > uint(int(params.StackLimit)+1-2) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, int(params.StackLimit)+1)
 			}
 			if callContext.gas < GasFastestStep {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= GasFastestStep
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -531,20 +550,14 @@ run:
 		case PUSH1:
 			cost = GasFastestStep
 			if sLen := callContext.Stack.len(); sLen > int(params.StackLimit)-1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: int(params.StackLimit) - 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, int(params.StackLimit)-1)
 			}
 			if callContext.gas < GasFastestStep {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= GasFastestStep
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -558,20 +571,14 @@ run:
 		case PUSH2:
 			cost = GasFastestStep
 			if sLen := callContext.Stack.len(); sLen > int(params.StackLimit)-1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: int(params.StackLimit) - 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, int(params.StackLimit)-1)
 			}
 			if callContext.gas < GasFastestStep {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= GasFastestStep
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -584,23 +591,15 @@ run:
 			continue
 		case DUP2:
 			cost = GasFastestStep
-			if sLen := callContext.Stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
-			} else if sLen > int(params.StackLimit)-1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: int(params.StackLimit) - 1}
+			if sLen := callContext.Stack.len(); uint(sLen-2) > uint(int(params.StackLimit)-1-2) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, int(params.StackLimit)-1)
 			}
 			if callContext.gas < GasFastestStep {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= GasFastestStep
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -683,13 +682,7 @@ run:
 
 		// Do gas tracing before memory expansion
 		if debug {
-			if tracer.OnGasChange != nil {
-				tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-			}
-			if tracer.OnOpcode != nil {
-				tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-				logged = true
-			}
+			logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 		}
 
 		if memorySize > 0 {
