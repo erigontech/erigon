@@ -121,14 +121,17 @@ func (st *Stack) Cap() int {
 	return stackLimit
 }
 
-func (st *Stack) swap(n int) {
-	i, j := st.top-n-1, st.top-1
+// exchange swaps the (n+1)'th and (m+1)'th items counting from the top.
+func (st *Stack) exchange(n, m int) {
+	i, j := st.top-n-1, st.top-m-1
 	// Explicit range check: reducing amount of bounds check
 	if i < 0 || i >= stackLimit || j < 0 || j >= stackLimit {
 		panic("stack overflow")
 	}
 	st.data[i], st.data[j] = st.data[j], st.data[i]
 }
+
+func (st *Stack) swap(n int) { st.exchange(n, 0) }
 
 func (st *Stack) dup(n int) {
 	i, j := st.top-n, st.top

@@ -1489,10 +1489,7 @@ func opExchange(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		return pc, nil, &ErrStackUnderflow{stackLen: scope.Stack.len(), required: need}
 	}
 
-	// The (n+1)‘th stack item is swapped with the (m+1)‘th stack item.
-	indexN := scope.Stack.len() - 1 - n
-	indexM := scope.Stack.len() - 1 - m
-	scope.Stack.data[indexN], scope.Stack.data[indexM] = scope.Stack.data[indexM], scope.Stack.data[indexN]
+	scope.Stack.exchange(n, m)
 	return pc, nil, nil
 }
 
