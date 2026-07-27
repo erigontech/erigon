@@ -309,3 +309,31 @@ func BenchmarkAccessListSlots(b *testing.B) {
 		})
 	}
 }
+
+// TestAccessListMemoDroppedOnSlotMapReuse pins the memo invalidation in
+// DeleteSlot. Emptying a slot map truncates it out of al.slots and marks the
+// address slotless, so a surviving memo would send the next AddSlot into a
+// detached map — and hand that map, carrying the stray slot, to whichever
+// address claims the freed slot next. Reads go through the memo too, so the
+// damage only shows once another address has displaced it.
+func TestAccessListMemoDroppedOnSlotMapReuse(t *testing.T) {
+	t.Parallel()
+	addrA := accounts.InternAddress(common.HexToAddress("0xaa"))
+	addrB := accounts.InternAddress(common.HexToAddress("0xbb"))
+	slot1 := accounts.InternKey(common.HexToHash("0x01"))
+	slot2 := accounts.InternKey(common.HexToHash("0x02"))
+	slot3 := accounts.InternKey(common.HexToHash("0x03"))
+
+	al := newAccessList()
+	al.AddSlot(addrA, slot1) // populates the memo for A
+	al.DeleteSlot(addrA, slot1)
+	al.AddSlot(addrA, slot2) // must re-establish A's slot map, not reuse the detached one
+	al.AddSlot(addrB, slot3) // displaces the memo, so the reads below take the slow path
+
+	addrPresent, slotPresent := al.Contains(addrA, slot2)
+	require.True(t, addrPresent)
+	require.True(t, slotPresent, "addrA's slot was written into a detached slot map")
+
+	_, leaked := al.Contains(addrB, slot2)
+	require.False(t, leaked, "addrA's slot leaked into addrB's reused slot map")
+}
