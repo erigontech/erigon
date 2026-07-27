@@ -222,28 +222,23 @@ func TestP2P_Swarm_FullReplication(t *testing.T) {
 		}))
 	}
 
-	// Mesh-connect every peer to every other at BT + DevP2P layers.
-	// AddDevP2PPeer registers the other peer as static-dialed so the
-	// p2p server preserves its full ENR (with chain-toml v2 InfoHash)
-	// across the inbound side of each handshake — see the corresponding
-	// fix at p2p/server.go:setupConn. Without that fix the acceptor
-	// would silently see a stub enode and the manifest fetch would not
-	// fire.
-	//
-	// Two passes, intentionally. The p2p server's static-peer lookup
-	// (see fix at p2p/server.go:setupConn) is consulted from the
-	// inbound-handshake path to recover the dialer's full ENR. If we
-	// dialed in the same iteration as we registered, peer 0's first
-	// dial would race ahead and complete its inbound handshake on
-	// peer 1 BEFORE peer 1 has registered peer 0 as a static peer —
-	// the lookup misses, fallback to stub enode, and ENR entries are
-	// lost. So:
-	//
-	//   pass 1: every peer AddDevP2PPeer's every other peer. Static-peer
-	//           table is populated synchronously on every server. Dial
-	//           is also scheduled.
-	//   pass 2: BT-level AddSeederPeer, after every server has the
-	//           full static set.
+	// Bidirectional mesh setup — three passes so setupConn's inbound
+	// branch always finds the dialer in its static-peer table (see
+	// p2p/server.go:setupConn). Pass 1 uses RegisterStaticPeer to
+	// populate every server's staticByID synchronously with zero
+	// dials in flight, so a dial completing on the outbound side of
+	// pair (A,B) can no longer race the registration of A on B's
+	// server. Pass 2 kicks the dials (the second-time addStatic is
+	// idempotent on the map, the dial scheduler dedupes). Pass 3
+	// adds the BT-level static-peer set.
+	for i, p := range peers {
+		for j, other := range peers {
+			if i == j {
+				continue
+			}
+			p.PreRegisterDevP2PPeer(other.DevP2PSelf())
+		}
+	}
 	for i, p := range peers {
 		for j, other := range peers {
 			if i == j {

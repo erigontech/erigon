@@ -284,11 +284,21 @@ func TestP2P_Swarm_StaggeredEntry(t *testing.T) {
 
 	meshAdd := func(newIdx int) {
 		t.Helper()
-		// Two-pass: first AddDevP2PPeer everywhere so every server has
-		// every other peer in its static-peer table BEFORE any inbound
-		// handshake completes, then AddSeederPeer for BT-level static
-		// peers. See p2p/server.go:setupConn fix and the corresponding
-		// comment in p2p_full_replication_test.go for why.
+		// Three-pass mesh setup: PreRegisterDevP2PPeer populates every
+		// server's staticByID synchronously with no dials in flight, so
+		// setupConn's inbound branch always resolves the dialer's full
+		// ENR (see p2p/server.go RegisterStaticPeer + setupConn). Then
+		// AddDevP2PPeer kicks the dials — its map write is idempotent
+		// and the scheduler dedupes. Finally AddSeederPeer wires the
+		// BT-level static-peer set.
+		for i := 0; i <= newIdx; i++ {
+			for j := 0; j <= newIdx; j++ {
+				if i == j || peers[i] == nil || peers[j] == nil {
+					continue
+				}
+				peers[i].node.PreRegisterDevP2PPeer(peers[j].node.DevP2PSelf())
+			}
+		}
 		for i := 0; i <= newIdx; i++ {
 			for j := 0; j <= newIdx; j++ {
 				if i == j || peers[i] == nil || peers[j] == nil {
@@ -303,30 +313,6 @@ func TestP2P_Swarm_StaggeredEntry(t *testing.T) {
 					continue
 				}
 				peers[i].node.AddSeederPeer(peers[j].node)
-			}
-		}
-		// Even with the static-peer table populated synchronously by
-		// AddDevP2PPeer above, an outbound dial scheduled at i=0 can
-		// complete before i=newIdx finishes and the destination peer
-		// has registered the dialer. The acceptor side's setupConn
-		// then falls back to nodeFromConn, producing a stub enode
-		// without V2 in the ENR — mx.onPeerConnected reads
-		// ChainToml.InfoHash == zero and silently early-returns. The
-		// natural mesh fixes itself the moment THIS peer dials the
-		// other end (where the now-up-to-date static-peer table
-		// supplies the full enode), but mx has already given up on
-		// the racy inbound. Synthesize a follow-up PeerConnected on
-		// every peer's bus using each other peer's CURRENT (post-
-		// mesh-add) enode — that record always carries V2, so any
-		// pair stubbed by the inbound race gets a clean retry.
-		// Inflight dedup in mx prevents pairs that succeeded
-		// naturally from refetching.
-		for i := 0; i <= newIdx; i++ {
-			for j := 0; j <= newIdx; j++ {
-				if i == j || peers[i] == nil || peers[j] == nil {
-					continue
-				}
-				peers[i].node.Sentry.PublishPeerConnected(peers[j].node.DevP2PSelf())
 			}
 		}
 	}

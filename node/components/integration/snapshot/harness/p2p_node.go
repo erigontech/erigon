@@ -178,6 +178,21 @@ func (n *P2PNode) AddDevP2PPeer(node *enode.Node) {
 	}
 }
 
+// PreRegisterDevP2PPeer records the given peer in every sentry
+// server's static-peer table without scheduling a dial. Bidirectional
+// mesh setups must call this on every pair BEFORE any AddDevP2PPeer:
+// otherwise a dial completing early on one side races the registration
+// on the other side, and setupConn's inbound branch has to fall back
+// to a stub enode — stripping ENR entries (chain-toml, bt) that
+// downstream subscribers depend on.
+func (n *P2PNode) PreRegisterDevP2PPeer(node *enode.Node) {
+	for _, srv := range n.Sentry.Servers {
+		if p2pServer := srv.GetP2PServer(); p2pServer != nil {
+			p2pServer.RegisterStaticPeer(node)
+		}
+	}
+}
+
 // RemoveDevP2PPeer removes the given peer from this node's static set
 // and disconnects any active connection to it. The peer may be
 // re-added later via AddDevP2PPeer — soak / churn scenarios use this
@@ -594,9 +609,20 @@ func newP2PNodeAt(t *testing.T, baseDir string, logger log.Logger, mode storageM
 	sp.Configure(sentrycomp.Config{
 		SentryCtx: ctx,
 		P2P: p2p.Config{
-			PrivateKey:      privKey,
-			MaxPeers:        10,
-			MaxPendingPeers: 5,
+			PrivateKey: privKey,
+			// Harness caps sized for a fully-meshed swarm — every
+			// peer holds a bidirectional connection to every other
+			// peer, unlike production where a node connects to a
+			// subset of the wider network. DialRatio=2 splits the
+			// slots evenly between outbound and inbound so an
+			// arbitrary assignment of "who dials whom" in the mesh
+			// setup still leaves inbound room for the peers we
+			// didn't dial ourselves. MaxPendingPeers keeps the
+			// concurrent-dial ceiling above N-1 for the N we
+			// exercise in scenarios/.
+			MaxPeers:        64,
+			MaxPendingPeers: 32,
+			DialRatio:       2,
 			NoDiscovery:     true,
 			ListenAddr:      "127.0.0.1:0",
 			ProtocolVersion: []uint{direct.ETH68},
