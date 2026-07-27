@@ -409,17 +409,15 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules)
 	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
 	var (
-		authorizationGasRemaining *mdgas.MdGas
-		runtimeGas                mdgas.MdGas
-		runtimeSnapshot           = -1
+		runtimeGas      mdgas.MdGas
+		runtimeSnapshot = -1
 	)
 	if rules.IsAmsterdam {
 		runtimeGas = st.gasRemaining
 		runtimeSnapshot = st.state.PushSnapshot()
 		defer st.state.PopSnapshot(runtimeSnapshot)
-		authorizationGasRemaining = &st.gasRemaining
 	}
-	_, err = st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), authorizationGasRemaining)
+	st.gasRemaining, _, err = st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), st.gasRemaining)
 	if err != nil {
 		if !rules.IsAmsterdam {
 			return nil, err
@@ -590,14 +588,12 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		runtimeSnapshot = -1
 	)
 	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
-	var authorizationGasRemaining *mdgas.MdGas
 	if rules.IsAmsterdam {
 		runtimeGas = st.gasRemaining
 		runtimeSnapshot = st.state.PushSnapshot()
 		defer st.state.PopSnapshot(runtimeSnapshot)
-		authorizationGasRemaining = &st.gasRemaining
 	}
-	authGasUsed, vmerr = st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), authorizationGasRemaining)
+	st.gasRemaining, authGasUsed, vmerr = st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), st.gasRemaining)
 	if vmerr != nil {
 		if !rules.IsAmsterdam {
 			return nil, vmerr
@@ -776,24 +772,21 @@ func (st *TxnExecutor) warmDelegatedDestination(rules *chain.Rules) error {
 	return nil
 }
 
-func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string, gasRemaining *mdgas.MdGas) (mdgas.MdGasUsage, error) {
+func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
 	var gasUsed mdgas.MdGasUsage
 	if auths == nil {
-		return gasUsed, nil
+		return gasRemaining, gasUsed, nil
 	}
 	if !st.evm.ChainRules().IsPrague {
-		return gasUsed, errors.New("SetCode transaction not allowed before Prague fork")
+		return gasRemaining, gasUsed, errors.New("SetCode transaction not allowed before Prague fork")
 	}
 	if contractCreation {
-		return gasUsed, errors.New("contract creation not allowed with type4 txs")
+		return gasRemaining, gasUsed, errors.New("contract creation not allowed with type4 txs")
 	}
 	if len(auths) == 0 {
-		return gasUsed, errors.New("SetCode transaction must have at least one authorization")
+		return gasRemaining, gasUsed, errors.New("SetCode transaction must have at least one authorization")
 	}
 	isAmsterdam := st.evm.ChainRules().IsAmsterdam
-	if isAmsterdam && gasRemaining == nil {
-		return gasUsed, errors.New("missing runtime gas")
-	}
 	writtenAccounts := map[accounts.Address]struct{}{st.msg.From(): {}}
 	if !st.msg.Value().IsZero() {
 		writtenAccounts[st.msg.To()] = struct{}{}
@@ -827,13 +820,13 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 		// 4. authority code should be empty or already delegated
 		codeHash, err := st.state.GetCodeHash(authority)
 		if err != nil {
-			return gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+			return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 		hasDelegation := false
 		if !codeHash.IsEmpty() {
 			_, ok, err := st.state.GetDelegatedDesignation(authority)
 			if err != nil {
-				return gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+				return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
 			if !ok {
 				log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
@@ -845,7 +838,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 		// 5. nonce check
 		authorityNonce, err := st.state.GetNonce(authority)
 		if err != nil {
-			return gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+			return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 		if authorityNonce != auth.Nonce {
 			log.Trace("invalid nonce, skipping", "auth index", i)
@@ -854,15 +847,15 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 
 		exists, err := st.state.Exist(authority)
 		if err != nil {
-			return gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+			return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 		if isAmsterdam {
-			if !exists && !mdgas.Consume(gasRemaining, &gasUsed, params.StateGasNewAccount, mdgas.StateGas) {
-				return gasUsed, vm.ErrRuntimeOutOfGas
+			if !exists && !mdgas.Consume(&gasRemaining, &gasUsed, params.StateGasNewAccount, mdgas.StateGas) {
+				return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
 			}
 			if _, written := writtenAccounts[authority]; !written {
-				if !mdgas.Consume(gasRemaining, &gasUsed, params.AccountWriteCostEIP8038, mdgas.RegularGas) {
-					return gasUsed, vm.ErrRuntimeOutOfGas
+				if !mdgas.Consume(&gasRemaining, &gasUsed, params.AccountWriteCostEIP8038, mdgas.RegularGas) {
+					return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
 				}
 				writtenAccounts[authority] = struct{}{}
 			}
@@ -873,8 +866,8 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			}
 			if auth.Address != (common.Address{}) {
 				if !preTxDelegated && !delegationSetFor[authority] {
-					if !mdgas.Consume(gasRemaining, &gasUsed, params.StateGasAuthBase, mdgas.StateGas) {
-						return gasUsed, vm.ErrRuntimeOutOfGas
+					if !mdgas.Consume(&gasRemaining, &gasUsed, params.StateGasAuthBase, mdgas.StateGas) {
+						return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
 					}
 				}
 				delegationSetFor[authority] = true
@@ -886,21 +879,21 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 		// 7. set authority code
 		if auth.Address == (common.Address{}) {
 			if err := st.state.SetCode(authority, nil, tracing.CodeChangeAuthorizationClear); err != nil {
-				return gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+				return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
 		} else {
 			if err := st.state.SetCode(authority, types.AddressToDelegation(accounts.InternAddress(auth.Address)), tracing.CodeChangeAuthorization); err != nil {
-				return gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+				return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
 		}
 
 		// 8. increase the nonce of authority
 		if err := st.state.SetNonce(authority, authorityNonce+1, tracing.NonceChangeAuthorization); err != nil {
-			return gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+			return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 	}
 
-	return gasUsed, nil
+	return gasRemaining, gasUsed, nil
 }
 
 func (st *TxnExecutor) refundGas() {
