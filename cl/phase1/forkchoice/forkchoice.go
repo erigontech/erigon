@@ -176,6 +176,7 @@ type ForkChoiceStore struct {
 	ptcVoteMu                   sync.Mutex // protects read-modify-write on payloadTimelinessVote and payloadDataAvailabilityVote
 	payloadTimelinessVote       sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
 	payloadDataAvailabilityVote sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
+	payloadAttestationContexts  *payloadAttestationValidationContexts
 	// [New in Gloas:EIP7732] Block timeliness tracking.
 	// Pre-GLOAS: stores [block_timely, false] (only index 0 is meaningful).
 	// Post-GLOAS: stores [block_timely, payload_timely] — two independent booleans.
@@ -337,6 +338,10 @@ func NewForkChoiceStore(
 	if err != nil {
 		return nil, err
 	}
+	payloadAttestationContexts, err := newPayloadAttestationValidationContexts()
+	if err != nil {
+		return nil, err
+	}
 
 	publicKeysRegistry.ResetAnchor(anchorState)
 	participation.Add(state.Epoch(anchorState.BeaconState), anchorState.CurrentEpochParticipation().Copy())
@@ -394,6 +399,7 @@ func NewForkChoiceStore(
 		executionPayloadStatus:         executionPayloadStatus,
 		payloadStatusByRoot:            payloadStatusByRoot,
 		executionPayloadGasLimit:       executionPayloadGasLimit,
+		payloadAttestationContexts:     payloadAttestationContexts,
 		db:                             db,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)

@@ -65,11 +65,10 @@ const (
 	// seenPayloadAttestationCacheSize: PTC has 512 validators per slot.
 	// With clock disparity, we may see attestations for ~2 slots.
 	// 512 * 4 = 2048 provides safety margin.
-	seenPayloadAttestationCacheSize            = 2048
-	pendingPayloadAttestationExpiry            = 30 * time.Second
-	pendingPayloadAttestationCheckInterval     = 100 * time.Millisecond
-	maxPendingAttestations                     = 2048
-	maxConcurrentPayloadAttestationValidations = 2
+	seenPayloadAttestationCacheSize        = 2048
+	pendingPayloadAttestationExpiry        = 30 * time.Second
+	pendingPayloadAttestationCheckInterval = 100 * time.Millisecond
+	maxPendingAttestations                 = 2048
 )
 
 type payloadAttestationService struct {
@@ -85,7 +84,6 @@ type payloadAttestationService struct {
 	pendingAttestations sync.Map // pendingPayloadAttestationKey -> *pendingPayloadAttestationJob
 	pendingCount        atomic.Int32
 	pendingCond         *sync.Cond
-	validationSlots     chan struct{}
 	validationsInFlight sync.Map
 }
 
@@ -109,7 +107,6 @@ func NewPayloadAttestationService(
 		emitters:              emitters,
 		seenAttestationsCache: seenCache,
 		pendingCond:           sync.NewCond(&sync.Mutex{}),
-		validationSlots:       make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 	}
 	go s.loop(ctx)
 	return s
@@ -184,18 +181,11 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	}
 	defer finishValidation()
 
-	select {
-	case s.validationSlots <- struct{}{}:
-		defer func() { <-s.validationSlots }()
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-
 	// Process through forkchoice which handles:
 	// [IGNORE] block state not found
 	// [REJECT] validator is not in PTC
 	// [REJECT] signature verification
-	if err := s.forkchoiceStore.OnPayloadAttestationMessage(msg, false); err != nil {
+	if err := s.forkchoiceStore.OnPayloadAttestationMessage(ctx, msg, false); err != nil {
 		// Preserve IGNORE vs REJECT distinction from forkchoice
 		// forkchoice.ErrIgnore != services.ErrIgnore, so we need to convert
 		if errors.Is(err, forkchoice.ErrIgnore) {
@@ -228,6 +218,11 @@ func (s *payloadAttestationService) beginValidation(ctx context.Context, key see
 		validation := &payloadAttestationValidation{done: make(chan struct{})}
 		existing, loaded := s.validationsInFlight.LoadOrStore(key, validation)
 		if !loaded {
+			if s.seenAttestationsCache.Contains(key) {
+				s.validationsInFlight.CompareAndDelete(key, validation)
+				close(validation.done)
+				return nil, true, nil
+			}
 			return func() {
 				s.validationsInFlight.CompareAndDelete(key, validation)
 				close(validation.done)

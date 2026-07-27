@@ -45,7 +45,7 @@ type blockingPayloadAttestationForkchoice struct {
 	release chan struct{}
 }
 
-func (f *blockingPayloadAttestationForkchoice) OnPayloadAttestationMessage(*cltypes.PayloadAttestationMessage, bool) error {
+func (f *blockingPayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
 	active := f.active.Add(1)
 	defer f.active.Add(-1)
 	for {
@@ -66,7 +66,7 @@ type retryPayloadAttestationForkchoice struct {
 	releaseFirst chan struct{}
 }
 
-func (f *retryPayloadAttestationForkchoice) OnPayloadAttestationMessage(*cltypes.PayloadAttestationMessage, bool) error {
+func (f *retryPayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
 	if f.calls.Add(1) == 1 {
 		close(f.firstStarted)
 		<-f.releaseFirst
@@ -89,15 +89,12 @@ func setupPayloadAttestationService(t *testing.T, ctrl *gomock.Controller) (*pay
 		seenAttestationsCache: seenCache,
 		emitters:              beaconevents.NewEventEmitter(),
 		pendingCond:           sync.NewCond(&sync.Mutex{}), // Needed for queuePendingAttestation
-		validationSlots:       make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 	}
 
 	return service, forkchoiceMock, ethClockMock
 }
 
-func TestPayloadAttestationServiceBoundsConcurrentValidation(t *testing.T) {
-	const expectedMaxConcurrentValidations = 2
-
+func TestPayloadAttestationServiceAllowsConcurrentValidationForDifferentValidators(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -114,26 +111,30 @@ func TestPayloadAttestationServiceBoundsConcurrentValidation(t *testing.T) {
 	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true).Times(8)
 
 	var wg sync.WaitGroup
+	results := make(chan error, 8)
 	for i := range 8 {
 		wg.Go(func() {
 			msg := newTestPayloadAttestationMessage(100, uint64(i), blockRoot)
-			require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
+			results <- service.ProcessMessage(context.Background(), nil, msg)
 		})
 	}
 
-	for range expectedMaxConcurrentValidations + 1 {
+	for range 8 {
 		select {
 		case <-blockingForkchoice.started:
 		case <-time.After(time.Second):
 			close(blockingForkchoice.release)
 			wg.Wait()
-			require.LessOrEqual(t, blockingForkchoice.max.Load(), int32(expectedMaxConcurrentValidations))
-			return
+			require.FailNow(t, "validation was throttled")
 		}
 	}
 	close(blockingForkchoice.release)
 	wg.Wait()
-	require.LessOrEqual(t, blockingForkchoice.max.Load(), int32(expectedMaxConcurrentValidations))
+	close(results)
+	for err := range results {
+		require.NoError(t, err)
+	}
+	require.Equal(t, int32(8), blockingForkchoice.max.Load())
 }
 
 func TestPayloadAttestationServiceSerializesDuplicateValidation(t *testing.T) {
@@ -212,31 +213,6 @@ func TestPayloadAttestationServiceRetriesAfterInvalidDuplicate(t *testing.T) {
 	require.ErrorContains(t, <-firstResult, "invalid signature")
 	require.NoError(t, <-secondResult)
 	require.Equal(t, int32(2), retryForkchoice.calls.Load())
-}
-
-func TestPayloadAttestationServiceCanceledWhileValidationIsFull(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	service, fcu, ethClockMock := setupPayloadAttestationService(t, ctrl)
-	blockRoot := common.HexToHash("0x1234")
-	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
-	for range maxConcurrentPayloadAttestationValidations {
-		service.validationSlots <- struct{}{}
-	}
-	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	err := service.ProcessMessage(ctx, nil, newTestPayloadAttestationMessage(100, 42, blockRoot))
-
-	require.ErrorIs(t, err, context.Canceled)
-	inFlight := 0
-	service.validationsInFlight.Range(func(_, _ any) bool {
-		inFlight++
-		return true
-	})
-	require.Zero(t, inFlight)
 }
 
 func newTestPayloadAttestationMessage(slot uint64, validatorIndex uint64, blockRoot common.Hash) *cltypes.PayloadAttestationMessage {
