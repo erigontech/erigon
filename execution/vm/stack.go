@@ -25,6 +25,16 @@ import (
 
 const stackLimit = 1024
 
+// Multi-slot helpers guard with a single unsigned compare:
+//
+//	if uint(st.top) > stackLimit-2 // ⇔ st.top < 0 || st.top > stackLimit-2
+//
+// One branch covers both bounds (negative ints wrap to huge uints), and the
+// prove pass then drops the bounds checks on st.data[st.top+k]. Index off the
+// st.top field directly — a hoisted local (t := st.top - 2; st.data[t+1]) gets
+// reassociated away from the guarded value and the checks come back.
+// Verify: go build -gcflags='-d=ssa/check_bce/debug=1' ./execution/vm/
+//
 // Stack is an object for basic stack operations. Items popped to the stack are
 // expected to be changed and modified. stack does not take care of adding newly
 // initialised objects.
@@ -68,32 +78,36 @@ func (st *Stack) popRef() *uint256.Int {
 
 func (st *Stack) pop2uint64() (x, y uint64) {
 	st.top -= 2
-	if st.top < 0 || st.top+1 >= stackLimit {
-		panic("stack overflow")
+	if uint(st.top) > stackLimit-2 {
+		panic("stack index out of range")
 	}
 	return st.data[st.top+1].Uint64(), st.data[st.top].Uint64()
 }
 
+// popRef1Peek1 pops one slot and peeks the next, shaped as pop-two-push-one so
+// both indices sit on the guarded st.top.
 func (st *Stack) popRef1Peek1() (x, y *uint256.Int) {
-	st.top--
-	if st.top-1 < 0 || st.top >= stackLimit {
-		panic("stack overflow")
+	st.top -= 2
+	if uint(st.top) > stackLimit-2 {
+		panic("stack index out of range")
 	}
-	return &st.data[st.top], &st.data[st.top-1]
+	x, y = &st.data[st.top+1], &st.data[st.top]
+	st.top++
+	return
 }
 
 func (st *Stack) popRef2() (x, y *uint256.Int) {
 	st.top -= 2
-	if st.top < 0 || st.top+1 >= stackLimit {
-		panic("stack overflow")
+	if uint(st.top) > stackLimit-2 {
+		panic("stack index out of range")
 	}
 	return &st.data[st.top+1], &st.data[st.top]
 }
 
 func (st *Stack) popRef3() (x, y, z *uint256.Int) {
 	st.top -= 3
-	if st.top < 0 || st.top+2 >= stackLimit {
-		panic("stack overflow")
+	if uint(st.top) > stackLimit-3 {
+		panic("stack index out of range")
 	}
 	return &st.data[st.top+2], &st.data[st.top+1], &st.data[st.top]
 }
@@ -110,9 +124,8 @@ func (st *Stack) Cap() int {
 // exchange swaps the (n+1)'th and (m+1)'th items counting from the top.
 func (st *Stack) exchange(n, m int) {
 	i, j := st.top-n-1, st.top-m-1
-	// Explicit range check: reducing amount of bounds check
-	if i < 0 || i >= stackLimit || j < 0 || j >= stackLimit {
-		panic("stack overflow")
+	if uint(i) >= stackLimit || uint(j) >= stackLimit {
+		panic("stack index out of range")
 	}
 	st.data[i], st.data[j] = st.data[j], st.data[i]
 }
@@ -121,8 +134,8 @@ func (st *Stack) swap(n int) { st.exchange(n, 0) }
 
 func (st *Stack) dup(n int) {
 	i, j := st.top-n, st.top
-	if i < 0 || i >= stackLimit || j < 0 || j >= stackLimit {
-		panic("stack overflow")
+	if uint(i) >= stackLimit || uint(j) >= stackLimit {
+		panic("stack index out of range")
 	}
 	st.data[j] = st.data[i]
 	st.top++
@@ -135,8 +148,8 @@ func (st *Stack) peek() *uint256.Int {
 // back2 returns the n'th and m'th items from the top under one range check.
 func (st *Stack) back2(n, m int) (x, y *uint256.Int) {
 	i, j := st.top-n-1, st.top-m-1
-	if i < 0 || i >= stackLimit || j < 0 || j >= stackLimit {
-		panic("stack overflow")
+	if uint(i) >= stackLimit || uint(j) >= stackLimit {
+		panic("stack index out of range")
 	}
 	return &st.data[i], &st.data[j]
 }
@@ -144,13 +157,13 @@ func (st *Stack) back2(n, m int) (x, y *uint256.Int) {
 // back3 returns the n'th, m'th and k'th items from the top under one range check.
 func (st *Stack) back3(n, m, k int) (x, y, z *uint256.Int) {
 	i, j, l := st.top-n-1, st.top-m-1, st.top-k-1
-	if i < 0 || i >= stackLimit || j < 0 || j >= stackLimit || l < 0 || l >= stackLimit {
-		panic("stack overflow")
+	if uint(i) >= stackLimit || uint(j) >= stackLimit || uint(l) >= stackLimit {
+		panic("stack index out of range")
 	}
 	return &st.data[i], &st.data[j], &st.data[l]
 }
 
-// Back returns the n'th item in stack
+// back returns the n'th item in stack
 func (st *Stack) back(n int) *uint256.Int {
 	return &st.data[st.top-n-1]
 }

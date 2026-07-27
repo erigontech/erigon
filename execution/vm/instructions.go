@@ -1071,8 +1071,7 @@ func stCreate2(_ uint64, scope *CallContext) string {
 func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	stack := &scope.Stack
 	// Pop gas. The actual gas in evm.callGasTemp.
-	// We can use this as a temporary value
-	stack.drop() // result slot; value is overwritten below
+	stack.drop() // gas operand, already consumed by the gas phase
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
 	addr, value := stack.pop(), stack.pop()
@@ -1137,8 +1136,7 @@ func stCall(_ uint64, scope *CallContext) string {
 func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	// Pop gas. The actual gas is in evm.callGasTemp.
 	stack := &scope.Stack
-	// We use it as a temporary value
-	stack.drop() // result slot; value is overwritten below
+	stack.drop() // gas operand, already consumed by the gas phase
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
 	addr, value := stack.pop(), stack.pop()
@@ -1188,8 +1186,7 @@ func stCallCode(_ uint64, scope *CallContext) string {
 func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	stack := &scope.Stack
 	// Pop gas. The actual gas is in evm.callGasTemp.
-	// We use it as a temporary value
-	stack.drop() // result slot; value is overwritten below
+	stack.drop() // gas operand, already consumed by the gas phase
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
 	addr := stack.pop()
@@ -1235,8 +1232,7 @@ func stDelegateCall(_ uint64, scope *CallContext) string {
 func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	// Pop gas. The actual gas is in evm.callGasTemp.
 	stack := &scope.Stack
-	// We use it as a temporary value
-	stack.drop() // result slot; value is overwritten below
+	stack.drop() // gas operand, already consumed by the gas phase
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
 	addr := stack.pop()
