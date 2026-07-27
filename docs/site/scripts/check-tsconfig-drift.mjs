@@ -69,9 +69,13 @@ function stripJsonc(text) {
 }
 
 // Order-insensitive comparison key. Object key order carries no meaning in
-// tsconfig, so upstream reordering must not read as drift. Array order IS
-// meaningful — `paths` entries are an ordered fallback list — so arrays keep
-// their order and a genuine reordering there still reports.
+// tsconfig, so upstream reordering must not read as drift.
+//
+// Arrays keep their order. Order matters in some (a `paths` entry is an ordered
+// fallback list) and not in others (`lib`, `types`). Preserving it everywhere is
+// the safe direction: a reordered `lib` reports drift that turns out to be
+// harmless, costing one reconciliation, whereas sorting arrays would silently
+// hide a real `paths` change.
 function canon(v) {
   const norm = (x) =>
     Array.isArray(x)
