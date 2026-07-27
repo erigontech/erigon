@@ -31,7 +31,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
@@ -386,7 +385,7 @@ func Benchmark_BTree_SeekThenNext(b *testing.B) {
 				panic("mistmatch")
 			}
 
-			prevKey := common.Copy(keys[p])
+			prevKey := bytes.Clone(keys[p])
 			ntimer := time.Duration(0)
 			nextKeys := 5000
 			for range nextKeys {
@@ -612,7 +611,7 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 			break
 		}
 		key, _ := getter.Next(key[:0])
-		listing = append(listing, common.Copy(key))
+		listing = append(listing, bytes.Clone(key))
 		getter.Skip()
 	}
 	decomp.Close()

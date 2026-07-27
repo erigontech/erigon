@@ -17,12 +17,12 @@
 package solid
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
@@ -91,7 +91,7 @@ func (b *ByteListSSZ) DecodeSSZ(buf []byte, _ int) error {
 	if uint64(len(buf)) > b.limit {
 		return fmt.Errorf("ByteListSSZ: SSZ data length %d exceeds limit %d", len(buf), b.limit)
 	}
-	b.data = common.Copy(buf)
+	b.data = bytes.Clone(buf)
 	return nil
 }
 
@@ -128,7 +128,7 @@ func (b *ByteListSSZ) HashSSZ() ([32]byte, error) {
 
 // Bytes returns a copy of the underlying data.
 func (b *ByteListSSZ) Bytes() []byte {
-	return common.Copy(b.data)
+	return bytes.Clone(b.data)
 }
 
 // SetBytes replaces the underlying data with a copy of the provided slice.
@@ -137,7 +137,7 @@ func (b *ByteListSSZ) SetBytes(buf []byte) error {
 	if uint64(len(buf)) > b.limit {
 		return fmt.Errorf("ByteListSSZ: data length %d exceeds limit %d", len(buf), b.limit)
 	}
-	b.data = common.Copy(buf)
+	b.data = bytes.Clone(buf)
 	return nil
 }
 

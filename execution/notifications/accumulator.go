@@ -17,6 +17,7 @@
 package notifications
 
 import (
+	"bytes"
 	"context"
 
 	"github.com/erigontech/erigon/common"
@@ -89,7 +90,7 @@ func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 	if txs != nil {
 		a.latestChange.Txs = make([][]byte, len(txs))
 		for i := range txs {
-			a.latestChange.Txs[i] = common.Copy(txs[i])
+			a.latestChange.Txs[i] = bytes.Clone(txs[i])
 		}
 	}
 }
