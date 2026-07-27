@@ -348,7 +348,7 @@ func ExecV3(ctx context.Context,
 		// serial and parallel paths uniformly.
 		if cfg.badBlockHalt && dbg.BadBlockHalt {
 			logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", execStage.LogPrefix()), "err", execErr)
-			os.Exit(1)
+			os.Exit(1) //nolint:gocritic // exitAfterDefer: intentional process halt without running deferred rollback to preserve state
 		}
 		return execErr
 	}
