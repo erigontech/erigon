@@ -193,7 +193,7 @@ func TestSimpleLocalTxLatencyBenchmark(t *testing.T) {
 		averageLatency += time.Since(start)
 	}
 
-	averageLatency = averageLatency / time.Duration(txToSendCount)
+	averageLatency /= time.Duration(txToSendCount)
 	fmt.Println("Avg latency:", averageLatency)
 
 	dir.RemoveAll("./dev") //remove tmp dir
@@ -345,7 +345,7 @@ func TestSimpleRemoteTxLatencyBenchmark(t *testing.T) {
 		averageLatency += time.Since(start)
 	}
 
-	averageLatency = averageLatency / time.Duration(txToSendCount)
+	averageLatency /= time.Duration(txToSendCount)
 	fmt.Println("Avg latency:", averageLatency)
 
 	dir.RemoveAll("./dev") //remove tmp dir
