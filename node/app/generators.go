@@ -35,7 +35,7 @@ type sequentialGenerator[T constraints.Integer] struct {
 	mutex  sync.Mutex
 }
 
-func (generator *sequentialGenerator[T]) GenerateId(generationContext context.Context, entity ...interface{}) (T, error) {
+func (generator *sequentialGenerator[T]) GenerateId(generationContext context.Context, entity ...any) (T, error) {
 	generator.mutex.Lock()
 	id := generator.nextId
 	generator.nextId++
@@ -51,7 +51,7 @@ type fixedValueGenerator[T comparable] struct {
 	value T
 }
 
-func (generator *fixedValueGenerator[T]) GenerateId(generationContext context.Context, entity ...interface{}) (T, error) {
+func (generator *fixedValueGenerator[T]) GenerateId(generationContext context.Context, entity ...any) (T, error) {
 	return generator.value, nil
 }
 
@@ -62,7 +62,7 @@ func PassThroughGenerator[T comparable]() IdGenerator[T] {
 type passThroughGenerator[T comparable] struct {
 }
 
-func (generator *passThroughGenerator[T]) GenerateId(generationContext context.Context, entity ...interface{}) (T, error) {
+func (generator *passThroughGenerator[T]) GenerateId(generationContext context.Context, entity ...any) (T, error) {
 	return entity[0].(T), nil
 }
 
@@ -74,17 +74,17 @@ type randomGenerator[T comparable] struct {
 	len uint
 }
 
-func (generator *randomGenerator[T]) GenerateId(generationContext context.Context, entity ...interface{}) (T, error) {
+func (generator *randomGenerator[T]) GenerateId(generationContext context.Context, entity ...any) (T, error) {
 	var v T
 	t := reflect.TypeOf(v)
 
 	switch t.Kind() {
 	case reflect.String:
-		return ((interface{})(random.RandomString(generator.len))).(T), nil
+		return ((any)(random.RandomString(generator.len))).(T), nil
 	case reflect.Slice:
 		switch t.Elem().Kind() {
 		case reflect.Uint8:
-			return ((interface{})(random.RandomBytes(generator.len))).(T), nil
+			return ((any)(random.RandomBytes(generator.len))).(T), nil
 		}
 	}
 
@@ -99,15 +99,15 @@ func (generator *randomGenerator[T]) GenerateId(generationContext context.Contex
 //
 //	[]byte or string value it is returned as the id
 //	cri.IdGenerator it is called to generatan is
-func ContextualGenerator[T comparable](key interface{}) IdGenerator[T] {
+func ContextualGenerator[T comparable](key any) IdGenerator[T] {
 	return &contextualGenerator[T]{key}
 }
 
 type contextualGenerator[T comparable] struct {
-	key interface{}
+	key any
 }
 
-func (generator *contextualGenerator[T]) GenerateId(generationContext context.Context, entity ...interface{}) (T, error) {
+func (generator *contextualGenerator[T]) GenerateId(generationContext context.Context, entity ...any) (T, error) {
 	value := generationContext.Value(generator.key)
 
 	var zero T

@@ -22,7 +22,6 @@ func NewLocalCheckpointSyncer(genesisState *state.CachingBeaconState, dir afero.
 		genesisState: genesisState,
 		dir:          dir,
 	}
-
 }
 
 func (l *LocalCheckpointSyncer) GetLatestBeaconState(ctx context.Context) (*state.CachingBeaconState, error) {

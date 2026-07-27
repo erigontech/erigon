@@ -6,7 +6,7 @@ sidebar_position: 16
 
 # GraphQL
 
-Erigon implements the standard Ethereum GraphQL interface defined in [EIP-1767](https://eips.ethereum.org/EIPS/eip-1767), following the same schema as Geth.
+Erigon implements the Ethereum GraphQL interface originally introduced in [EIP-1767](https://eips.ethereum.org/EIPS/eip-1767). The schema is maintained in the [`ethereum/execution-apis`](https://github.com/ethereum/execution-apis) repository, kept in sync with client implementations such as Geth and Besu. Erigon follows that schema.
 
 ## Enabling GraphQL
 
@@ -27,7 +27,7 @@ GraphQL shares the same port as the HTTP JSON-RPC server (default `8545`). It do
 
 ## Schema Reference
 
-Erigon follows the Geth GraphQL schema. For the full schema reference, query examples, and field descriptions, see https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql.
+Erigon follows the GraphQL schema maintained in [`ethereum/execution-apis`](https://github.com/ethereum/execution-apis), which is kept in sync with major clients such as Geth and Besu. For human-readable field descriptions and query examples, the [Geth GraphQL reference](https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql) is a useful companion.
 
 The schema includes queries for blocks, transactions, accounts, logs, and pending state, as well as the `sendRawTransaction` mutation.
 

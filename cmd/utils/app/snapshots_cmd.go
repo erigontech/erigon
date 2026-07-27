@@ -19,6 +19,7 @@ package app
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -37,7 +38,7 @@ import (
 
 	g "github.com/anacrolix/generics"
 	"github.com/c2h5oh/datasize"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -53,7 +54,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
-	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader/webseeds"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/fromdb"
@@ -69,6 +70,8 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/snapshotsync/caplinsnapschema"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
@@ -98,29 +101,29 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 }
 
 // This needs to run *after* subcommand arguments are parsed, in case they alter root flags like data dir.
-func commonBeforeSnapshotCommand(cliCtx *cli.Context) error {
-	go mem.LogMemStats(cliCtx.Context, log.New())
-	go disk.UpdateDiskStats(cliCtx.Context, log.New())
-	_, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
+func commonBeforeSnapshotCommand(ctx context.Context, cliCtx *cli.Command) (context.Context, error) {
+	go mem.LogMemStats(ctx, log.New())
+	go disk.UpdateDiskStats(ctx, log.New())
+	_, err := debug.SetupSimple(ctx, cliCtx, true /* rootLogger */)
 	if err != nil {
-		return err
+		return ctx, err
 	}
-	return nil
+	return ctx, nil
 }
 
 func init() {
 	// Inject commonBeforeSnapshotCommand into all snapshot subcommands Before handlers.
-	for _, cmd := range snapshotCommand.Subcommands {
+	for _, cmd := range snapshotCommand.Commands {
 		oldBefore := cmd.Before
-		cmd.Before = func(cliCtx *cli.Context) error {
-			err := commonBeforeSnapshotCommand(cliCtx)
+		cmd.Before = func(ctx context.Context, cliCtx *cli.Command) (context.Context, error) {
+			ctx, err := commonBeforeSnapshotCommand(ctx, cliCtx)
 			if err != nil {
-				return fmt.Errorf("common before snapshot subcommand: %w", err)
+				return ctx, fmt.Errorf("common before snapshot subcommand: %w", err)
 			}
 			if oldBefore == nil {
-				return nil
+				return ctx, nil
 			}
-			return oldBefore(cliCtx)
+			return oldBefore(ctx, cliCtx)
 		}
 	}
 }
@@ -129,12 +132,12 @@ var snapshotCommand = cli.Command{
 	Name:    "snapshots",
 	Aliases: []string{"seg", "snapshot", "segments", "segment"},
 	Usage:   `Managing historical data segments (partitions)`,
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		{
 			Name: "ls",
-			Action: func(c *cli.Context) error {
+			Action: func(ctx context.Context, c *cli.Command) error {
 				dirs := datadir.New(c.String(utils.DataDirFlag.Name))
-				return doLS(c, dirs)
+				return doLS(ctx, c, dirs)
 			},
 			Usage: "List all files with their words count",
 			Flags: joinFlags([]cli.Flag{
@@ -144,12 +147,12 @@ var snapshotCommand = cli.Command{
 		{
 			Name:  "du",
 			Usage: "Report snapshot disk usage by category with estimated sizes per node type",
-			Action: func(c *cli.Context) error {
+			Action: func(ctx context.Context, c *cli.Command) error {
 				dirs := datadir.Open(c.String(utils.DataDirFlag.Name))
 				if _, err := os.Stat(dirs.DataDir); os.IsNotExist(err) {
 					return fmt.Errorf("datadir does not exist: %s", dirs.DataDir)
 				}
-				return doDU(c, dirs)
+				return doDU(ctx, c, dirs)
 			},
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
@@ -157,17 +160,18 @@ var snapshotCommand = cli.Command{
 				&cli.BoolFlag{Name: "v", Aliases: []string{"verbose"}, Usage: "Show per-domain/per-type subcategory breakdown"},
 			}),
 		},
+		&exportPreimagesCommand,
 		{
 			Name:    "accessor",
 			Aliases: []string{"index"},
-			Action: func(c *cli.Context) error {
+			Action: func(ctx context.Context, c *cli.Command) error {
 				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
 				if err != nil {
 					return err
 				}
 				defer l.Unlock()
 
-				return doIndicesCommand(c, dirs)
+				return doIndicesCommand(ctx, c, dirs)
 			},
 			Usage: "Create all missed indices for snapshots. It also removing unsupported versions of existing indices and re-build them",
 			Flags: joinFlags([]cli.Flag{
@@ -177,14 +181,14 @@ var snapshotCommand = cli.Command{
 		},
 		{
 			Name: "retire",
-			Action: func(c *cli.Context) error {
+			Action: func(ctx context.Context, c *cli.Command) error {
 				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
 				if err != nil {
 					return err
 				}
 				defer l.Unlock()
 
-				return doRetireCommand(c, dirs)
+				return doRetireCommand(ctx, c, dirs)
 			},
 			Usage: "create snapshots from the specified block number",
 			Flags: joinFlags([]cli.Flag{
@@ -194,14 +198,14 @@ var snapshotCommand = cli.Command{
 		},
 		{
 			Name: "unmerge",
-			Action: func(c *cli.Context) error {
+			Action: func(ctx context.Context, c *cli.Command) error {
 				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
 				if err != nil {
 					return err
 				}
 				defer l.Unlock()
 
-				return doUnmerge(c, dirs)
+				return doUnmerge(ctx, c, dirs)
 			},
 			Usage: "unmerge a particular snapshot file (to 1 step files).",
 			Flags: joinFlags([]cli.Flag{
@@ -211,14 +215,14 @@ var snapshotCommand = cli.Command{
 		},
 		{
 			Name: "remove_overlaps",
-			Action: func(c *cli.Context) error {
+			Action: func(ctx context.Context, c *cli.Command) error {
 				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
 				if err != nil {
 					return err
 				}
 				defer l.Unlock()
 
-				return doRemoveOverlap(c, dirs)
+				return doRemoveOverlap(ctx, c, dirs)
 			},
 			Usage: "remove overlaps from e3 files",
 			Flags: joinFlags([]cli.Flag{
@@ -248,7 +252,7 @@ var snapshotCommand = cli.Command{
 			Name:   "bt-search",
 			Action: doBtSearch,
 			Flags: joinFlags([]cli.Flag{
-				&cli.PathFlag{Name: "src", Required: true},
+				&cli.StringFlag{Name: "src", Required: true, TakesFile: true},
 				&cli.StringFlag{Name: "key", Required: true},
 			}),
 			Description: "Search for a key in a btree index",
@@ -256,14 +260,14 @@ var snapshotCommand = cli.Command{
 		{
 			Name:    "rm-all-state-snapshots",
 			Aliases: []string{"rm-all-state"},
-			Action: func(cliCtx *cli.Context) error {
+			Action: func(ctx context.Context, cliCtx *cli.Command) error {
 				dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 				if err != nil {
 					return err
 				}
 				defer l.Unlock()
 
-				err = dir2.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable)
+				err = dir2.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors)
 				if err != nil {
 					return err
 				}
@@ -276,7 +280,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name:  "reset-to-old-ver-format",
 			Usage: "change all the snapshots to 3.0 file format",
-			Action: func(cliCtx *cli.Context) error {
+			Action: func(ctx context.Context, cliCtx *cli.Command) error {
 				dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 				if err != nil {
 					return err
@@ -289,7 +293,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name:  "update-to-new-ver-format",
 			Usage: "change all the snapshots to 3.1 file ver format",
-			Action: func(cliCtx *cli.Context) error {
+			Action: func(ctx context.Context, cliCtx *cli.Command) error {
 				dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 				if err != nil {
 					return err
@@ -319,7 +323,7 @@ var snapshotCommand = cli.Command{
 			Action:  doRmStateSnapshots,
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&cli.StringFlag{Name: "step"},
+				&cli.StringFlag{Name: "step", Usage: "step range to remove: 'from-to' (e.g. 5-10), or 'from+' (e.g. 5+) for everything from step N to the latest"},
 				&cli.BoolFlag{Name: "recentStep", Aliases: []string{"latest", "latestStep", "recent"}, Usage: "remove minimal possible recent/latest files: and Domain and History. Useful when have 1 corrupted recent file"},
 				&cli.BoolFlag{Name: "dry-run"},
 				&cli.StringSliceFlag{Name: "domain"},
@@ -344,12 +348,12 @@ var snapshotCommand = cli.Command{
 				"related seg files and also state files that contain data of its first tx num and later." +
 				"It is useful for shadowforks, recovering broken nodes or chains, and/or for doing experiments that " +
 				"involve replaying certain blocks.",
-			Action: func(cliCtx *cli.Context) error {
+			Action: func(ctx context.Context, cliCtx *cli.Command) error {
 				logger := log.Root()
 				block := cliCtx.Uint64("block")
 				prompt := cliCtx.Bool("prompt")
 				dataDir := cliCtx.String(utils.DataDirFlag.Name)
-				err := doRollbackSnapshotsToBlock(cliCtx.Context, block, prompt, dataDir, logger)
+				err := doRollbackSnapshotsToBlock(ctx, block, prompt, dataDir, logger)
 				if err != nil {
 					logger.Error(err.Error())
 					return err
@@ -366,8 +370,8 @@ var snapshotCommand = cli.Command{
 			Name:   "diff",
 			Action: doDiff,
 			Flags: joinFlags([]cli.Flag{
-				&cli.PathFlag{Name: "src", Required: true},
-				&cli.PathFlag{Name: "dst", Required: true},
+				&cli.StringFlag{Name: "src", Required: true, TakesFile: true},
+				&cli.StringFlag{Name: "dst", Required: true, TakesFile: true},
 			}),
 		},
 		{
@@ -403,13 +407,13 @@ var snapshotCommand = cli.Command{
 		},
 		{
 			Name: "integrity",
-			Action: func(cliCtx *cli.Context) error {
+			Action: func(ctx context.Context, cliCtx *cli.Command) error {
 				_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 				if err != nil {
 					return err
 				}
 				defer l.Unlock()
-				if err := doIntegrity(cliCtx); err != nil {
+				if err := doIntegrity(ctx, cliCtx); err != nil {
 					log.Error("[integrity]", "err", err)
 					return err
 				}
@@ -432,9 +436,9 @@ var snapshotCommand = cli.Command{
 		},
 		{
 			Name: "check-commitment-hist-at-blk",
-			Action: func(cliCtx *cli.Context) error {
+			Action: func(ctx context.Context, cliCtx *cli.Command) error {
 				logger := log.Root()
-				err := doCheckCommitmentHistAtBlk(cliCtx, logger)
+				err := doCheckCommitmentHistAtBlk(ctx, cliCtx, logger)
 				if err != nil {
 					log.Error("[check-commitment-hist-at-blk] failure", "err", err)
 					return err
@@ -450,9 +454,9 @@ var snapshotCommand = cli.Command{
 		},
 		{
 			Name: "check-commitment-hist-at-blk-range",
-			Action: func(cliCtx *cli.Context) error {
+			Action: func(ctx context.Context, cliCtx *cli.Command) error {
 				logger := log.Root()
-				err := doCheckStateRootByHistory(cliCtx, logger)
+				err := doCheckStateRootByHistory(ctx, cliCtx, logger)
 				if err != nil {
 					log.Error("[check-commitment-hist-at-blk-range] failure", "err", err)
 					return err
@@ -471,9 +475,9 @@ var snapshotCommand = cli.Command{
 		},
 		{
 			Name: "check-rcache-root-at-blk",
-			Action: func(cliCtx *cli.Context) error {
+			Action: func(ctx context.Context, cliCtx *cli.Command) error {
 				logger := log.Root()
-				err := doCheckRCacheRootAtBlk(cliCtx, logger)
+				err := doCheckRCacheRootAtBlk(ctx, cliCtx, logger)
 				if err != nil {
 					log.Error("[check-rcache-root-at-blk] failure", "err", err)
 					return err
@@ -490,9 +494,9 @@ var snapshotCommand = cli.Command{
 		},
 		{
 			Name: "check-rcache-root-at-blk-range",
-			Action: func(cliCtx *cli.Context) error {
+			Action: func(ctx context.Context, cliCtx *cli.Command) error {
 				logger := log.Root()
-				err := doCheckRCacheRootAtBlkRange(cliCtx, logger)
+				err := doCheckRCacheRootAtBlkRange(ctx, cliCtx, logger)
 				if err != nil {
 					log.Error("[check-rcache-root-at-blk-range] failure", "err", err)
 					return err
@@ -513,9 +517,9 @@ var snapshotCommand = cli.Command{
 		{
 			Name:        "verify-state",
 			Description: "verify correspondence between state snapshots (accounts, storage) and commitment snapshots",
-			Action: func(cliCtx *cli.Context) error {
+			Action: func(ctx context.Context, cliCtx *cli.Command) error {
 				logger := log.Root()
-				err := doVerifyState(cliCtx, logger)
+				err := doVerifyState(ctx, cliCtx, logger)
 				if err != nil {
 					log.Error("[verify-state] failure", "err", err)
 					return err
@@ -532,9 +536,9 @@ var snapshotCommand = cli.Command{
 		{
 			Name:        "verify-history",
 			Description: "verify history snapshots by re-executing blocks and comparing state changes",
-			Action: func(cliCtx *cli.Context) error {
+			Action: func(ctx context.Context, cliCtx *cli.Command) error {
 				logger := log.Root()
-				err := doVerifyHistory(cliCtx, logger)
+				err := doVerifyHistory(ctx, cliCtx, logger)
 				if err != nil {
 					log.Error("[verify-history] failure", "err", err)
 					return err
@@ -551,7 +555,7 @@ var snapshotCommand = cli.Command{
 		},
 		{
 			Name: "publishable",
-			Action: func(cliCtx *cli.Context) error {
+			Action: func(ctx context.Context, cliCtx *cli.Command) error {
 				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 				if err := doPublishable(dirs, nil); err != nil {
 					log.Error("[publishable]", "err", err)
@@ -578,8 +582,8 @@ var snapshotCommand = cli.Command{
 			Action:      doCompareIdx,
 			Description: "compares to accessors (recsplit) files",
 			Flags: joinFlags([]cli.Flag{
-				&cli.PathFlag{Name: "first", Required: true},
-				&cli.PathFlag{Name: "second", Required: true},
+				&cli.StringFlag{Name: "first", Required: true, TakesFile: true},
+				&cli.StringFlag{Name: "second", Required: true, TakesFile: true},
 				&cli.BoolFlag{Name: "skip-size-check", Required: false, Value: false},
 			}),
 		},
@@ -599,14 +603,14 @@ var snapshotCommand = cli.Command{
 			Description: "Show misc information about a segment file",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&cli.PathFlag{Name: "file", Required: true},
+				&cli.StringFlag{Name: "file", Required: true, TakesFile: true},
 				&cli.StringFlag{Name: "compress", Required: true, Usage: "Values compression type: all,none,keys,values"},
 			}),
 		},
 		{
 			Name:        "domain",
 			Description: "Domain related subcommands",
-			Subcommands: []*cli.Command{
+			Commands: []*cli.Command{
 				{
 					Name:   "stat",
 					Action: domainStat,
@@ -620,7 +624,7 @@ var snapshotCommand = cli.Command{
 		},
 		{
 			Name: "preverified",
-			Action: func(cliCtx *cli.Context) (err error) {
+			Action: func(ctx context.Context, cliCtx *cli.Command) (err error) {
 				var dataDir string
 				// Don't use the default, it must be set to apply.
 				if cliCtx.IsSet(utils.DataDirFlag.Name) {
@@ -629,13 +633,13 @@ var snapshotCommand = cli.Command{
 				var targetChain g.Option[string]
 				// Don't use the default, it must be set to apply.
 				if cliCtx.IsSet(VerifyChainFlag.Name) {
-					targetChain.Set(VerifyChainFlag.Get(cliCtx))
+					targetChain.Set(cliCtx.String(VerifyChainFlag.Name))
 				}
 				return webseeds.Verify(
-					cliCtx.Context,
-					PreverifiedFlag.Get(cliCtx),
+					ctx,
+					cliCtx.String(PreverifiedFlag.Name),
 					dataDir,
-					ConcurrencyFlag.Get(cliCtx),
+					cliCtx.Int(ConcurrencyFlag.Name),
 					targetChain,
 				)
 			},
@@ -714,7 +718,8 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, label s
 		return true, false, "", nil
 	}
 	if !ok {
-		return false, false, "", fmt.Errorf("can't find accessor for %s", filePath)
+		log.Warn("[dbg] no accessor found, assuming file may have state", "file", filePath)
+		return true, false, "", nil
 	}
 	rd, bti, err := btindex.OpenBtreeIndexAndDataFile(bt, filePath, btindex.DefaultBtreeM, statecfg.Schema.CommitmentDomain.Compression, false)
 	if err != nil {
@@ -747,6 +752,31 @@ type DeleteStateSnapshotsArgs struct {
 	DomainNames            []string
 }
 
+// parseStepRange parses a --step value of "from-to" (e.g. "5-10") or "from+"
+// (e.g. "5+"), where "+" means from the given step to maxAvailableStep.
+func parseStepRange(stepRange string, maxAvailableStep uint64) (from, to uint64, err error) {
+	if prefix, ok := strings.CutSuffix(stepRange, "+"); ok {
+		from, err = strconv.ParseUint(prefix, 10, 64)
+		if err != nil {
+			return 0, 0, fmt.Errorf("step expected in format from-to or N+, got %s", stepRange)
+		}
+		return from, maxAvailableStep, nil
+	}
+	fromS, toS, ok := strings.Cut(stepRange, "-")
+	if !ok {
+		return 0, 0, fmt.Errorf("step expected in format from-to or N+, got %s", stepRange)
+	}
+	from, err = strconv.ParseUint(fromS, 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("step expected in format from-to or N+, got %s", stepRange)
+	}
+	to, err = strconv.ParseUint(toS, 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("step expected in format from-to or N+, got %s", stepRange)
+	}
+	return from, to, nil
+}
+
 func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	dirs := args.Dirs
 	removeLatest := args.RemoveLatest
@@ -770,7 +800,7 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 		filePath string
 	}, 0)
 
-	scanDirs := []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable}
+	scanDirs := []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors}
 	if args.OnlyDomain {
 		scanDirs = []string{dirs.SnapDomain}
 	} else if args.OnlyHistory {
@@ -816,7 +846,8 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	// Step 2: Process each candidate file (already parsed)
 	doesRmCommitment := len(domainNames) == 0 || slices.Contains(domainNames, kv.CommitmentDomain.String())
 	var snapDir string
-	for _, candidate := range candidateFiles {
+	for i := range candidateFiles {
+		candidate := &candidateFiles[i]
 		res := candidate.fileInfo
 
 		// check that commitment file has state in it
@@ -854,13 +885,11 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			if err != nil {
 				_, err = kv.String2Domain(domainName)
 				if err != nil {
-					_, err = kv.String2Forkable(domainName)
-					if err != nil {
-						return err
-					}
+					return err
 				}
 			}
-			for _, res := range files {
+			for i := range files {
+				res := &files[i]
 				if !strings.Contains(res.Name(), domainName) {
 					continue
 				}
@@ -868,7 +897,7 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 					_maxFrom = max(_maxFrom, res.From)
 					_maxTo = max(_maxTo, res.To)
 				}
-				domainFiles = append(domainFiles, res)
+				domainFiles = append(domainFiles, *res)
 			}
 		}
 		files = domainFiles
@@ -876,15 +905,13 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	if stepRange != "" || removeLatest {
 		var minS, maxS uint64
 		if stepRange != "" {
-			parseStep := func(step string) (uint64, uint64, error) {
-				var from, to uint64
-				if _, err := fmt.Sscanf(step, "%d-%d", &from, &to); err != nil {
-					return 0, 0, fmt.Errorf("step expected in format from-to, got %s", step)
-				}
-				return from, to, nil
+			var maxAvailableStep uint64
+			for i := range files {
+				res := &files[i]
+				maxAvailableStep = max(maxAvailableStep, res.To)
 			}
 			var err error
-			minS, maxS, err = parseStep(stepRange)
+			minS, maxS, err = parseStepRange(stepRange, maxAvailableStep)
 			if err != nil {
 				return err
 			}
@@ -930,11 +957,12 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 		}
 
 		// Pre-compute files to remove
-		for _, res := range files {
+		for i := range files {
+			res := &files[i]
 			if res.From >= minS && res.To <= maxS {
-				toRemove[res.Path] = res
+				toRemove[res.Path] = *res
 			} else if removeLatest && res.To == _maxTo {
-				toRemove[res.Path] = res
+				toRemove[res.Path] = *res
 			}
 		}
 
@@ -949,15 +977,17 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 		// if C ⊂ B and B ⊂ A, then C ⊂ A. Since A (the originally-marked file) is
 		// already in toRemove, C will match against A directly without needing B as
 		// an intermediate step.
-		for _, res := range files {
+		for i := range files {
+			res := &files[i]
 			if _, alreadyMarked := toRemove[res.Path]; alreadyMarked {
 				continue
 			}
-			for _, marked := range toRemove {
+			for path := range toRemove {
+				marked := toRemove[path]
 				if res.TypeString == marked.TypeString &&
 					res.From >= marked.From && res.To <= marked.To &&
 					(res.From != marked.From || res.To != marked.To) {
-					toRemove[res.Path] = res
+					toRemove[res.Path] = *res
 					break
 				}
 			}
@@ -965,7 +995,8 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 
 		// Estimate total deletion size via noop stat pass
 		var removeSize uint64
-		for _, res := range toRemove {
+		for path := range toRemove {
+			res := toRemove[path]
 			if info, err := os.Stat(res.Path); err == nil {
 				removeSize += uint64(info.Size())
 			}
@@ -985,7 +1016,8 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			// Display commitment files with KEEP/REMOVE markers, sizes, and labels
 			hasStateTrie := 0
 			fmt.Println()
-			for _, cf := range commitmentFilesWithState {
+			for i := range commitmentFilesWithState {
+				cf := &commitmentFilesWithState[i]
 				var sizeStr string
 				if info, err := os.Stat(cf.file.Path); err == nil {
 					sizeStr = common.ByteCount(uint64(info.Size()))
@@ -1022,13 +1054,15 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			}
 		}
 	} else {
-		for _, res := range files {
-			toRemove[res.Path] = res
+		for i := range files {
+			res := &files[i]
+			toRemove[res.Path] = *res
 		}
 	}
 
 	var removed uint64
-	for _, res := range toRemove {
+	for path := range toRemove {
+		res := toRemove[path]
 		if dryRun {
 			fmt.Printf("[dry-run] rm %s\n", res.Path)
 			fmt.Printf("[dry-run] rm %s\n", res.Path+".torrent")
@@ -1043,7 +1077,7 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	// Unconditionally remove .tmp files from all snapshot directories.
 	// These are artifacts from incomplete/cancelled operations and should always be cleaned up.
 	var removedTmp uint64
-	for _, dirPath := range []string{dirs.Snap, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapCaplin, dirs.SnapForkable} {
+	for _, dirPath := range []string{dirs.Snap, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapCaplin} {
 		tmpFiles, err := snaptype.TmpFiles(dirPath)
 		if err != nil {
 			return err
@@ -1070,7 +1104,7 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	return nil
 }
 
-func doRmStateSnapshots(cliCtx *cli.Context) error {
+func doRmStateSnapshots(ctx context.Context, cliCtx *cli.Command) error {
 	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 	if err != nil {
 		return err
@@ -1172,11 +1206,12 @@ func DeleteBlockSnapshots(args DeleteBlockSnapshotsArgs) error {
 
 	toRemove := make([]snaptype.FileInfo, 0)
 	var maxTo, removeSize uint64
-	for _, f := range allFiles {
+	for i := range allFiles {
+		f := &allFiles[i]
 		if f.From != maxFrom {
 			continue
 		}
-		toRemove = append(toRemove, f)
+		toRemove = append(toRemove, *f)
 		if f.To > maxTo {
 			maxTo = f.To
 		}
@@ -1189,14 +1224,14 @@ func DeleteBlockSnapshots(args DeleteBlockSnapshotsArgs) error {
 	}
 
 	// Sort by (From desc, To desc, name asc) for display: newest ranges first.
-	sort.Slice(allFiles, func(i, j int) bool {
-		if allFiles[i].From != allFiles[j].From {
-			return allFiles[i].From > allFiles[j].From
+	slices.SortFunc(allFiles, func(a, b snaptype.FileInfo) int {
+		if a.From != b.From {
+			return cmp.Compare(b.From, a.From)
 		}
-		if allFiles[i].To != allFiles[j].To {
-			return allFiles[i].To > allFiles[j].To
+		if a.To != b.To {
+			return cmp.Compare(b.To, a.To)
 		}
-		return allFiles[i].Name() < allFiles[j].Name()
+		return cmp.Compare(a.Name(), b.Name())
 	})
 
 	fmt.Printf("\nDatadir: %s\n", dirs.DataDir)
@@ -1205,7 +1240,8 @@ func DeleteBlockSnapshots(args DeleteBlockSnapshotsArgs) error {
 	// Show files at the latest From plus a bit of older context for orientation.
 	shown := 0
 	const contextLines = 12
-	for _, f := range allFiles {
+	for i := range allFiles {
+		f := &allFiles[i]
 		atMax := f.From == maxFrom
 		if !atMax && shown >= contextLines {
 			break
@@ -1231,7 +1267,8 @@ func DeleteBlockSnapshots(args DeleteBlockSnapshotsArgs) error {
 	}
 
 	var removed uint64
-	for _, f := range toRemove {
+	for i := range toRemove {
+		f := &toRemove[i]
 		// Catch both ".torrent" and partial ".torrent<suffix>" companions
 		// (see snaptype.IsTorrentPartial).
 		torrentArtifacts, err := filepath.Glob(f.Path + ".torrent*")
@@ -1292,7 +1329,7 @@ func sweepTmpFilesInSnapDir(snapDir string, dryRun bool) error {
 	return nil
 }
 
-func doRmBlockSnapshots(cliCtx *cli.Context) error {
+func doRmBlockSnapshots(ctx context.Context, cliCtx *cli.Command) error {
 	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 	if err != nil {
 		return err
@@ -1327,7 +1364,7 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 		return err
 	}
 	defer clean()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
@@ -1343,9 +1380,9 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 	if err != nil {
 		return err
 	}
-	toStep := toTxNum / agg.StepSize()
+	toStep := toTxNum / tx.Debug().StepSize()
 	var toDelete []string
-	for _, dirPath := range []string{dirs.Snap, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable} {
+	for _, dirPath := range []string{dirs.Snap, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors} {
 		filePaths, err := dir2.ListFiles(dirPath)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
@@ -1389,7 +1426,7 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 	return nil
 }
 
-func doBtSearch(cliCtx *cli.Context) error {
+func doBtSearch(ctx context.Context, cliCtx *cli.Command) error {
 	_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 	if err != nil {
 		return err
@@ -1436,7 +1473,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 	return nil
 }
 
-func doDebugKey(cliCtx *cli.Context) error {
+func doDebugKey(ctx context.Context, cliCtx *cli.Command) error {
 	logger := log.Root()
 	key := common.FromHex(cliCtx.String("key"))
 	var domain kv.Domain
@@ -1460,7 +1497,6 @@ func doDebugKey(cliCtx *cli.Context) error {
 	}
 	_ = idx
 
-	ctx := cliCtx.Context
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -1486,10 +1522,9 @@ func doDebugKey(cliCtx *cli.Context) error {
 	return nil
 }
 
-func doIntegrity(cliCtx *cli.Context) error {
+func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 	logger := log.Root()
 
-	ctx := cliCtx.Context
 	checkStr := cliCtx.String("check")
 	var requestedChecks []integrity.Check
 	if len(checkStr) > 0 {
@@ -1589,16 +1624,15 @@ func doIntegrity(cliCtx *cli.Context) error {
 	defer clean()
 
 	defer blockRetire.MadvNormal().DisableReadAhead()
-	defer agg.MadvNormal().DisableReadAhead()
-
-	db, err := temporal.New(chainDB, agg)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
 
 	blockReader, _ := blockRetire.IO()
 	heimdallStore, _ := blockRetire.BorStore()
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
+	if err != nil {
+		return err
+	}
+	defer db.Debug().EnableReadAhead().DisableReadAhead()
+	defer db.Close()
 
 	var commitmentHistoryEnabled bool
 	if err := chainDB.View(ctx, func(tx kv.Tx) error {
@@ -1625,6 +1659,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 			return integrity.CheckStateProgress(ctx, db, blockReader, failFast)
 		case integrity.Publishable:
 			return doPublishable(dirs, chainDB)
+		case integrity.CaplinStateRoots:
+			return integrity.CheckCaplinStateRoots(ctx, dirs, failFast, logger)
 		case integrity.BorEvents:
 			if !CheckBorChain(chainConfig.ChainName) {
 				logger.Info("BorEvents skipped because not bor chain")
@@ -1671,7 +1707,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				logger.Info("[integrity] StateRootVerifyByHistory skipped because commitment history is not enabled on this datadir")
 				return nil
 			}
-			to, err := stateProgress(ctx, db, blockReader.TxnumReader())
+			to, err := stateFilesProgress(ctx, db, blockReader.TxnumReader())
 			if err != nil {
 				return err
 			}
@@ -1734,34 +1770,24 @@ func doIntegrity(cliCtx *cli.Context) error {
 	return nil
 }
 
-// stateProgress returns the latest block number for which state history is available.
-// It considers both snapshot files (EndTxNumMinimax) and MDBX data (Execution stage progress).
-// Use this as the upper bound for state-history integrity commands.
-func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
-	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
-	aggMax := agg.EndTxNumMinimax()
-	if aggMax == 0 {
-		return 0, nil
-	}
-	roTx, err := db.BeginRo(ctx)
+// stateFilesProgress returns the latest block fully covered by state-history files.
+// Commitment-history checks reconstruct from files only, so they must not run past file coverage.
+func stateFilesProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
+	roTx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer roTx.Rollback()
+	aggMax := state.AggTx(roTx).EndTxNumNoCommitment()
+	if aggMax == 0 {
+		return 0, nil
+	}
 	blockNum, err := findBlockNumByTxNum(ctx, roTx, txNumsReader, aggMax)
 	if err != nil {
 		return 0, err
 	}
 	if blockNum > 0 {
 		blockNum-- // FindBlockNum returns the block *containing* aggMax, but the per-block check needs the entire block covered
-	}
-	// Also check execution stage progress — MDBX may have state beyond snapshots
-	execProgress, err := stages.GetStageProgress(roTx, stages.Execution)
-	if err != nil {
-		return blockNum, nil // fall back to snapshot-only progress
-	}
-	if execProgress > blockNum {
-		blockNum = execProgress
 	}
 	return blockNum, nil
 }
@@ -1789,8 +1815,7 @@ func findBlockNumByTxNum(ctx context.Context, tx kv.Tx, txNumsReader rawdbv3.TxN
 	)
 }
 
-func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
-	ctx := cliCtx.Context
+func doCheckCommitmentHistAtBlk(ctx context.Context, cliCtx *cli.Command, logger log.Logger) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -1803,11 +1828,11 @@ func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
 	}
 	defer clean()
 	defer blockRetire.MadvNormal().DisableReadAhead()
-	defer agg.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
+	defer db.Debug().EnableReadAhead().DisableReadAhead()
 	defer db.Close()
 	blockReader, _ := blockRetire.IO()
 	blockNum := cliCtx.Uint64("block")
@@ -1817,8 +1842,7 @@ func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
 	return nil
 }
 
-func doCheckStateRootByHistory(cliCtx *cli.Context, logger log.Logger) error {
-	ctx := cliCtx.Context
+func doCheckStateRootByHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -1830,7 +1854,7 @@ func doCheckStateRootByHistory(cliCtx *cli.Context, logger log.Logger) error {
 		return err
 	}
 	defer clean()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
@@ -1839,7 +1863,7 @@ func doCheckStateRootByHistory(cliCtx *cli.Context, logger log.Logger) error {
 	from := cliCtx.Uint64("from")
 	to := cliCtx.Uint64("to")
 	if !cliCtx.IsSet("to") {
-		latestBlock, err := stateProgress(ctx, db, blockReader.TxnumReader())
+		latestBlock, err := stateFilesProgress(ctx, db, blockReader.TxnumReader())
 		if err != nil {
 			return err
 		}
@@ -1861,8 +1885,7 @@ func doCheckStateRootByHistory(cliCtx *cli.Context, logger log.Logger) error {
 	return integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, from, to, logger)
 }
 
-func doCheckRCacheRootAtBlk(cliCtx *cli.Context, logger log.Logger) error {
-	ctx := cliCtx.Context
+func doCheckRCacheRootAtBlk(ctx context.Context, cliCtx *cli.Command, logger log.Logger) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -1875,11 +1898,11 @@ func doCheckRCacheRootAtBlk(cliCtx *cli.Context, logger log.Logger) error {
 	defer clean()
 	blockRetire, agg := res.BlockRetire, res.Aggregator
 	defer blockRetire.MadvNormal().DisableReadAhead()
-	defer agg.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
+	defer db.Debug().EnableReadAhead().DisableReadAhead()
 	defer db.Close()
 	blockReader, _ := blockRetire.IO()
 	blockNum := cliCtx.Uint64("block")
@@ -1890,8 +1913,7 @@ func doCheckRCacheRootAtBlk(cliCtx *cli.Context, logger log.Logger) error {
 	return nil
 }
 
-func doCheckRCacheRootAtBlkRange(cliCtx *cli.Context, logger log.Logger) error {
-	ctx := cliCtx.Context
+func doCheckRCacheRootAtBlkRange(ctx context.Context, cliCtx *cli.Command, logger log.Logger) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -1904,11 +1926,11 @@ func doCheckRCacheRootAtBlkRange(cliCtx *cli.Context, logger log.Logger) error {
 	defer clean()
 	blockRetire, agg := res.BlockRetire, res.Aggregator
 	defer blockRetire.MadvNormal().DisableReadAhead()
-	defer agg.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
+	defer db.Debug().EnableReadAhead().DisableReadAhead()
 	defer db.Close()
 	blockReader, _ := blockRetire.IO()
 
@@ -1948,8 +1970,7 @@ func doCheckRCacheRootAtBlkRange(cliCtx *cli.Context, logger log.Logger) error {
 	return integrity.CheckRCacheRootAtBlkRange(ctx, sc, db, blockReader, chainConfig, from, to, failFast, logger)
 }
 
-func doVerifyState(cliCtx *cli.Context, logger log.Logger) error {
-	ctx := cliCtx.Context
+func doVerifyState(ctx context.Context, cliCtx *cli.Command, logger log.Logger) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 
 	// Open MDBX without Accede so it creates the DB if needed (memState-only setups have no chaindata).
@@ -1959,19 +1980,18 @@ func doVerifyState(cliCtx *cli.Context, logger log.Logger) error {
 
 	agg := openAgg(ctx, dirs, chainDB, logger)
 	defer agg.Close()
-	defer agg.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, nil)
 	if err != nil {
 		return err
 	}
+	defer db.Debug().EnableReadAhead().DisableReadAhead()
 	defer db.Close()
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("from-step")
 	return integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger)
 }
 
-func doVerifyHistory(cliCtx *cli.Context, logger log.Logger) error {
-	ctx := cliCtx.Context
+func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 
 	limiterB := semaphore.NewWeighted(threadsLimit)
@@ -1990,7 +2010,7 @@ func doVerifyHistory(cliCtx *cli.Context, logger log.Logger) error {
 	blockReader := freezeblocks.NewBlockReader(snaps.BlockSnaps, snaps.BorSnaps)
 
 	agg := snaps.Aggregator
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, snaps.BlockSnaps)
 	if err != nil {
 		return err
 	}
@@ -2006,7 +2026,6 @@ func doVerifyHistory(cliCtx *cli.Context, logger log.Logger) error {
 	}
 
 	verifier := verify.NewHistoryVerifier(blockReader, chainConfig, engine, workers, logger)
-	stepSize := agg.StepSize()
 
 	// Iterate domain files to find history ranges to verify.
 	// We use AccountsDomain files as the canonical list of step ranges,
@@ -2016,6 +2035,7 @@ func doVerifyHistory(cliCtx *cli.Context, logger log.Logger) error {
 		return err
 	}
 	defer tx.Rollback()
+	stepSize := tx.Debug().StepSize()
 	aggTx := state.AggTx(tx)
 	files := aggTx.Files(kv.AccountsDomain)
 
@@ -2072,7 +2092,7 @@ func CheckBorChain(chainName string) bool {
 
 func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil)
-	caplinSchema := snapshotsync.NewCaplinSchema(dirs, 1000, stateSnapTypes)
+	caplinSchema := caplinsnapschema.NewCaplinSchema(dirs, 1000, stateSnapTypes)
 
 	//to := int64(-1)
 	for _, snapt := range snaptype.CaplinSnapshotTypes {
@@ -2307,8 +2327,11 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 		return err
 	}
 
-	sort.Slice(accFiles, func(i, j int) bool {
-		return (accFiles[i].From < accFiles[j].From) || (accFiles[i].From == accFiles[j].From && accFiles[i].To < accFiles[j].To)
+	slices.SortFunc(accFiles, func(a, b snaptype.FileInfo) int {
+		if a.From != b.From {
+			return cmp.Compare(a.From, b.From)
+		}
+		return cmp.Compare(a.To, b.To)
 	})
 	if len(accFiles) == 0 {
 		return fmt.Errorf("%w (.kv) in %s", ErrSnapNoAccountFiles, dirs.SnapDomain)
@@ -2332,13 +2355,14 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 		prevFrom, prevTo = res.From, res.To
 	}
 
-	for _, res := range accFiles {
+	for i := range accFiles {
+		res := &accFiles[i]
 		// do a range check over all snapshots types (sanitizes domain and history folder)
 		accName, err := version.ReplaceVersionWithMask(res.Name())
 		if err != nil {
 			return fmt.Errorf("%w: failed to replace version in %s: %v", ErrSnapParseFilename, res.Name(), err)
 		}
-		for snapType := kv.Domain(0); snapType < kv.DomainLen; snapType++ {
+		for snapType := range kv.DomainLen {
 			// skip rcache check if this datadir doesn't produce it
 			if snapType == kv.RCacheDomain && !persistReceiptCache {
 				continue
@@ -2417,8 +2441,11 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 		return err
 	}
 
-	sort.Slice(accFiles, func(i, j int) bool {
-		return (accFiles[i].From < accFiles[j].From) || (accFiles[i].From == accFiles[j].From && accFiles[i].To < accFiles[j].To)
+	slices.SortFunc(accFiles, func(a, b snaptype.FileInfo) int {
+		if a.From != b.From {
+			return cmp.Compare(a.From, b.From)
+		}
+		return cmp.Compare(a.To, b.To)
 	})
 	if len(accFiles) == 0 {
 		return fmt.Errorf("%w (.ef) in %s", ErrSnapNoAccountFiles, dirs.SnapIdx)
@@ -2453,7 +2480,8 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 		viTypes = append(viTypes, "commitment")
 		iiTypes = append(iiTypes, "commitment")
 	}
-	for _, res := range accFiles {
+	for i := range accFiles {
+		res := &accFiles[i]
 		accName, err := version.ReplaceVersionWithMask(res.Name())
 		if err != nil {
 			return fmt.Errorf("%w: failed to replace version in %s: %v", ErrSnapParseFilename, res.Name(), err)
@@ -2529,8 +2557,8 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	}); err != nil {
 		return err
 	}
-	sort.Slice(intervals, func(i, j int) bool {
-		return intervals[i].from < intervals[j].from
+	slices.SortFunc(intervals, func(a, b interval) int {
+		return cmp.Compare(a.from, b.from)
 	})
 	if len(intervals) == 0 {
 		return fmt.Errorf("no snapshot files found in %s for type: %s", snapDir, snapType)
@@ -2587,7 +2615,7 @@ func doPublishable(dat datadir.Dirs, chainDB kv.RoDB) error {
 	return nil
 }
 
-func doClearIndexing(cliCtx *cli.Context) error {
+func doClearIndexing(ctx context.Context, cliCtx *cli.Command) error {
 	dat, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 	if err != nil {
 		return err
@@ -2646,7 +2674,7 @@ func deleteFilesWithExtensions(dir string, extensions []string) error {
 	})
 }
 
-func doBlkTxNum(cliCtx *cli.Context) error {
+func doBlkTxNum(ctx context.Context, cliCtx *cli.Command) error {
 	logger := log.Root()
 	defer logger.Info("Done")
 
@@ -2661,7 +2689,6 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 		return errors.New("both block and txnum can't be provided")
 	}
 
-	ctx := cliCtx.Context
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
@@ -2674,7 +2701,7 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 	}
 	defer clean()
 
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
@@ -2698,7 +2725,7 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 		if err != nil {
 			return err
 		}
-		stepSize := agg.StepSize()
+		stepSize := tx.Debug().StepSize()
 		minStep := min / stepSize
 		maxStep := max / stepSize
 		logger.Info("out", "block", blkNumber, "min_txnum", min, "max_txnum", max, "min_step", minStep, "max_step", maxStep)
@@ -2719,8 +2746,8 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 	return nil
 }
 
-func doDiff(cliCtx *cli.Context) error {
-	log.Info("staring")
+func doDiff(ctx context.Context, cliCtx *cli.Command) error {
+	log.Info("starting")
 	defer log.Info("Done")
 	srcF, dstF := cliCtx.String("src"), cliCtx.String("dst")
 	src, err := seg.NewDecompressor(srcF)
@@ -2753,7 +2780,7 @@ func doDiff(cliCtx *cli.Context) error {
 	return nil
 }
 
-func doMeta(cliCtx *cli.Context) error {
+func doMeta(ctx context.Context, cliCtx *cli.Command) error {
 	args := cliCtx.Args()
 	if args.Len() < 1 {
 		return errors.New("expecting file path as a first argument")
@@ -2815,7 +2842,7 @@ func doMeta(cliCtx *cli.Context) error {
 	return nil
 }
 
-func doDecompressSpeed(cliCtx *cli.Context) error {
+func doDecompressSpeed(ctx context.Context, cliCtx *cli.Command) error {
 	logger := log.Root()
 	args := cliCtx.Args()
 	if args.Len() < 1 {
@@ -2832,7 +2859,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		//defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
-		view, err := decompressor.OpenSequentialView()
+		view, err := decompressor.OpenSequentialView(true)
 		if err != nil {
 			panic(err)
 		}
@@ -2848,7 +2875,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		//defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
-		view, err := decompressor.OpenSequentialView()
+		view, err := decompressor.OpenSequentialView(true)
 		if err != nil {
 			panic(err)
 		}
@@ -2862,17 +2889,67 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	return nil
 }
 
-func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
+// removeAccessorsForRebuild deletes all accessor/index files so the subsequent
+// BuildMissed* passes regenerate them from the data files (.seg/.kv/.v/.ef).
+func removeAccessorsForRebuild(dirs datadir.Dirs, logger log.Logger) error {
+	targets := []struct {
+		dir  string
+		exts []string
+	}{
+		{dirs.Snap, []string{".idx"}},
+		{dirs.SnapCaplin, []string{".idx"}},
+		{dirs.SnapAccessors, []string{".vi", ".efi"}},
+		{dirs.SnapDomain, []string{".kvi", ".bt", ".kvei"}},
+	}
+	remove := func(fPath string) error {
+		if err := dir2.RemoveFile(fPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("rebuild: remove %s: %w", fPath, err)
+		}
+		logger.Info("[rebuild] removed accessor", "file", filepath.Base(fPath))
+		return nil
+	}
+	for _, t := range targets {
+		files, err := dir2.ListFiles(t.dir, t.exts...)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+		for _, fPath := range files {
+			if err := remove(fPath); err != nil {
+				return err
+			}
+		}
+		torrents, err := dir2.ListFiles(t.dir, ".torrent")
+		if err != nil {
+			return err
+		}
+		for _, fPath := range torrents {
+			base := strings.TrimSuffix(fPath, ".torrent")
+			if !slices.ContainsFunc(t.exts, func(ext string) bool { return strings.HasSuffix(base, ext) }) {
+				continue
+			}
+			if err := remove(fPath); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 	logger := log.Root()
 	defer logger.Info("Done")
-	ctx := cliCtx.Context
 
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	if rebuild {
-		panic("not implemented")
+		if err := removeAccessorsForRebuild(dirs, logger); err != nil {
+			return err
+		}
 	}
 
 	if err := freezeblocks.RemoveIncompatibleIndices(dirs); err != nil {
@@ -2900,7 +2977,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	temporalDb, err := temporal.New(chainDB, agg)
+	temporalDb, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
@@ -2912,38 +2989,75 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	return nil
 }
-func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger := log.Root()
+func doLS(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
+	return lsDatadir(ctx, dirs, log.Root())
+}
+
+func lsDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	defer logger.Info("Done")
-	ctx := cliCtx.Context
 
-	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
-	defer chainDB.Close()
-	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(chainDB).ChainName)
+	chainDB, chainName := tryOpenChaindata(ctx, dirs, logger)
+	if chainDB != nil {
+		defer chainDB.Close()
+	}
 
-	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	blockSnaps, borSnaps, caplinSnaps, agg := res.BlockSnaps, res.BorSnaps, res.CaplinSnaps, res.Aggregator
-	if err != nil {
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainName)
+
+	blockSnaps := blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, logger)
+	if err := blockSnaps.OpenFolder(); err != nil {
 		return err
 	}
-	defer clean()
-
+	defer blockSnaps.Close()
 	blockSnaps.Ls()
+
+	heimdall.RecordWayPoints(true) // needed to load checkpoints and milestones snapshots
+	borSnaps := heimdall.NewRoSnapshots(cfg, dirs.Snap, logger)
+	if err := borSnaps.OpenFolder(); err != nil {
+		return err
+	}
+	defer borSnaps.Close()
 	borSnaps.Ls()
-	caplinSnaps.LS()
-	agg.LS()
+
+	if agg, err := tryOpenAgg(ctx, dirs, chainDB, logger); err == nil {
+		defer agg.Close()
+		agg.LS()
+	} else {
+		logger.Info("state aggregator unavailable, skipping", "reason", err)
+	}
+
+	if chainName != "" {
+		if _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(chainName); err == nil {
+			caplinSnaps := freezeblocks.NewCaplinSnapshots(cfg, beaconConfig, dirs, logger)
+			if err := caplinSnaps.OpenFolder(); err == nil {
+				defer caplinSnaps.Close()
+				caplinSnaps.LS()
+			}
+		}
+	}
 
 	return nil
 }
 
+func tryOpenChaindata(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (kv.RwDB, string) {
+	if _, err := os.Stat(dirs.Chaindata); err != nil {
+		logger.Info("chaindata unavailable, using filesystem-only listing", "reason", err)
+		return nil, ""
+	}
+	db, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Open(ctx)
+	if err != nil {
+		logger.Info("chaindata unavailable, using filesystem-only listing", "reason", err)
+		return nil, ""
+	}
+	return db, fromdb.ChainConfig(db).ChainName
+}
+
 type OpenSnapsResult struct {
-	BlockSnaps       *freezeblocks.RoSnapshots
+	BlockSnaps       *blocksnapshots.RoSnapshots
 	BorSnaps         *heimdall.RoSnapshots
 	CaplinSnaps      *freezeblocks.CaplinSnapshots
 	CaplinStateSnaps *snapshotsync.CaplinStateSnapshots
 	BlockRetire      *freezeblocks.BlockRetire
 	Aggregator       *state.Aggregator
-	ForkAgg          *state.ForkableAgg
 }
 
 func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
@@ -2957,7 +3071,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 
 	chainConfig := fromdb.ChainConfig(chainDB)
 
-	res.BlockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
+	res.BlockSnaps = blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err = res.BlockSnaps.OpenFolder(); err != nil {
 		return
 	}
@@ -3009,7 +3123,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	blockReader := freezeblocks.NewBlockReader(res.BlockSnaps, res.BorSnaps)
 	blockWriter := blockio.NewBlockWriter()
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
-	res.BlockRetire = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, heimdallStore, bridgeStore, chainConfig, &ethconfig.Defaults, nil, blockSnapBuildSema, logger)
+	res.BlockRetire = freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, heimdallStore, bridgeStore, chainConfig, &ethconfig.Defaults, nil, blockSnapBuildSema, logger)
 
 	res.Aggregator = openAgg(ctx, dirs, chainDB, logger)
 	res.Aggregator.SetSnapshotBuildSema(blockSnapBuildSema)
@@ -3019,6 +3133,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		defer res.BorSnaps.Close()
 		defer res.CaplinSnaps.Close()
 		defer res.Aggregator.Close()
+		defer res.BlockRetire.Close() // LIFO: drain the retire before agg/snaps close
 	}
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
 		ac := res.Aggregator.BeginFilesRo()
@@ -3035,7 +3150,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	return
 }
 
-func doUncompress(cliCtx *cli.Context) error {
+func doUncompress(ctx context.Context, cliCtx *cli.Command) error {
 	_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 	if err != nil {
 		return err
@@ -3062,7 +3177,7 @@ func doUncompress(cliCtx *cli.Context) error {
 	return err
 }
 
-func doCompress(cliCtx *cli.Context) error {
+func doCompress(ctx context.Context, cliCtx *cli.Command) error {
 	defer func() {
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
@@ -3076,7 +3191,6 @@ func doCompress(cliCtx *cli.Context) error {
 	defer lck.Unlock()
 
 	logger := log.Root()
-	ctx := cliCtx.Context
 
 	args := cliCtx.Args()
 	if args.Len() < 1 {
@@ -3172,7 +3286,7 @@ func doCompress(cliCtx *cli.Context) error {
 	return nil
 }
 
-func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
+func doRemoveOverlap(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 	logger := log.Root()
 	defer logger.Info("Done")
 
@@ -3180,7 +3294,6 @@ func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer db.Close()
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	ctx := cliCtx.Context
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
 	agg := res.Aggregator
@@ -3192,11 +3305,10 @@ func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	return agg.RemoveOverlapsAfterMerge(ctx)
 }
 
-func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
+func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 	logger := log.Root()
 	defer logger.Info("Done")
 
-	ctx := cliCtx.Context
 	sourcefile := cliCtx.String(SnapshotFileFlag.Name)
 	sourcefile = filepath.Join(dirs.Snap, sourcefile)
 
@@ -3324,10 +3436,9 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	return nil
 }
 
-func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
+func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 	logger := log.Root()
 	defer logger.Info("Done")
-	ctx := cliCtx.Context
 
 	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
@@ -3335,34 +3446,17 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
-	caplinSnaps, br, agg := res.CaplinSnaps, res.BlockRetire, res.Aggregator
+	caplinSnaps, caplinStateSnaps, br, agg := res.CaplinSnaps, res.CaplinStateSnaps, res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
 	}
 	defer clean()
 
-	defer br.MadvNormal().DisableReadAhead()
-	defer agg.MadvNormal().DisableReadAhead()
+	//defer br.MadvNormal().DisableReadAhead()
+	//defer agg.MadvNormal().DisableReadAhead()
 
-	if cliCtx.IsSet(utils.ErigondbDomainStepsInFrozenFileFlag.Name) {
-		s := cliCtx.String(utils.ErigondbDomainStepsInFrozenFileFlag.Name)
-		var v uint64
-		if strings.EqualFold(s, "inf") {
-			v = config3.UnboundedDomainMerge
-		} else {
-			parsed, perr := strconv.ParseUint(s, 10, 64)
-			if perr != nil || parsed == 0 {
-				return fmt.Errorf("invalid --%s value %q: must be a positive integer or \"Inf\"",
-					utils.ErigondbDomainStepsInFrozenFileFlag.Name, s)
-			}
-			v = parsed
-		}
-		stepsStr := "Inf"
-		if v != config3.UnboundedDomainMerge {
-			stepsStr = fmt.Sprintf("%d", v)
-		}
-		logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
-		agg.SetErigondbDomainStepsInFrozenFile(v)
+	if err := agg.SetDomainStepsInFrozenFile(cliCtx.String(utils.ErigondbDomainStepsInFrozenFileFlag.Name)); err != nil {
+		return err
 	}
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
@@ -3395,11 +3489,15 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		blocksInSnapshots = min(blocksInSnapshots, blockReader.FrozenBorBlocks(false))
 	}
 	logger.Info("retiring blocks", "from", blocksInSnapshots, "to", to)
-	if err := br.RetireBlocks(ctx, blocksInSnapshots, to, log.LvlInfo, downloader.NoopSeederClient{}, nil); err != nil {
+	if err := br.BuildFiles(ctx, blocksInSnapshots, to, log.LvlInfo, dbservices.NoopSeederClient{}, nil); err != nil {
 		return err
 	}
 
 	if err := br.RemoveOverlaps(nil); err != nil {
+		return err
+	}
+
+	if err := caplinStateSnaps.RemoveOverlaps(); err != nil {
 		return err
 	}
 
@@ -3422,14 +3520,15 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	logger.Info("Pruning has ended", "deleted blocks", allDeletedBlocks)
 
-	db, err = temporal.New(db, agg)
+	temporalDb, err := temporal.New(db, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
+	db = temporalDb
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err = agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
+	if err = temporalDb.BuildMissedAccessors(ctx, indexWorkers); err != nil {
 		return err
 	}
 
@@ -3471,7 +3570,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	return nil
 }
 
-func doCompareIdx(cliCtx *cli.Context) error {
+func doCompareIdx(ctx context.Context, cliCtx *cli.Command) error {
 	// doesn't compare exact hashes offset,
 	// only sizes, counts, offsets, and ordinal lookups.
 	logger := log.Root()
@@ -3482,8 +3581,8 @@ func doCompareIdx(cliCtx *cli.Context) error {
 		}
 	}
 
-	first := cliCtx.Path("first")
-	second := cliCtx.Path("second")
+	first := cliCtx.String("first")
+	second := cliCtx.String("second")
 	doSizeCheck := !cliCtx.Bool("skip-size-check")
 
 	if doSizeCheck {
@@ -3562,18 +3661,27 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
-	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger)
 	if err != nil {
-		panic(err)
-	}
-	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
-	if err != nil {
-		panic(err)
-	}
-	if err = agg.OpenFolder(); err != nil {
 		panic(err)
 	}
 	return agg
+}
+
+func tryOpenAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (*state.Aggregator, error) {
+	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return nil, err
+	}
+	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
+	if err != nil {
+		return nil, err
+	}
+	if err = agg.OpenFolder(); err != nil {
+		agg.Close()
+		return nil, err
+	}
+	return agg, nil
 }
 
 // ── du (disk usage) helpers ─────────────────────────────────────────────
@@ -3588,7 +3696,6 @@ const (
 	duCatCaplin     = "caplin"
 	duCatCommitHist = "commitment hist"
 	duCatRcache     = "rcache"
-	duCatForkable   = "forkable"
 	duCatOther      = "other"
 )
 
@@ -3637,8 +3744,6 @@ func duClassifyFile(dir, name string) string {
 		return duCatAccessors
 	case "caplin":
 		return duCatCaplin
-	case "forkable":
-		return duCatForkable
 	}
 
 	// Files directly under snapshots/ — only known segment extensions are block segments.
@@ -3663,7 +3768,6 @@ func duWalkSnapshots(dirs datadir.Dirs) ([]duFileInfo, error) {
 		{dirs.SnapIdx, true},
 		{dirs.SnapAccessors, true},
 		{dirs.SnapCaplin, false},
-		{dirs.SnapForkable, false},
 		{dirs.Snap, false}, // top-level snapshots/ for block segments
 	}
 
@@ -4059,11 +4163,11 @@ func duFormatHuman(w io.Writer, result duResult, verbose bool) {
 	for cat, stat := range result.Categories {
 		entries = append(entries, catEntry{cat, stat})
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].stat.Bytes != entries[j].stat.Bytes {
-			return entries[i].stat.Bytes > entries[j].stat.Bytes
+	slices.SortFunc(entries, func(a, b catEntry) int {
+		if a.stat.Bytes != b.stat.Bytes {
+			return cmp.Compare(b.stat.Bytes, a.stat.Bytes)
 		}
-		return entries[i].name < entries[j].name
+		return cmp.Compare(a.name, b.name)
 	})
 
 	fmt.Fprintln(w, "── Breakdown ──────────────────────────────────────────────────")
@@ -4087,11 +4191,11 @@ func duFormatHuman(w io.Writer, result duResult, verbose bool) {
 				for sub, stat := range subs {
 					subEntries = append(subEntries, catEntry{sub, stat})
 				}
-				sort.Slice(subEntries, func(i, j int) bool {
-					if subEntries[i].stat.Bytes != subEntries[j].stat.Bytes {
-						return subEntries[i].stat.Bytes > subEntries[j].stat.Bytes
+				slices.SortFunc(subEntries, func(a, b catEntry) int {
+					if a.stat.Bytes != b.stat.Bytes {
+						return cmp.Compare(b.stat.Bytes, a.stat.Bytes)
 					}
-					return subEntries[i].name < subEntries[j].name
+					return cmp.Compare(a.name, b.name)
 				})
 				for j, sub := range subEntries {
 					subPct := float64(0)
@@ -4136,7 +4240,7 @@ func duFormatJSON(w io.Writer, result duResult) error {
 }
 
 // doDU implements the "erigon seg du" subcommand.
-func doDU(cliCtx *cli.Context, dirs datadir.Dirs) error {
+func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 	// Resolve chain name and configured prune mode from chaindata (best-effort).
 	// Use recover because both MustOpen and fromdb.ChainConfig can panic
 	// (e.g., DB locked by running node, corrupted/empty chaindata).

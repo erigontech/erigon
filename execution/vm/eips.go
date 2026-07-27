@@ -387,7 +387,13 @@ func enable7843(jt *JumpTable) {
 // enable8037 applies EIP-8037 (State Creation Gas Cost Increase)
 func enable8037(jt *JumpTable) {
 	jt[CREATE].constantGas = params.CreateGasEIP8037
-	jt[CREATE].dynamicGas = gasCreateEip8037
 	jt[CREATE2].constantGas = params.Create2GasEIP8037
-	jt[CREATE2].dynamicGas = gasCreate2Eip8037
+}
+
+// enable8038 applies EIP-8038 (State-access gas cost update)
+func enable8038(jt *JumpTable) {
+	jt[EXTCODESIZE].constantGas = params.ExtCodeWarmAccessGasEIP8038
+	jt[EXTCODECOPY].constantGas = params.ExtCodeWarmAccessGasEIP8038
+	jt[CREATE].constantGas = params.CreateAccessEIP8038
+	jt[CREATE2].constantGas = params.CreateAccessEIP8038
 }

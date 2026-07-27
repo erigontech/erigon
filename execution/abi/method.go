@@ -100,11 +100,13 @@ func NewMethod(name string, rawName string, funType FunctionType, mutability str
 		inputNames  = make([]string, len(inputs))
 		outputNames = make([]string, len(outputs))
 	)
-	for i, input := range inputs {
+	for i := range inputs {
+		input := &inputs[i]
 		inputNames[i] = fmt.Sprintf("%v %v", input.Type, input.Name)
 		types[i] = input.Type.String()
 	}
-	for i, output := range outputs {
+	for i := range outputs {
+		output := &outputs[i]
 		outputNames[i] = output.Type.String()
 		if len(output.Name) > 0 {
 			outputNames[i] += fmt.Sprintf(" %v", output.Name)

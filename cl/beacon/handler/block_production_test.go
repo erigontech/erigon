@@ -19,15 +19,23 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"math/big"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -40,7 +48,431 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
+
+func TestBlockBuilderWindowPreGloas(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+	now := slotStart
+
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion)
+
+	// Attestation deadline is 4s; polling stops a quarter of it (1s) earlier, at 3s.
+	require.Equal(t, slotStart.Add(3*time.Second).Add(-minPayloadPollingWindow), window.firstGetAt)
+	require.Equal(t, slotStart.Add(3*time.Second), window.pollUntil)
+}
+
+func TestBlockBuilderWindowGloas(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+	now := slotStart
+
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion)
+
+	// Attestation deadline is 3s; polling stops a quarter of it (750ms) earlier, at 2.25s.
+	require.Equal(t, slotStart.Add(2250*time.Millisecond).Add(-minPayloadPollingWindow), window.firstGetAt)
+	require.Equal(t, slotStart.Add(2250*time.Millisecond), window.pollUntil)
+}
+
+func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
+	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(nil))
+	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+
+	_, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), cltypes.ErrGloasCannotBlind.Error())
+}
+
+func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.AltairVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			h := &ApiHandler{
+				beaconChainCfg: &clparams.MainnetBeaconConfig,
+				builderClient:  builder_mock.NewMockBuilderClient(ctrl),
+			}
+			block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, version)
+			body, err := json.Marshal(block)
+			require.NoError(t, err)
+			req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Eth-Consensus-Version", version.String())
+
+			_, err = h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+			require.ErrorContains(t, err, "blinded blocks are unsupported before Bellatrix")
+		})
+	}
+
+	require.NoError(t, validateBlindedBlockRequest(
+		cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.BellatrixVersion),
+		clparams.BellatrixVersion,
+	))
+}
+
+func TestPublishBlindedBlocksRejectsUnsupportedContentType(t *testing.T) {
+	h := &ApiHandler{beaconChainCfg: &clparams.MainnetBeaconConfig}
+	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", nil)
+	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
+
+	_, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+	endpointErr, ok := err.(*beaconhttp.EndpointError)
+	require.True(t, ok)
+	require.Equal(t, http.StatusUnsupportedMediaType, endpointErr.Code)
+	require.ErrorContains(t, err, "unsupported content type")
+}
+
+func TestPublishBlindedBlocksAcceptsEmptyFuluBuilderResponse(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
+	builderClient.EXPECT().SubmitBlindedBlocks(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *cltypes.ExecutionRequests, error) {
+			require.Equal(t, cltypes.NewEth1Header(clparams.FuluVersion).EncodingSizeSSZ(), block.Block.Body.ExecutionPayload.EncodingSizeSSZ())
+			return nil, nil, nil, nil
+		},
+	)
+	h := &ApiHandler{
+		beaconChainCfg: &clparams.MainnetBeaconConfig,
+		builderClient:  builderClient,
+	}
+	block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
+
+	resp, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+}
+
+func TestPublishBlindedBlocksRejectsMissingPreFuluPayload(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
+	builderClient.EXPECT().SubmitBlindedBlocks(gomock.Any(), gomock.Any()).Return(nil, nil, nil, nil)
+	h := &ApiHandler{
+		beaconChainCfg: &clparams.MainnetBeaconConfig,
+		builderClient:  builderClient,
+	}
+	block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.ElectraVersion)
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.ElectraVersion.String())
+
+	_, err = h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+	require.ErrorContains(t, err, "builder returned nil execution payload")
+}
+
+func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		mutate     func(*cltypes.SignedBlindedBeaconBlock)
+		mutateJSON func(*testing.T, []byte) []byte
+		wantErr    string
+	}{
+		{
+			name: "missing block",
+			mutate: func(block *cltypes.SignedBlindedBeaconBlock) {
+				block.Block = nil
+			},
+			wantErr: "missing block",
+		},
+		{
+			name: "missing body",
+			mutate: func(block *cltypes.SignedBlindedBeaconBlock) {
+				block.Block.Body = nil
+			},
+			wantErr: "missing block body",
+		},
+		{
+			name: "null execution payload header",
+			mutate: func(block *cltypes.SignedBlindedBeaconBlock) {
+				block.Block.Body.ExecutionPayload = nil
+			},
+			mutateJSON: func(t *testing.T, body []byte) []byte {
+				var request map[string]any
+				require.NoError(t, json.Unmarshal(body, &request))
+				message := request["message"].(map[string]any)
+				blockBody := message["body"].(map[string]any)
+				blockBody["execution_payload_header"] = nil
+				encoded, err := json.Marshal(request)
+				require.NoError(t, err)
+				return encoded
+			},
+			wantErr: "missing execution payload header",
+		},
+		{
+			name: "omitted execution payload header",
+			mutate: func(block *cltypes.SignedBlindedBeaconBlock) {
+				block.Block.Body.ExecutionPayload = nil
+			},
+			wantErr: "missing execution payload header",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			builderClient := builder_mock.NewMockBuilderClient(ctrl)
+			h := &ApiHandler{
+				beaconChainCfg: &clparams.MainnetBeaconConfig,
+				builderClient:  builderClient,
+			}
+			block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+			tc.mutate(block)
+			body, err := json.Marshal(block)
+			require.NoError(t, err)
+			if tc.mutateJSON != nil {
+				body = tc.mutateJSON(t, body)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
+
+			_, err = h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
+
+func TestValidateBuilderPayload(t *testing.T) {
+	validPayload := func(version clparams.StateVersion) *cltypes.Eth1Block {
+		payload := cltypes.NewEth1Block(version, &clparams.MainnetBeaconConfig)
+		payload.Extra = solid.NewExtraData()
+		payload.Transactions = &solid.TransactionsSSZ{}
+		if version.AfterOrEqual(clparams.CapellaVersion) {
+			payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
+		}
+		return payload
+	}
+	validBellatrix := validPayload(clparams.BellatrixVersion)
+	require.NoError(t, validateBuilderPayload(validBellatrix, nil, clparams.BellatrixVersion))
+
+	for _, tc := range []struct {
+		name    string
+		payload *cltypes.Eth1Block
+		version clparams.StateVersion
+		wantErr string
+	}{
+		{name: "missing payload", version: clparams.BellatrixVersion, wantErr: "nil execution payload"},
+		{
+			name: "missing extra data",
+			payload: func() *cltypes.Eth1Block {
+				payload := validPayload(clparams.BellatrixVersion)
+				payload.Extra = nil
+				return payload
+			}(),
+			version: clparams.BellatrixVersion,
+			wantErr: "missing extra data",
+		},
+		{
+			name: "missing transactions",
+			payload: func() *cltypes.Eth1Block {
+				payload := validPayload(clparams.BellatrixVersion)
+				payload.Transactions = nil
+				return payload
+			}(),
+			version: clparams.BellatrixVersion,
+			wantErr: "missing transactions",
+		},
+		{
+			name: "missing withdrawals",
+			payload: func() *cltypes.Eth1Block {
+				payload := validPayload(clparams.CapellaVersion)
+				payload.Withdrawals = nil
+				return payload
+			}(),
+			version: clparams.CapellaVersion,
+			wantErr: "missing withdrawals",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.ErrorContains(t, validateBuilderPayload(tc.payload, nil, tc.version), tc.wantErr)
+		})
+	}
+}
+
+func TestValidateBuilderPayloadRejectsOlderResponseVersion(t *testing.T) {
+	payload := cltypes.NewEth1Block(clparams.BellatrixVersion, &clparams.MainnetBeaconConfig)
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = &solid.TransactionsSSZ{}
+
+	require.ErrorContains(t, validateBuilderPayload(payload, nil, clparams.ElectraVersion), "version mismatch")
+}
+
+func TestValidateBuilderPayloadRejectsMissingElectraExecutionRequests(t *testing.T) {
+	payload := cltypes.NewEth1Block(clparams.ElectraVersion, &clparams.MainnetBeaconConfig)
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = &solid.TransactionsSSZ{}
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
+
+	require.ErrorContains(t, validateBuilderPayload(payload, nil, clparams.ElectraVersion), "missing execution requests")
+	require.NoError(t, validateBuilderPayload(payload, cltypes.NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, clparams.ElectraVersion), clparams.ElectraVersion))
+}
+
+func TestBlockBuilderWindowLateStartKeepsPublicationMargin(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+	now := slotStart.Add(2950 * time.Millisecond)
+
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion)
+
+	// A late request clamps the first poll up to now but still stops at 3s, preserving the margin.
+	require.Equal(t, now, window.firstGetAt)
+	require.Equal(t, slotStart.Add(3*time.Second), window.pollUntil)
+}
+
+func TestBlockBuilderWindowLateRequestGrabsImmediately(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+	now := slotStart.Add(5 * time.Second)
+
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion)
+
+	require.Equal(t, now, window.firstGetAt)
+	require.Equal(t, now, window.pollUntil)
+}
+
+func TestBlockBuilderWindowReservesPublicationMargin(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+
+	for _, tc := range []struct {
+		name          string
+		version       clparams.StateVersion
+		deadline      time.Duration
+		wantPollUntil time.Duration
+	}{
+		{"pre-gloas", clparams.ElectraVersion, 4 * time.Second, 3 * time.Second},
+		{"gloas", clparams.GloasVersion, 3 * time.Second, 2250 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			window := computeBlockBuilderWindow(slotStart, slotStart, cfg, tc.version)
+			require.Equal(t, slotStart.Add(tc.wantPollUntil), window.pollUntil)
+			require.True(t, window.pollUntil.Before(slotStart.Add(tc.deadline)),
+				"polling must stop before the attestation deadline to leave publication margin")
+		})
+	}
+}
+
+func TestShouldRetryGetPayloadStopsAtDeadline(t *testing.T) {
+	deadline := time.Unix(100, 0)
+
+	require.True(t, shouldRetryGetPayload(deadline.Add(-time.Nanosecond), deadline))
+	require.False(t, shouldRetryGetPayload(deadline, deadline))
+	require.False(t, shouldRetryGetPayload(deadline.Add(time.Nanosecond), deadline))
+}
+
+func TestPollAssembledPayloadReturnsReadyPayload(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now.Add(-time.Millisecond), pollUntil: now.Add(time.Second)}
+	want := &cltypes.Eth1Block{}
+	calls := 0
+	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			return want, nil, nil, nil, nil
+		})
+	require.True(t, ok)
+	require.Same(t, want, payload)
+	require.Equal(t, 1, calls)
+}
+
+func TestPollAssembledPayloadRetriesWhileBusy(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
+	want := &cltypes.Eth1Block{}
+	calls := 0
+	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			if calls < 3 {
+				return nil, nil, nil, nil, nil
+			}
+			return want, nil, nil, nil, nil
+		})
+	require.True(t, ok)
+	require.Same(t, want, payload)
+	require.Equal(t, 3, calls)
+}
+
+func TestPollAssembledPayloadRetriesOnError(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
+	want := &cltypes.Eth1Block{}
+	calls := 0
+	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			if calls == 1 {
+				return nil, nil, nil, nil, errors.New("EL busy")
+			}
+			return want, nil, nil, nil, nil
+		})
+	require.True(t, ok)
+	require.Same(t, want, payload)
+	require.Equal(t, 2, calls)
+}
+
+func TestPollAssembledPayloadStopsAtDeadline(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
+	calls := 0
+	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			return nil, nil, nil, nil, nil
+		})
+	require.False(t, ok)
+	require.Nil(t, payload)
+	require.NotZero(t, calls)
+}
+
+func TestPollAssembledPayloadLateRequestGrabsOnce(t *testing.T) {
+	past := time.Now().Add(-time.Second)
+	window := blockBuilderWindow{firstGetAt: past, pollUntil: past}
+	calls := 0
+	_, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			return nil, nil, nil, nil, nil
+		})
+	require.False(t, ok)
+	require.Equal(t, 1, calls)
+}
+
+func TestPollAssembledPayloadReturnsOnContextCancel(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now.Add(time.Hour), pollUntil: now.Add(time.Hour)}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls := 0
+	_, _, _, _, ok := pollAssembledPayload(ctx, window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			return nil, nil, nil, nil, nil
+		})
+	require.False(t, ok)
+	require.Zero(t, calls)
+}
 
 func TestSetupHeaderResponseForBlockProductionGloasPayloadIncluded(t *testing.T) {
 	h := &ApiHandler{}
@@ -279,7 +711,7 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	// so block production expects an envelope on disk. Provide one with empty ExecutionRequests.
 	fcu.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
-			ExecutionRequests: &cltypes.ExecutionRequests{},
+			ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(h.beaconChainCfg, clparams.GloasVersion),
 		},
 	}
 

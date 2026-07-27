@@ -9,11 +9,11 @@ import (
 	"github.com/erigontech/erigon/db/datastruct/existence"
 )
 
-func benchContainsHash(b *testing.B, n int, useFuse bool) {
+func benchContainsHash(b *testing.B, n int) {
 	b.Helper()
 	fp := filepath.Join(b.TempDir(), "filter")
 
-	f, err := existence.NewFilter(uint64(n), fp, useFuse)
+	f, err := existence.NewFilter(uint64(n), fp)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func benchContainsHash(b *testing.B, n int, useFuse bool) {
 		b.Fatal(err)
 	}
 
-	r, err := existence.OpenFilter(fp, useFuse)
+	r, err := existence.OpenFilter(fp, true)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -58,14 +58,8 @@ func benchContainsHash(b *testing.B, n int, useFuse bool) {
 
 func BenchmarkContainsHash(b *testing.B) {
 	for _, n := range []int{100_000, 1_000_000} {
-		for _, useFuse := range []bool{false, true} {
-			label := "bloom"
-			if useFuse {
-				label = "fuse"
-			}
-			b.Run(fmt.Sprintf("%s/n=%d", label, n), func(b *testing.B) {
-				benchContainsHash(b, n, useFuse)
-			})
-		}
+		b.Run(fmt.Sprintf("fuse/n=%d", n), func(b *testing.B) {
+			benchContainsHash(b, n)
+		})
 	}
 }

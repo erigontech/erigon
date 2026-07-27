@@ -70,19 +70,16 @@ func TestTracerStopRace(t *testing.T) {
 				var ready sync.WaitGroup
 				var wg sync.WaitGroup
 				ready.Add(2)
-				wg.Add(2)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					ready.Done()
 					<-start
 					tr.Stop(stopErr)
-				}()
-				go func() {
-					defer wg.Done()
+				})
+				wg.Go(func() {
 					ready.Done()
 					<-start
 					_, _ = tr.GetResult()
-				}()
+				})
 				ready.Wait()
 				close(start)
 				wg.Wait()

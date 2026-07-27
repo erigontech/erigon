@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/holiman/uint256"
 
@@ -50,18 +49,9 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 	}
 
 	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByHash
-	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txnHash)
+	blockNum, txNum, isBorStateSyncTx, ok, err := api.txnLookupWithBorFallback(ctx, tx, txnHash, chainConfig)
 	if err != nil {
 		return nil, err
-	}
-
-	// Private API returns 0 if transaction is not found.
-	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
-	if isBorStateSyncTx {
-		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
-		if err != nil {
-			return nil, err
-		}
 	}
 	if ok {
 		err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
@@ -70,13 +60,9 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		}
 
 		overlayTx := api.filters.WithOverlay(tx)
-		txNumMin, err := api._txNumReader.Min(ctx, overlayTx, blockNum)
+		txnIndex, err := api.txnIndexInBlock(ctx, overlayTx, blockNum, txNum, isBorStateSyncTx)
 		if err != nil {
 			return nil, err
-		}
-
-		if txNumMin+1 > txNum && !isBorStateSyncTx {
-			return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 		}
 
 		header, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
@@ -106,17 +92,15 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return ethapi.NewRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(txCount), chainConfig.ChainID), nil
 		}
 
-		var txnIndex = txNum - txNumMin - 1
-
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, int(txnIndex))
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
 		if err != nil {
 			return nil, err
 		}
 
-		return ethapi.NewRPCTransaction(txn, blockHash, blockTime, blockNum, txnIndex, baseFee), nil
+		return ethapi.NewRPCTransaction(txn, blockHash, blockTime, blockNum, uint64(txnIndex), baseFee), nil
 	}
 
-	curHeader := rawdb.ReadCurrentHeader(tx)
+	curHeader := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
 	if curHeader == nil {
 		return nil, nil
 	}
@@ -166,14 +150,10 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 		return nil, err
 	}
 
-	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum, false)
 	if err != nil {
 		return nil, err
 	}
-	if txNumMin+1 > txNum {
-		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
-	}
-	txnIndex := int(txNum - txNumMin - 1)
 	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
 	if err != nil {
 		return nil, err

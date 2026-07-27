@@ -39,10 +39,10 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
@@ -70,6 +70,7 @@ var errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
 type EngineServer struct {
 	blockDownloader *engine_block_downloader.EngineBlockDownloader
 	config          *chain.Config
+	beaconCfg       atomic.Pointer[clparams.BeaconChainConfig]
 	// Block proposing for proof-of-stake
 	proposing bool
 	// Block consuming for proof-of-stake
@@ -126,14 +127,18 @@ func NewEngineServer(
 	return srv
 }
 
+func (e *EngineServer) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig) {
+	e.beaconCfg.Store(beaconCfg)
+}
+
 func (e *EngineServer) Start(
 	ctx context.Context,
 	httpConfig *httpcfg.HttpCfg,
 	db kv.TemporalRoDB,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	filters *rpchelper.Filters,
 	stateCache kvcache.Cache,
-	engineReader rules.EngineReader,
+	engine rules.Engine,
 	eth rpchelper.ApiBackend,
 	mining txpoolproto.MiningClient,
 	events *shards.Events,
@@ -150,7 +155,7 @@ func (e *EngineServer) Start(
 			return nil
 		})
 	}
-	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs, nil, httpConfig.BlockRangeLimit, httpConfig.GetLogsMaxResults)
+	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, engine, nil, jsonrpc.NewBaseApiConfig(httpConfig))
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, jsonrpc.NewEthApiConfig(httpConfig), e.logger)
 
 	apiList := []rpc.API{
@@ -207,6 +212,9 @@ func (s *EngineServer) validatePayloadAttributesPreFCU(version clparams.StateVer
 	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // V1/V2 fcu at a Cancun timestamp
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
+	if s.config.IsAmsterdam(timestamp) && version < clparams.GloasVersion { // V3 fcu at an Amsterdam timestamp
+		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
 	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
 		return &engine_helpers.InvalidPayloadAttributesErr // wrong V1/V2 withdrawals presence vs Shanghai
 	}
@@ -227,13 +235,18 @@ func (s *EngineServer) validatePayloadAttributesPostFCU(version clparams.StateVe
 	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 outside Cancun window (cancun.md point 8.2)
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
+	if !s.config.IsAmsterdam(timestamp) && version >= clparams.GloasVersion { // V4 outside Amsterdam window
+		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
 	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // SlotNumber required for Glamsterdam (EIP-7843)
 	}
-	// TODO: enable once tests catch up with glamsterdam-devnet-4 spec
-	// if version >= clparams.GloasVersion && payloadAttributes.TargetGasLimit == nil {
-	// 	return &engine_helpers.InvalidPayloadAttributesErr // TargetGasLimit required for V4 attrs
-	// }
+	if version >= clparams.GloasVersion && payloadAttributes.TargetGasLimit == nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // TargetGasLimit required for V4 attrs
+	}
+	if version < clparams.GloasVersion && payloadAttributes.SlotNumber != nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // pre-V4 attrs MUST NOT carry slotNumber
+	}
 	if version < clparams.GloasVersion && payloadAttributes.TargetGasLimit != nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // pre-V4 attrs MUST NOT carry targetGasLimit
 	}
@@ -346,46 +359,42 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
 	}
 
-	var blockAccessList types.BlockAccessList
 	var blockAccessListBytes []byte
 	var err error
-	if version >= clparams.GloasVersion && !s.config.IsEIPDisabled(7928) {
+	if version >= clparams.GloasVersion && s.config.IsEIPEnabled(7928, header.Time) {
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
-		if len(req.BlockAccessList) == 0 {
-			blockAccessList = make(types.BlockAccessList, 0)
-			hash := empty.BlockAccessListHash
-			header.BlockAccessListHash = &hash
-			blockAccessListBytes, err = types.EncodeBlockAccessListBytes(blockAccessList)
-			if err != nil {
-				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("encode empty blockAccessList: %v", err)}
-			}
-		} else {
-			blockAccessList, err = types.DecodeBlockAccessListBytes(req.BlockAccessList)
-			if err != nil {
-				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(req.BlockAccessList))
+		bal := *req.BlockAccessList
+		// Decode fully validates EIP-7928 structure, ordering and limits; the raw
+		// bytes are what we hash and store, so the decoded value itself is discarded.
+		if _, err = types.DecodeBlockAccessListBytes(bal); err != nil {
+			s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(bal))
+			// A decodable list that violates EIP-7928 rules is an invalid
+			// block; undecodable bytes are a malformed request (-32602).
+			if errors.Is(err, types.ErrInvalidBlockAccessList) {
 				return &engine_types.PayloadStatus{
 					Status:          engine_types.InvalidStatus,
-					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list decode: %v", err)),
+					ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
 				}, nil
 			}
-			if err := blockAccessList.Validate(); err != nil {
-				return &engine_types.PayloadStatus{
-					Status:          engine_types.InvalidStatus,
-					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list validate: %v", err)),
-				}, nil
-			}
-			hash := crypto.HashData(req.BlockAccessList)
-			header.BlockAccessListHash = &hash
-			blockAccessListBytes = req.BlockAccessList
+			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("undecodable blockAccessList: %v", err)}
 		}
+		hash := crypto.Keccak256Hash(bal)
+		header.BlockAccessListHash = &hash
+		blockAccessListBytes = bal
 		if req.SlotNumber != nil {
 			slotNumber := uint64(*req.SlotNumber)
 			header.SlotNumber = &slotNumber
 		} else {
 			return nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
 		}
+	} else if req.BlockAccessList != nil && len(*req.BlockAccessList) > 0 {
+		// Reject only a NON-EMPTY block access list pre-Amsterdam. An empty ("0x")
+		// param must fall through rather than error here: a pre-fork block that
+		// carries a bal-hash header is rejected by the ensuing block-hash mismatch,
+		// and erroring on the empty param would pre-empt that expected path.
+		return nil, &rpc.InvalidParamsError{Message: "unexpected blockAccessList in pre-Amsterdam payload"}
 	}
 
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
@@ -1112,12 +1121,10 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 		ep.SlotNumber = &sn
 	}
 	if header.BlockAccessListHash != nil && br.BlockAccessList != nil {
-		// EIP-7928: encode even when br.BlockAccessList is empty — an empty
-		// BAL serializes to 0xc0 via standard RLP rules. A nil BAL means
-		// the data is missing/not-populated and should not be emitted.
 		encoded, encErr := types.EncodeBlockAccessListBytes(br.BlockAccessList)
 		if encErr == nil {
-			ep.BlockAccessList = encoded
+			bal := hexutil.Bytes(encoded)
+			ep.BlockAccessList = &bal
 		}
 	}
 
@@ -1297,7 +1304,7 @@ func waitForResponse(maxWait time.Duration, waitCondnF func() (bool, error)) (bo
 	}
 	checkInterval := 10 * time.Millisecond
 	maxChecks := int64(maxWait) / int64(checkInterval)
-	for i := int64(0); i < maxChecks; i++ {
+	for range maxChecks {
 		time.Sleep(checkInterval)
 		shouldWait, err = waitCondnF()
 		if err != nil || !shouldWait {

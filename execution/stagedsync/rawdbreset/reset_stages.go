@@ -28,20 +28,20 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func ResetState(db kv.TemporalRwDB, ctx context.Context, dirs datadir.Dirs, br services.FullBlockReader, logger log.Logger) error {
+func ResetState(db kv.TemporalRwDB, ctx context.Context, dirs datadir.Dirs, br dbservices.FullBlockReader, logger log.Logger) error {
 	// don't reset senders here
 	if err := db.Update(ctx, ResetWitnesses); err != nil {
 		return err
@@ -91,7 +91,7 @@ func ResetState(db kv.TemporalRwDB, ctx context.Context, dirs datadir.Dirs, br s
 // from peers. The stale TD records are independently keyed by hash and do
 // not affect canonical assignment, and FillDBFromSnapshots rewrites the
 // snapshot-range TDs as it walks the frozen headers.
-func ResetCanonicalAndRefillFromSnapshots(ctx context.Context, db kv.TemporalRwDB, dirs datadir.Dirs, br services.FullBlockReader, logger log.Logger) error {
+func ResetCanonicalAndRefillFromSnapshots(ctx context.Context, db kv.TemporalRwDB, dirs datadir.Dirs, br dbservices.FullBlockReader, logger log.Logger) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if err := tx.ClearTable(kv.HeaderCanonical); err != nil {
 			return fmt.Errorf("clear canonical hash table: %w", err)
@@ -108,7 +108,7 @@ func ResetCanonicalAndRefillFromSnapshots(ctx context.Context, db kv.TemporalRwD
 	})
 }
 
-func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
+func ResetBlocks(db kv.RwDB, tx kv.RwTx, br dbservices.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -157,14 +157,16 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blocki
 	return nil
 }
 
-func ResetSenders(ctx context.Context, tx kv.RwTx) error {
-	if err := backup.ClearTables(ctx, tx, kv.Senders); err != nil {
-		return fmt.Errorf("clearing senders table: %w", err)
-	}
-	return clearStageProgress(tx, stages.Senders)
+func ResetSenders(ctx context.Context, db kv.RwDB) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if err := backup.ClearTables(ctx, db, tx, kv.Senders); err != nil {
+			return fmt.Errorf("clearing senders table: %w", err)
+		}
+		return clearStageProgress(tx, stages.Senders)
+	})
 }
 
-func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
+func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
 	domainTablesCount := len(db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain))
 	invertedIdxTablesCount := len(db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx))
 	cleanupList := make([]string, 0, len(stateBuckets)+len(stateHistoryBuckets)+domainTablesCount+invertedIdxTablesCount)
@@ -173,17 +175,37 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 	cleanupList = append(cleanupList, db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain)...)
 	cleanupList = append(cleanupList, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
-	return db.Update(ctx, func(tx kv.RwTx) error {
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		if err := clearStageProgress(tx, stages.Execution); err != nil {
-			return err
+			return fmt.Errorf("clearing Execution stage progress: %w", err)
 		}
-
-		if err := backup.ClearTables(ctx, tx, cleanupList...); err != nil {
-			return fmt.Errorf("clearing exec state tables: %w", err)
+		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. just leave progress as 0.
+		if err := backup.ClearTables(ctx, db, tx, cleanupList...); err != nil {
+			return fmt.Errorf("reset exec state tables: %w", err)
 		}
-		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Wiping the commitment table leaves the aggregator's in-memory branchCache
+	// pointing at now-deleted trie nodes; drop it so a from-0 re-exec repopulates
+	// from the wiped table instead of computing a wrong root off stale nodes.
+	branchCacheCleared := false
+	if hasAgg, ok := db.(dbstate.HasAgg); ok {
+		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok {
+			aggTx := agg.BeginFilesRo()
+			defer aggTx.Close()
+			if bc := aggTx.BranchCache(); bc != nil {
+				bc.Clear()
+			}
+			branchCacheCleared = true
+		}
+	}
+	if !branchCacheCleared {
+		log.Warn("[reset] commitment branch cache not cleared after wiping the table (no *state.Aggregator); a from-0 re-exec may read stale commitment nodes and produce a wrong trie root")
+	}
+	return nil
 }
 
 func ResetTxLookup(tx kv.RwTx) error {
@@ -234,8 +256,8 @@ func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
 	// "block 0 already done" — SeekCommitment then returns (1, 0), the exec
 	// loop starts at block 1, and the block-0 init task that re-applies the
 	// genesis allocation never runs. This breaks `stage_exec --reset` →
-	// `stage_exec` from-0 sync (parallel-exec drops genesis-allocated
-	// addresses that no subsequent block touches; see #21138).
+	// `stage_exec` from-0 sync (parallel exec drops genesis-allocated
+	// addresses that no subsequent block touches).
 	for _, stage := range stagesList {
 		if err := tx.Delete(kv.SyncStageProgress, []byte(stage)); err != nil {
 			return err
@@ -250,19 +272,15 @@ func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
 func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		for _, st := range stagesList {
-			if err := backup.ClearTables(ctx, tx, Tables[st]...); err != nil {
-				return err
-			}
-			if err := clearStageProgress(tx, stagesList...); err != nil {
+			if err := backup.ClearTables(ctx, db, tx, Tables[st]...); err != nil {
 				return err
 			}
 		}
-		return nil
+		return clearStageProgress(tx, stagesList...)
 	})
 }
 
-func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, logger log.Logger) error {
-	startTime := time.Now()
+func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader dbservices.FullBlockReader, logger log.Logger) error {
 	blocksAvailable := blockReader.FrozenBlocks()
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -329,14 +347,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					diaglib.Send(diaglib.SnapshotFillDBStageUpdate{
-						Stage: diaglib.SnapshotFillDBStage{
-							StageName: string(stage),
-							Current:   header.Number.Uint64(),
-							Total:     blocksAvailable,
-						},
-						TimeElapsed: time.Since(startTime).Seconds(),
-					})
 					logger.Info(fmt.Sprintf("[%s] Total difficulty index: %s/%s", logPrefix,
 						common.PrettyCounter(header.Number.Uint64()), common.PrettyCounter(blockReader.FrozenBlocks())))
 				default:
@@ -360,25 +370,17 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}
 
 		case stages.Bodies:
-			firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
+			firstTxNum := blockReader.FirstTxnNumNotInSnapshots(tx)
 			if err := tx.ResetSequence(kv.EthTx, firstTxNum); err != nil {
 				return err
 			}
 
 			_ = tx.ClearTable(kv.MaxTxNum)
-			if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
+			if err := blockReader.IterateFrozenBodies(tx, func(blockNum, baseTxNum, txAmount uint64) error {
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					diaglib.Send(diaglib.SnapshotFillDBStageUpdate{
-						Stage: diaglib.SnapshotFillDBStage{
-							StageName: string(stage),
-							Current:   blockNum,
-							Total:     blocksAvailable,
-						},
-						TimeElapsed: time.Since(startTime).Seconds(),
-					})
 					logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %s/%s", logPrefix, common.PrettyCounter(blockNum), common.PrettyCounter(blockReader.FrozenBlocks())))
 				default:
 				}
@@ -409,16 +411,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					return err
 				}
 			}
-
-		default:
-			diaglib.Send(diaglib.SnapshotFillDBStageUpdate{
-				Stage: diaglib.SnapshotFillDBStage{
-					StageName: string(stage),
-					Current:   blocksAvailable, // as we are done with other stages
-					Total:     blocksAvailable,
-				},
-				TimeElapsed: time.Since(startTime).Seconds(),
-			})
 		}
 	}
 	return nil
@@ -433,7 +425,7 @@ const (
 	pruneMarkerSafeThreshold = snaptype.Erigon2MergeLimit * 1.5 // 1.5x the merge limit
 )
 
-func GetPruneMarkerSafeThreshold(blockReader services.FullBlockReader) uint64 {
+func GetPruneMarkerSafeThreshold(blockReader dbservices.FullBlockReader) uint64 {
 	snapProgress := min(blockReader.FrozenBorBlocks(false), blockReader.FrozenBlocks())
 	if blockReader.BorSnapshots() == nil {
 		snapProgress = blockReader.FrozenBlocks()

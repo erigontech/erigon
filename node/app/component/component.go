@@ -26,7 +26,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common/dbg"
 	liblog "github.com/erigontech/erigon/common/log/v3"
@@ -99,7 +99,7 @@ type Component[P any] interface {
 
 	Provider() *P
 
-	EventBus(key interface{}) *event.ManagedEventBus
+	EventBus(key any) *event.ManagedEventBus
 }
 
 type typedComponent[P any] struct {
@@ -138,10 +138,10 @@ func (c typedComponent[P]) Deactivate(ctx context.Context, handler ...ActivityHa
 var deactivatoinWaiters = struct {
 	sync.Mutex
 	*util.ChannelGroup
-	cmap   map[interface{}]*component
+	cmap   map[any]*component
 	cancel func()
 }{
-	cmap: map[interface{}]*component{},
+	cmap: map[any]*component{},
 }
 
 // relations is stored as []*component (not []relation) so pointer identity
@@ -170,7 +170,7 @@ func (c relations) Add(r relation) relations {
 	}
 
 	var i = l
-	for index := 0; index < l; index++ {
+	for index := range l {
 		if cmp(c[index], component) && (index == l-1 || !cmp(c[index+1], component)) {
 			i = index
 			break
@@ -251,7 +251,7 @@ func (c relations) Contains(r relation) bool {
 	}
 
 	var i = l
-	for index := 0; index < l; index++ {
+	for index := range l {
 		if cmp(c[index], component) && (index == l-1 || !cmp(c[index+1], component)) {
 			i = index + 1
 			break
@@ -301,7 +301,7 @@ type component struct {
 	state           State
 	dependents      relations
 	dependencies    relations
-	provider        interface{}
+	provider        any
 	log             app.Logger
 	flags           []cli.Flag
 	inbox           chan actorMsg // serializes activate/deactivate/stateChanged — prevents lock-ordering deadlocks
@@ -379,7 +379,7 @@ type componentOptions struct {
 	id           string
 	logLabels    []string
 	logLvl       liblog.Lvl
-	logCtx       []interface{}
+	logCtx       []any
 }
 
 func WithLogLevel(lvl liblog.Lvl) app.Option {
@@ -398,7 +398,7 @@ func WithLogLabels(labels ...string) app.Option {
 		})
 }
 
-func WithLogCtx(ctx ...interface{}) app.Option {
+func WithLogCtx(ctx ...any) app.Option {
 	return app.WithOption[componentOptions](
 		func(c *componentOptions) bool {
 			c.logCtx = ctx
@@ -682,7 +682,7 @@ func (c *component) Name() string {
 		if c.provider != nil {
 			return fmt.Sprintf("%T(%p)", c, c)
 		}
-		return reflect.TypeOf(c).String()
+		return reflect.TypeFor[*component]().String()
 	}
 
 	return c.id.String()
@@ -1034,7 +1034,7 @@ func awaitDeactivationChannels() {
 	waiters := &deactivatoinWaiters
 	go func() {
 		myChannels.Wait(
-			func(ch interface{}, _ interface{}, _ bool) (bool, bool) {
+			func(ch any, _ any, _ bool) (bool, bool) {
 				waiters.Lock()
 				c, ok := waiters.cmap[ch]
 				delete(waiters.cmap, ch)
@@ -1155,7 +1155,7 @@ func (c *component) deactivateProvider(ctx context.Context, onActivity onActivit
 	return nil
 }
 
-func (c *component) EventBus(key interface{}) *event.ManagedEventBus {
+func (c *component) EventBus(key any) *event.ManagedEventBus {
 	return c.serviceBus().GetEventBus(key)
 }
 
@@ -1171,7 +1171,7 @@ func (c *component) serviceBus() *event.ServiceBus {
 
 func (c *component) setDomain(cm *componentDomain, domainLocked bool) error {
 	if c.componentDomain != cm {
-		var registrations []interface{}
+		var registrations []any
 
 		if c.componentDomain != nil {
 			registrations = c.serviceBus().Registrations(c)

@@ -61,6 +61,7 @@ func TestCreate2Revive(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},
@@ -129,6 +130,7 @@ func TestCreate2Revive(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -150,6 +152,7 @@ func TestCreate2Revive(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -168,6 +171,7 @@ func TestCreate2Revive(t *testing.T) {
 	var check2 uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -190,6 +194,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if exist {
@@ -205,6 +210,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -245,6 +251,7 @@ func TestCreate2Polymorth(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},
@@ -348,6 +355,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -369,6 +377,7 @@ func TestCreate2Polymorth(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -385,6 +394,7 @@ func TestCreate2Polymorth(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -416,6 +426,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if exist {
@@ -431,6 +442,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -462,6 +474,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -509,6 +522,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},
@@ -582,6 +596,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -604,6 +619,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	var correctValueX uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -625,6 +641,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if exist {
@@ -639,6 +656,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -672,6 +690,7 @@ func TestReorgOverStateChange(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): {Balance: funds},
@@ -737,6 +756,7 @@ func TestReorgOverStateChange(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -761,6 +781,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	var correctValueX uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -786,6 +807,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -836,6 +858,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): {Balance: funds},
@@ -878,6 +901,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -899,6 +923,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	var check0 uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -937,6 +962,7 @@ func TestReproduceCrash(t *testing.T) {
 	tsr := state.NewReaderV3(sd.AsGetter(tx))
 
 	intraBlockState := state.New(tsr)
+	defer intraBlockState.Release(false)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
@@ -1028,6 +1054,7 @@ func TestEip2200Gas(t *testing.T) {
 	var balanceBefore uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1050,6 +1077,7 @@ func TestEip2200Gas(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1128,6 +1156,7 @@ func TestWrongIncarnation(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1162,6 +1191,7 @@ func TestWrongIncarnation(t *testing.T) {
 		}
 
 		st := state.New(stateReader)
+		defer st.Release(false)
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1288,6 +1318,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1309,6 +1340,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1362,6 +1394,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 
 	r, tsw := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	intraBlockState := state.New(r)
+	defer intraBlockState.Release(false)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 
@@ -1409,6 +1442,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
 	intraBlockState := state.New(r)
+	defer intraBlockState.Release(false)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 
@@ -1446,6 +1480,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
 	intraBlockState := state.New(r)
+	defer intraBlockState.Release(false)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 
@@ -1519,10 +1554,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			block.AddTx(txn)
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
-			var codeHash common.Hash
-			if codeHash, err = common.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
-				panic(err)
-			}
+			codeHash := crypto.Keccak256Hash(common.FromHex(contracts.PhoenixBin))
 			phoenixAddress = types.CreateAddress2(reviveAddress, [32]byte{}, accounts.InternCodeHash(codeHash))
 			if phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackend); err != nil {
 				panic(err)
@@ -1581,10 +1613,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			block.AddTx(txn)
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
-			var codeHash common.Hash
-			if codeHash, err = common.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
-				panic(err)
-			}
+			codeHash := crypto.Keccak256Hash(common.FromHex(contracts.PhoenixBin))
 			phoenixAddress = types.CreateAddress2(reviveAddress, [32]byte{}, accounts.InternCodeHash(codeHash))
 			if phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackendLonger); err != nil {
 				panic(err)
@@ -1631,6 +1660,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	var check0 uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(accounts.InternAddress(phoenixAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1652,6 +1682,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(accounts.InternAddress(phoenixAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1673,6 +1704,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		if exist, err := st.Exist(accounts.InternAddress(phoenixAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1706,6 +1738,7 @@ func TestTxLookupUnwind(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},

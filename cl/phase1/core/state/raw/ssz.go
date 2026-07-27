@@ -158,8 +158,10 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 
 // getSchema gives the schema for the current beacon state version according to ETH 2.0 specs.
 func (b *BeaconState) getSchema() []any {
-	s := []any{&b.genesisTime, b.genesisValidatorsRoot[:], &b.slot, b.fork, b.latestBlockHeader, b.blockRoots, b.stateRoots, b.historicalRoots,
-		b.eth1Data, b.eth1DataVotes, &b.eth1DepositIndex, b.validators, b.balances, b.randaoMixes, b.slashings}
+	s := []any{
+		&b.genesisTime, b.genesisValidatorsRoot[:], &b.slot, b.fork, b.latestBlockHeader, b.blockRoots, b.stateRoots, b.historicalRoots,
+		b.eth1Data, b.eth1DataVotes, &b.eth1DepositIndex, b.validators, b.balances, b.randaoMixes, b.slashings,
+	}
 	if b.version == clparams.Phase0Version {
 		return append(s, b.previousEpochAttestations, b.currentEpochAttestations, &b.justificationBits, &b.previousJustifiedCheckpoint, &b.currentJustifiedCheckpoint,
 			&b.finalizedCheckpoint)

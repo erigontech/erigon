@@ -17,29 +17,24 @@
 package btindex
 
 import (
-	"bufio"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 	"unsafe"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/murmur3"
+	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/datastruct/existence"
-	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -52,6 +47,18 @@ const BtreeLogPrefix = "btree"
 var DefaultBtreeM = uint64(dbg.EnvInt("BT_M", 256))
 
 const DefaultBtreeStartSkip = uint64(4) // defines smallest shard available for scan instead of binsearch
+
+const (
+	// btFirstByteLegacy (0x00) is the released legacy layout's first byte (the EF count's MSB).
+	btFirstByteLegacy = byte(0x00)
+	// btFirstByteUseFooter is the (non-zero) first byte of footer-based files; it lets the reader fall
+	// back to the legacy layout from the first byte. The format version lives in the footer, not here.
+	btFirstByteUseFooter = byte(0x01)
+)
+
+// BtInterp enables interpolation search in the leaf window, falling back to binary after BtInterpBudget probes.
+var BtInterp = dbg.EnvBool("BT_INTERP", true)
+var BtInterpBudget = uint64(dbg.EnvInt("BT_INTERP_BUDGET", 8))
 
 var ErrBtIndexLookupBounds = errors.New("BtIndex: lookup di bounds error")
 
@@ -169,19 +176,16 @@ func (c *Cursor) readKV() error {
 }
 
 type BtIndexWriter struct {
-	maxOffset  uint64
-	prevOffset uint64
-	minDelta   uint64
-	indexF     *os.File
-	ef         *eliasfano32.EliasFano
-	collector  *etl.Collector
+	indexF    *os.File
+	writer    *countingWriter
+	ef        *eliasfano32.EliasFano
+	efBuilder *eliasfano32.OffHeapBuilder
 
 	args BtIndexWriterArgs
 
 	indexFileName string
 
-	numBuf      [8]byte
-	keysWritten uint64
+	nodeHeaderBuf [2]byte
 
 	built   bool
 	lvl     log.Lvl
@@ -190,67 +194,78 @@ type BtIndexWriter struct {
 }
 
 type BtIndexWriterArgs struct {
-	IndexFile   string // File name where the index and the minimal perfect hash function will be written to
-	TmpDir      string
-	M           uint64
-	KeyCount    int
-	EtlBufLimit datasize.ByteSize
-	Lvl         log.Lvl
+	IndexFile string
+	TmpDir    string
+	M         uint64
+	KeyCount  uint64
+	MaxOffset uint64 // must be >= the largest offset passed to AddKey; an over-estimate (e.g. data file size) is fine
+	Lvl       log.Lvl
 }
 
 // NewBtIndexWriter creates a new BtIndexWriter instance with given number of keys
 // Typical bucket size is 100 - 2048, larger bucket sizes result in smaller representations of hash functions, at a cost of slower access
 // salt parameters is used to randomise the hash function construction, to ensure that different Erigon instances (nodes)
 // are likely to use different hash function, to collision attacks are unlikely to slow down any meaningful number of nodes at the same time
-func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter, error) {
-	if args.EtlBufLimit == 0 {
-		args.EtlBufLimit = etl.BufferOptimalSize / 2
-	}
+func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (_ *BtIndexWriter, err error) {
 	if args.Lvl == 0 {
 		args.Lvl = log.LvlTrace
 	}
 
 	btw := &BtIndexWriter{lvl: args.Lvl, logger: logger, args: args}
+	defer func() {
+		if err != nil {
+			btw.Close()
+		}
+	}()
 
 	_, fname := filepath.Split(btw.args.IndexFile)
 	btw.indexFileName = fname
 
-	btw.collector = etl.NewCollectorWithAllocator(BtreeLogPrefix+" "+fname, btw.args.TmpDir, etl.LargeSortableBuffers, logger)
-	btw.collector.SortAndFlushInBackground(false)
-	btw.collector.LogLvl(btw.args.Lvl)
+	if btw.indexF, err = dir.CreateTemp(args.IndexFile); err != nil {
+		return nil, fmt.Errorf("create temp index file for %s: %w", args.IndexFile, err)
+	}
+	btw.writer = &countingWriter{w: bufiopool.Writer(btw.indexF)}
+
+	if args.KeyCount > 0 {
+		if args.M == 0 {
+			return nil, fmt.Errorf("[index] %s: M must be > 0", btw.indexFileName)
+		}
+		if btw.efBuilder, err = eliasfano32.NewEliasFanoOffHeap(args.KeyCount, args.MaxOffset, args.TmpDir); err != nil {
+			return nil, fmt.Errorf("[index] create offheap ef: %w", err)
+		}
+		btw.ef = btw.efBuilder.EliasFano
+
+		if _, err = btw.writer.Write([]byte{btFirstByteUseFooter}); err != nil {
+			return nil, fmt.Errorf("[index] write format byte: %w", err)
+		}
+	}
 
 	return btw, nil
 }
 
-func (btw *BtIndexWriter) AddKey(key []byte, offset uint64, keep bool) error {
+func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 	if btw.built {
 		return errors.New("cannot add keys after perfect hash function had been built")
 	}
-
-	binary.BigEndian.PutUint64(btw.numBuf[:], offset)
-	if offset > btw.maxOffset {
-		btw.maxOffset = offset
+	if btw.ef == nil {
+		return fmt.Errorf("[index] %s: AddKey called with KeyCount==0", btw.indexFileName)
 	}
-
-	keepKey := keep
-	if btw.keysWritten > 0 {
-		delta := offset - btw.prevOffset
-		if btw.keysWritten == 1 || delta < btw.minDelta {
-			btw.minDelta = delta
-		}
-		keepKey = btw.keysWritten%btw.args.M == 0
+	di := btw.ef.AddedCount()
+	if di >= btw.args.KeyCount {
+		return fmt.Errorf("[index] %s: AddKey beyond KeyCount=%d", btw.indexFileName, btw.args.KeyCount)
 	}
-
-	var k []byte
-	if keepKey {
-		k = key
+	if offset > btw.args.MaxOffset { // EF is pre-sized for [0, MaxOffset]; a larger offset would write out of bounds
+		return fmt.Errorf("[index] %s: offset %d exceeds MaxOffset %d", btw.indexFileName, offset, btw.args.MaxOffset)
 	}
+	btw.ef.AddOffset(offset)
 
-	if err := btw.collector.Collect(btw.numBuf[:], k); err != nil {
+	// every M-th key (di==0 included) is kept as a B-tree node
+	if di%btw.args.M != 0 {
+		return nil
+	}
+	if err := (Node{key: key}).Encode(btw.writer, btw.nodeHeaderBuf[:]); err != nil {
 		return err
 	}
-	btw.keysWritten++
-	btw.prevOffset = offset
 	return nil
 }
 
@@ -260,57 +275,52 @@ func (btw *BtIndexWriter) Build() error {
 	if btw.built {
 		return errors.New("already built")
 	}
-	var err error
-	if btw.indexF, err = dir.CreateTemp(btw.args.IndexFile); err != nil {
-		return fmt.Errorf("create temp index file for %s: %w", btw.args.IndexFile, err)
+	defer btw.closeTemps()
+	if btw.args.KeyCount > 0 && btw.ef.AddedCount() != btw.args.KeyCount {
+		return fmt.Errorf("[index] %s: KeyCount=%d but %d keys added", btw.indexFileName, btw.args.KeyCount, btw.ef.AddedCount())
 	}
-	defer btw.indexF.Close()
-	indexW := bufio.NewWriterSize(btw.indexF, etl.BufIOSize)
 
-	defer btw.collector.Close()
 	log.Log(btw.args.Lvl, "[index] calculating", "file", btw.indexFileName)
 
-	if btw.keysWritten > 0 {
-		btw.ef = eliasfano32.NewEliasFano(btw.keysWritten, btw.maxOffset)
-
-		nodes := make([]Node, 0, btw.keysWritten/btw.args.M)
-		var ki uint64
-		if err = btw.collector.Load(nil, "", func(offt, k []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-			btw.ef.AddOffset(binary.BigEndian.Uint64(offt))
-
-			if len(k) > 0 { // for every M-th key, keep the key
-				nodes = append(nodes, Node{key: common.Copy(k), di: ki})
-			}
-			ki++ // we need to keep key ordinal so count every key
-			return nil
-		}, etl.TransformArgs{}); err != nil {
-			return err
+	var err error
+	if btw.args.KeyCount > 0 {
+		// nodes were streamed straight into the index file during AddKey
+		if err = btw.writer.padTo(btEFAlign); err != nil {
+			return fmt.Errorf("[index] pad before ef: %w", err)
 		}
-		btw.ef.Build()
+		efOffset := btw.writer.written
 
-		if err := btw.ef.Write(indexW); err != nil {
+		btw.ef.Build()
+		if err = btw.ef.Write(btw.writer); err != nil {
 			return fmt.Errorf("[index] write ef: %w", err)
 		}
-		if err = encodeListNodes(nodes, indexW); err != nil {
-			return fmt.Errorf("[index] write nodes: %w", err)
+		if err = btw.writer.padTo(btFooterAlign); err != nil {
+			return fmt.Errorf("[index] pad before footer: %w", err)
+		}
+
+		footer := Footer{Meta: Metadata{KeysCount: btw.args.KeyCount, M: btw.args.M, EfOffset: efOffset}, FormatVersion: btVersion}
+		if err = footer.Encode(btw.writer); err != nil {
+			return fmt.Errorf("[index] write footer: %w", err)
 		}
 	}
 
 	btw.logger.Log(btw.args.Lvl, "[index] write", "file", btw.indexFileName)
 	btw.built = true
 
-	if err = indexW.Flush(); err != nil {
+	if err = btw.writer.Flush(); err != nil {
 		return err
 	}
 	if err = btw.fsync(); err != nil {
 		return err
 	}
+	tmpName := btw.indexF.Name()
 	if err = btw.indexF.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(btw.indexF.Name(), btw.args.IndexFile); err != nil {
+	if err = os.Rename(tmpName, btw.args.IndexFile); err != nil {
 		return err
 	}
+	btw.indexF = nil
 	return nil
 }
 
@@ -330,16 +340,26 @@ func (btw *BtIndexWriter) fsync() error {
 	return nil
 }
 
+func (btw *BtIndexWriter) closeTemps() {
+	if btw.efBuilder != nil {
+		btw.efBuilder.Close()
+		btw.efBuilder = nil
+		btw.ef = nil
+	}
+}
+
 func (btw *BtIndexWriter) Close() {
-	if btw.indexF != nil {
+	if btw.writer != nil {
+		bufiopool.PutWriter(btw.writer.w)
+		btw.writer = nil
+	}
+	if btw.indexF != nil { // non-nil means Build didn't rename it: drop the partial .tmp
+		name := btw.indexF.Name()
 		btw.indexF.Close()
+		_ = dir.RemoveFile(name)
+		btw.indexF = nil
 	}
-	if btw.collector != nil {
-		btw.collector.Close()
-	}
-	//if btw.offsetCollector != nil {
-	//	btw.offsetCollector.Close()
-	//}
+	btw.closeTemps()
 }
 
 type BtIndex struct {
@@ -351,12 +371,13 @@ type BtIndex struct {
 	size     int64
 	modTime  time.Time
 	filePath string
+	indexM   uint64
 	pool     sync.Pool
 }
 
 // Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
-func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Reader, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors statecfg.Accessors) (*BtIndex, error) {
-	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, ps, tmpdir, seed, logger, noFsync, accessors)
+func CreateBtreeIndexWithDecompressor(indexPath string, existenceFilterPath string, M uint64, decompressor *seg.Reader, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors statecfg.Accessors) (*BtIndex, error) {
+	err := BuildBtreeIndexWithDecompressor(indexPath, existenceFilterPath, decompressor, ps, tmpdir, seed, logger, noFsync, accessors)
 	if err != nil {
 		return nil, err
 	}
@@ -383,19 +404,17 @@ func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed 
 	return d, bt, nil
 }
 
-func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool, accessors statecfg.Accessors) error {
+func BuildBtreeIndexWithDecompressor(indexPath string, existenceFilterPath string, kv *seg.Reader, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool, accessors statecfg.Accessors) error {
 	_, indexFileName := filepath.Split(indexPath)
 	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)
 
 	defer kv.MadvNormal().DisableReadAhead()
-	existenceFilterPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
 
 	var existenceFilter *existence.Filter
 	if accessors.Has(statecfg.AccessorExistence) {
 		var err error
-		useFuse := false
-		existenceFilter, err = existence.NewFilter(uint64(kv.Count()/2), existenceFilterPath, useFuse)
+		existenceFilter, err = existence.NewFilter(uint64(kv.Count()/2), existenceFilterPath)
 		if err != nil {
 			return err
 		}
@@ -408,6 +427,8 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *backg
 		IndexFile: indexPath,
 		TmpDir:    tmpdir,
 		M:         DefaultBtreeM,
+		KeyCount:  uint64(kv.Count() / 2),
+		MaxOffset: uint64(kv.Size()),
 	}
 
 	iw, err := NewBtIndexWriter(args, logger)
@@ -421,16 +442,9 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *backg
 	key := make([]byte, 0, 64)
 	var pos uint64
 
-	var b0 [256]bool
 	for kv.HasNext() {
 		key, _ = kv.Next(key[:0])
-		keep := false
-		if !b0[key[0]] {
-			b0[key[0]] = true
-			keep = true
-		}
-		err = iw.AddKey(key, pos, keep)
-		if err != nil {
+		if err = iw.AddKey(key, pos); err != nil {
 			return err
 		}
 		hi, _ := murmur3.Sum128WithSeed(key, salt)
@@ -456,10 +470,10 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *backg
 	return nil
 }
 
-// For now, M is not stored inside index file.
 func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Reader) (bt *BtIndex, err error) {
 	idx := &BtIndex{
 		filePath: indexPath,
+		indexM:   M,
 	}
 
 	var validationPassed bool
@@ -496,31 +510,73 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 	}
 	idx.data = idx.m[:idx.size]
 
-	var pos int
-	if len(idx.data[pos:]) == 0 {
-		return idx, nil
+	var nodeOfftEF *eliasfano32.EliasFano
+	var keysBlob []byte
+	var nodeStride uint64
+	switch idx.data[0] {
+	case btFirstByteLegacy: // legacy [EF][nodesCount][di-nodes]
+		var pos int
+		idx.ef, pos = eliasfano32.ReadEliasFano(idx.data)
+		if len(idx.data[pos:]) > 0 {
+			keysBlob = idx.data[pos:]
+			if nodeOfftEF, nodeStride, _, err = decodeListNodesV0(keysBlob); err != nil {
+				return nil, err
+			}
+			if nodeStride == 0 { // <2 nodes: only di=0 exists, stride is irrelevant
+				nodeStride = M
+			}
+		}
+	case btFirstByteUseFooter: // footer-based layout: [leadingByte][nodes][EF][footer][anchor]
+		var footer Footer
+		var footerStart int
+		if footer, footerStart, err = ReadFooter(idx.data); err != nil {
+			if errors.Is(err, errNotFooterFormat) {
+				return nil, fmt.Errorf("btindex: %s: truncated or corrupt footer (missing trailing magic)", indexPath)
+			}
+			return nil, fmt.Errorf("btindex: %s: %w", indexPath, err)
+		}
+		if footer.FormatVersion != btVersion {
+			return nil, fmt.Errorf("btindex: %s: unsupported format version %d (want %d): upgrade Erigon", indexPath, footer.FormatVersion, btVersion)
+		}
+		M = footer.Meta.M
+		if M == 0 || footer.Meta.EfOffset >= uint64(footerStart) {
+			return nil, fmt.Errorf("btindex: corrupt footer in %s (M=%d ef_offset=%d body=%d)", indexPath, M, footer.Meta.EfOffset, footerStart)
+		}
+		// ceil(K/M) overflow-safe: (K+M-1)/M overflows when K≈MaxUint64; use (K-1)/M+1 for K>0.
+		var nodesCount uint64
+		if footer.Meta.KeysCount > 0 {
+			nodesCount = (footer.Meta.KeysCount-1)/M + 1
+		}
+		keysBlob = idx.data[1:]
+		nodeStride = M
+		var nodesEnd int
+		if nodeOfftEF, nodesEnd, err = decodeNodes(keysBlob, nodesCount); err != nil {
+			return nil, err
+		}
+		if footer.Meta.EfOffset != uint64(alignUp(1+nodesEnd, btEFAlign)) { // cross-check ef_offset against the decoded nodes
+			return nil, fmt.Errorf("btindex: corrupt footer in %s: ef_offset=%d but nodes end at %d", indexPath, footer.Meta.EfOffset, alignUp(1+nodesEnd, btEFAlign))
+		}
+		idx.ef, _ = eliasfano32.ReadEliasFano(idx.data[footer.Meta.EfOffset:])
+		if idx.ef.Count() != footer.Meta.KeysCount {
+			return nil, fmt.Errorf("btindex: corrupt file %s: ef has %d keys, footer says %d", indexPath, idx.ef.Count(), footer.Meta.KeysCount)
+		}
+	default:
+		return nil, fmt.Errorf("btindex: %s: unknown format byte %#x", indexPath, idx.data[0])
 	}
 
-	idx.ef, pos = eliasfano32.ReadEliasFano(idx.data[pos:])
-	idx.pool = sync.Pool{}
+	idx.indexM = M
 	idx.pool.New = func() any {
 		return &Cursor{ef: idx.ef, returnInto: &idx.pool}
 	}
 
 	defer kvGetter.MadvNormal().DisableReadAhead()
 
-	if len(idx.data[pos:]) == 0 {
+	if nodeOfftEF == nil {
 		idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup)
-		idx.bplus.cursorGetter = idx.newCursor
-		// fallback for files without nodes encoded
 	} else {
-		nodes, err := decodeListNodes(idx.data[pos:])
-		if err != nil {
-			return nil, err
-		}
-		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, nodes)
-		idx.bplus.cursorGetter = idx.newCursor
+		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, keysBlob, nodeOfftEF, nodeStride)
 	}
+	idx.bplus.cursorGetter = idx.newCursor
 
 	validationPassed = true
 	return idx, nil
@@ -571,6 +627,8 @@ func (b *BtIndex) ModTime() time.Time { return b.modTime }
 func (b *BtIndex) FilePath() string { return b.filePath }
 
 func (b *BtIndex) FileName() string { return path.Base(b.filePath) }
+
+func (b *BtIndex) M() uint64 { return b.indexM }
 
 func (b *BtIndex) Empty() bool { return b == nil || b.ef == nil || b.ef.Count() == 0 }
 

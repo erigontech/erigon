@@ -10,16 +10,18 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-func RegisterGossipService[T any](gm *GossipManager, service serviceintf.Service[T], conditions ...ConditionFunc) {
+func RegisterGossipService[T any](gm *GossipManager, service serviceintf.Service[T], conditions ...ConditionFunc) (subscribed, expired int) {
 	wrappedService := wrapService(service)
 	gossipSrv := GossipService{
 		Service:    wrappedService,
 		conditions: conditions,
 	}
 	gm.registeredServices = append(gm.registeredServices, gossipSrv)
-	if err := gm.registerGossipService(wrappedService, conditions...); err != nil {
+	subscribed, expired, err := gm.registerGossipService(wrappedService, conditions...)
+	if err != nil {
 		panic(err)
 	}
+	return
 }
 
 type ConditionFunc func(peer.ID, *pubsub.Message, clparams.StateVersion) bool

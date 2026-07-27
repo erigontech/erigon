@@ -6,8 +6,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # Defensive guard — skip silently only when docs/site/ is absent
       # (e.g. branches that predate the Docusaurus migration).
@@ -29,7 +32,7 @@ jobs:
           test -d docs/site/scripts || { echo "missing docs/site/scripts/"; exit 1; }
           test -f docs/site/scripts/generate-llms.py || { echo "missing docs/site/scripts/generate-llms.py"; exit 1; }
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         if: steps.guard.outputs.present == 'true'
         with:
           python-version: '3.11'
@@ -40,7 +43,37 @@ jobs:
           python3 docs/site/scripts/generate-llms.py --check
           python3 -m unittest discover docs/site/scripts -v
 
-      - uses: actions/setup-node@v6
+      - name: Verify disk-size markers are in sync
+        if: steps.guard.outputs.present == 'true'
+        run: python3 docs/site/scripts/render-disk-sizes.py --check
+
+      - name: Guard against dynamic disk-size references in docs pages
+        if: steps.guard.outputs.present == 'true'
+        run: |
+          # Disk sizes must be static text (markers), never a runtime import.
+          # A runtime import in a versioned snapshot silently tracks the live
+          # file; in the current page it hides a `?? '—'` fallback. Fail closed.
+          # Check grep's exit code explicitly: 0=match (fail), 1=no match (ok),
+          # 2+=error (fail) — an `if grep` alone would swallow errors as "no match".
+          set +e
+          matches=$(grep -rn --include='*.md' --include='*.mdx' \
+               -e 'diskSizes' -e "src/data/disk-sizes.json" \
+               docs/site/docs docs/site/versioned_docs)
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "$matches"
+            echo "::error::Found a dynamic disk-sizes reference in a docs page. \
+          Disk sizes must be static (see docs/site/scripts/render-disk-sizes.py \
+          and the README 'Disk size data flow' section)."
+            exit 1
+          elif [ "$rc" -ne 1 ]; then
+            echo "::error::grep failed (exit $rc) while scanning for disk-size references"
+            exit 1
+          fi
+          echo "OK: no dynamic disk-size references in docs pages"
+
+      - uses: actions/setup-node@v7
         if: steps.guard.outputs.present == 'true'
         with:
           node-version: '20.x'

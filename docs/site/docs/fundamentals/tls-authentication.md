@@ -62,7 +62,7 @@ Generate a key pair for the Erigon node:
 openssl ecparam -name prime256v1 -genkey -noout -out erigon-key.pem
 ```
 
-Also generate a key pair for the RPC daemon:
+Also generate a key pair for the RPC Daemon:
 
 ```bash
 openssl ecparam -name prime256v1 -genkey -noout -out RPC-key.pem

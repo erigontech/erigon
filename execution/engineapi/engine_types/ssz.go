@@ -4,6 +4,7 @@
 package engine_types
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -121,8 +122,10 @@ func (p *ExecutionPayload) ToSSZBlock(version clparams.StateVersion) (*cltypes.E
 	}
 	if version >= clparams.GloasVersion {
 		block.BlockAccessList = solid.NewByteListSSZ(sszMaxBytesPerTransaction)
-		if err := block.BlockAccessList.SetBytes(p.BlockAccessList); err != nil {
-			return nil, err
+		if p.BlockAccessList != nil {
+			if err := block.BlockAccessList.SetBytes(*p.BlockAccessList); err != nil {
+				return nil, err
+			}
 		}
 		if p.SlotNumber != nil {
 			block.SlotNumber = uint64(*p.SlotNumber)
@@ -132,7 +135,7 @@ func (p *ExecutionPayload) ToSSZBlock(version clparams.StateVersion) (*cltypes.E
 }
 
 func ExecutionPayloadFromSSZBlock(block *cltypes.Eth1Block, version clparams.StateVersion) *ExecutionPayload {
-	baseFeeBytes := common.Copy(block.BaseFeePerGas[:])
+	baseFeeBytes := bytes.Clone(block.BaseFeePerGas[:])
 	for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
 		baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
 	}
@@ -163,9 +166,11 @@ func ExecutionPayloadFromSSZBlock(block *cltypes.Eth1Block, version clparams.Sta
 		p.BlobGasUsed, p.ExcessBlobGas = &bg, &ebg
 	}
 	if version >= clparams.GloasVersion {
+		bal := hexutil.Bytes{}
 		if block.BlockAccessList != nil {
-			p.BlockAccessList = block.BlockAccessList.Bytes()
+			bal = block.BlockAccessList.Bytes()
 		}
+		p.BlockAccessList = &bal
 		slot := hexutil.Uint64(block.SlotNumber)
 		p.SlotNumber = &slot
 	}
@@ -485,7 +490,7 @@ func kzgCommitmentBytes(list *solid.ListSSZ[*cltypes.KZGCommitment]) []hexutil.B
 	out := make([]hexutil.Bytes, 0, list.Len())
 	list.Range(func(_ int, v *cltypes.KZGCommitment, _ int) bool {
 		value := *v
-		out = append(out, common.Copy(value[:]))
+		out = append(out, bytes.Clone(value[:]))
 		return true
 	})
 	return out
@@ -495,7 +500,7 @@ func kzgProofBytes(list *solid.ListSSZ[*cltypes.KZGProof]) []hexutil.Bytes {
 	out := make([]hexutil.Bytes, 0, list.Len())
 	list.Range(func(_ int, v *cltypes.KZGProof, _ int) bool {
 		value := *v
-		out = append(out, common.Copy(value[:]))
+		out = append(out, bytes.Clone(value[:]))
 		return true
 	})
 	return out
@@ -505,7 +510,7 @@ func blobBytes(list *solid.ListSSZ[*cltypes.Blob]) []hexutil.Bytes {
 	out := make([]hexutil.Bytes, 0, list.Len())
 	list.Range(func(_ int, v *cltypes.Blob, _ int) bool {
 		value := *v
-		out = append(out, common.Copy(value[:]))
+		out = append(out, bytes.Clone(value[:]))
 		return true
 	})
 	return out
@@ -522,8 +527,8 @@ func (b *BlobAndProofV1) DecodeSSZ(buf []byte, version int) error {
 	if err := ssz2.UnmarshalSSZ(buf, version, blob, proof); err != nil {
 		return err
 	}
-	b.Blob = common.Copy(blob[:])
-	b.Proof = common.Copy(proof[:])
+	b.Blob = bytes.Clone(blob[:])
+	b.Proof = bytes.Clone(proof[:])
 	return nil
 }
 func (b *BlobAndProofV1) HashSSZ() ([32]byte, error) { return [32]byte{}, nil }
@@ -543,7 +548,7 @@ func (b *BlobAndProofV2) DecodeSSZ(buf []byte, version int) error {
 	if err := ssz2.UnmarshalSSZ(buf, version, blob, proofs); err != nil {
 		return err
 	}
-	b.Blob = common.Copy(blob[:])
+	b.Blob = bytes.Clone(blob[:])
 	b.CellProofs = kzgProofBytes(proofs)
 	return nil
 }

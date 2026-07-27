@@ -40,16 +40,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       # Probe for an exact-key hit without downloading the archive. cache-hit is
       # true only on the exact primary key, so a version bump (new key) reports a
       # miss even when an older entry still matches the restore-key prefix.
       - name: Probe EEST cache
         id: probe
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: |
             test-fixtures-cache/eest_stable.tar.gz
@@ -69,7 +70,7 @@ jobs:
 
       - name: Save EEST cache
         if: steps.probe.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: |
             test-fixtures-cache/eest_stable.tar.gz

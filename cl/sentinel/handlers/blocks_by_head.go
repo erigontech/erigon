@@ -31,10 +31,7 @@ func (c *ConsensusHandlers) beaconBlocksByHeadHandler(s network.Stream) error {
 		return err
 	}
 
-	count := req.Count
-	if count > c.beaconConfig.MaxRequestBlocksDeneb {
-		count = c.beaconConfig.MaxRequestBlocksDeneb
-	}
+	count := min(req.Count, c.beaconConfig.MaxRequestBlocksDeneb)
 	if count == 0 {
 		return nil
 	}
@@ -50,7 +47,7 @@ func (c *ConsensusHandlers) beaconBlocksByHeadHandler(s network.Stream) error {
 	defer tx.Rollback()
 
 	currentRoot := req.BeaconRoot
-	for i := uint64(0); i < count; i++ {
+	for range count {
 		block, err := c.beaconDB.ReadBlockByRoot(c.ctx, tx, currentRoot)
 		if err != nil {
 			return err

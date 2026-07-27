@@ -96,7 +96,8 @@ func TestAssembledBlockToPayloadResponseIncludesCanonicalEmptyBAL(t *testing.T) 
 
 	emptyBAL, err := types.EncodeBlockAccessListBytes(make(types.BlockAccessList, 0))
 	require.NoError(t, err)
-	require.Equal(t, hexutil.Bytes(emptyBAL), resp.ExecutionPayload.BlockAccessList)
+	require.NotNil(t, resp.ExecutionPayload.BlockAccessList)
+	require.Equal(t, hexutil.Bytes(emptyBAL), *resp.ExecutionPayload.BlockAccessList)
 }
 
 func newProposingEngineServerForGetPayloadTests(stub execmodule.ExecutionModule) *EngineServer {

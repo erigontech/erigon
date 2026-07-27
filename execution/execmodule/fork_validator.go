@@ -27,10 +27,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -59,7 +59,7 @@ type ForkValidator struct {
 	maxReorgDepth         uint64
 	// pipeline executor used for fork validation (ValidateBlock).
 	executor    *PipelineExecutor
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 	// this is the current point where we processed the chain so far.
 	currentHeight uint64
 	// block hashes that are deemed valid
@@ -73,7 +73,7 @@ type ForkValidator struct {
 	timingsCache *lru.Cache[common.Hash, BlockTimings]
 }
 
-func newForkValidator(ctx context.Context, currentHeight uint64, executor *PipelineExecutor, blockReader services.FullBlockReader, maxReorgDepth uint64) *ForkValidator {
+func newForkValidator(ctx context.Context, currentHeight uint64, executor *PipelineExecutor, blockReader dbservices.FullBlockReader, maxReorgDepth uint64) *ForkValidator {
 	validHashes, err := lru.New[common.Hash, bool]("validHashes", int(maxReorgDepth)*8)
 	if err != nil {
 		panic(err)

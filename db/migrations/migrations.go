@@ -26,7 +26,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -121,9 +120,9 @@ func AppliedMigrations(tx kv.Tx, withPayload bool) (map[string][]byte, error) {
 			return nil
 		}
 		if withPayload {
-			applied[string(common.Copy(k))] = common.Copy(v)
+			applied[string(bytes.Clone(k))] = bytes.Clone(v)
 		} else {
-			applied[string(common.Copy(k))] = []byte{}
+			applied[string(bytes.Clone(k))] = []byte{}
 		}
 		return nil
 	})

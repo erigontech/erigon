@@ -30,10 +30,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -44,17 +44,17 @@ import (
 	"github.com/erigontech/erigon/p2p"
 )
 
-var _ services.FullBlockReader = &RemoteBackend{}
+var _ dbservices.FullBlockReader = &RemoteBackend{}
 
 type RemoteBackend struct {
 	remoteEthBackend remoteproto.ETHBACKENDClient
 	log              log.Logger
 	version          gointerfaces.Version
 	db               kv.RoDB
-	blockReader      services.FullBlockReader
+	blockReader      dbservices.FullBlockReader
 }
 
-func NewRemoteBackend(client remoteproto.ETHBACKENDClient, db kv.RoDB, blockReader services.FullBlockReader) *RemoteBackend {
+func NewRemoteBackend(client remoteproto.ETHBACKENDClient, db kv.RoDB, blockReader dbservices.FullBlockReader) *RemoteBackend {
 	return &RemoteBackend{
 		remoteEthBackend: client,
 		version:          gointerfaces.VersionFromProto(privateapi.EthBackendAPIVersion),
@@ -71,7 +71,7 @@ func (back *RemoteBackend) HeadersRange(ctx context.Context, walker func(header 
 	panic("not implemented")
 }
 
-func (back *RemoteBackend) Integrity(_ context.Context) error {
+func (back *RemoteBackend) Integrity(_ context.Context, _ kv.Getter) error {
 	panic("not implemented")
 }
 
@@ -82,7 +82,7 @@ func (back *RemoteBackend) RawTransactions(ctx context.Context, tx kv.Getter, fr
 	panic("not implemented")
 }
 
-func (back *RemoteBackend) FirstTxnNumNotInSnapshots() uint64 {
+func (back *RemoteBackend) FirstTxnNumNotInSnapshots(_ kv.Getter) uint64 {
 	panic("not implemented")
 }
 
@@ -109,10 +109,10 @@ func (back *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash commo
 	return block, err
 }
 func (back *RemoteBackend) TxsV3Enabled() bool { panic("not implemented") }
-func (back *RemoteBackend) Snapshots() services.BlockSnapshots {
+func (back *RemoteBackend) Snapshots() dbservices.BlockSnapshots {
 	return back.blockReader.Snapshots()
 }
-func (back *RemoteBackend) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
+func (back *RemoteBackend) BorSnapshots() dbservices.BlockSnapshots { panic("not implemented") }
 
 func (back *RemoteBackend) Ready(ctx context.Context) <-chan error {
 	return back.blockReader.Ready(ctx)
@@ -123,7 +123,6 @@ func (back *RemoteBackend) FrozenBlocks() uint64      { return back.blockReader.
 func (back *RemoteBackend) FrozenBorBlocks(align bool) uint64 {
 	return back.blockReader.FrozenBorBlocks(align)
 }
-func (back *RemoteBackend) FrozenFiles() (list []string) { return back.blockReader.FrozenFiles() }
 func (back *RemoteBackend) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
 	return back.blockReader.CanonicalBodyForStorage(ctx, tx, blockNum)
 }
@@ -321,7 +320,7 @@ func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Getter, h
 	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockNum)
 }
 
-func (back *RemoteBackend) IterateFrozenBodies(_ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error {
+func (back *RemoteBackend) IterateFrozenBodies(_ kv.Getter, _ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error {
 	panic("not implemented")
 }
 

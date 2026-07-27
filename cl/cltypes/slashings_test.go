@@ -31,11 +31,13 @@ func TestProposerSlashing(t *testing.T) {
 	header1 := &SignedBeaconBlockHeader{
 		Header: &BeaconBlockHeader{
 			Slot: 69,
-		}} // Create a SignedBeaconBlockHeader object
+		},
+	} // Create a SignedBeaconBlockHeader object
 	header2 := &SignedBeaconBlockHeader{
 		Header: &BeaconBlockHeader{
 			Slot: 99,
-		}} // Create another SignedBeaconBlockHeader object
+		},
+	} // Create another SignedBeaconBlockHeader object
 
 	// Create ProposerSlashing
 	proposerSlashing := &ProposerSlashing{

@@ -546,9 +546,14 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 		if err != nil {
 			return nil, err
 		}
+		if txCount <= 2 {
+			continue
+		}
 
-		binary.BigEndian.PutUint64(encNum, baseTxnID.U64())
-		if err = db.ForAmount(kv.EthTx, encNum, txCount, func(k, v []byte) error {
+		// TxCount counts the two system txns, which have no kv.EthTx entries;
+		// reading from the system slot drifts into neighbouring blocks' txns.
+		binary.BigEndian.PutUint64(encNum, baseTxnID.First())
+		if err = db.ForAmount(kv.EthTx, encNum, txCount-2, func(k, v []byte) error {
 			res = append(res, v)
 			return nil
 		}); err != nil {
@@ -622,7 +627,7 @@ func ReadSenders(db kv.Getter, hash common.Hash, number uint64) ([]common.Addres
 		return nil, fmt.Errorf("readSenders failed: %w", err)
 	}
 	senders := make([]common.Address, len(data)/length.Addr)
-	for i := 0; i < len(senders); i++ {
+	for i := range senders {
 		copy(senders[i][:], data[i*length.Addr:])
 	}
 	return senders, nil
@@ -891,7 +896,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 		}
 		// Copying k because otherwise the same memory will be reused
 		// for the next key and Delete below will end up deleting 1 more record than required
-		kCopy := common.Copy(k)
+		kCopy := bytes.Clone(k)
 		if err = tx.Delete(kv.Senders, kCopy); err != nil {
 			return deleted, err
 		}
@@ -942,7 +947,7 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 		}
 		// Copying k because otherwise the same memory will be reused
 		// for the next key and Delete below will end up deleting 1 more record than required
-		kCopy := common.Copy(k)
+		kCopy := bytes.Clone(k)
 		if err := tx.Delete(kv.Senders, kCopy); err != nil {
 			return err
 		}
@@ -999,6 +1004,7 @@ func ReadHeaderByHash(db kv.Getter, hash common.Hash) (*types.Header, error) {
 	return ReadHeader(db, hash, *number), nil
 }
 
+// DeleteNewerEpochs drops [blockNum, ∞)
 func DeleteNewerEpochs(tx kv.RwTx, number uint64) error {
 	if err := tx.ForEach(kv.PendingEpoch, hexutil.EncodeTs(number), func(k, v []byte) error {
 		return tx.Delete(kv.PendingEpoch, k)
@@ -1358,7 +1364,9 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uin
 		}
 		if dbg.AssertEnabled {
 			storageReceipt2 := &types.ReceiptForStorage{}
-			rlp.DecodeBytes(toWrite, storageReceipt2)
+			if err := rlp.DecodeBytes(toWrite, storageReceipt2); err != nil {
+				panic(fmt.Sprintf("assert: receipt encode/decode round-trip: %v", err))
+			}
 			if storageReceipt.ContractAddress != storageReceipt2.ContractAddress {
 				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.ContractAddress, storageReceipt2.ContractAddress))
 			}

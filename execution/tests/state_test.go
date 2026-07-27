@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/vm"
@@ -70,21 +71,6 @@ func TestLegacyCancunState(t *testing.T) {
 	// EVM perf-stress fixtures (loopMul, loopExp, performanceTester) overrun
 	// the 1h package timeout under -race instrumentation.
 	st.SkipLoad(`^VMTests/vmPerformance/`)
-
-	// Pre-existing Constantinople-only divergences from geth — see
-	// https://github.com/erigontech/erigon/issues/20894. Geth's local runner
-	// walks LegacyTests/Constantinople/GeneralStateTests (an older snapshot
-	// that doesn't include these fixtures) so it never exercises them
-	// locally even though it generated them. Skip-loading the whole file
-	// means we lose non-Constantinople coverage of these six fixtures, which
-	// is acceptable: the d3 RIPEMD-160 touch case this test was added to
-	// catch is in stRevertTest/RevertPrecompiledTouch.json, not these.
-	st.SkipLoad(`^stSStoreTest/sstoreGas\.json`)
-	st.SkipLoad(`^stCreateTest/CREATE_HighNonce\.json`)
-	st.SkipLoad(`^stCreate2/CREATE2_HighNonce\.json`)
-	st.SkipLoad(`^stCreate2/CREATE2_HighNonceDelegatecall\.json`)
-	st.SkipLoad(`^stPreCompiledContracts2/CallEcrecover_Overflow\.json`)
-	st.SkipLoad(`^stPreCompiledContracts2/ecrecoverShortBuff\.json`)
 
 	runStateTests(t, st, filepath.Join(legacyDir, "LegacyTests", "Cancun", "GeneralStateTests"))
 }
@@ -122,7 +108,12 @@ func runStateTests(t *testing.T, st *testutil.TestMatcher, testDir string) {
 				withTrace(t, func(vmconfig vm.Config) error {
 					tx := beginRwNoContention(t, db)
 					defer tx.Rollback()
-					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
+					sd, sdErr := execctx.NewSharedDomains(context.Background(), tx, log.New())
+					if sdErr != nil {
+						return sdErr
+					}
+					defer sd.Close()
+					_, _, err = test.Run(t, sd, tx, subtest, vmconfig, dirs)
 					tx.Rollback()
 					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors
