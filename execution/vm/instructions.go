@@ -115,7 +115,7 @@ func stSmod(_ uint64, scope *CallContext) string {
 }
 
 func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	base, exponent := scope.Stack.popRef(), scope.Stack.peek()
+	base, exponent := scope.Stack.popRef1Peek1()
 	switch {
 	case exponent.IsZero():
 		// x ^ 0 == 1
@@ -144,7 +144,7 @@ func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 }
 
 func opSignExtend(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	back, num := scope.Stack.popRef(), scope.Stack.peek()
+	back, num := scope.Stack.popRef1Peek1()
 	num.ExtendSign(num, back)
 	return pc, nil, nil
 }
@@ -284,7 +284,7 @@ func stXor(_ uint64, scope *CallContext) string {
 }
 
 func opByte(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	th, val := scope.Stack.popRef(), scope.Stack.peek()
+	th, val := scope.Stack.popRef1Peek1()
 	val.Byte(th)
 	return pc, nil, nil
 }
@@ -318,7 +318,7 @@ func stMulmod(_ uint64, scope *CallContext) string {
 // and pushes on the stack arg2 shifted to the left by arg1 number of bits.
 func opSHL(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	// Note, second operand is left in the stack; accumulate result into it, and no need to push it afterwards
-	shift, value := scope.Stack.popRef(), scope.Stack.peek()
+	shift, value := scope.Stack.popRef1Peek1()
 	if shift.LtUint64(256) {
 		value.Lsh(value, uint(shift.Uint64()))
 	} else {
@@ -332,7 +332,7 @@ func opSHL(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 // and pushes on the stack arg2 shifted to the right by arg1 number of bits with zero fill.
 func opSHR(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	// Note, second operand is left in the stack; accumulate result into it, and no need to push it afterwards
-	shift, value := scope.Stack.popRef(), scope.Stack.peek()
+	shift, value := scope.Stack.popRef1Peek1()
 	if shift.LtUint64(256) {
 		value.Rsh(value, uint(shift.Uint64()))
 	} else {
@@ -345,7 +345,7 @@ func opSHR(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 // The SAR instruction (arithmetic shift right) pops 2 values from the stack, first arg1 and then arg2,
 // and pushes on the stack arg2 shifted to the right by arg1 number of bits with sign extension.
 func opSAR(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	shift, value := scope.Stack.popRef(), scope.Stack.peek()
+	shift, value := scope.Stack.popRef1Peek1()
 	if shift.GtUint64(255) {
 		if value.Sign() >= 0 {
 			value.Clear()
@@ -361,7 +361,7 @@ func opSAR(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 }
 
 func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	offset, size := scope.Stack.popRef(), scope.Stack.peek()
+	offset, size := scope.Stack.popRef1Peek1()
 	data := scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 
 	hash := crypto.Keccak256Hash(data)
