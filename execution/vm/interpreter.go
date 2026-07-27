@@ -382,6 +382,17 @@ func traceGas(op OpCode, callGas, cost uint64) uint64 {
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
 func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
+	// Pointer identity keeps the generated loops exactly in sync with the
+	// tables they were generated from: ExtraEips copy the table, unlisted
+	// forks pick a different one, and both fall through to the generic loop.
+	if !genDispatchDisabled {
+		if runAmsterdamGen != nil && evm.jt == amsterdamTablePtr {
+			return runAmsterdamGen(evm, contract, gas, input, readOnly)
+		}
+		if runCancunGen != nil && evm.jt == cancunTablePtr {
+			return runCancunGen(evm, contract, gas, input, readOnly)
+		}
+	}
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
 		return nil, gas, mdgas.MdGasUsage{}, nil
