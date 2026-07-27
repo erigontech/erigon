@@ -33,12 +33,13 @@ type Matches []Match
 // acNode is the compiled per-state record. The scan is memory-latency bound: for
 // each input byte it needs this state's fail link, its match length and its edge,
 // all indexed by the same jumpy state id. Packing them into one 16-byte record
-// (4 per cache line) turns four random array loads into one.
+// (four per 64-byte cache line) turns four random array loads into one.
 //
 // child tags the fanout in three disjoint ranges, so the single field both
 // discriminates and carries its payload: noEdge means none; >=0 is the single
 // edge to that state on byte(label); a wideTag value means the edges live in
-// wideByte/wideChild[wideStart(child) : label].
+// wideByte/wideChild[wideStart(child) : label]. label is dual-purpose to match:
+// the edge byte for a single edge, the end of the edge range for a wide state.
 type acNode struct {
 	fail     int32
 	matchLen int32 // longest pattern ending at this state (0 = none)
