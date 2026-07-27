@@ -25,8 +25,8 @@ import (
 const witnessCacheMaxBlocks = 96
 
 // witnessResultCache maps a canonical block hash to its pre-marshaled legacy-mode
-// witness. Keying by hash makes reorgs self-evicting — a reorged hash is never
-// requested again and ages out via the LRU — so no reconcile step is needed.
+// witness. Keying by hash needs no reorg reconcile: number-based lookups resolve to
+// the current canonical hash, and an orphaned hash ages out of the LRU.
 type witnessResultCache = lru.Cache[common.Hash, *ExecutionWitnessResult]
 
 // WitnessCacheCapacity is the number of witnesses the cache actually holds for a
