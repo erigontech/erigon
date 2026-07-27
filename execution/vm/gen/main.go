@@ -211,13 +211,7 @@ func (e *emitter) emitDebugBlock() {
 		return
 	}
 	e.p("if debug {\n")
-	e.p("if tracer.OnGasChange != nil {\n")
-	e.p("tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)\n")
-	e.p("}\n")
-	e.p("if tracer.OnOpcode != nil {\n")
-	e.p("tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))\n")
-	e.p("logged = true\n")
-	e.p("}\n")
+	e.p("logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)\n")
 	e.p("}\n")
 }
 
@@ -259,24 +253,23 @@ func (e *emitter) emitCase(p opPlan) {
 	}
 
 	if p.stackInv {
-		if p.numPop > 0 {
-			e.p("if sLen := stack.len(); sLen < %d {\n", p.numPop)
-			e.p(errReturn+"&ErrStackUnderflow{stackLen: sLen, required: %d}\n", p.numPop)
-			if p.maxStack < 1024 {
-				e.p("} else if sLen > %d {\n", p.maxStack)
-				e.p(errReturn+"&ErrStackOverflow{stackLen: sLen, limit: %d}\n", p.maxStack)
-			}
+		switch {
+		case p.numPop > 0 && p.maxStack < 1024:
+			e.p("if sLen := stack.len(); uint(sLen-%d) > %d {\n", p.numPop, p.maxStack-p.numPop)
+			e.p(errReturn+"stackBoundsErrConst(sLen, %d, %d)\n", p.numPop, p.maxStack)
 			e.p("}\n")
-		} else if p.maxStack < 1024 {
+		case p.numPop > 0:
+			e.p("if sLen := stack.len(); sLen < %d {\n", p.numPop)
+			e.p(errReturn+"stackBoundsErrConst(sLen, %d, %d)\n", p.numPop, p.maxStack)
+			e.p("}\n")
+		case p.maxStack < 1024:
 			e.p("if sLen := stack.len(); sLen > %d {\n", p.maxStack)
-			e.p(errReturn+"&ErrStackOverflow{stackLen: sLen, limit: %d}\n", p.maxStack)
+			e.p(errReturn+"stackBoundsErrConst(sLen, %d, %d)\n", p.numPop, p.maxStack)
 			e.p("}\n")
 		}
 	} else {
-		e.p("if sLen := stack.len(); sLen < operation.numPop {\n")
-		e.p(errReturn + "&ErrStackUnderflow{stackLen: sLen, required: operation.numPop}\n")
-		e.p("} else if sLen > operation.maxStack {\n")
-		e.p(errReturn + "&ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}\n")
+		e.p("if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {\n")
+		e.p(errReturn + "stackBoundsErr(sLen, operation)\n")
 		e.p("}\n")
 	}
 
@@ -491,6 +484,9 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 	}
 
 	anyTrace := dbg.TraceDynamicGas || debug || trace
+	hasGasChange := debug && tracer.OnGasChange != nil
+	hasOpcode := debug && tracer.OnOpcode != nil
+	var opCtx tracing.OpContext = callContext
 	stack := &callContext.Stack
 
 	jt := evm.jt

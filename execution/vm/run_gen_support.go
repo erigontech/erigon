@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/tracing"
 )
 
 // genDispatchDisabled is a kill switch for the generated dispatch loop,
@@ -79,4 +80,28 @@ func traceInstruction(evm *EVM, operation *operation, op OpCode, pc uint64, call
 // traceDynamicGasPrint prints the dbg.TraceDynamicGas line.
 func traceDynamicGasPrint(evm *EVM, op OpCode, callGas, cost uint64) {
 	fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), traceGas(op, callGas, cost), op)
+}
+
+// stackBoundsErrConst is stackBoundsErr for cases whose bounds are baked
+// literals.
+func stackBoundsErrConst(sLen, numPop, maxStack int) error {
+	if sLen < numPop {
+		return &ErrStackUnderflow{stackLen: sLen, required: numPop}
+	}
+	return &ErrStackOverflow{stackLen: sLen, limit: maxStack}
+}
+
+// opHook fires the per-opcode tracer hooks. Outlined so the traced loop's
+// case bodies stay small; reports whether OnOpcode fired.
+//
+//go:noinline
+func opHook(tracer *tracing.Hooks, hasGasChange, hasOpcode bool, pc uint64, op OpCode, gasCopy, cost uint64, opCtx tracing.OpContext, evm *EVM, err error) bool {
+	if hasGasChange {
+		tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
+	}
+	if hasOpcode {
+		tracer.OnOpcode(pc, byte(op), gasCopy, cost, opCtx, evm.returnData, evm.depth, VMErrorFromErr(err))
+		return true
+	}
+	return false
 }
