@@ -76,9 +76,7 @@ func (st *Stack) pop2uint64() (x, y uint64) {
 }
 
 // popRef pops the top item and returns a pointer to its slot. The value stays
-// valid until the stack next grows (push or dup reuse that slot), so it can be
-// read as an operand while a following peek() writes the result into the slot
-// below it.
+// valid until the stack next push/dup/swap
 func (st *Stack) popRef() *uint256.Int {
 	st.top--
 	return &st.data[st.top]
@@ -89,9 +87,6 @@ func (st *Stack) drop() {
 	st.top--
 }
 
-// pop3Ref pops the top three items and returns pointers to their slots, x
-// topmost. One top update and one bounds check instead of three; the pointers
-// carry the same validity rule as popRef.
 func (st *Stack) pop3Ref() (x, y, z *uint256.Int) {
 	st.top -= 3
 	t := st.top
