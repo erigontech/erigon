@@ -454,9 +454,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	anyTrace := dbg.TraceDynamicGas || debug || trace
 	jt := evm.jt
 
-	jt := evm.jt
-	_ = jt[0] // nil-check the jump table out of the loop
-
 	for {
 		callContext.cacheGen++
 		if debug {
