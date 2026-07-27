@@ -84,6 +84,20 @@ func (st *Stack) popRef() *uint256.Int {
 	return &st.data[st.top]
 }
 
+// drop discards the top item without reading it.
+func (st *Stack) drop() {
+	st.top--
+}
+
+// pop3Ref pops the top three items and returns pointers to their slots, x
+// topmost. One top update and one bounds check instead of three; the pointers
+// carry the same validity rule as popRef.
+func (st *Stack) pop3Ref() (x, y, z *uint256.Int) {
+	st.top -= 3
+	t := st.top
+	return &st.data[t+2], &st.data[t+1], &st.data[t]
+}
+
 func (st *Stack) Cap() int {
 	return stackLimit
 }
