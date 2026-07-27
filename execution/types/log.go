@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -393,6 +394,33 @@ func (l *Log) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, &rlpLog{Address: l.Address, Topics: l.Topics, Data: l.Data})
 }
 
+func (l *Log) payloadSize() int {
+	topicsLen := (1 + length.Hash) * len(l.Topics)
+	return rlp.StringLen(l.Address[:]) + rlp.ListPrefixLen(topicsLen) + topicsLen + rlp.StringLen(l.Data)
+}
+
+func (l *Log) encodingSize() int {
+	return rlp.ListLen(l.payloadSize())
+}
+
+func (l *Log) encodeRLP(w io.Writer, b []byte) error {
+	if err := rlp.EncodeListPrefix(l.payloadSize(), w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeString(l.Address[:], w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeListPrefix((1+length.Hash)*len(l.Topics), w, b); err != nil {
+		return err
+	}
+	for i := range l.Topics {
+		if err := rlp.EncodeString(l.Topics[i][:], w, b); err != nil {
+			return err
+		}
+	}
+	return rlp.EncodeString(l.Data, w, b)
+}
+
 // DecodeRLP implements rlp.Decoder.
 func (l *Log) DecodeRLP(s *rlp.Stream) error {
 	var dec rlpLog
@@ -401,6 +429,30 @@ func (l *Log) DecodeRLP(s *rlp.Stream) error {
 		l.Address, l.Topics, l.Data = dec.Address, dec.Topics, dec.Data
 	}
 	return err
+}
+
+// RlpHashLogs hashes the concatenation of the given log groups as one RLP list,
+// without flattening them into a single slice first.
+func RlpHashLogs(groups []Logs) common.Hash {
+	return rlpPayloadHash(func(w io.Writer, b []byte) error {
+		payloadSize := 0
+		for _, logs := range groups {
+			for _, l := range logs {
+				payloadSize += l.encodingSize()
+			}
+		}
+		if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
+			return err
+		}
+		for _, logs := range groups {
+			for _, l := range logs {
+				if err := l.encodeRLP(w, b); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 // Copy creates a deep copy of the Log.
