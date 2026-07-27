@@ -2621,7 +2621,11 @@ func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 // to an empty value, matching WriteSet.Normalize's candidate set so the two
 // passes cannot reach different verdicts.
 func (sdb *IntraBlockState) removeEmptyAccountWrites(chainRules *chain.Rules) error {
-	if chainRules == nil || !chainRules.IsEIP161Enabled() {
+	// Genesis is exempt, as it is on the serial path (which runs it under empty
+	// rules) and in the apply loop: an alloc may be empty by EIP-161's
+	// code/nonce/balance test yet still carry storage, and clearing it would
+	// drop that storage.
+	if sdb.blockNum == 0 || chainRules == nil || !chainRules.IsEIP161Enabled() {
 		return nil
 	}
 
