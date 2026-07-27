@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -256,6 +257,9 @@ func (logs Logs) Copy() Logs {
 	}
 	var nt, nd int
 	for _, l := range logs {
+		if l == nil {
+			continue
+		}
 		nt += len(l.Topics)
 		nd += len(l.Data)
 	}
@@ -264,12 +268,15 @@ func (logs Logs) Copy() Logs {
 	backing := make([]Log, len(logs))
 	out := make(Logs, len(logs))
 	to, do := 0, 0
-	for i := range logs {
-		lt, ld := len(logs[i].Topics), len(logs[i].Data)
+	for i, l := range logs {
+		if l == nil {
+			continue
+		}
+		lt, ld := len(l.Topics), len(l.Data)
 		backing[i].Topics = topicsBuf[to : to+lt : to+lt]
 		backing[i].Data = dataBuf[do : do+ld : do+ld]
 		to, do = to+lt, do+ld
-		logs[i].CopyTo(&backing[i])
+		l.CopyTo(&backing[i])
 		out[i] = &backing[i]
 	}
 	return out
@@ -416,12 +423,15 @@ func (l *Log) Copy() *Log {
 	return dst
 }
 
-// CopyTo
+// CopyTo deep-copies l into dst, reusing dst's Topics and Data backing arrays
+// when they are big enough. dst never keeps a reference to l's slices.
 func (l *Log) CopyTo(dst *Log) {
-	t, d := dst.Topics, dst.Data
+	t := slices.Grow(dst.Topics[:0], len(l.Topics))[:len(l.Topics)]
+	d := slices.Grow(dst.Data[:0], len(l.Data))[:len(l.Data)]
+	copy(t, l.Topics)
+	copy(d, l.Data)
 	*dst = *l
-	dst.Topics = t[:copy(t, l.Topics)]
-	dst.Data = d[:copy(d, l.Data)]
+	dst.Topics, dst.Data = t, d
 }
 
 // LogForStorage is a wrapper around a Log that flattens and parses the entire content of
