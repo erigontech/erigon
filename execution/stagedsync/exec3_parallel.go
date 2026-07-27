@@ -1180,13 +1180,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				// folded ahead), and its successor is the terminal stop.
 				terminal, startCatchup := false, false
 				if blockResult.Err == nil {
-					// AfterCommitment estimate (2x) in per-block mode since commitment
-					// is already computed; BeforeCommitment (4x) in batch mode.
 					var sizeEst uint64
 					if dbg.BatchCommitments {
-						sizeEst = pe.rs.SizeEstimateBeforeCommitment()
+						sizeEst = pe.rs.SizeEstimateBeforeCommitment() // 2x
 					} else {
-						sizeEst = pe.rs.SizeEstimateAfterCommitment()
+						sizeEst = pe.rs.SizeEstimateAfterCommitment() // 1x
 					}
 					batchLimit := pe.cfg.batchSize.Bytes()
 					switch execLoopShouldExit(blockResult, sizeEst, batchLimit, pe.maxBlockNum, dbg.StopAfterBlock) {
