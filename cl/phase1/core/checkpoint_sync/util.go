@@ -167,13 +167,14 @@ func resolveResumeHorizonSlots(beaconCfg *clparams.BeaconChainConfig, resumeMaxS
 	if resumeMaxStalenessEpochs == 0 {
 		return retentionSlots
 	}
-	requestedSlots := resumeMaxStalenessEpochs * beaconCfg.SlotsPerEpoch
-	if requestedSlots > retentionSlots {
+	// Clamp in epochs: converting to slots first would overflow uint64 on an absurd flag value and
+	// wrap to a tiny horizon instead of the retention window.
+	if resumeMaxStalenessEpochs > retentionEpochs {
 		log.Warn("[Checkpoint Sync] caplin.resume-max-staleness-epochs exceeds the sidecar-retention window; clamping",
 			"requestedEpochs", resumeMaxStalenessEpochs, "retentionEpochs", retentionEpochs)
 		return retentionSlots
 	}
-	return requestedSlots
+	return resumeMaxStalenessEpochs * beaconCfg.SlotsPerEpoch
 }
 
 // stateWithinResumeHorizon reports whether a locally-finalized state at localSlot is recent

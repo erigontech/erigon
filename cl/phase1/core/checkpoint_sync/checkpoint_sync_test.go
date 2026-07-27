@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -471,6 +472,34 @@ func TestResumeHorizonHonorsAndClampsConfig(t *testing.T) {
 		resolveResumeHorizonSlots(&fuluCfg, 0, fuluEpoch-1), "pre-Fulu uses the blob-retention window")
 	assert.Equal(t, fuluCfg.MinEpochsForDataColumnSidecarsRequests*fuluCfg.SlotsPerEpoch,
 		resolveResumeHorizonSlots(&fuluCfg, 0, fuluEpoch), "Fulu+ uses the data-column-retention window")
+
+	// An epochs-to-slots conversion before the clamp overflows uint64 and wraps to a tiny horizon.
+	for _, epochs := range []uint64{1 << 59, math.MaxUint64} {
+		assert.Equal(t, retention, resolveResumeHorizonSlots(cfg, epochs, 0),
+			"an overflowing value clamps to the window, epochs=%d", epochs)
+	}
+}
+
+func TestLocalCheckpointSyncRejectsForeignNetworkFile(t *testing.T) {
+	_, foreign, _ := tests.GetPhase0Random()
+	foreign.SetGenesisValidatorsRoot(common.Hash{0xaa})
+	f := afero.NewMemMapFs()
+	enc, err := foreign.EncodeSSZ(nil)
+	require.NoError(t, err)
+	require.NoError(t, afero.WriteFile(f, clparams.LatestFinalizedStateFileName, utils.CompressSnappy(enc), 0o644))
+
+	_, genesisState, _ := tests.GetPhase0Random()
+	genesisState.SetGenesisValidatorsRoot(common.Hash{0xbb})
+
+	got, err := NewLocalCheckpointSyncer(genesisState, f).GetLatestBeaconState(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, got)
+
+	wantRoot, err := genesisState.HashSSZ()
+	require.NoError(t, err)
+	gotRoot, err := got.HashSSZ()
+	require.NoError(t, err)
+	assert.Equal(t, wantRoot, gotRoot, "a foreign-network file must not anchor the node")
 }
 
 func TestLocalCheckpointSyncFallsBackToGenesisWhenAbsent(t *testing.T) {

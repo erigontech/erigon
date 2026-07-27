@@ -293,10 +293,10 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 }
 
 // writeFinalizedStateFile snappy-encodes st and replaces the finalized-state resume file via a
-// same-directory temp file and rename. The rename is atomic on POSIX within one filesystem; on
-// Windows it is best-effort. The temp file is fsynced before the rename so the replacement
-// survives a crash, and chmod'd to 0644 to match the other Caplin datadir artifacts
-// (os.CreateTemp defaults to 0600).
+// same-directory temp file and rename, so a crash mid-write can never leave a truncated file under
+// the final name. The rename is atomic on POSIX within one filesystem; on Windows it is best-effort.
+// The temp name is fixed rather than randomized so a crash before the rename leaves at most one
+// stale temp, reused by the next save.
 func writeFinalizedStateFile(dirs datadir.Dirs, st *state.CachingBeaconState) error {
 	dat, err := utils.EncodeSSZSnappy(st)
 	if err != nil {
@@ -305,11 +305,11 @@ func writeFinalizedStateFile(dirs datadir.Dirs, st *state.CachingBeaconState) er
 	if err := os.MkdirAll(dirs.CaplinLatest, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
-	tmp, err := os.CreateTemp(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName+".tmp-*")
+	tmpName := filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName+".tmp")
+	tmp, err := os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return fmt.Errorf("failed to create temp finalized state file: %w", err)
 	}
-	tmpName := tmp.Name()
 	defer func() { _ = dir.RemoveFile(tmpName) }()
 	if _, err := tmp.Write(dat); err != nil {
 		tmp.Close()
@@ -318,10 +318,6 @@ func writeFinalizedStateFile(dirs datadir.Dirs, st *state.CachingBeaconState) er
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		return fmt.Errorf("failed to sync finalized state temp file: %w", err)
-	}
-	if err := tmp.Chmod(0o644); err != nil {
-		tmp.Close()
-		return fmt.Errorf("failed to chmod finalized state temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("failed to close finalized state temp file: %w", err)

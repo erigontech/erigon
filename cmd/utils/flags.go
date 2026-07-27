@@ -1035,7 +1035,7 @@ var (
 	}
 	CaplinResumeMaxStalenessEpochsFlag = cli.Uint64Flag{
 		Name:  "caplin.resume-max-staleness-epochs",
-		Usage: "max epochs a locally-finalized state may be stale to resume from it on restart instead of remote checkpoint syncing (0 = default: the active fork's sidecar-retention window). Data-availability bound; larger values are clamped to the retention window",
+		Usage: "max epochs a locally-finalized state may be stale to resume from it on restart instead of remote checkpoint syncing (0 = default: the anchor fork's sidecar-retention window). Data-availability bound; larger values are clamped to the retention window",
 		Value: 0,
 	}
 
