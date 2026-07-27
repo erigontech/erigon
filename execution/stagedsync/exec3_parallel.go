@@ -1042,19 +1042,19 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		// processRequest is non-blocking (it just stores blocks in the map), so
 		// without this check execRequests drains instantly and pe.blockExecutors
 		// grows unbounded — holding all decoded TxTask objects in RAM.
-		// Setting pendingCh to nil causes the select to skip that case entirely,
+		// Setting execReqCh to nil causes the select to skip that case entirely,
 		// applying backpressure that propagates to executeBlocks.func1.
 		const maxPendingBlocks = 32
 		pe.RLock()
 		pendingBlocks := len(pe.blockExecutors)
 		pe.RUnlock()
-		var pendingCh chan *execRequest
+		var execReqCh chan *execRequest
 		if pendingBlocks < maxPendingBlocks {
-			pendingCh = pe.execRequests
+			execReqCh = pe.execRequests
 		}
 
 		select {
-		case exec := <-pendingCh:
+		case exec := <-execReqCh:
 			if err := pe.processRequest(ctx, exec); err != nil {
 				return err
 			}
