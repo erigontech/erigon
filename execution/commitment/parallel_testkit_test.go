@@ -155,7 +155,7 @@ func processRoot(t *testing.T, trie Trie, ut *Updates) []byte {
 	t.Helper()
 	root, err := trie.Process(context.Background(), ut, "", nil, WarmupConfig{})
 	require.NoError(t, err)
-	return common.Copy(root)
+	return bytes.Clone(root)
 }
 
 func processModeBatch(t *testing.T, ms *MockState, mode runMode, workers int, keys [][]byte, upds []Update) []byte {
@@ -213,7 +213,7 @@ func processModeBatchState(t *testing.T, ms *MockState, mode runMode, workers in
 		r, err := sc.Process(ctx)
 		require.NoError(t, err)
 		sc.PromoteRootInto(tmpl)
-		return common.Copy(r), encoded(tmpl)
+		return bytes.Clone(r), encoded(tmpl)
 	case modeStreamingPublic:
 		cfg := DefaultTrieConfig()
 		cfg.Variant = VariantStreamingHexPatricia

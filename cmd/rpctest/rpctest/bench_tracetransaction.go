@@ -57,7 +57,8 @@ func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFro
 			continue
 		}
 
-		for idx, txn := range b.Result.Transactions {
+		for idx := range b.Result.Transactions {
+			txn := &b.Result.Transactions[idx]
 			if idx%30 != 0 {
 				continue
 			}

@@ -2001,7 +2001,9 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 		0x60, 0x00, //             PUSH1 0 (memory offset)
 		0xf3, //                   RETURN
 	}
-	deployCode := append(initHeader, make([]byte, runtimeLen)...)
+	deployCode := make([]byte, 0, len(initHeader)+runtimeLen)
+	deployCode = append(deployCode, initHeader...)
+	deployCode = append(deployCode, make([]byte, runtimeLen)...)
 
 	// With a 1_000_000 block gas limit, two txs (~337K state each) leave
 	// the pool at ~326K; a third has 184K intrinsic state (fits in pool by

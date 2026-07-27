@@ -452,7 +452,7 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 }
 
 func (sdb *IntraBlockState) AddLog(log *types.Log) {
-	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
+	sdb.journal.addLogChange(sdb.txIndex)
 	log.TxIndex = hexutil.Uint(sdb.txIndex)
 	log.Index = hexutil.Uint(sdb.logSize)
 	if dbg.TraceLogs && (sdb.trace || dbg.TraceAccount(accounts.InternAddress(log.Address).Handle())) {
@@ -507,14 +507,14 @@ func (sdb *IntraBlockState) Logs() types.Logs {
 
 // AddRefund adds gas to the refund counter
 func (sdb *IntraBlockState) AddRefund(gas uint64) {
-	sdb.journal.append(refundChange{prev: sdb.refund})
+	sdb.journal.refundChange(sdb.refund)
 	sdb.refund += gas
 }
 
 // SubRefund removes gas from the refund counter.
 // This method will panic if the refund counter goes below zero
 func (sdb *IntraBlockState) SubRefund(gas uint64) error {
-	sdb.journal.append(refundChange{prev: sdb.refund})
+	sdb.journal.refundChange(sdb.refund)
 	if gas > sdb.refund {
 		return errors.New("refund counter below zero")
 	}
@@ -977,7 +977,7 @@ func (sdb *IntraBlockState) writeBalanceVersioned(addr accounts.Address, update 
 	if err != nil {
 		return err
 	}
-	sdb.journal.append(balanceChange{account: addr, prev: prev, wasCommited: wasCommited})
+	sdb.journal.balanceChange(addr, prev, wasCommited)
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
 		sdb.tracingHooks.OnBalanceChange(addr, prev, update, reason)
 	}
@@ -991,10 +991,7 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 	if sdb.versionMap == nil {
 		// If this account has not been read, add to the balance increment map
 		if _, needAccount := sdb.stateObjects[addr]; !needAccount && addr == ripemd && amount.IsZero() {
-			sdb.journal.append(balanceIncrease{
-				account:  addr,
-				increase: amount,
-			})
+			sdb.journal.balanceIncrease(addr, amount)
 
 			bi, ok := sdb.balanceInc[addr]
 			if !ok {
@@ -1071,9 +1068,7 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 }
 
 func (sdb *IntraBlockState) touchAccount(addr accounts.Address) {
-	sdb.journal.append(touchAccount{
-		account: addr,
-	})
+	sdb.journal.touchAccount(addr, false, uint256.Int{})
 	if addr == ripemd {
 		// Explicitly put it in the dirty-cache, which is otherwise generated from
 		// flattened journals.
@@ -1093,12 +1088,12 @@ func (sdb *IntraBlockState) TouchAccount(addr accounts.Address) error {
 			// that reverts it, so the write-set stays in step through reverts
 			// without any dirties re-processing (deprecated on this path).
 			prevWrite, had := sdb.versionedWrites.GetBalance(addr)
-			ch := touchAccount{account: addr, wasCommited: !had}
+			var prev uint256.Int
 			if had {
-				ch.prev = prevWrite.Val
+				prev = prevWrite.Val
 			}
 			sdb.recordWriteBalance(addr, uint256.Int{})
-			sdb.journal.append(ch)
+			sdb.journal.touchAccount(addr, !had, prev)
 			return
 		}
 		sdb.recordWriteBalance(addr, uint256.Int{})
@@ -1399,7 +1394,7 @@ func (sdb *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uin
 	if vw, ok := sdb.versionedWrites.GetNonce(addr); ok {
 		prev = vw.Val
 	}
-	sdb.journal.append(nonceChange{account: addr, prev: prev, wasCommited: wasCommited})
+	sdb.journal.nonceChange(addr, prev, wasCommited)
 	if sdb.tracingHooks != nil {
 		if sdb.tracingHooks.OnNonceChangeV2 != nil {
 			sdb.tracingHooks.OnNonceChangeV2(addr, prev, nonce, reason)
@@ -1592,7 +1587,7 @@ func (sdb *IntraBlockState) setStateVersioned(addr accounts.Address, key account
 	if source != UnknownSource && prev == value {
 		return nil
 	}
-	sdb.journal.append(storageChange{account: addr, key: key, prevalue: prev, wasCommited: commited})
+	sdb.journal.storageChange(addr, key, prev, commited)
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnStorageChange != nil {
 		sdb.tracingHooks.OnStorageChange(addr, key, prev, value)
 	}
@@ -1676,12 +1671,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance 
 		return false, nil
 	}
 	prevBalance := stateObject.Balance()
-	sdb.journal.append(selfdestructChange{
-		account:     addr,
-		prev:        stateObject.selfdestructed,
-		prevbalance: prevBalance,
-		wasCommited: !sdb.hasWrite(addr, SelfDestructPath, accounts.NilKey),
-	})
+	sdb.journal.selfdestructChange(addr, stateObject.selfdestructed, prevBalance, !sdb.hasWrite(addr, SelfDestructPath, accounts.NilKey))
 
 	if !preserveBalance && sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
 		sdb.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
@@ -1742,25 +1732,23 @@ func (sdb *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 		inc = vw.Val
 	}
 
-	sd := selfdestructChange{
-		account:         addr,
-		prev:            prev,
-		prevbalance:     prevBalance,
-		wasCommited:     !sdb.hasWrite(addr, SelfDestructPath, accounts.NilKey),
-		preserveBalance: preserveBalance,
-	}
 	// Capture the pre-destruct versioned incarnation write, which the self-destruct
 	// clears below, so a revert restores it rather than the cleared value.
+	hadIncarnation, prevIncarnation := false, uint64(0)
 	if vw, ok := sdb.versionedWrites.GetIncarnation(addr); ok {
-		sd.hadIncarnation, sd.prevIncarnation = true, vw.Val
+		hadIncarnation, prevIncarnation = true, vw.Val
 	}
 	// Same for the balance write: the self-destruct records BalancePath=0 below,
 	// so a revert must restore the pre-destruct write (which may predate the
 	// snapshot) rather than delete the cell.
+	hadBalance := false
+	var prevBalanceVersioned uint256.Int
 	if vw, ok := sdb.versionedWrites.GetBalance(addr); ok {
-		sd.hadBalance, sd.prevBalanceVersioned = true, vw.Val
+		hadBalance, prevBalanceVersioned = true, vw.Val
 	}
-	sdb.journal.append(sd)
+	sdb.journal.selfdestructChangeVersioned(addr, prev, prevBalance,
+		!sdb.hasWrite(addr, SelfDestructPath, accounts.NilKey),
+		hadIncarnation, prevIncarnation, hadBalance, prevBalanceVersioned)
 
 	if !preserveBalance && sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
 		sdb.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
@@ -1824,11 +1812,7 @@ func (sdb *IntraBlockState) SetTransientState(addr accounts.Address, key account
 		return
 	}
 
-	sdb.journal.append(transientStorageChange{
-		account:  addr,
-		key:      key,
-		prevalue: prev,
-	})
+	sdb.journal.transientStorageChange(addr, key, prev)
 
 	sdb.setTransientState(addr, key, value)
 }
@@ -2001,7 +1985,7 @@ func (sdb *IntraBlockState) setStateObject(addr accounts.Address, object *stateO
 	if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred && sdb.versionMap == nil {
 		object.data.Balance = u256.Add(object.data.Balance, bi.increase)
 		bi.transferred = true
-		sdb.journal.append(balanceIncreaseTransfer{bi: bi})
+		sdb.journal.balanceIncreaseTransfer(bi)
 	}
 	sdb.stateObjects[addr] = object
 }
@@ -2033,13 +2017,13 @@ func (sdb *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	newobj = newObject(sdb, addr, account, original)
 	newobj.setNonce(0) // sets the object to dirty
 	if previous == nil {
-		sdb.journal.append(createObjectChange{account: addr})
+		sdb.journal.createObjectChange(addr)
 	} else {
-		reset := resetObjectChange{account: addr, prev: previous}
+		var prevWrites *createWriteSnapshot
 		if sdb.versionMap != nil {
-			reset.prevWrites = sdb.versionedWrites.snapshotCreateFields(addr)
+			prevWrites = sdb.versionedWrites.snapshotCreateFields(addr)
 		}
-		sdb.journal.append(reset)
+		sdb.journal.resetObjectChange(addr, previous, prevWrites)
 	}
 	newobj.newlyCreated = true
 	if !sdb.noMaterialize {
@@ -2233,6 +2217,14 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		carryBalance = b
 	}
 	newObj := sdb.createObject(addr, previous)
+	if previous != nil && previous.selfdestructed {
+		// The reset-object journal entry already marks addr dirty, but that
+		// mark is dropped if the entry is reverted; this un-journalled
+		// increment keeps a resurrected address in journal.dirties across an
+		// intra-tx revert. Confined to CreateAccount — the GetOrNewStateObject
+		// AddBalance path must NOT mark dirty here.
+		sdb.journal.dirty(addr)
+	}
 	if carryBalanceValid {
 		newObj.data.Balance.Set(&carryBalance)
 	}
@@ -2777,7 +2769,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 func (sdb *IntraBlockState) AddAddressToAccessList(addr accounts.Address) (addrMod bool) {
 	addrMod = sdb.accessList.AddAddress(addr)
 	if addrMod {
-		sdb.journal.append(accessListAddAccountChange{addr})
+		sdb.journal.accessListAddAccountChange(addr)
 	}
 	return addrMod
 }
@@ -2790,13 +2782,10 @@ func (sdb *IntraBlockState) AddSlotToAccessList(addr accounts.Address, slot acco
 		// scope of 'address' without having the 'address' become already added
 		// to the access list (via call-variant, create, etc).
 		// Better safe than sorry, though
-		sdb.journal.append(accessListAddAccountChange{addr})
+		sdb.journal.accessListAddAccountChange(addr)
 	}
 	if slotMod {
-		sdb.journal.append(accessListAddSlotChange{
-			address: addr,
-			slot:    slot,
-		})
+		sdb.journal.accessListAddSlotChange(addr, slot)
 	}
 	return addrMod, slotMod
 }
@@ -3359,12 +3348,7 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes *WriteSet) error {
 			// contain the post-write code value (when the worker read the code
 			// after a SetCodeTx modified it), causing SetCode's equality
 			// comparison to incorrectly skip the update and leave dirtyCode unset.
-			sdb.journal.append(codeChange{
-				account:     addr,
-				prevhash:    stateObject.data.CodeHash,
-				prevcode:    stateObject.code.Bytes,
-				wasCommited: !sdb.hasWrite(addr, CodePath, accounts.NilKey),
-			})
+			sdb.journal.codeChange(addr, stateObject.code.Bytes, stateObject.data.CodeHash, !sdb.hasWrite(addr, CodePath, accounts.NilKey))
 			stateObject.setCode(code)
 			sdb.recordWriteCode(addr, code)
 			sdb.recordWriteCodeHash(addr, code.Hash)

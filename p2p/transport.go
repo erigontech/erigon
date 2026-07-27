@@ -29,7 +29,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/bitutil"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/rlpx"
@@ -72,7 +71,7 @@ func (t *rlpxTransport) ReadMsg() (Msg, error) {
 		// Protocol messages are dispatched to subprotocol handlers asynchronously,
 		// but package rlpx may reuse the returned 'data' buffer on the next call
 		// to Read. Copy the message data to avoid this being an issue.
-		data = common.Copy(data)
+		data = bytes.Clone(data)
 		msg = Msg{
 			ReceivedAt: time.Now(),
 			Code:       code,

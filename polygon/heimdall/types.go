@@ -50,7 +50,9 @@ func init() {
 }
 
 func initTypes() {
-	borTypes := append(snaptype2.BlockSnapshotTypes, SnapshotTypes()...)
+	borTypes := make([]snaptype.Type, 0, len(snaptype2.BlockSnapshotTypes)+len(SnapshotTypes())+len(snaptype2.E3StateTypes))
+	borTypes = append(borTypes, snaptype2.BlockSnapshotTypes...)
+	borTypes = append(borTypes, SnapshotTypes()...)
 	borTypes = append(borTypes, snaptype2.E3StateTypes...)
 
 	snapcfg.RegisterKnownTypes(networkname.Mumbai, borTypes)
