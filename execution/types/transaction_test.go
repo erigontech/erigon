@@ -1036,3 +1036,23 @@ func BenchmarkDecodeTransactionThenHash(b *testing.B) {
 		})
 	}
 }
+
+// Error text is matched verbatim by eest's ErigonExceptionMapper (TYPE_3/TYPE_4_TX_CONTRACT_CREATION).
+func TestTypedTxEmptyToErrorMessage(t *testing.T) {
+	t.Parallel()
+	// list of: chainID=1, nonce=0, tip=0, feeCap=0, gas=0, to=""
+	payload := []byte{0xc6, 0x01, 0x80, 0x80, 0x80, 0x80, 0x80}
+
+	for _, tc := range []struct {
+		name string
+		txn  Transaction
+	}{
+		{"blob", &BlobTx{}},
+		{"setCode", &SetCodeTransaction{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.txn.DecodeRLP(rlp.NewStream(bytes.NewReader(payload), 0))
+			assert.EqualError(t, err, "wrong size for To: 0")
+		})
+	}
+}

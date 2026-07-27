@@ -256,7 +256,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			currentStateRoot, _ = f.currentState.BlockRoot()
 			currentStateSlot = f.currentState.Slot()
 		}
-		log.Debug("AddChainSegment: missing segment",
+		log.Debug(
+			"AddChainSegment: missing segment",
 			"slot", block.Slot,
 			"blockRoot", common.Hash(blockRoot),
 			"parentRoot", block.ParentRoot,
@@ -331,7 +332,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		// Detailed diagnostics: compare state header fields with block fields.
 		hdr := newState.LatestBlockHeader()
 		stateHashSSZ, _ := newState.HashSSZ()
-		log.Warn("AddChainSegment: BlockRoot MISMATCH after TransitionState",
+		log.Warn(
+			"AddChainSegment: BlockRoot MISMATCH after TransitionState",
 			"slot", block.Slot,
 			"expectedBlockRoot", common.Hash(blockRoot),
 			"computedBlockRoot", computedRoot,
@@ -407,6 +409,7 @@ func (f *forkGraphDisk) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBl
 
 	return obj.(*cltypes.SignedBeaconBlock), true
 }
+
 func (f *forkGraphDisk) GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
 	return f.getState(blockRoot, alwaysCopy, false)
 }

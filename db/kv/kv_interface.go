@@ -528,10 +528,16 @@ type TemporalDebugTx interface {
 	NewMemBatch(ioMetrics any) TemporalMemBatch
 }
 
+type BuildAccessorsOption uint8
+
+// SkipCoveredAccessors skips files whose range is covered by other visible
+// sub-files; those self-heal via the background merge cycle.
+const SkipCoveredAccessors BuildAccessorsOption = 1
+
 type TemporalDebugDB interface {
 	DomainTables(names ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
-	BuildMissedAccessors(ctx context.Context, workers int) error
+	BuildMissedAccessors(ctx context.Context, workers int, opts ...BuildAccessorsOption) error
 	EnableReadAhead() TemporalDebugDB
 	DisableReadAhead()
 
@@ -603,6 +609,13 @@ type TemporalRwTx interface {
 
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
 	Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff) error
+}
+
+// CanReopenUnderlyingFilesTx is implemented by temporal txs (and wrappers over
+// them) that pin aggregator/block-files views at begin-time and can refresh
+// those views to pick up files opened later in the same tx.
+type CanReopenUnderlyingFilesTx interface {
+	ForceReopenUnderlyingFilesTx()
 }
 
 type TemporalPutDel interface {

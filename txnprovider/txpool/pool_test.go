@@ -899,7 +899,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 			asrt.NoError(err)
 			defer sd.Close()
-			cache := kvcache.NewSimple()
+			cache := kvcache.NewLatestBatchCache()
 			pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 			asrt.NoError(err)
 
@@ -1016,7 +1016,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	var chainConfig chain.Config
 	require.NoError(t, copier.CopyWithOption(&chainConfig, testforks.Forks["Prague"], copier.Option{DeepCopy: true}))
 	chainConfig.ChainID = maxUint256
-	cache := kvcache.NewSimple()
+	cache := kvcache.NewLatestBatchCache()
 	logger := log.New()
 	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, &chainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	require.NoError(t, err)
@@ -2134,8 +2134,8 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	cfg := txpoolcfg.DefaultConfig
 
-	// SimpleCache — avoids coherence-version coupling.
-	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewSimple(), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	// LatestBatchCache — avoids coherence-version coupling.
+	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewLatestBatchCache(), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	req.NoError(err)
 	req.NotNil(pool)
 
@@ -2239,7 +2239,7 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 // client see a receipt — and submit the next-nonce tx — before the txpool has
 // processed the dispatched StateChangeBatch. PR #20515 narrowed but did not
 // close the resulting race: AddLocalTxns can still capture a cacheView whose
-// SimpleCache lookups return the pre-block sender nonce. With NoNonceGaps
+// LatestBatchCache lookups return the pre-block sender nonce. With NoNonceGaps
 // unset, the new tx lands in queued. The only mechanism that re-evaluates a
 // queued sender's bits is `addTxnsOnNewBlock`'s sendersWithChangedState loop,
 // which depends on the sender appearing in stateChanges. If the sender's only
@@ -2247,10 +2247,10 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 // again and the tx is stuck (until the dormancy sweep evicts it).
 //
 // Scenario:
-//  1. addr1 starts at on-chain nonce=0; OnNewBlock seeds the SimpleCache.
+//  1. addr1 starts at on-chain nonce=0; OnNewBlock seeds the LatestBatchCache.
 //  2. The chain advances addr1 to nonce=1 but the pool has not yet received
 //     the corresponding StateChangeBatch. Modeled directly: write the new
-//     on-chain state to the DB while the SimpleCache still holds nonce=0
+//     on-chain state to the DB while the LatestBatchCache still holds nonce=0
 //     from the seed batch — same observable conditions as the production
 //     race when AddLocalTxns reads the cache before cache.OnNewBlock fires.
 //  3. AddLocalTxns adds a nonce=1 tx. The cache hit returns nonce=0,
@@ -2273,9 +2273,9 @@ func TestQueuedTxnPromotedAfterStaleAddLocal(t *testing.T) {
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	cfg := txpoolcfg.DefaultConfig
 
-	// SimpleCache matches the in-process embedded RPC daemon configuration in
+	// LatestBatchCache matches the in-process embedded RPC daemon configuration in
 	// node/eth/backend.go and the cache the production failure was observed on.
-	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewSimple(), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewLatestBatchCache(), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	req.NoError(err)
 	req.NotNil(pool)
 
@@ -2291,7 +2291,7 @@ func TestQueuedTxnPromotedAfterStaleAddLocal(t *testing.T) {
 		return accounts3.SerialiseV3(&a)
 	}
 
-	// 1) Bootstrap addr1 at nonce=0 in both DB and SimpleCache.
+	// 1) Bootstrap addr1 at nonce=0 in both DB and LatestBatchCache.
 	writeTestSenderState(t, ctx, coreDB, logger, addr1, serialiseAcc(0), 0)
 	initChange := &remoteproto.StateChangeBatch{
 		StateVersionId: 0, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
@@ -2306,10 +2306,10 @@ func TestQueuedTxnPromotedAfterStaleAddLocal(t *testing.T) {
 
 	// 2) Chain advances addr1 to nonce=1 (a tx from addr1 mined) but the pool
 	// has not yet processed the StateChangeBatch for that block. The DB now
-	// reflects the new on-chain state; the SimpleCache still holds nonce=0.
+	// reflects the new on-chain state; the LatestBatchCache still holds nonce=0.
 	writeTestSenderState(t, ctx, coreDB, logger, addr1, serialiseAcc(1), 1)
 
-	// 3) AddLocalTxns runs in this race window. The SimpleCache hit returns
+	// 3) AddLocalTxns runs in this race window. The LatestBatchCache hit returns
 	// the stale nonce=0, so the nonce=1 tx is misclassified into queued.
 	txn := newTestTxnSlot(1, 0, 300_000, 300_000, 100_000)
 	txn.IDHash[0] = 1
@@ -2339,4 +2339,81 @@ func TestQueuedTxnPromotedAfterStaleAddLocal(t *testing.T) {
 	pending, _, queued = pool.CountContent()
 	asrt.Equal(1, pending, "queued tx must be promoted after re-evaluation")
 	asrt.Equal(0, queued, "queued must be empty after promotion")
+}
+
+// TestOnNewBlockRefreshesDepthMetrics pins that the txpool_pending/basefee/queued
+// gauges reflect the live sub-pool sizes after each block. They must not depend on
+// logStats, which only runs on the LogEvery tick (forced to 3 minutes for every node
+// in cmd/utils/flags.go) — coupling the gauges to it left dashboards reading a value
+// up to 3 minutes stale while the pool churned every block.
+func TestOnNewBlockRefreshesDepthMetrics(t *testing.T) {
+	asrt := assert.New(t)
+	req := require.New(t)
+	logger := log.New()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	ch := make(chan Announcements, 100)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	cfg := txpoolcfg.DefaultConfig
+	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewLatestBatchCache(), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	req.NoError(err)
+	req.NotNil(pool)
+
+	var addr1 [20]byte
+	addr1[0] = 1
+	h0 := gointerfaces.ConvertHashToH256([32]byte{})
+	serialiseAcc := func(nonce uint64) []byte {
+		a := accounts3.Account{
+			Nonce: nonce, Balance: *uint256.NewInt(1 * common.Ether),
+			CodeHash: accounts.EmptyCodeHash, Incarnation: 1,
+		}
+		return accounts3.SerialiseV3(&a)
+	}
+
+	writeTestSenderState(t, ctx, coreDB, logger, addr1, serialiseAcc(0), 0)
+	initChange := &remoteproto.StateChangeBatch{
+		StateVersionId: 0, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 0, BlockHash: h0}},
+	}
+	initChange.ChangeBatch[0].Changes = append(initChange.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr1),
+		Data:    serialiseAcc(0),
+	})
+	req.NoError(pool.OnNewBlock(ctx, initChange, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	// Executable txn (nonce 0 == on-chain nonce) → pending; nonce-gapped txn (nonce 3) → queued.
+	execTxn := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	execTxn.IDHash[0] = 1
+	gappedTxn := newTestTxnSlot(3, 0, 300_000, 300_000, 100_000)
+	gappedTxn.IDHash[0] = 2
+	var slots TxnSlots
+	slots.Append(execTxn, addr1[:], true)
+	slots.Append(gappedTxn, addr1[:], true)
+	_, err = pool.AddLocalTxns(ctx, slots)
+	req.NoError(err)
+
+	_, _, wantQueued := pool.CountContent()
+	req.Positive(wantQueued, "test needs a non-empty queued pool to be meaningful")
+
+	// Poison the gauges so a stale reading can't accidentally match the live count.
+	const sentinel = -12345
+	pendingSubCounter.SetInt(sentinel)
+	basefeeSubCounter.SetInt(sentinel)
+	queuedSubCounter.SetInt(sentinel)
+
+	// A subsequent block that touches no pool sender must still refresh the gauges.
+	h1 := gointerfaces.ConvertHashToH256([32]byte{1})
+	block1 := &remoteproto.StateChangeBatch{
+		StateVersionId: 1, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1, BlockHash: h1}},
+	}
+	req.NoError(pool.OnNewBlock(ctx, block1, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	pending, baseFee, queued := pool.CountContent()
+	asrt.EqualValues(pending, pendingSubCounter.GetValue(), "pending gauge stale after OnNewBlock")
+	asrt.EqualValues(baseFee, basefeeSubCounter.GetValue(), "baseFee gauge stale after OnNewBlock")
+	asrt.EqualValues(queued, queuedSubCounter.GetValue(), "queued gauge stale after OnNewBlock")
 }

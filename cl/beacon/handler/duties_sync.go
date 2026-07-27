@@ -88,7 +88,8 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 	if !ok {
 		syncCommittee, err = state_accessors.ReadCurrentSyncCommittee(
 			state_accessors.GetValFnTxAndSnapshot(tx, snRoTx),
-			a.beaconChainCfg.RoundSlotToSyncCommitteePeriod(startSlotAtEpoch))
+			a.beaconChainCfg.RoundSlotToSyncCommitteePeriod(startSlotAtEpoch),
+		)
 		if syncCommittee == nil {
 			log.Warn("could not find sync committee for epoch", "epoch", epoch, "period", period)
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find sync committee for epoch %d", epoch))
@@ -127,7 +128,8 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 		}
 		dutiesSet[committeeParticipantIndex].ValidatorSyncCommitteeIndicies = append(
 			dutiesSet[committeeParticipantIndex].ValidatorSyncCommitteeIndicies,
-			strconv.FormatUint(uint64(idx), 10))
+			strconv.FormatUint(uint64(idx), 10),
+		)
 	}
 	// Now we can convert the map to a slice
 	duties := make([]*syncDutyResponse, 0, len(dutiesSet))

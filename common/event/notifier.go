@@ -56,11 +56,7 @@ func (en *Notifier) Wait(ctx context.Context) error {
 	defer waitCancel()
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		en.mutex.Lock()
 		defer en.mutex.Unlock()
 
@@ -68,7 +64,7 @@ func (en *Notifier) Wait(ctx context.Context) error {
 			en.cond.Wait()
 		}
 		waitCancel()
-	}()
+	})
 
 	// wait for the waiting goroutine or the parent context to finish, whichever happens first
 	<-waitCtx.Done()

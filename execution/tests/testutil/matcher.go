@@ -243,16 +243,15 @@ func readJSONFile(fn string, value any) error {
 func jsoniterErrorOffset(err error) (int64, bool) {
 	const marker = ", error found in #"
 	msg := err.Error()
-	idx := strings.Index(msg, marker)
-	if idx < 0 {
+	_, rest, found := strings.Cut(msg, marker)
+	if !found {
 		return 0, false
 	}
-	rest := msg[idx+len(marker):]
-	end := strings.IndexByte(rest, ' ')
-	if end < 0 {
+	numStr, _, found := strings.Cut(rest, " ")
+	if !found {
 		return 0, false
 	}
-	n, parseErr := strconv.ParseInt(rest[:end], 10, 64)
+	n, parseErr := strconv.ParseInt(numStr, 10, 64)
 	if parseErr != nil {
 		return 0, false
 	}

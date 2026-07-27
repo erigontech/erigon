@@ -149,7 +149,8 @@ func (I *impl) ProcessAttesterSlashing(
 	currentEpoch := state.GetEpochAtSlot(s.BeaconConfig(), s.Slot())
 	for _, ind := range solid.IntersectionOfSortedSets(
 		solid.IterableSSZ[uint64](att1.AttestingIndices),
-		solid.IterableSSZ[uint64](att2.AttestingIndices)) {
+		solid.IterableSSZ[uint64](att2.AttestingIndices),
+	) {
 		validator, err := s.ValidatorForValidatorIndex(int(ind))
 		if err != nil {
 			return err
@@ -557,7 +558,8 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 	// Verify commitments are under limit
 	epoch := state.Epoch(s)
 	if bid.BlobKzgCommitments.Len() > int(s.BeaconConfig().GetBlobParameters(epoch).MaxBlobsPerBlock) {
-		return fmt.Errorf("processExecutionPayloadBid: too many blob kzg commitments: %d > %d",
+		return fmt.Errorf(
+			"processExecutionPayloadBid: too many blob kzg commitments: %d > %d",
 			bid.BlobKzgCommitments.Len(),
 			s.BeaconConfig().GetBlobParameters(epoch).MaxBlobsPerBlock,
 		)
@@ -960,11 +962,9 @@ func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, body cltypes.Gene
 		if body.GetBlobKzgCommitments().Len() > int(blobParameters.MaxBlobsPerBlock) {
 			return errors.New("ProcessExecutionPayload: too many blob commitments")
 		}
-	} else {
+	} else if body.GetBlobKzgCommitments().Len() > int(s.BeaconConfig().MaxBlobsPerBlockByVersion(s.Version())) {
 		// assert len(body.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
-		if body.GetBlobKzgCommitments().Len() > int(s.BeaconConfig().MaxBlobsPerBlockByVersion(s.Version())) {
-			return errors.New("ProcessExecutionPayload: too many blob commitments")
-		}
+		return errors.New("ProcessExecutionPayload: too many blob commitments")
 	}
 
 	s.SetLatestExecutionPayloadHeader(payloadHeader)
@@ -1092,7 +1092,8 @@ func (I *impl) ProcessBlsToExecutionChange(
 	domain, err := fork.ComputeDomain(
 		s.BeaconConfig().DomainBLSToExecutionChange[:],
 		utils.Uint32ToBytes4(uint32(s.BeaconConfig().GenesisForkVersion)),
-		s.GenesisValidatorsRoot())
+		s.GenesisValidatorsRoot(),
+	)
 	if err != nil {
 		return err
 	}

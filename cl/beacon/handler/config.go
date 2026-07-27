@@ -47,7 +47,6 @@ func (a *ApiHandler) getDepositContract(w http.ResponseWriter, r *http.Request) 
 		ChainId         uint64 `json:"chain_id,string"`
 		DepositContract string `json:"address"`
 	}{ChainId: a.beaconChainCfg.DepositChainID, DepositContract: a.beaconChainCfg.DepositContractAddress}), nil
-
 }
 
 func (a *ApiHandler) getForkSchedule(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {

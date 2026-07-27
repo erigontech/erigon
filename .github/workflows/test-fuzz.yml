@@ -40,7 +40,6 @@ concurrency:
 
 permissions:
   contents: read
-  issues: write   # notify job opens/updates the tracking issue
 
 jobs:
   fuzz:
@@ -131,6 +130,9 @@ jobs:
     # whoever triggered them. `always()` lets this run despite `fuzz` failing.
     if: ${{ always() && needs.fuzz.result == 'failure' && github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
       - name: Open or update tracking issue
         env:
