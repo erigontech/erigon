@@ -50,9 +50,6 @@ linters:
       enabled-checks:
         - ruleguard
       disabled-checks:
-        - assignOp
-        - singleCaseSwitch
-        - unlambda
         - captLocal
         - commentFormatting
         - ifElseChain

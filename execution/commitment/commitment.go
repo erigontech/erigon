@@ -1333,8 +1333,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 				panic("unexpected cell " + c.FullString())
 			}
 			if c.extLen > 0 {
-				switch tv {
-				case VariantHexPatriciaTrie:
+				if tv == VariantHexPatriciaTrie {
 					stat.ExtSize += uint64(c.extLen)
 				}
 				stat.ExtCount++

@@ -89,8 +89,9 @@ type calcState struct {
 	// domainReader provides lazy-load from the domain via asOfStateReader.
 	domainReader *calcDomainReader
 
-	// storageEnum enumerates an account's persisted storage subtree for
-	// self-destruct; nil disables the on-disk subtree wipe.
+	// storageEnum is a test injection point; production leaves it nil. The
+	// self-destruct path no longer reads it — the account delete collapses the
+	// subtree — so it exists only to assert that in tests.
 	storageEnum storageEnumerator
 
 	// lazyLoadErr captures the first error encountered during ensureAccount /
@@ -115,7 +116,6 @@ func newCalcState(reader *asOfStateReader, logger log.Logger, logPrefix string) 
 		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
 		domainReader: &calcDomainReader{reader: reader},
-		storageEnum:  &asOfStorageEnumerator{reader: reader},
 		logger:       logger,
 		logPrefix:    logPrefix,
 	}
@@ -244,14 +244,14 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	}
 }
 
-// deleteStorageSubtree zeroes and dirties every storage slot under a
-// self-destructed account, including untouched on-disk slots pulled via
-// storageEnum, so FlushToUpdates emits a DeleteUpdate for each.
+// deleteStorageSubtree handles a self-destructed account's storage. Only slots
+// touched this window (already in the maps) get explicit deletes; the account's
+// own DeleteUpdate collapses the rest of the subtree, so untouched on-disk slots
+// need not be read.
 func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
 	slots := cs.storageState[addr]
-	if slots == nil {
-		slots = make(map[accounts.StorageKey]uint256.Int)
-		cs.storageState[addr] = slots
+	if len(slots) == 0 {
+		return
 	}
 	dirty := cs.storageDirty[addr]
 	if dirty == nil {
@@ -261,25 +261,6 @@ func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
 	for key := range slots {
 		slots[key] = uint256.Int{}
 		dirty[key] = true
-	}
-	if cs.storageEnum == nil {
-		return
-	}
-	if err := cs.storageEnum.EachStorageSlot(addr, func(key accounts.StorageKey) error {
-		if _, ok := slots[key]; !ok {
-			slots[key] = uint256.Int{}
-			dirty[key] = true
-		}
-		return nil
-	}); err != nil {
-		// Sticky — a partial subtree wipe yields a wrong root, so fail the
-		// next compute rather than silently leaving stale slots.
-		if cs.lazyLoadErr == nil {
-			cs.lazyLoadErr = fmt.Errorf("deleteStorageSubtree(%x): %w", addr.Value(), err)
-		}
-		if cs.logger != nil {
-			cs.logger.Warn("["+cs.logPrefix+"] commitmentCalculator: SD storage enumeration failed", "addr", addr, "err", err)
-		}
 	}
 }
 
