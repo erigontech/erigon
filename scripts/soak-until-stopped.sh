@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # soak-until-stopped.sh — loop unwind-fresh-sync-then-soak.sh with a fresh
 # random seed each cycle. Every cycle is a clean fresh-sync + 50-iter
-# randomized-depth soak. Runs until interrupted; each cycle writes its own
-# log + CSV under $OUT_DIR.
+# randomized-depth soak. Runs until either interrupted OR a cycle fails
+# (default), leaving its datadir intact for post-mortem.
 #
 # Design goals:
-#   * A cycle failure MUST NOT stop the loop — the point is that the runner
-#     accumulates diverse-seed evidence over many cycles. Rc is captured and
-#     logged; the next cycle starts on its own fresh datadir.
+#   * Stop-on-fail by default — the failing cycle's datadir stays on disk
+#     for inspection (integration commands, log walk, snapshot diff). Set
+#     KEEP_GOING=true to override and accumulate diverse-seed evidence
+#     across many cycles (the original mode; only useful when you already
+#     know the fix stack is stable and you want a green-cadence sample).
 #   * Each cycle's seed is captured up-front and printed to $OUT_DIR/index.tsv
 #     so a green-run cadence is auditable later without opening every log.
 #   * Cycles use their own datadir path so a still-running iteration can be
@@ -22,6 +24,7 @@
 #   SETHEAD_CALL_TIMEOUT_SEC — passed through to unwind-soak.sh
 #   MAX_CYCLES          — stop after N cycles (default: unlimited)
 #   SLEEP_BETWEEN_SEC   — pause between cycles (default: 60)
+#   KEEP_GOING          — "true" to loop past failed cycles (default: false)
 
 set -u
 
@@ -31,6 +34,7 @@ OUT_DIR="${OUT_DIR:-/tmp/continuous-soak}"
 ITER="${ITER:-50}"
 MAX_CYCLES="${MAX_CYCLES:-0}"
 SLEEP_BETWEEN_SEC="${SLEEP_BETWEEN_SEC:-60}"
+KEEP_GOING="${KEEP_GOING:-false}"
 FRESH_SYNC_SCRIPT="${FRESH_SYNC_SCRIPT:-scripts/unwind-fresh-sync-then-soak.sh}"
 LAUNCH_CMD="${LAUNCH_CMD:-scripts/erigon-launch-hoodi-soak.sh}"
 
@@ -81,6 +85,15 @@ while :; do
         "$cycle" "$START" "$END" "$rc" "$SEED" "$CYCLE_DD" "$CYCLE_LOG" "$CYCLE_CSV" \
         >>"$INDEX"
     echo "=== cycle $cycle ended at $END rc=$rc ==="
+
+    if [[ "$rc" -ne 0 && "$KEEP_GOING" != "true" ]]; then
+        echo "soak-until-stopped: cycle $cycle failed (rc=$rc); stopping so the datadir + logs are preserved for post-mortem."
+        echo "  datadir: $CYCLE_DD"
+        echo "  log: $CYCLE_LOG"
+        echo "  csv: $CYCLE_CSV"
+        echo "  (set KEEP_GOING=true to skip past failures on a future run)"
+        exit "$rc"
+    fi
 
     if [[ "$SLEEP_BETWEEN_SEC" -gt 0 ]]; then
         echo "sleeping ${SLEEP_BETWEEN_SEC}s before next cycle…"
