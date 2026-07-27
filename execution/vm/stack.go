@@ -98,6 +98,11 @@ func (st *Stack) Cap() int {
 
 func (st *Stack) swap(n int) {
 	i, j := st.top-n-1, st.top-1
+	// Explicit range check: it lets the compiler drop its own bounds checks on
+	// the four index expressions below, for the same emitted code.
+	if i < 0 || i >= stackLimit || j < 0 || j >= stackLimit {
+		panic("evm stack: swap index out of range")
+	}
 	st.data[i], st.data[j] = st.data[j], st.data[i]
 }
 
