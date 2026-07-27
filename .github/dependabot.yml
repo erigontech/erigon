@@ -22,3 +22,17 @@ updates:
           - "react-dom"
           - "@types/react"
           - "@types/react-dom"
+    ignore:
+      # TypeScript 7 removed `baseUrl` (TS5102), which @docusaurus/tsconfig
+      # still sets as of 3.10.2 — and an inherited compilerOption cannot be
+      # unset by the extending config, so docs/site/tsconfig.json's
+      # `ignoreDeprecations: "6.0"` (which only silences TS 6's TS5101) does
+      # not help. `npm run typecheck` is gated in docs-site-build.yml, so a
+      # TS 7 bump turns docs CI red. PR #22395 was closed for this reason;
+      # without this rule Dependabot re-proposes on every new 7.x release.
+      #
+      # Taking TS 7 requires inlining @docusaurus/tsconfig's options minus
+      # baseUrl (deleting our local baseUrl alone would just inherit theirs).
+      # Drop this rule once Docusaurus ships a tsconfig without baseUrl.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
