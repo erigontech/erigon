@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -458,10 +459,12 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 	// Hoist to locals so the compiler sees them as loop-invariant.
 	anyTrace := dbg.TraceDynamicGas || debug || trace
+	fast := !debug && !trace
 
 	jt := evm.jt
 	_ = jt[0] // nil-check the jump table out of the loop
 
+run:
 	for {
 		callContext.cacheGen++
 		if debug {
@@ -471,6 +474,43 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(pc)
+		if fast {
+			// Devirtualized fast path for the hottest constant-gas opcodes:
+			// stack bounds and gas literals match the jump-table entries, and
+			// the direct calls let the compiler inline the op bodies.
+			switch op {
+			case ADD:
+				if sLen := callContext.Stack.len(); sLen < 2 {
+					return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				} else if sLen > int(params.StackLimit)+1 {
+					return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: int(params.StackLimit) + 1}
+				}
+				if callContext.gas < GasFastestStep {
+					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
+				}
+				callContext.gas -= GasFastestStep
+				pc, res, err = opAdd(pc, evm, callContext)
+				if err != nil {
+					break run
+				}
+				pc++
+				continue
+			case PUSH1:
+				if sLen := callContext.Stack.len(); sLen > int(params.StackLimit)-1 {
+					return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: int(params.StackLimit) - 1}
+				}
+				if callContext.gas < GasFastestStep {
+					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
+				}
+				callContext.gas -= GasFastestStep
+				pc, res, err = opPush1(pc, evm, callContext)
+				if err != nil {
+					break run
+				}
+				pc++
+				continue
+			}
+		}
 		operation := jt[op]
 		cost = operation.constantGas // For tracing
 		// Validate stack
