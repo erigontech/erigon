@@ -17,6 +17,7 @@
 package engineapi_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
@@ -35,10 +36,12 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -998,4 +1001,155 @@ func lastBalanceChange(ac *types.AccountChanges) *types.BalanceChange {
 		}
 	}
 	return last
+}
+
+// signAuthorization builds an EIP-7702 authorization tuple signed by key.
+func signAuthorization(t *testing.T, key *ecdsa.PrivateKey, chainID *uint256.Int, target common.Address, nonce uint64) types.Authorization {
+	t.Helper()
+	var buf [33]byte
+	data := bytes.NewBuffer(nil)
+
+	authLen := rlp.Uint256Len(*chainID)
+	authLen += 1 + length.Addr
+	authLen += rlp.U64Len(nonce)
+	require.NoError(t, rlp.EncodeListPrefix(authLen, data, buf[:]))
+	require.NoError(t, rlp.EncodeUint256(*chainID, data, buf[:]))
+	require.NoError(t, types.EncodeOptionalAddress(&target, data, buf[:]))
+	require.NoError(t, rlp.EncodeU64(nonce, data, buf[:]))
+
+	hash := crypto.Keccak256Hash(append([]byte{params.SetCodeMagicPrefix}, data.Bytes()...))
+	sig, err := crypto.Sign(hash[:], key)
+	require.NoError(t, err)
+
+	auth := types.Authorization{
+		ChainID: *chainID,
+		Address: target,
+		Nonce:   nonce,
+		YParity: sig[64],
+		R:       *uint256.NewInt(0).SetBytes(sig[:32]),
+		S:       *uint256.NewInt(0).SetBytes(sig[32:64]),
+	}
+	recovered, err := auth.RecoverSigner(bytes.NewBuffer(nil), buf[:])
+	require.NoError(t, err)
+	require.Equal(t, crypto.PubkeyToAddress(key.PublicKey), *recovered)
+	return auth
+}
+
+// TestEngineApiEmptyAccountClearingConsistency pins builder/validator agreement
+// when one transaction leaves a fresh account empty (a SELFDESTRUCT forwarding a
+// zero balance to it) and a later transaction in the same block reads that
+// account's existence through an EIP-7702 authorization. EIP-161 clears the
+// account at the first transaction's boundary, so the authorization must be
+// priced as naming a new account. Each ingredient is also exercised alone, and
+// the same block is validated under both execution modes.
+func TestEngineApiEmptyAccountClearingConsistency(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		touch, auth, parallel bool
+	}{
+		{"touch_only", true, false, true},
+		{"authorization_only", false, true, true},
+		{"combined_serial", true, true, false},
+		{"combined_parallel", true, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runEmptyAccountClearingCase(t, tc.touch, tc.auth, tc.parallel)
+		})
+	}
+}
+
+func runEmptyAccountClearingCase(t *testing.T, doTouch, doAuth, parallel bool) {
+	prev := dbg.Exec3Parallel
+	dbg.Exec3Parallel = parallel
+	t.Cleanup(func() { dbg.Exec3Parallel = prev })
+
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	// Pre-Amsterdam, so the legacy EIP-7702 regular-gas refund branch applies.
+	genesis.Config.AmsterdamTime = nil
+
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(senderKey.PublicKey)
+	genesis.Alloc[senderAddr] = types.GenesisAccount{
+		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil),
+	}
+
+	// A fresh, unfunded account: both the SELFDESTRUCT beneficiary and the
+	// authority signing the authorization.
+	emptyKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	emptyAddr := crypto.PubkeyToAddress(emptyKey.PublicKey)
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		signer := types.LatestSignerForChainID(chainID)
+		rpcClient := eat.Transactor.RpcClient()
+		feeCap, tipCap := uint256.NewInt(1_000_000_000), uint256.NewInt(1_000_000_000)
+
+		send := func(txn types.Transaction) {
+			signed, err := types.SignTx(txn, *signer, senderKey)
+			require.NoError(t, err)
+			_, err = rpcClient.SendTransaction(signed)
+			require.NoError(t, err)
+		}
+
+		// Deploy in its own block so EIP-6780 keeps the contract alive and the
+		// SELFDESTRUCT only forwards its (zero) balance.
+		// runtime: PUSH20 <empty account> ; SELFDESTRUCT
+		// init:    PUSH22 <runtime> ; PUSH1 0 ; MSTORE ; PUSH1 0x16 ; PUSH1 0x0a ; RETURN
+		initCode := append([]byte{0x75, 0x73}, emptyAddr[:]...)
+		initCode = append(initCode, 0xff, 0x60, 0x00, 0x52, 0x60, 0x16, 0x60, 0x0a, 0xf3)
+		send(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 0, GasLimit: 200_000, Data: initCode},
+			ChainID:  *chainID, TipCap: *tipCap, FeeCap: *feeCap,
+		})
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		selfDestructor := types.CreateAddress(senderAddr, 0)
+		code, err := rpcClient.GetCode(selfDestructor, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.NotEmpty(t, code)
+
+		nonce := uint64(1)
+		if doTouch {
+			send(&types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 200_000, To: &selfDestructor},
+				ChainID:  *chainID, TipCap: *tipCap, FeeCap: *feeCap,
+			})
+			nonce++
+		}
+		if doAuth {
+			send(&types.SetCodeTransaction{
+				DynamicFeeTransaction: types.DynamicFeeTransaction{
+					CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 500_000, To: &senderAddr},
+					ChainID:  *chainID, TipCap: *tipCap, FeeCap: *feeCap,
+				},
+				Authorizations: []types.Authorization{
+					signAuthorization(t, emptyKey, chainID, common.Address{0xaa}, 0),
+				},
+			})
+		}
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		var want uint64
+		if doTouch {
+			want += 28603 // 21000 + PUSH20 + SELFDESTRUCT + cold beneficiary
+		}
+		if doAuth {
+			want += 46000 // 21000 + PerEmptyAccountCost, no existing-account refund
+		}
+		require.Equal(t, want, uint64(payload.ExecutionPayload.GasUsed))
+	})
 }
