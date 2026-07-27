@@ -71,6 +71,9 @@ func (st *Stack) pop() (ret uint256.Int) {
 // opcodes that need only the low word (memory offsets/sizes).
 func (st *Stack) pop2uint64() (x, y uint64) {
 	st.top -= 2
+	if st.top < 0 || st.top+1 >= stackLimit {
+		panic("evm stack: pop2uint64 index out of range")
+	}
 	return st.data[st.top+1].Uint64(), st.data[st.top].Uint64()
 }
 
@@ -89,6 +92,9 @@ func (st *Stack) drop() {
 func (st *Stack) pop3Ref() (x, y, z *uint256.Int) {
 	st.top -= 3
 	t := st.top
+	if t < 0 || t+2 >= stackLimit {
+		panic("evm stack: pop3Ref index out of range")
+	}
 	return &st.data[t+2], &st.data[t+1], &st.data[t]
 }
 
