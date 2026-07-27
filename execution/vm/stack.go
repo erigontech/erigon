@@ -106,7 +106,11 @@ func (st *Stack) swap(n int) {
 }
 
 func (st *Stack) dup(n int) {
-	st.data[st.top] = st.data[st.top-n]
+	i, j := st.top-n, st.top
+	if i < 0 || i >= stackLimit || j < 0 || j >= stackLimit {
+		panic("evm stack: dup index out of range")
+	}
+	st.data[j] = st.data[i]
 	st.top++
 }
 
