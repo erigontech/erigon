@@ -123,10 +123,8 @@ func (f *SnapshotRepo) DeleteFilesAfterMerge(files []*FilesItem) {
 			if f.schema.DataTag() == traceFileLife && file.decompressor != nil {
 				f.logger.Warn("[agg.dbg] DeleteFilesAfterMerge: remove", "f", file.decompressor.FileName())
 			}
-		} else {
-			if f.schema.DataTag() == traceFileLife && file.decompressor != nil {
-				f.logger.Warn("[agg.dbg] DeleteFilesAfterMerge: mark as canDelete=true", "f", file.decompressor.FileName())
-			}
+		} else if f.schema.DataTag() == traceFileLife && file.decompressor != nil {
+			f.logger.Warn("[agg.dbg] DeleteFilesAfterMerge: mark as canDelete=true", "f", file.decompressor.FileName())
 		}
 	}
 }
