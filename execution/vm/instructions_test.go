@@ -686,14 +686,14 @@ func TestCreate2TraceWiring(t *testing.T) {
 func TestStackPopHelpers(t *testing.T) {
 	st := &Stack{}
 
-	// pop2uint64 returns the low 64 bits of (top, next) and shrinks by two.
+	// pop2Uint64 returns the low 64 bits of (top, next) and shrinks by two.
 	st.push(*uint256.NewInt(0xAAAA)) // next
 	st.push(*uint256.NewInt(0xBBBB)) // top
-	if x, y := st.pop2uint64(); x != 0xBBBB || y != 0xAAAA {
-		t.Fatalf("pop2uint64 = (%#x, %#x), want (0xbbbb, 0xaaaa)", x, y)
+	if x, y := st.pop2Uint64(); x != 0xBBBB || y != 0xAAAA {
+		t.Fatalf("pop2Uint64 = (%#x, %#x), want (0xbbbb, 0xaaaa)", x, y)
 	}
 	if st.len() != 0 {
-		t.Fatalf("pop2uint64 len = %d, want 0", st.len())
+		t.Fatalf("pop2Uint64 len = %d, want 0", st.len())
 	}
 
 	// popRef returns a pointer to the just-popped slot, shrinks by one, and the
@@ -716,6 +716,23 @@ func TestStackPopHelpers(t *testing.T) {
 	st.push(*uint256.NewInt(9))
 	if ref.Uint64() != 9 {
 		t.Fatalf("push did not reuse popRef slot: ref = %d, want 9", ref.Uint64())
+	}
+
+	// popRef2Peek1 returns (top, next, third), shrinks by two, and leaves the
+	// third slot as the new top so the result can be built in place.
+	st.Reset()
+	st.push(*uint256.NewInt(3)) // third: stays as new top
+	st.push(*uint256.NewInt(2)) // next
+	st.push(*uint256.NewInt(1)) // top
+	x, y, z := st.popRef2Peek1()
+	if x.Uint64() != 1 || y.Uint64() != 2 || z.Uint64() != 3 {
+		t.Fatalf("popRef2Peek1 = (%d, %d, %d), want (1, 2, 3)", x.Uint64(), y.Uint64(), z.Uint64())
+	}
+	if st.len() != 1 {
+		t.Fatalf("popRef2Peek1 len = %d, want 1", st.len())
+	}
+	if st.peek() != z {
+		t.Fatalf("popRef2Peek1 left wrong slot on top: peek = %p, want %p", st.peek(), z)
 	}
 }
 

@@ -288,8 +288,7 @@ func opByte(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 }
 
 func opAddmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef2()
-	z := scope.Stack.peek()
+	x, y, z := scope.Stack.popRef2Peek1()
 	z.AddMod(x, y, z)
 	return pc, nil, nil
 }
@@ -300,8 +299,7 @@ func stAddmod(_ uint64, scope *CallContext) string {
 }
 
 func opMulmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef2()
-	z := scope.Stack.peek()
+	x, y, z := scope.Stack.popRef2Peek1()
 	z.MulMod(x, y, z)
 	return pc, nil, nil
 }
@@ -760,7 +758,7 @@ func stMstore(_ uint64, scope *CallContext) string {
 }
 
 func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	off, val := scope.Stack.pop2uint64()
+	off, val := scope.Stack.pop2Uint64()
 	scope.Memory.store[off] = byte(val)
 	return pc, nil, nil
 }
@@ -1075,8 +1073,8 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
 	addr, value := stack.pop(), stack.pop()
-	inOffset, inSize := stack.pop2uint64()
-	retOffset, retSize := stack.pop2uint64()
+	inOffset, inSize := stack.pop2Uint64()
+	retOffset, retSize := stack.pop2Uint64()
 	toAddr := accounts.InternAddress(addr.Bytes20())
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
@@ -1140,8 +1138,8 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
 	addr, value := stack.pop(), stack.pop()
-	inOffset, inSize := stack.pop2uint64()
-	retOffset, retSize := stack.pop2uint64()
+	inOffset, inSize := stack.pop2Uint64()
+	retOffset, retSize := stack.pop2Uint64()
 	toAddr := accounts.InternAddress(addr.Bytes20())
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
@@ -1190,8 +1188,8 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
 	addr := stack.pop()
-	inOffset, inSize := stack.pop2uint64()
-	retOffset, retSize := stack.pop2uint64()
+	inOffset, inSize := stack.pop2Uint64()
+	retOffset, retSize := stack.pop2Uint64()
 	toAddr := accounts.InternAddress(addr.Bytes20())
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
@@ -1236,8 +1234,8 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
 	addr := stack.pop()
-	inOffset, inSize := stack.pop2uint64()
-	retOffset, retSize := stack.pop2uint64()
+	inOffset, inSize := stack.pop2Uint64()
+	retOffset, retSize := stack.pop2Uint64()
 	toAddr := accounts.InternAddress(addr.Bytes20())
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
@@ -1274,13 +1272,13 @@ func stStaticCall(_ uint64, scope *CallContext) string {
 }
 
 func opReturn(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	offset, size := scope.Stack.pop2uint64()
+	offset, size := scope.Stack.pop2Uint64()
 	ret := scope.Memory.GetCopy(offset, size)
 	return pc, ret, errStopToken
 }
 
 func opRevert(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	offset, size := scope.Stack.pop2uint64()
+	offset, size := scope.Stack.pop2Uint64()
 	ret := scope.Memory.GetCopy(offset, size)
 	evm.returnData = ret
 	return pc, ret, ErrExecutionReverted
@@ -1496,7 +1494,7 @@ func makeLog(size int) executionFunc {
 			return pc, nil, ErrWriteProtection
 		}
 		stack, ibs := &scope.Stack, evm.IntraBlockState()
-		mStart, mSize := stack.pop2uint64()
+		mStart, mSize := stack.pop2Uint64()
 		mem := scope.Memory.GetPtr(mStart, mSize)
 		log := ibs.AllocLog(size, len(mem))
 		log.Address = scope.Contract.Address().Value()

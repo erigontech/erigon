@@ -143,10 +143,8 @@ func TraceTx(
 			}
 
 			return result, err
-		} else {
-			if tracer != nil && tracer.OnTxEnd != nil {
-				tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
-			}
+		} else if tracer != nil && tracer.OnTxEnd != nil {
+			tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
 		}
 
 		gasUsed = result.ReceiptGasUsed

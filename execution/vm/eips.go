@@ -304,9 +304,8 @@ func enable5656(jt *JumpTable) {
 func opMcopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	// These values are checked for overflow during memory expansion calculation
 	// (the memorySize function on the opcode).
-	dst, src := scope.Stack.pop2uint64()
-	length := scope.Stack.popRef().Uint64()
-	scope.Memory.Copy(dst, src, length)
+	dst, src, length := scope.Stack.popRef3()
+	scope.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
 	return pc, nil, nil
 }
 

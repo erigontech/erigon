@@ -302,8 +302,7 @@ func flatFromNested(input *callFrame, traceAddress []int, convertErrs bool, ctx 
 	output = append(output, *frame)
 	for i := range input.Calls {
 		childAddr := childTraceAddress(traceAddress, i)
-		childCallCopy := input.Calls[i]
-		flat, err := flatFromNested(&childCallCopy, childAddr, convertErrs, ctx)
+		flat, err := flatFromNested(&input.Calls[i], childAddr, convertErrs, ctx)
 		if err != nil {
 			return nil, err
 		}

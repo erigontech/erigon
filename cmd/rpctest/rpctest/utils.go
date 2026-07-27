@@ -353,12 +353,8 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 		} else {
 			return compareErrors(errVal, errValg, methodName, errCtx, errs)
 		}
-	} else {
-		if channel != nil {
-			if insertOnlyIfSuccess == false || (insertOnlyIfSuccess && errVal == nil) {
-				channel <- res
-			}
-		}
+	} else if channel != nil && (!insertOnlyIfSuccess || errVal == nil) {
+		channel <- res
 	}
 
 	if recording {
@@ -413,12 +409,8 @@ func requestAndCompareErigon(requestA, requestB string, methodNameA, methodNameB
 			//TODO fix for two methods
 			return compareErrors(errVal, errValg, methodNameA, errCtx, errs)
 		}
-	} else {
-		if channel != nil {
-			if insertOnlyIfSuccess == false || (insertOnlyIfSuccess && errVal == nil) {
-				channel <- res
-			}
-		}
+	} else if channel != nil && (!insertOnlyIfSuccess || errVal == nil) {
+		channel <- res
 	}
 
 	if recording {
