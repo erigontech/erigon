@@ -686,14 +686,14 @@ func TestCreate2TraceWiring(t *testing.T) {
 func TestStackPopHelpers(t *testing.T) {
 	st := &Stack{}
 
-	// pop2uint64 returns the low 64 bits of (top, next) and shrinks by two.
+	// pop2Uint64 returns the low 64 bits of (top, next) and shrinks by two.
 	st.push(*uint256.NewInt(0xAAAA)) // next
 	st.push(*uint256.NewInt(0xBBBB)) // top
-	if x, y := st.pop2uint64(); x != 0xBBBB || y != 0xAAAA {
-		t.Fatalf("pop2uint64 = (%#x, %#x), want (0xbbbb, 0xaaaa)", x, y)
+	if x, y := st.pop2Uint64(); x != 0xBBBB || y != 0xAAAA {
+		t.Fatalf("pop2Uint64 = (%#x, %#x), want (0xbbbb, 0xaaaa)", x, y)
 	}
 	if st.len() != 0 {
-		t.Fatalf("pop2uint64 len = %d, want 0", st.len())
+		t.Fatalf("pop2Uint64 len = %d, want 0", st.len())
 	}
 
 	// popRef returns a pointer to the just-popped slot, shrinks by one, and the

@@ -76,7 +76,7 @@ func (st *Stack) popRef() *uint256.Int {
 	return &st.data[st.top]
 }
 
-func (st *Stack) pop2uint64() (x, y uint64) {
+func (st *Stack) pop2Uint64() (x, y uint64) {
 	st.top -= 2
 	if uint(st.top) > stackLimit-2 {
 		panic("stack index out of range")
