@@ -1364,9 +1364,8 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 
 		branchData := commitment.BranchData(branchValue)
 
-		// Empty branch values are deletion tombstones kept across merges, not corruption.
-		if len(branchData) == 0 {
-			continue
+		if branchData.IsTombstone() {
+			continue // tombstones kept across merges, not corruption
 		}
 
 		// Check completeness
@@ -1578,9 +1577,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 		branchKeys++
 
 		branchData := commitment.BranchData(branchValue)
-
-		// Empty branch values are deletion tombstones kept across merges, not corruption.
-		if len(branchData) == 0 {
+		if branchData.IsTombstone() {
 			continue
 		}
 

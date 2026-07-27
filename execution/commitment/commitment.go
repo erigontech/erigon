@@ -690,8 +690,11 @@ func (branchData BranchData) ChildCount() int {
 	return bits.OnesCount16(binary.BigEndian.Uint16(branchData[2:4]))
 }
 
+// IsTombstone checks if given branch a domain's tombstone (will be removed on next .kv merge)
+func (branchData BranchData) IsTombstone() bool { return len(branchData) == 0 }
+
 func (branchData BranchData) String() string {
-	if len(branchData) == 0 {
+	if branchData.IsTombstone() {
 		return ""
 	}
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
@@ -1026,7 +1029,7 @@ func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*
 }
 
 func (branchData BranchData) Validate(branchKey []byte) error {
-	if len(branchData) == 0 {
+	if branchData.IsTombstone() {
 		return nil
 	}
 	_, afterMap, row, err := branchData.decodeCells()
