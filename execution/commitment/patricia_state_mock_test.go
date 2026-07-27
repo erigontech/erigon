@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -380,7 +381,7 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 				hashedKey[64+i*2] = (c >> 4) & 0xf
 				hashedKey[64+i*2+1] = c & 0xf
 			}
-			hs := string(common.Copy(hashedKey))
+			hs := string(bytes.Clone(hashedKey))
 			hashed = append(hashed, hs)
 			preimages[hs] = []byte(sk1)
 			preimages2[hs] = []byte(sk2)

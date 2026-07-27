@@ -179,9 +179,9 @@ func (g *PagedReader) Reset(offset uint64) {
 //		for {
 //			var keys [][]byte
 //			fst, _ := g.page.First()
-//			fst = common.Copy(fst)
+//			fst = bytes.Clone(fst)
 //			lst, _ := g.page.Last()
-//			lst = common.Copy(lst)
+//			lst = bytes.Clone(lst)
 //			fmt.Printf("page: %d, offset=%d, keys: %d %x-%x\n", i, g.currentPageOffset, len(keys), fst, lst)
 //			i++
 //			if !g.HasNextPage() {

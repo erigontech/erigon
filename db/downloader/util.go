@@ -38,7 +38,6 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -334,7 +333,7 @@ func readPeerID(db kv.RoDB) (peerID []byte, err error) {
 		if err != nil {
 			return fmt.Errorf("get peer id: %w", err)
 		}
-		peerID = common.Copy(peerIDFromDB)
+		peerID = bytes.Clone(peerIDFromDB)
 		return nil
 	}); err != nil {
 		return nil, err

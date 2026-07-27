@@ -30,6 +30,17 @@ func MerkleizeProgressive(chunks [][32]byte) ([32]byte, error) {
 	return merkleizeProgressive(chunks, 1)
 }
 
+// ProgressiveListRoot computes the EIP-7916 root from already packed basic
+// values or composite element roots. logicalLength counts elements, not chunks.
+func ProgressiveListRoot(chunks [][32]byte, logicalLength uint64) ([32]byte, error) {
+	progressiveRoot, err := MerkleizeProgressive(chunks)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	lengthRoot := Uint64Root(logicalLength)
+	return crypto.Sha256(progressiveRoot[:], lengthRoot[:]), nil
+}
+
 // MixInActiveFields computes the EIP-7495 active-fields mix-in. Bit i is
 // packed into bit i%8 of byte i/8 in a zero-padded 32-byte chunk.
 func MixInActiveFields(root [32]byte, activeFields []bool) ([32]byte, error) {
