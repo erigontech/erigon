@@ -29,41 +29,50 @@ import (
 // forcing every frame through the generic jump-table interpreter.
 var genDispatchDisabled = dbg.EnvBool("EVM_NO_GEN_DISPATCH", false)
 
-// runAmsterdamGen/runCancunGen are set by the generated file's init.
-// Delegating through nil-checked vars lets the package build before the
-// generator has run.
-var (
-	runAmsterdamGen func(evm *EVM, contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error)
-	runCancunGen    func(evm *EVM, contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error)
-)
+// runGeneratedFn is set by the generated file's init. Delegating through a
+// nil-checked var lets the package build before the generator has run.
+var runGeneratedFn func(evm *EVM, contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error)
 
-// Table pointers are assigned in init rather than referenced from Run
-// directly: a table's construction chain reaches Run through the CALL and
-// CREATE op funcs, so a static reference from Run back to a table var is an
-// initialization cycle.
-var (
-	amsterdamTablePtr *JumpTable
-	cancunTablePtr    *JumpTable
-)
+// genTables holds the canonical tables the generated loop's baked literals
+// were verified against. Populated in init rather than referenced from Run:
+// a table's construction chain reaches Run through the CALL and CREATE op
+// funcs, so a static reference from Run back to a table var would be an
+// initialization cycle. ExtraEips copies are absent by construction.
+var genTables map[*JumpTable]struct{}
 
 func init() {
-	amsterdamTablePtr = &amsterdamInstructionSet
-	cancunTablePtr = &cancunInstructionSet
+	genTables = map[*JumpTable]struct{}{
+		&frontierInstructionSet:         {},
+		&homesteadInstructionSet:        {},
+		&tangerineWhistleInstructionSet: {},
+		&spuriousDragonInstructionSet:   {},
+		&byzantiumInstructionSet:        {},
+		&constantinopleInstructionSet:   {},
+		&istanbulInstructionSet:         {},
+		&berlinInstructionSet:           {},
+		&londonInstructionSet:           {},
+		&shanghaiInstructionSet:         {},
+		&napoliInstructionSet:           {},
+		&cancunInstructionSet:           {},
+		&pragueInstructionSet:           {},
+		&bhilaiInstructionSet:           {},
+		&osakaInstructionSet:            {},
+		&amsterdamInstructionSet:        {},
+	}
 }
 
-// traceInstructionPrint is the dbg.TraceInstructions per-op line for the
-// generated loop, which runs only against the amsterdam table.
-func traceInstructionPrint(evm *EVM, op OpCode, pc uint64, callGas, cost uint64, callContext *CallContext) {
+// traceInstruction prints the dbg.TraceInstructions per-op line.
+func traceInstruction(evm *EVM, operation *operation, op OpCode, pc uint64, callGas, cost uint64, callContext *CallContext) {
 	var opstr string
-	if stringer := amsterdamInstructionSet[op].string; stringer != nil {
-		opstr = stringer(pc, callContext)
+	if operation.string != nil {
+		opstr = operation.string(pc, callContext)
 	} else {
 		opstr = op.String()
 	}
 	fmt.Printf("%d (%d.%d) %5d %5d %s\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), pc, traceGas(op, callGas, cost), opstr)
 }
 
-// traceDynamicGasPrint is the dbg.TraceDynamicGas line for the generated loop.
+// traceDynamicGasPrint prints the dbg.TraceDynamicGas line.
 func traceDynamicGasPrint(evm *EVM, op OpCode, callGas, cost uint64) {
 	fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), traceGas(op, callGas, cost), op)
 }

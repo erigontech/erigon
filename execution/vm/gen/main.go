@@ -16,16 +16,15 @@
 
 //go:build gendispatch
 
-// Dispatch-loop generator: emits run_amsterdam_gen.go, a copy of the
-// interpreter loop where the jump-table load and per-operation metadata reads
-// are replaced by a switch with compile-time constants and direct calls.
+// Dispatch-loop generator: emits run_dispatch_gen.go, one switch-dispatch
+// twin of EVM.Run valid for every canonical fork table.
 //
-// The live amsterdam table (obtained via vm.DumpAmsterdamDispatch, so the
-// fork-constructor chain is never re-implemented here) supplies the metadata.
-// Table slots holding named functions become direct calls; slots holding
-// closures (makePush/makeDup/makeSwap/makeLog products and gas-func factories)
-// are re-exposed as generated package vars initialised from the table itself,
-// which keeps their semantics identical by construction.
+// The generator dumps all constructed tables (vm.DumpAllDispatch) and, per
+// opcode, bakes a field as a compile-time literal only when it is identical
+// in every table; anything fork-varying — state-op gas schedules, opcodes
+// that appear mid-history, closure-valued slots — is read from the active
+// table at run time. ExtraEips-patched table copies fall back to the generic
+// interpreter loop.
 //
 // Usage: go generate ./execution/vm (or: go run -tags gendispatch ./execution/vm/gen)
 package main
@@ -48,8 +47,8 @@ import (
 const symbolPrefix = "github.com/erigontech/erigon/execution/vm."
 
 // packageFuncs returns the set of top-level function names declared in the vm
-// package, parsed from source. Used to verify that every symbol the dump
-// reports as "named" really is a directly callable package function.
+// package, parsed from source. A dumped symbol is directly callable only when
+// it resolves to one of these.
 func packageFuncs(vmDir string) map[string]bool {
 	funcs := make(map[string]bool)
 	matches, err := filepath.Glob(filepath.Join(vmDir, "*.go"))
@@ -75,51 +74,132 @@ func packageFuncs(vmDir string) map[string]bool {
 	return funcs
 }
 
+type callMode int
+
+const (
+	callNone   callMode = iota // field nil in every table
+	callDirect                 // named func, identical in every table
+	callEntry                  // non-nil everywhere but varying or closure-valued
+	callGuard                  // nil in some tables: needs a runtime nil check
+)
+
+// opPlan is the cross-fork emission plan for one opcode.
+type opPlan struct {
+	op   byte
+	name string
+
+	undefinedEverywhere bool
+
+	gasInv bool
+	gas    uint64
+
+	stackInv bool
+	numPop   int
+	maxStack int
+
+	exec       callMode // callDirect or callEntry
+	execSymbol string
+
+	dyn       callMode
+	dynSymbol string
+
+	mem       callMode
+	memSymbol string
+}
+
+// needsEntry reports whether the emitted case must load operation := jt[op].
+func (p *opPlan) needsEntry() bool {
+	return !p.gasInv || !p.stackInv ||
+		p.exec == callEntry ||
+		p.dyn == callEntry || p.dyn == callGuard ||
+		p.mem == callEntry || p.mem == callGuard
+}
+
+func analyze(forks []vm.ForkDispatch, funcs map[string]bool, undefinedSymbol string) []opPlan {
+	directName := func(symbol string) string {
+		name := strings.TrimPrefix(symbol, symbolPrefix)
+		if funcs[name] && !strings.Contains(name, ".") {
+			return name
+		}
+		return ""
+	}
+
+	plans := make([]opPlan, 0, 256)
+	for i := range 256 {
+		p := opPlan{op: byte(i), gasInv: true, stackInv: true, undefinedEverywhere: true}
+		var execSyms, dynSyms, memSyms []string
+		for f, fork := range forks {
+			e := fork.Entries[i]
+			if !e.Undefined {
+				p.undefinedEverywhere = false
+				p.name = e.Name
+			}
+			if f == 0 {
+				p.gas, p.numPop, p.maxStack = e.ConstantGas, e.NumPop, e.MaxStack
+			} else {
+				if e.ConstantGas != p.gas {
+					p.gasInv = false
+				}
+				if e.NumPop != p.numPop || e.MaxStack != p.maxStack {
+					p.stackInv = false
+				}
+			}
+			execSyms = append(execSyms, e.Execute)
+			dynSyms = append(dynSyms, e.DynamicGas)
+			memSyms = append(memSyms, e.MemorySize)
+		}
+		if p.undefinedEverywhere {
+			plans = append(plans, p)
+			continue
+		}
+
+		p.exec, p.execSymbol = classify(execSyms, directName)
+		if p.exec != callDirect {
+			p.exec = callEntry
+		}
+		p.dyn, p.dynSymbol = classify(dynSyms, directName)
+		p.mem, p.memSymbol = classify(memSyms, directName)
+		plans = append(plans, p)
+	}
+	return plans
+}
+
+// classify decides how the emitted case reaches a function-valued field,
+// given its symbol in every fork table.
+func classify(symbols []string, directName func(string) string) (callMode, string) {
+	allNil, someNil := true, false
+	invariant := true
+	for _, s := range symbols {
+		if s == "" {
+			someNil = true
+		} else {
+			allNil = false
+		}
+		if s != symbols[0] {
+			invariant = false
+		}
+	}
+	switch {
+	case allNil:
+		return callNone, ""
+	case someNil:
+		return callGuard, ""
+	case invariant:
+		if name := directName(symbols[0]); name != "" {
+			return callDirect, name
+		}
+		return callEntry, ""
+	default:
+		return callEntry, ""
+	}
+}
+
 type emitter struct {
-	buf   bytes.Buffer
-	vars  []string // generated closure-var declarations
-	funcs map[string]bool
-	fork  string // e.g. "Amsterdam" — suffix for generated identifiers
-	table string // e.g. "amsterdamInstructionSet"
+	buf bytes.Buffer
 }
 
 func (e *emitter) p(format string, args ...any) {
 	fmt.Fprintf(&e.buf, format, args...)
-}
-
-// callable resolves a table symbol to a Go expression the generated code can
-// call: the bare function name when it is a named package function, otherwise
-// a generated package var initialised from the live table slot.
-func (e *emitter) callable(symbol, kind string, op byte, opName string) string {
-	name := strings.TrimPrefix(symbol, symbolPrefix)
-	if e.funcs[name] && !strings.Contains(name, ".") {
-		return name
-	}
-	varName := fmt.Sprintf("%s%s%s", kind, sanitize(opName), e.fork)
-	e.vars = append(e.vars, fmt.Sprintf("%s = %s[OpCode(0x%02X)].%s", varName, e.table, op, kindField(kind)))
-	return varName
-}
-
-func kindField(kind string) string {
-	switch kind {
-	case "exec":
-		return "execute"
-	case "dyn":
-		return "dynamicGas"
-	case "mem":
-		return "memorySize"
-	}
-	panic("unknown kind " + kind)
-}
-
-func sanitize(name string) string {
-	var b strings.Builder
-	for _, r := range name {
-		if r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
 }
 
 const errReturn = "return nil, callContext.Gas(), mdgas.MdGasUsage{}, "
@@ -138,51 +218,88 @@ func (e *emitter) emitDebugBlock() {
 
 func (e *emitter) emitTraceBlock() {
 	e.p("if trace {\n")
-	e.p("traceInstructionPrint(evm, op, pc, callGas, cost, callContext)\n")
+	e.p("traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)\n")
 	e.p("}\n")
 }
 
-func (e *emitter) emitCase(entry vm.DispatchEntry) {
-	e.p("case OpCode(0x%02X): // %s\n", entry.Op, entry.Name)
-	e.p("cost = %d\n", entry.ConstantGas)
-	if entry.NumPop > 0 {
-		e.p("if sLen := callContext.Stack.len(); sLen < %d {\n", entry.NumPop)
-		e.p(errReturn+"&ErrStackUnderflow{stackLen: sLen, required: %d}\n", entry.NumPop)
-		if entry.MaxStack < 1024 {
-			e.p("} else if sLen > %d {\n", entry.MaxStack)
-			e.p(errReturn+"&ErrStackOverflow{stackLen: sLen, limit: %d}\n", entry.MaxStack)
-		}
-		e.p("}\n")
-	} else if entry.MaxStack < 1024 {
-		e.p("if sLen := callContext.Stack.len(); sLen > %d {\n", entry.MaxStack)
-		e.p(errReturn+"&ErrStackOverflow{stackLen: sLen, limit: %d}\n", entry.MaxStack)
-		e.p("}\n")
-	}
-	if entry.ConstantGas > 0 {
-		e.p("if callContext.gas < %d {\n", entry.ConstantGas)
-		e.p(errReturn + "ErrOutOfGas\n")
-		e.p("}\n")
-		e.p("callContext.gas -= %d\n", entry.ConstantGas)
+func (e *emitter) emitCase(p opPlan) {
+	e.p("case OpCode(0x%02X): // %s\n", p.op, p.name)
+	if p.needsEntry() {
+		e.p("operation := jt[op]\n")
 	}
 
-	hasDyn := entry.DynamicGas != ""
-	hasMem := entry.MemorySize != ""
-	if hasDyn {
-		memorySizeExpr := "0"
-		if hasMem {
-			memFn := e.callable(entry.MemorySize, "mem", entry.Op, entry.Name)
-			e.p("var memorySize uint64\n")
-			e.p("if memSize, overflow := %s(callContext); overflow {\n", memFn)
+	if p.gasInv {
+		e.p("cost = %d\n", p.gas)
+	} else {
+		e.p("cost = operation.constantGas\n")
+	}
+
+	if p.stackInv {
+		if p.numPop > 0 {
+			e.p("if sLen := stack.len(); sLen < %d {\n", p.numPop)
+			e.p(errReturn+"&ErrStackUnderflow{stackLen: sLen, required: %d}\n", p.numPop)
+			if p.maxStack < 1024 {
+				e.p("} else if sLen > %d {\n", p.maxStack)
+				e.p(errReturn+"&ErrStackOverflow{stackLen: sLen, limit: %d}\n", p.maxStack)
+			}
+			e.p("}\n")
+		} else if p.maxStack < 1024 {
+			e.p("if sLen := stack.len(); sLen > %d {\n", p.maxStack)
+			e.p(errReturn+"&ErrStackOverflow{stackLen: sLen, limit: %d}\n", p.maxStack)
+			e.p("}\n")
+		}
+	} else {
+		e.p("if sLen := stack.len(); sLen < operation.numPop {\n")
+		e.p(errReturn + "&ErrStackUnderflow{stackLen: sLen, required: operation.numPop}\n")
+		e.p("} else if sLen > operation.maxStack {\n")
+		e.p(errReturn + "&ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}\n")
+		e.p("}\n")
+	}
+
+	if p.gasInv {
+		if p.gas > 0 {
+			e.p("if callContext.gas < %d {\n", p.gas)
+			e.p(errReturn + "ErrOutOfGas\n")
+			e.p("}\n")
+			e.p("callContext.gas -= %d\n", p.gas)
+		}
+	} else {
+		e.p("if callContext.gas < cost {\n")
+		e.p(errReturn + "ErrOutOfGas\n")
+		e.p("}\n")
+		e.p("callContext.gas -= cost\n")
+	}
+
+	if p.dyn != callNone {
+		e.p("var memorySize uint64\n")
+		switch p.mem {
+		case callNone:
+		case callDirect:
+			e.p("if memSize, overflow := %s(callContext); overflow {\n", p.memSymbol)
 			e.p(errReturn + "ErrGasUintOverflow\n")
 			e.p("} else if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {\n")
 			e.p(errReturn + "ErrGasUintOverflow\n")
 			e.p("}\n")
-			memorySizeExpr = "memorySize"
+		default:
+			e.p("if operation.memorySize != nil {\n")
+			e.p("if memSize, overflow := operation.memorySize(callContext); overflow {\n")
+			e.p(errReturn + "ErrGasUintOverflow\n")
+			e.p("} else if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {\n")
+			e.p(errReturn + "ErrGasUintOverflow\n")
+			e.p("}\n")
+			e.p("}\n")
 		}
-		dynFn := e.callable(entry.DynamicGas, "dyn", entry.Op, entry.Name)
+
+		if p.dyn == callGuard {
+			e.p("if operation.dynamicGas != nil {\n")
+		}
 		e.p("evm.callGasTemp = 0\n")
 		e.p("var dynamicCost mdgas.MdGas\n")
-		e.p("dynamicCost, err = %s(evm, callContext, callContext.Gas(), %s)\n", dynFn, memorySizeExpr)
+		if p.dyn == callDirect {
+			e.p("dynamicCost, err = %s(evm, callContext, callContext.Gas(), memorySize)\n", p.dynSymbol)
+		} else {
+			e.p("dynamicCost, err = operation.dynamicGas(evm, callContext, callContext.Gas(), memorySize)\n")
+		}
 		e.p("if err != nil {\n")
 		e.p("if !errors.Is(err, ErrOutOfGas) {\n")
 		e.p("err = fmt.Errorf(\"%%w: %%w\", ErrOutOfGas, err)\n")
@@ -191,7 +308,11 @@ func (e *emitter) emitCase(entry vm.DispatchEntry) {
 		e.p("}\n")
 		e.p("if anyTrace {\n")
 		e.p("cost += dynamicCost.Regular\n")
-		e.p("callGas = %d + dynamicCost.Regular - evm.CallGasTemp()\n", entry.ConstantGas)
+		if p.gasInv {
+			e.p("callGas = %d + dynamicCost.Regular - evm.CallGasTemp()\n", p.gas)
+		} else {
+			e.p("callGas = operation.constantGas + dynamicCost.Regular - evm.CallGasTemp()\n")
+		}
 		e.p("if dbg.TraceDynamicGas && dynamicCost.Regular > 0 {\n")
 		e.p("traceDynamicGasPrint(evm, op, callGas, cost)\n")
 		e.p("}\n")
@@ -205,17 +326,23 @@ func (e *emitter) emitCase(entry vm.DispatchEntry) {
 		e.p(errReturn + "ErrOutOfGas\n")
 		e.p("}\n")
 		e.p("}\n")
+		if p.dyn == callGuard {
+			e.p("}\n")
+		}
 	}
 
 	e.emitDebugBlock()
-	if hasMem {
+	if p.dyn != callNone && p.mem != callNone {
 		e.p("if memorySize > 0 {\n")
 		e.p("callContext.Memory.Resize(memorySize)\n")
 		e.p("}\n")
 	}
 	e.emitTraceBlock()
-	execFn := e.callable(entry.Execute, "exec", entry.Op, entry.Name)
-	e.p("pc, res, err = %s(pc, evm, callContext)\n", execFn)
+	if p.exec == callDirect {
+		e.p("pc, res, err = %s(pc, evm, callContext)\n", p.execSymbol)
+	} else {
+		e.p("pc, res, err = operation.execute(pc, evm, callContext)\n")
+	}
 }
 
 func (e *emitter) emitDefaultCase() {
@@ -242,10 +369,12 @@ import (
 
 `
 
-const runPrologue = `// run%[1]s is the generated switch-dispatch twin of EVM.Run for the
-// unmodified %[1]s jump table. Run delegates here on pointer identity, so
-// ExtraEips (which copy the table) and unlisted forks keep the generic loop.
-func (evm *EVM) run%[1]s(contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
+const runPrologue = `// runGenerated is the generated switch-dispatch twin of EVM.Run, valid for
+// every canonical fork table: fields identical across all tables are baked as
+// literals, fork-varying ones are read from the active table. Run delegates
+// here only for tables in genTables, so ExtraEips-patched copies keep the
+// generic loop.
+func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	if len(contract.Code) == 0 {
 		return nil, gas, mdgas.MdGasUsage{}, nil
 	}
@@ -296,6 +425,10 @@ func (evm *EVM) run%[1]s(contract Contract, gas mdgas.MdGas, input []byte, readO
 	}
 
 	anyTrace := dbg.TraceDynamicGas || debug || trace
+	stack := &callContext.Stack
+
+	jt := evm.jt
+	_ = jt[0]
 
 	for {
 		callContext.cacheGen++
@@ -320,6 +453,9 @@ const runEpilogue = `		}
 	return res, callContext.Gas(), mdgas.MdGasUsage{}, err
 }
 
+func init() {
+	runGeneratedFn = (*EVM).runGenerated
+}
 `
 
 func main() {
@@ -331,49 +467,26 @@ func main() {
 	vmDir := filepath.Dir(filepath.Dir(sourceFile))
 
 	funcs := packageFuncs(vmDir)
-	forks := []struct {
-		Name    string
-		Table   string
-		Entries []vm.DispatchEntry
-	}{
-		{"Amsterdam", "amsterdamInstructionSet", vm.DumpAmsterdamDispatch()},
-		{"Cancun", "cancunInstructionSet", vm.DumpCancunDispatch()},
-	}
+	forks := vm.DumpAllDispatch()
+	plans := analyze(forks, funcs, "")
 
-	e := &emitter{funcs: funcs}
+	e := &emitter{}
 	e.p("%s", fileHeader)
-	totalVars := 0
-	var inits []string
-	for _, f := range forks {
-		ce := &emitter{funcs: funcs, fork: f.Name, table: f.Table}
-		for _, entry := range f.Entries {
-			if entry.Undefined {
-				continue
-			}
-			ce.emitCase(entry)
+	e.p("%s", runPrologue)
+	baked, entryBased := 0, 0
+	for _, p := range plans {
+		if p.undefinedEverywhere {
+			continue
 		}
-		ce.emitDefaultCase()
-
-		if len(ce.vars) > 0 {
-			e.p("// Closure-valued %s table slots, re-exposed as vars so the generated\n", f.Name)
-			e.p("// loop calls the exact same function values the table holds.\n")
-			e.p("var (\n")
-			for _, v := range ce.vars {
-				e.p("%s\n", v)
-			}
-			e.p(")\n\n")
+		e.emitCase(p)
+		if p.needsEntry() {
+			entryBased++
+		} else {
+			baked++
 		}
-		e.p(runPrologue, f.Name)
-		e.buf.Write(ce.buf.Bytes())
-		e.p("%s", runEpilogue)
-		totalVars += len(ce.vars)
-		inits = append(inits, fmt.Sprintf("run%sGen = (*EVM).run%s", f.Name, f.Name))
 	}
-	e.p("func init() {\n")
-	for _, line := range inits {
-		e.p("%s\n", line)
-	}
-	e.p("}\n")
+	e.emitDefaultCase()
+	e.p("%s", runEpilogue)
 
 	formatted, err := format.Source(e.buf.Bytes())
 	if err != nil {
@@ -387,5 +500,5 @@ func main() {
 		fmt.Fprintf(os.Stderr, "cannot write %s: %v\n", outPath, err)
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "wrote %s (%d bytes, %d closure vars)\n", outPath, len(formatted), totalVars)
+	fmt.Fprintf(os.Stderr, "wrote %s (%d bytes; %d fully-baked cases, %d entry-reading cases)\n", outPath, len(formatted), baked, entryBased)
 }

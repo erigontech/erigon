@@ -39,12 +39,38 @@ type DispatchEntry struct {
 	Undefined   bool
 }
 
-// DumpAmsterdamDispatch and DumpCancunDispatch return fully-constructed jump
-// tables as data, so the generator does not have to re-implement the fork
-// constructor chain (base sets + enableXXXX patches) to learn what each slot
-// holds.
-func DumpAmsterdamDispatch() []DispatchEntry { return dumpDispatch(&amsterdamInstructionSet) }
-func DumpCancunDispatch() []DispatchEntry    { return dumpDispatch(&cancunInstructionSet) }
+// ForkDispatch is one fork's fully-constructed jump table as data, so the
+// generator does not have to re-implement the fork constructor chain
+// (base sets + enableXXXX patches) to learn what each slot holds.
+type ForkDispatch struct {
+	Name    string
+	Entries []DispatchEntry
+}
+
+// DumpAllDispatch returns every canonical fork table. The generator emits a
+// single loop from the cross-fork intersection: per-opcode fields that are
+// identical in every table become compile-time literals, everything else is
+// read from the active table at run time.
+func DumpAllDispatch() []ForkDispatch {
+	return []ForkDispatch{
+		{"frontier", dumpDispatch(&frontierInstructionSet)},
+		{"homestead", dumpDispatch(&homesteadInstructionSet)},
+		{"tangerineWhistle", dumpDispatch(&tangerineWhistleInstructionSet)},
+		{"spuriousDragon", dumpDispatch(&spuriousDragonInstructionSet)},
+		{"byzantium", dumpDispatch(&byzantiumInstructionSet)},
+		{"constantinople", dumpDispatch(&constantinopleInstructionSet)},
+		{"istanbul", dumpDispatch(&istanbulInstructionSet)},
+		{"berlin", dumpDispatch(&berlinInstructionSet)},
+		{"london", dumpDispatch(&londonInstructionSet)},
+		{"shanghai", dumpDispatch(&shanghaiInstructionSet)},
+		{"napoli", dumpDispatch(&napoliInstructionSet)},
+		{"cancun", dumpDispatch(&cancunInstructionSet)},
+		{"prague", dumpDispatch(&pragueInstructionSet)},
+		{"bhilai", dumpDispatch(&bhilaiInstructionSet)},
+		{"osaka", dumpDispatch(&osakaInstructionSet)},
+		{"amsterdam", dumpDispatch(&amsterdamInstructionSet)},
+	}
+}
 
 func dumpDispatch(tbl *JumpTable) []DispatchEntry {
 	undefinedName := funcSymbol(opUndefined)
