@@ -61,19 +61,14 @@ func (st *Stack) pushRef() *uint256.Int {
 	return ref
 }
 
+// drop discards the top item without reading it.
+func (st *Stack) drop() {
+	st.top--
+}
+
 func (st *Stack) pop() uint256.Int {
 	st.top--
 	return st.data[st.top]
-}
-
-// pop2uint64 pops the top two items as their low 64 bits (x topmost) — for
-// opcodes that need only the low word (memory offsets/sizes).
-func (st *Stack) pop2uint64() (x, y uint64) {
-	st.top -= 2
-	if st.top < 0 || st.top+1 >= stackLimit {
-		panic("stack overflow")
-	}
-	return st.data[st.top+1].Uint64(), st.data[st.top].Uint64()
 }
 
 // popRef pops the top item and returns a pointer to its slot. The value stays
@@ -83,9 +78,14 @@ func (st *Stack) popRef() *uint256.Int {
 	return &st.data[st.top]
 }
 
-// popRef1Peek1 pops the top item and returns it together with a pointer to the
-// new top: the operand and write target of a binary op. One range check covers
-// both slots. Same validity rule as popRef.
+func (st *Stack) pop2uint64() (x, y uint64) {
+	st.top -= 2
+	if st.top < 0 || st.top+1 >= stackLimit {
+		panic("stack overflow")
+	}
+	return st.data[st.top+1].Uint64(), st.data[st.top].Uint64()
+}
+
 func (st *Stack) popRef1Peek1() (x, y *uint256.Int) {
 	st.top--
 	if st.top-1 < 0 || st.top >= stackLimit {
@@ -94,13 +94,6 @@ func (st *Stack) popRef1Peek1() (x, y *uint256.Int) {
 	return &st.data[st.top], &st.data[st.top-1]
 }
 
-// drop discards the top item without reading it.
-func (st *Stack) drop() {
-	st.top--
-}
-
-// popRef2 pops the top two items and returns pointers to their slots, x
-// topmost. One range check covers both. Same validity rule as popRef.
 func (st *Stack) popRef2() (x, y *uint256.Int) {
 	st.top -= 2
 	if st.top < 0 || st.top+1 >= stackLimit {
