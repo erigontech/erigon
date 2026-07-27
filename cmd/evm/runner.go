@@ -282,6 +282,7 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 		if err != nil {
 			return fmt.Errorf("could not create CPU profile: %w", err)
 		}
+		defer f.Close()
 		if err := pprof.StartCPUProfile(f); err != nil {
 			return fmt.Errorf("could not start CPU profile: %w", err)
 		}

@@ -435,7 +435,7 @@ func BenchmarkPrecompiledBLS12381G1MultiExpWorstCase(b *testing.B) {
 		"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
 	input := task
 	for range 4787 {
-		input = input + task
+		input += task
 	}
 	testcase := precompiledTest{
 		Input:       input,
@@ -455,7 +455,7 @@ func BenchmarkPrecompiledBLS12381G2MultiExpWorstCase(b *testing.B) {
 		"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
 	input := task
 	for range 1040 {
-		input = input + task
+		input += task
 	}
 
 	testcase := precompiledTest{
