@@ -996,9 +996,7 @@ func runTests(t *testing.T, decode func([]byte, any) error) {
 }
 
 func TestDecodeWithByteReader(t *testing.T) {
-	runTests(t, func(input []byte, into any) error {
-		return DecodeBytes(input, into)
-	})
+	runTests(t, DecodeBytes)
 }
 
 func testDecodeWithEncReader(t *testing.T, n int) {
