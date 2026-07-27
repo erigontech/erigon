@@ -34,10 +34,10 @@ const stackLimit = 1024
 // st.top field directly — a hoisted local (t := st.top - 2; st.data[t+1]) gets
 // reassociated away from the guarded value and the checks come back.
 // Verify: go build -gcflags='-d=ssa/check_bce/debug=1' ./execution/vm/
-//
-// Stack is an object for basic stack operations. Items popped to the stack are
-// expected to be changed and modified. stack does not take care of adding newly
-// initialised objects.
+
+// Stack is the EVM operand stack: a fixed 1024-slot array indexed by top.
+// Helpers return pointers into data so ops mutate slots in place; position
+// arguments are depths below the top, with depth 0 the top item.
 type Stack struct {
 	data [stackLimit]uint256.Int
 	top  int
@@ -133,7 +133,7 @@ func (st *Stack) Cap() int {
 	return stackLimit
 }
 
-// exchange swaps the (n+1)'th and (m+1)'th items counting from the top.
+// exchange swaps the items at depths n and m.
 func (st *Stack) exchange(n, m int) {
 	i, j := st.top-n-1, st.top-m-1
 	if uint(i) >= stackLimit || uint(j) >= stackLimit {
@@ -144,8 +144,9 @@ func (st *Stack) exchange(n, m int) {
 
 func (st *Stack) swap(n int) { st.exchange(n, 0) }
 
+// dup copies the item at depth n onto the top.
 func (st *Stack) dup(n int) {
-	i, j := st.top-n, st.top
+	i, j := st.top-n-1, st.top
 	if uint(i) >= stackLimit || uint(j) >= stackLimit {
 		panic("stack index out of range")
 	}
@@ -157,7 +158,7 @@ func (st *Stack) peek() *uint256.Int {
 	return &st.data[st.top-1]
 }
 
-// back2 returns the n'th and m'th items from the top under one range check.
+// back2 returns the items at depths n and m under one range check.
 func (st *Stack) back2(n, m int) (x, y *uint256.Int) {
 	i, j := st.top-n-1, st.top-m-1
 	if uint(i) >= stackLimit || uint(j) >= stackLimit {
@@ -166,7 +167,7 @@ func (st *Stack) back2(n, m int) (x, y *uint256.Int) {
 	return &st.data[i], &st.data[j]
 }
 
-// back3 returns the n'th, m'th and k'th items from the top under one range check.
+// back3 returns the items at depths n, m and k under one range check.
 func (st *Stack) back3(n, m, k int) (x, y, z *uint256.Int) {
 	i, j, l := st.top-n-1, st.top-m-1, st.top-k-1
 	if uint(i) >= stackLimit || uint(j) >= stackLimit || uint(l) >= stackLimit {
@@ -175,7 +176,7 @@ func (st *Stack) back3(n, m, k int) (x, y, z *uint256.Int) {
 	return &st.data[i], &st.data[j], &st.data[l]
 }
 
-// back returns the n'th item in stack
+// back returns the item at depth n.
 func (st *Stack) back(n int) *uint256.Int {
 	return &st.data[st.top-n-1]
 }

@@ -24,8 +24,6 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -122,7 +120,7 @@ func enable1344(jt *JumpTable) {
 // opChainID implements CHAINID opcode
 func opChainID(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error) {
 	chainId := evm.ChainRules().ChainID
-	callContext.Stack.push(*chainId)
+	callContext.Stack.pushRef().Set(chainId)
 	return pc, nil, nil
 }
 
@@ -246,7 +244,7 @@ func enable3855(jt *JumpTable) {
 
 // opPush0 implements the PUSH0 opcode
 func opPush0(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.push(uint256.Int{})
+	scope.Stack.pushRef().Clear()
 	return pc, nil, nil
 }
 
