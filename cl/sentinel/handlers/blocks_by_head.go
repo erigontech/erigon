@@ -47,7 +47,7 @@ func (c *ConsensusHandlers) beaconBlocksByHeadHandler(s network.Stream) error {
 	defer tx.Rollback()
 
 	currentRoot := req.BeaconRoot
-	for i := uint64(0); i < count; i++ {
+	for range count {
 		block, err := c.beaconDB.ReadBlockByRoot(c.ctx, tx, currentRoot)
 		if err != nil {
 			return err

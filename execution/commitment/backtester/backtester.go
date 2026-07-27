@@ -33,10 +33,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -69,7 +69,7 @@ func WithChartsPageSize(n uint64) Opt {
 	}
 }
 
-func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, outputDir string, opts ...Opt) Backtester {
+func New(logger log.Logger, db kv.TemporalRoDB, br dbservices.FullBlockReader, outputDir string, opts ...Opt) Backtester {
 	bt := Backtester{
 		logger:          logger,
 		db:              db,
@@ -87,7 +87,7 @@ func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, out
 type Backtester struct {
 	logger          log.Logger
 	db              kv.TemporalRoDB
-	blockReader     services.FullBlockReader
+	blockReader     dbservices.FullBlockReader
 	outputDir       string
 	paraTrie        bool
 	trieWarmup      bool
@@ -217,7 +217,11 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	//   - commitment data as-of the beginning of the block
 	//   - account/storage/code data as-of the end of the block
 	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewSplitHistoryReader(tx, fromTxNum, toTxNum /* withHistory */, false))
-	sd.GetCommitmentCtx().SetTrace(bt.logger.Enabled(ctx, log.LvlTrace))
+	if bt.logger.Enabled(ctx, log.LvlTrace) {
+		sd.GetCommitmentCtx().SetTraceWriter(os.Stderr)
+	} else {
+		sd.GetCommitmentCtx().SetTraceWriter(nil)
+	}
 	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
 		return err

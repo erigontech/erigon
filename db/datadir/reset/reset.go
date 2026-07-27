@@ -78,11 +78,9 @@ func (reset *Reset) Run() (err error) {
 	err = reset.remove(OsFilePath(reset.Dirs.PreverifiedPath()))
 	if err == nil {
 		logger.Info("Removed snapshots lock file", "path", datadir.PreverifiedFileName)
-	} else {
-		if !errors.Is(err, fs.ErrNotExist) {
-			err = fmt.Errorf("removing snapshot lock file: %w", err)
-			return
-		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		err = fmt.Errorf("removing snapshot lock file: %w", err)
+		return
 	}
 	return nil
 }

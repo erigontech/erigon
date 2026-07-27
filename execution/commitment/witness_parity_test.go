@@ -27,19 +27,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/trie"
 )
 
-func processFreshTrie(t *testing.T, plainKeys [][]byte, updates []Update) (*HexPatriciaHashed, []byte) {
-	t.Helper()
-	ms := NewMockState(t)
-	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	hph.SetTrace(false)
-	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
-	toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-	defer toProcess.Close()
-	root, err := hph.Process(context.Background(), toProcess, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	return hph, root
-}
-
 func touchUpdates(touchAccounts, touchStorage [][]byte) *Updates {
 	u := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
 	for _, a := range touchAccounts {

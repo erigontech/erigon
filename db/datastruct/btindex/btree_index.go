@@ -17,10 +17,8 @@
 package btindex
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -28,7 +26,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon/common/background"
@@ -36,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/murmur3"
+	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
@@ -226,7 +224,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (_ *BtIndexWrit
 	if btw.indexF, err = dir.CreateTemp(args.IndexFile); err != nil {
 		return nil, fmt.Errorf("create temp index file for %s: %w", args.IndexFile, err)
 	}
-	btw.writer = &countingWriter{w: getBufioWriter(btw.indexF)}
+	btw.writer = &countingWriter{w: bufiopool.Writer(btw.indexF)}
 
 	if args.KeyCount > 0 {
 		if args.M == 0 {
@@ -352,7 +350,7 @@ func (btw *BtIndexWriter) closeTemps() {
 
 func (btw *BtIndexWriter) Close() {
 	if btw.writer != nil {
-		putBufioWriter(btw.writer.w)
+		bufiopool.PutWriter(btw.writer.w)
 		btw.writer = nil
 	}
 	if btw.indexF != nil { // non-nil means Build didn't rename it: drop the partial .tmp
@@ -724,19 +722,3 @@ func (b *BtIndex) OrdinalLookup(getter *seg.Reader, i uint64) *Cursor {
 
 func (b *BtIndex) Offsets() *eliasfano32.EliasFano { return b.bplus.Offsets() }
 func (b *BtIndex) Distances() (map[int]int, error) { return b.bplus.Distances() }
-
-// Erigon doesn't create tons of bufio readers/writers, but it has tons of
-// parallel small unit-tests which each create many small files and bufio
-// readers/writers — pooling avoids the allocation pressure in that scenario.
-var bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
-
-func getBufioWriter(w io.Writer) *bufio.Writer {
-	bw := bufioWriterPool.Get().(*bufio.Writer)
-	bw.Reset(w)
-	return bw
-}
-
-// Reset(nil) before Put is required: without it the pool entry retains a
-// reference to the underlying io.Writer/io.Reader, keeping it alive until the
-// next GC cycle or until the entry is reused — whichever comes first.
-func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }

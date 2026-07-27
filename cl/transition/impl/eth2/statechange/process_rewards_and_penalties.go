@@ -41,7 +41,7 @@ func getFlagsTotalBalances(s abstract.BeaconState, flagsUnslashedIndiciesSet [][
 	for i := range weights {
 		flagsTotalBalancesShards[i] = make([]uint64, numWorkers)
 	}
-	for i := 0; i < numWorkers; i++ {
+	for i := range numWorkers {
 		workerID := i
 		from := workerID * shardSize
 		to := (workerID + 1) * shardSize
@@ -73,7 +73,7 @@ func getFlagsTotalBalances(s abstract.BeaconState, flagsUnslashedIndiciesSet [][
 	wp.Execute()
 
 	for i := range weights {
-		for j := 0; j < numWorkers; j++ {
+		for j := range numWorkers {
 			flagsTotalBalances[i] += flagsTotalBalancesShards[i][j]
 		}
 	}

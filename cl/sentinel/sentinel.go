@@ -25,11 +25,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/OffchainLabs/go-bitfield"
 	"github.com/go-chi/chi/v5"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/prysmaticlabs/go-bitfield"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -177,7 +177,8 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		s.peers,
 		s.cfg.NetworkConfig,
 		s.p2p.UDPv5Listener().LocalNode(),
-		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks).Start()
+		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks,
+	).Start()
 
 	/*if err := s.connectToBootnodes(); err != nil {
 		return nil, fmt.Errorf("failed to connect to bootnodes err=%w", err)

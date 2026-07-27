@@ -17,13 +17,8 @@
 package privateapi
 
 import (
-	"fmt"
-	"net"
-
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/health"
-	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
@@ -38,10 +33,6 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 	miningServer txpoolproto.MiningServer, bridgeServer *bridge.BackendServer, heimdallServer *heimdall.BackendServer,
 	addr string, rateLimit uint32, creds credentials.TransportCredentials, healthCheck bool, logger log.Logger) (*grpc.Server, error) {
 	logger.Info("Starting private RPC server", "on", addr)
-	lis, err := net.Listen("tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
-	}
 
 	grpcServer := grpcutil.NewServer(rateLimit, creds)
 	remoteproto.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
@@ -57,21 +48,10 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 	if heimdallServer != nil {
 		remoteproto.RegisterHeimdallBackendServer(grpcServer, heimdallServer)
 	}
-
 	remoteproto.RegisterKVServer(grpcServer, kv)
-	var healthServer *health.Server
-	if healthCheck {
-		healthServer = health.NewServer()
-		grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
-	}
-	go func() {
-		if healthCheck {
-			defer healthServer.Shutdown()
-		}
-		if err := grpcServer.Serve(lis); err != nil {
-			logger.Error("private RPC server fail", "err", err)
-		}
-	}()
 
+	if err := grpcutil.StartServer(grpcServer, addr, healthCheck, logger, "private RPC server fail"); err != nil {
+		return nil, err
+	}
 	return grpcServer, nil
 }

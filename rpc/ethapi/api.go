@@ -185,9 +185,9 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 
 	if args.AuthorizationList != nil {
 		authorizations := make([]types.Authorization, len(args.AuthorizationList))
-		for i, auth := range args.AuthorizationList {
+		for i := range args.AuthorizationList {
 			var err error
-			authorizations[i], err = auth.ToAuthorization()
+			authorizations[i], err = args.AuthorizationList[i].ToAuthorization()
 			if err != nil {
 				return nil, err
 			}
@@ -224,8 +224,8 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 		authorizations := make([]types.Authorization, 0)
 		if args.AuthorizationList != nil {
 			authorizations = make([]types.Authorization, len(args.AuthorizationList))
-			for i, auth := range args.AuthorizationList {
-				authorizations[i], err = auth.ToAuthorization()
+			for i := range args.AuthorizationList {
+				authorizations[i], err = args.AuthorizationList[i].ToAuthorization()
 				if err != nil {
 					return nil, err
 				}
@@ -602,9 +602,12 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 
 	if txn.Type() == types.LegacyTxType {
 		if !v.IsZero() { // skip chain id derivation in case of call simulation (where v,r,s are zero)
-			chainId = types.DeriveChainId(v)
+			var err error
+			chainId, err = types.DeriveChainId(v)
 			// if a legacy transaction has an EIP-155 chain id, include it explicitly, otherwise chain id is not included
-			if !chainId.IsZero() {
+			if err != nil {
+				log.Warn("[rpc] chain id derivation", "err", err)
+			} else if !chainId.IsZero() {
 				result.ChainID = (*hexutil.Big)(chainId.ToBig())
 			}
 		}
@@ -630,9 +633,10 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 			result.BlobVersionedHashes = blobTx.BlobVersionedHashes
 		} else if txn.Type() == types.SetCodeTxType {
 			setCodeTx := txn.(*types.SetCodeTransaction)
-			ats := make([]types.JsonAuthorization, len(setCodeTx.GetAuthorizations()))
-			for i, a := range setCodeTx.GetAuthorizations() {
-				ats[i] = types.JsonAuthorization{}.FromAuthorization(a)
+			auths := setCodeTx.GetAuthorizations()
+			ats := make([]types.JsonAuthorization, len(auths))
+			for i := range auths {
+				ats[i] = types.JsonAuthorization{}.FromAuthorization(auths[i])
 			}
 			result.Authorizations = &ats
 		}

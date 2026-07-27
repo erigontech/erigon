@@ -39,6 +39,7 @@ func (b *BeaconBlockHeader) Copy() *BeaconBlockHeader {
 	copied := *b
 	return &copied
 }
+
 func (b *BeaconBlockHeader) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, b.Slot, b.ProposerIndex, b.ParentRoot[:], b.Root[:], b.BodyRoot[:])
 }
@@ -49,7 +50,6 @@ func (b *BeaconBlockHeader) DecodeSSZ(buf []byte, v int) error {
 
 func (b *BeaconBlockHeader) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(b.Slot, b.ProposerIndex, b.ParentRoot[:], b.Root[:], b.BodyRoot[:])
-
 }
 
 func (b *BeaconBlockHeader) EncodingSizeSSZ() int {

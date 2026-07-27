@@ -38,6 +38,8 @@ import (
 var (
 	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
+	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", 0)
+
 	saveHeapProfile             = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath         = EnvString("HEAP_PROFILE_FILE_PATH", "")
 	heapProfileThresholdPercent = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
@@ -57,6 +59,7 @@ var (
 
 	//state v3
 	noPrune              = EnvBool("NO_PRUNE", false)
+	noRetire             = EnvBool("NO_RETIRE", false)              // kill-switch: don't delete aged frozen files (history/II + block snapshots)
 	noMerge              = EnvBool("NO_MERGE", false)               // don't merge Domain/Hist/II
 	noBackgroundE3Build  = EnvBool("NO_BACKGROUND_E3_BUILD", false) // suppress background E3 file build / merge / retire goroutines
 	noMergeHistory       = EnvBool("NO_MERGE_HISTORY", false)       // don't merge Hist/II but still merge Domain
@@ -75,7 +78,9 @@ var (
 	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1) // allows 1 kind of snapshots to be built simultaneously
 
 	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
-	OnlyCreateDB    = EnvBool("ONLY_CREATE_DB", false)
+	// kill-switch: set SNAPSHOT_MADV_SEQUENTIAL=false to skip MADV_SEQUENTIAL in seg.OpenSequentialView
+	SnapshotMadvSequential = EnvBool("SNAPSHOT_MADV_SEQUENTIAL", true)
+	OnlyCreateDB           = EnvBool("ONLY_CREATE_DB", false)
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
@@ -91,15 +96,19 @@ var (
 
 	MergeThrottleMs = EnvInt("ERIGON_MERGE_THROTTLE_MS", 0)
 
+	// Trace is the umbrella switch: TRACE=true force-enables opcode + gas tracing
+	// for every tx (it makes IntraBlockState.Trace() true and turns on the
+	// instruction/gas sub-flags below), for debugging a single fixture end-to-end.
+	Trace                 = EnvBool("TRACE", false)
 	TraceAccounts         = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys        = EnvStrings("TRACE_STATE_KEYS", ",", nil)
-	TraceInstructions     = EnvBool("TRACE_INSTRUCTIONS", false)
+	TraceInstructions     = EnvBool("TRACE_INSTRUCTIONS", false) || Trace
 	TraceTransactionIO    = EnvBool("TRACE_TRANSACTION_IO", false)
 	TraceDomainIO         = EnvBool("TRACE_DOMAIN_IO", false)
 	TraceNoopIO           = EnvBool("TRACE_NOOP_IO", false)
 	TraceLogs             = EnvBool("TRACE_LOGS", false)
-	TraceGas              = EnvBool("TRACE_GAS", false)
-	TraceDynamicGas       = EnvBool("TRACE_DYNAMIC_GAS", false)
+	TraceGas              = EnvBool("TRACE_GAS", false) || Trace
+	TraceDynamicGas       = EnvBool("TRACE_DYNAMIC_GAS", false) || Trace
 	TraceApply            = EnvBool("TRACE_APPLY", false)
 	TraceTouchKey         = EnvBool("TRACE_TOUCH_KEY", false)
 	TraceBlockAccessLists = EnvBool("TRACE_BLOCK_ACCESS_LISTS", false)
@@ -111,11 +120,22 @@ var (
 	BadBlockHalt          = EnvBool("BAD_BLOCK_HALT", false)
 	IgnoreBAL             = EnvBool("IGNORE_BAL", false)
 	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
-	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
-	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
-	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
-	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
-	ReadAhead             = EnvBool("READ_AHEAD", true)
+	// BALDrivenCommitment folds a block's commitment from its BAL ahead of the
+	// per-tx result stream, overlapping execution. On by default; set
+	// BAL_DRIVEN_COMMITMENT=false (or IGNORE_BAL=true) to fall back to the
+	// incremental path if it ever misbehaves.
+	BALDrivenCommitment = EnvBool("BAL_DRIVEN_COMMITMENT", true)
+	// BALShadowCompute (requires BALDrivenCommitment) also computes each
+	// BAL-driven block incrementally and asserts both roots match before
+	// publishing; without it the BAL-driven root is published directly.
+	BALShadowCompute     = EnvBool("BAL_SHADOW_COMPUTE", false)
+	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
+	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
+	UseStateCache        = EnvBool("USE_STATE_CACHE", true)
+	UseCodeStore         = EnvBool("USE_CODE_STORE", true)
+	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", false)
+	AssertStateCache     = EnvBool("ASSERT_STATE_CACHE", false)
+	ReadAhead            = EnvBool("READ_AHEAD", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
@@ -142,6 +162,7 @@ func ReadMemStats(m *runtime.MemStats) {
 
 func DiscardCommitment() bool       { return discardCommitment }
 func NoPrune() bool                 { return noPrune }
+func NoRetire() bool                { return noRetire }
 func NoMerge() bool                 { return noMerge }
 func NoBackgroundMaintenance() bool { return noBackgroundE3Build }
 func NoMergeHistory() bool          { return noMergeHistory }

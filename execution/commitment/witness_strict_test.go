@@ -17,13 +17,12 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 )
@@ -39,31 +38,15 @@ func assertPresentStrict(t *testing.T, wt *trie.Trie, plainKey []byte) {
 }
 
 func storageKey(account, slot []byte) []byte {
-	return append(common.Copy(account), slot...)
+	return append(bytes.Clone(account), slot...)
 }
 
 func benchWitnessTrie(b *testing.B) (*HexPatriciaHashed, [][]byte) {
 	b.Helper()
 	ms := NewMockState(b)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	hph.SetTrace(false)
-	builder := NewUpdateBuilder()
-	accounts := make([][]byte, 0, 128)
-	for i := 0; i < 128; i++ {
-		a, _ := generateKeyWithHashedPrefix(nil, length.Addr)
-		accounts = append(accounts, a)
-		builder.Balance(common.Bytes2Hex(a), uint64(i+1))
-		for j := 0; j < 4; j++ {
-			slot := common.FromHex(fmt.Sprintf("%064x", j+1))
-			builder.Storage(common.Bytes2Hex(a), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
-		}
-	}
-	plainKeys, updates := builder.Build()
-	require.NoError(b, ms.applyPlainUpdates(plainKeys, updates))
-	toProcess := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-	defer toProcess.Close()
-	_, err := hph.Process(context.Background(), toProcess, "", nil, WarmupConfig{})
-	require.NoError(b, err)
+	hph.SetTraceWriter(nil)
+	accounts := buildWitnessCorpus(b, ms, hph, 128, 4)
 	return hph, accounts[:16]
 }
 

@@ -259,7 +259,7 @@ func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparam
 	if version.AfterOrEqual(clparams.ElectraVersion) {
 		maxAttSlashing = MaxAttesterSlashingsElectra
 		maxAttestation = MaxAttestationsElectra
-		executionRequests = NewExecutionRequests(beaconCfg)
+		executionRequests = NewExecutionRequestsWithVersion(beaconCfg, version)
 	}
 
 	return &BlindedBeaconBody{
@@ -276,10 +276,11 @@ func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparam
 		ExecutionChanges:   solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172),
 		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](int(beaconCfg.MaxBlobCommittmentsPerBlock), 48),
 		ExecutionRequests:  executionRequests,
-		Version:            0,
+		Version:            version,
 		beaconCfg:          beaconCfg,
 	}
 }
+
 func (b *BlindedBeaconBody) SetVersion(version clparams.StateVersion) *BlindedBeaconBody {
 	b.Version = version
 	if b.ExecutionPayload == nil {
@@ -360,7 +361,7 @@ func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
 		size += b.ExecutionChanges.EncodingSizeSSZ()
 	}
 	if b.Version >= clparams.DenebVersion {
-		size += b.ExecutionChanges.EncodingSizeSSZ()
+		size += b.BlobKzgCommitments.EncodingSizeSSZ()
 	}
 	if b.Version >= clparams.ElectraVersion {
 		if b.ExecutionRequests != nil {
@@ -487,6 +488,7 @@ func (b *BlindedBeaconBody) Full(txs *solid.TransactionsSSZ, withdrawals *solid.
 func (*BlindedBeaconBody) Static() bool {
 	return false
 }
+
 func (b *BlindedBeaconBody) Clone() clonable.Clonable {
 	return NewBlindedBeaconBody(b.beaconCfg, b.Version)
 }

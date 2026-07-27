@@ -3,8 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
-
-	"github.com/erigontech/erigon/rpc"
+	"strings"
 )
 
 // toJSONText converts a value to pretty-printed JSON string
@@ -19,11 +18,35 @@ func toJSONText(v any) string {
 	return string(formatted)
 }
 
-func parseBlockNumber(s string) (rpc.BlockNumber, error) {
-	var blockNum rpc.BlockNumber
-	b, err := json.Marshal(s)
-	if err != nil {
-		return blockNum, err
+// toJSONIndent pretty-prints raw JSON bytes. A nil message (what a JSON null
+// unmarshals into) renders as "null", not as an empty string.
+func toJSONIndent(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return "null"
 	}
-	return blockNum, blockNum.UnmarshalJSON(b)
+	var parsed any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return string(raw)
+	}
+	formatted, err := json.MarshalIndent(parsed, "", "  ")
+	if err != nil {
+		return string(raw)
+	}
+	return string(formatted)
+}
+
+// extractURIParam extracts a path parameter from an MCP resource template URI.
+// For example, given URI "erigon://address/0xABC/summary" and template prefix
+// "erigon://address/" with suffix "/summary", it returns "0xABC". It returns
+// "" if the URI does not match the prefix and suffix.
+func extractURIParam(uri, prefix, suffix string) string {
+	s, ok := strings.CutPrefix(uri, prefix)
+	if !ok {
+		return ""
+	}
+	s, ok = strings.CutSuffix(s, suffix)
+	if !ok {
+		return ""
+	}
+	return s
 }

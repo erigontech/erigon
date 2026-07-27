@@ -113,7 +113,7 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
+		logger := debug.SetupCobra(cmd, "txpool")
 		if err := doTxpool(cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Error(err.Error())
@@ -216,11 +216,14 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 }
 
 func main() {
-	ctx, cancel := common.RootContext()
-	defer cancel()
-
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
+	if err := run(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+}
+
+func run() error {
+	ctx, cancel := common.RootContext()
+	defer cancel()
+	return rootCmd.ExecuteContext(ctx)
 }
