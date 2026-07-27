@@ -60,7 +60,7 @@ func BenchEthCreateAccessList(erigonURL, gethURL string, needCompare, latest boo
 		for i := range b.Result.Transactions {
 			txn := &b.Result.Transactions[i]
 
-			nTransactions = nTransactions + 1
+			nTransactions++
 
 			request := reqGen.ethCreateAccessList(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input, bn-1)
 			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, txn.Hash)
