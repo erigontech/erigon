@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 // gossipMeta represents the meta.yaml structure for gossip networking tests.
@@ -110,7 +111,7 @@ func validateGossipBLSToExecutionChange(
 	if withdrawalCredentials[0] != byte(beaconState.BeaconConfig().BLSWithdrawalPrefixByte) {
 		return "reject"
 	}
-	hashedFrom := utils.Sha256(change.From[:])
+	hashedFrom := crypto.Sha256(change.From[:])
 	if !bytes.Equal(withdrawalCredentials[1:], hashedFrom[1:]) {
 		return "reject"
 	}
@@ -194,7 +195,7 @@ func validateGossipSyncCommitteeMessage(
 	if err != nil {
 		return "reject"
 	}
-	signingRoot := utils.Sha256(message.BeaconBlockRoot[:], domain)
+	signingRoot := crypto.Sha256(message.BeaconBlockRoot[:], domain)
 	valid, err := bls.Verify(message.Signature[:], signingRoot[:], publicKey[:])
 	if err != nil || !valid {
 		return "reject"
@@ -269,7 +270,7 @@ func validateGossipSyncContribution(
 		return "reject"
 	}
 	modulo := max(uint64(1), config.SyncCommitteeSize/config.SyncCommitteeSubnetCount/config.TargetAggregatorsPerSyncSubcommittee)
-	selectionProofHash := utils.Sha256(message.SelectionProof[:])
+	selectionProofHash := crypto.Sha256(message.SelectionProof[:])
 	if binary.LittleEndian.Uint64(selectionProofHash[:8])%modulo != 0 {
 		return "reject"
 	}
@@ -321,7 +322,7 @@ func validateGossipSyncContribution(
 	if err != nil {
 		return "reject"
 	}
-	signingRoot = utils.Sha256(contribution.BeaconBlockRoot[:], domain)
+	signingRoot = crypto.Sha256(contribution.BeaconBlockRoot[:], domain)
 	valid, err := bls.VerifyAggregate(contribution.Signature[:], signingRoot[:], participantPublicKeys)
 	if err != nil || !valid {
 		return "reject"
