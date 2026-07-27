@@ -349,11 +349,9 @@ func TestRPCAdmissionHandler(t *testing.T) {
 
 		var wg sync.WaitGroup
 		for range limit {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", nil))
-			}()
+			})
 		}
 
 		// Give goroutines time to enter the handler and increment the counter.

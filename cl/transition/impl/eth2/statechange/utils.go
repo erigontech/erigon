@@ -15,7 +15,8 @@ import (
 
 func IsValidDepositSignature(
 	depositData *cltypes.DepositData,
-	cfg *clparams.BeaconChainConfig) (bool, error) {
+	cfg *clparams.BeaconChainConfig,
+) (bool, error) {
 	// Agnostic domain.
 	domain, err := fork.ComputeDomain(
 		cfg.DomainDeposit[:],

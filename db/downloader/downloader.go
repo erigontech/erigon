@@ -471,11 +471,9 @@ func (d *Downloader) ManifestReady() <-chan struct{} {
 // It discovers chain.toml from P2P peers and either merges new entries (acquiring mode)
 // or verifies against local entries (verify mode after initial sync).
 func (d *Downloader) StartChainTomlDiscovery(ctx context.Context, networkName string) {
-	d.wg.Add(1)
-	go func() {
-		defer d.wg.Done()
+	d.wg.Go(func() {
 		d.chainTomlDiscoveryLoop(ctx, networkName)
-	}()
+	})
 }
 
 // StartTorrentPeerManager launches the background torrent peer manager that
@@ -490,11 +488,9 @@ func (d *Downloader) StartTorrentPeerManager(ctx context.Context) {
 	}
 
 	d.peerManager = NewTorrentPeerManager(d.torrentClient, fn, d.logger)
-	d.wg.Add(1)
-	go func() {
-		defer d.wg.Done()
+	d.wg.Go(func() {
 		d.peerManager.Run(ctx)
-	}()
+	})
 }
 
 // Check snapshot data looks right.
@@ -834,9 +830,7 @@ func (d *Downloader) startSnapshotsDownload(
 	var batchCtx context.Context
 	batchCtx, batch.cancel = context.WithCancelCause(d.ctx)
 
-	batch.all.Add(1)
-	go func() {
-		defer batch.all.Done()
+	batch.all.Go(func() {
 		d.logDownload(
 			batchCtx,
 			items,
@@ -854,7 +848,7 @@ func (d *Downloader) startSnapshotsDownload(
 				}
 			},
 		)
-	}()
+	})
 
 	defer func() {
 		if err != nil {
@@ -1631,11 +1625,7 @@ func (d *Downloader) spawn(f func()) bool {
 	if d.ctx.Err() != nil {
 		return false
 	}
-	d.wg.Add(1)
-	go func() {
-		defer d.wg.Done()
-		f()
-	}()
+	d.wg.Go(f)
 	return true
 }
 

@@ -349,8 +349,8 @@ func (s *RecordingState) UpdateAccountData(address accounts.Address, original, a
 func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	addr := address.Value()
 	s.ModifiedAccounts[addr] = struct{}{}
-	s.codeOverlay[addr] = common.Copy(code)
-	s.ModifiedCode[addr] = common.Copy(code)
+	s.codeOverlay[addr] = bytes.Clone(code)
+	s.ModifiedCode[addr] = bytes.Clone(code)
 	if len(code) > 0 {
 		s.createdCodeHashes[codeHash.Value()] = struct{}{}
 	}
@@ -494,7 +494,7 @@ func (s *RecordingState) OnCodeAccess(address accounts.Address, code []byte) {
 func (s *RecordingState) GetAccessedCode() map[common.Address][]byte {
 	result := make(map[common.Address][]byte, len(s.AccessedCode))
 	for addr, code := range s.AccessedCode {
-		result[addr] = common.Copy(code)
+		result[addr] = bytes.Clone(code)
 	}
 	return result
 }
@@ -506,7 +506,7 @@ func (s *RecordingState) GetAccessedCode() map[common.Address][]byte {
 func (s *RecordingState) GetPreStateCode() map[common.Address][]byte {
 	result := make(map[common.Address][]byte, len(s.PreStateCode))
 	for addr, code := range s.PreStateCode {
-		result[addr] = common.Copy(code)
+		result[addr] = bytes.Clone(code)
 	}
 	return result
 }
@@ -515,7 +515,7 @@ func (s *RecordingState) GetPreStateCode() map[common.Address][]byte {
 func (s *RecordingState) GetModifiedCode() map[common.Address][]byte {
 	result := make(map[common.Address][]byte, len(s.ModifiedCode))
 	for addr, code := range s.ModifiedCode {
-		result[addr] = common.Copy(code)
+		result[addr] = bytes.Clone(code)
 	}
 	return result
 }
@@ -658,10 +658,8 @@ func (api *BaseAPI) buildAccessedState(
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		// A user tx that accesses the system address via an opcode keeps it in the
 		// witness; the per-tx access set captures this even on state-cache hits.
-		if acc := ibs.AccessedAddresses(); acc != nil {
-			if _, ok := acc[params.SystemAddress]; ok {
-				recordingState.MarkSystemAddrTouchedInTx()
-			}
+		if ibs.AccessedAddr(params.SystemAddress) {
+			recordingState.MarkSystemAddrTouchedInTx()
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
@@ -871,7 +869,9 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 	}
 	for addr, keys := range a.Storage {
 		for key := range keys {
-			plainKey := append(addr[:], key[:]...)
+			plainKey := make([]byte, 0, len(addr)+len(key))
+			plainKey = append(plainKey, addr[:]...)
+			plainKey = append(plainKey, key[:]...)
 			postEnc, _, _ := post.Read(kv.StorageDomain, plainKey, stepSize)
 			if len(postEnc) == 0 {
 				preEnc, _, _ := pre.Read(kv.StorageDomain, plainKey, stepSize)
@@ -1104,8 +1104,8 @@ func detectCollapseSiblings(
 	var candidates []collapseCandidate
 	sdCtx.SetCollapseTracer(func(hashedKeyPath, branchPrefix []byte) {
 		candidates = append(candidates, collapseCandidate{
-			siblingPath:  common.Copy(hashedKeyPath),
-			branchPrefix: common.Copy(branchPrefix),
+			siblingPath:  bytes.Clone(hashedKeyPath),
+			branchPrefix: bytes.Clone(branchPrefix),
 		})
 	})
 	defer sdCtx.SetCollapseTracer(nil)
@@ -1182,7 +1182,7 @@ func buildWitnessTrie(
 	}
 
 	for _, node := range witnessNodes {
-		encodedNodes = append(encodedNodes, common.Copy(node))
+		encodedNodes = append(encodedNodes, bytes.Clone(node))
 	}
 	return encodedNodes, nil
 }

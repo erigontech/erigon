@@ -60,7 +60,7 @@ func collectAll(t *testing.T, c *etl.Collector) map[string][]byte {
 	t.Helper()
 	result := make(map[string][]byte)
 	c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error { //nolint:gocritic
-		result[string(k)] = common.Copy(v)
+		result[string(k)] = bytes.Clone(v)
 		return next(nil, nil, nil)
 	}, etl.TransformArgs{})
 	return result
@@ -261,8 +261,8 @@ func TestAntiquateBytesListDiff(t *testing.T) {
 
 	key := base_encoding.Encode64ToBytes4(42)
 	// Use a simple diff function that just writes the new data
-	simpleDiff := func(w io.Writer, old, new []byte) error {
-		_, err := w.Write(new)
+	simpleDiff := func(w io.Writer, oldVal, newVal []byte) error {
+		_, err := w.Write(newVal)
 		return err
 	}
 

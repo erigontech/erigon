@@ -86,14 +86,14 @@ func TestParallelPatriciaHashedSkeletonPlumbing(t *testing.T) {
 
 		ms := NewMockState(t)
 		called := 0
-		f := func() (PatriciaContext, func()) {
+		f := func(context.Context) (PatriciaContext, func()) {
 			called++
 			return ms, func() {}
 		}
 		p.SetTrieContextFactory(f)
 		require.NotNil(t, p.trieCtxFactory)
 
-		got, cleanup := p.trieCtxFactory()
+		got, cleanup := p.trieCtxFactory(context.Background())
 		assert.Same(t, ms, got)
 		assert.NotNil(t, cleanup)
 		assert.Equal(t, 1, called)

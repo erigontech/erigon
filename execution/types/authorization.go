@@ -108,8 +108,8 @@ func authorizationSize(auth Authorization) (authLen int) {
 }
 
 func authorizationsSize(authorizations []Authorization) (totalSize int) {
-	for _, auth := range authorizations {
-		authLen := authorizationSize(auth)
+	for i := range authorizations {
+		authLen := authorizationSize(authorizations[i])
 		totalSize += rlp.ListPrefixLen(authLen) + authLen
 	}
 
@@ -130,8 +130,8 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 		}
 
 		// address
-		if err = s.ReadBytes(auth.Address[:]); err != nil {
-			return err
+		if auth.Address, err = s.Addr(); err != nil {
+			return fmt.Errorf("read Address: %w", err)
 		}
 
 		// nonce

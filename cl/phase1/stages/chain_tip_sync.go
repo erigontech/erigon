@@ -720,7 +720,8 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 
 	log.Debug("[chainTipSync] execution engine is ready")
 
-	logger.Debug("waiting for blocks...",
+	logger.Debug(
+		"waiting for blocks...",
 		"seenSlot", args.seenSlot,
 		"targetSlot", args.targetSlot,
 		"requestedSlots", totalRequest,

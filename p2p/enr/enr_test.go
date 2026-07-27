@@ -350,3 +350,29 @@ func (testSig) NodeAddr(r *Record) []byte {
 	}
 	return id
 }
+
+func BenchmarkDecodeRecord(b *testing.B) {
+	var r Record
+	r.Set(IPv4{192, 0, 2, 1})
+	r.Set(TCP(30303))
+	r.Set(UDP(30303))
+	r.Set(IPv6{0x20, 0x01, 0xd, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1})
+	r.Set(TCP6(30303))
+	r.Set(UDP6(30303))
+	r.Set(WithEntry("eth", []byte{0xc7, 0xc6, 0x84, 0xa0, 0x0b, 0xc6, 0x80}))
+	r.Set(WithEntry("attnets", []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}))
+	require.NoError(b, signTest([]byte{5}, &r))
+
+	enc, err := rlp.EncodeToBytes(&r)
+	require.NoError(b, err)
+	b.Logf("record size %d bytes, %d pairs", len(enc), len(r.pairs))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		var dec Record
+		if err := rlp.DecodeBytes(enc, &dec); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
