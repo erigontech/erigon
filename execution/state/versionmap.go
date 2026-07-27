@@ -1305,9 +1305,9 @@ func (mvr ReadResult) Status() int {
 // The map is left empty and must not be written to again; a fresh one is
 // built per block.
 func (vm *VersionMap) Release() {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
-	for _, e := range vm.s {
+	vm.s.Range(func(key, value any) bool {
+		e := value.(*AddressEntry)
+		e.mu.Lock()
 		releaseCells(e.Address, releaseCellAccount)
 		releaseCells(e.SelfDestruct, releaseCellSelfDestruct)
 		releaseCells(e.Balance, releaseCellBalance)
@@ -1320,8 +1320,10 @@ func (vm *VersionMap) Release() {
 		for _, cells := range e.Storage {
 			releaseCells(cells, releaseCellStorage)
 		}
-	}
-	clear(vm.s)
+		e.mu.Unlock()
+		vm.s.Delete(key)
+		return true
+	})
 }
 
 func releaseCells[T any](cells *btree.Map[int, *WriteCell[T]], release func(*WriteCell[T])) {

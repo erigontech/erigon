@@ -839,16 +839,19 @@ func TestVersionMapRelease_EmptiesEveryPath(t *testing.T) {
 		require.Equal(t, MVReadResultDone, rr.Status(), "%s: setup write must read back Done", path)
 	}
 
-	entries := make([]*AddressEntry, 0, len(vm.s))
-	for _, e := range vm.s {
-		entries = append(entries, e)
-	}
+	var entries []*AddressEntry
+	vm.s.Range(func(_, value any) bool {
+		entries = append(entries, value.(*AddressEntry))
+		return true
+	})
 	require.NotEmpty(t, entries, "setup must build address entries")
 	require.NotZero(t, countCells(entries), "setup must leave cells in the entries")
 
 	vm.Release()
 
-	require.Empty(t, vm.s, "Release must leave no address entries behind")
+	remaining := 0
+	vm.s.Range(func(_, _ any) bool { remaining++; return true })
+	require.Zero(t, remaining, "Release must leave no address entries behind")
 	require.Zero(t, countCells(entries), "Release must empty every cell container it returns to the pools")
 	for i, path := range paths {
 		_, rr, ok := readFor(vm, getAddress(i), path, key, 3)
