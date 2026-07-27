@@ -432,7 +432,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		// gasRemaining (covers precompile/no-code paths and the revert burn).
 		gasUsed.StateSpill = callContext.stateGasSpill
 		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
-		// this function must execute _after_: the `CaptureState` needs the stacks before
 		callContext.put()
 		if restoreReadonly {
 			evm.readOnly = false
