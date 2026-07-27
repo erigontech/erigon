@@ -193,7 +193,7 @@ func writeBlocksByHeadRequest(t *testing.T, stream network.Stream, root common.H
 	}
 	var reqBuf bytes.Buffer
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&reqBuf, req))
-	_, err := stream.Write(common.Copy(reqBuf.Bytes()))
+	_, err := stream.Write(bytes.Clone(reqBuf.Bytes()))
 	require.NoError(t, err)
 }
 

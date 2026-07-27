@@ -101,17 +101,15 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 
 	jobs := make(chan *senderRecoveryJob, cfg.batchSize)
 	out := make(chan *senderRecoveryJob, cfg.batchSize)
-	wg := new(sync.WaitGroup)
-	wg.Add(cfg.numOfGoroutines)
+	var wg sync.WaitGroup
 	ctx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
 	for i := 0; i < cfg.numOfGoroutines; i++ {
-		go func(threadNo int) {
+		wg.Go(func() {
 			defer dbg.LogPanic()
-			defer wg.Done()
 			// each goroutine gets it's own crypto context to make sure they are really parallel
-			recoverSenders(ctx, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
-		}(i)
+			recoverSenders(ctx, secp256k1.ContextForThread(i), cfg.chainConfig, jobs, out, quitCh)
+		})
 	}
 
 	collectorSenders := etl.NewCollectorWithAllocator(logPrefix, cfg.tmpdir, etl.SmallSortableBuffers, logger)

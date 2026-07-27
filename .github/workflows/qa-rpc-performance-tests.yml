@@ -32,6 +32,9 @@ env:
   ERIGON_QA_PATH: /home/qarunner/erigon-qa
   RPC_PAST_TEST_DIR: /opt/rpc-past-tests
 
+permissions:
+  contents: read
+
 jobs:
   setup:
     name: Setup benchmark run

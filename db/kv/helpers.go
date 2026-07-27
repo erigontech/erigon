@@ -17,6 +17,7 @@
 package kv
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/binary"
@@ -129,7 +130,7 @@ func BigChunks(db RoDB, table string, from []byte, walker func(tx Tx, k, v []byt
 				stop = true
 			}
 
-			from = common.Copy(k) // next transaction will start from this key
+			from = bytes.Clone(k) // next transaction will start from this key
 
 			return nil
 		}); err != nil {
@@ -194,9 +195,7 @@ func ReadAheadDeprecated(ctx context.Context, db RoDB, progress *atomic.Bool, ta
 		cancel()
 		wg.Wait()
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer progress.Store(false)
 		_ = db.View(ctx, func(tx Tx) error {
 			c, err := tx.Cursor(table)
@@ -221,7 +220,7 @@ func ReadAheadDeprecated(ctx context.Context, db RoDB, progress *atomic.Bool, ta
 			}
 			return nil
 		})
-	}()
+	})
 	return clean
 }
 
@@ -326,7 +325,7 @@ func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte) {
 		if prevValue == nil {
 			d.prevValues[valsKeySCopy] = []byte{} // no previous value (new key)
 		} else {
-			d.prevValues[valsKeySCopy] = common.Copy(prevValue)
+			d.prevValues[valsKeySCopy] = bytes.Clone(prevValue)
 		}
 		d.prevValsSlice = nil
 	}

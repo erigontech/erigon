@@ -22,7 +22,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -164,9 +163,9 @@ func (c *StateCache) putCodeWithHash(addr, code, codeHash []byte, txNum uint64, 
 		return
 	}
 	if overwrite {
-		cc.PutWithCodeHash(addr, common.Copy(code), codeHash, txNum)
+		cc.PutWithCodeHash(addr, bytes.Clone(code), codeHash, txNum)
 	} else {
-		cc.PutWithCodeHashIfAbsent(addr, common.Copy(code), codeHash, txNum)
+		cc.PutWithCodeHashIfAbsent(addr, bytes.Clone(code), codeHash, txNum)
 	}
 }
 
@@ -245,9 +244,9 @@ func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint6
 		return
 	}
 	if overwrite {
-		cache.Put(key, common.Copy(value), txNum)
+		cache.Put(key, bytes.Clone(value), txNum)
 	} else {
-		cache.PutIfAbsent(key, common.Copy(value), txNum)
+		cache.PutIfAbsent(key, bytes.Clone(value), txNum)
 	}
 }
 

@@ -18,6 +18,9 @@ on:
         required: false
         default: ''
 
+permissions:
+  contents: read
+
 jobs:
   sync-test-bisect:
     runs-on: [self-hosted, qa, long-running]

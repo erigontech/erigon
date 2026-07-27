@@ -16,6 +16,9 @@ on:
     paths:
       - '.github/workflows/qa-txpool-performance-test.yml'
 
+permissions:
+  contents: read
+
 jobs:
   tx_pool_assertoor_test:
     name: tx_pool_assertoor_test (${{ matrix.exec_mode }})

@@ -143,10 +143,10 @@ func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storage
 // Storage-root analogue of the account mount fold: parallelize a whale's storage by first nibble.
 // sem is the shared fold-concurrency budget: acquired per first-nibble worker so that
 // this whale's fan-out plus every other concurrently-folding subtree stays within the core count.
-func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker func() (*HexPatriciaHashed, func()), pu *parallelUpdate, node *prefixNode, path []byte, accountFresh bool) (cell, error) {
+func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker func(context.Context) (*HexPatriciaHashed, func()), pu *parallelUpdate, node *prefixNode, path []byte, accountFresh bool) (cell, error) {
 	accPrefix := append([]byte(nil), path...)
 
-	base, releaseBase := newWorker()
+	base, releaseBase := newWorker(ctx)
 	defer releaseBase()
 
 	// Tag this account's storage-fold workers with its address so one account's
@@ -186,7 +186,7 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 				return err
 			}
 			defer sem.Release(1)
-			w, release := newWorker()
+			w, release := newWorker(gctx)
 			if w.traceW != nil {
 				w.SetTraceWriter(tracePrefix(w.traceW, accTag))
 			}
@@ -289,9 +289,9 @@ func storageRootFromSingleChild(base *HexPatriciaHashed) (cell, error) {
 
 // newDeferredStorageWorker yields a pooled trie worker for a deferring storage fold
 // and a release that returns it to the pool and frees its context.
-func newDeferredStorageWorker(pool *sync.Pool, factory TrieContextFactory, traceW io.Writer) (*HexPatriciaHashed, func()) {
+func newDeferredStorageWorker(ctx context.Context, pool *sync.Pool, factory TrieContextFactory, traceW io.Writer) (*HexPatriciaHashed, func()) {
 	w := pool.Get().(*HexPatriciaHashed)
-	wctx, cleanup := factory()
+	wctx, cleanup := factory(ctx)
 	w.ResetContext(wctx)
 	w.SetTraceWriter(traceW)
 	w.branchEncoder.setDeferUpdates(true)

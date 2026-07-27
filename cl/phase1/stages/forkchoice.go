@@ -53,7 +53,6 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		} else {
 			return 0, common.Hash{}, fmt.Errorf("failed to get head: %w", err)
 		}
-
 	}
 	// Observe the current slot and epoch in the monitor
 	monitor.ObserveCurrentSlot(headSlot)
@@ -86,7 +85,8 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 	if err2 := cfg.rpc.SetStatus(
 		cfg.forkChoice.FinalizedCheckpoint().Root,
 		cfg.forkChoice.FinalizedCheckpoint().Epoch,
-		headRoot, headSlot); err2 != nil {
+		headRoot, headSlot,
+	); err2 != nil {
 		logger.Warn("Could not set status", "err", err2)
 	}
 	return
@@ -300,13 +300,13 @@ func saveHeadStateOnDiskIfNeeded(cfg *Cfg, headState *state.CachingBeaconState) 
 		fileToWriteTo := fmt.Sprintf("%s/%s", cfg.dirs.CaplinLatest, clparams.LatestStateFileName)
 
 		// Create the directory if it doesn't exist
-		err = os.MkdirAll(cfg.dirs.CaplinLatest, 0755)
+		err = os.MkdirAll(cfg.dirs.CaplinLatest, 0o755)
 		if err != nil {
 			return fmt.Errorf("failed to create directory: %w", err)
 		}
 
 		// Write the data to the file
-		err = os.WriteFile(fileToWriteTo, dat, 0644)
+		err = os.WriteFile(fileToWriteTo, dat, 0o644)
 		if err != nil {
 			return fmt.Errorf("failed to write head state to disk: %w", err)
 		}
@@ -364,7 +364,6 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 		preCacheNextShuffledValidatorSet(ctx, logger, cfg, headState)
 		return nil
 	})
-
 }
 
 // doForkchoiceRoutine performs the fork choice routine by computing the new fork choice, updating the canonical chain in the database,

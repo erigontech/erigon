@@ -76,8 +76,11 @@ type CallContext struct {
 	cachedKey     accounts.StorageKey
 	cachedAddr    accounts.Address
 
-	Stack    Stack
+	// Contract carries pointers, so it must precede the pointer-free Stack:
+	// the GC scans a struct only up to its last pointer word (PtrBytes), and
+	// Stack.data is 32 KB it can skip entirely.
 	Contract Contract
+	Stack    Stack
 }
 
 // peekStorageKey returns the top-of-stack value as an interned StorageKey.
@@ -115,7 +118,7 @@ var contextPool = sync.Pool{
 func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallContext {
 	ctx, ok := contextPool.Get().(*CallContext)
 	if !ok {
-		log.Error("Type assertion failure", "err", "cannot get Stack pointer from stackPool")
+		log.Error("Type assertion failure", "err", "cannot get CallContext from contextPool")
 	}
 
 	ctx.gas = gas.Regular
@@ -360,6 +363,18 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 	return jt
 }
 
+// traceGas picks the figure the dev instruction trace should report: call
+// opcodes forward gas to the callee, so their charged cost is not the
+// interesting number.
+func traceGas(op OpCode, callGas, cost uint64) uint64 {
+	switch op {
+	case CALL, CALLCODE, DELEGATECALL, STATICCALL:
+		return callGas
+	default:
+		return cost
+	}
+}
+
 // Run loops and evaluates the contract's code with the given input data and returns
 // the return byte-slice and an error if one occurred.
 //
@@ -385,16 +400,14 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		pc   = uint64(0) // program counter
 		cost uint64
 		// copies used by tracer
-		pcCopy                 uint64 // needed for the deferred Tracer
-		gasCopy                uint64 // for Tracer to log gas remaining before execution
-		callGas                uint64
-		logged                 bool   // deferred Tracer should ignore already logged steps
-		res                    []byte // result of the opcode execution function
-		tracer                 = evm.config.Tracer
-		debug                  = tracer != nil && (tracer.OnOpcode != nil || tracer.OnGasChange != nil || tracer.OnFault != nil)
-		trace                  = dbg.TraceInstructions && evm.intraBlockState.Trace()
-		blockNum               uint64
-		txIndex, txIncarnation int
+		pcCopy  uint64 // needed for the deferred Tracer
+		gasCopy uint64 // for Tracer to log gas remaining before execution
+		callGas uint64
+		logged  bool   // deferred Tracer should ignore already logged steps
+		res     []byte // result of the opcode execution function
+		tracer  = evm.config.Tracer
+		debug   = tracer != nil && (tracer.OnOpcode != nil || tracer.OnGasChange != nil || tracer.OnFault != nil)
+		trace   = dbg.TraceInstructions && evm.intraBlockState.Trace()
 	)
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
@@ -406,15 +419,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	// Increment the call depth which is restricted to 1024
 	evm.depth++
 	defer func() {
-		// first: capture data/memory/state/depth/etc... then clenup them
-		if debug && err != nil {
-			if !logged && tracer.OnOpcode != nil {
-				tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-			}
-			if logged && tracer.OnFault != nil {
-				tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, evm.depth, VMErrorFromErr(err))
-			}
-		}
 		// EIP-8037: snapshot the spilled portion and derive the frame's net
 		// state-gas usage from the reservoir delta before callContext.put()
 		// clears them. A state charge lowers stateGas (or raises stateGasSpill
@@ -424,7 +428,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		// gasRemaining (covers precompile/no-code paths and the revert burn).
 		gasUsed.StateSpill = callContext.stateGasSpill
 		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
-		// this function must execute _after_: the `CaptureState` needs the stacks before
 		callContext.put()
 		if restoreReadonly {
 			evm.readOnly = false
@@ -432,34 +435,43 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		evm.depth--
 	}()
 
+	// Registered after the cleanup defer so LIFO runs it first: the tracer needs
+	// the stacks before callContext.put() returns them to the pool.
+	if debug {
+		defer func() {
+			if err == nil {
+				return
+			}
+			if !logged && tracer.OnOpcode != nil {
+				tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
+			}
+			if logged && tracer.OnFault != nil {
+				tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, evm.depth, VMErrorFromErr(err))
+			}
+		}()
+	}
+
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
 	// parent context.
 
-	var traceGas = func(op OpCode, callGas, cost uint64) uint64 {
-		switch op {
-		case CALL, CALLCODE, DELEGATECALL, STATICCALL:
-			return callGas
-		default:
-			return cost
-		}
-	}
-
 	// Hoist to locals so the compiler sees them as loop-invariant.
 	anyTrace := dbg.TraceDynamicGas || debug || trace
 
+	jt := evm.jt
+	_ = jt[0] // nil-check the jump table out of the loop
+
 	for {
 		callContext.cacheGen++
-		if anyTrace {
+		if debug {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas
-			blockNum, txIndex, txIncarnation = evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation()
 		}
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(pc)
-		operation := evm.jt[op]
+		operation := jt[op]
 		cost = operation.constantGas // For tracing
 		// Validate stack
 		if sLen := callContext.Stack.len(); sLen < operation.numPop {
@@ -508,7 +520,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				cost += dynamicCost.Regular
 				callGas = operation.constantGas + dynamicCost.Regular - evm.CallGasTemp()
 				if dbg.TraceDynamicGas && dynamicCost.Regular > 0 {
-					fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
+					fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), traceGas(op, callGas, cost), op)
 				}
 			}
 			// EIP-8037: "Regular gas charge MUST be applied first. If the regular
@@ -557,7 +569,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				opstr = op.String()
 			}
 
-			fmt.Printf("%d (%d.%d) %5d %5d %s\n", blockNum, txIndex, txIncarnation, pc, traceGas(op, callGas, cost), opstr)
+			fmt.Printf("%d (%d.%d) %5d %5d %s\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), pc, traceGas(op, callGas, cost), opstr)
 		}
 
 		// execute the operation
