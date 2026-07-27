@@ -90,7 +90,7 @@ func Compare(a, b any) int {
 		if bcomp, ok := b.(Comparable); ok {
 			return acomp.CompareTo(bcomp)
 		} else {
-			if reflect.ValueOf(reflect.TypeOf(a)).Pointer()-reflect.ValueOf(reflect.TypeOf(b)).Pointer() > 0 {
+			if reflect.ValueOf(reflect.TypeOf(a)).Pointer() > reflect.ValueOf(reflect.TypeOf(b)).Pointer() {
 				return 1
 			}
 
@@ -98,7 +98,7 @@ func Compare(a, b any) int {
 		}
 	} else {
 		if _, ok := b.(Comparable); ok {
-			if reflect.ValueOf(reflect.TypeOf(a)).Pointer()-reflect.ValueOf(reflect.TypeOf(b)).Pointer() > 0 {
+			if reflect.ValueOf(reflect.TypeOf(a)).Pointer() > reflect.ValueOf(reflect.TypeOf(b)).Pointer() {
 				return 1
 			}
 
