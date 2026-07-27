@@ -582,12 +582,12 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	var (
-		ret                  []byte
-		vmerr                error
-		gasUsed              mdgas.MdGasUsage
-		authorizationGasUsed mdgas.MdGasUsage
-		runtimeGas           mdgas.MdGas
-		runtimeSnapshot      = -1
+		ret             []byte
+		vmerr           error
+		gasUsed         mdgas.MdGasUsage
+		authGasUsed     mdgas.MdGasUsage
+		runtimeGas      mdgas.MdGas
+		runtimeSnapshot = -1
 	)
 	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
 	var authorizationGasRemaining *mdgas.MdGas
@@ -597,7 +597,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		defer st.state.PopSnapshot(runtimeSnapshot)
 		authorizationGasRemaining = &st.gasRemaining
 	}
-	authorizationGasUsed, vmerr = st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), authorizationGasRemaining)
+	authGasUsed, vmerr = st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), authorizationGasRemaining)
 	if vmerr != nil {
 		if !rules.IsAmsterdam {
 			return nil, vmerr
@@ -628,9 +628,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 				st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
 				gasUsed = mdgas.MdGasUsage{Regular: runtimeGas.Regular}
 			} else {
-				gasUsed.Regular += authorizationGasUsed.Regular
-				gasUsed.State += authorizationGasUsed.State
-				gasUsed.StateSpill += authorizationGasUsed.StateSpill
+				gasUsed.Regular += authGasUsed.Regular
+				gasUsed.State += authGasUsed.State
+				gasUsed.StateSpill += authGasUsed.StateSpill
 			}
 		}
 	}
@@ -857,11 +857,11 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			return gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 		if isAmsterdam {
-			if !exists && !consumeRuntimeGas(gasRemaining, &gasUsed, params.StateGasNewAccount, mdgas.StateGas) {
+			if !exists && !mdgas.Consume(gasRemaining, &gasUsed, params.StateGasNewAccount, mdgas.StateGas) {
 				return gasUsed, vm.ErrRuntimeOutOfGas
 			}
 			if _, written := writtenAccounts[authority]; !written {
-				if !consumeRuntimeGas(gasRemaining, &gasUsed, params.AccountWriteCostEIP8038, mdgas.RegularGas) {
+				if !mdgas.Consume(gasRemaining, &gasUsed, params.AccountWriteCostEIP8038, mdgas.RegularGas) {
 					return gasUsed, vm.ErrRuntimeOutOfGas
 				}
 				writtenAccounts[authority] = struct{}{}
@@ -873,7 +873,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			}
 			if auth.Address != (common.Address{}) {
 				if !preTxDelegated && !delegationSetFor[authority] {
-					if !consumeRuntimeGas(gasRemaining, &gasUsed, params.StateGasAuthBase, mdgas.StateGas) {
+					if !mdgas.Consume(gasRemaining, &gasUsed, params.StateGasAuthBase, mdgas.StateGas) {
 						return gasUsed, vm.ErrRuntimeOutOfGas
 					}
 				}
@@ -901,30 +901,6 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 	}
 
 	return gasUsed, nil
-}
-
-func consumeRuntimeGas(gas *mdgas.MdGas, used *mdgas.MdGasUsage, amount uint64, typ mdgas.MdGasType) bool {
-	switch typ {
-	case mdgas.RegularGas:
-		if gas.Regular < amount {
-			return false
-		}
-		gas.Regular -= amount
-		used.Regular += amount
-		return true
-	case mdgas.StateGas:
-		spill := amount - min(amount, gas.State)
-		if gas.Regular < spill {
-			return false
-		}
-		gas.State -= amount - spill
-		gas.Regular -= spill
-		used.State += int64(amount)
-		used.StateSpill += spill
-		return true
-	default:
-		panic(fmt.Errorf("unknown gas type: %d", typ))
-	}
 }
 
 func (st *TxnExecutor) refundGas() {

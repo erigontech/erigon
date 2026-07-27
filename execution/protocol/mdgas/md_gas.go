@@ -79,6 +79,31 @@ func (u MdGasUsage) Total() uint64 {
 	return u.Regular + u.StateClamped()
 }
 
+// Consume atomically deducts a charge and records its multidimensional usage.
+func Consume(remaining *MdGas, used *MdGasUsage, amount uint64, typ MdGasType) bool {
+	switch typ {
+	case RegularGas:
+		if remaining.Regular < amount {
+			return false
+		}
+		remaining.Regular -= amount
+		used.Regular += amount
+		return true
+	case StateGas:
+		spill := amount - min(amount, remaining.State)
+		if remaining.Regular < spill {
+			return false
+		}
+		remaining.State -= amount - spill
+		remaining.Regular -= spill
+		used.State += int64(amount)
+		used.StateSpill += spill
+		return true
+	default:
+		panic(fmt.Errorf("unknown gas type: %d", typ))
+	}
+}
+
 type MdGasType uint8
 
 const (

@@ -193,31 +193,20 @@ func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.Ga
 	return initial - gas, true
 }
 
-// useMdGas charges gas in the requested dimension. State charges that
-// exceed the reservoir spill the deficit into the regular dimension. No
-// EVM-level tracker is touched here — spill accounting lives on
-// CallContext.stateGasSpill (for in-loop charges via CallContext.useMdGas)
-// or on the caller's local gasUsed accumulator (for code-deposit charges
-// in evm.create after Run returns).
 func useMdGas(initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (mdgas.MdGas, uint64, bool) {
-	var ok bool
-	switch t {
-	case mdgas.StateGas:
-		initial.State, ok = useGas(initial.State, gas, tracer, reason)
-		if ok {
-			return initial, 0, true
-		}
-		// otherwise use up all remaining state gas and spill the remainder into regular gas
-		spill := gas - initial.State
-		initial.State = 0
-		initial.Regular, ok = useGas(initial.Regular, spill, tracer, reason)
-		return initial, spill, ok
-	case mdgas.RegularGas:
-		initial.Regular, ok = useGas(initial.Regular, gas, tracer, reason)
-		return initial, 0, ok
-	default:
-		panic(fmt.Errorf("useMdGas: invalid gas type: %d", t))
+	remaining := initial
+	var used mdgas.MdGasUsage
+	if !mdgas.Consume(&remaining, &used, gas, t) {
+		return initial, 0, false
 	}
+	if tracer != nil && tracer.OnGasChange != nil && reason != tracing.GasChangeIgnored {
+		before, after := initial.Regular, remaining.Regular
+		if t == mdgas.StateGas && used.StateSpill == 0 {
+			before, after = initial.State, remaining.State
+		}
+		tracer.OnGasChange(before, after, reason)
+	}
+	return remaining, used.StateSpill, true
 }
 
 // RefundGas refunds gas to the contract
