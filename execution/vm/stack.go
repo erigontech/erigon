@@ -146,6 +146,15 @@ func (st *Stack) peek() *uint256.Int {
 	return &st.data[st.top-1]
 }
 
+// back2 returns the n'th and m'th items from the top under one range check.
+func (st *Stack) back2(n, m int) (x, y *uint256.Int) {
+	i, j := st.top-n-1, st.top-m-1
+	if i < 0 || i >= stackLimit || j < 0 || j >= stackLimit {
+		panic("stack overflow")
+	}
+	return &st.data[i], &st.data[j]
+}
+
 // Back returns the n'th item in stack
 func (st *Stack) Back(n int) *uint256.Int {
 	return &st.data[st.top-n-1]
