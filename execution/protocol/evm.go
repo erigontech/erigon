@@ -166,7 +166,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 				}
 
 				lastKnownHash = hash
-				lastKnownNumber = lastKnownNumber - 1
+				lastKnownNumber--
 				if n == lastKnownNumber {
 					//fmt.Println("GH-CA1", lastKnownNumber, lastKnownHash)
 					return lastKnownHash, nil
