@@ -50,12 +50,6 @@ linters:
       enabled-checks:
         - ruleguard
       disabled-checks:
-        - exitAfterDefer
-        - elseif
-        - dupBranchBody
-        - assignOp
-        - singleCaseSwitch
-        - unlambda
         - captLocal
         - commentFormatting
         - ifElseChain

@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Package bal regenerates EIP-7928 Block Access Lists for blocks whose stored
-// copy has been pruned, by re-executing the block against historical state.
 package bal
 
 import (

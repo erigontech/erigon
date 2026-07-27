@@ -430,27 +430,27 @@ func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawVa
 	return bodyRlp
 }
 
-func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) (types.Transaction, error) {
+func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) (types.Transaction, bool, error) {
 	b, err := ReadBodyForStorageByKey(db, dbutils.BlockBodyKey(blockNum, blockHash))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if b == nil {
-		return nil, nil
+		return nil, false, nil
 	}
 
 	v, err := db.GetOne(kv.EthTx, hexutil.EncodeTs(b.BaseTxnID.At(txIdxInBlock)))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if len(v) == 0 {
-		return nil, nil
+		return nil, false, nil
 	}
 	txn, err := types.DecodeTransaction(v)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return txn, nil
+	return txn, true, nil
 }
 
 func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.Transaction, error) {
