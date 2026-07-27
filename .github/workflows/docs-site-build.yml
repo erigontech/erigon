@@ -84,6 +84,13 @@ jobs:
         if: steps.guard.outputs.present == 'true'
         working-directory: docs/site
 
+      # docs/site/tsconfig.json inlines @docusaurus/tsconfig instead of
+      # extending it (TS 7 removed `baseUrl`, which upstream still sets), so
+      # guard the copy against upstream drift.
+      - run: npm run check:tsconfig
+        if: steps.guard.outputs.present == 'true'
+        working-directory: docs/site
+
       - run: npm run typecheck
         if: steps.guard.outputs.present == 'true'
         working-directory: docs/site
