@@ -106,7 +106,7 @@ func TestRemoteCheckpointSyncTimeout(t *testing.T) {
 	defer cancel()
 
 	// Only slow HTTP servers, so we must get a timeout
-	clparams.ConfigurableCheckpointsURLs = []string{mockSlowServer.URL, mockSlowServer.URL, mockSlowServer.URL}
+	setCheckpointURLs(t, mockSlowServer.URL, mockSlowServer.URL, mockSlowServer.URL)
 	syncer := &RemoteCheckpointSync{&clparams.MainnetBeaconConfig, chainspec.MainnetChainID, 50 * time.Millisecond}
 	currentState, err := syncer.GetLatestBeaconState(ctx)
 	require.Nil(t, currentState)
@@ -117,7 +117,7 @@ func TestRemoteCheckpointSyncCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	clparams.ConfigurableCheckpointsURLs = []string{"http://127.0.0.1:1"}
+	setCheckpointURLs(t, "http://127.0.0.1:1")
 	syncer := NewRemoteCheckpointSync(&clparams.MainnetBeaconConfig, chainspec.MainnetChainID)
 	currentState, err := syncer.GetLatestBeaconState(ctx)
 
@@ -143,7 +143,7 @@ func TestRemoteCheckpointSyncPossiblyAfterTimeout(t *testing.T) {
 	defer mockServer.Close()
 
 	// 3 slow + 1 OK HTTP servers, so we may get some timeout(s) with probability 0.75 but will eventually succeed
-	clparams.ConfigurableCheckpointsURLs = []string{mockSlowServer.URL, mockSlowServer.URL, mockSlowServer.URL, mockServer.URL}
+	setCheckpointURLs(t, mockSlowServer.URL, mockSlowServer.URL, mockSlowServer.URL, mockServer.URL)
 	syncer := &RemoteCheckpointSync{&clparams.MainnetBeaconConfig, chainspec.MainnetChainID, 1 * time.Second}
 	actualState, err := syncer.GetLatestBeaconState(ctx)
 	assert.True(t, rec)
@@ -180,7 +180,7 @@ func TestRemoteCheckpointSyncRejectsHTML(t *testing.T) {
 	}))
 	defer mockHTMLServer.Close()
 
-	clparams.ConfigurableCheckpointsURLs = []string{mockHTMLServer.URL + beaconStatePath}
+	setCheckpointURLs(t, mockHTMLServer.URL+beaconStatePath)
 	syncer := NewRemoteCheckpointSync(&clparams.MainnetBeaconConfig, chainspec.MainnetChainID)
 	st, err := syncer.GetLatestBeaconState(context.Background())
 	require.Nil(t, st)

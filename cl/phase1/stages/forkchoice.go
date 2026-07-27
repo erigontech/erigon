@@ -292,14 +292,17 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 	return nil
 }
 
-// writeFinalizedStateFile snappy-encodes st and atomically replaces the finalized-state resume
-// file. The temp file lives in the same directory as the target so os.Rename is atomic.
+// writeFinalizedStateFile snappy-encodes st and replaces the finalized-state resume file via a
+// same-directory temp file and rename. The rename is atomic on POSIX within one filesystem; on
+// Windows it is best-effort. The temp file is fsynced before the rename so the replacement
+// survives a crash, and chmod'd to 0644 to match the other Caplin datadir artifacts
+// (os.CreateTemp defaults to 0600).
 func writeFinalizedStateFile(dirs datadir.Dirs, st *state.CachingBeaconState) error {
 	dat, err := utils.EncodeSSZSnappy(st)
 	if err != nil {
 		return fmt.Errorf("failed to encode ssz snappy: %w", err)
 	}
-	if err := os.MkdirAll(dirs.CaplinLatest, 0755); err != nil {
+	if err := os.MkdirAll(dirs.CaplinLatest, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 	tmp, err := os.CreateTemp(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName+".tmp-*")
@@ -311,6 +314,14 @@ func writeFinalizedStateFile(dirs datadir.Dirs, st *state.CachingBeaconState) er
 	if _, err := tmp.Write(dat); err != nil {
 		tmp.Close()
 		return fmt.Errorf("failed to write finalized state to disk: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("failed to sync finalized state temp file: %w", err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return fmt.Errorf("failed to chmod finalized state temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("failed to close finalized state temp file: %w", err)
