@@ -119,6 +119,7 @@ func BlobsBundleFromTransactions(txs types.Transactions) (*BlobsBundle, error) {
 			copy(pp, p[:])
 			bundle.Proofs = append(bundle.Proofs, pp)
 		}
+		//nolint:gocritic // rangeValCopy: iterating over 128KB blob byte array directly
 		for _, b := range blobTx.Blobs {
 			bp := make([]byte, len(b))
 			copy(bp, b[:])
@@ -148,7 +149,7 @@ type ExecutionPayloadBody struct {
 type ExecutionPayloadBodyV2 struct {
 	Transactions    []hexutil.Bytes     `json:"transactions" gencodec:"required"`
 	Withdrawals     []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
-	BlockAccessList hexutil.Bytes       `json:"blockAccessList,omitempty"`
+	BlockAccessList *hexutil.Bytes      `json:"blockAccessList"`
 }
 
 type PayloadStatus struct {

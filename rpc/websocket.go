@@ -328,8 +328,7 @@ func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remot
 		wc.info.HTTP.UserAgent = req.Get("User-Agent")
 	}
 	// Start pinger.
-	wc.wg.Add(1)
-	go wc.pingLoop()
+	wc.wg.Go(wc.pingLoop)
 	return wc
 }
 
@@ -362,7 +361,6 @@ func (wc *websocketCodec) WriteJSON(ctx context.Context, v any) error {
 // pingLoop sends periodic ping frames when the connection is idle.
 func (wc *websocketCodec) pingLoop() {
 	timer := time.NewTimer(wsPingInterval)
-	defer wc.wg.Done()
 	defer timer.Stop()
 
 	for {

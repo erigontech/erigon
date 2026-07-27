@@ -41,9 +41,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
-var (
-	ErrResourceUnavailable = errors.New("resource unavailable")
-)
+var ErrResourceUnavailable = errors.New("resource unavailable")
 
 type ConsensusHandlers struct {
 	handlers     map[protocol.ID]network.StreamHandler
@@ -87,7 +85,8 @@ func NewConsensusHandlers(
 	blobsStorage blob_storage.BlobStorage,
 	dataColumnStorage blob_storage.DataColumnStorage,
 	peerDasStateReader peerdasstate.PeerDasStateReader,
-	enabledBlocks bool) *ConsensusHandlers {
+	enabledBlocks bool,
+) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,
 		hs:                 hs,

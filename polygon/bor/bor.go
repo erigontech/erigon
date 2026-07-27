@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	math2 "github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -771,16 +772,14 @@ func (c *Bor) Prepare(chain rules.ChainHeaderReader, header *types.Header, state
 	now := time.Now()
 	if header.Time < uint64(now.Unix()) {
 		header.Time = uint64(now.Unix())
-	} else {
+	} else if c.config.IsBhilai(number) && succession == 0 {
 		// For primary validators, wait until the current block production window
 		// starts. This prevents bor from starting to build next block before time
 		// as we'd like to wait for new transactions. Although this change doesn't
 		// need a check for hard fork as it doesn't change any consensus rules, we
 		// still keep it for safety and testing.
-		if c.config.IsBhilai(number) && succession == 0 {
-			startTime := time.Unix(int64(header.Time)-int64(c.config.CalculatePeriod(number)), 0)
-			time.Sleep(time.Until(startTime))
-		}
+		startTime := time.Unix(int64(header.Time)-int64(c.config.CalculatePeriod(number)), 0)
+		time.Sleep(time.Until(startTime))
 	}
 
 	return nil
@@ -1180,7 +1179,7 @@ func (c *Bor) GetRootHash(ctx context.Context, tx kv.Tx, start, end uint64) (str
 }
 
 func ComputeHeadersRootHash(blockHeaders []*types.Header) ([]byte, error) {
-	headers := make([][32]byte, NextPowerOfTwo(uint64(len(blockHeaders))))
+	headers := make([][32]byte, math2.NextPowerOfTwo(uint64(len(blockHeaders))))
 	for i := range blockHeaders {
 		blockHeader := blockHeaders[i]
 		headers[i] = crypto.Keccak256Hash(AppendBytes32(

@@ -50,7 +50,8 @@ func Bench2(erigon_url string) error {
 			fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
 		}
 
-		for i, txn := range b.Result.Transactions {
+		for i := range b.Result.Transactions {
+			txn := &b.Result.Transactions[i]
 			if txn.To != nil && txn.Gas.ToInt().Uint64() > 21000 {
 				// Request storage range
 				// blockHash common.Hash, txIndex int, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int

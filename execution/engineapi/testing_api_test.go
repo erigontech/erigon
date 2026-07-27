@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -861,6 +863,30 @@ func TestStaticTxnProvider(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, txns)
 	})
+
+	t.Run("concurrent callers: exactly one consumes the transactions", func(t *testing.T) {
+		t.Parallel()
+		p := &staticTxnProvider{txns: []types.Transaction{stubTx}}
+		const goroutines = 32
+		var nonEmpty atomic.Int32
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		wg.Add(goroutines)
+		for range goroutines {
+			go func() {
+				defer wg.Done()
+				<-start
+				txns, err := p.ProvideTxns(context.Background())
+				assert.NoError(t, err)
+				if len(txns) > 0 {
+					nonEmpty.Add(1)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		assert.Equal(t, int32(1), nonEmpty.Load(), "exactly one concurrent caller must consume the transactions")
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -957,6 +983,44 @@ func TestBuildBlockV1AssembleParamsVersion(t *testing.T) {
 		assert.Nil(t, captured.ParentBeaconBlockRoot, "ParentBeaconBlockRoot must NOT be set pre-Cancun")
 		require.NotNil(t, captured.Withdrawals, "Withdrawals must be set for Shanghai/Capella")
 		assert.Equal(t, withdrawals, captured.Withdrawals)
+	})
+
+	t.Run("Glamsterdam: SlotNumber and TargetGasLimit propagated", func(t *testing.T) {
+		t.Parallel()
+		attrs := validPayloadAttrs(parentTimestamp)
+		*attrs.SlotNumber = 7
+		*attrs.TargetGasLimit = 45_000_000
+		var captured *builder.Parameters
+		stub := &stubExecutionModule{
+			getHeaderFunc:         getHeaderReturning(parentHash, parentHdr),
+			assembleBlockFunc:     captureAssembleParams(&captured),
+			getAssembledBlockFunc: nilGetAssembledBlock,
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		_, _ = api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
+		require.NotNil(t, captured)
+		require.NotNil(t, captured.SlotNumber, "SlotNumber must be forwarded for Glamsterdam+")
+		assert.Equal(t, uint64(7), *captured.SlotNumber)
+		require.NotNil(t, captured.TargetGasLimit, "TargetGasLimit must be forwarded for Glamsterdam+")
+		assert.Equal(t, uint64(45_000_000), *captured.TargetGasLimit)
+	})
+
+	t.Run("pre-Glamsterdam: SlotNumber and TargetGasLimit not set", func(t *testing.T) {
+		t.Parallel()
+		attrs := validPayloadAttrs(parentTimestamp)
+		attrs.SlotNumber = nil
+		attrs.TargetGasLimit = nil
+		var captured *builder.Parameters
+		stub := &stubExecutionModule{
+			getHeaderFunc:         getHeaderReturning(parentHash, parentHdr),
+			assembleBlockFunc:     captureAssembleParams(&captured),
+			getAssembledBlockFunc: nilGetAssembledBlock,
+		}
+		api := newTestingAPI(preAmsterdamChainConfig(), stub)
+		_, _ = api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
+		require.NotNil(t, captured)
+		assert.Nil(t, captured.SlotNumber, "SlotNumber must NOT be set pre-Glamsterdam")
+		assert.Nil(t, captured.TargetGasLimit, "TargetGasLimit must NOT be set pre-Glamsterdam")
 	})
 }
 

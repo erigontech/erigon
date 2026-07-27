@@ -83,9 +83,9 @@ func (f *ForwardBeaconDownloader) SetHTTPFallbackURL(checkpointSyncURL string) {
 	if checkpointSyncURL == "" {
 		return
 	}
-	idx := strings.Index(checkpointSyncURL, "/eth/")
-	if idx >= 0 {
-		f.httpFallbackURL = checkpointSyncURL[:idx]
+	before, _, found := strings.Cut(checkpointSyncURL, "/eth/")
+	if found {
+		f.httpFallbackURL = before
 	} else {
 		// Accept bare base URL (no /eth/ path).
 		f.httpFallbackURL = strings.TrimRight(checkpointSyncURL, "/")
@@ -461,9 +461,7 @@ func fetchBlocksFromBeaconAPI(ctx context.Context, baseURL string, startSlot, co
 	for i := range count {
 		slot := startSlot + i
 		idx := i
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
@@ -502,7 +500,7 @@ func fetchBlocksFromBeaconAPI(ctx context.Context, baseURL string, startSlot, co
 				return
 			}
 			results[idx].block = block
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -599,9 +597,7 @@ func fetchEnvelopesFromBeaconAPI(
 		idx := i
 		slot := item.slot
 		root := item.root
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
@@ -630,7 +626,7 @@ func fetchEnvelopesFromBeaconAPI(
 				return
 			}
 			results[idx] = envResult{hash: common.Hash(root), envelope: envelope}
-		}()
+		})
 	}
 	wg.Wait()
 

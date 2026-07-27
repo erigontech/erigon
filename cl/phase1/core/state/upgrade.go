@@ -219,8 +219,8 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		}
 		curValidator := v.validator
 		// Do NOT directly modify the validator in the validator set, because we need to mark validatorSet as dirty in BeaconState
-		//curValidator.SetEffectiveBalance(0)
-		//curValidator.SetActivationEligibilityEpoch(b.BeaconConfig().FarFutureEpoch)
+		// curValidator.SetEffectiveBalance(0)
+		// curValidator.SetActivationEligibilityEpoch(b.BeaconConfig().FarFutureEpoch)
 		b.SetEffectiveBalanceForValidatorAtIndex(int(v.index), 0)
 		b.SetActivationEligibilityEpochForValidatorAtIndex(int(v.index), b.BeaconConfig().FarFutureEpoch)
 		// Use bls.G2_POINT_AT_INFINITY as a signature field placeholder
