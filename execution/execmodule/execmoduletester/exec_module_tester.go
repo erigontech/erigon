@@ -446,14 +446,13 @@ func addAmsterdamBuilderContracts(genesis *types.Genesis) {
 	if genesis.Alloc == nil {
 		genesis.Alloc = types.GenesisAlloc{}
 	}
-	slot := common.Hash{}
-	sentinel := common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 	genesis.Alloc[genesis.Config.GetBuilderDepositContract().Value()] = types.GenesisAccount{
 		Balance: new(big.Int),
 		Code:    misc.BuilderDepositRequestCode,
 		Nonce:   1,
-		Storage: map[common.Hash]common.Hash{slot: sentinel},
 	}
+	slot := common.Hash{}
+	sentinel := common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 	genesis.Alloc[genesis.Config.GetBuilderExitContract().Value()] = types.GenesisAccount{
 		Balance: new(big.Int),
 		Code:    misc.BuilderExitRequestCode,

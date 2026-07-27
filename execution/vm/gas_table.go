@@ -100,7 +100,7 @@ func memoryCopierGas(stackpos int) gasFunc {
 			return mdgas.MdGas{}, err
 		}
 		// And gas for copying data, charged per word at param.CopyGas
-		words, overflow := callContext.Stack.Back(stackpos).Uint64WithOverflow()
+		words, overflow := callContext.Stack.back(stackpos).Uint64WithOverflow()
 		if overflow {
 			return mdgas.MdGas{}, ErrGasUintOverflow
 		}
@@ -128,7 +128,7 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 	if evm.readOnly {
 		return mdgas.MdGas{}, ErrWriteProtection
 	}
-	value, x := callContext.Stack.Back(1), callContext.Stack.Back(0)
+	value, x := callContext.Stack.back2(1, 0)
 	key := accounts.InternKey(x.Bytes32())
 	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
 	// The legacy gas metering only takes into consideration the current state
@@ -217,7 +217,7 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 		return mdgas.MdGas{}, errors.New("not enough gas for reentrancy sentry")
 	}
 	// Gas sentry honoured, do the actual gas calculation based on the stored value
-	value, x := callContext.Stack.Back(1), callContext.Stack.Back(0)
+	value, x := callContext.Stack.back2(1, 0)
 	key := accounts.InternKey(x.Bytes32())
 	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
 
@@ -254,7 +254,7 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 
 func makeGasLog(n uint64) gasFunc {
 	return func(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
-		requestedSize, overflow := callContext.Stack.Back(1).Uint64WithOverflow()
+		requestedSize, overflow := callContext.Stack.back(1).Uint64WithOverflow()
 		if overflow {
 			return mdgas.MdGas{}, ErrGasUintOverflow
 		}
@@ -287,7 +287,7 @@ func gasKeccak256(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, me
 	if err != nil {
 		return mdgas.MdGas{}, err
 	}
-	wordGas, overflow := callContext.Stack.Back(1).Uint64WithOverflow()
+	wordGas, overflow := callContext.Stack.back(1).Uint64WithOverflow()
 	if overflow {
 		return mdgas.MdGas{}, ErrGasUintOverflow
 	}
@@ -332,7 +332,7 @@ func gasCreate2(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, me
 	if err != nil {
 		return mdgas.MdGas{}, err
 	}
-	size, overflow := callContext.Stack.Back(2).Uint64WithOverflow()
+	size, overflow := callContext.Stack.back(2).Uint64WithOverflow()
 	if overflow {
 		return mdgas.MdGas{}, ErrGasUintOverflow
 	}
@@ -356,7 +356,7 @@ func gasCreateEip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	if err != nil {
 		return mdgas.MdGas{}, err
 	}
-	size, overflow := callContext.Stack.Back(2).Uint64WithOverflow()
+	size, overflow := callContext.Stack.back(2).Uint64WithOverflow()
 	if overflow {
 		return mdgas.MdGas{}, ErrGasUintOverflow
 	}
@@ -384,7 +384,7 @@ func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.Md
 	if err != nil {
 		return mdgas.MdGas{}, err
 	}
-	size, overflow := callContext.Stack.Back(2).Uint64WithOverflow()
+	size, overflow := callContext.Stack.back(2).Uint64WithOverflow()
 	if overflow {
 		return mdgas.MdGas{}, ErrGasUintOverflow
 	}
@@ -438,7 +438,7 @@ func gasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memor
 func statelessGasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGas, bool, error) {
 	var gas mdgas.MdGas
 
-	transfersValue := !callContext.Stack.Back(2).IsZero()
+	transfersValue := !callContext.Stack.back(2).IsZero()
 	if transfersValue {
 		gas.Regular += callValueTransferGas(evm.ChainRules())
 	}
@@ -495,7 +495,7 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 
 func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGas, error) {
 	var accountGas, stateGas uint64
-	var address = accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
+	var address = accounts.InternAddress(callContext.Stack.back(1).Bytes20())
 	rules := evm.ChainRules()
 	evm.callNewAccountCharged = false
 	if rules.IsEIP161Enabled() {
@@ -550,7 +550,7 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availa
 }
 
 func calcCallGas(evm *EVM, callContext *CallContext, availableGas, baseGas uint64) (uint64, error) {
-	callGas, err := callGas(evm.ChainRules().IsTangerineWhistle, availableGas, baseGas, callContext.Stack.Back(0))
+	callGas, err := callGas(evm.ChainRules().IsTangerineWhistle, availableGas, baseGas, callContext.Stack.back(0))
 	if err != nil {
 		return 0, err
 	}
@@ -576,7 +576,7 @@ func statelessGasCallCode(evm *EVM, callContext *CallContext, availableGas mdgas
 		gas      mdgas.MdGas
 		overflow bool
 	)
-	if !callContext.Stack.Back(2).IsZero() {
+	if !callContext.Stack.back(2).IsZero() {
 		gas.Regular += callValueTransferGas(evm.ChainRules())
 	}
 
@@ -631,7 +631,7 @@ func statelessGasDelegateCall(evm *EVM, callContext *CallContext, availableGas m
 	}
 
 	var callGasTemp uint64
-	callGasTemp, err = callGas(evm.ChainRules().IsTangerineWhistle, availableGas.Regular, gas, callContext.Stack.Back(0))
+	callGasTemp, err = callGas(evm.ChainRules().IsTangerineWhistle, availableGas.Regular, gas, callContext.Stack.back(0))
 	evm.SetCallGasTemp(callGasTemp)
 
 	if err != nil {
