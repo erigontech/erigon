@@ -205,15 +205,8 @@ func (e *emitter) p(format string, args ...any) {
 const errReturn = "return nil, callContext.Gas(), mdgas.MdGasUsage{}, "
 
 func (e *emitter) emitDebugBlock() {
-	e.p("if debug {\n")
-	e.p("if tracer.OnGasChange != nil {\n")
-	e.p("tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)\n")
-	e.p("}\n")
-	e.p("if tracer.OnOpcode != nil {\n")
-	e.p("tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))\n")
-	e.p("logged = true\n")
-	e.p("}\n")
-	e.p("}\n")
+	// Experiment: per-case OnOpcode/OnGasChange emission removed to measure
+	// the register-pressure cost of the hook machinery in the case bodies.
 }
 
 func (e *emitter) emitTraceBlock() {

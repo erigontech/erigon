@@ -82,15 +82,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 		switch op {
 		case OpCode(0x00): // STOP
 			cost = 0
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -104,15 +95,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -126,15 +108,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 5
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -148,15 +121,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -170,15 +134,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 5
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -192,15 +147,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 5
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -214,15 +160,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 5
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -236,15 +173,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 5
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -258,15 +186,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 8
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -280,15 +199,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 8
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -325,15 +235,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -347,15 +248,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 5
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -369,15 +261,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -391,15 +274,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -413,15 +287,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -435,15 +300,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -457,15 +313,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -479,15 +326,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -501,15 +339,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -523,15 +352,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -545,15 +365,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -567,15 +378,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -589,15 +391,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -614,15 +407,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= cost
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -639,15 +423,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= cost
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -664,15 +439,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= cost
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -689,15 +455,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= cost
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -742,15 +499,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
 			}
@@ -767,15 +515,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -818,15 +557,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					}
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -840,15 +570,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -862,15 +583,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -884,15 +596,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -906,15 +609,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -928,15 +622,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -982,15 +667,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
 			}
@@ -1007,15 +683,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1061,15 +728,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
 			}
@@ -1086,15 +744,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1135,15 +784,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					if ok := callContext.useMdGas(dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored); !ok {
 						return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 					}
-				}
-			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
 				}
 			}
 			if trace {
@@ -1191,15 +831,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
 			}
@@ -1219,15 +850,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= cost
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1279,15 +901,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					}
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
 			}
@@ -1335,15 +948,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					}
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1357,15 +961,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 20
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1379,15 +974,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1401,15 +987,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1423,15 +1000,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1445,15 +1013,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1467,15 +1026,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1492,15 +1042,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= cost
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1517,15 +1058,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= cost
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1542,15 +1074,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= cost
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1567,15 +1090,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= cost
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1592,15 +1106,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= cost
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1617,15 +1122,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= cost
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1639,15 +1135,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1690,15 +1177,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if dynamicCost.State > 0 {
 				if ok := callContext.useMdGas(dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored); !ok {
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
 				}
 			}
 			if memorySize > 0 {
@@ -1748,15 +1226,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
 			}
@@ -1804,15 +1273,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
 			}
@@ -1858,15 +1318,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					}
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1903,15 +1354,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1925,15 +1367,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 8
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1947,15 +1380,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 10
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1969,15 +1393,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -1991,15 +1406,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2013,15 +1419,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2032,15 +1429,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 1
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2057,15 +1445,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= cost
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2082,15 +1461,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= cost
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2142,15 +1512,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					}
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
 			}
@@ -2170,15 +1531,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= cost
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2192,15 +1544,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2214,15 +1557,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2237,15 +1571,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2260,15 +1585,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2283,15 +1599,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2306,15 +1613,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2329,15 +1627,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2352,15 +1641,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2375,15 +1655,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2398,15 +1669,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2421,15 +1683,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2444,15 +1697,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2467,15 +1711,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2490,15 +1725,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2513,15 +1739,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2536,15 +1753,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2559,15 +1767,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2582,15 +1781,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2605,15 +1795,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2628,15 +1809,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2651,15 +1823,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2674,15 +1837,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2697,15 +1851,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2720,15 +1865,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2743,15 +1879,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2766,15 +1893,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2789,15 +1907,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2812,15 +1921,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2835,15 +1935,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2858,15 +1949,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2881,15 +1963,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2904,15 +1977,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2929,15 +1993,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2954,15 +2009,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -2979,15 +2025,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3004,15 +2041,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3029,15 +2057,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3054,15 +2073,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3079,15 +2089,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3104,15 +2105,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3129,15 +2121,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3154,15 +2137,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3179,15 +2153,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3204,15 +2169,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3229,15 +2185,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3254,15 +2201,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3279,15 +2217,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3304,15 +2233,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3326,15 +2246,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3348,15 +2259,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3370,15 +2272,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3392,15 +2285,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3414,15 +2298,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3436,15 +2311,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3458,15 +2324,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3480,15 +2337,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3502,15 +2350,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3524,15 +2363,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3546,15 +2376,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3568,15 +2389,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3590,15 +2402,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3612,15 +2415,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3634,15 +2428,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3656,15 +2441,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3704,15 +2480,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if dynamicCost.State > 0 {
 				if ok := callContext.useMdGas(dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored); !ok {
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
 				}
 			}
 			if memorySize > 0 {
@@ -3759,15 +2526,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
 			}
@@ -3810,15 +2568,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if dynamicCost.State > 0 {
 				if ok := callContext.useMdGas(dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored); !ok {
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
 				}
 			}
 			if memorySize > 0 {
@@ -3865,15 +2614,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
 			}
@@ -3918,15 +2658,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
 			}
@@ -3946,15 +2677,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= cost
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3966,15 +2688,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= cost
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -3986,15 +2699,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= cost
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
@@ -4038,15 +2742,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if dynamicCost.State > 0 {
 				if ok := callContext.useMdGas(dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored); !ok {
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
 				}
 			}
 			if memorySize > 0 {
@@ -4097,15 +2792,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
 			}
@@ -4154,15 +2840,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
 			}
@@ -4204,15 +2881,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if dynamicCost.State > 0 {
 				if ok := callContext.useMdGas(dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored); !ok {
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
 				}
 			}
 			if memorySize > 0 {
@@ -4269,15 +2937,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					}
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
 			}
@@ -4330,15 +2989,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					if ok := callContext.useMdGas(dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored); !ok {
 						return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 					}
-				}
-			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
 				}
 			}
 			if memorySize > 0 {
@@ -4395,15 +3045,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					}
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
 			}
@@ -4454,15 +3095,6 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					}
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
 			}
@@ -4506,30 +3138,12 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 				}
 			}
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
 			pc, res, err = operation.execute(pc, evm, callContext)
 		default:
 			cost = 0
-			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
