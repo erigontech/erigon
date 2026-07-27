@@ -451,6 +451,11 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 	}
 }
 
+// maxReusedLogDataCap bounds the Data capacity an emit-buffer entry may keep
+// across blocks; Reset drops entries above it so a one-off huge log doesn't
+// stay pinned for the life of the worker.
+const maxReusedLogDataCap = 64 << 10
+
 // AllocLog reserves the next log slot of the current tx and returns it sized for
 // numTopics/dataSize. The caller must fill Address, Topics and Data and then call
 // NotifyLog. The entry is owned by the buffer and reused by later blocks, so it
