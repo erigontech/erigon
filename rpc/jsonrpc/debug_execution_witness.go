@@ -823,9 +823,9 @@ var errWitnessVerifyFailed = errors.New("witness stateless verification failed")
 // number is no longer canonical (the hash was reorged out); errWitnessCanonicalUnavailable
 // covers a canonical-mode request, which the legacy-only cache never builds.
 var (
-	errWitnessOutOfWindow          = errors.New("debug_executionWitness: requested block is outside the head-capture cache window")
-	errWitnessReorgedAway          = errors.New("debug_executionWitness: requested block hash was reorged away and is no longer canonical")
-	errWitnessCanonicalUnavailable = errors.New("debug_executionWitness: canonical witness mode is unavailable on a cache-only node (serves legacy only)")
+	errWitnessOutOfWindow          = errors.New("requested block is outside the head-capture witness cache window")
+	errWitnessReorgedAway          = errors.New("requested block hash was reorged away and is no longer canonical")
+	errWitnessCanonicalUnavailable = errors.New("canonical witness mode is unavailable on a cache-only node (serves legacy only)")
 )
 
 // headCaptureSource carries the pinned-parent commitment plane for a minimal-node

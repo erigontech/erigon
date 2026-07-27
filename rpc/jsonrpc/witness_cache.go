@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"math"
 	"sync"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -28,6 +29,16 @@ const (
 	witnessCacheMaxBlocks = 96
 	bytesPerMB            = 1024 * 1024
 )
+
+// witnessCacheMaxBytes converts a MB byte-cap to bytes, clamping to avoid int
+// overflow on 32-bit builds or absurd values. 0 stays 0 (byte cap disabled).
+func witnessCacheMaxBytes(mb uint) int {
+	const maxMB = uint(math.MaxInt / bytesPerMB)
+	if mb > maxMB {
+		mb = maxMB
+	}
+	return int(mb) * bytesPerMB
+}
 
 // witnessResultCache maps a canonical block hash to its pre-marshaled legacy-mode
 // witness. Keying by hash makes reorgs self-evicting — a reorged hash is never

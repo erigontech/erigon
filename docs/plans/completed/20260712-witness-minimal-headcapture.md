@@ -8,7 +8,7 @@ Today both the eager witness cache and on-demand serving are hard-gated on commi
 Benefit: minimal nodes serve recent-block witnesses with zero commitment-history storage and no new code on the consensus commitment fold.
 
 ## Context (from discovery)
-- **Repo/worktree:** `/Users/awskii/org/wrk/wt/witness-cache`, branch `awskii/witness-cache`. Language: Go.
+- **Repo/branch:** erigon; feature branch stacked on `awskii/witness-cache`. Language: Go.
 - **Witness cache (existing on this branch):**
   - `rpc/jsonrpc/witness_cache.go` — `witnessResultCache = lru.Cache[common.Hash, *ExecutionWitnessResult]` **(a type ALIAS, `:30`)**, cap `witnessCacheMaxBlocks = 96` (`:25`), `newWitnessResultCache` (`:32`). Count-only today (no byte cap). Method call sites via promotion: `.Add`/`.Get`/`.Contains`/`.Len` at `witness_cache_builder.go:189/288/289`, `debug_execution_witness.go:767`.
   - `rpc/jsonrpc/witness_cache_builder.go` — `WitnessCacheShouldEnable(blocks uint, commitmentHistoryEnabled bool)` (`:124`), `NewWitnessCacheBuilderAPI` (`:134`), `RunWitnessCacheBuilder` (`:154`), `waitCommittedHead` (`:79`, opens a fresh committed RO tx after the head commits — **retained**, it is the committed ≥B tx for plain history), `decideCommittedHead` (`:56`), `shouldBuild` (`:70`), `buildAndCache` (`:247`).
