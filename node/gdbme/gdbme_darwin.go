@@ -74,7 +74,7 @@ quit
 	_, err = tmpFile.WriteString(lldbScript)
 	closeErr := tmpFile.Close()
 	if err != nil || closeErr != nil {
-		dir.RemoveFile(tmpFile.Name())
+		_ = dir.RemoveFile(tmpFile.Name())
 		fmt.Fprintln(os.Stderr, "Error: could not write or close LLDB script:", err, closeErr)
 		os.Exit(1)
 	}
@@ -89,7 +89,7 @@ quit
 	// process replacing in order to keep only one erigon alive
 	err = syscall.Exec(lldbPath, cmd.Args, os.Environ())
 	if err != nil {
-		dir.RemoveFile(tmpFile.Name())
+		_ = dir.RemoveFile(tmpFile.Name())
 		fmt.Fprintln(os.Stderr, "Failed to restart under LLDB:", err)
 		os.Exit(1)
 	}
