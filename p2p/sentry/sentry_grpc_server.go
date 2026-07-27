@@ -1383,10 +1383,8 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgID sent
 		err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 		if err != nil {
 			ss.removePeer(peerInfo.ID(), p2p.NewPeerError(p2p.PeerErrorMessageSend, p2p.DiscNetworkError, err, fmt.Sprintf("%s writePeer msgcode=%d", logPrefix, msgcode)))
-		} else {
-			if ttl > 0 {
-				peerInfo.AddDeadline(time.Now().Add(ttl))
-			}
+		} else if ttl > 0 {
+			peerInfo.AddDeadline(time.Now().Add(ttl))
 		}
 	}, ss.logger)
 }

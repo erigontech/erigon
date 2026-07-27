@@ -550,7 +550,8 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, overrideBlockHash)
 		// do not reset ibs, because we want to keep the overrides and state change
 		// ibs.Reset()
-		for txnIndex, txn := range bundle.Transactions {
+		for txnIndex := range bundle.Transactions {
+			txn := &bundle.Transactions[txnIndex]
 			if txn.Gas == nil || *(txn.Gas) == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
 			}

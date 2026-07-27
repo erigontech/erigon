@@ -226,7 +226,9 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	// Add accounts with authorizations to the prestate before they get applied.
 	var b [32]byte
 	data := bytes.NewBuffer(nil)
-	for _, auth := range tx.GetAuthorizations() {
+	auths := tx.GetAuthorizations()
+	for i := range auths {
+		auth := &auths[i]
 		data.Reset()
 		addr, err := auth.RecoverSigner(data, b[:])
 		if err != nil {

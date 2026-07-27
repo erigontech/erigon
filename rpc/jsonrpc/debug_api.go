@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -87,13 +88,13 @@ type DebugAPIImpl struct {
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(base *BaseAPI, db kv.TemporalRoDB, ethBackend rpchelper.ApiBackend, gascap uint64, gethCompatibility bool) *DebugAPIImpl {
+func NewPrivateDebugAPI(base *BaseAPI, db kv.TemporalRoDB, ethBackend rpchelper.ApiBackend, cfg *rpccfg.DebugApiConfig) *DebugAPIImpl {
 	return &DebugAPIImpl{
 		BaseAPI:           base,
 		db:                db,
 		ethBackend:        ethBackend,
-		GasCap:            gascap,
-		gethCompatibility: gethCompatibility,
+		GasCap:            cfg.GasCap,
+		gethCompatibility: cfg.GethCompatibility,
 	}
 }
 
@@ -821,18 +822,17 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 		return nil, err
 	}
 
-	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
+	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
 	if err != nil {
 		return nil, err
 	}
-
-	if txn != nil {
-		var buf bytes.Buffer
-		err = txn.MarshalBinary(&buf)
-		return buf.Bytes(), err
+	if !ok {
+		return nil, nil
 	}
 
-	return nil, nil
+	var buf bytes.Buffer
+	err = txn.MarshalBinary(&buf)
+	return buf.Bytes(), err
 }
 
 // MemStats returns detailed runtime memory statistics.

@@ -1,4 +1,20 @@
-package stagedsync
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package bal
 
 import (
 	"fmt"
@@ -15,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func CreateBAL(blockNum uint64, txIO *state.VersionedIO, dataDir string, logger log.Logger) types.BlockAccessList {
+func Create(blockNum uint64, txIO *state.VersionedIO, dataDir string, logger log.Logger) types.BlockAccessList {
 	bal := txIO.AsBlockAccessList()
 	if dbg.TraceBlockAccessLists {
 		writeBALToFile(bal, dataDir, fmt.Sprintf("computed_bal_%d.txt", blockNum), logger)
@@ -39,7 +55,7 @@ func writeBALToFile(bal types.BlockAccessList, dataDir string, name string, logg
 	}
 }
 
-func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) error {
+func Process(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) error {
 	if !isEIP7928 && !experimental {
 		return nil
 	}
@@ -48,7 +64,7 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isE
 	}
 	blockNum := h.Number.Uint64()
 	blockHash := h.Hash()
-	computedBlockBal := CreateBAL(blockNum, vio, dataDir, logger)
+	computedBlockBal := Create(blockNum, vio, dataDir, logger)
 	err := computedBlockBal.Validate()
 	if err != nil {
 		return fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
@@ -103,6 +119,12 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isE
 // computed one under <dataDir>/bal for offline diffing.
 func reportBALMismatch(blockNum uint64, blockHash common.Hash, blockBal types.BlockAccessList, blockBalHash common.Hash, computedBlockBal types.BlockAccessList, dataDir string, logger log.Logger) {
 	logger.Error("BAL mismatch", "blockNum", blockNum, "blockHash", blockHash, "blockBalHash", blockBalHash, "computedBlockBalHash", computedBlockBal.Hash())
+	if dbg.Trace {
+		fmt.Printf("[BALTRACE] computed BAL block %d:\n%s\n", blockNum, computedBlockBal.DebugString())
+		if blockBal != nil {
+			fmt.Printf("[BALTRACE] stored/expected BAL block %d:\n%s\n", blockNum, blockBal.DebugString())
+		}
+	}
 	writeBALToFile(computedBlockBal, dataDir, fmt.Sprintf("computed_bal_%d.txt", blockNum), logger)
 	if blockBal != nil {
 		writeBALToFile(blockBal, dataDir, fmt.Sprintf("block_bal_%d.txt", blockNum), logger)
