@@ -247,3 +247,122 @@ func TestFindExecutedDiffsetAtHeight_FallsBackAfterCanonicalReorg(t *testing.T) 
 	require.NoError(t, err)
 	require.False(t, found, "must report not-found when no diffset is stored at this height")
 }
+
+func newFindDiffsetHarness(t *testing.T) (context.Context, kv.TemporalRwTx, *freezeblocks.BlockReader, *execctx.SharedDomains) {
+	t.Helper()
+
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDBWithStepSize(t, dirs, 16)
+	snaps := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
+	br := freezeblocks.NewBlockReader(snaps, nil)
+
+	ctx := t.Context()
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	require.NoError(t, err)
+	t.Cleanup(doms.Close)
+
+	return ctx, tx, br, doms
+}
+
+// writeSiblingHeader stores a header at height (a unique root => a unique hash so
+// several can coexist at one height) and, when executed, its diffset.
+func writeSiblingHeader(t *testing.T, tx kv.TemporalRwTx, height uint64, root common.Hash, executed bool) common.Hash {
+	t.Helper()
+
+	h := makeHeader(height, root)
+	require.NoError(t, rawdb.WriteHeader(tx, h))
+	if executed {
+		addr := common.Address{0xde, 0xad}
+		cs := &changeset.StateChangeSet{}
+		cs.Diffs[kv.AccountsDomain].DomainUpdate(addr[:], kv.Step(0), nil)
+		require.NoError(t, changeset.WriteDiffSet(tx, height, h.Hash(), cs))
+	}
+	return h.Hash()
+}
+
+// TestFindExecutedDiffsetAtHeight_MultiHeaderSelectsDiffsetBearing pins that when a
+// reorg leaves several sibling headers at one height and the canonical hash is gone,
+// the lookup selects the single header that actually executed (the one carrying a
+// diffset) instead of failing as ambiguous.
+func TestFindExecutedDiffsetAtHeight_MultiHeaderSelectsDiffsetBearing(t *testing.T) {
+	t.Parallel()
+
+	ctx, tx, br, doms := newFindDiffsetHarness(t)
+
+	const height = uint64(20)
+	writeSiblingHeader(t, tx, height, common.Hash{0x01}, false)
+	want := writeSiblingHeader(t, tx, height, common.Hash{0x02}, true)
+	writeSiblingHeader(t, tx, height, common.Hash{0x03}, false)
+
+	_, canonOk, err := br.CanonicalHash(ctx, tx, height)
+	require.NoError(t, err)
+	require.False(t, canonOk, "sanity: no canonical hash at the forked height")
+
+	diffs, executed, found, err := findExecutedDiffsetAtHeight(ctx, tx, br, doms, height)
+	require.NoError(t, err)
+	require.True(t, found, "the unique diffset-bearing header must be found among several siblings")
+	require.Equal(t, want, executed, "must select the header that actually carries a diffset")
+	require.NotEmpty(t, diffs[kv.AccountsDomain], "selected header's AccountsDomain diff must be returned")
+}
+
+// TestFindExecutedDiffsetAtHeight_MultiHeaderAmbiguousDiffsets pins that two executed
+// siblings at one height (both carrying a diffset) is genuinely ambiguous and errors —
+// and that the error counts diffset-bearing headers, not every stored header.
+func TestFindExecutedDiffsetAtHeight_MultiHeaderAmbiguousDiffsets(t *testing.T) {
+	t.Parallel()
+
+	ctx, tx, br, doms := newFindDiffsetHarness(t)
+
+	const height = uint64(20)
+	writeSiblingHeader(t, tx, height, common.Hash{0x01}, true)
+	writeSiblingHeader(t, tx, height, common.Hash{0x02}, false)
+	writeSiblingHeader(t, tx, height, common.Hash{0x03}, true)
+
+	_, _, _, err := findExecutedDiffsetAtHeight(ctx, tx, br, doms, height)
+	require.Error(t, err, "two diffset-bearing headers at one height must be reported as ambiguous")
+	require.ErrorContains(t, err, "have 2", "the error must count diffset-bearing headers, not all stored headers")
+}
+
+// TestFindExecutedDiffsetAtHeight_NoHeadersCanonicalCleared pins that a height with no
+// canonical hash and no stored header surfaces as an error rather than a silent no-op.
+func TestFindExecutedDiffsetAtHeight_NoHeadersCanonicalCleared(t *testing.T) {
+	t.Parallel()
+
+	ctx, tx, br, doms := newFindDiffsetHarness(t)
+
+	const height = uint64(20)
+	require.NoError(t, rawdb.TruncateCanonicalHash(tx, height, false))
+	_, canonOk, err := br.CanonicalHash(ctx, tx, height)
+	require.NoError(t, err)
+	require.False(t, canonOk, "sanity: no canonical hash at the height")
+
+	_, _, found, err := findExecutedDiffsetAtHeight(ctx, tx, br, doms, height)
+	require.Error(t, err, "no header and no canonical hash must be an error")
+	require.False(t, found)
+	require.ErrorContains(t, err, "can't find diffsets")
+}
+
+// TestFindExecutedDiffsetAtHeight_MultiHeaderNoDiffsetReportsConcreteHash pins that when
+// several siblings exist but none carries a diffset (not-found), the returned hash is a
+// concrete stored header rather than the zero hash, so the caller's not-found diagnostic
+// points at a real block.
+func TestFindExecutedDiffsetAtHeight_MultiHeaderNoDiffsetReportsConcreteHash(t *testing.T) {
+	t.Parallel()
+
+	ctx, tx, br, doms := newFindDiffsetHarness(t)
+
+	const height = uint64(20)
+	h1 := writeSiblingHeader(t, tx, height, common.Hash{0x01}, false)
+	h2 := writeSiblingHeader(t, tx, height, common.Hash{0x02}, false)
+
+	_, executed, found, err := findExecutedDiffsetAtHeight(ctx, tx, br, doms, height)
+	require.NoError(t, err)
+	require.False(t, found, "no sibling carries a diffset -> not found")
+	require.NotEqual(t, common.Hash{}, executed, "not-found must still report a concrete header hash for diagnostics")
+	require.Contains(t, []common.Hash{h1, h2}, executed, "reported hash must be one of the stored siblings")
+}
