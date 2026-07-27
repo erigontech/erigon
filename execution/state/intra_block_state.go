@@ -388,7 +388,13 @@ func (sdb *IntraBlockState) Reset() {
 	clear(sdb.stateObjects)
 	clear(sdb.stateObjectsDirty)
 	for i := range sdb.logs {
-		sdb.logs[i] = sdb.logs[i][:0] // entries and their Topics/Data buffers are reused by AllocLog
+		buf := sdb.logs[i]
+		for j := range buf {
+			if buf[j] != nil && cap(buf[j].Data) > maxReusableLogDataCap {
+				buf[j] = nil
+			}
+		}
+		sdb.logs[i] = buf[:0] // entries and their Topics/Data buffers are reused by AllocLog
 	}
 	clear(sdb.balanceInc)
 	sdb.journal.Reset()
@@ -451,10 +457,7 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 	}
 }
 
-// maxReusedLogDataCap bounds the Data capacity an emit-buffer entry may keep
-// across blocks; Reset drops entries above it so a one-off huge log doesn't
-// stay pinned for the life of the worker.
-const maxReusedLogDataCap = 64 << 10
+const maxReusableLogDataCap = 64 * 1024
 
 // AllocLog reserves the next log slot of the current tx and returns it sized for
 // numTopics/dataSize. The caller must fill Address, Topics and Data and then call
@@ -513,11 +516,9 @@ func (sdb *IntraBlockState) NotifyLog(lp *types.Log) {
 	}
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
 		// lp is a reused buffer entry, so hand the hook an owned copy it can
-		// safely retain, then take back its content. Adopting the copy's slices
-		// instead would let the next log reusing lp overwrite what the hook kept.
-		cp := lp.Copy()
-		sdb.tracingHooks.OnLog(cp)
-		cp.CopyTo(lp)
+		// safely retain. Hooks must not mutate the log: writes to the copy do
+		// not reach the stored logs.
+		sdb.tracingHooks.OnLog(lp.Copy())
 	}
 }
 
@@ -565,7 +566,7 @@ func (sdb *IntraBlockState) LogsRootHash() common.Hash {
 }
 
 func (sdb *IntraBlockState) rawLogs() types.Logs {
-	var all types.Logs
+	all := make(types.Logs, 0, sdb.logSize)
 	for _, lgs := range sdb.logs {
 		all = append(all, lgs...)
 	}

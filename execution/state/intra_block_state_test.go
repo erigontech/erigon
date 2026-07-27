@@ -1114,24 +1114,20 @@ func TestAllocLogPreservesCapacityAcrossRevert(t *testing.T) {
 	require.Equal(t, capBefore, cap(ibs.logs[1]), "inner log buffer capacity must survive revert+relog")
 }
 
-// TestResetDropsOversizedLogDataBuffers pins the Reset hygiene bound: entries
-// keep being reused across blocks, but an entry whose Data capacity grew past
-// maxReusedLogDataCap must be dropped so a one-off huge log doesn't stay pinned
-// for the life of the worker.
 func TestResetDropsOversizedLogDataBuffers(t *testing.T) {
 	t.Parallel()
 
 	ibs := New(NewNoopReader())
 	ibs.SetTxContext(1, 0)
 	small := ibs.AllocLog(1, 8)
-	big := ibs.AllocLog(1, maxReusedLogDataCap+1)
+	big := ibs.AllocLog(1, maxReusableLogDataCap+1)
 
 	ibs.Reset()
 	ibs.SetTxContext(2, 0)
 	require.Same(t, small, ibs.AllocLog(1, 8), "normal-size entry is reused")
 	relog := ibs.AllocLog(1, 8)
 	require.NotSame(t, big, relog, "oversized entry must not survive Reset")
-	require.LessOrEqual(t, cap(relog.Data), maxReusedLogDataCap)
+	require.LessOrEqual(t, cap(relog.Data), maxReusableLogDataCap)
 }
 
 // TestLogIndexIsBlockWide pins that AddLog stamps a block-wide log index:
