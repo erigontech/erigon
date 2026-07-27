@@ -116,7 +116,8 @@ func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, r
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			pc, res, err = opAdd(pc, evm, callContext)
+			x, y := stack.pop1Peek1()
+			y.Add(x, y)
 		case OpCode(0x02): // MUL
 			cost = 5
 			if sLen := stack.len(); sLen < 2 {
