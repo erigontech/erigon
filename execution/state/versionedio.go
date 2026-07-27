@@ -585,6 +585,65 @@ func (s ReadSet) RangeHeaders(yield func(AccountPath, ReadHeader) bool) {
 	}
 }
 
+// RangeFullHeaders visits every read as (address, path, key, header) — like
+// RangeHeaders but with the address/key the internal maps are keyed by, so a
+// caller can build a reverse (key -> readers) index. Callback returns false to
+// stop early.
+func (s ReadSet) RangeFullHeaders(yield func(accounts.Address, AccountPath, accounts.StorageKey, ReadHeader) bool) {
+	for a, tr := range s.address {
+		if !yield(a, AddressPath, accounts.StorageKey{}, tr.ReadHeader) {
+			return
+		}
+	}
+	for a, tr := range s.balance {
+		if !yield(a, BalancePath, accounts.StorageKey{}, tr.ReadHeader) {
+			return
+		}
+	}
+	for a, tr := range s.nonce {
+		if !yield(a, NoncePath, accounts.StorageKey{}, tr.ReadHeader) {
+			return
+		}
+	}
+	for a, tr := range s.incarnation {
+		if !yield(a, IncarnationPath, accounts.StorageKey{}, tr.ReadHeader) {
+			return
+		}
+	}
+	for a, tr := range s.selfDestruct {
+		if !yield(a, SelfDestructPath, accounts.StorageKey{}, tr.ReadHeader) {
+			return
+		}
+	}
+	for a, tr := range s.createContract {
+		if !yield(a, CreateContractPath, accounts.StorageKey{}, tr.ReadHeader) {
+			return
+		}
+	}
+	for a, tr := range s.code {
+		if !yield(a, CodePath, accounts.StorageKey{}, tr.ReadHeader) {
+			return
+		}
+	}
+	for a, tr := range s.codeHash {
+		if !yield(a, CodeHashPath, accounts.StorageKey{}, tr.ReadHeader) {
+			return
+		}
+	}
+	for a, tr := range s.codeSize {
+		if !yield(a, CodeSizePath, accounts.StorageKey{}, tr.ReadHeader) {
+			return
+		}
+	}
+	for a, inner := range s.storage {
+		for k, tr := range inner {
+			if !yield(a, StoragePath, k, tr.ReadHeader) {
+				return
+			}
+		}
+	}
+}
+
 // WriteHeader is the type-agnostic part of a versioned write: address,
 // path, optional storage key, tx-version and balance-change reason.
 // Shared across every per-path write via embedding in VersionedWrite[T].

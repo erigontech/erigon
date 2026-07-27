@@ -1952,6 +1952,12 @@ var depOrderVal = dbg.EnvBool("DEP_ORDER_VAL", false)
 // unchanged (that is a separate later step).
 var goroutinePerTask = dbg.EnvBool("GOROUTINE_PER_TASK", false)
 
+// revalIndex uses the readerIdx reverse index in revalidateCommittedDependents
+// (re-check only actual readers of the changed keys) instead of scanning every
+// later committed task. Correctness-identical (same per-candidate check); cuts
+// the O(n²) revalidation spine.
+var revalIndex = dbg.EnvBool("REVAL_INDEX", false)
+
 // dispatchRun executes a task on a free worker context in its own goroutine and
 // pushes the result to pe.rws — the same result path the pull-loop workers use.
 // Bounded by runSem (one slot per worker context); the goroutine blocks until a
@@ -2613,6 +2619,10 @@ type blockExecutor struct {
 	// re-validated. The old write-set is needed alongside the new one so a
 	// dependent that read a key the new incarnation DROPPED is still re-checked.
 	writeChangedPrev map[int]*state.WriteSet
+	// readerIdx: reverse index (read cell -> task indices that read it), used by
+	// revalidateCommittedDependents to re-check only actual readers of a changed
+	// tx's keys instead of scanning all later committed tasks.
+	readerIdx map[readerKey]map[int]struct{}
 }
 
 // countReadyEarly returns how many exec-complete, not-yet-validated txs have all
@@ -2752,7 +2762,34 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		exhausted:           exhausted,
 		coinbaseFlushedUpTo: -1,
 		writeChangedPrev:    map[int]*state.WriteSet{},
+		readerIdx:           map[readerKey]map[int]struct{}{},
 	}
+}
+
+// readerKey identifies one versioned read cell (address, path, storage key).
+// The reverse index readerIdx maps each such cell to the task indices that read
+// it, so revalidateCommittedDependents re-checks only the actual readers of a
+// changed tx's keys instead of scanning every later committed task (O(n²)).
+type readerKey struct {
+	addr accounts.Address
+	path state.AccountPath
+	key  accounts.StorageKey
+}
+
+// indexReads records taskIdx as a reader of every cell in rs. Append-only across
+// incarnations; the precise HasReadDep re-check in revalidateCommittedDependents
+// filters any stale entry, so over-inclusion only costs a redundant check.
+func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
+	rs.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, k accounts.StorageKey, _ state.ReadHeader) bool {
+		rk := readerKey{a, p, k}
+		m := be.readerIdx[rk]
+		if m == nil {
+			m = map[int]struct{}{}
+			be.readerIdx[rk] = m
+		}
+		m[taskIdx] = struct{}{}
+		return true
+	})
 }
 
 // invalidBlockResult wraps a block-validity failure (insufficient funds, gas
@@ -3047,7 +3084,7 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 	// the block-level TxIndex. They differ by the block's leading system tx, so
 	// blockIO reads must map through be.tasks[i].Task.Version().TxIndex.
 	newWrites := be.blockIO.WriteSet(be.tasks[changedTx].Task.Version().TxIndex)
-	for tx := changedTx + 1; tx < len(be.tasks); tx++ {
+	for _, tx := range be.revalCandidates(changedTx, newWrites, oldWrites) {
 		if !be.validateTasks.checkComplete(tx) || be.publishTasks.checkComplete(tx) {
 			continue
 		}
@@ -3081,6 +3118,42 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 		}
 	}
 	return nil
+}
+
+// revalCandidates returns the task indices > changedTx to re-check. Default:
+// every later task (the caller filters by HasReadDep). Under REVAL_INDEX: only
+// the tasks the reverse index records as readers of changedTx's changed keys
+// (new ∪ old write-sets) — the exact set for which HasReadDep can be true —
+// sorted ascending so the cascade order matches the scan.
+func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *state.WriteSet) []int {
+	if !revalIndex {
+		out := make([]int, 0, len(be.tasks)-changedTx-1)
+		for tx := changedTx + 1; tx < len(be.tasks); tx++ {
+			out = append(out, tx)
+		}
+		return out
+	}
+	set := map[int]struct{}{}
+	add := func(ws *state.WriteSet) {
+		if ws == nil {
+			return
+		}
+		for h := range ws.AllHeaders() {
+			for tx := range be.readerIdx[readerKey{h.Address, h.Path, h.Key}] {
+				if tx > changedTx {
+					set[tx] = struct{}{}
+				}
+			}
+		}
+	}
+	add(newWrites)
+	add(oldWrites)
+	out := make([]int, 0, len(set))
+	for tx := range set {
+		out = append(out, tx)
+	}
+	sort.Ints(out)
+	return out
 }
 
 // runDepOrderValidation is the DEP_ORDER_VAL validation pass. It first finalizes
@@ -3223,6 +3296,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				fmt.Println(be.blockNum, "err", execErr)
 			}
 			be.blockIO.RecordReads(res.Version(), res.TxIn)
+			if revalIndex {
+				be.indexReads(tx, res.TxIn)
+			}
 
 			if execErr.IsError() {
 				// Genuine, non-dependency execution error (issue #21319).
@@ -3314,6 +3390,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		txVersion := res.Version()
 
 		be.blockIO.RecordReads(txVersion, res.TxIn)
+		if revalIndex {
+			be.indexReads(tx, res.TxIn)
+		}
 
 		if res.Version().Incarnation == 0 {
 			be.blockIO.RecordWrites(txVersion, res.TxOut)
