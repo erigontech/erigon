@@ -2603,24 +2603,19 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 // (versionMap) path: WriteSet.Finalize applies the EIP-6780 wipe and snapshots
 // the recorded IO. No journal reset here — Reset() does that before the next tx.
 func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet, error) {
-	if err := sdb.removeEmptyAccountWrites(chainRules); err != nil {
+	if err := sdb.clearEmptyAccounts(chainRules); err != nil {
 		return nil, err
 	}
 	return sdb.versionedWrites.Finalize(), nil
 }
 
-// removeEmptyAccountWrites applies EIP-161 account clearing to the recorded
-// write-set — the versioned counterpart of updateAccount's emptyRemoval branch,
-// which the serial path reaches through MakeWriteSet. An account left empty by
-// this tx has to be published as a delete rather than as an existing empty
-// record: this write-set is flushed to the version map, so it is what the next
-// tx in the block reads, and an empty account cannot survive a transaction
-// boundary once EIP-161 is active.
-//
-// Candidates are the addresses whose balance, nonce or code-hash this tx wrote
-// to an empty value, matching WriteSet.Normalize's candidate set so the two
-// passes cannot reach different verdicts.
-func (sdb *IntraBlockState) removeEmptyAccountWrites(chainRules *chain.Rules) error {
+// clearEmptyAccounts is the versioned counterpart of updateAccount's
+// emptyRemoval branch, which the serial path reaches through MakeWriteSet: an
+// account this tx leaves empty must be published as a delete, not as an
+// existing empty record. This write-set is flushed to the version map, so it is
+// what the next tx in the block reads, and an empty account cannot survive a
+// transaction boundary once EIP-161 is active.
+func (sdb *IntraBlockState) clearEmptyAccounts(chainRules *chain.Rules) error {
 	// Genesis is exempt, as it is on the serial path (which runs it under empty
 	// rules) and in the apply loop: an alloc may be empty by EIP-161's
 	// code/nonce/balance test yet still carry storage, and clearing it would
@@ -2629,47 +2624,40 @@ func (sdb *IntraBlockState) removeEmptyAccountWrites(chainRules *chain.Rules) er
 		return nil
 	}
 
-	var candidates map[accounts.Address]struct{}
-	consider := func(addr accounts.Address) {
-		if !EIP161EmptyRemoval(true, chainRules.IsAura, addr) {
-			return
-		}
-		if sd, ok := sdb.versionedWrites.GetSelfDestruct(addr); ok && sd.Val {
-			return // already published as a delete
-		}
-		if candidates == nil {
-			candidates = make(map[accounts.Address]struct{}, 2)
-		}
-		candidates[addr] = struct{}{}
-	}
+	// An account left empty always has one of these three writes, so they are
+	// also what WriteSet.Normalize considers. Repeats are harmless: Empty
+	// reports false once the delete below has been recorded.
+	var candidates []accounts.Address
 	for addr, vw := range sdb.versionedWrites.Balances() {
 		if vw.Val.IsZero() {
-			consider(addr)
+			candidates = append(candidates, addr)
 		}
 	}
 	for addr, vw := range sdb.versionedWrites.Nonces() {
 		if vw.Val == 0 {
-			consider(addr)
+			candidates = append(candidates, addr)
 		}
 	}
 	for addr, vw := range sdb.versionedWrites.CodeHashes() {
 		if vw.Val == accounts.EmptyCodeHash {
-			consider(addr)
+			candidates = append(candidates, addr)
 		}
 	}
 
-	for addr := range candidates {
-		// Resolve emptiness as Empty() does, minus its absent-account branch:
-		// an address with no account record has nothing to delete, and marking
-		// it self-destructed would make Snapshot drop its surviving writes.
-		account, _, _, err := sdb.versionedAccountBase(addr, true)
+	for _, addr := range candidates {
+		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
+			continue
+		}
+		// Exist first: Empty reports true for an absent account, and marking one
+		// self-destructed would make Snapshot drop its surviving writes.
+		exists, err := sdb.Exist(addr)
 		if err != nil {
 			return err
 		}
-		if account == nil || sdb.hasWrite(addr, SelfDestructPath, accounts.NilKey) {
+		if !exists {
 			continue
 		}
-		empty, err := sdb.emptyFromVersionedFields(addr, account)
+		empty, err := sdb.Empty(addr)
 		if err != nil {
 			return err
 		}
