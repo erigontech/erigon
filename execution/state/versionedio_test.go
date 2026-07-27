@@ -1076,7 +1076,7 @@ func recordTouch(io *VersionedIO, txIndex int, addr accounts.Address, revertable
 	if rs.access == nil {
 		rs.access = make(AccessSet)
 	}
-	rs.access[addr] = &accessOptions{revertable: revertable}
+	rs.access[addr] = accessOptions{revertable: revertable}
 	io.RecordReads(Version{TxIndex: txIndex}, rs)
 }
 
@@ -1606,7 +1606,7 @@ func TestVersionedIO_mergeTxEquivalentToMerge(t *testing.T) {
 			Val:        *uint256.NewInt(x.val),
 		})
 		// Access marks travel on the read-set now.
-		rs.access = AccessSet{x.addr: &accessOptions{}}
+		rs.access = AccessSet{x.addr: accessOptions{}}
 		return rs
 	}
 	writes := func(x txIO) *WriteSet {
