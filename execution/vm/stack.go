@@ -76,12 +76,12 @@ func (st *Stack) pop() *uint256.Int {
 	return &st.data[st.top]
 }
 
-func (st *Stack) pop2Uint64() (x, y uint64) {
+func (st *Stack) pop2() (x, y *uint256.Int) {
 	st.top -= 2
-	if uint(st.top) > stackLimit-2 {
+	if uint(st.top) > stackLimit-2 { // Bounds Check Elimination: 1 manual check, or compiler will add 2 checks
 		panic("stack index out of range")
 	}
-	return st.data[st.top+1].Uint64(), st.data[st.top].Uint64()
+	return &st.data[st.top+1], &st.data[st.top]
 }
 
 // pop1Peek1 pops one slot and peeks the next, shaped as popCopy-two-push-one so
@@ -108,20 +108,20 @@ func (st *Stack) pop2Peek1() (x, y, z *uint256.Int) {
 	return
 }
 
-func (st *Stack) pop2() (x, y *uint256.Int) {
-	st.top -= 2
-	if uint(st.top) > stackLimit-2 {
-		panic("stack index out of range")
-	}
-	return &st.data[st.top+1], &st.data[st.top]
-}
-
 func (st *Stack) pop3() (x, y, z *uint256.Int) {
 	st.top -= 3
 	if uint(st.top) > stackLimit-3 {
 		panic("stack index out of range")
 	}
 	return &st.data[st.top+2], &st.data[st.top+1], &st.data[st.top]
+}
+
+func (st *Stack) pop2Uint64() (x, y uint64) {
+	st.top -= 2
+	if uint(st.top) > stackLimit-2 {
+		panic("stack index out of range")
+	}
+	return st.data[st.top+1].Uint64(), st.data[st.top].Uint64()
 }
 
 func (st *Stack) Cap() int {
