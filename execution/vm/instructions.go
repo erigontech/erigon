@@ -36,7 +36,7 @@ import (
 )
 
 func opAdd(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef1Peek1()
 	y.Add(x, y)
 	return pc, nil, nil
 }
@@ -47,7 +47,7 @@ func stAdd(_ uint64, scope *CallContext) string {
 }
 
 func opSub(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef1Peek1()
 	y.Sub(x, y)
 	return pc, nil, nil
 }
@@ -58,7 +58,7 @@ func stSub(_ uint64, scope *CallContext) string {
 }
 
 func opMul(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef1Peek1()
 	y.Mul(x, y)
 	return pc, nil, nil
 }
@@ -69,7 +69,7 @@ func stMul(_ uint64, scope *CallContext) string {
 }
 
 func opDiv(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef1Peek1()
 	y.Div(x, y)
 	return pc, nil, nil
 }
@@ -80,7 +80,7 @@ func stDiv(_ uint64, scope *CallContext) string {
 }
 
 func opSdiv(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef1Peek1()
 	y.SDiv(x, y)
 	return pc, nil, nil
 }
@@ -91,7 +91,7 @@ func stSdiv(_ uint64, scope *CallContext) string {
 }
 
 func opMod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef1Peek1()
 	y.Mod(x, y)
 	return pc, nil, nil
 }
@@ -102,7 +102,7 @@ func stMod(_ uint64, scope *CallContext) string {
 }
 
 func opSmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef1Peek1()
 	y.SMod(x, y)
 	return pc, nil, nil
 }
@@ -113,7 +113,7 @@ func stSmod(_ uint64, scope *CallContext) string {
 }
 
 func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	base, exponent := scope.Stack.popRef(), scope.Stack.peek()
+	base, exponent := scope.Stack.popRef1Peek1()
 	switch {
 	case exponent.IsZero():
 		// x ^ 0 == 1
@@ -142,7 +142,7 @@ func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 }
 
 func opSignExtend(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	back, num := scope.Stack.popRef(), scope.Stack.peek()
+	back, num := scope.Stack.popRef1Peek1()
 	num.ExtendSign(num, back)
 	return pc, nil, nil
 }
@@ -159,7 +159,7 @@ func stNot(_ uint64, scope *CallContext) string {
 }
 
 func opLt(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef1Peek1()
 	if x.Lt(y) {
 		y.SetOne()
 	} else {
@@ -174,7 +174,7 @@ func stLt(_ uint64, scope *CallContext) string {
 }
 
 func opGt(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef1Peek1()
 	if x.Gt(y) {
 		y.SetOne()
 	} else {
@@ -189,7 +189,7 @@ func stGt(_ uint64, scope *CallContext) string {
 }
 
 func opSlt(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef1Peek1()
 	if x.Slt(y) {
 		y.SetOne()
 	} else {
@@ -204,7 +204,7 @@ func stSlt(_ uint64, scope *CallContext) string {
 }
 
 func opSgt(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef1Peek1()
 	if x.Sgt(y) {
 		y.SetOne()
 	} else {
@@ -219,7 +219,7 @@ func stSgt(_ uint64, scope *CallContext) string {
 }
 
 func opEq(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef1Peek1()
 	if x.Eq(y) {
 		y.SetOne()
 	} else {
@@ -249,7 +249,7 @@ func stIsZero(_ uint64, scope *CallContext) string {
 }
 
 func opAnd(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef1Peek1()
 	y.And(x, y)
 	return pc, nil, nil
 }
@@ -260,7 +260,7 @@ func stAnd(_ uint64, scope *CallContext) string {
 }
 
 func opOr(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef1Peek1()
 	y.Or(x, y)
 	return pc, nil, nil
 }
@@ -271,7 +271,7 @@ func stOr(_ uint64, scope *CallContext) string {
 }
 
 func opXor(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef1Peek1()
 	y.Xor(x, y)
 	return pc, nil, nil
 }
@@ -282,13 +282,14 @@ func stXor(_ uint64, scope *CallContext) string {
 }
 
 func opByte(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	th, val := scope.Stack.popRef(), scope.Stack.peek()
+	th, val := scope.Stack.popRef1Peek1()
 	val.Byte(th)
 	return pc, nil, nil
 }
 
 func opAddmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y, z := scope.Stack.popRef(), scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef2()
+	z := scope.Stack.peek()
 	z.AddMod(x, y, z)
 	return pc, nil, nil
 }
@@ -299,7 +300,8 @@ func stAddmod(_ uint64, scope *CallContext) string {
 }
 
 func opMulmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y, z := scope.Stack.popRef(), scope.Stack.popRef(), scope.Stack.peek()
+	x, y := scope.Stack.popRef2()
+	z := scope.Stack.peek()
 	z.MulMod(x, y, z)
 	return pc, nil, nil
 }
@@ -314,7 +316,7 @@ func stMulmod(_ uint64, scope *CallContext) string {
 // and pushes on the stack arg2 shifted to the left by arg1 number of bits.
 func opSHL(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	// Note, second operand is left in the stack; accumulate result into it, and no need to push it afterwards
-	shift, value := scope.Stack.popRef(), scope.Stack.peek()
+	shift, value := scope.Stack.popRef1Peek1()
 	if shift.LtUint64(256) {
 		value.Lsh(value, uint(shift.Uint64()))
 	} else {
@@ -328,7 +330,7 @@ func opSHL(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 // and pushes on the stack arg2 shifted to the right by arg1 number of bits with zero fill.
 func opSHR(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	// Note, second operand is left in the stack; accumulate result into it, and no need to push it afterwards
-	shift, value := scope.Stack.popRef(), scope.Stack.peek()
+	shift, value := scope.Stack.popRef1Peek1()
 	if shift.LtUint64(256) {
 		value.Rsh(value, uint(shift.Uint64()))
 	} else {
@@ -341,7 +343,7 @@ func opSHR(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 // The SAR instruction (arithmetic shift right) pops 2 values from the stack, first arg1 and then arg2,
 // and pushes on the stack arg2 shifted to the right by arg1 number of bits with sign extension.
 func opSAR(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	shift, value := scope.Stack.popRef(), scope.Stack.peek()
+	shift, value := scope.Stack.popRef1Peek1()
 	if shift.GtUint64(255) {
 		if value.Sign() >= 0 {
 			value.Clear()
@@ -357,7 +359,7 @@ func opSAR(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 }
 
 func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	offset, size := scope.Stack.popRef(), scope.Stack.peek()
+	offset, size := scope.Stack.popRef1Peek1()
 	data := scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 
 	hash := crypto.Keccak256Hash(data)
@@ -445,7 +447,7 @@ func stCallDataSize(_ uint64, scope *CallContext) string {
 }
 
 func opCallDataCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	memOffset, dataOffset, length := scope.Stack.pop3Ref()
+	memOffset, dataOffset, length := scope.Stack.popRef3()
 	dataOffset64, overflow := dataOffset.Uint64WithOverflow()
 	if overflow {
 		dataOffset64 = math.MaxUint64
@@ -476,7 +478,7 @@ func opReturnDataSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, 
 }
 
 func opReturnDataCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	memOffset, dataOffset, length := scope.Stack.pop3Ref()
+	memOffset, dataOffset, length := scope.Stack.popRef3()
 
 	offset64, overflow := dataOffset.Uint64WithOverflow()
 	if overflow {
@@ -545,7 +547,7 @@ func opCodeSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 }
 
 func opCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	memOffset, codeOffset, length := scope.Stack.pop3Ref()
+	memOffset, codeOffset, length := scope.Stack.popRef3()
 	uint64CodeOffset, overflow := codeOffset.Uint64WithOverflow()
 	if overflow {
 		uint64CodeOffset = math.MaxUint64
@@ -558,7 +560,7 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	addr := scope.peekAddress()
 	stack := &scope.Stack
 	stack.drop() // consume addr
-	memOffset, codeOffset, length := stack.pop3Ref()
+	memOffset, codeOffset, length := stack.popRef3()
 	// BAL: EXTCODECOPY is a real state access per EIP-7928.
 	evm.IntraBlockState().MarkAddressAccess(addr, false)
 	len64 := length.Uint64()
@@ -729,7 +731,7 @@ func opGasLimit(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 }
 
 func opPop(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.pop()
+	scope.Stack.drop()
 	return pc, nil, nil
 }
 
@@ -747,7 +749,7 @@ func stMload(_ uint64, scope *CallContext) string {
 }
 
 func opMstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	mStart, val := scope.Stack.popRef(), scope.Stack.popRef()
+	mStart, val := scope.Stack.popRef2()
 	scope.Memory.Set32(mStart.Uint64(), val)
 	return pc, nil, nil
 }
@@ -779,7 +781,7 @@ func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		return pc, nil, ErrWriteProtection
 	}
 	key := scope.peekStorageKey(evm)
-	scope.Stack.pop()
+	scope.Stack.drop()
 	val := scope.Stack.pop()
 	return pc, nil, evm.IntraBlockState().SetState(scope.Contract.Address(), key, val)
 }
@@ -823,9 +825,9 @@ func opJumpi(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.Cancelled() {
 		return pc, nil, errStopToken
 	}
-	pos, cond := scope.Stack.pop(), scope.Stack.pop()
+	pos, cond := scope.Stack.popRef2()
 	if !cond.IsZero() {
-		if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
+		if valid, usedBitmap := scope.Contract.validJumpdest(*pos); !valid {
 			if usedBitmap {
 				if evm.config.TraceJumpDest {
 					log.Warn("Code Bitmap used for detecting invalid jump",
@@ -960,8 +962,9 @@ func opSwap16(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 
 func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	var (
-		value        = scope.Stack.pop()
-		offset, size = scope.Stack.pop2uint64()
+		v, o, sz     = scope.Stack.popRef3()
+		value        = *v
+		offset, size = o.Uint64(), sz.Uint64()
 		input        = scope.Memory.GetCopy(offset, size)
 	)
 	return execCreate(pc, evm, scope, value, input, nil)
@@ -981,8 +984,9 @@ func stCreate(_ uint64, scope *CallContext) string {
 
 func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	var (
-		endowment    = scope.Stack.pop()
-		offset, size = scope.Stack.pop2uint64()
+		v, o, sz     = scope.Stack.popRef3()
+		endowment    = *v
+		offset, size = o.Uint64(), sz.Uint64()
 		salt         = scope.Stack.pop()
 		input        = scope.Memory.GetCopy(offset, size)
 	)
@@ -1068,7 +1072,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	stack := &scope.Stack
 	// Pop gas. The actual gas in evm.callGasTemp.
 	// We can use this as a temporary value
-	temp := stack.pop()
+	stack.drop() // result slot; value is overwritten below
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
 	addr, value := stack.pop(), stack.pop()
@@ -1094,12 +1098,12 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	scope.stateGas = 0                             // pass reservoir to child via callGas; restoreChildGas returns it
 	newAccountCharged := evm.callNewAccountCharged // Captured before the call: nested CALL gas phases overwrite the flag.
 	ret, returnGas, childGasUsage, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
+	res := stack.pushRef()
 	if err != nil {
-		temp.Clear()
+		res.Clear()
 	} else {
-		temp.SetOne()
+		res.SetOne()
 	}
-	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
 		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
@@ -1134,7 +1138,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	// Pop gas. The actual gas is in evm.callGasTemp.
 	stack := &scope.Stack
 	// We use it as a temporary value
-	temp := stack.pop()
+	stack.drop() // result slot; value is overwritten below
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
 	addr, value := stack.pop(), stack.pop()
@@ -1151,12 +1155,12 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	ret, returnGas, childGasUsage, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
+	res := stack.pushRef()
 	if err != nil {
-		temp.Clear()
+		res.Clear()
 	} else {
-		temp.SetOne()
+		res.SetOne()
 	}
-	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
 		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
@@ -1185,7 +1189,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	stack := &scope.Stack
 	// Pop gas. The actual gas is in evm.callGasTemp.
 	// We use it as a temporary value
-	temp := stack.pop()
+	stack.drop() // result slot; value is overwritten below
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
 	addr := stack.pop()
@@ -1198,12 +1202,12 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	ret, returnGas, childGasUsage, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
+	res := stack.pushRef()
 	if err != nil {
-		temp.Clear()
+		res.Clear()
 	} else {
-		temp.SetOne()
+		res.SetOne()
 	}
-	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
 		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
@@ -1232,7 +1236,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	// Pop gas. The actual gas is in evm.callGasTemp.
 	stack := &scope.Stack
 	// We use it as a temporary value
-	temp := stack.pop()
+	stack.drop() // result slot; value is overwritten below
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
 	addr := stack.pop()
@@ -1245,12 +1249,12 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	ret, returnGas, childGasUsage, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
+	res := stack.pushRef()
 	if err != nil {
-		temp.Clear()
+		res.Clear()
 	} else {
-		temp.SetOne()
+		res.SetOne()
 	}
-	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
@@ -1299,7 +1303,7 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		return pc, nil, ErrWriteProtection
 	}
 	beneficiaryAddr := scope.peekAddress()
-	scope.Stack.pop()
+	scope.Stack.drop()
 	self := scope.Contract.Address()
 	ibs := evm.IntraBlockState()
 	balance, err := ibs.GetBalance(self)
@@ -1328,7 +1332,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		return pc, nil, ErrWriteProtection
 	}
 	beneficiaryAddr := scope.peekAddress()
-	scope.Stack.pop()
+	scope.Stack.drop()
 	self := scope.Contract.Address()
 	ibs := evm.IntraBlockState()
 	balance, err := ibs.GetBalance(self)

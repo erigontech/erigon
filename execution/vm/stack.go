@@ -61,16 +61,18 @@ func (st *Stack) pushRef() *uint256.Int {
 	return ref
 }
 
-func (st *Stack) pop() (ret uint256.Int) {
+func (st *Stack) pop() uint256.Int {
 	st.top--
-	ret = st.data[st.top]
-	return
+	return st.data[st.top]
 }
 
 // pop2uint64 pops the top two items as their low 64 bits (x topmost) — for
 // opcodes that need only the low word (memory offsets/sizes).
 func (st *Stack) pop2uint64() (x, y uint64) {
 	st.top -= 2
+	if st.top < 0 || st.top+1 >= stackLimit {
+		panic("stack overflow")
+	}
 	return st.data[st.top+1].Uint64(), st.data[st.top].Uint64()
 }
 
@@ -81,15 +83,38 @@ func (st *Stack) popRef() *uint256.Int {
 	return &st.data[st.top]
 }
 
+// popRef1Peek1 pops the top item and returns it together with a pointer to the
+// new top: the operand and write target of a binary op. One range check covers
+// both slots. Same validity rule as popRef.
+func (st *Stack) popRef1Peek1() (x, y *uint256.Int) {
+	st.top--
+	if st.top-1 < 0 || st.top >= stackLimit {
+		panic("stack overflow")
+	}
+	return &st.data[st.top], &st.data[st.top-1]
+}
+
 // drop discards the top item without reading it.
 func (st *Stack) drop() {
 	st.top--
 }
 
-func (st *Stack) pop3Ref() (x, y, z *uint256.Int) {
+// popRef2 pops the top two items and returns pointers to their slots, x
+// topmost. One range check covers both. Same validity rule as popRef.
+func (st *Stack) popRef2() (x, y *uint256.Int) {
+	st.top -= 2
+	if st.top < 0 || st.top+1 >= stackLimit {
+		panic("stack overflow")
+	}
+	return &st.data[st.top+1], &st.data[st.top]
+}
+
+func (st *Stack) popRef3() (x, y, z *uint256.Int) {
 	st.top -= 3
-	t := st.top
-	return &st.data[t+2], &st.data[t+1], &st.data[t]
+	if st.top < 0 || st.top+2 >= stackLimit {
+		panic("stack overflow")
+	}
+	return &st.data[st.top+2], &st.data[st.top+1], &st.data[st.top]
 }
 
 func (st *Stack) popHash() [32]byte {
@@ -105,7 +130,7 @@ func (st *Stack) swap(n int) {
 	i, j := st.top-n-1, st.top-1
 	// Explicit range check: reducing amount of bounds check
 	if i < 0 || i >= stackLimit || j < 0 || j >= stackLimit {
-		panic("evm stack: swap index out of range")
+		panic("stack overflow")
 	}
 	st.data[i], st.data[j] = st.data[j], st.data[i]
 }
@@ -113,7 +138,7 @@ func (st *Stack) swap(n int) {
 func (st *Stack) dup(n int) {
 	i, j := st.top-n, st.top
 	if i < 0 || i >= stackLimit || j < 0 || j >= stackLimit {
-		panic("evm stack: dup index out of range")
+		panic("stack overflow")
 	}
 	st.data[j] = st.data[i]
 	st.top++
