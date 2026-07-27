@@ -551,11 +551,11 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 		return newPrefixes, newFixedBits, newHooks
 	case *HashNode:
 		newPrefixes = prefixes
-		newPrefixes = append(newPrefixes, common.Copy(dbPrefix))
+		newPrefixes = append(newPrefixes, bytes.Clone(dbPrefix))
 		newFixedBits = fixedbits
 		newFixedBits = append(newFixedBits, bits)
 		newHooks = hooks
-		newHooks = append(newHooks, common.Copy(hook))
+		newHooks = append(newHooks, bytes.Clone(hook))
 		return newPrefixes, newFixedBits, newHooks
 	}
 	return prefixes, fixedbits, hooks
@@ -607,7 +607,7 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 	var nn Node
 	switch n := origNode.(type) {
 	case nil:
-		return true, NewShortNode(common.Copy(key[pos:]), value)
+		return true, NewShortNode(bytes.Clone(key[pos:]), value)
 	case *AccountNode:
 		updated, nn = t.insertRecursive(n.Storage, key, pos, value)
 		if updated {
@@ -632,13 +632,13 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 			if len(n.Key) == matchlen+1 {
 				c1 = n.Val
 			} else {
-				c1 = NewShortNode(common.Copy(n.Key[matchlen+1:]), n.Val)
+				c1 = NewShortNode(bytes.Clone(n.Key[matchlen+1:]), n.Val)
 			}
 			var c2 Node
 			if len(key) == pos+matchlen+1 {
 				c2 = value
 			} else {
-				c2 = NewShortNode(common.Copy(key[pos+matchlen+1:]), value)
+				c2 = NewShortNode(bytes.Clone(key[pos+matchlen+1:]), value)
 			}
 			branch := &DuoNode{}
 			if n.Key[matchlen] < key[pos+matchlen] {
@@ -655,7 +655,7 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 				newNode = branch // current node leaves the generation, but new node branch joins it
 			} else {
 				// Otherwise, replace it with a short node leading up to the branch.
-				n.Key = common.Copy(key[pos : pos+matchlen])
+				n.Key = bytes.Clone(key[pos : pos+matchlen])
 				n.Val = branch
 				n.ref.len = 0
 				newNode = n
@@ -686,7 +686,7 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 			if len(key) == pos+1 {
 				child = value
 			} else {
-				child = NewShortNode(common.Copy(key[pos+1:]), value)
+				child = NewShortNode(bytes.Clone(key[pos+1:]), value)
 			}
 			newnode := &FullNode{}
 			newnode.Children[i1] = n.child1
@@ -704,7 +704,7 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 			if len(key) == pos+1 {
 				n.Children[key[pos]] = value
 			} else {
-				n.Children[key[pos]] = NewShortNode(common.Copy(key[pos+1:]), value)
+				n.Children[key[pos]] = NewShortNode(bytes.Clone(key[pos+1:]), value)
 			}
 			updated = true
 			n.ref.len = 0
@@ -1301,7 +1301,7 @@ func (t *Trie) RLPEncode() ([][]byte, error) {
 			hash := crypto.Keccak256Hash(nodeRLP)
 			if _, ok := seen[hash]; !ok {
 				seen[hash] = struct{}{}
-				nodes = append(nodes, common.Copy(nodeRLP))
+				nodes = append(nodes, bytes.Clone(nodeRLP))
 			}
 			return collect(n.Val)
 
@@ -1313,7 +1313,7 @@ func (t *Trie) RLPEncode() ([][]byte, error) {
 			hash := crypto.Keccak256Hash(nodeRLP)
 			if _, ok := seen[hash]; !ok {
 				seen[hash] = struct{}{}
-				nodes = append(nodes, common.Copy(nodeRLP))
+				nodes = append(nodes, bytes.Clone(nodeRLP))
 			}
 			if err := collect(n.child1); err != nil {
 				return err
@@ -1328,7 +1328,7 @@ func (t *Trie) RLPEncode() ([][]byte, error) {
 			hash := crypto.Keccak256Hash(nodeRLP)
 			if _, ok := seen[hash]; !ok {
 				seen[hash] = struct{}{}
-				nodes = append(nodes, common.Copy(nodeRLP))
+				nodes = append(nodes, bytes.Clone(nodeRLP))
 			}
 			for i := range 17 {
 				if n.Children[i] != nil {
