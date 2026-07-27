@@ -142,14 +142,6 @@ func ProgressiveContainerRootAll(schema ...any) ([32]byte, error) {
 	return ProgressiveContainerRoot(activeFields, schema...)
 }
 
-func ProgressiveListRoot(roots [][32]byte, listLength uint64) ([32]byte, error) {
-	root, err := MerkleizeProgressive(roots)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	return hashPair(root, Uint64Root(listLength)), nil
-}
-
 func ProgressiveBitlistRoot(packed []byte, bitLength uint64) ([32]byte, error) {
 	chunks := make([][32]byte, (len(packed)+31)/32)
 	for i := range packed {
@@ -164,29 +156,6 @@ func ProgressiveBasicListRoot(packed []byte, listLength uint64) ([32]byte, error
 		chunks[i/32][i%32] = packed[i]
 	}
 	return ProgressiveListRoot(chunks, listLength)
-}
-
-func MerkleizeProgressive(chunks [][32]byte) ([32]byte, error) {
-	return merkleizeProgressive(chunks, 1)
-}
-
-func merkleizeProgressive(chunks [][32]byte, numLeaves uint64) ([32]byte, error) {
-	if len(chunks) == 0 {
-		return [32]byte{}, nil
-	}
-	count := min(uint64(len(chunks)), numLeaves)
-	left, err := MerkleizeVector(chunks[:count], numLeaves)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	if numLeaves > ^uint64(0)/4 {
-		return [32]byte{}, errors.New("progressive merkle tree is too large")
-	}
-	right, err := merkleizeProgressive(chunks[count:], numLeaves*4)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	return hashPair(left, right), nil
 }
 
 func progressiveSchemaRoots(schema []any) ([][32]byte, error) {
