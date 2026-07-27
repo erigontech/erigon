@@ -538,8 +538,8 @@ func (sdb *IntraBlockState) AddLog(log *types.Log) {
 	sdb.NotifyLog(lp)
 }
 
-// GetLogs deep-copies the tx's logs (types.Logs.Copy batches Topics/Data via
-// CopyTo), so the result is safe to hold after the emit buffer is reused.
+// GetLogs deep-copies the tx's logs, so the result is safe to hold after the
+// emit buffer is reused.
 func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs {
 	if txIndex+1 >= len(sdb.logs) {
 		return nil

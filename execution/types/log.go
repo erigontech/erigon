@@ -256,34 +256,11 @@ func (logs Logs) Copy() Logs {
 	if logs == nil {
 		return nil
 	}
-	var nt, nd int
-	for _, l := range logs {
-		if l == nil {
-			continue
-		}
-		nt += len(l.Topics)
-		nd += len(l.Data)
+	logsCopy := make(Logs, len(logs))
+	for i, log := range logs {
+		logsCopy[i] = log.Copy()
 	}
-	topicsBuf := make([]common.Hash, nt)
-	dataBuf := make([]byte, nd)
-	backing := make([]Log, len(logs))
-	out := make(Logs, len(logs))
-	to, do := 0, 0
-	for i, l := range logs {
-		if l == nil {
-			continue
-		}
-		lt, ld := len(l.Topics), len(l.Data)
-		t := topicsBuf[to : to+lt : to+lt]
-		d := dataBuf[do : do+ld : do+ld]
-		to, do = to+lt, do+ld
-		copy(t, l.Topics)
-		copy(d, l.Data)
-		backing[i] = *l
-		backing[i].Topics, backing[i].Data = t, d
-		out[i] = &backing[i]
-	}
-	return out
+	return logsCopy
 }
 
 // ToRPCTransactionLog converts types.Log in a RPCLog.
@@ -470,23 +447,17 @@ func (l *Log) Copy() *Log {
 	if l == nil {
 		return nil
 	}
-	dst := &Log{
-		Topics: make([]common.Hash, len(l.Topics)),
-		Data:   make(hexutil.Bytes, len(l.Data)),
+	return &Log{
+		Address:     l.Address,
+		Topics:      slices.Clone(l.Topics),
+		Data:        slices.Clone(l.Data),
+		BlockNumber: l.BlockNumber,
+		TxHash:      l.TxHash,
+		TxIndex:     l.TxIndex,
+		BlockHash:   l.BlockHash,
+		Index:       l.Index,
+		Removed:     l.Removed,
 	}
-	l.CopyTo(dst)
-	return dst
-}
-
-// CopyTo deep-copies l into dst, reusing dst's Topics and Data backing arrays
-// when they are big enough. dst never keeps a reference to l's slices.
-func (l *Log) CopyTo(dst *Log) {
-	t := slices.Grow(dst.Topics[:0], len(l.Topics))[:len(l.Topics)]
-	d := slices.Grow(dst.Data[:0], len(l.Data))[:len(l.Data)]
-	copy(t, l.Topics)
-	copy(d, l.Data)
-	*dst = *l
-	dst.Topics, dst.Data = t, d
 }
 
 // LogForStorage is a wrapper around a Log that flattens and parses the entire content of
