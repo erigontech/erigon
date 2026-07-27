@@ -8,7 +8,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
@@ -431,9 +430,9 @@ func tableScanningPrune(
 						time.Sleep(*throttling)
 					}
 					if ctx.Err() != nil {
-						stat.LastPrunedValue = common.Copy(val)
+						stat.LastPrunedValue = bytes.Clone(val)
 						stat.ValueProgress = InProgress
-						return common.Copy(val), nil
+						return bytes.Clone(val), nil
 					}
 					goto nextKey
 				}
