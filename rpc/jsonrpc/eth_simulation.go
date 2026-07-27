@@ -386,12 +386,9 @@ func (s *simulator) sanitizeCall(
 		// Default to remaining block gas, but capped by the node's effective gas cap.
 		remaining := min(blockContext.GasLimit-gasUsed, effectiveCap)
 		args.Gas = (*hexutil.Uint64)(&remaining)
-	} else {
-		// Cap user-specified gas against the node's gas cap.
-		if globalGasCap > 0 && globalGasCap < uint64(*args.Gas) {
-			log.Warn("Caller gas above allowance, capping", "requested", args.Gas, "cap", globalGasCap)
-			args.Gas = (*hexutil.Uint64)(&globalGasCap)
-		}
+	} else if globalGasCap > 0 && globalGasCap < uint64(*args.Gas) {
+		log.Warn("Caller gas above allowance, capping", "requested", args.Gas, "cap", globalGasCap)
+		args.Gas = (*hexutil.Uint64)(&globalGasCap)
 	}
 	if gasUsed+uint64(*args.Gas) > blockContext.GasLimit {
 		return blockGasLimitReachedError(fmt.Sprintf("block gas limit reached: %d >= %d", gasUsed, blockContext.GasLimit))
