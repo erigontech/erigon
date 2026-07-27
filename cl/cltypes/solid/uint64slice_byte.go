@@ -128,7 +128,7 @@ func (arr *byteBasedUint64Slice) Pop() uint64 {
 	offset := (arr.l - 1) * 8
 	val := binary.LittleEndian.Uint64(arr.u[offset : offset+8])
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], 0)
-	arr.l = arr.l - 1
+	arr.l--
 	arr.MerkleTree = nil
 	return val
 }

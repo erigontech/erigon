@@ -29,7 +29,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 )
 
@@ -357,7 +356,7 @@ func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
 	}
 
 	b.size += len(k)*2 + len(v)
-	b.entries[string(k)] = common.Copy(v)
+	b.entries[string(k)] = bytes.Clone(v)
 }
 
 func (b *oldestEntrySortableBuffer) Size() int      { return b.size }
