@@ -363,6 +363,14 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 	return jt
 }
 
+// stackBoundsErr reconstructs which bound the failed range check violated.
+func stackBoundsErr(sLen int, operation *operation) error {
+	if sLen < operation.numPop {
+		return &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
+	}
+	return &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+}
+
 // traceGas picks the figure the dev instruction trace should report: call
 // opcodes forward gas to the callee, so their charged cost is not the
 // interesting number.
@@ -382,6 +390,14 @@ func traceGas(op OpCode, callGas, cost uint64) uint64 {
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
 func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
+	// The generated loop's baked literals are valid only for the canonical
+	// tables it was verified against; ExtraEips-patched copies fall through
+	// to the generic loop below.
+	if runGeneratedFn != nil && !genDispatchDisabled {
+		if _, ok := genTables[evm.jt]; ok {
+			return runGeneratedFn(evm, contract, gas, input, readOnly)
+		}
+	}
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
 		return nil, gas, mdgas.MdGasUsage{}, nil
@@ -458,6 +474,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 	// Hoist to locals so the compiler sees them as loop-invariant.
 	anyTrace := dbg.TraceDynamicGas || debug || trace
+	stack := &callContext.Stack
 
 	jt := evm.jt
 	_ = jt[0] // nil-check the jump table out of the loop
@@ -473,11 +490,10 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		op = contract.GetOp(pc)
 		operation := jt[op]
 		cost = operation.constantGas // For tracing
-		// Validate stack
-		if sLen := callContext.Stack.len(); sLen < operation.numPop {
-			return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-		} else if sLen > operation.maxStack {
-			return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
+		// a stack shallower than numPop wraps negative and fails the compare.
+		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+			return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 		}
 		// for tracing: this gas consumption event is emitted below in the debug section.
 		if callContext.gas < cost {
