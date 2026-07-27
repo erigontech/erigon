@@ -59,7 +59,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = opStop(pc, evm, callContext)
 		case OpCode(0x01): // ADD
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -71,7 +71,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			y.Add(x, y)
 		case OpCode(0x02): // MUL
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 5 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -83,7 +83,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			y.Mul(x, y)
 		case OpCode(0x03): // SUB
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -95,7 +95,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			y.Sub(x, y)
 		case OpCode(0x04): // DIV
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 5 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -107,7 +107,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			y.Div(x, y)
 		case OpCode(0x05): // SDIV
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 5 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -119,7 +119,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			y.SDiv(x, y)
 		case OpCode(0x06): // MOD
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 5 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -131,7 +131,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			y.Mod(x, y)
 		case OpCode(0x07): // SMOD
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 5 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -143,7 +143,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			y.SMod(x, y)
 		case OpCode(0x08): // ADDMOD
 			if sLen := stack.len(); sLen < 3 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 3}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 3, 1026)
 			}
 			if callContext.gas < 8 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -155,7 +155,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			z.AddMod(x, y, z)
 		case OpCode(0x09): // MULMOD
 			if sLen := stack.len(); sLen < 3 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 3}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 3, 1026)
 			}
 			if callContext.gas < 8 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -168,7 +168,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x0A): // EXP
 			operation := jt[op]
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			var memorySize uint64
 			evm.callGasTemp = 0
@@ -218,7 +218,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			}
 		case OpCode(0x0B): // SIGNEXTEND
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 5 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -230,7 +230,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			num.ExtendSign(num, back)
 		case OpCode(0x10): // LT
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -246,7 +246,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			}
 		case OpCode(0x11): // GT
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -262,7 +262,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			}
 		case OpCode(0x12): // SLT
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -278,7 +278,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			}
 		case OpCode(0x13): // SGT
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -294,7 +294,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			}
 		case OpCode(0x14): // EQ
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -310,7 +310,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			}
 		case OpCode(0x15): // ISZERO
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -326,7 +326,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			}
 		case OpCode(0x16): // AND
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -338,7 +338,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			y.And(x, y)
 		case OpCode(0x17): // OR
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -350,7 +350,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			y.Or(x, y)
 		case OpCode(0x18): // XOR
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -362,7 +362,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			y.Xor(x, y)
 		case OpCode(0x19): // NOT
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -374,7 +374,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			x.Not(x)
 		case OpCode(0x1A): // BYTE
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -386,10 +386,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			val.Byte(th)
 		case OpCode(0x1B): // SHL
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -398,10 +396,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x1C): // SHR
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -410,10 +406,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x1D): // SAR
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -422,10 +416,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x1E): // CLZ
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -434,7 +426,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x20): // KECCAK256
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 30 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -476,7 +468,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			size.SetBytes(hash[:])
 		case OpCode(0x30): // ADDRESS
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -489,7 +481,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x31): // BALANCE
 			operation := jt[op]
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1024)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -519,7 +511,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = opBalance(pc, evm, callContext)
 		case OpCode(0x32): // ORIGIN
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -535,7 +527,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			}
 		case OpCode(0x33): // CALLER
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -551,7 +543,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			}
 		case OpCode(0x34): // CALLVALUE
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -562,7 +554,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.push(callContext.Contract.value)
 		case OpCode(0x35): // CALLDATALOAD
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -579,7 +571,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			}
 		case OpCode(0x36): // CALLDATASIZE
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -591,7 +583,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x37): // CALLDATACOPY
 			operation := jt[op]
 			if sLen := stack.len(); sLen < 3 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 3}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 3, 1027)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -637,7 +629,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Memory.SetFromData(memOffset64, length64, dataOffset64, callContext.input)
 		case OpCode(0x38): // CODESIZE
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -649,7 +641,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x39): // CODECOPY
 			operation := jt[op]
 			if sLen := stack.len(); sLen < 3 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 3}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 3, 1027)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -692,7 +684,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Memory.SetFromData(memOffset.Uint64(), length.Uint64(), uint64CodeOffset, callContext.Contract.Code)
 		case OpCode(0x3A): // GASPRICE
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -704,7 +696,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x3B): // EXTCODESIZE
 			operation := jt[op]
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1024)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -735,7 +727,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x3C): // EXTCODECOPY
 			operation := jt[op]
 			if sLen := stack.len(); sLen < 4 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 4}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 4, 1028)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -771,10 +763,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = opExtCodeCopy(pc, evm, callContext)
 		case OpCode(0x3D): // RETURNDATASIZE
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -783,10 +773,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x3E): // RETURNDATACOPY
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -826,10 +814,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x3F): // EXTCODEHASH
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -859,7 +845,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x40): // BLOCKHASH
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1024)
 			}
 			if callContext.gas < 20 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -868,7 +854,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = opBlockhash(pc, evm, callContext)
 		case OpCode(0x41): // COINBASE
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -884,7 +870,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			}
 		case OpCode(0x42): // TIMESTAMP
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -895,7 +881,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.pushRef().SetUint64(evm.Context.Time)
 		case OpCode(0x43): // NUMBER
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -906,7 +892,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.pushRef().SetUint64(evm.Context.BlockNumber)
 		case OpCode(0x44): // DIFFICULTY
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -924,7 +910,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.push(v)
 		case OpCode(0x45): // GASLIMIT
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -939,10 +925,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			}
 		case OpCode(0x46): // CHAINID
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -951,10 +935,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x47): // SELFBALANCE
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -963,10 +945,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x48): // BASEFEE
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -975,10 +955,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x49): // BLOBHASH
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -987,10 +965,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x4A): // BLOBBASEFEE
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -999,10 +975,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x4B): // SLOTNUM
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1011,7 +985,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x50): // POP
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1025)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1022,7 +996,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.drop()
 		case OpCode(0x51): // MLOAD
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1062,7 +1036,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			v.SetBytes(callContext.Memory.GetPtr(offset, 32))
 		case OpCode(0x52): // MSTORE
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1026)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1101,7 +1075,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Memory.Set32(mStart.Uint64(), val)
 		case OpCode(0x53): // MSTORE8
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1026)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1141,7 +1115,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x54): // SLOAD
 			operation := jt[op]
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1024)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1172,7 +1146,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x55): // SSTORE
 			operation := jt[op]
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1026)
 			}
 			var memorySize uint64
 			evm.callGasTemp = 0
@@ -1196,7 +1170,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = opSstore(pc, evm, callContext)
 		case OpCode(0x56): // JUMP
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1025)
 			}
 			if callContext.gas < 8 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1205,7 +1179,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = opJump(pc, evm, callContext)
 		case OpCode(0x57): // JUMPI
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1026)
 			}
 			if callContext.gas < 10 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1214,7 +1188,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = opJumpi(pc, evm, callContext)
 		case OpCode(0x58): // PC
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1225,7 +1199,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.pushRef().SetUint64(pc)
 		case OpCode(0x59): // MSIZE
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1236,7 +1210,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.pushRef().SetUint64(uint64(callContext.Memory.Len()))
 		case OpCode(0x5A): // GAS
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1254,10 +1228,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 
 		case OpCode(0x5C): // TLOAD
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1266,10 +1238,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x5D): // TSTORE
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1278,10 +1248,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x5E): // MCOPY
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1321,10 +1289,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x5F): // PUSH0
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1333,7 +1299,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x60): // PUSH1
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1350,7 +1316,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			}
 		case OpCode(0x61): // PUSH2
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1371,7 +1337,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x62): // PUSH3
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1381,7 +1347,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x63): // PUSH4
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1391,7 +1357,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x64): // PUSH5
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1401,7 +1367,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x65): // PUSH6
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1411,7 +1377,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x66): // PUSH7
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1421,7 +1387,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x67): // PUSH8
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1431,7 +1397,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x68): // PUSH9
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1441,7 +1407,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x69): // PUSH10
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1451,7 +1417,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x6A): // PUSH11
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1461,7 +1427,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x6B): // PUSH12
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1471,7 +1437,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x6C): // PUSH13
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1481,7 +1447,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x6D): // PUSH14
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1491,7 +1457,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x6E): // PUSH15
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1501,7 +1467,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x6F): // PUSH16
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1511,7 +1477,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x70): // PUSH17
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1521,7 +1487,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x71): // PUSH18
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1531,7 +1497,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x72): // PUSH19
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1541,7 +1507,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x73): // PUSH20
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1551,7 +1517,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x74): // PUSH21
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1561,7 +1527,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x75): // PUSH22
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1571,7 +1537,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x76): // PUSH23
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1581,7 +1547,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x77): // PUSH24
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1591,7 +1557,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x78): // PUSH25
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1601,7 +1567,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x79): // PUSH26
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1611,7 +1577,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x7A): // PUSH27
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1621,7 +1587,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x7B): // PUSH28
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1631,7 +1597,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x7C): // PUSH29
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1641,7 +1607,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x7D): // PUSH30
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1651,7 +1617,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x7E): // PUSH31
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1661,7 +1627,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0x7F): // PUSH32
 			operation := jt[op]
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1670,10 +1636,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x80): // DUP1
 			operation := jt[op]
-			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-1) > 1022 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1682,10 +1646,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x81): // DUP2
 			operation := jt[op]
-			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-2) > 1021 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1694,10 +1656,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x82): // DUP3
 			operation := jt[op]
-			if sLen := stack.len(); sLen < 3 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 3}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-3) > 1020 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 3, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1706,10 +1666,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x83): // DUP4
 			operation := jt[op]
-			if sLen := stack.len(); sLen < 4 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 4}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-4) > 1019 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 4, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1718,10 +1676,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x84): // DUP5
 			operation := jt[op]
-			if sLen := stack.len(); sLen < 5 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 5}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-5) > 1018 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 5, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1730,10 +1686,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x85): // DUP6
 			operation := jt[op]
-			if sLen := stack.len(); sLen < 6 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 6}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-6) > 1017 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 6, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1742,10 +1696,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x86): // DUP7
 			operation := jt[op]
-			if sLen := stack.len(); sLen < 7 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 7}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-7) > 1016 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 7, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1754,10 +1706,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x87): // DUP8
 			operation := jt[op]
-			if sLen := stack.len(); sLen < 8 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 8}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-8) > 1015 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 8, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1766,10 +1716,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x88): // DUP9
 			operation := jt[op]
-			if sLen := stack.len(); sLen < 9 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 9}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-9) > 1014 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 9, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1778,10 +1726,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x89): // DUP10
 			operation := jt[op]
-			if sLen := stack.len(); sLen < 10 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 10}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-10) > 1013 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 10, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1790,10 +1736,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x8A): // DUP11
 			operation := jt[op]
-			if sLen := stack.len(); sLen < 11 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 11}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-11) > 1012 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 11, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1802,10 +1746,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x8B): // DUP12
 			operation := jt[op]
-			if sLen := stack.len(); sLen < 12 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 12}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-12) > 1011 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 12, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1814,10 +1756,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x8C): // DUP13
 			operation := jt[op]
-			if sLen := stack.len(); sLen < 13 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 13}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-13) > 1010 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 13, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1826,10 +1766,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x8D): // DUP14
 			operation := jt[op]
-			if sLen := stack.len(); sLen < 14 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 14}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-14) > 1009 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 14, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1838,10 +1776,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x8E): // DUP15
 			operation := jt[op]
-			if sLen := stack.len(); sLen < 15 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 15}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-15) > 1008 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 15, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1850,10 +1786,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x8F): // DUP16
 			operation := jt[op]
-			if sLen := stack.len(); sLen < 16 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 16}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-16) > 1007 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 16, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1862,7 +1796,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0x90): // SWAP1
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1873,7 +1807,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.swap(1)
 		case OpCode(0x91): // SWAP2
 			if sLen := stack.len(); sLen < 3 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 3}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 3, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1884,7 +1818,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.swap(2)
 		case OpCode(0x92): // SWAP3
 			if sLen := stack.len(); sLen < 4 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 4}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 4, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1895,7 +1829,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.swap(3)
 		case OpCode(0x93): // SWAP4
 			if sLen := stack.len(); sLen < 5 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 5}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 5, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1906,7 +1840,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.swap(4)
 		case OpCode(0x94): // SWAP5
 			if sLen := stack.len(); sLen < 6 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 6}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 6, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1917,7 +1851,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.swap(5)
 		case OpCode(0x95): // SWAP6
 			if sLen := stack.len(); sLen < 7 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 7}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 7, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1928,7 +1862,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.swap(6)
 		case OpCode(0x96): // SWAP7
 			if sLen := stack.len(); sLen < 8 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 8}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 8, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1939,7 +1873,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.swap(7)
 		case OpCode(0x97): // SWAP8
 			if sLen := stack.len(); sLen < 9 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 9}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 9, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1950,7 +1884,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.swap(8)
 		case OpCode(0x98): // SWAP9
 			if sLen := stack.len(); sLen < 10 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 10}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 10, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1961,7 +1895,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.swap(9)
 		case OpCode(0x99): // SWAP10
 			if sLen := stack.len(); sLen < 11 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 11}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 11, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1972,7 +1906,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.swap(10)
 		case OpCode(0x9A): // SWAP11
 			if sLen := stack.len(); sLen < 12 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 12}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 12, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1983,7 +1917,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.swap(11)
 		case OpCode(0x9B): // SWAP12
 			if sLen := stack.len(); sLen < 13 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 13}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 13, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -1994,7 +1928,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.swap(12)
 		case OpCode(0x9C): // SWAP13
 			if sLen := stack.len(); sLen < 14 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 14}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 14, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -2005,7 +1939,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.swap(13)
 		case OpCode(0x9D): // SWAP14
 			if sLen := stack.len(); sLen < 15 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 15}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 15, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -2016,7 +1950,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.swap(14)
 		case OpCode(0x9E): // SWAP15
 			if sLen := stack.len(); sLen < 16 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 16}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 16, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -2027,7 +1961,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			callContext.Stack.swap(15)
 		case OpCode(0x9F): // SWAP16
 			if sLen := stack.len(); sLen < 17 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 17}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 17, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -2039,7 +1973,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0xA0): // LOG0
 			operation := jt[op]
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1026)
 			}
 			var memorySize uint64
 			if memSize, overflow := memoryLog(callContext); overflow {
@@ -2072,7 +2006,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0xA1): // LOG1
 			operation := jt[op]
 			if sLen := stack.len(); sLen < 3 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 3}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 3, 1027)
 			}
 			var memorySize uint64
 			if memSize, overflow := memoryLog(callContext); overflow {
@@ -2105,7 +2039,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0xA2): // LOG2
 			operation := jt[op]
 			if sLen := stack.len(); sLen < 4 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 4}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 4, 1028)
 			}
 			var memorySize uint64
 			if memSize, overflow := memoryLog(callContext); overflow {
@@ -2138,7 +2072,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0xA3): // LOG3
 			operation := jt[op]
 			if sLen := stack.len(); sLen < 5 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 5}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 5, 1029)
 			}
 			var memorySize uint64
 			if memSize, overflow := memoryLog(callContext); overflow {
@@ -2171,7 +2105,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0xA4): // LOG4
 			operation := jt[op]
 			if sLen := stack.len(); sLen < 6 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 6}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 6, 1030)
 			}
 			var memorySize uint64
 			if memSize, overflow := memoryLog(callContext); overflow {
@@ -2203,10 +2137,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0xE6): // DUPN
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -2230,7 +2162,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0xF0): // CREATE
 			operation := jt[op]
 			if sLen := stack.len(); sLen < 3 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 3}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 3, 1026)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -2267,7 +2199,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0xF1): // CALL
 			operation := jt[op]
 			if sLen := stack.len(); sLen < 7 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 7}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 7, 1030)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -2304,7 +2236,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0xF2): // CALLCODE
 			operation := jt[op]
 			if sLen := stack.len(); sLen < 7 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 7}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 7, 1030)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -2340,7 +2272,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = opCallCode(pc, evm, callContext)
 		case OpCode(0xF3): // RETURN
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1026)
 			}
 			var memorySize uint64
 			if memSize, overflow := memoryReturn(callContext); overflow {
@@ -2372,10 +2304,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = opReturn(pc, evm, callContext)
 		case OpCode(0xF4): // DELEGATECALL
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -2415,10 +2345,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0xF5): // CREATE2
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -2458,10 +2386,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0xFA): // STATICCALL
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -2501,10 +2427,8 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 			pc, res, err = operation.execute(pc, evm, callContext)
 		case OpCode(0xFD): // REVERT
 			operation := jt[op]
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			var memorySize uint64
 			if operation.memorySize != nil {
@@ -2541,7 +2465,7 @@ func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byt
 		case OpCode(0xFF): // SELFDESTRUCT
 			operation := jt[op]
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1025)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -2636,6 +2560,9 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 	}
 
 	anyTrace := dbg.TraceDynamicGas || debug || trace
+	hasGasChange := debug && tracer.OnGasChange != nil
+	hasOpcode := debug && tracer.OnOpcode != nil
+	var opCtx tracing.OpContext = callContext
 	stack := &callContext.Stack
 
 	jt := evm.jt
@@ -2651,13 +2578,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x00): // STOP
 			cost = 0
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -2666,20 +2587,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x01): // ADD
 			cost = 3
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -2691,20 +2606,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x02): // MUL
 			cost = 5
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 5 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 5
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -2716,20 +2625,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x03): // SUB
 			cost = 3
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -2741,20 +2644,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x04): // DIV
 			cost = 5
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 5 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 5
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -2766,20 +2663,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x05): // SDIV
 			cost = 5
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 5 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 5
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -2791,20 +2682,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x06): // MOD
 			cost = 5
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 5 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 5
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -2816,20 +2701,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x07): // SMOD
 			cost = 5
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 5 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 5
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -2841,20 +2720,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x08): // ADDMOD
 			cost = 8
 			if sLen := stack.len(); sLen < 3 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 3}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 3, 1026)
 			}
 			if callContext.gas < 8 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 8
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -2866,20 +2739,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x09): // MULMOD
 			cost = 8
 			if sLen := stack.len(); sLen < 3 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 3}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 3, 1026)
 			}
 			if callContext.gas < 8 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 8
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -2892,7 +2759,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 0
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			var memorySize uint64
 			evm.callGasTemp = 0
@@ -2921,13 +2788,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -2962,20 +2823,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x0B): // SIGNEXTEND
 			cost = 5
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 5 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 5
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -2987,20 +2842,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x10): // LT
 			cost = 3
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3016,20 +2865,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x11): // GT
 			cost = 3
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3045,20 +2888,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x12): // SLT
 			cost = 3
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3074,20 +2911,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x13): // SGT
 			cost = 3
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3103,20 +2934,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x14): // EQ
 			cost = 3
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3132,20 +2957,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x15): // ISZERO
 			cost = 3
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3161,20 +2980,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x16): // AND
 			cost = 3
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3186,20 +2999,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x17): // OR
 			cost = 3
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3211,20 +3018,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x18): // XOR
 			cost = 3
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3236,20 +3037,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x19): // NOT
 			cost = 3
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3261,20 +3056,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x1A): // BYTE
 			cost = 3
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3286,23 +3075,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x1B): // SHL
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= operation.constantGas
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3311,23 +3092,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x1C): // SHR
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= operation.constantGas
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3336,23 +3109,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x1D): // SAR
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= operation.constantGas
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3361,23 +3126,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x1E): // CLZ
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= operation.constantGas
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3386,7 +3143,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x20): // KECCAK256
 			cost = 30
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1025)
 			}
 			if callContext.gas < 30 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -3424,13 +3181,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -3448,20 +3199,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x30): // ADDRESS
 			cost = 2
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3474,7 +3219,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = operation.constantGas
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1024)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -3509,13 +3254,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3524,20 +3263,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x32): // ORIGIN
 			cost = 2
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3553,20 +3286,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x33): // CALLER
 			cost = 2
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3582,20 +3309,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x34): // CALLVALUE
 			cost = 2
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3606,20 +3327,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x35): // CALLDATALOAD
 			cost = 3
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3636,20 +3351,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x36): // CALLDATASIZE
 			cost = 2
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3661,7 +3370,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 3 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 3}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 3, 1027)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -3699,13 +3408,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -3727,20 +3430,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x38): // CODESIZE
 			cost = 2
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3752,7 +3449,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen < 3 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 3}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 3, 1027)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -3790,13 +3487,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -3815,20 +3506,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x3A): // GASPRICE
 			cost = 2
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3840,7 +3525,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = operation.constantGas
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1024)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -3875,13 +3560,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3891,7 +3570,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = operation.constantGas
 			if sLen := stack.len(); sLen < 4 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 4}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 4, 1028)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -3929,13 +3608,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -3947,23 +3620,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x3D): // RETURNDATASIZE
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= operation.constantGas
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -3972,10 +3637,8 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x3E): // RETURNDATACOPY
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -4017,13 +3680,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -4035,10 +3692,8 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x3F): // EXTCODEHASH
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -4073,13 +3728,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4088,20 +3737,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x40): // BLOCKHASH
 			cost = 20
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1024)
 			}
 			if callContext.gas < 20 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 20
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4110,20 +3753,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x41): // COINBASE
 			cost = 2
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4139,20 +3776,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x42): // TIMESTAMP
 			cost = 2
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4163,20 +3794,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x43): // NUMBER
 			cost = 2
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4187,20 +3812,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x44): // DIFFICULTY
 			cost = 2
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4218,20 +3837,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x45): // GASLIMIT
 			cost = 2
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4246,23 +3859,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x46): // CHAINID
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= operation.constantGas
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4271,23 +3876,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x47): // SELFBALANCE
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= operation.constantGas
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4296,23 +3893,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x48): // BASEFEE
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= operation.constantGas
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4321,23 +3910,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x49): // BLOBHASH
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= operation.constantGas
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4346,23 +3927,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x4A): // BLOBBASEFEE
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= operation.constantGas
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4371,23 +3944,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x4B): // SLOTNUM
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= operation.constantGas
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4396,20 +3961,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x50): // POP
 			cost = 2
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1025)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4420,7 +3979,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x51): // MLOAD
 			cost = 3
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -4458,13 +4017,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -4480,7 +4033,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x52): // MSTORE
 			cost = 3
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1026)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -4518,13 +4071,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -4539,7 +4086,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x53): // MSTORE8
 			cost = 3
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1026)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -4577,13 +4124,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -4599,7 +4140,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = operation.constantGas
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1024)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -4634,13 +4175,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4650,7 +4185,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 0
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1026)
 			}
 			var memorySize uint64
 			evm.callGasTemp = 0
@@ -4679,13 +4214,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4694,20 +4223,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x56): // JUMP
 			cost = 8
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1025)
 			}
 			if callContext.gas < 8 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 8
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4716,20 +4239,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x57): // JUMPI
 			cost = 10
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1026)
 			}
 			if callContext.gas < 10 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 10
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4738,20 +4255,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x58): // PC
 			cost = 2
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4762,20 +4273,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x59): // MSIZE
 			cost = 2
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4786,20 +4291,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x5A): // GAS
 			cost = 2
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 2 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 2
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4814,13 +4313,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			}
 			callContext.gas -= 1
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4830,23 +4323,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x5C): // TLOAD
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= operation.constantGas
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4855,23 +4340,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x5D): // TSTORE
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= operation.constantGas
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4880,10 +4357,8 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x5E): // MCOPY
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -4925,13 +4400,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -4943,23 +4412,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x5F): // PUSH0
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= operation.constantGas
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4968,20 +4429,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x60): // PUSH1
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -4998,20 +4453,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x61): // PUSH2
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5032,20 +4481,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5055,20 +4498,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5078,20 +4515,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5101,20 +4532,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5124,20 +4549,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5147,20 +4566,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5170,20 +4583,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5193,20 +4600,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5216,20 +4617,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5239,20 +4634,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5262,20 +4651,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5285,20 +4668,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5308,20 +4685,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5331,20 +4702,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5354,20 +4719,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5377,20 +4736,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5400,20 +4753,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5423,20 +4770,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5446,20 +4787,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5469,20 +4804,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5492,20 +4821,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5515,20 +4838,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5538,20 +4855,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5561,20 +4872,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5584,20 +4889,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5607,20 +4906,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5630,20 +4923,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5653,20 +4940,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5676,20 +4957,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5699,20 +4974,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 3
 			if sLen := stack.len(); sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 0, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5721,23 +4990,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x80): // DUP1
 			operation := jt[op]
 			cost = 3
-			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-1) > 1022 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5746,23 +5007,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x81): // DUP2
 			operation := jt[op]
 			cost = 3
-			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-2) > 1021 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5771,23 +5024,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x82): // DUP3
 			operation := jt[op]
 			cost = 3
-			if sLen := stack.len(); sLen < 3 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 3}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-3) > 1020 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 3, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5796,23 +5041,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x83): // DUP4
 			operation := jt[op]
 			cost = 3
-			if sLen := stack.len(); sLen < 4 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 4}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-4) > 1019 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 4, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5821,23 +5058,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x84): // DUP5
 			operation := jt[op]
 			cost = 3
-			if sLen := stack.len(); sLen < 5 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 5}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-5) > 1018 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 5, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5846,23 +5075,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x85): // DUP6
 			operation := jt[op]
 			cost = 3
-			if sLen := stack.len(); sLen < 6 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 6}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-6) > 1017 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 6, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5871,23 +5092,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x86): // DUP7
 			operation := jt[op]
 			cost = 3
-			if sLen := stack.len(); sLen < 7 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 7}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-7) > 1016 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 7, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5896,23 +5109,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x87): // DUP8
 			operation := jt[op]
 			cost = 3
-			if sLen := stack.len(); sLen < 8 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 8}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-8) > 1015 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 8, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5921,23 +5126,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x88): // DUP9
 			operation := jt[op]
 			cost = 3
-			if sLen := stack.len(); sLen < 9 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 9}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-9) > 1014 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 9, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5946,23 +5143,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x89): // DUP10
 			operation := jt[op]
 			cost = 3
-			if sLen := stack.len(); sLen < 10 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 10}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-10) > 1013 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 10, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5971,23 +5160,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x8A): // DUP11
 			operation := jt[op]
 			cost = 3
-			if sLen := stack.len(); sLen < 11 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 11}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-11) > 1012 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 11, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -5996,23 +5177,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x8B): // DUP12
 			operation := jt[op]
 			cost = 3
-			if sLen := stack.len(); sLen < 12 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 12}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-12) > 1011 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 12, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6021,23 +5194,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x8C): // DUP13
 			operation := jt[op]
 			cost = 3
-			if sLen := stack.len(); sLen < 13 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 13}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-13) > 1010 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 13, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6046,23 +5211,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x8D): // DUP14
 			operation := jt[op]
 			cost = 3
-			if sLen := stack.len(); sLen < 14 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 14}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-14) > 1009 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 14, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6071,23 +5228,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x8E): // DUP15
 			operation := jt[op]
 			cost = 3
-			if sLen := stack.len(); sLen < 15 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 15}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-15) > 1008 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 15, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6096,23 +5245,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x8F): // DUP16
 			operation := jt[op]
 			cost = 3
-			if sLen := stack.len(); sLen < 16 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 16}
-			} else if sLen > 1023 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: 1023}
+			if sLen := stack.len(); uint(sLen-16) > 1007 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 16, 1023)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6121,20 +5262,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x90): // SWAP1
 			cost = 3
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6145,20 +5280,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x91): // SWAP2
 			cost = 3
 			if sLen := stack.len(); sLen < 3 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 3}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 3, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6169,20 +5298,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x92): // SWAP3
 			cost = 3
 			if sLen := stack.len(); sLen < 4 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 4}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 4, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6193,20 +5316,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x93): // SWAP4
 			cost = 3
 			if sLen := stack.len(); sLen < 5 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 5}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 5, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6217,20 +5334,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x94): // SWAP5
 			cost = 3
 			if sLen := stack.len(); sLen < 6 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 6}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 6, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6241,20 +5352,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x95): // SWAP6
 			cost = 3
 			if sLen := stack.len(); sLen < 7 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 7}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 7, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6265,20 +5370,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x96): // SWAP7
 			cost = 3
 			if sLen := stack.len(); sLen < 8 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 8}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 8, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6289,20 +5388,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x97): // SWAP8
 			cost = 3
 			if sLen := stack.len(); sLen < 9 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 9}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 9, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6313,20 +5406,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x98): // SWAP9
 			cost = 3
 			if sLen := stack.len(); sLen < 10 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 10}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 10, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6337,20 +5424,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x99): // SWAP10
 			cost = 3
 			if sLen := stack.len(); sLen < 11 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 11}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 11, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6361,20 +5442,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x9A): // SWAP11
 			cost = 3
 			if sLen := stack.len(); sLen < 12 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 12}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 12, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6385,20 +5460,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x9B): // SWAP12
 			cost = 3
 			if sLen := stack.len(); sLen < 13 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 13}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 13, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6409,20 +5478,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x9C): // SWAP13
 			cost = 3
 			if sLen := stack.len(); sLen < 14 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 14}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 14, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6433,20 +5496,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x9D): // SWAP14
 			cost = 3
 			if sLen := stack.len(); sLen < 15 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 15}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 15, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6457,20 +5514,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x9E): // SWAP15
 			cost = 3
 			if sLen := stack.len(); sLen < 16 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 16}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 16, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6481,20 +5532,14 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0x9F): // SWAP16
 			cost = 3
 			if sLen := stack.len(); sLen < 17 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 17}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 17, 1024)
 			}
 			if callContext.gas < 3 {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= 3
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6506,7 +5551,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 0
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1026)
 			}
 			var memorySize uint64
 			if memSize, overflow := memoryLog(callContext); overflow {
@@ -6540,13 +5585,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -6559,7 +5598,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 0
 			if sLen := stack.len(); sLen < 3 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 3}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 3, 1027)
 			}
 			var memorySize uint64
 			if memSize, overflow := memoryLog(callContext); overflow {
@@ -6593,13 +5632,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -6612,7 +5645,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 0
 			if sLen := stack.len(); sLen < 4 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 4}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 4, 1028)
 			}
 			var memorySize uint64
 			if memSize, overflow := memoryLog(callContext); overflow {
@@ -6646,13 +5679,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -6665,7 +5692,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 0
 			if sLen := stack.len(); sLen < 5 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 5}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 5, 1029)
 			}
 			var memorySize uint64
 			if memSize, overflow := memoryLog(callContext); overflow {
@@ -6699,13 +5726,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -6718,7 +5739,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = 0
 			if sLen := stack.len(); sLen < 6 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 6}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 6, 1030)
 			}
 			var memorySize uint64
 			if memSize, overflow := memoryLog(callContext); overflow {
@@ -6752,13 +5773,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -6770,23 +5785,15 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0xE6): // DUPN
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= operation.constantGas
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6800,13 +5807,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			}
 			callContext.gas -= operation.constantGas
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6820,13 +5821,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			}
 			callContext.gas -= operation.constantGas
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -6836,7 +5831,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = operation.constantGas
 			if sLen := stack.len(); sLen < 3 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 3}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 3, 1026)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -6874,13 +5869,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -6893,7 +5882,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = operation.constantGas
 			if sLen := stack.len(); sLen < 7 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 7}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 7, 1030)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -6931,13 +5920,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -6950,7 +5933,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = operation.constantGas
 			if sLen := stack.len(); sLen < 7 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 7}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 7, 1030)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -6988,13 +5971,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -7006,7 +5983,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0xF3): // RETURN
 			cost = 0
 			if sLen := stack.len(); sLen < 2 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 2, 1026)
 			}
 			var memorySize uint64
 			if memSize, overflow := memoryReturn(callContext); overflow {
@@ -7040,13 +6017,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -7058,10 +6029,8 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0xF4): // DELEGATECALL
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -7103,13 +6072,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -7121,10 +6084,8 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0xF5): // CREATE2
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -7166,13 +6127,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -7184,10 +6139,8 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0xFA): // STATICCALL
 			operation := jt[op]
 			cost = operation.constantGas
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -7229,13 +6182,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -7247,10 +6194,8 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		case OpCode(0xFD): // REVERT
 			operation := jt[op]
 			cost = 0
-			if sLen := stack.len(); sLen < operation.numPop {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-			} else if sLen > operation.maxStack {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 			}
 			var memorySize uint64
 			if operation.memorySize != nil {
@@ -7288,13 +6233,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if memorySize > 0 {
 				callContext.Memory.Resize(memorySize)
@@ -7307,7 +6246,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 			operation := jt[op]
 			cost = operation.constantGas
 			if sLen := stack.len(); sLen < 1 {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 1}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErrConst(sLen, 1, 1025)
 			}
 			if callContext.gas < operation.constantGas {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -7340,13 +6279,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 				}
 			}
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
@@ -7355,13 +6288,7 @@ func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []b
 		default:
 			cost = 0
 			if debug {
-				if tracer.OnGasChange != nil {
-					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
-				}
-				if tracer.OnOpcode != nil {
-					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-					logged = true
-				}
+				logged = opHook(tracer, hasGasChange, hasOpcode, pc, op, gasCopy, cost, opCtx, evm, err)
 			}
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
