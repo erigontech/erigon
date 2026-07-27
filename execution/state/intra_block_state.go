@@ -133,7 +133,7 @@ type accessOptions struct {
 	revertable bool
 }
 
-type AccessSet map[accounts.Address]*accessOptions
+type AccessSet map[accounts.Address]accessOptions
 
 func (aa AccessSet) Merge(other AccessSet) AccessSet {
 	if len(other) == 0 {
@@ -2821,9 +2821,10 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 	if opts, ok := sdb.versionedReads.access[addr]; ok {
 		if opts.revertable && !revertable {
 			opts.revertable = false
+			sdb.versionedReads.access[addr] = opts
 		}
 	} else {
-		sdb.versionedReads.access[addr] = &accessOptions{revertable}
+		sdb.versionedReads.access[addr] = accessOptions{revertable: revertable}
 	}
 }
 
@@ -2838,19 +2839,9 @@ func (sdb *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
 	})
 }
 
-// AccessedAddresses returns and resets the set of addresses touched during the current transaction.
-func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
-	access := sdb.versionedReads.access
-	if len(access) == 0 {
-		sdb.recordAccess = false
-		sdb.versionedReads.access = nil
-		return nil
-	}
-	out := make(AccessSet, len(access))
-	maps.Copy(out, access)
-	sdb.recordAccess = false
-	sdb.versionedReads.access = nil
-	return out
+func (sdb *IntraBlockState) AccessedAddr(addr accounts.Address) bool {
+	_, ok := sdb.versionedReads.access[addr]
+	return ok
 }
 
 func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts.Account, source ReadSource, version Version) {
