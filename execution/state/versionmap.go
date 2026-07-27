@@ -1058,7 +1058,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 
 	if vm.trace || (traceInvalid && valid == VersionInvalid) {
 		if len(tracePrefix) > 0 {
-			tracePrefix = tracePrefix + "  RD"
+			tracePrefix += "  RD"
 		} else {
 			tracePrefix = "RD"
 		}

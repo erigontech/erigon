@@ -167,13 +167,11 @@ func (hmap *handlerMap) publish(bus *eventBus, args []any, argIndex int) int {
 						handlerBus := asyncHandler.bus.Load()
 						if handlerBus != nil {
 							asyncHandler.doPublish(handlerBus, logEnabled, args...)
-						} else {
-							if logEnabled {
-								log.Trace("Ignoring callback",
-									"handler", fmt.Sprint(asyncHandler),
-									"bus", app.LogInstance(handlerBus),
-									"args", fmt.Sprint(args...))
-							}
+						} else if logEnabled {
+							log.Trace("Ignoring callback",
+								"handler", fmt.Sprint(asyncHandler),
+								"bus", app.LogInstance(handlerBus),
+								"args", fmt.Sprint(args...))
 						}
 						bus.wg.Done()
 					})
