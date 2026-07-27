@@ -731,7 +731,7 @@ func opGasLimit(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 }
 
 func opPop(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.pop()
+	scope.Stack.drop()
 	return pc, nil, nil
 }
 
@@ -781,7 +781,7 @@ func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		return pc, nil, ErrWriteProtection
 	}
 	key := scope.peekStorageKey()
-	scope.Stack.pop()
+	scope.Stack.drop()
 	val := scope.Stack.pop()
 	return pc, nil, evm.IntraBlockState().SetState(scope.Contract.Address(), key, val)
 }
@@ -1070,7 +1070,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	stack := &scope.Stack
 	// Pop gas. The actual gas in evm.callGasTemp.
 	// We can use this as a temporary value
-	temp := stack.pop()
+	stack.drop() // result slot; value is overwritten below
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
 	addr, value := stack.pop(), stack.pop()
@@ -1096,12 +1096,12 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	scope.stateGas = 0                             // pass reservoir to child via callGas; restoreChildGas returns it
 	newAccountCharged := evm.callNewAccountCharged // Captured before the call: nested CALL gas phases overwrite the flag.
 	ret, returnGas, childGasUsage, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
+	res := stack.pushRef()
 	if err != nil {
-		temp.Clear()
+		res.Clear()
 	} else {
-		temp.SetOne()
+		res.SetOne()
 	}
-	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
 		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
@@ -1136,7 +1136,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	// Pop gas. The actual gas is in evm.callGasTemp.
 	stack := &scope.Stack
 	// We use it as a temporary value
-	temp := stack.pop()
+	stack.drop() // result slot; value is overwritten below
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
 	addr, value := stack.pop(), stack.pop()
@@ -1153,12 +1153,12 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	ret, returnGas, childGasUsage, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
+	res := stack.pushRef()
 	if err != nil {
-		temp.Clear()
+		res.Clear()
 	} else {
-		temp.SetOne()
+		res.SetOne()
 	}
-	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
 		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
@@ -1187,7 +1187,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	stack := &scope.Stack
 	// Pop gas. The actual gas is in evm.callGasTemp.
 	// We use it as a temporary value
-	temp := stack.pop()
+	stack.drop() // result slot; value is overwritten below
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
 	addr := stack.pop()
@@ -1200,12 +1200,12 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	ret, returnGas, childGasUsage, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
+	res := stack.pushRef()
 	if err != nil {
-		temp.Clear()
+		res.Clear()
 	} else {
-		temp.SetOne()
+		res.SetOne()
 	}
-	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
 		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
@@ -1234,7 +1234,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	// Pop gas. The actual gas is in evm.callGasTemp.
 	stack := &scope.Stack
 	// We use it as a temporary value
-	temp := stack.pop()
+	stack.drop() // result slot; value is overwritten below
 	gas := scope.callGas(evm)
 	// Pop other call parameters.
 	addr := stack.pop()
@@ -1247,12 +1247,12 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	ret, returnGas, childGasUsage, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
+	res := stack.pushRef()
 	if err != nil {
-		temp.Clear()
+		res.Clear()
 	} else {
-		temp.SetOne()
+		res.SetOne()
 	}
-	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
@@ -1301,7 +1301,7 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		return pc, nil, ErrWriteProtection
 	}
 	beneficiaryAddr := scope.peekAddress()
-	scope.Stack.pop()
+	scope.Stack.drop()
 	self := scope.Contract.Address()
 	ibs := evm.IntraBlockState()
 	balance, err := ibs.GetBalance(self)
@@ -1330,7 +1330,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		return pc, nil, ErrWriteProtection
 	}
 	beneficiaryAddr := scope.peekAddress()
-	scope.Stack.pop()
+	scope.Stack.drop()
 	self := scope.Contract.Address()
 	ibs := evm.IntraBlockState()
 	balance, err := ibs.GetBalance(self)
