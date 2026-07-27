@@ -913,8 +913,8 @@ func deleteBlocksRange(ctx context.Context, tx kv.RwTx, blockFrom uint64, to []b
 		if to != nil && n >= binary.BigEndian.Uint64(to) { // [from, to)
 			break
 		}
-		var b types.BodyForStorage
-		if err := rlp.DecodeBytes(v, &b); err != nil {
+		var b types.BodyOnlyTxn
+		if err := b.DecodeRLPBytes(v); err != nil {
 			return err
 		}
 		if b.TxCount > 0 {
