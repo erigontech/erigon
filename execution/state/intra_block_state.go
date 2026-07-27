@@ -2687,14 +2687,10 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 //
 // Cancun fork:
 // - Reset transient storage (EIP-1153)
-//
-// Prague fork:
-// - Add authorities to access list (EIP-7702)
-// - Add delegated designation (if it exists for dst) to access list (EIP-7702)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase accounts.Address, dst accounts.Address,
-	precompiles []accounts.Address, list types.AccessList, authorities []accounts.Address) error {
+	precompiles []accounts.Address, list types.AccessList) {
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(sender.Handle()) || !dst.IsNil() && dbg.TraceAccount(dst.Handle())) {
-		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v, %v\n", sdb.blockNum, sdb.txIndex, sdb.version, sender, coinbase, dst, precompiles, list, rules, authorities)
+		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v\n", sdb.blockNum, sdb.txIndex, sdb.version, sender, coinbase, dst, precompiles, list, rules)
 	}
 	sdb.eip8246 = rules.IsAmsterdam
 	if rules.IsBerlin {
@@ -2721,48 +2717,15 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 			al.AddAddress(coinbase)
 		}
 	}
-	if rules.IsPrague {
-		for _, addr := range authorities {
-			sdb.AddAddressToAccessList(addr)
-		}
-
-		if !rules.IsAmsterdam && !dst.IsNil() {
-			dd, ok, err := sdb.GetDelegatedDesignation(dst)
-			if err != nil {
-				return err
-			}
-			if ok {
-				sdb.AddAddressToAccessList(dd)
-			}
-		}
-	}
 	// Reset transient storage at the beginning of transaction execution
 	clear(sdb.transientStorage)
 	sdb.versionedReads.access = nil
 	sdb.recordAccess = true
 
-	// EIP-3651 makes the coinbase warm (Shanghai+). EIP-7928 BAL must include
-	// it even when the block has no priority-fee transfer to the coinbase
-	// (i.e. nothing else in the tx writes to the coinbase). Without this, txns
-	// that produce no fee for the coinbase leave its address out of the BAL
-	// and the validator-side BAL hash diverges from the spec sidecar.
-	// recordAccess was just enabled and the access set reset, so
-	// MarkAddressAccess will actually take effect here (unlike when called
-	// from verifyAuthorities, which runs before Prepare).
+	// EIP-7928 records the EIP-3651 coinbase access even without a priority fee.
 	if rules.IsShanghai {
 		sdb.MarkAddressAccess(coinbase, true)
 	}
-	// EIP-7702 authorities: txn_executor.verifyAuthorities calls
-	// MarkAddressAccess for each recovered authority before Prepare runs, so
-	// that mark is a no-op. Re-mark here so the authority is captured in the
-	// BAL even when the EVM never touches the authority during execution
-	// (e.g. authorization fails the nonce check after recovery).
-	if rules.IsPrague {
-		for _, addr := range authorities {
-			sdb.MarkAddressAccess(addr, false)
-		}
-	}
-	return nil
 }
 
 // AddAddressToAccessList adds the given address to the access list
