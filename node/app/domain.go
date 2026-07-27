@@ -241,8 +241,7 @@ func (d *domain[T]) CompareTo(other any) int {
 		return 1
 	}
 
-	switch otherTyped := other.(type) {
-	case Domain:
+	if otherTyped, ok := other.(Domain); ok {
 		return bytes.Compare(d.id.asBytes(), otherTyped.Id().asBytes())
 	}
 

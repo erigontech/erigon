@@ -357,7 +357,7 @@ func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 
 func onlyKnownFeatures(features Features) error {
 	for _, f := range SupportedFeatures {
-		features = features &^ f
+		features &^= f
 	}
 	if features != No {
 		return fmt.Errorf("%w. unknown features bitmap: %b", IncompatibleErr, features)
