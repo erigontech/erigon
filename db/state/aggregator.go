@@ -1883,9 +1883,10 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 			if !dr.values.needMerge || cr.values.to < dr.values.from {
 				if _, err := at.d[kd].lookupVisibleFileByRange(cr.values.from, cr.values.to); err == nil {
 					// file for required range exists, hold this domain from merge but allow to merge comitemnt
+					prevValues := dr.values
 					r.domain[k].values = MergeRange{}
 					at.a.logger.Debug("findMergeRange: commitment range is different but file exists in domain, hold further merge",
-						at.d[k].d.FilenameBase, dr.values.String("vals", at.StepSize()),
+						at.d[k].d.FilenameBase, prevValues.String("vals", at.StepSize()),
 						"commitment", cr.values.String("vals", at.StepSize()))
 					continue
 				}

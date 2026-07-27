@@ -1057,6 +1057,37 @@ func TestAddLogOnLogPointerStability(t *testing.T) {
 	require.Equal(t, []byte{0xbe, 0xef}, []byte(first.Data))
 }
 
+// TestAllocLogOnLogRetentionSurvivesReuse pins the same OnLog contract for the
+// AllocLog path the EVM's makeLog uses: it fills the entry's Topics/Data in
+// place, so a hook copy that shares those buffers would be rewritten by the next
+// log reusing the entry.
+func TestAllocLogOnLogRetentionSurvivesReuse(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	var retained []*types.Log
+	ibs.SetHooks(&tracing.Hooks{OnLog: func(l *types.Log) { retained = append(retained, l) }})
+
+	emit := func(addr common.Address, topic common.Hash, data []byte) {
+		lp := ibs.AllocLog(1, len(data))
+		lp.Address = addr
+		lp.Topics[0] = topic
+		copy(lp.Data, data)
+		ibs.NotifyLog(lp)
+	}
+
+	ibs.SetTxContext(1, 0)
+	emit(common.Address{0xaa}, common.Hash{0x01}, []byte{0x11, 0x22})
+	require.Len(t, retained, 1)
+
+	ibs.Reset()
+	ibs.SetTxContext(2, 0)
+	emit(common.Address{0xbb}, common.Hash{0x99}, []byte{0xde, 0xad})
+
+	require.Equal(t, []byte{0x11, 0x22}, []byte(retained[0].Data))
+	require.Equal(t, common.Hash{0x01}, retained[0].Topics[0])
+}
+
 // TestAllocLogPreservesCapacityAcrossRevert pins that fully reverting a tx's
 // logs (which truncates the outer buffer) and then logging again reuses the
 // inner buffer's capacity instead of dropping it — the same capacity Reset

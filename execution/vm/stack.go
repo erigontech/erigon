@@ -57,11 +57,6 @@ func (st *Stack) pop() (ret uint256.Int) {
 	return
 }
 
-func (st *Stack) pop2uint64() (x, y uint64) {
-	st.top -= 2
-	return st.data[st.top+1].Uint64(), st.data[st.top].Uint64()
-}
-
 func (st *Stack) popHash() [32]byte {
 	st.top--
 	return st.data[st.top].Bytes32()
