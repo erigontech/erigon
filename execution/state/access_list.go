@@ -33,10 +33,9 @@ type accessList struct {
 	addresses map[accounts.Address]int
 	slots     []map[accounts.StorageKey]struct{}
 
-	// Memo of the last resolved (address -> slot set); a nil lastSlots means no
-	// memo. Must be dropped whenever a slot map can be handed to a different
-	// address, or the memo would keep writing slots into a map that address no
-	// longer owns.
+	// Memo of the last resolved (address -> slot set)
+	// Means calling `AddSlot` on same addr will make 1 less map-lookup.
+	// nil lastSlots means no memo
 	lastAddr  accounts.Address
 	lastSlots map[accounts.StorageKey]struct{}
 }
@@ -180,7 +179,6 @@ func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.Storage
 		}
 		al.slots = al.slots[:idx]
 		al.addresses[address] = -1
-		// The truncated map is now free for a different address to claim.
 		al.dropMemo()
 	}
 }
