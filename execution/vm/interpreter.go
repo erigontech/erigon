@@ -457,7 +457,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	// Hoist to locals so the compiler sees them as loop-invariant.
 	anyTrace := dbg.TraceDynamicGas || debug || trace
 	jt := evm.jt
-	_ = jt[0] // nil-check the jump table out of the loop
 
 	for {
 		if debug {
