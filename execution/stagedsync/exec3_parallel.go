@@ -111,9 +111,14 @@ type parallelExecutor struct {
 	// worker pull-loops draining pe.in. runSem holds the idle worker contexts;
 	// runWG tracks in-flight task goroutines for teardown. Results flow (rws) is
 	// deliberately unchanged here — that's a separate later step.
-	runSem         chan *exec.Worker
-	runWG          sync.WaitGroup
-	workersCtx     context.Context
+	runSem     chan *exec.Worker
+	runWG      sync.WaitGroup
+	workersCtx context.Context
+	// results is the Step-2 plain results channel: dispatchRun pushes finished
+	// tasks here (as-arrive) and the exec loop consumes them directly via
+	// processSingleResult, replacing the pe.rws heap + in-order drain. Only used
+	// under GOROUTINE_PER_TASK.
+	results        chan *exec.TxResult
 	workerCount    int
 	blockExecutors map[uint64]*blockExecutor
 	// applyResultsCh and commitResultsCh are set before execLoop starts.
@@ -1078,79 +1083,134 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		if logNpPhases {
 			npWaitStart = time.Now()
 		}
-		select {
-		case exec := <-pendingCh:
-			if err := pe.processRequest(ctx, exec); err != nil {
-				return err
-			}
-			continue
-		case <-ctx.Done():
-			// Context cancelled (executeBlocks returned from errgroup, or
-			// executor cleanup ran). Drain any remaining worker results,
-			// forward any completed blockResults to the apply loop +
-			// commitment calculator, then exit. Without forwarding the
-			// trailing blockResult, the apply loop sees only the channel
-			// close and never observes that maxBlockNum was reached —
-			// which makes single-block fork validation see "more work
-			// pending" when there is none.
-			for {
-				select {
-				case nextResult, ok := <-pe.rws.ResultCh():
-					if !ok {
-						return pe.execLoopExitCheck(ctx, "ctx-done-drain: rws.ResultCh closed")
+		var blockResult *blockResult
+		if goroutinePerTask {
+			// Plain-channel path: results arrive as-arrive on pe.results (no heap
+			// reorder); process each directly. Order is imposed at publish.
+			select {
+			case exec := <-pendingCh:
+				if err := pe.processRequest(ctx, exec); err != nil {
+					return err
+				}
+				continue
+			case <-ctx.Done():
+				for {
+					select {
+					case txResult, ok := <-pe.results:
+						if !ok {
+							return pe.execLoopExitCheck(ctx, "ctx-done-drain: results closed")
+						}
+						br, e := pe.processSingleResult(ctx, applyTx, txResult)
+						if e != nil {
+							return e
+						}
+						if br != nil {
+							pe.RLock()
+							blockExecutor, exists := pe.blockExecutors[br.BlockNum]
+							pe.RUnlock()
+							if exists {
+								pe.lastExecutedBlockNum.Store(int64(br.BlockNum))
+								if err := blockExecutor.sendResult(ctx, br, false); err != nil {
+									return err
+								}
+								if br.Err != nil {
+									return nil
+								}
+								pe.Lock()
+								delete(pe.blockExecutors, br.BlockNum)
+								pe.Unlock()
+								pe.scheduleNextPending(ctx)
+							}
+						}
+					default:
+						return pe.execLoopExitCheck(ctx, "ctx-done-drain: no more results")
 					}
-					if closed, err := pe.rws.Drain(ctx, nextResult); err != nil || closed {
+				}
+			case txResult, ok := <-pe.results:
+				if !ok {
+					return pe.execLoopExitCheck(ctx, "main-select: results closed")
+				}
+				if logNpPhases {
+					npWait += time.Since(npWaitStart)
+					npProcStart = time.Now()
+				}
+				blockResult, err = pe.processSingleResult(ctx, applyTx, txResult)
+			}
+		} else {
+			select {
+			case exec := <-pendingCh:
+				if err := pe.processRequest(ctx, exec); err != nil {
+					return err
+				}
+				continue
+			case <-ctx.Done():
+				// Context cancelled (executeBlocks returned from errgroup, or
+				// executor cleanup ran). Drain any remaining worker results,
+				// forward any completed blockResults to the apply loop +
+				// commitment calculator, then exit. Without forwarding the
+				// trailing blockResult, the apply loop sees only the channel
+				// close and never observes that maxBlockNum was reached —
+				// which makes single-block fork validation see "more work
+				// pending" when there is none.
+				for {
+					select {
+					case nextResult, ok := <-pe.rws.ResultCh():
+						if !ok {
+							return pe.execLoopExitCheck(ctx, "ctx-done-drain: rws.ResultCh closed")
+						}
+						if closed, err := pe.rws.Drain(ctx, nextResult); err != nil || closed {
+							if err != nil {
+								return err
+							}
+							return pe.execLoopExitCheck(ctx, "ctx-done-drain: rws.Drain returned closed")
+						}
+						blockResult, err := pe.processResults(ctx, applyTx)
 						if err != nil {
 							return err
 						}
-						return pe.execLoopExitCheck(ctx, "ctx-done-drain: rws.Drain returned closed")
-					}
-					blockResult, err := pe.processResults(ctx, applyTx)
-					if err != nil {
-						return err
-					}
-					if blockResult != nil {
-						pe.RLock()
-						blockExecutor, exists := pe.blockExecutors[blockResult.BlockNum]
-						pe.RUnlock()
-						if exists {
-							pe.lastExecutedBlockNum.Store(int64(blockResult.BlockNum))
-							if err := blockExecutor.sendResult(ctx, blockResult, false); err != nil {
-								return err
+						if blockResult != nil {
+							pe.RLock()
+							blockExecutor, exists := pe.blockExecutors[blockResult.BlockNum]
+							pe.RUnlock()
+							if exists {
+								pe.lastExecutedBlockNum.Store(int64(blockResult.BlockNum))
+								if err := blockExecutor.sendResult(ctx, blockResult, false); err != nil {
+									return err
+								}
+								// See main exec-loop path: invalid blockResult is
+								// the apply loop's signal — don't schedule next.
+								if blockResult.Err != nil {
+									return nil
+								}
+								pe.Lock()
+								delete(pe.blockExecutors, blockResult.BlockNum)
+								pe.Unlock()
+								pe.scheduleNextPending(ctx)
 							}
-							// See main exec-loop path: invalid blockResult is
-							// the apply loop's signal — don't schedule next.
-							if blockResult.Err != nil {
-								return nil
-							}
-							pe.Lock()
-							delete(pe.blockExecutors, blockResult.BlockNum)
-							pe.Unlock()
-							pe.scheduleNextPending(ctx)
 						}
+					default:
+						return pe.execLoopExitCheck(ctx, "ctx-done-drain: no more pending results")
 					}
-				default:
-					return pe.execLoopExitCheck(ctx, "ctx-done-drain: no more pending results")
+				}
+			case nextResult, ok := <-pe.rws.ResultCh():
+				if !ok {
+					return pe.execLoopExitCheck(ctx, "main-select: rws.ResultCh closed")
+				}
+				if logNpPhases {
+					npWait += time.Since(npWaitStart)
+					npProcStart = time.Now()
+				}
+				closed, err := pe.rws.Drain(ctx, nextResult)
+				if err != nil {
+					return err
+				}
+				if closed {
+					return pe.execLoopExitCheck(ctx, "main-select: rws.Drain returned closed")
 				}
 			}
-		case nextResult, ok := <-pe.rws.ResultCh():
-			if !ok {
-				return pe.execLoopExitCheck(ctx, "main-select: rws.ResultCh closed")
-			}
-			if logNpPhases {
-				npWait += time.Since(npWaitStart)
-				npProcStart = time.Now()
-			}
-			closed, err := pe.rws.Drain(ctx, nextResult)
-			if err != nil {
-				return err
-			}
-			if closed {
-				return pe.execLoopExitCheck(ctx, "main-select: rws.Drain returned closed")
-			}
-		}
 
-		blockResult, err := pe.processResults(ctx, applyTx)
+			blockResult, err = pe.processResults(ctx, applyTx)
+		}
 		if logNpPhases {
 			npProc += time.Since(npProcStart)
 		}
@@ -1652,44 +1712,49 @@ func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.TemporalTx) (blockResult *blockResult, err error) {
 	rwsIt := pe.rws.Iter()
 	for rwsIt.HasNext() && blockResult == nil {
-		txResult := rwsIt.PopNext()
-		injectSpineDelay()
-
-		if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
-			chaosErr := chaos_monkey.ThrowRandomConsensusError(false, txResult.Version().TxIndex, pe.cfg.badBlockHalt, txResult.Err)
-			if chaosErr != nil {
-				log.Warn("Monkey in consensus")
-				return blockResult, chaosErr
-			}
-		}
-
-		pe.RLock()
-		blockExecutor, ok := pe.blockExecutors[txResult.Version().BlockNum]
-		pe.RUnlock()
-
-		if !ok {
-			return nil, fmt.Errorf("unknown block: %d", txResult.Version().BlockNum)
-		}
-
-		// Ensure this block's changeset accumulator is installed before its
-		// writes are applied — covers blocks scheduled out of band (with no
-		// preceding blockResult to trigger the fast-path install above).
-		pe.ensureChangesetAccumulator(txResult.Version().BlockNum)
-
-		if depShapeEnabled {
-			serialStart := time.Now()
-			blockResult, err = blockExecutor.nextResult(ctx, pe, txResult, applyTx)
-			blockExecutor.serialNanos += time.Since(serialStart).Nanoseconds()
-		} else {
-			blockResult, err = blockExecutor.nextResult(ctx, pe, txResult, applyTx)
-		}
-
+		blockResult, err = pe.processSingleResult(ctx, applyTx, rwsIt.PopNext())
 		if err != nil {
 			return blockResult, err
 		}
 	}
 
 	return blockResult, nil
+}
+
+// processSingleResult routes one worker result to its block executor's
+// nextResult. It is the per-result body shared by the heap-drained path
+// (processResults) and the plain-channel path (GOROUTINE_PER_TASK).
+func (pe *parallelExecutor) processSingleResult(ctx context.Context, applyTx kv.TemporalTx, txResult *exec.TxResult) (*blockResult, error) {
+	injectSpineDelay()
+
+	if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
+		chaosErr := chaos_monkey.ThrowRandomConsensusError(false, txResult.Version().TxIndex, pe.cfg.badBlockHalt, txResult.Err)
+		if chaosErr != nil {
+			log.Warn("Monkey in consensus")
+			return nil, chaosErr
+		}
+	}
+
+	pe.RLock()
+	blockExecutor, ok := pe.blockExecutors[txResult.Version().BlockNum]
+	pe.RUnlock()
+
+	if !ok {
+		return nil, fmt.Errorf("unknown block: %d", txResult.Version().BlockNum)
+	}
+
+	// Ensure this block's changeset accumulator is installed before its
+	// writes are applied — covers blocks scheduled out of band (with no
+	// preceding blockResult to trigger the fast-path install above).
+	pe.ensureChangesetAccumulator(txResult.Version().BlockNum)
+
+	if depShapeEnabled {
+		serialStart := time.Now()
+		blockResult, err := blockExecutor.nextResult(ctx, pe, txResult, applyTx)
+		blockExecutor.serialNanos += time.Since(serialStart).Nanoseconds()
+		return blockResult, err
+	}
+	return blockExecutor.nextResult(ctx, pe, txResult, applyTx)
 }
 
 func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.CancelCauseFunc, error) {
@@ -1743,6 +1808,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 			for _, w := range pe.execWorkers {
 				pe.runSem <- w
 			}
+			pe.results = make(chan *exec.TxResult, len(pe.execWorkers)*8)
 		}
 		return pe.execLoop(execLoopCtx)
 	})
@@ -1902,7 +1968,10 @@ func (pe *parallelExecutor) dispatchRun(t exec.Task) {
 		}
 		defer func() { pe.runSem <- w }()
 		result := w.RunTxTask(t)
-		_ = pe.rws.Add(pe.workersCtx, result)
+		select {
+		case pe.results <- result:
+		case <-pe.workersCtx.Done():
+		}
 	}()
 }
 
