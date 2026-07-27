@@ -203,7 +203,7 @@ type ShardedLRU[V any] struct {
 // size >= 2 no shard has capacity 1 (where two colliding keys would evict each other).
 func NewShardedLRU[V any](size, shards int) (*ShardedLRU[V], error) {
 	const minShardCapacity = 2
-	if maxShards := size / minShardCapacity; shards > maxShards {
+	if maxShards := max(size/minShardCapacity, 1); shards > maxShards {
 		shards = maxShards
 	}
 	n := 1
