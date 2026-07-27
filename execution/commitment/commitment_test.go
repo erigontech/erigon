@@ -462,6 +462,29 @@ func TestBranchData_ChildCount(t *testing.T) {
 	require.Equal(t, 3, buf.ChildCount())
 }
 
+func TestBranchData_IsComplete(t *testing.T) {
+	t.Parallel()
+
+	// Buffers shorter than the 4-byte touchMap+afterMap header are not complete
+	// and must not panic. Empty values are deletion tombstones kept across merges.
+	require.False(t, BranchData(nil).IsComplete())
+	require.False(t, BranchData{}.IsComplete())
+	require.False(t, BranchData{0x00}.IsComplete())
+	require.False(t, BranchData{0xff, 0xff, 0x00}.IsComplete())
+
+	// Every child present in afterMap is also covered by touchMap -> complete.
+	complete := make(BranchData, 4)
+	binary.BigEndian.PutUint16(complete[0:], 0xffff)
+	binary.BigEndian.PutUint16(complete[2:], 0b0000_0000_0000_0111)
+	require.True(t, complete.IsComplete())
+
+	// afterMap references a child missing from touchMap -> incomplete.
+	incomplete := make(BranchData, 4)
+	binary.BigEndian.PutUint16(incomplete[0:], 0b0000_0000_0000_0001)
+	binary.BigEndian.PutUint16(incomplete[2:], 0b0000_0000_0000_0011)
+	require.False(t, incomplete.IsComplete())
+}
+
 func TestBranchData_MergeHexBranchesEmptyBranches(t *testing.T) {
 	t.Parallel()
 
