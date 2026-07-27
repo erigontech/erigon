@@ -29,9 +29,13 @@ import (
 // forcing every frame through the generic jump-table interpreter.
 var genDispatchDisabled = dbg.EnvBool("EVM_NO_GEN_DISPATCH", false)
 
-// runGeneratedFn is set by the generated file's init. Delegating through a
-// nil-checked var lets the package build before the generator has run.
-var runGeneratedFn func(evm *EVM, contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error)
+// runGeneratedFastFn/runGeneratedTracedFn are set by the generated file's
+// init. Delegating through nil-checked vars lets the package build before the
+// generator has run.
+var (
+	runGeneratedFastFn   func(evm *EVM, contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error)
+	runGeneratedTracedFn func(evm *EVM, contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error)
+)
 
 // genTables holds the canonical tables the generated loop's baked literals
 // were verified against. Populated in init rather than referenced from Run:

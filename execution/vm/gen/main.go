@@ -195,7 +195,9 @@ func classify(symbols []string, directName func(string) string) (callMode, strin
 }
 
 type emitter struct {
-	buf bytes.Buffer
+	buf     bytes.Buffer
+	tracing bool              // emit hook/trace bookkeeping into each case
+	bodies  map[string]string // trivially inlinable op-func bodies, by name
 }
 
 func (e *emitter) p(format string, args ...any) {
@@ -205,6 +207,9 @@ func (e *emitter) p(format string, args ...any) {
 const errReturn = "return nil, callContext.Gas(), mdgas.MdGasUsage{}, "
 
 func (e *emitter) emitDebugBlock() {
+	if !e.tracing {
+		return
+	}
 	e.p("if debug {\n")
 	e.p("if tracer.OnGasChange != nil {\n")
 	e.p("tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)\n")
@@ -217,9 +222,26 @@ func (e *emitter) emitDebugBlock() {
 }
 
 func (e *emitter) emitTraceBlock() {
+	if !e.tracing {
+		return
+	}
 	e.p("if trace {\n")
 	e.p("traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)\n")
 	e.p("}\n")
+}
+
+// emitExec emits the op execution: an inlined body when one qualified, a
+// direct call for invariant named functions, the table entry otherwise.
+func (e *emitter) emitExec(p opPlan) {
+	if p.exec == callDirect {
+		if body, ok := e.bodies[p.execSymbol]; ok {
+			e.p("// inlined %s\n%s\n", p.execSymbol, body)
+			return
+		}
+		e.p("pc, res, err = %s(pc, evm, callContext)\n", p.execSymbol)
+		return
+	}
+	e.p("pc, res, err = operation.execute(pc, evm, callContext)\n")
 }
 
 func (e *emitter) emitCase(p opPlan) {
@@ -228,10 +250,12 @@ func (e *emitter) emitCase(p opPlan) {
 		e.p("operation := jt[op]\n")
 	}
 
-	if p.gasInv {
-		e.p("cost = %d\n", p.gas)
-	} else {
-		e.p("cost = operation.constantGas\n")
+	if e.tracing {
+		if p.gasInv {
+			e.p("cost = %d\n", p.gas)
+		} else {
+			e.p("cost = operation.constantGas\n")
+		}
 	}
 
 	if p.stackInv {
@@ -264,10 +288,10 @@ func (e *emitter) emitCase(p opPlan) {
 			e.p("callContext.gas -= %d\n", p.gas)
 		}
 	} else {
-		e.p("if callContext.gas < cost {\n")
+		e.p("if callContext.gas < operation.constantGas {\n")
 		e.p(errReturn + "ErrOutOfGas\n")
 		e.p("}\n")
-		e.p("callContext.gas -= cost\n")
+		e.p("callContext.gas -= operation.constantGas\n")
 	}
 
 	if p.dyn != callNone {
@@ -306,17 +330,19 @@ func (e *emitter) emitCase(p opPlan) {
 		e.p("}\n")
 		e.p(errReturn + "err\n")
 		e.p("}\n")
-		e.p("if anyTrace {\n")
-		e.p("cost += dynamicCost.Regular\n")
-		if p.gasInv {
-			e.p("callGas = %d + dynamicCost.Regular - evm.CallGasTemp()\n", p.gas)
-		} else {
-			e.p("callGas = operation.constantGas + dynamicCost.Regular - evm.CallGasTemp()\n")
+		if e.tracing {
+			e.p("if anyTrace {\n")
+			e.p("cost += dynamicCost.Regular\n")
+			if p.gasInv {
+				e.p("callGas = %d + dynamicCost.Regular - evm.CallGasTemp()\n", p.gas)
+			} else {
+				e.p("callGas = operation.constantGas + dynamicCost.Regular - evm.CallGasTemp()\n")
+			}
+			e.p("if dbg.TraceDynamicGas && dynamicCost.Regular > 0 {\n")
+			e.p("traceDynamicGasPrint(evm, op, callGas, cost)\n")
+			e.p("}\n")
+			e.p("}\n")
 		}
-		e.p("if dbg.TraceDynamicGas && dynamicCost.Regular > 0 {\n")
-		e.p("traceDynamicGasPrint(evm, op, callGas, cost)\n")
-		e.p("}\n")
-		e.p("}\n")
 		e.p("if callContext.gas < dynamicCost.Regular {\n")
 		e.p(errReturn + "ErrOutOfGas\n")
 		e.p("}\n")
@@ -338,16 +364,14 @@ func (e *emitter) emitCase(p opPlan) {
 		e.p("}\n")
 	}
 	e.emitTraceBlock()
-	if p.exec == callDirect {
-		e.p("pc, res, err = %s(pc, evm, callContext)\n", p.execSymbol)
-	} else {
-		e.p("pc, res, err = operation.execute(pc, evm, callContext)\n")
-	}
+	e.emitExec(p)
 }
 
 func (e *emitter) emitDefaultCase() {
 	e.p("default:\n")
-	e.p("cost = 0\n")
+	if e.tracing {
+		e.p("cost = 0\n")
+	}
 	e.emitDebugBlock()
 	e.emitTraceBlock()
 	e.p("pc, res, err = opUndefined(pc, evm, callContext)\n")
@@ -361,6 +385,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -369,12 +396,51 @@ import (
 
 `
 
-const runPrologue = `// runGenerated is the generated switch-dispatch twin of EVM.Run, valid for
-// every canonical fork table: fields identical across all tables are baked as
-// literals, fork-varying ones are read from the active table. Run delegates
-// here only for tables in genTables, so ExtraEips-patched copies keep the
-// generic loop.
-func (evm *EVM) runGenerated(contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
+const runFastPrologue = `// runGeneratedFast is the hookless generated twin of EVM.Run for canonical
+// fork tables: no tracer, dev-trace, or per-op cost bookkeeping in the loop.
+// Run routes here only when no tracing of any kind is active.
+func (evm *EVM) runGeneratedFast(contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
+	if len(contract.Code) == 0 {
+		return nil, gas, mdgas.MdGasUsage{}, nil
+	}
+	evm.returnData = nil
+
+	var (
+		op          OpCode
+		callContext = getCallContext(contract, input, gas)
+		pc          = uint64(0)
+		res         []byte
+	)
+
+	restoreReadonly := readOnly && !evm.readOnly
+	if restoreReadonly {
+		evm.readOnly = true
+	}
+	evm.depth++
+	defer func() {
+		gasUsed.StateSpill = callContext.stateGasSpill
+		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
+		callContext.put()
+		if restoreReadonly {
+			evm.readOnly = false
+		}
+		evm.depth--
+	}()
+
+	stack := &callContext.Stack
+
+	jt := evm.jt
+	_ = jt[0]
+
+	for {
+		callContext.cacheGen++
+		op = contract.GetOp(pc)
+		switch op {
+`
+
+const runTracedPrologue = `// runGeneratedTraced is the generated twin of EVM.Run with full tracer and
+// dev-trace bookkeeping, used whenever any tracing is active.
+func (evm *EVM) runGeneratedTraced(contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	if len(contract.Code) == 0 {
 		return nil, gas, mdgas.MdGasUsage{}, nil
 	}
@@ -453,10 +519,81 @@ const runEpilogue = `		}
 	return res, callContext.Gas(), mdgas.MdGasUsage{}, err
 }
 
-func init() {
-	runGeneratedFn = (*EVM).runGenerated
+`
+
+const initBlock = `func init() {
+	runGeneratedFastFn = (*EVM).runGeneratedFast
+	runGeneratedTracedFn = (*EVM).runGeneratedTraced
 }
 `
+
+// inlinableBodies returns the bodies of op functions safe to paste into a
+// case: exactly one return, which is the final `return pc, nil, nil`, and no
+// defers. The return is stripped and `scope.` rewritten to `callContext.`.
+func inlinableBodies(vmDir string) map[string]string {
+	bodies := make(map[string]string)
+	matches, _ := filepath.Glob(filepath.Join(vmDir, "*.go"))
+	fset := token.NewFileSet()
+	for _, path := range matches {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		f, err := parser.ParseFile(fset, path, src, 0)
+		if err != nil {
+			continue
+		}
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || fn.Body == nil || len(fn.Body.List) == 0 {
+				continue
+			}
+			if !strings.HasPrefix(fn.Name.Name, "op") {
+				continue
+			}
+			last, ok := fn.Body.List[len(fn.Body.List)-1].(*ast.ReturnStmt)
+			if !ok || !isPcNilNil(last) {
+				continue
+			}
+			returns, hasDefer := 0, false
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				switch n.(type) {
+				case *ast.ReturnStmt:
+					returns++
+				case *ast.DeferStmt:
+					hasDefer = true
+				case *ast.FuncLit:
+					return false
+				}
+				return true
+			})
+			if returns != 1 || hasDefer {
+				continue
+			}
+			start := fset.Position(fn.Body.Lbrace).Offset + 1
+			end := fset.Position(last.Pos()).Offset
+			body := strings.TrimRight(string(src[start:end]), "\n\t ")
+			bodies[fn.Name.Name] = strings.ReplaceAll(body, "scope.", "callContext.")
+		}
+	}
+	return bodies
+}
+
+func isPcNilNil(r *ast.ReturnStmt) bool {
+	if len(r.Results) != 3 {
+		return false
+	}
+	for i, want := range []string{"pc", "nil", "nil"} {
+		id, ok := r.Results[i].(*ast.Ident)
+		if !ok || id.Name != want {
+			return false
+		}
+	}
+	return true
+}
 
 func main() {
 	_, sourceFile, _, ok := runtime.Caller(0)
@@ -469,24 +606,42 @@ func main() {
 	funcs := packageFuncs(vmDir)
 	forks := vm.DumpAllDispatch()
 	plans := analyze(forks, funcs, "")
+	bodies := inlinableBodies(vmDir)
 
 	e := &emitter{}
 	e.p("%s", fileHeader)
-	e.p("%s", runPrologue)
-	baked, entryBased := 0, 0
-	for _, p := range plans {
-		if p.undefinedEverywhere {
-			continue
+	baked, entryBased, inlined := 0, 0, 0
+	for _, variant := range []struct {
+		tracing  bool
+		prologue string
+	}{
+		{false, runFastPrologue},
+		{true, runTracedPrologue},
+	} {
+		ce := &emitter{tracing: variant.tracing, bodies: bodies}
+		for _, p := range plans {
+			if p.undefinedEverywhere {
+				continue
+			}
+			ce.emitCase(p)
+			if variant.tracing {
+				continue
+			}
+			if p.needsEntry() {
+				entryBased++
+			} else {
+				baked++
+			}
+			if p.exec == callDirect && bodies[p.execSymbol] != "" {
+				inlined++
+			}
 		}
-		e.emitCase(p)
-		if p.needsEntry() {
-			entryBased++
-		} else {
-			baked++
-		}
+		ce.emitDefaultCase()
+		e.p("%s", variant.prologue)
+		e.buf.Write(ce.buf.Bytes())
+		e.p("%s", runEpilogue)
 	}
-	e.emitDefaultCase()
-	e.p("%s", runEpilogue)
+	e.p("%s", initBlock)
 
 	formatted, err := format.Source(e.buf.Bytes())
 	if err != nil {
@@ -500,5 +655,5 @@ func main() {
 		fmt.Fprintf(os.Stderr, "cannot write %s: %v\n", outPath, err)
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "wrote %s (%d bytes; %d fully-baked cases, %d entry-reading cases)\n", outPath, len(formatted), baked, entryBased)
+	fmt.Fprintf(os.Stderr, "wrote %s (%d bytes; %d fully-baked cases, %d entry-reading cases, %d inlined bodies)\n", outPath, len(formatted), baked, entryBased, inlined)
 }

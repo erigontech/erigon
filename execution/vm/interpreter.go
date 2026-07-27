@@ -390,12 +390,18 @@ func traceGas(op OpCode, callGas, cost uint64) uint64 {
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
 func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
-	// The generated loop's baked literals are valid only for the canonical
-	// tables it was verified against; ExtraEips-patched copies fall through
-	// to the generic loop below.
-	if runGeneratedFn != nil && !genDispatchDisabled {
+	// The generated loops' baked literals are valid only for the canonical
+	// tables they were verified against; ExtraEips-patched copies fall through
+	// to the generic loop below. The hookless fast loop is chosen only when no
+	// tracing of any kind is active.
+	if runGeneratedFastFn != nil && !genDispatchDisabled {
 		if _, ok := genTables[evm.jt]; ok {
-			return runGeneratedFn(evm, contract, gas, input, readOnly)
+			tracer := evm.config.Tracer
+			debug := tracer != nil && (tracer.OnOpcode != nil || tracer.OnGasChange != nil || tracer.OnFault != nil)
+			if debug || dbg.TraceDynamicGas || (dbg.TraceInstructions && evm.intraBlockState.Trace()) {
+				return runGeneratedTracedFn(evm, contract, gas, input, readOnly)
+			}
+			return runGeneratedFastFn(evm, contract, gas, input, readOnly)
 		}
 	}
 	// Don't bother with the execution if there's no code.
