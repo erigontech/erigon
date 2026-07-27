@@ -307,13 +307,7 @@ func (ctx *CallContext) callGas(evm *EVM) mdgas.MdGas {
 }
 
 func copyJumpTable(jt *JumpTable) *JumpTable {
-	var copy JumpTable
-	for i, op := range jt {
-		if op != nil {
-			opCopy := *op
-			copy[i] = &opCopy
-		}
-	}
+	copy := *jt
 	return &copy
 }
 
@@ -462,6 +456,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 	// Hoist to locals so the compiler sees them as loop-invariant.
 	anyTrace := dbg.TraceDynamicGas || debug || trace
+	jt := evm.jt
 
 	jt := evm.jt
 	_ = jt[0] // nil-check the jump table out of the loop
