@@ -768,10 +768,14 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
 					if isAmsterdam || pe.cfg.experimentalBAL {
-						err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+						var computedBAL types.BlockAccessList
+						computedBAL, err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
 						if err != nil {
 							failInfra(err)
 							continue
+						}
+						if pe.cfg.balSink != nil {
+							pe.cfg.balSink(applyResult.BlockNum, computedBAL)
 						}
 					}
 

@@ -39,34 +39,38 @@ func writeBALToFile(bal types.BlockAccessList, dataDir string, name string, logg
 	}
 }
 
-func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) error {
+// ProcessBAL derives the block's access list from the executed VersionedIO and,
+// once Amsterdam is active, cross-checks it against the header commitment. It
+// returns the computed BAL so callers (e.g. the pre-Amsterdam experimental
+// path, where the header carries no BAL hash) can capture it.
+func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) (types.BlockAccessList, error) {
 	if !isEIP7928 && !experimental {
-		return nil
+		return nil, nil
 	}
 	if h == nil {
-		return nil
+		return nil, nil
 	}
 	blockNum := h.Number.Uint64()
 	blockHash := h.Hash()
 	computedBlockBal := CreateBAL(blockNum, vio, dataDir, logger)
 	err := computedBlockBal.Validate()
 	if err != nil {
-		return fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
+		return nil, fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
 	}
 	if !isEIP7928 {
-		return nil
+		return computedBlockBal, nil
 	}
 	// EIP-7928 size bound is only consensus-binding once Amsterdam activates.
 	if err := computedBlockBal.ValidateMaxItems(h.GasLimit); err != nil {
-		return fmt.Errorf("%w, block %d: %w", rules.ErrInvalidBlock, blockNum, err)
+		return nil, fmt.Errorf("%w, block %d: %w", rules.ErrInvalidBlock, blockNum, err)
 	}
 	if h.BlockAccessListHash == nil {
-		return fmt.Errorf("block %d: EIP-7928 active but BlockAccessListHash is nil in header", blockNum)
+		return nil, fmt.Errorf("block %d: EIP-7928 active but BlockAccessListHash is nil in header", blockNum)
 	}
 	blockBalHash := *h.BlockAccessListHash
 	blockBalBytes, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
 	if err != nil {
-		return fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
+		return nil, fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
 	}
 	// A stored BAL sidecar may be absent — eth/71 backfill is best-effort and
 	// never blocks stage progress — so cross-check it only when present.
@@ -74,17 +78,17 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isE
 	if blockBalBytes != nil {
 		blockBal, err = types.DecodeBlockAccessListBytes(blockBalBytes)
 		if err != nil {
-			return fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
+			return nil, fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
 		}
 		if err = blockBal.Validate(); err != nil {
-			return fmt.Errorf("block %d: db block access list is invalid: %w", blockNum, err)
+			return nil, fmt.Errorf("block %d: db block access list is invalid: %w", blockNum, err)
 		}
 		if err = blockBal.ValidateMaxItems(h.GasLimit); err != nil {
-			return fmt.Errorf("block %d: stored block access list exceeds max items: %w", blockNum, err)
+			return nil, fmt.Errorf("block %d: stored block access list exceeds max items: %w", blockNum, err)
 		}
 		if blockBalHash != blockBal.Hash() {
 			reportBALMismatch(blockNum, blockHash, blockBal, blockBalHash, computedBlockBal, dataDir, logger)
-			return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, blockBal.Hash(), blockBalHash)
+			return nil, fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, blockBal.Hash(), blockBalHash)
 		}
 	}
 	// Always validate computed BAL against header. The BalancePath cross-check
@@ -93,10 +97,10 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isE
 	computedBlockBalHash := computedBlockBal.Hash()
 	if blockBalHash != computedBlockBalHash {
 		reportBALMismatch(blockNum, blockHash, blockBal, blockBalHash, computedBlockBal, dataDir, logger)
-		return fmt.Errorf("%w, block=%d (hash=%s): block access list mismatch: got %s expected %s",
+		return nil, fmt.Errorf("%w, block=%d (hash=%s): block access list mismatch: got %s expected %s",
 			rules.ErrInvalidBlock, blockNum, blockHash, computedBlockBalHash, blockBalHash)
 	}
-	return nil
+	return computedBlockBal, nil
 }
 
 // reportBALMismatch logs a BAL hash mismatch and dumps the block's BAL and the

@@ -36,6 +36,7 @@ type singleBlockSource struct {
 	block  *types.Block
 	num    uint64
 	parent *types.Header
+	bal    types.BlockAccessList // seed BAL for pre-seeding the versionMap (nil = none)
 	done   bool
 }
 
@@ -44,7 +45,7 @@ func (s *singleBlockSource) next(ctx context.Context) (*types.Block, types.Block
 		return nil, nil, 0, false, nil
 	}
 	s.done = true
-	return s.block, nil, s.num, true, nil
+	return s.block, s.bal, s.num, true, nil
 }
 
 func (s *singleBlockSource) header(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error) {
@@ -147,7 +148,13 @@ func (r *ephemeralReplay) newDomains(tb testing.TB, fx *blockreplay.Fixture) (kv
 // exec runs the block once through parallel ExecV3. This is the only thing a
 // benchmark should time. Receipts/gas/bloom are validated inside the apply loop.
 func (r *ephemeralReplay) exec(tx kv.TemporalRwTx, doms *execctx.SharedDomains) error {
-	src := &singleBlockSource{block: r.block, num: r.num, parent: r.parent}
+	return r.execSeeded(tx, doms, nil)
+}
+
+// execSeeded runs the block once, optionally pre-seeding the versionMap from
+// seedBAL (the BAL round-trip's run 2).
+func (r *ephemeralReplay) execSeeded(tx kv.TemporalRwTx, doms *execctx.SharedDomains, seedBAL types.BlockAccessList) error {
+	src := &singleBlockSource{block: r.block, num: r.num, parent: r.parent, bal: seedBAL}
 	_, err := ExecV3(r.ctx, r.cfg, doms, tx, stages.ModeApplyingBlocks, false, "replay", r.rng, src, r.logger)
 	return err
 }
@@ -195,4 +202,44 @@ func BenchmarkEphemeralParallelReplay(b *testing.B) {
 		doms.Close()
 		tx.Rollback()
 	}
+}
+
+// BenchmarkEphemeralBALRoundTrip exercises the pre-seed==post-output invariant:
+// a BAL derived from a block's execution must be reproduced when the versionMap
+// is pre-seeded from it and the block re-executed. The reference BAL is derived
+// here rather than read from the header, since the header may carry no BAL hash.
+// Same recipe as BenchmarkEphemeralParallelReplay (DISCARD_COMMITMENT=true).
+func BenchmarkEphemeralBALRoundTrip(b *testing.B) {
+	if !dbg.DiscardCommitment() {
+		b.Fatal("set DISCARD_COMMITMENT=true: the witness carries no commitment trie")
+	}
+	fx, err := blockreplay.Load(fixturePath(b))
+	require.NoError(b, err)
+	require.NotNil(b, fx.Outputs, "fixture missing captured outputs; recapture with `integration capture_block`")
+	expected := fx.Outputs
+
+	r, closeFn := setupEphemeralReplay(b, fx)
+	defer closeFn()
+
+	// experimentalBAL is the pre-Amsterdam BAL-production debug option: it makes
+	// ProcessBAL derive a BAL for this block even though the header has none.
+	r.cfg.experimentalBAL = true
+	var captured types.BlockAccessList
+	r.cfg.SetBALSink(func(_ uint64, bal types.BlockAccessList) { captured = bal })
+
+	derive := func(seed types.BlockAccessList) types.BlockAccessList {
+		captured = nil
+		tx, doms := r.newDomains(b, fx)
+		require.NoError(b, r.execSeeded(tx, doms, seed))
+		require.NoError(b, r.verify(tx, doms, expected))
+		doms.Close()
+		tx.Rollback()
+		require.NotNil(b, captured, "no BAL derived (experimentalBAL not honored?)")
+		return captured
+	}
+
+	balOut := derive(nil)     // run 1: reference, no seed
+	balOut2 := derive(balOut) // run 2: pre-seed from run 1's BAL
+	require.Equal(b, balOut.Hash(), balOut2.Hash(),
+		"pre-seed != post-output: derived BAL changed when the versionMap was seeded from it")
 }

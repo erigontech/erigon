@@ -81,6 +81,19 @@ type ExecuteBlockCfg struct {
 
 	experimentalBAL bool
 	readAheader     *exec.BlockReadAheader
+
+	// balSink, when set, receives the BAL derived from each executed block's
+	// VersionedIO (see ProcessBAL). Test-only seam: lets the block-replay
+	// harness capture the derived BAL for a block whose header carries no BAL
+	// hash (pre-Amsterdam), so the harness can own the pre-seed==post-output
+	// reference instead of the header.
+	balSink func(blockNum uint64, bal types.BlockAccessList)
+}
+
+// SetBALSink registers a callback receiving each executed block's derived BAL.
+// Test-only.
+func (cfg *ExecuteBlockCfg) SetBALSink(sink func(blockNum uint64, bal types.BlockAccessList)) {
+	cfg.balSink = sink
 }
 
 func StageExecuteBlocksCfg(
