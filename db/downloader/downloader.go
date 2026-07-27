@@ -132,32 +132,27 @@ type Downloader struct {
 	manifestReady chan struct{}
 
 	// Latest aggregated stats snapshot, published by the download logging loop
-	// so eth_syncing can report download progress. Nil until the first sample.
+	// so eth_syncing can report download progress.
 	lastStats atomic.Pointer[AggStats]
 }
 
-// progressReporter is the in-process capability the embedded downloader chain
-// (*Downloader, *GrpcServer, directGrpcServerClient) exposes for eth_syncing
-// progress. The remote gRPC client does not implement it, so callers degrade
-// gracefully via a type assertion against this interface.
+// progressReporter is the in-process side of dbservices.DownloadProgressReport,
+// reached through the client wrappers by type assertion.
 type progressReporter interface {
-	Completed() (done, total uint64, ok bool)
+	Completed() (done, total uint64)
 	ResetStats()
 }
 
-// Completed reports the latest snapshot-download progress in bytes. ok is false
-// until the first stats sample is available or when nothing is downloading.
-func (d *Downloader) Completed() (done, total uint64, ok bool) {
+// Completed reports the latest snapshot-download progress in bytes; total is 0
+// until the first stats sample is available.
+func (d *Downloader) Completed() (done, total uint64) {
 	s := d.lastStats.Load()
-	if s == nil || s.BytesTotal == 0 {
-		return 0, 0, false
+	if s == nil {
+		return 0, 0
 	}
-	return s.BytesCompleted, s.BytesTotal, true
+	return s.BytesCompleted, s.BytesTotal
 }
 
-// ResetStats drops the last progress sample so Completed reports ok=false until a
-// fresh one arrives. Used at a phase boundary (header-chain → full snapshots) to
-// avoid exposing the previous phase's ratio, whose byte total was much smaller.
 func (d *Downloader) ResetStats() {
 	d.lastStats.Store(nil)
 }

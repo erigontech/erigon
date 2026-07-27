@@ -21,21 +21,26 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
-func buildReplyForTest(t *testing.T, lastNewBlockSeen, frozenBlocks, executionProgress uint64) *remoteproto.SyncingReply {
+func newSyncStateFixture(t *testing.T, executionProgress uint64) (*Notifications, kv.RwTx) {
 	t.Helper()
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
-	defer tx.Rollback()
+	t.Cleanup(tx.Rollback)
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, executionProgress))
+	return NewNotifications(nil), tx
+}
 
-	n := NewNotifications(nil)
+func buildReplyForTest(t *testing.T, lastNewBlockSeen, frozenBlocks, executionProgress uint64) *remoteproto.SyncingReply {
+	t.Helper()
+	n, tx := newSyncStateFixture(t, executionProgress)
 	n.NewLastBlockSeen(lastNewBlockSeen)
 	reply, err := n.BuildSyncingReply(tx, frozenBlocks)
 	require.NoError(t, err)
@@ -79,13 +84,7 @@ func TestBuildSyncingReplyFrozenBlocksRaiseHighestBlock(t *testing.T) {
 
 func buildReplyWithDownloadForTest(t *testing.T, done, total, targetBlock, executionProgress uint64) *remoteproto.SyncingReply {
 	t.Helper()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, executionProgress))
-
-	n := NewNotifications(nil)
+	n, tx := newSyncStateFixture(t, executionProgress)
 	n.SetSnapshotDownloadProgress(done, total, targetBlock)
 	reply, err := n.BuildSyncingReply(tx, 0)
 	require.NoError(t, err)
@@ -127,13 +126,7 @@ func TestBuildSyncingReplySnapshotDownloadCompletePinsFullProgress(t *testing.T)
 // never combine the total of one sample with the completed bytes of the next:
 // that overshoots the target, i.e. currentBlock > highestBlock.
 func TestBuildSyncingReplySnapshotDownloadProgressIsPublishedAtomically(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	tx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 0))
-
-	n := NewNotifications(nil)
+	n, tx := newSyncStateFixture(t, 0)
 	const target = 20_000_000
 
 	stop, writerDone := make(chan struct{}), make(chan struct{})

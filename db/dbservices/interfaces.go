@@ -172,11 +172,13 @@ type DownloaderClient interface {
 
 // DownloadProgressReport is an optional capability of a DownloaderClient: it
 // reports snapshot-download progress in bytes so eth_syncing can surface it.
-// ok is false when progress is unknown (e.g. an external downloader over gRPC).
+// Only the in-process downloader implements it; an external one over gRPC does
+// not, and callers degrade to no progress.
 type DownloadProgressReport interface {
-	Completed(ctx context.Context) (done, total uint64, ok bool, err error)
-	// ResetProgress drops any stale sample so Completed reports ok=false until a
-	// fresh one arrives (used at the header-chain → full-snapshots phase boundary).
+	// Completed reports downloaded and total bytes; total == 0 means unknown.
+	Completed() (done, total uint64)
+	// ResetProgress drops any stale sample, so that a phase downloading a small
+	// subset of the files cannot be mistaken for progress on the full set.
 	ResetProgress()
 }
 

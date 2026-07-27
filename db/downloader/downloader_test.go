@@ -339,32 +339,29 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 func TestDownloaderCompletedAndResetStats(t *testing.T) {
 	var d Downloader
 
-	_, _, ok := d.Completed()
-	require.False(t, ok, "no sample yet")
+	_, total := d.Completed()
+	require.Zero(t, total, "no sample yet")
 
 	d.lastStats.Store(&AggStats{BytesCompleted: 30, BytesTotal: 100})
-	done, total, ok := d.Completed()
-	require.True(t, ok)
+	done, total := d.Completed()
 	require.Equal(t, uint64(30), done)
 	require.Equal(t, uint64(100), total)
 
 	d.ResetStats()
-	_, _, ok = d.Completed()
-	require.False(t, ok, "reset drops the sample")
+	_, total = d.Completed()
+	require.Zero(t, total, "reset drops the sample")
 }
 
-// storeStats must publish an immutable snapshot: mutating the source after the
-// call must not change what Completed reports (guards the torn-read fix, where
-// the pointer used to alias the loop buffer overwritten each iteration).
+// The stored snapshot must not alias the caller's value, which the stats loop
+// overwrites on every iteration.
 func TestDownloaderStoreStatsSnapshotIsImmutable(t *testing.T) {
 	var d Downloader
 
 	s := AggStats{BytesCompleted: 10, BytesTotal: 100}
 	d.storeStats(s)
-	s.BytesCompleted = 999 // mutate the source after storing
+	s.BytesCompleted = 999
 
-	done, total, ok := d.Completed()
-	require.True(t, ok)
-	require.Equal(t, uint64(10), done, "stored snapshot must not alias the mutated source")
+	done, total := d.Completed()
+	require.Equal(t, uint64(10), done)
 	require.Equal(t, uint64(100), total)
 }
