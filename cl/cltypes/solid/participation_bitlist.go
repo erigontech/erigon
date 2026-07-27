@@ -99,7 +99,7 @@ func (u *ParticipationBitList) Range(fn func(index int, value byte, length int) 
 // Pop removes the first bit from the list, like when the Red Ranger takes the first hit.
 func (u *ParticipationBitList) Pop() (x byte) {
 	x, u.u = u.u[0], u.u[1:]
-	u.l = u.l - 1
+	u.l--
 	return x
 }
 
@@ -109,7 +109,7 @@ func (u *ParticipationBitList) Append(v byte) {
 		u.u = append(u.u, 0)
 	}
 	u.u[u.l] = v
-	u.l = u.l + 1
+	u.l++
 }
 
 // Get lets us peek at a bit in the list, like when the team uses their sensors to spot the monster.

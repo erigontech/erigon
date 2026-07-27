@@ -411,7 +411,7 @@ type StorageKeysInfo struct {
 	KeyLength int
 }
 
-// GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
+// GetProof implements eth_getProof; historical blocks are supported as far back as the commitment history allows.
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHashArg *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
 	blockNrOrHash := orLatest(blockNrOrHashArg)
 	if len(storageKeys) > maxGetProofKeys {
@@ -430,8 +430,6 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
-	} else if requestedBlockNr == 0 {
-		return nil, errors.New("block not found")
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, roTx, uint64(requestedBlockNr))
@@ -852,7 +850,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		logger.Warn("state root mismatch after stateless execution", "actual", newStateRoot, "expected", block.Root())
 	}
 
-	return common.Copy(witnessBuffer.Bytes()), nil
+	return bytes.Clone(witnessBuffer.Bytes()), nil
 }
 
 // emptyWitnessBytes serializes an empty op-stream witness, used for genesis and
@@ -993,7 +991,8 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		var data bytes.Buffer
 		var buf [32]byte
 		rules := blockCtx.Rules(chainConfig)
-		for _, jsonAuth := range args.AuthorizationList {
+		for i := range args.AuthorizationList {
+			jsonAuth := &args.AuthorizationList[i]
 			auth, err := jsonAuth.ToAuthorization()
 			if err != nil {
 				continue

@@ -141,13 +141,13 @@ func (b *BackwardBeaconDownloader) SetHTTPFallbackURL(checkpointSyncURL string) 
 	if checkpointSyncURL == "" {
 		return
 	}
-	idx := strings.Index(checkpointSyncURL, "/eth/")
-	if idx < 0 {
+	before, _, found := strings.Cut(checkpointSyncURL, "/eth/")
+	if !found {
 		// URL is already a base URL without path (e.g. https://beacon.example.io).
 		b.httpFallbackURL = strings.TrimRight(checkpointSyncURL, "/")
 		return
 	}
-	b.httpFallbackURL = checkpointSyncURL[:idx]
+	b.httpFallbackURL = before
 }
 
 // SetShouldStopAtFn sets the stop condition.

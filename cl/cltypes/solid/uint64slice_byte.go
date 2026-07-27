@@ -34,7 +34,6 @@ func convertDepthToChunkSize(d int) int {
 func getTreeCacheSize(listLen int, cacheDepth int) int {
 	treeChunks := convertDepthToChunkSize(cacheDepth)
 	return (listLen + treeChunks - 1) / treeChunks
-
 }
 
 // byteBasedUint64Slice represents a dynamic Uint64Slice data type that is byte-backed.
@@ -129,7 +128,7 @@ func (arr *byteBasedUint64Slice) Pop() uint64 {
 	offset := (arr.l - 1) * 8
 	val := binary.LittleEndian.Uint64(arr.u[offset : offset+8])
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], 0)
-	arr.l = arr.l - 1
+	arr.l--
 	arr.MerkleTree = nil
 	return val
 }

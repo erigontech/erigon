@@ -127,14 +127,12 @@ func runBlockTestsParallel(ctx *cli.Command, files []string, workers uint64) ([]
 	close(fileCh)
 
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for item := range fileCh {
 				r, err := runBlockTest(ctx, item.fname)
 				resultCh <- fileResult{index: item.index, results: r, err: err}
 			}
-		}()
+		})
 	}
 	go func() {
 		wg.Wait()

@@ -31,7 +31,6 @@ func ProcessEth1DataReset(s abstract.BeaconState) {
 
 func ProcessSlashingsReset(s abstract.BeaconState) {
 	s.SetSlashingSegmentAt(int(state.Epoch(s)+1)%int(s.BeaconConfig().EpochsPerSlashingsVector), 0)
-
 }
 
 func ProcessRandaoMixesReset(s abstract.BeaconState) {

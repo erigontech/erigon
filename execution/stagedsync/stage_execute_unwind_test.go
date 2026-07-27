@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -80,11 +81,19 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, (committedBlock+1)*perBlock, pruneFloorTxNum, "sanity: prune floor == first txNum of committedBlock+1")
 
+	// sysKey is written by the first re-executed block's begin-system tx — at
+	// exactly the boundary txNum. It re-executes, so it must be pruned too.
+	sysAddr := common.HexToAddress("0x00000000000000000000000000000000000000cc")
+	sysSlot := common.Hash{31: 0x03}
+	sysKey := dbutils.GenerateStoragePlainKey(sysAddr, sysSlot)
+	sysVal := []byte{0xd0, 0x0d}
+	sysTxNum := pruneFloorTxNum
+
 	// staleKey mirrors ca5daf64 slot0: first-written by failedBlock's tx19 at a
 	// txNum strictly above the unwind boundary — must be pruned on unwind.
 	staleAddr := common.HexToAddress("0xca5daf6473971693b760cc65d726f72c6849d615")
 	staleSlot := common.Hash{} // slot 0
-	staleKey := append(append([]byte{}, staleAddr[:]...), staleSlot[:]...)
+	staleKey := dbutils.GenerateStoragePlainKey(staleAddr, staleSlot)
 	staleValHash := common.HexToHash("0xd7549f2a387fa81a1d5a77adc7bd3f782ac0780c460689d88e22aee6916a3a34")
 	staleVal := staleValHash[:]
 	const staleTxNum = failedBlock*perBlock + 5 // inside failedBlock, above the boundary
@@ -95,19 +104,22 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	// pruned, even though it's at/below the unwind point.
 	reexecAddr := common.HexToAddress("0x00000000000000000000000000000000000000aa")
 	reexecSlot := common.Hash{31: 0x01}
-	reexecKey := append(append([]byte{}, reexecAddr[:]...), reexecSlot[:]...)
+	reexecKey := dbutils.GenerateStoragePlainKey(reexecAddr, reexecSlot)
 	reexecVal := []byte{0xbe, 0xef}
 	const reexecTxNum = unwindPoint * perBlock // inside the unwind-target block (block 7 > committed 5)
 
-	// keepKey is written at/below committed progress — committed state, must survive.
+	// keepKey is written at exactly the last committed txNum — committed state,
+	// must survive (the prune boundary is one past it).
 	keepAddr := common.HexToAddress("0x00000000000000000000000000000000000000bb")
 	keepSlot := common.Hash{31: 0x02}
-	keepKey := append(append([]byte{}, keepAddr[:]...), keepSlot[:]...)
+	keepKey := dbutils.GenerateStoragePlainKey(keepAddr, keepSlot)
 	keepVal := []byte{0xca, 0xfe}
-	const keepTxNum = committedBlock*perBlock + 3 // inside the committed block
+	const keepTxNum = committedBlock*perBlock + perBlock - 1 // committed block's end-system txNum
 
 	doms.SetTxNum(keepTxNum)
 	require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, keepKey, keepVal, keepTxNum, nil))
+	doms.SetTxNum(sysTxNum)
+	require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, sysKey, sysVal, sysTxNum, nil))
 	doms.SetTxNum(reexecTxNum)
 	require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, reexecKey, reexecVal, reexecTxNum, nil))
 	doms.SetTxNum(staleTxNum)
@@ -135,6 +147,14 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	require.Empty(t, got,
 		"after Unwind, the overlay must not return failedBlock(%d) tx write %x (got %x)",
 		failedBlock, staleVal, got)
+
+	// The write at exactly the boundary txNum re-executes too — must be pruned.
+	got, _, err = doms.GetLatest(kv.StorageDomain, tx, sysKey)
+	require.NoError(t, err)
+	require.Empty(t, got,
+		"after Unwind, the overlay must not return the write at the boundary txNum %d (got %x): "+
+			"the first re-executed block's system tx is inside the re-executed range",
+		sysTxNum, got)
 
 	// A write in (committedBlock, unwindPoint] re-executes too, so it must also
 	// be pruned — the prune floor is s.BlockNumber+1, not u.UnwindPoint+1.

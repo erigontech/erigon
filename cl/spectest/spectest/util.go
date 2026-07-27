@@ -157,6 +157,7 @@ func ReadBlockSlot(root fs.FS, index int) (uint64, error) {
 	}
 	return ssz.UnmarshalUint64SSZ(blockBytes[100:108]), nil
 }
+
 func ReadBlocks(root fs.FS, version clparams.StateVersion) ([]*cltypes.SignedBeaconBlock, error) {
 	i := 0
 	blocks := []*cltypes.SignedBeaconBlock{}

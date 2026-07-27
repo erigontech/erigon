@@ -294,7 +294,7 @@ func TestGetValidatorExecutionPayloadBidReturnsUnsignedBid(t *testing.T) {
 		ParentBlockRoot: bid.ParentBlockRoot,
 	}, &cltypes.SignedExecutionPayloadBid{Message: bid})
 
-	request := httptest.NewRequest(http.MethodGet, "/eth/v1/validator/execution_payload_bid/12/3", nil)
+	request := httptest.NewRequest(http.MethodGet, "/eth/v1/validator/execution_payload_bid/12/3", http.NoBody)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, request)
@@ -406,7 +406,7 @@ func TestSnapshotPayloadAttestationPTCsCopiesMessageSlots(t *testing.T) {
 
 	snapshot := snapshotPayloadAttestationPTCs(provider, []*cltypes.PayloadAttestationMessage{
 		nil,
-		&cltypes.PayloadAttestationMessage{Data: nil},
+		{Data: nil},
 		msg,
 	})
 
@@ -533,7 +533,7 @@ func TestGetValidatorExecutionPayloadEnvelopesBySlot(t *testing.T) {
 	envelope.BuilderIndex = 7
 	handler.selfBuildEnvelopes.Add(slot, envelope)
 
-	request := httptest.NewRequest(http.MethodGet, "/eth/v1/validator/execution_payload_envelopes/3", nil)
+	request := httptest.NewRequest(http.MethodGet, "/eth/v1/validator/execution_payload_envelopes/3", http.NoBody)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, request)
