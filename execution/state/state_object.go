@@ -152,6 +152,11 @@ func (so *stateObject) GetState(key accounts.StorageKey) (uint256.Int, bool) {
 	if dirty {
 		return value, false
 	}
+	// The originStorage probe duplicates GetCommittedState's first tier so a warm
+	// read completes without the extra call.
+	if value, cached := so.originStorage[key]; cached {
+		return value, true
+	}
 	// Otherwise return the entry's original value
 	value, _ = so.GetCommittedState(key)
 	return value, true

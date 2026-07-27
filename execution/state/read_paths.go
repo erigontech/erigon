@@ -270,12 +270,15 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	// re-zero here — that would be a redundant 256-byte memclr on every read.
 
 	if s.versionMap == nil {
-		so, err := s.getStateObject(addr, true)
-		if err != nil {
-			r.err = err
-			r.source = StorageRead
-			r.version = UnknownVersion
-			return
+		so, ok := s.stateObjects[addr]
+		if !ok {
+			var err error
+			if so, err = s.getStateObject(addr, true); err != nil {
+				r.err = err
+				r.source = StorageRead
+				r.version = UnknownVersion
+				return
+			}
 		}
 		r.outcome = outcomeLegacyStorage
 		r.so = so
@@ -1330,7 +1333,17 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 }
 
 // readCommittedState reads a storage slot with committed-view semantics.
-func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, error) {
+//
+// The GetCommittedState trace lives here rather than in the caller for the same
+// reason as the GetState trace in readState: it would otherwise keep the
+// GetCommittedState wrapper from inlining. The defer keeps one trace point
+// across the many returns.
+func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (v uint256.Int, source ReadSource, version Version, err error) {
+	if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
+		defer func() {
+			fmt.Printf("%d (%d.%d) GetCommittedState (%s) %x, %x=%s\n", s.blockNum, s.txIndex, s.version, source, addr, key, v.Hex()[2:])
+		}()
+	}
 	var r readPathResult
 	versionedReadCore(s, addr, StoragePath, key, true, false, &r)
 	if r.err != nil {
