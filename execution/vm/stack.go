@@ -54,8 +54,7 @@ func (st *Stack) push(d uint256.Int) {
 // pushRef grows the stack by one and returns a pointer to the new top slot so
 // the caller can build the value in place instead of constructing a temporary
 // and copying it in. The slot holds stale data from a prior use, so the caller
-// must fully overwrite it — a Set*/Clear that writes all four words, never a
-// partial update.
+// must fully overwrite it
 func (st *Stack) pushRef() *uint256.Int {
 	ref := &st.data[st.top]
 	st.top++
@@ -76,12 +75,21 @@ func (st *Stack) pop2uint64() (x, y uint64) {
 }
 
 // popRef pops the top item and returns a pointer to its slot. The value stays
-// valid until the stack next grows (push or dup reuse that slot), so it can be
-// read as an operand while a following peek() writes the result into the slot
-// below it.
+// valid until the stack next push/dup/swap
 func (st *Stack) popRef() *uint256.Int {
 	st.top--
 	return &st.data[st.top]
+}
+
+// drop discards the top item without reading it.
+func (st *Stack) drop() {
+	st.top--
+}
+
+func (st *Stack) pop3Ref() (x, y, z *uint256.Int) {
+	st.top -= 3
+	t := st.top
+	return &st.data[t+2], &st.data[t+1], &st.data[t]
 }
 
 func (st *Stack) popHash() [32]byte {
@@ -94,11 +102,13 @@ func (st *Stack) Cap() int {
 }
 
 func (st *Stack) swap(n int) {
-	st.data[st.top-n-1], st.data[st.top-1] = st.data[st.top-1], st.data[st.top-n-1]
+	// `&(stackLimit-1)` mask trick allow drop all bounds-check here. It's safe because EVM.Run does `Stack.len()` checks
+	i, j := (st.top-n-1)&(stackLimit-1), (st.top-1)&(stackLimit-1)
+	st.data[i], st.data[j] = st.data[j], st.data[i]
 }
 
 func (st *Stack) dup(n int) {
-	st.data[st.top] = st.data[st.top-n]
+	st.data[st.top&(stackLimit-1)] = st.data[(st.top-n)&(stackLimit-1)]
 	st.top++
 }
 

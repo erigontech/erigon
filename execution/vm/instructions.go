@@ -445,11 +445,7 @@ func stCallDataSize(_ uint64, scope *CallContext) string {
 }
 
 func opCallDataCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	var (
-		memOffset  = scope.Stack.pop()
-		dataOffset = scope.Stack.pop()
-		length     = scope.Stack.pop()
-	)
+	memOffset, dataOffset, length := scope.Stack.pop3Ref()
 	dataOffset64, overflow := dataOffset.Uint64WithOverflow()
 	if overflow {
 		dataOffset64 = math.MaxUint64
@@ -480,19 +476,15 @@ func opReturnDataSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, 
 }
 
 func opReturnDataCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	var (
-		memOffset  = scope.Stack.pop()
-		dataOffset = scope.Stack.pop()
-		length     = scope.Stack.pop()
-	)
+	memOffset, dataOffset, length := scope.Stack.pop3Ref()
 
 	offset64, overflow := dataOffset.Uint64WithOverflow()
 	if overflow {
 		return pc, nil, ErrReturnDataOutOfBounds
 	}
-	// we can reuse dataOffset now (aliasing it for clarity)
+	// dataOffset is popped, so its slot is dead — reuse it as the end accumulator
 	end := dataOffset
-	_, overflow = end.AddOverflow(&dataOffset, &length)
+	_, overflow = end.AddOverflow(end, length)
 	if overflow {
 		return pc, nil, ErrReturnDataOutOfBounds
 	}
@@ -553,11 +545,7 @@ func opCodeSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 }
 
 func opCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	var (
-		memOffset  = scope.Stack.pop()
-		codeOffset = scope.Stack.pop()
-		length     = scope.Stack.pop()
-	)
+	memOffset, codeOffset, length := scope.Stack.pop3Ref()
 	uint64CodeOffset, overflow := codeOffset.Uint64WithOverflow()
 	if overflow {
 		uint64CodeOffset = math.MaxUint64
@@ -569,10 +557,8 @@ func opCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	addr := scope.peekAddress()
 	stack := &scope.Stack
-	stack.pop() // consume addr
-	memOffset := stack.pop()
-	codeOffset := stack.pop()
-	length := stack.pop()
+	stack.drop() // addr was already read via peekAddress
+	memOffset, codeOffset, length := stack.pop3Ref()
 	// BAL: EXTCODECOPY is a real state access per EIP-7928.
 	evm.IntraBlockState().MarkAddressAccess(addr, false)
 	len64 := length.Uint64()
