@@ -446,15 +446,19 @@ func addAmsterdamBuilderContracts(genesis *types.Genesis) {
 	if genesis.Alloc == nil {
 		genesis.Alloc = types.GenesisAlloc{}
 	}
+	slot := common.Hash{}
+	sentinel := common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 	genesis.Alloc[genesis.Config.GetBuilderDepositContract().Value()] = types.GenesisAccount{
 		Balance: new(big.Int),
 		Code:    misc.BuilderDepositRequestCode,
 		Nonce:   1,
+		Storage: map[common.Hash]common.Hash{slot: sentinel},
 	}
 	genesis.Alloc[genesis.Config.GetBuilderExitContract().Value()] = types.GenesisAccount{
 		Balance: new(big.Int),
 		Code:    misc.BuilderExitRequestCode,
 		Nonce:   1,
+		Storage: map[common.Hash]common.Hash{slot: sentinel},
 	}
 }
 
@@ -761,7 +765,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, dispatcher, logger)
 
-	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil)
+	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil, mock.BlockReader)
 
 	mock.StateCache = &execmodule.Cache{}
 	onlySnapDownloadOnStart := cfg.Genesis.Config.Bor != nil

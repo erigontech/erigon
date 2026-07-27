@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 
@@ -1115,7 +1116,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	}
 	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = common.Copy(ret)
+		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -1170,7 +1171,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	}
 	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = common.Copy(ret)
+		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -1215,7 +1216,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	}
 	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = common.Copy(ret)
+		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -1388,7 +1389,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 			return pc, nil, err
 		}
 	}
-	if rules.IsAmsterdam && !rules.IsEIPDisabled(7708) && !balance.IsZero() && self != beneficiaryAddr { // EIP-7708
+	if rules.IsEIPEnabled(7708) && !balance.IsZero() && self != beneficiaryAddr { // EIP-7708
 		ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
 	}
 	tracer := evm.Config().Tracer

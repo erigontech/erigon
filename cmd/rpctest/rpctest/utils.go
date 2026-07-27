@@ -110,7 +110,8 @@ func compareBlocks(b, bg *EthBlockByNumber) bool {
 		fmt.Printf("Num of txs different: %d %d\n", len(r.Transactions), len(rg.Transactions))
 		return false
 	}
-	for i, txn := range r.Transactions {
+	for i := range r.Transactions {
+		txn := &r.Transactions[i]
 		txg := rg.Transactions[i]
 		if txn.From != txg.From {
 			fmt.Printf("Tx %d different From: %x %x\n", i, txn.From, txg.From)
@@ -352,12 +353,8 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 		} else {
 			return compareErrors(errVal, errValg, methodName, errCtx, errs)
 		}
-	} else {
-		if channel != nil {
-			if insertOnlyIfSuccess == false || (insertOnlyIfSuccess && errVal == nil) {
-				channel <- res
-			}
-		}
+	} else if channel != nil && (!insertOnlyIfSuccess || errVal == nil) {
+		channel <- res
 	}
 
 	if recording {
@@ -412,12 +409,8 @@ func requestAndCompareErigon(requestA, requestB string, methodNameA, methodNameB
 			//TODO fix for two methods
 			return compareErrors(errVal, errValg, methodNameA, errCtx, errs)
 		}
-	} else {
-		if channel != nil {
-			if insertOnlyIfSuccess == false || (insertOnlyIfSuccess && errVal == nil) {
-				channel <- res
-			}
-		}
+	} else if channel != nil && (!insertOnlyIfSuccess || errVal == nil) {
+		channel <- res
 	}
 
 	if recording {
@@ -869,8 +862,9 @@ func compareBlockTransactions(b, bg *OtsBlockTransactions) bool {
 			return false
 		}
 	}
-	for i, txn := range r.FullBlock.Transactions {
-		txg := rg.FullBlock.Transactions[i]
+	for i := range r.FullBlock.Transactions {
+		txn := &r.FullBlock.Transactions[i]
+		txg := &rg.FullBlock.Transactions[i]
 		if txn.From != txg.From {
 			fmt.Printf("Tx %d different From: %x %x\n", i, txn.From, txg.From)
 			return false
@@ -924,8 +918,9 @@ func compareBlockTransactions(b, bg *OtsBlockTransactions) bool {
 			return false
 		}
 	}
-	for i, rcp := range r.Receipts {
-		rcpg := rg.Receipts[i]
+	for i := range r.Receipts {
+		rcp := &r.Receipts[i]
+		rcpg := &rg.Receipts[i]
 		if rcp.From != rcpg.From {
 			fmt.Printf("Receipt %d different From: %x %x\n", i, rcp.From, rcpg.From)
 			return false

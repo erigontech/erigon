@@ -796,7 +796,8 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 		delegationSetFor := make(map[accounts.Address]bool)
 		var b [32]byte
 		data := bytes.NewBuffer(nil)
-		for i, auth := range auths {
+		for i := range auths {
+			auth := &auths[i]
 			data.Reset()
 
 			// 1. chainId check
