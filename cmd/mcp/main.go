@@ -48,6 +48,13 @@ import (
 var defaultRPCPorts = []uint{8545, 8546, 8547}
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	var (
 		rpcURL    string
 		port      uint
@@ -167,10 +174,7 @@ Examples:
 		rootCancel()
 	}()
 
-	if err := rootCmd.ExecuteContext(rootCtx); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
+	return rootCmd.ExecuteContext(rootCtx)
 }
 
 // serve starts the MCP server in the chosen transport mode.

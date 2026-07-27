@@ -212,12 +212,10 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		if status == execution_client.PayloadStatusInvalidated {
 			return errors.New("parent execution payload is invalid")
 		}
-	} else {
+	} else if msg.Block.Body.BlobKzgCommitments != nil && msg.Block.Body.BlobKzgCommitments.Len() > int(maxBlobsPerBlock) {
 		// Pre-GLOAS: [REJECT] The length of KZG commitments is less than or equal to the limitation defined in Consensus Layer
 		// i.e. validate that len(body.signed_beacon_block.message.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
-		if msg.Block.Body.BlobKzgCommitments != nil && msg.Block.Body.BlobKzgCommitments.Len() > int(maxBlobsPerBlock) {
-			return ErrInvalidCommitmentsCount
-		}
+		return ErrInvalidCommitmentsCount
 	}
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
