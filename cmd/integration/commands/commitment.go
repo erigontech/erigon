@@ -1071,7 +1071,8 @@ func printHistoryBenchResultsTable(prefix []byte, compactKey []byte, fileStats [
 	var totalSamples int
 	var totalDuration time.Duration
 
-	for _, fs := range fileStats {
+	for i := range fileStats {
+		fs := &fileStats[i]
 		fmt.Printf("%-45s %12d %12d %8d %10v %10v %10v %10v\n",
 			fs.Name,
 			fs.StartTxNum,
