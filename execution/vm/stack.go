@@ -145,7 +145,7 @@ func (st *Stack) back3(n, m, k int) (x, y, z *uint256.Int) {
 	return &st.data[i], &st.data[j], &st.data[l]
 }
 
-// Back returns the n'th item in stack
+// back returns the n'th item in stack
 func (st *Stack) back(n int) *uint256.Int {
 	return &st.data[st.top-n-1]
 }
