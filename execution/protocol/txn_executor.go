@@ -822,8 +822,8 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 		if err != nil {
 			return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
-		hasDelegation := false
-		if !codeHash.IsEmpty() {
+		hasDelegation := !codeHash.IsEmpty()
+		if hasDelegation {
 			_, ok, err := st.state.GetDelegatedDesignation(authority)
 			if err != nil {
 				return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
@@ -832,7 +832,6 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 				log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
 				continue
 			}
-			hasDelegation = true
 		}
 
 		// 5. nonce check

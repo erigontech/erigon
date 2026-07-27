@@ -268,9 +268,10 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	// Add the cost of authorizations
 	var perAuthCost uint64
 	if args.IsEIP2780 {
-		perAuthCost = params.RegularPerAuthBaseCostEIP8038
 		if args.IsAATxn {
 			perAuthCost = params.PerAuthRegularCostEIP8038
+		} else {
+			perAuthCost = params.RegularPerAuthBaseCostEIP8038
 		}
 	} else {
 		perAuthCost = params.PerEmptyAccountCost

@@ -233,8 +233,10 @@ func (evm *EVM) chargeTopLevelFrameGas(gasRemaining mdgas.MdGas, addr accounts.A
 			return gasRemaining, topLvlFrameStateGas, topLvlFrameStateGasSpill, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		if isDelegated {
-			accessCost := params.WarmStorageReadCostEIP2929
-			if !evm.intraBlockState.AddressInAccessList(dd) {
+			var accessCost uint64
+			if evm.intraBlockState.AddressInAccessList(dd) {
+				accessCost = params.WarmStorageReadCostEIP2929
+			} else {
 				accessCost = coldAccountAccessCost(evm.chainRules)
 			}
 			if gasRemaining.Regular < accessCost {
