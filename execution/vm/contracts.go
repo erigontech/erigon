@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -409,7 +410,7 @@ func (c *dataCopy) RequiredGas(input []byte) uint64 {
 	return ToWordSize(uint64(len(input)))*params.IdentityPerWordGas + params.IdentityBaseGas
 }
 func (c *dataCopy) Run(in []byte) ([]byte, error) {
-	return common.Copy(in), nil
+	return bytes.Clone(in), nil
 }
 
 func (c *dataCopy) Name() string {

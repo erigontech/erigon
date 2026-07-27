@@ -17,6 +17,7 @@
 package remotedbserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -260,8 +261,8 @@ func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 				if err != nil {
 					return fmt.Errorf("kvserver: %w", err)
 				}
-				c.k = common.Copy(k)
-				c.v = common.Copy(v)
+				c.k = bytes.Clone(k)
+				c.v = bytes.Clone(v)
 			}
 
 			if err := s.renew(stream.Context(), id); err != nil {
@@ -661,8 +662,8 @@ func (s *KvServer) HistoryRange(_ context.Context, req *remoteproto.HistoryRange
 			if err != nil {
 				return err
 			}
-			key := common.Copy(k)
-			value := common.Copy(v)
+			key := bytes.Clone(k)
+			value := bytes.Clone(v)
 			reply.Keys = append(reply.Keys, key)
 			reply.Values = append(reply.Values, value)
 		}
@@ -702,8 +703,8 @@ func (s *KvServer) RangeAsOf(_ context.Context, req *remoteproto.RangeAsOfReq) (
 			if err != nil {
 				return err
 			}
-			key := common.Copy(k)
-			value := common.Copy(v)
+			key := bytes.Clone(k)
+			value := bytes.Clone(v)
 			reply.Keys = append(reply.Keys, key)
 			reply.Values = append(reply.Values, value)
 			limit--
