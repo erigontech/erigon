@@ -2199,18 +2199,24 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 // deleteLargeValuesDup removes the dup at invStep for bareKey from a LargeValues DupSort
 // keys cursor, deleting the corresponding vals row when the seqID is not the deletion sentinel.
 func deleteLargeValuesDup(keysCursor kv.RwCursorDupSort, valsCursor kv.RwCursor, bareKey, invStep []byte) error {
-	existing, err := keysCursor.SeekBothRange(bareKey, invStep)
-	if err != nil || len(existing) != dupRecordLen || !bytes.Equal(existing[:8], invStep) {
-		return err
-	}
-	if binary.BigEndian.Uint64(existing[8:]) != deletionSeqID {
-		var seqKey [8]byte
-		copy(seqKey[:], existing[8:])
-		if err := valsCursor.Delete(seqKey[:]); err != nil {
+	// Repeated unwind/flush cycles can leave several dups at the same invStep;
+	// a survivor would shadow the restored value and strand its valsTable row.
+	for {
+		existing, err := keysCursor.SeekBothRange(bareKey, invStep)
+		if err != nil || len(existing) != dupRecordLen || !bytes.Equal(existing[:8], invStep) {
+			return err
+		}
+		if binary.BigEndian.Uint64(existing[8:]) != deletionSeqID {
+			var seqKey [8]byte
+			copy(seqKey[:], existing[8:])
+			if err := valsCursor.Delete(seqKey[:]); err != nil {
+				return err
+			}
+		}
+		if err := keysCursor.DeleteCurrent(); err != nil {
 			return err
 		}
 	}
-	return keysCursor.DeleteCurrent()
 }
 
 // pruneLargeValues prunes the keysTable+valsTable of a LargeValues domain by
