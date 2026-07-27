@@ -290,8 +290,7 @@ func opByte(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 }
 
 func opAddmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef2()
-	z := scope.Stack.peek()
+	x, y, z := scope.Stack.popRef2Peek1()
 	z.AddMod(x, y, z)
 	return pc, nil, nil
 }
@@ -302,8 +301,7 @@ func stAddmod(_ uint64, scope *CallContext) string {
 }
 
 func opMulmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	x, y := scope.Stack.popRef2()
-	z := scope.Stack.peek()
+	x, y, z := scope.Stack.popRef2Peek1()
 	z.MulMod(x, y, z)
 	return pc, nil, nil
 }

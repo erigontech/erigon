@@ -96,6 +96,18 @@ func (st *Stack) popRef1Peek1() (x, y *uint256.Int) {
 	return
 }
 
+// popRef2Peek1 pops two slots and peeks the third, shaped as pop-three-push-one
+// so all indices sit on the guarded st.top.
+func (st *Stack) popRef2Peek1() (x, y, z *uint256.Int) {
+	st.top -= 3
+	if uint(st.top) > stackLimit-3 {
+		panic("stack index out of range")
+	}
+	x, y, z = &st.data[st.top+2], &st.data[st.top+1], &st.data[st.top]
+	st.top++
+	return
+}
+
 func (st *Stack) popRef2() (x, y *uint256.Int) {
 	st.top -= 2
 	if uint(st.top) > stackLimit-2 {
