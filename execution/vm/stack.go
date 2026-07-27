@@ -126,14 +126,17 @@ func (st *Stack) Cap() int {
 	return stackLimit
 }
 
-func (st *Stack) swap(n int) {
-	i, j := st.top-n-1, st.top-1
+// exchange swaps the (n+1)'th and (m+1)'th items counting from the top.
+func (st *Stack) exchange(n, m int) {
+	i, j := st.top-n-1, st.top-m-1
 	// Explicit range check: reducing amount of bounds check
 	if i < 0 || i >= stackLimit || j < 0 || j >= stackLimit {
 		panic("stack overflow")
 	}
 	st.data[i], st.data[j] = st.data[j], st.data[i]
 }
+
+func (st *Stack) swap(n int) { st.exchange(n, 0) }
 
 func (st *Stack) dup(n int) {
 	i, j := st.top-n, st.top
@@ -146,6 +149,24 @@ func (st *Stack) dup(n int) {
 
 func (st *Stack) peek() *uint256.Int {
 	return &st.data[st.top-1]
+}
+
+// back2 returns the n'th and m'th items from the top under one range check.
+func (st *Stack) back2(n, m int) (x, y *uint256.Int) {
+	i, j := st.top-n-1, st.top-m-1
+	if i < 0 || i >= stackLimit || j < 0 || j >= stackLimit {
+		panic("stack overflow")
+	}
+	return &st.data[i], &st.data[j]
+}
+
+// back3 returns the n'th, m'th and k'th items from the top under one range check.
+func (st *Stack) back3(n, m, k int) (x, y, z *uint256.Int) {
+	i, j, l := st.top-n-1, st.top-m-1, st.top-k-1
+	if i < 0 || i >= stackLimit || j < 0 || j >= stackLimit || l < 0 || l >= stackLimit {
+		panic("stack overflow")
+	}
+	return &st.data[i], &st.data[j], &st.data[l]
 }
 
 // Back returns the n'th item in stack
