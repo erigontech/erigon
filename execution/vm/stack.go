@@ -88,11 +88,10 @@ func (st *Stack) popRef() *uint256.Int {
 // both slots. Same validity rule as popRef.
 func (st *Stack) popRef1Peek1() (x, y *uint256.Int) {
 	st.top--
-	t := st.top
-	if t-1 < 0 || t >= stackLimit {
+	if st.top-1 < 0 || st.top >= stackLimit {
 		panic("stack overflow")
 	}
-	return &st.data[t], &st.data[t-1]
+	return &st.data[st.top], &st.data[st.top-1]
 }
 
 // drop discards the top item without reading it.
@@ -104,20 +103,18 @@ func (st *Stack) drop() {
 // topmost. One range check covers both. Same validity rule as popRef.
 func (st *Stack) popRef2() (x, y *uint256.Int) {
 	st.top -= 2
-	t := st.top
-	if t < 0 || t+1 >= stackLimit {
+	if st.top < 0 || st.top+1 >= stackLimit {
 		panic("stack overflow")
 	}
-	return &st.data[t+1], &st.data[t]
+	return &st.data[st.top+1], &st.data[st.top]
 }
 
 func (st *Stack) popRef3() (x, y, z *uint256.Int) {
 	st.top -= 3
-	t := st.top
-	if t < 0 || t+2 >= stackLimit {
+	if st.top < 0 || st.top+2 >= stackLimit {
 		panic("stack overflow")
 	}
-	return &st.data[t+2], &st.data[t+1], &st.data[t]
+	return &st.data[st.top+2], &st.data[st.top+1], &st.data[st.top]
 }
 
 func (st *Stack) Cap() int {
