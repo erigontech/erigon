@@ -1395,7 +1395,7 @@ func (r *BlockReader) IntegrityTxnID(ctx context.Context, failFast bool) error {
 				log.Error(err.Error())
 			}
 		}
-		expectedFirstTxnID = expectedFirstTxnID + uint64(sn.Src().Count())
+		expectedFirstTxnID += uint64(sn.Src().Count())
 	}
 	return nil
 }

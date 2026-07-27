@@ -82,8 +82,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
-		switch i {
-		case 0:
+		if i == 0 {
 			contractAddress, txn, selfDestructorContract, err = contracts.DeploySelfDestructor(transactOpts, contractBackend)
 			if err != nil {
 				t.Fatal(err)
