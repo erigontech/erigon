@@ -272,6 +272,13 @@ func TestAggregateAndProofSuccess(t *testing.T) {
 	require.NoError(t, aggService.ProcessMessage(context.Background(), nil, agg))
 }
 
+func TestShouldVerifyAggregateForObserver(t *testing.T) {
+	require.True(t, shouldVerifyAggregate(nil, false, false))
+	require.False(t, shouldVerifyAggregate([]uint64{1}, false, false))
+	require.True(t, shouldVerifyAggregate([]uint64{1}, true, false))
+	require.True(t, shouldVerifyAggregate([]uint64{1}, false, true))
+}
+
 func TestSyncMapRangeDeadlock(t *testing.T) {
 	var m sync.Map
 	m.Store(1, 1)
