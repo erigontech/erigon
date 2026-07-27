@@ -98,7 +98,7 @@ func (st *Stack) Cap() int {
 
 func (st *Stack) swap(n int) {
 	i, j := st.top-n-1, st.top-1
-	// Explicit range check: reduing amount of bounds check
+	// Explicit range check: reducing amount of bounds check
 	if i < 0 || i >= stackLimit || j < 0 || j >= stackLimit {
 		panic("evm stack: swap index out of range")
 	}
