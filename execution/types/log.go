@@ -274,10 +274,13 @@ func (logs Logs) Copy() Logs {
 			continue
 		}
 		lt, ld := len(l.Topics), len(l.Data)
-		backing[i].Topics = topicsBuf[to : to+lt : to+lt]
-		backing[i].Data = dataBuf[do : do+ld : do+ld]
+		t := topicsBuf[to : to+lt : to+lt]
+		d := dataBuf[do : do+ld : do+ld]
 		to, do = to+lt, do+ld
-		l.CopyTo(&backing[i])
+		copy(t, l.Topics)
+		copy(d, l.Data)
+		backing[i] = *l
+		backing[i].Topics, backing[i].Data = t, d
 		out[i] = &backing[i]
 	}
 	return out

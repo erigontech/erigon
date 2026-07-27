@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -489,8 +488,16 @@ func (sdb *IntraBlockState) AllocLog(numTopics, dataSize int) *types.Log {
 	}
 	sdb.logs[ti] = buf
 
-	lp.Topics = slices.Grow(lp.Topics[:0], numTopics)[:numTopics]
-	lp.Data = slices.Grow(lp.Data[:0], dataSize)[:dataSize]
+	if numTopics <= cap(lp.Topics) {
+		lp.Topics = lp.Topics[:numTopics]
+	} else {
+		lp.Topics = make([]common.Hash, numTopics)
+	}
+	if dataSize <= cap(lp.Data) {
+		lp.Data = lp.Data[:dataSize]
+	} else {
+		lp.Data = make([]byte, dataSize)
+	}
 	lp.Removed = false // Address set by caller
 	lp.TxHash, lp.BlockHash = common.Hash{}, common.Hash{}
 	lp.TxIndex = hexutil.Uint(sdb.txIndex)
