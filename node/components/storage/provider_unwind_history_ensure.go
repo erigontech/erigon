@@ -123,7 +123,7 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 		return noop, nil
 	}
 
-	missing, downloadedPaths := filterMissingOnDisk(needed, p.snapDir)
+	missing, downloadedPaths, downloadedNames := filterMissingOnDisk(needed, p.snapDir)
 	if len(missing) == 0 {
 		return noop, nil
 	}
@@ -138,7 +138,7 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 	}
 
 	if err := p.Aggregator.OpenFolder(); err != nil {
-		p.discardDownloadedHistory(downloadedPaths)
+		p.discardDownloadedHistory(ctx, downloadedPaths, downloadedNames)
 		return noop, fmt.Errorf("OpenFolder after history download: %w", err)
 	}
 	if trw, ok := any(opts.Tx).(*temporal.RwTx); ok {
@@ -146,7 +146,7 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 	}
 
 	return func() {
-		p.discardDownloadedHistory(downloadedPaths)
+		p.discardDownloadedHistory(ctx, downloadedPaths, downloadedNames)
 		if err := p.Aggregator.OpenFolder(); err != nil && p.logger != nil {
 			p.logger.Warn("[storage] Provider.Unwind: OpenFolder after temp-history cleanup failed", "err", err)
 		}
@@ -156,12 +156,24 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 	}, nil
 }
 
-// discardDownloadedHistory removes the given files and their .torrent
-// sidecars from disk. Errors are logged and swallowed — cleanup is
-// best-effort. Callers own the aggregator refresh (this function does
-// not call OpenFolder so it can be reused on the error path where the
-// caller hasn't yet done the initial OpenFolder either).
-func (p *Provider) discardDownloadedHistory(paths []string) {
+// discardDownloadedHistory removes the given files, their .torrent
+// sidecars, AND drops the corresponding torrents from the downloader
+// client's internal state. The Delete step is load-bearing: without
+// it, the torrent client keeps the torrents marked as "complete" from
+// the previous download, and the next mode-B ensure call reports
+// 100%/instant success even though the files were unlinked — the
+// compute then walks over an empty visible file set and produces the
+// baseline root instead of the target root. Errors are logged and
+// swallowed — cleanup is best-effort. Callers own the aggregator
+// refresh (this function does not call OpenFolder so it can be reused
+// on the error path where the caller hasn't yet done the initial
+// OpenFolder either).
+func (p *Provider) discardDownloadedHistory(ctx context.Context, paths []string, names []string) {
+	if p.downloaderClient != nil && len(names) > 0 {
+		if err := p.downloaderClient.Delete(ctx, names); err != nil && p.logger != nil {
+			p.logger.Warn("[storage] Provider.Unwind: downloader.Delete temp history failed", "count", len(names), "err", err)
+		}
+	}
 	for _, path := range paths {
 		if err := dir.RemoveFile(path); err != nil && !errors.Is(err, os.ErrNotExist) && p.logger != nil {
 			p.logger.Warn("[storage] Provider.Unwind: remove temp history file failed", "path", path, "err", err)
@@ -254,10 +266,16 @@ func neededPreverifiedHistoryForWalk(items snapcfg.PreverifiedItems, baselineSte
 
 // filterMissingOnDisk returns the subset of `needed` whose destination
 // path under snapDir does not yet exist, plus the parallel list of
-// absolute destination paths (for cleanup).
-func filterMissingOnDisk(needed []snapcfg.PreverifiedItem, snapDir string) ([]services.DownloadRequest, []string) {
+// absolute destination paths and snap-dir-relative names (both used by
+// discardDownloadedHistory — the paths for FS unlink, the names for
+// downloader.Delete so the torrent client drops the torrent from its
+// internal state; without the Delete step the next mode-B ensure call
+// sees the torrent as "have complete" from the prior download and
+// returns immediately even though the actual files were unlinked).
+func filterMissingOnDisk(needed []snapcfg.PreverifiedItem, snapDir string) ([]services.DownloadRequest, []string, []string) {
 	missing := make([]services.DownloadRequest, 0, len(needed))
 	paths := make([]string, 0, len(needed))
+	names := make([]string, 0, len(needed))
 	for _, item := range needed {
 		absPath := filepath.Join(snapDir, item.Name)
 		if _, err := os.Stat(absPath); err == nil {
@@ -265,8 +283,9 @@ func filterMissingOnDisk(needed []snapcfg.PreverifiedItem, snapDir string) ([]se
 		}
 		missing = append(missing, services.DownloadRequest{Path: item.Name, TorrentHash: item.Hash})
 		paths = append(paths, absPath)
+		names = append(names, item.Name)
 	}
-	return missing, paths
+	return missing, paths, names
 }
 
 func isHistoryOrIdxOrAccessor(name string) bool {

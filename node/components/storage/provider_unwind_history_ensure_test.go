@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 const testStepSize uint64 = 390625
@@ -139,13 +141,15 @@ func TestFilterMissingOnDisk_SplitsPresentAndMissing(t *testing.T) {
 		{Name: "history/needed-2.v", Hash: "hash2"},
 	}
 
-	missing, paths := filterMissingOnDisk(inputs, dir)
+	missing, paths, names := filterMissingOnDisk(inputs, dir)
 	require.Len(t, missing, 2)
 	require.Equal(t, "history/needed-1.v", missing[0].Path)
 	require.Equal(t, "hash1", missing[0].TorrentHash)
 	require.Equal(t, "history/needed-2.v", missing[1].Path)
 	require.Equal(t, filepath.Join(dir, "history", "needed-1.v"), paths[0])
 	require.Equal(t, filepath.Join(dir, "history", "needed-2.v"), paths[1])
+	require.Equal(t, "history/needed-1.v", names[0])
+	require.Equal(t, "history/needed-2.v", names[1])
 }
 
 func TestFilterMissingOnDisk_AllPresentReturnsEmpty(t *testing.T) {
@@ -155,11 +159,59 @@ func TestFilterMissingOnDisk_AllPresentReturnsEmpty(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "idx"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "idx", "one.ef"), []byte("x"), 0o644))
 
-	missing, paths := filterMissingOnDisk([]snapcfg.PreverifiedItem{
+	missing, paths, names := filterMissingOnDisk([]snapcfg.PreverifiedItem{
 		{Name: "idx/one.ef", Hash: "h"},
 	}, dir)
 	require.Empty(t, missing)
 	require.Empty(t, paths)
+	require.Empty(t, names)
+}
+
+// stubDeleteCounter satisfies just enough of downloader.Client to
+// capture the names passed to Delete during a discard call. Never
+// calls into a real downloader — the goal is to prove the ensure
+// cleanup ALSO invokes Delete (dropping the torrents from the client's
+// internal state), not just the FS-unlink.
+type stubDeleteCounter struct {
+	deletes [][]string
+}
+
+func (s *stubDeleteCounter) Seed(_ context.Context, _ []string) error { return nil }
+func (s *stubDeleteCounter) Delete(_ context.Context, paths []string) error {
+	s.deletes = append(s.deletes, append([]string(nil), paths...))
+	return nil
+}
+func (s *stubDeleteCounter) Download(_ context.Context, _ *downloaderproto.DownloadRequest) error {
+	return nil
+}
+
+// TestDiscardDownloadedHistory_InvokesDownloaderDelete regressions the
+// mode-B bootstrap-loop bug: after the ensure step downloaded history
+// files for iter N's compute walk, the cleanup callback unlinked the
+// files but did NOT tell the torrent client to drop the torrents.
+// Iter N+1's ensure call then saw the torrents as "have complete"
+// from N's download, returned instantly with files=12/12 100.00%
+// even though the actual files were gone, and the compute produced
+// the baseline root instead of the target root (mismatch → setHead
+// mode-B fail on any deep unwind after a prior mode-B in the same
+// session).
+func TestDiscardDownloadedHistory_InvokesDownloaderDelete(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "history"), 0o755))
+	f := filepath.Join(dir, "history", "a.v")
+	require.NoError(t, os.WriteFile(f, []byte("x"), 0o644))
+
+	stub := &stubDeleteCounter{}
+	p := &Provider{downloaderClient: stub}
+	names := []string{"history/a.v"}
+	p.discardDownloadedHistory(context.Background(), []string{f}, names)
+
+	require.Len(t, stub.deletes, 1, "downloader.Delete must be called exactly once")
+	require.Equal(t, names, stub.deletes[0], "downloader.Delete must receive the snap-dir-relative names")
+	_, err := os.Stat(f)
+	require.True(t, os.IsNotExist(err), "file must also be unlinked from disk")
 }
 
 func TestDiscardDownloadedHistory_RemovesFilesAndTorrents(t *testing.T) {
@@ -175,7 +227,9 @@ func TestDiscardDownloadedHistory_RemovesFilesAndTorrents(t *testing.T) {
 	// f2.torrent intentionally missing — cleanup must not error on that.
 
 	p := &Provider{}
-	p.discardDownloadedHistory([]string{f1, f2})
+	// Pass nil names — Provider.downloaderClient is nil so the Delete
+	// step is a no-op; the FS-unlink path is what this test exercises.
+	p.discardDownloadedHistory(context.Background(), []string{f1, f2}, nil)
 
 	for _, path := range []string{f1, f2, f1 + ".torrent"} {
 		_, err := os.Stat(path)
