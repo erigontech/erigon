@@ -218,8 +218,8 @@ func opTstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
 	}
-	loc := scope.Stack.pop()
-	val := scope.Stack.pop()
+	loc := scope.Stack.popCopy()
+	val := scope.Stack.popCopy()
 	evm.IntraBlockState().SetTransientState(scope.Contract.Address(), accounts.InternKey(loc.Bytes32()), val)
 	return pc, nil, nil
 }
@@ -302,7 +302,7 @@ func enable5656(jt *JumpTable) {
 func opMcopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	// These values are checked for overflow during memory expansion calculation
 	// (the memorySize function on the opcode).
-	dst, src, length := scope.Stack.popRef3()
+	dst, src, length := scope.Stack.pop3()
 	scope.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
 	return pc, nil, nil
 }

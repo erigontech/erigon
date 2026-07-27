@@ -64,14 +64,14 @@ func (st *Stack) drop() {
 	st.top--
 }
 
-func (st *Stack) pop() uint256.Int {
+func (st *Stack) popCopy() uint256.Int {
 	st.top--
 	return st.data[st.top]
 }
 
-// popRef pops the top item and returns a pointer to its slot. The value stays
+// pop pops the top item and returns a pointer to its slot. The value stays
 // valid until the stack next push/dup/swap
-func (st *Stack) popRef() *uint256.Int {
+func (st *Stack) pop() *uint256.Int {
 	st.top--
 	return &st.data[st.top]
 }
@@ -84,9 +84,9 @@ func (st *Stack) pop2Uint64() (x, y uint64) {
 	return st.data[st.top+1].Uint64(), st.data[st.top].Uint64()
 }
 
-// popRef1Peek1 pops one slot and peeks the next, shaped as pop-two-push-one so
+// pop1Peek1 pops one slot and peeks the next, shaped as popCopy-two-push-one so
 // both indices sit on the guarded st.top.
-func (st *Stack) popRef1Peek1() (x, y *uint256.Int) {
+func (st *Stack) pop1Peek1() (x, y *uint256.Int) {
 	st.top -= 2
 	if uint(st.top) > stackLimit-2 {
 		panic("stack index out of range")
@@ -96,9 +96,9 @@ func (st *Stack) popRef1Peek1() (x, y *uint256.Int) {
 	return
 }
 
-// popRef2Peek1 pops two slots and peeks the third, shaped as pop-three-push-one
+// pop2Peek1 pops two slots and peeks the third, shaped as popCopy-three-push-one
 // so all indices sit on the guarded st.top.
-func (st *Stack) popRef2Peek1() (x, y, z *uint256.Int) {
+func (st *Stack) pop2Peek1() (x, y, z *uint256.Int) {
 	st.top -= 3
 	if uint(st.top) > stackLimit-3 {
 		panic("stack index out of range")
@@ -108,7 +108,7 @@ func (st *Stack) popRef2Peek1() (x, y, z *uint256.Int) {
 	return
 }
 
-func (st *Stack) popRef2() (x, y *uint256.Int) {
+func (st *Stack) pop2() (x, y *uint256.Int) {
 	st.top -= 2
 	if uint(st.top) > stackLimit-2 {
 		panic("stack index out of range")
@@ -116,7 +116,7 @@ func (st *Stack) popRef2() (x, y *uint256.Int) {
 	return &st.data[st.top+1], &st.data[st.top]
 }
 
-func (st *Stack) popRef3() (x, y, z *uint256.Int) {
+func (st *Stack) pop3() (x, y, z *uint256.Int) {
 	st.top -= 3
 	if uint(st.top) > stackLimit-3 {
 		panic("stack index out of range")

@@ -128,7 +128,7 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 		if callContext.Stack.top != 1 {
 			t.Errorf("Expected one item on stack after %v, got %d: ", name, callContext.Stack.top)
 		}
-		actual := callContext.Stack.pop()
+		actual := callContext.Stack.popCopy()
 
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %v %d, %v(%x, %x): expected  %x, got %x", name, i, name, x, y, expected, &actual)
@@ -244,7 +244,7 @@ func TestAddMod(t *testing.T) {
 		callContext.Stack.push(y)
 		callContext.Stack.push(x)
 		opAddmod(pc, evm, callContext)
-		actual := callContext.Stack.pop()
+		actual := callContext.Stack.popCopy()
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %d, expected  %x, got %x", i, expected, actual)
 		}
@@ -318,7 +318,7 @@ func opBenchmark(b *testing.B, op executionFunc, args ...string) {
 			callContext.Stack.push(a)
 		}
 		op(pc, evm, callContext)
-		callContext.Stack.pop()
+		callContext.Stack.popCopy()
 	}
 }
 
@@ -700,7 +700,7 @@ func TestStackPopHelpers(t *testing.T) {
 	// pointed-to value stays valid until the next push reuses that slot.
 	st.push(*uint256.NewInt(1)) // stays below
 	st.push(*uint256.NewInt(2)) // popped by popRef
-	ref := st.popRef()
+	ref := st.pop()
 	if st.len() != 1 {
 		t.Fatalf("popRef len = %d, want 1", st.len())
 	}
@@ -724,7 +724,7 @@ func TestStackPopHelpers(t *testing.T) {
 	st.push(*uint256.NewInt(3)) // third: stays as new top
 	st.push(*uint256.NewInt(2)) // next
 	st.push(*uint256.NewInt(1)) // top
-	x, y, z := st.popRef2Peek1()
+	x, y, z := st.pop2Peek1()
 	if x.Uint64() != 1 || y.Uint64() != 2 || z.Uint64() != 3 {
 		t.Fatalf("popRef2Peek1 = (%d, %d, %d), want (1, 2, 3)", x.Uint64(), y.Uint64(), z.Uint64())
 	}
@@ -793,7 +793,7 @@ func BenchmarkOpKeccak256(bench *testing.B) {
 		callContext.Stack.push(*uint256.NewInt(32))
 		callContext.Stack.push(start)
 		opKeccak256(pc, evm, callContext)
-		callContext.Stack.popRef()
+		callContext.Stack.pop()
 	}
 }
 
@@ -1043,7 +1043,7 @@ func TestOpCLZ(t *testing.T) {
 			if gotLen := callContext.Stack.len(); gotLen != 1 {
 				t.Fatalf("stack length = %d; want 1", gotLen)
 			}
-			result := callContext.Stack.pop()
+			result := callContext.Stack.popCopy()
 
 			if got := result.Uint64(); got != tc.want {
 				t.Fatalf("clz(%q) = %d; want %d", tc.inputHex, got, tc.want)
@@ -1112,7 +1112,7 @@ func TestPush(t *testing.T) {
 	} {
 		pc := uint64(i)
 		push32(pc, evm, callContext)
-		res := callContext.Stack.pop()
+		res := callContext.Stack.popCopy()
 		if have := res.Hex(); have != want {
 			t.Fatalf("case %d, have %v want %v", i, have, want)
 		}
