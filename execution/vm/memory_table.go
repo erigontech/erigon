@@ -40,15 +40,15 @@ func memoryExtCodeCopy(callContext *CallContext) (uint64, bool) {
 }
 
 func memoryMLoad(callContext *CallContext) (uint64, bool) {
-	return calcMemSize64WithUint(callContext.Stack.Back(0), 32)
+	return calcMemSize64WithUint(callContext.Stack.back(0), 32)
 }
 
 func memoryMStore8(callContext *CallContext) (uint64, bool) {
-	return calcMemSize64WithUint(callContext.Stack.Back(0), 1)
+	return calcMemSize64WithUint(callContext.Stack.back(0), 1)
 }
 
 func memoryMStore(callContext *CallContext) (uint64, bool) {
-	return calcMemSize64WithUint(callContext.Stack.Back(0), 32)
+	return calcMemSize64WithUint(callContext.Stack.back(0), 32)
 }
 
 func memoryMcopy(callContext *CallContext) (uint64, bool) {

@@ -158,7 +158,7 @@ func (st *Stack) back3(n, m, k int) (x, y, z *uint256.Int) {
 }
 
 // Back returns the n'th item in stack
-func (st *Stack) Back(n int) *uint256.Int {
+func (st *Stack) back(n int) *uint256.Int {
 	return &st.data[st.top-n-1]
 }
 
