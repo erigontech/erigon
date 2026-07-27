@@ -28,7 +28,6 @@ import (
 var TestFormats = spectest.Appendix{}
 
 func init() {
-
 	TestFormats.Add("bls").
 		With("aggregate_verify", &BlsAggregateVerify{}).
 		With("aggregate", spectest.UnimplementedHandler).
@@ -139,19 +138,19 @@ func addSszTests() {
 		// With("Eth1Block", getSSZStaticConsensusTest(&cltypes.Eth1Block{})).
 		With("Eth1Data", getSSZStaticConsensusTest(&cltypes.Eth1Data{})).
 		With("Fork", getSSZStaticConsensusTest(&cltypes.Fork{})).
-		//With("ForkData", getSSZStaticConsensusTest(&cltypes.ForkData{})).
-		//With("HistoricalBatch", getSSZStaticConsensusTest(&cltypes.HistoricalBatch{})).
+		// With("ForkData", getSSZStaticConsensusTest(&cltypes.ForkData{})).
+		// With("HistoricalBatch", getSSZStaticConsensusTest(&cltypes.HistoricalBatch{})).
 		With("HistoricalSummary", getSSZStaticConsensusTest(&cltypes.HistoricalSummary{})).
 		With("LightClientBootstrap", getSSZStaticConsensusTest(&cltypes.LightClientBootstrap{})).
 		With("LightClientFinalityUpdate", getSSZStaticConsensusTest(&cltypes.LightClientFinalityUpdate{})).
 		With("LightClientOptimisticUpdate", getSSZStaticConsensusTest(&cltypes.LightClientOptimisticUpdate{})).
-		//With("LightClientUpdate", getSSZStaticConsensusTest(&cltypes.LightClientUpdate{})).
+		// With("LightClientUpdate", getSSZStaticConsensusTest(&cltypes.LightClientUpdate{})).
 		With("PendingAttestation", getSSZStaticConsensusTest(&solid.PendingAttestation{})).
 		//		With("PowBlock", getSSZStaticConsensusTest(&cltypes.PowBlock{})). Unimplemented
 		With("ProposerSlashing", getSSZStaticConsensusTest(&cltypes.ProposerSlashing{})).
 		With("SignedAggregateAndProof", getSSZStaticConsensusTest(&cltypes.SignedAggregateAndProof{})).
 		With("SignedBeaconBlockHeader", getSSZStaticConsensusTest(&cltypes.SignedBeaconBlockHeader{})).
-		//With("SignedBlobSidecar", getSSZStaticConsensusTest(&cltypes.SignedBlobSideCar{})).
+		// With("SignedBlobSidecar", getSSZStaticConsensusTest(&cltypes.SignedBlobSideCar{})).
 		With("SignedBLSToExecutionChange", getSSZStaticConsensusTest(&cltypes.SignedBLSToExecutionChange{})).
 		With("SignedContributionAndProof", getSSZStaticConsensusTest(&cltypes.SignedContributionAndProof{})).
 		With("SignedVoluntaryExit", getSSZStaticConsensusTest(&cltypes.SignedVoluntaryExit{})).
@@ -164,49 +163,60 @@ func addSszTests() {
 		With("ExecutionPayloadHeader", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.Eth1Header {
 				return cltypes.NewEth1Header(v)
-			}, withTestJson())).
+			}, withTestJson(),
+		)).
 		With("SyncCommitteeContribution", sszStaticTestByEmptyObject(&cltypes.Contribution{})).
 		With("Withdrawal", sszStaticTestByEmptyObject(&cltypes.Withdrawal{}, withTestJson())).
 		With("LightClientHeader", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.LightClientHeader {
 				return cltypes.NewLightClientHeader(v)
-			}, withTestJson())).
+			}, withTestJson(),
+		)).
 		With("LightClientUpdate", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.LightClientUpdate {
 				return cltypes.NewLightClientUpdate(v, &clparams.MainnetBeaconConfig)
-			}, withTestJson())).
+			}, withTestJson(),
+		)).
 		With("SignedBeaconBlock", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.SignedBeaconBlock {
 				return cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, v)
-			}, withTestJson())).
+			}, withTestJson(),
+		)).
 		With("ExecutionPayload", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.Eth1Block {
 				return cltypes.NewEth1Block(v, &clparams.MainnetBeaconConfig)
-			}, withTestJson())).
+			}, withTestJson(),
+		)).
 		With("ExecutionRequests", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.ExecutionRequests {
 				return cltypes.NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, v)
-			}, withTestJson(), runAfterVersion(clparams.ElectraVersion))).
+			}, withTestJson(), runAfterVersion(clparams.ElectraVersion),
+		)).
 		With("IndexedAttestation", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.IndexedAttestation {
 				return cltypes.NewIndexedAttestation(v)
-			}, withTestJson())).
+			}, withTestJson(),
+		)).
 		With("BeaconBlock", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.BeaconBlock {
 				return cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, v)
-			}, withTestJson())).
+			}, withTestJson(),
+		)).
 		With("AttesterSlashing", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.AttesterSlashing {
 				return cltypes.NewAttesterSlashing(v)
-			}, withTestJson())).
+			}, withTestJson(),
+		)).
 		With("BeaconBlockBody", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.BeaconBody {
 				return cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, v)
-			}, withTestJson())).
+			}, withTestJson(),
+		)).
 		With("Attestation", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *solid.Attestation {
 				return &solid.Attestation{}
-			}, withTestJson())).
+			}, withTestJson(),
+		)).
 		With("SyncCommitteeMessage", sszStaticTestByEmptyObject(&cltypes.SyncCommitteeMessage{}, withTestJson())).
 		With("VoluntaryExit", sszStaticTestByEmptyObject(&cltypes.VoluntaryExit{}, withTestJson())).
 		With("SingleAttestation", sszStaticTestByEmptyObject(&solid.SingleAttestation{}, withTestJson(), runAfterVersion(clparams.ElectraVersion))).
@@ -221,20 +231,24 @@ func addSszTests() {
 		With("DataColumnSidecar", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.DataColumnSidecar {
 				return cltypes.NewDataColumnSidecarWithVersion(v)
-			}, withTestJson(), runAfterVersion(clparams.FuluVersion))).
+			}, withTestJson(), runAfterVersion(clparams.FuluVersion),
+		)).
 		// [New in Fulu] Partial data column types
 		With("PartialDataColumnHeader", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.PartialDataColumnHeader {
 				return cltypes.NewPartialDataColumnHeader(v)
-			}, runAfterVersion(clparams.FuluVersion))).
+			}, runAfterVersion(clparams.FuluVersion),
+		)).
 		With("PartialDataColumnSidecar", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.PartialDataColumnSidecar {
 				return cltypes.NewPartialDataColumnSidecar(v)
-			}, runAfterVersion(clparams.FuluVersion))).
+			}, runAfterVersion(clparams.FuluVersion),
+		)).
 		With("PartialDataColumnPartsMetadata", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.PartialDataColumnPartsMetadata {
 				return cltypes.NewPartialDataColumnPartsMetadata()
-			}, runAfterVersion(clparams.FuluVersion))).
+			}, runAfterVersion(clparams.FuluVersion),
+		)).
 		// [New in Gloas:EIP7732] GLOAS SSZ types
 		With("Builder", sszStaticTestByEmptyObject(&cltypes.Builder{}, runAfterVersion(clparams.GloasVersion))).
 		With("BuilderPendingPayment", sszStaticTestByEmptyObject(&cltypes.BuilderPendingPayment{
@@ -249,11 +263,13 @@ func addSszTests() {
 		With("ExecutionPayloadEnvelope", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.ExecutionPayloadEnvelope {
 				return cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
-			}, runAfterVersion(clparams.GloasVersion))).
+			}, runAfterVersion(clparams.GloasVersion),
+		)).
 		With("IndexedPayloadAttestation", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.IndexedPayloadAttestation {
 				return cltypes.NewIndexedPayloadAttestation()
-			}, runAfterVersion(clparams.GloasVersion))).
+			}, runAfterVersion(clparams.GloasVersion),
+		)).
 		With("PayloadAttestation", sszStaticTestByEmptyObject(&cltypes.PayloadAttestation{}, runAfterVersion(clparams.GloasVersion))).
 		With("PayloadAttestationData", sszStaticTestByEmptyObject(&cltypes.PayloadAttestationData{}, runAfterVersion(clparams.GloasVersion))).
 		With("PayloadAttestationMessage", sszStaticTestByEmptyObject(&cltypes.PayloadAttestationMessage{
@@ -271,7 +287,8 @@ func addSszTests() {
 				return &cltypes.SignedExecutionPayloadEnvelope{
 					Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig),
 				}
-			}, runAfterVersion(clparams.GloasVersion))).
+			}, runAfterVersion(clparams.GloasVersion),
+		)).
 		With("SignedProposerPreferences", sszStaticTestByEmptyObject(&cltypes.SignedProposerPreferences{
 			Message: &cltypes.ProposerPreferences{},
 		}, runAfterVersion(clparams.GloasVersion))).

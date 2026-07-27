@@ -5,6 +5,9 @@ on:
     - cron: '0 20 * * 0'  # Run on Sunday at 08:00 PM UTC
   workflow_dispatch:     # Run manually
 
+permissions:
+  contents: read
+
 jobs:
   constrained-tip-tracking-test:
     strategy:

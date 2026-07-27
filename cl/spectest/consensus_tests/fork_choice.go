@@ -176,6 +176,7 @@ func (f *ForkChoiceStep) GetTick() int {
 	}
 	return *f.Tick
 }
+
 func (f *ForkChoiceStep) GetValid() bool {
 	if f.Valid == nil {
 		return true
@@ -189,6 +190,7 @@ func (f *ForkChoiceStep) GetAttestation() string {
 	}
 	return *f.Attestation
 }
+
 func (f *ForkChoiceStep) GetBlock() string {
 	if f.Block == nil {
 		return ""
@@ -209,30 +211,35 @@ func (f *ForkChoiceStep) GetPowBlock() string {
 	}
 	return *f.PowBlock
 }
+
 func (f *ForkChoiceStep) GetAttesterSlashing() string {
 	if f.AttesterSlashing == nil {
 		return ""
 	}
 	return *f.AttesterSlashing
 }
+
 func (f *ForkChoiceStep) GetBlockHash() string {
 	if f.BlockHash == nil {
 		return ""
 	}
 	return *f.BlockHash
 }
+
 func (f *ForkChoiceStep) GetPayloadStatus() *ForkChoicePayloadStatus {
 	if f.PayloadStatus == nil {
 		return nil
 	}
 	return f.PayloadStatus
 }
+
 func (f *ForkChoiceStep) GetExecutionPayload() string {
 	if f.ExecutionPayload == nil {
 		return ""
 	}
 	return *f.ExecutionPayload
 }
+
 func (f *ForkChoiceStep) GetChecks() *ForkChoiceChecks {
 	if f.Checks == nil {
 		return nil
@@ -266,8 +273,7 @@ type ForkChoicePayloadStatus struct {
 	ValidationError string `yaml:"validation_error"`
 }
 
-type ForkChoice struct {
-}
+type ForkChoice struct{}
 
 func NewForkChoice(fn func(s abstract.BeaconState) error) *ForkChoice {
 	return &ForkChoice{}
@@ -313,7 +319,8 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 		ethClock, anchorState, forkChoiceSpectestEngine{}, pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
 		fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}),
 		emitters, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true), blobStorage, public_keys_registry.NewInMemoryPublicKeysRegistry(),
-		localValidators, false, nil)
+		localValidators, false, nil,
+	)
 	require.NoError(t, err)
 	forkStore.SetSynced(true)
 	forkStore.InitPeerDas(peerDas)
@@ -425,7 +432,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			}
 		case "on_tick":
 			forkStore.OnTick(uint64(step.GetTick()))
-			//TODO: onTick needs to be able to return error
+			// TODO: onTick needs to be able to return error
 		//	if step.GetValid() {
 		//		require.NoError(t, err)
 		//	} else {

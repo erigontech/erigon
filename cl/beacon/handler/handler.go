@@ -267,6 +267,7 @@ func (a *ApiHandler) Init() {
 		a.init()
 	})
 }
+
 func (a *ApiHandler) init() {
 	r := chi.NewRouter()
 	a.mux = r
@@ -416,7 +417,6 @@ func (a *ApiHandler) init() {
 					}
 				})
 			}
-
 		})
 		r.Route("/v2", func(r chi.Router) {
 			if a.routerCfg.Debug {

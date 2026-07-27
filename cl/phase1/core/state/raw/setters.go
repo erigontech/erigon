@@ -578,6 +578,7 @@ func (b *BeaconState) SetConsolidationBalanceToConsume(balance uint64) {
 	b.consolidationBalanceToConsume = balance
 	b.markLeaf(ConsolidationBalanceToConsumeLeafIndex)
 }
+
 func (b *BeaconState) SetEarlistConsolidationEpoch(epoch uint64) {
 	b.earliestConsolidationEpoch = epoch
 	b.markLeaf(EarliestConsolidationEpochLeafIndex)

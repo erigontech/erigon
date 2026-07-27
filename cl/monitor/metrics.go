@@ -97,7 +97,6 @@ func (a *aggregateQualityMetric) observe(participationCount int, totalCount int)
 	aggregateQualityMax.Set(a.qualities[len(a.qualities)-1])
 
 	a.qualities = a.qualities[:0]
-
 }
 
 var (

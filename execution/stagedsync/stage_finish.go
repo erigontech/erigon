@@ -17,6 +17,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"time"
@@ -103,7 +104,7 @@ func NotifyNewHeaders(ctx context.Context, notifyFrom, notifyTo uint64, notifier
 		}
 		headerRLP := rawdb.ReadHeaderRLP(tx, common.BytesToHash(hash), blockNum)
 		if headerRLP != nil {
-			headersRlp = append(headersRlp, common.Copy(headerRLP))
+			headersRlp = append(headersRlp, bytes.Clone(headerRLP))
 		}
 		return common.Stopped(ctx.Done())
 	}); err != nil {

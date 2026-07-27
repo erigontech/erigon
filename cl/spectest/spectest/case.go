@@ -48,6 +48,7 @@ func (tx *TestCases) add(t TestCase) {
 func (t *TestCases) Slice() []TestCase {
 	return t.tc
 }
+
 func (t *TestCases) Filter(fn func(t TestCase) bool) *TestCases {
 	o := &TestCases{}
 	for _, v := range t.tc {
@@ -69,7 +70,7 @@ func ReadTestCases(root fs.FS) (out *TestCases, err error) {
 			}
 		}
 
-		//TODO: probably we can do more sanitation here
+		// TODO: probably we can do more sanitation here
 		if len(pathList) != 6 {
 			return nil
 		}

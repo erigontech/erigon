@@ -60,7 +60,6 @@ func getTestBlobSidecars(blockHeader *cltypes.SignedBeaconBlockHeader) []*cltype
 		))
 	}
 	return out
-
 }
 
 func TestBlobsByRangeHandler(t *testing.T) {
@@ -127,7 +126,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 		return
 	}
 
-	reqData := common.Copy(reqBuf.Bytes())
+	reqData := bytes.Clone(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BlobSidecarByRangeProtocolV1))
 	require.NoError(t, err)
 
@@ -183,8 +182,8 @@ func TestBlobsByRangeHandler(t *testing.T) {
 		t.Fatal("Stream is not empty")
 	}
 
-	defer indiciesDB.Close()
-	defer tx.Rollback()
+	indiciesDB.Close()
+	tx.Rollback()
 }
 
 func TestBlobsByIdentifiersHandler(t *testing.T) {
@@ -251,7 +250,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 		return
 	}
 
-	reqData := common.Copy(reqBuf.Bytes())
+	reqData := bytes.Clone(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BlobSidecarByRootProtocolV1))
 	require.NoError(t, err)
 
@@ -307,6 +306,6 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 		t.Fatal("Stream is not empty")
 	}
 
-	defer indiciesDB.Close()
-	defer tx.Rollback()
+	indiciesDB.Close()
+	tx.Rollback()
 }
