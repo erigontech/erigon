@@ -604,7 +604,7 @@ run:
 			if trace {
 				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
 			}
-			callContext.Stack.dup(2)
+			callContext.Stack.dup(1)
 			pc++
 			continue
 		}
