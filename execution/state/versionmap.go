@@ -224,7 +224,14 @@ func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 			vm.WriteNonce(accountChanges.Address, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
 		}
 		for _, codeChange := range accountChanges.CodeChanges {
-			vm.WriteCode(accountChanges.Address, Version{TxIndex: int(codeChange.Index) - 1}, accounts.NewCode(codeChange.Bytecode), true)
+			// Seed the whole code trio so pre-population matches what tx execution
+			// flushes together; a CodePath cell without its CodeHashPath/CodeSizePath
+			// siblings lets a concurrent reader see code but no code hash.
+			code := accounts.NewCode(codeChange.Bytecode)
+			v := Version{TxIndex: int(codeChange.Index) - 1}
+			vm.WriteCode(accountChanges.Address, v, code, true)
+			vm.WriteCodeHash(accountChanges.Address, v, code.Hash, true)
+			vm.WriteCodeSize(accountChanges.Address, v, code.Len(), true)
 		}
 	}
 }
@@ -1051,7 +1058,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 
 	if vm.trace || (traceInvalid && valid == VersionInvalid) {
 		if len(tracePrefix) > 0 {
-			tracePrefix = tracePrefix + "  RD"
+			tracePrefix += "  RD"
 		} else {
 			tracePrefix = "RD"
 		}

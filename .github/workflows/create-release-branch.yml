@@ -226,12 +226,12 @@ jobs:
           path: outgoing
           persist-credentials: false
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         if: steps.plan.outputs.outcome == 'proceed'
         with:
           node-version: '20'
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         if: steps.plan.outputs.outcome == 'proceed'
         with:
           python-version: '3.11'
