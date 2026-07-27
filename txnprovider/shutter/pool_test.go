@@ -665,14 +665,15 @@ func (cb *MockContractBackend) SimulateFilterLogs(addr common.Address, logs []ty
 func (cb *MockContractBackend) SimulateLogEvents(ctx context.Context, logs []types.Log) error {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	for _, l := range logs {
+	for i := range logs {
+		l := &logs[i]
 		cb.logger.Trace("--- DEBUG --- attempting to send log for", "addr", l.Address.String())
 		for _, sub := range cb.subs[l.Address] {
 			cb.logger.Trace("--- DEBUG --- sending log event", "addr", l.Address.String())
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case sub <- l: // no-op
+			case sub <- *l: // no-op
 				cb.logger.Trace("--- DEBUG --- sent log event", "addr", l.Address.String())
 			}
 		}
