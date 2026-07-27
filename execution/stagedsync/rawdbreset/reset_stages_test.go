@@ -29,23 +29,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
-
-// newEmptyBlockReader returns a BlockReader backed by an empty RoSnapshots
-// instance, so FrozenBlocks() == 0 and the reset helper takes its
-// "no-snapshots, skip FillDBFromSnapshots" path. FillDBFromSnapshots itself
-// is exercised by stage_header --reset / stage_exec --reset integration
-// paths and is out of scope for this unit test.
-func newEmptyBlockReader(t *testing.T, dirs datadir.Dirs, logger log.Logger) *freezeblocks.BlockReader {
-	t.Helper()
-	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs.Snap, logger)
-	t.Cleanup(snaps.Close)
-	return freezeblocks.NewBlockReader(snaps, nil)
-}
 
 // TestResetCanonicalAndRefillFromSnapshots_ClearsStaleSidechainPointers
 // verifies the fix for a stale-canonical-pointer leak observed on hoodi
@@ -72,7 +58,7 @@ func TestResetCanonicalAndRefillFromSnapshots_ClearsStaleSidechainPointers(t *te
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
 	logger := log.New()
-	br := newEmptyBlockReader(t, dirs, logger)
+	br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles(), nil)
 
 	const sideTipHeight = uint64(110)
 	staleHashAt105 := common.Hash{0x99}
@@ -133,7 +119,7 @@ func TestResetCanonicalAndRefillFromSnapshots_NoOpOnEmptyDB(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
 	logger := log.New()
-	br := newEmptyBlockReader(t, dirs, logger)
+	br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles(), nil)
 
 	require.NoError(t, rawdbreset.ResetCanonicalAndRefillFromSnapshots(ctx, db, dirs, br, logger))
 

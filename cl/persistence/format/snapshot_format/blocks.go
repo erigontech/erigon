@@ -141,6 +141,15 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	}
 	blockNumber := blindedBlock.Block.Body.ExecutionPayload.BlockNumber
 	blockHash := blindedBlock.Block.Body.ExecutionPayload.BlockHash
+	// Pre-Merge Bellatrix blocks carry a default (all-zero) execution payload header.
+	// Their BlockHash is the zero hash, meaning no EL block exists to fetch transactions
+	// from. This matches the consensus spec's is_execution_enabled check:
+	// is_merge_transition_complete(state) || block.body.execution_payload.block_hash != Bytes32()
+	// We don't have beacon state here, but a zero BlockHash is a reliable indicator that
+	// execution is not yet enabled for this block.
+	if blockHash == (common.Hash{}) {
+		return blindedBlock.Full(nil, nil), nil
+	}
 	txs, err := executionReader.Transactions(blockNumber, blockHash)
 	if err != nil {
 		return nil, err

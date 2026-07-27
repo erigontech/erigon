@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"math/rand"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -100,10 +100,7 @@ func voteSampleBounds(count int, probabilistic bool, gen *rand.Rand) (int, int) 
 	if !probabilistic || count == 0 {
 		return 0, 1
 	}
-	startLimit := sampleBasis
-	if count < startLimit {
-		startLimit = count
-	}
+	startLimit := min(count, sampleBasis)
 	return gen.Intn(startLimit), sampleBasis + gen.Intn(sampleFactor)
 }
 
@@ -297,10 +294,8 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (co
 			continue
 		}
 		// Sort children by lexigographical order
-		sort.Slice(children, func(i, j int) bool {
-			childA := children[i]
-			childB := children[j]
-			return bytes.Compare(childA[:], childB[:]) < 0
+		slices.SortFunc(children, func(a, b common.Hash) int {
+			return bytes.Compare(a[:], b[:])
 		})
 		// After sorting is done determine best fit.
 		f.headHash = children[0]

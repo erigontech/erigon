@@ -24,10 +24,12 @@ import (
 	"math/big"
 	"math/rand"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -67,7 +69,7 @@ func (tr *TRand) RandBig() *big.Int {
 
 func (tr *TRand) RandBytes(size int) []byte {
 	arr := make([]byte, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		arr[i] = byte(tr.rnd.Intn(256))
 	}
 	return arr
@@ -137,7 +139,7 @@ func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
 	headerValue := reflect.ValueOf(h)
 	headerElem := headerValue.Elem()
 	numField := headerElem.Type().NumField()
-	for i := 0; i < numField; i++ {
+	for i := range numField {
 		field := headerElem.Field(i)
 		if !field.CanSet() {
 			continue
@@ -183,7 +185,7 @@ func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
 func (tr *TRand) RandAccessTuple() AccessTuple {
 	n := tr.RandIntInRange(1, 5)
 	sk := make([]common.Hash, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		sk[i] = tr.RandHash()
 	}
 	return AccessTuple{
@@ -194,7 +196,7 @@ func (tr *TRand) RandAccessTuple() AccessTuple {
 
 func (tr *TRand) RandAccessList(size int) AccessList {
 	al := make([]AccessTuple, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		al[i] = tr.RandAccessTuple()
 	}
 	return al
@@ -202,7 +204,7 @@ func (tr *TRand) RandAccessList(size int) AccessList {
 
 func (tr *TRand) RandAuthorizations(size int) []Authorization {
 	auths := make([]Authorization, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		auths[i] = Authorization{
 			ChainID: *tr.RandUint256(),
 			Address: tr.RandAddress(),
@@ -317,7 +319,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 
 func (tr *TRand) RandHashes(size int) []common.Hash {
 	hashes := make([]common.Hash, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		hashes[i] = tr.RandHash()
 	}
 	return hashes
@@ -325,7 +327,7 @@ func (tr *TRand) RandHashes(size int) []common.Hash {
 
 func (tr *TRand) RandTransactions(size int) []Transaction {
 	txns := make([]Transaction, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		txns[i] = tr.RandTransaction(-1)
 	}
 	return txns
@@ -333,7 +335,7 @@ func (tr *TRand) RandTransactions(size int) []Transaction {
 
 func (tr *TRand) RandRawTransactions(size int) [][]byte {
 	txns := make([][]byte, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		txns[i] = tr.RandBytes(tr.RandIntInRange(1, 512))
 	}
 	return txns
@@ -341,7 +343,7 @@ func (tr *TRand) RandRawTransactions(size int) [][]byte {
 
 func (tr *TRand) RandRLPTransactions(size int) [][]byte {
 	txns := make([][]byte, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		txn := make([]byte, 512)
 		txSize := tr.RandIntInRange(1, 500)
 		encodedSize := rlp.EncodeStringToBuf(tr.RandBytes(txSize), txn)
@@ -352,7 +354,7 @@ func (tr *TRand) RandRLPTransactions(size int) [][]byte {
 
 func (tr *TRand) RandHeaders(size int) []*Header {
 	uncles := make([]*Header, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		uncles[i] = tr.RandHeader()
 	}
 	return uncles
@@ -360,7 +362,7 @@ func (tr *TRand) RandHeaders(size int) []*Header {
 
 func (tr *TRand) RandWithdrawals(size int) []*Withdrawal {
 	withdrawals := make([]*Withdrawal, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		withdrawals[i] = tr.RandWithdrawal()
 	}
 	return withdrawals
@@ -469,6 +471,7 @@ func compareTransactions(t *testing.T, a, b Transaction) {
 	check(t, "Tx.GetTo", a.GetTo(), b.GetTo())
 	check(t, "Tx.GetData", a.GetData(), b.GetData())
 	check(t, "Tx.GetAccessList", a.GetAccessList(), b.GetAccessList())
+	check(t, "Tx.GetAuthorizations", a.GetAuthorizations(), b.GetAuthorizations())
 	check(t, "Tx.V", v1, v2)
 	check(t, "Tx.R", r1, r2)
 	check(t, "Tx.S", s1, s2)
@@ -482,7 +485,7 @@ func compareHeaders(t *testing.T, a, b []*Header) error {
 		return fmt.Errorf("uncles len mismatch: expected: %v, got: %v", auLen, buLen)
 	}
 
-	for i := 0; i < auLen; i++ {
+	for i := range auLen {
 		checkHeaders(t, a[i], b[i])
 	}
 	return nil
@@ -496,7 +499,7 @@ func compareWithdrawals(t *testing.T, a, b []*Withdrawal) error {
 		return fmt.Errorf("withdrawals len mismatch: expected: %v, got: %v", awLen, bwLen)
 	}
 
-	for i := 0; i < awLen; i++ {
+	for i := range awLen {
 		checkWithdrawals(t, a[i], b[i])
 	}
 	return nil
@@ -510,7 +513,7 @@ func compareRawBodies(t *testing.T, a, b *RawBody) error {
 		return fmt.Errorf("transactions len mismatch: expected: %v, got: %v", atLen, btLen)
 	}
 
-	for i := 0; i < atLen; i++ {
+	for i := range atLen {
 		if !isEqualBytes(a.Transactions[i], b.Transactions[i]) {
 			return fmt.Errorf("byte transactions are not equal")
 		}
@@ -529,7 +532,7 @@ func compareBodies(t *testing.T, a, b *Body) error {
 		return fmt.Errorf("txns len mismatch: expected: %v, got: %v", atLen, btLen)
 	}
 
-	for i := 0; i < atLen; i++ {
+	for i := range atLen {
 		compareTransactions(t, a.Transactions[i], b.Transactions[i])
 	}
 
@@ -542,7 +545,7 @@ func compareBodies(t *testing.T, a, b *Body) error {
 func TestTransactionEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer
-	for i := 0; i < RUNS; i++ {
+	for range RUNS {
 		enc := tr.RandTransaction(-1)
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
@@ -562,10 +565,44 @@ func TestTransactionEncodeDecodeRLP(t *testing.T) {
 	}
 }
 
+// TestDecodeTransactionDoesNotAliasInput pins the invariant that lets
+// DecodeRLPTransaction pass a zero-copy view of the typed-transaction envelope
+// to UnmarshalTransactionFromBinary: a decoder must copy out every field it
+// keeps, never retain a sub-slice of its input. Decoding happens straight from
+// reusable buffers that the caller is free to overwrite afterwards.
+func TestDecodeTransactionDoesNotAliasInput(t *testing.T) {
+	tr := NewTRand()
+	var buf bytes.Buffer
+	for range RUNS {
+		txn := tr.RandTransaction(-1)
+		buf.Reset()
+		if err := txn.EncodeRLP(&buf); err != nil {
+			if txn.Type() >= BlobTxType && errors.Is(err, ErrNilToFieldTx) {
+				continue
+			}
+			t.Fatalf("error: Transaction.EncodeRLP(): %v", err)
+		}
+		scribbled, pristine := bytes.Clone(buf.Bytes()), buf.Bytes()
+
+		fromScribbled, err := DecodeTransaction(scribbled)
+		if err != nil {
+			t.Fatalf("error: DecodeTransaction(): %v", err)
+		}
+		for i := range scribbled {
+			scribbled[i] = 0xFF
+		}
+		fromPristine, err := DecodeTransaction(pristine)
+		if err != nil {
+			t.Fatalf("error: DecodeTransaction(): %v", err)
+		}
+		compareTransactions(t, fromPristine, fromScribbled)
+	}
+}
+
 func TestHeaderEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer
-	for i := 0; i < RUNS; i++ {
+	for range RUNS {
 		enc := tr.RandHeader()
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
@@ -587,7 +624,7 @@ func TestHeaderEncodeDecodeRLP(t *testing.T) {
 func TestRawBodyEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer
-	for i := 0; i < RUNS; i++ {
+	for range RUNS {
 		enc := tr.RandRawBody()
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
@@ -611,7 +648,7 @@ func TestRawBodyEncodeDecodeRLP(t *testing.T) {
 func TestBodyEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer
-	for i := 0; i < RUNS; i++ {
+	for range RUNS {
 		enc := tr.RandBody()
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
@@ -637,7 +674,7 @@ func TestBodyEncodeDecodeRLP(t *testing.T) {
 func TestWithdrawalEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer
-	for i := 0; i < RUNS; i++ {
+	for range RUNS {
 		enc := tr.RandWithdrawal()
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
@@ -736,6 +773,109 @@ func BenchmarkSetCodeTxRLP(b *testing.B) {
 	}
 }
 
+var benchTxTypes = []struct {
+	name   string
+	txType int
+}{
+	{"Legacy", LegacyTxType},
+	{"AccessList", AccessListTxType},
+	{"DynamicFee", DynamicFeeTxType},
+	{"Blob", BlobTxType},
+	{"SetCode", SetCodeTxType},
+}
+
+// randCallTransaction returns a transaction of the given type that has a non-nil
+// To, i.e. a call rather than a contract creation. Blob transactions cannot
+// encode without one. The seed is fixed so that payload sizes stay comparable
+// across runs.
+func randCallTransaction(b *testing.B, txType int) Transaction {
+	b.Helper()
+	tr := &TRand{rnd: rand.New(rand.NewSource(1))}
+	for range 100 {
+		if txn := tr.RandTransaction(txType); txn.GetTo() != nil {
+			return txn
+		}
+	}
+	b.Fatalf("no transaction of type %d with a non-nil To", txType)
+	return nil
+}
+
+func encodeTxRLP(b *testing.B, txn Transaction) []byte {
+	b.Helper()
+	var buf bytes.Buffer
+	if err := txn.EncodeRLP(&buf); err != nil {
+		b.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func encodeTxBinary(b *testing.B, txn Transaction) []byte {
+	b.Helper()
+	var buf bytes.Buffer
+	if err := txn.MarshalBinary(&buf); err != nil {
+		b.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// BenchmarkDecodeTransactionRLP covers the encoding transactions have inside a
+// block body and in snapshot files: typed transactions are wrapped in an RLP
+// string envelope.
+func BenchmarkDecodeTransactionRLP(b *testing.B) {
+	for _, tt := range benchTxTypes {
+		b.Run(tt.name, func(b *testing.B) {
+			enc := encodeTxRLP(b, randCallTransaction(b, tt.txType))
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := DecodeTransaction(enc); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkUnmarshalTransactionFromBinary covers the canonical EIP-2718
+// encoding used on the wire and by the RPC API: no envelope.
+func BenchmarkUnmarshalTransactionFromBinary(b *testing.B) {
+	for _, tt := range benchTxTypes {
+		b.Run(tt.name, func(b *testing.B) {
+			enc := encodeTxBinary(b, randCallTransaction(b, tt.txType))
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := UnmarshalTransactionFromBinary(enc, false); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkDecodeOptionalAddress(b *testing.B) {
+	run := func(b *testing.B, addr *common.Address) {
+		b.Helper()
+		var buf bytes.Buffer
+		if err := EncodeOptionalAddress(addr, &buf, make([]byte, 21)); err != nil {
+			b.Fatal(err)
+		}
+		enc := buf.Bytes()
+		b.ReportAllocs()
+		var dst *common.Address
+		for b.Loop() {
+			s := rlp.NewBytesStream(enc)
+			if err := DecodeOptionalAddress(&dst, s); err != nil {
+				b.Fatal(err)
+			}
+			rlp.PutStream(s)
+		}
+	}
+	b.Run("Address", func(b *testing.B) {
+		addr := common.HexToAddress("0x000000000000000000000000000000000000dEaD")
+		run(b, &addr)
+	})
+	b.Run("Nil", func(b *testing.B) { run(b, nil) })
+}
+
 func BenchmarkWithdrawalRLP(b *testing.B) {
 	tr := NewTRand()
 	w := tr.RandWithdrawal()
@@ -767,9 +907,23 @@ func (tr *TRand) RandLogFixed() *Log {
 func (tr *TRand) RandReceipt() *Receipt {
 	numLogs := tr.RandIntInRange(1, 5)
 	logs := make(Logs, numLogs)
-	for i := 0; i < numLogs; i++ {
+	for i := range numLogs {
 		logs[i] = tr.RandLog()
 	}
+	return tr.randReceiptWithLogs(logs)
+}
+
+// RandReceiptFixed creates a Receipt with fixed log count and sizes: contents
+// stay random, but benchmark timings/allocations are comparable across runs.
+func (tr *TRand) RandReceiptFixed() *Receipt {
+	logs := make(Logs, 3)
+	for i := range logs {
+		logs[i] = tr.RandLogFixed()
+	}
+	return tr.randReceiptWithLogs(logs)
+}
+
+func (tr *TRand) randReceiptWithLogs(logs Logs) *Receipt {
 	return &Receipt{
 		Type:              LegacyTxType,
 		PostState:         tr.RandBytes(32),
@@ -786,7 +940,7 @@ func (tr *TRand) RandReceipt() *Receipt {
 
 func BenchmarkLogRLP(b *testing.B) {
 	tr := NewTRand()
-	log := tr.RandLog()
+	log := tr.RandLogFixed()
 	var buf bytes.Buffer
 
 	b.Run(`Encode`, func(b *testing.B) {
@@ -810,9 +964,72 @@ func BenchmarkLogRLP(b *testing.B) {
 	})
 }
 
+func TestReceiptForStorageRoundTrip(t *testing.T) {
+	tr := NewTRand()
+
+	failed := tr.RandReceipt()
+	failed.PostState = nil
+	failed.Status = ReceiptStatusFailed
+
+	success := tr.RandReceipt()
+	success.PostState = nil
+	success.Status = ReceiptStatusSuccessful
+
+	noLogs := tr.RandReceipt()
+	noLogs.Logs = Logs{}
+	noLogs.FirstLogIndexWithinBlock = 7
+
+	emptyLog := tr.RandReceipt()
+	emptyLog.Logs = Logs{{Address: tr.RandAddress()}}
+
+	for i, r := range []*Receipt{tr.RandReceipt(), failed, success, noLogs, emptyLog} {
+		t.Run(fmt.Sprintf("case%d", i), func(t *testing.T) {
+			var buf bytes.Buffer
+			require.NoError(t, (*ReceiptForStorage)(r).EncodeRLP(&buf))
+
+			var dec ReceiptForStorage
+			require.NoError(t, rlp.DecodeBytes(buf.Bytes(), &dec))
+
+			require.Equal(t, r.Type, dec.Type)
+			require.Equal(t, r.PostState, dec.PostState)
+			require.Equal(t, r.Status, dec.Status)
+			require.Equal(t, r.CumulativeGasUsed, dec.CumulativeGasUsed)
+			require.Equal(t, r.FirstLogIndexWithinBlock, dec.FirstLogIndexWithinBlock)
+			require.Equal(t, r.TransactionIndex, dec.TransactionIndex)
+			require.Equal(t, r.ContractAddress, dec.ContractAddress)
+			require.Equal(t, r.GasUsed, dec.GasUsed)
+			require.Equal(t, len(r.Logs), len(dec.Logs))
+			for j := range r.Logs {
+				require.Equal(t, r.Logs[j].Address, dec.Logs[j].Address)
+				require.True(t, slices.Equal(r.Logs[j].Topics, dec.Logs[j].Topics), "topics mismatch: log %d: %x != %x", j, r.Logs[j].Topics, dec.Logs[j].Topics)
+				require.True(t, bytes.Equal(r.Logs[j].Data, dec.Logs[j].Data), "data mismatch: log %d: %x != %x", j, r.Logs[j].Data, dec.Logs[j].Data)
+			}
+		})
+	}
+}
+
+func BenchmarkDeriveFieldsV4ForCachedReceipt(b *testing.B) {
+	tr := NewTRand()
+	receipt := tr.RandReceiptFixed()
+	blockHash, txnHash := tr.RandHash(), tr.RandHash()
+
+	b.Run(`bloom`, func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			receipt.DeriveFieldsV4ForCachedReceipt(blockHash, 123456, txnHash, true)
+		}
+	})
+	b.Run(`no-bloom`, func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			receipt.DeriveFieldsV4ForCachedReceipt(blockHash, 123456, txnHash, false)
+		}
+	})
+}
+
 func BenchmarkReceiptRLP(b *testing.B) {
 	tr := NewTRand()
-	receipt := tr.RandReceipt()
+	receipt := tr.RandReceiptFixed()
 	var buf bytes.Buffer
 
 	b.Run(`Encode`, func(b *testing.B) {
@@ -830,110 +1047,6 @@ func BenchmarkReceiptRLP(b *testing.B) {
 		receiptStorage := (*ReceiptForStorage)(receipt)
 		receiptStorage.EncodeRLP(&buf)
 		var decoded ReceiptForStorage
-		for b.Loop() {
-			rlp.DecodeBytes(buf.Bytes(), &decoded)
-		}
-	})
-}
-
-// Comparison: Custom vs Generated Code
-func BenchmarkLogCustomVsGenerated(b *testing.B) {
-	tr := NewTRand()
-	logData := tr.RandLog()
-	var buf bytes.Buffer
-
-	b.Run(`Custom/Encode`, func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			buf.Reset()
-			logStorage := (*LogForStorage)(logData)
-			logStorage.EncodeRLP(&buf)
-		}
-	})
-
-	b.Run(`Custom/Decode`, func(b *testing.B) {
-		b.ReportAllocs()
-		buf.Reset()
-		logStorage := (*LogForStorage)(logData)
-		logStorage.EncodeRLP(&buf)
-		var decoded LogForStorage
-		for b.Loop() {
-			rlp.DecodeBytes(buf.Bytes(), &decoded)
-		}
-	})
-
-	// Generated code comparison
-	genLog := &LogForStorageGen{
-		Address: logData.Address,
-		Topics:  logData.Topics,
-		Data:    logData.Data,
-	}
-
-	b.Run(`Generated/Encode`, func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			buf.Reset()
-			genLog.EncodeRLP(&buf)
-		}
-	})
-
-	b.Run(`Generated/Decode`, func(b *testing.B) {
-		b.ReportAllocs()
-		buf.Reset()
-		genLog.EncodeRLP(&buf)
-		var decoded LogForStorageGen
-		for b.Loop() {
-			rlp.DecodeBytes(buf.Bytes(), &decoded)
-		}
-	})
-}
-
-// BenchmarkLogCustomVsGeneratedFixed uses fixed data for deterministic results
-func BenchmarkLogCustomVsGeneratedFixed(b *testing.B) {
-	tr := NewTRand()
-	logData := tr.RandLogFixed() // Fixed: 3 topics, 32 bytes data
-	var buf bytes.Buffer
-
-	b.Run(`Custom/Encode`, func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			buf.Reset()
-			logStorage := (*LogForStorage)(logData)
-			logStorage.EncodeRLP(&buf)
-		}
-	})
-
-	b.Run(`Custom/Decode`, func(b *testing.B) {
-		b.ReportAllocs()
-		buf.Reset()
-		logStorage := (*LogForStorage)(logData)
-		logStorage.EncodeRLP(&buf)
-		var decoded LogForStorage
-		for b.Loop() {
-			rlp.DecodeBytes(buf.Bytes(), &decoded)
-		}
-	})
-
-	// Generated code comparison
-	genLog := &LogForStorageGen{
-		Address: logData.Address,
-		Topics:  logData.Topics,
-		Data:    logData.Data,
-	}
-
-	b.Run(`Generated/Encode`, func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			buf.Reset()
-			genLog.EncodeRLP(&buf)
-		}
-	})
-
-	b.Run(`Generated/Decode`, func(b *testing.B) {
-		b.ReportAllocs()
-		buf.Reset()
-		genLog.EncodeRLP(&buf)
-		var decoded LogForStorageGen
 		for b.Loop() {
 			rlp.DecodeBytes(buf.Bytes(), &decoded)
 		}

@@ -18,6 +18,7 @@ package antiquary
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
@@ -63,4 +65,63 @@ func TestStateAntiquaryBellatrix(t *testing.T) {
 func TestStateAntiquaryPhase0(t *testing.T) {
 	blocks, preState, postState := tests.GetPhase0Random()
 	runTest(t, blocks, preState, postState)
+}
+
+type commitCountingDB struct {
+	kv.RwDB
+	commits *atomic.Int64
+}
+
+func (d *commitCountingDB) BeginRw(ctx context.Context) (kv.RwTx, error) {
+	tx, err := d.RwDB.BeginRw(ctx) //nolint:gocritic // wrapper returns the tx to the caller; it owns Rollback
+	if err != nil {
+		return nil, err
+	}
+	return &commitCountingTx{RwTx: tx, commits: d.commits}, nil
+}
+
+type commitCountingTx struct {
+	kv.RwTx
+	commits *atomic.Int64
+}
+
+func (t *commitCountingTx) Commit() error {
+	t.commits.Add(1)
+	return t.RwTx.Commit()
+}
+
+// A single antiquary run must reconstruct the same slots whether committed in
+// one big transaction or in maxSlotsPerCommit-bounded batches, and the bounded
+// run must flush more often — bounding the per-commit retired-page list is what
+// keeps libmdbx's gc_fill_returned from overflowing on large DBs.
+func TestStateAntiquaryCommitIsBounded(t *testing.T) {
+	blocks, preState, postState := tests.GetCapellaRandom()
+	to := blocks[len(blocks)-1].Block.Slot + 33
+
+	run := func(maxSlotsPerCommit uint64) (commits int64, progress uint64) {
+		db := memdb.NewTestDB(t, dbcfg.ChainDB)
+		reader := tests.LoadChain(blocks, postState, db, t)
+		sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+		sn.OnHeadState(postState)
+		ctx := context.Background()
+		vt := state_accessors.NewStaticValidatorTable()
+		counter := &atomic.Int64{}
+		countingDB := &commitCountingDB{RwDB: db, commits: counter}
+		a := NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, countingDB, nil, nil, reader, sn, log.New(), true, true, true, false, nil)
+		a.maxSlotsPerCommit = maxSlotsPerCommit
+		require.NoError(t, a.IncrementBeaconState(ctx, to))
+		require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+			var e error
+			progress, e = state_accessors.GetStateProcessingProgress(tx)
+			return e
+		}))
+		return counter.Load(), progress
+	}
+
+	singleCommits, singleProgress := run(1 << 62)
+	boundedCommits, boundedProgress := run(8)
+
+	require.Equal(t, singleProgress, boundedProgress)
+	require.Greater(t, boundedCommits, singleCommits)
+	require.GreaterOrEqual(t, boundedCommits, singleCommits+2)
 }

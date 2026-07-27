@@ -262,7 +262,7 @@ func TestHistoryKeyTxNumRange_RandomRanges(t *testing.T) {
 		defer ic.Close()
 
 		rng := rand.New(rand.NewSource(0))
-		for i := 0; i < 50; i++ {
+		for i := range 50 {
 			from := rng.Intn(int(txs) + 100)
 			to := rng.Intn(int(txs) + 100)
 			if from > to {

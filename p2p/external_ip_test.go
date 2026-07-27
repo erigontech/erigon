@@ -17,6 +17,7 @@
 package p2p
 
 import (
+	"context"
 	"errors"
 	"net"
 	"testing"
@@ -138,6 +139,45 @@ func TestExternalIPTrackerIgnoresError(t *testing.T) {
 	}
 	if len(*applied) != 0 {
 		t.Fatalf("expected no apply, got %v", *applied)
+	}
+}
+
+type levelCaptureHandler struct{ levels []log.Lvl }
+
+func (h *levelCaptureHandler) Log(r *log.Record) error {
+	h.levels = append(h.levels, r.Lvl)
+	return nil
+}
+func (h *levelCaptureHandler) Enabled(context.Context, log.Lvl) bool { return true }
+
+func TestExternalIPTrackerFailureLogIsDeduped(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	h := &levelCaptureHandler{}
+	logger.SetHandler(h)
+	tr := &externalIPTracker{
+		nat: &fakeNAT{results: []fakeResult{
+			{err: errors.New("down")},
+			{err: errors.New("down")},
+			{ip: net.ParseIP("203.0.113.7")},
+			{err: errors.New("down")},
+		}},
+		set:    func(net.IP) {},
+		logger: logger,
+	}
+	tr.refresh() // failure -> WARN (first)
+	tr.refresh() // failure -> DEBUG (deduped)
+	tr.refresh() // success -> INFO
+	tr.refresh() // failure after recovery -> WARN again
+
+	want := []log.Lvl{log.LvlWarn, log.LvlDebug, log.LvlInfo, log.LvlWarn}
+	if len(h.levels) != len(want) {
+		t.Fatalf("levels = %v, want %v", h.levels, want)
+	}
+	for i := range want {
+		if h.levels[i] != want[i] {
+			t.Fatalf("levels = %v, want %v", h.levels, want)
+		}
 	}
 }
 

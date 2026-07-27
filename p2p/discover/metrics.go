@@ -40,7 +40,7 @@ var (
 )
 
 func init() {
-	for i := 0; i < nBuckets; i++ {
+	for i := range nBuckets {
 		bucketsCounter = append(bucketsCounter, metrics.NewGauge(fmt.Sprintf("%s_bucket_%d_count", moduleName, i)))
 	}
 }

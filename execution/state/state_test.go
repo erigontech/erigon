@@ -82,6 +82,7 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 	domains.SetTxNum(txNum)
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	setup := New(NewReaderV3(domains.AsGetter(tx)))
+	defer setup.Release(false)
 	setup.CreateAccount(addr, true)
 	setup.SetState(addr, key, valA)
 	err = setup.FinalizeTx(&chain.Rules{}, w)
@@ -91,6 +92,7 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 
 	// IBS for the next block — reads block-start state (slot=A) from domains.
 	ibs := New(NewReaderV3(domains.AsGetter(tx)))
+	defer ibs.Release(false)
 
 	// Tx1: A → B.
 	ibs.SetState(addr, key, valB)
@@ -124,6 +126,7 @@ func TestNull(t *testing.T) {
 	r := NewReaderV3(domains.AsGetter(tx))
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	state := New(r)
+	defer state.Release(false)
 
 	address := accounts.InternAddress(common.HexToAddress("0x823140710bf13990e4500136726d8b55"))
 	state.CreateAccount(address, true)
@@ -157,6 +160,7 @@ func TestTouchDelete(t *testing.T) {
 	r := NewReaderV3(domains.AsGetter(tx))
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	state := New(r)
+	defer state.Release(false)
 
 	state.GetOrNewStateObject(accounts.ZeroAddress)
 
@@ -190,6 +194,7 @@ func TestSnapshot(t *testing.T) {
 
 	r := NewReaderV3(domains.AsGetter(tx))
 	state := New(r)
+	defer state.Release(false)
 
 	stateobjaddr := toAddr([]byte("aa"))
 	storageaddr := accounts.ZeroKey
@@ -234,6 +239,7 @@ func TestSnapshotEmpty(t *testing.T) {
 
 	r := NewReaderV3(domains.AsGetter(tx))
 	state := New(r)
+	defer state.Release(false)
 
 	snapshot := state.PushSnapshot()
 	state.RevertToSnapshot(snapshot, nil)
@@ -253,6 +259,7 @@ func TestSnapshot2(t *testing.T) {
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 
 	state := New(NewReaderV3(domains.AsGetter(tx)))
+	defer state.Release(false)
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -269,7 +276,7 @@ func TestSnapshot2(t *testing.T) {
 	require.NoError(t, err)
 	so0.SetBalance(*uint256.NewInt(42), true, tracing.BalanceChangeUnspecified)
 	so0.SetNonce(43, true, tracing.NonceChangeUnspecified)
-	so0.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.HashData([]byte{'c', 'a', 'f', 'e'})), Bytes: []byte{'c', 'a', 'f', 'e'}}, true, tracing.CodeChangeUnspecified)
+	so0.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'})), Bytes: []byte{'c', 'a', 'f', 'e'}}, true, tracing.CodeChangeUnspecified)
 	so0.selfdestructed = false
 	so0.deleted = false
 	state.setStateObject(stateobjaddr0, so0)
@@ -285,7 +292,7 @@ func TestSnapshot2(t *testing.T) {
 	require.NoError(t, err)
 	so1.SetBalance(*uint256.NewInt(52), true, tracing.BalanceChangeUnspecified)
 	so1.SetNonce(53, true, tracing.NonceChangeUnspecified)
-	so1.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.HashData([]byte{'c', 'a', 'f', 'e', '2'})), Bytes: []byte{'c', 'a', 'f', 'e', '2'}}, true, tracing.CodeChangeUnspecified)
+	so1.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'})), Bytes: []byte{'c', 'a', 'f', 'e', '2'}}, true, tracing.CodeChangeUnspecified)
 	so1.selfdestructed = true
 	so1.deleted = true
 	state.setStateObject(stateobjaddr1, so1)
@@ -327,6 +334,7 @@ func TestCodeResolve(t *testing.T) {
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 
 	state := New(NewReaderV3(domains.AsGetter(tx)))
+	defer state.Release(false)
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -334,7 +342,7 @@ func TestCodeResolve(t *testing.T) {
 	so0, err := state.GetOrNewStateObject(stateobjaddr0)
 	require.NoError(t, err)
 	del := types.AddressToDelegation(stateobjaddr1)
-	so0.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.HashData(del)), Bytes: del}, true, tracing.CodeChangeUnspecified)
+	so0.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash(del)), Bytes: del}, true, tracing.CodeChangeUnspecified)
 	so0.selfdestructed = false
 	so0.deleted = false
 	state.setStateObject(stateobjaddr0, so0)
@@ -342,7 +350,7 @@ func TestCodeResolve(t *testing.T) {
 	so1, err := state.GetOrNewStateObject(stateobjaddr1)
 	require.NoError(t, err)
 	target := []byte{'c', 'a', 'f', 'e'}
-	so1.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.HashData(target)), Bytes: target}, true, tracing.CodeChangeUnspecified)
+	so1.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash(target)), Bytes: target}, true, tracing.CodeChangeUnspecified)
 	so1.selfdestructed = false
 	so1.deleted = false
 	state.setStateObject(stateobjaddr1, so1)
@@ -354,6 +362,7 @@ func TestCodeResolve(t *testing.T) {
 	require.NoError(t, err)
 
 	state1 := New(NewReaderV3(domains.AsGetter(tx)))
+	defer state1.Release(false)
 	state1.SetVersionMap(&VersionMap{})
 	state1.Prepare(&chain.Rules{}, accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, nil, nil, nil)
 
@@ -447,6 +456,7 @@ func TestDump(t *testing.T) {
 	require.NoError(t, err)
 
 	st := New(NewReaderV3(domains.AsGetter(tx)))
+	defer st.Release(false)
 
 	// generate a few entries
 	obj1, err := st.GetOrNewStateObject(toAddr([]byte{0x01}))
@@ -454,7 +464,7 @@ func TestDump(t *testing.T) {
 	st.AddBalance(toAddr([]byte{0x01}), *uint256.NewInt(22), tracing.BalanceChangeUnspecified)
 	obj2, err := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	require.NoError(t, err)
-	obj2.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.HashData([]byte{3, 3, 3, 3, 3, 3, 3})), Bytes: []byte{3, 3, 3, 3, 3, 3, 3}}, true, tracing.CodeChangeUnspecified)
+	obj2.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3})), Bytes: []byte{3, 3, 3, 3, 3, 3, 3}}, true, tracing.CodeChangeUnspecified)
 	obj2.setIncarnation(1)
 	obj3, err := st.GetOrNewStateObject(toAddr([]byte{0x02}))
 	require.NoError(t, err)

@@ -582,6 +582,7 @@ func TestOpTstore(t *testing.T) {
 		callContext = &CallContext{Contract: *NewContract(caller, caller, to, uint256.Int{})}
 		value       = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)
+	defer state.Release(false)
 
 	pc := uint64(0)
 	// push the value to the stack
@@ -679,7 +680,7 @@ func TestCreate2Addreses(t *testing.T) {
 		origin := common.BytesToAddress(common.FromHex(tt.origin))
 		salt := common.BytesToHash(common.FromHex(tt.salt))
 		code := common.FromHex(tt.code)
-		codeHash := accounts.InternCodeHash(crypto.HashData(code))
+		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 		address := types.CreateAddress2(origin, salt, codeHash)
 		/*
 			stack          := newstack()

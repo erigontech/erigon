@@ -17,6 +17,7 @@
 package solid
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 
@@ -101,7 +102,7 @@ func (e *ExtraData) DecodeSSZ(buf []byte, _ int) error {
 
 // Bytes returns a copy of the ExtraData bytes.
 func (e *ExtraData) Bytes() []byte {
-	return common.Copy(e.data[:e.l])
+	return bytes.Clone(e.data[:e.l])
 }
 
 // SetBytes sets the ExtraData bytes from the provided byte slice.

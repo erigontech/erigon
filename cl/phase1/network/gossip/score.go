@@ -303,7 +303,7 @@ func decayLimit(decayRate, rate float64) (float64, error) {
 func (g *GossipManager) committeeCountPerSlot() uint64 {
 	activeValidatorCount := g.activeIndicies
 	cfg := g.beaconConfig
-	var committeesPerSlot = activeValidatorCount / cfg.SlotsPerEpoch / cfg.TargetCommitteeSize
+	committeesPerSlot := activeValidatorCount / cfg.SlotsPerEpoch / cfg.TargetCommitteeSize
 
 	if committeesPerSlot > cfg.MaxCommitteesPerSlot {
 		return cfg.MaxCommitteesPerSlot

@@ -17,8 +17,8 @@
 package forkchoice
 
 import (
+	"cmp"
 	"slices"
-	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -616,10 +616,8 @@ func (f *ForkChoiceStore) AnchorRoot() common.Hash {
 }
 
 func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
-	if !alwaysCopy {
-		f.mu.RLock()
-		defer f.mu.RUnlock()
-	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	return f.forkGraph.GetState(blockRoot, alwaysCopy)
 }
 
@@ -736,8 +734,8 @@ func (f *ForkChoiceStore) ForkNodes() []ForkNode {
 			ExecutionBlock: blockHash,
 		})
 	}
-	sort.Slice(forkNodes, func(i, j int) bool {
-		return forkNodes[i].Slot < forkNodes[j].Slot
+	slices.SortFunc(forkNodes, func(a, b ForkNode) int {
+		return cmp.Compare(a.Slot, b.Slot)
 	})
 	return forkNodes
 }

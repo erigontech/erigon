@@ -19,17 +19,16 @@ package temporal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
-	"testing"
 	"time"
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -76,12 +75,28 @@ var ( // Compile time interface checks
 type DB struct {
 	kv.RwDB
 	stateFiles *state.Aggregator
+	// blockFiles: block snapshots, the peer of stateFiles. Optional; nil for
+	// state-only tools, in which case block reads fall back to their own view.
+	blockFiles *blocksnapshots.RoSnapshots
 }
 
-func New(db kv.RwDB, agg *state.Aggregator) (*DB, error) {
-	return &DB{RwDB: db, stateFiles: agg}, nil
+// New wires the temporal DB over a raw kv.RwDB, its state aggregator, and the
+// (optional) block snapshots — the block-data peer of stateFiles. Pass nil
+// blockSnaps for state-only tools.
+func New(db kv.RwDB, agg *state.Aggregator, blockSnaps *blocksnapshots.RoSnapshots) (*DB, error) {
+	return &DB{RwDB: db, stateFiles: agg, blockFiles: blockSnaps}, nil
 }
-func (db *DB) Agg() any                  { return db.stateFiles }
+
+func (db *DB) Agg() any                                     { return db.stateFiles }
+func (db *DB) DebugBlockFiles() *blocksnapshots.RoSnapshots { return db.blockFiles }
+
+// beginBlockFilesRo pins the block-files view for a tx, or nil if unset.
+func (db *DB) beginBlockFilesRo() *blocksnapshots.View {
+	if db.blockFiles == nil {
+		return nil
+	}
+	return db.blockFiles.View()
+}
 func (db *DB) InternalDB() kv.RwDB       { return db.RwDB }
 func (db *DB) Debug() kv.TemporalDebugDB { return kv.TemporalDebugDB(db) }
 
@@ -93,9 +108,39 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	tx := &Tx{Tx: kvTx, tx: tx{db: db, ctx: ctx}}
 
 	tx.aggtx = db.stateFiles.BeginFilesRo()
+	tx.blocktx = db.beginBlockFilesRo()
 
 	return tx, nil
 }
+
+// temporalFilesPin implements kv.TemporalFilesPin: it holds a consistent
+// aggregator file snapshot and opens read txns bound to it.
+type temporalFilesPin struct {
+	db  *DB
+	agg *state.AggregatorFilesPin
+}
+
+// Pin returns a kv.TemporalFilesPin holding this tx's aggregator file snapshot;
+// read txns opened from it stay on that generation. Independent of this tx's
+// lifetime — release with Close.
+func (tx *tx) Pin() kv.TemporalFilesPin {
+	return &temporalFilesPin{db: tx.db, agg: tx.aggtx.Pin()}
+}
+
+func (p *temporalFilesPin) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	kvTx, err := p.db.RwDB.BeginRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	// Commitment workers read only state domains through aggtx, never forkable
+	// data, so the worker tx needs the pinned file snapshot and nothing else.
+	tx := &Tx{Tx: kvTx, tx: tx{db: p.db, ctx: ctx}}
+	tx.aggtx = p.agg.BeginFilesRo()
+	return tx, nil
+}
+
+func (p *temporalFilesPin) Close() { p.agg.Close() }
+
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -121,6 +166,7 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 func (db *DB) newRwTx(kvTx kv.RwTx, ctx context.Context) *RwTx {
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 	tx.aggtx = db.stateFiles.BeginFilesRo()
+	tx.blocktx = db.beginBlockFilesRo()
 	return tx
 }
 
@@ -210,33 +256,12 @@ func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	db.stateFiles.OnFilesChange(onChange, onDel)
 }
 
-func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
-	tb.Helper()
-	db := memdb.NewTestDB(tb, label)
-	dirs := datadir.New(tb.TempDir())
-	agg := state.NewTest(dirs).DisableHistory().MustOpen(context.Background(), db)
-	tb.Cleanup(agg.Close)
-	tdb, _ := New(db, agg)
-	return tdb
-}
-
-func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
-	tb.Helper()
-	db := NewTestDB(tb, dbcfg.ChainDB)
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tb.Cleanup(tx.Rollback)
-	return db, tx
-}
-
 type tx struct {
-	db               *DB
-	aggtx            *state.AggregatorRoTx
-	resourcesToClose []kv.Closer
-	ctx              context.Context
-	mu               sync.RWMutex
+	db      *DB
+	aggtx   *state.AggregatorRoTx
+	blocktx *blocksnapshots.View
+	ctx     context.Context
+	mu      sync.RWMutex
 }
 
 type Tx struct {
@@ -249,29 +274,38 @@ type RwTx struct {
 	tx
 }
 
-func (tx *tx) ForceReopenAggCtx() {
-	tx.aggtx.Close()
+func (tx *tx) ForceReopenUnderlyingFilesTx() {
+	if tx.blocktx != nil {
+		tx.blocktx.Close()
+	}
+	tx.blocktx = tx.db.beginBlockFilesRo()
+	if tx.aggtx != nil {
+		tx.aggtx.Close()
+	}
 	tx.aggtx = tx.Agg().BeginFilesRo()
 }
 func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 
 func (tx *tx) AggTx() any             { return tx.aggtx }
 func (tx *tx) Agg() *state.Aggregator { return tx.db.stateFiles }
+
+// BlockFilesRoTx returns the tx's pinned block-files view, or nil if unset.
+func (tx *tx) BlockFilesRoTx() *blocksnapshots.View { return tx.blocktx }
 func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return tx.aggtx.StepsInFiles(entitySet...)
 }
 func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error) {
-	return tx.Agg().Retire(ctx, cutoffs)
+	return tx.aggtx.Retire(ctx, cutoffs)
 }
 
 func (tx *tx) Rollback() {
-	tx.autoClose()
+	tx.closeFilesView()
 }
 func (tx *Tx) Rollback() {
 	if tx == nil {
 		return
 	}
-	tx.autoClose()
+	tx.closeFilesView()
 	if tx.Tx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
@@ -296,6 +330,22 @@ func (tx *Tx) LockDBInRam() error {
 	return nil
 }
 
+// DistributeCursors forwards to the underlying mdbx engine. Like DeleteRange, it
+// fails loud on a non-mdbx inner rather than silently degrading (none exists today).
+func (tx *Tx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
+	if s, ok := tx.Tx.(kv.DBWithDistributionSupport); ok {
+		return s.DistributeCursors(table, from, n)
+	}
+	return nil, fmt.Errorf("DistributeCursors not supported by %T", tx.Tx)
+}
+
+func (tx *RwTx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
+	if s, ok := tx.RwTx.(kv.DBWithDistributionSupport); ok {
+		return s.DistributeCursors(table, from, n)
+	}
+	return nil, fmt.Errorf("DistributeCursors not supported by %T", tx.RwTx)
+}
+
 func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	tx.tx.mu.RLock()
 	applyTx := tx.Tx
@@ -311,6 +361,15 @@ func (tx *RwTx) WarmupDB(force bool) error {
 		return mdbxTx.WarmupDB(force)
 	}
 	return nil
+}
+
+func (tx *RwTx) DeleteRange(table string, from, to []byte) (uint64, error) {
+	if dr, ok := tx.RwTx.(kv.HasDeleteRange); ok {
+		return dr.DeleteRange(table, from, to)
+	}
+	// No non-mdbx temporal backend exists (mdbx's native range-delete is used
+	// above); fail loud rather than carry an unexercised, DupSort-unsafe emulation.
+	return 0, fmt.Errorf("DeleteRange not supported by %T", tx.RwTx)
 }
 
 func (tx *RwTx) LockDBInRam() error {
@@ -354,7 +413,7 @@ func (tx *RwTx) Rollback() {
 	if tx == nil {
 		return
 	}
-	tx.autoClose()
+	tx.closeFilesView()
 	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
@@ -375,10 +434,10 @@ func (rwtx *RwTx) AsyncClone(asyncTx kv.RwTx) *asyncClone {
 		RwTx{
 			RwTx: asyncTx,
 			tx: tx{
-				db:               rwtx.db,
-				aggtx:            rwtx.aggtx,
-				resourcesToClose: nil,
-				ctx:              rwtx.ctx,
+				db:      rwtx.db,
+				aggtx:   rwtx.aggtx,
+				blocktx: rwtx.blocktx,
+				ctx:     rwtx.ctx,
 			}}}
 }
 
@@ -392,18 +451,18 @@ func (tx *asyncClone) Commit() error {
 func (tx *asyncClone) Rollback() {
 }
 
-func (tx *tx) autoClose() {
-	for _, closer := range tx.resourcesToClose {
-		closer.Close()
-	}
+func (tx *tx) closeFilesView() {
 	tx.aggtx.Close()
+	tx.aggtx = nil
+	tx.blocktx.Close()
+	tx.blocktx = nil
 }
 
 func (tx *RwTx) Commit() error {
 	if tx == nil {
 		return nil
 	}
-	tx.autoClose()
+	tx.closeFilesView()
 	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return nil
 	}
@@ -417,7 +476,6 @@ func (tx *tx) rangeAsOf(name kv.Domain, rtx kv.Tx, fromKey, toKey []byte, asOfTs
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
 
@@ -509,7 +567,6 @@ func (tx *tx) indexRange(name kv.InvertedIdx, dbTx kv.Tx, k []byte, fromTs, toTs
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, timestamps)
 	return timestamps, nil
 }
 
@@ -526,7 +583,6 @@ func (tx *tx) historyRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int, asc ord
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
 
@@ -543,7 +599,6 @@ func (tx *tx) historyKeyTxNumRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int,
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
 
@@ -611,8 +666,8 @@ func (db *DB) DomainTables(domain ...kv.Domain) []string {
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 	return db.stateFiles.InvertedIdxTables(domain...)
 }
-func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) (err error) {
-	return db.stateFiles.BuildMissedAccessors(ctx, workers)
+func (db *DB) BuildMissedAccessors(ctx context.Context, workers int, opts ...kv.BuildAccessorsOption) (err error) {
+	return db.stateFiles.BuildMissedAccessors(ctx, workers, opts...)
 }
 func (db *DB) EnableReadAhead() kv.TemporalDebugDB {
 	db.stateFiles.MadvNormal()
