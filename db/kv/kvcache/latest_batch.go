@@ -17,6 +17,7 @@
 package kvcache
 
 import (
+	"bytes"
 	"context"
 	"sync"
 
@@ -65,7 +66,7 @@ func (c *LatestBatchCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
 				if c.accounts == nil {
 					c.accounts = make(map[common.Address][]byte)
 				}
-				c.accounts[addr] = common.Copy(change.Changes[i].Data)
+				c.accounts[addr] = bytes.Clone(change.Changes[i].Data)
 			case remoteproto.Action_REMOVE:
 				addr := gointerfaces.ConvertH160toAddress(change.Changes[i].Address)
 				delete(c.accounts, addr)
@@ -84,7 +85,7 @@ func (c *LatestBatchCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, e
 		c.mu.RLock()
 		if v, ok := c.accounts[common.BytesToAddress(k)]; ok {
 			c.mu.RUnlock()
-			return common.Copy(v), nil
+			return bytes.Clone(v), nil
 		}
 		c.mu.RUnlock()
 		v, _, err := tx.GetLatest(kv.AccountsDomain, k)
