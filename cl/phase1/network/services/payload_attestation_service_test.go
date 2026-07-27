@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,10 +31,49 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 )
+
+type blockingPayloadAttestationForkchoice struct {
+	forkchoice.ForkChoiceStorage
+	active  atomic.Int32
+	max     atomic.Int32
+	started chan struct{}
+	release chan struct{}
+}
+
+func (f *blockingPayloadAttestationForkchoice) OnPayloadAttestationMessage(*cltypes.PayloadAttestationMessage, bool) error {
+	active := f.active.Add(1)
+	defer f.active.Add(-1)
+	for {
+		maxActive := f.max.Load()
+		if active <= maxActive || f.max.CompareAndSwap(maxActive, active) {
+			break
+		}
+	}
+	f.started <- struct{}{}
+	<-f.release
+	return nil
+}
+
+type retryPayloadAttestationForkchoice struct {
+	forkchoice.ForkChoiceStorage
+	calls        atomic.Int32
+	firstStarted chan struct{}
+	releaseFirst chan struct{}
+}
+
+func (f *retryPayloadAttestationForkchoice) OnPayloadAttestationMessage(*cltypes.PayloadAttestationMessage, bool) error {
+	if f.calls.Add(1) == 1 {
+		close(f.firstStarted)
+		<-f.releaseFirst
+		return errors.New("invalid signature")
+	}
+	return nil
+}
 
 func setupPayloadAttestationService(t *testing.T, ctrl *gomock.Controller) (*payloadAttestationService, *mock_services.ForkChoiceStorageMock, *eth_clock.MockEthereumClock) {
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
@@ -49,9 +89,154 @@ func setupPayloadAttestationService(t *testing.T, ctrl *gomock.Controller) (*pay
 		seenAttestationsCache: seenCache,
 		emitters:              beaconevents.NewEventEmitter(),
 		pendingCond:           sync.NewCond(&sync.Mutex{}), // Needed for queuePendingAttestation
+		validationSlots:       make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 	}
 
 	return service, forkchoiceMock, ethClockMock
+}
+
+func TestPayloadAttestationServiceBoundsConcurrentValidation(t *testing.T) {
+	const expectedMaxConcurrentValidations = 2
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, fcu, ethClockMock := setupPayloadAttestationService(t, ctrl)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+
+	blockingForkchoice := &blockingPayloadAttestationForkchoice{
+		ForkChoiceStorage: fcu,
+		started:           make(chan struct{}, 8),
+		release:           make(chan struct{}),
+	}
+	service.forkchoiceStore = blockingForkchoice
+	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true).Times(8)
+
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Go(func() {
+			msg := newTestPayloadAttestationMessage(100, uint64(i), blockRoot)
+			require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
+		})
+	}
+
+	for range expectedMaxConcurrentValidations + 1 {
+		select {
+		case <-blockingForkchoice.started:
+		case <-time.After(time.Second):
+			close(blockingForkchoice.release)
+			wg.Wait()
+			require.LessOrEqual(t, blockingForkchoice.max.Load(), int32(expectedMaxConcurrentValidations))
+			return
+		}
+	}
+	close(blockingForkchoice.release)
+	wg.Wait()
+	require.LessOrEqual(t, blockingForkchoice.max.Load(), int32(expectedMaxConcurrentValidations))
+}
+
+func TestPayloadAttestationServiceSerializesDuplicateValidation(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, fcu, ethClockMock := setupPayloadAttestationService(t, ctrl)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+
+	blockingForkchoice := &blockingPayloadAttestationForkchoice{
+		ForkChoiceStorage: fcu,
+		started:           make(chan struct{}, 2),
+		release:           make(chan struct{}),
+	}
+	service.forkchoiceStore = blockingForkchoice
+	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true).Times(2)
+
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			results <- service.ProcessMessage(context.Background(), nil, newTestPayloadAttestationMessage(100, 42, blockRoot))
+		}()
+	}
+
+	<-blockingForkchoice.started
+	select {
+	case <-blockingForkchoice.started:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(blockingForkchoice.release)
+
+	firstErr := <-results
+	secondErr := <-results
+	require.Equal(t, 1, int(blockingForkchoice.max.Load()))
+	require.True(t, (firstErr == nil) != (secondErr == nil))
+	if firstErr != nil {
+		require.ErrorIs(t, firstErr, ErrIgnore)
+	} else {
+		require.ErrorIs(t, secondErr, ErrIgnore)
+	}
+}
+
+func TestPayloadAttestationServiceRetriesAfterInvalidDuplicate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, fcu, ethClockMock := setupPayloadAttestationService(t, ctrl)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+
+	retryForkchoice := &retryPayloadAttestationForkchoice{
+		ForkChoiceStorage: fcu,
+		firstStarted:      make(chan struct{}),
+		releaseFirst:      make(chan struct{}),
+	}
+	service.forkchoiceStore = retryForkchoice
+	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true).Times(2)
+
+	firstResult := make(chan error, 1)
+	go func() {
+		firstResult <- service.ProcessMessage(context.Background(), nil, newTestPayloadAttestationMessage(100, 42, blockRoot))
+	}()
+	<-retryForkchoice.firstStarted
+
+	secondResult := make(chan error, 1)
+	go func() {
+		second := newTestPayloadAttestationMessage(100, 42, blockRoot)
+		second.Signature[0] = 1
+		secondResult <- service.ProcessMessage(context.Background(), nil, second)
+	}()
+
+	require.Never(t, func() bool { return retryForkchoice.calls.Load() > 1 }, 100*time.Millisecond, 10*time.Millisecond)
+	close(retryForkchoice.releaseFirst)
+
+	require.ErrorContains(t, <-firstResult, "invalid signature")
+	require.NoError(t, <-secondResult)
+	require.Equal(t, int32(2), retryForkchoice.calls.Load())
+}
+
+func TestPayloadAttestationServiceCanceledWhileValidationIsFull(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, fcu, ethClockMock := setupPayloadAttestationService(t, ctrl)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+	for range maxConcurrentPayloadAttestationValidations {
+		service.validationSlots <- struct{}{}
+	}
+	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := service.ProcessMessage(ctx, nil, newTestPayloadAttestationMessage(100, 42, blockRoot))
+
+	require.ErrorIs(t, err, context.Canceled)
+	inFlight := 0
+	service.validationsInFlight.Range(func(_, _ any) bool {
+		inFlight++
+		return true
+	})
+	require.Zero(t, inFlight)
 }
 
 func newTestPayloadAttestationMessage(slot uint64, validatorIndex uint64, blockRoot common.Hash) *cltypes.PayloadAttestationMessage {
