@@ -788,7 +788,7 @@ func opJump(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.Cancelled() {
 		return pc, nil, errStopToken
 	}
-	pos := scope.Stack.pop()
+	pos := scope.Stack.popRef()
 	if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
 		if usedBitmap {
 			if evm.config.TraceJumpDest {
@@ -820,7 +820,7 @@ func opJumpi(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	}
 	pos, cond := scope.Stack.popRef2()
 	if !cond.IsZero() {
-		if valid, usedBitmap := scope.Contract.validJumpdest(*pos); !valid {
+		if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
 			if usedBitmap {
 				if evm.config.TraceJumpDest {
 					log.Warn("Code Bitmap used for detecting invalid jump",
