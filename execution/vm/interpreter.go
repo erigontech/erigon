@@ -458,12 +458,12 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(pc)
 		operation := &jt[op]
-		cost = operation.constantGas // For tracing
+		cost = uint64(operation.constantGas) // For tracing
 		// Validate stack
-		if sLen := callContext.Stack.len(); sLen < operation.numPop {
-			return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-		} else if sLen > operation.maxStack {
-			return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+		if sLen := callContext.Stack.len(); sLen < int(operation.numPop) {
+			return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: int(operation.numPop)}
+		} else if sLen > int(operation.maxStack) {
+			return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: int(operation.maxStack)}
 		}
 		// for tracing: this gas consumption event is emitted below in the debug section.
 		if callContext.gas < cost {
@@ -504,7 +504,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			}
 			if anyTrace {
 				cost += dynamicCost.Regular
-				callGas = operation.constantGas + dynamicCost.Regular - evm.CallGasTemp()
+				callGas = uint64(operation.constantGas) + dynamicCost.Regular - evm.CallGasTemp()
 				if dbg.TraceDynamicGas && dynamicCost.Regular > 0 {
 					fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
 				}
@@ -549,8 +549,8 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 		if trace {
 			var opstr string
-			if operation.string != nil {
-				opstr = operation.string(pc, callContext)
+			if s := opStringers[op]; s != nil {
+				opstr = s(pc, callContext)
 			} else {
 				opstr = op.String()
 			}

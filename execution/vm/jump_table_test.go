@@ -1,7 +1,4 @@
-// Copyright 2017 The go-ethereum Authors
-// (original work)
-// Copyright 2024 The Erigon Authors
-// (modifications)
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -20,9 +17,16 @@
 package vm
 
 import (
-	"github.com/erigontech/erigon/execution/protocol/params"
+	"testing"
+	"unsafe"
 )
 
-func maxStack(pop, push uint8) uint16 {
-	return uint16(params.StackLimit) + uint16(pop) - uint16(push)
+// The interpreter reads several operation fields per executed opcode; a
+// 32-byte entry keeps the whole read set on one cache line and the table at
+// 8 KiB. Growing the struct is a silent interpreter regression — shrink or
+// repack instead.
+func TestOperationEntryIs32Bytes(t *testing.T) {
+	if size := unsafe.Sizeof(operation{}); size != 32 {
+		t.Fatalf("operation struct is %d bytes, want 32", size)
+	}
 }

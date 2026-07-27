@@ -23,14 +23,15 @@ import (
 	"github.com/holiman/uint256"
 )
 
-// Gas costs
+// Gas costs. Untyped so they fit operation.constantGas (uint32) and uint64
+// contexts alike.
 const (
-	GasQuickStep   uint64 = 2
-	GasFastestStep uint64 = 3
-	GasFastStep    uint64 = 5
-	GasMidStep     uint64 = 8
-	GasSlowStep    uint64 = 10
-	GasExtStep     uint64 = 20
+	GasQuickStep   = 2
+	GasFastestStep = 3
+	GasFastStep    = 5
+	GasMidStep     = 8
+	GasSlowStep    = 10
+	GasExtStep     = 20
 )
 
 // callGas returns the actual gas cost of the call.
