@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -1079,4 +1080,35 @@ func TestAllocLogPreservesCapacityAcrossRevert(t *testing.T) {
 	ibs.AddLog(&types.Log{Address: common.Address{0xff}})
 	require.Len(t, ibs.logs, 2)
 	require.Equal(t, capBefore, cap(ibs.logs[1]), "inner log buffer capacity must survive revert+relog")
+}
+
+// TestLogIndexIsBlockWide pins that AddLog stamps a block-wide log index:
+// receipts.DeriveFields derives FirstLogIndexWithinBlock from Logs[0].Index, so
+// the counter must run across transactions, roll back with a reverted log, and
+// restart at zero on Reset.
+func TestLogIndexIsBlockWide(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	ibs.SetTxContext(1, 0)
+	ibs.AddLog(&types.Log{Address: common.Address{0x01}})
+	ibs.AddLog(&types.Log{Address: common.Address{0x02}})
+
+	ibs.SetTxContext(1, 1)
+	snap := ibs.PushSnapshot()
+	ibs.AddLog(&types.Log{Address: common.Address{0x03}})
+	ibs.RevertToSnapshot(snap, nil)
+	ibs.AddLog(&types.Log{Address: common.Address{0x04}})
+
+	tx0, tx1 := ibs.GetRawLogs(0), ibs.GetRawLogs(1)
+	require.Len(t, tx0, 2)
+	require.Len(t, tx1, 1)
+	require.Equal(t, hexutil.Uint(0), tx0[0].Index)
+	require.Equal(t, hexutil.Uint(1), tx0[1].Index)
+	require.Equal(t, hexutil.Uint(2), tx1[0].Index, "index continues across txs and reuses a reverted slot")
+
+	ibs.Reset()
+	ibs.SetTxContext(2, 0)
+	ibs.AddLog(&types.Log{Address: common.Address{0x05}})
+	require.Equal(t, hexutil.Uint(0), ibs.GetRawLogs(0)[0].Index, "next block restarts at zero")
 }

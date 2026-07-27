@@ -490,6 +490,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		if len(s.logs[txIndex+1]) == 0 {
 			s.logs = s.logs[:len(s.logs)-1] // revert txn
 		}
+		s.logSize--
 		return nil
 
 	case kindTouch:

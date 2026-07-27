@@ -162,6 +162,7 @@ type IntraBlockState struct {
 	txIndex  int
 	blockNum uint64
 	logs     []types.Logs
+	logSize  uint
 
 	// Per-transaction access list
 	accessList accessList
@@ -394,6 +395,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.refund = uint64(0)
 	sdb.txIndex = 0
 	sdb.sdProbeEpoch++
+	sdb.logSize = 0
 	sdb.accessList.Reset()
 	clear(sdb.transientStorage)
 	sdb.versionMap = nil
@@ -486,9 +488,12 @@ func (sdb *IntraBlockState) allocLog(numTopics, dataSize int) *types.Log {
 		lp.Data = make(hexutil.Bytes, dataSize)
 	}
 	lp.Removed = false // Address set by caller
-	// lp.TxHash, lp.BlockHash, lp.Removed = common.Hash{}, common.Hash{}, false // Address set by caller
 	lp.TxIndex = hexutil.Uint(sdb.txIndex)
 	lp.BlockNumber = hexutil.Uint64(sdb.blockNum)
+	// Block-wide, not per-tx: receipts.DeriveFields reads Logs[0].Index to
+	// recover FirstLogIndexWithinBlock.
+	lp.Index = hexutil.Uint(sdb.logSize)
+	sdb.logSize++
 	return lp
 }
 
