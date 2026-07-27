@@ -555,6 +555,59 @@ run:
 			}
 			pc++
 			continue
+		case PUSH2:
+			cost = GasFastestStep
+			if sLen := callContext.Stack.len(); sLen > int(params.StackLimit)-1 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: int(params.StackLimit) - 1}
+			}
+			if callContext.gas < GasFastestStep {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
+			}
+			callContext.gas -= GasFastestStep
+			if debug {
+				if tracer.OnGasChange != nil {
+					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
+				}
+				if tracer.OnOpcode != nil {
+					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
+					logged = true
+				}
+			}
+			if trace {
+				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
+			}
+			pc, res, err = opPush2(pc, evm, callContext)
+			if err != nil {
+				break run
+			}
+			pc++
+			continue
+		case DUP2:
+			cost = GasFastestStep
+			if sLen := callContext.Stack.len(); sLen < 2 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: 2}
+			} else if sLen > int(params.StackLimit)-1 {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: int(params.StackLimit) - 1}
+			}
+			if callContext.gas < GasFastestStep {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
+			}
+			callContext.gas -= GasFastestStep
+			if debug {
+				if tracer.OnGasChange != nil {
+					tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
+				}
+				if tracer.OnOpcode != nil {
+					tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
+					logged = true
+				}
+			}
+			if trace {
+				traceInstruction(evm, jt[op], op, pc, callGas, cost, callContext)
+			}
+			callContext.Stack.dup(2)
+			pc++
+			continue
 		}
 		operation := jt[op]
 		cost = operation.constantGas // For tracing
