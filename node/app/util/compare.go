@@ -87,17 +87,17 @@ func Compare(a, b any) int {
 	if acomp, ok := a.(Comparable); ok {
 		if bcomp, ok := b.(Comparable); ok {
 			return acomp.CompareTo(bcomp)
-		} else if reflect.ValueOf(reflect.TypeOf(a)).Pointer()-reflect.ValueOf(reflect.TypeOf(b)).Pointer() > 0 {
+		} else if reflect.ValueOf(reflect.TypeOf(a)).Pointer() > reflect.ValueOf(reflect.TypeOf(b)).Pointer() {
 			return 1
 		} else {
 			return -1
 		}
 	} else if _, ok := b.(Comparable); ok {
-		if reflect.ValueOf(reflect.TypeOf(a)).Pointer()-reflect.ValueOf(reflect.TypeOf(b)).Pointer() > 0 {
+		if reflect.ValueOf(reflect.TypeOf(a)).Pointer() > reflect.ValueOf(reflect.TypeOf(b)).Pointer() {
 			return 1
+		} else {
+			return -1
 		}
-
-		return -1
 	}
 
 	if _, ok := a.(string); ok {
