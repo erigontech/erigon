@@ -17,12 +17,12 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 )
@@ -38,7 +38,7 @@ func assertPresentStrict(t *testing.T, wt *trie.Trie, plainKey []byte) {
 }
 
 func storageKey(account, slot []byte) []byte {
-	return append(common.Copy(account), slot...)
+	return append(bytes.Clone(account), slot...)
 }
 
 func benchWitnessTrie(b *testing.B) (*HexPatriciaHashed, [][]byte) {
