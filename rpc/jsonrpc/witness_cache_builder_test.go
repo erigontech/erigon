@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 // encodeSyntheticHeader RLP-encodes a header carrying only a block number, as the
@@ -249,7 +250,7 @@ func TestBuildAndCacheHeadCaptureStalePin(t *testing.T) {
 		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
 	}))
 
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 	api.witnessCache = newWitnessResultCache(96, 0, true, true)
 
 	const blockNum = uint64(3)
@@ -290,10 +291,10 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 
 	hash, _ := buildTestChainHeader(t, m, buildNum)
 
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 	api.witnessCache = newWitnessResultCache(96, 0, true, true)
 
-	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 	bn := rpc.BlockNumber(buildNum)
 	want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
 	require.NoError(t, err, "durable on-demand build must succeed")
@@ -347,10 +348,10 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 
 	cache := newWitnessResultCache(96, 0, false, false)
-	builder := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	builder := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 	builder.witnessCache = cache
 
 	headerCh := make(chan [][]byte, 8)
@@ -443,7 +444,7 @@ func TestBuildAndCacheHeadCaptureReorgDropsLosingFork(t *testing.T) {
 	forkHash := writeForkHeader(t, ctx, m, buildNum)
 	require.NotEqual(t, canonHash, forkHash)
 
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 	api.witnessCache = newWitnessResultCache(96, 0, true, true)
 
 	pinAfterLosing := api.buildAndCacheHeadCapture(ctx, pin, buildNum, forkHash)
@@ -470,7 +471,7 @@ func TestHeadCaptureBuildIsRootNeutral(t *testing.T) {
 
 	beforeFinish, beforeState := readCommittedCommitmentState(t, ctx, m.DB)
 
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 	api.witnessCache = newWitnessResultCache(96, 0, true, true)
 
 	next := api.buildAndCacheHeadCapture(ctx, pin, buildNum, hash)
@@ -493,7 +494,7 @@ func readCommittedCommitmentState(t *testing.T, ctx context.Context, db kv.Tempo
 	require.NoError(t, err)
 	state, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState)
 	require.NoError(t, err)
-	return finish, common.Copy(state)
+	return finish, bytes.Clone(state)
 }
 
 // TestRollingPinStableUnderTipAdvance is the mmap-pin race/soak guard (run under -race):
@@ -523,7 +524,7 @@ func TestRollingPinStableUnderTipAdvance(t *testing.T) {
 	require.NoError(t, err)
 	baseState, _, err := pin.tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState)
 	require.NoError(t, err)
-	baseState = common.Copy(baseState)
+	baseState = bytes.Clone(baseState)
 
 	stop := make(chan struct{})
 	errCh := make(chan error, 2)

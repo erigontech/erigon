@@ -191,8 +191,9 @@ func TestConfigWithFlags(t *testing.T) {
 }
 
 // TestPersistReceiptsDefaultByMode pins that the historical receipts cache
-// (--persist.receipts) defaults to off in every prune mode, and is enabled only
-// when the operator sets the flag explicitly.
+// (--prune.include-receipts) defaults to off in every prune mode, and is enabled
+// only when the operator sets the flag explicitly. The legacy --persist.receipts
+// alias must keep working.
 func TestPersistReceiptsDefaultByMode(t *testing.T) {
 	tests := []struct {
 		name string
@@ -204,9 +205,10 @@ func TestPersistReceiptsDefaultByMode(t *testing.T) {
 		{"full", []string{"--prune.mode=full"}, false},
 		{"minimal", []string{"--prune.mode=minimal"}, false},
 		{"blocks", []string{"--prune.mode=blocks"}, false},
-		{"explicit on with full", []string{"--prune.mode=full", "--persist.receipts"}, true},
-		{"explicit on with archive", []string{"--prune.mode=archive", "--persist.receipts"}, true},
-		{"explicit off with full", []string{"--prune.mode=full", "--persist.receipts=false"}, false},
+		{"explicit on with full", []string{"--prune.mode=full", "--prune.include-receipts"}, true},
+		{"explicit on with archive", []string{"--prune.mode=archive", "--prune.include-receipts"}, true},
+		{"explicit off with full", []string{"--prune.mode=full", "--prune.include-receipts=false"}, false},
+		{"legacy persist.receipts alias", []string{"--prune.mode=full", "--persist.receipts"}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

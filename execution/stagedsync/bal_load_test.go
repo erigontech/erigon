@@ -159,7 +159,7 @@ func TestLoadFromBAL_MatchesApplyWrites(t *testing.T) {
 	}
 
 	csBAL := newTestCalcState()
-	csBAL.LoadFromBAL(bal, true, false)
+	csBAL.LoadFromBAL(bal, true, false, true)
 
 	// Incremental equivalent: the same values fed as a multi-write stream
 	// in ascending tx order — ApplyWrites' last-write-wins must land on
@@ -181,7 +181,7 @@ func TestLoadFromBAL_MatchesApplyWrites(t *testing.T) {
 	incWrites.SetCode(addrC, &state.VersionedWrite[accounts.Code]{WriteHeader: bal2(addrC, state.CodePath), Val: accounts.NewCode(codeC)})
 	incWrites.SetBalance(addrE, &state.VersionedWrite[uint256.Int]{WriteHeader: bal2(addrE, state.BalancePath), Val: *uint256.NewInt(200)})
 	incWrites.SetBalance(addrE, &state.VersionedWrite[uint256.Int]{WriteHeader: bal2(addrE, state.BalancePath), Val: *uint256.NewInt(500)})
-	csInc.ApplyWrites(incWrites)
+	csInc.ApplyWrites(incWrites, true)
 
 	assert.Equal(t, csInc.accounts, csBAL.accounts, "accounts: BAL load diverged from the write stream")
 	assert.Equal(t, csInc.storageState, csBAL.storageState, "storageState: BAL load diverged from the write stream")
@@ -208,7 +208,7 @@ func TestLoadFromBAL_EmptyAccountBecomesDelete(t *testing.T) {
 	}
 
 	cs := newTestCalcState()
-	cs.LoadFromBAL(bal, true, false) // spuriousDragon on, non-AuRa
+	cs.LoadFromBAL(bal, true, false, true) // spuriousDragon on, non-AuRa
 
 	require.True(t, cs.accounts[emptied].Deleted,
 		"an EIP-161 empty account in the BAL must be reconstructed as a delete, not a zero-valued update")
@@ -229,7 +229,7 @@ func TestLoadFromBAL_EmptyAccountBecomesDelete(t *testing.T) {
 	csPre := newTestCalcState()
 	csPre.LoadFromBAL(types.BlockAccessList{
 		{Address: emptied, BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(0)}}},
-	}, false, false)
+	}, false, false, false)
 	require.False(t, csPre.accounts[emptied].Deleted,
 		"pre-SpuriousDragon, an empty touched account is not removed")
 }
@@ -255,7 +255,7 @@ func TestLoadFromBAL_SelfDestructKeepsCodeNotDeleted(t *testing.T) {
 	}
 
 	cs := newTestCalcState()
-	cs.LoadFromBAL(bal, true, false) // SpuriousDragon on
+	cs.LoadFromBAL(bal, true, false, true) // SpuriousDragon on
 
 	require.False(t, cs.accounts[contract].Deleted,
 		"a zero-balance account that still has code must not be reconstructed as a delete")
@@ -282,7 +282,7 @@ func TestLoadFromBAL_CreatedThenDestroyedHasNoLeaf(t *testing.T) {
 	}
 
 	cs := newTestCalcState()
-	cs.LoadFromBAL(bal, true, false)
+	cs.LoadFromBAL(bal, true, false, true)
 
 	_, ok := cs.accounts[transient]
 	require.False(t, ok, "a created-then-destroyed account absent from the BAL must not enter calcState")

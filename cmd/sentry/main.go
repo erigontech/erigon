@@ -115,10 +115,14 @@ var rootCmd = &cobra.Command{
 }
 
 func main() {
-	ctx, cancel := common.RootContext()
-	defer cancel()
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
+	if err := run(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+}
+
+func run() error {
+	ctx, cancel := common.RootContext()
+	defer cancel()
+	return rootCmd.ExecuteContext(ctx)
 }

@@ -67,6 +67,7 @@ func TestVersionedWritesMatchStateObjects(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 0)
 
 	addr1 := accounts.InternAddress(common.HexToAddress("0x1111"))
@@ -93,7 +94,7 @@ func TestVersionedWritesMatchStateObjects(t *testing.T) {
 	require.NoError(t, err)
 
 	// Capture VersionedWrites BEFORE FinalizeTx (journal.dirties still intact).
-	writes := ibs.VersionedWrites(true)
+	writes := ibs.VersionedWrites()
 
 	// — addr1 checks —
 	idx1 := addrWriteIndex(writes, addr1)
@@ -156,6 +157,7 @@ func TestSnapshotRandomWithVersionMap(t *testing.T) {
 	key := accounts.InternKey(common.HexToHash("0x0001"))
 
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 0)
 
 	// Pre-snapshot state
@@ -194,7 +196,7 @@ func TestSnapshotRandomWithVersionMap(t *testing.T) {
 	require.Equal(t, uint256.NewInt(11), &stor, "storage should be reverted to pre-snapshot value")
 
 	// VersionedWrites must reflect the same reverted values.
-	writes := ibs.VersionedWrites(true)
+	writes := ibs.VersionedWrites()
 	idx := addrWriteIndex(writes, addr)
 
 	wbal, ok := idx[AccountKey{Path: BalancePath, Key: accounts.NilKey}]
@@ -235,17 +237,19 @@ func TestCommittedStateWithVersionMap(t *testing.T) {
 
 	// — tx0 (txIndex 0) — writes val1, flushes to versionMap —
 	ibs0 := NewWithVersionMap(reader, mvhm)
+	defer ibs0.Release(false)
 	ibs0.SetTxContext(1, 0)
 
 	err := ibs0.SetState(addr, key, val1)
 	require.NoError(t, err)
 
 	// Capture and flush before FinalizeTx (journal.dirties still populated).
-	writes0 := ibs0.VersionedWrites(true)
+	writes0 := ibs0.VersionedWrites()
 	mvhm.FlushVersionedWrites(writes0, true, "")
 
 	// — tx1 (txIndex 1) — reads committed state before modifying —
 	ibs1 := NewWithVersionMap(reader, mvhm)
+	defer ibs1.Release(false)
 	ibs1.SetTxContext(1, 1)
 
 	// Before tx1 writes anything, committed state must be val1.
@@ -287,6 +291,7 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 	// — Block N: write state then commit to domains via Writer —
 	{
 		ibsN := New(NewReaderV3(domains.AsGetter(tx)))
+		defer ibsN.Release(false)
 		ibsN.SetTxContext(1, 0)
 
 		err := ibsN.SetBalance(addr, *wantBalance, tracing.BalanceChangeUnspecified)
@@ -303,6 +308,7 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 
 	// — Block N+1: fresh IBS reads state that block N wrote to domains —
 	ibsN1 := New(NewReaderV3(domains.AsGetter(tx)))
+	defer ibsN1.Release(false)
 
 	gotBal, err := ibsN1.GetBalance(addr)
 	require.NoError(t, err)
@@ -338,6 +344,7 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 
 	// — Step 1: produce VersionedWrites via a tx —
 	ibsTx := NewWithVersionMap(reader, mvhm)
+	defer ibsTx.Release(false)
 	ibsTx.SetTxContext(1, 0)
 
 	err := ibsTx.SetBalance(addr, wantBalance, tracing.BalanceChangeUnspecified)
@@ -347,11 +354,12 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 	err = ibsTx.SetState(addr, key, wantStorage)
 	require.NoError(t, err)
 
-	writes := ibsTx.VersionedWrites(true)
+	writes := ibsTx.VersionedWrites()
 	require.NotEmpty(t, writes, "VersionedWrites must not be empty")
 
 	// — Step 2: apply VersionedWrites through existing round-trip path —
 	ibsApply := New(reader)
+	defer ibsApply.Release(false)
 	err = ibsApply.ApplyVersionedWrites(writes)
 	require.NoError(t, err)
 
@@ -361,6 +369,7 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 
 	// — Step 3: read back from domains, assert correct state —
 	ibsRead := New(NewReaderV3(domains.AsGetter(tx)))
+	defer ibsRead.Release(false)
 
 	gotBal, err := ibsRead.GetBalance(addr)
 	require.NoError(t, err)

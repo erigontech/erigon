@@ -106,6 +106,7 @@ func TestSelfDestructReceive(t *testing.T) {
 
 	if err := m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		exist, err := st.Exist(address)
 		if err != nil {
 			return err
@@ -140,6 +141,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		// and that means that the state of the accounts written in the first block was correct.
 		// This test checks that the storage root of the account is properly set to the root of the empty tree
 		st := state.New(m.NewStateReader(tx))
+		defer st.Release(false)
 		exist, err := st.Exist(address)
 		if err != nil {
 			t.Error(err)

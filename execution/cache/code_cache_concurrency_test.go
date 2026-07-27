@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"encoding/binary"
 	"sync"
 	"testing"
 
@@ -35,7 +36,7 @@ import (
 // goroutine that actually inserts accounts the size, so the counters must equal
 // exactly one entry regardless of how many concurrent Puts raced.
 func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
-	cc := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 
 	addr := make([]byte, 20)
 	addr[0] = 0xab
@@ -44,12 +45,10 @@ func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
 
 	const workers = 64
 	var wg sync.WaitGroup
-	wg.Add(workers)
-	for i := 0; i < workers; i++ {
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			cc.PutWithCodeHash(addr, code, codeHash, 1)
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -69,7 +68,7 @@ func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
 // an entry whose stored keyHash differs from the requested codeHash is treated
 // as a miss, so a 64-bit maphash collision can never serve the wrong code.
 func TestCodeCache_ByteCheckRejectsForeignKeyHash(t *testing.T) {
-	cc := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 
 	code := []byte("contract A bytecode")
 	realHash := crypto.Keccak256(code)
@@ -97,18 +96,17 @@ func TestCodeCache_ByteCheckRejectsForeignKeyHash(t *testing.T) {
 // OnEvict-maintained byte counter must never drift negative under concurrency.
 func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 	const codeCap = 4 * datasize.KB
-	cc := NewCodeCache(codeCap, 16*datasize.MB)
+	cc := closeOnCleanup(t, NewCodeCache(codeCap, 16*datasize.MB))
 
 	const workers = 128
 	var wg sync.WaitGroup
-	wg.Add(workers)
-	for i := 0; i < workers; i++ {
-		go func(n int) {
-			defer wg.Done()
+	for i := range workers {
+		idx := i
+		wg.Go(func() {
 			code := make([]byte, 256)
-			code[0], code[1] = byte(n), byte(n>>8) // distinct code per worker
+			code[0], code[1] = byte(idx), byte(idx>>8) // distinct code per worker
 			cc.PutWithCodeHash(nil, code, crypto.Keccak256(code), 1)
-		}(i)
+		})
 	}
 	wg.Wait()
 
@@ -124,17 +122,16 @@ func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 // authoritative Put must win over a conditional prefetch put in every
 // interleaving.
 func TestCodeCache_PutIfAbsentAtomicWithPut(t *testing.T) {
-	cc := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 	addr := make([]byte, 20)
 	addr[0] = 0xcd
 	fresh := []byte{0xaa, 1, 2, 3}
 	stale := []byte{0xbb, 4, 5, 6}
-	for round := 0; round < 20000; round++ {
-		cc.Delete(addr)
+	for round := range 20000 {
+		binary.BigEndian.PutUint64(addr[1:], uint64(round))
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); cc.Put(addr, fresh, 20) }()
-		go func() { defer wg.Done(); cc.PutIfAbsent(addr, stale, 10) }()
+		wg.Go(func() { cc.Put(addr, fresh, 20) })
+		wg.Go(func() { cc.PutIfAbsent(addr, stale, 10) })
 		wg.Wait()
 		v, ok := cc.Get(addr)
 		require.True(t, ok)

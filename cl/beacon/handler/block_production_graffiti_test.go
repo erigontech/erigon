@@ -173,12 +173,10 @@ func TestDefaultGraffiti(t *testing.T) {
 
 		a := &ApiHandler{engine: engine, version: "1.2.3"}
 		var wg sync.WaitGroup
-		for i := 0; i < 16; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for range 16 {
+			wg.Go(func() {
 				_ = a.defaultGraffiti()
-			}()
+			})
 		}
 		wg.Wait() // returns while the engine call is still blocked, proving proposals never block on it
 		close(release)

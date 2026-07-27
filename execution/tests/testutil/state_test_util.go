@@ -269,7 +269,7 @@ func (t *StateTest) Run(tb testing.TB, sd *execctx.SharedDomains, tx kv.Temporal
 	if root != common.Hash(post.Root) {
 		return st, root, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
-	if logs := rlpHash(st.Logs()); logs != common.Hash(post.Logs) {
+	if logs := types.RlpHash(st.Logs()); logs != common.Hash(post.Logs) {
 		return st, root, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
 	}
 	return st, root, nil
@@ -496,10 +496,8 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 	}
 }
 
-var rlpHash = types.RlpHash
-
 func vmTestBlockHash(n uint64) (common.Hash, error) {
-	return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
+	return crypto.Keccak256Hash([]byte(new(big.Int).SetUint64(n).String())), nil
 }
 
 // toMessage builds a protocol.Message directly from the JSON fixture's

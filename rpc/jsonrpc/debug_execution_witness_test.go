@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 // fakeStateReader is a minimal state.StateReader backed by an in-memory account
@@ -340,7 +341,7 @@ func TestCheckWitnessKeysComplete(t *testing.T) {
 	})
 	t.Run("large missing list truncated, total preserved", func(t *testing.T) {
 		used := make(map[common.Address]struct{})
-		for i := 0; i < 50; i++ {
+		for i := range 50 {
 			var a common.Address
 			a[19] = byte(i)
 			used[a] = struct{}{}
@@ -458,7 +459,7 @@ func TestBuildWitnessResultHeadCapture_FailsClosedOnBadParent(t *testing.T) {
 		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
 	}))
 
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 
 	tx, err := api.db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -492,7 +493,7 @@ func TestHeadCaptureFailClosedYieldsOutOfWindow(t *testing.T) {
 		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
 	}))
 
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 	api.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
 
 	tx, err := api.db.BeginTemporalRo(ctx)
@@ -522,7 +523,7 @@ func TestHeadCaptureFailClosedYieldsOutOfWindow(t *testing.T) {
 // served as canonical.
 func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 	ctx := context.Background()
 
 	var block1Hash common.Hash

@@ -45,7 +45,7 @@ func mkSized(n int) *ExecutionWitnessResult {
 // requested sizes below it.
 func TestNewWitnessResultCacheClampsBlocks(t *testing.T) {
 	c := newWitnessResultCache(witnessCacheMaxBlocks+100, 0, false, false)
-	for n := 0; n < int(witnessCacheMaxBlocks)+100; n++ {
+	for n := range int(witnessCacheMaxBlocks) + 100 {
 		var h common.Hash
 		h[0], h[1] = byte(n), byte(n>>8)
 		c.Add(h, mkResult())

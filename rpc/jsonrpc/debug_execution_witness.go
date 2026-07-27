@@ -351,8 +351,8 @@ func (s *RecordingState) UpdateAccountData(address accounts.Address, original, a
 func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	addr := address.Value()
 	s.ModifiedAccounts[addr] = struct{}{}
-	s.codeOverlay[addr] = common.Copy(code)
-	s.ModifiedCode[addr] = common.Copy(code)
+	s.codeOverlay[addr] = bytes.Clone(code)
+	s.ModifiedCode[addr] = bytes.Clone(code)
 	if len(code) > 0 {
 		s.createdCodeHashes[codeHash.Value()] = struct{}{}
 	}
@@ -496,7 +496,7 @@ func (s *RecordingState) OnCodeAccess(address accounts.Address, code []byte) {
 func (s *RecordingState) GetAccessedCode() map[common.Address][]byte {
 	result := make(map[common.Address][]byte, len(s.AccessedCode))
 	for addr, code := range s.AccessedCode {
-		result[addr] = common.Copy(code)
+		result[addr] = bytes.Clone(code)
 	}
 	return result
 }
@@ -508,7 +508,7 @@ func (s *RecordingState) GetAccessedCode() map[common.Address][]byte {
 func (s *RecordingState) GetPreStateCode() map[common.Address][]byte {
 	result := make(map[common.Address][]byte, len(s.PreStateCode))
 	for addr, code := range s.PreStateCode {
-		result[addr] = common.Copy(code)
+		result[addr] = bytes.Clone(code)
 	}
 	return result
 }
@@ -517,7 +517,7 @@ func (s *RecordingState) GetPreStateCode() map[common.Address][]byte {
 func (s *RecordingState) GetModifiedCode() map[common.Address][]byte {
 	result := make(map[common.Address][]byte, len(s.ModifiedCode))
 	for addr, code := range s.ModifiedCode {
-		result[addr] = common.Copy(code)
+		result[addr] = bytes.Clone(code)
 	}
 	return result
 }
@@ -558,19 +558,14 @@ type ExecutionWitnessResult struct {
 	cachedJSON []byte
 }
 
-// executionWitnessResultView drops the fastJSONResult method so json.Marshal
-// encodes the exported fields directly, without recursing through MarshalFastJSON.
-type executionWitnessResultView ExecutionWitnessResult
-
 // MarshalFastJSON is the rpc fast-result path (rpc.fastJSONResult): a cache shell
-// returns its stored bytes verbatim, while a freshly built result marshals its
-// fields exactly as encoding/json would — so cached and on-demand output match.
+// returns its stored bytes verbatim; a freshly built result marshals its exported
+// fields, byte-identical to the cached form so both paths agree.
 func (m *ExecutionWitnessResult) MarshalFastJSON() ([]byte, error) {
 	if m.cachedJSON != nil {
 		return m.cachedJSON, nil
 	}
-	v := executionWitnessResultView(*m)
-	return json.Marshal(&v)
+	return json.Marshal(m)
 }
 
 func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error) {
@@ -634,7 +629,7 @@ func (api *BaseAPI) buildAccessedState(
 	ibs := state.New(recordingState)
 
 	// Get header for block context
-	header := block.Header()
+	header := block.HeaderNoCopy()
 
 	// Create EVM block context
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader, chainConfig)
@@ -1031,7 +1026,9 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 	}
 	for addr, keys := range a.Storage {
 		for key := range keys {
-			plainKey := append(addr[:], key[:]...)
+			plainKey := make([]byte, 0, len(addr)+len(key))
+			plainKey = append(plainKey, addr[:]...)
+			plainKey = append(plainKey, key[:]...)
 			postEnc, _, _ := post.Read(kv.StorageDomain, plainKey, stepSize)
 			if len(postEnc) == 0 {
 				preEnc, _, _ := pre.Read(kv.StorageDomain, plainKey, stepSize)
@@ -1266,8 +1263,8 @@ func detectCollapseSiblings(
 	var candidates []collapseCandidate
 	sdCtx.SetCollapseTracer(func(hashedKeyPath, branchPrefix []byte) {
 		candidates = append(candidates, collapseCandidate{
-			siblingPath:  common.Copy(hashedKeyPath),
-			branchPrefix: common.Copy(branchPrefix),
+			siblingPath:  bytes.Clone(hashedKeyPath),
+			branchPrefix: bytes.Clone(branchPrefix),
 		})
 	})
 	defer sdCtx.SetCollapseTracer(nil)
@@ -1345,7 +1342,7 @@ func buildWitnessTrie(
 	}
 
 	for _, node := range witnessNodes {
-		encodedNodes = append(encodedNodes, common.Copy(node))
+		encodedNodes = append(encodedNodes, bytes.Clone(node))
 	}
 	return encodedNodes, nil
 }
@@ -1634,10 +1631,7 @@ func (s *witnessStateless) ReadAccountDataForDebug(address accounts.Address) (*a
 
 func (s *witnessStateless) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	addr := address.Value()
-	addrHash, err := common.HashData(addr[:])
-	if err != nil {
-		return nil, err
-	}
+	addrHash := crypto.Keccak256Hash(addr[:])
 
 	// Check if account has been updated in memory
 	if acc, ok := s.accountUpdates[addr]; ok {
@@ -1687,16 +1681,8 @@ func (s *witnessStateless) ReadAccountStorage(address accounts.Address, key acco
 	addr := address.Value()
 	keyValue := key.Value()
 
-	addrHash, err := common.HashData(addr[:])
-	if err != nil {
-		return uint256.Int{}, false, err
-	}
-
-	seckey, err := common.HashData(keyValue[:])
-	if err != nil {
-		return uint256.Int{}, false, err
-	}
-
+	addrHash := crypto.Keccak256Hash(addr[:])
+	seckey := crypto.Keccak256Hash(keyValue[:])
 	// Check if storage has been updated in memory
 	if m, ok := s.storageWrites[addr]; ok {
 		if v, ok := m[keyValue]; ok {
@@ -1740,11 +1726,7 @@ func (s *witnessStateless) ReadAccountStorage(address accounts.Address, key acco
 
 func (s *witnessStateless) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	addr := address.Value()
-	addrHash, err := common.HashData(addr[:])
-	if err != nil {
-		return nil, err
-	}
-
+	addrHash := crypto.Keccak256Hash(addr[:])
 	// Check code updates first — look up by the account's code hash (matching UpdateAccountCode key)
 	acc, err := s.ReadAccountData(address)
 	if err != nil {
@@ -1807,11 +1789,7 @@ func (s *witnessStateless) ReadAccountIncarnation(address accounts.Address) (uin
 
 func (s *witnessStateless) HasStorage(address accounts.Address) (bool, error) {
 	addr := address.Value()
-	addrHash, err := common.HashData(addr[:])
-	if err != nil {
-		return false, err
-	}
-
+	addrHash := crypto.Keccak256Hash(addr[:])
 	// Check if account has been deleted
 	if _, ok := s.deleted[addr]; ok {
 		if s.tracing(addr) {
@@ -1869,10 +1847,7 @@ func (s *witnessStateless) UpdateAccountData(address accounts.Address, original,
 
 func (s *witnessStateless) DeleteAccount(address accounts.Address, original *accounts.Account) error {
 	addr := address.Value()
-	addrHash, err := common.HashData(addr[:])
-	if err != nil {
-		return err
-	}
+	addrHash := crypto.Keccak256Hash(addr[:])
 	// Only delete if the account exists in the original state (trie or was previously updated)
 	// Skip deletes for accounts that weren't in the witness - they don't affect the state root
 	accInTrie, isInTrie := s.t.GetAccount(addrHash[:])
@@ -1964,14 +1939,14 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
 			account.Root = trie.EmptyRoot
 		}
-		addrHash, _ := common.HashData(addr[:])
+		addrHash := crypto.Keccak256Hash(addr[:])
 		s.t.DeleteSubtree(addrHash[:])
 		// fmt.Printf("  Created contract %x: cleared subtrie\n", addr[:8])
 	}
 
 	// Apply account updates
 	for addr, account := range s.accountUpdates {
-		addrHash, _ := common.HashData(addr[:])
+		addrHash := crypto.Keccak256Hash(addr[:])
 		if account != nil {
 			// fmt.Printf("  UpdateAccount %x: Nonce=%d, Balance=%s\n", addr[:8], account.Nonce, account.Balance.String())
 			s.t.UpdateAccount(addrHash[:], account)
@@ -1985,7 +1960,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 		if account == nil {
 			continue
 		}
-		addrHash, _ := common.HashData(addr[:])
+		addrHash := crypto.Keccak256Hash(addr[:])
 		codeHashValue := account.CodeHash.Value()
 		if code, ok := s.codeUpdates[codeHashValue]; ok {
 			// fmt.Printf("  UpdateAccountCode %x: codeHash=%x, len=%d\n", addr[:8], codeHashValue[:8], len(code))
@@ -2003,9 +1978,9 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 			continue
 		}
 		updatedAccounts[addr] = struct{}{}
-		addrHash, _ := common.HashData(addr[:])
+		addrHash := crypto.Keccak256Hash(addr[:])
 		for key, v := range m {
-			keyHash, _ := common.HashData(key[:])
+			keyHash := crypto.Keccak256Hash(key[:])
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
 			// fmt.Printf("  Storage write: account=%x, key=%x, value=%x\n", addr[:8], key[:8], v.Bytes())
 			s.t.Update(cKey, v.Bytes())
@@ -2019,9 +1994,9 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 			continue
 		}
 		updatedAccounts[addr] = struct{}{}
-		addrHash, _ := common.HashData(addr[:])
+		addrHash := crypto.Keccak256Hash(addr[:])
 		for key := range m {
-			keyHash, _ := common.HashData(key[:])
+			keyHash := crypto.Keccak256Hash(key[:])
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
 			// fmt.Printf("DELETING Storage Key at path %x\n", cKey)
 			s.t.Delete(cKey)
@@ -2032,7 +2007,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 	// DeepHash computes the storage root, then we update the account with it
 	for addr := range updatedAccounts {
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
-			addrHash, _ := common.HashData(addr[:])
+			addrHash := crypto.Keccak256Hash(addr[:])
 			gotRoot, root := s.t.DeepHash(addrHash[:])
 			if gotRoot {
 				// Update the account's storage root and re-apply to trie
@@ -2050,7 +2025,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
 			account.Root = trie.EmptyRoot
 		}
-		addrHash, _ := common.HashData(addr[:])
+		addrHash := crypto.Keccak256Hash(addr[:])
 		s.t.DeleteSubtree(addrHash[:])
 	}
 
@@ -2084,7 +2059,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 
 	// Create the in-block state with the witness stateless as reader
 	ibs := state.New(stateless)
-	header := block.Header()
+	header := block.HeaderNoCopy()
 	blockNum := block.NumberU64()
 
 	// Create EVM block context - pass header.Coinbase as the author/beneficiary

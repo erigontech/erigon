@@ -138,7 +138,7 @@ func verifyFileFromTorrent(ctx context.Context, torrentPath string, completedByt
 	pieceLen := info.PieceLength
 	numPieces := info.NumPieces()
 
-	for i := 0; i < numPieces; i++ {
+	for i := range numPieces {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

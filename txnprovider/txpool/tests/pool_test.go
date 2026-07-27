@@ -83,7 +83,7 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 			log.New(),
 		)
 
-		for i := 0; i < txToSendCount; i++ {
+		for i := range txToSendCount {
 			signedTx, err := types.SignTx(
 				&types.LegacyTx{
 					CommonTx: types.CommonTx{
@@ -157,7 +157,7 @@ func TestSimpleLocalTxLatencyBenchmark(t *testing.T) {
 
 	averageLatency := time.Duration(0)
 
-	for i := 0; i < txToSendCount; i++ {
+	for i := range txToSendCount {
 		signedTx, err := types.SignTx(
 			&types.LegacyTx{
 				CommonTx: types.CommonTx{
@@ -226,7 +226,7 @@ func TestSimpleRemoteTxThroughputBenchmark(t *testing.T) {
 			log.New(),
 		)
 
-		for i := 0; i < txToSendCount; i++ {
+		for i := range txToSendCount {
 			signedTx, err := types.SignTx(
 				&types.LegacyTx{
 					CommonTx: types.CommonTx{
@@ -309,7 +309,7 @@ func TestSimpleRemoteTxLatencyBenchmark(t *testing.T) {
 
 	averageLatency := time.Duration(0)
 
-	for i := 0; i < txToSendCount; i++ {
+	for i := range txToSendCount {
 		signedTx, err := types.SignTx(
 			&types.LegacyTx{
 				CommonTx: types.CommonTx{

@@ -41,13 +41,12 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
@@ -107,9 +106,9 @@ type BlockRetire struct {
 	tmpDir  string
 	db      kv.RoDB
 
-	notifier    services.DBEventNotifier
+	notifier    dbservices.DBEventNotifier
 	logger      log.Logger
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 	blockWriter *blockio.BlockWriter
 	dirs        datadir.Dirs
 	chainConfig *chain.Config
@@ -131,14 +130,14 @@ func NewBlockRetire(
 	ctx context.Context,
 	compressWorkers int,
 	dirs datadir.Dirs,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	blockWriter *blockio.BlockWriter,
 	db kv.RoDB,
 	heimdallStore heimdall.Store,
 	bridgeStore bridge.Store,
 	chainConfig *chain.Config,
 	config *ethconfig.Config,
-	notifier services.DBEventNotifier,
+	notifier dbservices.DBEventNotifier,
 	snBuildAllowed *semaphore.Weighted,
 	logger log.Logger,
 ) *BlockRetire {
@@ -183,7 +182,7 @@ func (br *BlockRetire) SetCommitGate(gate *sync.RWMutex) {
 	br.db = kv.NewGatedRoDB(br.db, gate)
 }
 
-func (br *BlockRetire) IO() (services.FullBlockReader, *blockio.BlockWriter) {
+func (br *BlockRetire) IO() (dbservices.FullBlockReader, *blockio.BlockWriter) {
 	return br.blockReader, br.blockWriter
 }
 
@@ -260,7 +259,7 @@ func (br *BlockRetire) buildFiles(
 	minBlockNum uint64,
 	maxBlockNum uint64,
 	lvl log.Lvl,
-	seeder downloader.SeederClient,
+	seeder dbservices.SeederClient,
 ) (bool, error) {
 	select {
 	case <-ctx.Done():
@@ -302,7 +301,7 @@ func (br *BlockRetire) buildFiles(
 func (br *BlockRetire) MergeBlocks(
 	ctx context.Context,
 	lvl log.Lvl,
-	seeder downloader.SeederClient,
+	seeder dbservices.SeederClient,
 ) (merged bool, err error) {
 	notifier, logger, _, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers.Load()
 	snapshots := br.snapshots()
@@ -385,7 +384,7 @@ func (br *BlockRetire) BuildFilesInBackground(
 	minBlockNum,
 	maxBlockNum uint64,
 	lvl log.Lvl,
-	seeder downloader.SeederClient,
+	seeder dbservices.SeederClient,
 	onFinishRetire func() error,
 	onDone func(),
 ) bool {
@@ -460,7 +459,7 @@ func (br *BlockRetire) BuildFiles(
 	requestedMinBlockNum uint64,
 	requestedMaxBlockNum uint64,
 	lvl log.Lvl,
-	seeder downloader.SeederClient,
+	seeder dbservices.SeederClient,
 	onFinish func() error,
 ) error {
 	if requestedMaxBlockNum > br.maxScheduledBlock.Load() {
@@ -524,7 +523,7 @@ func (br *BlockRetire) BuildFiles(
 	return nil
 }
 
-func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier) error {
+func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier dbservices.DBEventNotifier) error {
 	if err := br.snapshots().BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, br.chainConfig, br.logger); err != nil {
 		return err
 	}
@@ -537,6 +536,13 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 
 	return nil
 }
+
+// RetireTransactionFiles expires transaction segments ending below blockTo — the
+// minimal/full-node step that drops old bodies once state no longer needs them.
+func (br *BlockRetire) RetireTransactionFiles(blockTo uint64, onDelete func(l []string) error) (bool, error) {
+	return br.snapshots().RetireFilesBelow(snaptype2.Transactions, blockTo, onDelete)
+}
+
 func (br *BlockRetire) RemoveOverlaps(onDelete func(l []string) error) error {
 	if err := br.snapshots().RemoveOverlaps(onDelete); err != nil {
 		return err
@@ -565,7 +571,7 @@ func (br *BlockRetire) DisableReadAhead() {
 	}
 }
 
-func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader, snCfg *snapcfg.Cfg, inProgress *snapshotsync.BaseRoSnapshots) error {
+func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader dbservices.FullBlockReader, snCfg *snapcfg.Cfg, inProgress *snapshotsync.BaseRoSnapshots) error {
 	var firstTxNum uint64
 	if err := chainDB.View(ctx, func(tx kv.Tx) error {
 		firstTxNum = blockReader.FirstTxnNumNotInSnapshots(tx)

@@ -8,12 +8,18 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+
 jobs:
   # Workflow files can't read local files directly — they must be loaded via a
   # job step. We do this so the matrix group names come from the same source as
   # the test code (tools/test-groups), keeping CI and local runs in sync.
   load-matrix:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
     timeout-minutes: 60
     outputs:
       test-groups: ${{ steps.load.outputs.groups }}
@@ -57,6 +63,9 @@ jobs:
           - parallel
     name: tests-linux (${{ matrix.os }}, ${{ matrix.test-group }}, ${{ matrix.exec_mode }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: write
 
     steps:
       - name: Declare runners
@@ -90,7 +99,8 @@ jobs:
           # in common/dbg/dbg_env.go auto-prepends ERIGON_, so this maps to
           # the EXEC3_PARALLEL flag declared in common/dbg/experiments.go.
           ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
-        run: make test-group TEST_GROUP=${{ matrix.test-group }} GO_FLAGS="-race -timeout=60m"
+          TEST_GROUP: ${{ matrix.test-group }}
+        run: make test-group TEST_GROUP="$TEST_GROUP" GO_FLAGS="-race -timeout=60m"
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()

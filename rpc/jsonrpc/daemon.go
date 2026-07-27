@@ -19,18 +19,33 @@ package jsonrpc
 import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
-func NewEthApiConfig(cfg *httpcfg.HttpCfg) *EthApiConfig {
-	return &EthApiConfig{
+func NewBaseApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.BaseApiConfig {
+	if cfg == nil {
+		return &rpccfg.BaseApiConfig{}
+	}
+	return &rpccfg.BaseApiConfig{
+		SingleNodeMode:    cfg.WithDatadir,
+		EvmCallTimeout:    cfg.EvmCallTimeout,
+		Dirs:              cfg.Dirs,
+		BlockRangeLimit:   cfg.BlockRangeLimit,
+		GetLogsMaxResults: cfg.GetLogsMaxResults,
+		LogQueryLimit:     cfg.LogQueryLimit,
+	}
+}
+
+func NewEthApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.EthApiConfig {
+	return &rpccfg.EthApiConfig{
 		GasCap:                      cfg.Gascap,
 		FeeCap:                      cfg.Feecap,
 		ReturnDataLimit:             cfg.ReturnDataLimit,
@@ -42,21 +57,51 @@ func NewEthApiConfig(cfg *httpcfg.HttpCfg) *EthApiConfig {
 	}
 }
 
+func NewDebugApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.DebugApiConfig {
+	return &rpccfg.DebugApiConfig{
+		GasCap:            cfg.Gascap,
+		GethCompatibility: cfg.GethCompatibility,
+	}
+}
+
+func NewTraceApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.TraceApiConfig {
+	return &rpccfg.TraceApiConfig{
+		MaxTraces:     cfg.MaxTraces,
+		GasCap:        cfg.Gascap,
+		Compatibility: cfg.TraceCompatibility,
+	}
+}
+
+func NewGraphQLApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.GraphQLApiConfig {
+	return &rpccfg.GraphQLApiConfig{
+		GasCap:          cfg.Gascap,
+		ReturnDataLimit: cfg.ReturnDataLimit,
+	}
+}
+
+func NewOverlayApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.OverlayApiConfig {
+	return &rpccfg.OverlayApiConfig{
+		GasCap:                    cfg.Gascap,
+		OverlayGetLogsTimeout:     cfg.OverlayGetLogsTimeout,
+		OverlayReplayBlockTimeout: cfg.OverlayReplayBlockTimeout,
+	}
+}
+
 // APIList describes the list of available RPC apis
 func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
-	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg, engine rules.EngineReader,
+	blockReader dbservices.FullBlockReader, cfg *httpcfg.HttpCfg, engine rules.Engine,
 	logger log.Logger, bridgeReader bridgeReader, spanProducersReader spanProducersReader,
 	testingEntry *rpc.API, witnessCache *witnessResultCache,
 ) (list []rpc.API) {
-	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.BlockRangeLimit, cfg.GetLogsMaxResults)
+	base := NewBaseApi(filters, stateCache, blockReader, engine, bridgeReader, NewBaseApiConfig(cfg))
 	base.witnessCache = witnessCache
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, NewEthApiConfig(cfg), logger)
 	erigonImpl := NewErigonAPI(base, db, eth)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
 	netImpl := NewNetAPIImpl(eth)
-	debugImpl := NewPrivateDebugAPI(base, db, eth, cfg.Gascap, cfg.GethCompatibility)
-	traceImpl := NewTraceAPI(base, db, cfg)
+	debugImpl := NewPrivateDebugAPI(base, db, eth, NewDebugApiConfig(cfg))
+	traceImpl := NewTraceAPI(base, db, NewTraceApiConfig(cfg))
 	web3Impl := NewWeb3APIImpl(eth)
 	adminImpl := NewAdminAPI(eth)
 	parityImpl := NewParityAPIImpl(base, db)
@@ -79,8 +124,8 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 
 	otsImpl := NewOtterscanAPI(base, db, cfg.OtsMaxPageSize)
 	internalImpl := NewInternalAPI(base, db)
-	gqlImpl := NewGraphQLAPI(base, db, ethImpl, txPool, cfg.Gascap, cfg.ReturnDataLimit)
-	overlayImpl := NewOverlayAPI(base, db, cfg.Gascap, cfg.OverlayGetLogsTimeout, cfg.OverlayReplayBlockTimeout, otsImpl)
+	gqlImpl := NewGraphQLAPI(base, db, ethImpl, txPool, NewGraphQLApiConfig(cfg))
+	overlayImpl := NewOverlayAPI(base, db, NewOverlayApiConfig(cfg), otsImpl)
 
 	if cfg.GraphQLEnabled {
 		list = append(list, rpc.API{
@@ -98,6 +143,11 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 				Namespace: "eth",
 				Public:    true,
 				Service:   EthAPI(ethImpl),
+				Version:   "1.0",
+			}, rpc.API{
+				Namespace: "eth",
+				Public:    true,
+				Service:   NewEthSyncingSubscriptionAPI(filters, logger),
 				Version:   "1.0",
 			})
 		case "debug":

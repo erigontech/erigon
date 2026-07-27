@@ -66,7 +66,7 @@ func FuzzLongestMatch(f *testing.F) {
 			keyIdx = keyIdx % len(keys)
 			key := []byte(keys[keyIdx])
 			data = append(data, key...)
-			for j := 0; j < len(key); j++ {
+			for j := range key {
 				data = append(data, key[len(key)-1-j])
 			}
 		}

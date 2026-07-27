@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"net"
 	"path"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -45,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -130,6 +132,18 @@ func DefaultEngineApiTesterGenesis() (*types.Genesis, *ecdsa.PrivateKey, error) 
 				Nonce:   1,
 				Balance: new(big.Int),
 			},
+			chainConfig.GetBuilderDepositContract().Value(): {
+				Code:    misc.BuilderDepositRequestCode,
+				Storage: make(map[common.Hash]common.Hash),
+				Balance: new(big.Int),
+				Nonce:   1,
+			},
+			chainConfig.GetBuilderExitContract().Value(): {
+				Code:    misc.BuilderExitRequestCode,
+				Storage: make(map[common.Hash]common.Hash),
+				Balance: new(big.Int),
+				Nonce:   1,
+			},
 		},
 	}
 	return genesis, coinbasePrivKey, nil
@@ -166,8 +180,8 @@ type cleanupHandle struct {
 func (h *cleanupHandle) close() error {
 	h.once.Do(func() {
 		var errs []error
-		for i := len(h.cleanups) - 1; i >= 0; i-- {
-			err := h.cleanups[i]()
+		for _, cleanup := range slices.Backward(h.cleanups) {
+			err := cleanup()
 			if err != nil {
 				errs = append(errs, err)
 			}

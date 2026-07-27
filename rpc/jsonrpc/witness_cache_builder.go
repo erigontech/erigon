@@ -25,10 +25,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -220,15 +220,15 @@ func NewWitnessCacheBuilderAPI(
 	enable, headCapture bool,
 	db kv.TemporalRoDB, eth rpchelper.ApiBackend,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
-	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg,
-	engine rules.EngineReader, bridgeReader bridgeReader,
+	blockReader dbservices.FullBlockReader, cfg *httpcfg.HttpCfg,
+	engine rules.Engine, bridgeReader bridgeReader,
 ) (*witnessResultCache, *DebugAPIImpl) {
 	if !enable {
 		return nil, nil
 	}
 	cache := newWitnessResultCache(cfg.WitnessCacheBlocks, witnessCacheMaxBytes(cfg.WitnessCacheMaxMB), headCapture, headCapture)
-	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.BlockRangeLimit, cfg.GetLogsMaxResults)
-	impl := NewPrivateDebugAPI(base, db, eth, cfg.Gascap, cfg.GethCompatibility)
+	base := NewBaseApi(filters, stateCache, blockReader, engine, bridgeReader, NewBaseApiConfig(cfg))
+	impl := NewPrivateDebugAPI(base, db, eth, NewDebugApiConfig(cfg))
 	impl.witnessCache = cache
 	return cache, impl
 }
@@ -486,6 +486,7 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 		log.Warn("[witness-cache] build witness", "block", num, "err", err)
 		return false
 	}
+	witnessCacheBuildDuration.ObserveDuration(start)
 	enc, err := result.MarshalFastJSON()
 	if err != nil {
 		witnessCacheBuildFailOtherCounter.Inc()

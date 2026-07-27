@@ -227,14 +227,12 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 			if codeFileFlag == "-" {
 				//Try reading from stdin
 				if hexcode, err = io.ReadAll(os.Stdin); err != nil {
-					fmt.Printf("Could not load code from stdin: %v\n", err)
-					os.Exit(1)
+					return fmt.Errorf("could not load code from stdin: %w", err)
 				}
 			} else {
 				// Codefile with hex assembly
 				if hexcode, err = os.ReadFile(codeFileFlag); err != nil {
-					fmt.Printf("Could not load code from file: %v\n", err)
-					os.Exit(1)
+					return fmt.Errorf("could not load code from file: %w", err)
 				}
 			}
 		} else {
@@ -242,8 +240,7 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 		}
 		hexcode = bytes.TrimSpace(hexcode)
 		if len(hexcode)%2 != 0 {
-			fmt.Printf("Invalid input length for hex data (%d)\n", len(hexcode))
-			os.Exit(1)
+			return fmt.Errorf("invalid input length for hex data (%d)", len(hexcode))
 		}
 		code = hexutil.MustDecodeHex(string(hexcode))
 	} else if fn := ctx.Args().First(); len(fn) > 0 {
@@ -283,12 +280,10 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 	if cpuProfilePath := ctx.String(CPUProfileFlag.Name); cpuProfilePath != "" {
 		f, err := os.Create(cpuProfilePath)
 		if err != nil {
-			fmt.Println("could not create CPU profile: ", err)
-			os.Exit(1)
+			return fmt.Errorf("could not create CPU profile: %w", err)
 		}
 		if err := pprof.StartCPUProfile(f); err != nil {
-			fmt.Println("could not start CPU profile: ", err)
-			os.Exit(1)
+			return fmt.Errorf("could not start CPU profile: %w", err)
 		}
 		defer pprof.StopCPUProfile()
 	}
@@ -303,8 +298,7 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 	if inputFileFlag := ctx.String(InputFileFlag.Name); inputFileFlag != "" {
 		var err error
 		if hexInput, err = os.ReadFile(inputFileFlag); err != nil {
-			fmt.Printf("could not load input from file: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("could not load input from file: %w", err)
 		}
 	} else {
 		hexInput = []byte(ctx.String(InputFlag.Name))
@@ -341,8 +335,7 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 			rules = blockContext.Rules(chainConfig)
 		}
 		if err = statedb.CommitBlock(rules, state.NewNoopWriter()); err != nil {
-			fmt.Println("Could not commit state: ", err)
-			os.Exit(1)
+			return fmt.Errorf("could not commit state: %w", err)
 		}
 		fmt.Println(string(state.NewDumper(tx, rawdbv3.TxNums, 0).DefaultDump()))
 	}
@@ -350,12 +343,10 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 	if memProfilePath := ctx.String(MemProfileFlag.Name); memProfilePath != "" {
 		f, err := os.Create(memProfilePath)
 		if err != nil {
-			fmt.Println("could not create memory profile: ", err)
-			os.Exit(1)
+			return fmt.Errorf("could not create memory profile: %w", err)
 		}
 		if err := pprof.WriteHeapProfile(f); err != nil {
-			fmt.Println("could not write memory profile: ", err)
-			os.Exit(1)
+			return fmt.Errorf("could not write memory profile: %w", err)
 		}
 		closeErr := f.Close()
 		if closeErr != nil {

@@ -41,8 +41,8 @@ func witnessCacheMaxBytes(mb uint) int {
 }
 
 // witnessResultCache maps a canonical block hash to its pre-marshaled legacy-mode
-// witness. Keying by hash makes reorgs self-evicting — a reorged hash is never
-// requested again and ages out via the LRU — so no reconcile step is needed.
+// witness. Keying by hash needs no reorg reconcile: number-based lookups resolve to
+// the current canonical hash, and an orphaned hash ages out of the LRU.
 //
 // It wraps a hashicorp LRU (count cap) with a resident-bytes cap and the serving
 // mode, so the builder and serve paths read one source of truth for both. The
@@ -64,17 +64,23 @@ type witnessResultCache struct {
 	entryBytes    map[common.Hash]int
 }
 
-func newWitnessResultCache(blocks uint, maxBytes int, headCapture, cacheOnly bool) *witnessResultCache {
+// WitnessCacheCapacity is the number of witnesses the cache actually holds for a
+// requested block count, after clamping to witnessCacheMaxBlocks.
+func WitnessCacheCapacity(blocks uint) uint {
 	if blocks > witnessCacheMaxBlocks {
-		blocks = witnessCacheMaxBlocks
+		return witnessCacheMaxBlocks
 	}
+	return blocks
+}
+
+func newWitnessResultCache(blocks uint, maxBytes int, headCapture, cacheOnly bool) *witnessResultCache {
 	c := &witnessResultCache{
 		headCapture: headCapture,
 		cacheOnly:   cacheOnly,
 		maxBytes:    maxBytes,
 		entryBytes:  make(map[common.Hash]int),
 	}
-	cache, err := lru.NewWithEvict[common.Hash, *ExecutionWitnessResult](int(blocks), c.onEvict)
+	cache, err := lru.NewWithEvict[common.Hash, *ExecutionWitnessResult](int(WitnessCacheCapacity(blocks)), c.onEvict)
 	if err != nil {
 		panic(err)
 	}

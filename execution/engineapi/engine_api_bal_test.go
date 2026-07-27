@@ -29,9 +29,11 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/abi/bind"
+	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	stateContracts "github.com/erigontech/erigon/execution/state/contracts"
@@ -703,7 +705,7 @@ func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
 		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
 		require.NoError(t, err, "block 1 (deploy shared Changer) must build cleanly")
 
-		for blockIdx := 0; blockIdx < numBlocks; blockIdx++ {
+		for blockIdx := range numBlocks {
 			// Each sender does one simple transfer (fully independent state).
 			for i, key := range senderKeys {
 				// Distinct receiver per (sender, block) to avoid nonce/collision.
@@ -1140,4 +1142,61 @@ func findStorageChange(sc *types.SlotChanges, index uint32) *types.StorageChange
 		}
 	}
 	return nil
+}
+
+// TestEngineApiNewPayloadBALMalformedVsInvalid pins the EIP-7928 newPayload
+// error split: a blockAccessList param that is not decodable RLP is a
+// malformed request (-32602 invalid params), while a decodable one that
+// violates EIP-7928 ordering rules is an invalid block ({status: INVALID}).
+func TestEngineApiNewPayloadBALMalformedVsInvalid(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	receiver := common.HexToAddress("0x333")
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		_, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(1))
+		require.NoError(t, err)
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		executionRequests := payload.ExecutionRequests
+		if executionRequests == nil {
+			executionRequests = []hexutil.Bytes{}
+		}
+		sendWithBAL := func(bal hexutil.Bytes) (*enginetypes.PayloadStatus, error) {
+			elPayload := *payload.ExecutionPayload
+			elPayload.BlockAccessList = &bal
+			return eat.EngineApiClient.NewPayloadV5(ctx, &elPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
+		}
+		for name, malformed := range map[string]hexutil.Bytes{
+			"empty byte string": {},
+			"string not list":   {0x80},
+			"truncated list":    {0xc1},
+		} {
+			_, err := sendWithBAL(malformed)
+			require.Errorf(t, err, "%s: expected invalid-params error", name)
+			var rpcErr rpc.Error
+			require.ErrorAsf(t, err, &rpcErr, "%s: expected rpc error, got: %v", name, err)
+			require.Equalf(t, -32602, rpcErr.ErrorCode(), "%s: %v", name, err)
+		}
+		account := append([]byte{0xda, 0x94}, make([]byte, 20)...)
+		account = append(account, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0)
+		duplicateAccounts := make([]byte, 0, 1+2*len(account))
+		duplicateAccounts = append(duplicateAccounts, 0xc0+byte(2*len(account)))
+		duplicateAccounts = append(duplicateAccounts, account...)
+		duplicateAccounts = append(duplicateAccounts, account...)
+		status, err := sendWithBAL(duplicateAccounts)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.InvalidStatus, status.Status)
+		require.NotNil(t, status.ValidationError)
+		require.ErrorContains(t, status.ValidationError.Error(), "access list",
+			"INVALID must originate from block-access-list validation, not e.g. a block-hash mismatch")
+	})
 }

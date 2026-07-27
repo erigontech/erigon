@@ -10,9 +10,10 @@ package commitment
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/binary"
 	"errors"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -124,7 +125,7 @@ func breadthFirstOrder(tree syntheticTree, exclude map[string]bool) []string {
 			return
 		}
 		reach[p] = true
-		for n := 0; n < 16; n++ {
+		for n := range 16 {
 			if am&(1<<uint(n)) != 0 {
 				dfs(p + string([]byte{byte(n)}))
 			}
@@ -137,11 +138,11 @@ func breadthFirstOrder(tree syntheticTree, exclude map[string]bool) []string {
 		copy(kc, k)
 		pks = append(pks, pk{path: p, key: kc})
 	}
-	sort.Slice(pks, func(i, j int) bool {
-		if len(pks[i].path) != len(pks[j].path) {
-			return len(pks[i].path) < len(pks[j].path)
+	slices.SortFunc(pks, func(a, b pk) int {
+		if len(a.path) != len(b.path) {
+			return cmp.Compare(len(a.path), len(b.path))
 		}
-		return bytes.Compare(pks[i].key, pks[j].key) < 0
+		return bytes.Compare(a.key, b.key)
 	})
 	out := make([]string, len(pks))
 	for i := range pks {
@@ -181,7 +182,7 @@ func TestPreloadParallel_BudgetCutoff(t *testing.T) {
 	// at depths 64..66 are 33/33/34 bytes; use the actual lengths.
 	want := 3
 	budget := 0
-	for i := 0; i < want; i++ {
+	for i := range want {
 		budget += estimatedEntryOverheadBytes + len(nibbles.HexToCompact([]byte(order[i]))) + valSz
 	}
 	budget += 10 // slack inside the want-th but below the (want+1)-th
@@ -193,7 +194,7 @@ func TestPreloadParallel_BudgetCutoff(t *testing.T) {
 	if n != want {
 		t.Fatalf("pinned %d, want %d", n, want)
 	}
-	for i := 0; i < want; i++ {
+	for i := range want {
 		if _, _, ok := c.Get(nibbles.HexToCompact([]byte(order[i]))); !ok {
 			t.Fatalf("shallowest #%d (%x) should be pinned", i, order[i])
 		}
@@ -241,7 +242,7 @@ func TestPreloadParallel_CapsWaveFetch(t *testing.T) {
 	}
 	root := string(hexNibbles(hash))
 	tree := syntheticTree{root: 0xffff}
-	for n := 0; n < 16; n++ {
+	for n := range 16 {
 		tree[root+string([]byte{byte(n)})] = 0 // 16 depth-65 leaves
 	}
 	const valSz = 100
@@ -669,7 +670,7 @@ func TestContractTrunkPreloadParallel_PinnedPrefixesAccumulate(t *testing.T) {
 	rootKey := nibbles.HexToCompact(hexNibbles(hash))
 	entry := estimatedEntryOverheadBytes + len(rootKey) + valSz
 	// Two small steps then one big step.
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if _, _, err := p.Run(2*entry+10, nil, resolve, c, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -722,6 +723,57 @@ func TestContractTrunkPreloadParallel_NilResolverError(t *testing.T) {
 	}
 	if _, _, err := p.Run(1<<20, nil, nil, c, nil); err == nil {
 		t.Fatal("expected error when resolver is nil")
+	}
+}
+
+// The reusable partition scratch must not keep the last wave's keys and values
+// reachable once Run returns — a drained ~1M-entry frontier would otherwise stay
+// pinned until the next Run. Only the capacity survives.
+func TestContractTrunkPreloadParallel_RunReleasesScratch(t *testing.T) {
+	hash, tree, allPaths := buildSyntheticTree(t)
+	root := hexNibbles(hash)
+	const valSz = 100
+	// Shadow every node but the root, so the deepest wave partitions into dbHits
+	// (non-empty at return) and the first wave into fileMiss.
+	dbBranches := map[string][]byte{}
+	for _, p := range allPaths {
+		if bytes.Equal(p, root) {
+			continue
+		}
+		dbBranches[string(nibbles.HexToCompact(p))] = branchVal(tree[string(p)], valSz)
+	}
+
+	p, err := NewContractTrunkPreloadParallel(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := NewBranchCache(64)
+	n, queueEmpty, err := p.Run(1<<20, dbBranches, fakeResolver(tree, nil, valSz, ""), c, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !queueEmpty || n != len(tree) {
+		t.Fatalf("pinned %d (queueEmpty=%v), want the whole %d-node tree drained", n, queueEmpty, len(tree))
+	}
+
+	if cap(p.scratchDbHits) == 0 || cap(p.scratchDbVals) == 0 || cap(p.scratchFileMiss) == 0 {
+		t.Fatalf("scratch capacity not retained for reuse: dbHits=%d dbVals=%d fileMiss=%d",
+			cap(p.scratchDbHits), cap(p.scratchDbVals), cap(p.scratchFileMiss))
+	}
+	for i, pk := range p.scratchDbHits[:cap(p.scratchDbHits)] {
+		if pk.key != nil || pk.path != nil {
+			t.Fatalf("scratchDbHits[%d] still references wave data after Run", i)
+		}
+	}
+	for i, v := range p.scratchDbVals[:cap(p.scratchDbVals)] {
+		if v != nil {
+			t.Fatalf("scratchDbVals[%d] still references a dbBranches value after Run", i)
+		}
+	}
+	for i, pk := range p.scratchFileMiss[:cap(p.scratchFileMiss)] {
+		if pk.key != nil || pk.path != nil {
+			t.Fatalf("scratchFileMiss[%d] still references wave data after Run", i)
+		}
 	}
 }
 

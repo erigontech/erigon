@@ -273,9 +273,9 @@ func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
-	upd.prefix = common.Copy(prefix)
-	upd.raw = common.Copy(raw)
-	upd.prev = common.Copy(prev)
+	upd.prefix = bytes.Clone(prefix)
+	upd.raw = bytes.Clone(raw)
+	upd.prev = bytes.Clone(prev)
 	upd.encoded = nil
 
 	return upd
@@ -389,7 +389,7 @@ func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error 
 		if err != nil {
 			return err
 		}
-		upd.encoded = common.Copy(merged)
+		upd.encoded = bytes.Clone(merged)
 		return nil
 	}
 	upd.encoded = upd.raw
@@ -456,14 +456,13 @@ func ApplyDeferredBranchUpdates(
 	errs := make([]error, numWorkers)
 	var wg sync.WaitGroup
 	for w := 0; w < numWorkers; w++ {
+		w := w
 		lo := w * chunk
 		hi := min(lo+chunk, len(deferred))
 		if lo >= hi {
 			break
 		}
-		wg.Add(1)
-		go func(w, lo, hi int) {
-			defer wg.Done()
+		wg.Go(func() {
 			merger := workerMergerPool.Get().(*BranchMerger)
 			defer workerMergerPool.Put(merger)
 			for i := lo; i < hi; i++ {
@@ -472,7 +471,7 @@ func ApplyDeferredBranchUpdates(
 					return
 				}
 			}
-		}(w, lo, hi)
+		})
 	}
 	wg.Wait()
 	for _, err := range errs {
@@ -534,8 +533,8 @@ func (be *BranchEncoder) CollectUpdate(
 		}
 	}
 
-	prefixCopy := common.Copy(prefix)
-	updateCopy := common.Copy(update)
+	prefixCopy := bytes.Clone(prefix)
+	updateCopy := bytes.Clone(update)
 	if err = ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
@@ -1686,8 +1685,8 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 // from DomainPut.
 func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	if dbg.TraceTouchKey {
-		fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%d nonce=%d codeHash=%x\n",
-			key, update.Flags, &update.Balance, update.Nonce, update.CodeHash)
+		fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%s nonce=%d codeHash=%x\n",
+			key, update.Flags, update.Balance.String(), update.Nonce, update.CodeHash)
 	}
 	switch t.mode {
 	case ModeUpdate:
@@ -1773,7 +1772,7 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 			t.keys[dedupKey] = struct{}{}
 		}
 	case ModeUpdate:
-		pivot := &KeyUpdate{hashedKey: common.Copy(hashedKey), update: new(Update)}
+		pivot := &KeyUpdate{hashedKey: bytes.Clone(hashedKey), update: new(Update)}
 		t.tree.ReplaceOrInsert(pivot)
 	default:
 	}
@@ -1831,7 +1830,7 @@ func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
 		c.update.CodeHash = empty.CodeHash
 		return
 	}
-	c.update.CodeHash = crypto.HashData(code)
+	c.update.CodeHash = crypto.Keccak256Hash(code)
 }
 
 func (t *Updates) Close() {

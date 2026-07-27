@@ -33,6 +33,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   tip-tracking-with-load-test:
     name: Tip-tracking with load ${{ matrix.client }}
@@ -79,6 +82,8 @@ jobs:
     - name: Check out Erigon repository
       if: matrix.client == 'erigon'
       uses: actions/checkout@v7
+      with:
+        persist-credentials: false
 
     - name: Checkout RPC Tests Repository & Install Requirements
       if: matrix.client == 'erigon' || (matrix.client == 'geth' && github.event.inputs.run_geth == 'true')

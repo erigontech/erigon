@@ -76,7 +76,7 @@ type componentDomain struct {
 
 type serviceManager interface {
 	ServiceBus() *event.ServiceBus
-	Post(args ...interface{})
+	Post(args ...any)
 }
 
 type domainOptions struct {

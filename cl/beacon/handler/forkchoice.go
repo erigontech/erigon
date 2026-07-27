@@ -40,7 +40,8 @@ func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Req
 				"root":                 root,
 				"execution_optimistic": false,
 			},
-		}), nil
+		},
+	), nil
 }
 
 func (a *ApiHandler) GetEthV1DebugBeaconForkChoice(w http.ResponseWriter, r *http.Request) {
