@@ -259,6 +259,21 @@ func (srv *Server) AddPeer(node *enode.Node) {
 	srv.dialsched.addStatic(node)
 }
 
+// RegisterStaticPeer records the given node in the static-peer lookup
+// table without scheduling a dial. Use it to pre-populate the table
+// on both ends of a bidirectional mesh before triggering any dial via
+// AddPeer — an inbound handshake completing early on the peer being
+// dialed will then still find the dialer in its own static table and
+// preserve the dialer's full ENR (see setupConn's inbound branch),
+// instead of falling back to the stub enode from nodeFromConn.
+// Callers that want the normal "register + dial" semantic keep using
+// AddPeer; this method is only for the pre-register pass.
+func (srv *Server) RegisterStaticPeer(node *enode.Node) {
+	if srv.dialsched != nil {
+		srv.dialsched.preAddStatic(node)
+	}
+}
+
 // RemovePeer removes a node from the static node set. It also disconnects from the given
 // node if it is currently connected as a peer.
 //

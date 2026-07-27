@@ -225,6 +225,22 @@ func (d *dialScheduler) addStatic(n *enode.Node) {
 	}
 }
 
+// preAddStatic populates the static-peer lookup table without kicking
+// off a dial. Symmetric with addStatic on the map-write side; the loop
+// side is skipped so no dial task is scheduled. Bidirectional-mesh
+// callers use this in a first pass across every pair so setupConn's
+// inbound-branch lookupStatic finds the dialer's full ENR regardless
+// of how a subsequent addStatic + dial interleaves with the ongoing
+// registrations elsewhere in the mesh.
+func (d *dialScheduler) preAddStatic(n *enode.Node) {
+	d.staticByIDMu.Lock()
+	defer d.staticByIDMu.Unlock()
+	if d.staticByID == nil {
+		d.staticByID = make(map[enode.ID]*enode.Node)
+	}
+	d.staticByID[n.ID()] = n
+}
+
 // removeStatic removes a static dial candidate.
 func (d *dialScheduler) removeStatic(n *enode.Node) {
 	d.staticByIDMu.Lock()

@@ -239,6 +239,70 @@ func TestDialSchedStaticDial(t *testing.T) {
 	})
 }
 
+// TestDialSchedPreAddStatic guards the invariant of preAddStatic: the
+// static-peer lookup table gets the node so setupConn's inbound branch
+// resolves it to its full ENR, but no dial is scheduled. A follow-up
+// addStatic call then triggers the dial normally.
+func TestDialSchedPreAddStatic(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	config := dialConfig{
+		maxActiveDials: 3,
+		maxDialPeers:   3,
+	}
+	runDialTest(t, config, []dialTestRound{
+		// Round 1 — preAddStatic three nodes. The lookup table must
+		// carry them, but no dial goes out.
+		{
+			update: func(d *dialScheduler) {
+				d.preAddStatic(newNode(uintID(0x01), "127.0.0.1:30303"))
+				d.preAddStatic(newNode(uintID(0x02), "127.0.0.2:30303"))
+				d.preAddStatic(newNode(uintID(0x03), "127.0.0.3:30303"))
+			},
+			// wantNewDials is empty: preAddStatic must not schedule a dial.
+		},
+		// Round 2 — same nodes via addStatic now trigger the dials.
+		{
+			update: func(d *dialScheduler) {
+				d.addStatic(newNode(uintID(0x01), "127.0.0.1:30303"))
+				d.addStatic(newNode(uintID(0x02), "127.0.0.2:30303"))
+				d.addStatic(newNode(uintID(0x03), "127.0.0.3:30303"))
+			},
+			wantNewDials: []*enode.Node{
+				newNode(uintID(0x01), "127.0.0.1:30303"),
+				newNode(uintID(0x02), "127.0.0.2:30303"),
+				newNode(uintID(0x03), "127.0.0.3:30303"),
+			},
+		},
+	})
+}
+
+// TestDialSchedPreAddStaticLookup guards the lookupStatic mapping after
+// preAddStatic: setupConn's inbound branch calls lookupStatic to
+// recover the dialer's full ENR, and preAddStatic must make that
+// lookup succeed even before the dial-scheduler loop has processed
+// anything.
+func TestDialSchedPreAddStaticLookup(t *testing.T) {
+	t.Parallel()
+
+	d := &dialScheduler{}
+	d.ctx, d.cancel = context.WithCancel(context.Background())
+	defer d.cancel()
+
+	n := newNode(uintID(0xab), "127.0.0.1:30303")
+	if got := d.lookupStatic(n.ID()); got != nil {
+		t.Fatalf("lookupStatic returned %v before preAddStatic; want nil", got)
+	}
+	d.preAddStatic(n)
+	if got := d.lookupStatic(n.ID()); got == nil || got.ID() != n.ID() {
+		t.Fatalf("lookupStatic returned %v after preAddStatic; want the node", got)
+	}
+}
+
 // This test checks that removing static nodes stops connecting to them.
 func TestDialSchedRemoveStatic(t *testing.T) {
 	if testing.Short() {
