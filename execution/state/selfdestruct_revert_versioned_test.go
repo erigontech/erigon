@@ -45,6 +45,39 @@ func TestSelfdestructVersioned_RevertPreservesPriorBalanceWrite(t *testing.T) {
 	require.Equal(t, uint64(1000), got.Val.Uint64(), "the pre-snapshot balance value must be restored")
 }
 
+// A self-destruct clears the versioned incarnation write, so a revert must put
+// the pre-destruct one back. That incarnation write can exist without a matching
+// balance write, which selfdestructChangeVersioned records separately — this
+// pins that combination.
+func TestSelfdestructVersioned_RevertRestoresIncarnationWithoutBalanceWrite(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x5D01"))
+	committed := accounts.NewAccount()
+	committed.Balance = *uint256.NewInt(1000)
+	committed.Incarnation = 1
+
+	ibs := NewWithVersionMap(&fieldReader{addr: addr, account: &committed}, NewVersionMap(nil))
+	ibs.SetTxContext(0, 0)
+	ibs.SetVersion(0)
+
+	require.NoError(t, ibs.SetIncarnation(addr, 7))
+
+	_, hasIncarnation := ibs.VersionedWrites().GetIncarnation(addr)
+	require.True(t, hasIncarnation, "SetIncarnation records an IncarnationPath write")
+	_, hasBalance := ibs.VersionedWrites().GetBalance(addr)
+	require.False(t, hasBalance, "no BalancePath write yet: this is the combination under test")
+
+	snap := ibs.PushSnapshot()
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+
+	ibs.RevertToSnapshot(snap, nil)
+
+	vw, ok := ibs.VersionedWrites().GetIncarnation(addr)
+	require.True(t, ok, "reverting the self-destruct must restore the IncarnationPath write")
+	require.Equal(t, uint64(7), vw.Val)
+}
+
 // A same-tx-created contract bumps its nonce (e.g. it CREATEs a child) and then
 // SELFDESTRUCTs (EIP-8246 preserve-balance). The versioned self-destruct must
 // NOT clear the nonce/code cells: the account is alive until finalize, and a

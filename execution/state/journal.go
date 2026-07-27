@@ -81,7 +81,7 @@ type journalExtra struct {
 // journalEntry is a compact tagged union stored inline in journal.entries.
 // Fields are reused across kinds: value holds the reverted uint256 — or, for
 // the kinds that revert a plain scalar (nonce/refund/log index), that scalar in
-// its low word via setScalar/scalar — flags the booleans, and extra only what
+// its low word via scalarValue/scalar — flags the booleans, and extra only what
 // the infrequent kinds need.
 type journalEntry struct {
 	account accounts.Address
