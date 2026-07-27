@@ -155,6 +155,15 @@ func (st *Stack) back2(n, m int) (x, y *uint256.Int) {
 	return &st.data[i], &st.data[j]
 }
 
+// back3 returns the n'th, m'th and k'th items from the top under one range check.
+func (st *Stack) back3(n, m, k int) (x, y, z *uint256.Int) {
+	i, j, l := st.top-n-1, st.top-m-1, st.top-k-1
+	if i < 0 || i >= stackLimit || j < 0 || j >= stackLimit || l < 0 || l >= stackLimit {
+		panic("stack overflow")
+	}
+	return &st.data[i], &st.data[j], &st.data[l]
+}
+
 // Back returns the n'th item in stack
 func (st *Stack) Back(n int) *uint256.Int {
 	return &st.data[st.top-n-1]

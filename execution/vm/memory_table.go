@@ -52,11 +52,12 @@ func memoryMStore(callContext *CallContext) (uint64, bool) {
 }
 
 func memoryMcopy(callContext *CallContext) (uint64, bool) {
-	mStart := callContext.Stack.Back(0) // stack[0]: dest
-	if callContext.Stack.Back(1).Gt(mStart) {
-		mStart = callContext.Stack.Back(1) // stack[1]: source
+	dst, src, length := callContext.Stack.back3(0, 1, 2)
+	mStart := dst
+	if src.Gt(mStart) {
+		mStart = src
 	}
-	return calcMemSize64(mStart, callContext.Stack.Back(2)) // stack[2]: length
+	return calcMemSize64(mStart, length)
 }
 
 func memoryCreate(callContext *CallContext) (uint64, bool) {
