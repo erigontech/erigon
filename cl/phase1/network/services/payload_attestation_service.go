@@ -65,11 +65,10 @@ const (
 	// seenPayloadAttestationCacheSize: PTC has 512 validators per slot.
 	// With clock disparity, we may see attestations for ~2 slots.
 	// 512 * 4 = 2048 provides safety margin.
-	seenPayloadAttestationCacheSize            = 2048
-	pendingPayloadAttestationExpiry            = 30 * time.Second
-	pendingPayloadAttestationCheckInterval     = 100 * time.Millisecond
-	maxPendingAttestations                     = 2048
-	maxConcurrentPayloadAttestationValidations = 2
+	seenPayloadAttestationCacheSize        = 2048
+	pendingPayloadAttestationExpiry        = 30 * time.Second
+	pendingPayloadAttestationCheckInterval = 100 * time.Millisecond
+	maxPendingAttestations                 = 2048
 )
 
 type payloadAttestationService struct {
@@ -85,7 +84,6 @@ type payloadAttestationService struct {
 	pendingAttestations sync.Map // pendingPayloadAttestationKey -> *pendingPayloadAttestationJob
 	pendingCount        atomic.Int32
 	pendingCond         *sync.Cond
-	validationSlots     chan struct{}
 	validationsInFlight sync.Map
 }
 
@@ -109,7 +107,6 @@ func NewPayloadAttestationService(
 		emitters:              emitters,
 		seenAttestationsCache: seenCache,
 		pendingCond:           sync.NewCond(&sync.Mutex{}),
-		validationSlots:       make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 	}
 	go s.loop(ctx)
 	return s
@@ -183,13 +180,6 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 		return fmt.Errorf("%w: already seen payload attestation from validator %d for slot %d", ErrIgnore, validatorIndex, slot)
 	}
 	defer finishValidation()
-
-	select {
-	case s.validationSlots <- struct{}{}:
-		defer func() { <-s.validationSlots }()
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 
 	// Process through forkchoice which handles:
 	// [IGNORE] block state not found
