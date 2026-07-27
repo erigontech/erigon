@@ -167,8 +167,8 @@ func findExecutedDiffsetAtHeight(ctx context.Context, rwTx kv.TemporalRwTx, br d
 		if len(nonCanonicalHeaders) == 0 {
 			return diffSet, common.Hash{}, false, fmt.Errorf("can't find diffsets for: %d", currentBlock)
 		}
-		// A reorg/fork can leave several headers at one height, but only the block
-		// that actually executed has a stored diffset. Pick that unique header;
+		// A reorg/fork can leave several headers at one height; only the ones that
+		// executed have a stored diffset. Pick that header when it is unique;
 		// treat two diffset-bearing headers as genuinely ambiguous.
 		withDiffset := 0
 		for _, h := range nonCanonicalHeaders {
@@ -183,7 +183,8 @@ func findExecutedDiffsetAtHeight(ctx context.Context, rwTx kv.TemporalRwTx, br d
 			}
 		}
 		if withDiffset > 1 {
-			return diffSet, common.Hash{}, false, fmt.Errorf("diffsets ambiguous for: %d, have %d headers with diffsets", currentBlock, withDiffset)
+			return [kv.DomainLen][]kv.DomainEntryDiff{}, common.Hash{}, false,
+				fmt.Errorf("diffsets ambiguous for: %d, have %d of %d headers with diffsets", currentBlock, withDiffset, len(nonCanonicalHeaders))
 		}
 		if withDiffset == 0 {
 			// No sibling has executed here yet. Report a concrete header hash so the

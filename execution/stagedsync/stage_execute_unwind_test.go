@@ -328,15 +328,14 @@ func TestFindExecutedDiffsetAtHeight_MultiHeaderAmbiguousDiffsets(t *testing.T) 
 	require.ErrorContains(t, err, "have 2", "the error must count diffset-bearing headers, not all stored headers")
 }
 
-// TestFindExecutedDiffsetAtHeight_NoHeadersCanonicalCleared pins that a height with no
+// TestFindExecutedDiffsetAtHeight_NoHeadersAtHeight pins that a height with no
 // canonical hash and no stored header surfaces as an error rather than a silent no-op.
-func TestFindExecutedDiffsetAtHeight_NoHeadersCanonicalCleared(t *testing.T) {
+func TestFindExecutedDiffsetAtHeight_NoHeadersAtHeight(t *testing.T) {
 	t.Parallel()
 
 	ctx, tx, br, doms := newFindDiffsetHarness(t)
 
 	const height = uint64(20)
-	require.NoError(t, rawdb.TruncateCanonicalHash(tx, height, false))
 	_, canonOk, err := br.CanonicalHash(ctx, tx, height)
 	require.NoError(t, err)
 	require.False(t, canonOk, "sanity: no canonical hash at the height")
