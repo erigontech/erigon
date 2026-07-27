@@ -1609,10 +1609,8 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dt.d.FilenameBase, k, f.src.existence.FileName)
 					}
 					continue
-				} else {
-					if traceGetLatest == dt.name {
-						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> true\n", dt.d.FilenameBase, k, f.src.existence.FileName)
-					}
+				} else if traceGetLatest == dt.name {
+					fmt.Printf("GetLatest(%s, %x) -> existence index %s -> true\n", dt.d.FilenameBase, k, f.src.existence.FileName)
 				}
 			} else {
 				if traceGetLatest == dt.name {

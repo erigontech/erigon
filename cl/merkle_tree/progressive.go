@@ -30,6 +30,17 @@ func MerkleizeProgressive(chunks [][32]byte) ([32]byte, error) {
 	return merkleizeProgressive(chunks, 1)
 }
 
+// ProgressiveListRoot computes the EIP-7916 root from already packed basic
+// values or composite element roots. logicalLength counts elements, not chunks.
+func ProgressiveListRoot(chunks [][32]byte, logicalLength uint64) ([32]byte, error) {
+	progressiveRoot, err := MerkleizeProgressive(chunks)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	lengthRoot := Uint64Root(logicalLength)
+	return crypto.Sha256(progressiveRoot[:], lengthRoot[:]), nil
+}
+
 func merkleizeProgressive(chunks [][32]byte, numLeaves uint64) ([32]byte, error) {
 	if len(chunks) == 0 {
 		return [32]byte{}, nil

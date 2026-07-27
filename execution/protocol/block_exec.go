@@ -188,14 +188,13 @@ func ExecuteBlockEphemerally(
 			return nil, err
 		}
 	}
-	blockLogs := ibs.Logs()
 	newRoot := newBlock.Root()
 	execRs := &EphemeralExecResult{
 		StateRoot:   newRoot,
 		TxRoot:      types.DeriveSha(includedTxs),
 		ReceiptRoot: receiptSha,
 		Bloom:       bloom,
-		LogsHash:    types.RlpHash(blockLogs),
+		LogsHash:    ibs.LogsRlpHash(),
 		Receipts:    receipts,
 		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty.ToBig()),
 		GasUsed:     math.HexOrDecimal64(blockGasUsed),
@@ -203,6 +202,7 @@ func ExecuteBlockEphemerally(
 	}
 
 	if chainConfig.Bor != nil {
+		blockLogs := ibs.Logs()
 		var logs []*types.Log
 		for _, receipt := range receipts {
 			logs = append(logs, receipt.Logs...)
