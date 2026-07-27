@@ -173,7 +173,7 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 			}
 			utils.FlipBitOn(contribution.AggregationBits, int(i-startSubCommittee))
 			// Note: it's possible that one validator appears multiple times in the subcommittee.
-			signatures = append(signatures, common.Copy(message.Signature[:]))
+			signatures = append(signatures, bytes.Clone(message.Signature[:]))
 		}
 	}
 	if len(signatures) == 0 {
@@ -181,7 +181,7 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 		return errors.New("validator not found in sync committee")
 	}
 	// Compute the aggregated signature.
-	signatures = append(signatures, common.Copy(contribution.Signature[:]))
+	signatures = append(signatures, bytes.Clone(contribution.Signature[:]))
 	aggregatedSignature, err := bls.AggregateSignatures(signatures)
 	if err != nil {
 		return err

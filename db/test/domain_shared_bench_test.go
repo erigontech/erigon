@@ -17,6 +17,7 @@
 package test
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/binary"
 	randOld "math/rand"
@@ -28,7 +29,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -61,7 +61,7 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.TemporalRwDB, *s
 }
 
 func composite(k, k2 []byte) []byte {
-	return append(common.Copy(k), k2...)
+	return append(bytes.Clone(k), k2...)
 }
 
 func Benchmark_SharedDomains_GetLatest(t *testing.B) {
@@ -199,7 +199,7 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 			if v == nil {
 				continue
 			}
-			touches = append(touches, keyTouch{dom, []byte(key), common.Copy(v)})
+			touches = append(touches, keyTouch{dom, []byte(key), bytes.Clone(v)})
 		}
 	}
 
@@ -477,7 +477,7 @@ func generateSharedDomainsUpdatesForBench(b *testing.B, domains *execctx.SharedD
 
 			prevKeys[string(sk)] = struct{}{}
 
-			err = domains.DomainPut(kv.StorageDomain, tx, sk, append(common.Copy(prev), []byte("v")...), txNum, prev)
+			err = domains.DomainPut(kv.StorageDomain, tx, sk, append(bytes.Clone(prev), []byte("v")...), txNum, prev)
 			require.NoError(b, err)
 		}
 	}

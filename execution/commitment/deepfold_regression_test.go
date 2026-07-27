@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"testing"
@@ -290,7 +291,7 @@ func TestSingletonAccountOnlyRetouchKeepsStorage(t *testing.T) {
 	ut2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, k2, u2)
 	got, err := tr.Process(ctx, ut2, "", nil, WarmupConfig{})
 	require.NoError(t, err)
-	got = common.Copy(got)
+	got = bytes.Clone(got)
 	ut2.Close()
 
 	msr := NewMockState(t)

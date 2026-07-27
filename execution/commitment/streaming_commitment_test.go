@@ -369,7 +369,7 @@ func newDrainContext(ms *MockState) *drainContext {
 }
 
 func (d *drainContext) PutBranch(prefix, data, _ []byte) error {
-	d.pending[string(prefix)] = common.Copy(data)
+	d.pending[string(prefix)] = bytes.Clone(data)
 	return nil
 }
 

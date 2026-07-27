@@ -17,7 +17,7 @@
 package execctx
 
 import (
-	"github.com/erigontech/erigon/common"
+	"bytes"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 )
@@ -39,7 +39,7 @@ func pinBranchResolver(ttx kv.TemporalGetter) commitment.BatchBranchResolver {
 				return nil, err
 			}
 			if len(v) > 0 {
-				vals[i] = common.Copy(v)
+				vals[i] = bytes.Clone(v)
 			}
 		}
 		return vals, nil
