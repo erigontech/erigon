@@ -263,7 +263,7 @@ func (vals *ValidatorSet) RescalePriorities(diffMax int64) {
 
 	if diff > diffMax {
 		for _, val := range vals.Validators {
-			val.ProposerPriority = val.ProposerPriority / ratio
+			val.ProposerPriority /= ratio
 		}
 	}
 }
