@@ -1056,7 +1056,7 @@ func TestOpCLZ(t *testing.T) {
 // smaller than the size of the immediate.
 func TestPush(t *testing.T) {
 	code := common.FromHex("0011223344556677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a19181716151413121")
-	push32 := makePush(32, 32)
+	push32 := opPush32
 
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 	callContext := &CallContext{}
@@ -1269,8 +1269,7 @@ func TestEIP8024_Execution(t *testing.T) {
 				case PUSH1:
 					pc, _, err = opPush1(pc, evm, callContext)
 				case DUP1:
-					dup1 := makeDup(1)
-					pc, _, err = dup1(pc, evm, callContext)
+					pc, _, err = opDup1(pc, evm, callContext)
 				case JUMP:
 					pc, _, err = opJump(pc, evm, callContext)
 				case JUMPDEST:
