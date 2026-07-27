@@ -399,7 +399,6 @@ func TestEIP2780DelegationTargetAccessUsesWarmCost(t *testing.T) {
 		IsEIP7623:     true,
 		IsEIP7976:     true,
 		IsEIP7981:     true,
-		IsEIP8037:     true,
 		IsEIP2780:     true,
 	})
 	require.False(t, overflow)
@@ -428,7 +427,6 @@ func TestEIP2780DelegationTargetIsNotReadWhenAccessChargeRunsOutOfGas(t *testing
 		IsEIP7623: true,
 		IsEIP7976: true,
 		IsEIP7981: true,
-		IsEIP8037: true,
 		IsEIP2780: true,
 	})
 	require.False(t, overflow)
@@ -456,7 +454,6 @@ func TestEIP2780CalldataFloorBindsBlockRegularGas(t *testing.T) {
 		IsEIP7623: true,
 		IsEIP7976: true,
 		IsEIP7981: true,
-		IsEIP8037: true,
 		IsEIP2780: true,
 	})
 	require.False(t, overflow)
@@ -491,7 +488,6 @@ func TestEIP2780ContractCreationRuntimeOutOfGasKeepsSenderNonce(t *testing.T) {
 		IsEIP7623:          true,
 		IsEIP7976:          true,
 		IsEIP7981:          true,
-		IsEIP8037:          true,
 		IsEIP2780:          true,
 	})
 	require.False(t, overflow)

@@ -58,13 +58,11 @@ type MdGasUsage struct {
 	StateSpill uint64
 }
 
-// PlusIntrinsic folds an intrinsic-gas MdGas into the frame-usage report,
-// preserving signed semantics on State so a net state refill stays
-// negative in the combined value.
-func (u MdGasUsage) PlusIntrinsic(igas MdGas) MdGasUsage {
+// PlusIntrinsic folds intrinsic regular gas into the frame-usage report.
+func (u MdGasUsage) PlusIntrinsic(intrinsicGas uint64) MdGasUsage {
 	return MdGasUsage{
-		Regular:    u.Regular + igas.Regular,
-		State:      u.State + int64(igas.State),
+		Regular:    u.Regular + intrinsicGas,
+		State:      u.State,
 		StateSpill: u.StateSpill,
 	}
 }
@@ -105,21 +103,19 @@ func (t MdGasType) String() string {
 // code deposit) draw from before spilling to regular gas.
 // Pre-Amsterdam: all gas is regular (state reservoir is 0).
 // See process_transaction in EIP-8037.
-func SplitTxnGasLimit(txnGasLimit uint64, igas MdGas, rules *chain.Rules) MdGas {
+func SplitTxnGasLimit(txnGasLimit, intrinsicGas uint64, rules *chain.Rules) MdGas {
 	if rules.IsAmsterdam {
-		//intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas
 		//execution_gas = tx.gas - intrinsic_gas
-		//regular_gas_budget = TX_MAX_GAS_LIMIT - intrinsic_regular_gas
+		//regular_gas_budget = TX_MAX_GAS_LIMIT - intrinsic_gas
 		//gas_left = min(regular_gas_budget, execution_gas)
 		//state_gas_reservoir = execution_gas - gas_left
-		intrinsicGas := igas.Regular + igas.State
 		executionGas := txnGasLimit - intrinsicGas
-		regularGasBudget := params.MaxTxnGasLimit - igas.Regular
+		regularGasBudget := params.MaxTxnGasLimit - intrinsicGas
 		gasLeft := min(regularGasBudget, executionGas)
 		stateGasReservoir := executionGas - gasLeft
 		return MdGas{Regular: gasLeft, State: stateGasReservoir}
 	}
 	gas := MdGas{Regular: txnGasLimit}
-	gas.Regular -= igas.Regular
+	gas.Regular -= intrinsicGas
 	return gas
 }

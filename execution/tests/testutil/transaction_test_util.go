@@ -94,7 +94,6 @@ func (tt *TransactionTest) Run(chainID *uint256.Int) error {
 			IsEIP7623:          rules.IsPrague,
 			IsEIP7976:          rules.IsAmsterdam,
 			IsEIP7981:          rules.IsAmsterdam,
-			IsEIP8037:          rules.IsAmsterdam,
 			IsEIP2780:          rules.IsAmsterdam,
 		})
 		requiredGas := intrinsicGasResult.RegularGas

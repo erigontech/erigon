@@ -39,7 +39,6 @@ type IntrinsicGasCalcArgs struct {
 	IsEIP7623          bool
 	IsEIP7976          bool
 	IsEIP7981          bool
-	IsEIP8037          bool
 	IsEIP2780          bool
 	IsAATxn            bool
 }
@@ -47,7 +46,6 @@ type IntrinsicGasCalcArgs struct {
 type IntrinsicGasCalcResult struct {
 	RegularGas   uint64
 	FloorGasCost uint64
-	StateGas     uint64
 }
 
 // CountNonZeroBytes returns the number of non-zero bytes in data.
@@ -75,6 +73,8 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	dataLen := uint64(len(args.Data))
 	// Set the starting gas for the raw transaction
 	switch {
+	case args.IsAATxn:
+		result.RegularGas = params.TxAAGas
 	case args.IsEIP2780:
 		result.RegularGas = params.TxBaseEIP2780
 		if args.IsContractCreation {
@@ -90,8 +90,6 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		}
 	case args.IsContractCreation && args.IsEIP2:
 		result.RegularGas = params.TxGasContractCreation
-	case args.IsAATxn:
-		result.RegularGas = params.TxAAGas
 	default:
 		result.RegularGas = params.TxGas
 	}
@@ -144,7 +142,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	}
 	if args.AccessListLen > 0 {
 		var addressGas, storageKeyGas uint64
-		if args.IsEIP8037 {
+		if args.IsEIP2780 {
 			addressGas = params.TxAccessListAddressGasEIP8038
 			storageKeyGas = params.TxAccessListStorageKeyGasEIP8038
 		} else {
@@ -268,38 +266,22 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	}
 
 	// Add the cost of authorizations
-	if args.IsEIP8037 {
-		perAuthRegularCost := params.PerAuthRegularCostEIP8038
-		if args.IsEIP2780 {
-			perAuthRegularCost = params.RegularPerAuthBaseCostEIP8038
-		}
-		regularCost, overflow := math.SafeMul(args.AuthorizationsLen, perAuthRegularCost)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
-		}
-		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, regularCost)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
-		}
-		if !args.IsEIP2780 {
-			authCost, overflow := math.SafeMul(args.AuthorizationsLen, params.StateGasNewAccountAndAuth)
-			if overflow {
-				return IntrinsicGasCalcResult{}, true
-			}
-			result.StateGas, overflow = math.SafeAdd(result.StateGas, authCost)
-			if overflow {
-				return IntrinsicGasCalcResult{}, true
-			}
+	var perAuthCost uint64
+	if args.IsEIP2780 {
+		perAuthCost = params.RegularPerAuthBaseCostEIP8038
+		if args.IsAATxn {
+			perAuthCost = params.PerAuthRegularCostEIP8038
 		}
 	} else {
-		authCost, overflow := math.SafeMul(args.AuthorizationsLen, params.PerEmptyAccountCost)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
-		}
-		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, authCost)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
-		}
+		perAuthCost = params.PerEmptyAccountCost
+	}
+	authCost, overflow := math.SafeMul(args.AuthorizationsLen, perAuthCost)
+	if overflow {
+		return IntrinsicGasCalcResult{}, true
+	}
+	result.RegularGas, overflow = math.SafeAdd(result.RegularGas, authCost)
+	if overflow {
+		return IntrinsicGasCalcResult{}, true
 	}
 
 	return result, false

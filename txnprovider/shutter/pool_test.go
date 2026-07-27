@@ -314,10 +314,6 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 
 //goland:noinspection DuplicatedCode
 func TestPoolProvideTxnsFiltersByIntrinsicGasNotFullGasLimit(t *testing.T) {
-	// EIP-8037: gas filtering uses intrinsic regular/state gas per dimension,
-	// not the full txn gas limit. A txn whose gas limit exceeds availableGas
-	// in one dimension must still be included as long as its intrinsic gas
-	// fits. Execution-time state gas is enforced later by applyTransaction.
 	t.Parallel()
 	pt := PoolTest{t}
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
@@ -328,8 +324,7 @@ func TestPoolProvideTxnsFiltersByIntrinsicGasNotFullGasLimit(t *testing.T) {
 		err = handle.SimulateNewBlockChange(ctx)
 		require.NoError(t, err)
 		synctest.Wait()
-		// A simple transfer has intrinsic regular gas of TxGas=21_000 and
-		// intrinsic state gas of 0 — but its declared gas limit is 100_000.
+		// A simple transfer has intrinsic gas of 21,000 but declares 100,000.
 		const txnGasLimit uint64 = 100_000
 		encTxn := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon(), MockWithGasLimit(txnGasLimit))
 		err = handle.SimulateLogEvents(ctx, []types.Log{
@@ -345,11 +340,7 @@ func TestPoolProvideTxnsFiltersByIntrinsicGasNotFullGasLimit(t *testing.T) {
 		handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encTxn.IdentityPreimage)
 		synctest.Wait()
 		require.Len(t, pool.AllDecryptedTxns(), 1)
-		// Budget enough regular gas for the intrinsic (21_000) but strictly
-		// less than the txn's declared gas limit (100_000), and zero state
-		// gas. The pre-fix logic compared txn.GetGasLimit() against both
-		// dimensions and would have rejected this txn; the EIP-8037 logic
-		// accepts it because intrinsic gas fits.
+		// Budget enough gas for the intrinsic but less than the declared limit.
 		txns, err := pool.ProvideTxns(
 			ctx,
 			txnprovider.WithBlockTime(handle.nextBlockTime),

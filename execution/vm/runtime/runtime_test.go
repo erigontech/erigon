@@ -967,7 +967,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 		systemAddr,
 		target,
 		nil,
-		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules),
 		uint256.Int{}, // value = 0
 		false,
 	)

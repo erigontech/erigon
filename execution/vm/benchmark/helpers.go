@@ -107,6 +107,6 @@ func prepareAndCall(cfg *runtime.Config, addr accounts.Address, input []byte) ([
 	vmenv := runtime.NewEnv(cfg)
 	rules := vmenv.ChainRules()
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, addr, vm.ActivePrecompiles(rules), nil, nil)
-	ret, left, _, err := vmenv.Call(cfg.Origin, addr, input, mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules), cfg.Value, false)
+	ret, left, _, err := vmenv.Call(cfg.Origin, addr, input, mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules), cfg.Value, false)
 	return ret, left, err
 }
