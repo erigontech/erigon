@@ -2916,33 +2916,34 @@ func GetDep(deps *VersionedIO) map[int]map[int]bool {
 	return newDependencies
 }
 
-// createdEmpty reports whether these writes create addr and leave it EIP-161
-// empty, holding no storage of its own. A created account starts zeroed, so an
-// absent field write counts as zero.
+// createdEmpty reports whether these writes create addr and leave it empty, with
+// nothing else recorded against it. The AddressPath write carries the account as
+// created, so overlaying the field writes gives its end-of-tx value; anything
+// beyond those fields — code, storage, a creation or destruction marker — would
+// be orphaned by withholding the record, so it disqualifies addr instead.
 func (s *WriteSet) createdEmpty(addr accounts.Address) bool {
 	if s == nil {
 		return false
 	}
-	if _, created := s.address[addr]; !created {
+	created, ok := s.address[addr]
+	if !ok || created.Val == nil {
 		return false
 	}
-	if vw, ok := s.balance[addr]; ok && !vw.Val.IsZero() {
+	acc := *created.Val
+	if vw, ok := s.balance[addr]; ok {
+		acc.Balance = vw.Val
+	}
+	if vw, ok := s.nonce[addr]; ok {
+		acc.Nonce = vw.Val
+	}
+	if vw, ok := s.codeHash[addr]; ok {
+		acc.CodeHash = vw.Val
+	}
+	if !acc.Empty() {
 		return false
 	}
-	if vw, ok := s.nonce[addr]; ok && vw.Val != 0 {
-		return false
-	}
-	if vw, ok := s.codeHash[addr]; ok && vw.Val != accounts.EmptyCodeHash {
-		return false
-	}
-	if vw, ok := s.code[addr]; ok && len(vw.Val.Bytes) > 0 {
-		return false
-	}
-	if vw, ok := s.createContract[addr]; ok && vw.Val {
-		return false
-	}
-	if vw, ok := s.selfDestruct[addr]; ok && vw.Val {
-		return false
-	}
-	return len(s.storage[addr]) == 0
+	_, hasCode := s.code[addr]
+	_, destroyed := s.selfDestruct[addr]
+	_, createdContract := s.createContract[addr]
+	return !hasCode && !destroyed && !createdContract && len(s.storage[addr]) == 0
 }
