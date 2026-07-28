@@ -145,8 +145,8 @@ func (opts MdbxOpts) WithMetrics() MdbxOpts                    { opts.metrics = 
 // Flags
 func (opts MdbxOpts) HasFlag(flag uint) bool           { return opts.flags&flag != 0 }
 func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts { opts.flags = f(opts.flags); return opts }
-func (opts MdbxOpts) AddFlags(flags uint) MdbxOpts     { opts.flags = opts.flags | flags; return opts }
-func (opts MdbxOpts) RemoveFlags(flags uint) MdbxOpts  { opts.flags = opts.flags &^ flags; return opts }
+func (opts MdbxOpts) AddFlags(flags uint) MdbxOpts     { opts.flags |= flags; return opts }
+func (opts MdbxOpts) RemoveFlags(flags uint) MdbxOpts  { opts.flags &^= flags; return opts }
 func (opts MdbxOpts) boolToFlag(enabled bool, flag uint) MdbxOpts {
 	if enabled {
 		return opts.AddFlags(flag)
@@ -1507,6 +1507,14 @@ func (tx *MdbxTx) DBSize() (uint64, error) {
 		return 0, err
 	}
 	return info.Geo.Current, err
+}
+
+func (db *MdbxKV) DBSize() (uint64, error) {
+	info, err := db.env.Info(nil)
+	if err != nil {
+		return 0, err
+	}
+	return info.Geo.Current, nil
 }
 
 func (tx *MdbxTx) RwCursor(bucket string) (kv.RwCursor, error) {

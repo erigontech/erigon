@@ -425,14 +425,12 @@ func TestPayloadAttestationServicePendingQueueCapConcurrent(t *testing.T) {
 	service.pendingCount.Store(maxPendingAttestations - 5)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			blockRoot := common.Hash{byte(idx), byte(idx >> 8)}
-			msg := newTestPayloadAttestationMessage(100, uint64(10000+idx), blockRoot)
+	for i := range 100 {
+		wg.Go(func() {
+			blockRoot := common.Hash{byte(i), byte(i >> 8)}
+			msg := newTestPayloadAttestationMessage(100, uint64(10000+i), blockRoot)
 			service.queuePendingAttestation(blockRoot, msg)
-		}(i)
+		})
 	}
 	wg.Wait()
 

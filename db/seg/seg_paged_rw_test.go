@@ -28,7 +28,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -105,7 +104,7 @@ type multyBytesWriter struct {
 }
 
 func (w *multyBytesWriter) Write(p []byte) (n int, err error) {
-	w.buffer = append(w.buffer, common.Copy(p))
+	w.buffer = append(w.buffer, bytes.Clone(p))
 	return len(p), nil
 }
 func (w *multyBytesWriter) Bytes() [][]byte                { return w.buffer }
@@ -459,7 +458,7 @@ func BenchmarkPagedWriterAdd(b *testing.B) {
 func BenchmarkName(b *testing.B) {
 	buf := &multyBytesWriter{pageSize: 16}
 	w := NewPagedWriter(b.Context(), buf, false, 1)
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		w.Add([]byte{byte(i)}, []byte{10 + byte(i)})
 	}
 	bts := buf.Bytes()[0]
@@ -646,7 +645,9 @@ func TestReaderBinarySearch(t *testing.T) {
 	require.True(t, g.MatchPrefix(lastKey[:10]), "prefix of last key should match")
 
 	// prefix larger than last key (appended 0xFF) should not match
-	beyondKey := append(lastKey[:len(lastKey):len(lastKey)], 0xFF)
+	beyondKey := make([]byte, len(lastKey)+1)
+	copy(beyondKey, lastKey)
+	beyondKey[len(lastKey)] = 0xFF
 	g.Reset(lastOffset)
 	require.False(t, g.MatchPrefix(beyondKey), "prefix beyond last key should not match")
 

@@ -104,7 +104,7 @@ func TestGrowShrinkBack(t *testing.T) {
 	var q Deque[int]
 	size := minCapacity * 2
 
-	for i := 0; i < size; i++ {
+	for i := range size {
 		if q.Len() != i {
 			t.Error("q.Len() =", q.Len(), "expected", i)
 		}
@@ -134,7 +134,7 @@ func TestGrowShrinkFront(t *testing.T) {
 	var q Deque[int]
 	size := minCapacity * 2
 
-	for i := 0; i < size; i++ {
+	for i := range size {
 		if q.Len() != i {
 			t.Error("q.Len() =", q.Len(), "expected", i)
 		}
@@ -143,7 +143,7 @@ func TestGrowShrinkFront(t *testing.T) {
 	bufLen := len(q.buf)
 
 	// Remove from Front
-	for i := 0; i < size; i++ {
+	for i := range size {
 		if q.Len() != size-i {
 			t.Error("q.Len() =", q.Len(), "expected", minCapacity*2-i)
 		}
@@ -163,7 +163,7 @@ func TestGrowShrinkFront(t *testing.T) {
 func TestSimple(t *testing.T) {
 	var q Deque[int]
 
-	for i := 0; i < minCapacity; i++ {
+	for i := range minCapacity {
 		q.PushBack(i)
 	}
 	if q.Front() != 0 {
@@ -173,7 +173,7 @@ func TestSimple(t *testing.T) {
 		t.Fatalf("expected %d at back, got %d", minCapacity-1, q.Back())
 	}
 
-	for i := 0; i < minCapacity; i++ {
+	for i := range minCapacity {
 		if q.Front() != i {
 			t.Error("peek", i, "had value", q.Front())
 		}
@@ -184,7 +184,7 @@ func TestSimple(t *testing.T) {
 	}
 
 	q.Clear()
-	for i := 0; i < minCapacity; i++ {
+	for i := range minCapacity {
 		q.PushFront(i)
 	}
 	for i := minCapacity - 1; i >= 0; i-- {
@@ -198,16 +198,16 @@ func TestSimple(t *testing.T) {
 func TestBufferWrap(t *testing.T) {
 	var q Deque[int]
 
-	for i := 0; i < minCapacity; i++ {
+	for i := range minCapacity {
 		q.PushBack(i)
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		q.PopFront()
 		q.PushBack(minCapacity + i)
 	}
 
-	for i := 0; i < minCapacity; i++ {
+	for i := range minCapacity {
 		if q.Front() != i+3 {
 			t.Error("peek", i, "had value", q.Front())
 		}
@@ -218,15 +218,15 @@ func TestBufferWrap(t *testing.T) {
 func TestBufferWrapReverse(t *testing.T) {
 	var q Deque[int]
 
-	for i := 0; i < minCapacity; i++ {
+	for i := range minCapacity {
 		q.PushFront(i)
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		q.PopBack()
 		q.PushFront(minCapacity + i)
 	}
 
-	for i := 0; i < minCapacity; i++ {
+	for i := range minCapacity {
 		if q.Back() != i+3 {
 			t.Error("peek", i, "had value", q.Front())
 		}
@@ -241,13 +241,13 @@ func TestLen(t *testing.T) {
 		t.Error("empty queue length not 0")
 	}
 
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		q.PushBack(i)
 		if q.Len() != i+1 {
 			t.Error("adding: queue with", i, "elements has length", q.Len())
 		}
 	}
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		q.PopFront()
 		if q.Len() != 1000-i-1 {
 			t.Error("removing: queue with", 1000-i-i, "elements has length", q.Len())
@@ -258,7 +258,7 @@ func TestLen(t *testing.T) {
 func TestBack(t *testing.T) {
 	var q Deque[int]
 
-	for i := 0; i < minCapacity+5; i++ {
+	for i := range minCapacity + 5 {
 		q.PushBack(i)
 		if q.Back() != i {
 			t.Errorf("Back returned wrong value")
@@ -297,7 +297,7 @@ func TestNew(t *testing.T) {
 
 func checkRotate(t *testing.T, size int) {
 	var q Deque[int]
-	for i := 0; i < size; i++ {
+	for i := range size {
 		q.PushBack(i)
 	}
 
@@ -331,7 +331,7 @@ func TestRotate(t *testing.T) {
 	checkRotate(t, minCapacity+minCapacity/2)
 
 	var q Deque[int]
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		q.PushBack(i)
 	}
 	q.Rotate(11)
@@ -357,7 +357,7 @@ func TestRotate(t *testing.T) {
 func TestAt(t *testing.T) {
 	var q Deque[int]
 
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		q.PushBack(i)
 	}
 
@@ -379,7 +379,7 @@ func TestAt(t *testing.T) {
 func TestSet(t *testing.T) {
 	var q Deque[int]
 
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		q.PushBack(i)
 		q.Set(i, i+50)
 	}
@@ -395,7 +395,7 @@ func TestSet(t *testing.T) {
 func TestClear(t *testing.T) {
 	var q Deque[int]
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		q.PushBack(i)
 	}
 	if q.Len() != 100 {
@@ -418,7 +418,7 @@ func TestClear(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < 128; i++ {
+	for i := range 128 {
 		q.PushBack(i)
 	}
 	q.Clear()
@@ -841,10 +841,10 @@ func BenchmarkRemove(b *testing.B) {
 func BenchmarkYoyo(b *testing.B) {
 	var q Deque[int]
 	for i := 0; i < b.N; i++ {
-		for j := 0; j < 65536; j++ {
+		for j := range 65536 {
 			q.PushBack(j)
 		}
-		for j := 0; j < 65536; j++ {
+		for range 65536 {
 			q.PopFront()
 		}
 	}
@@ -854,10 +854,10 @@ func BenchmarkYoyoFixed(b *testing.B) {
 	var q Deque[int]
 	q.SetMinCapacity(16)
 	for i := 0; i < b.N; i++ {
-		for j := 0; j < 65536; j++ {
+		for j := range 65536 {
 			q.PushBack(j)
 		}
-		for j := 0; j < 65536; j++ {
+		for range 65536 {
 			q.PopFront()
 		}
 	}

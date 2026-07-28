@@ -94,7 +94,6 @@ func checkSyncMapLength(m *sync.Map, length int) bool {
 }
 
 func (t *optimisticTestSuite) TestAddOptimisticCandidate() {
-
 	// Add an optimistic candidate
 	err := t.opStore.AddOptimisticCandidate(mockBlock1Root, mockBlock1)
 	t.Require().NoError(err)

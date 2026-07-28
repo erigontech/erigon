@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 // encodeSyntheticHeader RLP-encodes a header carrying only a block number, as the
@@ -189,10 +190,10 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 
 	cache := newWitnessResultCache(96)
-	builder := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	builder := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 	builder.witnessCache = cache
 
 	headerCh := make(chan [][]byte, 8)

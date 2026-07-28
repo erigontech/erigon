@@ -17,7 +17,8 @@
 package integrity
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 )
 
 type Check string
@@ -157,18 +158,18 @@ func SortChecksByCost(checks []Check) []Check {
 		rank[c] = i
 	}
 	out := append([]Check{}, checks...)
-	sort.SliceStable(out, func(i, j int) bool {
-		ri, oki := rank[out[i]]
-		rj, okj := rank[out[j]]
+	slices.SortStableFunc(out, func(a, b Check) int {
+		ri, oki := rank[a]
+		rj, okj := rank[b]
 		switch {
 		case oki && okj:
-			return ri < rj
+			return cmp.Compare(ri, rj)
 		case oki:
-			return true
+			return -1
 		case okj:
-			return false
+			return 1
 		default:
-			return false
+			return 0
 		}
 	})
 	return out

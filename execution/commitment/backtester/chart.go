@@ -202,12 +202,17 @@ func generateLocateChartPageFileJsFunc(chartsPageFilePaths []string) types.FuncS
 	itemListSb.WriteString("const fileInfos = [\n")
 	for i, filePath := range chartsPageFilePaths {
 		base := path.Base(filePath)
-		parts := strings.Split(strings.Replace(base, ".html", "", 1), "_")
-		from, err := strconv.ParseUint(parts[1], 10, 64)
+		nameWithoutHtml := strings.Replace(base, ".html", "", 1)
+		_, rest, ok1 := strings.Cut(nameWithoutHtml, "_")
+		fromStr, toStr, ok2 := strings.Cut(rest, "_")
+		if !ok1 || !ok2 {
+			panic(fmt.Errorf("generate locate chart page file js func: invalid chart filename format: %s", base))
+		}
+		from, err := strconv.ParseUint(fromStr, 10, 64)
 		if err != nil {
 			panic(fmt.Errorf("generate locate chart page file js func: could not parse from: %w", err))
 		}
-		to, err := strconv.ParseUint(parts[2], 10, 64)
+		to, err := strconv.ParseUint(toStr, 10, 64)
 		if err != nil {
 			panic(fmt.Errorf("generate locate chart page file js func: could not parse to: %w", err))
 		}

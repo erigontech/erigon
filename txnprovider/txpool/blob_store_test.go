@@ -65,35 +65,31 @@ func TestGetBlobsConcurrentReadWrite(t *testing.T) {
 	var wg sync.WaitGroup
 	var stop atomic.Bool
 
-	for w := 0; w < 4; w++ {
-		wg.Add(1)
-		go func(seed int) {
-			defer wg.Done()
+	for w := range 4 {
+		wg.Go(func() {
 			for !stop.Load() {
-				for i := seed; i < numBlobs; i += 4 {
+				for i := w; i < numBlobs; i += 4 {
 					pool.blobs.put(hashes[i], owners[i], bundles[i])
 				}
-				for i := seed; i < numBlobs; i += 4 {
+				for i := w; i < numBlobs; i += 4 {
 					pool.blobs.remove(owners[i], []common.Hash{hashes[i]})
 				}
 			}
-		}(w)
+		})
 	}
 
-	for r := 0; r < 4; r++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 4 {
+		wg.Go(func() {
 			for !stop.Load() {
 				got := pool.GetBlobs(hashes)
 				if len(got) != numBlobs {
 					panic("GetBlobs returned wrong length")
 				}
 			}
-		}()
+		})
 	}
 
-	for i := 0; i < 5000; i++ {
+	for range 5000 {
 		_ = pool.GetBlobs(hashes)
 	}
 	stop.Store(true)

@@ -94,7 +94,7 @@ func BenchmarkMapTxNum2BlockNumIter(b *testing.B) {
 	// Populate MaxTxNum table
 	err := db.Update(ctx, func(tx kv.RwTx) error {
 		var maxTxNum uint64
-		for blockNum := uint64(0); blockNum < numBlocks; blockNum++ {
+		for blockNum := range uint64(numBlocks) {
 			maxTxNum += txPerBlock
 			if err := TxNums.Append(tx, blockNum, maxTxNum); err != nil {
 				return err
@@ -107,7 +107,7 @@ func BenchmarkMapTxNum2BlockNumIter(b *testing.B) {
 	// Worst case: one txNum per block — every Next() changes block — maximum cursor opens
 	txNumsPerBlock := make([]uint64, numBlocks)
 	err = db.View(ctx, func(tx kv.Tx) error {
-		for blockNum := uint64(0); blockNum < numBlocks; blockNum++ {
+		for blockNum := range uint64(numBlocks) {
 			min, err := TxNums.Min(ctx, tx, blockNum)
 			if err != nil {
 				return err

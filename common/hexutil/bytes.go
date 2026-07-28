@@ -39,6 +39,13 @@ func (b Bytes) MarshalText() ([]byte, error) {
 	return result, nil
 }
 
+// AppendText implements encoding.TextAppender: the alloc-free, byte-identical
+// counterpart to MarshalText. Only encoding/json/v2 consults it today.
+func (b Bytes) AppendText(dst []byte) ([]byte, error) {
+	dst = append(dst, HexPrefix...)
+	return hex.AppendEncode(dst, b), nil
+}
+
 // UnmarshalJSON implements json.Unmarshaler.
 func (b *Bytes) UnmarshalJSON(input []byte) error {
 	if !isString(input) {
@@ -54,8 +61,9 @@ func (b *Bytes) UnmarshalText(input []byte) error {
 		return err
 	}
 	dec := make([]byte, len(raw)/2)
-	_, err = hex.Decode(dec, raw)
-	if err == nil {
+	if _, err = hex.Decode(dec, raw); err != nil {
+		err = mapError(err)
+	} else {
 		*b = dec
 	}
 	return err

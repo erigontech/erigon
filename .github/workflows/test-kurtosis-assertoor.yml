@@ -51,6 +51,9 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+
 jobs:
   # Build the erigon image once for the whole matrix. The matrix below has
   # grown to suite × {serial, parallel} entries — having every entry run its
@@ -315,6 +318,9 @@ jobs:
     # cache; there's nothing for the matrix to do (the test step is skipped).
     if: ${{ !inputs.cache-warming-only && !inputs.cl-images-only && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
     timeout-minutes: 60
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's

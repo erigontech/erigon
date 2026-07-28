@@ -22,13 +22,13 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 
-	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/dbservices"
 )
 
 type AssemblerCfg struct {
 	ChainConfig     *chain.Config
 	Engine          rules.Engine
-	BlockReader     services.FullBlockReader
+	BlockReader     dbservices.FullBlockReader
 	ExperimentalBAL bool
 }
 
@@ -156,6 +156,9 @@ func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalT
 	}
 	if ba.HasBAL() {
 		ibs.MergeTxIOInto(ba.balIO)
+		// Publish block-init writes (EIP-4788, etc.) to the versionMap so the
+		// first tx observes them across the ResetVersionedIO below.
+		ibs.FlushWritesToVersionMap()
 		ibs.ResetVersionedIO()
 	}
 	return nil
@@ -205,16 +208,22 @@ func (ba *BlockAssembler) AddTransactions(
 	// CommitBlock in AssembleBlock writes all final state correctly.
 	writer := state.NewNoopWriter()
 	recordTxIO := func() {
+		// EIP-6780: zero storage of an account created+destructed in this tx so
+		// the BAL records net-zero reads (the stateObject-based wipe no longer
+		// runs on the cache-free builder path).
+		ibs.ApplyEIP6780StorageWipe()
 		if ba.HasBAL() {
 			ibs.MergeTxIOInto(ba.balIO)
 		}
+		// Publish this tx's writes to the versionMap so the next tx observes them;
+		// ResetVersionedIO below clears the per-tx write set used for BAL recording.
+		ibs.FlushWritesToVersionMap()
 		ibs.ResetVersionedIO()
 	}
 	clearTxIO := func() {
 		if !ba.HasBAL() {
 			return
 		}
-		ibs.AccessedAddresses()
 		ibs.ResetVersionedIO()
 	}
 
@@ -399,6 +408,12 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 	if ba.HasBAL() {
 		// Record finalize system call I/O (EIP-7002, EIP-7251, etc.)
 		ibs.MergeTxIOInto(ba.balIO)
+		// Publish finalize-phase writes to the versionMap, mirroring the init and
+		// per-tx phases: the versioned commit loop normalizes each phase against the
+		// map and prefers the map value, so a finalize update to an address already
+		// written earlier in the block (fee recipient, withdrawal target) must be
+		// visible there or the commit reuses the stale pre-finalize value.
+		ibs.FlushWritesToVersionMap()
 		ibs.ResetVersionedIO()
 		ba.BlockAccessList = ba.balIO.AsBlockAccessList()
 		// Only embed the BAL hash in the header for Amsterdam+ chains.
@@ -407,7 +422,7 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 		// header RLP encoding is positional and skipping intermediate nil
 		// fields (BlobGasUsed, ExcessBlobGas, etc.) would cause a
 		// marshaling mismatch on decode.
-		if ba.cfg.ChainConfig.IsAmsterdam(header.Time) && !ba.cfg.ChainConfig.IsEIPDisabled(7928) {
+		if ba.cfg.ChainConfig.IsEIPEnabled(7928, header.Time) {
 			balHash := ba.BlockAccessList.Hash()
 			header.BlockAccessListHash = &balHash
 		}

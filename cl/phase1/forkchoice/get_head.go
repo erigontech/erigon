@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"math/rand"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -294,10 +294,8 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (co
 			continue
 		}
 		// Sort children by lexigographical order
-		sort.Slice(children, func(i, j int) bool {
-			childA := children[i]
-			childB := children[j]
-			return bytes.Compare(childA[:], childB[:]) < 0
+		slices.SortFunc(children, func(a, b common.Hash) int {
+			return bytes.Compare(a[:], b[:])
 		})
 		// After sorting is done determine best fit.
 		f.headHash = children[0]
