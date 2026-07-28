@@ -231,7 +231,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 				"blockNum", blockNum,
 				"firstLogIndex", firstLogIndex,
 				"logIdxAfterTx", logIdxAfterTx,
-				"nil receipt in db", receiptFromDB == nil,
+				"nilReceiptInDB", receiptFromDB == nil,
 				"err", err)
 		}
 	}()
@@ -462,7 +462,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if dbg.Enabled(ctx) {
 			log.Info("[dbg] ReceiptGenerator.GetReceipts",
 				"blockNum", blockNum,
-				"nil receipts in db", receiptsFromDB == nil)
+				"nilReceiptsInDB", receiptsFromDB == nil)
 		}
 	}()
 
