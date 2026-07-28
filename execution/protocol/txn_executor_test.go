@@ -897,9 +897,10 @@ func TestPreCheck_NilMaxFeePerBlobGas(t *testing.T) {
 }
 
 // TestApplyFrame_IntrinsicGasBeforeAuthorities pins that ApplyFrame validates
-// intrinsic gas before verifyAuthorities mutates state. On a pre-Prague config
-// verifyAuthorities rejects a non-nil authorization list with a distinct error,
-// so reaching ErrIntrinsicGas proves the gas check runs first.
+// intrinsic gas before the SetCode prerequisite check and verifyAuthorities'
+// state mutation. On a pre-Prague config checkSetCodeAuthorizations rejects a
+// non-nil authorization list with a distinct error, so reaching
+// ErrIntrinsicGas proves the gas check runs first.
 func TestApplyFrame_IntrinsicGasBeforeAuthorities(t *testing.T) {
 	t.Parallel()
 
