@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"bytes"
 	"context"
 	"sync"
 	"sync/atomic"
@@ -145,11 +146,9 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, h
 		if !bra.warming.CompareAndSwap(false, true) {
 			return
 		}
-		bra.warmWg.Add(1)
-		go func() {
-			defer bra.warmWg.Done()
+		bra.warmWg.Go(func() {
 			bra.warmBody(ctx, db, header, body, 8) // use 8 workers for warming
-		}()
+		})
 	}
 }
 
@@ -172,7 +171,7 @@ func (bra *BlockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
 	if _, ok := bra.bodies.Get(blockHash); !ok {
 		return
 	}
-	bra.senders.Add(blockHash, common.Copy(senders))
+	bra.senders.Add(blockHash, bytes.Clone(senders))
 }
 
 // warmBody warms state for all transactions in a body using multiple workers.

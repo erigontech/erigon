@@ -18,6 +18,7 @@ package snapshotsync
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/chain"
@@ -277,8 +279,8 @@ func TestBlackListForPruning_ChainHistoryExpiry(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if info.From >= mergeHeight {
-			t.Errorf("post-merge tx segment unexpectedly blacklisted: %s (From=%d)", p, info.From)
+		if info.To > mergeHeight {
+			t.Errorf("merge-spanning or post-merge tx segment unexpectedly blacklisted: %s (To=%d)", p, info.To)
 		} else {
 			sawPreMergeTx = true
 		}
@@ -508,4 +510,78 @@ func TestReceiptsSegmentRetentionCutoff(t *testing.T) {
 	assert.Equal(t, uint64(0), receiptsSegmentRetentionCutoff(prune.BlocksMode, nil, head, logIdxSeg))
 
 	assert.Equal(t, blocksRetentionCutoff(prune.MinimalMode, nil, head), receiptsSegmentRetentionCutoff(prune.MinimalMode, nil, head, rcacheSeg))
+}
+
+// TestIsReceiptsSegmentPruned verifies segments are skipped at download time
+// only when they lie entirely below the prune height: the segment containing
+// the cutoff step must still be downloaded, otherwise blocks inside the
+// retention window would have receipts but no log index.
+func TestIsReceiptsSegmentPruned(t *testing.T) {
+	const stepSize = 100
+	const pruneHeight = 50 // minTxNum(50)=5000 → cutoff step 50
+
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	for b := uint64(0); b <= 60; b++ {
+		if err := rawdbv3.TxNums.Append(tx, b, (b+1)*stepSize-1); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	logIdx := func(from, to int) string {
+		return fmt.Sprintf("idx/v1.0-%s.%d-%d.ef", kv.LogTopicIdx.String(), from, to)
+	}
+	cases := []struct {
+		name   string
+		seg    string
+		pruned bool
+	}{
+		{"segment spanning the cutoff is kept", logIdx(32, 64), false},
+		{"segment entirely below the cutoff is pruned", logIdx(16, 32), true},
+		{"segment ending exactly at the cutoff is pruned", logIdx(48, 50), true},
+		{"segment above the cutoff is kept", logIdx(64, 96), false},
+		{"domain segment is never pruned", "domain/v1.0-rcache.16-32.kv", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := snapcfg.PreverifiedItem{Name: tc.seg}
+			assert.Equal(t, tc.pruned, isReceiptsSegmentPruned(context.Background(), tx, rawdbv3.TxNums, p, stepSize, pruneHeight))
+		})
+	}
+
+	t.Run("pruneHeight=0 keeps everything", func(t *testing.T) {
+		p := snapcfg.PreverifiedItem{Name: logIdx(0, 16)}
+		assert.False(t, isReceiptsSegmentPruned(context.Background(), tx, rawdbv3.TxNums, p, stepSize, 0))
+	})
+}
+
+func TestGetMaxStepRangeInSnapshots(t *testing.T) {
+	t.Run("valid domain entries", func(t *testing.T) {
+		preverified := snapcfg.Preverified{
+			Items: []snapcfg.PreverifiedItem{
+				{Name: "domain/v1.0-accounts.0-10.kv"},
+				{Name: "domain/v1.0-accounts.10-50.kv"},
+				{Name: "domain/v1.0-storage.0-20.kv"},
+			},
+		}
+		maxTo, err := getMaxStepRangeInSnapshots(preverified)
+		assert.NoError(t, err)
+		assert.Equal(t, uint64(50), maxTo)
+	})
+
+	t.Run("malformed domain entry fails fast", func(t *testing.T) {
+		preverified := snapcfg.Preverified{
+			Items: []snapcfg.PreverifiedItem{
+				{Name: "domain/v1.0-accounts.0-10.kv"},
+				{Name: "domain/malformed-entry"},
+			},
+		}
+		_, err := getMaxStepRangeInSnapshots(preverified)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid domain snapshot filename")
+	})
 }

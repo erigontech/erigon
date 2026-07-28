@@ -129,7 +129,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		// require.EqualValues(t, uint64(i), cur.Value())
 	}
 	for i := 1; i < len(keys); i++ {
-		alt := common.Copy(keys[i])
+		alt := bytes.Clone(keys[i])
 		for j := len(alt) - 1; j >= 0; j-- {
 			if alt[j] > 0 {
 				alt[j] -= 1
@@ -222,7 +222,7 @@ func writeV0Index(tb testing.TB, dataPath, indexPath string, compressed seg.File
 			key, _ = r.Next(key[:0])
 			ef.AddOffset(pos)
 			if di%m == 0 {
-				nodes = append(nodes, v0node{key: common.Copy(key), di: di})
+				nodes = append(nodes, v0node{key: bytes.Clone(key), di: di})
 			}
 			di++
 			pos, _ = r.Skip()
@@ -598,7 +598,7 @@ func TestBpsTree_Seek(t *testing.T) {
 	//tr := newTrie()
 	ef := eliasfano32.NewEliasFano(uint64(keyCount), ps[len(ps)-1])
 	for i := 0; i < len(ps); i++ {
-		//tr.insert(Node{i: uint64(i), key: common.Copy(keys[i]), off: ps[i]})
+		//tr.insert(Node{i: uint64(i), key: bytes.Clone(keys[i]), off: ps[i]})
 		ef.AddOffset(ps[i])
 	}
 	ef.Build()
@@ -636,8 +636,8 @@ func (b *mockIndexReader) newCursor(k, v []byte, di uint64, g *seg.Reader) *Curs
 	return &Cursor{
 		ef:     b.ef,
 		getter: g,
-		key:    common.Copy(k),
-		value:  common.Copy(v),
+		key:    bytes.Clone(k),
+		value:  bytes.Clone(v),
 		d:      di,
 	}
 }

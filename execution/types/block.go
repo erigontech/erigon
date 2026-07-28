@@ -21,6 +21,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -603,6 +604,11 @@ func (h *Header) Size() common.StorageSize {
 		s += common.StorageSize(32)
 	}
 	return s
+}
+
+// HasBAL reports whether the header commits to a non-empty EIP-7928 block access list.
+func (h *Header) HasBAL() bool {
+	return h.BlockAccessListHash != nil && *h.BlockAccessListHash != empty.BlockAccessListHash
 }
 
 // SanityCheck checks a few basic things -- these checks are way beyond what
@@ -1361,7 +1367,7 @@ func (b *Block) ParentHash() common.Hash  { return b.header.ParentHash }
 func (b *Block) TxHash() common.Hash      { return b.header.TxHash }
 func (b *Block) ReceiptHash() common.Hash { return b.header.ReceiptHash }
 func (b *Block) UncleHash() common.Hash   { return b.header.UncleHash }
-func (b *Block) Extra() []byte            { return common.Copy(b.header.Extra) }
+func (b *Block) Extra() []byte            { return bytes.Clone(b.header.Extra) }
 func (b *Block) BaseFee() *uint256.Int {
 	if b.header.BaseFee == nil {
 		return nil

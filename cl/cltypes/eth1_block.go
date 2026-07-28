@@ -17,6 +17,7 @@
 package cltypes
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -443,8 +444,10 @@ func (b *Eth1Block) ensureSSZFields() {
 }
 
 func (b *Eth1Block) getSchema() []any {
-	s := []any{b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
-		b.PrevRandao[:], &b.BlockNumber, &b.GasLimit, &b.GasUsed, &b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions}
+	s := []any{
+		b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
+		b.PrevRandao[:], &b.BlockNumber, &b.GasLimit, &b.GasUsed, &b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions,
+	}
 	if b.version >= clparams.CapellaVersion {
 		s = append(s, b.Withdrawals)
 	}
@@ -460,7 +463,7 @@ func (b *Eth1Block) getSchema() []any {
 // RlpHeader returns the equivalent types.Header struct with RLP-based fields.
 func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.Hash) (*types.Header, error) {
 	// Reverse the order of the bytes in the BaseFeePerGas array and convert it to a big integer.
-	reversedBaseFeePerGas := common.Copy(b.BaseFeePerGas[:])
+	reversedBaseFeePerGas := bytes.Clone(b.BaseFeePerGas[:])
 	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
 		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
 	}

@@ -124,3 +124,12 @@ func SafeAdd(x, y uint64) (uint64, bool) {
 	sum, carryOut := bits.Add64(x, y, 0)
 	return sum, carryOut != 0
 }
+
+// NextPowerOfTwo returns the least power of two at or above n, and 1 for
+// n == 0; n above 1<<63 wraps to 0.
+func NextPowerOfTwo(n uint64) uint64 {
+	if n <= 1 {
+		return 1
+	}
+	return uint64(1) << bits.Len64(n-1)
+}

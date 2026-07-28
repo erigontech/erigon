@@ -59,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -139,6 +140,7 @@ type ExecModuleTester struct {
 	HistoryV3      bool
 	cfg            ethconfig.Config
 	BlockSnapshots *blocksnapshots.RoSnapshots
+	borSnapshots   *heimdall.RoSnapshots
 	blockRetire    dbservices.BlockRetire
 	BlockReader    dbservices.FullBlockReader
 	ReceiptsReader *receipts.Generator
@@ -159,6 +161,9 @@ func (emt *ExecModuleTester) Close() {
 	}
 	if emt.BlockSnapshots != nil {
 		emt.BlockSnapshots.Close()
+	}
+	if emt.borSnapshots != nil {
+		emt.borSnapshots.Close()
 	}
 	if emt.DB != nil {
 		emt.DB.Close()
@@ -337,6 +342,12 @@ func WithChainConfig(cfg *chain.Config) Option {
 	}
 }
 
+func WithoutAmsterdamBuilderContracts() Option {
+	return func(opts *options) {
+		opts.skipAmsterdamBuilderContracts = true
+	}
+}
+
 func WithFcuBackgroundCommit() Option {
 	return func(opts *options) {
 		opts.fcuBackgroundCommit = true
@@ -375,20 +386,21 @@ func WithSentryProtocol(protocol uint) Option {
 }
 
 type options struct {
-	stepSize                 *uint64
-	experimentalBAL          bool
-	genesis                  *types.Genesis
-	chainConfig              *chain.Config
-	key                      *ecdsa.PrivateKey
-	engine                   rules.Engine
-	pruneMode                *prune.Mode
-	withTxPool               bool
-	enableDomains            []kv.Domain
-	fcuBackgroundCommit      bool
-	fcuBackgroundPrune       bool
-	alwaysGenerateChangesets *bool
-	maxReorgDepth            *uint64
-	sentryProtocol           uint
+	stepSize                      *uint64
+	experimentalBAL               bool
+	genesis                       *types.Genesis
+	chainConfig                   *chain.Config
+	key                           *ecdsa.PrivateKey
+	engine                        rules.Engine
+	pruneMode                     *prune.Mode
+	withTxPool                    bool
+	enableDomains                 []kv.Domain
+	fcuBackgroundCommit           bool
+	fcuBackgroundPrune            bool
+	alwaysGenerateChangesets      *bool
+	maxReorgDepth                 *uint64
+	sentryProtocol                uint
+	skipAmsterdamBuilderContracts bool
 }
 
 func applyOptions(opts []Option) options {
@@ -414,6 +426,9 @@ func applyOptions(opts []Option) options {
 			},
 		}
 	}
+	if !opt.skipAmsterdamBuilderContracts {
+		addAmsterdamBuilderContracts(opt.genesis)
+	}
 	// engine depends on genesis
 	if opt.engine == nil {
 		switch {
@@ -426,6 +441,28 @@ func applyOptions(opts []Option) options {
 		}
 	}
 	return opt
+}
+
+func addAmsterdamBuilderContracts(genesis *types.Genesis) {
+	if genesis.Config.AmsterdamTime == nil {
+		return
+	}
+	if genesis.Alloc == nil {
+		genesis.Alloc = types.GenesisAlloc{}
+	}
+	genesis.Alloc[genesis.Config.GetBuilderDepositContract().Value()] = types.GenesisAccount{
+		Balance: new(big.Int),
+		Code:    misc.BuilderDepositRequestCode,
+		Nonce:   1,
+	}
+	slot := common.Hash{}
+	sentinel := common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+	genesis.Alloc[genesis.Config.GetBuilderExitContract().Value()] = types.GenesisAccount{
+		Balance: new(big.Int),
+		Code:    misc.BuilderExitRequestCode,
+		Nonce:   1,
+		Storage: map[common.Hash]common.Hash{slot: sentinel},
+	}
 }
 
 // New creates an ExecModuleTester. When called with no options, it uses
@@ -524,6 +561,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		stateChangesClient: direct.NewStateDiffClientDirect(erigonGrpcServer),
 		PeerId:             gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots:     allSnapshots,
+		borSnapshots:       allBorSnapshots,
 		BlockReader:        br,
 		ReceiptsReader:     receipts.NewGenerator(dirs, br, engine, nil, 5*time.Second),
 		HistoryV3:          true,
@@ -563,20 +601,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		}
 	}
 
-	// Deploy Amsterdam system contracts (EIP-8282) at genesis whenever Amsterdam is
-	// scheduled — a later fork transition must still find deployed code. These are
-	// required for the Merge engine's FinalizeAndAssemble to process builder
-	// deposit and exit requests.
-	if gspec.Config.AmsterdamTime != nil {
-		if err := blockgen.InitAmsterdamPreDeploys(mock.DB, gspec.Config, mock.Log); err != nil {
-			if tb != nil {
-				tb.Fatal(err)
-			} else {
-				panic(err)
-			}
-		}
-	}
-
 	blockWriter := blockio.NewBlockWriter()
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
@@ -592,7 +616,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			ctx,
 			poolCfg,
 			mock.DB,
-			kvcache.NewSimple(),
+			kvcache.NewLatestBatchCache(),
 			sentries,
 			stateChangesClient,
 			func() {}, /* builderNotifyNewTxns */
@@ -745,7 +769,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, dispatcher, logger)
 
-	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil)
+	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil, mock.BlockReader)
 
 	mock.StateCache = &execmodule.Cache{}
 	onlySnapDownloadOnStart := cfg.Genesis.Config.Bor != nil

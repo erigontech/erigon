@@ -20,6 +20,7 @@
 package types
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -65,7 +66,7 @@ func (tx *AccessListTx) copy() *AccessListTx {
 				TransactionMisc: TransactionMisc{},
 				Nonce:           tx.Nonce,
 				To:              tx.To, // TODO: copy pointed-to address
-				Data:            common.Copy(tx.Data),
+				Data:            bytes.Clone(tx.Data),
 				GasLimit:        tx.GasLimit,
 				Value:           tx.Value,
 				V:               tx.V,
@@ -276,24 +277,13 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 	i := 0
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		// decode tuple
-		*al = append(*al, AccessTuple{StorageKeys: []common.Hash{}})
+		*al = append(*al, AccessTuple{})
 		tuple := &(*al)[len(*al)-1]
-		if err = s.ReadBytes(tuple.Address[:]); err != nil {
+		if tuple.Address, err = s.Addr(); err != nil {
 			return fmt.Errorf("read Address: %w", err)
 		}
-		if _, err = s.List(); err != nil {
-			return fmt.Errorf("open StorageKeys: %w", err)
-		}
-		for s.MoreDataInList() {
-			var key common.Hash
-			if err = s.ReadBytes(key[:]); err != nil {
-				return fmt.Errorf("read StorageKey: %w", err)
-			}
-			tuple.StorageKeys = append(tuple.StorageKeys, key)
-		}
-		// end of StorageKeys list
-		if err = s.ListEnd(); err != nil {
-			return fmt.Errorf("close StorageKeys: %w", err)
+		if tuple.StorageKeys, err = decodeHashList(s); err != nil {
+			return fmt.Errorf("read StorageKeys: %w", err)
 		}
 		// end of tuple
 		if err = s.ListEnd(); err != nil {

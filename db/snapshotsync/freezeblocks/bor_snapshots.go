@@ -73,7 +73,7 @@ func (br *BlockRetire) retireBorBlocks(
 			}
 
 			logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "type", snap,
-				"range", fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
+				"range", fmt.Sprintf("%s-%s", common.PrettyExact(blockFrom), common.PrettyExact(blockTo)))
 
 			var firstKeyGetter snaptype.FirstKeyGetter
 
@@ -161,11 +161,12 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, _max uint64) {
 	var toDel []string
 	l := make([]snaptype.FileInfo, 0, len(list))
 
-	for _, f := range list {
+	for i := range list {
+		f := &list[i]
 		if !(f.Type.Enum() == heimdall.Enums.Spans || f.Type.Enum() == heimdall.Enums.Events) {
 			continue
 		}
-		l = append(l, f)
+		l = append(l, *f)
 	}
 
 	// added overhead to make sure we don't delete in the
@@ -174,12 +175,14 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, _max uint64) {
 		_max -= 500_001
 	}
 
-	for _, f := range l {
+	for i := range l {
+		f := &l[i]
 		if _max < f.From {
 			continue
 		}
 
-		for _, a := range active {
+		for j := range active {
+			a := &active[j]
 			if a.Type.Enum() != heimdall.Enums.Spans {
 				continue
 			}
