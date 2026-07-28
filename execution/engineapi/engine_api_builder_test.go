@@ -1120,3 +1120,109 @@ func runEmptyAccountClearingCase(t *testing.T, doTouch, doAuth, preexisting, par
 		require.Equal(t, want, uint64(payload.ExecutionPayload.GasUsed))
 	})
 }
+
+// TestEngineApiEmptyCoinbaseTipped pins builder/validator agreement when a
+// transaction touches an empty fee recipient. EIP-161 judges emptiness after the
+// tip lands, so the transaction's own write-set — which predates it — must not
+// settle the fee recipient's fate either way: it survives a tip and is cleared
+// without one.
+func TestEngineApiEmptyCoinbaseTipped(t *testing.T) {
+	for _, tc := range []emptyCoinbaseCase{
+		{name: "touched_serial", touchFeeRecipient: true},
+		{name: "touched_parallel", touchFeeRecipient: true, parallel: true},
+		{name: "untouched_parallel", parallel: true},
+		{name: "touched_zero_tip_serial", touchFeeRecipient: true, zeroTip: true},
+		{name: "touched_zero_tip_parallel", touchFeeRecipient: true, zeroTip: true, parallel: true},
+		{name: "touched_amsterdam_serial", touchFeeRecipient: true, amsterdam: true},
+		{name: "touched_amsterdam_parallel", touchFeeRecipient: true, amsterdam: true, parallel: true},
+		{name: "touched_zero_tip_amsterdam_parallel", touchFeeRecipient: true, zeroTip: true, amsterdam: true, parallel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runEmptyCoinbaseCase(t, tc)
+		})
+	}
+}
+
+type emptyCoinbaseCase struct {
+	name              string
+	touchFeeRecipient bool
+	zeroTip           bool
+	amsterdam         bool
+	parallel          bool
+}
+
+func runEmptyCoinbaseCase(t *testing.T, tc emptyCoinbaseCase) {
+	touchFeeRecipient, zeroTip, parallel := tc.touchFeeRecipient, tc.zeroTip, tc.parallel
+	prev := dbg.Exec3Parallel
+	dbg.Exec3Parallel = parallel
+	t.Cleanup(func() { dbg.Exec3Parallel = prev })
+
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	if !tc.amsterdam {
+		genesis.Config.AmsterdamTime = nil
+	}
+
+	feeRecipient := genesis.Coinbase
+	genesis.Alloc[feeRecipient] = types.GenesisAccount{Balance: new(big.Int)}
+
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(senderKey.PublicKey)
+	genesis.Alloc[senderAddr] = types.GenesisAccount{
+		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil),
+	}
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		rpcClient := eat.Transactor.RpcClient()
+
+		to := &senderAddr
+		if touchFeeRecipient {
+			to = &feeRecipient
+		}
+		tipCap := uint256.NewInt(1_000_000_000)
+		if zeroTip {
+			tipCap = uint256.NewInt(0)
+		}
+		txn, err := types.SignTx(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 0, GasLimit: 100_000, To: to},
+			ChainID:  *chainID,
+			TipCap:   *tipCap,
+			FeeCap:   *uint256.NewInt(1_000_000_000),
+		}, *types.LatestSignerForChainID(chainID), senderKey)
+		require.NoError(t, err)
+		_, err = rpcClient.SendTransaction(txn)
+		require.NoError(t, err)
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		require.Len(t, payload.ExecutionPayload.Transactions, 1)
+
+		if tc.amsterdam {
+			// EIP-7928: the assembler's and the validator's account lists must
+			// agree on the fee recipient too.
+			bal := decodeAndValidateBAL(t, payload)
+			block, err := eat.RpcApiClient.GetBlockByNumber(ctx, rpc.BlockNumber(payload.ExecutionPayload.BlockNumber), false)
+			require.NoError(t, err)
+			require.NotNil(t, block.BlockAccessListHash)
+			require.Equal(t, bal.Hash(), *block.BlockAccessListHash)
+		}
+
+		balance, err := rpcClient.GetBalance(feeRecipient, rpc.LatestBlock)
+		require.NoError(t, err)
+		if zeroTip {
+			require.Zero(t, balance.Sign(), "an untipped empty fee recipient stays cleared")
+			return
+		}
+		require.Positive(t, balance.Sign(), "fee recipient must keep the tip it was credited")
+	})
+}

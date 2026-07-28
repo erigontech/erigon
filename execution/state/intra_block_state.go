@@ -2602,8 +2602,9 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 // FinalizedWrites returns the tx's committable write-set on the parallel
 // (versionMap) path: WriteSet.Finalize applies the EIP-6780 wipe and snapshots
 // the recorded IO. No journal reset here — Reset() does that before the next tx.
-func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet, error) {
-	if err := sdb.clearEmptyAccounts(chainRules); err != nil {
+// deferredFeeAddrs name the addresses fee finalization credits after execution.
+func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules, deferredFeeAddrs ...accounts.Address) (*WriteSet, error) {
+	if err := sdb.clearEmptyAccounts(chainRules, deferredFeeAddrs); err != nil {
 		return nil, err
 	}
 	return sdb.versionedWrites.Finalize(), nil
@@ -2614,7 +2615,12 @@ func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 // remain empty are withheld, while pre-existing accounts that end empty emit a
 // deletion so neither can remain visible to later transactions through the
 // version map. Genesis and Aura system-account exceptions match the serial path.
-func (sdb *IntraBlockState) clearEmptyAccounts(chainRules *chain.Rules) error {
+//
+// A deferred-fee address is exempt from the deletion, as its credit lands after
+// execution: emptiness cannot be settled here, so fee finalization decides its
+// removal. Withholding a created record stays safe — fee finalization
+// re-publishes the account it credits.
+func (sdb *IntraBlockState) clearEmptyAccounts(chainRules *chain.Rules, deferredFeeAddrs []accounts.Address) error {
 	if sdb.blockNum == 0 || chainRules == nil {
 		return nil
 	}
@@ -2626,15 +2632,17 @@ func (sdb *IntraBlockState) clearEmptyAccounts(chainRules *chain.Rules) error {
 		if !EIP161EmptyRemoval(emptyRemoval, chainRules.IsAura, addr) {
 			continue
 		}
-		existingEmpty, err := sdb.existingAccountEndsEmpty(addr)
-		if err != nil {
-			return err
-		}
-		if existingEmpty {
-			sdb.versionMap.DeleteAll(addr, sdb.txIndex)
-			sdb.versionedWrites.deleteAddr(addr)
-			sdb.recordWriteSelfDestruct(addr, true)
-			continue
+		if !slices.Contains(deferredFeeAddrs, addr) {
+			existingEmpty, err := sdb.existingAccountEndsEmpty(addr)
+			if err != nil {
+				return err
+			}
+			if existingEmpty {
+				sdb.versionMap.DeleteAll(addr, sdb.txIndex)
+				sdb.versionedWrites.deleteAddr(addr)
+				sdb.recordWriteSelfDestruct(addr, true)
+				continue
+			}
 		}
 		if sdb.versionedWrites.createdEmpty(addr) {
 			sdb.versionMap.DeleteAll(addr, sdb.txIndex)
