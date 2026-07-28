@@ -98,7 +98,7 @@ func buildTestPrefixIndexWithNodes(t testing.TB, kvPath string, compressFlags se
 		key, _ = g.Next(key[:0])
 		g.Skip()
 		if di > 0 && di%M == 0 {
-			nodes = append(nodes, prefixNode{key: common.Copy(key), di: di})
+			nodes = append(nodes, prefixNode{key: bytes.Clone(key), di: di})
 		}
 	}
 
@@ -128,7 +128,7 @@ func TestPrefixIndexBuild(t *testing.T) {
 	// Verify non-empty buckets have firstDI < endDI.
 	activeBuckets := 0
 	totalNodes := 0
-	for prefix := 0; prefix < 65536; prefix++ {
+	for prefix := range 65536 {
 		b := &pi.buckets[prefix]
 		if b.firstDI == math.MaxUint64 {
 			require.Empty(t, b.nodes, "empty bucket %04x should have no nodes", prefix)
@@ -158,10 +158,10 @@ func TestPrefixIndexBuild(t *testing.T) {
 	require.Greater(t, totalNodes, 0, "should have at least one node")
 
 	// Verify L1 aggregation.
-	for b0 := 0; b0 < 256; b0++ {
+	for b0 := range 256 {
 		minFirst := uint64(math.MaxUint64)
 		maxEnd := uint64(0)
-		for b1 := 0; b1 < 256; b1++ {
+		for b1 := range 256 {
 			prefix := b0<<8 | b1
 			b := &pi.buckets[prefix]
 			if b.firstDI == math.MaxUint64 {
@@ -197,7 +197,7 @@ func TestPrefixIndexNodeDistribution(t *testing.T) {
 	defer pi.Close()
 
 	// Verify that all non-empty buckets have at least 1 node.
-	for prefix := 0; prefix < 65536; prefix++ {
+	for prefix := range 65536 {
 		b := &pi.buckets[prefix]
 		if b.firstDI == math.MaxUint64 {
 			continue
@@ -233,7 +233,7 @@ func TestPrefixIndexSeek(t *testing.T) {
 	c.Close()
 
 	// Seek each key -> should find that exact key.
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		c, err := pi.Seek(g, keys[i])
 		require.NoErrorf(t, err, "i=%d key=%x", i, keys[i])
 		require.NotNilf(t, c, "i=%d key=%x", i, keys[i])
@@ -243,7 +243,7 @@ func TestPrefixIndexSeek(t *testing.T) {
 
 	// Seek with key-1 (decrement last byte) should still find the original key.
 	for i := 1; i < len(keys); i++ {
-		alt := common.Copy(keys[i])
+		alt := bytes.Clone(keys[i])
 		for j := len(alt) - 1; j >= 0; j-- {
 			if alt[j] > 0 {
 				alt[j]--
@@ -305,11 +305,11 @@ func TestPrefixIndexGet(t *testing.T) {
 	for g.HasNext() {
 		_, _ = g.Next(nil) // skip key
 		v, _ := g.Next(nil)
-		values = append(values, common.Copy(v))
+		values = append(values, bytes.Clone(v))
 	}
 
 	// Get each key -> should find exact value.
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		v, ok, _, err := pi.Get(g, keys[i])
 		require.NoErrorf(t, err, "i=%d key=%x", i, keys[i])
 		require.Truef(t, ok, "i=%d key=%x not found", i, keys[i])
@@ -358,7 +358,7 @@ func TestPrefixIndexSmallFile(t *testing.T) {
 	require.Len(t, keys, keyCount)
 
 	// Seek and Get each key.
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		c, err := pi.Seek(g, keys[i])
 		require.NoError(t, err)
 		require.NotNil(t, c)
@@ -407,7 +407,7 @@ func TestPrefixIndexBackwardCompat(t *testing.T) {
 	getter := seg.NewReader(kv2.MakeGetter(), compressFlags)
 
 	// Compare Get results between PrefixIndex (with nodes) and BpsTree.
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		v1, ok1, _, err1 := piNodes.Get(g, keys[i])
 		_, v2, _, ok2, err2 := bt.Get(keys[i], getter)
 		require.NoError(t, err1, "i=%d", i)
@@ -417,7 +417,7 @@ func TestPrefixIndexBackwardCompat(t *testing.T) {
 	}
 
 	// Compare Seek results.
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		c1, err1 := piNodes.Seek(g, keys[i])
 		c2, err2 := bt.Seek(getter, keys[i])
 		require.NoError(t, err1, "i=%d", i)
@@ -455,7 +455,7 @@ func TestPrefixIndexSeekIteration(t *testing.T) {
 	c, err := pi.Seek(g, nil)
 	require.NoError(t, err)
 	require.NotNil(t, c)
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		require.Equalf(t, keys[i], c.Key(), "i=%d", i)
 		if i < len(keys)-1 {
 			ok := c.Next()
@@ -515,7 +515,7 @@ func TestPrefixIndexNarrowWithNodes(t *testing.T) {
 	require.NoError(t, err)
 
 	// For keys that have cached nodes, narrowWithNodes should tighten the range.
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		l, r := pi.lookup(keys[i])
 		if l == 0 && r == 0 {
 			continue
@@ -539,7 +539,7 @@ func TestPrefixIndexNarrowWithNodes(t *testing.T) {
 	}
 
 	// Verify Seek still works after narrowing.
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		c, err := pi.Seek(g, keys[i])
 		require.NoError(t, err)
 		require.NotNil(t, c)
@@ -598,7 +598,7 @@ func TestPrefixIndexBucketNodesAreSorted(t *testing.T) {
 	require.NotNil(t, pi)
 	defer pi.Close()
 
-	for prefix := 0; prefix < 65536; prefix++ {
+	for prefix := range 65536 {
 		b := &pi.buckets[prefix]
 		if len(b.nodes) < 2 {
 			continue
@@ -627,7 +627,7 @@ func TestPrefixIndexNodePrefixMatch(t *testing.T) {
 	require.NotNil(t, pi)
 	defer pi.Close()
 
-	for prefix := 0; prefix < 65536; prefix++ {
+	for prefix := range 65536 {
 		b := &pi.buckets[prefix]
 		if b.firstDI == math.MaxUint64 || len(b.nodes) == 0 {
 			continue
@@ -668,13 +668,13 @@ func TestPrefixIndexNodeKeysAreIndependent(t *testing.T) {
 		ptr    uintptr
 	}
 	var records []nodeRecord
-	for prefix := 0; prefix < 65536; prefix++ {
+	for prefix := range 65536 {
 		b := &pi.buckets[prefix]
 		for i := range b.nodes {
 			records = append(records, nodeRecord{
 				prefix: prefix,
 				idx:    i,
-				orig:   common.Copy(b.nodes[i].key),
+				orig:   bytes.Clone(b.nodes[i].key),
 				ptr:    uintptr(unsafe.Pointer(&b.nodes[i].key[0])),
 			})
 		}
@@ -697,7 +697,7 @@ func TestPrefixIndexNodeKeysAreIndependent(t *testing.T) {
 	}
 
 	idx := 0
-	for prefix := 0; prefix < 65536; prefix++ {
+	for prefix := range 65536 {
 		b := &pi.buckets[prefix]
 		for i := range b.nodes {
 			require.Equal(t, records[idx].orig, b.nodes[i].key,
@@ -750,7 +750,7 @@ func TestPrefixIndexWithNodesNodeKeysStable(t *testing.T) {
 		key, _ = g.Next(key[:0])
 		g.Skip()
 		if di > 0 && di%M == 0 {
-			nodes = append(nodes, prefixNode{key: common.Copy(key), di: di})
+			nodes = append(nodes, prefixNode{key: bytes.Clone(key), di: di})
 		}
 	}
 	require.NotEmpty(t, nodes)
@@ -795,7 +795,7 @@ func TestPrefixIndexBuildWithSinglePrefix(t *testing.T) {
 
 	// Verify exactly 1 active bucket (0xABCD).
 	activeBuckets := 0
-	for p := 0; p < 65536; p++ {
+	for p := range 65536 {
 		if pi.buckets[p].firstDI != math.MaxUint64 {
 			activeBuckets++
 			require.Equal(t, 0xABCD, p, "unexpected active bucket %04x", p)
@@ -1125,7 +1125,7 @@ func TestPrefixIndexGetLastBucketBoundary(t *testing.T) {
 	require.Equal(t, count, b.endDI, "last key's bucket endDI should equal count")
 
 	// Fabricate a key in the same prefix bucket but greater than lastKey.
-	fabricated := append(common.Copy(lastKey), 0xFF)
+	fabricated := append(bytes.Clone(lastKey), 0xFF)
 	v, ok, _, err := pi.Get(g, fabricated)
 	require.NoError(t, err, "F3: Get should not return error for non-existent key at boundary")
 	require.False(t, ok, "should not find fabricated key")
@@ -1446,10 +1446,8 @@ func TestPrefixIndexConcurrentReads(t *testing.T) {
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup
-	for n := 0; n < 8; n++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			g := seg.NewReader(decomp.MakeGetter(), compressFlags)
 			for _, k := range keys {
 				c, err := pi.Seek(g, k)
@@ -1475,7 +1473,7 @@ func TestPrefixIndexConcurrentReads(t *testing.T) {
 					t.Errorf("Get(%x): not found", k)
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -1680,7 +1678,7 @@ func TestPrefixIndex_GetExact(t *testing.T) {
 	for g.HasNext() {
 		_, _ = g.Next(nil)
 		v, _ := g.Next(nil)
-		values = append(values, common.Copy(v))
+		values = append(values, bytes.Clone(v))
 	}
 
 	for i, k := range keys {
@@ -1805,7 +1803,7 @@ func TestPrefixIndex_NodeKeyStability(t *testing.T) {
 	// Save original key values.
 	origKeys := make([][]byte, len(nodes))
 	for i, n := range nodes {
-		origKeys[i] = common.Copy(n.key)
+		origKeys[i] = bytes.Clone(n.key)
 	}
 
 	// Build PrefixIndex with these nodes.
@@ -1838,7 +1836,7 @@ func TestPrefixIndex_NodeKeyStability(t *testing.T) {
 	}
 
 	// Verify internal keys are unaffected (not all 0xff).
-	for prefix := 0; prefix < 65536; prefix++ {
+	for prefix := range 65536 {
 		for _, n := range pi.buckets[prefix].nodes {
 			allFF := true
 			for _, b := range n.key {
@@ -1984,7 +1982,7 @@ func TestPrefixIndex_CompareWithBpsTree(t *testing.T) {
 	// Note: BpsTree has the same last-bucket boundary bug (F3) that we fixed in PrefixIndex.
 	// When BpsTree returns ErrBtIndexLookupBounds, PrefixIndex should return (nil, false) — not an error.
 	rnd := newRnd(42)
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		var testKey []byte
 		if rnd.IntN(2) == 0 && len(keys) > 0 {
 			testKey = keys[rnd.IntN(len(keys))]
@@ -2050,13 +2048,13 @@ func TestPrefixIndex_ConcurrentReads(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for w := 0; w < goroutines; w++ {
+	for w := range goroutines {
 		go func(id int) {
 			defer wg.Done()
 			g := seg.NewReader(decomp.MakeGetter(), compressFlags)
 			rnd := newRnd(uint64(id))
 
-			for i := 0; i < opsPerGoroutine; i++ {
+			for i := range opsPerGoroutine {
 				k := keys[rnd.IntN(len(keys))]
 				if i%2 == 0 {
 					c, err := pi.Seek(g, k)

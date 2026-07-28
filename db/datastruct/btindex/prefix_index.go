@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
 )
@@ -78,7 +77,7 @@ func (p *PrefixIndex) computeL1() {
 		p.l1First[i] = math.MaxUint64
 	}
 	// l1End is zero-initialized which is correct (no entries)
-	for prefix := 0; prefix < 65536; prefix++ {
+	for prefix := range 65536 {
 		b := &p.buckets[prefix]
 		if b.firstDI == math.MaxUint64 {
 			continue
@@ -171,7 +170,7 @@ func (p *PrefixIndex) addNode(n prefixNode) {
 	prefix := uint16(n.key[0])<<8 | uint16(n.key[1])
 	bucket := &p.buckets[prefix]
 	if len(bucket.nodes) < maxNodesPerBucket {
-		n.key = common.Copy(n.key)
+		n.key = bytes.Clone(n.key)
 		bucket.nodes = append(bucket.nodes, n)
 	}
 }
@@ -240,7 +239,7 @@ func NewPrefixIndex(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLookup data
 	}
 	scanState := make([]prefixScan, 65536)
 
-	for prefix := 0; prefix < 65536; prefix++ {
+	for prefix := range 65536 {
 		c := counts[prefix]
 		if c == 0 {
 			continue
@@ -277,7 +276,7 @@ func NewPrefixIndex(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLookup data
 
 			if uint32(s.seen) == targetPos {
 				p.buckets[prefix].nodes = append(p.buckets[prefix].nodes, prefixNode{
-					key: common.Copy(key),
+					key: bytes.Clone(key),
 					di:  di,
 				})
 				s.curPick++
@@ -329,7 +328,7 @@ func NewPrefixIndexWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLo
 	// do a supplementary scan to ensure each non-empty bucket gets at least 1 node.
 	// With M=256 and 65K buckets, pre-built nodes cover <6% of buckets.
 	emptyNodeBuckets := 0
-	for i := 0; i < 65536; i++ {
+	for i := range 65536 {
 		if p.buckets[i].firstDI != math.MaxUint64 && len(p.buckets[i].nodes) == 0 {
 			emptyNodeBuckets++
 		}
@@ -357,7 +356,7 @@ func NewPrefixIndexWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLo
 			mid := counts[prefix] / 2
 			if seen[prefix]-1 == mid {
 				p.addNode(prefixNode{
-					key: common.Copy(key),
+					key: bytes.Clone(key),
 					di:  di,
 				})
 			}

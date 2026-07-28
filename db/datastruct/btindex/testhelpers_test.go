@@ -140,7 +140,7 @@ func generateControlledKV(tb testing.TB, tmp string, prefixes [][]byte, keysPerP
 	}
 	var pairs []kv
 	for _, pfx := range prefixes {
-		for i := 0; i < keysPerPrefix; i++ {
+		for i := range keysPerPrefix {
 			suffix := make([]byte, 6)
 			binary.BigEndian.PutUint32(suffix, uint32(i))
 			suffix[4] = byte(rnd.IntN(256))
