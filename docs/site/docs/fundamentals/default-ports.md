@@ -42,7 +42,6 @@ Here is a comprehensive list of port-related options:
 ### Sentry
 
 * `--port [value]`: Network listening port (default: `30303`)
-* `--p2p.allowed-ports [value]`: Allowed ports to pick for different eth p2p protocol versions (default: `30303`, `30304`, `30305`, `30306`, `30307`)
 * `--sentry.api.addr [value]`: Comma separated Sentry addresses `<host>:<port>,<host>:<port>` (default `127.0.0.1:9091`)
 
 ### RPC Daemon
@@ -66,10 +65,6 @@ The embedded MCP server is enabled by default. To disable it, pass `--mcp.disabl
 * `--mcp.disable`: Disables the embedded MCP server (default: `false`)
 * `--mcp.addr [value]`: MCP server listening address (default: `127.0.0.1`)
 * `--mcp.port [value]`: MCP server listening port (default: `8553`)
-
-### Diagnostics
-
-* `--diagnostics.endpoint.port [value]`: Diagnostics HTTP server listening port (default: `6062`)
 
 ## Shutter Network Default Ports
 
