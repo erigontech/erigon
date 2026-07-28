@@ -26,7 +26,10 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
+
+var _ rpchelper.ChainConfigRestartable = (*CaplinService)(nil)
 
 // fakeLaunch returns a LaunchFn that blocks until its ctx is cancelled
 // and records each invocation. Used to simulate the Caplin goroutine
@@ -55,7 +58,7 @@ func (f *fakeLaunch) fn() LaunchFn {
 func TestCaplinService_StartSpawnsLaunch(t *testing.T) {
 	fl := newFakeLaunch()
 	s := NewCaplinService(context.Background(), datadir.Dirs{}, fl.fn(), nil, log.New())
-	require.NoError(t, s.Start())
+	require.NoError(t, s.Start(context.Background()))
 
 	select {
 	case <-fl.released:
@@ -64,26 +67,25 @@ func TestCaplinService_StartSpawnsLaunch(t *testing.T) {
 	}
 	require.Equal(t, int32(1), fl.starts.Load())
 
-	s.Stop()
+	s.Close()
 }
 
-func TestCaplinService_DoubleStartErrors(t *testing.T) {
+func TestCaplinService_DoubleStartIsIdempotent(t *testing.T) {
 	s := NewCaplinService(context.Background(), datadir.Dirs{}, newFakeLaunch().fn(), nil, log.New())
-	require.NoError(t, s.Start())
-	err := s.Start()
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "already started")
-	s.Stop()
+	require.NoError(t, s.Start(context.Background()))
+	require.NoError(t, s.Start(context.Background()),
+		"second Start while running must be a no-op — matches the sentry/storage Restartable exemplars")
+	s.Close()
 }
 
 func TestCaplinService_StopExitsCleanly(t *testing.T) {
 	unexpected := atomic.Int32{}
 	fl := newFakeLaunch()
 	s := NewCaplinService(context.Background(), datadir.Dirs{}, fl.fn(), func() { unexpected.Add(1) }, log.New())
-	require.NoError(t, s.Start())
+	require.NoError(t, s.Start(context.Background()))
 	<-fl.released
 
-	s.Stop()
+	s.Close()
 	require.Equal(t, int32(0), unexpected.Load(),
 		"onUnexpectedExit must not fire when the exit was triggered by Stop")
 }
@@ -96,7 +98,7 @@ func TestCaplinService_RestartTearsDownAndRelaunches(t *testing.T) {
 	unexpected := atomic.Int32{}
 	fl := newFakeLaunch()
 	s := NewCaplinService(context.Background(), datadir.Dirs{}, fl.fn(), func() { unexpected.Add(1) }, log.New())
-	require.NoError(t, s.Start())
+	require.NoError(t, s.Start(context.Background()))
 	<-fl.released
 
 	require.NoError(t, s.Restart())
@@ -110,7 +112,7 @@ func TestCaplinService_RestartTearsDownAndRelaunches(t *testing.T) {
 	require.Equal(t, int32(0), unexpected.Load(),
 		"Restart-driven teardown must not fire onUnexpectedExit")
 
-	s.Stop()
+	s.Close()
 }
 
 func TestCaplinService_RestartBeforeStartErrors(t *testing.T) {
@@ -135,11 +137,44 @@ func TestCaplinService_UnexpectedExitFiresCallback(t *testing.T) {
 		default:
 		}
 	}, log.New())
-	require.NoError(t, s.Start())
+	require.NoError(t, s.Start(context.Background()))
 
 	select {
 	case <-unexpected:
 	case <-time.After(2 * time.Second):
 		t.Fatal("onUnexpectedExit must fire when Caplin exits without Stop/Restart")
 	}
+}
+
+// TestCaplinService_StopStartRoundTrip is the ChainConfigRestartable
+// exercise: Start spawns Caplin, Stop drains it cleanly (no unexpected-
+// exit callback), and a subsequent Start relaunches with the current
+// launch closure — including one swapped via SetLaunch, which the
+// debug_setFork orchestrator uses to rebind Caplin to the new
+// chain.Config.
+func TestCaplinService_StopStartRoundTrip(t *testing.T) {
+	unexpected := atomic.Int32{}
+	fl := newFakeLaunch()
+	s := NewCaplinService(context.Background(), datadir.Dirs{}, fl.fn(), func() { unexpected.Add(1) }, log.New())
+
+	require.NoError(t, s.Start(context.Background()))
+	<-fl.released
+	require.Equal(t, int32(1), fl.starts.Load())
+
+	require.NoError(t, s.Stop())
+	require.Equal(t, int32(0), unexpected.Load(),
+		"Stop-driven teardown must not fire onUnexpectedExit")
+
+	// Second Start with a fresh launch closure — the orchestrator's
+	// SetChainConfig+SetLaunch sequence in miniature. Assert the fresh
+	// closure was invoked (not the original one).
+	fl2 := newFakeLaunch()
+	s.SetChainConfig(nil) // no-op stub; must not panic
+	s.SetLaunch(fl2.fn())
+	require.NoError(t, s.Start(context.Background()))
+	<-fl2.released
+	require.Equal(t, int32(1), fl2.starts.Load(), "the SetLaunch closure must be the one invoked on the second Start")
+	require.Equal(t, int32(1), fl.starts.Load(), "the original closure must NOT run again")
+
+	s.Close()
 }

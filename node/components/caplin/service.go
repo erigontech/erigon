@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 // teardownTimeout bounds how long Stop/Restart wait for the Caplin
@@ -77,16 +78,37 @@ func NewCaplinService(parentCtx context.Context, dirs datadir.Dirs, launch Launc
 	}
 }
 
-// Start spawns the first Caplin goroutine. Returns an error if Start
-// has already been called.
-func (s *CaplinService) Start() error {
+// Start spawns the Caplin goroutine parented on ctx. Subsequent Start
+// calls after Stop are supported: they spawn a fresh goroutine using
+// the current launch closure (updated via SetLaunch if the caller
+// wants a chain-config-aware relaunch).
+func (s *CaplinService) Start(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.done != nil {
-		return fmt.Errorf("CaplinService.Start: already started")
+		return nil
 	}
+	s.parentCtx = ctx
 	s.spawnLocked()
 	return nil
+}
+
+// SetChainConfig is the ChainConfigRestartable hook. The runtime
+// chain.Config isn't stored on CaplinService directly — the launch
+// closure carries the full config bundle Caplin needs. The orchestrator
+// swaps that closure via SetLaunch before calling Start; this method
+// stays a no-op so the trio still type-checks as the interface and the
+// orchestrator can drive Caplin the same way it drives any other
+// Restartable component.
+func (s *CaplinService) SetChainConfig(_ *chain.Config) {}
+
+// SetLaunch replaces the launch closure Start will use on the next
+// spawn. The debug_setFork orchestrator invokes it between Stop and
+// Start with a closure rebound to the new caplin1.CaplinConfig.
+func (s *CaplinService) SetLaunch(fn LaunchFn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.launch = fn
 }
 
 // Restart cancels the running goroutine, waits for it to exit, lets
@@ -137,9 +159,11 @@ func (s *CaplinService) Restart() error {
 	return nil
 }
 
-// Stop cancels the running goroutine and waits for it to exit. Called
+// Close cancels the running goroutine and waits for it to exit. Called
 // by backend shutdown to drain Caplin cleanly. No-op if never started.
-func (s *CaplinService) Stop() {
+// Use Stop (not Close) for a mid-process pause the service can later
+// resume via Start.
+func (s *CaplinService) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.done == nil {
@@ -150,9 +174,34 @@ func (s *CaplinService) Stop() {
 	select {
 	case <-s.done:
 	case <-time.After(teardownTimeout):
-		s.logger.Error("[caplin-service] Stop: goroutine did not exit within timeout; leaking",
+		s.logger.Error("[caplin-service] Close: goroutine did not exit within timeout; leaking",
 			"timeout", teardownTimeout)
 	}
+}
+
+// Stop is the ChainConfigRestartable pause: cancels the running Caplin
+// goroutine and waits for it to exit within teardownTimeout. Leaves
+// launch + parentCtx + dirs intact so a subsequent Start reuses them
+// (or the caller can update the launch closure via SetLaunch first).
+// Returns an error if the goroutine does not exit within the timeout.
+// Idempotent: no-op if not currently running.
+func (s *CaplinService) Stop() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.done == nil {
+		return nil
+	}
+	s.stopping.Store(true)
+	s.cancel()
+	select {
+	case <-s.done:
+	case <-time.After(teardownTimeout):
+		return fmt.Errorf("CaplinService.Stop: goroutine did not exit within %s", teardownTimeout)
+	}
+	s.done = nil
+	s.cancel = nil
+	s.stopping.Store(false)
+	return nil
 }
 
 // spawnLocked launches a fresh goroutine. Caller must hold s.mu.

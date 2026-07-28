@@ -1871,7 +1871,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		backend.caplinService = caplincomp.NewCaplinService(ctx, dirs, launchCaplin, ctxCancel, logger)
 		caplinProvider.SetRestarter(backend.caplinService)
-		if err := backend.caplinService.Start(); err != nil {
+		if err := backend.caplinService.Start(ctx); err != nil {
 			return nil, fmt.Errorf("caplin service start: %w", err)
 		}
 		// Start embedded dev validator if configured.
@@ -2411,7 +2411,7 @@ func (s *Ethereum) Stop() error {
 	// Drain Caplin first so its in-flight goroutines release the CL DB
 	// before sentry teardown closes the underlying handles.
 	if s.caplinService != nil {
-		s.caplinService.Stop()
+		s.caplinService.Close()
 	}
 	// Stop all the peer-related stuff first.
 	s.sentryCancel()
