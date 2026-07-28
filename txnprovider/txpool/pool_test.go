@@ -2340,3 +2340,80 @@ func TestQueuedTxnPromotedAfterStaleAddLocal(t *testing.T) {
 	asrt.Equal(1, pending, "queued tx must be promoted after re-evaluation")
 	asrt.Equal(0, queued, "queued must be empty after promotion")
 }
+
+// TestOnNewBlockRefreshesDepthMetrics pins that the txpool_pending/basefee/queued
+// gauges reflect the live sub-pool sizes after each block. They must not depend on
+// logStats, which only runs on the LogEvery tick (forced to 3 minutes for every node
+// in cmd/utils/flags.go) — coupling the gauges to it left dashboards reading a value
+// up to 3 minutes stale while the pool churned every block.
+func TestOnNewBlockRefreshesDepthMetrics(t *testing.T) {
+	asrt := assert.New(t)
+	req := require.New(t)
+	logger := log.New()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	ch := make(chan Announcements, 100)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	cfg := txpoolcfg.DefaultConfig
+	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewLatestBatchCache(), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	req.NoError(err)
+	req.NotNil(pool)
+
+	var addr1 [20]byte
+	addr1[0] = 1
+	h0 := gointerfaces.ConvertHashToH256([32]byte{})
+	serialiseAcc := func(nonce uint64) []byte {
+		a := accounts3.Account{
+			Nonce: nonce, Balance: *uint256.NewInt(1 * common.Ether),
+			CodeHash: accounts.EmptyCodeHash, Incarnation: 1,
+		}
+		return accounts3.SerialiseV3(&a)
+	}
+
+	writeTestSenderState(t, ctx, coreDB, logger, addr1, serialiseAcc(0), 0)
+	initChange := &remoteproto.StateChangeBatch{
+		StateVersionId: 0, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 0, BlockHash: h0}},
+	}
+	initChange.ChangeBatch[0].Changes = append(initChange.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr1),
+		Data:    serialiseAcc(0),
+	})
+	req.NoError(pool.OnNewBlock(ctx, initChange, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	// Executable txn (nonce 0 == on-chain nonce) → pending; nonce-gapped txn (nonce 3) → queued.
+	execTxn := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	execTxn.IDHash[0] = 1
+	gappedTxn := newTestTxnSlot(3, 0, 300_000, 300_000, 100_000)
+	gappedTxn.IDHash[0] = 2
+	var slots TxnSlots
+	slots.Append(execTxn, addr1[:], true)
+	slots.Append(gappedTxn, addr1[:], true)
+	_, err = pool.AddLocalTxns(ctx, slots)
+	req.NoError(err)
+
+	_, _, wantQueued := pool.CountContent()
+	req.Positive(wantQueued, "test needs a non-empty queued pool to be meaningful")
+
+	// Poison the gauges so a stale reading can't accidentally match the live count.
+	const sentinel = -12345
+	pendingSubCounter.SetInt(sentinel)
+	basefeeSubCounter.SetInt(sentinel)
+	queuedSubCounter.SetInt(sentinel)
+
+	// A subsequent block that touches no pool sender must still refresh the gauges.
+	h1 := gointerfaces.ConvertHashToH256([32]byte{1})
+	block1 := &remoteproto.StateChangeBatch{
+		StateVersionId: 1, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1, BlockHash: h1}},
+	}
+	req.NoError(pool.OnNewBlock(ctx, block1, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	pending, baseFee, queued := pool.CountContent()
+	asrt.EqualValues(pending, pendingSubCounter.GetValue(), "pending gauge stale after OnNewBlock")
+	asrt.EqualValues(baseFee, basefeeSubCounter.GetValue(), "baseFee gauge stale after OnNewBlock")
+	asrt.EqualValues(queued, queuedSubCounter.GetValue(), "queued gauge stale after OnNewBlock")
+}

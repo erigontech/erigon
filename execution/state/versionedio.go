@@ -520,9 +520,9 @@ func (s ReadSet) eachHeader(yield func(ReadHeader) bool) {
 // Shared across every per-path write via embedding in VersionedWrite[T].
 type WriteHeader struct {
 	Address     accounts.Address
-	Path        AccountPath
 	Key         accounts.StorageKey
 	Version     Version
+	Path        AccountPath
 	Reason      tracing.BalanceChangeReason
 	NonceReason tracing.NonceChangeReason
 }
@@ -2454,7 +2454,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			// a gas-calculation read. This is used to distinguish real state
 			// access from incidental reads (e.g. Empty() in gas calc) for
 			// the system address filter.
-			if isUserTx && opts != nil && !opts.revertable {
+			if isUserTx && !opts.revertable {
 				account.nonRevertableUserAccess = true
 			}
 		}
@@ -2812,9 +2812,9 @@ type DAG struct {
 }
 
 type TxDep struct {
-	Index         int
 	Reads         ReadSet
 	FullWriteList []*WriteSet
+	Index         int
 }
 
 func HasReadDep(txFrom *WriteSet, txTo ReadSet) bool {

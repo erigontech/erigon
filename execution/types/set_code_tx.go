@@ -61,8 +61,8 @@ func (tx *SetCodeTransaction) copy() *SetCodeTransaction {
 
 	cpy.Authorizations = make([]Authorization, len(tx.Authorizations))
 
-	for i, ath := range tx.Authorizations {
-		cpy.Authorizations[i] = *ath.copy()
+	for i := range tx.Authorizations {
+		cpy.Authorizations[i] = *tx.Authorizations[i].copy()
 	}
 
 	return cpy

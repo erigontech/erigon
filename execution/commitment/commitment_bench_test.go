@@ -17,13 +17,13 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"testing"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -110,7 +110,7 @@ func BenchmarkBranchMerger_Merge(b *testing.B) {
 		enc1, err := be.EncodeBranch(bm, tm, am, &cellData)
 		require.NoError(b, err)
 
-		copies[i] = common.Copy(enc1)
+		copies[i] = bytes.Clone(enc1)
 	}
 
 	bmg := NewHexBranchMerger(4096)
@@ -145,7 +145,7 @@ func benchReplacePlainKeys(b *testing.B, data BranchData, buf []byte, fn func(ke
 func encodeSyntheticBranch(b *testing.B, nCells int) (BranchData, uint16) {
 	b.Helper()
 	_, bm, enc := encodeCellRow(b, nCells)
-	return BranchData(common.Copy(enc)), bm
+	return BranchData(bytes.Clone(enc)), bm
 }
 
 // preshortenBranchData shortens keys in enc and returns the shortened data plus
@@ -160,13 +160,13 @@ func preshortenBranchData(b *testing.B, enc BranchData) (BranchData, map[string]
 		} else {
 			short = key[:4]
 		}
-		keyMap[string(short)] = common.Copy(key)
+		keyMap[string(short)] = bytes.Clone(key)
 		return short, nil
 	})
 	if err != nil {
 		b.Fatal(err)
 	}
-	return BranchData(common.Copy(shortened)), keyMap
+	return BranchData(bytes.Clone(shortened)), keyMap
 }
 
 func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
