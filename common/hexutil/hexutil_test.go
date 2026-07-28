@@ -190,6 +190,15 @@ func TestEncodeBig(t *testing.T) {
 	}
 }
 
+func BenchmarkEncodeBig(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		for _, test := range encodeBigTests {
+			EncodeBig(test.input.(*big.Int))
+		}
+	}
+}
+
 func TestDecodeBig(t *testing.T) {
 	for idx, test := range decodeBigTests {
 		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
