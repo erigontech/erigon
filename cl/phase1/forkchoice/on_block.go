@@ -53,6 +53,7 @@ var (
 	ErrMissingSegment                = errors.New("missing segment: parent state not available")
 	ErrParentEnvelopePending         = errors.New("parent execution payload envelope not yet available")
 	ErrNotFinalizedDescendant        = errors.New("block is not a descendant of the finalized checkpoint")
+	ErrForkSchemaSlotMismatch        = errors.New("block schema fork disagrees with the fork implied by its slot")
 )
 
 func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.BeaconBlock) error {
@@ -134,6 +135,12 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
 	blockVersion := f.beaconCfg.GetCurrentStateVersion(blockEpoch)
 	isGloas := blockVersion >= clparams.GloasVersion
+	// A peer picks the response fork digest, so the decoded schema is independent of
+	// the block's slot. Gloas moved ExecutionPayload and BlobKzgCommitments out of
+	// BeaconBody, so on a disagreement either branch reads fields left unset.
+	if isGloas != (block.Version() >= clparams.GloasVersion) {
+		return ErrForkSchemaSlotMismatch
+	}
 	headBeforeBlock := common.Hash{}
 	if isGloas && f.Slot() == block.Block.Slot {
 		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
