@@ -81,29 +81,58 @@ type accHolder interface {
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 }
 
+// domainVisibleEndMemo caches DomainVisibleEnd per domain. Concurrent gets
+// share a single view; view rotation happens in serial sections.
 type domainVisibleEndMemo struct {
-	viewID uint64
-	ends   [kv.DomainLen]uint64
-	loaded [kv.DomainLen]bool
-	ok     [kv.DomainLen]bool
+	ends   [kv.DomainLen]atomic.Uint64
+	mu     sync.Mutex
+	viewID atomic.Uint64
+	state  atomic.Uint32
 }
 
+// state packs a loaded and an ok bit per domain — compile-time capacity check.
+var _ [32 - 2*int(kv.DomainLen)]struct{}
+
+// The fast path reads viewID before state, and rotation clears state before
+// publishing the new viewID, so a stale loaded bit can never pair with a
+// fresh viewID.
 func (m *domainVisibleEndMemo) get(tx kv.TemporalTx, domain kv.Domain) (uint64, bool) {
 	viewID := tx.ViewID()
-	if viewID != m.viewID {
-		m.viewID = viewID
-		m.loaded = [kv.DomainLen]bool{}
+	bit := uint32(1) << uint32(domain)
+	if m.viewID.Load() == viewID {
+		if state := m.state.Load(); state&bit != 0 {
+			return m.ends[domain].Load(), state&(bit<<uint32(kv.DomainLen)) != 0
+		}
 	}
-
-	if !m.loaded[domain] {
-		m.ends[domain], m.ok[domain] = tx.Debug().DomainVisibleEnd(domain)
-		m.loaded[domain] = true
-	}
-	return m.ends[domain], m.ok[domain]
+	return m.load(tx, domain, viewID, bit)
 }
 
+func (m *domainVisibleEndMemo) load(tx kv.TemporalTx, domain kv.Domain, viewID uint64, bit uint32) (uint64, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.viewID.Load() != viewID {
+		m.state.Store(0)
+		m.viewID.Store(viewID)
+	}
+	state := m.state.Load()
+	if state&bit == 0 {
+		end, ok := tx.Debug().DomainVisibleEnd(domain)
+		m.ends[domain].Store(end)
+		state |= bit
+		if ok {
+			state |= bit << uint32(kv.DomainLen)
+		}
+		m.state.Store(state)
+	}
+	return m.ends[domain].Load(), state&(bit<<uint32(kv.DomainLen)) != 0
+}
+
+// reset takes mu so an in-flight load can't re-store pre-reset bits.
 func (m *domainVisibleEndMemo) reset() {
-	m.loaded = [kv.DomainLen]bool{}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state.Store(0)
 }
 
 func (sd *SharedDomains) domainVisibleEnd(tx kv.TemporalTx, domain kv.Domain) (uint64, bool) {
