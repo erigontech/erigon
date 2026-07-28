@@ -55,23 +55,3 @@ func TestOnBlockRejectsForkSchemaSlotMismatch(t *testing.T) {
 	err := store.OnBlock(context.Background(), mismatched, false, true, true)
 	require.ErrorIs(t, err, ErrForkSchemaSlotMismatch)
 }
-
-func TestForkSchemaMatchesSlot(t *testing.T) {
-	for _, tc := range []struct {
-		name           string
-		slotVersion    clparams.StateVersion
-		decodedVersion clparams.StateVersion
-		want           bool
-	}{
-		// Schemas differ only across the Gloas boundary as far as OnBlock is
-		// concerned, so a disagreement below it is not a mismatch.
-		{"both pre-Gloas", clparams.FuluVersion, clparams.DenebVersion, true},
-		{"both Gloas", clparams.GloasVersion, clparams.GloasVersion, true},
-		{"Gloas schema at a pre-Gloas slot", clparams.FuluVersion, clparams.GloasVersion, false},
-		{"pre-Gloas schema at a Gloas slot", clparams.GloasVersion, clparams.FuluVersion, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, forkSchemaMatchesSlot(tc.slotVersion, tc.decodedVersion))
-		})
-	}
-}

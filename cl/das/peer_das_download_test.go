@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -127,11 +128,16 @@ func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
 		t.Fatal("malicious peer was not added to the custody-peer queue")
 	}
 
+	// gloasDataCache is populated so that a sidecar wrongly accepted as Gloas
+	// fails this test's ban assertion rather than nil-panicking downstream.
+	gloasDataCache, err := lru.New[common.Hash, *gloasBlockData]("gloasDataCacheTest", 8)
+	require.NoError(t, err)
 	d := &peerdas{
-		rpc:           rpcClient,
-		beaconConfig:  &cfg,
-		state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
-		columnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), 0, &cfg, clock, beaconevents.NewEventEmitter()),
+		rpc:            rpcClient,
+		beaconConfig:   &cfg,
+		state:          peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage:  blob_storage.NewDataColumnStore(afero.NewMemMapFs(), 0, &cfg, clock, beaconevents.NewEventEmitter()),
+		gloasDataCache: gloasDataCache,
 	}
 	req := &downloadRequest{
 		beaconConfig: &cfg,

@@ -90,14 +90,6 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot, cur
 	monitor.ObserveBlockImportingLatency(initialSlotTime)
 }
 
-// forkSchemaMatchesSlot reports whether a block's decoded SSZ schema agrees with
-// the fork implied by its slot. A peer picks the response fork digest, so the two
-// are independent; Gloas moved ExecutionPayload and BlobKzgCommitments out of
-// BeaconBody, which the pre-Gloas path reads unconditionally.
-func forkSchemaMatchesSlot(slotVersion, decodedVersion clparams.StateVersion) bool {
-	return (slotVersion >= clparams.GloasVersion) == (decodedVersion >= clparams.GloasVersion)
-}
-
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	f.mu.Lock()
 	unlocked := false
@@ -139,12 +131,13 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 	currentSlotOnEntry := f.ethClock.GetCurrentSlot()
 
+	if !f.beaconCfg.ForkSchemaMatchesSlot(block.Block.Slot, block.Version()) {
+		return ErrForkSchemaSlotMismatch
+	}
+
 	// Validate parent payload status path early (before expensive operations)
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
 	blockVersion := f.beaconCfg.GetCurrentStateVersion(blockEpoch)
-	if !forkSchemaMatchesSlot(blockVersion, block.Version()) {
-		return ErrForkSchemaSlotMismatch
-	}
 	isGloas := blockVersion >= clparams.GloasVersion
 	headBeforeBlock := common.Hash{}
 	if isGloas && f.Slot() == block.Block.Slot {

@@ -921,33 +921,28 @@ mainloop:
 }
 
 // resolveColumnSidecarSlotAndRoot reads a received column sidecar's slot and
-// block root from the fields populated by the schema it was decoded with,
-// returning ok=false for a malformed sidecar. A peer picks that schema via the
-// response fork-digest, independently of the slot the sidecar claims, so ok is
-// also false when the fork implied by the slot disagrees with the decoded schema
-// across the Gloas boundary (which removed SignedBlockHeader) — otherwise a peer
-// could reach a field its schema left unset.
+// block root from the fields populated by the schema it was decoded with. ok is
+// false for a malformed sidecar, or one whose slot disagrees with that schema —
+// see BeaconChainConfig.ForkSchemaMatchesSlot.
 func (d *peerdas) resolveColumnSidecarSlotAndRoot(sidecar *cltypes.DataColumnSidecar) (slot uint64, blockRoot common.Hash, ok bool) {
-	isGloas := sidecar.Version() >= clparams.GloasVersion
-	if isGloas {
-		slot = sidecar.Slot
-	} else {
-		if sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
+	if sidecar.Version() >= clparams.GloasVersion {
+		if !d.beaconConfig.ForkSchemaMatchesSlot(sidecar.Slot, sidecar.Version()) {
 			return 0, common.Hash{}, false
 		}
-		slot = sidecar.SignedBlockHeader.Header.Slot
+		return sidecar.Slot, sidecar.BeaconBlockRoot, true
 	}
-	if (d.beaconConfig.GetCurrentStateVersion(slot/d.beaconConfig.SlotsPerEpoch) >= clparams.GloasVersion) != isGloas {
+	header := sidecar.SignedBlockHeader
+	if header == nil || header.Header == nil {
 		return 0, common.Hash{}, false
 	}
-	if isGloas {
-		return slot, sidecar.BeaconBlockRoot, true
+	if !d.beaconConfig.ForkSchemaMatchesSlot(header.Header.Slot, sidecar.Version()) {
+		return 0, common.Hash{}, false
 	}
-	root, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+	root, err := header.Header.HashSSZ()
 	if err != nil {
 		return 0, common.Hash{}, false
 	}
-	return slot, root, true
+	return header.Header.Slot, root, true
 }
 
 func isExpectedColumnDownloadMiss(err error) bool {
