@@ -44,7 +44,7 @@ jq -r '.outcome + " — " + .reason' result-mainnet.json
 
 A flat dict; keys carry their unit as a suffix (`_m` minutes, `_mb` megabytes,
 `_%` percent, `_s` seconds). Tip-tracking-family keys are documented in
-[tip-tracking-report.md](tip-tracking-report.md). Notable ones:
+[sync-tests.md](sync-tests.md). Notable ones:
 
 | Key | Why you care |
 |-----|--------------|

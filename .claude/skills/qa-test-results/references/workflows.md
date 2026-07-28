@@ -11,7 +11,7 @@ datadir**.
 ## Tip-tracking family
 
 All drive `qa-tests/tip-tracking/run_and_check_tip_tracking.py` — same report
-format, same thresholds ([tip-tracking-report.md](tip-tracking-report.md)).
+format, same thresholds ([sync-tests.md](sync-tests.md)).
 
 | Workflow | Runner labels | DB | Times | `--test_name` |
 |----------|---------------|-----|-------|---------------|

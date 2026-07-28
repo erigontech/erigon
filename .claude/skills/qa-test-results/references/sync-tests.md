@@ -1,9 +1,14 @@
-# The tip-tracking report, line by line
+# Reading Sync test logs — the tip-tracking report, line by line
+
+The **Sync test** category (tip-tracking + sync-from-scratch) all drives one
+Python state machine, so every Sync workflow shares the report format, thresholds
+and metric block described here.
 
 Driver: `erigon-qa/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py`.
 Shared by `qa-tip-tracking*`, `qa-constrained-tip-tracking`,
 `qa-sync-from-scratch*`, `qa-sync-with-externalcl`, `qa-sync-test-bisection-tool`
-and the pre-test stabilisation steps.
+and the pre-test stabilisation steps. The report block opens with
+`*** Tip tracking completed` on *every* Sync workflow, sync-from-scratch included.
 
 ## Test phases
 

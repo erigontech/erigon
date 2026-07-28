@@ -95,7 +95,7 @@ tip-tracking report:
 ```
 
 Full field-by-field reference, including the metric block that follows it:
-[references/tip-tracking-report.md](references/tip-tracking-report.md).
+[references/sync-tests.md](references/sync-tests.md).
 
 **Which step holds the log.** For the sync tests the report and the Erigon
 output you want are in the step **`Run Erigon, wait sync and check ability to
