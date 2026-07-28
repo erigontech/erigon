@@ -2200,7 +2200,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `2m0s`
 * `--healthcheck`: Enables gRPC health checks.
   * Default: `false`
-* `--witness.cache.blocks value` *(New in v3.6)*: Number of recent blocks whose legacy `debug_executionWitness` result is eagerly cached in memory, keyed by block hash in an LRU. Each witness is held as serialized JSON and served verbatim on a hit, so memory use is roughly this count multiplied by the per-block witness size. Embedded RPC only, and requires `--prune.include-commitment-history`.
+* `--witness.cache.blocks value` *(New in v3.6)*: Number of recent blocks whose legacy `debug_executionWitness` result is eagerly cached in memory, keyed by block hash in an LRU. Each witness is held as serialized JSON and served verbatim on a hit, so memory use is roughly this count multiplied by the per-block witness size. Embedded RPC only, and requires `--prune.include-commitment-history` (runtime errors from `debug_executionWitness` and `eth_getWitness` name its `--prune.experimental.include-commitment-history` alias instead).
   * Default: `0` (cache disabled); values above the cap of `96` are clamped
 
 ### MCP Server
@@ -4096,7 +4096,7 @@ Usage:
 
 Flags:
       --datadir string                              path to Erigon working directory
-      --db.read.concurrency int                     Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot rather than error. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. A value below the parallel-exec worker count is raised to it (each worker holds a long-lived read tx, so a lower ceiling would deadlock); to actually reduce read concurrency, lower --exec.workers instead
+      --db.read.concurrency int                     Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. A value below the parallel-exec worker count is raised to it (each worker holds a long-lived read tx, so a lower ceiling would deadlock); to actually reduce read concurrency, lower --exec.workers instead
       --graphql                                     enables graphql endpoint (disabled by default)
       --grpc                                        Enable GRPC server
       --grpc.addr string                            GRPC server listening interface (default "localhost")
@@ -4412,7 +4412,7 @@ Flags:
                                            
       --netrestrict string                 Restricts network communication to the given IP networks (CIDR masks)
       --nodiscover                         Disables the peer discovery mechanism (manual peer addition)
-      --p2p.protocol uint                  Version of eth p2p protocol (default [69,70,71])
+      --p2p.protocol uint                  Version of eth p2p protocol (default 69)
       --port int                           Network listening port (default 30303)
       --pprof                              Enable the pprof HTTP server
       --pprof.addr string                  pprof HTTP server listening interface (default "127.0.0.1")

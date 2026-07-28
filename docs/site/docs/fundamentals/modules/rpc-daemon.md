@@ -48,7 +48,7 @@ Usage:
 
 Flags:
       --datadir string                              path to Erigon working directory
-      --db.read.concurrency int                     Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot rather than error. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. A value below the parallel-exec worker count is raised to it (each worker holds a long-lived read tx, so a lower ceiling would deadlock); to actually reduce read concurrency, lower --exec.workers instead
+      --db.read.concurrency int                     Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. A value below the parallel-exec worker count is raised to it (each worker holds a long-lived read tx, so a lower ceiling would deadlock); to actually reduce read concurrency, lower --exec.workers instead
       --graphql                                     enables graphql endpoint (disabled by default)
       --grpc                                        Enable GRPC server
       --grpc.addr string                            GRPC server listening interface (default "localhost")
