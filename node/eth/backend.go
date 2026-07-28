@@ -99,6 +99,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node"
 	caplincomp "github.com/erigontech/erigon/node/components/caplin"
+	forkcomp "github.com/erigontech/erigon/node/components/fork"
 	manifestexchange "github.com/erigontech/erigon/node/components/manifest_exchange"
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	"github.com/erigontech/erigon/node/components/snapshotauth"
@@ -2256,136 +2257,47 @@ func (s *Ethereum) SetHead(ctx context.Context, targetBlock uint64) error {
 	return s.execModule.SetHead(ctx, targetBlock)
 }
 
-// SetFork transitions the node onto a different chain. Validates the
-// target, unwinds to the CutBlock, then walks the registered captor
-// list: Stops the Restartables (Caplin → sentry → storage), swaps
-// chain.Config on the Reconfigurables (txpool, downloader,
-// manifest_exchange) and Restartables, then Starts the Restartables
-// back in the reverse order (storage → sentry → Caplin).
-//
-// Returns RestartRequired=false on success — the process stays alive
-// on the new chain. If any component's Start fails on the new config
-// the return carries RestartRequired=true so the operator restarts
-// erigon with --chain=<target> to complete the transition manually.
+// SetFork transitions the node onto a different chain. Thin wrapper
+// over fork.Controller.Transition — Ethereum satisfies fork.Runtime
+// (below) so the same transition logic drives both the debug_setFork
+// RPC and any offline caller (e.g. the integration binary).
 func (s *Ethereum) SetFork(ctx context.Context, targetChainName string) (*rpchelper.SetForkResult, error) {
-	if targetChainName == "" {
-		return nil, errors.New("targetChainName is required")
-	}
-	currentName := s.chainConfig.ChainName
-	if targetChainName == currentName {
-		return nil, fmt.Errorf("target chain %q is the currently-loaded chain; no transition needed", targetChainName)
-	}
-
-	targetSpec, err := chainspec.ChainSpecByNameOrForkDatadir(targetChainName, s.config.Dirs.DataDir)
-	if err != nil {
-		return nil, fmt.Errorf("looking up target chain %q: %w", targetChainName, err)
-	}
-	target := targetSpec.Config
-	if target == nil {
-		return nil, fmt.Errorf("target chain %q has no config", targetChainName)
-	}
-
-	var cutBlock uint64
-	switch {
-	case target.Parent == currentName:
-		cutBlock = target.CutBlock
-	case s.chainConfig.Parent == targetChainName:
-		cutBlock = s.chainConfig.CutBlock
-	default:
-		return nil, fmt.Errorf(
-			"target chain %q has no direct parent relationship with current %q "+
-				"(target.Parent=%q, current.Parent=%q)",
-			targetChainName, currentName, target.Parent, s.chainConfig.Parent,
-		)
-	}
-	if cutBlock == 0 {
-		return nil, fmt.Errorf(
-			"transition target %q resolves to CutBlock=0; refusing (root-chain transitions not supported)",
-			targetChainName,
-		)
-	}
-
-	unwoundFrom, err := readCurrentBlockNumber(ctx, s.chainDB)
-	if err != nil {
-		return nil, fmt.Errorf("reading current head: %w", err)
-	}
-	if unwoundFrom < cutBlock {
-		return nil, fmt.Errorf(
-			"current head %d is already at or below CutBlock %d for target %q",
-			unwoundFrom, cutBlock, targetChainName,
-		)
-	}
-
-	if err := s.SetHead(ctx, cutBlock); err != nil {
-		return nil, fmt.Errorf("SetHead(%d): %w", cutBlock, err)
-	}
-
-	restartRequired, swapErr := s.applyForkChainConfigSwap(ctx, target)
-	message := ""
-	if swapErr != nil {
-		message = fmt.Sprintf("Unwound OK but chain-config swap failed: %v. Restart erigon with --chain=%s to complete the transition.", swapErr, targetChainName)
-		s.logger.Error("[SetFork] chain-config swap failed; restart required", "err", swapErr)
-	} else if restartRequired {
-		message = fmt.Sprintf("Unwound OK and partial swap completed. Restart erigon with --chain=%s to complete the transition.", targetChainName)
-	}
-
-	return &rpchelper.SetForkResult{
-		FromChain:       currentName,
-		ToChain:         targetChainName,
-		UnwoundFrom:     unwoundFrom,
-		UnwoundTo:       cutBlock,
-		RestartRequired: restartRequired || swapErr != nil,
-		Message:         message,
-	}, nil
+	return forkcomp.New(s).Transition(ctx, targetChainName)
 }
 
-// applyForkChainConfigSwap drives every ChainConfigRestartable /
-// ChainConfigReconfigurable captor through the target chain.Config.
-// Returns restartRequired=true if any captor's post-swap Start fails
-// (leaving the process in a partially-swapped state; the operator
-// completes the transition via a full erigon restart on the target
-// chain).
-func (s *Ethereum) applyForkChainConfigSwap(ctx context.Context, target *chain.Config) (restartRequired bool, err error) {
-	restartables := s.chainConfigRestartables()
-	reconfigurables := s.chainConfigReconfigurables()
+// --- fork.Runtime implementation --------------------------------------
+// ChainDB(), ChainConfig(), and DataDir() are declared elsewhere on
+// *Ethereum for other consumers; the fork.Runtime interface reuses
+// them via CurrentChainConfig() below.
 
-	for name, r := range restartables {
-		if stopErr := r.Stop(); stopErr != nil {
-			return true, fmt.Errorf("stop %s: %w", name, stopErr)
-		}
-	}
+// CurrentChainConfig satisfies fork.Runtime.
+func (s *Ethereum) CurrentChainConfig() *chain.Config { return s.chainConfig }
 
-	for name, r := range reconfigurables {
-		if rcErr := r.Reconfigure(ctx, target); rcErr != nil {
-			return true, fmt.Errorf("reconfigure %s: %w", name, rcErr)
-		}
-	}
+// Restartables satisfies fork.Runtime.
+func (s *Ethereum) Restartables() map[string]rpchelper.ChainConfigRestartable {
+	return s.chainConfigRestartables()
+}
 
-	for _, r := range restartables {
-		r.SetChainConfig(target)
-	}
+// Reconfigurables satisfies fork.Runtime.
+func (s *Ethereum) Reconfigurables() map[string]rpchelper.ChainConfigReconfigurable {
+	return s.chainConfigReconfigurables()
+}
 
-	s.chainConfig = target
+// SwapChainConfig satisfies fork.Runtime.
+func (s *Ethereum) SwapChainConfig(target *chain.Config) { s.chainConfig = target }
 
+// ApplyPostSwapHooks satisfies fork.Runtime — runtime-specific fixups
+// the captor interfaces don't cover: Downloader chain-identity re-
+// derivation, manifest_exchange filter re-installation, Caplin launch
+// closure rebind.
+func (s *Ethereum) ApplyPostSwapHooks(target *chain.Config) {
 	s.applyForkDownloaderIdentity(target)
 	s.applyForkManifestExchangeFilters(target)
 	s.applyForkCaplinLaunchRebind(target)
-
-	var startErrs []string
-	for _, name := range []string{"storage", "sentry", "caplin"} {
-		r, ok := restartables[name]
-		if !ok {
-			continue
-		}
-		if startErr := r.Start(ctx); startErr != nil {
-			startErrs = append(startErrs, fmt.Sprintf("start %s: %v", name, startErr))
-		}
-	}
-	if len(startErrs) > 0 {
-		return true, fmt.Errorf("post-swap start failures: %s", strings.Join(startErrs, "; "))
-	}
-	return false, nil
 }
+
+// Logger satisfies fork.Runtime.
+func (s *Ethereum) Logger() log.Logger { return s.logger }
 
 // chainConfigRestartables returns the running captors that implement
 // ChainConfigRestartable, keyed by short name so Start ordering can be
