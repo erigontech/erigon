@@ -220,6 +220,12 @@ type Ethereum struct {
 	// transitions; nil for setups without lifecycle-driven storage.
 	manifestExchange *manifestexchange.Provider
 
+	// caplinLaunchBuilder produces a caplincomp.LaunchFn bound to a
+	// target chain.Config. Populated at backend construction so
+	// SetFork can rebind Caplin's launch closure across a chain-
+	// config swap. Nil when Caplin isn't wired in this deployment.
+	caplinLaunchBuilder func(*chain.Config) caplincomp.LaunchFn
+
 	blockSnapshots *freezeblocks.RoSnapshots
 	blockReader    services.FullBlockReader
 	blockWriter    *blockio.BlockWriter
@@ -1870,11 +1876,21 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		} else {
 			logger.Warn("[caplin-component] storage bus is nil; CL restart on user-initiated SetHead will NOT fire")
 		}
-		// LaunchFn closes over RunCaplinService's args so the service
-		// can spawn fresh Caplin goroutines without re-collecting them.
-		launchCaplin := func(launchCtx context.Context) error {
-			return caplin1.RunCaplinService(launchCtx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter, backend.components.Storage.BlockHeadersReady, localBlockTipFn)
+		// caplinLaunchBuilder captures the non-chain-config-derived
+		// inputs Caplin needs (execution engine, dirs, eth1 accessor,
+		// downloader, credentials, semaphore, BlockHeadersReady,
+		// tip-block fn) so SetFork can produce a fresh launch closure
+		// against a target chain.Config without re-collecting them.
+		// Same-family transitions (fork children inheriting parent's
+		// CaplinConfig) produce a functionally-equivalent closure; the
+		// hook is where cross-family recomputation of CaplinConfig
+		// would live.
+		backend.caplinLaunchBuilder = func(_ *chain.Config) caplincomp.LaunchFn {
+			return func(launchCtx context.Context) error {
+				return caplin1.RunCaplinService(launchCtx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter, backend.components.Storage.BlockHeadersReady, localBlockTipFn)
+			}
 		}
+		launchCaplin := backend.caplinLaunchBuilder(chainConfig)
 		backend.caplinService = caplincomp.NewCaplinService(ctx, dirs, launchCaplin, ctxCancel, logger)
 		caplinProvider.SetRestarter(backend.caplinService)
 		if err := backend.caplinService.Start(ctx); err != nil {
@@ -2353,6 +2369,7 @@ func (s *Ethereum) applyForkChainConfigSwap(ctx context.Context, target *chain.C
 
 	s.applyForkDownloaderIdentity(target)
 	s.applyForkManifestExchangeFilters(target)
+	s.applyForkCaplinLaunchRebind(target)
 
 	var startErrs []string
 	for _, name := range []string{"storage", "sentry", "caplin"} {
@@ -2420,6 +2437,20 @@ func (s *Ethereum) applyForkDownloaderIdentity(target *chain.Config) {
 	if target.Parent != "" && target.CutBlock > 0 {
 		dl.SetForkCutBlock(target.CutBlock, nil)
 	}
+}
+
+// applyForkCaplinLaunchRebind produces a fresh Caplin LaunchFn bound
+// to the target chain.Config and hands it to caplinService via
+// SetLaunch, so the next Start after the transition spawns Caplin
+// with target-bound arguments. Same-family transitions (fork children
+// inheriting parent's CaplinConfig) produce a functionally-equivalent
+// closure; the hook exists so cross-family transitions have a
+// well-defined seam.
+func (s *Ethereum) applyForkCaplinLaunchRebind(target *chain.Config) {
+	if s.caplinService == nil || s.caplinLaunchBuilder == nil {
+		return
+	}
+	s.caplinService.SetLaunch(s.caplinLaunchBuilder(target))
 }
 
 // applyForkManifestExchangeFilters re-installs the consumer-side
