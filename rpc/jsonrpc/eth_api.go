@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -167,6 +168,15 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 	var (
 		blocksLRUSize = 128 // ~32Mb
 	)
+	// A zero evmCallTimeout means "abort immediately" (context.WithTimeout with a
+	// 0 deadline), not "no limit" — it silently breaks every RPC that re-executes
+	// blocks (eth_getLogs receipt regeneration, eth_call, traces, simulation) with
+	// "execution aborted (timeout = 0s)". Embedders that build the http config
+	// without setting EvmCallTimeout (the zero value) would otherwise hit this, so
+	// treat non-positive as the default. See rpccfg.DefaultEvmCallTimeout.
+	if evmCallTimeout <= 0 {
+		evmCallTimeout = rpccfg.DefaultEvmCallTimeout
+	}
 	// if RPCDaemon deployed as independent process: increase cache sizes
 	if !singleNodeMode {
 		blocksLRUSize *= 5
@@ -217,6 +227,15 @@ func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chai
 		return nil, nil, err
 	}
 	if cc != nil {
+		// Config.Precompiles is json:"-" and is dropped by ReadChainConfig. Re-attach
+		// the node's registered runtime precompile set so this RPC config (used by the
+		// receipt / eth_getLogs re-execution EVM) matches the execution path — else a
+		// tx that calls a custom precompile regenerates to a divergent receipt.
+		if cc.Precompiles == nil {
+			if cp := chain.RegisteredPrecompiles(cc.ChainID); cp != nil {
+				cc.Precompiles = cp
+			}
+		}
 		api._genesis.Store(genesisBlock)
 		api._chainConfig.Store(cc)
 	}

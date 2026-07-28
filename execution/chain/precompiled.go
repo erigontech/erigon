@@ -16,7 +16,13 @@
 
 package chain
 
-import "github.com/erigontech/erigon/execution/types/accounts"
+import (
+	"sync"
+
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/execution/types/accounts"
+)
 
 // PrecompiledContract is the basic interface for native Go contracts. The implementation
 // requires a deterministic gas count based on the input size of the Run method of the
@@ -115,4 +121,39 @@ func (cp *ChainPrecompiles) Contracts(r *Rules) PrecompiledContracts {
 // returned slice is shared and must not be mutated.
 func (cp *ChainPrecompiles) Addresses(r *Rules) []accounts.Address {
 	return cp.addrs[r.PrecompileForkId()]
+}
+
+// Config.Precompiles is json:"-" — it is attached at chain initialization and lost
+// whenever the ChainConfig is re-materialised from the DB (ReadChainConfig). That is
+// fine for the execution path (which re-attaches at startup), but the RPC layer
+// re-reads the config independently for receipt/eth_getLogs re-execution, and so its
+// EVM would silently lack any custom precompiles — a tx that calls one then
+// regenerates to a DIFFERENT receipt than consensus produced.
+//
+// The registry below lets a node register its runtime precompile set by chain id at
+// startup so those re-materialised configs can re-attach it (see
+// ChainConfig.attachRegisteredPrecompiles). Register once, before serving RPC.
+var (
+	registeredPrecompilesMu sync.RWMutex
+	registeredPrecompiles   = map[string]*ChainPrecompiles{}
+)
+
+// RegisterPrecompiles records a chain's runtime precompile set by chain id.
+func RegisterPrecompiles(chainID *uint256.Int, cp *ChainPrecompiles) {
+	if chainID == nil || cp == nil {
+		return
+	}
+	registeredPrecompilesMu.Lock()
+	registeredPrecompiles[chainID.Hex()] = cp
+	registeredPrecompilesMu.Unlock()
+}
+
+// RegisteredPrecompiles returns the precompile set registered for chainID, or nil.
+func RegisteredPrecompiles(chainID *uint256.Int) *ChainPrecompiles {
+	if chainID == nil {
+		return nil
+	}
+	registeredPrecompilesMu.RLock()
+	defer registeredPrecompilesMu.RUnlock()
+	return registeredPrecompiles[chainID.Hex()]
 }
