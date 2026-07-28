@@ -82,6 +82,12 @@ type commitmentCalculator struct {
 	// execLoop or apply loop. Only this goroutine reads/writes it.
 	updates *commitment.Updates
 
+	// balUpdates is a reusable buffer for the per-block BAL fold. Each fold
+	// fully consumes it (FlushToUpdates → root) on this single goroutine, so
+	// it is Reset and reused across blocks instead of freshly allocated —
+	// avoiding a new prefix-trie arena (a 16k-node slab) per block.
+	balUpdates *commitment.Updates
+
 	// state accumulates account/storage values across TX writes.
 	// At block boundary, the accumulated state is flushed to updates.
 	// Values are lazy-loaded from the domain on first touch via asOfReader.
@@ -260,6 +266,10 @@ func (cc *commitmentCalculator) Start(ctx context.Context) {
 func (cc *commitmentCalculator) Stop() {
 	close(cc.done)
 	cc.wg.Wait()
+	if cc.balUpdates != nil {
+		cc.balUpdates.Close()
+		cc.balUpdates = nil
+	}
 	if cc.roTx != nil {
 		cc.roTx.Rollback()
 	}
@@ -607,13 +617,21 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	if err := balState.LazyLoadErr(); err != nil {
 		return nil, fmt.Errorf("lazy-load: %w", err)
 	}
-	balUpdates := cc.updates.NewEmpty()
-	// Match the calculator's constructor: only ModeDirect needs upgrading to
-	// ModeUpdate to carry compute-ahead's BAL-sourced values; ModeParallel already
-	// carries them (and ParallelPatriciaHashed rejects any other mode).
-	if balUpdates.Mode() != commitment.ModeParallel {
-		balUpdates.SetMode(commitment.ModeUpdate)
+	// Reuse the fold buffer across blocks: Reset clears its contents while
+	// retaining the prefix-trie arena's first slab, so we skip a fresh
+	// NewEmpty (and its ~16k-node slab allocation) every block.
+	if cc.balUpdates == nil {
+		cc.balUpdates = cc.updates.NewEmpty()
+		// Match the calculator's constructor: only ModeDirect needs upgrading to
+		// ModeUpdate to carry compute-ahead's BAL-sourced values; ModeParallel already
+		// carries them (and ParallelPatriciaHashed rejects any other mode).
+		if cc.balUpdates.Mode() != commitment.ModeParallel {
+			cc.balUpdates.SetMode(commitment.ModeUpdate)
+		}
+	} else {
+		cc.balUpdates.Reset()
 	}
+	balUpdates := cc.balUpdates
 	balState.FlushToUpdates(balUpdates)
 	return cc.computeRootFromUpdates(ctx, t, balUpdates, reader)
 }
