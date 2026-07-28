@@ -181,3 +181,101 @@ func TestApplyChainConfigSwap_StartFailureSurfacesRestartRequired(t *testing.T) 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "storage")
 }
+
+// TestApplyChainConfigSwap_ReconfigureFailureAbortsSwap: a
+// Reconfigurable that errors during phase 2 must abort the swap
+// before SwapChainConfig fires. Restartables that were Stopped in
+// phase 1 stay stopped (partial state — caller sees
+// RestartRequired=true and does a process restart); no captor gets
+// SetChainConfig, no post-swap hook runs, and no Start fires.
+func TestApplyChainConfigSwap_ReconfigureFailureAbortsSwap(t *testing.T) {
+	newCfg := &chain.Config{ChainName: "hoodi-fork-42", ChainID: uint256.NewInt(9999999)}
+	stor := &mockRestartable{}
+	failingReconfig := &mockReconfigurable{rcErr: errors.New("kaboom")}
+	rt := &fakeRuntime{
+		current:      &chain.Config{ChainName: "hoodi", ChainID: uint256.NewInt(560048)},
+		logger:       log.Root(),
+		restartables: map[string]rpchelper.ChainConfigRestartable{"storage": stor},
+		reconfigs:    map[string]rpchelper.ChainConfigReconfigurable{"txpool": failingReconfig},
+	}
+	c := New(rt)
+
+	restartRequired, err := c.applyChainConfigSwap(context.Background(), newCfg)
+	require.True(t, restartRequired)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "txpool")
+
+	require.Equal(t, 1, stor.stopped, "Restartable should already be Stopped when reconfigure fails")
+	require.Nil(t, stor.setCfg, "no SetChainConfig should fire after reconfigure failure")
+	require.Equal(t, 0, stor.started, "no Start should fire after reconfigure failure")
+	require.Nil(t, rt.swapped, "SwapChainConfig must not fire when reconfigure fails")
+	require.Equal(t, 0, rt.hooksRan, "ApplyPostSwapHooks must not fire when reconfigure fails")
+}
+
+// TestApplyChainConfigSwap_StopFailureAbortsBeforeSwap: a Restartable
+// whose Stop errors must abort before the chain.Config pointer moves.
+// Reconfigurables must not be touched, SwapChainConfig must not fire,
+// no post-swap hooks. Partial-Stop state across other Restartables
+// is caller-visible via RestartRequired=true.
+func TestApplyChainConfigSwap_StopFailureAbortsBeforeSwap(t *testing.T) {
+	newCfg := &chain.Config{ChainName: "hoodi-fork-42", ChainID: uint256.NewInt(9999999)}
+	failing := &mockRestartable{stopErr: errors.New("stop-boom")}
+	txp := &mockReconfigurable{}
+	rt := &fakeRuntime{
+		current:      &chain.Config{ChainName: "hoodi", ChainID: uint256.NewInt(560048)},
+		logger:       log.Root(),
+		restartables: map[string]rpchelper.ChainConfigRestartable{"storage": failing},
+		reconfigs:    map[string]rpchelper.ChainConfigReconfigurable{"txpool": txp},
+	}
+	c := New(rt)
+
+	restartRequired, err := c.applyChainConfigSwap(context.Background(), newCfg)
+	require.True(t, restartRequired)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "storage")
+
+	require.Equal(t, 0, txp.rcCount, "Reconfigurables must not be touched when a Stop errors")
+	require.Nil(t, rt.swapped, "SwapChainConfig must not fire when Stop errors")
+	require.Equal(t, 0, rt.hooksRan, "ApplyPostSwapHooks must not fire when Stop errors")
+	require.Equal(t, 0, failing.started, "no Start attempted on a Stop-failure abort")
+}
+
+// TestApplyChainConfigSwap_SequenceRobustness: three back-to-back
+// successful swaps against the same Runtime + captor set. Each
+// captor's counters advance monotonically; the runtime's chain.Config
+// tracks the latest target. Catches state leaks between Transitions
+// (e.g. a captor left in a stopped state after the first cycle would
+// have started != 3 after three cycles).
+func TestApplyChainConfigSwap_SequenceRobustness(t *testing.T) {
+	stor, sen, cap_ := &mockRestartable{}, &mockRestartable{}, &mockRestartable{}
+	txp := &mockReconfigurable{}
+	rt := &fakeRuntime{
+		current: &chain.Config{ChainName: "hoodi", ChainID: uint256.NewInt(560048)},
+		logger:  log.Root(),
+		restartables: map[string]rpchelper.ChainConfigRestartable{
+			"storage": stor, "sentry": sen, "caplin": cap_,
+		},
+		reconfigs: map[string]rpchelper.ChainConfigReconfigurable{"txpool": txp},
+	}
+	c := New(rt)
+
+	targets := []*chain.Config{
+		{ChainName: "a", ChainID: uint256.NewInt(1)},
+		{ChainName: "b", ChainID: uint256.NewInt(2)},
+		{ChainName: "c", ChainID: uint256.NewInt(3)},
+	}
+	for i, tgt := range targets {
+		restartRequired, err := c.applyChainConfigSwap(context.Background(), tgt)
+		require.NoError(t, err, "iter %d", i)
+		require.False(t, restartRequired, "iter %d", i)
+	}
+
+	for _, m := range []*mockRestartable{stor, sen, cap_} {
+		require.Equal(t, 3, m.stopped, "each Restartable must be Stopped exactly per iter")
+		require.Equal(t, 3, m.started, "each Restartable must be Started exactly per iter")
+		require.Same(t, targets[2], m.setCfg, "last SetChainConfig wins")
+	}
+	require.Equal(t, 3, txp.rcCount)
+	require.Same(t, targets[2], rt.swapped)
+	require.Equal(t, 3, rt.hooksRan)
+}
