@@ -1425,7 +1425,7 @@ func opDupN(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		return pc, nil, &ErrStackUnderflow{stackLen: scope.Stack.len(), required: n}
 	}
 
-	// The n‘th stack item is duplicated at the top of the stack.
+	// The nth stack item is duplicated at the top of the stack.
 	scope.Stack.dup(n - 1)
 	return pc, nil, nil
 }

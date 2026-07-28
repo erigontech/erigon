@@ -157,7 +157,8 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	// 		}
 	// 	}
 	// 	// pos := 1 + 8 + idx.bytesPerRec*int(idx.keyCount)
-	// 		// panic(err)
+	// 	// if err := mmap.MadviseWillNeed(idx.data[:pos]); err != nil {
+	// 	// 	panic(err)
 	// 	// }
 	// }
 
