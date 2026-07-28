@@ -412,14 +412,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		trace   = dbg.TraceInstructions && evm.intraBlockState.Trace()
 	)
 
-	// Make sure the readOnly is only set if we aren't in readOnly yet.
-	// This makes also sure that the readOnly flag isn't removed for child calls.
-	restoreReadonly := readOnly && !evm.readOnly
-	if restoreReadonly {
-		evm.readOnly = true
-	}
-	// Increment the call depth which is restricted to 1024
-	evm.depth++
+	exitFrame := evm.enterFrame(readOnly)
 	defer func() {
 		// EIP-8037: snapshot the spilled portion and derive the frame's net
 		// state-gas usage from the reservoir delta before callContext.put()
@@ -431,10 +424,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		gasUsed.StateSpill = callContext.stateGasSpill
 		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
 		callContext.put()
-		if restoreReadonly {
-			evm.readOnly = false
-		}
-		evm.depth--
+		exitFrame()
 	}()
 
 	// Registered after the cleanup defer so LIFO runs it first: the tracer needs
