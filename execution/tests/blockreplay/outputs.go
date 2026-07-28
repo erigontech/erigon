@@ -119,8 +119,9 @@ func (want *Outputs) Diff(got *Outputs) []string {
 			diffs = append(diffs, fmt.Sprintf("account %x: missing (want present)", a))
 			continue
 		}
-		if g.Nonce != w.Nonce || g.Balance != w.Balance || g.CodeHash != w.CodeHash {
-			diffs = append(diffs, fmt.Sprintf("account %x: got {nonce=%d bal=%x} want {nonce=%d bal=%x}", a, g.Nonce, g.Balance, w.Nonce, w.Balance))
+		if g.Nonce != w.Nonce || g.Balance != w.Balance || g.CodeHash != w.CodeHash || g.Incarnation != w.Incarnation {
+			diffs = append(diffs, fmt.Sprintf("account %x: got {nonce=%d bal=%x codehash=%x inc=%d} want {nonce=%d bal=%x codehash=%x inc=%d}",
+				a, g.Nonce, g.Balance, g.CodeHash, g.Incarnation, w.Nonce, w.Balance, w.CodeHash, w.Incarnation))
 		}
 	}
 	for a := range want.Deleted {

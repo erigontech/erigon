@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -32,6 +33,9 @@ func Capture(
 	blockNum uint64,
 	logger log.Logger,
 ) (*Fixture, error) {
+	if blockNum == 0 {
+		return nil, fmt.Errorf("cannot capture genesis block (0): it has no parent")
+	}
 	hash, ok, err := blockReader.CanonicalHash(ctx, tx, blockNum)
 	if err != nil {
 		return nil, fmt.Errorf("canonical hash %d: %w", blockNum, err)
@@ -101,6 +105,12 @@ func Capture(
 	}
 	if fx.ParentHeaderRLP, err = rlpEncodeHeader(parent); err != nil {
 		return nil, err
+	}
+	// Persist the block access list sidecar so a BAL fixture replays through the
+	// production BAL-driven scheduling path, not the OCC/no-BAL fallback. Empty
+	// pre-Amsterdam (no sidecar in the DB).
+	if fx.BALBytes, err = rawdb.ReadBlockAccessListBytes(tx, hash, blockNum); err != nil {
+		return nil, fmt.Errorf("read block access list %d: %w", blockNum, err)
 	}
 	captureAncestors(ctx, tx, blockReader, block.Header(), fx)
 	return fx, nil

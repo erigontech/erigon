@@ -445,9 +445,10 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 // unwindOnExecError performs the bad-block unwind at the stage boundary after
 // parallel exec reports an invalid block. A non-initial-cycle wrong trie root
 // binary-searches from the implicated block (out.failedBlock/Hash); any other
-// invalid block unwinds to the last executed header minus one. Under
-// badBlockHalt (in-memory fork validation) or a non-invalid error it unwinds
-// nothing and returns execErr unchanged for the caller to propagate.
+// invalid block unwinds to the recorded failed block minus one and marks that
+// block bad. Under badBlockHalt (in-memory fork validation) or a non-invalid
+// error it unwinds nothing and returns execErr unchanged for the caller to
+// propagate.
 func unwindOnExecError(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
 	if !errors.Is(execErr, rules.ErrInvalidBlock) || cfg.badBlockHalt || u == nil {
 		return execErr
@@ -457,7 +458,16 @@ func unwindOnExecError(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s 
 		return handleIncorrectRootHashError(out.failedBlock, out.failedHash, out.applyTx, cfg, s, logger, u)
 	}
 
-	if out.lastHeader != nil {
+	// Unwind the block that actually failed, not the last good one. out.lastHeader
+	// points at the last successfully validated block, so unwinding from it would
+	// unwind one block too far and mark the valid predecessor bad — and would
+	// schedule no unwind at all when the first block in the batch fails.
+	if out.failedBlock > 0 {
+		if err := u.UnwindTo(out.failedBlock-1, BadBlock(out.failedHash, execErr), out.applyTx); err != nil {
+			return err
+		}
+	} else if out.lastHeader != nil {
+		// Fallback for failure paths that don't record the failed block.
 		unwindTo := uint64(0)
 		if out.lastHeader.Number.Uint64() > 0 {
 			unwindTo = out.lastHeader.Number.Uint64() - 1

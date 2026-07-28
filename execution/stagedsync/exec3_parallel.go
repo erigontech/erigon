@@ -279,18 +279,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 			"isForkValidation", pe.isForkValidation, "isApplyingBlocks", pe.isApplyingBlocks)
 	}
 
-	// restoreTxNum must run before pe.run() so that doms.SetTxNum() completes
-	// before any goroutine reads txNum (via AsGetter/GetLatest). With an injected
-	// block source (ephemeral replay) the caller owns range resolution and there
-	// is no TxNums index to consult, so the passed-in inputTxNum is used as-is.
+	// The caller resolves the exec range (SeekCommitment + restoreTxNum) and passes
+	// the already-resolved inputTxNum in, for both the DB-backed and the injected-
+	// source paths. It is used as-is here — re-resolving would repeat the TxNums-
+	// index lookup on every run and contradict the stage-agnostic split.
 	restoredTxNum := inputTxNum
-	if pe.blockSrc == nil {
-		var err error
-		restoredTxNum, _, _, _, err = restoreTxNum(ctx, &pe.cfg, rwTx, inputTxNum, maxBlockNum)
-		if err != nil {
-			return nil, rwTx, err
-		}
-	}
 
 	// Set accumulator before pe.run() so execLoop sees it without a race.
 	pe.accumulator = accumulator

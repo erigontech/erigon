@@ -20,13 +20,21 @@ import (
 // data is read from or flushed to it — the whole witness lives in the mem batch
 // seam. The returned SharedDomains serves the block's reads as "latest"; the
 // caller runs the parallel executor against it and must never Flush.
-func NewWitnessDomains(ctx context.Context, tx kv.TemporalRwTx, fx *Fixture, seedTxNum uint64, logger log.Logger) (*execctx.SharedDomains, error) {
+// WitnessWriteSet exposes the replay's post-Seal write-set so the ephemeral
+// verifier can require it to equal the reference output key set exactly.
+type WitnessWriteSet struct{ mem *witnessMemBatch }
+
+// Diff returns the key-set differences between the replay's write-set and want,
+// in both directions (extra and missing writes). Empty when they match exactly.
+func (ws *WitnessWriteSet) Diff(want *Outputs) []string { return ws.mem.writeSetDiff(want) }
+
+func NewWitnessDomains(ctx context.Context, tx kv.TemporalRwTx, fx *Fixture, seedTxNum uint64, logger log.Logger) (*execctx.SharedDomains, *WitnessWriteSet, error) {
 	metrics := &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}}
 	wmem := newWitnessMemBatch(tx.Debug().NewMemBatch(metrics))
 
 	doms, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithMemBatch(wmem))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	doms.SetTxNum(seedTxNum)
 
@@ -38,7 +46,7 @@ func NewWitnessDomains(ctx context.Context, tx kv.TemporalRwTx, fx *Fixture, see
 		orig := accounts.NewAccount()
 		if err := w.UpdateAccountData(accounts.InternAddress(common.Address(a)), &orig, d.toAccount()); err != nil {
 			doms.Close()
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	for a, code := range fx.Code {
@@ -49,7 +57,7 @@ func NewWitnessDomains(ctx context.Context, tx kv.TemporalRwTx, fx *Fixture, see
 		ch := accounts.InternCodeHash(common.BytesToHash(d.CodeHash[:]))
 		if err := w.UpdateAccountCode(accounts.InternAddress(common.Address(a)), d.Incarnation, ch, code); err != nil {
 			doms.Close()
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	for a, slots := range fx.Storage {
@@ -60,11 +68,11 @@ func NewWitnessDomains(ctx context.Context, tx kv.TemporalRwTx, fx *Fixture, see
 			val.SetBytes(v[:])
 			if err := w.WriteAccountStorage(addr, inc, accounts.InternKey(common.Hash(k)), uint256.Int{}, val); err != nil {
 				doms.Close()
-				return nil, err
+				return nil, nil, err
 			}
 		}
 	}
 
 	wmem.Seal()
-	return doms, nil
+	return doms, &WitnessWriteSet{mem: wmem}, nil
 }

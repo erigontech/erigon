@@ -2,6 +2,7 @@ package blockreplay
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/holiman/uint256"
 
@@ -35,6 +36,9 @@ func NewMemBlockReader(fx *Fixture) (dbservices.FullBlockReader, error) {
 	block, err := fx.Block()
 	if err != nil {
 		return nil, err
+	}
+	if block.NumberU64() == 0 {
+		return nil, fmt.Errorf("cannot replay genesis block (0): it has no parent")
 	}
 	parent, err := fx.ParentHeader()
 	if err != nil {

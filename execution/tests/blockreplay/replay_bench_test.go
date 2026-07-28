@@ -17,10 +17,10 @@ import (
 
 func loadFixture(tb testing.TB, block string) *blockreplay.Fixture {
 	tb.Helper()
+	// The fixture is committed to testdata/; a missing file is a packaging
+	// regression, so fail loudly rather than skip (skips also fall outside the
+	// repo's allowed test-skip cases).
 	p := filepath.Join("testdata", "block-"+block+".gob")
-	if _, err := os.Stat(p); err != nil {
-		tb.Skipf("fixture %s not present: %v", p, err)
-	}
 	fx, err := blockreplay.Load(p)
 	require.NoError(tb, err)
 	return fx

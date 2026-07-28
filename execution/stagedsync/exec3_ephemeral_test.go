@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -36,6 +37,7 @@ type singleBlockSource struct {
 	block  *types.Block
 	num    uint64
 	parent *types.Header
+	bal    types.BlockAccessList
 	done   bool
 }
 
@@ -44,7 +46,7 @@ func (s *singleBlockSource) next(ctx context.Context) (*types.Block, types.Block
 		return nil, nil, 0, false, nil
 	}
 	s.done = true
-	return s.block, nil, s.num, true, nil
+	return s.block, s.bal, s.num, true, nil
 }
 
 func (s *singleBlockSource) header(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error) {
@@ -77,6 +79,7 @@ type ephemeralReplay struct {
 	rng        execRange
 	block      *types.Block
 	parent     *types.Header
+	bal        types.BlockAccessList
 	num        uint64
 	inputTxNum uint64
 }
@@ -95,6 +98,8 @@ func setupEphemeralReplay(tb testing.TB, fx *blockreplay.Fixture) (*ephemeralRep
 	block, err := fx.Block()
 	require.NoError(tb, err)
 	parent, err := fx.ParentHeader()
+	require.NoError(tb, err)
+	bal, err := fx.BAL()
 	require.NoError(tb, err)
 
 	br, err := blockreplay.NewMemBlockReader(fx)
@@ -120,7 +125,7 @@ func setupEphemeralReplay(tb testing.TB, fx *blockreplay.Fixture) (*ephemeralRep
 	inputTxNum := ephemeralSeedTxNum + 1
 	r := &ephemeralReplay{
 		ctx: ctx, logger: logger, db: db, cfg: cfg,
-		block: block, parent: parent, num: num, inputTxNum: inputTxNum,
+		block: block, parent: parent, bal: bal, num: num, inputTxNum: inputTxNum,
 		rng: execRange{
 			blockNum:     num,
 			initialTxNum: ephemeralSeedTxNum,
@@ -133,33 +138,40 @@ func setupEphemeralReplay(tb testing.TB, fx *blockreplay.Fixture) (*ephemeralRep
 
 // newDomains builds a fresh witness-backed SharedDomains for one run. Not part
 // of the ExecV3 measurement.
-func (r *ephemeralReplay) newDomains(tb testing.TB, fx *blockreplay.Fixture) (kv.TemporalRwTx, *execctx.SharedDomains) {
+func (r *ephemeralReplay) newDomains(tb testing.TB, fx *blockreplay.Fixture) (kv.TemporalRwTx, *execctx.SharedDomains, *blockreplay.WitnessWriteSet) {
 	tb.Helper()
 	tx, err := r.db.BeginTemporalRw(r.ctx) //nolint:gocritic
 	require.NoError(tb, err)
-	doms, err := blockreplay.NewWitnessDomains(r.ctx, tx, fx, ephemeralSeedTxNum, r.logger)
+	doms, writeSet, err := blockreplay.NewWitnessDomains(r.ctx, tx, fx, ephemeralSeedTxNum, r.logger)
 	require.NoError(tb, err)
 	doms.SetTxNum(r.inputTxNum)
-	return tx, doms
+	return tx, doms, writeSet
 }
 
 // exec runs the block once through parallel ExecV3. This is the only thing a
 // benchmark should time. Receipts/gas/bloom are validated inside the apply loop.
 func (r *ephemeralReplay) exec(tx kv.TemporalRwTx, doms *execctx.SharedDomains) error {
-	src := &singleBlockSource{block: r.block, num: r.num, parent: r.parent}
+	src := &singleBlockSource{block: r.block, num: r.num, parent: r.parent, bal: r.bal}
 	_, err := ExecV3(r.ctx, r.cfg, doms, tx, stages.ModeApplyingBlocks, false, "replay", r.rng, src, r.logger)
 	return err
 }
 
 // verify checks the post-state (Flush -> outputs read via the domains) against
-// the authoritative canonical outputs — the data, not the trie root.
-func (r *ephemeralReplay) verify(tx kv.TemporalRwTx, doms *execctx.SharedDomains, expected *blockreplay.Outputs) error {
+// the authoritative canonical outputs — the data, not the trie root. It first
+// requires the replay's write-set to equal the reference key set exactly (an
+// extra or missing account/storage/code write fails), then compares values —
+// so a state-only extra write commitment-off replay can't otherwise see is
+// caught.
+func (r *ephemeralReplay) verify(tx kv.TemporalRwTx, doms *execctx.SharedDomains, writeSet *blockreplay.WitnessWriteSet, expected *blockreplay.Outputs) error {
+	if diffs := writeSet.Diff(expected); len(diffs) > 0 {
+		return fmt.Errorf("write-set mismatch (%d differences): %s", len(diffs), strings.Join(diffs, " | "))
+	}
 	got, err := blockreplay.CollectOutputs(state.NewReaderV3(doms.AsGetter(tx)), expected)
 	if err != nil {
 		return err
 	}
 	if diffs := expected.Diff(got); len(diffs) > 0 {
-		return fmt.Errorf("post-state mismatch (%d differences), first: %s", len(diffs), diffs[0])
+		return fmt.Errorf("post-state mismatch (%d differences): %s", len(diffs), strings.Join(diffs, " | "))
 	}
 	return nil
 }
@@ -182,16 +194,20 @@ func BenchmarkEphemeralParallelReplay(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		b.StopTimer()
-		tx, doms := r.newDomains(b, fx)
-		b.StartTimer()
+		func() {
+			b.StopTimer()
+			tx, doms, writeSet := r.newDomains(b, fx)
+			// Deferred so a require failure (which Goexits) still closes the tx
+			// before the test-DB cleanup, which otherwise blocks on the open tx.
+			defer tx.Rollback()
+			defer doms.Close()
+			b.StartTimer()
 
-		execErr := r.exec(tx, doms)
+			execErr := r.exec(tx, doms)
 
-		b.StopTimer()
-		require.NoError(b, execErr)
-		require.NoError(b, r.verify(tx, doms, expected))
-		doms.Close()
-		tx.Rollback()
+			b.StopTimer()
+			require.NoError(b, execErr)
+			require.NoError(b, r.verify(tx, doms, writeSet, expected))
+		}()
 	}
 }

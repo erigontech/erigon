@@ -20,6 +20,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -69,6 +70,16 @@ type Fixture struct {
 	Storage         map[[20]byte]map[[32]byte][32]byte
 	Code            map[[20]byte][]byte
 	Outputs         *Outputs // post-state the block wrote; nil until captured/backfilled
+	BALBytes        []byte   // encoded block access list sidecar; empty pre-Amsterdam
+}
+
+// BAL decodes the fixture's block access list sidecar, or nil when the block
+// carried none (pre-Amsterdam).
+func (f *Fixture) BAL() (types.BlockAccessList, error) {
+	if len(f.BALBytes) == 0 {
+		return nil, nil
+	}
+	return types.DecodeBlockAccessListBytes(f.BALBytes)
 }
 
 // Outputs is the post-state a block's execution produced: the accounts it

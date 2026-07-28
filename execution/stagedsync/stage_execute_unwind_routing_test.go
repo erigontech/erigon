@@ -63,7 +63,22 @@ func TestUnwindOnExecError(t *testing.T) {
 		require.Empty(t, u.calls)
 	})
 
-	t.Run("plain invalid block unwinds to lastHeader-1 and propagates", func(t *testing.T) {
+	t.Run("plain invalid block unwinds to failedBlock-1 and marks the failed block bad", func(t *testing.T) {
+		u := &recordingUnwinder{}
+		s := &StageState{}
+		failedHash := common.HexToHash("0xbad20")
+		// Block 20 failed; last good block is 19. Unwind must target failedBlock-1=19
+		// and mark block 20 bad — not lastHeader-1=18, which would unwind one block
+		// too far and mark the valid block 19 bad.
+		out := execV3Outcome{lastHeader: headerAt(19), failedBlock: 20, failedHash: failedHash}
+		got := unwindOnExecError(plainInvalid, out, ExecuteBlockCfg{}, s, u, logger)
+		require.ErrorIs(t, got, rules.ErrInvalidBlock)
+		require.Len(t, u.calls, 1)
+		require.Equal(t, uint64(19), u.calls[0].point)
+		require.True(t, u.calls[0].reason.IsBadBlock())
+	})
+
+	t.Run("plain invalid without a recorded failed block falls back to lastHeader-1", func(t *testing.T) {
 		u := &recordingUnwinder{}
 		s := &StageState{}
 		got := unwindOnExecError(plainInvalid, execV3Outcome{lastHeader: headerAt(20)}, ExecuteBlockCfg{}, s, u, logger)
@@ -73,7 +88,19 @@ func TestUnwindOnExecError(t *testing.T) {
 		require.True(t, u.calls[0].reason.IsBadBlock())
 	})
 
-	t.Run("plain invalid with nil lastHeader unwinds nothing but propagates", func(t *testing.T) {
+	t.Run("plain invalid recording the first block in the batch still unwinds", func(t *testing.T) {
+		u := &recordingUnwinder{}
+		s := &StageState{}
+		// The batch's first block fails: lastHeader is nil, but failedBlock is
+		// recorded, so an unwind must still be scheduled (to failedBlock-1).
+		out := execV3Outcome{failedBlock: 12, failedHash: common.HexToHash("0xbad12")}
+		got := unwindOnExecError(plainInvalid, out, ExecuteBlockCfg{}, s, u, logger)
+		require.ErrorIs(t, got, rules.ErrInvalidBlock)
+		require.Len(t, u.calls, 1)
+		require.Equal(t, uint64(11), u.calls[0].point)
+	})
+
+	t.Run("plain invalid with neither failedBlock nor lastHeader unwinds nothing but propagates", func(t *testing.T) {
 		u := &recordingUnwinder{}
 		s := &StageState{}
 		got := unwindOnExecError(plainInvalid, execV3Outcome{}, ExecuteBlockCfg{}, s, u, logger)
@@ -109,14 +136,17 @@ func TestUnwindOnExecError(t *testing.T) {
 		require.Empty(t, u.calls, "must not take the plain lastHeader-1 unwind branch")
 	})
 
-	t.Run("wrong root on initial cycle falls back to the plain lastHeader-1 unwind", func(t *testing.T) {
+	t.Run("wrong root on initial cycle falls through to the recorded-failure unwind", func(t *testing.T) {
 		u := &recordingUnwinder{}
 		s := &StageState{BlockNumber: 10}
 		s.CurrentSyncCycle.IsInitialCycle = true
-		out := execV3Outcome{lastHeader: headerAt(20), failedBlock: 5}
+		// Initial cycle skips the binary search and falls through to the plain
+		// unwind, which targets the recorded failed block (5) minus one, not
+		// lastHeader-1.
+		out := execV3Outcome{lastHeader: headerAt(20), failedBlock: 5, failedHash: common.HexToHash("0xbad5")}
 		got := unwindOnExecError(wrongRoot, out, ExecuteBlockCfg{}, s, u, logger)
 		require.ErrorIs(t, got, ErrWrongTrieRoot)
 		require.Len(t, u.calls, 1)
-		require.Equal(t, uint64(19), u.calls[0].point)
+		require.Equal(t, uint64(4), u.calls[0].point)
 	})
 }
