@@ -30,7 +30,11 @@
 //     execution-P2P layer
 //   - Start: kick off background work (stream loops, status updates, peer
 //     logging)
-//   - Close: shut down servers and background goroutines
+//   - Stop: tear down goroutines + Servers + sharedP2PServer, leaving the
+//     Provider in a stopped state safe for SetChainConfig + Start (the
+//     debug_setFork transition uses this to swap chain identity mid-process)
+//   - SetChainConfig: swap chain.Config; must be called between Stop and Start
+//   - Close: full teardown; equivalent to Stop plus UnbindBus for shutdown paths
 package sentry
 
 import (
@@ -54,6 +58,7 @@ import (
 	execp2p "github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/shards"
@@ -191,15 +196,31 @@ type Provider struct {
 	// Internal
 	cfg             Config
 	logger          log.Logger
-	started         bool           // guards Start from firing twice
-	eg              errgroup.Group // tracks background goroutines launched in Start
-	sharedP2PServer *p2p.Server    // shared p2p.Server backing all GrpcServers in local mode; Close() stops it
+	built           bool               // Initialize has run; Stop resets this
+	started         bool               // Start has launched goroutines; Stop resets this
+	eg              errgroup.Group     // tracks background goroutines launched in Start; reset on Stop
+	sharedP2PServer *p2p.Server        // shared p2p.Server backing all GrpcServers in local mode
+	innerCtx        context.Context    // per-Start ctx that all background goroutines listen to; child of cfg.SentryCtx
+	innerCancel     context.CancelFunc // cancels innerCtx; called by Stop
 
 	// Event-bus wiring. bus is nil until BindBus is called. busStateOnce
 	// guards lazy allocation so BindBus remains safe to call from multiple
 	// goroutines in setups that wire the component after Initialize.
 	busStateOnce sync.Once
 	bus          *busState
+}
+
+// activeCtx returns the ctx background goroutines should honour: p.innerCtx
+// once Start has run, else p.cfg.SentryCtx as the fallback for the
+// build-time bonding goroutine spawned by Initialize under the legacy
+// (non-Restartable) call path. The Restartable path always sets innerCtx
+// in Start before any goroutine is spawned, so this is stable across
+// Stop→SetChainConfig→Start cycles.
+func (p *Provider) activeCtx() context.Context {
+	if p.innerCtx != nil {
+		return p.innerCtx
+	}
+	return p.cfg.SentryCtx
 }
 
 // Configure stores the Provider's configuration. Call before Initialize.
@@ -221,9 +242,18 @@ func (p *Provider) Configure(cfg Config) {
 // non-nil.
 //
 // Initialize does NOT start background goroutines — call Start for that.
+//
+// Idempotent: after a successful call p.built is true and subsequent calls
+// return nil. Stop resets p.built so a fresh Initialize (or Start, which
+// calls Initialize on demand) re-runs the build against the current
+// chain.Config.
 func (p *Provider) Initialize(ctx context.Context) error {
+	if p.built {
+		return nil
+	}
 	if p.cfg.Disable {
 		p.buildStatusAndExecutionP2P()
+		p.built = true
 		return nil
 	}
 	if len(p.cfg.P2P.SentryAddr) > 0 {
@@ -236,6 +266,7 @@ func (p *Provider) Initialize(ctx context.Context) error {
 			p.Sentries = append(p.Sentries, sentryClient)
 		}
 		p.buildStatusAndExecutionP2P()
+		p.built = true
 		return nil
 	}
 
@@ -300,20 +331,8 @@ func (p *Provider) Initialize(ctx context.Context) error {
 		return err
 	}
 
-	// Force-bond known endpoints in the discv5 routing table once for the
-	// shared p2p.Server. Run under the component's errgroup so shutdown is
-	// component-driven. See docs/plans/20260507-discv5-handshake-on-connect.md.
-	if p.sharedP2PServer != nil {
-		bondCtx := p.cfg.SentryCtx
-		bondSrv := p.sharedP2PServer
-		bondLogger := p.logger
-		p.eg.Go(func() error {
-			sentry.ForceDiscv5Bonding(bondCtx, bondSrv, bondLogger)
-			return nil
-		})
-	}
-
 	p.buildStatusAndExecutionP2P()
+	p.built = true
 	return nil
 }
 
@@ -507,19 +526,40 @@ func (p *Provider) BuildMultiClient(deps MultiClientDeps) error {
 // Requires Initialize (and, for stream loops, BuildMultiClient) to have
 // completed successfully. Subsequent calls are a no-op.
 //
-// The ctx passed here should be Config.SentryCtx in practice — it's the
-// context the goroutines honour for shutdown. Caller context cancellation
-// doesn't need to match; the Provider follows the SentryCtx it was
-// configured with.
+// The ctx passed here parents p.innerCtx, which is what every background
+// goroutine honours for shutdown. Stop cancels innerCtx; a subsequent
+// Start creates a fresh one parented on the caller's ctx (still the
+// outer cfg.SentryCtx in practice). This is what makes Stop→SetChainConfig
+// →Start a supported lifecycle for the debug_setFork transition.
 func (p *Provider) Start(ctx context.Context) error {
 	if p.started {
 		return nil
 	}
+	if !p.built {
+		if err := p.Initialize(ctx); err != nil {
+			return err
+		}
+	}
+
+	p.innerCtx, p.innerCancel = context.WithCancel(ctx)
 	p.started = true
+
+	// Force-bond known endpoints in the discv5 routing table once for the
+	// shared p2p.Server. Runs under the component's errgroup so Stop drains
+	// it.
+	if p.sharedP2PServer != nil {
+		bondCtx := p.innerCtx
+		bondSrv := p.sharedP2PServer
+		bondLogger := p.logger
+		p.eg.Go(func() error {
+			sentry.ForceDiscv5Bonding(bondCtx, bondSrv, bondLogger)
+			return nil
+		})
+	}
 
 	// Stream loops — only meaningful if BuildMultiClient has run.
 	if p.Client != nil {
-		p.Client.StartStreamLoops(p.cfg.SentryCtx)
+		p.Client.StartStreamLoops(p.innerCtx)
 		// Small sleep to keep startup-log order readable; identical to the
 		// legacy backend.go behaviour.
 		time.Sleep(10 * time.Millisecond)
@@ -532,7 +572,7 @@ func (p *Provider) Start(ctx context.Context) error {
 		p.eg.Go(func() error {
 			defer unsubHeaders()
 			defer unsubSnapshots()
-			p.StatusDataProvider.Run(p.cfg.SentryCtx, headersCh, snapshotsCh)
+			p.StatusDataProvider.Run(p.innerCtx, headersCh, snapshotsCh)
 			return nil
 		})
 	}
@@ -540,11 +580,13 @@ func (p *Provider) Start(ctx context.Context) error {
 	// Execution-P2P layer goroutines. Each Run returns on context cancel;
 	// non-cancel errors are logged but don't propagate (matches legacy
 	// backend.go behaviour — a peer-tracker error shouldn't bring the
-	// whole node down).
-	if p.ExecutionP2PMessageListener != nil && p.ExecutionP2PPeerTracker != nil && p.ExecutionP2PPublisher != nil {
+	// whole node down). Skipped when no sentries are wired: the multiplexer
+	// has nothing to pump and the goroutines would nil-deref on the first
+	// peer-event call.
+	if len(p.Sentries) > 0 && p.ExecutionP2PMessageListener != nil && p.ExecutionP2PPeerTracker != nil && p.ExecutionP2PPublisher != nil {
 		p.eg.Go(func() error {
 			defer p.logger.Info("[p2p] MessageListener goroutine terminated")
-			err := p.ExecutionP2PMessageListener.Run(p.cfg.SentryCtx)
+			err := p.ExecutionP2PMessageListener.Run(p.innerCtx)
 			if err != nil && !errors.Is(err, context.Canceled) {
 				p.logger.Error("[p2p] MessageListener failed", "err", err)
 			}
@@ -552,7 +594,7 @@ func (p *Provider) Start(ctx context.Context) error {
 		})
 		p.eg.Go(func() error {
 			defer p.logger.Info("[p2p] PeerTracker goroutine terminated")
-			err := p.ExecutionP2PPeerTracker.Run(p.cfg.SentryCtx)
+			err := p.ExecutionP2PPeerTracker.Run(p.innerCtx)
 			if err != nil && !errors.Is(err, context.Canceled) {
 				p.logger.Error("[p2p] PeerTracker failed", "err", err)
 			}
@@ -560,7 +602,7 @@ func (p *Provider) Start(ctx context.Context) error {
 		})
 		p.eg.Go(func() error {
 			defer p.logger.Info("[p2p] publisher goroutine terminated")
-			err := p.ExecutionP2PPublisher.Run(p.cfg.SentryCtx)
+			err := p.ExecutionP2PPublisher.Run(p.innerCtx)
 			if err != nil && !errors.Is(err, context.Canceled) {
 				p.logger.Error("[p2p] publisher failed", "err", err)
 			}
@@ -612,28 +654,86 @@ func (p *Provider) runPeerCountLogger() error {
 	}
 }
 
-// Close shuts down the sentry stack:
-//   - Closes each local sentry GrpcServer (no-op in external mode).
-//   - Waits for background goroutines spawned by Start to finish.
-//
-// Background goroutines exit when Config.SentryCtx is cancelled; Close
-// blocks until they drain. Close does NOT cancel SentryCtx itself — the
-// caller owns context lifetime (typically by cancelling backend.sentryCtx
-// during node shutdown).
-//
-// Safe to call multiple times.
-func (p *Provider) Close() error {
-	_ = p.UnbindBus()
+// Stop is the ChainConfigRestartable teardown half. Cancels innerCtx so
+// every background goroutine exits, shuts down the local GrpcServers and
+// the shared p2p.Server, drains the errgroup, and resets the built +
+// derived-state fields so the next Start rebuilds from the current
+// chain.Config. Bus binding is preserved across the cycle — orchestrator
+// callers don't need to re-BindBus. Idempotent when already stopped.
+func (p *Provider) Stop() error {
+	if !p.started {
+		return nil
+	}
+	if p.innerCancel != nil {
+		p.innerCancel()
+	}
 	for _, srv := range p.Servers {
 		srv.Close()
 	}
-	// Stop the shared p2p.Server (if any). Each GrpcServer.Close above is a
-	// no-op for externally-owned Servers, so the listener and discovery
-	// goroutines would otherwise outlive Provider.Close until SentryCtx is
-	// cancelled.
 	if p.sharedP2PServer != nil {
 		p.sharedP2PServer.Stop()
-		p.sharedP2PServer = nil
 	}
-	return p.eg.Wait()
+	waitErr := p.eg.Wait()
+	if errors.Is(waitErr, context.Canceled) {
+		waitErr = nil
+	}
+
+	if p.bus != nil {
+		p.bus.mu.Lock()
+		bus := p.bus.bus
+		peers := p.bus.announcedPeers
+		p.bus.announcedPeers = make(map[string]struct{})
+		p.bus.mu.Unlock()
+		if bus != nil {
+			for peerID := range peers {
+				bus.Publish(flow.PeerDeparted{PeerID: peerID})
+			}
+		}
+	}
+
+	p.Servers = nil
+	p.Sentries = nil
+	p.Multiplexer = nil
+	p.StatusDataProvider = nil
+	p.ExecutionP2PMessageListener = nil
+	p.ExecutionP2PPeerTracker = nil
+	p.ExecutionP2PPublisher = nil
+	p.ExecutionP2PMessageSender = nil
+	p.ExecutionP2PPeerPenalizer = nil
+	p.Client = nil
+	p.sharedP2PServer = nil
+	p.eg = errgroup.Group{}
+	p.innerCtx = nil
+	p.innerCancel = nil
+	p.built = false
+	p.started = false
+
+	return waitErr
+}
+
+// SetChainConfig swaps the captured chain.Config. Must be called between
+// Stop and Start. Returns an error if the Provider is running.
+func (p *Provider) SetChainConfig(cfg *chain.Config) {
+	if p.started {
+		panic("sentry.Provider: SetChainConfig called while Provider is started")
+	}
+	p.cfg.ChainConfig = cfg
+}
+
+// Close shuts down the sentry stack for node exit: full teardown via Stop
+// plus UnbindBus. Safe to call from any state; safe to call multiple times.
+func (p *Provider) Close() error {
+	if p.started {
+		_ = p.Stop()
+	} else {
+		if p.sharedP2PServer != nil {
+			p.sharedP2PServer.Stop()
+			p.sharedP2PServer = nil
+		}
+		for _, srv := range p.Servers {
+			srv.Close()
+		}
+	}
+	_ = p.UnbindBus()
+	return nil
 }

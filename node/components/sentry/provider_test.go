@@ -22,13 +22,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
+
+var _ rpchelper.ChainConfigRestartable = (*Provider)(nil)
 
 // TestConfigureIsPure verifies Configure just stores the config without
 // touching the network, starting goroutines, or allocating anything that
@@ -189,4 +195,68 @@ func TestProviderClose_StopsSharedP2PServer(t *testing.T) {
 
 	_, err = net.DialTimeout("tcp", addr, 200*time.Millisecond)
 	require.Error(t, err, "Provider.Close must shut the shared p2p.Server's listener down")
+}
+
+// TestRestartCycle_SwapsChainConfig verifies the ChainConfigRestartable
+// contract: after Start, Stop tears down derived state; SetChainConfig
+// swaps the captured chain.Config; a second Start rebuilds the stack on
+// the new config. Uses Disable=true so no p2p listener is needed —
+// exercises the pure lifecycle plumbing (built/started/innerCtx reset,
+// StatusDataProvider rebuild).
+func TestRestartCycle_SwapsChainConfig(t *testing.T) {
+	cfg1 := &chain.Config{ChainID: uint256.NewInt(560048)}
+	cfg2 := &chain.Config{ChainID: uint256.NewInt(9999999)}
+	genesis := types.NewBlockWithHeader(&types.Header{})
+
+	p := &Provider{}
+	p.Configure(Config{
+		SentryCtx:   t.Context(),
+		Logger:      log.Root(),
+		Disable:     true,
+		ChainConfig: cfg1,
+		Genesis:     genesis,
+	})
+
+	ctx := t.Context()
+	require.NoError(t, p.Start(ctx))
+	require.True(t, p.built)
+	require.True(t, p.started)
+	require.NotNil(t, p.innerCtx)
+	require.NotNil(t, p.StatusDataProvider)
+
+	require.NoError(t, p.Stop())
+	require.False(t, p.built)
+	require.False(t, p.started)
+	require.Nil(t, p.innerCtx)
+	require.Nil(t, p.StatusDataProvider)
+
+	p.SetChainConfig(cfg2)
+	require.Same(t, cfg2, p.cfg.ChainConfig)
+
+	require.NoError(t, p.Start(ctx))
+	require.True(t, p.built)
+	require.True(t, p.started)
+	require.NotNil(t, p.StatusDataProvider)
+
+	require.NoError(t, p.Close())
+}
+
+// TestSetChainConfig_PanicsWhileStarted enforces the invariant: swapping
+// config while goroutines run leaves them referencing stale state and
+// would race the subsequent rebuild. Fail loud rather than silently.
+func TestSetChainConfig_PanicsWhileStarted(t *testing.T) {
+	p := &Provider{}
+	p.Configure(Config{
+		SentryCtx:   t.Context(),
+		Logger:      log.Root(),
+		Disable:     true,
+		ChainConfig: &chain.Config{ChainID: uint256.NewInt(1)},
+		Genesis:     types.NewBlockWithHeader(&types.Header{}),
+	})
+	require.NoError(t, p.Start(t.Context()))
+	t.Cleanup(func() { p.Close() })
+
+	require.Panics(t, func() {
+		p.SetChainConfig(&chain.Config{ChainID: uint256.NewInt(2)})
+	})
 }
