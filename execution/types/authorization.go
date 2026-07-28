@@ -2,6 +2,7 @@ package types
 
 import (
 	"bytes"
+	"crypto/ecdsa"
 	"errors"
 	"fmt"
 	"io"
@@ -36,33 +37,61 @@ func (ath *Authorization) copy() *Authorization {
 	}
 }
 
+// encodeSigningPayload writes the RLP list the authorization signature covers —
+// chainId, address, nonce — into data. buf is scratch space the caller reuses
+// across authorizations.
+func encodeSigningPayload(chainID uint256.Int, address common.Address, nonce uint64, data *bytes.Buffer, buf []byte) error {
+	authLen := rlp.Uint256Len(chainID)
+	authLen += 1 + length.Addr
+	authLen += rlp.U64Len(nonce)
+
+	if err := rlp.EncodeListPrefix(authLen, data, buf); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(chainID, data, buf); err != nil {
+		return err
+	}
+	if err := EncodeOptionalAddress(&address, data, buf); err != nil {
+		return err
+	}
+	return rlp.EncodeU64(nonce, data, buf)
+}
+
 func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common.Address, error) {
 	if ath.Nonce == math.MaxUint64 {
 		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
 	}
 
-	authLen := rlp.Uint256Len(ath.ChainID)
-	authLen += 1 + length.Addr
-	authLen += rlp.U64Len(ath.Nonce)
-
-	if err := rlp.EncodeListPrefix(authLen, data, buf); err != nil {
-		return nil, err
-	}
-
-	// chainId, address, nonce
-	if err := rlp.EncodeUint256(ath.ChainID, data, buf); err != nil {
-		return nil, err
-	}
-
-	if err := EncodeOptionalAddress(&ath.Address, data, buf); err != nil {
-		return nil, err
-	}
-
-	if err := rlp.EncodeU64(ath.Nonce, data, buf); err != nil {
+	if err := encodeSigningPayload(ath.ChainID, ath.Address, ath.Nonce, data, buf); err != nil {
 		return nil, err
 	}
 
 	return RecoverSignerFromRLP(data.Bytes(), ath.YParity, ath.R, ath.S)
+}
+
+// SignAuthorization returns an authorization tuple delegating address, signed by
+// key — the counterpart to RecoverSigner.
+func SignAuthorization(key *ecdsa.PrivateKey, chainID uint256.Int, address common.Address, nonce uint64) (Authorization, error) {
+	var buf [33]byte
+	data := bytes.NewBuffer(nil)
+	if err := encodeSigningPayload(chainID, address, nonce, data, buf[:]); err != nil {
+		return Authorization{}, err
+	}
+
+	hash := crypto.Keccak256Hash(append([]byte{params.SetCodeMagicPrefix}, data.Bytes()...))
+	sig, err := crypto.Sign(hash[:], key)
+	if err != nil {
+		return Authorization{}, err
+	}
+
+	return Authorization{
+		ChainID: chainID,
+		Address: address,
+		Nonce:   nonce,
+		YParity: sig[64],
+		R:       *new(uint256.Int).SetBytes(sig[:32]),
+		S:       *new(uint256.Int).SetBytes(sig[32:64]),
+	}, nil
 }
 
 func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*common.Address, error) {
