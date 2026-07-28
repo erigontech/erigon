@@ -64,7 +64,7 @@ func (b Big) AppendText(dst []byte) ([]byte, error) {
 	case 0:
 		return append(dst, `0x0`...), nil
 	case -1:
-		// EncodeBig (fmt %#x) writes the sign before the prefix ("-0x…"); big.Int.Append
+		// EncodeBig writes the sign before the prefix ("-0x…"); big.Int.Append
 		// writes it after ("0x-…"). Append "-0x", let Append add the magnitude with its
 		// own leading '-', then drop that duplicate '-'.
 		dst = append(dst, `-0x`...)
