@@ -631,7 +631,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		st.traceRuntimeFailure(runtimeGas, vmerr)
 	} else {
 		if contractCreation {
-			ret, _, st.gasRemaining, gasUsed.frame, _, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
+			ret, _, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
 		} else {
 			ret, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 			gasUsed.refillTopLevelCallState(&st.gasRemaining, vmConfig.RestoreState, vmerr)
