@@ -18,6 +18,23 @@ Aligns Erigon with the `eth_simulateV1` error code specification ([NethermindEth
 
 ---
 
+# Erigon v3.5.4 — Tidal Tails — 2026-07-28
+
+v3.5.4 is a bugfix release recommended for all users, and especially for operators running the RPC daemon with response compression enabled — archive nodes and high-traffic RPC endpoints — where a native-memory leak in the gzip path could grow by ~9-15 GiB/day (#22700). It is a drop-in upgrade from 3.5.3 — no re-sync required.
+
+**Bugfixes**
+
+- node: fix a native (C-allocated) memory leak in the RPC gzip path (#22700) by @AskAlexSharov — the `libdeflate.Compressor` was pooled in a `sync.Pool` whose GC-evicted entries never had `Close()` called, leaking the C context (~9-15 GiB/day on an archive node). Replaced with a bounded channel pool that closes compressors on overflow. Fixes #22672.
+- cmd: expand a leading `~/` (or `~\` on Windows) and `$VAR` in `--datadir` for the cobra-based binaries (#22785) by @lystopad — rpcdaemon and the other cobra commands previously used the raw path, so a tilde/env-prefixed `--datadir` was not resolved the way the main erigon binary resolves it. Fixes #14629.
+
+**Improvements**
+
+- build: update `google.golang.org/grpc` to v1.82.1 (#22690) by @AskAlexSharov — brings `release/3.5` in line with `release/3.6` and `main`.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.5.3...v3.5.4
+
+---
+
 # Erigon v3.5.3 — Tidal Tails — 2026-07-23
 
 v3.5.3 is a bugfix release recommended for all users. It is a drop-in upgrade from 3.5.2 — no re-sync required.
