@@ -111,7 +111,7 @@ func TestModeString_BlocksSentinelAlias(t *testing.T) {
 	blockDist, err := ParseBlocksDistance("keep-post-merge")
 	require.NoError(t, err)
 
-	mode, err := FromCli(archiveModeStr, 0, blockDist)
+	mode, err := FromCli(archiveModeStr, 0, blockDist, 0)
 	require.NoError(t, err)
 	assert.Equal(t, KeepPostMergeBlocksPruneMode, mode.Blocks)
 	assert.Equal(t, "archive --prune.distance.blocks=keep-post-merge", mode.String())

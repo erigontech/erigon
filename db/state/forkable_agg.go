@@ -43,7 +43,7 @@ type ForkableAgg struct {
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
-	wg sync.WaitGroup
+	wg closingWaitGroup
 
 	ps *background.ProgressSet
 
@@ -159,10 +159,15 @@ func (r *ForkableAgg) BuildFilesInBackground(num RootNum) chan struct{} {
 		return fin
 	}
 
+	if !r.wg.TryAdd() {
+		r.buildingFiles.Store(false)
+		close(fin)
+		return fin
+	}
+
 	built := true
 	var err error
 
-	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
 		defer r.buildingFiles.Store(false)
@@ -177,12 +182,13 @@ func (r *ForkableAgg) BuildFilesInBackground(num RootNum) chan struct{} {
 			}
 		}
 
-		r.wg.Add(1)
+		if !r.wg.TryAdd() {
+			close(fin)
+			return
+		}
 		go func() {
 			defer r.wg.Done()
-			defer func() {
-				close(fin)
-			}()
+			defer close(fin)
 			if err := r.mergeLoop(r.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 					r.logger.Debug("[fork_agg] MergeLoop cancelled/stopped", "err", err)
@@ -218,7 +224,9 @@ func (a *ForkableAgg) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 }
 
 func (r *ForkableAgg) MergeLoop(ctx context.Context) error {
-	r.wg.Add(1)
+	if !r.wg.TryAdd() {
+		return nil
+	}
 	defer r.wg.Done()
 	return r.mergeLoop(ctx)
 }
@@ -373,10 +381,7 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 
 	firstRootNumNotInFiles := tx.AlignedMaxRootNum()
 	r.loop(func(p *ProtoForkable) error {
-		r.wg.Add(1)
 		g.Go(func() error {
-			defer r.wg.Done()
-
 			fromRootNum := firstRootNumNotInFiles
 			if p.unaligned {
 				fromRootNum = tx.MaxRootNum(p.id)
@@ -441,11 +446,13 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 }
 
 func (r *ForkableAgg) Close() {
-	if r == nil || r.ctxCancel == nil { // invariant: it's safe to call Close multiple times
+	if r == nil {
+		return
+	}
+	if !r.wg.BeginClose() { // idempotent: safe to call Close multiple times
 		return
 	}
 	r.ctxCancel()
-	r.ctxCancel = nil
 	r.wg.Wait()
 
 	r.dirtyFilesLock.Lock()
@@ -528,12 +535,12 @@ func (r *ForkableAgg) BuildMissedAccessors(ctx context.Context, workers int) err
 ////
 
 func (r *ForkableAgg) openFolder() error {
-	eg := &errgroup.Group{}
+	eg, ctx := errgroup.WithContext(r.ctx)
 	r.loop(func(p *ProtoForkable) error {
 		eg.Go(func() error {
 			select {
-			case <-r.ctx.Done():
-				return r.ctx.Err()
+			case <-ctx.Done():
+				return ctx.Err()
 			default:
 			}
 			return p.snaps.OpenFolder()

@@ -155,16 +155,7 @@ func buildClusteredStorageCorpus(b testing.TB, numAccounts, slotsPerAccount int)
 	rnd := rand.New(rand.NewSource(99001))
 	ub := NewUpdateBuilder()
 	for i := 0; i < numAccounts; i++ {
-		addr := findAddressForNibble(i%16, i)
-		ah := hex.EncodeToString(addr)
-		ub.Balance(ah, rnd.Uint64())
-		for range slotsPerAccount {
-			loc := make([]byte, length.Hash)
-			rnd.Read(loc)
-			val := make([]byte, 32)
-			rnd.Read(val)
-			ub.Storage(ah, hex.EncodeToString(loc), hex.EncodeToString(val))
-		}
+		addNibbleAccount(ub, rnd, i%16, i, slotsPerAccount)
 	}
 	return ub.Build()
 }
@@ -206,11 +197,7 @@ func buildWhaleStorageGroups(slots, groups int) []storageGroup {
 		ubs[i].Balance(a, rnd.Uint64()+1)
 	}
 	for i := 0; i < slots; i++ {
-		loc := make([]byte, length.Hash)
-		rnd.Read(loc)
-		val := make([]byte, 32)
-		rnd.Read(val)
-		ubs[i%groups].Storage(a, hex.EncodeToString(loc), hex.EncodeToString(val))
+		addRandomSlot(ubs[i%groups], rnd, a)
 	}
 
 	out := make([]storageGroup, groups)

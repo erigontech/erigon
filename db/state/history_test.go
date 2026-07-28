@@ -1329,7 +1329,7 @@ func TestHistoryScanFiles(t *testing.T) {
 		// Recreate domain and re-scan the files
 		scanDirsRes, err := scanDirs(h.dirs)
 		require.NoError(err)
-		require.NoError(h.openFolder(scanDirsRes))
+		require.NoError(h.openFolder(t.Context(), scanDirsRes))
 		// Check the history
 		checkHistoryHistory(t, h, txs)
 	}
@@ -1908,7 +1908,7 @@ func TestHistory_OpenFolder(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(h.dirs)
 	require.NoError(t, err)
-	err = h.openFolder(scanDirsRes)
+	err = h.openFolder(t.Context(), scanDirsRes)
 	require.NoError(t, err)
 	h.Close()
 }

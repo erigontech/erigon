@@ -17,7 +17,6 @@
 package commitment
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"math/rand"
@@ -35,14 +34,10 @@ func TestDeepIntegration_BranchParity(t *testing.T) {
 	ctx := context.Background()
 
 	seqMs := NewMockState(t)
-	require.NoError(t, seqMs.applyPlainUpdates(pk, upds))
 	seq := NewHexPatriciaHashed(length.Addr, seqMs, DefaultTrieConfig())
-	sUpd := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk, upds)
-	seqRoot, err := seq.Process(ctx, sUpd, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	sUpd.Close()
+	seqRoot := processBatch(t, seqMs, seq, pk, upds)
 
-	for _, workers := range []int{1, 4, 8} {
+	for _, workers := range benchWorkerCounts() {
 		parMs := NewMockState(t)
 		parMs.SetConcurrentCommitment(true)
 		require.NoError(t, parMs.applyPlainUpdates(pk, upds))
@@ -57,26 +52,7 @@ func TestDeepIntegration_BranchParity(t *testing.T) {
 
 		require.Equalf(t, seqRoot, parRoot, "deep parallel(workers=%d) root != sequential", workers)
 
-		mism := 0
-		seen := map[string]struct{}{}
-		for k := range seqMs.cm {
-			seen[k] = struct{}{}
-		}
-		for k := range parMs.cm {
-			seen[k] = struct{}{}
-		}
-		for k := range seen {
-			sb, sok := seqMs.cm[k]
-			pb, pok := parMs.cm[k]
-			if !sok || !pok || !bytes.Equal(sb, pb) {
-				mism++
-			}
-		}
-		t.Logf("workers=%d seq branches=%d par branches=%d mismatched=%d", workers, len(seqMs.cm), len(parMs.cm), mism)
-		if mism != 0 {
-			branchDiff(t, seqMs, parMs)
-		}
-		require.Zerof(t, mism, "stored branch metadata differs between deep-parallel(workers=%d) and sequential", workers)
+		requireBranchParity(t, seqMs, parMs)
 	}
 }
 
@@ -94,11 +70,7 @@ func whaleByNibble(slots int) (addr []byte, accHash []byte, accNib int, accUpd U
 	ub := NewUpdateBuilder()
 	ub.Balance(a, 12345)
 	for i := 0; i < slots; i++ {
-		loc := make([]byte, length.Hash)
-		rnd.Read(loc)
-		val := make([]byte, 32)
-		rnd.Read(val)
-		ub.Storage(a, hex.EncodeToString(loc), hex.EncodeToString(val))
+		addRandomSlot(ub, rnd, a)
 	}
 	pk, upds = ub.Build()
 	accHash = KeyToHexNibbleHash(addr)
@@ -210,12 +182,8 @@ func TestDeepConcurrent_WhaleParity(t *testing.T) {
 	addr, accHash, accNib, accUpd, pk, upds, groups := whaleByNibble(750_000)
 
 	ms := NewMockState(t)
-	require.NoError(t, ms.applyPlainUpdates(pk, upds))
 	seq := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	seqUpd := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk, upds)
-	seqRoot, err := seq.Process(context.Background(), seqUpd, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	seqUpd.Close()
+	seqRoot := processBatch(t, ms, seq, pk, upds)
 
 	conRoot, err := concurrentAccountRoot(ms, addr, accHash, accNib, accUpd, groups, true)
 	require.NoError(t, err)

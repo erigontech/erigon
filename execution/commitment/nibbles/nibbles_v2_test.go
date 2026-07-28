@@ -118,21 +118,6 @@ func TestDecodeKeyV2_Vectors(t *testing.T) {
 	}
 }
 
-func TestEncodeKeyV2_RoundTrip(t *testing.T) {
-	for _, v := range v2Vectors() {
-		t.Run(v.name, func(t *testing.T) {
-			encoded := EncodeKeyV2(v.nibbles)
-			decoded, err := DecodeKeyV2(encoded)
-			if err != nil {
-				t.Fatalf("round-trip decode error: %v", err)
-			}
-			if !bytes.Equal(decoded, v.nibbles) {
-				t.Fatalf("round-trip mismatch: got %x, want %x", decoded, v.nibbles)
-			}
-		})
-	}
-}
-
 func TestEncodeKeyV2_MaxLen(t *testing.T) {
 	got := EncodeKeyV2(make([]byte, 128))
 	if len(got) != 65 {

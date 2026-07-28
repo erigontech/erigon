@@ -439,7 +439,9 @@ func (br *BlockRetire) RetireBlocksInBackground(
 		if br.snBuildAllowed != nil {
 			//we are inside own goroutine - it's fine to block here
 			if err := br.snBuildAllowed.Acquire(ctx, 1); err != nil {
-				br.logger.Warn("[snapshots] retire blocks", "err", err)
+				if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
+					br.logger.Warn("[snapshots] retire blocks", "err", err)
+				}
 				return
 			}
 			defer br.snBuildAllowed.Release(1)
@@ -456,6 +458,10 @@ func (br *BlockRetire) RetireBlocksInBackground(
 			return
 		}
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+				br.logger.Debug("[snapshots] retire blocks canceled", "err", err)
+				return
+			}
 			br.logger.Error("[snapshots] retire blocks", "err", err)
 			return
 		}

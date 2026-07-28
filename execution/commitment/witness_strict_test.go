@@ -18,7 +18,6 @@ package commitment
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -47,23 +46,7 @@ func benchWitnessTrie(b *testing.B) (*HexPatriciaHashed, [][]byte) {
 	ms := NewMockState(b)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 	hph.SetTraceWriter(nil)
-	builder := NewUpdateBuilder()
-	accounts := make([][]byte, 0, 128)
-	for i := 0; i < 128; i++ {
-		a, _ := generateKeyWithHashedPrefix(nil, length.Addr)
-		accounts = append(accounts, a)
-		builder.Balance(common.Bytes2Hex(a), uint64(i+1))
-		for j := 0; j < 4; j++ {
-			slot := common.FromHex(fmt.Sprintf("%064x", j+1))
-			builder.Storage(common.Bytes2Hex(a), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
-		}
-	}
-	plainKeys, updates := builder.Build()
-	require.NoError(b, ms.applyPlainUpdates(plainKeys, updates))
-	toProcess := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-	defer toProcess.Close()
-	_, err := hph.Process(context.Background(), toProcess, "", nil, WarmupConfig{})
-	require.NoError(b, err)
+	accounts := buildWitnessCorpus(b, ms, hph, 128, 4)
 	return hph, accounts[:16]
 }
 

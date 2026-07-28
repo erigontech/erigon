@@ -17,7 +17,7 @@
 package cli
 
 import (
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/utils"
 )
@@ -44,6 +44,7 @@ var DefaultFlags = []cli.Flag{
 	&PruneBlocksDistanceFlag,
 	&PruneModeFlag,
 	&utils.KeepExecutionProofsFlag,
+	&utils.CommitmentHistoryDistanceFlag,
 	&utils.FcuTimeoutFlag,
 	&utils.FcuBackgroundPruneFlag,
 	&utils.FcuBackgroundCommitFlag,

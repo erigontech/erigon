@@ -26,7 +26,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common/dbg"
 	liblog "github.com/erigontech/erigon/common/log/v3"
