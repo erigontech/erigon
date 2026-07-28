@@ -1342,7 +1342,7 @@ func buildWitnessTrie(
 	}
 
 	for _, node := range witnessNodes {
-		encodedNodes = append(encodedNodes, bytes.Clone(node))
+		encodedNodes = append(encodedNodes, node)
 	}
 	return encodedNodes, nil
 }
