@@ -542,6 +542,29 @@ func compareBodies(t *testing.T, a, b *Body) error {
 	return nil
 }
 
+func TestDecodeTransactionOptionalTo(t *testing.T) {
+	to := common.HexToAddress("0x000000000000000000000000000000000000dEaD")
+	for _, tc := range []struct {
+		name string
+		txn  Transaction
+	}{
+		{"LegacyCall", &LegacyTx{CommonTx: CommonTx{To: &to}}},
+		{"LegacyCreate", &LegacyTx{}},
+		{"AccessListCall", &AccessListTx{LegacyTx: LegacyTx{CommonTx: CommonTx{To: &to}}}},
+		{"AccessListCreate", &AccessListTx{}},
+		{"DynamicFeeCall", &DynamicFeeTransaction{CommonTx: CommonTx{To: &to}}},
+		{"DynamicFeeCreate", &DynamicFeeTransaction{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			require.NoError(t, tc.txn.EncodeRLP(&buf))
+			dec, err := DecodeTransaction(buf.Bytes())
+			require.NoError(t, err)
+			require.Equal(t, tc.txn.GetTo(), dec.GetTo())
+		})
+	}
+}
+
 func TestTransactionEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer

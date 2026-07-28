@@ -617,14 +617,15 @@ type Stream struct {
 	// Inline storage for NewBytesStream so the slice header doesn't escape per call.
 	sliceRdr sliceReader
 
-	remaining uint64   // number of bytes remaining to be read from r
-	size      uint64   // size of value ahead
-	kinderr   error    // error from last readKind
-	stack     []uint64 // list sizes
-	uintbuf   [32]byte // auxiliary buffer for integer decoding
-	kind      Kind     // kind of value ahead
-	byteval   byte     // value of single byte in type tag
-	limited   bool     // true if input limit is in effect
+	remaining uint64           // number of bytes remaining to be read from r
+	size      uint64           // size of value ahead
+	kinderr   error            // error from last readKind
+	stack     []uint64         // list sizes
+	addrs     []common.Address // bump-allocation chunk for AddrRef
+	uintbuf   [32]byte         // auxiliary buffer for integer decoding
+	kind      Kind             // kind of value ahead
+	byteval   byte             // value of single byte in type tag
+	limited   bool             // true if input limit is in effect
 }
 
 // Remaining returns number of bytes remaining to be read.
@@ -971,6 +972,25 @@ func (s *Stream) Addr() (a common.Address, err error) {
 	}
 	copy(a[:], s.uintbuf[:len(a)])
 	return a, nil
+}
+
+// AddrRef decodes an RLP string of exactly 20 bytes as an address and returns
+// a pointer to it. Each pointer gets a slot of its own, handed out from a
+// chunk that survives Reset and pool reuse, so one heap allocation is
+// amortized over many decoded addresses. A returned address stays valid
+// forever but must not be mutated: it pins its chunk, and callers may share it.
+func (s *Stream) AddrRef() (*common.Address, error) {
+	a, err := s.Addr()
+	if err != nil {
+		return nil, err
+	}
+	if len(s.addrs) == 0 {
+		s.addrs = make([]common.Address, 16)
+	}
+	p := &s.addrs[0]
+	s.addrs = s.addrs[1:]
+	*p = a
+	return p, nil
 }
 
 // ReadHash decodes an RLP string of exactly 32 bytes as a hash. Like Addr, it

@@ -47,10 +47,10 @@ func DecodeOptionalAddress(dst **common.Address, s *rlp.Stream) error {
 		*dst = nil
 		return s.ReadBytes(nil)
 	}
-	a, err := s.Addr()
+	a, err := s.AddrRef()
 	if err != nil {
 		return err
 	}
-	*dst = &a
+	*dst = a
 	return nil
 }

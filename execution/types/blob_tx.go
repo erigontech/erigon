@@ -377,11 +377,9 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	} else if size != length.Addr {
 		return fmt.Errorf("wrong size for To: %d", size)
 	}
-	to, err := s.Addr()
-	if err != nil {
+	if stx.To, err = s.AddrRef(); err != nil {
 		return err
 	}
-	stx.To = &to
 	if err = s.ReadUint256(&stx.Value); err != nil {
 		return err
 	}

@@ -262,11 +262,9 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	} else if size != length.Addr {
 		return fmt.Errorf("wrong size for To: %d", size)
 	}
-	to, err := s.Addr()
-	if err != nil {
+	if tx.To, err = s.AddrRef(); err != nil {
 		return err
 	}
-	tx.To = &to
 	if err = s.ReadUint256(&tx.Value); err != nil {
 		return err
 	}
