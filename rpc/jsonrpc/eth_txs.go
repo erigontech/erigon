@@ -92,15 +92,18 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return ethapi.NewRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(txCount), chainConfig.ChainID), nil
 		}
 
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
+		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
 		if err != nil {
 			return nil, err
+		}
+		if !ok {
+			return nil, nil
 		}
 
 		return ethapi.NewRPCTransaction(txn, blockHash, blockTime, blockNum, uint64(txnIndex), baseFee), nil
 	}
 
-	curHeader := rawdb.ReadCurrentHeader(tx)
+	curHeader := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
 	if curHeader == nil {
 		return nil, nil
 	}
@@ -154,12 +157,12 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 	if err != nil {
 		return nil, err
 	}
-	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
+	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
 	if err != nil {
 		return nil, err
 	}
 
-	if txn != nil {
+	if ok {
 		var buf bytes.Buffer
 		err = txn.MarshalBinary(&buf)
 		return buf.Bytes(), err

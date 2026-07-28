@@ -416,7 +416,7 @@ func makeTestTree(domain string, nodes []*enode.Node, links []string) (*Tree, st
 // testKeys creates deterministic private keys for testing.
 func testKeys(n int) []*ecdsa.PrivateKey {
 	keys := make([]*ecdsa.PrivateKey, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		key, err := crypto.GenerateKey()
 		if err != nil {
 			panic("can't generate key: " + err.Error())

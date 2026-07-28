@@ -71,6 +71,7 @@ type configSnapshot struct {
 	// Feature flags
 	ExperimentalBAL     bool `json:"experimental_bal"`
 	KeepExecutionProofs bool `json:"keep_execution_proofs"`
+	PersistReceipts     bool `json:"persist_receipts"`
 
 	// Snapshot config
 	SnapKeepBlocks bool `json:"snap_keep_blocks"`
@@ -96,6 +97,7 @@ func snapshotConfig(cfg *ethconfig.Config) configSnapshot {
 		ExecWorkerCount:     cfg.Sync.ExecWorkerCount,
 		ExperimentalBAL:     cfg.ExperimentalBAL,
 		KeepExecutionProofs: cfg.Sync.KeepExecutionProofs,
+		PersistReceipts:     cfg.Sync.PersistReceiptsCacheV2,
 		SnapKeepBlocks:      cfg.Snapshot.KeepBlocks,
 		SnapProduceE2:       cfg.Snapshot.ProduceE2,
 		SnapProduceE3:       cfg.Snapshot.ProduceE3,
@@ -117,6 +119,7 @@ func TestConfigDefaults(t *testing.T) {
 	require.True(t, snap.InternalCL, "internal CL (Caplin) is on by default")
 	require.False(t, snap.ExperimentalBAL, "experimental BAL should be off by default")
 	require.False(t, snap.KeepExecutionProofs, "keep execution proofs should be off by default")
+	require.False(t, snap.PersistReceipts, "persist receipts should be off by default")
 
 	// Snapshot defaults
 	require.True(t, snap.SnapProduceE2, "snap produce e2 should be on by default")
@@ -183,6 +186,34 @@ func TestConfigWithFlags(t *testing.T) {
 			cfg := buildEthConfig(t, tt.args)
 			snap := snapshotConfig(cfg)
 			tt.check(t, snap)
+		})
+	}
+}
+
+// TestPersistReceiptsDefaultByMode pins that the historical receipts cache
+// (--prune.include-receipts) defaults to off in every prune mode, and is enabled
+// only when the operator sets the flag explicitly. The legacy --persist.receipts
+// alias must keep working.
+func TestPersistReceiptsDefaultByMode(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"default mode", nil, false},
+		{"archive", []string{"--prune.mode=archive"}, false},
+		{"full", []string{"--prune.mode=full"}, false},
+		{"minimal", []string{"--prune.mode=minimal"}, false},
+		{"blocks", []string{"--prune.mode=blocks"}, false},
+		{"explicit on with full", []string{"--prune.mode=full", "--prune.include-receipts"}, true},
+		{"explicit on with archive", []string{"--prune.mode=archive", "--prune.include-receipts"}, true},
+		{"explicit off with full", []string{"--prune.mode=full", "--prune.include-receipts=false"}, false},
+		{"legacy persist.receipts alias", []string{"--prune.mode=full", "--persist.receipts"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := buildEthConfig(t, tt.args)
+			require.Equal(t, tt.want, cfg.Sync.PersistReceiptsCacheV2)
 		})
 	}
 }

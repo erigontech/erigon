@@ -21,14 +21,15 @@ package eth
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
 
@@ -330,14 +331,14 @@ func TestBlockAccessListsPacket66RoundTrip(t *testing.T) {
 // the protocol name/length tables and that the two new message codes route to
 // their sentry MessageId counterparts via ToProto/FromProto.
 func TestEth71ProtocolRegistration(t *testing.T) {
-	if name, ok := ProtocolToString[direct.ETH71]; !ok || name != "eth71" {
+	if name, ok := ProtocolToString[ETH71]; !ok || name != "eth71" {
 		t.Fatalf("ProtocolToString[ETH71] = (%q, %v), want (eth71, true)", name, ok)
 	}
-	if length, ok := ProtocolLengths[direct.ETH71]; !ok || length != 20 {
+	if length, ok := ProtocolLengths[ETH71]; !ok || length != 20 {
 		t.Fatalf("ProtocolLengths[ETH71] = (%d, %v), want (20, true)", length, ok)
 	}
 
-	fwd := ToProto[direct.ETH71]
+	fwd := ToProto[ETH71]
 	if fwd == nil {
 		t.Fatal("ToProto has no ETH71 entry")
 	}
@@ -348,7 +349,7 @@ func TestEth71ProtocolRegistration(t *testing.T) {
 		t.Errorf("ToProto[ETH71][BlockAccessListsMsg] = %v, want BLOCK_ACCESS_LISTS_71", got)
 	}
 
-	rev := FromProto[direct.ETH71]
+	rev := FromProto[ETH71]
 	if rev == nil {
 		t.Fatal("FromProto has no ETH71 entry")
 	}
@@ -357,5 +358,67 @@ func TestEth71ProtocolRegistration(t *testing.T) {
 	}
 	if got := rev[sentryproto.MessageId_BLOCK_ACCESS_LISTS_71]; got != BlockAccessListsMsg {
 		t.Errorf("FromProto[ETH71][BLOCK_ACCESS_LISTS_71] = %v, want BlockAccessListsMsg", got)
+	}
+}
+
+// BenchmarkHashOrNumberEncodeRLP pins why the hash branch encodes through a pointer:
+// a common.Hash boxed by value is not addressable, so the reflection encoder copies
+// it with reflect.New before it can take a byte slice of it.
+func BenchmarkHashOrNumberEncodeRLP(b *testing.B) {
+	hn := &HashOrNumber{Hash: common.Hash{1, 2, 3}}
+
+	b.Run("byValue", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			if err := rlp.Encode(io.Discard, hn.Hash); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("byPointer", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			if err := rlp.Encode(io.Discard, &hn.Hash); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+// TestHashOrNumberEncodeRLPPointerIsAllocFree pins the allocation win the pointer
+// form gives, and that both forms still produce identical bytes.
+func TestHashOrNumberEncodeRLPPointerIsAllocFree(t *testing.T) {
+	hn := &HashOrNumber{Hash: common.Hash{1, 2, 3}}
+
+	var byValue, byPointer bytes.Buffer
+	if err := rlp.Encode(&byValue, hn.Hash); err != nil {
+		t.Fatal(err)
+	}
+	if err := rlp.Encode(&byPointer, &hn.Hash); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(byValue.Bytes(), byPointer.Bytes()) {
+		t.Fatalf("value=%x pointer=%x", byValue.Bytes(), byPointer.Bytes())
+	}
+
+	// Panic rather than drop the error: a failing Encode would otherwise report a
+	// misleadingly low allocation count. The panic path never runs when it succeeds.
+	mustEncode := func(val any) func() {
+		return func() {
+			if err := rlp.Encode(io.Discard, val); err != nil {
+				panic(err)
+			}
+		}
+	}
+	valueAllocs := testing.AllocsPerRun(200, mustEncode(hn.Hash))
+	pointerAllocs := testing.AllocsPerRun(200, mustEncode(&hn.Hash))
+	t.Logf("allocs/op: byValue=%v byPointer=%v", valueAllocs, pointerAllocs)
+	if pointerAllocs >= valueAllocs {
+		t.Errorf("pointer form should allocate less: value=%v pointer=%v", valueAllocs, pointerAllocs)
+	}
+	// encBuffer is pooled, and sync.Pool drops values under the race detector.
+	//goland:noinspection GoBoolExpressions
+	if !race.Enabled && pointerAllocs != 0 {
+		t.Errorf("pointer form should not allocate, got %v", pointerAllocs)
 	}
 }

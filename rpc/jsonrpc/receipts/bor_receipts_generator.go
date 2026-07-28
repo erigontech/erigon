@@ -7,11 +7,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -26,13 +26,13 @@ import (
 
 type BorGenerator struct {
 	receiptCache *lru.Cache[common.Hash, *types.Receipt]
-	blockReader  services.FullBlockReader
+	blockReader  dbservices.FullBlockReader
 	engine       rules.EngineReader
 	stateCache   kvcache.Cache
 	filters      *rpchelper.Filters
 }
 
-func NewBorGenerator(blockReader services.FullBlockReader,
+func NewBorGenerator(blockReader dbservices.FullBlockReader,
 	engine rules.EngineReader, stateCache kvcache.Cache, filters ...*rpchelper.Filters) *BorGenerator {
 	receiptCache, err := lru.New[common.Hash, *types.Receipt](receiptsCacheLimit)
 	if err != nil {
@@ -126,15 +126,13 @@ func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *protocol.GasPool, ibs *s
 	var logIndex uint
 	if receiptWithFirstLogIdx {
 		logIndex = logIdxAfterTx
-	} else {
+	} else if logIdxAfterTx >= uint(len(receiptLogs)) {
 		// this check is a hack put in place because for cases where a block had only one tx, which was system
 		// e.g. 50075104 on bor.
 		// the receipt calculation stored 0 for logIdxAfterTx, which leads to underflow
 		// this check allows to adjust for that error (first logIndex is 0 for such cases)
 		// can be removed when receipt files fixed and all users are sure to have it (v2.2)
-		if logIdxAfterTx >= uint(len(receiptLogs)) {
-			logIndex = logIdxAfterTx - uint(len(receiptLogs))
-		}
+		logIndex = logIdxAfterTx - uint(len(receiptLogs))
 	}
 	for i, l := range receiptLogs {
 		l.TxIndex = hexutil.Uint(txIndex)

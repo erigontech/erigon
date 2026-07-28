@@ -184,12 +184,9 @@ func sampleViaBT(reader *seg.Reader, fi *FilesItem, samples int) ([]sampledPair,
 	if keyCount == 0 {
 		return nil, nil
 	}
-	n := uint64(samples)
-	if n > keyCount {
-		n = keyCount
-	}
+	n := min(uint64(samples), keyCount)
 	out := make([]sampledPair, 0, n)
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		// distribute samples across the full key space; stride = keyCount/n
 		// puts the i-th sample at index i*keyCount/n, covering [0, keyCount).
 		ordinal := i * keyCount / n
@@ -1429,10 +1426,7 @@ func sampleViaStride(reader *seg.Reader, fi *FilesItem, samples int) ([]sampledP
 		return nil, fmt.Errorf("sampleViaStride: %s has %d words (want even, non-zero)", fi.decompressor.FileName(), wordCount)
 	}
 	pairCount := wordCount / 2
-	n := samples
-	if n > pairCount {
-		n = pairCount
-	}
+	n := min(samples, pairCount)
 	stride := pairCount / n
 	if stride == 0 {
 		stride = 1

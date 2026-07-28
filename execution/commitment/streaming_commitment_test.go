@@ -150,7 +150,11 @@ func makeBranch(prefix []byte, afterMap uint16, touched []int, seed byte, prev [
 			cells[n].hash[b] = seed + byte(n)
 		}
 	}
-	return getDeferredUpdate(prefix, tm, tm, afterMap, &cells, prev)
+	raw, err := NewBranchEncoder(64).EncodeBranch(tm, tm, afterMap, &cells)
+	if err != nil {
+		panic(err)
+	}
+	return getDeferredUpdate(prefix, raw, prev)
 }
 
 // Settle condition is idle, not all-clean: the coalescing gate may legitimately leave a split dirty.
@@ -194,13 +198,11 @@ func TestStreaming_SchedulerConcurrentParity(t *testing.T) {
 		const goroutines = 4
 		var wg sync.WaitGroup
 		for g := range goroutines {
-			wg.Add(1)
-			go func(start int) {
-				defer wg.Done()
-				for i := start; i < len(keys); i += goroutines {
+			wg.Go(func() {
+				for i := g; i < len(keys); i += goroutines {
 					sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
 				}
-			}(g)
+			})
 		}
 		wg.Wait()
 
@@ -367,7 +369,7 @@ func newDrainContext(ms *MockState) *drainContext {
 }
 
 func (d *drainContext) PutBranch(prefix, data, _ []byte) error {
-	d.pending[string(prefix)] = common.Copy(data)
+	d.pending[string(prefix)] = bytes.Clone(data)
 	return nil
 }
 

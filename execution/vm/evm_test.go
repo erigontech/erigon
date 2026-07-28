@@ -24,7 +24,7 @@ import (
 // TestDeriveFrameRegularGasUsed covers the EIP-8037 cases where the formula
 // Regular = (inputTotal − gasRemainingTotal) − stateGasUsed must hold,
 // including the refund-heavy case where stateGas grows above the input
-// because inline state-gas refunds (creditStateGasRefund) credit the
+// because inline state-gas refunds (refillStateGas) credit the
 // frame's local reservoir.
 func TestDeriveFrameRegularGasUsed(t *testing.T) {
 	t.Parallel()

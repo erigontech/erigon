@@ -234,7 +234,7 @@ func BenchmarkBpsTree_bs(b *testing.B) {
 
 			totalCount := uint64(cfg.N)
 			ef := eliasfano32.NewEliasFano(totalCount, totalCount*100)
-			for i := uint64(0); i < totalCount; i++ {
+			for i := range totalCount {
 				ef.AddOffset(i * 100)
 			}
 			ef.Build()
