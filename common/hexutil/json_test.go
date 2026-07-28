@@ -174,6 +174,30 @@ func TestUnmarshalU256(t *testing.T) {
 	}
 }
 
+func TestBigToUint256(t *testing.T) {
+	tests := []struct {
+		input        *big.Int
+		want         *uint256.Int
+		wantOverflow bool
+	}{
+		{input: big.NewInt(0), want: uint256.NewInt(0)},
+		{input: big.NewInt(12345678), want: uint256.NewInt(12345678)},
+		{input: bigFromString("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), want: new(uint256.Int).SetAllOne()},
+		// negative values wrap two's-complement style, they do not overflow
+		{input: big.NewInt(-1), want: new(uint256.Int).SetAllOne()},
+		{input: new(big.Int).Lsh(big.NewInt(1), 256), wantOverflow: true},
+	}
+	for idx, test := range tests {
+		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
+			got, overflow := (*Big)(test.input).ToUint256()
+			require.Equal(t, test.wantOverflow, overflow)
+			if !test.wantOverflow {
+				require.Equal(t, test.want, got)
+			}
+		})
+	}
+}
+
 // TestMarshalU256 pins U256's wire format to hexutil.Big's: for every value the
 // JSON bytes, text bytes, and String() must be identical between the two types.
 func TestMarshalU256(t *testing.T) {
