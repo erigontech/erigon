@@ -359,7 +359,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				return result.Err
 			}
 			if result.Err != nil {
-				return fmt.Errorf("%w, txnIdx=%d, %v", rules.ErrInvalidBlock, txTask.TxIndex, result.Err) //same as in stage_exec.go
+				return fmt.Errorf("%w, txnIdx=%d, %v", rules.ErrInvalidBlock, txTask.TxIndex, result.Err) // same as in stage_exec.go
 			}
 
 			se.txCount++
@@ -370,7 +370,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				se.blobGasUsed += txTask.Tx().GetBlobGas()
 			}
 			if txTask.IsBlockEnd() && txTask.BlockNumber() > 0 {
-				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
+				// fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
 				defer ibs.Release(true)
@@ -421,11 +421,11 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				checkReceipts := checkBloom && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber())
 
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
-					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+					// Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
 					blockGasUsed := max(se.blockGasUsed, se.blockStateGasUsed)
 					if err := validateBlockPostExecution(se.cfg.engine, se.cfg.chainConfig, txTask.Header, blockGasUsed, se.blobGasUsed, checkReceipts, checkBloom, blockReceipts, txTask.Txs, se.logger); err != nil {
-						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
+						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) // same as in stage_exec.go
 					}
 				}
 

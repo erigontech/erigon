@@ -95,8 +95,8 @@ func BenchmarkShuffleList(b *testing.B) {
 	}
 }
 
-//// TODO optimize memory allocations even more by analysis of statistics
-//func BenchmarkShuffleListWithAllocsReport(b *testing.B) {
-//	b.ReportAllocs()
-//	BenchmarkShuffleList(b)
-//}
+// // TODO optimize memory allocations even more by analysis of statistics
+// func BenchmarkShuffleListWithAllocsReport(b *testing.B) {
+// 	b.ReportAllocs()
+// 	BenchmarkShuffleList(b)
+// }

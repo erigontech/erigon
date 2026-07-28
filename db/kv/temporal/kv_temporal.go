@@ -39,7 +39,7 @@ var ( // Compile time interface checks
 	_ kv.TemporalDebugTx = (*Tx)(nil)
 )
 
-//Variables Naming:
+// Variables Naming:
 //  tx - Database Transaction
 //  txn - Ethereum Transaction (and TxNum - is also number of Ethereum Transaction)
 //  RoTx - Read-Only Database Transaction. RwTx - read-write
@@ -48,12 +48,12 @@ var ( // Compile time interface checks
 //  Cursor - low-level mdbx-tide api to navigate over Table
 //  Iter - high-level iterator-like api over Table/InvertedIndex/History/Domain. Server-side-streaming friendly - less methods than Cursor, but constructor is powerful as `SELECT key, value FROM table WHERE key BETWEEN x1 AND x2 ORDER DESC LIMIT n`.
 
-//Methods Naming:
+// Methods Naming:
 //  Get: exact match of criteria
 //  Range: [from, to). from=nil means StartOfTable, to=nil means EndOfTable, rangeLimit=-1 means Unlimited
 //  Prefix: `Range(Table, prefix, kv.NextSubtree(prefix))`
 
-//Abstraction Layers:
+// Abstraction Layers:
 // LowLevel:
 //      1. DB/Tx - low-level key-value database
 //      2. Snapshots/Freeze - immutable files with historical data. May be downloaded at first App

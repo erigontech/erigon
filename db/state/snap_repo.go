@@ -516,7 +516,7 @@ func getFreezingRange(rootFrom, rootTo RootNum, cfg *SnapshotConfig) (freezeFrom
 }
 
 func getMergeLimit(cfg *SnapshotConfig, from uint64) uint64 {
-	//return 0
+	// return 0
 	maxMergeLimit := cfg.MergeStages[len(cfg.MergeStages)-1]
 
 	for _, info := range cfg.PreverifiedParsed {

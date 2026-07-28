@@ -103,7 +103,7 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	require.Equal(100, int(c.latestStateVersionID))
 	require.True(c.roots[100].isCanonical)
 
-	//c.add([]byte{1}, nil, c.roots[2], 2)
+	// c.add([]byte{1}, nil, c.roots[2], 2)
 	require.Equal(0, c.latestStateView.cache.Len())
 	require.Equal(0, c.stateEvict.Len())
 }
@@ -131,11 +131,11 @@ func TestEviction(t *testing.T) {
 		_, _ = c.Get([]byte{1}, tx, view.stateVersionID)
 		_, _ = c.Get([]byte{2}, tx, view.stateVersionID)
 		_, _ = c.Get([]byte{3}, tx, view.stateVersionID)
-		//require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
+		// require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
 		return nil
 	})
 	require.Equal(0, c.stateEvict.Len())
-	//require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
+	// require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
 	c.OnNewBlock(&remoteproto.StateChangeBatch{
 		StateVersionId: id + 1,
 		ChangeBatch: []*remoteproto.StateChange{

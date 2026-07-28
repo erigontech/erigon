@@ -151,7 +151,7 @@ func TestIndexLookup(t *testing.T) {
 		LeafSize:   8,
 
 		Enums:              false,
-		LessFalsePositives: true, //must not impact index when `Enums: false`
+		LessFalsePositives: true, // must not impact index when `Enums: false`
 	}
 	t.Run("v0", func(t *testing.T) {
 		test(t, cfg)

@@ -224,7 +224,7 @@ func wsRequest(t *testing.T, url, browserOrigin string) error {
 }
 
 func TestAllowList(t *testing.T) {
-	allowList := rpc.AllowList(map[string]struct{}{"net_version": {}}) //don't allow RPC modules
+	allowList := rpc.AllowList(map[string]struct{}{"net_version": {}}) // don't allow RPC modules
 	url := startHTTPServer(t, allowList, nil, nil)
 
 	assert.False(t, testCustomRequest(t, url, "rpc_modules"))

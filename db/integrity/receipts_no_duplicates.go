@@ -97,7 +97,7 @@ func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 			_max, _ = txNumsReader.Max(ctx, tx, blockNum)
 			blockChanged = true
 		}
-		//fmt.Println("txNum:", txNum, "cumGasUsed:", cumGasUsed)
+		// fmt.Println("txNum:", txNum, "cumGasUsed:", cumGasUsed)
 		if blockChanged {
 			prevCumGasUsed = 0
 		}

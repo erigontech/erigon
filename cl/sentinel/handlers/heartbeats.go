@@ -71,7 +71,7 @@ func (c *ConsensusHandlers) metadataV1Handler(s network.Stream) error {
 	if err := c.me.Node().Load(attSubEnr); err != nil {
 		return err
 	}
-	//me.Load()
+	// me.Load()
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.Metadata{
 		SeqNumber: c.me.Seq(),
 		Attnets:   subnetField,

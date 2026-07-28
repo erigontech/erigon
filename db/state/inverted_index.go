@@ -92,7 +92,7 @@ func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, stepsInFrozenFile uint64
 	if cfg.FilenameBase == "" {
 		panic("assert: empty `filenameBase`")
 	}
-	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
+	// if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.CompressorCfg = seg.DefaultCfg
 	if cfg.Accessors == 0 {
 		cfg.Accessors = statecfg.AccessorHashMap
@@ -544,7 +544,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 			if txNum <= fromCache.found {
 				iit.seekInFilesCache.hit++
 				return true, fromCache.found, nil
-			} else if fromCache.found == 0 { //not found
+			} else if fromCache.found == 0 { // not found
 				iit.seekInFilesCache.hit++
 				return false, 0, nil
 			}
@@ -739,7 +739,7 @@ func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 
 	pruneInProgress := (stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done) && untilTx == stat.TxTo
 
-	//println("in ii", iit.ii.FilenameBase, stat.KeyProgress.String(), stat.ValueProgress.String(), stat.TxTo, untilTx, min)
+	// println("in ii", iit.ii.FilenameBase, stat.KeyProgress.String(), stat.ValueProgress.String(), stat.TxTo, untilTx, min)
 	return min == 0 || min < iit.files.EndTxNum() || pruneInProgress || untilTx > stat.TxTo
 }
 
@@ -1169,9 +1169,9 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 	// Design decision: `why Enum=true and LessFalsePositives=true`?
 	//
 	// Test on: rpcdaemon (erigon shut-down), `--http.compression=false`, after `sync && sudo sysctl vm.drop_caches=3`, query:
-	//```sh
-	//curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method": "eth_getLogs","params": [{"fromBlock": "0x115B624", "toBlock": "0x115B664"}], "id":1}' -s -o /dev/null  localhost:8545
-	//```
+	// ```sh
+	// curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method": "eth_getLogs","params": [{"fromBlock": "0x115B624", "toBlock": "0x115B664"}], "id":1}' -s -o /dev/null  localhost:8545
+	// ```
 	//
 	// On compared it with `Enum=false and LessFalsePositives=false` on ethmainnet (on small machine with cloud drives and `sync && sudo sysctl vm.drop_caches=3`):
 	//  - `du -hsc *.efi` changed from `24Gb` to `17Gb` (better)
@@ -1180,15 +1180,15 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 	//  - speed on hot data - not changed. speed on cold data changed from `7min` to `10min`  (worse)
 	//  - but most important i see `.ef` files became "randomly warm":
 	// From:
-	//```sh
-	//vmtouch -v /mnt/erigon/snapshots/idx/v1.0-storage.1680-1682.ef
-	//[ ooooooooo ooooooo oooooooooooooooooo oooooooo  oo o o  ooo ] 93/81397
-	//```
+	// ```sh
+	// vmtouch -v /mnt/erigon/snapshots/idx/v1.0-storage.1680-1682.ef
+	// [ ooooooooo ooooooo oooooooooooooooooo oooooooo  oo o o  ooo ] 93/81397
+	// ```
 	// To:
-	//```sh
-	//vmtouch -v /mnt/erigon/snapshots/idx/v1.0-storage.1680-1682.ef
-	//[oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo] 16279/81397
-	//```
+	// ```sh
+	// vmtouch -v /mnt/erigon/snapshots/idx/v1.0-storage.1680-1682.ef
+	// [oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo] 16279/81397
+	// ```
 	// It happens because: EVM does read much non-existing keys, like "create storage key if it doesn't exists". And
 	// each such non-existing key read `MPH` transforms to random
 	// key read. `LessFalsePositives=true` feature filtering-out such cases (with `1/256=0.3%` false-positives).

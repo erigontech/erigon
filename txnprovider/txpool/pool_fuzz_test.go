@@ -44,10 +44,10 @@ import (
 
 // https://go.dev/doc/fuzz/
 // golang.org/s/draft-fuzzing-design
-//go doc testing
-//go doc testing.F
-//go doc testing.F.AddRemoteTxns
-//go doc testing.F.Fuzz
+// go doc testing
+// go doc testing.F
+// go doc testing.F.AddRemoteTxns
+// go doc testing.F.Fuzz
 
 // go test -trimpath -v -fuzz=Fuzz -fuzztime=10s ./txpool
 
@@ -201,7 +201,7 @@ func poolsFromFuzzBytes(rawTxnNonce, rawValues, rawTips, rawFeeCap, rawSender []
 	senderIDs = map[common.Address]uint64{}
 	senders := make(Addresses, 20*len(senderNonce))
 	for i := range senderNonce {
-		senderID := uint64(i + 1) //non-zero expected
+		senderID := uint64(i + 1) // non-zero expected
 		binary.BigEndian.PutUint64(senders.At(i%senders.Len()), senderID)
 		sendersInfo[senderID] = newSender(senderNonce[i], senderBalance[i%len(senderBalance)])
 		senderIDs[senders.AddressAt(i%senders.Len())] = senderID
@@ -236,20 +236,20 @@ func fakeRlpTxn(slot *TxnSlot, data []byte) []byte {
 	feeCap := *slot.GetFeeCap()
 	value := *slot.GetValue()
 
-	dataLen := rlp.U64Len(1) + //chainID
+	dataLen := rlp.U64Len(1) + // chainID
 		rlp.U64Len(slot.Nonce) + rlp.Uint256Len(tip) + rlp.Uint256Len(feeCap) +
 		rlp.U64Len(0) + // gas
 		rlp.StringLen([]byte{}) + // dest addr
 		rlp.Uint256Len(value) +
 		rlp.StringLen(data) + // data
-		rlp.ListPrefixLen(0) + //access list
+		rlp.ListPrefixLen(0) + // access list
 		+3 // v,r,s
 
 	buf := make([]byte, 1+rlp.ListPrefixLen(dataLen)+dataLen)
 	buf[0] = DynamicFeeTxnType
 	p := 1
 	p += rlp.EncodeListPrefixToBuf(dataLen, buf[p:])
-	p += rlp.EncodeU64ToBuf(1, buf[p:]) //chainID
+	p += rlp.EncodeU64ToBuf(1, buf[p:]) // chainID
 	p += rlp.EncodeU64ToBuf(slot.Nonce, buf[p:])
 	bb := bytes.NewBuffer(buf[p:p])
 	_ = tip.EncodeRLP(bb)
@@ -257,16 +257,16 @@ func fakeRlpTxn(slot *TxnSlot, data []byte) []byte {
 	bb = bytes.NewBuffer(buf[p:p])
 	_ = feeCap.EncodeRLP(bb)
 	p += rlp.Uint256Len(feeCap)
-	p += rlp.EncodeU64ToBuf(0, buf[p:])           //gas
-	p += rlp.EncodeStringToBuf([]byte{}, buf[p:]) //destrination addr
+	p += rlp.EncodeU64ToBuf(0, buf[p:])           // gas
+	p += rlp.EncodeStringToBuf([]byte{}, buf[p:]) // destrination addr
 	bb = bytes.NewBuffer(buf[p:p])
 	_ = value.EncodeRLP(bb)
 	p += rlp.Uint256Len(value)
-	p += rlp.EncodeStringToBuf(data, buf[p:])  //data
+	p += rlp.EncodeStringToBuf(data, buf[p:])  // data
 	p += rlp.EncodeListPrefixToBuf(0, buf[p:]) // access list
-	p += rlp.EncodeU64ToBuf(1, buf[p:])        //v
-	p += rlp.EncodeU64ToBuf(1, buf[p:])        //r
-	p += rlp.EncodeU64ToBuf(1, buf[p:])        //s
+	p += rlp.EncodeU64ToBuf(1, buf[p:])        // v
+	p += rlp.EncodeU64ToBuf(1, buf[p:])        // r
+	p += rlp.EncodeU64ToBuf(1, buf[p:])        // s
 	_ = p
 	return buf
 }
@@ -426,7 +426,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 				assert.GreaterOrEqual(txn.worstIndex, 0, msg)
 			}
 			for id := range senders {
-				//assert.True(senders[i].all.Len() > 0)
+				// assert.True(senders[i].all.Len() > 0)
 				pool.all.ascend(id, func(mt *metaTxn) bool {
 					require.GreaterOrEqual(mt.worstIndex, 0, msg)
 					assert.GreaterOrEqual(mt.bestIndex, 0, msg)

@@ -140,7 +140,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 
 				require.True(t, ok)
 				require.NotNil(t, v)
-				//require.EqualValuesf(t, latest, v, "unexpected %d, wanted %d", binary.BigEndian.Uint64(v), maxTx-1)
+				// require.EqualValuesf(t, latest, v, "unexpected %d, wanted %d", binary.BigEndian.Uint64(v), maxTx-1)
 				require.NoError(t, err)
 			}
 		}
@@ -291,7 +291,7 @@ func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 func generateArbitraryValueUpdates(r *rndGen, totalTx, keyTxsLimit, maxSize uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
-	//maxStorageSize := 24 * (1 << 10) // limit on contract code
+	// maxStorageSize := 24 * (1 << 10) // limit on contract code
 
 	for range keyTxsLimit {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)

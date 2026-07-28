@@ -166,7 +166,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		require.NoError(t, err)
 		if len(stored) == 0 {
 			miss++
-			//fmt.Printf("%x [%d/%d]", key, miss, i+1) // txnum starts from 1
+			// fmt.Printf("%x [%d/%d]", key, miss, i+1) // txnum starts from 1
 			continue
 		}
 		acc := accounts.Account{}
@@ -371,7 +371,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	mustSeeFile := func(files []string, folderName, fileNameWithoutVersion string) bool { //file-version agnostic
+	mustSeeFile := func(files []string, folderName, fileNameWithoutVersion string) bool { // file-version agnostic
 		for _, f := range files {
 			if strings.HasPrefix(f, folderName) && strings.HasSuffix(f, fileNameWithoutVersion) {
 				return true
@@ -409,7 +409,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.Equal(t, 6, onChangeCalls)
 	require.Equal(t, 7, onDelCalls)
 
-	{ //prune
+	{ // prune
 		rwTx, err = db.BeginTemporalRw(t.Context())
 		require.NoError(t, err)
 		defer rwTx.Rollback()
@@ -617,7 +617,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	//t.Logf("expected hash: %x", expectedHash)
+	// t.Logf("expected hash: %x", expectedHash)
 	err = agg.BuildFiles(stepSize * 16)
 	require.NoError(t, err)
 
@@ -641,7 +641,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	resultHash, err := domains.ComputeCommitment(t.Context(), rwTx, false, txNum/stepSize, txNum, "", nil)
 	require.NoError(t, err)
 
-	//t.Logf("result hash: %x", resultHash)
+	// t.Logf("result hash: %x", resultHash)
 	require.Equal(t, expectedHash, resultHash)
 }
 
@@ -669,7 +669,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
-	//var maxWrite, otherMaxWrite uint64
+	// var maxWrite, otherMaxWrite uint64
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
@@ -815,7 +815,7 @@ func generateSharedDomainsUpdates(t *testing.T, domains *execctx.SharedDomains, 
 			stateRootHash, err := domains.ComputeCommitment(t.Context(), tx, true, txNum/commitEvery, txNum, "", nil)
 			require.NoErrorf(t, err, "txNum=%d", txNum)
 			_ = stateRootHash
-			//t.Logf("commitment %x txn=%d", stateRootHash, txNum)
+			// t.Logf("commitment %x txn=%d", stateRootHash, txNum)
 		}
 	}
 	return usedKeys

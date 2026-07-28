@@ -140,7 +140,7 @@ func New(
 	logger log.Logger,
 	tracer *tracers.Tracer,
 ) (*ErigonNode, error) {
-	//prepareBuckets(optionalParams.CustomBuckets)
+	// prepareBuckets(optionalParams.CustomBuckets)
 	node, err := node.New(ctx, nodeConfig, logger)
 	if err != nil {
 		utils.Fatalf("Failed to create Erigon node: %v", err)

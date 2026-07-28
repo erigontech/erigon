@@ -885,7 +885,7 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 	}
 	addressValue := address.Value()
 	if original.Incarnation > account.Incarnation {
-		//del, before create: to clanup code/storage
+		// del, before create: to clanup code/storage
 		if err := w.tx.DomainDel(kv.CodeDomain, addressValue[:], w.txNum, nil); err != nil {
 			return err
 		}
@@ -926,13 +926,13 @@ func (w *Writer) DeleteAccount(address accounts.Address, original *accounts.Acco
 	if w.trace {
 		fmt.Printf("del acc: %x\n", address)
 	}
-	//TODO: move logic from SD
-	//if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
-	//	return err
-	//}
-	//if err := w.tx.DomainDel(kv.CodeDomain, address[:], nil); err != nil {
-	//	return err
-	//}
+	// TODO: move logic from SD
+	// if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
+	// 	return err
+	// }
+	// if err := w.tx.DomainDel(kv.CodeDomain, address[:], nil); err != nil {
+	// 	return err
+	// }
 	addressValue := address.Value()
 	if err := w.tx.DomainDel(kv.AccountsDomain, addressValue[:], w.txNum, nil); err != nil {
 		return err
@@ -1834,10 +1834,10 @@ func returnReadList(v ReadLists) {
 	if v == nil {
 		return
 	}
-	//for _, tbl := range v {
-	//	clear(tbl.Keys)
-	//	clear(tbl.Vals)
-	//	tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
-	//}
+	// for _, tbl := range v {
+	// 	clear(tbl.Keys)
+	// 	clear(tbl.Vals)
+	// 	tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
+	// }
 	readListPool.Put(v)
 }

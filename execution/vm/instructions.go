@@ -525,10 +525,10 @@ func stReturnDataCopy(_ uint64, scope *CallContext) string {
 		return fmt.Sprintf("%s %d %d %d (%s)", RETURNDATACOPY, memOffset.Uint64(), offset64, length.Uint64(), ErrReturnDataOutOfBounds)
 	}
 
-	//end64, overflow := end.Uint64WithOverflow()
-	//if overflow || uint64(len(interpreter.returnData)) < end64 {
-	//	return fmt.Sprintf("%s %d %d %d (%s)", RETURNDATACOPY, memOffset.Uint64(), offset64, length.Uint64(), ErrReturnDataOutOfBounds)
-	//}
+	// end64, overflow := end.Uint64WithOverflow()
+	// if overflow || uint64(len(interpreter.returnData)) < end64 {
+	// 	return fmt.Sprintf("%s %d %d %d (%s)", RETURNDATACOPY, memOffset.Uint64(), offset64, length.Uint64(), ErrReturnDataOutOfBounds)
+	// }
 
 	// return fmt.Sprintf("%s %d %d %d (%x)", RETURNDATACOPY, memOffset.Uint64(), offset64, length.Uint64(), interpreter.returnData[offset64:end64])
 	return fmt.Sprintf("%s %d %d %d", RETURNDATACOPY, memOffset.Uint64(), offset64, length.Uint64())
@@ -1439,7 +1439,7 @@ func opDupN(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		return pc, nil, &ErrStackUnderflow{stackLen: scope.Stack.len(), required: n}
 	}
 
-	//The n‘th stack item is duplicated at the top of the stack.
+	// The n‘th stack item is duplicated at the top of the stack.
 	scope.Stack.dup(n)
 	return pc, nil, nil
 }

@@ -159,7 +159,7 @@ type CaplinStateSnapshots struct {
 
 	visibleLock sync.RWMutex // guards  `visible` field
 	visible     sync.Map
-	//visible     map[string]VisibleSegments // ordered map `type.Enum()` -> VisbileSegments
+	// visible     map[string]VisibleSegments // ordered map `type.Enum()` -> VisbileSegments
 
 	snapshotTypes SnapshotTypes
 

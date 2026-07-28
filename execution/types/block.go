@@ -74,7 +74,7 @@ func (n *BlockNonce) UnmarshalText(input []byte) error {
 	return hexutil.UnmarshalFixedText("BlockNonce", input, n[:])
 }
 
-//()go:generate gencodec -type Header -field-override headerMarshaling -out gen_header_json.go
+// ()go:generate gencodec -type Header -field-override headerMarshaling -out gen_header_json.go
 
 // Header represents a block header in the Ethereum blockchain.
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
@@ -1139,7 +1139,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	}
 
 	b.header.ParentBeaconBlockRoot = header.ParentBeaconBlockRoot
-	b.header.mutable = false //Force immutability of block and header. Use `NewBlockForAsembling` if you need mutable block
+	b.header.mutable = false // Force immutability of block and header. Use `NewBlockForAsembling` if you need mutable block
 	return b
 }
 

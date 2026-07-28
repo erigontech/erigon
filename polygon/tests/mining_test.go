@@ -83,7 +83,7 @@ func TestMiningBenchmark(t *testing.T) {
 		t.Skip("issue #15007")
 	}
 
-	//usually 15sec is enough
+	// usually 15sec is enough
 	timeout := time.Minute
 	ctx, clean := context.WithTimeout(context.Background(), timeout)
 	defer clean()

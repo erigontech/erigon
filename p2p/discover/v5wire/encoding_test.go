@@ -322,7 +322,7 @@ func TestDecodeErrorsV5(t *testing.T) {
 
 		testDataFile := filepath.Join("testdata", "v5.1-ping-handshake"+".txt")
 		enc := hexFile(testDataFile)
-		//delete some byte from handshake to make it invalid
+		// delete some byte from handshake to make it invalid
 		enc = enc[:len(enc)-requiredNumber]
 		net.nodeB.expectDecodeErr(t, errMsgTooShort, enc)
 	})
@@ -334,12 +334,12 @@ func TestDecodeErrorsV5(t *testing.T) {
 			file := filepath.Join("testdata", name+".txt")
 			enc := hexFile(file)
 			if counter == 0 {
-				//make whoareyou header
+				// make whoareyou header
 				testPacket = enc[:sizeofStaticPacketData-1]
 				testPacket = append(testPacket, 255)
 			}
 			if counter == 1 {
-				//append invalid auth size
+				// append invalid auth size
 				testPacket = append(testPacket, enc[sizeofStaticPacketData:]...)
 			}
 		}

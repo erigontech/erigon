@@ -1152,7 +1152,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 		if toStep > fromStep {
 			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
 		}
-		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
+		for step := fromStep; step < toStep; step++ { // `step` must be fully-written - means `step+1` records must be visible
 			if err := a.buildFiles(ctx, step); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
@@ -1422,7 +1422,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		}
 
 		select {
-		case <-localTimeout.C: //must be first to improve responsivness
+		case <-localTimeout.C: // must be first to improve responsivness
 			at.a.logger.Debug("[snapshots] PruneSmallBatches local timeout", "timeout", timeout.String())
 			return true, nil
 		case <-ctx.Done():
@@ -1431,19 +1431,19 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		case <-logEvery.C:
 			if furiousPrune {
 				at.a.logger.Info("[prune] state",
-					//"until commit", time.Until(started.Add(timeout)).String(),
-					//"pruneLimit", pruneLimit,
-					//"aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
+					// "until commit", time.Until(started.Add(timeout)).String(),
+					// "pruneLimit", pruneLimit,
+					// "aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
 					"stepsRangeInDB", at.stepsRangeInDBAsStr(tx),
-					//"pruned", fullStat.String(),
+					// "pruned", fullStat.String(),
 				)
 			} else {
 				at.a.logger.Info("[prune] state",
 					"until commit", time.Until(started.Add(timeout)).String(),
-					//"pruneLimit", pruneLimit,
-					//"aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
+					// "pruneLimit", pruneLimit,
+					// "aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
 					"stepsRangeInDB", at.stepsRangeInDBAsStr(tx),
-					//"pruned", fullStat.String(),
+					// "pruned", fullStat.String(),
 				)
 			}
 		default:
@@ -1572,12 +1572,12 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 	}
 	aggStat := newAggregatorPruneStat()
 	for id, d := range at.d {
-		//if _, ok := invalidateOnce[fmt.Sprintf("domain%s", d.d.ValuesTable)]; !ok {
-		//	if true { //d.d.Name != kv.CommitmentDomain {
-		//		err := InvalidatePruneProgress(tx, d.d.ValuesTable)
-		//		if err != nil {
-		//			d.d.logger.Error("invalidate prune progress", "err", err)
-		//			return nil, err
+		// if _, ok := invalidateOnce[fmt.Sprintf("domain%s", d.d.ValuesTable)]; !ok {
+		// 	if true { //d.d.Name != kv.CommitmentDomain {
+		// 		err := InvalidatePruneProgress(tx, d.d.ValuesTable)
+		// 		if err != nil {
+		// 			d.d.logger.Error("invalidate prune progress", "err", err)
+		// 			return nil, err
 		//		}
 		//		invalidateOnce[fmt.Sprintf("domain%s", d.d.ValuesTable)] = 1
 		//		err = InvalidatePruneProgress(tx, d.ht.h.ValuesTable)
@@ -1608,14 +1608,14 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 			return aggStat, ctx.Err()
 		default:
 		}
-		//if _, ok := invalidateOnce[fmt.Sprintf("ii%s", at.iis[iikey].ii.ValuesTable)]; !ok {
-		//	err := InvalidatePruneProgress(tx, at.iis[iikey].ii.ValuesTable)
-		//	if err != nil {
-		//		at.iis[iikey].ii.logger.Error("invalidate prune progress", "err", err)
-		//		return nil, err
-		//	}
-		//	invalidateOnce[fmt.Sprintf("ii%s", at.iis[iikey].ii.ValuesTable)] = 1
-		//	at.iis[iikey].ii.logger.Info("invalidated ii prune progress", "name", at.iis[iikey].ii.Name)
+		// if _, ok := invalidateOnce[fmt.Sprintf("ii%s", at.iis[iikey].ii.ValuesTable)]; !ok {
+		// 	err := InvalidatePruneProgress(tx, at.iis[iikey].ii.ValuesTable)
+		// 	if err != nil {
+		// 		at.iis[iikey].ii.logger.Error("invalidate prune progress", "err", err)
+		// 		return nil, err
+		// 	}
+		// 	invalidateOnce[fmt.Sprintf("ii%s", at.iis[iikey].ii.ValuesTable)] = 1
+		// 	at.iis[iikey].ii.logger.Info("invalidated ii prune progress", "name", at.iis[iikey].ii.Name)
 		//}
 		stat, err := at.iis[iikey].TableScanningPrune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil,
 			nil, nil, prune.DefaultStorageMode)
@@ -1749,11 +1749,11 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 	// TODO(awskii) have two different functions including commitment/without it
 	//  Usually its skipped because commitment either have MaxUint64 due to no history or equal to other domains
 
-	//log.Warn("dirtyFilesEndTxNumMinimax", "min", m,
-	//	"acc", a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
-	//	"sto", a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
-	//	"cod", a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
-	//	"com", a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
+	// log.Warn("dirtyFilesEndTxNumMinimax", "min", m,
+	// 	"acc", a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
+	// 	"sto", a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
+	// 	"cod", a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
+	// 	"com", a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
 	//)
 	return m
 }
@@ -1914,7 +1914,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
 	}
 
-	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/at.a.stepSize, maxSpan/at.a.stepSize, r))
+	// log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/at.a.stepSize, maxSpan/at.a.stepSize, r))
 	return r
 }
 
@@ -2150,7 +2150,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		defer a.buildingFiles.Store(false)
 
 		if a.snapshotBuildSema != nil {
-			//we are inside own goroutine - it's fine to block here
+			// we are inside own goroutine - it's fine to block here
 			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil { //TODO: not sure if this ctx is correct
 				if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
 					a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
@@ -2245,7 +2245,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		// - to reduce amount of small merges
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
-		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
+		for ; step < lastInDB; step++ { // `step` must be fully-written - means `step+1` records must be visible
 			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break

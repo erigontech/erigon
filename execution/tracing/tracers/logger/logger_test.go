@@ -56,7 +56,7 @@ func (d *dummyContractRef) SetNonce(uint64)            {}
 func (d *dummyContractRef) Balance() *big.Int          { return new(big.Int) }
 
 func TestStoreCapture(t *testing.T) {
-	//c := vm.NewJumpDestCache(128)
+	// c := vm.NewJumpDestCache(128)
 	ibs := state.New(state.NewNoopReader())
 	defer ibs.Release(false)
 	ibs.AddRefund(1337)
@@ -100,7 +100,7 @@ func TestJSONLoggerOnSystemCallStartSetsEnv(t *testing.T) {
 	}
 }
 
-//func TestStoreCapture(t *testing.T) {
+// func TestStoreCapture(t *testing.T) {
 //	c := vm.NewJumpDestCache()
 //	var (
 //		logger   = NewStructLogger(nil)

@@ -17,7 +17,7 @@ type SimpleSequence struct {
 	baseNum uint64
 	raw     []byte
 	pos     int
-	count   uint64 //u64-typed pre-calculated `len(raw)/4`
+	count   uint64 // u64-typed pre-calculated `len(raw)/4`
 }
 
 func NewSimpleSequence(baseNum uint64, count uint64) *SimpleSequence {

@@ -330,7 +330,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 	// 0-1, 1-2, ..... 14-15 => 0-1....12-13, 13-15
 	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 14}, {14, 15}}, 15, true, 13, 15)
 
-	//0-1....12-13, 13-15, 15-16 => 0-16
+	// 0-1....12-13, 13-15, 15-16 => 0-16
 	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 15}, {15, 16}}, 15, true, 0, 16)
 }
 
@@ -538,7 +538,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 	// 0-1, 1-2, ..... 14-15 => 0-1....12-13, 13-15
 	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 14}, {14, 15}}, true, 2, 14, 14)
 
-	//0-1....12-13, 13-15, 15-16 => 0-16
+	// 0-1....12-13, 13-15, 15-16 => 0-16
 	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 15}, {15, 16}}, true, 15, 1, 1)
 }
 
@@ -551,7 +551,7 @@ func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 
 	filepath.WalkDir(dirs.DataDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { //skip magically disappeared files
+			if os.IsNotExist(err) { // skip magically disappeared files
 				return nil
 			}
 			return err

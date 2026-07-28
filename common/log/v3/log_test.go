@@ -652,7 +652,7 @@ func TestCallStack(t *testing.T) {
 	scenarios := map[string]struct {
 		handler Handler
 	}{
-		//"CallerStackHandler": {CallerStackHandler("%+v", h)}, // -trimpath flag will cause this to fail
+		// "CallerStackHandler": {CallerStackHandler("%+v", h)}, // -trimpath flag will cause this to fail
 		"CallerFuncHandler": {CallerFuncHandler(h)},
 		"CallerFileHandler": {CallerFileHandler(h)},
 	}

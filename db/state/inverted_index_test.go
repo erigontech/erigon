@@ -70,17 +70,17 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 		ii.Close()
 		db.Close()
 
-		//if runtime.GOOS == "windows" {
-		//	runtime.GC()
-		//	debug.FreeOSMemory()
-		//}
+		// if runtime.GOOS == "windows" {
+		// 	runtime.GC()
+		// 	debug.FreeOSMemory()
+		// }
 		//
-		//accFile := filepath.Join(dirs.SnapAccessors, "v1.0-inv.0-1.efi")
-		//err := os.Remove(accFile)
-		//tb.Log("remove accessor file after Close:", err, accFile)
-		//idxFile := filepath.Join(dirs.SnapIdx, "v1.0-inv.0-1.ef")
-		//err = os.Remove(idxFile)
-		//tb.Log("remove idx file after Close:", err, idxFile)
+		// accFile := filepath.Join(dirs.SnapAccessors, "v1.0-inv.0-1.efi")
+		// err := os.Remove(accFile)
+		// tb.Log("remove accessor file after Close:", err, accFile)
+		// idxFile := filepath.Join(dirs.SnapIdx, "v1.0-inv.0-1.ef")
+		// err = os.Remove(idxFile)
+		// tb.Log("remove idx file after Close:", err, idxFile)
 	})
 	ii.salt.Store(&salt)
 	ii.DisableFsync()

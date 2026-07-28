@@ -685,9 +685,9 @@ func TestStackStream_BoundaryValues(t *testing.T) {
 	assert.Contains(t, result, `"uint16_max":65535`)
 	assert.Contains(t, result, `"uint32_max":4294967295`)
 	// NaN and Infinity are represented as null in JSON
-	//assert.Contains(t, result, `"float32_special":null`)
-	//assert.Contains(t, result, `"float64_inf":null`)
-	//assert.Contains(t, result, `"float64_neg_inf":null`)
+	// assert.Contains(t, result, `"float32_special":null`)
+	// assert.Contains(t, result, `"float64_inf":null`)
+	// assert.Contains(t, result, `"float64_neg_inf":null`)
 	assert.True(t, ss.IsComplete())
 }
 

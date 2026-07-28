@@ -106,7 +106,7 @@ func Bench3(erigon_url, geth_url string) error {
 		if traceg.Error != nil {
 			return fmt.Errorf("Error tracing transaction g: %d %s\n", traceg.Error.Code, traceg.Error.Message)
 		}
-		//print(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
+		// print(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
 		if !compareTraces(&trace, &traceg) {
 			return fmt.Errorf("Different traces block %d, txn %s\n", 1720000, txhash)
 		}

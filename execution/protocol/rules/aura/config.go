@@ -32,8 +32,8 @@ import (
 
 // Draws a validator nonce modulo number of validators.
 func GetFromValidatorSet(set ValidatorSet, parent common.Hash, nonce uint, call rules.Call) (common.Address, error) {
-	//d, err := set.defaultCaller(parent)
-	//if err != nil {
+	// d, err := set.defaultCaller(parent)
+	// if err != nil {
 	//	return common.Address{}, err
 	//}
 	return set.getWithCaller(parent, nonce, call)

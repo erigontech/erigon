@@ -91,7 +91,7 @@ func testDbAndDomainOfStep(t *testing.T, domainCfg statecfg.DomainCfg, aggStep u
 	salt := uint32(1)
 
 	cfg.Hist.IiCfg.FileVersion = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
-	//cfg.hist.historyValuesOnCompressedPage = 16
+	// cfg.hist.historyValuesOnCompressedPage = 16
 	d, err := NewDomain(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 	d.salt.Store(&salt)
 	require.NoError(t, err)
@@ -245,19 +245,19 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		}
 		require.Equal(t, []string{"key1", "value1.2", "key2", "value2.1"}, words)
 		// Check index
-		//require.Equal(t, 2, int(sf.valuesIdx.KeyCount()))
+		// require.Equal(t, 2, int(sf.valuesIdx.KeyCount()))
 		require.Equal(t, 2, int(sf.valuesBt.KeyCount()))
 
-		//r := recsplit.NewIndexReader(sf.valuesIdx)
-		//defer r.Close()
-		//for i := 0; i < len(words); i += 2 {
-		//	offset, _ := r.Lookup([]byte(words[i]))
-		//	g.Reset(offset)
-		//	w, _ := g.Next(nil)
-		//	require.Equal(t, words[i], string(w))
-		//	w, _ = g.Next(nil)
-		//	require.Equal(t, words[i+1], string(w))
-		//}
+		// r := recsplit.NewIndexReader(sf.valuesIdx)
+		// defer r.Close()
+		// for i := 0; i < len(words); i += 2 {
+		// 	offset, _ := r.Lookup([]byte(words[i]))
+		// 	g.Reset(offset)
+		// 	w, _ := g.Next(nil)
+		// 	require.Equal(t, words[i], string(w))
+		// 	w, _ = g.Next(nil)
+		// 	require.Equal(t, words[i+1], string(w))
+		// }
 
 		for i := 0; i < len(words); i += 2 {
 			c, _ := sf.valuesBt.Seek(g, []byte(words[i]))
@@ -289,17 +289,17 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 			require.Equal(t, words[i+1], string(c.Value()))
 		}
 
-		//require.Equal(t, 1, int(sf.valuesIdx.KeyCount()))
-		//r := recsplit.NewIndexReader(sf.valuesIdx)
-		//defer r.Close()
-		//for i := 0; i < len(words); i += 2 {
-		//	offset := r.Lookup([]byte(words[i]))
-		//	g.Reset(offset)
-		//	w, _ := g.Next(nil)
-		//	require.Equal(t, words[i], string(w))
-		//	w, _ = g.Next(nil)
-		//	require.Equal(t, words[i+1], string(w))
-		//}
+		// require.Equal(t, 1, int(sf.valuesIdx.KeyCount()))
+		// r := recsplit.NewIndexReader(sf.valuesIdx)
+		// defer r.Close()
+		// for i := 0; i < len(words); i += 2 {
+		// 	offset := r.Lookup([]byte(words[i]))
+		// 	g.Reset(offset)
+		// 	w, _ := g.Next(nil)
+		// 	require.Equal(t, words[i], string(w))
+		// 	w, _ = g.Next(nil)
+		// 	require.Equal(t, words[i+1], string(w))
+		// }
 	}
 }
 
@@ -740,9 +740,9 @@ func collateAndMerge(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
 			valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
 			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
 			require.NoError(t, err)
-			//if valuesIn != nil && valuesIn.decompressor != nil {
-			//fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
-			//}
+			// if valuesIn != nil && valuesIn.decompressor != nil {
+			// fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
+			// }
 			d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
 			return false
 		}(); stop {
@@ -947,15 +947,15 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	otherTx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer otherTx.Rollback()
-	//domainRoTx.valsC.Close()
-	//domainRoTx.valsC = nil
+	// domainRoTx.valsC.Close()
+	// domainRoTx.valsC = nil
 
 	defer func() {
 		r := recover()
 		require.NotNil(r)
-		//re := r.(error)
-		//fmt.Println(re)
-		//require.ErrorIs(re, sdTxImmutabilityInvariant)
+		// re := r.(error)
+		// fmt.Println(re)
+		// require.ErrorIs(re, sdTxImmutabilityInvariant)
 	}()
 
 	_, _, _, err = domainRoTx.GetLatest([]byte("key1"), otherTx)
@@ -1077,20 +1077,20 @@ func TestDomain_Delete(t *testing.T) {
 	defer domainRoTx.Close()
 	for txNum := range uint64(1000) {
 		label := fmt.Sprintf("txNum=%d", txNum)
-		//val, ok, err := domainRoTx.GetLatestBeforeTxNum([]byte("key1"), txNum+1, tx)
-		//require.NoError(err)
-		//require.True(ok)
-		//if txNum%2 == 0 {
-		//	require.Equal([]byte("value1"), val, label)
-		//} else {
-		//	require.Nil(val, label)
-		//}
-		//if txNum == 976 {
+		// val, ok, err := domainRoTx.GetLatestBeforeTxNum([]byte("key1"), txNum+1, tx)
+		// require.NoError(err)
+		// require.True(ok)
+		// if txNum%2 == 0 {
+		// 	require.Equal([]byte("value1"), val, label)
+		// } else {
+		// 	require.Nil(val, label)
+		// }
+		// if txNum == 976 {
 		val, _, err := domainRoTx.GetAsOf([]byte("key2"), txNum+1, tx)
 		require.NoError(err)
-		//require.False(ok, label)
+		// require.False(ok, label)
 		require.Nil(val, label)
-		//}
+		// }
 	}
 }
 
@@ -1167,15 +1167,15 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 					continue
 				}
 				continue
-				//fmt.Printf("Put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
-			} else { //warm data
+				// fmt.Printf("Put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
+			} else { // warm data
 				if keyNum == 0 || keyNum == 1 {
 					continue
 				}
 				if keyNum == txNum%dom.stepSize {
 					continue
 				}
-				//fmt.Printf("Put: %d, step=%d\n", keyNum, step)
+				// fmt.Printf("Put: %d, step=%d\n", keyNum, step)
 			}
 
 			label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txNum, keyNum)
@@ -1197,7 +1197,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 		}
 	}
 
-	//warm keys
+	// warm keys
 	binary.BigEndian.PutUint64(v[:], txCount)
 	for keyNum := uint64(2); keyNum < keyCount; keyNum++ {
 		label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txCount-1, keyNum)
@@ -1398,18 +1398,18 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 		danglingDomains[run1Doms[i]] = false
 	}
 
-	//dom.dirtyFiles.Walk(func(items []*filesItem) bool {
-	//	for _, item := range items {
-	//		if _, found := danglingDomains[item.decompressor.FileName()]; found {
-	//			danglingDomains[item.decompressor.FileName()] = true
-	//		}
-	//	}
-	//	return true
-	//})
+	// dom.dirtyFiles.Walk(func(items []*filesItem) bool {
+	// 	for _, item := range items {
+	// 		if _, found := danglingDomains[item.decompressor.FileName()]; found {
+	// 			danglingDomains[item.decompressor.FileName()] = true
+	// 		}
+	// 	}
+	// 	return true
+	// })
 	//
-	//for f, persists := range danglingDomains {
-	//	require.True(t, persists, f)
-	//}
+	// for f, persists := range danglingDomains {
+	// 	require.True(t, persists, f)
+	// }
 
 	// check files persist on the disk
 	persistingDomains := make(map[string]bool, 0)
@@ -1550,18 +1550,18 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 		require.Equal(t, words[i+1], string(c.Value()))
 	}
 
-	//require.Equal(t, 3, int(sf.valuesIdx.KeyCount()))
+	// require.Equal(t, 3, int(sf.valuesIdx.KeyCount()))
 	//
-	//r := recsplit.NewIndexReader(sf.valuesIdx)
-	//defer r.Close()
-	//for i := 0; i < len(words); i += 2 {
-	//	offset := r.Lookup([]byte(words[i]))
-	//	g.Reset(offset)
-	//	w, _ := g.Next(nil)
-	//	require.Equal(t, words[i], string(w))
-	//	w, _ = g.Next(nil)
-	//	require.Equal(t, words[i+1], string(w))
-	//}
+	// r := recsplit.NewIndexReader(sf.valuesIdx)
+	// defer r.Close()
+	// for i := 0; i < len(words); i += 2 {
+	// 	offset := r.Lookup([]byte(words[i]))
+	// 	g.Reset(offset)
+	// 	w, _ := g.Next(nil)
+	// 	require.Equal(t, words[i], string(w))
+	// 	w, _ = g.Next(nil)
+	// 	require.Equal(t, words[i+1], string(w))
+	// }
 }
 
 func TestDomainContext_getFromFiles(t *testing.T) {
@@ -1623,7 +1623,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
 
-		//fmt.Printf("Step %d [%d,%d)\n", step, txFrom, txTo)
+		// fmt.Printf("Step %d [%d,%d)\n", step, txFrom, txTo)
 
 		require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, ps))
 
@@ -1708,20 +1708,20 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 				if !allowInsert {
 					continue
 				}
-				//fmt.Printf("Put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
-			} else { //warm data
+				// fmt.Printf("Put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
+			} else { // warm data
 				if keyNum == 0 || keyNum == 1 {
 					continue
 				}
 				if keyNum == txNum%d.stepSize {
 					continue
 				}
-				//fmt.Printf("Put: %d, step=%d\n", keyNum, step)
+				// fmt.Printf("Put: %d, step=%d\n", keyNum, step)
 			}
 
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum)
-			//v[0] = 3 // value marker
+			// v[0] = 3 // value marker
 			err = writer.PutWithPrev(k[:], v[:], txNum, []byte(prev[string(k[:])]))
 			require.NoError(t, err)
 			if _, ok := dat[keyNum]; !ok {
@@ -1815,8 +1815,8 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	defer tx.Rollback()
 
 	d.HistoryLargeValues = false
-	d.History.Compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
-	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
+	d.History.Compression = seg.CompressNone // seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressNone         // seg.CompressKeys | seg.CompressVals
 	d.FilenameBase = kv.CommitmentDomain.String()
 
 	domainRoTx := d.beginForTests()
@@ -2106,8 +2106,8 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	defer tx.Rollback()
 
 	d.HistoryLargeValues = false
-	d.History.Compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
-	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
+	d.History.Compression = seg.CompressNone // seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressNone         // seg.CompressKeys | seg.CompressVals
 
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
@@ -2681,25 +2681,25 @@ func compareIterators(t *testing.T, et, ut stream.KV) {
 	t.Helper()
 
 	/* uncomment when mismatches amount of keys in expectedIter and unwindedIter*/
-	//i := 0
-	//for {
-	//	ek, ev, err1 := et.Next()
-	//	fmt.Printf("ei=%d %s %s %v\n", i, ek, ev, err1)
-	//	i++
-	//	if !et.HasNext() {
-	//		break
-	//	}
-	//}
+	// i := 0
+	// for {
+	// 	ek, ev, err1 := et.Next()
+	// 	fmt.Printf("ei=%d %s %s %v\n", i, ek, ev, err1)
+	// 	i++
+	// 	if !et.HasNext() {
+	// 		break
+	// 	}
+	// }
 	//
-	//i = 0
-	//for {
-	//	uk, uv, err2 := ut.Next()
-	//	fmt.Printf("ui=%d %s %s %v\n", i, string(uk), string(uv), err2)
-	//	i++
-	//	if !ut.HasNext() {
-	//		break
-	//	}
-	//}
+	// i = 0
+	// for {
+	// 	uk, uv, err2 := ut.Next()
+	// 	fmt.Printf("ui=%d %s %s %v\n", i, string(uk), string(uv), err2)
+	// 	i++
+	// 	if !ut.HasNext() {
+	// 		break
+	// 	}
+	// }
 	for {
 		ek, ev, err1 := et.Next()
 		uk, uv, err2 := ut.Next()
@@ -2859,7 +2859,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		domainRoTx = d.beginForTests()
 		pruneOneKeyDomain(t, domainRoTx, db, 0, pruneFrom, pruneTo)
 		domainRoTx.Close()
-		//checkKeyPruned(t, domainRoTx, db, stepSize, pruneFrom, pruneTo)
+		// checkKeyPruned(t, domainRoTx, db, stepSize, pruneFrom, pruneTo)
 
 		rotx, err = db.BeginRo(ctx)
 		require.NoError(t, err)
@@ -3055,7 +3055,7 @@ func testTraceKey(t *testing.T, largeVals bool) {
 	randfn := func(till uint64) uint64 { return 1 + (rand.Uint64() % till) } // [1,till]
 
 	key := randfn(20) // [1-20] random key
-	//key := uint64(18)
+	// key := uint64(18)
 	t.Logf("using key: %d", key)
 	keyBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(keyBytes, key)
@@ -3064,7 +3064,7 @@ func testTraceKey(t *testing.T, largeVals bool) {
 		from, to = randfn(100), randfn(1000)
 	}
 
-	//from, to := uint64(78), uint64(108)
+	// from, to := uint64(78), uint64(108)
 	t.Logf("from: %d, to: %d", from, to)
 	it, err := domainRoTx.TraceKey(ctx, keyBytes, from, to, roTx)
 	require.NoError(t, err)
@@ -3266,7 +3266,7 @@ func TestDomain_DebugRangeLatestFromFiles(t *testing.T) {
 	writer = domainRoTx.NewWriter()
 	defer writer.Close()
 
-	dbOnlyKeyNums := make(map[uint64]bool) //keys only in MDBX
+	dbOnlyKeyNums := make(map[uint64]bool) // keys only in MDBX
 	dbTxNum := txs + 1
 	for keyNum := uint64(11); keyNum <= uint64(20); keyNum++ {
 		var k [8]byte

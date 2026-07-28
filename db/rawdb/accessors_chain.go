@@ -861,7 +861,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 	if err != nil {
 		return deleted, err
 	}
-	if firstK == nil { //nothing to delete
+	if firstK == nil { // nothing to delete
 		return deleted, err
 	}
 	blockFrom := binary.BigEndian.Uint64(firstK)
@@ -928,7 +928,7 @@ func TruncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error 
 func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	if blockFrom < 1 { //protect genesis
+	if blockFrom < 1 { // protect genesis
 		blockFrom = 1
 	}
 	return tx.ForEach(kv.Headers, hexutil.EncodeTs(blockFrom), func(k, v []byte) error {
@@ -1263,14 +1263,14 @@ func ReceiptCacheV2Stream(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (stream.D
 			return txNum, nil, nil
 		}
 
-		//fmt.Println("stream", "txnum", txNum, "v", len(v))
+		// fmt.Println("stream", "txnum", txNum, "v", len(v))
 
 		receipt := &types.ReceiptForStorage{}
 		if err := rlp.DecodeBytes(v, receipt); err != nil {
 			return txNum, nil, fmt.Errorf("%w, of txNum %d, len(v)=%d", err, txNum, len(v))
 		}
 		res := (*types.Receipt)(receipt)
-		//res.DeriveFieldsV4ForCachedReceipt(query.BlockHash, query.BlockNum, query.TxnHash, !query.DontCalcBloom)
+		// res.DeriveFieldsV4ForCachedReceipt(query.BlockHash, query.BlockNum, query.TxnHash, !query.DontCalcBloom)
 		return txNum, res, nil
 	}), nil
 }

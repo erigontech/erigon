@@ -331,7 +331,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
-	_ = g.Alloc //nil-check
+	_ = g.Alloc // nil-check
 
 	head, withdrawals := GenesisWithoutStateToBlock(g)
 

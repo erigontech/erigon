@@ -101,8 +101,8 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 				next    = current + query.Skip + 1
 			)
 			if next <= current {
-				//infos, _ := json.MarshalIndent(peer.Peer.Info(), "", "  ")
-				//log.Warn("GetBlockHeaders skip overflow attack", "current", current, "skip", query.Skip, "next", next, "attacker", infos)
+				// infos, _ := json.MarshalIndent(peer.Peer.Info(), "", "  ")
+				// log.Warn("GetBlockHeaders skip overflow attack", "current", current, "skip", query.Skip, "next", next, "attacker", infos)
 				log.Warn("[p2p] GetBlockHeaders skip overflow attack", "current", current, "skip", query.Skip, "next", next)
 				unknown = true
 			} else {

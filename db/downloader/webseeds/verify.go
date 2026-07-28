@@ -218,9 +218,9 @@ func (me *webseedChecker) checkPreverifiedItem(
 		stateItem.DataMatchesTorrent = true
 		me.logger.Info("snapshot matches",
 			"url", dataUrl,
-			//"name", item.Name,
+			// "name", item.Name,
 			"content length", resp.ContentLength,
-			//"etag", resp.Header.Get("etag"),
+			// "etag", resp.Header.Get("etag"),
 		)
 	}
 	return

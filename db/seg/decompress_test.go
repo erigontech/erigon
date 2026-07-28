@@ -350,7 +350,7 @@ func TestUncompressed(t *testing.T) {
 	})
 	t.Run("BinarySearch end of file", func(t *testing.T) {
 		require := require.New(t)
-		//last word is `voluptate`
+		// last word is `voluptate`
 		_, ok := g.BinarySearch([]byte("voluptate"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
 		k, _ := g.Next(nil)
@@ -365,7 +365,7 @@ func TestUncompressed(t *testing.T) {
 
 	t.Run("BinarySearch begin of file", func(t *testing.T) {
 		require := require.New(t)
-		//first word is ``
+		// first word is ``
 		_, ok := g.BinarySearch([]byte(""), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
 		k, _ := g.Next(nil)

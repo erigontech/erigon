@@ -152,7 +152,7 @@ type HexPatriciaHashed struct {
 	mountWall  int16 // depth the mounted subtree folds down to (split depth + 1); foldMounted stops here
 
 	memoizationOff bool // if true, do not rely on memoized hashes
-	//temp buffers
+	// temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
 	// leaveDeferredForCaller when true, Process() leaves deferred updates on the branchEncoder
@@ -168,7 +168,7 @@ type HexPatriciaHashed struct {
 
 	cfg TrieConfig // static config, set at construction
 
-	//processing metrics
+	// processing metrics
 	metrics       *Metrics
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
 
@@ -761,7 +761,7 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 	canEmbed := !singleton && totalLen+pl < length.Hash
 	var writer io.Writer
 	if canEmbed {
-		//hph.byteArrayWriter.Setup(buf)
+		// hph.byteArrayWriter.Setup(buf)
 		hph.auxBuffer.Reset()
 		writer = hph.auxBuffer
 	} else {
@@ -963,8 +963,8 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			} else {
 				storageRootHashIsSet = true
 				storageRootHash = *(*common.Hash)(res[1:])
-				//copy(storageRootHash[:], res[1:])
-				//cell.stateHashLen = 0
+				// copy(storageRootHash[:], res[1:])
+				// cell.stateHashLen = 0
 			}
 		} else {
 			if !cell.loaded.storage() {
@@ -2285,9 +2285,9 @@ func (hph *HexPatriciaHashed) unfoldKeyPath(hashedKey, plainKey []byte) error {
 }
 
 func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateUpdate *Update) (err error) {
-	//if hph.traceW != nil {
+	// if hph.traceW != nil {
 	// fmt.Fprintf(hph.traceW, "mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
-	//}
+	// }
 	// Keep folding until the currentKey is the prefix of the key we modify
 	for hph.needFolding(hashedKey) {
 		var foldDone func()
@@ -2510,7 +2510,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
 
-	//hph.traceW = os.Stderr
+	// hph.traceW = os.Stderr
 
 	hph.metrics.Reset()
 	hph.metrics.updates.Store(updatesCount)
@@ -2627,8 +2627,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	if dbg.KVReadLevelledMetrics {
 		hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
 		log.Debug("commitment finished, counters updated (no reset)",
-			//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
-			//"hadToReset", common.PrettyCounter(hadToReset.Load()),
+			// "hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
+			// "hadToReset", common.PrettyCounter(hadToReset.Load()),
 			"skip ratio", fmt.Sprintf("%.1f%%", 100*(float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))),
 			"reset ratio", fmt.Sprintf("%.1f%%", 100*(float64(hadToReset.Load())/float64(hadToLoad.Load()))),
 			"keys", common.PrettyCounter(ki), "spent", time.Since(start),

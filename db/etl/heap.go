@@ -53,7 +53,7 @@ func (h *Heap) Pop() *HeapElem {
 	old := h.elems
 	n := len(old) - 1
 	x := old[n]
-	//old[n].Key, old[n].Value, old[n].TimeIdx = nil, nil, 0
+	// old[n].Key, old[n].Value, old[n].TimeIdx = nil, nil, 0
 	old[n] = nil
 	h.elems = old[0:n]
 	return x

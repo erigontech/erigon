@@ -118,10 +118,10 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 			StatusCode: resp.StatusCode,
 			Body:       string(errBody),
 		}
-		//if strings.Contains(errorMessage.Error(), "Read Code: EOF") {
+		// if strings.Contains(errorMessage.Error(), "Read Code: EOF") {
 		// don't ban the peer.
-		//	return nil, errorMessage
-		//}
+		// 	return nil, errorMessage
+		// }
 		if shouldBanOnFail {
 			s.sentinel.Peers().RemovePeer(pid)
 			s.sentinel.Host().Peerstore().RemovePeer(pid)

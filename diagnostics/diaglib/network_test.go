@@ -66,7 +66,7 @@ var mockOutboundUpdMsg = diaglib.PeerStatisticMsgUpdate{
 }
 
 func TestPeerStatisticsFromMsgUpdate(t *testing.T) {
-	//test handing inbound message
+	// test handing inbound message
 	inboundPeerStats := diaglib.PeerStatisticsFromMsgUpdate(mockInboundUpdMsg, nil)
 	require.Equal(t, mockInboundPeerStats, inboundPeerStats)
 
@@ -82,7 +82,7 @@ func TestPeerStatisticsFromMsgUpdate(t *testing.T) {
 		TypeBytesOut: map[string]uint64{},
 	}, inboundPeerStats)
 
-	//test handing outbound message
+	// test handing outbound message
 	outboundPeerStats := diaglib.PeerStatisticsFromMsgUpdate(mockOutboundUpdMsg, nil)
 	require.Equal(t, mockOutboundPeerStats, outboundPeerStats)
 

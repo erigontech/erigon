@@ -376,12 +376,12 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://checkpointz.pietjepuk.net/eth/v2/debug/beacon/states/finalized",
 	},
 	chainspec.SepoliaChainID: {
-		//"https://beaconstate-sepolia.chainsafe.io/eth/v2/debug/beacon/states/finalized",
-		//"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
+		// "https://beaconstate-sepolia.chainsafe.io/eth/v2/debug/beacon/states/finalized",
+		// "https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
 		"https://checkpoint-sync.sepolia.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 	chainspec.GnosisChainID: {
-		//"https://checkpoint.gnosis.gateway.fm/eth/v2/debug/beacon/states/finalized",
+		// "https://checkpoint.gnosis.gateway.fm/eth/v2/debug/beacon/states/finalized",
 		"https://checkpoint.gnosischain.com/eth/v2/debug/beacon/states/finalized",
 	},
 	chainspec.ChiadoChainID: {
@@ -1037,7 +1037,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	BytesPerLogsBloom:            256,
 
 	// Updated penalty values.
-	InactivityPenaltyQuotientAltair:         3 * 1 << 24, //50331648
+	InactivityPenaltyQuotientAltair:         3 * 1 << 24, // 50331648
 	MinSlashingPenaltyQuotientAltair:        64,
 	ProportionalSlashingMultiplierAltair:    2,
 	MinSlashingPenaltyQuotientBellatrix:     32,

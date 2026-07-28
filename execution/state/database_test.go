@@ -1084,7 +1084,7 @@ func TestEip2200Gas(t *testing.T) {
 			return err
 		}
 		gasSpent := big.NewInt(0).Sub(balanceBefore.ToBig(), balanceAfter.ToBig())
-		expectedGasSpent := big.NewInt(190373) //(192245) // In the incorrect version, it is 179645
+		expectedGasSpent := big.NewInt(190373) // (192245) // In the incorrect version, it is 179645
 		if gasSpent.Cmp(expectedGasSpent) != 0 {
 			t.Errorf("Expected gas spent: %d, got %d", expectedGasSpent, gasSpent)
 		}
@@ -1402,7 +1402,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	}
 	rh1, err := sd.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
 	require.NoError(t, err)
-	//t.Logf("stateRoot %x", rh1)
+	// t.Logf("stateRoot %x", rh1)
 
 	trieCode, tcErr := r.ReadAccountCode(contract)
 	require.NoError(t, tcErr, "you can receive the new code")
@@ -1428,7 +1428,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 func TestCacheCodeSizeSeparately(t *testing.T) {
 	t.Parallel()
 	contract := accounts.InternAddress(common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624"))
-	//root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
+	// root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
 	_, tx, sd := state.NewTestRwTx(t)
 	blockNum, txNum := uint64(1), uint64(3)
@@ -1464,7 +1464,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 // TestCacheCodeSizeInTrie makes sure that we don't just read from the DB all the time
 func TestCacheCodeSizeInTrie(t *testing.T) {
 	t.Parallel()
-	//t.Skip("switch to TG state readers/writers")
+	// t.Skip("switch to TG state readers/writers")
 	contract := accounts.InternAddress(common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624"))
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 

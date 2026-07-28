@@ -300,9 +300,9 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 	// Special case - if no addresses specified, take all traces
 	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
 		allBlocks = stream.Range[uint64](from, to)
-		//} else {
-		//allBlocks.RemoveRange(0, from)
-		//allBlocks.RemoveRange(to, uint64(0x100000000))
+		// } else {
+		// allBlocks.RemoveRange(0, from)
+		// allBlocks.RemoveRange(to, uint64(0x100000000))
 	}
 
 	return fromAddresses, toAddresses, allBlocks, nil
@@ -570,11 +570,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			}
 			continue
 		}
-		if txIndex == -1 { //is system tx
+		if txIndex == -1 { // is system tx
 			continue
 		}
 		txIndexU64 := uint64(txIndex)
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
+		// fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNum, txIndex)
 		if err != nil {
 			if first {
@@ -588,7 +588,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue
 		}
 		if !ok {
-			continue //guess block doesn't have transactions
+			continue // guess block doesn't have transactions
 		}
 		txHash := txn.Hash()
 		msg, err := txn.AsMessage(*lastSigner, &lastBaseFee, lastRules)

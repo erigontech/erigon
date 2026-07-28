@@ -637,7 +637,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		beaconConfig,
 		state,
 		engine,
-		//gossipManager,
+		// gossipManager,
 		forkChoice,
 		indexDB,
 		csn,

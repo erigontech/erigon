@@ -459,7 +459,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 }
 
 func BenchmarkAggregator_BeginFilesRo_Latency(b *testing.B) {
-	//BenchmarkAggregator_BeginFilesRo/begin_files_ro-16  1737404  737.3 ns/op  3216 B/op  21 allocs/op
+	// BenchmarkAggregator_BeginFilesRo/begin_files_ro-16  1737404  737.3 ns/op  3216 B/op  21 allocs/op
 	aggStep := uint64(100_00)
 	_, agg := testDbAndAggregatorBench(b, aggStep)
 
@@ -490,7 +490,7 @@ func BenchmarkAggregator_BeginFilesRo_Throughput(b *testing.B) {
 	if !flag.Parsed() {
 		flag.Parse()
 	}
-	//b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *cpuIters, *parallel*runtime.GOMAXPROCS(0))
+	// b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *cpuIters, *parallel*runtime.GOMAXPROCS(0))
 
 	aggStep := uint64(100_00)
 	_, agg := testDbAndAggregatorBench(b, aggStep)
@@ -534,7 +534,7 @@ func BenchmarkDb_BeginFiles_Throughput(b *testing.B) {
 	if !flag.Parsed() {
 		flag.Parse()
 	}
-	//b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *sleepMs, *parallel*runtime.GOMAXPROCS(0))
+	// b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *sleepMs, *parallel*runtime.GOMAXPROCS(0))
 
 	aggStep := uint64(100_00)
 	db, _ := testDbAndAggregatorBench(b, aggStep)
@@ -542,7 +542,7 @@ func BenchmarkDb_BeginFiles_Throughput(b *testing.B) {
 
 	b.SetParallelism(*parallel) // p * maxprocs
 	b.RunParallel(func(pb *testing.PB) {
-		//foo := 0
+		// foo := 0
 		for pb.Next() {
 			tx, err := db.BeginRo(ctx) //nolint:gocritic
 			if err != nil {
@@ -572,7 +572,7 @@ func BenchmarkDb_BeginFiles_Throughput_IO(b *testing.B) {
 	if !flag.Parsed() {
 		flag.Parse()
 	}
-	//b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *loopv, *parallel*runtime.GOMAXPROCS(0))
+	// b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *loopv, *parallel*runtime.GOMAXPROCS(0))
 
 	aggStep := uint64(100_00)
 	db, _ := testDbAndAggregatorBench(b, aggStep)

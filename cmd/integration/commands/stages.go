@@ -572,7 +572,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 			if err != nil {
 				return err
 			}
-			withoutSenders.Body().SendersFromTxs() //remove senders info from txs
+			withoutSenders.Body().SendersFromTxs() // remove senders info from txs
 			txs := withoutSenders.Transactions()
 			if txs.Len() != len(senders) {
 				logger.Error("not equal amount of senders", "block", i, "db", len(senders), "expect", txs.Len())
@@ -618,7 +618,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 			return err
 		}
 	} else if pruneTo > 0 {
-		//noop
+		// noop
 		return nil
 	} else {
 		if err = stagedsync.SpawnRecoverSendersStage(cfg, s, sync, tx, block, ctx, logger); err != nil {
@@ -962,9 +962,9 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 		if err := stagedsync.StageCustomTraceReset(ctx, db, cfg.Produce); err != nil {
 			return err
 		}
-		//if err := rawdbreset.Reset(ctx, db, stages.CustomTrace); err != nil {
-		//	return err
-		//}
+		// if err := rawdbreset.Reset(ctx, db, stages.CustomTrace); err != nil {
+		// 	return err
+		// }
 		return nil
 	}
 
@@ -978,7 +978,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	defer br.(*freezeblocks.BlockRetire).MadvNormal().DisableReadAhead()
-	//defer agg.MadvNormal().DisableReadAhead()
+	// defer agg.MadvNormal().DisableReadAhead()
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
@@ -1151,7 +1151,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 		}
 
 		_allSnapshotsSingleton.LogStat("blocks")
-		//_allBorSnapshotsSingleton.LogStat("bor")
+		// _allBorSnapshotsSingleton.LogStat("bor")
 		_ = db.View(context.Background(), func(tx kv.Tx) error {
 			ac := _aggSingleton.BeginFilesRo()
 			defer ac.Close()
@@ -1201,7 +1201,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
 	}
-	//logger.Info("Initialised chain configuration", "config", chainConfig)
+	// logger.Info("Initialised chain configuration", "config", chainConfig)
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))

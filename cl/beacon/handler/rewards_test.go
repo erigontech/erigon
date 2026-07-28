@@ -42,7 +42,7 @@ func TestGetBlockRewards(t *testing.T) {
 	require.NoError(t, err)
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
-	//fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, math.MaxUint64)
+	// fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, math.MaxUint64)
 	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: math.MaxUint64, Root: fcu.HeadVal}
 	fcu.FinalizedSlotVal = math.MaxUint64
 

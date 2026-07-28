@@ -140,14 +140,14 @@ type RecSplit struct {
 	// v=1 falsePositeves=true - as fuse filter (%9 bits/key). Doesn't require `enum=true`
 	dataStructureVersion version.DataStructureVersion
 
-	//v0 fields
+	// v0 fields
 	existenceFV0 *os.File
 	existenceWV0 *bufio.Writer
 
-	//v1 fields
+	// v1 fields
 	existenceFV1 *fusefilter.WriterOffHeap
 
-	//v2 fields
+	// v2 fields
 	existenceFV2 *fusefilter.WriterSharded
 
 	offsetFile   *os.File      // Temp file for offsets (already sorted, no need for etl.Collector)
@@ -1090,7 +1090,7 @@ func (rs *RecSplit) flushExistenceFilter() error {
 	if rs.dataStructureVersion == 0 && rs.enums && rs.keysAdded > 0 && rs.lessFalsePositives {
 		defer rs.existenceFV0.Close()
 
-		//Write len of array
+		// Write len of array
 		binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
 		if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
 			return err

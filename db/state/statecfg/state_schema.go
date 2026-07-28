@@ -326,11 +326,11 @@ var Schema = SchemaGen{
 		LargeValues: true,
 
 		Accessors:   AccessorHashMap,
-		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblRCacheHistoryVals,
-			CompressorCfg: seg.Cfg{ValuesOnCompressedPage: 16}, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+			CompressorCfg: seg.Cfg{ValuesOnCompressedPage: 16}, Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: true,

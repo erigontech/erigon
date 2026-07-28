@@ -141,7 +141,7 @@ func GenStructStep(
 			hasTree = append(hasTree, 0)
 			hasHash = append(hasHash, 0)
 		}
-		//fmt.Printf("groups is now %x,%d,%b\n", extraDigit, maxLen, groups)
+		// fmt.Printf("groups is now %x,%d,%b\n", extraDigit, maxLen, groups)
 
 		if !buildExtensions {
 			switch v := data.(type) {

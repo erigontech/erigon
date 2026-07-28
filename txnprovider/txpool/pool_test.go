@@ -1190,7 +1190,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 
 	tip, feeCap, blobFeeCap := uint256.NewInt(100_000), uint256.NewInt(200_000), uint256.NewInt(200_000)
 
-	//add a blob txn to the pool
+	// add a blob txn to the pool
 	{
 		txnSlots := TxnSlots{}
 		blobTxn := makeBlobTxn()
@@ -1214,7 +1214,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 		w := blobTxn.Txn.(*types.BlobTx)
 		w.FeeCap.Mul(uint256.NewInt(2), feeCap)
 		w.TipCap.Mul(uint256.NewInt(2), tip)
-		//increase blobFeeCap by 10% - no good
+		// increase blobFeeCap by 10% - no good
 		w.MaxFeePerBlobGas.Add(blobFeeCap, uint256.NewInt(1).Div(blobFeeCap, uint256.NewInt(10)))
 		blobTxn.IDHash[0] = 0x01
 		txnSlots.Append(&blobTxn, addr[:], true)
@@ -1228,7 +1228,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 
 	{
 		txnSlots := TxnSlots{}
-		//try to replace it with a regular txn - should fail
+		// try to replace it with a regular txn - should fail
 		regularTxn := &TxnSlot{
 			Txn: &types.DynamicFeeTransaction{
 				CommonTx: types.CommonTx{
@@ -1506,7 +1506,7 @@ func TestBlobSlots(t *testing.T) {
 	cfg := txpoolcfg.DefaultConfig
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	//Setting limits for blobs in the pool
+	// Setting limits for blobs in the pool
 	cfg.TotalBlobPoolLimit = 20
 
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
@@ -1551,7 +1551,7 @@ func TestBlobSlots(t *testing.T) {
 	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(err)
 
-	//Adding 20 blobs from 10 different accounts
+	// Adding 20 blobs from 10 different accounts
 	for i := 0; i < int(cfg.TotalBlobPoolLimit/2); i++ {
 		txnSlots := TxnSlots{}
 		addr[0] = uint8(i + 1)
@@ -1721,7 +1721,7 @@ func TestGetBlobs(t *testing.T) {
 	cfg := txpoolcfg.DefaultConfig
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	//Setting limits for blobs in the pool
+	// Setting limits for blobs in the pool
 	cfg.TotalBlobPoolLimit = 20
 
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
@@ -1768,7 +1768,7 @@ func TestGetBlobs(t *testing.T) {
 	require.NoError(err)
 	blobHashes := make([]common.Hash, 0, 20)
 
-	//Adding 2 blobs with 1 txn
+	// Adding 2 blobs with 1 txn
 	txnSlots := TxnSlots{}
 	addr[0] = uint8(1)
 	blobTxn := makeBlobTxn() // makes a txn with 2 blobs

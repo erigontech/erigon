@@ -1700,7 +1700,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	if traceTypeStateDiff {
 		cloneCache := stateCache.Clone()
 		cloneReader = state.NewCachedReader(stateReader, cloneCache)
-		//cloneReader = stateReader
+		// cloneReader = stateReader
 		if isHistoricalStateReader {
 			historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 		}

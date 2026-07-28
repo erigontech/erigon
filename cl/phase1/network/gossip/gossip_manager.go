@@ -97,7 +97,7 @@ func NewGossipManager(
 
 	go gm.observeBandwidth(cctx, maxInboundTrafficPerPeer, maxOutboundTrafficPerPeer, adaptableTrafficRequirements)
 	go gm.goCheckForkAndResubscribe(cctx)
-	//gm.stats.goPrintStats(cctx)
+	// gm.stats.goPrintStats(cctx)
 	return gm
 }
 
@@ -493,7 +493,7 @@ func (g *GossipManager) observeBandwidth(ctx context.Context, maxInboundTrafficP
 			}
 			// ban hammer
 			for _, p := range peersToBan {
-				//g.p2p.Peers().SetBanStatus(p, true)
+				// g.p2p.Peers().SetBanStatus(p, true)
 				host.Peerstore().RemovePeer(p)
 				host.Network().ClosePeer(p)
 			}

@@ -38,7 +38,7 @@ type AggOpts struct { //nolint:gocritic
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
-	return AggOpts{ //Defaults
+	return AggOpts{ // Defaults
 		logger:          log.Root(),
 		dirs:            dirs,
 		reorgBlockDepth: dbg.MaxReorgDepth,
@@ -210,7 +210,7 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 	for _, dirPath := range directories {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) { //skip magically disappeared files
+				if os.IsNotExist(err) { // skip magically disappeared files
 					return nil
 				}
 				return err

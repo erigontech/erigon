@@ -170,7 +170,7 @@ var distributionCmd = &cobra.Command{
 				keysEntries[string(key)] += 1
 				uniqueEntries++
 
-				//fmt.Printf("key: %x, txn: %d, val: %x\n", key, txNum, val)
+				// fmt.Printf("key: %x, txn: %d, val: %x\n", key, txNum, val)
 			},
 		)
 		if err != nil {

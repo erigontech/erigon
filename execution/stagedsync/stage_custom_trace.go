@@ -118,8 +118,8 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	log.Info("[stage_custom_trace] start params", "produce", cfg.Produce)
 	txNumsReader := cfg.ExecArgs.BlockReader.TxnumReader()
 
-	//agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	//stepSize := agg.StepSize()
+	// agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	// stepSize := agg.StepSize()
 
 	// 1. Require stage_exec > 0: means don't need handle "half-block execution case here"
 	// 2. Require stage_exec > 0: means has enough state-history
@@ -150,7 +150,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	endBlock = execProgress
 
 	defer cfg.ExecArgs.BlockReader.Snapshots().(*blocksnapshots.RoSnapshots).MadvNormal().DisableReadAhead()
-	//defer tx.(dbstate.HasAggTx).AggTx().(*dbstate.AggregatorRoTx).MadvNormal().DisableReadAhead()
+	// defer tx.(dbstate.HasAggTx).AggTx().(*dbstate.AggregatorRoTx).MadvNormal().DisableReadAhead()
 
 	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
 	batchSize := uint64(50_000)

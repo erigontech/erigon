@@ -54,7 +54,7 @@ func TestFakeExponential(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-		//t.Logf("%v*e^(%v/%v): %v", factor, num, denom, result)
+		// t.Logf("%v*e^(%v/%v): %v", factor, num, denom, result)
 		if tt.want != result.ToBig().Uint64() {
 			t.Errorf("got %v want %v", result, tt.want)
 		}

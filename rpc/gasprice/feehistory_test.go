@@ -61,7 +61,7 @@ func TestFeeHistory(t *testing.T) {
 		{false, 0, 0, 1000000000, 30, nil, 0, 31, nil},
 		{false, 0, 0, 1000000000, rpc.LatestBlockNumber, nil, 0, 33, nil},
 		{false, 0, 0, 10, 40, nil, 0, 0, gasprice.ErrRequestBeyondHead},
-		//{true, 0, 0, 10, 40, nil, 0, 0, gasprice.ErrRequestBeyondHead},
+		// {true, 0, 0, 10, 40, nil, 0, 0, gasprice.ErrRequestBeyondHead},
 		{false, 20, 2, 100, rpc.LatestBlockNumber, nil, 13, 20, nil},
 		{false, 20, 2, 100, rpc.LatestBlockNumber, []float64{0, 10}, 31, 2, nil},
 		{false, 20, 2, 100, 32, []float64{0, 10}, 31, 2, nil},
@@ -77,7 +77,7 @@ func TestFeeHistory(t *testing.T) {
 		}
 
 		func() {
-			m := newTestBackend(t) //, big.NewInt(16), c.pending)
+			m := newTestBackend(t) // , big.NewInt(16), c.pending)
 			defer m.Close()
 
 			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})

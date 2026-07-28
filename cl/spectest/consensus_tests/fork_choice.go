@@ -462,7 +462,7 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 	}
 	/*if e.GenesisTime != nil {
 		// TODO:  what value to use here??
-		//assert.EqualValues(t, e.Time, store.GenesisTime())
+		// assert.EqualValues(t, e.Time, store.GenesisTime())
 	}*/
 	if e.ProposerBoostRoot != nil {
 		assert.Equal(t, *e.ProposerBoostRoot, store.ProposerBoostRoot(), stepstr)

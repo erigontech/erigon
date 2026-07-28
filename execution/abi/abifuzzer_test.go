@@ -32,9 +32,9 @@ import (
 // Just replace testString with the data in .quoted
 func TestReplicate(t *testing.T) {
 	t.Parallel()
-	//t.Skip("Test only useful for reproducing issues")
+	// t.Skip("Test only useful for reproducing issues")
 	fuzzAbi([]byte("\x20\x20\x20\x20\x20\x20\x20\x20\x80\x00\x00\x00\x20\x20\x20\x20\x00"))
-	//fuzzAbi([]byte("asdfasdfkadsf;lasdf;lasd;lfk"))
+	// fuzzAbi([]byte("asdfasdfkadsf;lasdf;lasd;lfk"))
 }
 
 // FuzzABI is the main entrypoint for fuzzing

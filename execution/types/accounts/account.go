@@ -128,7 +128,7 @@ func (a *Account) EncodeForStorage(buffer []byte) {
 		buffer[pos] = 32
 		codeHashValue := a.CodeHash.Value()
 		copy(buffer[pos+1:], codeHashValue[:])
-		//pos += 33
+		// pos += 33
 	}
 
 	buffer[0] = byte(fieldSet)
@@ -252,7 +252,7 @@ func (a *Account) EncodeForHashing(buffer []byte) {
 	pos++
 	codeHashValue := a.CodeHash.Value()
 	copy(buffer[pos:], codeHashValue[:])
-	//pos += 32
+	// pos += 32
 }
 
 // Copy makes `a` a full, independent (meaning that if the `image` changes in any way, it does not affect `a`) copy of the account `image`.
@@ -526,7 +526,7 @@ func DecodeIncarnationFromStorage(enc []byte) (uint64, error) {
 	var fieldSet = enc[0]
 	var pos = 1
 
-	//looks for the position incarnation is at
+	// looks for the position incarnation is at
 	if fieldSet&1 > 0 {
 		decodeLength := int(enc[pos])
 		if len(enc) < pos+decodeLength+1 {
@@ -550,7 +550,7 @@ func DecodeIncarnationFromStorage(enc []byte) (uint64, error) {
 	if fieldSet&4 > 0 {
 		decodeLength := int(enc[pos])
 
-		//checks if the ending position is correct if not returns 0
+		// checks if the ending position is correct if not returns 0
 		if len(enc) < pos+decodeLength+1 {
 			return 0, fmt.Errorf(
 				"malformed CBOR for Account.Incarnation: %s, Length %d",
@@ -607,9 +607,9 @@ func (a *Account) Equals(acc *Account) bool {
 // DeserialiseV3 - method to deserialize accounts in Erigon22 history
 func DeserialiseV3(a *Account, enc []byte) error {
 	a.Reset()
-	//if len(enc) == 0 {
-	//	return nil
-	//}
+	// if len(enc) == 0 {
+	// 	return nil
+	// }
 	pos := 0
 	nonceBytes := int(enc[pos])
 	pos++

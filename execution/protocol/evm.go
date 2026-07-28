@@ -135,17 +135,17 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 		defer hashLookupCacheLock.Unlock()
 
 		if n == lastKnownNumber {
-			//fmt.Println("GH-LN", n, refHash)
+			// fmt.Println("GH-LN", n, refHash)
 			return lastKnownHash, nil
 		}
 
 		if n == refNumber {
-			//fmt.Println("GH-RF", n, refHash)
+			// fmt.Println("GH-RF", n, refHash)
 			return refHash, nil
 		}
 
 		if hash, ok := hashLookupCache.Get(n); ok {
-			//fmt.Println("GH-CA", n, hash)
+			// fmt.Println("GH-CA", n, hash)
 			return hash, nil
 		}
 
@@ -168,7 +168,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 				lastKnownHash = hash
 				lastKnownNumber--
 				if n == lastKnownNumber {
-					//fmt.Println("GH-CA1", lastKnownNumber, lastKnownHash)
+					// fmt.Println("GH-CA1", lastKnownNumber, lastKnownHash)
 					return lastKnownHash, nil
 				}
 			}
@@ -191,7 +191,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 			hashLookupCache.Add(lastKnownNumber, lastKnownHash)
 
 			if n == lastKnownNumber {
-				//fmt.Println("GH-DB", lastKnownNumber, lastKnownHash)
+				// fmt.Println("GH-DB", lastKnownNumber, lastKnownHash)
 				return lastKnownHash, nil
 			}
 		}

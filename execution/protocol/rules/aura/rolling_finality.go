@@ -120,7 +120,7 @@ func (f *RollingFinality) removeSigners(signers []common.Address) {
 		count, ok := f.signCount[signers[i]]
 		if !ok {
 			panic("all hashes in `header` should have entries in `sign_count` for their signers")
-			//continue
+			// continue
 		}
 		if count <= 1 {
 			delete(f.signCount, signers[i])
@@ -158,7 +158,7 @@ func (f *RollingFinality) buildAncestrySubChain(get func(hash common.Hash) ([]co
 				panic("we just pushed a block")
 			}
 			f.removeSigners(e.signers)
-			//log.Info("[aura] finality encountered already finalized block", "hash", e.hash.String(), "number", e.number)
+			// log.Info("[aura] finality encountered already finalized block", "hash", e.hash.String(), "number", e.number)
 			break
 		}
 

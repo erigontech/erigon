@@ -17,8 +17,6 @@
 package exec
 
 import (
-	//"fmt"
-
 	"bytes"
 	"container/heap"
 	"context"
@@ -65,7 +63,7 @@ type ReconnWork struct {
 
 // ReconState is the accumulator of changes to the state
 type ReconState struct {
-	*ReconnWork //has it's own mutex. allow avoid lock-contention between state.Get() and work.Done() methods
+	*ReconnWork // has it's own mutex. allow avoid lock-contention between state.Get() and work.Done() methods
 
 	lock         sync.RWMutex
 	changes      map[string]*btree2.BTreeG[reconPair] // table => [] (txNum; key1; key2; val)

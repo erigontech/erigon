@@ -240,7 +240,7 @@ func downloaderV2Migration(dirs *Dirs) error {
 	}
 	from, to := filepath.Join(dirs.Snap, "db", "mdbx.dat"), filepath.Join(dirs.Downloader, "mdbx.dat")
 	if err := os.Rename(from, to); err != nil {
-		//fall back to copy-file if folders are on different disks
+		// fall back to copy-file if folders are on different disks
 		if err := CopyFile(from, to); err != nil {
 			return err
 		}
@@ -284,7 +284,7 @@ func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 	for _, dirPath := range directories {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) { //skip magically disappeared files
+				if os.IsNotExist(err) { // skip magically disappeared files
 					return nil
 				}
 				return err
@@ -357,7 +357,7 @@ func (d *Dirs) RenameNewVersions() error {
 	for _, dirPath := range directories {
 		err := filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) { //skip magically disappeared files
+				if os.IsNotExist(err) { // skip magically disappeared files
 					return nil
 				}
 				return err
@@ -414,7 +414,7 @@ func (d *Dirs) RenameNewVersions() error {
 
 	log.Info(fmt.Sprintf("Renamed %d directories to old format and removed %d unsupported files", renamed, removed))
 
-	//eliminate polygon-bridge && heimdall && chaindata just in case
+	// eliminate polygon-bridge && heimdall && chaindata just in case
 	if d.DataDir != "" {
 		if err := dir.RemoveAll(filepath.Join(d.DataDir, dbcfg.PolygonBridgeDB)); err != nil && !os.IsNotExist(err) {
 			return err

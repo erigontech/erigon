@@ -105,7 +105,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		_, _, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
 		require.NoError(t, err)
 
-		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) //seek beyeon the last key
+		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) // seek beyeon the last key
 		require.NoError(t, err)
 		require.Nil(t, cur)
 		cur.Close()
@@ -510,7 +510,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 		_, _, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
 		require.NoError(t, err)
 
-		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) //seek beyeon the last key
+		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) // seek beyeon the last key
 		require.NoError(t, err)
 		require.Nil(t, cur)
 		cur.Close()
@@ -591,14 +591,14 @@ func TestBpsTree_Seek(t *testing.T) {
 		k, _ := g.Next(nil)
 		_, p = g.Next(nil)
 		keys = append(keys, k)
-		//fmt.Printf("%2d k=%x, p=%v\n", i, k, p)
+		// fmt.Printf("%2d k=%x, p=%v\n", i, k, p)
 		i++
 	}
 
-	//tr := newTrie()
+	// tr := newTrie()
 	ef := eliasfano32.NewEliasFano(uint64(keyCount), ps[len(ps)-1])
 	for i := 0; i < len(ps); i++ {
-		//tr.insert(Node{i: uint64(i), key: bytes.Clone(keys[i]), off: ps[i]})
+		// tr.insert(Node{i: uint64(i), key: bytes.Clone(keys[i]), off: ps[i]})
 		ef.AddOffset(ps[i])
 	}
 	ef.Build()
@@ -617,8 +617,8 @@ func TestBpsTree_Seek(t *testing.T) {
 		require.NotNil(t, c)
 		require.NotNil(t, c.Key())
 
-		//k, _, err := it.KVFromGetter(g)
-		//require.NoError(t, err)
+		// k, _, err := it.KVFromGetter(g)
+		// require.NoError(t, err)
 		require.Equal(t, keys[i], c.Key())
 		c.Close()
 	}

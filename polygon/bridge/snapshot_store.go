@@ -483,9 +483,9 @@ func ValidateEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, b
 			}
 		}
 
-		//if prevEventId == 0 {
-		//log.Info("[integrity] checking bor events", "event", eventId, "block", block)
-		//}
+		// if prevEventId == 0 {
+		// log.Info("[integrity] checking bor events", "event", eventId, "block", block)
+		// }
 
 		if prevBlock != 0 && prevBlock != block {
 			var err error
@@ -586,11 +586,11 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 
 		eventTime := EventTime(event)
 
-		//if i != 0 {
-		//	if eventTime.Before(lastBlockEventTime) {
-		//		eventTime = lastBlockEventTime
-		//	}
-		//}
+		// if i != 0 {
+		// 	if eventTime.Before(lastBlockEventTime) {
+		// 		eventTime = lastBlockEventTime
+		// 	}
+		// }
 
 		if i == 0 {
 			lastBlockEventTime = eventTime

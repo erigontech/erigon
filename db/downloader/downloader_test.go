@@ -149,7 +149,7 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 	//		ErigonV1.24 node must keep using existing file instead of downloading new one.
 	err = test.downloader.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("bb"), "a.seg")
 	// I'm not sure if this is a good idea.
-	//require.Error(err)
+	// require.Error(err)
 	_ = err
 	tt, ok = test.downloader.torrentClient.Torrent(snaptype.Hex2InfoHash("aa"))
 	require.True(ok)

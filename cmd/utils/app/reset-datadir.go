@@ -114,10 +114,10 @@ func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 
 	// Here we intended to have a list of os.Root to restrict deletions. Instead, for now you should
 	// do a dry run, and make sure to use good permissioning.
-	//datadirOsRoot, err := os.OpenRoot(dirs.DataDir)
-	//if err != nil {
-	//	return fmt.Errorf("opening datadir: %w", err)
-	//}
+	// datadirOsRoot, err := os.OpenRoot(dirs.DataDir)
+	// if err != nil {
+	// 	return fmt.Errorf("opening datadir: %w", err)
+	// }
 
 	r := reset.Reset{
 		Dirs:                 &dirs,
@@ -131,7 +131,7 @@ func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 				return nil
 			}
 			logger.Debug("Removing datadir file", "name", osName)
-			//return datadirOsRoot.Remove(string(osName))
+			// return datadirOsRoot.Remove(string(osName))
 			return dir.RemoveFile(string(osName))
 		},
 	}

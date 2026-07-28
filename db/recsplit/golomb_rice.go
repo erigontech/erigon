@@ -65,7 +65,7 @@ func (g *GolombRice) appendFixed(v uint64, log2golomb int) {
 	lowerBits := v & ((uint64(1) << log2golomb) - 1) // Extract the part of the number that will be encoded using truncated binary encoding
 	usedBits := g.bitCount & 63                      // How many bits of the last element of b.data is used by previous value
 	targetSize := (g.bitCount + log2golomb + 63) / 64
-	//fmt.Printf("g.bitCount = %d, log2golomb = %d, targetSize = %d\n", g.bitCount, log2golomb, targetSize)
+	// fmt.Printf("g.bitCount = %d, log2golomb = %d, targetSize = %d\n", g.bitCount, log2golomb, targetSize)
 	for len(g.data) < targetSize {
 		g.data = append(g.data, 0)
 	}

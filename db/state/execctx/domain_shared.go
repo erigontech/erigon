@@ -822,7 +822,7 @@ func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.
 }
 
 func (sd *SharedDomains) Close() {
-	if sd.sdCtx == nil { //idempotency
+	if sd.sdCtx == nil { // idempotency
 		return
 	}
 
@@ -830,8 +830,8 @@ func (sd *SharedDomains) Close() {
 	sd.SetTxNum(0)
 	sd.ResetPendingUpdates()
 
-	//sd.walLock.Lock()
-	//defer sd.walLock.Unlock()
+	// sd.walLock.Lock()
+	// defer sd.walLock.Unlock()
 
 	sd.mem.Close()
 
@@ -1561,7 +1561,7 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 			return nil
 		}
 	case kv.RCacheDomain:
-		//noop
+		// noop
 	default:
 		if bytes.Equal(prevVal, v) {
 			return nil

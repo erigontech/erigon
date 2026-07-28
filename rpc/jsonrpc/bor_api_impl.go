@@ -252,16 +252,16 @@ func (api *BorImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 	}
 	defer tx.Rollback()
 
-	//Confirmation of 16 blocks on the endblock
+	// Confirmation of 16 blocks on the endblock
 	tipConfirmationBlockNr := endBlockNr + uint64(16)
 
-	//Check if tipConfirmation block exit
+	// Check if tipConfirmation block exit
 	_, err = api._blockReader.BlockByNumber(ctx, tx, tipConfirmationBlockNr)
 	if err != nil {
 		return false, errors.New("failed to get tip confirmation block")
 	}
 
-	//Check if end block exist
+	// Check if end block exist
 	localEndBlock, err := api._blockReader.BlockByNumber(ctx, tx, endBlockNr)
 	if err != nil {
 		return false, errors.New("failed to get end block")

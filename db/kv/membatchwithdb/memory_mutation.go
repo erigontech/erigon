@@ -391,7 +391,7 @@ func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc or
 		return s, err
 	}
 	if _, err := s.init(); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
+		s.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil
@@ -476,7 +476,7 @@ func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPr
 		return s, err
 	}
 	if err := s.init(); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
+		s.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil

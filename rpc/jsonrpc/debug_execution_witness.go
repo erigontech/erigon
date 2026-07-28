@@ -55,7 +55,7 @@ type RecordingState struct {
 	// already created in-block is redundant in the witness (the verifier replays the create).
 	createdCodeHashes map[common.Hash]struct{}
 
-	//HashedCodes map[common.Hash][]byte // set of code hashes seen during execution, used to avoid duplicate code entries in result.Codes
+	// HashedCodes map[common.Hash][]byte // set of code hashes seen during execution, used to avoid duplicate code entries in result.Codes
 
 	// In-memory state overlay (writes)
 	accountOverlay map[common.Address]*accounts.Account // non-nil = updated, entry present with nil value=deleted
@@ -486,7 +486,7 @@ func (s *RecordingState) GetModifiedKeys() ([]common.Address, map[common.Address
 func (s *RecordingState) OnCodeAccess(address accounts.Address, code []byte) {
 	if len(code) > 0 {
 		s.AccessedCode[address.Value()] = code
-		//s.HashedCodes[crypto.Keccak256Hash(code)] = code
+		// s.HashedCodes[crypto.Keccak256Hash(code)] = code
 	}
 }
 

@@ -110,7 +110,7 @@ func NewAttestationService(
 		// attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
 	}
 
-	//go a.loop(ctx)
+	// go a.loop(ctx)
 	return a
 }
 
@@ -238,7 +238,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 				return fmt.Errorf("aggregation bits count mismatch: %d != %d", actualAggregationBitsLength, expectedAggregationBitsLength)
 			}
 
-			//[REJECT] The attestation is unaggregated -- that is, it has exactly one participating validator (len([bit for bit in aggregation_bits if bit]) == 1, i.e. exactly 1 bit is set).
+			// [REJECT] The attestation is unaggregated -- that is, it has exactly one participating validator (len([bit for bit in aggregation_bits if bit]) == 1, i.e. exactly 1 bit is set).
 			setBits := 0
 			onBitIndex := 0 // Aggregationbits is []byte, so we need to iterate over all bits.
 			for i := range bits {
@@ -314,7 +314,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// (a client MAY queue attestations for processing once block is retrieved).
 	blockHeader, ok := s.forkchoiceStore.GetHeader(root)
 	if !ok {
-		//s.scheduleAttestationForLaterProcessing(att)
+		// s.scheduleAttestationForLaterProcessing(att)
 		return fmt.Errorf("%w: block not seen: %v", ErrIgnore, root)
 	}
 

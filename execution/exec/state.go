@@ -617,7 +617,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 				return
 			}
 		}
-		//applyWorker.ResetTx(nil)
+		// applyWorker.ResetTx(nil)
 	}
 	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
 

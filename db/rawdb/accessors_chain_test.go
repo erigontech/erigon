@@ -451,7 +451,7 @@ func TestBodyStorage(t *testing.T) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, body)
 	}
 	if entry := rawdb.ReadBodyRLP(tx, header.Hash(), 1); entry == nil {
-		//if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
+		// if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
 		t.Fatalf("Stored body RLP not found")
 	} else {
 		bodyRlp, err := rlp.EncodeToBytes(entry)
@@ -531,9 +531,9 @@ func TestBlockStorage(t *testing.T) {
 	if err := rawdb.TruncateBlocks(t.Context(), tx, block.NumberU64()); err != nil {
 		t.Fatal(err)
 	}
-	//if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
-	//	t.Fatalf("Could not delete block: %v", err)
-	//}
+	// if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
+	// 	t.Fatalf("Could not delete block: %v", err)
+	// }
 	if entry, _, _ := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Deleted block returned: %v", entry)
 	}
@@ -854,7 +854,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	receipts := types.Receipts{receipt1, receipt2}
 
 	// Check that no receipt entries are in a pristine database
-	hash := header.Hash() //common.BytesToHash([]byte{0x03, 0x14})
+	hash := header.Hash() // common.BytesToHash([]byte{0x03, 0x14})
 
 	require.NoError(rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()))
 	require.NoError(rawdb.WriteHeader(tx, header))
@@ -1118,9 +1118,9 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	if err := rawdb.TruncateBlocks(t.Context(), tx, block.NumberU64()); err != nil {
 		t.Fatal(err)
 	}
-	//if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
-	//	t.Fatalf("Could not delete block: %v", err)
-	//}
+	// if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
+	// 	t.Fatalf("Could not delete block: %v", err)
+	// }
 	if entry, _, _ := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Deleted block returned: %v", entry)
 	}

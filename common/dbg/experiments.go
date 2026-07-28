@@ -57,7 +57,7 @@ var (
 
 	mergeTr = EnvInt("MERGE_THRESHOLD", -1)
 
-	//state v3
+	// state v3
 	noPrune              = EnvBool("NO_PRUNE", false)
 	noRetire             = EnvBool("NO_RETIRE", false)              // kill-switch: don't delete aged frozen files (history/II + block snapshots)
 	noMerge              = EnvBool("NO_MERGE", false)               // don't merge Domain/Hist/II

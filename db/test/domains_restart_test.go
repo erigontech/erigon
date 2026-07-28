@@ -127,12 +127,12 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		}
 
 		err = writer.UpdateAccountData(addr, &accounts.Account{}, acc)
-		//buf := EncodeAccountBytes(1, uint256.NewInt(rnd.Uint64()), nil, 0)
-		//err = domains.UpdateAccountData(addr, buf, nil)
+		// buf := EncodeAccountBytes(1, uint256.NewInt(rnd.Uint64()), nil, 0)
+		// err = domains.UpdateAccountData(addr, buf, nil)
 		require.NoError(t, err)
 
 		err = writer.WriteAccountStorage(addr, 0, loc, uint256.Int{}, u256.U64(txNum))
-		//err = domains.WriteAccountStorage(addr, loc, sbuf, nil)
+		// err = domains.WriteAccountStorage(addr, loc, sbuf, nil)
 		require.NoError(t, err)
 		if txNum%blockSize == 0 {
 			err = rawdbv3.TxNums.Append(tx, blockNum, txNum)
@@ -156,13 +156,13 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	err = domains.Flush(ctx, tx)
 	require.NoError(t, err)
 
-	//COMS := make(map[string][]byte)
-	//{
-	//	cct := domains.Commitment.BeginFilesRo()
-	//	err = cct.IteratePrefix(tx, []byte("state"), func(k, v []byte) {
-	//		COMS[string(k)] = v
-	//		//fmt.Printf("k %x v %x\n", k, v)
-	//	})
+	// COMS := make(map[string][]byte)
+	// {
+	// 	cct := domains.Commitment.BeginFilesRo()
+	// 	err = cct.IteratePrefix(tx, []byte("state"), func(k, v []byte) {
+	// 		COMS[string(k)] = v
+	// 		// fmt.Printf("k %x v %x\n", k, v)
+	// 	})
 	//	cct.Close()
 	//}
 
@@ -243,7 +243,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		blockNum = txNum / blockSize
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
-		//fmt.Printf("tx+ %d addr %x\n", txNum, addrs[i])
+		// fmt.Printf("tx+ %d addr %x\n", txNum, addrs[i])
 		err = writer.UpdateAccountData(addrs[i], &accounts.Account{}, accs[i])
 		require.NoError(t, err)
 
@@ -333,7 +333,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 				require.NoError(t, err)
 
 				hashes = append(hashes, rh)
-				hashedTxs = append(hashedTxs, txNum) //nolint
+				hashedTxs = append(hashedTxs, txNum) // nolint
 				err = rawdbv3.TxNums.Append(tx, blockNum, txNum)
 				require.NoError(t, err)
 			}
@@ -342,8 +342,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		latestHash, err := domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
 		require.NoError(t, err)
 		_ = latestHash
-		//require.EqualValues(t, params.MainnetGenesisHash, common.Hash(latestHash))
-		//t.Logf("executed tx %d root %x datadir %q\n", txs, latestHash, datadir)
+		// require.EqualValues(t, params.MainnetGenesisHash, common.Hash(latestHash))
+		// t.Logf("executed tx %d root %x datadir %q\n", txs, latestHash, datadir)
 
 		err = domains.Flush(ctx, tx)
 		require.NoError(t, err)
@@ -363,7 +363,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	t.Run("delete_datadir", func(t *testing.T) {
 		err := dir.RemoveAll(datadir)
 		require.NoError(t, err)
-		//t.Logf("datadir has been removed")
+		// t.Logf("datadir has been removed")
 
 		db, _, _ = testDbAndAggregatorv3(t, datadir, aggStep)
 
@@ -405,8 +405,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		s, err := chainspec.ChainSpecByName(networkname.Test)
 		require.NoError(t, err)
 		require.Equal(t, s.GenesisStateRoot, common.BytesToHash(rh))
-		//require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
-		//common.BytesToHash(rh))
+		// require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
+		// common.BytesToHash(rh))
 
 		var i, j int
 		for tt := txToStart; tt <= txs; tt++ {
@@ -424,7 +424,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 			if txNum%blockSize == 0 {
 				rh, err := domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
 				require.NoError(t, err)
-				//fmt.Printf("tx %d rh %x\n", txNum, rh)
+				// fmt.Printf("tx %d rh %x\n", txNum, rh)
 				require.Equal(t, hashes[j], rh)
 				j++
 			}

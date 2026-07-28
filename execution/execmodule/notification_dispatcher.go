@@ -112,7 +112,7 @@ func (d *Dispatcher) Dispatch(
 			notifyFrom = finishProgressAfter - heightSpan
 			notifyFrom++
 		}
-		notifyTo := finishProgressAfter + 1 //[from, to)
+		notifyTo := finishProgressAfter + 1 // [from, to)
 
 		if err := stagedsync.NotifyNewHeaders(ctx, notifyFrom, notifyTo, d.events, tx, d.logger); err != nil {
 			return err

@@ -509,13 +509,13 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 	var err error
 	header := txTask.Header
-	//fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
+	// fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
 
 	switch {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNumber() == 0 {
 
-			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
+			// fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 			if genesis != nil {
 				_, ibs, err = genesiswrite.GenesisToBlock(nil, genesis, dirs, txTask.Logger)
 				if err != nil {
@@ -528,7 +528,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}
 
 		// Block initialisation
-		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
+		// fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 			ret, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
 			return ret, err

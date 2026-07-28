@@ -247,7 +247,7 @@ Loop:
 
 		blockIndex := int(blockNumber) - int(s.BlockNumber) - 1
 		if blockIndex < 0 {
-			panic(blockIndex) //uint-underflow
+			panic(blockIndex) // uint-underflow
 		}
 
 		// Register pending block

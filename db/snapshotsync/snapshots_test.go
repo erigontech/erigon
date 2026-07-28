@@ -531,7 +531,7 @@ func TestRetireFilesAbove(t *testing.T) {
 }
 
 func TestRemoveOverlaps(t *testing.T) {
-	mustSeeFile := func(files []string, fileNameWithoutVersion string) bool { //file-version agnostic
+	mustSeeFile := func(files []string, fileNameWithoutVersion string) bool { // file-version agnostic
 		for _, f := range files {
 			if strings.HasSuffix(f, fileNameWithoutVersion) {
 				return true
@@ -581,7 +581,7 @@ func TestRemoveOverlaps(t *testing.T) {
 	require.NoError(err)
 	require.Len(list, 60)
 
-	//corner case: small header.seg was removed, but header.idx left as garbage. such garbage must be cleaned.
+	// corner case: small header.seg was removed, but header.idx left as garbage. such garbage must be cleaned.
 	dir2.RemoveFile(filepath.Join(s.Dir(), list[15].Name()))
 
 	require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, true))
@@ -932,7 +932,7 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.True(ok)
 	require.True(e3)
 	require.Equal("tracesto", f.TypeString)
-	//require.Equal("tracesto", f.Type.Name())
+	// require.Equal("tracesto", f.Type.Name())
 }
 
 func TestCalculateVisibleSegments(t *testing.T) {

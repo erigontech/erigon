@@ -287,9 +287,9 @@ func (TxNumsReader) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
 			return err
 		}
 		prevBlockNum = currentBlockNum
-		//if err = c.DeleteCurrent(); err != nil {
-		//	return err
-		//}
+		// if err = c.DeleteCurrent(); err != nil {
+		// 	return err
+		// }
 	}
 	return nil
 }

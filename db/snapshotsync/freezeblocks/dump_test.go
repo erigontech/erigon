@@ -139,7 +139,7 @@ func TestDump(t *testing.T) {
 			require.NoError(err)
 			require.Equal(2*(test.chainSize+1), systemTxs)
 			require.Equal(nonceRange(0, test.chainSize-1), nonceList)
-			//require.Equal(2*(test.chainSize+1)+test.chainSize, cnt)
+			// require.Equal(2*(test.chainSize+1)+test.chainSize, cnt)
 		})
 		t.Run("txs_not_from_zero", func(t *testing.T) {
 			require := require.New(t)
@@ -161,7 +161,7 @@ func TestDump(t *testing.T) {
 			require.NoError(err)
 			require.Equal(2*(test.chainSize-2), systemTxs)
 			require.Equal(nonceRange(1, test.chainSize-2), nonceList)
-			//require.Equal(3*test.chainSize-6, cnt)
+			// require.Equal(3*test.chainSize-6, cnt)
 		})
 		t.Run("headers", func(t *testing.T) {
 			require := require.New(t)

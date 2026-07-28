@@ -193,7 +193,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// Download only the snapshots that are for the header chain.
 
 	// How do we get to the real Downloader if we need? Get the stack trace.
-	//panic("here")
+	// panic("here")
 
 	if err := snapshotsync.SyncSnapshots(
 		ctx,

@@ -859,7 +859,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	//TODO: e3 not implemented Prune feature yet
+	// TODO: e3 not implemented Prune feature yet
 	/*
 		if pm.History.Enabled() {
 			it, err := tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, 0, int(pm.History.PruneTo(head)), order.Asc, -1)
@@ -902,9 +902,9 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 	}
 	/*
 		for bucketName, shouldBeEmpty := range map[string]bool{
-			//dbutils.AccountsHistory: pm.History.Enabled(),
+			// dbutils.AccountsHistory: pm.History.Enabled(),
 			dbutils.Receipts: pm.Receipts.Enabled(),
-			//dbutils.TxLookup: pm.TxIndex.Enabled(),
+			// dbutils.TxLookup: pm.TxIndex.Enabled(),
 		} {
 			numberOfEntries := 0
 
@@ -1878,7 +1878,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 			e.exist = false
 			e.values = nil
 		}
-		//t.Logf("block %d; adding destruct\n", e.blocknum)
+		// t.Logf("block %d; adding destruct\n", e.blocknum)
 		return tx
 	}
 	var newResurrect = func(e *expectation) types.Transaction {
@@ -1889,7 +1889,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 			e.exist = true
 			e.values = map[int]int{3: e.blocknum + 1, 4: 4}
 		}
-		//t.Logf("block %d; adding resurrect\n", e.blocknum)
+		// t.Logf("block %d; adding resurrect\n", e.blocknum)
 		return tx
 	}
 

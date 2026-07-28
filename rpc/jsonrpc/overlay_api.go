@@ -348,14 +348,14 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 
 	hasOverrides := false
 	allBlocks := roaring64.New()
-	//TODO: use E3 iterators
-	//for overlayAddress := range *stateOverride {
-	//	hasOverrides = true
-	//	fromB, err := bitmapdb.Get64(tx, kv.CallFromIndex, overlayAddress.Bytes(), begin, end+1)
-	//	if err != nil {
-	//		log.Error(err.Error())
-	//		return nil, err
-	//	}
+	// TODO: use E3 iterators
+	// for overlayAddress := range *stateOverride {
+	// 	hasOverrides = true
+	// 	fromB, err := bitmapdb.Get64(tx, kv.CallFromIndex, overlayAddress.Bytes(), begin, end+1)
+	// 	if err != nil {
+	// 		log.Error(err.Error())
+	// 		return nil, err
+	// 	}
 	//
 	//	toB, err := bitmapdb.Get64(tx, kv.CallToIndex, overlayAddress.Bytes(), begin, end+1)
 	//	if err != nil {
@@ -535,7 +535,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			log.Debug("[replayBlock] res result for transaction", "transactionHash", txn.Hash(), "failed", res.Failed(), "revert", res.Revert(), "error", res.Err)
 			log.Debug("[replayBlock] discarding txLogs because txn has status=failed", "transactionHash", txn.Hash())
 		} else {
-			//append logs only if txn has not reverted
+			// append logs only if txn has not reverted
 			txLogs := statedb.GetLogs(statedb.TxnIndex(), txn.Hash(), blockNum, header.Hash())
 			log.Debug("[replayBlock]", "len(txLogs)", len(txLogs), "transactionHash", txn.Hash())
 			blockLogs = append(blockLogs, txLogs...)

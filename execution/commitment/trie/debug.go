@@ -288,7 +288,7 @@ func printDiff(n1, n2 Node, w io.Writer, ind string, key string) {
 			fmt.Fprintf(w, "%x/%x", n1.hash, n.hash)
 		} else {
 			fmt.Fprintf(w, "hash(%x)/%T(%x)\n", n1.hash, n2, n2.reference())
-			//printDiffSide(n2, w, ind, key)
+			// printDiffSide(n2, w, ind, key)
 		}
 		fmt.Fprintf(w, ")")
 	}

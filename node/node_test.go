@@ -166,11 +166,11 @@ func TestNodeCloseClosesDB(t *testing.T) {
 	}
 
 	stack.Close()
-	//if err = db.Update(t.Context(), func(tx kv.RwTx) error {
-	//	return tx.Put(kv.Inodes, []byte("testK"), []byte{})
-	//}); err == nil {
-	//	t.Fatal("Put succeeded after node is closed")
-	//}
+	// if err = db.Update(t.Context(), func(tx kv.RwTx) error {
+	// 	return tx.Put(kv.Inodes, []byte("testK"), []byte{})
+	// }); err == nil {
+	// 	t.Fatal("Put succeeded after node is closed")
+	// }
 }
 
 // This test checks that OpenDatabase can be used from within a Lifecycle Start method.

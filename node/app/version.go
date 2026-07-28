@@ -231,7 +231,7 @@ func (v *SemanticVersion) Validate() error {
 	// Major, Minor, Patch already validated using uint64
 
 	for _, pre := range v.PreReleaseInfo {
-		if !pre.isNumeric { //Numeric prerelease versioning already uint64
+		if !pre.isNumeric { // Numeric prerelease versioning already uint64
 			if len(pre.strValue) == 0 {
 				return fmt.Errorf("prerelease can not be empty %q", pre.strValue)
 			}

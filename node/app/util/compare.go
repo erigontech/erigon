@@ -215,7 +215,7 @@ func (comparators CompoundComparator) Compare(a, b any) int {
 	avals = a.([]any)
 	bvals = b.([]any)
 
-	//fmt.Printf("A=%v, b=%v\n", a, b)
+	// fmt.Printf("A=%v, b=%v\n", a, b)
 	if len(avals) >= len(bvals) {
 		lenb := len(bvals)
 		for index, aval := range avals {

@@ -82,7 +82,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 
 	stepSize := uint64(100)
 	db := newTestDb(t, stepSize)
-	//db := wrapDbWithCtx(_db, agg)
+	// db := wrapDbWithCtx(_db, agg)
 
 	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
@@ -150,7 +150,7 @@ Loop:
 	require.NoError(t, err)
 
 	unwindTo := uint64(commitStep * rand.IntN(int(maxTx)/commitStep))
-	//domains.currentChangesAccumulator = nil
+	// domains.currentChangesAccumulator = nil
 
 	var a [kv.DomainLen][]kv.DomainEntryDiff
 	for idx, d := range stateChangeset.Diffs {
@@ -954,7 +954,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	stepSize := uint64(4)
 	db := newTestDb(t, stepSize)
-	//db := wrapDbWithCtx(_db, agg)
+	// db := wrapDbWithCtx(_db, agg)
 
 	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
@@ -1026,7 +1026,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	err = db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(maxTx - stepSize)
 	require.NoError(t, err)
 
-	{ //prune
+	{ // prune
 		rwTx, err = db.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		defer rwTx.Rollback()
@@ -1195,7 +1195,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
 	}
-	{ //delete marker is in Files
+	{ // delete marker is in Files
 		domains.Close()
 		err = rwTx.Commit() // otherwise agg.BuildFiles will not see data
 		require.NoError(err)

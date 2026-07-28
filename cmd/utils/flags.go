@@ -1519,7 +1519,7 @@ func SetP2PConfig(ctx *cli.Command, cfg *p2p.Config, nodeName, datadir string, l
 
 	if ctx.String(ChainFlag.Name) == networkname.Dev {
 		// --dev mode can't use p2p networking.
-		//cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
+		// cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
 		if !ctx.IsSet(ListenPortFlag.Name) {
 			cfg.ListenAddr = ":0"
 		}
@@ -1544,7 +1544,7 @@ func SetNodeConfig(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logger) err
 
 func SetNodeConfigCobra(cmd *cobra.Command, cfg *nodecfg.Config) {
 	flags := cmd.Flags()
-	//SetP2PConfig(ctx, &cfg.P2P)
+	// SetP2PConfig(ctx, &cfg.P2P)
 	setNodeUserIdentCobra(flags, cfg)
 	setDataDirCobra(flags, cfg)
 }

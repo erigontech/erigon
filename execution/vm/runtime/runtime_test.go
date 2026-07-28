@@ -161,10 +161,10 @@ func BenchmarkCall(b *testing.B) {
 	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: 0, Time: 0, Value: *uint256.MustFromBig(big.NewInt(13377)), Difficulty: uint256.NewInt(0)}
 	db := testutil.TemporalDB(b)
 	tx, sd := testutil.TemporalTxSD(b, db)
-	//cfg.w = state.NewWriter(execctx, nil)
+	// cfg.w = state.NewWriter(execctx, nil)
 	cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
 	defer cfg.State.Release(false)
-	//cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
+	// cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
 
 	tmpdir := b.TempDir()
 
@@ -341,8 +341,8 @@ func (d *dummyChain) GetHeader(h common.Hash, n uint64) (*types.Header, error) {
 	s := common.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
 	copy(parentHash[:], s)
 
-	//parentHash := common.Hash{byte(n - 1)}
-	//fmt.Printf("GetHeader(%x, %d) => header with parent %x\n", h, n, parentHash)
+	// parentHash := common.Hash{byte(n - 1)}
+	// fmt.Printf("GetHeader(%x, %d) => header with parent %x\n", h, n, parentHash)
 	return fakeHeader(n, parentHash), nil
 }
 
@@ -445,7 +445,7 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 	// TODO revise
 	//
 	cfg.Origin = accounts.ZeroAddress
-	//if len(tracerCode) > 0 {
+	// if len(tracerCode) > 0 {
 	//	tracer, err := tracers.DefaultDirectory.New(tracerCode, new(tracers.Context), nil, cfg.ChainConfig)
 	//	if err != nil {
 	//		b.Fatal(err)
@@ -476,7 +476,7 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 		}, tracing.CodeChangeUnspecified)
 	}
 
-	//cfg.State.CreateAccount(cfg.Origin)
+	// cfg.State.CreateAccount(cfg.Origin)
 	// set the receiver's (the executing contract) code for execution.
 	cfg.State.SetCode(destination, code, tracing.CodeChangeUnspecified)
 	vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */) // nolint:errcheck
@@ -548,12 +548,12 @@ func BenchmarkSimpleLoop(b *testing.B) {
 		Call(nil, 0xee, 0, 0, 0x20, 0x0, 0x0).
 		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
 
-	//tracer := logger.NewJSONLogger(nil, os.Stdout)
-	//Execute(loopingCode, nil, &Config{
-	//	EVMConfig: vm.Config{
-	//		Debug:  true,
-	//		Tracer: tracer,
-	//	}})
+	// tracer := logger.NewJSONLogger(nil, os.Stdout)
+	// Execute(loopingCode, nil, &Config{
+	// 	EVMConfig: vm.Config{
+	// 		Debug:  true,
+	// 		Tracer: tracer,
+	// 	}})
 	// 100M gas
 	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, staticCallIdentity, "staticcall-identity-100M", "", b)
 	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callIdentity, "call-identity-100M", "", b)
@@ -564,8 +564,8 @@ func BenchmarkSimpleLoop(b *testing.B) {
 	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callEOA, "call-EOA-100M", "", b)
 	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callRevertingContractWithInput, "call-reverting-100M", "", b)
 
-	//benchmarkNonModifyingCode(10000000, staticCallIdentity, "staticcall-identity-10M", b)
-	//benchmarkNonModifyingCode(10000000, loopingCode, "loop-10M", b)
+	// benchmarkNonModifyingCode(10000000, staticCallIdentity, "staticcall-identity-10M", b)
+	// benchmarkNonModifyingCode(10000000, loopingCode, "loop-10M", b)
 }
 
 // TestEip2929Cases contains various testcases that are used for
@@ -585,10 +585,10 @@ func TestEip2929Cases(t *testing.T) {
 			}
 		}
 		ops := strings.Join(instrs, ", ")
-		//fmt.Printf("### Case %d\n\n", id)
-		//fmt.Printf("%v\n\nBytecode: \n```\n0x%x\n```\nOperations: \n```\n%v\n```\n\n",
-		//	comment,
-		//	code, ops)
+		// fmt.Printf("### Case %d\n\n", id)
+		// fmt.Printf("%v\n\nBytecode: \n```\n0x%x\n```\nOperations: \n```\n%v\n```\n\n",
+		// 	comment,
+		// 	code, ops)
 		_ = ops
 		id++
 		cfg := &Config{
@@ -630,13 +630,13 @@ func TestEip2929Cases(t *testing.T) {
 	{ // EXTCODECOPY
 		code := []byte{
 			// extcodecopy( 0xff,0,0,0,0)
-			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, //length, codeoffset, memoffset
+			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, // length, codeoffset, memoffset
 			byte(vm.PUSH1), 0xff, byte(vm.EXTCODECOPY),
 			// extcodecopy( 0xff,0,0,0,0)
-			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, //length, codeoffset, memoffset
+			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, // length, codeoffset, memoffset
 			byte(vm.PUSH1), 0xff, byte(vm.EXTCODECOPY),
 			// extcodecopy( this,0,0,0,0)
-			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, //length, codeoffset, memoffset
+			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, // length, codeoffset, memoffset
 			byte(vm.ADDRESS), byte(vm.EXTCODECOPY),
 
 			byte(vm.STOP),

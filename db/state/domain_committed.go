@@ -166,12 +166,12 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 			dt.d.FilenameBase, itemGetter.FileName(), item.decompressor.FileName()))
 	}
 
-	//if idxList&withExistence != 0 {
-	//	hi, _ := dt.ht.iit.hashKey(fullKey)
-	//	if !item.existence.ContainsHash(hi) {
-	//		continue
-	//	}
-	//}
+	// if idxList&withExistence != 0 {
+	// 	hi, _ := dt.ht.iit.hashKey(fullKey)
+	// 	if !item.existence.ContainsHash(hi) {
+	// 		continue
+	// 	}
+	// }
 
 	if dt.d.Accessors.Has(statecfg.AccessorHashMap) {
 		reader := recsplit.NewIndexReader(item.index)
@@ -253,7 +253,7 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 		}
 	}()
 
-	//getter := NewArchiveGetter(item.decompressor.MakeGetter(), dt.d.Compression)
+	// getter := NewArchiveGetter(item.decompressor.MakeGetter(), dt.d.Compression)
 	getter.Reset(offset)
 	n := getter.HasNext()
 	if !n || uint64(getter.Size()) <= offset {

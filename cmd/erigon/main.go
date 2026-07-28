@@ -89,7 +89,7 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 		return err
 	}
 
-	//diagnostics.Setup(cliCtx, ethNode, metricsMux, pprofMux)
+	// diagnostics.Setup(cliCtx, ethNode, metricsMux, pprofMux)
 
 	err = ethNode.Serve()
 	if err != nil {

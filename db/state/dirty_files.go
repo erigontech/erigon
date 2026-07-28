@@ -122,7 +122,7 @@ type FilesItem struct {
 	index                *recsplit.Index
 	bindex               *btindex.BtIndex
 	existence            *existence.Filter
-	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
+	startTxNum, endTxNum uint64 // [startTxNum, endTxNum)
 
 	// version is the file's parsed on-disk version, used as a per-file regime marker.
 	version  version.Version
@@ -149,8 +149,8 @@ func (i *FilesItem) ExistenceFilter() *existence.Filter { return i.existence }
 func (i *FilesItem) MadvNormal() {
 	i.decompressor.MadvNormal()
 	i.index.MadvNormal()
-	//i.bindex.MadvNormal()
-	//i.existence.MadvNormal()
+	// i.bindex.MadvNormal()
+	// i.existence.MadvNormal()
 }
 func (i *FilesItem) EnableReadAhead() {
 	i.decompressor.MadvSequential()
@@ -159,8 +159,8 @@ func (i *FilesItem) EnableReadAhead() {
 func (i *FilesItem) DisableReadAhead() {
 	i.decompressor.DisableReadAhead()
 	i.index.DisableReadAhead()
-	//i.bindex.DisableReadAhead()
-	//i.existence.DisableReadAhead()
+	// i.bindex.DisableReadAhead()
+	// i.existence.DisableReadAhead()
 }
 
 func (i *FilesItem) Range() (startTxNum, endTxNum uint64) {
@@ -723,21 +723,21 @@ func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canB
 		if trace {
 			log.Warn("[dbg] checkForVisibility: BTindex not opened", "f", item.decompressor.FileName())
 		}
-		//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
+		// panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
 		return false
 	}
 	if l.Has(statecfg.AccessorHashMap) && item.index == nil {
 		if trace {
 			log.Warn("[dbg] checkForVisibility: RecSplit not opened", "f", item.decompressor.FileName())
 		}
-		//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
+		// panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
 		return false
 	}
 	if l.Has(statecfg.AccessorExistence) && item.existence == nil {
 		if trace {
 			log.Warn("[dbg] checkForVisibility: Existence not opened", "f", item.decompressor.FileName())
 		}
-		//panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
+		// panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
 		return false
 	}
 	return true

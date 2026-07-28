@@ -265,7 +265,7 @@ func (hr *HistoryReaderV3) HasStorage(address accounts.Address) (bool, error) {
 
 func (hr *HistoryReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
-	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
+	// code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 	hr.addr = address.Value()
 	code, _, err := hr.getAsOf(kv.CodeDomain, hr.addr[:])
 	if hr.trace {

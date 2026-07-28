@@ -282,7 +282,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 }
 
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, asc order.By) (out stream.U64, err error) {
-	//[from,to)
+	// [from,to)
 	var fromTxNum, toTxNum uint64
 	c, err := tx.Cursor(kv.MaxTxNum)
 	if err != nil {
@@ -368,7 +368,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		return nil, err
 	}
 
-	//var blockHash common.Hash
+	// var blockHash common.Hash
 	var header *types.Header
 
 	txNumbers, err := applyFiltersV3(api._txNumReader, tx, begin, end, crit, order.Asc)
@@ -440,7 +440,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			continue
 		}
 
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
+		// fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
 
 		if r, ok := api.receiptsGenerator.TryGetCachedReceipt(header.Hash(), txNum, txIndex); ok {
 			for _, filteredLog := range r.Logs.FilterWithTopicMap(addrMap, topicMap, 0) {

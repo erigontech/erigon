@@ -35,12 +35,12 @@ const ChangeSets3 = "ChangeSets3"
 
 const (
 
-	//HashedAccounts
+	// HashedAccounts
 	// key - address hash
 	// value - account encoded for storage
 	// Contains Storage:
-	//key - address hash + incarnation + storage key hash
-	//value - storage value(common.hash)
+	// key - address hash + incarnation + storage key hash
+	// value - storage value(common.hash)
 	HashedAccountsDeprecated = "HashedAccount"
 	HashedStorageDeprecated  = "HashedStorage"
 )
@@ -281,7 +281,7 @@ const (
 	StatesProcessingProgress = "StatesProcessingProgress"
 	StatesPruneProgress      = "StatesPruneProgress" // table name => slot
 
-	//Diagnostics tables
+	// Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
 	DiagSyncStages = "DiagSyncStages"
 )

@@ -273,7 +273,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
 		// But Erigon app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
 		// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
-		//if err = env.SetOption(mdbx.OptSpillMinDenominator, 8); err != nil {
+		// if err = env.SetOption(mdbx.OptSpillMinDenominator, 8); err != nil {
 		//	return nil, err
 		//}
 
@@ -316,7 +316,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 				dirtySpace = dirtySpaceMaxDefault
 			}
 		}
-		//can't use real pagesize here - it will be known only after env.Open()
+		// can't use real pagesize here - it will be known only after env.Open()
 		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/pageSize.Bytes()); err != nil {
 			return nil, err
 		}
@@ -1965,7 +1965,7 @@ func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte, asc order.By,
 	}
 	tx.toCloseMap[s.id] = s
 	if err := s.init(table, tx); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
+		s.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil
@@ -2140,7 +2140,7 @@ func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []
 	}
 	tx.toCloseMap[s.id] = s
 	if err := s.init(table, tx); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
+		s.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil

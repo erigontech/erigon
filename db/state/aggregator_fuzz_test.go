@@ -59,8 +59,8 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
 	var maxWrite, otherMaxWrite uint64
-	//f.Add([]common.Address{common.HexToAddress("0x123"), common.HexToAddress("0x456")})
-	//f.Add([]common.Hash{common.HexToHash("0x123"), common.HexToHash("0x456")})
+	// f.Add([]common.Address{common.HexToAddress("0x123"), common.HexToAddress("0x456")})
+	// f.Add([]common.Hash{common.HexToHash("0x123"), common.HexToHash("0x456")})
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) < int(txs*(length.Addr+length.Hash)) {
 			t.Skip()
@@ -171,7 +171,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
-	//var maxWrite, otherMaxWrite uint64
+	// var maxWrite, otherMaxWrite uint64
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) < int(txs*(length.Addr+length.Hash)) {
 			t.Skip()

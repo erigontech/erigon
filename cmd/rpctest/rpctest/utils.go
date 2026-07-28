@@ -406,7 +406,7 @@ func requestAndCompareErigon(requestA, requestB string, methodNameA, methodNameB
 				}
 			}
 		} else {
-			//TODO fix for two methods
+			// TODO fix for two methods
 			return compareErrors(errVal, errValg, methodNameA, errCtx, errs)
 		}
 	} else if channel != nil && (!insertOnlyIfSuccess || errVal == nil) {
@@ -705,9 +705,9 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 }
 
 func post(client *http.Client, url, request string, response any) error {
-	//fmt.Printf("Request=%s\n", request)
-	//log.Info("Getting", "url", url, "request", request)
-	//start := time.Now()
+	// fmt.Printf("Request=%s\n", request)
+	// log.Info("Getting", "url", url, "request", request)
+	// start := time.Now()
 	r, err := client.Post(url, "application/json", strings.NewReader(request))
 	if err != nil {
 		return err
@@ -724,14 +724,14 @@ func post(client *http.Client, url, request string, response any) error {
 	if err != nil {
 		return fmt.Errorf("json unmarshal error: %w, body: %s", err, string(b))
 	}
-	//log.Info("Got in", "time", time.Since(start).Seconds())
+	// log.Info("Got in", "time", time.Since(start).Seconds())
 	return err
 }
 
 func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, error) {
-	//fmt.Printf("Request=%s\n", request)
-	//log.Info("Getting", "url", url, "request", request)
-	//start := time.Now()
+	// fmt.Printf("Request=%s\n", request)
+	// log.Info("Getting", "url", url, "request", request)
+	// start := time.Now()
 	r, err := client.Post(url, "application/json", strings.NewReader(request))
 	if err != nil {
 		return nil, nil, err
@@ -750,7 +750,7 @@ func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, e
 	if err != nil {
 		return nil, nil, fmt.Errorf("parsing http response: %w", err)
 	}
-	//log.Info("Got in", "time", time.Since(start).Seconds())
+	// log.Info("Got in", "time", time.Since(start).Seconds())
 	return response, v, nil
 }
 
@@ -774,7 +774,7 @@ func print(client *http.Client, url, request string) {
 	}
 	if l < len(buf) {
 		fmt.Printf("Could not read response: %d out of %d\n", l, len(buf))
-		//return
+		// return
 	}
 	fmt.Printf("%s\n", buf[:l])
 }

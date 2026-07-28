@@ -99,7 +99,7 @@ func NotifyNewHeaders(ctx context.Context, notifyFrom, notifyTo uint64, notifier
 			return nil
 		}
 		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= notifyTo { //[from,to)
+		if blockNum >= notifyTo { // [from,to)
 			return nil
 		}
 		headerRLP := rawdb.ReadHeaderRLP(tx, common.BytesToHash(hash), blockNum)

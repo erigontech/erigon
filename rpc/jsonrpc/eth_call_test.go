@@ -918,7 +918,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 
 func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	ctx := context.Background()
-	//logger := testlog.Logger(t, log.LvlCrit)
+	// logger := testlog.Logger(t, log.LvlCrit)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -933,8 +933,8 @@ func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	// schema (drop_legacy_e2_tables migration drops it), so there is
 	// nothing to prune from that table.
 
-	//err = rawdb.PruneTable(tx, kv.RCacheDomain, pruneTo, ctx, math.MaxInt32, time.Hour, logger, "")
-	//require.NoError(t, err)
+	// err = rawdb.PruneTable(tx, kv.RCacheDomain, pruneTo, ctx, math.MaxInt32, time.Hour, logger, "")
+	// require.NoError(t, err)
 
 	err = tx.Commit()
 	require.NoError(t, err)
