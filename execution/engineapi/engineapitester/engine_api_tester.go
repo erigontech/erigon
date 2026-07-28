@@ -364,6 +364,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 
 	rpcDaemonHttpUrl := fmt.Sprintf("%s:%d", httpConfig.HttpListenAddress, httpConfig.HttpPort)
 	rpcApiClient := requests.NewRequestGenerator(rpcDaemonHttpUrl, logger)
+	addCleanup(func() error { rpcApiClient.UnsubscribeAll(); return nil })
 	contractBackend := contracts.NewJsonRpcBackend(rpcDaemonHttpUrl, logger)
 	//goland:noinspection HttpUrlsUsage
 	engineApiClientOpts := []engineapi.JsonRpcClientOption{
