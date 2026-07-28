@@ -240,3 +240,37 @@ func TestTier2_SequenceRobustness_MultipleTransitions(t *testing.T) {
 	}
 	require.Equal(t, int32(6), rt.hooksRan.Load(), "3 round-trips × 2 transitions each")
 }
+
+// TestTier2_RejectsUnrelatedChain: target chain is registered but has
+// no direct parent/child relationship with the currently-loaded
+// chain — Controller must refuse with a diagnostic naming both.
+func TestTier2_RejectsUnrelatedChain(t *testing.T) {
+	t.Parallel()
+	rt := newTier2Runtime(t, "unused-fork-name", 100, 200)
+	ctrl := forkcomp.New(rt)
+
+	_, err := ctrl.Transition(t.Context(), chainspec.Sepolia.Config.ChainName)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no direct parent relationship")
+	require.Contains(t, err.Error(), "hoodi")
+	require.Contains(t, err.Error(), "sepolia")
+}
+
+// TestTier2_RejectsHeadBelowCutBlock: current head is < CutBlock, so
+// there is nothing to unwind AND the chain-config swap alone would
+// leave the node's state at pre-cut, off the fork's canonical chain.
+// Controller refuses rather than corrupt state silently.
+func TestTier2_RejectsHeadBelowCutBlock(t *testing.T) {
+	t.Parallel()
+	const (
+		cutBlock    uint64 = 500
+		initialHead uint64 = 100 // below cutBlock
+	)
+	forkName := "hoodi-fork-tier2-belowcut"
+	rt := newTier2Runtime(t, forkName, cutBlock, initialHead)
+	ctrl := forkcomp.New(rt)
+
+	_, err := ctrl.Transition(t.Context(), forkName)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already at or below CutBlock")
+}
