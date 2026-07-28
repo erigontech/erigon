@@ -65,6 +65,7 @@ func (r *tier2Runtime) SetHead(ctx context.Context, block uint64) error {
 func (r *tier2Runtime) SwapChainConfig(t *chain.Config)  { r.swapped = t; r.current = t }
 func (r *tier2Runtime) ApplyPostSwapHooks(*chain.Config) { r.hooksRan.Add(1) }
 func (r *tier2Runtime) Logger() log.Logger               { return log.Root() }
+func (r *tier2Runtime) BackgroundCtx() context.Context   { return r.t.Context() }
 func (r *tier2Runtime) Restartables() map[string]rpchelper.ChainConfigRestartable {
 	return map[string]rpchelper.ChainConfigRestartable{"sentry": r.sentry}
 }

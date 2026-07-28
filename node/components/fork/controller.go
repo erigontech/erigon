@@ -75,6 +75,13 @@ type Runtime interface {
 	// sequence, so post-transition Starts see the target chain
 	// identity everywhere.
 	ApplyPostSwapHooks(target *chain.Config)
+	// BackgroundCtx returns the runtime's long-lived shutdown ctx
+	// (backend.sentryCtx in the in-process case). The Controller
+	// uses it — NOT the caller's Transition ctx — when calling
+	// Restartable.Start on post-swap. The Transition ctx cancels as
+	// soon as the RPC responds; parenting Caplin's goroutine on it
+	// would kill Caplin immediately after the transition returns.
+	BackgroundCtx() context.Context
 	// Logger returns the runtime's logger for diagnostic output.
 	Logger() log.Logger
 }
@@ -193,13 +200,22 @@ func (c *Controller) applyChainConfigSwap(ctx context.Context, target *chain.Con
 	c.rt.SwapChainConfig(target)
 	c.rt.ApplyPostSwapHooks(target)
 
+	// Start uses BackgroundCtx (node lifetime), NOT the caller's ctx.
+	// The Transition ctx is bound to the RPC handler and cancels as
+	// soon as the response is sent — parenting a long-lived component
+	// goroutine (Caplin, sentry) on it would kill the goroutine
+	// immediately after Transition returns.
+	startCtx := c.rt.BackgroundCtx()
+	if startCtx == nil {
+		startCtx = ctx
+	}
 	var startErrs []string
 	for _, name := range []string{"storage", "sentry", "caplin"} {
 		r, ok := restartables[name]
 		if !ok {
 			continue
 		}
-		if startErr := r.Start(ctx); startErr != nil {
+		if startErr := r.Start(startCtx); startErr != nil {
 			startErrs = append(startErrs, fmt.Sprintf("start %s: %v", name, startErr))
 		}
 	}

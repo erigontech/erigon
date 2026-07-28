@@ -2296,15 +2296,53 @@ func (s *Ethereum) SwapChainConfig(target *chain.Config) { s.chainConfig = targe
 // ApplyPostSwapHooks satisfies fork.Runtime — runtime-specific fixups
 // the captor interfaces don't cover: Downloader chain-identity re-
 // derivation, manifest_exchange filter re-installation, Caplin launch
-// closure rebind.
+// closure rebind, DB-side chainConfig update + RPC cache invalidation
+// so eth_chainId + BaseAPI.chainConfig read the target chain post-
+// swap.
 func (s *Ethereum) ApplyPostSwapHooks(target *chain.Config) {
 	s.applyForkDownloaderIdentity(target)
 	s.applyForkManifestExchangeFilters(target)
 	s.applyForkCaplinLaunchRebind(target)
+	s.applyForkChainConfigPersist(target)
+	s.applyForkRPCCacheInvalidate()
+}
+
+// applyForkChainConfigPersist writes the target chain.Config to the
+// chaindata DB, keyed on the (stable across fork) genesis hash — so
+// rawdb.ReadChainConfig in RPC handlers picks up the fork's rules on
+// next read instead of the parent's persisted config.
+func (s *Ethereum) applyForkChainConfigPersist(target *chain.Config) {
+	if s.chainDB == nil || s.genesisHash == (common.Hash{}) {
+		return
+	}
+	if err := s.chainDB.Update(context.Background(), func(tx kv.RwTx) error {
+		return rawdb.WriteChainConfig(tx, s.genesisHash, target)
+	}); err != nil {
+		s.logger.Warn("[fork] persist target chain.Config to chaindata failed", "err", err)
+	}
+}
+
+// applyForkRPCCacheInvalidate clears the BaseAPI atomic chainConfig
+// cache on every DebugAPIImpl (which shares the same BaseAPI across
+// all RPC services in APIList). Without this, chainConfig() served
+// via the RPC keeps returning the pre-swap pointer until process
+// restart.
+func (s *Ethereum) applyForkRPCCacheInvalidate() {
+	for i := range s.apiList {
+		if impl, ok := s.apiList[i].Service.(*jsonrpc.DebugAPIImpl); ok {
+			impl.BaseAPI.ResetChainConfigCache()
+			return
+		}
+	}
 }
 
 // Logger satisfies fork.Runtime.
 func (s *Ethereum) Logger() log.Logger { return s.logger }
+
+// BackgroundCtx satisfies fork.Runtime — returns the node's long-
+// lived shutdown ctx so components spawned via Start post-swap
+// aren't tied to the RPC handler's request ctx.
+func (s *Ethereum) BackgroundCtx() context.Context { return s.sentryCtx }
 
 // chainConfigRestartables returns the running captors that implement
 // ChainConfigRestartable, keyed by short name so Start ordering can be

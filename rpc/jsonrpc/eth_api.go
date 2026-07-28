@@ -200,6 +200,16 @@ func (api *BaseAPI) chainConfig(ctx context.Context, tx kv.Tx) (*chain.Config, e
 	return cfg, err
 }
 
+// ResetChainConfigCache clears the atomically-cached chain.Config
+// pointer. Called from Ethereum.SetFork after the in-process chain-
+// config swap so eth_chainId + downstream chainConfig() callers
+// re-read the freshly-written chain.Config from the DB on the next
+// request instead of serving the pre-transition cache.
+func (api *BaseAPI) ResetChainConfigCache() {
+	api._chainConfig.Store(nil)
+	api._genesis.Store(nil)
+}
+
 func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chain.Config, *types.Block, error) {
 	cc, genesisBlock := api._chainConfig.Load(), api._genesis.Load()
 	if cc != nil && genesisBlock != nil {

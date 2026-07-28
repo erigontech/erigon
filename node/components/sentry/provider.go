@@ -613,25 +613,29 @@ func (p *Provider) Start(ctx context.Context) error {
 	// Peer-count logger — local-sentry mode only (no local Servers in
 	// remote mode, nothing to count). Was an anonymous goroutine in
 	// backend.go right after server construction; moves here as part of
-	// the lifecycle consolidation.
+	// the lifecycle consolidation. Captures innerCtx at spawn time so
+	// Stop's innerCancel drains this goroutine via eg.Wait(); the outer
+	// SentryCtx is the wrong signal because it survives across Stop.
 	if len(p.Servers) > 0 {
-		p.eg.Go(p.runPeerCountLogger)
+		peerLoggerCtx := p.innerCtx
+		p.eg.Go(func() error { return p.runPeerCountLogger(peerLoggerCtx) })
 	}
 
 	return nil
 }
 
-// runPeerCountLogger periodically emits the sum of "good peers" across all
-// local sentry servers, grouped by protocol version. Exits when SentryCtx
-// is cancelled.
-func (p *Provider) runPeerCountLogger() error {
+// runPeerCountLogger periodically emits the sum of "good peers" across
+// all local sentry servers, grouped by protocol version. Exits when
+// the caller's ctx is cancelled — Start passes p.innerCtx so Stop's
+// innerCancel drains this loop.
+func (p *Provider) runPeerCountLogger(ctx context.Context) error {
 	logEvery := time.NewTicker(90 * time.Second)
 	defer logEvery.Stop()
 
 	var logItems []any
 	for {
 		select {
-		case <-p.cfg.SentryCtx.Done():
+		case <-ctx.Done():
 			return nil
 		case <-logEvery.C:
 			logItems = logItems[:0]

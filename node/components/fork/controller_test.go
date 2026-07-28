@@ -53,6 +53,7 @@ func (f *fakeRuntime) SetHead(context.Context, uint64) error { f.setHeadCalled =
 func (f *fakeRuntime) SwapChainConfig(t *chain.Config)       { f.swapped = t }
 func (f *fakeRuntime) ApplyPostSwapHooks(*chain.Config)      { f.hooksRan++ }
 func (f *fakeRuntime) Logger() log.Logger                    { return f.logger }
+func (f *fakeRuntime) BackgroundCtx() context.Context        { return context.Background() }
 func (f *fakeRuntime) Restartables() map[string]rpchelper.ChainConfigRestartable {
 	return f.restartables
 }
