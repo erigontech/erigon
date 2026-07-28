@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
@@ -42,7 +42,7 @@ var FromBlock = cli.Uint64Flag{
 }
 
 var Command = cli.Command{
-	Action:      func(cliCtx *cli.Context) error { return genFromRPc(cliCtx) },
+	Action:      func(ctx context.Context, cliCtx *cli.Command) error { return genFromRPc(ctx, cliCtx) },
 	Name:        "genfromrpc",
 	Usage:       "genfromrpc utilities",
 	Flags:       []cli.Flag{&utils.DataDirFlag, &RpcAddr, &Verify, &FromBlock},
@@ -344,9 +344,9 @@ func unMarshalTransactions(rawTxs []map[string]any) (types.Transactions, error) 
 }
 
 // getBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
-func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*types.Block, error) {
+func getBlockByNumber(ctx context.Context, client *rpc.Client, blockNumber *big.Int, verify bool) (*types.Block, error) {
 	var block BlockJson
-	err := client.CallContext(context.Background(), &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
+	err := client.CallContext(ctx, &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
 	if err != nil {
 		return nil, err
 	}
@@ -396,7 +396,7 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*t
 
 // genFromRPc connects to the RPC, fetches blocks starting from the given block,
 // and writes them into the local database.
-func genFromRPc(cliCtx *cli.Context) error {
+func genFromRPc(ctx context.Context, cliCtx *cli.Command) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	jsonRpcAddr := cliCtx.String(RpcAddr.Name)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
@@ -414,7 +414,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 
 	// Query latest block number.
 	var latestBlockHex string
-	if err := client.CallContext(context.Background(), &latestBlockHex, "eth_blockNumber"); err != nil {
+	if err := client.CallContext(ctx, &latestBlockHex, "eth_blockNumber"); err != nil {
 		log.Warn("Error fetching latest block number", "err", err)
 		return err
 	}
@@ -428,10 +428,10 @@ func genFromRPc(cliCtx *cli.Context) error {
 		prev := i
 		prevTime := time.Now()
 		timer := time.NewTimer(40 * time.Second)
-		err := db.Update(context.TODO(), func(tx kv.RwTx) error {
+		err := db.Update(ctx, func(tx kv.RwTx) error {
 			for blockNum := i; blockNum < latestBlock.Uint64(); blockNum++ {
 				blockNumber.SetUint64(blockNum)
-				blk, err := getBlockByNumber(client, &blockNumber, verification)
+				blk, err := getBlockByNumber(ctx, client, &blockNumber, verification)
 				if err != nil {
 					return fmt.Errorf("error fetching block %d: %w", blockNum, err)
 				}

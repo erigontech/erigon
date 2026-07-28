@@ -3,6 +3,7 @@ package mcp
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,8 +12,35 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// handleLogsTail handles the logs_tail tool
-func (e *ErigonMCPServer) handleLogsTail(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// logTools implements the logs_* tool handlers; it is embedded by both the
+// embedded and standalone MCP servers.
+type logTools struct {
+	logDir string
+}
+
+func (l logTools) resolveLogFile(logType string) (string, error) {
+	if l.logDir == "" {
+		return "", errors.New("log directory not configured (use --log.dir or --datadir)")
+	}
+	switch logType {
+	case "erigon":
+		return filepath.Join(l.logDir, "erigon.log"), nil
+	case "torrent":
+		return filepath.Join(l.logDir, "torrent.log"), nil
+	default:
+		return "", errors.New("log_type must be 'erigon' or 'torrent'")
+	}
+}
+
+func (l logTools) handleLogsTail(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return l.readLogLines(req, "Last", readLogTail)
+}
+
+func (l logTools) handleLogsHead(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return l.readLogLines(req, "First", readLogHead)
+}
+
+func (l logTools) readLogLines(req mcp.CallToolRequest, position string, read func(string, int, string) ([]string, error)) (*mcp.CallToolResult, error) {
 	logType := req.GetString("log_type", "erigon")
 	lines := req.GetInt("lines", 100)
 	filter := req.GetString("filter", "")
@@ -21,22 +49,17 @@ func (e *ErigonMCPServer) handleLogsTail(ctx context.Context, req mcp.CallToolRe
 		return mcp.NewToolResultError("lines must be between 1 and 10000"), nil
 	}
 
-	var logFile string
-	switch logType {
-	case "erigon":
-		logFile = filepath.Join(e.logDir, "erigon.log")
-	case "torrent":
-		logFile = filepath.Join(e.logDir, "torrent.log")
-	default:
-		return mcp.NewToolResultError("log_type must be 'erigon' or 'torrent'"), nil
+	logFile, err := l.resolveLogFile(logType)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	logLines, err := readLogTail(logFile, lines, filter)
+	logLines, err := read(logFile, lines, filter)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to read log: %v", err)), nil
 	}
 
-	result := fmt.Sprintf("Last %d lines from %s.log", len(logLines), logType)
+	result := fmt.Sprintf("%s %d lines from %s.log", position, len(logLines), logType)
 	if filter != "" {
 		result += fmt.Sprintf(" (filtered by: %s)", filter)
 	}
@@ -45,42 +68,7 @@ func (e *ErigonMCPServer) handleLogsTail(ctx context.Context, req mcp.CallToolRe
 	return mcp.NewToolResultText(result), nil
 }
 
-// handleLogsHead handles the logs_head tool
-func (e *ErigonMCPServer) handleLogsHead(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	logType := req.GetString("log_type", "erigon")
-	lines := req.GetInt("lines", 100)
-	filter := req.GetString("filter", "")
-
-	if lines <= 0 || lines > 10000 {
-		return mcp.NewToolResultError("lines must be between 1 and 10000"), nil
-	}
-
-	var logFile string
-	switch logType {
-	case "erigon":
-		logFile = filepath.Join(e.logDir, "erigon.log")
-	case "torrent":
-		logFile = filepath.Join(e.logDir, "torrent.log")
-	default:
-		return mcp.NewToolResultError("log_type must be 'erigon' or 'torrent'"), nil
-	}
-
-	logLines, err := readLogHead(logFile, lines, filter)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("Failed to read log: %v", err)), nil
-	}
-
-	result := fmt.Sprintf("First %d lines from %s.log", len(logLines), logType)
-	if filter != "" {
-		result += fmt.Sprintf(" (filtered by: %s)", filter)
-	}
-	result += ":\n\n" + strings.Join(logLines, "\n")
-
-	return mcp.NewToolResultText(result), nil
-}
-
-// handleLogsGrep handles the logs_grep tool
-func (e *ErigonMCPServer) handleLogsGrep(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (l logTools) handleLogsGrep(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	logType := req.GetString("log_type", "erigon")
 	pattern := req.GetString("pattern", "")
 	maxLines := req.GetInt("max_lines", 1000)
@@ -94,14 +82,9 @@ func (e *ErigonMCPServer) handleLogsGrep(ctx context.Context, req mcp.CallToolRe
 		return mcp.NewToolResultError("max_lines must be between 1 and 10000"), nil
 	}
 
-	var logFile string
-	switch logType {
-	case "erigon":
-		logFile = filepath.Join(e.logDir, "erigon.log")
-	case "torrent":
-		logFile = filepath.Join(e.logDir, "torrent.log")
-	default:
-		return mcp.NewToolResultError("log_type must be 'erigon' or 'torrent'"), nil
+	logFile, err := l.resolveLogFile(logType)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 
 	logLines, err := grepLog(logFile, pattern, maxLines, caseInsensitive)
@@ -115,18 +98,12 @@ func (e *ErigonMCPServer) handleLogsGrep(ctx context.Context, req mcp.CallToolRe
 	return mcp.NewToolResultText(result), nil
 }
 
-// handleLogsStats handles the logs_stats tool
-func (e *ErigonMCPServer) handleLogsStats(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (l logTools) handleLogsStats(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	logType := req.GetString("log_type", "erigon")
 
-	var logFile string
-	switch logType {
-	case "erigon":
-		logFile = filepath.Join(e.logDir, "erigon.log")
-	case "torrent":
-		logFile = filepath.Join(e.logDir, "torrent.log")
-	default:
-		return mcp.NewToolResultError("log_type must be 'erigon' or 'torrent'"), nil
+	logFile, err := l.resolveLogFile(logType)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 
 	stats, err := getLogStats(logFile)

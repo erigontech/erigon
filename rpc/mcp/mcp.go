@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -30,7 +31,7 @@ const Version = "0.0.2"
 type MCPTransport interface {
 	Serve() error
 	ServeContext(ctx context.Context) error
-	ServeSSE(addr string) error
+	ServeSSE(ctx context.Context, addr string) error
 }
 
 // ErigonMCPServer wraps Erigon APIs with MCP server capabilities.
@@ -39,7 +40,7 @@ type ErigonMCPServer struct {
 	ethAPI    jsonrpc.EthAPI
 	erigonAPI jsonrpc.ErigonAPI
 	otsAPI    jsonrpc.OtterscanAPI
-	logDir    string
+	logTools
 }
 
 // NewErigonMCPServer creates a new MCP server for Erigon.
@@ -48,7 +49,7 @@ func NewErigonMCPServer(ethAPI jsonrpc.EthAPI, erigonAPI jsonrpc.ErigonAPI, otsA
 		ethAPI:    ethAPI,
 		erigonAPI: erigonAPI,
 		otsAPI:    otsAPI,
-		logDir:    logDir,
+		logTools:  logTools{logDir: logDir},
 	}
 
 	e.mcpServer = server.NewMCPServer(
@@ -61,9 +62,10 @@ func NewErigonMCPServer(ethAPI jsonrpc.EthAPI, erigonAPI jsonrpc.ErigonAPI, otsA
 		server.WithRecovery(),
 	)
 
-	e.registerTools()
-	e.registerPrompts()
-	e.registerResources()
+	registerTools(e.mcpServer, e.toolHandlers())
+	e.mcpServer.AddTool(storageValuesTool(), e.handleGetStorageValues)
+	registerPrompts(e.mcpServer)
+	registerResources(e.mcpServer, e.resourceHandlers())
 
 	return e
 }
@@ -77,366 +79,67 @@ func parseBlockNumberOrHash(s string) (rpc.BlockNumberOrHash, error) {
 	return result, result.UnmarshalJSON(b)
 }
 
-// registerTools registers all MCP tools
-func (e *ErigonMCPServer) registerTools() {
-	// eth_blockNumber
-	e.mcpServer.AddTool(mcp.NewTool("eth_blockNumber",
-		mcp.WithDescription("Get the current block number"),
-	), e.handleBlockNumber)
-
-	// eth_getBlockByNumber
-	e.mcpServer.AddTool(mcp.NewTool("eth_getBlockByNumber",
-		mcp.WithDescription("Get block by number"),
-		mcp.WithString("blockNumber", mcp.Required(), mcp.Description("Block number or tag")),
-		mcp.WithBoolean("fullTransactions", mcp.Description("Return full tx objects")),
-	), e.handleGetBlockByNumber)
-
-	// eth_getBlockByHash
-	e.mcpServer.AddTool(mcp.NewTool("eth_getBlockByHash",
-		mcp.WithDescription("Get block by hash"),
-		mcp.WithString("blockHash", mcp.Required(), mcp.Description("Block hash")),
-		mcp.WithBoolean("fullTransactions", mcp.Description("Return full tx objects")),
-	), e.handleGetBlockByHash)
-
-	// eth_getBlockTransactionCountByNumber
-	e.mcpServer.AddTool(mcp.NewTool("eth_getBlockTransactionCountByNumber",
-		mcp.WithDescription("Get transaction count in block by number"),
-		mcp.WithString("blockNumber", mcp.Required(), mcp.Description("Block number")),
-	), e.handleGetBlockTransactionCountByNumber)
-
-	// eth_getBlockTransactionCountByHash
-	e.mcpServer.AddTool(mcp.NewTool("eth_getBlockTransactionCountByHash",
-		mcp.WithDescription("Get transaction count in block by hash"),
-		mcp.WithString("blockHash", mcp.Required(), mcp.Description("Block hash")),
-	), e.handleGetBlockTransactionCountByHash)
-
-	// eth_getBalance
-	e.mcpServer.AddTool(mcp.NewTool("eth_getBalance",
-		mcp.WithDescription("Get address balance"),
-		mcp.WithString("address", mcp.Required(), mcp.Description("Address")),
-		mcp.WithString("blockNumber", mcp.Description("Block number (default: latest)")),
-	), e.handleGetBalance)
-
-	// eth_getTransactionByHash
-	e.mcpServer.AddTool(mcp.NewTool("eth_getTransactionByHash",
-		mcp.WithDescription("Get transaction by hash"),
-		mcp.WithString("txHash", mcp.Required(), mcp.Description("Transaction hash")),
-	), e.handleGetTransactionByHash)
-
-	// eth_getTransactionByBlockHashAndIndex
-	e.mcpServer.AddTool(mcp.NewTool("eth_getTransactionByBlockHashAndIndex",
-		mcp.WithDescription("Get transaction by block hash and index"),
-		mcp.WithString("blockHash", mcp.Required(), mcp.Description("Block hash")),
-		mcp.WithNumber("index", mcp.Required(), mcp.Description("Transaction index")),
-	), e.handleGetTransactionByBlockHashAndIndex)
-
-	// eth_getTransactionByBlockNumberAndIndex
-	e.mcpServer.AddTool(mcp.NewTool("eth_getTransactionByBlockNumberAndIndex",
-		mcp.WithDescription("Get transaction by block number and index"),
-		mcp.WithString("blockNumber", mcp.Required(), mcp.Description("Block number")),
-		mcp.WithNumber("index", mcp.Required(), mcp.Description("Transaction index")),
-	), e.handleGetTransactionByBlockNumberAndIndex)
-
-	// eth_getTransactionReceipt
-	e.mcpServer.AddTool(mcp.NewTool("eth_getTransactionReceipt",
-		mcp.WithDescription("Get transaction receipt"),
-		mcp.WithString("txHash", mcp.Required(), mcp.Description("Transaction hash")),
-	), e.handleGetTransactionReceipt)
-
-	// eth_getBlockReceipts
-	e.mcpServer.AddTool(mcp.NewTool("eth_getBlockReceipts",
-		mcp.WithDescription("Get all receipts for a block"),
-		mcp.WithString("blockNumberOrHash", mcp.Required(), mcp.Description("Block number or hash")),
-	), e.handleGetBlockReceipts)
-
-	// eth_getLogs
-	e.mcpServer.AddTool(mcp.NewTool("eth_getLogs",
-		mcp.WithDescription("Get logs matching filter"),
-		mcp.WithString("fromBlock", mcp.Description("Start block")),
-		mcp.WithString("toBlock", mcp.Description("End block")),
-		mcp.WithString("address", mcp.Description("Contract address(es)")),
-		mcp.WithString("topics", mcp.Description("Topics array (JSON)")),
-		mcp.WithString("blockHash", mcp.Description("Single block hash")),
-	), e.handleGetLogs)
-
-	// eth_getCode
-	e.mcpServer.AddTool(mcp.NewTool("eth_getCode",
-		mcp.WithDescription("Get contract code"),
-		mcp.WithString("address", mcp.Required(), mcp.Description("Contract address")),
-		mcp.WithString("blockNumber", mcp.Description("Block number")),
-	), e.handleGetCode)
-
-	// eth_getStorageAt
-	e.mcpServer.AddTool(mcp.NewTool("eth_getStorageAt",
-		mcp.WithDescription("Get storage at position"),
-		mcp.WithString("address", mcp.Required(), mcp.Description("Address")),
-		mcp.WithString("position", mcp.Required(), mcp.Description("Storage position")),
-		mcp.WithString("blockNumber", mcp.Description("Block number")),
-	), e.handleGetStorageAt)
-
-	// eth_getStorageValues
-	e.mcpServer.AddTool(mcp.NewTool("eth_getStorageValues",
-		mcp.WithDescription("Get multiple storage slot values for multiple accounts in a single request"),
-		mcp.WithString("requests", mcp.Required(), mcp.Description("JSON object mapping addresses to arrays of storage slot keys")),
-		mcp.WithString("blockNumber", mcp.Description("Block number or tag (latest, earliest, pending)")),
-	), e.handleGetStorageValues)
-
-	// eth_getTransactionCount
-	e.mcpServer.AddTool(mcp.NewTool("eth_getTransactionCount",
-		mcp.WithDescription("Get nonce (transaction count)"),
-		mcp.WithString("address", mcp.Required(), mcp.Description("Address")),
-		mcp.WithString("blockNumber", mcp.Description("Block number")),
-	), e.handleGetTransactionCount)
-
-	// eth_call
-	e.mcpServer.AddTool(mcp.NewTool("eth_call",
-		mcp.WithDescription("Execute call without transaction"),
-		mcp.WithString("to", mcp.Required(), mcp.Description("Contract address")),
-		mcp.WithString("data", mcp.Required(), mcp.Description("Call data")),
-		mcp.WithString("from", mcp.Description("Sender address")),
-		mcp.WithString("value", mcp.Description("Value (hex)")),
-		mcp.WithString("gas", mcp.Description("Gas limit (hex)")),
-		mcp.WithString("blockNumber", mcp.Description("Block number")),
-	), e.handleCall)
-
-	// eth_estimateGas
-	e.mcpServer.AddTool(mcp.NewTool("eth_estimateGas",
-		mcp.WithDescription("Estimate gas for transaction"),
-		mcp.WithString("to", mcp.Description("To address")),
-		mcp.WithString("data", mcp.Description("Call data")),
-		mcp.WithString("from", mcp.Description("From address")),
-		mcp.WithString("value", mcp.Description("Value (hex)")),
-	), e.handleEstimateGas)
-
-	// eth_gasPrice
-	e.mcpServer.AddTool(mcp.NewTool("eth_gasPrice",
-		mcp.WithDescription("Get current gas price"),
-	), e.handleGasPrice)
-
-	// eth_chainId
-	e.mcpServer.AddTool(mcp.NewTool("eth_chainId",
-		mcp.WithDescription("Get chain ID"),
-	), e.handleChainId)
-
-	// eth_syncing
-	e.mcpServer.AddTool(mcp.NewTool("eth_syncing",
-		mcp.WithDescription("Get sync status"),
-	), e.handleSyncing)
-
-	// eth_accounts
-	e.mcpServer.AddTool(mcp.NewTool("eth_accounts",
-		mcp.WithDescription("Get accounts"),
-	), e.handleAccounts)
-
-	// eth_getProof
-	e.mcpServer.AddTool(mcp.NewTool("eth_getProof",
-		mcp.WithDescription("Get Merkle proof"),
-		mcp.WithString("address", mcp.Required(), mcp.Description("Address")),
-		mcp.WithString("storageKeys", mcp.Description("Storage keys (JSON array)")),
-		mcp.WithString("blockNumber", mcp.Description("Block number")),
-	), e.handleGetProof)
-
-	// eth_coinbase
-	e.mcpServer.AddTool(mcp.NewTool("eth_coinbase",
-		mcp.WithDescription("Get coinbase address"),
-	), e.handleCoinbase)
-
-	// eth_mining
-	e.mcpServer.AddTool(mcp.NewTool("eth_mining",
-		mcp.WithDescription("Check if mining"),
-	), e.handleMining)
-
-	// eth_hashrate
-	e.mcpServer.AddTool(mcp.NewTool("eth_hashrate",
-		mcp.WithDescription("Get hashrate"),
-	), e.handleHashrate)
-
-	// eth_protocolVersion
-	e.mcpServer.AddTool(mcp.NewTool("eth_protocolVersion",
-		mcp.WithDescription("Get protocol version"),
-	), e.handleProtocolVersion)
-
-	// Uncle methods
-	e.mcpServer.AddTool(mcp.NewTool("eth_getUncleByBlockNumberAndIndex",
-		mcp.WithDescription("Get uncle by block number and index"),
-		mcp.WithString("blockNumber", mcp.Required(), mcp.Description("Block number")),
-		mcp.WithNumber("index", mcp.Required(), mcp.Description("Uncle index")),
-	), e.handleGetUncleByBlockNumberAndIndex)
-
-	e.mcpServer.AddTool(mcp.NewTool("eth_getUncleByBlockHashAndIndex",
-		mcp.WithDescription("Get uncle by block hash and index"),
-		mcp.WithString("blockHash", mcp.Required(), mcp.Description("Block hash")),
-		mcp.WithNumber("index", mcp.Required(), mcp.Description("Uncle index")),
-	), e.handleGetUncleByBlockHashAndIndex)
-
-	e.mcpServer.AddTool(mcp.NewTool("eth_getUncleCountByBlockNumber",
-		mcp.WithDescription("Get uncle count by block number"),
-		mcp.WithString("blockNumber", mcp.Required(), mcp.Description("Block number")),
-	), e.handleGetUncleCountByBlockNumber)
-
-	e.mcpServer.AddTool(mcp.NewTool("eth_getUncleCountByBlockHash",
-		mcp.WithDescription("Get uncle count by block hash"),
-		mcp.WithString("blockHash", mcp.Required(), mcp.Description("Block hash")),
-	), e.handleGetUncleCountByBlockHash)
-
-	// Erigon-specific tools
-	e.mcpServer.AddTool(mcp.NewTool("erigon_forks",
-		mcp.WithDescription("Get fork information"),
-	), e.handleErigonForks)
-
-	e.mcpServer.AddTool(mcp.NewTool("erigon_blockNumber",
-		mcp.WithDescription("Get block number (Erigon)"),
-		mcp.WithString("blockNumber", mcp.Description("Block tag")),
-	), e.handleErigonBlockNumber)
-
-	e.mcpServer.AddTool(mcp.NewTool("erigon_getHeaderByNumber",
-		mcp.WithDescription("Get header by number"),
-		mcp.WithString("blockNumber", mcp.Required(), mcp.Description("Block number")),
-	), e.handleErigonGetHeaderByNumber)
-
-	e.mcpServer.AddTool(mcp.NewTool("erigon_getHeaderByHash",
-		mcp.WithDescription("Get header by hash"),
-		mcp.WithString("blockHash", mcp.Required(), mcp.Description("Block hash")),
-	), e.handleErigonGetHeaderByHash)
-
-	e.mcpServer.AddTool(mcp.NewTool("erigon_getBlockByTimestamp",
-		mcp.WithDescription("Get block by timestamp"),
-		mcp.WithString("timestamp", mcp.Required(), mcp.Description("Unix timestamp")),
-		mcp.WithBoolean("fullTransactions", mcp.Description("Full tx objects")),
-	), e.handleErigonGetBlockByTimestamp)
-
-	e.mcpServer.AddTool(mcp.NewTool("erigon_getBalanceChangesInBlock",
-		mcp.WithDescription("Get all balance changes in block"),
-		mcp.WithString("blockNumberOrHash", mcp.Required(), mcp.Description("Block")),
-	), e.handleErigonGetBalanceChangesInBlock)
-
-	e.mcpServer.AddTool(mcp.NewTool("erigon_getLogsByHash",
-		mcp.WithDescription("Get logs by block hash"),
-		mcp.WithString("blockHash", mcp.Required(), mcp.Description("Block hash")),
-	), e.handleErigonGetLogsByHash)
-
-	e.mcpServer.AddTool(mcp.NewTool("erigon_getLogs",
-		mcp.WithDescription("Get logs (Erigon format)"),
-		mcp.WithString("fromBlock", mcp.Description("From block")),
-		mcp.WithString("toBlock", mcp.Description("To block")),
-		mcp.WithString("address", mcp.Description("Address")),
-		mcp.WithString("topics", mcp.Description("Topics (JSON)")),
-	), e.handleErigonGetLogs)
-
-	e.mcpServer.AddTool(mcp.NewTool("erigon_getBlockReceiptsByBlockHash",
-		mcp.WithDescription("Get block receipts by hash"),
-		mcp.WithString("blockHash", mcp.Required(), mcp.Description("Block hash")),
-	), e.handleErigonGetBlockReceiptsByBlockHash)
-
-	e.mcpServer.AddTool(mcp.NewTool("erigon_nodeInfo",
-		mcp.WithDescription("Get P2P node info"),
-	), e.handleErigonNodeInfo)
-
-	// Metrics tools
-	e.mcpServer.AddTool(mcp.NewTool("metrics_list",
-		mcp.WithDescription("List all available metric names"),
-	), e.handleMetricsList)
-
-	e.mcpServer.AddTool(mcp.NewTool("metrics_get",
-		mcp.WithDescription("Get metrics with optional filtering by pattern (supports wildcards like 'db_*', '*_size', etc.)"),
-		mcp.WithString("pattern", mcp.Description("Metric name pattern (optional, empty = all metrics)")),
-	), e.handleMetricsGet)
-
-	// Log tools
-	e.mcpServer.AddTool(mcp.NewTool("logs_tail",
-		mcp.WithDescription("Get last N lines from erigon or torrent logs"),
-		mcp.WithString("log_type", mcp.Description("Log type: 'erigon' or 'torrent' (default: erigon)")),
-		mcp.WithNumber("lines", mcp.Description("Number of lines to retrieve (default: 100, max: 10000)")),
-		mcp.WithString("filter", mcp.Description("Optional string to filter log lines")),
-	), e.handleLogsTail)
-
-	e.mcpServer.AddTool(mcp.NewTool("logs_head",
-		mcp.WithDescription("Get first N lines from erigon or torrent logs"),
-		mcp.WithString("log_type", mcp.Description("Log type: 'erigon' or 'torrent' (default: erigon)")),
-		mcp.WithNumber("lines", mcp.Description("Number of lines to retrieve (default: 100, max: 10000)")),
-		mcp.WithString("filter", mcp.Description("Optional string to filter log lines")),
-	), e.handleLogsHead)
-
-	e.mcpServer.AddTool(mcp.NewTool("logs_grep",
-		mcp.WithDescription("Search for a pattern in erigon or torrent logs"),
-		mcp.WithString("log_type", mcp.Description("Log type: 'erigon' or 'torrent' (default: erigon)")),
-		mcp.WithString("pattern", mcp.Required(), mcp.Description("Search pattern")),
-		mcp.WithNumber("max_lines", mcp.Description("Maximum matching lines to return (default: 1000, max: 10000)")),
-		mcp.WithBoolean("case_insensitive", mcp.Description("Case-insensitive search (default: false)")),
-	), e.handleLogsGrep)
-
-	e.mcpServer.AddTool(mcp.NewTool("logs_stats",
-		mcp.WithDescription("Get statistics about erigon or torrent logs"),
-		mcp.WithString("log_type", mcp.Description("Log type: 'erigon' or 'torrent' (default: erigon)")),
-	), e.handleLogsStats)
-
-	// Otterscan tools
-	e.mcpServer.AddTool(mcp.NewTool("ots_getApiLevel",
-		mcp.WithDescription("Get Otterscan API level"),
-	), e.handleOtsGetApiLevel)
-
-	e.mcpServer.AddTool(mcp.NewTool("ots_getInternalOperations",
-		mcp.WithDescription("Get internal operations (internal txs) for a transaction"),
-		mcp.WithString("txHash", mcp.Required(), mcp.Description("Transaction hash")),
-	), e.handleOtsGetInternalOperations)
-
-	e.mcpServer.AddTool(mcp.NewTool("ots_searchTransactionsBefore",
-		mcp.WithDescription("Search transactions before a given block for an address"),
-		mcp.WithString("address", mcp.Required(), mcp.Description("Address")),
-		mcp.WithNumber("blockNumber", mcp.Required(), mcp.Description("Block number")),
-		mcp.WithNumber("pageSize", mcp.Description("Page size (default: 25)")),
-	), e.handleOtsSearchTransactionsBefore)
-
-	e.mcpServer.AddTool(mcp.NewTool("ots_searchTransactionsAfter",
-		mcp.WithDescription("Search transactions after a given block for an address"),
-		mcp.WithString("address", mcp.Required(), mcp.Description("Address")),
-		mcp.WithNumber("blockNumber", mcp.Required(), mcp.Description("Block number")),
-		mcp.WithNumber("pageSize", mcp.Description("Page size (default: 25)")),
-	), e.handleOtsSearchTransactionsAfter)
-
-	e.mcpServer.AddTool(mcp.NewTool("ots_getBlockDetails",
-		mcp.WithDescription("Get detailed block information"),
-		mcp.WithString("blockNumber", mcp.Required(), mcp.Description("Block number or tag")),
-	), e.handleOtsGetBlockDetails)
-
-	e.mcpServer.AddTool(mcp.NewTool("ots_getBlockDetailsByHash",
-		mcp.WithDescription("Get detailed block information by hash"),
-		mcp.WithString("blockHash", mcp.Required(), mcp.Description("Block hash")),
-	), e.handleOtsGetBlockDetailsByHash)
-
-	e.mcpServer.AddTool(mcp.NewTool("ots_getBlockTransactions",
-		mcp.WithDescription("Get paginated transactions for a block"),
-		mcp.WithString("blockNumber", mcp.Required(), mcp.Description("Block number or tag")),
-		mcp.WithNumber("pageNumber", mcp.Description("Page number (default: 0)")),
-		mcp.WithNumber("pageSize", mcp.Description("Page size (default: 25)")),
-	), e.handleOtsGetBlockTransactions)
-
-	e.mcpServer.AddTool(mcp.NewTool("ots_hasCode",
-		mcp.WithDescription("Check if an address has code (is a contract)"),
-		mcp.WithString("address", mcp.Required(), mcp.Description("Address")),
-		mcp.WithString("blockNumber", mcp.Description("Block number or tag")),
-	), e.handleOtsHasCode)
-
-	e.mcpServer.AddTool(mcp.NewTool("ots_traceTransaction",
-		mcp.WithDescription("Get trace for a transaction"),
-		mcp.WithString("txHash", mcp.Required(), mcp.Description("Transaction hash")),
-	), e.handleOtsTraceTransaction)
-
-	e.mcpServer.AddTool(mcp.NewTool("ots_getTransactionError",
-		mcp.WithDescription("Get transaction error/revert reason"),
-		mcp.WithString("txHash", mcp.Required(), mcp.Description("Transaction hash")),
-	), e.handleOtsGetTransactionError)
-
-	e.mcpServer.AddTool(mcp.NewTool("ots_getTransactionBySenderAndNonce",
-		mcp.WithDescription("Get transaction hash by sender address and nonce"),
-		mcp.WithString("address", mcp.Required(), mcp.Description("Sender address")),
-		mcp.WithNumber("nonce", mcp.Required(), mcp.Description("Nonce")),
-	), e.handleOtsGetTransactionBySenderAndNonce)
-
-	e.mcpServer.AddTool(mcp.NewTool("ots_getContractCreator",
-		mcp.WithDescription("Get contract creator address and transaction"),
-		mcp.WithString("address", mcp.Required(), mcp.Description("Contract address")),
-	), e.handleOtsGetContractCreator)
+func (e *ErigonMCPServer) toolHandlers() map[string]server.ToolHandlerFunc {
+	return map[string]server.ToolHandlerFunc{
+		"eth_blockNumber":                         e.handleBlockNumber,
+		"eth_getBlockByNumber":                    e.handleGetBlockByNumber,
+		"eth_getBlockByHash":                      e.handleGetBlockByHash,
+		"eth_getBlockTransactionCountByNumber":    e.handleGetBlockTransactionCountByNumber,
+		"eth_getBlockTransactionCountByHash":      e.handleGetBlockTransactionCountByHash,
+		"eth_getBalance":                          e.handleGetBalance,
+		"eth_getTransactionByHash":                e.handleGetTransactionByHash,
+		"eth_getTransactionByBlockHashAndIndex":   e.handleGetTransactionByBlockHashAndIndex,
+		"eth_getTransactionByBlockNumberAndIndex": e.handleGetTransactionByBlockNumberAndIndex,
+		"eth_getTransactionReceipt":               e.handleGetTransactionReceipt,
+		"eth_getBlockReceipts":                    e.handleGetBlockReceipts,
+		"eth_getLogs":                             e.handleGetLogs,
+		"eth_getCode":                             e.handleGetCode,
+		"eth_getStorageAt":                        e.handleGetStorageAt,
+		"eth_getTransactionCount":                 e.handleGetTransactionCount,
+		"eth_call":                                e.handleCall,
+		"eth_estimateGas":                         e.handleEstimateGas,
+		"eth_gasPrice":                            e.handleGasPrice,
+		"eth_chainId":                             e.handleChainId,
+		"eth_syncing":                             e.handleSyncing,
+		"eth_accounts":                            e.handleAccounts,
+		"eth_getProof":                            e.handleGetProof,
+		"eth_coinbase":                            e.handleCoinbase,
+		"eth_mining":                              e.handleMining,
+		"eth_hashrate":                            e.handleHashrate,
+		"eth_protocolVersion":                     e.handleProtocolVersion,
+		"eth_getUncleByBlockNumberAndIndex":       e.handleGetUncleByBlockNumberAndIndex,
+		"eth_getUncleByBlockHashAndIndex":         e.handleGetUncleByBlockHashAndIndex,
+		"eth_getUncleCountByBlockNumber":          e.handleGetUncleCountByBlockNumber,
+		"eth_getUncleCountByBlockHash":            e.handleGetUncleCountByBlockHash,
+		"erigon_forks":                            e.handleErigonForks,
+		"erigon_blockNumber":                      e.handleErigonBlockNumber,
+		"erigon_getHeaderByNumber":                e.handleErigonGetHeaderByNumber,
+		"erigon_getHeaderByHash":                  e.handleErigonGetHeaderByHash,
+		"erigon_getBlockByTimestamp":              e.handleErigonGetBlockByTimestamp,
+		"erigon_getBalanceChangesInBlock":         e.handleErigonGetBalanceChangesInBlock,
+		"erigon_getLogsByHash":                    e.handleErigonGetLogsByHash,
+		"erigon_getLogs":                          e.handleErigonGetLogs,
+		"erigon_getBlockReceiptsByBlockHash":      e.handleErigonGetBlockReceiptsByBlockHash,
+		"erigon_nodeInfo":                         e.handleErigonNodeInfo,
+		"metrics_list":                            e.handleMetricsList,
+		"metrics_get":                             e.handleMetricsGet,
+		"logs_tail":                               e.handleLogsTail,
+		"logs_head":                               e.handleLogsHead,
+		"logs_grep":                               e.handleLogsGrep,
+		"logs_stats":                              e.handleLogsStats,
+		"ots_getApiLevel":                         e.handleOtsGetApiLevel,
+		"ots_getInternalOperations":               e.handleOtsGetInternalOperations,
+		"ots_searchTransactionsBefore":            e.handleOtsSearchTransactionsBefore,
+		"ots_searchTransactionsAfter":             e.handleOtsSearchTransactionsAfter,
+		"ots_getBlockDetails":                     e.handleOtsGetBlockDetails,
+		"ots_getBlockDetailsByHash":               e.handleOtsGetBlockDetailsByHash,
+		"ots_getBlockTransactions":                e.handleOtsGetBlockTransactions,
+		"ots_hasCode":                             e.handleOtsHasCode,
+		"ots_traceTransaction":                    e.handleOtsTraceTransaction,
+		"ots_getTransactionError":                 e.handleOtsGetTransactionError,
+		"ots_getTransactionBySenderAndNonce":      e.handleOtsGetTransactionBySenderAndNonce,
+		"ots_getContractCreator":                  e.handleOtsGetContractCreator,
+	}
 }
 
 // ===== ETH API HANDLERS =====
@@ -1253,25 +956,43 @@ func (e *ErigonMCPServer) ServeContext(ctx context.Context) error {
 	return s.Listen(ctx, os.Stdin, os.Stdout)
 }
 
-// ServeSSE starts MCP server with SSE transport
-func (e *ErigonMCPServer) ServeSSE(addr string) (err error) {
+// ServeSSE starts MCP server with SSE transport, shutting it down when ctx is cancelled.
+func (e *ErigonMCPServer) ServeSSE(ctx context.Context, addr string) error {
 	// Apply NonBlockingAcquire so BeginRo fails fast (ErrServerOverloaded)
 	// instead of blocking the SSE handler goroutine indefinitely when all DB
 	// read slots are held by a concurrent write/ETL transaction. The HTTP RPC
 	// layer sets the same flag in node/rpcstack.go.
-	sse := server.NewSSEServer(e.mcpServer,
+	return serveSSE(ctx, e.mcpServer, addr,
 		server.WithSSEContextFunc(func(ctx context.Context, _ *http.Request) context.Context {
 			return kv.WithNonBlockingAcquire(ctx)
 		}),
 	)
+}
 
-	defer func() {
-		if r := recover(); r != nil {
-			log.Error("[MCP]: recovered from panic:", "panic", r)
-
-			err = fmt.Errorf("mcp sse server panicked: %v", r)
-		}
+// serveSSE runs the SSE server until ctx is cancelled. The http.Server is
+// pre-created so a Shutdown racing ahead of Start targets it instead of leaking
+// Start in Accept; it must carry Handler: sse because Start wires the handler
+// only on a server it creates itself.
+func serveSSE(ctx context.Context, mcpServer *server.MCPServer, addr string, opts ...server.SSEOption) error {
+	sse := server.NewSSEServer(mcpServer, opts...)
+	server.WithHTTPServer(&http.Server{Addr: addr, Handler: sse})(sse)
+	errCh := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("[MCP] recovered from panic", "panic", r)
+				errCh <- fmt.Errorf("mcp sse server panicked: %v", r)
+			}
+		}()
+		errCh <- sse.Start(addr)
 	}()
 
-	return sse.Start(addr)
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return sse.Shutdown(shutdownCtx)
+	case err := <-errCh:
+		return err
+	}
 }

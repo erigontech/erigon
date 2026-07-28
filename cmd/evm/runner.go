@@ -32,7 +32,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -144,7 +144,7 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 	return output, stats, err
 }
 
-func runCmd(ctx *cli.Context) error {
+func runCmd(_ context.Context, ctx *cli.Command) error {
 	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
 	if machineFriendlyOutput {
 		log.Root().SetHandler(log.DiscardHandler())

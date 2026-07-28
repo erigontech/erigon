@@ -158,7 +158,7 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 
 func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.Context, failFast bool, fromStep uint64) error {
 	fromTxNum := fromStep * iit.ii.stepSize
-	g := &errgroup.Group{}
+	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(estimate.AlmostAllCPUs())
 
 	logEvery := time.NewTicker(30 * time.Second)

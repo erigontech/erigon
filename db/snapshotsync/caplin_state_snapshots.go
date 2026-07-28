@@ -273,7 +273,7 @@ func (s *CaplinStateSnapshots) coveredRangesForType(name string) []Range {
 	if !ok {
 		return nil
 	}
-	segs, ok := v.([]*VisibleSegment)
+	segs, ok := v.(VisibleSegments)
 	if !ok {
 		return nil
 	}
@@ -451,8 +451,8 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 	s.visibleLock.Lock()
 	defer s.visibleLock.Unlock()
 
-	getNewVisibleSegments := func(dirtySegments *btree.BTreeG[*DirtySegment]) []*VisibleSegment {
-		newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
+	getNewVisibleSegments := func(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSegments {
+		newVisibleSegments := make(VisibleSegments, 0, dirtySegments.Len())
 		dirtySegments.Walk(func(segments []*DirtySegment) bool {
 			for _, sn := range segments {
 				if sn.canDelete.Load() {
@@ -499,7 +499,7 @@ func (s *CaplinStateSnapshots) idxAvailability() uint64 {
 	// 	}
 	// }
 	s.visible.Range(func(_, v any) bool {
-		segs := v.([]*VisibleSegment)
+		segs := v.(VisibleSegments)
 		if len(segs) == 0 {
 			min = 0
 			return false
@@ -588,7 +588,7 @@ func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	// 	v.roTxs[k] = segments.BeginRo()
 	// }
 	s.visible.Range(func(k, val any) bool {
-		v.roTxs[k.(string)] = VisibleSegments(val.([]*VisibleSegment)).BeginRo()
+		v.roTxs[k.(string)] = val.(VisibleSegments).BeginRo()
 		return true
 	})
 	return v
@@ -608,7 +608,7 @@ func (v *CaplinStateView) Close() {
 	v.closed = true
 }
 
-func (v *CaplinStateView) VisibleSegments(tbl string) []*VisibleSegment {
+func (v *CaplinStateView) VisibleSegments(tbl string) VisibleSegments {
 	// if v.s == nil || v.s.visible[tbl] == nil {
 	// 	return nil
 	// }
@@ -617,7 +617,7 @@ func (v *CaplinStateView) VisibleSegments(tbl string) []*VisibleSegment {
 		return nil
 	}
 	if val, ok := v.s.visible.Load(tbl); ok {
-		return val.([]*VisibleSegment)
+		return val.(VisibleSegments)
 	}
 	return nil
 }

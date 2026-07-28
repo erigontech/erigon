@@ -183,24 +183,6 @@ func TestParallelPatriciaHashedSkeletonRootHashFallsBackToTemplate(t *testing.T)
 	assert.Equal(t, expected, got, "RootHash falls back to template for the no-updates path")
 }
 
-func assertEquivalentRoot(
-	t *testing.T,
-	plainKeys [][]byte,
-	updates []Update,
-) []byte {
-	return assertEquivalentRootWorkers(t, plainKeys, updates, 1)
-}
-
-func assertEquivalentRootWorkers(
-	t *testing.T,
-	plainKeys [][]byte,
-	updates []Update,
-	numWorkers int,
-) []byte {
-	t.Helper()
-	return requireRootParity(t, plainKeys, updates, numWorkers)
-}
-
 func TestParallelProcessSkeleton_DenseSingleNibbleBucket(t *testing.T) {
 	t.Parallel()
 
@@ -214,7 +196,7 @@ func TestParallelProcessSkeleton_DenseSingleNibbleBucket(t *testing.T) {
 	}
 	plainKeys, updates := ub.Build()
 
-	root := assertEquivalentRoot(t, plainKeys, updates)
+	root := requireRootParity(t, plainKeys, updates, 1)
 	require.NotEmpty(t, root)
 }
 
@@ -231,17 +213,8 @@ func TestParallelProcessSkeleton_RejectsMissingFactory(t *testing.T) {
 		Build()
 	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
 
-	upds := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	upds := WrapKeyUpdates(t, ModeParallel, KeyToHexNibbleHash, plainKeys, updates)
 	defer upds.Close()
-	for i, k := range plainKeys {
-		i, k := i, k
-		ks := string(k)
-		upds.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
-			c.plainKey = ks
-			c.hashedKey = KeyToHexNibbleHash(k)
-			c.update = &updates[i]
-		})
-	}
 
 	_, err := p.Process(context.Background(), upds, "", nil, WarmupConfig{})
 	require.Error(t, err)
@@ -391,7 +364,7 @@ func TestParallelFanout(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			plainKeys, updates := tc.build(t)
-			root := assertEquivalentRootWorkers(t, plainKeys, updates, tc.workers)
+			root := requireRootParity(t, plainKeys, updates, tc.workers)
 			require.NotEmpty(t, root)
 		})
 	}
@@ -413,17 +386,8 @@ func TestParallelPatriciaHashedTemplateMirrorsPublishedRoot(t *testing.T) {
 	p.SetNumWorkers(1)
 	p.ResetContext(parMs)
 
-	parUpds := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	parUpds := WrapKeyUpdates(t, ModeParallel, KeyToHexNibbleHash, plainKeys, updates)
 	defer parUpds.Close()
-	for i, k := range plainKeys {
-		i, k := i, k
-		ks := string(k)
-		parUpds.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
-			c.plainKey = ks
-			c.hashedKey = KeyToHexNibbleHash(k)
-			c.update = &updates[i]
-		})
-	}
 
 	published, err := p.Process(context.Background(), parUpds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
@@ -454,17 +418,8 @@ func TestParallelPatriciaHashedStateRoundTrip(t *testing.T) {
 	p.SetNumWorkers(1)
 	p.ResetContext(parMs)
 
-	parUpds := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	parUpds := WrapKeyUpdates(t, ModeParallel, KeyToHexNibbleHash, plainKeys, updates)
 	defer parUpds.Close()
-	for i, k := range plainKeys {
-		i, k := i, k
-		ks := string(k)
-		parUpds.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
-			c.plainKey = ks
-			c.hashedKey = KeyToHexNibbleHash(k)
-			c.update = &updates[i]
-		})
-	}
 
 	published, err := p.Process(context.Background(), parUpds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
@@ -531,16 +486,7 @@ func stagedRootEquivalence(t *testing.T, batches []stagedBatch, numWorkers int) 
 		require.NoError(t, err, "batch[%d] %q: seq Process", i, batch.label)
 		seqTrie.Reset()
 
-		parUpds := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
-		for j, k := range batch.plainKeys {
-			j, k := j, k
-			ks := string(k)
-			parUpds.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
-				c.plainKey = ks
-				c.hashedKey = KeyToHexNibbleHash(k)
-				c.update = &batch.updates[j]
-			})
-		}
+		parUpds := WrapKeyUpdates(t, ModeParallel, KeyToHexNibbleHash, batch.plainKeys, batch.updates)
 		parRoot, err := parTrie.Process(ctx, parUpds, "", nil, WarmupConfig{})
 		parUpds.Close()
 		require.NoError(t, err, "batch[%d] %q: par Process", i, batch.label)
@@ -555,31 +501,6 @@ func stagedRootEquivalence(t *testing.T, batches []stagedBatch, numWorkers int) 
 		prevRoot = seqRoot
 	}
 	return prevRoot
-}
-
-func TestParallelDeleteWithSurvivingSiblings(t *testing.T) {
-	t.Parallel()
-
-	ub1 := NewUpdateBuilder()
-	for nib := range 8 {
-		for s := range 4 {
-			ub1.Balance(addrHex(nibbleAddr(nib, s)), uint64(100+nib*10+s))
-		}
-	}
-	pk1, up1 := ub1.Build()
-
-	ub2 := NewUpdateBuilder()
-	ub2.Delete(addrHex(nibbleAddr(0x0, 0)))
-	ub2.Delete(addrHex(nibbleAddr(0x0, 1)))
-	ub2.Balance(addrHex(nibbleAddr(0x5, 0)), 9999)
-	ub2.Balance(addrHex(nibbleAddr(0x5, 1)), 8888)
-	pk2, up2 := ub2.Build()
-
-	root := stagedRootEquivalence(t, []stagedBatch{
-		{label: "phase1-populate-8-nibbles", plainKeys: pk1, updates: up1},
-		{label: "phase2-delete-and-modify-touched", plainKeys: pk2, updates: up2},
-	}, 4)
-	require.NotEmpty(t, root)
 }
 
 func TestParallelAllDeleted(t *testing.T) {
@@ -656,7 +577,7 @@ func TestParallelBloatnetShape(t *testing.T) {
 	}
 	plainKeys, updates := ub.Build()
 
-	root := assertEquivalentRootWorkers(t, plainKeys, updates, 8)
+	root := requireRootParity(t, plainKeys, updates, 8)
 	require.NotEmpty(t, root)
 	t.Logf("bloatnet root (%d touched keys, %d accounts): %x",
 		len(plainKeys), numAccounts, root)
@@ -679,14 +600,14 @@ func TestParallelSingleAccountManyStorage(t *testing.T) {
 	}
 	plainKeys, updates := ub.Build()
 
-	root := assertEquivalentRootWorkers(t, plainKeys, updates, 4)
+	root := requireRootParity(t, plainKeys, updates, 4)
 	require.NotEmpty(t, root)
 	t.Logf("single-account-%d-slots root: %x", numSlots, root)
 }
 
 func TestParallelEmptyUpdates(t *testing.T) {
 	t.Parallel()
-	root := assertEquivalentRoot(t, nil, nil)
+	root := requireRootParity(t, nil, nil, 1)
 	require.NotEmpty(t, root, "empty-trie root is the empty hash")
 }
 
@@ -695,7 +616,7 @@ func TestParallelSingleTouchedKey(t *testing.T) {
 	plainKeys, updates := NewUpdateBuilder().
 		Balance("4c888535841acbe0709b0758083f61d375bc02b4", 9001).
 		Build()
-	root := assertEquivalentRoot(t, plainKeys, updates)
+	root := requireRootParity(t, plainKeys, updates, 1)
 	require.NotEmpty(t, root)
 }
 
@@ -711,7 +632,7 @@ func TestParallelOnlyOneAccountTouchedManyTimes(t *testing.T) {
 	require.Equal(t, 1, len(plainKeys), "UpdateBuilder merges per-account updates into one key")
 	require.Equal(t, BalanceUpdate|NonceUpdate|CodeUpdate, updates[0].Flags)
 
-	root := assertEquivalentRoot(t, plainKeys, updates)
+	root := requireRootParity(t, plainKeys, updates, 1)
 	require.NotEmpty(t, root)
 }
 
@@ -740,16 +661,7 @@ func TestParallelDeleteWithSurvivingSiblings_BranchInspection(t *testing.T) {
 		require.NoError(t, err)
 		seqTrie.Reset()
 
-		parUpds := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
-		for j, k := range plainKeys {
-			j, k := j, k
-			ks := string(k)
-			parUpds.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
-				c.plainKey = ks
-				c.hashedKey = KeyToHexNibbleHash(k)
-				c.update = &updates[j]
-			})
-		}
+		parUpds := WrapKeyUpdates(t, ModeParallel, KeyToHexNibbleHash, plainKeys, updates)
 		parRoot, err := parTrie.Process(ctx, parUpds, "", nil, WarmupConfig{})
 		parUpds.Close()
 		require.NoError(t, err)
@@ -963,7 +875,7 @@ func requireIncrementalEquiv(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte
 func TestVerifyParallel_WideNested(t *testing.T) {
 	t.Parallel()
 	keys, upds := genWideNested(t)
-	require.NotEmpty(t, assertEquivalentRootWorkers(t, keys, upds, 8))
+	require.NotEmpty(t, requireRootParity(t, keys, upds, 8))
 }
 
 func TestVerifyParallel_WideNestedIncremental(t *testing.T) {
@@ -1005,27 +917,13 @@ func TestVerifyParallel_StorageBranchEquiv(t *testing.T) {
 	defer parTrie.Release()
 	parTrie.SetNumWorkers(8)
 	parTrie.ResetContext(parMs)
-	parUpds := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	parUpds := WrapKeyUpdates(t, ModeParallel, KeyToHexNibbleHash, keys, upds)
 	defer parUpds.Close()
-	for i, k := range keys {
-		ks := string(k)
-		parUpds.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
-			c.plainKey = ks
-			c.hashedKey = KeyToHexNibbleHash(k)
-			c.update = &upds[i]
-		})
-	}
 	parRoot, err := parTrie.Process(ctx, parUpds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	require.Equal(t, seqRoot, parRoot, "single-batch root must match")
-	if len(seqMs.cm) != len(parMs.cm) {
-		branchDiff(t, seqMs, parMs)
-	}
-	require.Equal(t, len(seqMs.cm), len(parMs.cm), "branch count must match")
-	for k, sb := range seqMs.cm {
-		require.Equalf(t, []byte(sb), []byte(parMs.cm[k]), "branch at prefix %x must match", []byte(k))
-	}
+	requireBranchParity(t, seqMs, parMs)
 }
 
 func TestVerifyParallel_RandomStorageIncremental(t *testing.T) {
