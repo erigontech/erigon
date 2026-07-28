@@ -58,6 +58,9 @@ func TestDirVarExpandsEnv(t *testing.T) {
 	if got != want {
 		t.Fatalf("env var not expanded: got %q want %q", got, want)
 	}
+	if v := fs.Lookup("datadir").Value.String(); v != want {
+		t.Fatalf("flag lookup not expanded: got %q want %q", v, want)
+	}
 }
 
 func TestDirVarEmptyDefaultStaysEmpty(t *testing.T) {
