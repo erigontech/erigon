@@ -1046,9 +1046,10 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 		u.CodeHash = acc.CodeHash.Value()
 	}
 
-	// Verify only code-bearing accounts whose code is actually in the domain, and
-	// never fold the read into u: a code-less account may keep a benign CodeDomain
-	// residue, and overridden code can live in an overlay this read doesn't see.
+	// Verify only code-bearing accounts whose code is actually in the domain,
+	// and never fold the read into u. A cleared EIP-7702 delegation leaves a
+	// benign CodeDomain residue on a code-less account, and eth_simulateV1
+	// overrides put code in an overlay the domain read doesn't see.
 	if dbg.AssertEnabled && !acc.IsEmptyCodeHash() {
 		code, _, err := sdc.readDomain(kv.CodeDomain, plainKey)
 		if err != nil {

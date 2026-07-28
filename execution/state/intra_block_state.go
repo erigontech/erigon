@@ -438,7 +438,7 @@ func (sdb *IntraBlockState) Release(parallel bool) {
 	journal := sdb.journal
 	sdb.stateObjects = nil
 	sdb.journal = nil
-	sdb.logs = nil // drop the reused log entries and their Topics/Data buffers
+	sdb.logs = nil
 
 	if parallel {
 		go releaseResources(stateObjects, journal)
@@ -488,15 +488,17 @@ func (sdb *IntraBlockState) AllocLog(numTopics, dataSize int) *types.Log {
 	}
 	sdb.logs[ti] = buf
 
-	if numTopics <= cap(lp.Topics) {
-		lp.Topics = lp.Topics[:numTopics]
-	} else {
+	// The nil checks keep Topics/Data non-nil even when empty (make of size 0 is
+	// free), so hooks and copies marshal them as [] and 0x, never null.
+	if lp.Topics == nil || numTopics > cap(lp.Topics) {
 		lp.Topics = make([]common.Hash, numTopics)
-	}
-	if dataSize <= cap(lp.Data) {
-		lp.Data = lp.Data[:dataSize]
 	} else {
+		lp.Topics = lp.Topics[:numTopics]
+	}
+	if lp.Data == nil || dataSize > cap(lp.Data) {
 		lp.Data = make([]byte, dataSize)
+	} else {
+		lp.Data = lp.Data[:dataSize]
 	}
 	lp.Removed = false // Address set by caller
 	lp.TxHash, lp.BlockHash = common.Hash{}, common.Hash{}
@@ -522,10 +524,9 @@ func (sdb *IntraBlockState) NotifyLog(lp *types.Log) {
 		fmt.Printf("%d (%d.%d) Log: Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, lp.Address, topics, lp.Data)
 	}
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
-		// lp is a reused buffer entry, so hand the hook an owned copy it can
-		// safely retain. Hooks must not mutate the log: writes to the copy do
-		// not reach the stored logs.
-		sdb.tracingHooks.OnLog(lp.Copy())
+		// lp is a reused buffer entry; per the LogHook contract the hook must
+		// copy anything it retains and must not mutate the log.
+		sdb.tracingHooks.OnLog(lp)
 	}
 }
 

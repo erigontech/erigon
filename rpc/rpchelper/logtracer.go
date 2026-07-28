@@ -1,6 +1,8 @@
 package rpchelper
 
 import (
+	"slices"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -95,7 +97,7 @@ func (t *LogTracer) onEnd(reverted bool) {
 }
 
 func (t *LogTracer) onLog(log *types.Log) {
-	t.captureLog(log.Address, log.Topics, log.Data)
+	t.captureLog(log.Address, slices.Clone(log.Topics), slices.Clone(log.Data))
 }
 
 func (t *LogTracer) captureLog(address common.Address, topics []common.Hash, data []byte) {
