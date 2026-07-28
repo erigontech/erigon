@@ -135,7 +135,7 @@ func setupEphemeralReplay(tb testing.TB, fx *blockreplay.Fixture) (*ephemeralRep
 // of the ExecV3 measurement.
 func (r *ephemeralReplay) newDomains(tb testing.TB, fx *blockreplay.Fixture) (kv.TemporalRwTx, *execctx.SharedDomains) {
 	tb.Helper()
-	tx, err := r.db.BeginTemporalRw(r.ctx)
+	tx, err := r.db.BeginTemporalRw(r.ctx) //nolint:gocritic
 	require.NoError(tb, err)
 	doms, err := blockreplay.NewWitnessDomains(r.ctx, tx, fx, ephemeralSeedTxNum, r.logger)
 	require.NoError(tb, err)
