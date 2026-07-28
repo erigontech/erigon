@@ -22,10 +22,20 @@ make eest-spec-enginextests-stable-parallel  # same, but with ERIGON_EXEC3_PARAL
 make eest-spec-statetests-devnet             # …vs eest_devnet fixtures
 make eest-spec-blocktests-devnet             # devnet blocktests (always parallel exec3)
 make eest-spec-statetests-legacy             # pinned legacy Cancun state-test archive
-make eest-spec-blocktests-legacy-sequential  # pinned ethereum/tests + Cancun blockchain archives
-make eest-spec-blocktests-legacy-parallel
-make eest-spec-blocktests-legacy-race-berlin-shanghai-cancun
-make eest-spec-blocktests-legacy-race-other-forks
+make eest-spec-blocktests-legacy-consensus-sequential
+                                             # Hive consensus fixture selection;
+                                             # -parallel and -race variants too
+make eest-spec-blocktests-legacy-constantinople-sequential
+                                             # Hive legacy fixture selection;
+                                             # -parallel plus three race partitions:
+                                             # ...-race-constantinople,
+                                             # ...-race-constantinople-fix, and
+                                             # ...-race-other-forks
+make eest-spec-blocktests-legacy-cancun-sequential
+                                             # Hive legacy-cancun selection;
+                                             # -parallel plus two race partitions:
+                                             # ...-race-berlin-shanghai-cancun and
+                                             # ...-race-other-forks
 make eest-spec-enginextests-benchmark-1m-sequential
                                              # engine-x benchmark fixtures @ 1M gas target
                                              # (with per-test --time stats);

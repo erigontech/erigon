@@ -10,12 +10,18 @@
 #   statetests-legacy                          complete legacy Cancun state tests
 #   blocktests-stable-sequential               blockchain tests vs. eest_stable
 #   blocktests-devnet                          blockchain tests vs. eest_devnet
-#   blocktests-legacy-{sequential,parallel}
-#                                              complete ethereum/tests and legacy
-#                                              Cancun blockchain tests
-#   blocktests-legacy-race-{berlin-shanghai-cancun,other-forks}
+#   blocktests-legacy-consensus-{sequential,parallel,race}
+#                                              Hive consensus suite
+#   blocktests-legacy-constantinople-{sequential,parallel}
+#                                              Hive legacy suite
+#   blocktests-legacy-constantinople-race-{constantinople,constantinople-fix,other-forks}
 #                                              race-detector partition of the
-#                                              same complete blockchain corpus
+#                                              Hive legacy suite
+#   blocktests-legacy-cancun-{sequential,parallel}
+#                                              Hive legacy-cancun suite
+#   blocktests-legacy-cancun-race-{berlin-shanghai-cancun,other-forks}
+#                                              race-detector partition of the
+#                                              Hive legacy-cancun suite
 #   enginextests-stable-sequential             engine-x tests vs. eest_stable
 #   enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}-sequential
 #                                              engine-x benchmark fixtures per
@@ -80,8 +86,10 @@ case "$shard" in
 	*-stable*)                     fixture_sets=(eest_stable) ;;
 	*-devnet*)                     fixture_sets=(eest_devnet) ;;
 	*-benchmark*)                  fixture_sets=(eest_benchmark) ;;
-	statetests-legacy)             fixture_sets=(legacy_cancun) ;;
-	blocktests-legacy-*)           fixture_sets=(legacy_tests legacy_cancun) ;;
+	statetests-legacy)                       fixture_sets=(legacy_cancun) ;;
+	blocktests-legacy-consensus-*)           fixture_sets=(legacy_tests) ;;
+	blocktests-legacy-constantinople-* | \
+		blocktests-legacy-cancun-*)          fixture_sets=(legacy_cancun) ;;
 	*) echo "cannot resolve fixtures for shard: $shard" >&2; exit 2 ;;
 esac
 fixture_base() {
@@ -130,12 +138,12 @@ case "$shard_route" in
 	# manifest `run` key (appended after this case), not from a per-shard arm.
 	blocktests-stable | blocktests-devnet | blocktests-stable-race-* | blocktests-devnet-race-*)
 		cmd=blocktest;   paths=("$base/blockchain_tests") ;;
-	blocktests-legacy | blocktests-legacy-race-*)
-		cmd=blocktest
-		paths=(
-			"$(fixture_base legacy_tests)/BlockchainTests"
-			"$(fixture_base legacy_cancun)/Cancun/BlockchainTests"
-		) ;;
+	blocktests-legacy-consensus | blocktests-legacy-consensus-*)
+		cmd=blocktest;   paths=("$base/BlockchainTests") ;;
+	blocktests-legacy-constantinople | blocktests-legacy-constantinople-*)
+		cmd=blocktest;   paths=("$base/Constantinople/BlockchainTests") ;;
+	blocktests-legacy-cancun | blocktests-legacy-cancun-*)
+		cmd=blocktest;   paths=("$base/Cancun/BlockchainTests") ;;
 	enginextests-stable)
 		cmd=enginextest
 		paths=("$base/blockchain_tests_engine_x")

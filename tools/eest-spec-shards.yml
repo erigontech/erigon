@@ -58,35 +58,97 @@
   # TODO: reduce to 0 as tests-glamsterdam-devnet@v7.2.0 support lands.
   max-allowed-failures: 2238
   exec3-parallel: true
-- shard: blocktests-legacy-sequential
+- shard: blocktests-legacy-consensus-sequential
   workers: 12
-  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
-  max-allowed-failures: 26
-  expected-tests: 113125
+  max-allowed-failures: 0
+  expected-tests: 1142
   exclude:
     - '/\.meta/'
-- shard: blocktests-legacy-parallel
+- shard: blocktests-legacy-consensus-parallel
   workers: 12
-  # PoW/TD: https://github.com/erigontech/erigon/issues/22061; parallel writes: https://github.com/erigontech/erigon/issues/21136
-  max-allowed-failures: 41
-  expected-tests: 113125
+  max-allowed-failures: 0
+  expected-tests: 1142
   exec3-parallel: true
   exclude:
     - '/\.meta/'
-- shard: blocktests-legacy-race-berlin-shanghai-cancun
+- shard: blocktests-legacy-consensus-race
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 1142
+  exec3-parallel: true
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-constantinople-sequential
+  workers: 12
+  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
+  max-allowed-failures: 24
+  expected-tests: 32615
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-constantinople-parallel
+  workers: 12
+  # PoW/TD: https://github.com/erigontech/erigon/issues/22061; parallel writes: https://github.com/erigontech/erigon/issues/21136
+  max-allowed-failures: 40
+  expected-tests: 32615
+  exec3-parallel: true
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-constantinople-race-constantinople
+  workers: 12
+  # PoW/TD: https://github.com/erigontech/erigon/issues/22061; parallel writes: https://github.com/erigontech/erigon/issues/21136
+  max-allowed-failures: 10
+  expected-tests: 10807
+  exec3-parallel: true
+  run: '_Constantinople$'
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-constantinople-race-constantinople-fix
+  workers: 12
+  # PoW/TD: https://github.com/erigontech/erigon/issues/22061; parallel writes: https://github.com/erigontech/erigon/issues/21136
+  max-allowed-failures: 10
+  expected-tests: 10802
+  exec3-parallel: true
+  run: '_ConstantinopleFix$'
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-constantinople-race-other-forks
+  workers: 12
+  # PoW/TD: https://github.com/erigontech/erigon/issues/22061; parallel writes: https://github.com/erigontech/erigon/issues/21136
+  max-allowed-failures: 20
+  expected-tests: 11006
+  exec3-parallel: true
+  exclude:
+    - '/\.meta/'
+    - '::.*_Constantinople(Fix)?$'
+- shard: blocktests-legacy-cancun-sequential
+  workers: 12
+  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
+  max-allowed-failures: 26
+  expected-tests: 111983
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-cancun-parallel
+  workers: 12
+  # PoW/TD: https://github.com/erigontech/erigon/issues/22061; parallel writes: https://github.com/erigontech/erigon/issues/21136
+  max-allowed-failures: 41
+  expected-tests: 111983
+  exec3-parallel: true
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-cancun-race-berlin-shanghai-cancun
   workers: 12
   # PoW/TD: https://github.com/erigontech/erigon/issues/22061; parallel writes: https://github.com/erigontech/erigon/issues/21136
   max-allowed-failures: 12
-  expected-tests: 57135
+  expected-tests: 56564
   exec3-parallel: true
   run: '(_(Berlin|Shanghai|Cancun)$|fork_(Berlin|Shanghai|Cancun)-)'
   exclude:
     - '/\.meta/'
-- shard: blocktests-legacy-race-other-forks
+- shard: blocktests-legacy-cancun-race-other-forks
   workers: 12
   # PoW/TD: https://github.com/erigontech/erigon/issues/22061; parallel writes: https://github.com/erigontech/erigon/issues/21136
   max-allowed-failures: 29
-  expected-tests: 55990
+  expected-tests: 55419
   exec3-parallel: true
   exclude:
     - '/\.meta/'
