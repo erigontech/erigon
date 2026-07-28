@@ -78,11 +78,19 @@ else
     # (starting an erigon + waiting for sync is a multi-hour operation
     # the operator should drive explicitly via erigon-launch-hoodi-fork-parent.sh).
     stage "Probing live parent erigon at $PARENT_RPC"
-    if ! curl -s --max-time 5 -X POST -H "Content-Type: application/json" \
+    HEAD_MIN="${HEAD_MIN:-2000}" # head must exceed HEAD_MIN before E2E is meaningful
+    head_hex=$(curl -s --max-time 5 -X POST -H "Content-Type: application/json" \
         --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-        "$PARENT_RPC" | grep -q '"result"'; then
+        "$PARENT_RPC" 2>/dev/null | jq -r '.result // "null"')
+    if [[ "$head_hex" == "null" || -z "$head_hex" ]]; then
         echo "  no parent erigon at $PARENT_RPC — skipping Tier 3+"
         echo "  launch one first via: scripts/erigon-launch-hoodi-fork-parent.sh"
+        report "Tier 3b (fork-rpc-transition)" skip
+        report "Tier 3c (fork-restart-transition)" skip
+        report "Tier 4  (fork-soak)" skip
+    elif (( $(printf '%d' "$head_hex") < HEAD_MIN )); then
+        echo "  parent head=$(printf '%d' "$head_hex") below HEAD_MIN=$HEAD_MIN — skipping Tier 3+"
+        echo "  wait for parent to sync further (or set HEAD_MIN lower to override)"
         report "Tier 3b (fork-rpc-transition)" skip
         report "Tier 3c (fork-restart-transition)" skip
         report "Tier 4  (fork-soak)" skip
