@@ -16,9 +16,24 @@ DATADIR="${DATADIR:-/erigon/tmp/erigon-hoodi-fork-child}"
 CHAIN="${CHAIN:?fork chain name is required — set CHAIN=<name-from-chain.json>}"
 LOG="${LOG:-/tmp/erigon-hoodi-fork-child.log}"
 BIN="${BIN:-./build/bin/erigon}"
+# SNAPSHOT_DELEGATION points at an Authority UCAN sidecar. Setting it
+# marks this node as a permissioned publisher and lets backend.go's
+# fork-initiator gate-skip branch fire (see the ce2c1719b2 tightening)
+# so the ENR carries chain-toml at boot instead of waiting on the
+# InitialValidationComplete signal that a pre-populated fork datadir
+# never emits. Without SNAPSHOT_DELEGATION the launcher runs
+# unpermissioned — the V2-publish gate stays ON and this node does
+# not advertise chain-toml over the wire (safe default: any random
+# fork-chain node is not automatically a canonical-view publisher).
+SNAPSHOT_DELEGATION="${SNAPSHOT_DELEGATION:-}"
 
 export USE_STATE_CACHE=false
 export ERIGON_MERGE_MIN_AGE_STEPS="${ERIGON_MERGE_MIN_AGE_STEPS:-6}"
+
+DELEGATION_FLAG=()
+if [[ -n "$SNAPSHOT_DELEGATION" ]]; then
+    DELEGATION_FLAG=(--snapshot.delegation="$SNAPSHOT_DELEGATION")
+fi
 
 exec "$BIN" \
   --datadir="$DATADIR" \
@@ -26,6 +41,7 @@ exec "$BIN" \
   --prune.mode=minimal \
   --snap.p2p-manifest \
   --snap.lifecycle-driven-by-storage \
+  "${DELEGATION_FLAG[@]}" \
   --http.api=eth,erigon,engine,debug,net,web3,trace,txpool,admin \
   --http.port=19745 --authrpc.port=19751 --private.api.addr=127.0.0.1:11790 \
   --torrent.port=43669 --port=31803 \
