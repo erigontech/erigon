@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/mvcc"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
@@ -187,18 +188,18 @@ func filesFromDir(dir string) ([]string, error) {
 	return filtered, nil
 }
 
-func (ii *InvertedIndex) openList(ctx context.Context, fNames, accessorFiles []string) error {
-	ii.closeWhatNotInList(fNames)
+func (ii *InvertedIndex) openList(ctx context.Context, fNames, accessorFiles []string) (retiredFiles, error) {
+	retired := ii.retireFilesNotInList(fNames)
 	ii.scanDirtyFiles(fNames)
 	if err := ii.openDirtyFiles(ctx, fNames, accessorFiles); err != nil {
-		return fmt.Errorf("InvertedIndex(%s).openDirtyFiles: %w", ii.FilenameBase, err)
+		return retired, fmt.Errorf("InvertedIndex(%s).openDirtyFiles: %w", ii.FilenameBase, err)
 	}
-	return nil
+	return retired, nil
 }
 
-func (ii *InvertedIndex) openFolder(ctx context.Context, r *ScanDirsResult) error {
+func (ii *InvertedIndex) openFolder(ctx context.Context, r *ScanDirsResult) (retiredFiles, error) {
 	if ii.Disable {
-		return nil
+		return nil, nil
 	}
 	return ii.openList(ctx, r.iiFiles, r.accessorFiles)
 }
@@ -292,6 +293,10 @@ func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.G
 
 func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 	closeWhatNotInList(ii.dirtyFiles, fNames)
+}
+
+func (ii *InvertedIndex) retireFilesNotInList(fNames []string) retiredFiles {
+	return retireFilesNotInList(mvcc.RetireReasonWasDeletedFromDisk, ii.dirtyFiles, fNames, ii.FilenameBase, ii.logger)
 }
 
 func (ii *InvertedIndex) Tables() []string { return []string{ii.KeysTable, ii.ValuesTable} }

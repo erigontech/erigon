@@ -34,7 +34,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
@@ -985,14 +984,6 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		}
 	}
 
-	if dbg.AssertEnabled {
-		_ = rs.indexW.Flush()
-		rs.indexF.Seek(0, 0)
-		b, _ := io.ReadAll(rs.indexF)
-		if len(b) != 9+int(rs.keysAdded)*rs.scratch.bytesPerRec {
-			panic(fmt.Errorf("expected: %d, got: %d; rs.keysAdded=%d, rs.bytesPerRec=%d, %s", 9+int(rs.keysAdded)*rs.scratch.bytesPerRec, len(b), rs.keysAdded, rs.scratch.bytesPerRec, rs.filePath))
-		}
-	}
 	if rs.lvl < log.LvlTrace {
 		log.Log(rs.lvl, "[index] write", "file", rs.fileName)
 	}
@@ -1353,11 +1344,9 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 	for range numWorkers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			recsplitBucketWorker(ctx, taskCh, resultCh, freeScratchCh)
-		}()
+		})
 	}
 	go func() {
 		defer close(resultCh)

@@ -40,5 +40,4 @@ func TestUpgradeAndExpectedWithdrawals(t *testing.T) {
 	w, err := GetExpectedWithdrawals(s, Epoch(s))
 	require.NoError(t, err)
 	assert.Empty(t, w.Withdrawals)
-
 }

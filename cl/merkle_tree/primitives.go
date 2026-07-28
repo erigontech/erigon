@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/math"
 )
 
 // Uint64Root retrieves the root hash of a uint64 value by converting it to a byte array and returning it as a hash.
@@ -31,7 +32,7 @@ func Uint64Root(val uint64) common.Hash {
 }
 
 func BytesRoot(b []byte) (out [32]byte, err error) {
-	leafCount := NextPowerOfTwo(uint64((len(b) + 31) / length.Hash))
+	leafCount := math.NextPowerOfTwo(uint64((len(b) + 31) / length.Hash))
 	leaves := make([]byte, leafCount*length.Hash)
 	copy(leaves, b)
 	if err = MerkleRootFromFlatLeaves(leaves, leaves); err != nil {

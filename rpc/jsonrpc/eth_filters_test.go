@@ -37,11 +37,12 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func newBaseApiWithFiltersForTest(f *rpchelper.Filters, stateCache *kvcache.Coherent, m *execmoduletester.ExecModuleTester) *BaseAPI {
-	return NewBaseApi(f, stateCache, m.BlockReader, m.Engine, nil, &BaseApiConfig{Dirs: m.Dirs})
+	return NewBaseApi(f, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 }
 
 func TestSubscriptionsRequireFiltersAndNotifier(t *testing.T) {
@@ -141,16 +142,15 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 	// make a lot of subscriptions
 	wg := sync.WaitGroup{}
 	for i := range 1000 {
-		wg.Add(1)
-		go func(idx int) {
+		idx := i
+		wg.Go(func() {
 			_, id, _ := ff.SubscribeLogs(32, crit, "")
 			defer func() {
 				time.Sleep(100 * time.Nanosecond)
 				ff.UnsubscribeLogs(id)
-				wg.Done()
 			}()
 			ids[idx] = id
-		}(i)
+		})
 	}
 	wg.Wait()
 }
@@ -273,6 +273,10 @@ func TestPendingTxsFilterChangesReturnsAllBatches(t *testing.T) {
 	changes, err := api.GetFilterChanges(ctx, ptf)
 	require.NoError(t, err)
 	require.Equal(t, []any{tx0.Hash(), tx1.Hash(), tx2.Hash()}, changes)
+
+	ok, err := api.UninstallFilter(ctx, ptf)
+	require.NoError(t, err)
+	require.True(t, ok)
 }
 
 func TestGetFilterChangesReturnsFilterNotFoundForUnknownID(t *testing.T) {

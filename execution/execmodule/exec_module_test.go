@@ -27,18 +27,22 @@ import (
 	"fmt"
 	"math/big"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/generics"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -56,7 +60,35 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/txnprovider"
 )
+
+type blockingTxnProvider struct {
+	ready     chan struct{}
+	release   chan struct{}
+	exhausted chan struct{}
+	txns      []types.Transaction
+	readyOnce sync.Once
+	emptyOnce sync.Once
+}
+
+func (p *blockingTxnProvider) ProvideTxns(ctx context.Context, _ ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	first := false
+	p.readyOnce.Do(func() {
+		first = true
+		close(p.ready)
+	})
+	if first {
+		select {
+		case <-p.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return p.txns, nil
+	}
+	p.emptyOnce.Do(func() { close(p.exhausted) })
+	return nil, nil
+}
 
 func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	// See https://github.com/erigontech/erigon/issues/18823
@@ -452,6 +484,7 @@ func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
 		t.Run(mode.name, func(t *testing.T) {
 			ctx := t.Context()
 			m := execmoduletester.New(t, opts...)
+			m.ExecModule.WaitIdle(ctx)
 
 			const chainLen = 9
 			const reorgBackTo = 5
@@ -565,6 +598,88 @@ func TestAssembleBlock(t *testing.T) {
 
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
+}
+
+func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	parentChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, gen *blockgen.BlockGen) {
+		tx, txErr := types.SignTx(
+			types.NewTransaction(0, common.Address{1}, uint256.NewInt(10_000), 50_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+			m.Key,
+		)
+		require.NoError(t, txErr)
+		gen.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(parentChain))
+	parent := parentChain.TopBlock
+	builderTx, err := types.SignTx(
+		types.NewTransaction(1, common.Address{2}, uint256.NewInt(20_000), 50_000, uint256.NewInt(parent.BaseFee().Uint64()), nil),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+		m.Key,
+	)
+	require.NoError(t, err)
+	builderTx.SetSender(accounts.InternAddress(m.Address))
+	siblingTx, err := types.SignTx(
+		types.NewTransaction(1, common.Address{3}, uint256.NewInt(30_000), 50_000, uint256.NewInt(parent.BaseFee().Uint64()), nil),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+		m.Key,
+	)
+	require.NoError(t, err)
+	siblingChain, err := blockgen.GenerateChain(m.ChainConfig, parent, m.Engine, m.DB, 1, func(_ int, gen *blockgen.BlockGen) {
+		gen.AddTx(siblingTx)
+	})
+	require.NoError(t, err)
+	provider := &blockingTxnProvider{
+		ready:     make(chan struct{}),
+		release:   make(chan struct{}, 1),
+		exhausted: make(chan struct{}),
+		txns:      []types.Transaction{builderTx},
+	}
+	parentBeaconBlockRoot := randomHash()
+	payloadID, err := assembleBlock(ctx, m.ExecModule, &builder.Parameters{
+		ParentHash:            parent.Hash(),
+		Timestamp:             parent.Time() + 1,
+		PrevRandao:            parent.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{4},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		CustomTxnProvider:     provider,
+	})
+	require.NoError(t, err)
+	defer func() {
+		select {
+		case provider.release <- struct{}{}:
+		default:
+		}
+		_, _ = getAssembledBlock(context.Background(), m.ExecModule, payloadID)
+	}()
+	select {
+	case <-provider.ready:
+	case <-time.After(10 * time.Second):
+		t.Fatal("builder did not reach transaction selection")
+	}
+	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, siblingChain.Blocks))
+	provider.release <- struct{}{}
+	select {
+	case <-provider.exhausted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("builder did not finish transaction selection")
+	}
+	built, err := getAssembledBlock(ctx, m.ExecModule, payloadID)
+	require.NoError(t, err)
+	require.Equal(t, parent.Hash(), built.ParentHash())
+	require.Len(t, built.Transactions(), 1)
+	require.Equal(t, builderTx.Hash(), built.Transactions()[0].Hash())
+	status, err := insertBlocks(ctx, m.ExecModule, []*types.Block{built})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	validation, err := validateChain(ctx, m.ExecModule, built.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 }
 
 func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
@@ -1399,6 +1514,94 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 	}
 }
 
+func TestGetPayloadBodiesEmptyBlockAccessList(t *testing.T) {
+	t.Parallel()
+	m, chainPack := newPayloadBodiesBALTestChain(t, chain.AllProtocolChanges)
+	block := chainPack.Blocks[0]
+	require.NotNil(t, block.Header().BlockAccessListHash)
+	err := m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		return rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), []byte{0xc0})
+	})
+	require.NoError(t, err)
+	requirePayloadBodiesBlockAccessList(t, m, block, []byte{0xc0})
+}
+
+func TestGetPayloadBodiesPreAmsterdamBlockAccessList(t *testing.T) {
+	t.Parallel()
+	var config chain.Config
+	require.NoError(t, copier.CopyWithOption(&config, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	config.AmsterdamTime = nil
+	m, chainPack := newPayloadBodiesBALTestChain(t, &config)
+	block := chainPack.Blocks[0]
+	require.Nil(t, block.Header().BlockAccessListHash)
+	requirePayloadBodiesBlockAccessList(t, m, block, nil)
+}
+
+func TestGetPayloadBodiesPrunedHistoryBlockAccessList(t *testing.T) {
+	t.Parallel()
+	m, chainPack := newPayloadBodiesBALTestChain(t, chain.AllProtocolChanges)
+	block := chainPack.Blocks[0]
+	require.NotNil(t, block.Header().BlockAccessListHash)
+	prunePayloadBodiesBALHistory(t, m, block)
+	requirePayloadBodiesBlockAccessList(t, m, block, nil)
+}
+
+func newPayloadBodiesBALTestChain(t *testing.T, config *chain.Config) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+	t.Helper()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(config))
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	return m, chainPack
+}
+
+func requirePayloadBodiesBlockAccessList(t *testing.T, m *execmoduletester.ExecModuleTester, block *types.Block, want []byte) {
+	t.Helper()
+	byHash, err := m.ExecModule.GetPayloadBodiesByHash(t.Context(), []common.Hash{block.Hash()})
+	require.NoError(t, err)
+	require.Len(t, byHash, 1)
+	require.NotNil(t, byHash[0])
+	require.Equal(t, want, byHash[0].BlockAccessList)
+	byRange, err := m.ExecModule.GetPayloadBodiesByRange(t.Context(), block.NumberU64(), 1)
+	require.NoError(t, err)
+	require.Len(t, byRange, 1)
+	require.NotNil(t, byRange[0])
+	require.Equal(t, want, byRange[0].BlockAccessList)
+}
+
+func prunePayloadBodiesBALHistory(t *testing.T, m *execmoduletester.ExecModuleTester, block *types.Block) {
+	t.Helper()
+	err := m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := tx.Delete(kv.BlockAccessList, dbutils.BlockBodyKey(block.NumberU64(), block.Hash())); err != nil {
+			return err
+		}
+		var historyStart [8]byte
+		binary.BigEndian.PutUint64(historyStart[:], ^uint64(0))
+		for _, table := range []struct {
+			name     string
+			valueLen int
+		}{{name: kv.TblAccountHistoryKeys, valueLen: length.Addr}, {name: kv.TblStorageHistoryKeys, valueLen: length.Addr + length.Hash}, {name: kv.TblCodeHistoryKeys, valueLen: length.Addr}} {
+			for {
+				key, err := kv.FirstKey(tx, table.name)
+				if err != nil {
+					return err
+				}
+				if key == nil {
+					break
+				}
+				if err := tx.Delete(table.name, key); err != nil {
+					return err
+				}
+			}
+			if err := tx.Put(table.name, historyStart[:], make([]byte, table.valueLen)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+}
+
 // TestGetPayloadBodiesNonCanonicalBlockAccessList verifies that payload-bodies
 // requests for non-canonical blocks degrade the blockAccessList to null instead
 // of failing the batch: BALs can only be re-derived from canonical state.
@@ -1799,7 +2002,9 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 		0x60, 0x00, //             PUSH1 0 (memory offset)
 		0xf3, //                   RETURN
 	}
-	deployCode := append(initHeader, make([]byte, runtimeLen)...)
+	deployCode := make([]byte, 0, len(initHeader)+runtimeLen)
+	deployCode = append(deployCode, initHeader...)
+	deployCode = append(deployCode, make([]byte, runtimeLen)...)
 
 	// With a 1_000_000 block gas limit, two txs (~337K state each) leave
 	// the pool at ~326K; a third has 184K intrinsic state (fits in pool by
@@ -2432,82 +2637,84 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 	}))
 }
 
-// TestBALDrivenFoldAheadChangesetIntegrity guards against the fold misrouting a
-// block's commitment branch deltas into the wrong block's changeset. The BAL
-// fold computes a pre-window block ahead of its blockResult; if it recorded its
-// deferred branch writes into a later window block's changeset (instead of
-// isolated), that window block's saved diffset would gain entries it must not
-// have, and a later unwind would restore a wrong trie root.
+// TestBALDrivenComputeAheadChangesetIntegrity guards against compute-ahead
+// misrouting a block's commitment branch deltas into the wrong block's changeset.
+// BAL-driven compute-ahead computes a pre-window block ahead of its blockResult;
+// if it recorded its deferred branch writes into a later window block's changeset
+// (instead of isolated), that window block's saved diffset would gain entries it
+// must not have, and a later unwind would restore a wrong trie root.
 //
 // The batch uses a mid-batch changeset window (MaxReorgDepth places windowStart
-// inside the batch) so early blocks fold ahead (pre-window, isolated) while the
+// inside the batch) so early blocks compute ahead (pre-window, isolated) while the
 // later window blocks keep per-block changesets. The check is differential and
 // per-key: the window blocks' CommitmentDomain diffsets must be byte-identical
-// whether the earlier blocks were folded (fold-on) or computed incrementally
-// (fold-off). A leak would show up as extra/changed entries under fold-on — the
-// vacuous NotEmpty check the previous version used could not see that. It also
-// asserts the fold path actually engaged (a real fold count) so a silent
-// degrade-to-incremental can't make the differential pass trivially.
+// whether the earlier blocks were computed ahead (compute-ahead-on) or computed
+// incrementally (compute-ahead-off). A leak would show up as extra/changed entries
+// under compute-ahead-on — the vacuous NotEmpty check the previous version used
+// could not see that. It also asserts the compute-ahead path actually engaged (a
+// real count) so a silent degrade-to-incremental can't make the differential pass
+// trivially.
 //
 // (An end-to-end divergent-fork reorg would be a stronger check, but blockgen
 // randomises ParentBeaconBlockRoot per block, so under Amsterdam — required for
 // BALs — two chains can't share a prefix and a mid-chain parent has no state.)
-func TestBALDrivenFoldAheadChangesetIntegrity(t *testing.T) {
-	off := runBALFoldAheadChangeset(t, false, false)
-	on := runBALFoldAheadChangeset(t, true, false)
+func TestBALDrivenComputeAheadChangesetIntegrity(t *testing.T) {
+	off := runBALComputeAheadChangeset(t, false, false)
+	on := runBALComputeAheadChangeset(t, true, false)
 
-	require.Zero(t, off.folds, "fold-off must not fold any block")
-	require.Positive(t, on.folds, "fold-on must actually fold the pre-window blocks (else the differential is vacuous)")
+	require.Zero(t, off.computedAhead, "compute-ahead-off must not compute any block ahead")
+	require.Positive(t, on.computedAhead, "compute-ahead-on must actually compute the pre-window blocks ahead (else the differential is vacuous)")
 	// Compare the SET OF KEYS each window block's commitment changeset touched,
-	// not the raw diff bytes: per-block folds and a merged batch transition
+	// not the raw diff bytes: per-block compute-ahead and a merged batch transition
 	// legitimately encode the same branches differently (step references), so
 	// byte-equality is too strict. But the set of branches a window block's own
-	// compute touches is fixed by the post-pre-window trie shape — a fold that
-	// leaked a pre-window block's deltas into a window block's changeset would
-	// add keys that block never touched, so the key sets must match.
+	// compute touches is fixed by the post-pre-window trie shape — misrouting
+	// a pre-window block's deltas into a window block's changeset would add
+	// keys that block never touched, so the key sets must match.
 	require.Equal(t, off.windowCommitmentKeys, on.windowCommitmentKeys,
 		"a window block's commitment-changeset key set differs between incremental and "+
-			"fold-ahead — the fold misrouted a pre-window block's branch deltas into a "+
+			"compute-ahead — a pre-window block's branch deltas were misrouted into a "+
 			"window block's changeset")
 }
 
 // TestBALShadowCompute_MatchesIncremental exercises BAL_SHADOW_COMPUTE's success
-// path end-to-end: with fold-ahead AND shadow cross-check on, every folded block
-// is recomputed incrementally and the two roots must agree. runBALFoldAheadChangeset
-// asserts the batch validates cleanly, so a shadow mismatch would fail the block
-// with ErrWrongTrieRoot; a clean run with folds>0 proves the match path ran.
+// path end-to-end: with compute-ahead AND shadow cross-check on, every block
+// computed ahead is recomputed incrementally and the two roots must agree.
+// runBALComputeAheadChangeset asserts the batch validates cleanly, so a shadow
+// mismatch would fail the block with ErrWrongTrieRoot; a clean run with
+// computedAhead>0 proves the match path ran.
 func TestBALShadowCompute_MatchesIncremental(t *testing.T) {
-	res := runBALFoldAheadChangeset(t, true, true)
-	require.Positive(t, res.folds, "the fold must have run so shadow cross-check exercised the match path")
+	res := runBALComputeAheadChangeset(t, true, true)
+	require.Positive(t, res.computedAhead, "compute-ahead must have run so shadow cross-check exercised the match path")
 }
 
-type balFoldResult struct {
+type balComputeAheadResult struct {
 	// windowCommitmentKeys maps each window block number to the sorted set of
 	// CommitmentDomain changeset keys (branch prefixes) it touched — compared
-	// across modes to catch a fold misrouting deltas into the wrong block.
+	// across modes to catch compute-ahead misrouting deltas into the wrong block.
 	windowCommitmentKeys map[uint64][]string
-	folds                int64
+	computedAhead        int64
 }
 
-func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResult {
+func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balComputeAheadResult {
 	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
 	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
 	defer func(prev bool) { dbg.BALShadowCompute = prev }(dbg.BALShadowCompute)
-	dbg.BALDrivenCommitment = foldAhead
+	dbg.BALDrivenCommitment = computeAhead
 	dbg.IgnoreBAL = false
 	dbg.BALShadowCompute = shadow
-	stagedsync.ResetFoldsAheadForTest()
+	stagedsync.ResetComputedAheadForTest()
 
 	const chainLen = 12
 	// maxReorgDepth places the changeset window at maxBlock-depth = 12-4 = 8, so
-	// blocks 1..7 are pre-window (fold candidates) and 8..12 own changesets.
+	// blocks 1..7 are pre-window (compute-ahead candidates) and 8..12 own changesets.
 	const maxReorgDepth = 4
 	const windowStart = chainLen - maxReorgDepth
 
 	ctx := t.Context()
-	// Deterministic key: fold-off and fold-on must execute the identical chain
+	// Deterministic key: compute-ahead-off and compute-ahead-on must execute the identical chain
 	// (same sender → same trie branches) so the only difference between the two
-	// runs is fold-ahead vs incremental. A random key would give each run a
+	// runs is compute-ahead vs incremental. A random key would give each run a
 	// different address and thus different branch keys, making the cross-mode
 	// changeset comparison meaningless (and flaky).
 	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -2543,22 +2750,22 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 	fcuRes, err := updateForkChoice(ctx, m.ExecModule, canonical.TopBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status,
-		"batch with fold-ahead=%v must execute cleanly; validationError=%q", foldAhead, fcuRes.ValidationError)
+		"batch with compute-ahead=%v must execute cleanly; validationError=%q", computeAhead, fcuRes.ValidationError)
 
 	m.ExecModule.WaitIdle(ctx)
 
-	res := balFoldResult{
+	res := balComputeAheadResult{
 		windowCommitmentKeys: map[uint64][]string{},
-		folds:                stagedsync.FoldsAheadPerformedForTest(),
+		computedAhead:        stagedsync.ComputedAheadCountForTest(),
 	}
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		// Confirm blocks carry BALs (checked on the tip, which is inside the
 		// window and so not pruned — pre-window BAL sidecars are pruned beyond
-		// MaxReorgDepth, but the fold reads them in-memory during execution, and
-		// on.folds asserts the fold path actually engaged).
+		// MaxReorgDepth, but compute-ahead reads them in-memory during execution,
+		// and on.computedAhead asserts the compute-ahead path actually engaged).
 		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, canonical.TopBlock.Hash(), canonical.TopBlock.NumberU64())
 		require.NoError(t, err)
-		require.NotEmpty(t, balBytes, "blocks must carry a BAL so BAL-driven fold-ahead actually engages")
+		require.NotEmpty(t, balBytes, "blocks must carry a BAL so BAL-driven compute-ahead actually engages")
 
 		// Window blocks own per-block changesets; capture their CommitmentDomain
 		// deltas for the cross-mode differential.
@@ -2570,8 +2777,8 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 			require.NoError(t, err)
 			require.Truef(t, ok, "window block %d must have a saved diffset", blk.NumberU64())
 			require.NotEmptyf(t, diffs[kv.CommitmentDomain],
-				"window block %d changeset is missing CommitmentDomain deltas (fold-ahead=%v)",
-				blk.NumberU64(), foldAhead)
+				"window block %d changeset is missing CommitmentDomain deltas (compute-ahead=%v)",
+				blk.NumberU64(), computeAhead)
 			keys := make([]string, 0, len(diffs[kv.CommitmentDomain]))
 			for _, d := range diffs[kv.CommitmentDomain] {
 				keys = append(keys, d.Key)
@@ -2583,8 +2790,8 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 	}))
 
 	// End-to-end: FCU back into the window unwinds using those changesets, then
-	// FCU forward re-executes. If the fold-built state were wrong, the unwind
-	// restores a bad root and the forward re-exec fails.
+	// FCU forward re-executes. If the compute-ahead-built state were wrong, the
+	// unwind restores a bad root and the forward re-exec fails.
 	const reorgBackTo = chainLen - 2 // within the window (>= windowStart)
 	back, err := updateForkChoice(ctx, m.ExecModule, canonical.Blocks[reorgBackTo-1].Header())
 	require.NoError(t, err)
@@ -2600,8 +2807,8 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 	fwd, err := updateForkChoice(ctx, m.ExecModule, canonical.TopBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fwd.Status,
-		"forward re-exec after unwind must reach the correct root (fold-ahead=%v); validationError=%q",
-		foldAhead, fwd.ValidationError)
+		"forward re-exec after unwind must reach the correct root (compute-ahead=%v); validationError=%q",
+		computeAhead, fwd.ValidationError)
 	m.ExecModule.WaitIdle(ctx)
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		execProg, err := stages.GetStageProgress(tx, stages.Execution)

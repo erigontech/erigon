@@ -38,7 +38,6 @@ func downloadGenesisState(url string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to download genesis state: %s", resp.Status)
 	}
 	return io.ReadAll(resp.Body)
-
 }
 
 //go:embed mainnet.state.ssz

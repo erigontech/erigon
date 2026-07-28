@@ -740,13 +740,11 @@ func TestMemoryMutationConcurrentReadWrite(t *testing.T) {
 
 	// Concurrent readers — simulate engine server getters using OverlayReadView.
 	// Each reader opens its own RO tx (just like the real getters do).
-	for r := range readers {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
+	for readerID := range readers {
+		wg.Go(func() {
 			readerTx, err := db.BeginRo(t.Context())
 			if err != nil {
-				t.Errorf("reader %d: BeginRo: %v", id, err)
+				t.Errorf("reader %d: BeginRo: %v", readerID, err)
 				return
 			}
 			defer readerTx.Rollback()
@@ -758,7 +756,7 @@ func TestMemoryMutationConcurrentReadWrite(t *testing.T) {
 				// Read from overlay mem layer.
 				v, err := view.GetOne(kv.HeaderNumber, []byte("overlay-key"))
 				if err != nil {
-					t.Errorf("reader %d: GetOne overlay-key: %v", id, err)
+					t.Errorf("reader %d: GetOne overlay-key: %v", readerID, err)
 					return
 				}
 				if v != nil && string(v) != "overlay-value" {
@@ -768,7 +766,7 @@ func TestMemoryMutationConcurrentReadWrite(t *testing.T) {
 				// Read from DB fallback (via reader's own tx).
 				v, err = view.GetOne(kv.HeaderNumber, []byte("existing-key"))
 				if err != nil {
-					t.Errorf("reader %d: GetOne existing-key: %v", id, err)
+					t.Errorf("reader %d: GetOne existing-key: %v", readerID, err)
 					return
 				}
 				if v != nil && string(v) != "db-value" {
@@ -778,26 +776,24 @@ func TestMemoryMutationConcurrentReadWrite(t *testing.T) {
 				// Has check.
 				_, err = view.Has(kv.HeaderNumber, []byte("overlay-key"))
 				if err != nil {
-					t.Errorf("reader %d: Has: %v", id, err)
+					t.Errorf("reader %d: Has: %v", readerID, err)
 					return
 				}
 			}
-		}(r)
+		})
 	}
 
 	// Concurrent writer — simulate InsertBlocks writing to the overlay.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range iterations {
-			key := []byte(fmt.Sprintf("write-key-%04d", i))
-			val := []byte(fmt.Sprintf("write-val-%04d", i))
+			key := fmt.Appendf(nil, "write-key-%04d", i)
+			val := fmt.Appendf(nil, "write-val-%04d", i)
 			if err := batch.Put(kv.HeaderNumber, key, val); err != nil {
 				t.Errorf("writer: Put: %v", err)
 				return
 			}
 		}
-	}()
+	})
 
 	wg.Wait()
 
@@ -814,7 +810,7 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 
 	// Pre-populate DB.
 	for i := range 100 {
-		key := []byte(fmt.Sprintf("key-%03d", i))
+		key := fmt.Appendf(nil, "key-%03d", i)
 		require.NoError(t, rwTx.Put(kv.HeaderNumber, key, []byte("db-val")))
 	}
 	require.NoError(t, rwTx.Commit())
@@ -830,9 +826,7 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Reader goroutine using OverlayReadView with its own tx.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		readerTx, err := db.BeginRo(t.Context())
 		if err != nil {
 			t.Errorf("reader: BeginRo: %v", err)
@@ -841,21 +835,19 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 		defer readerTx.Rollback()
 		view := batch.NewReadView(readerTx)
 		for i := range 100 {
-			key := []byte(fmt.Sprintf("key-%03d", i))
+			key := fmt.Appendf(nil, "key-%03d", i)
 			_, _ = view.GetOne(kv.HeaderNumber, key)
 			_, _ = view.Has(kv.HeaderNumber, key)
 		}
-	}()
+	})
 
 	// Deleter goroutine.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range 100 {
-			key := []byte(fmt.Sprintf("key-%03d", i))
+			key := fmt.Appendf(nil, "key-%03d", i)
 			_ = batch.Delete(kv.HeaderNumber, key)
 		}
-	}()
+	})
 
 	wg.Wait()
 }

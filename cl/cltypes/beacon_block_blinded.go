@@ -280,6 +280,7 @@ func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparam
 		beaconCfg:          beaconCfg,
 	}
 }
+
 func (b *BlindedBeaconBody) SetVersion(version clparams.StateVersion) *BlindedBeaconBody {
 	b.Version = version
 	if b.ExecutionPayload == nil {
@@ -487,6 +488,7 @@ func (b *BlindedBeaconBody) Full(txs *solid.TransactionsSSZ, withdrawals *solid.
 func (*BlindedBeaconBody) Static() bool {
 	return false
 }
+
 func (b *BlindedBeaconBody) Clone() clonable.Clonable {
 	return NewBlindedBeaconBody(b.beaconCfg, b.Version)
 }

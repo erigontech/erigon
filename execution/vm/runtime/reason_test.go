@@ -101,6 +101,7 @@ func TestCreateEmitsNonceChangeContractCreator(t *testing.T) {
 	initCode := []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.RETURN)}
 
 	cfg := newTestIBS(t, recordingTracer(&nonceEvents, &codeEvents))
+	defer cfg.State.Release(false)
 
 	_, _, _, err := Create(initCode, cfg, 0)
 	require.NoError(t, err)
@@ -136,6 +137,7 @@ func TestCreateEmitsNonceChangeNewContract(t *testing.T) {
 	initCode := []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.RETURN)}
 
 	cfg := newTestIBS(t, recordingTracer(&nonceEvents, &codeEvents))
+	defer cfg.State.Release(false)
 
 	_, contractAddr, _, err := Create(initCode, cfg, 0)
 	require.NoError(t, err)
@@ -187,6 +189,7 @@ func TestCreateEmitsCodeChangeContractCreation(t *testing.T) {
 	}
 
 	cfg := newTestIBS(t, recordingTracer(&nonceEvents, &codeEvents))
+	defer cfg.State.Release(false)
 
 	_, contractAddr, _, err := Create(initCode, cfg, 0)
 	require.NoError(t, err)
@@ -235,6 +238,7 @@ func TestCreateReasonOrdering(t *testing.T) {
 	}
 
 	cfg := newTestIBS(t, tracer)
+	defer cfg.State.Release(false)
 
 	_, _, _, err := Create(initCode, cfg, 0)
 	require.NoError(t, err)
@@ -264,6 +268,7 @@ func TestCodeChangeUnspecifiedOnSetup(t *testing.T) {
 	// Simple code: STOP
 	code := []byte{byte(vm.STOP)}
 	cfg := newTestIBS(t, tracer)
+	defer cfg.State.Release(false)
 
 	_, _, err := Execute(code, nil, cfg, t.TempDir())
 	require.NoError(t, err)
@@ -312,6 +317,7 @@ func TestReasonRoundTripThroughIBS(t *testing.T) {
 					},
 				}
 				cfg := newTestIBS(t, tracer)
+				defer cfg.State.Release(false)
 				addr := accounts.InternAddress(common.HexToAddress("0x01"))
 
 				require.NoError(t, cfg.State.SetNonce(addr, 1, reason))
@@ -340,6 +346,7 @@ func TestReasonRoundTripThroughIBS(t *testing.T) {
 					},
 				}
 				cfg := newTestIBS(t, tracer)
+				defer cfg.State.Release(false)
 				addr := accounts.InternAddress(common.HexToAddress("0x02"))
 
 				require.NoError(t, cfg.State.SetCode(addr, []byte{byte(vm.STOP)}, reason))

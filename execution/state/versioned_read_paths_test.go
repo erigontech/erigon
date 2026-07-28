@@ -26,6 +26,7 @@ func TestVersionedRead_A1_LegacyWithStorage(t *testing.T) {
 
 	// IBS without versionMap → legacy/serial path
 	ibs := New(&emptyReader{})
+	defer ibs.Release(false)
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	// emptyReader returns nil account → zero balance, no error
@@ -40,6 +41,7 @@ func TestVersionedRead_A2_LegacyGetCodeReturnsEmpty(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xa2})
 
 	ibs := New(&emptyReader{})
+	defer ibs.Release(false)
 	code, err := ibs.GetCode(addr)
 	require.NoError(t, err)
 	assert.Empty(t, code, "empty reader => empty code")
@@ -58,6 +60,7 @@ func TestVersionedRead_B_DeletedStateObjectReturnsDefault(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 0)
 
 	addr := accounts.InternAddress(common.HexToAddress("0xdead"))
@@ -86,6 +89,7 @@ func TestVersionedRead_C5_DestructedCommittedReturnsZero(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xc5})
@@ -110,6 +114,7 @@ func TestVersionedRead_C6_DestructedRecordsDepAndReturnsZero(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xc6})
@@ -133,6 +138,7 @@ func TestVersionedRead_C4_CodePathBypassesSelfDestruct(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xc4})
@@ -156,6 +162,7 @@ func TestVersionedRead_C1_RevivalViaBalance(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 10)
 
 	addr := accounts.InternAddress([20]byte{0xc1})
@@ -170,7 +177,7 @@ func TestVersionedRead_C1_RevivalViaBalance(t *testing.T) {
 
 // Regression for the refresh* wrappers' missing outcomeReturnZero case: after a
 // self-destruct, the per-field refresh (refreshBalance/refreshNonce/
-// refreshIncarnation/refreshCodeHash, used by refreshVersionedAccount to rebuild
+// refreshIncarnation/refreshCodeHash, the per-field account refresh that rebuilds
 // an account) must return the typed ZERO, not the caller's stale pre-destruct
 // value. Returning the stale value gives the rebuilt account a phantom pre-SD
 // codeHash/balance, so the codeHash-change check compares the stale value
@@ -189,6 +196,7 @@ func TestVersionedRead_C7_RefreshReturnsZeroPastSelfDestruct(t *testing.T) {
 	}
 	mvhm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(r, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xc7})
@@ -222,6 +230,7 @@ func TestVersionedRead_D2_WriteSetHit(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 0)
 
 	addr := accounts.InternAddress([20]byte{0xd2})
@@ -246,6 +255,7 @@ func TestVersionedRead_E1_MapHitThenReadSetSameVersion(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xe1})
@@ -271,6 +281,7 @@ func TestVersionedRead_E3a_CodePathTrumpedBySelfDestruct(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 10)
 
 	addr := accounts.InternAddress([20]byte{0xe3})
@@ -296,6 +307,7 @@ func TestVersionedRead_G1_ReadSetReadOnSecondCall(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0x91})
@@ -326,6 +338,7 @@ func TestVersionedRead_G6_StorageZeroOnIncarnationWritten(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0x96})
@@ -350,6 +363,7 @@ func TestVersionedRead_G7_BalanceViaResolvedAddressPath(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0x97})
@@ -368,6 +382,7 @@ func TestVersionedRead_G8_StorageFallbackEmptyReader(t *testing.T) {
 	t.Parallel()
 	mvhm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(&emptyReader{}, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0x98})
@@ -385,7 +400,7 @@ func TestVersionedRead_G8_StorageFallbackEmptyReader(t *testing.T) {
 // the caller's currentBalance is a behavioral divergence that breaks
 // integration tests (wrong trie root in execution/engineapi).
 //
-// This test calls refreshVersionedAccount-style scenarios by going
+// This test calls per-field-account-refresh-style scenarios by going
 // through getVersionedAccount which triggers refreshBalance/refreshNonce/
 // refreshCodeHash/refreshIncarnation with the storage-read account's
 // fields as defaultV.  Asserts that subsequent reads through the
@@ -394,9 +409,9 @@ func TestVersionedRead_G8_StorageFallbackEmptyReader(t *testing.T) {
 func TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet(t *testing.T) {
 	t.Parallel()
 
-	// emptyReader returns nil account — refreshVersionedAccount won't
+	// emptyReader returns nil account — the per-field refresh won't
 	// run for nil-account paths.  We need a reader that returns a
-	// non-nil account so refreshVersionedAccount's per-field refresh*
+	// non-nil account so the per-field refresh*
 	// calls run with non-zero defaultV.
 	r := &refreshReader{
 		account: &accounts.Account{
@@ -408,39 +423,31 @@ func TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet(t *testing.T) {
 	}
 	mvhm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(r, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xa4})
 
-	// Reading the balance triggers getStateObject → getVersionedAccount
-	// → refreshVersionedAccount → refreshBalance/refreshNonce/...
+	// Lean read footprint: GetBalance reads only the balance field from the
+	// cell pipeline — it no longer drags in a whole-account refresh, so nonce /
+	// incarnation / codeHash are NOT recorded. Balance is recorded because
+	// GetBalance genuinely read it.
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	assert.Equal(t, *uint256.NewInt(1234), bal,
-		"GetBalance returns the storage-read account's balance after refresh")
+		"GetBalance returns the storage-read account's balance")
 
-	// Each refresh* path that ran in refreshVersionedAccount with
-	// no versionMap entry should have recorded its defaultV (the
-	// account's field) into the readSet.  Verify:
 	balRead, ok := ibs.versionedReads.GetBalance(addr)
 	require.True(t, ok, "BalancePath read must be recorded")
 	assert.Equal(t, *uint256.NewInt(1234), balRead.Val,
-		"recorded BalancePath value must be the refresh defaultV (currentBalance), not zero")
+		"recorded BalancePath value must be the read value, not zero")
 
-	nonceRead, ok := ibs.versionedReads.GetNonce(addr)
-	require.True(t, ok, "NoncePath read must be recorded")
-	assert.Equal(t, uint64(7), nonceRead.Val,
-		"recorded NoncePath value must be the refresh defaultV (currentNonce), not zero")
-
-	incRead, ok := ibs.versionedReads.GetIncarnation(addr)
-	require.True(t, ok, "IncarnationPath read must be recorded")
-	assert.Equal(t, uint64(3), incRead.Val,
-		"recorded IncarnationPath value must be the refresh defaultV (currentIncarnation), not zero")
-
-	chRead, ok := ibs.versionedReads.GetCodeHash(addr)
-	require.True(t, ok, "CodeHashPath read must be recorded")
-	assert.Equal(t, accounts.InternCodeHash([32]byte{0xab}), chRead.Val,
-		"recorded CodeHashPath value must be the refresh defaultV (currentCodeHash), not zero")
+	_, ok = ibs.versionedReads.GetNonce(addr)
+	require.False(t, ok, "NoncePath must NOT be recorded by a balance-only read")
+	_, ok = ibs.versionedReads.GetIncarnation(addr)
+	require.False(t, ok, "IncarnationPath must NOT be recorded by a balance-only read")
+	_, ok = ibs.versionedReads.GetCodeHash(addr)
+	require.False(t, ok, "CodeHashPath must NOT be recorded by a balance-only read")
 }
 
 // refreshReader returns a fixed account for ReadAccountData and zero/empty
@@ -474,6 +481,7 @@ func TestVersionedRead_C2_RevivalViaNonce(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 10)
 
 	addr := accounts.InternAddress([20]byte{0xc2})
@@ -492,6 +500,7 @@ func TestVersionedRead_C3_RevivalViaCodeHash(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 10)
 
 	addr := accounts.InternAddress([20]byte{0xc3})
@@ -507,33 +516,43 @@ func TestVersionedRead_C3_RevivalViaCodeHash(t *testing.T) {
 // when the readSet already records a different Version than the current
 // versionMap value at MapRead, versionedRead panics with ErrDependency so
 // the executor knows to re-execute. Captured via recover().
-func TestVersionedRead_E2_MapReadDifferentVersionPanics(t *testing.T) {
+func TestVersionedRead_E2_StaleMapReadCaughtAtCommit(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 10)
 
 	addr := accounts.InternAddress([20]byte{0xe2})
 	// Two writes at different versions; the later version wins in versionMap.
 	mvhm.WriteBalance(addr, Version{TxIndex: 2, Incarnation: 0}, *uint256.NewInt(10), true)
 
-	// Manually seed readSet with a stale version (TxIndex 1) so that the
-	// pr.Version != vr.Version branch fires.
+	// Manually seed readSet with a stale version (TxIndex 1).
 	ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
 		Val:        *uint256.NewInt(99),
 	})
 
-	defer func() {
-		r := recover()
-		require.NotNil(t, r, "must panic on version mismatch")
-		err, ok := r.(error)
-		require.True(t, ok, "panic must carry an error")
-		assert.ErrorIs(t, err, ErrDependency, "panic carries ErrDependency")
-	}()
-	_, _ = ibs.GetBalance(addr)
+	// Read-once (Block-STM): a path already recorded this execution attempt is
+	// served from the read-set without re-probing the version map, so a repeat
+	// read no longer aborts eagerly. The stale read is caught at commit —
+	// ValidateVersion re-checks it against the newer version-map write (TxIndex 2)
+	// and returns VersionInvalid, which is what drives re-execution.
+	got, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	assert.Equal(t, *uint256.NewInt(99), got, "read-once returns the recorded value")
+
+	var io VersionedIO
+	ibs.MergeTxIOInto(&io)
+	valid := mvhm.ValidateVersion(10, &io, func(rv, wv Version) VersionValidity {
+		if rv == wv {
+			return VersionValid
+		}
+		return VersionInvalid
+	}, false, "")
+	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the stale read")
 }
 
 // F: MVReadResultDependency status (versionMap saw an in-progress dep at a
@@ -546,6 +565,7 @@ func TestVersionedRead_F_MVReadResultDependencyPanics(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xf0})
@@ -572,6 +592,7 @@ func TestVersionedRead_D1_WriteSetHitWithStaleReadSetPanics(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xd1})

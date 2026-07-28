@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/mvcc"
 )
 
 // cutoffInRetireWindow reports whether cutoffTxNum is strictly inside the visible range:
@@ -132,7 +133,7 @@ func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) 
 	at.a.dirtyFilesLock.Lock()
 	defer at.a.dirtyFilesLock.Unlock()
 	for _, agedList := range aged {
-		retire(agedList.dirtyFiles, agedList.files, agedList.filenameBase, retireReasonAged, at.a.logger)
+		retire(mvcc.RetireReasonAged, agedList.dirtyFiles, agedList.files, agedList.filenameBase, at.a.logger)
 	}
 	at.a.onFilesDelete(deleted)
 	at.a.recalcVisibleFiles(retired)

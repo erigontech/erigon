@@ -17,13 +17,13 @@
 package cache
 
 import (
+	"bytes"
 	"math"
 	"strings"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -158,7 +158,7 @@ func (c *StateCache) PutCodeWithHash(addr, code, codeHash []byte, txNum uint64) 
 	if !ok {
 		return
 	}
-	cc.PutWithCodeHash(addr, common.Copy(code), codeHash, txNum)
+	cc.PutWithCodeHash(addr, bytes.Clone(code), codeHash, txNum)
 }
 
 // GetCodeSizeByHash returns the size of code by its Ethereum codeHash
@@ -223,7 +223,7 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, txNum uint6
 	if cache == nil {
 		return
 	}
-	cache.Put(key, common.Copy(value), txNum)
+	cache.Put(key, bytes.Clone(value), txNum)
 }
 
 // FillIfFresh conditionally inserts a value read from a read view without
@@ -247,7 +247,7 @@ func (c *StateCache) FillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 
 	if domain == kv.CodeDomain {
 		if codeCache, ok := cache.(*CodeCache); ok {
-			codeCache.PutWithCodeHashIfAbsent(key, common.Copy(value), codeHash, readTxNum)
+			codeCache.PutWithCodeHashIfAbsent(key, bytes.Clone(value), codeHash, readTxNum)
 		}
 		return
 	}
@@ -257,7 +257,7 @@ func (c *StateCache) FillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 			readTxNum = visibleEnd - 1
 		}
 	}
-	cache.PutIfAbsent(key, common.Copy(value), readTxNum)
+	cache.PutIfAbsent(key, bytes.Clone(value), readTxNum)
 }
 
 // Delete removes the data for the given domain and key.
@@ -275,7 +275,7 @@ func (c *StateCache) Apply(domain kv.Domain, key, value []byte, txNum uint64) {
 	if domain == kv.CodeDomain && len(value) > 0 {
 		// Copy before hashing so the stored bytes and codeHash come from the
 		// same copy of the caller-owned buffer.
-		value = common.Copy(value)
+		value = bytes.Clone(value)
 		codeHash = crypto.Keccak256(value)
 	}
 
@@ -311,7 +311,7 @@ func putOrDelete(cache Cache, key, value []byte, txNum uint64) {
 		cache.Delete(key)
 		return
 	}
-	cache.Put(key, common.Copy(value), txNum)
+	cache.Put(key, bytes.Clone(value), txNum)
 }
 
 func (c *StateCache) noteApplied(domain kv.Domain, txNum uint64) {

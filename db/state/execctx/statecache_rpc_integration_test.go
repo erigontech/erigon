@@ -45,20 +45,24 @@ func TestEmbeddedRPCCacheViewDoesNotResurrectDeletedCode(t *testing.T) {
 	testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t, kv.CodeDomain)
 }
 
-func TestTransientAccountDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
+func TestAccountOnlyDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()
 	db := newTestDb(t, stepSize)
 
 	contractAddr := make([]byte, 20)
 	contractAddr[0] = 0xaa
-	transientAddr := make([]byte, 20)
-	transientAddr[0] = 0xbb
+	deletedAddr := make([]byte, 20)
+	deletedAddr[0] = 0xbb
 	code := []byte{0xcc, 1, 2, 3}
 	account := accounts.SerialiseV3(&accounts.Account{
 		Nonce:    1,
 		Balance:  *uint256.NewInt(1),
 		CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code)),
+	})
+	codelessAccount := accounts.SerialiseV3(&accounts.Account{
+		Nonce:   1,
+		Balance: *uint256.NewInt(1),
 	})
 
 	seedTx, err := db.BeginTemporalRw(ctx)
@@ -70,6 +74,7 @@ func TestTransientAccountDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
 	seedDomains.SetTxNum(10)
 	require.NoError(t, seedDomains.DomainPut(kv.AccountsDomain, seedTx, contractAddr, account, 10, nil))
 	require.NoError(t, seedDomains.DomainPut(kv.CodeDomain, seedTx, contractAddr, code, 10, nil))
+	require.NoError(t, seedDomains.DomainPut(kv.AccountsDomain, seedTx, deletedAddr, codelessAccount, 10, nil))
 	require.NoError(t, seedDomains.Commit(ctx, seedTx))
 	seedDomains.Close()
 
@@ -85,7 +90,7 @@ func TestTransientAccountDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
 	defer deleteDomains.Close()
 	deleteDomains.SetStateCacheForTest(stateCache)
 	deleteDomains.SetTxNum(20)
-	require.NoError(t, deleteDomains.DomainDel(kv.AccountsDomain, deleteTx, transientAddr, 20, nil))
+	require.NoError(t, deleteDomains.DomainDel(kv.AccountsDomain, deleteTx, deletedAddr, 20, nil))
 	require.NoError(t, deleteDomains.Commit(ctx, deleteTx))
 	deleteDomains.Close()
 

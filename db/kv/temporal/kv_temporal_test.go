@@ -303,9 +303,7 @@ func TestTemporalTx_DomainVisibleEndConcurrent(t *testing.T) {
 		require.NoError(t, temporalDb.ViewTemporal(ctx, func(roTtx kv.TemporalTx) error {
 			var wg sync.WaitGroup
 			for range 8 {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					for range 4 {
 						for d := range kv.DomainLen {
 							end, ok := roTtx.Debug().DomainVisibleEnd(d)
@@ -314,7 +312,7 @@ func TestTemporalTx_DomainVisibleEndConcurrent(t *testing.T) {
 							}
 						}
 					}
-				}()
+				})
 			}
 			wg.Wait()
 			return nil
