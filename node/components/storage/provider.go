@@ -99,12 +99,20 @@ type Provider struct {
 	// Initialize. See node/components/storage/snapshot/inventory.go.
 	Inventory *snapshot.Inventory
 
-	// LifecycleDriver runs the storage-owned import lifecycle (per
-	// docs/plans/20260501-storage-lifecycle-spec.md). Created and
-	// started in Initialize ONLY when both Deps.Inventory is non-nil
-	// AND Config.Snapshot.LifecycleDrivenByStorage is true. Stopped
-	// via Provider.Stop. Nil otherwise.
+	// LifecycleDriver runs the storage-owned import lifecycle. Created
+	// and started in Initialize ONLY when both Deps.Inventory is non-nil
+	// AND Config.Snapshot.LifecycleDrivenByStorage is true. Stopped via
+	// Provider.Close. Nil otherwise.
 	LifecycleDriver *lifecycle.Driver
+
+	// restartDeps captures the subset of Initialize inputs
+	// SetChainConfig needs to rebuild BlockRetire when chain.Config is
+	// swapped for a fork transition. Populated in Initialize.
+	restartDeps *storageRestartDeps
+
+	// started tracks the ChainConfigRestartable state — true from
+	// Initialize until Stop; SetChainConfig requires false.
+	started bool
 
 	// eventBus + Orchestrator + InitialStateReady are constructed
 	// together in Initialize when storage owns the lifecycle. The
@@ -238,6 +246,17 @@ type Provider struct {
 	pendingRegen *pendingRegenState
 
 	logger log.Logger
+}
+
+// storageRestartDeps holds the Initialize inputs SetChainConfig
+// re-uses when it rebuilds BlockRetire on a chain.Config swap. Every
+// other rebuild input already lives on the Provider itself (BlockReader,
+// BlockWriter, ChainDB, HeimdallStore, BridgeStore, SegmentsBuildLimiter,
+// logger); these are the ones that only reach BlockRetire via Deps /
+// Config and would otherwise be lost after Initialize returns.
+type storageRestartDeps struct {
+	config          *ethconfig.Config
+	dbEventNotifier services.DBEventNotifier
 }
 
 // pendingTrimState is the deferred set of FS / inventory / network
@@ -400,6 +419,10 @@ func (p *Provider) Initialize(deps Deps) error {
 		p.CurrentBlockNumber = currentBlock.NumberU64()
 	}
 
+	p.restartDeps = &storageRestartDeps{
+		config:          config,
+		dbEventNotifier: deps.DBEventNotifier,
+	}
 	// BlockRetire — heimdallStore and bridgeStore may be nil for non-Bor chains.
 	p.BlockRetire = freezeblocks.NewBlockRetire(1, config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB, p.HeimdallStore, p.BridgeStore, p.ChainConfig, config, deps.DBEventNotifier, p.SegmentsBuildLimiter, logger)
 
@@ -1147,6 +1170,7 @@ func (p *Provider) Initialize(deps Deps) error {
 	// per-case recovery rule.
 	p.recoverOrphanRegenSidecars()
 
+	p.started = true
 	return nil
 }
 
@@ -1726,11 +1750,11 @@ func (p *Provider) Restart(ctx context.Context, opts RestartOpts) error {
 	return nil
 }
 
-// Stop releases the storage component's runtime resources. The
-// lifecycle driver and the flow orchestrator both need explicit
-// shutdown; other resources (DB, BlockRetire, etc.) follow the
-// framework's existing lifecycle. Multi-call safe.
-func (p *Provider) Stop() {
+// Close releases the storage component's runtime resources for node
+// exit: the lifecycle driver, the flow orchestrator, and the internal
+// event pool all need explicit shutdown. Multi-call safe. Use Stop
+// (not Close) for a mid-process pause the Provider can later resume.
+func (p *Provider) Close() {
 	if p.LifecycleDriver != nil {
 		p.LifecycleDriver.Stop()
 	}
@@ -1740,4 +1764,74 @@ func (p *Provider) Stop() {
 	if p.eventPool != nil {
 		p.eventPool.Stop()
 	}
+	p.started = false
+}
+
+// Stop is the ChainConfigRestartable pause: LifecycleDriver + Orchestrator
+// halt so SetChainConfig can swap chain.Config safely, then Start resumes
+// them. The event pool + bus stay warm — other components' subscribers
+// (e.g. CL) survive the cycle. Idempotent when already stopped.
+func (p *Provider) Stop() error {
+	if !p.started {
+		return nil
+	}
+	if p.LifecycleDriver != nil {
+		p.LifecycleDriver.Stop()
+	}
+	if p.Orchestrator != nil {
+		if err := p.Orchestrator.Close(); err != nil {
+			return fmt.Errorf("storage.Provider.Stop: orchestrator close: %w", err)
+		}
+	}
+	p.started = false
+	return nil
+}
+
+// SetChainConfig swaps the captured chain.Config and rebuilds
+// BlockRetire against it (NewBlockRetire captures chain.Config at
+// construction). Must be called between Stop and Start; panics if
+// invoked while the Provider is running.
+func (p *Provider) SetChainConfig(cfg *chain.Config) {
+	if p.started {
+		panic("storage.Provider: SetChainConfig called while Provider is started")
+	}
+	p.ChainConfig = cfg
+	if p.restartDeps == nil {
+		return
+	}
+	rd := p.restartDeps
+	p.BlockRetire = freezeblocks.NewBlockRetire(
+		1, rd.config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB,
+		p.HeimdallStore, p.BridgeStore, p.ChainConfig, rd.config,
+		rd.dbEventNotifier, p.SegmentsBuildLimiter, p.logger,
+	)
+	if hasAgg, ok := p.ChainDB.(dbstate.HasAgg); ok {
+		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
+			p.BlockRetire.(*freezeblocks.BlockRetire).SetCommitGate(agg.CommitGate())
+		}
+	}
+}
+
+// Start resumes the storage component after Stop: it re-launches the
+// LifecycleDriver and Orchestrator on their existing instances (both
+// support Stop/Close → Start cycles internally). Idempotent when
+// already started. Safe to call as the first lifecycle action too —
+// Initialize sets started=true directly, so an unpaired Start after
+// Initialize is a no-op.
+func (p *Provider) Start(ctx context.Context) error {
+	if p.started {
+		return nil
+	}
+	if p.LifecycleDriver != nil {
+		if err := p.LifecycleDriver.Start(ctx); err != nil {
+			return fmt.Errorf("storage.Provider.Start: lifecycle driver: %w", err)
+		}
+	}
+	if p.Orchestrator != nil {
+		if err := p.Orchestrator.Start(ctx); err != nil {
+			return fmt.Errorf("storage.Provider.Start: orchestrator: %w", err)
+		}
+	}
+	p.started = true
+	return nil
 }

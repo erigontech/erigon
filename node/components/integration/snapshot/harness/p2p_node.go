@@ -281,9 +281,7 @@ func (n *P2PNode) Close() {
 		_ = n.Mx.UnbindBus()
 		_ = n.Downloader.UnbindAutoPublish()
 		if n.storageProvider != nil {
-			// Provider.Stop closes the orchestrator, the lifecycle
-			// driver and the internal event pool it owns.
-			n.storageProvider.Stop()
+			n.storageProvider.Close()
 		} else {
 			_ = n.Orch.Close()
 		}
