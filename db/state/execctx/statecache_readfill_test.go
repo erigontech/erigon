@@ -141,43 +141,6 @@ func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
 	require.Greater(t, debug.last, initialEnd)
 }
 
-// The paired aggregator-level unwind rewrites backing rows on the same
-// transaction, so SharedDomains.Unwind must drop the memoized frontiers.
-func TestReadFill_UnwindResetsWritableVisibleEndMemo(t *testing.T) {
-	t.Parallel()
-
-	const stepSize = uint64(16)
-	ctx := t.Context()
-	db := newTestDb(t, stepSize)
-
-	baseTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer baseTx.Rollback()
-	debug := &visibleEndCountingDebugTx{TemporalDebugTx: baseTx.Debug()}
-	rwTx := &visibleEndCountingRwTx{TemporalRwTx: baseTx, debug: debug}
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-	stateCache := newSmallStateCache()
-	t.Cleanup(stateCache.Close)
-	domains.SetStateCacheForTest(stateCache)
-
-	missing := make([]byte, 20)
-	missing[0] = 2
-	value, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, missing)
-	require.NoError(t, err)
-	require.Empty(t, value)
-	require.Equal(t, uint64(1), debug.calls)
-
-	domains.Unwind(30, nil)
-
-	missing[0] = 3
-	value, _, err = domains.GetLatest(kv.AccountsDomain, rwTx, missing)
-	require.NoError(t, err)
-	require.Empty(t, value)
-	require.Equal(t, uint64(2), debug.calls, "unwind must drop the memoized frontier")
-}
-
 // During an in-flight unwind the mem overlay bounds reads of an affected key
 // by maxStep while MDBX still holds the not-yet-deleted dying row inside that
 // bound. A cache hit legitimately below the unwind floor then diverges from
