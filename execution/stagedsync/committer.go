@@ -116,14 +116,14 @@ type commitmentCalculator struct {
 	// stage progress instead of finding a commitment state).
 	hasComputed bool
 
-	// in receives the same applyResult stream as the apply loop,
+	// commitResults receives the same applyResult stream as the apply loop,
 	// plus commitComputeRequest messages for explicit compute triggers.
-	in chan applyResult
-	// blockRequests is the per-block heads-up channel — separate from `in`
-	// so a blockRequest is never trapped behind a block's txResults.
+	commitResults chan applyResult
+	// blockRequests is the per-block heads-up channel — separate from
+	// `commitResults` so a blockRequest is never trapped behind a block's txResults.
 	blockRequests chan *blockRequest
-	// out publishes commitment roots.
-	out chan commitmentResult
+	// rootResults publishes commitment roots.
+	rootResults chan commitmentResult
 
 	// pending records the per-block mode selected from each blockRequest,
 	// keyed by block number — populated from blockRequests, cleared on the
@@ -197,9 +197,9 @@ func newCommitmentCalculator(
 	logger log.Logger,
 	forcePerBlockCompute bool,
 	perBlockFrom uint64,
-	in chan applyResult,
+	commitResults chan applyResult,
 	blockRequests chan *blockRequest,
-	out chan commitmentResult,
+	rootResults chan commitmentResult,
 ) (*commitmentCalculator, error) {
 	// ModeUpdate carries values in its btree for the trie to read; the parallel
 	// trie reads leaf values from the as-of reader, so keep its ModeParallel buffer.
@@ -240,9 +240,9 @@ func newCommitmentCalculator(
 		asOfReader:           asOfReader,
 		roTx:                 roTx,
 		signalCtx:            signalCtx,
-		in:                   in,
+		commitResults:        commitResults,
 		blockRequests:        blockRequests,
-		out:                  out,
+		rootResults:          rootResults,
 		pending:              map[uint64]*pendingBlock{},
 		foldedAhead:          map[uint64]bool{},
 		balRoots:             map[uint64][]byte{},
@@ -268,25 +268,25 @@ func (cc *commitmentCalculator) Stop() {
 
 func (cc *commitmentCalculator) loop(ctx context.Context) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "calculator")))
-	defer close(cc.out) // Signal apply loop that no more results will come.
+	defer close(cc.rootResults) // Signal apply loop that no more results will come.
 
-	// The calculator exits ONLY when cc.in is closed (by the exec loop).
-	// Do NOT add ctx.Done or cc.done checks here — the exec loop owns
+	// The calculator exits ONLY when cc.commitResults is closed (by the exec
+	// loop). Do NOT add ctx.Done or cc.done checks here — the exec loop owns
 	// shutdown sequencing. Exiting early would leave commitment behind
 	// sd.mem, causing nonce mismatches on batch restart. The calculator
 	// must process ALL buffered items before exiting.
 	// Context cancellation is handled by the exec loop which closes
-	// cc.in after stopping.
+	// cc.commitResults after stopping.
 	//
 	// blockRequests is multiplexed but not a gate: it is only a fold-ahead
-	// heads-up, and draining leftovers after cc.in closes would re-fold
-	// already-finalized blocks. It is set to nil once closed.
-	in, reqs := cc.in, cc.blockRequests
-	for in != nil {
+	// heads-up, and draining leftovers after cc.commitResults closes would
+	// re-fold already-finalized blocks. It is set to nil once closed.
+	commitResults, reqs := cc.commitResults, cc.blockRequests
+	for commitResults != nil {
 		select {
-		case result, ok := <-in:
+		case result, ok := <-commitResults:
 			if !ok {
-				in = nil
+				commitResults = nil
 				continue
 			}
 			cc.handleMessage(ctx, result)
@@ -849,7 +849,7 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 		cc.logger.Warn("["+cc.logPrefix+"] commitment compute failed", "block", r.blockNum, "txNum", r.txNum, "err", r.err)
 	}
 	select {
-	case cc.out <- r:
+	case cc.rootResults <- r:
 	case <-ctx.Done():
 	case <-cc.done:
 	}
