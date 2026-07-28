@@ -69,6 +69,7 @@ type PrivateDebugAPI interface {
 	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
 	ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode *string) (*ExecutionWitnessResult, error)
 	SetHead(ctx context.Context, number hexutil.Uint64) error
+	SetFork(ctx context.Context, chainName string) (*rpchelper.SetForkResult, error)
 	FreeOSMemory()
 	SetGCPercent(v int) int
 	SetMemoryLimit(limit int64) int64
@@ -125,6 +126,19 @@ func (api *DebugAPIImpl) SetHead(ctx context.Context, number hexutil.Uint64) err
 
 	_, err = api.ethBackend.SetHead(ctx, &remoteproto.SetHeadRequest{BlockNumber: blockNum})
 	return err
+}
+
+// SetFork implements debug_setFork. Transitions this node onto a
+// different chain (parent → fork or fork → parent) by unwinding to
+// the CutBlock and returning RestartRequired=true. Requires the
+// in-process backend to implement rpchelper.ForkController;
+// unavailable via standalone rpcdaemon.
+func (api *DebugAPIImpl) SetFork(ctx context.Context, chainName string) (*rpchelper.SetForkResult, error) {
+	fc, ok := api.ethBackend.(rpchelper.ForkController)
+	if !ok {
+		return nil, errors.New("debug_setFork is not available in this deployment (requires in-process erigon backend)")
+	}
+	return fc.SetFork(ctx, chainName)
 }
 
 // StorageRangeAt implements debug_storageRangeAt. Returns information about a range of storage locations (if any) for the given address.

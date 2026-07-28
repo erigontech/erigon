@@ -2234,6 +2234,88 @@ func (s *Ethereum) SetHead(ctx context.Context, targetBlock uint64) error {
 	return s.execModule.SetHead(ctx, targetBlock)
 }
 
+// SetFork transitions the node onto a different chain. Validates
+// target has a direct parent/child relationship with the current
+// chain, computes the CutBlock, and delegates to SetHead. Returns
+// RestartRequired=true — the in-process chain.Config swap that
+// would let the running process continue on the new chain is not
+// wired up here; the operator restarts erigon with --chain=<target>
+// against the same datadir to complete the transition.
+func (s *Ethereum) SetFork(ctx context.Context, targetChainName string) (*rpchelper.SetForkResult, error) {
+	if targetChainName == "" {
+		return nil, errors.New("targetChainName is required")
+	}
+	currentName := s.chainConfig.ChainName
+	if targetChainName == currentName {
+		return nil, fmt.Errorf("target chain %q is the currently-loaded chain; no transition needed", targetChainName)
+	}
+
+	targetSpec, err := chainspec.ChainSpecByNameOrForkDatadir(targetChainName, s.config.Dirs.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("looking up target chain %q: %w", targetChainName, err)
+	}
+	target := targetSpec.Config
+	if target == nil {
+		return nil, fmt.Errorf("target chain %q has no config", targetChainName)
+	}
+
+	var cutBlock uint64
+	switch {
+	case target.Parent == currentName:
+		cutBlock = target.CutBlock
+	case s.chainConfig.Parent == targetChainName:
+		cutBlock = s.chainConfig.CutBlock
+	default:
+		return nil, fmt.Errorf(
+			"target chain %q has no direct parent relationship with current %q "+
+				"(target.Parent=%q, current.Parent=%q)",
+			targetChainName, currentName, target.Parent, s.chainConfig.Parent,
+		)
+	}
+	if cutBlock == 0 {
+		return nil, fmt.Errorf(
+			"transition target %q resolves to CutBlock=0; refusing (root-chain transitions not supported in Phase 1)",
+			targetChainName,
+		)
+	}
+
+	unwoundFrom, err := readCurrentBlockNumber(ctx, s.chainDB)
+	if err != nil {
+		return nil, fmt.Errorf("reading current head: %w", err)
+	}
+	if unwoundFrom < cutBlock {
+		return nil, fmt.Errorf(
+			"current head %d is already at or below CutBlock %d for target %q; no unwind needed but chain-config swap not supported in Phase 1",
+			unwoundFrom, cutBlock, targetChainName,
+		)
+	}
+
+	if err := s.SetHead(ctx, cutBlock); err != nil {
+		return nil, fmt.Errorf("SetHead(%d): %w", cutBlock, err)
+	}
+
+	return &rpchelper.SetForkResult{
+		FromChain:       currentName,
+		ToChain:         targetChainName,
+		UnwoundFrom:     unwoundFrom,
+		UnwoundTo:       cutBlock,
+		RestartRequired: true,
+		Message: fmt.Sprintf(
+			"Unwound from %d to CutBlock %d. Chain.Config swap not implemented in Phase 1 — restart erigon with --chain=%s to complete the transition.",
+			unwoundFrom, cutBlock, targetChainName,
+		),
+	}, nil
+}
+
+func readCurrentBlockNumber(ctx context.Context, db kv.RwDB) (uint64, error) {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	return stages.GetStageProgress(tx, stages.Finish)
+}
+
 // Protocols returns all the currently configured
 // network protocols to start.
 func (s *Ethereum) Protocols() []p2p.Protocol {

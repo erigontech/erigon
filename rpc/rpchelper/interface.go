@@ -50,3 +50,25 @@ type ApiBackend interface {
 	SetHead(ctx context.Context, req *remoteproto.SetHeadRequest) (*remoteproto.SetHeadReply, error)
 	PendingBlock(ctx context.Context) (*types.Block, error)
 }
+
+// SetForkResult is the debug_setFork RPC's response payload.
+// RestartRequired stays true through Phase 1 — the in-process
+// chain.Config swap that would let the running process continue on
+// the target chain is not yet wired.
+type SetForkResult struct {
+	FromChain       string `json:"from_chain"`
+	ToChain         string `json:"to_chain"`
+	UnwoundFrom     uint64 `json:"unwound_from"`
+	UnwoundTo       uint64 `json:"unwound_to"`
+	RestartRequired bool   `json:"restart_required"`
+	Message         string `json:"message,omitempty"`
+}
+
+// ForkController is the optional runtime-fork-transition surface a
+// backend may implement. jsonrpc.DebugAPIImpl type-asserts its
+// ApiBackend to this interface at construction; nil ⇒ debug_setFork
+// returns an actionable "not available" error. In-process erigon
+// (node/eth.Ethereum) implements it; standalone rpcdaemon does not.
+type ForkController interface {
+	SetFork(ctx context.Context, targetChainName string) (*SetForkResult, error)
+}
