@@ -121,6 +121,31 @@ to step covering CutBlock).
 
 ## chain.Config swap contract
 
+**Architectural principle: forking is a QUIESCE operation.**
+No component observes chainConfig mid-transition. The transition
+pauses every component that reads chainConfig on its own goroutine,
+performs the unwind + swap, then resumes them on the new config.
+
+This is not a fallback for a harder atomic-swap approach — it IS the
+right model. Runtime chainConfig changes are rare (one per fork
+transition). Concurrent config swap under load requires atomic
+pointers + mid-swap consistency guarantees at every read site;
+quiesce sidesteps all of that. A few seconds of paused processing
+per transition is acceptable; a subtle read-site bug that surfaces
+weeks later is not.
+
+The transition sequence:
+
+    Pause(everything that reads chainConfig on its own goroutine)
+    Unwind(target.CutBlock) via Provider.Unwind
+    Swap chainConfig on every captor (plain field writes — safe
+      because no concurrent readers by construction of the pause)
+    Resume(everything)
+
+Setter methods (`SetChainConfig(*chain.Config)`) on each captor
+become simple field writes with no lock discipline. All read sites
+in each captor stay `s.chainConfig.SomeField` — unchanged.
+
 grep-audit of who captures the pointer (from live 2026-07-28 audit):
 
 - `backend.chainConfig` — the canonical field.
@@ -284,10 +309,43 @@ setHead path, publishes `flow.UnwindCompleted`. Skips component
 swaps; leaves chain.Config unchanged. Verifies the unwind alone
 works end-to-end. Ships as `restart_required: true` return value.
 
-**Phase 2 — Bucket-A pointer swaps.** Implements the 16 direct
-struct-field rewrites from the audit table. Each is a per-file
-edit that adds a setter method (or exposes the field via an
-accessor) + wires the setter call into the swap sequence.
+**Phase 2 — component reconfigure via Stop → SetChainConfig →
+Start.** The transition model: every long-lived component that
+reads chainConfig on its own goroutine goes through a full
+lifecycle cycle (Stop → SetChainConfig → Start) during the
+transition. No concurrent readers, no atomic-pointer discipline —
+the component model itself carries the invariant. Debug_setFork's
+end-to-end test IS a test that the component model supports this.
+
+**Blocker discovered 2026-07-28 during Phase 2 opening scan:**
+sentry.Provider.Close explicitly does NOT cancel SentryCtx (per
+its own docstring at
+[node/components/sentry/provider.go:614-624](../../node/components/sentry/provider.go)).
+The current lifecycle assumes: Configure → Initialize → Start →
+Close-once-at-shutdown. It does not model Close-then-restart —
+the goroutines exit on SentryCtx cancellation, but Start uses
+the same SentryCtx which is then cancelled. There is no separate
+inner cancellable context per Start invocation.
+
+Likely-similar gaps in:
+- storage.Provider (its own driver goroutines with the same
+  ctx pattern).
+- Downloader.Provider (chain-identity closure captured at
+  BindBus).
+- Every long-lived component built for one-shot lifetime.
+
+**This is a componentization prerequisite**, not a debug_setFork
+implementation detail. Each component's lifecycle needs an inner
+`stopped`/`running` state + a per-Start cancellable context that
+Close cancels, so Close-then-Start becomes a legitimate operation.
+
+Phase 2 is therefore blocked pending that refactor for each
+component in the audit table. Phase 1 (unwind + restart_required)
+remains the shipped state — operators use it now, the
+restart-required workflow is honest about the current
+componentization limitation, and the fork soak driver can use
+restart-between-transitions as its transition mechanism until
+the component-model refactor lands per-component.
 
 **Phase 3 — Bucket-C: Caplin cancel-and-relaunch.** Implements the
 CL MVI's punted Phase 2 as the debug_setFork prerequisite.

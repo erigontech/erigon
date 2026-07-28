@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/p2p"
@@ -71,4 +72,30 @@ type SetForkResult struct {
 // (node/eth.Ethereum) implements it; standalone rpcdaemon does not.
 type ForkController interface {
 	SetFork(ctx context.Context, targetChainName string) (*SetForkResult, error)
+}
+
+// ChainConfigReconfigurable is implemented by every long-lived
+// component that reads chain.Config on its own goroutine.
+// debug_setFork drives components through a Stop → SetChainConfig
+// → Start(ctx) cycle during a fork transition — the transition
+// window has NO active work; each component picks up the new
+// chain.Config cleanly from the stopped state and resumes on it.
+//
+// This is deliberately the component-model contract rather than an
+// atomic-pointer pattern: chainConfig changes are rare, and the
+// "no active components during config swap" invariant makes the
+// transition trivial to reason about at every captor. Debug_setFork
+// tests that the component model actually supports this contract
+// end-to-end.
+type ChainConfigReconfigurable interface {
+	// Stop halts the component's background goroutines. After
+	// Stop returns the component holds no active work and no
+	// goroutine reads its captured chain.Config.
+	Stop()
+	// SetChainConfig replaces the captured chain.Config pointer.
+	// The component must be Stopped when this is called.
+	SetChainConfig(cfg *chain.Config)
+	// Start(ctx) re-launches background goroutines on the new
+	// chain.Config. Safe after a matching Stop + SetChainConfig.
+	Start(ctx context.Context) error
 }
