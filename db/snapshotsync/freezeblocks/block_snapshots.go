@@ -279,7 +279,7 @@ func (br *BlockRetire) buildFiles(
 			return false, nil
 		}
 		logger.Log(lvl, "[snapshots] Retire Blocks", "range",
-			fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
+			fmt.Sprintf("%s-%s", common.PrettyExact(blockFrom), common.PrettyExact(blockTo)))
 		// in future we will do it in background
 		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader, br.snCfg, &snapshots.BaseRoSnapshots); err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
