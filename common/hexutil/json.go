@@ -118,6 +118,7 @@ func (b *Big) ToInt() *big.Int {
 	return (*big.Int)(b)
 }
 
+// ToUint256 converts b to a uint256.Int and reports whether it overflows 256 bits.
 func (b *Big) ToUint256() (*uint256.Int, bool) {
 	return uint256.FromBig((*big.Int)(b))
 }
