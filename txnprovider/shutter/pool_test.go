@@ -345,11 +345,45 @@ func TestPoolProvideTxnsFiltersByIntrinsicGasNotFullGasLimit(t *testing.T) {
 			ctx,
 			txnprovider.WithBlockTime(handle.nextBlockTime),
 			txnprovider.WithParentBlockNum(handle.nextBlockNum-1),
-			txnprovider.WithGasTarget(mdgas.NewFullMdGas(50_000, 0, 0)),
+			txnprovider.WithGasTarget(mdgas.NewFullMdGas(50_000, txnGasLimit, 0)),
 		)
 		require.NoError(t, err)
 		require.Len(t, txns, 1)
 		require.Equal(t, encTxn.OriginalTxn.Hash(), txns[0].Hash())
+	})
+}
+
+func TestPoolProvideTxnsRejectsGasLimitAboveStateGasTarget(t *testing.T) {
+	t.Parallel()
+	pt := PoolTest{t}
+	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
+		require.NoError(t, err)
+		handle.SimulateInitialEonRead(t, ekg)
+		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
+		require.NoError(t, handle.SimulateNewBlockChange(ctx))
+		synctest.Wait()
+
+		const txnGasLimit uint64 = 100_000
+		encTxn := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon(), MockWithGasLimit(txnGasLimit))
+		require.NoError(t, handle.SimulateLogEvents(ctx, []types.Log{
+			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 1, encTxn),
+		}))
+		handle.SimulateCachedEonRead(t, ekg)
+		require.NoError(t, handle.SimulateNewBlockChange(ctx))
+		synctest.Wait()
+		handle.SimulateCurrentSlot()
+		handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encTxn.IdentityPreimage)
+		synctest.Wait()
+
+		txns, err := pool.ProvideTxns(
+			ctx,
+			txnprovider.WithBlockTime(handle.nextBlockTime),
+			txnprovider.WithParentBlockNum(handle.nextBlockNum-1),
+			txnprovider.WithGasTarget(mdgas.NewFullMdGas(50_000, txnGasLimit-1, 0)),
+		)
+		require.NoError(t, err)
+		require.Empty(t, txns)
 	})
 }
 

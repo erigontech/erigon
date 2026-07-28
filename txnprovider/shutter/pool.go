@@ -344,6 +344,18 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			)
 			continue
 		}
+		if isAmsterdam && txn.GetGasLimit() > availableGas.State {
+			sender, _ := txn.GetSender()
+			p.logger.Warn(
+				"skipping decrypted txn: insufficient state gas",
+				"hash", txn.Hash(),
+				"type", txn.Type(),
+				"sender", sender,
+				"gasLimit", txn.GetGasLimit(),
+				"availableState", availableGas.State,
+			)
+			continue
+		}
 		if blobGas > availableGas.Blob {
 			sender, _ := txn.GetSender()
 			p.logger.Warn(

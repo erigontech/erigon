@@ -721,9 +721,6 @@ func (p *TxPool) Started() bool {
 }
 
 // best returns the highest-priority pending transactions that fit within the given gas and RLP space budgets.
-// EIP-8037: availableGas.Regular tracks regular gas; availableGas.State tracks intrinsic
-// state gas. Execution-time state gas (SSTOREs) cannot be predicted here and is
-// enforced by applyTransaction in the block assembler.
 func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	availableGas mdgas.FullMdGas,
 	yielded mapset.Set[[32]byte], availableRlpSpace int) (bool, int, error) {
@@ -853,6 +850,9 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		}
 		if intrinsicGas > availableGas.Regular {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
+			continue
+		}
+		if isAmsterdam && mt.TxnSlot.GetGas() > availableGas.State {
 			continue
 		}
 		availableGas.Regular -= intrinsicGas
