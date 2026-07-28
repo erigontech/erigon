@@ -90,16 +90,16 @@ func RefillTopLevelCallGas(gasRemaining *mdgas.MdGas, gasUsed *mdgas.MdGasUsage,
 
 // TraceTopLevelCallFailure emits the root call frame when setup fails before
 // EVM.Call can emit it.
-func TraceTopLevelCallFailure(evm *vm.EVM, sender, recipient accounts.Address, input []byte, gas mdgas.MdGas, value uint256.Int, err error) {
+func TraceTopLevelCallFailure(evm *vm.EVM, sender, recipient accounts.Address, input []byte, startGas, gasRemaining mdgas.MdGas, value uint256.Int, err error) {
 	tracer := evm.Config().Tracer
 	if tracer == nil {
 		return
 	}
 	precompile := slices.Contains(vm.ActivePrecompiles(evm.ChainRules()), recipient)
 	if tracer.OnEnter != nil {
-		tracer.OnEnter(0, byte(vm.CALL), sender, recipient, precompile, input, gas.Regular, value, nil)
+		tracer.OnEnter(0, byte(vm.CALL), sender, recipient, precompile, input, startGas.Regular, value, nil)
 	}
 	if tracer.OnExit != nil {
-		tracer.OnExit(0, nil, gas.Regular, vm.VMErrorFromErr(err), true)
+		tracer.OnExit(0, nil, startGas.Regular-gasRemaining.Regular, vm.VMErrorFromErr(err), true)
 	}
 }

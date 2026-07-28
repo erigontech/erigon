@@ -450,7 +450,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		st.state.RevertToSnapshot(runtimeSnapshot, err)
 		if errors.Is(err, vm.ErrRuntimeOutOfGas) {
 			st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
-			st.traceRuntimeFailure(runtimeGas, err)
+			st.traceRuntimeFailure(runtimeGas, st.gasRemaining, err)
 			return &evmtypes.ExecutionResult{Err: err}, nil
 		}
 		return nil, err
@@ -628,7 +628,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}
 		st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
 		gasUsed.consumeAllRegularGas(runtimeGas.Regular)
-		st.traceRuntimeFailure(runtimeGas, vmerr)
+		st.traceRuntimeFailure(runtimeGas, st.gasRemaining, vmerr)
 	} else {
 		if contractCreation {
 			ret, _, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
@@ -756,8 +756,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	return result, nil
 }
 
-func (st *TxnExecutor) traceRuntimeFailure(gas mdgas.MdGas, err error) {
-	TraceTopLevelCallFailure(st.evm, st.msg.From(), st.to(), st.data, gas, st.value, err)
+func (st *TxnExecutor) traceRuntimeFailure(startGas, gasRemaining mdgas.MdGas, err error) {
+	TraceTopLevelCallFailure(st.evm, st.msg.From(), st.to(), st.data, startGas, gasRemaining, st.value, err)
 }
 
 func (st *TxnExecutor) prepareTopLevelCall(gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {

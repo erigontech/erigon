@@ -254,7 +254,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 		protocol.RefillTopLevelCallGas(&leftOverGas, &topLevelCallGasUsed, cfg.EVMConfig.RestoreState, err)
 	} else if errors.Is(err, vm.ErrRuntimeOutOfGas) {
 		leftOverGas = mdgas.MdGas{State: gas.State}
-		protocol.TraceTopLevelCallFailure(vmenv, sender.Address(), address, input, gas, cfg.Value, err)
+		protocol.TraceTopLevelCallFailure(vmenv, sender.Address(), address, input, gas, leftOverGas, cfg.Value, err)
 	}
 
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {

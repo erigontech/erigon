@@ -372,7 +372,7 @@ func TestCreate2OntoExistingAccountSkipsNewAccountCharge(t *testing.T) {
 	require.Equal(t, availableCreateGas-availableCreateGas/64, enteredCreateGas)
 }
 
-func TestCreateTraceUsesForwardedGasOnEarlyFailure(t *testing.T) {
+func TestCreateTraceUsesActualGasOnEarlyFailure(t *testing.T) {
 	t.Parallel()
 	tx, sd := testTemporalTxSD(t)
 	txNum, _, err := sd.SeekCommitment(t.Context(), tx)
@@ -417,7 +417,7 @@ func TestCreateTraceUsesForwardedGasOnEarlyFailure(t *testing.T) {
 	_, _, _, err = vmenv.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Regular: 500_000}, uint256.Int{}, false)
 	require.NoError(t, err)
 	require.NotZero(t, availableCreateGas)
-	require.Equal(t, availableCreateGas-availableCreateGas/64, enteredCreateGas)
+	require.Equal(t, availableCreateGas, enteredCreateGas)
 	require.Zero(t, exitedCreateGasUsed)
 }
 

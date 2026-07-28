@@ -466,6 +466,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 
 	depth := evm.depth
 	inputTotal := gas.Total()
+	childGasForwarded := false
 	defer func() {
 		if depth == 0 && evm.chainRules.IsAmsterdam && err != nil {
 			gasUsed.State = 0
@@ -473,30 +474,21 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 		gasUsed.Regular = deriveFrameRegularGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
 	}()
 
-	traceStarted := false
-	traceStartGas := gas
-	if parent != nil {
-		traceStartGas = createForwardedGas(gas, evm.chainRules.IsTangerineWhistle)
-	}
-	startTrace := func(startGas mdgas.MdGas) {
-		if evm.Config().Tracer != nil {
-			traceStartGas = startGas
-			traceStarted = true
-			evm.captureBegin(depth, typ, caller, address, false, codeAndHash.code, startGas, value, nil)
-		}
-	}
 	if evm.Config().Tracer != nil {
+		traceStartGas := gas
 		if parent == nil {
-			startTrace(gas)
+			evm.captureBegin(depth, typ, caller, address, false, codeAndHash.code, gas, value, nil)
 		}
 		defer func() {
+			if parentOutOfGas {
+				return
+			}
 			traceGasRemaining := gasRemaining
-			if !traceStarted {
-				if parentOutOfGas {
-					return
-				}
-				startTrace(traceStartGas)
-				traceGasRemaining = traceStartGas
+			if parent != nil && !childGasForwarded {
+				traceStartGas = gasRemaining
+				evm.captureBegin(depth, typ, caller, address, false, codeAndHash.code, traceStartGas, value, nil)
+			} else if childGasForwarded {
+				traceStartGas = gas
 			}
 			evm.captureEnd(depth, typ, traceStartGas, traceGasRemaining, ret, err)
 		}()
@@ -595,7 +587,10 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 		parent.stateGas = 0
 		gas = gasRemaining
 		inputTotal = gas.Total()
-		startTrace(gas)
+		childGasForwarded = true
+		if evm.Config().Tracer != nil {
+			evm.captureBegin(depth, typ, caller, address, false, codeAndHash.code, gas, value, nil)
+		}
 		defer func() {
 			parent.restoreChildGas(gasRemaining, evm.config.Tracer)
 			if err != nil && newAccountCharged {
