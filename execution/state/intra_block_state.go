@@ -564,15 +564,11 @@ func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 }
 
 func (sdb *IntraBlockState) Logs() types.Logs {
-	return sdb.rawLogs().Copy()
-}
-
-func (sdb *IntraBlockState) rawLogs() types.Logs {
 	all := make(types.Logs, 0, sdb.logSize)
 	for _, lgs := range sdb.logs {
 		all = append(all, lgs...)
 	}
-	return all
+	return all.Copy()
 }
 
 // LogsRlpHash is rlpHash of Logs, without building the flattened slice.
