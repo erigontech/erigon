@@ -31,6 +31,7 @@ import (
 
 var (
 	bigT    = reflect.TypeFor[*Big]()
+	u256T   = reflect.TypeFor[*U256]()
 	uintT   = reflect.TypeFor[Uint]()
 	uint16T = reflect.TypeFor[Uint16]()
 	uint32T = reflect.TypeFor[Uint32]()
@@ -128,6 +129,73 @@ func (b *Big) String() string {
 
 func (b *Big) Uint64() uint64 {
 	return ((*big.Int)(b)).Uint64()
+}
+
+// U256 marshals/unmarshals as a JSON string with 0x prefix, byte-identical to
+// Big for any value both can represent. The zero value marshals as "0x0".
+type U256 uint256.Int
+
+// MarshalText implements encoding.TextMarshaler
+func (b U256) MarshalText() ([]byte, error) {
+	return b.AppendText(make([]byte, 0, 66))
+}
+
+// AppendText implements encoding.TextAppender (alloc-free MarshalText).
+func (b U256) AppendText(dst []byte) ([]byte, error) {
+	z := (*uint256.Int)(&b)
+	nibbles := (z.BitLen() + 3) / 4
+	if nibbles == 0 {
+		nibbles = 1
+	}
+	dst = append(dst, '0', 'x')
+	for i := nibbles - 1; i >= 0; i-- {
+		dst = append(dst, "0123456789abcdef"[(z[i/16]>>(uint(i%16)*4))&0xf])
+	}
+	return dst, nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (b *U256) UnmarshalJSON(input []byte) error {
+	if !isString(input) {
+		return errNonString(u256T)
+	}
+	return wrapTypeError(b.UnmarshalText(input[1:len(input)-1]), u256T)
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler
+func (b *U256) UnmarshalText(input []byte) error {
+	raw, err := checkNumberText(input)
+	if err != nil {
+		return err
+	}
+	if len(raw) > 64 {
+		return ErrBig256Range
+	}
+	z := (*uint256.Int)(b)
+	z.Clear()
+	for _, nib := range raw {
+		d := decodeNibble(nib)
+		if d == badNibble {
+			return ErrSyntax
+		}
+		z.Lsh(z, 4)
+		z[0] |= d
+	}
+	return nil
+}
+
+// ToInt converts b to a big.Int.
+func (b *U256) ToInt() *big.Int {
+	return (*uint256.Int)(b).ToBig()
+}
+
+// String returns the hex encoding of b.
+func (b *U256) String() string {
+	return (*uint256.Int)(b).Hex()
+}
+
+func (b *U256) Uint64() uint64 {
+	return (*uint256.Int)(b).Uint64()
 }
 
 // Uint64 marshals/unmarshals as a JSON string with 0x prefix.
