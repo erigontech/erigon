@@ -647,11 +647,13 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		doms.SetParent(parent)
 	}
 
-	// Back the validation overlay by the SD's OWN parent chain so
-	// block-data reads cascade through the same generations that domain-state
-	// reads do — never a separate, divergent capture.
+	// Back the validation overlay by the SD's OWN parent chain so block-data
+	// reads cascade through the same generations that domain-state reads do —
+	// never a separate, divergent capture. doms has no overlay of its own yet
+	// (InitBlockOverlay is next), so OverlayTemporalTx here yields exactly the
+	// parent chain.
 	valOverlayBase := kv.TemporalTx(roTx)
-	if v := doms.ParentOverlayTemporalTx(roTx); v != nil {
+	if v := doms.OverlayTemporalTx(roTx); v != nil {
 		valOverlayBase = v
 	}
 	if err := doms.InitBlockOverlay(valOverlayBase, roTx.Debug().Dirs().Tmp); err != nil {

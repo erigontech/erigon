@@ -752,17 +752,6 @@ func (sd *SharedDomains) OverlayTemporalTx(roTx kv.TemporalTx) kv.TemporalTx {
 	return overlay.NewTemporalReadView(base)
 }
 
-// ParentOverlayTemporalTx returns the overlay read view of the parent chain
-// only (excluding this SD's own overlay), or nil when there is no parent.
-// A reader derives its overlay base from this so the base and the chain it later
-// walks via OverlayTemporalTx are the same generations — they cannot diverge.
-func (sd *SharedDomains) ParentOverlayTemporalTx(roTx kv.TemporalTx) kv.TemporalTx {
-	if sd.parent == nil {
-		return nil
-	}
-	return sd.parent.OverlayTemporalTx(roTx)
-}
-
 // InitBlockOverlay creates (or replaces) the block-level metadata overlay backed by
 // the given base transaction. Writes to the overlay are visible to subsequent reads
 // and are flushed atomically alongside domain state via Flush().
