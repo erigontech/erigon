@@ -402,6 +402,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 		return fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 	ibs := state.New(stateReader)
+	defer ibs.Release(false)
 
 	baseFee, err := overrideBaseFee(config, header.BaseFee)
 	if err != nil {
@@ -519,6 +520,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	ibs := state.New(stateReader)
+	defer ibs.Release(false)
 
 	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
 

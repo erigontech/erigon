@@ -64,6 +64,7 @@ func DoCall(
 	*/
 
 	state := state.New(stateReader)
+	defer state.Release(false)
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.

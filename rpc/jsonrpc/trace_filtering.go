@@ -663,6 +663,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			// Safe to skip FinalizeTx/CommitBlock: each iteration creates a fresh
 			// stateCache, cachedReader and ibs from the next txNum, and writes go
 			// to a noop writer, so no partial state escapes this scope.
+			ibs.Release(false)
 			continue
 		}
 		if err != nil {
@@ -677,6 +678,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectStart()
 			rpc.HandleError(err, stream)
 			stream.WriteObjectEnd()
+			ibs.Release(false)
 			continue
 		}
 		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
@@ -692,6 +694,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectStart()
 			rpc.HandleError(err, stream)
 			stream.WriteObjectEnd()
+			ibs.Release(false)
 			continue
 		}
 		if err = ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
@@ -703,8 +706,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectStart()
 			rpc.HandleError(err, stream)
 			stream.WriteObjectEnd()
+			ibs.Release(false)
 			continue
 		}
+		ibs.Release(false)
 		isIntersectionMode := req.Mode == TraceFilterModeIntersection
 		for _, pt := range traceResult.Trace {
 			if includeAll || filterTrace(pt, fromAddresses, toAddresses, isIntersectionMode) {
@@ -1089,6 +1094,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 
 				traceResult.Output = bytes.Clone(execResult.ReturnData)
 				results[job.txIndex] = traceResult
+				workerIbs.Release(false)
 			}
 		})
 	}
@@ -1175,6 +1181,7 @@ func (api *TraceAPIImpl) callTransaction(
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
+	defer ibs.Release(false)
 
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, nil)
 	logger := log.New("trace_filtering")
