@@ -69,12 +69,12 @@ quit
 		fmt.Fprintln(os.Stderr, "Error: could not create temp file for LLDB script:", err)
 		os.Exit(1)
 	}
-	defer dir.RemoveFile(tmpFile.Name())
 
 	_, err = tmpFile.WriteString(lldbScript)
 	closeErr := tmpFile.Close()
 	if err != nil || closeErr != nil {
 		fmt.Fprintln(os.Stderr, "Error: could not write or close LLDB script:", err, closeErr)
+		dir.RemoveFile(tmpFile.Name())
 		os.Exit(1)
 	}
 
@@ -89,6 +89,7 @@ quit
 	err = syscall.Exec(lldbPath, cmd.Args, os.Environ())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to restart under LLDB:", err)
+		dir.RemoveFile(tmpFile.Name())
 		os.Exit(1)
 	}
 }
