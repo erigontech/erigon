@@ -208,7 +208,7 @@ func TestReadFill_DoesNotClobberLiveEntry(t *testing.T) {
 	require.Equal(t, v3, got, "read-fill must not clobber the live entry")
 }
 
-// A negative reflects transactions below the snapshot's exclusive frontier,
+// A negative reflects transactions below the read view's exclusive frontier,
 // so its unwind stamp is the last included txNum.
 func TestReadFill_NegativeUsesLastVisibleTxNum(t *testing.T) {
 	t.Parallel()
@@ -254,9 +254,9 @@ func TestReadFill_NegativeUsesLastVisibleTxNum(t *testing.T) {
 
 	sc.Unwind(visibleEnd)
 	_, ok = sc.Get(kv.AccountsDomain, missing)
-	require.True(t, ok, "an unwind starting after the snapshot must preserve the negative")
+	require.True(t, ok, "an unwind starting after the read view must preserve the negative")
 
 	sc.Unwind(visibleEnd - 1)
 	_, ok = sc.Get(kv.AccountsDomain, missing)
-	require.False(t, ok, "an unwind of the snapshot's last included txNum must invalidate the negative")
+	require.False(t, ok, "an unwind of the view's last included txNum must invalidate the negative")
 }

@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/cache"
 )
 
-// stubTemporalGetter stands in for the committed-state snapshot a warmup
+// stubTemporalGetter stands in for the committed-state read view a warmup
 // goroutine reads: every GetLatest returns the same fixed value.
 type stubTemporalGetter struct {
 	v    []byte
@@ -51,8 +51,8 @@ func newTestStateCache() *cache.StateCache {
 
 // A warmup read-through must never replace a fresher entry an authoritative
 // writer (the FCU flush cache-apply) has already put: the warmup reads a
-// pre-flush snapshot, so a laggard Put landing after the flush would pin stale
-// state in the cache and corrupt the next block's execution.
+// pre-flush read view, so a laggard Put landing after the flush would pin
+// stale state in the cache and corrupt the next block's execution.
 func TestCachePopulatingGetterKeepsFresherEntry(t *testing.T) {
 	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
 	fresh := []byte("account-record-nonce-5")
@@ -64,7 +64,7 @@ func TestCachePopulatingGetterKeepsFresherEntry(t *testing.T) {
 
 		v, _, err := cpg.GetLatest(domain, key)
 		require.NoError(t, err)
-		require.Equal(t, stale, v, "read-through must still return the snapshot value")
+		require.Equal(t, stale, v, "read-through must still return the view's value")
 
 		got, ok := sc.Get(domain, key)
 		require.True(t, ok, "domain %s", domain)
@@ -162,7 +162,7 @@ func TestCachePopulatingGetterUnavailableVisibleEndNeverFills(t *testing.T) {
 	require.False(t, ok, "no exact frontier — nothing may be cached")
 }
 
-func TestCachePopulatingGetterStaleSnapshotDoesNotFill(t *testing.T) {
+func TestCachePopulatingGetterStaleViewDoesNotFill(t *testing.T) {
 	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
 	sc := newTestStateCache()
 	sc.Apply(kv.AccountsDomain, key, nil, 20)

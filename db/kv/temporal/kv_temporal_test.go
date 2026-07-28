@@ -359,7 +359,7 @@ func TestTemporalTx_ForceReopenRefreshesDomainVisibleEnd(t *testing.T) {
 	require.Equal(t, uint64(2), end)
 
 	// Write past the RO tx's MVCC view and move the data into files, which are
-	// visible regardless of the DB snapshot.
+	// visible regardless of the DB read view.
 	for txNum := uint64(2); txNum <= 3; txNum++ {
 		rwTtx, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)

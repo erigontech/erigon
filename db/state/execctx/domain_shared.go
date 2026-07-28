@@ -1131,7 +1131,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	if sd.stateCache != nil {
 		v, cTxNum, ok := sd.stateCache.GetWithTxNum(domain, k)
 		// The cache stamps txNums — divide to get the step the entry reflects.
-		// A negative uses the last txNum included by its snapshot frontier, not
+		// A negative uses the last txNum included by its read-view frontier, not
 		// the step of a deletion.
 		cStep := kv.Step(cTxNum / sd.StepSize())
 		if ok && !servableUnderBound(cStep, maxStep) {
@@ -1208,12 +1208,12 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	// Snapshot freshness is rechecked while the fill is serialized against
+	// View freshness is rechecked while the fill is serialized against
 	// committed cache updates.
 	if sd.stateCache != nil && sd.stateCache.GetCache(domain) != nil {
-		if snapshotEnd, ok := tx.Debug().DomainVisibleEnd(domain); ok {
+		if visibleEnd, ok := tx.Debug().DomainVisibleEnd(domain); ok {
 			readTxNum := (uint64(step)+1)*sd.StepSize() - 1
-			sd.stateCache.FillIfFresh(domain, k, v, readTxNum, snapshotEnd)
+			sd.stateCache.FillIfFresh(domain, k, v, readTxNum, visibleEnd)
 		}
 	}
 	// Only cache a branch when the read's txN is known: a txN=0 entry would
@@ -1373,8 +1373,8 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 	}
 
 	// Resolve from the committed layers (stateCache → MDBX/files). mem is
-	// intentionally not consulted here — it was checked above. fromSnapshot
-	// reports whether the record was read from the tx snapshot.
+	// intentionally not consulted here — it was checked above. fromReadView
+	// reports whether the record was read from the tx's read view.
 	resolve := func() ([]byte, bool) {
 		if sd.stateCache != nil {
 			if v, ok := sd.stateCache.Get(kv.AccountsDomain, addr); ok {
@@ -1391,20 +1391,20 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 		return accounts.DeserialiseV3CodeHash(v), true
 	}
 
-	h, fromSnapshot := resolve()
-	if fromSnapshot && sd.stateCache != nil {
+	h, fromReadView := resolve()
+	if fromReadView && sd.stateCache != nil {
 		var fixed [32]byte
 		if len(h) == 32 {
 			copy(fixed[:], h)
 		}
-		// Only a snapshot-sourced record (including the zero-hash sentinel for
+		// Only a view-sourced record (including the zero-hash sentinel for
 		// misses) may seed the mapping: the admission gate vouches for the tx's
 		// frontier, and a cache-sourced record can lag a just-committed flush,
 		// slipping pre-apply state past the gate. txNum is a conservative upper
 		// bound (>= the resolved account's write txNum), so the mapping drops
 		// on any unwind that reverts that account.
-		if snapshotEnd, ok := tx.Debug().DomainVisibleEnd(kv.AccountsDomain); ok {
-			sd.stateCache.PutAddrCodeHashIfFresh(addr, fixed, txNum, snapshotEnd)
+		if visibleEnd, ok := tx.Debug().DomainVisibleEnd(kv.AccountsDomain); ok {
+			sd.stateCache.PutAddrCodeHashIfFresh(addr, fixed, txNum, visibleEnd)
 		}
 	}
 	return h

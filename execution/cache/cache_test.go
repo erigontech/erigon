@@ -909,7 +909,7 @@ func TestStateCache_AppliedEndLifecycle(t *testing.T) {
 	require.Zero(t, sc.appliedEnd[kv.AccountsDomain])
 }
 
-func TestStateCache_StaleSnapshotCannotFillAfterDelete(t *testing.T) {
+func TestStateCache_StaleViewCannotFillAfterDelete(t *testing.T) {
 	b := 1 * datasize.MB
 	sc := NewStateCache(b, b, b, b)
 	t.Cleanup(sc.Close)
@@ -923,10 +923,10 @@ func TestStateCache_StaleSnapshotCannotFillAfterDelete(t *testing.T) {
 
 	sc.FillIfFresh(kv.AccountsDomain, key, stale, 10, 11)
 	_, ok = sc.Get(kv.AccountsDomain, key)
-	require.False(t, ok, "a snapshot older than the deletion must not fill afterward")
+	require.False(t, ok, "a view older than the deletion must not fill afterward")
 }
 
-func TestStateCache_FileEndSnapshotCannotFillAtAppliedTx(t *testing.T) {
+func TestStateCache_FileEndViewCannotFillAtAppliedTx(t *testing.T) {
 	b := 1 * datasize.MB
 	sc := NewStateCache(b, b, b, b)
 	t.Cleanup(sc.Close)
@@ -937,7 +937,7 @@ func TestStateCache_FileEndSnapshotCannotFillAtAppliedTx(t *testing.T) {
 
 	sc.FillIfFresh(kv.AccountsDomain, key, stale, 99, 100)
 	_, ok := sc.Get(kv.AccountsDomain, key)
-	require.False(t, ok, "a [0,100) snapshot does not contain the applied tx 100")
+	require.False(t, ok, "a [0,100) view does not contain the applied tx 100")
 
 	fresh := makeValue(2)
 	sc.FillIfFresh(kv.AccountsDomain, key, fresh, 100, 101)
@@ -956,18 +956,18 @@ func TestStateCache_ApplyDeleteAtomicWithFill(t *testing.T) {
 	value := makeValue(1)
 	for round := range 20000 {
 		appliedTxNum := uint64(round*2 + 1)
-		snapshotEnd := appliedTxNum + 1
+		visibleEnd := appliedTxNum + 1
 		sc.Apply(kv.AccountsDomain, progressKey, value, appliedTxNum)
 
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			sc.Apply(kv.AccountsDomain, key, nil, snapshotEnd)
+			sc.Apply(kv.AccountsDomain, key, nil, visibleEnd)
 		}()
 		go func() {
 			defer wg.Done()
-			sc.FillIfFresh(kv.AccountsDomain, key, value, appliedTxNum, snapshotEnd)
+			sc.FillIfFresh(kv.AccountsDomain, key, value, appliedTxNum, visibleEnd)
 		}()
 		wg.Wait()
 

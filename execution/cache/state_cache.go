@@ -194,15 +194,15 @@ func (c *StateCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return cc.GetAddrCodeHash(addr)
 }
 
-// PutAddrCodeHashIfFresh conditionally fills a mapping from a current account snapshot.
-func (c *StateCache) PutAddrCodeHashIfFresh(addr []byte, h [32]byte, txNum, snapshotEnd uint64) {
+// PutAddrCodeHashIfFresh conditionally fills a mapping from a current account read view.
+func (c *StateCache) PutAddrCodeHashIfFresh(addr []byte, h [32]byte, txNum, visibleEnd uint64) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
 	}
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
-	if snapshotEnd < c.appliedEnd[kv.AccountsDomain] {
+	if visibleEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
 	cc.PutAddrCodeHash(addr, h, txNum)
@@ -226,9 +226,9 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, txNum uint6
 	cache.Put(key, common.Copy(value), txNum)
 }
 
-// FillIfFresh conditionally inserts a snapshot read without replacing an
-// authoritative entry. Negative values use the snapshot's last visible txNum.
-func (c *StateCache) FillIfFresh(domain kv.Domain, key []byte, value []byte, readTxNum, snapshotEnd uint64) {
+// FillIfFresh conditionally inserts a value read from a read view without
+// replacing an authoritative entry. Negatives use the view's last included txNum.
+func (c *StateCache) FillIfFresh(domain kv.Domain, key []byte, value []byte, readTxNum, visibleEnd uint64) {
 	cache := c.caches[domain]
 	if cache == nil || (domain == kv.CodeDomain && len(value) == 0) {
 		return
@@ -241,7 +241,7 @@ func (c *StateCache) FillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
-	if snapshotEnd < c.appliedEnd[domain] {
+	if visibleEnd < c.appliedEnd[domain] {
 		return
 	}
 
@@ -253,8 +253,8 @@ func (c *StateCache) FillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 	}
 	if len(value) == 0 {
 		readTxNum = 0
-		if snapshotEnd > 0 {
-			readTxNum = snapshotEnd - 1
+		if visibleEnd > 0 {
+			readTxNum = visibleEnd - 1
 		}
 	}
 	cache.PutIfAbsent(key, common.Copy(value), readTxNum)
@@ -274,7 +274,7 @@ func (c *StateCache) Apply(domain kv.Domain, key, value []byte, txNum uint64) {
 	var codeHash []byte
 	if domain == kv.CodeDomain && len(value) > 0 {
 		// Copy before hashing so the stored bytes and codeHash come from the
-		// same snapshot of the caller-owned buffer.
+		// same copy of the caller-owned buffer.
 		value = common.Copy(value)
 		codeHash = crypto.Keccak256(value)
 	}

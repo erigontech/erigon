@@ -69,7 +69,7 @@ func TestCodeHashForAddr_InBatchAccountWinsOverStaleLRU(t *testing.T) {
 	})
 }
 
-// The addr→codeHash admission gate vouches for the tx snapshot's frontier, but
+// The addr→codeHash admission gate vouches for the tx read view's frontier, but
 // resolve() may serve the account record from the shared accounts cache, which
 // lags a just-committed flush until the apply loop reaches the key. A
 // cache-sourced record must therefore never seed the mapping — an apply
@@ -122,9 +122,9 @@ func TestCodeHashForAddr_CacheSourcedRecordDoesNotSeedMapping(t *testing.T) {
 	require.False(t, ok, "a cache-sourced account record must not seed the addr→codeHash mapping")
 }
 
-// A record read from the tx snapshot (accounts-cache miss) is exactly what the
-// admission gate vouches for, so it still seeds the mapping.
-func TestCodeHashForAddr_SnapshotSourcedRecordSeedsMapping(t *testing.T) {
+// A record read from the tx's read view (accounts-cache miss) is exactly what
+// the admission gate vouches for, so it still seeds the mapping.
+func TestCodeHashForAddr_ViewSourcedRecordSeedsMapping(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
@@ -164,6 +164,6 @@ func TestCodeHashForAddr_SnapshotSourcedRecordSeedsMapping(t *testing.T) {
 	got := sd.CodeHashForAddr(roTx, addr[:], 20)
 	require.Equal(t, codeHash[:], got)
 	h, ok := sc.GetAddrCodeHash(addr[:])
-	require.True(t, ok, "a snapshot-sourced record must seed the mapping")
+	require.True(t, ok, "a view-sourced record must seed the mapping")
 	require.Equal(t, [32]byte(codeHash), h)
 }

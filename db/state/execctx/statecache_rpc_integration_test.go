@@ -256,5 +256,5 @@ func testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t *testing.T, domain k
 	freshDomains.SetStateCacheForTest(stateCache)
 	got, _, err := freshDomains.GetLatest(domain, freshTx, key)
 	require.NoError(t, err)
-	require.Empty(t, got, "the old RPC snapshot must not repopulate the shared cache after the deletion")
+	require.Empty(t, got, "the old RPC read view must not repopulate the shared cache after the deletion")
 }
