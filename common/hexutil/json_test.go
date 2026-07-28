@@ -50,6 +50,47 @@ func bigFromString(s string) *big.Int {
 
 var errJSONEOF = errors.New("unexpected end of JSON input")
 
+var unmarshalBytesTests = []unmarshalTest{
+	{input: "", wantErr: errJSONEOF},
+	{input: "null", wantErr: errNonString(bytesT)},
+	{input: "10", wantErr: errNonString(bytesT)},
+	{input: `"0"`, wantErr: wrapTypeError(ErrMissingPrefix, bytesT)},
+	{input: `"0x0"`, wantErr: wrapTypeError(ErrOddLength, bytesT)},
+	{input: `"0xxx"`, wantErr: wrapTypeError(ErrSyntax, bytesT)},
+	{input: `"0x01zz01"`, wantErr: wrapTypeError(ErrSyntax, bytesT)},
+	{input: `""`, want: []byte{}},
+	{input: `"0x"`, want: []byte{}},
+	{input: `"0x02"`, want: []byte{0x02}},
+	{input: `"0X02"`, want: []byte{0x02}},
+	{input: `"0xffffffffff"`, want: []byte{0xff, 0xff, 0xff, 0xff, 0xff}},
+}
+
+func TestUnmarshalBytes(t *testing.T) {
+	for idx, test := range unmarshalBytesTests {
+		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
+			var v Bytes
+			err := json.Unmarshal([]byte(test.input), &v)
+			checkError(t, test.input, err, test.wantErr)
+			if test.want != nil {
+				require.EqualValues(t, test.want, []byte(v))
+			}
+		})
+	}
+}
+
+func TestBytesUnmarshalTextInvalidHex(t *testing.T) {
+	var v Bytes
+	require.ErrorIs(t, v.UnmarshalText([]byte("0x01zz01")), ErrSyntax)
+}
+
+func TestBytesUnmarshalJSONInvalidHex(t *testing.T) {
+	var v Bytes
+	err := json.Unmarshal([]byte(`"0x01zz01"`), &v)
+	var typeErr *json.UnmarshalTypeError
+	require.ErrorAs(t, err, &typeErr)
+	require.Equal(t, ErrSyntax.Error(), typeErr.Value)
+}
+
 var unmarshalBigTests = []unmarshalTest{
 	// invalid encoding
 	{input: "", wantErr: errJSONEOF},
