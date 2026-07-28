@@ -277,7 +277,9 @@ type RwTx struct {
 }
 
 type domainVisibleEnds struct {
-	ends  [kv.DomainLen]uint64
+	// ends is atomic so a lock-free read can overlap a reset-and-reload of
+	// the same slot without a data race.
+	ends  [kv.DomainLen]atomic.Uint64
 	mu    sync.Mutex
 	state atomic.Uint32
 }
@@ -289,7 +291,7 @@ func (v *domainVisibleEnds) get(tx *Tx, domain kv.Domain) (uint64, bool) {
 	bit := uint32(1) << uint32(domain)
 	state := v.state.Load()
 	if state&bit != 0 {
-		return v.ends[domain], state&(bit<<uint32(kv.DomainLen)) != 0
+		return v.ends[domain].Load(), state&(bit<<uint32(kv.DomainLen)) != 0
 	}
 	return v.load(tx, domain, bit)
 }
@@ -302,14 +304,14 @@ func (v *domainVisibleEnds) load(tx *Tx, domain kv.Domain, bit uint32) (uint64, 
 	availableBit := bit << uint32(kv.DomainLen)
 	if state&bit == 0 {
 		end, ok := tx.aggtx.DomainVisibleEnd(domain, tx.Tx)
-		v.ends[domain] = end
+		v.ends[domain].Store(end)
 		state |= bit
 		if ok {
 			state |= availableBit
 		}
 		v.state.Store(state)
 	}
-	return v.ends[domain], state&availableBit != 0
+	return v.ends[domain].Load(), state&availableBit != 0
 }
 
 // reset takes mu so an in-flight load can't re-store pre-reset bits.
