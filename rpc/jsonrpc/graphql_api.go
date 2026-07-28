@@ -391,7 +391,7 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 	var tx kv.TemporalTx = roTx
 	if api.filters != nil {
 		if sd := api.filters.LatestSD(); sd != nil {
-			if overlayTx := sd.BlockOverlayTemporalTx(roTx); overlayTx != nil {
+			if overlayTx := sd.OverlayTemporalTx(roTx); overlayTx != nil {
 				tx = overlayTx
 			}
 		}

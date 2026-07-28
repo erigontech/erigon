@@ -138,7 +138,7 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 		// generation chain, not just parentSD's local overlay — otherwise block
 		// data held in an ancestor generation is missed and executionAt reads
 		// stale, which desyncs the builder from the txpool's head.
-		if v := parentSD.BlockOverlayTemporalTx(tx); v != nil {
+		if v := parentSD.OverlayTemporalTx(tx); v != nil {
 			compositeTx = v
 		}
 	}

@@ -572,7 +572,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 		// chain must be layered ahead of the tx so an uncommitted ancestor
 		// generation's block data stays visible until its commit lands.
 		var blockTx kv.Tx = execRoTx
-		if v := te.doms.BlockOverlayTemporalTx(execRoTx); v != nil {
+		if v := te.doms.OverlayTemporalTx(execRoTx); v != nil {
 			blockTx = v
 		}
 

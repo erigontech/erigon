@@ -651,7 +651,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// block-data reads cascade through the same generations that domain-state
 	// reads do — never a separate, divergent capture.
 	valOverlayBase := kv.TemporalTx(roTx)
-	if v := doms.ParentBlockOverlayTemporalTx(roTx); v != nil {
+	if v := doms.ParentOverlayTemporalTx(roTx); v != nil {
 		valOverlayBase = v
 	}
 	if err := doms.InitBlockOverlay(valOverlayBase, roTx.Debug().Dirs().Tmp); err != nil {

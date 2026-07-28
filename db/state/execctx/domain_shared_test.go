@@ -2064,7 +2064,7 @@ func TestBlockOverlay_DomainReadsRegression(t *testing.T) {
 	require.Equal(t, value, gotValHist)
 
 	// --- Secondary path: overlay.NewTemporalReadView returns *OverlayTemporalReadView ---
-	overlayTx := sd.BlockOverlayTemporalTx(tx)
+	overlayTx := sd.OverlayTemporalTx(tx)
 	require.NotNil(t, overlayTx)
 
 	gotVal2, ok, err := overlayTx.GetAsOf(kv.ReceiptDomain, key, txNum+1)

@@ -52,7 +52,7 @@ type ScopedReadView struct {
 }
 
 // Tx returns the pinned base roTx. Readers pass it to sd.AsGetter /
-// BlockOverlay().NewReadView / BlockOverlayTemporalTx.
+// BlockOverlay().NewReadView / OverlayTemporalTx.
 func (v *ScopedReadView) Tx() kv.TemporalTx { return v.roTx }
 
 // HeadSD returns the head SharedDomains this view is pinned to, or nil when the

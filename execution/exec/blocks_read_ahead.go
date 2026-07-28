@@ -166,7 +166,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 		} else {
 			var balSrc kv.TemporalTx = btx
 			if sd != nil {
-				if ov := sd.BlockOverlayTemporalTx(btx); ov != nil {
+				if ov := sd.OverlayTemporalTx(btx); ov != nil {
 					balSrc = ov
 				}
 			}

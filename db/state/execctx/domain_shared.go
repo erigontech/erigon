@@ -727,10 +727,10 @@ func (sd *SharedDomains) CloseBlockOverlay() {
 	}
 }
 
-// BlockOverlayTemporalTx returns a read-only temporal view of the block overlay.
-// This allows consumers (RPC, shutter) to read uncommitted block data with
+// OverlayTemporalTx returns a read-only temporal view of the overlay. This
+// allows consumers (RPC, shutter) to read uncommitted overlay data with
 // temporal (state history) support. Returns nil if no overlay is active.
-func (sd *SharedDomains) BlockOverlayTemporalTx(roTx kv.TemporalTx) kv.TemporalTx {
+func (sd *SharedDomains) OverlayTemporalTx(roTx kv.TemporalTx) kv.TemporalTx {
 	// Chain the read view through the parent generations' block overlays, oldest
 	// ancestor first, bottoming out at roTx — NewTemporalReadView rebinds the
 	// fallthrough base, so the ancestor chain must be built explicitly here. This
@@ -738,7 +738,7 @@ func (sd *SharedDomains) BlockOverlayTemporalTx(roTx kv.TemporalTx) kv.TemporalT
 	// ancestor generation stays visible until its commit lands.
 	base := roTx
 	if sd.parent != nil {
-		if pv := sd.parent.BlockOverlayTemporalTx(roTx); pv != nil {
+		if pv := sd.parent.OverlayTemporalTx(roTx); pv != nil {
 			base = pv
 		}
 	}
@@ -752,15 +752,15 @@ func (sd *SharedDomains) BlockOverlayTemporalTx(roTx kv.TemporalTx) kv.TemporalT
 	return overlay.NewTemporalReadView(base)
 }
 
-// ParentBlockOverlayTemporalTx returns the block-overlay read view of the parent
-// chain only (excluding this SD's own overlay), or nil when there is no parent.
+// ParentOverlayTemporalTx returns the overlay read view of the parent chain
+// only (excluding this SD's own overlay), or nil when there is no parent.
 // A reader derives its overlay base from this so the base and the chain it later
-// walks via BlockOverlayTemporalTx are the same generations — they cannot diverge.
-func (sd *SharedDomains) ParentBlockOverlayTemporalTx(roTx kv.TemporalTx) kv.TemporalTx {
+// walks via OverlayTemporalTx are the same generations — they cannot diverge.
+func (sd *SharedDomains) ParentOverlayTemporalTx(roTx kv.TemporalTx) kv.TemporalTx {
 	if sd.parent == nil {
 		return nil
 	}
-	return sd.parent.BlockOverlayTemporalTx(roTx)
+	return sd.parent.OverlayTemporalTx(roTx)
 }
 
 // InitBlockOverlay creates (or replaces) the block-level metadata overlay backed by

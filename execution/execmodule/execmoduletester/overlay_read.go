@@ -76,7 +76,7 @@ func wrapSDTx(base kv.TemporalTx, sd *execctx.SharedDomains) kv.TemporalTx {
 		return base
 	}
 	read := base
-	if v := sd.BlockOverlayTemporalTx(base); v != nil {
+	if v := sd.OverlayTemporalTx(base); v != nil {
 		read = v
 	}
 	return &sdRoTx{TemporalTx: read, base: base, sd: sd}

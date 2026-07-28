@@ -246,7 +246,7 @@ func (e *ExecModule) latestGen() *execctx.SharedDomains {
 // FCU's writes instead of a stale DB. Returns roTx unchanged when there is none.
 func (e *ExecModule) overlayBaseFor(roTx kv.TemporalTx) kv.TemporalTx {
 	if parent := e.latestGen(); parent != nil {
-		if v := parent.BlockOverlayTemporalTx(roTx); v != nil {
+		if v := parent.OverlayTemporalTx(roTx); v != nil {
 			return v
 		}
 	}

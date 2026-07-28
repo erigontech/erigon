@@ -1186,7 +1186,7 @@ func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
 		// Chain every ancestor generation's overlay when the base tx is temporal;
 		// a non-temporal tx cannot carry the chain, so fall back to the leaf.
 		if ttx, ok := tx.(kv.TemporalTx); ok {
-			if v := sd.BlockOverlayTemporalTx(ttx); v != nil {
+			if v := sd.OverlayTemporalTx(ttx); v != nil {
 				return v
 			}
 		}
@@ -1205,11 +1205,11 @@ func (ff *Filters) WithTemporalOverlay(tx kv.TemporalTx) kv.TemporalTx {
 	if sd == nil {
 		return tx
 	}
-	// Route through BlockOverlayTemporalTx so the view chains every ancestor
+	// Route through OverlayTemporalTx so the view chains every ancestor
 	// generation's block overlay, not just the leaf — otherwise reads miss
 	// uncommitted block data from earlier FCUs.
 	if sd.BlockOverlay() != nil {
-		if v := sd.BlockOverlayTemporalTx(tx); v != nil {
+		if v := sd.OverlayTemporalTx(tx); v != nil {
 			return v
 		}
 	}

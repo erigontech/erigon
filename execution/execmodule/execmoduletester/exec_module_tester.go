@@ -979,7 +979,7 @@ func (emt *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
 	// it lands in the raw DB, so read through the overlay when one is published.
 	var roTx kv.Tx = baseTx
 	if sd := emt.PublishedSD(); sd != nil {
-		if v := sd.BlockOverlayTemporalTx(baseTx); v != nil {
+		if v := sd.OverlayTemporalTx(baseTx); v != nil {
 			roTx = v
 		}
 	}
