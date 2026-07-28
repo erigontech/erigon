@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -159,10 +160,10 @@ type IntraBlockState struct {
 	// The refund counter, also used by state transitioning.
 	refund uint64
 
-	txIndex  int
-	blockNum uint64
-	logs     []types.Logs
-	logSize  uint
+	txIndex         int
+	blockNum        uint64
+	logs            []types.Logs
+	logIndexInBlock uint
 
 	// Per-transaction access list
 	accessList accessList
@@ -401,7 +402,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.refund = uint64(0)
 	sdb.txIndex = 0
 	sdb.sdProbeEpoch++
-	sdb.logSize = 0
+	sdb.logIndexInBlock = 0
 	sdb.accessList.Reset()
 	clear(sdb.transientStorage)
 	sdb.versionMap = nil
@@ -419,7 +420,7 @@ func (sdb *IntraBlockState) Reset() {
 	// originals in sdb.versionedWrites are no longer referenced after the
 	// boundary call.  Walk the per-path maps and return every VW to its
 	// typed pool before resetting.
-	sdb.versionedWrites.ReleaseAndReset()
+	//sdb.versionedWrites.ReleaseAndReset()
 	sdb.recordAccess = false
 	sdb.accountReadDuration = 0
 	sdb.accountReadCount = 0
@@ -465,49 +466,28 @@ const maxReusableLogDataCap = 64 * 1024
 func (sdb *IntraBlockState) AllocLog(numTopics, dataSize int) *types.Log {
 	sdb.journal.addLogChange(sdb.txIndex)
 	ti := sdb.txIndex + 1
-	if len(sdb.logs) <= ti { // no slot for this tx yet
-		if ti < cap(sdb.logs) {
-			sdb.logs = sdb.logs[:ti+1]
-		} else {
-			for len(sdb.logs) <= ti {
-				sdb.logs = append(sdb.logs, nil)
-			}
-		}
+	if len(sdb.logs) <= ti {
+		sdb.logs = slices.Grow(sdb.logs[:0], ti+1)[:ti+1]
 	}
-	buf := sdb.logs[ti]
-	n := len(buf)
-	if n < cap(buf) {
-		buf = buf[:n+1] // re-slice instead of append, which would overwrite the reusable entry with nil
-	} else {
-		buf = append(buf, nil)
-	}
-	lp := buf[n] // a prior block's entry to reuse, or nil for a fresh slot
+	logIdx := len(sdb.logs[ti])
+	sdb.logs[ti] = slices.Grow(sdb.logs[ti][:0], logIdx+1)[:logIdx+1] // ensure enough capacity for 1 more log
+	logs := sdb.logs[ti]
+
+	lp := logs[logIdx] // a prior block's entry to reuse, or nil for a fresh slot
 	if lp == nil {
 		lp = &types.Log{}
-		buf[n] = lp
+		logs[logIdx] = lp
 	}
-	sdb.logs[ti] = buf
-
-	// The nil checks keep Topics/Data non-nil even when empty (make of size 0 is
-	// free), so hooks and copies marshal them as [] and 0x, never null.
-	if lp.Topics == nil || numTopics > cap(lp.Topics) {
-		lp.Topics = make([]common.Hash, numTopics)
-	} else {
-		lp.Topics = lp.Topics[:numTopics]
-	}
-	if lp.Data == nil || dataSize > cap(lp.Data) {
-		lp.Data = make([]byte, dataSize)
-	} else {
-		lp.Data = lp.Data[:dataSize]
-	}
+	lp.Topics = slices.Grow(lp.Topics[:0], numTopics)[:numTopics]
+	lp.Data = slices.Grow(lp.Data[:0], dataSize)[:dataSize]
 	lp.Removed = false // Address set by caller
 	lp.TxHash, lp.BlockHash = common.Hash{}, common.Hash{}
 	lp.TxIndex = hexutil.Uint(sdb.txIndex)
 	lp.BlockNumber = hexutil.Uint64(sdb.blockNum)
 	// Block-wide, not per-tx: receipts.DeriveFields reads Logs[0].Index to
 	// recover FirstLogIndexWithinBlock.
-	lp.Index = hexutil.Uint(sdb.logSize)
-	sdb.logSize++
+	lp.Index = hexutil.Uint(sdb.logIndexInBlock)
+	sdb.logIndexInBlock++
 	return lp
 }
 
@@ -515,7 +495,7 @@ func (sdb *IntraBlockState) AllocLog(numTopics, dataSize int) *types.Log {
 func (sdb *IntraBlockState) NotifyLog(lp *types.Log) {
 	if dbg.TraceLogs && (sdb.trace || dbg.TraceAccount(accounts.InternAddress(lp.Address).Handle())) {
 		var topics string
-		for i := 0; i < 4 && i < len(lp.Topics); i++ {
+		for i := 0; i < len(lp.Topics); i++ {
 			topics += "[" + hex.EncodeToString(lp.Topics[i][:]) + "]"
 		}
 		if topics == "" {
@@ -564,7 +544,7 @@ func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 }
 
 func (sdb *IntraBlockState) Logs() types.Logs {
-	all := make(types.Logs, 0, sdb.logSize)
+	all := make(types.Logs, 0, sdb.logIndexInBlock)
 	for _, lgs := range sdb.logs {
 		all = append(all, lgs...)
 	}
