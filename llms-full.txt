@@ -142,20 +142,19 @@ This path offers the simplest validator configuration by using Erigon's embedded
 **Steps for Minimal Downtime**
 
 1. **Preparation**: [Install](installation/) Erigon.
-2. **Configuration Check** (No Conflict): Ensure Erigon's standard [ports](../fundamentals/default-ports) (JSON-RPC, P2P) are different from Geth's. These ports are configured via the `--port` and `--p2p.allowed-ports` command-line options. For example:
+2. **Configuration Check** (No Conflict): Ensure Erigon's standard [ports](../fundamentals/default-ports) (JSON-RPC, P2P) are different from Geth's. The P2P listening port is configured via the `--port` command-line option. For example:
 
     ```sh
     erigon \
       --datadir=/data/erigon \
       --chain=mainnet \
-      --port=30304 \
-      --p2p.allowed-ports=30310,30311,30312,30313,30314,30315,30316
+      --port=30304
     ```
 3. **Synchronization**: Start syncing Erigon. Monitor the sync status using the `eth_syncing` JSON-[RPC method](../interacting-with-erigon/) or a health check.
 4. **Validator Swap**: Once Erigon is fully synced, shut down Geth and the external CL client.
 5. **Reconfiguration and Restart**:
-   * To restart Erigon, there's no need to specify `--port` or `--P2P.allowed-ports`. Refer to this [guide](../fundamentals/caplin) for additional Erigon + Caplin configuration recommendations.
-   * Crucially, reconfigure your **validator keys manager** to point directly to the Erigon Beacon API, as Erigon/Caplin now handles both layers internally).
+   * To restart Erigon, there's no need to specify `--port`. Refer to this [guide](../fundamentals/caplin) for additional Erigon + Caplin configuration recommendations.
+   * Crucially, reconfigure your **validator keys manager** to point directly to the Erigon Beacon API, as Erigon/Caplin now handles both layers internally.
 6. **Decommission Old Setup**: Verify Erigon/Caplin is proposing and attesting blocks correctly. If confirmed, safely remove Geth, the external CL client, and all their data, including the old JWT secret.
 
 Switch to an Erigon Execution Layer (EL) while keeping your current external Consensus Layer (CL) client (e.g., Prysm, Lighthouse) and your existing JWT secret. Start by syncing Erigon with Caplin as the CL, then configure it to use the external CL.
@@ -163,15 +162,14 @@ Switch to an Erigon Execution Layer (EL) while keeping your current external Con
 **Steps for Minimal Downtime**
 
 1. **Preparation**: [Install](installation/) Erigon.
-2. **Configuration Check**: run Erigon + Caplin simultaneously with Geth (or any other EL) for fast, parallel syncing and assign unique ports for its P2P networking via `--port` and `--p2p.allowed-ports` (check which ports your present
+2. **Configuration Check**: run Erigon + Caplin simultaneously with Geth (or any other EL) for fast, parallel syncing and assign a unique port for its P2P networking via `--port` (check which ports your present
    EL is using). For example:
 
     ```sh
     erigon \
       --datadir=/data/erigon \
       --chain=mainnet \
-      --port=30304 \
-      --p2p.allowed-ports=30310,30311,30312,30313,30314,30315,30316
+      --port=30304
     ```
 3. **Synchronization**: Monitor the sync status using the `eth_syncing` JSON-RPC method or a health check.
 4. **Validator Swap**: Once Erigon is fully synced, **shut down** both Geth and Erigon. **Keep the external CL client running.**
@@ -740,7 +738,7 @@ Once the image is installed, Erigon can be installed and kept up to date with yo
 sudo apt update && sudo apt install erigon
 ```
 
-For the full image, supported boards, and setup instructions, see the [Ethereum on ARM documentation](https://ethereum-on-arm-documentation.readthedocs.io/) and the [project on GitHub](https://github.com/diglos/ethereum-on-arm).
+For the full image, supported boards, and setup instructions, see the [Ethereum on ARM documentation](https://ethereum-on-arm-documentation.readthedocs.io/) and the [project on GitHub](https://github.com/EOA-Blockchain-Labs/ethereumonarm).
 
 :::info
 Ethereum on ARM is maintained independently by the community and is not an official Erigon distribution channel. The Erigon version available through its APT repository may lag behind the latest [GitHub release](https://github.com/erigontech/erigon/releases).
@@ -1446,7 +1444,7 @@ Erigon processes the chain in a series of **stages** rather than the traditional
 
 A simplified pipeline:
 
-```
+```text
 1. Snapshots    → fetch immutable history files via BitTorrent (OtterSync)
 2. Headers      → download and verify block headers
 3. Bodies       → download block bodies
@@ -1545,7 +1543,7 @@ This page covers the *what* and *where* of Erigon's data. For the *why* — flat
 
 ## The datadir at a glance
 
-```
+```text
 datadir/
 ├── chaindata/        # Active state + recent blocks (MDBX). Small, hot, mutable.
 ├── snapshots/        # Historical data as immutable .seg files. Large, cold.
@@ -1887,9 +1885,9 @@ When Caplin is running, it exposes a Beacon API that external tools can query. T
 | `--beacon.api.cors.allow-methods` | `GET, POST, PUT, DELETE, OPTIONS` | CORS allowed methods |
 | `--beacon.api.cors.allow-credentials` | `false` | Allow credentials in CORS requests |
 | `--beacon.api.protocol` | `tcp` | Network protocol (`tcp` or `tcp4` or `tcp6`) |
-| `--beacon.api.read.timeout` | `5s` | HTTP server read timeout |
-| `--beacon.api.write.timeout` | `31536000s` (~1 year) | HTTP server write timeout |
-| `--beacon.api.ide.timeout` | `25s` | HTTP server idle timeout (note: flag name is `ide` not `idle` — typo in source) |
+| `--beacon.api.read.timeout` | `5` | HTTP server read timeout, in seconds |
+| `--beacon.api.write.timeout` | `31536000` | HTTP server write timeout, in seconds (~1 year) |
+| `--beacon.api.idle.timeout` | `25` | HTTP server idle timeout, in seconds |
 
 ---
 
@@ -2049,9 +2047,7 @@ These flags manage network connectivity, peer discovery, and traffic control. Se
 * `--port value`: The main network listening port.
   * Default: `30303`
 * `--p2p.protocol value`: The version of the `eth` P2P protocol.
-  * Default: `68`, `69`
-* `--p2p.allowed-ports value`: A comma-separated list of allowed ports for different P2P protocols.
-  * Default: `30303, 30304, 30305, 30306, 30307`
+  * Default: `69`, `70`, `71`
 * `--nat value`: The NAT port mapping mechanism (See [here](/fundamentals/nat) for more details).
 * `--nodiscover`: Disables peer discovery.
   * Default: `false`
@@ -2235,13 +2231,6 @@ Flags for controlling logging and performance profiling. See [Logs](/fundamental
 
 Flags related to consensus mechanisms and network forks.
 
-* `--clique.checkpoint value`: The number of blocks after which to save the vote snapshot.
-  * Default: `10`
-* `--clique.snapshots value`: The number of recent vote snapshots to keep in memory.
-  * Default: `1024`
-* `--clique.signatures value`: The number of recent block signatures to keep in memory.
-  * Default: `16384`
-* `--clique.datadir value`: The path to the clique database folder.
 * `--fakepow`: Disables proof-of-work verification.
   * Default: `false`
 * `--gpo.blocks value`: The number of recent blocks to check for gas prices.
@@ -2629,14 +2618,13 @@ Erigon use the following default port for each service:
 | engine    | `9090`  | TCP       | gRPC Server                 | Private       |
 | engine    | `42069` | TCP & UDP | Snap sync (Bittorrent)      | Public        |
 | engine    | `8551`  | TCP       | Engine API (JWT auth)       | Private       |
-| Sentry    | `30303` | TCP & UDP | eth/68 peering              | Public        |
-| Sentry    | `30304` | TCP & UDP | eth/69 peering              | Public        |
+| Sentry    | `30303` | TCP & UDP | eth/69, eth/70, eth/71 peering | Public     |
 | Sentry    | `9091`  | TCP       | incoming gRPC Connections   | Private       |
 | RPC Daemon | `8545`  | TCP       | HTTP & WebSockets & GraphQL | Private       |
 | mcp       | `8553`  | TCP       | MCP server (AI assistants)  | Private       |
 | shutter   | `23102` | TCP       | Peering                     | Public        |
 
-Typically, `30303` and `30304` are exposed to the internet to allow incoming peering connections. `9090` is exposed only internally for RPC Daemon or other connections, (e.g. RPC Daemon -> erigon). Port `8551` (JWT authenticated) is exposed only internally for Engine API JSON-RPC queries from the Consensus Layer node.
+Typically, `30303` is exposed to the internet to allow incoming peering connections: a single listener serves every supported `eth` protocol version. `9090` is exposed only internally for RPC Daemon or other connections, (e.g. RPC Daemon -> erigon). Port `8551` (JWT authenticated) is exposed only internally for Engine API JSON-RPC queries from the Consensus Layer node.
 
 To ensure proper P2P functionality for both the Execution and Consensus layers use a minimal configuration without exposing unnecessary services:
 
@@ -2658,7 +2646,6 @@ Here is a comprehensive list of port-related options:
 ### Sentry
 
 * `--port [value]`: Network listening port (default: `30303`)
-* `--p2p.allowed-ports [value]`: Allowed ports to pick for different eth p2p protocol versions (default: `30303`, `30304`, `30305`, `30306`, `30307`)
 * `--sentry.api.addr [value]`: Comma separated Sentry addresses `<host>:<port>,<host>:<port>` (default `127.0.0.1:9091`)
 
 ### RPC Daemon
@@ -2682,10 +2669,6 @@ The embedded MCP server is enabled by default. To disable it, pass `--mcp.disabl
 * `--mcp.disable`: Disables the embedded MCP server (default: `false`)
 * `--mcp.addr [value]`: MCP server listening address (default: `127.0.0.1`)
 * `--mcp.port [value]`: MCP server listening port (default: `8553`)
-
-### Diagnostics
-
-* `--diagnostics.endpoint.port [value]`: Diagnostics HTTP server listening port (default: `6062`)
 
 ## Shutter Network Default Ports
 
@@ -3016,7 +2999,7 @@ For multiple instances, consider adjusting database parameters to reduce resourc
 | Engine    | 9090         | TCP      | gRPC Server (Private)    |
 | Engine    | 42069        | TCP/UDP  | BitTorrent (Public)      |
 | Engine    | 8551         | TCP      | Engine API (Private)     |
-| Sentry    | 30303/30304  | TCP/UDP  | P2P Peering (Public)     |
+| Sentry    | 30303        | TCP/UDP  | P2P Peering (Public)     |
 | RPC Daemon | 8545         | TCP      | HTTP/WebSocket (Private) |
 | MCP       | 8553         | TCP      | MCP Server (Private)     |
 
@@ -4054,10 +4037,6 @@ Usage:
 Flags:
       --datadir string                              path to Erigon working directory
       --db.read.concurrency int                     Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU) (default 1408)
-      --diagnostics.disabled                        Disable diagnostics
-      --diagnostics.endpoint.addr string            Diagnostics HTTP server listening interface (default "127.0.0.1")
-      --diagnostics.endpoint.port uint              Diagnostics HTTP server listening port (default 6062)
-      --diagnostics.speedtest                       Enable speed test
       --graphql                                     enables graphql endpoint (disabled by default)
       --grpc                                        Enable GRPC server
       --grpc.addr string                            GRPC server listening interface (default "localhost")
@@ -4096,7 +4075,6 @@ Flags:
       --metrics.addr string                         Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
       --metrics.port int                            Metrics HTTP server listening port (default 6061)
       --ots.search.max.pagesize uint                Max allowed page size for search methods (default 25)
-      --polygon.sync                                Enable if Erigon has been synced using the new polygon sync component
       --pprof                                       Enable the pprof HTTP server
       --pprof.addr string                           pprof HTTP server listening interface (default "127.0.0.1")
       --pprof.cpuprofile string                     Write CPU profile to the given file
@@ -4108,7 +4086,6 @@ Flags:
       --rpc.batch.limit int                         Maximum number of requests in a batch (default 100)
       --rpc.evmtimeout duration                     Maximum amount of time to wait for the answer from EVM call. (default 5m0s)
       --rpc.gascap uint                             Sets a cap on gas that can be used in eth_call/estimateGas (default 50000000)
-      --rpc.maxgetproofrewindblockcount.limit int   Max GetProof rewind block count (default 100000)
       --rpc.overlay.getlogstimeout duration         Maximum amount of time to wait for the answer from the overlay_getLogs call. (default 5m0s)
       --rpc.overlay.replayblocktimeout duration     Maximum amount of time to wait for the answer to replay a single block when called from an overlay_getLogs call. (default 10s)
       --rpc.returndata.limit int                    Maximum number of bytes returned from eth_call or similar invocations (default 100000)
@@ -4224,10 +4201,6 @@ Usage:
 Flags:
       --datadir string                     Data directory for the databases (default "/home/user/.local/share/erigon")
       --db.writemap                        Enable WRITE_MAP feature for fast database writes and fast commit times (default true)
-      --diagnostics.disabled               Disable diagnostics
-      --diagnostics.endpoint.addr string   Diagnostics HTTP server listening interface (default "127.0.0.1")
-      --diagnostics.endpoint.port uint     Diagnostics HTTP server listening port (default 6062)
-      --diagnostics.speedtest              Enable speed test
   -h, --help                               help for txpool
       --log.console.json                   Format console logs with JSON
       --log.console.verbosity string       Set the log level for console logs (default "info")
@@ -4350,10 +4323,6 @@ Usage:
 
 Flags:
       --datadir string                     Data directory for the databases (default "/home/user/.local/share/erigon")
-      --diagnostics.disabled               Disable diagnostics
-      --diagnostics.endpoint.addr string   Diagnostics HTTP server listening interface (default "127.0.0.1")
-      --diagnostics.endpoint.port uint     Diagnostics HTTP server listening port (default 6062)
-      --diagnostics.speedtest              Enable speed test
       --discovery.dns strings              Sets DNS discovery entry points (use "" to disable DNS)
       --healthcheck                        Enabling grpc health check
   -h, --help                               help for sentry
@@ -4366,7 +4335,7 @@ Flags:
       --log.dir.prefix string              The file name prefix for logs stored to disk
       --log.dir.verbosity string           Set the log verbosity for logs stored to disk (default "info")
       --log.json                           Format console logs with JSON
-      --maxpeers int                       Maximum number of network peers (network disabled if set to 0) (default 32)
+      --maxpeers int                       Maximum number of network peers (network disabled if set to 0) (default 64)
       --maxpendpeers int                   Maximum number of TCP connections pending to become connected peers (default 1000)
       --metrics                            Enable metrics collection and reporting
       --metrics.addr string                Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
@@ -4383,8 +4352,7 @@ Flags:
                                            
       --netrestrict string                 Restricts network communication to the given IP networks (CIDR masks)
       --nodiscover                         Disables the peer discovery mechanism (manual peer addition)
-      --p2p.allowed-ports uints            Allowed ports to pick for different eth p2p protocol versions as follows <porta>,<portb>,..,<porti> (default [30303,30304,30305,30306,30307])
-      --p2p.protocol uint                  Version of eth p2p protocol (default 68)
+      --p2p.protocol uint                  Version of eth p2p protocol (default [69,70,71])
       --port int                           Network listening port (default 30303)
       --pprof                              Enable the pprof HTTP server
       --pprof.addr string                  pprof HTTP server listening interface (default "127.0.0.1")
@@ -4464,10 +4432,6 @@ Flags:
       --chain string                       name of the network to join (default "mainnet")
       --datadir string                     Data directory for the databases (default "/home/admin/.local/share/erigon")
       --db.writemap                        Enable WRITE_MAP feature for fast database writes and fast commit times (default true)
-      --diagnostics.disabled               Disable diagnostics
-      --diagnostics.endpoint.addr string   Diagnostics HTTP server listening interface (default "127.0.0.1")
-      --diagnostics.endpoint.port uint     Diagnostics HTTP server listening port (default 6062)
-      --diagnostics.speedtest              Enable speed test
       --downloader.api.addr string         external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface (default "127.0.0.1:9093")
       --downloader.disable.ipv4            Turns off ipv4 for the downloader
       --downloader.disable.ipv6            Turns off ipv6 for the downloader
