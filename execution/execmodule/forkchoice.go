@@ -376,7 +376,15 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// The next semaphore acquirer must observe settled state, so the bg-commit/
 	// bg-prune paths run this eagerly before handing the semaphore to their goroutine.
 	cleanupBeforeSemaRelease := sync.OnceFunc(func() {
-		e.currentContext.ResetPendingUpdates()
+		// e.currentContext is written by InsertBlocks under e.lock; read it under
+		// the same lock so this cleanup (which may run on the FCU goroutine while
+		// a later InsertBlocks proceeds) doesn't race that write.
+		e.lock.RLock()
+		cc := e.currentContext
+		e.lock.RUnlock()
+		if cc != nil {
+			cc.ResetPendingUpdates()
+		}
 		e.forkValidator.ClearWithUnwind()
 	})
 	defer cleanupBeforeSemaRelease()
