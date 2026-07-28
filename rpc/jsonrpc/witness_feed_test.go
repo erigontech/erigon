@@ -105,10 +105,8 @@ func TestWitnessFeedConcurrent(t *testing.T) {
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
 
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -116,7 +114,7 @@ func TestWitnessFeedConcurrent(t *testing.T) {
 				default:
 				}
 				ch := f.subscribe()
-				for j := 0; j < 8; j++ {
+				for range 8 {
 					select {
 					case <-ch:
 					case <-time.After(time.Millisecond):
@@ -124,12 +122,10 @@ func TestWitnessFeedConcurrent(t *testing.T) {
 				}
 				f.unsubscribe(ch)
 			}
-		}()
+		})
 	}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := uint64(0); ; i++ {
 			select {
 			case <-stop:
@@ -138,7 +134,7 @@ func TestWitnessFeedConcurrent(t *testing.T) {
 			}
 			f.publish(mkPush(i))
 		}
-	}()
+	})
 
 	time.Sleep(100 * time.Millisecond)
 	close(stop)

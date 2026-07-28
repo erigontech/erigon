@@ -104,4 +104,3 @@ func TestWitnessCacheWiringSharedFeed(t *testing.T) {
 		t.Fatal("builder publish did not reach the serve-side subscriber over the shared feed")
 	}
 }
-
