@@ -3,7 +3,6 @@ package ethapi
 import (
 	"bytes"
 	"encoding/json"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -61,7 +60,7 @@ func TestNewRPCTransaction_SignedLegacyEIP155(t *testing.T) {
 	// from is recovered with the chain id derived from the EIP-155 v value.
 	require.Equal(t, from, result.From)
 	require.NotNil(t, result.ChainID)
-	require.Equal(t, chainID.ToBig(), (*big.Int)(result.ChainID))
+	require.Equal(t, chainID.ToBig(), result.ChainID.ToInt())
 }
 
 func TestNewRPCTransaction_EIP1559_YParityZero(t *testing.T) {
