@@ -908,7 +908,11 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	if cs == nil {
 		cs = &changeset.StateChangeSet{}
 	}
-	if localAcc := cc.buildResultLocalChangeset(t.blockNum); localAcc != nil {
+	localAcc, err := cc.buildResultLocalChangeset(t.blockNum)
+	if err != nil {
+		return nil, fmt.Errorf("changeset reconstruct block %d: %w", t.blockNum, err)
+	}
+	if localAcc != nil {
 		cs.Diffs[kv.AccountsDomain] = localAcc.Diffs[kv.AccountsDomain]
 		cs.Diffs[kv.StorageDomain] = localAcc.Diffs[kv.StorageDomain]
 		cs.Diffs[kv.CodeDomain] = localAcc.Diffs[kv.CodeDomain]
@@ -928,7 +932,11 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 // already recorded. A fold computes the root (and Diffs[3]) ahead of the tx-result
 // stream, so 0..2 cannot be built at fold time; this closes that gap.
 func (cc *commitmentCalculator) finalizeFoldedChangeset(blockNum uint64, blockHash common.Hash) {
-	localAcc := cc.buildResultLocalChangeset(blockNum)
+	localAcc, err := cc.buildResultLocalChangeset(blockNum)
+	if err != nil {
+		cc.logger.Warn("["+cc.logPrefix+"] changeset reconstruct: reader error", "block", blockNum, "err", err)
+		return
+	}
 	if localAcc == nil {
 		return
 	}

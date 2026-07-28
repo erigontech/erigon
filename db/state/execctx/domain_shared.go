@@ -870,7 +870,15 @@ func (sd *SharedDomains) InlineTouchKeyDisabled() bool {
 }
 
 func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
-	return sd.mem.HasPrefix(domain, prefix, roTx)
+	if k, v, ok, err := sd.mem.HasPrefix(domain, prefix, roTx); ok || err != nil {
+		return k, v, ok, err
+	}
+	for p := sd.parent; p != nil; p = p.parent {
+		if k, v, ok, err := p.mem.HasPrefix(domain, prefix, roTx); ok || err != nil {
+			return k, v, ok, err
+		}
+	}
+	return nil, nil, false, nil
 }
 
 func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
@@ -1583,7 +1591,15 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 }
 
 func (sd *SharedDomains) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return sd.mem.GetAsOf(domain, key, ts)
+	if v, ok, err = sd.mem.GetAsOf(domain, key, ts); ok || err != nil {
+		return v, ok, err
+	}
+	for p := sd.parent; p != nil; p = p.parent {
+		if v, ok, err = p.mem.GetAsOf(domain, key, ts); ok || err != nil {
+			return v, ok, err
+		}
+	}
+	return nil, false, nil
 }
 
 // RangeAsOf returns domain values over [fromKey, toKey) as of ts, merging the

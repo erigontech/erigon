@@ -923,7 +923,7 @@ func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLe
 		for k, txNums := range byKey {
 			kept := txNums[:0]
 			for _, tn := range txNums {
-				if tn <= unwindToTxNum {
+				if tn < unwindToTxNum {
 					kept = append(kept, tn)
 				}
 			}

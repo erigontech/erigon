@@ -414,7 +414,7 @@ func applyOptions(opts []Option) options {
 		chainConfig:         chain.TestChainBerlinConfig,
 		experimentalBAL:     false,
 		sentryProtocol:      direct.ETH68,
-		fcuBackgroundCommit: true,
+		fcuBackgroundCommit: false,
 	}
 	for _, o := range opts {
 		o(&opt)

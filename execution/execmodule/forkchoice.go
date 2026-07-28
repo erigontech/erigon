@@ -773,8 +773,13 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			commitTimings = ct
 
 			// Prune: background by default (fcuBackgroundPrune=true).
+			// The goroutine holds an enterForeground/leaveForeground pair so the
+			// commit worker cannot start a commit (and open a conflicting RwTx)
+			// while RunPrune shares the pipeline Sync with the next FCU's RunLoop.
 			if e.fcuBackgroundPrune {
+				e.enterForeground()
 				go func() {
+					defer e.leaveForeground()
 					if _, err := e.runForkchoicePrune(initialCycle); err != nil && !errors.Is(err, context.Canceled) {
 						e.logger.Error("Error running background prune", "err", err)
 					}

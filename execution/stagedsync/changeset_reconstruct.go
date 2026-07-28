@@ -152,14 +152,16 @@ func (cc *commitmentCalculator) feedChangeset(writes *state.WriteSet, txNum uint
 		if cc.state.storageEnum == nil {
 			continue
 		}
-		_ = cc.state.storageEnum.EachStorageSlot(addr, func(key accounts.StorageKey) error {
+		if err := cc.state.storageEnum.EachStorageSlot(addr, func(key accounts.StorageKey) error {
 			keyVal := key.Value()
 			composite := make([]byte, 20+32)
 			copy(composite, addrVal[:])
 			copy(composite[20:], keyVal[:])
 			cc.appendCS(kv.StorageDomain, composite, nil, txNum)
 			return nil
-		})
+		}); err != nil {
+			cc.logger.Warn("["+cc.logPrefix+"] changeset reconstruct: storage enumeration error", "addr", addr, "err", err)
+		}
 	}
 }
 
@@ -167,19 +169,18 @@ func (cc *commitmentCalculator) feedChangeset(writes *state.WriteSet, txNum uint
 // builder AT COMPUTE TIME — resolving prevs when block N-1 is settled in sd.mem
 // (matching exec's block-end flush) — and returns the account/storage/code diffs
 // (domains 0..2) as a StateChangeSet. The commitment domain (3) is left empty for
-// the caller's compute to fill. Returns nil if no writes were buffered for the
-// block or a prev-read failed.
-func (cc *commitmentCalculator) buildResultLocalChangeset(blockNum uint64) *changeset.StateChangeSet {
+// the caller's compute to fill. Returns (nil, nil) when no writes were buffered
+// for the block; returns (nil, err) on a prev-read failure.
+func (cc *commitmentCalculator) buildResultLocalChangeset(blockNum uint64) (*changeset.StateChangeSet, error) {
 	if cc.csBuilderBlock != blockNum {
-		return nil
+		return nil, nil
 	}
 	b := newChangesetBuilder(cc.prevReader, cc.doms.StepSize())
 	for _, w := range cc.csPending {
 		b.record(w.domain, w.key, w.val, w.txNum)
 	}
 	if err := b.err(); err != nil {
-		cc.logger.Warn("["+cc.logPrefix+"] changeset reconstruct: reader error", "block", blockNum, "err", err)
-		return nil
+		return nil, err
 	}
-	return b.result()
+	return b.result(), nil
 }

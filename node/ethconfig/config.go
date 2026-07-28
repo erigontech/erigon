@@ -113,7 +113,7 @@ var Defaults = Config{
 	},
 	FcuTimeout:          1 * time.Second,
 	FcuBackgroundPrune:  true,
-	FcuBackgroundCommit: true,
+	FcuBackgroundCommit: false,
 	ExperimentalBAL:     false,
 	WarmupKzgCtxOnInit:  true,
 }
