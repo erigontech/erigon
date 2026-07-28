@@ -18,8 +18,8 @@ package flags
 
 import "github.com/spf13/pflag"
 
-// dirValue is a pflag.Value that expands "~" and "$VAR" in the assigned path,
-// mirroring the urfave DirectoryFlag used by the main erigon binary.
+// dirValue is a pflag.Value that expands a leading "~/" and "$VAR" in the
+// assigned path, mirroring the urfave DirectoryFlag used by the main erigon binary.
 type dirValue struct{ p *string }
 
 func (d *dirValue) String() string {
@@ -40,8 +40,8 @@ func (d *dirValue) Set(s string) error {
 func (d *dirValue) Type() string { return "string" }
 
 // DirVar registers a cobra/pflag string flag for a directory path, expanding
-// "~" and "$VAR" at parse time so all binaries normalize --datadir identically
-// to the erigon binary's DirectoryFlag.
+// a leading "~/" and "$VAR" at parse time so all binaries normalize --datadir
+// identically to the erigon binary's DirectoryFlag.
 func DirVar(fs *pflag.FlagSet, p *string, name, value, usage string) {
 	if value != "" {
 		value = expandPath(value)
