@@ -84,6 +84,7 @@ type RequestGenerator interface {
 	FilterLogs(ctx context.Context, query bind.FilterQuery) ([]types.Log, error)
 	SubscribeFilterLogs(ctx context.Context, query bind.FilterQuery, ch chan<- types.Log) (event.Subscription, error)
 	Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (event.Subscription, error)
+	UnsubscribeAll()
 	TxpoolContent() (int, int, int, error)
 	Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error)
 	TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error)

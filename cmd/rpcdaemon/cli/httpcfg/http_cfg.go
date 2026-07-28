@@ -111,6 +111,7 @@ type HttpCfg struct {
 	WsMaxConnections                  int  // WebSocket connection limit; 0 = unlimited
 	TraceCompatibility                bool // Bug for bug compatibility for trace_ routines with OpenEthereum
 	GethCompatibility                 bool // Geth-compatible storage iteration order for debug_storageRangeAt
+	WitnessCacheBlocks                uint // Recent blocks to eagerly cache legacy debug_executionWitness results for; 0 disables (embedded RPC only)
 	TxPoolApiAddr                     string
 	StateCache                        kvcache.CoherentConfig
 	Snap                              ethconfig.BlocksFreezing

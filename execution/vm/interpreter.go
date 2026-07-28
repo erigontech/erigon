@@ -118,7 +118,7 @@ var contextPool = sync.Pool{
 func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallContext {
 	ctx, ok := contextPool.Get().(*CallContext)
 	if !ok {
-		log.Error("Type assertion failure", "err", "cannot get Stack pointer from stackPool")
+		log.Error("Type assertion failure", "err", "cannot get CallContext from contextPool")
 	}
 
 	ctx.gas = gas.Regular
@@ -303,13 +303,7 @@ func (ctx *CallContext) callGas(evm *EVM) mdgas.MdGas {
 }
 
 func copyJumpTable(jt *JumpTable) *JumpTable {
-	var copy JumpTable
-	for i, op := range jt {
-		if op != nil {
-			opCopy := *op
-			copy[i] = &opCopy
-		}
-	}
+	copy := *jt
 	return &copy
 }
 
@@ -361,6 +355,14 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 	}
 
 	return jt
+}
+
+// stackBoundsErr reconstructs which bound the failed range check violated.
+func stackBoundsErr(sLen int, operation *operation) error {
+	if sLen < operation.numPop {
+		return &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
+	}
+	return &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 }
 
 // traceGas picks the figure the dev instruction trace should report: call
@@ -458,9 +460,8 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 	// Hoist to locals so the compiler sees them as loop-invariant.
 	anyTrace := dbg.TraceDynamicGas || debug || trace
-
+	stack := &callContext.Stack
 	jt := evm.jt
-	_ = jt[0] // nil-check the jump table out of the loop
 
 	for {
 		callContext.cacheGen++
@@ -471,13 +472,12 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(pc)
-		operation := jt[op]
+		operation := &jt[op]
 		cost = operation.constantGas // For tracing
-		// Validate stack
-		if sLen := callContext.Stack.len(); sLen < operation.numPop {
-			return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-		} else if sLen > operation.maxStack {
-			return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
+		// a stack shallower than numPop wraps negative and fails the compare.
+		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+			return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 		}
 		// for tracing: this gas consumption event is emitted below in the debug section.
 		if callContext.gas < cost {
