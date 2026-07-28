@@ -1410,3 +1410,78 @@ func TestStreamResetSliceRdrCoherency(t *testing.T) {
 		check(t, s, false)
 	})
 }
+
+// TestAddrRefSlotImmutability pins the contract that lets transaction decoders
+// hold AddrRef results long-term: a returned slot is a copy that never aliases
+// the input or the stream's scratch storage, and no later use of the stream —
+// chunk refills, Reset, or pooled reuse — may overwrite it.
+func TestAddrRefSlotImmutability(t *testing.T) {
+	const n = 40
+	want := make([]common.Address, n)
+	var enc []byte
+	for i := range want {
+		for j := range want[i] {
+			want[i][j] = byte(1 + i + j)
+		}
+		enc = append(enc, 0x80+20)
+		enc = append(enc, want[i][:]...)
+	}
+
+	input := bytes.Clone(enc)
+	s := NewBytesStream(input)
+	got := make([]*common.Address, n)
+	for i := range got {
+		p, err := s.AddrRef()
+		if err != nil {
+			t.Fatalf("AddrRef %d: %v", i, err)
+		}
+		got[i] = p
+	}
+
+	checkAll := func(stage string) {
+		t.Helper()
+		for i, p := range got {
+			if *p != want[i] {
+				t.Fatalf("%s: address %d changed: got %x, want %x", stage, i, *p, want[i])
+			}
+		}
+	}
+
+	for i := range input {
+		input[i] = 0xFF
+	}
+	for i := range s.uintbuf {
+		s.uintbuf[i] = 0xFF
+	}
+	checkAll("after scribbling input and scratch")
+
+	seen := make(map[*common.Address]struct{}, n)
+	for _, p := range got {
+		if _, dup := seen[p]; dup {
+			t.Fatalf("slot handed out twice: %p", p)
+		}
+		seen[p] = struct{}{}
+	}
+
+	other := common.Address{19: 0xEE}
+	encOther := append([]byte{0x80 + 20}, other[:]...)
+	for range n {
+		s.Reset(bytes.NewReader(encOther), 0)
+		p, err := s.AddrRef()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if *p != other {
+			t.Fatalf("after Reset: got %x, want %x", *p, other)
+		}
+	}
+	checkAll("after Reset reuse")
+
+	PutStream(s)
+	s2 := NewBytesStream(encOther)
+	if p, err := s2.AddrRef(); err != nil || *p != other {
+		t.Fatalf("pooled reuse decode: %v %v", p, err)
+	}
+	PutStream(s2)
+	checkAll("after pooled reuse")
+}
