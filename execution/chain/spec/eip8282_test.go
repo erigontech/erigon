@@ -28,10 +28,13 @@ import (
 
 func TestDeveloperGenesisBuilderContracts(t *testing.T) {
 	genesis := chainspec.DeveloperGenesisBlock()
+	sentinel := common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 	tests := []struct {
-		name    string
-		address common.Address
-		code    []byte
+		name     string
+		address  common.Address
+		code     []byte
+		slot0    common.Hash
+		hasSlot0 bool
 	}{
 		{
 			name:    "deposit",
@@ -39,9 +42,11 @@ func TestDeveloperGenesisBuilderContracts(t *testing.T) {
 			code:    misc.BuilderDepositRequestCode,
 		},
 		{
-			name:    "exit",
-			address: common.HexToAddress("0x000064D678505AD48F8CCB093BC65613800E8282"),
-			code:    misc.BuilderExitRequestCode,
+			name:     "exit",
+			address:  common.HexToAddress("0x000064D678505AD48F8CCB093BC65613800E8282"),
+			code:     misc.BuilderExitRequestCode,
+			slot0:    sentinel,
+			hasSlot0: true,
 		},
 	}
 	for _, tt := range tests {
@@ -52,6 +57,9 @@ func TestDeveloperGenesisBuilderContracts(t *testing.T) {
 				require.True(t, ok)
 				require.Equal(t, uint64(1), account.Nonce)
 				require.Equal(t, tt.code, account.Code)
+				slot0, ok := account.Storage[common.Hash{}]
+				require.Equal(t, tt.hasSlot0, ok)
+				require.Equal(t, tt.slot0, slot0)
 			},
 		)
 	}

@@ -140,6 +140,7 @@ type ExecModuleTester struct {
 	HistoryV3      bool
 	cfg            ethconfig.Config
 	BlockSnapshots *blocksnapshots.RoSnapshots
+	borSnapshots   *heimdall.RoSnapshots
 	blockRetire    dbservices.BlockRetire
 	BlockReader    dbservices.FullBlockReader
 	ReceiptsReader *receipts.Generator
@@ -160,6 +161,9 @@ func (emt *ExecModuleTester) Close() {
 	}
 	if emt.BlockSnapshots != nil {
 		emt.BlockSnapshots.Close()
+	}
+	if emt.borSnapshots != nil {
+		emt.borSnapshots.Close()
 	}
 	if emt.DB != nil {
 		emt.DB.Close()
@@ -451,10 +455,13 @@ func addAmsterdamBuilderContracts(genesis *types.Genesis) {
 		Code:    misc.BuilderDepositRequestCode,
 		Nonce:   1,
 	}
+	slot := common.Hash{}
+	sentinel := common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 	genesis.Alloc[genesis.Config.GetBuilderExitContract().Value()] = types.GenesisAccount{
 		Balance: new(big.Int),
 		Code:    misc.BuilderExitRequestCode,
 		Nonce:   1,
+		Storage: map[common.Hash]common.Hash{slot: sentinel},
 	}
 }
 
@@ -554,6 +561,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		stateChangesClient: direct.NewStateDiffClientDirect(erigonGrpcServer),
 		PeerId:             gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots:     allSnapshots,
+		borSnapshots:       allBorSnapshots,
 		BlockReader:        br,
 		ReceiptsReader:     receipts.NewGenerator(dirs, br, engine, nil, 5*time.Second),
 		HistoryV3:          true,
@@ -761,7 +769,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, dispatcher, logger)
 
-	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil)
+	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil, mock.BlockReader)
 
 	mock.StateCache = &execmodule.Cache{}
 	onlySnapDownloadOnStart := cfg.Genesis.Config.Bor != nil

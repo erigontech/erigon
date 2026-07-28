@@ -415,7 +415,7 @@ func (s *SnapshotStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit 
 		for gg.HasNext() {
 			buf, _ = gg.Next(buf[:0])
 
-			raw := rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:]))
+			raw := rlp.RawValue(bytes.Clone(buf[length.Hash+length.BlockNum+8:]))
 			var event EventRecordWithTime
 			if err := event.UnmarshallBytes(raw); err != nil {
 				return nil, false, err

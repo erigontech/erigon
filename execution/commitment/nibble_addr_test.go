@@ -20,6 +20,7 @@
 package commitment
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -126,7 +127,7 @@ func findAddressForHexPrefix(nibblePrefix []byte, seed int) []byte {
 // mockTrieCtxFactory returns a TrieContextFactory that always returns the
 // given MockState and a no-op cleanup.
 func mockTrieCtxFactory(ms *MockState) TrieContextFactory {
-	return func() (PatriciaContext, func()) {
+	return func(context.Context) (PatriciaContext, func()) {
 		return ms, func() {}
 	}
 }

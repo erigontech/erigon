@@ -1771,7 +1771,7 @@ func drainHeaders(t *testing.T, ch <-chan [][]byte, timeout time.Duration) {
 // TestAssembleBlockStateGasLimit verifies that the builder respects the EIP-8037
 // block validity invariant: gas_used = max(regular, state) <= gas_limit.
 //
-// Contract creations have high intrinsic state gas (~184K per create at
+// Contract creations have high runtime state gas (~184K per create at
 // CostPerStateByte=1530, STATE_BYTES_PER_NEW_ACCOUNT=120) but low regular gas
 // (~30K). With a 500K gas limit, about 3 creates would push state gas past
 // the limit even though regular gas has room. Without the fix the builder
@@ -1808,7 +1808,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Submit 10 contract creation txns to the pool.
-	// Each has ~131K intrinsic state gas but only ~30K regular gas.
+	// Each has ~184K runtime state gas but only ~30K regular gas.
 	baseFee := chainPack.TopBlock.BaseFee().Uint64()
 	deployCode := []byte{0x60, 0x00} // PUSH1 0x00 — minimal contract
 	rlpTxs := make([][]byte, 10)
@@ -1859,14 +1859,12 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 }
 
 // TestAssembleBlockStateGasLimitSSTORE verifies the EIP-8037 block validity
-// invariant for execution-time state gas (SSTOREs), as opposed to intrinsic
-// state gas (contract creations tested above).
+// invariant for SSTORE state gas, as opposed to top-level runtime state gas
+// for contract creations tested above.
 //
-// A deployed contract writes 4 new storage slots per call (~150K execution
-// state gas, ~41K regular gas, 0 intrinsic state gas). The txpool cannot
-// filter these by state gas — only the check inside applyTransaction
-// (between ApplyMessage and FinalizeTx) prevents the block from exceeding
-// gas_limit.
+// A deployed contract writes 4 new storage slots per call (~150K state gas
+// and ~41K regular gas). The txpool cannot filter these by state gas; the
+// check inside applyTransaction prevents the block from exceeding gas_limit.
 func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -1916,9 +1914,8 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 
 	// Submit 10 call txns. Each writes 4 new slots (~150K state gas, ~41K
 	// regular gas). With a 500K gas limit, 3 calls fit (~451K state gas)
-	// but the 4th would push to ~601K. Intrinsic state gas is 0 for all
-	// calls, so the txpool's regular-gas filter lets them all through —
-	// the applyTransaction check is the only defense.
+	// but the 4th would push to ~601K. The txpool's regular-gas filter lets
+	// them all through, so the applyTransaction check is the only defense.
 	baseFee = chainPack.TopBlock.BaseFee().Uint64()
 	rlpTxs := make([][]byte, 10)
 	for i := range rlpTxs {
@@ -1974,13 +1971,10 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 // inflates the state pool, letting a follow-up tx exceed the block's
 // state-gas limit.
 //
-// The scenario relies on a tx whose intrinsic state gas (the part the txpool
-// can see when filtering) fits in the remaining pool but whose total state
-// gas (intrinsic + on-success code-deposit) does not: such a tx passes the
-// txpool's filter, reaches the assembler, and fails ConsumeState inside
-// ApplyTransaction. The bug then surfaces if a successor tx in the same
-// batch consumes the inflated state pool that the restore wrongly handed
-// back.
+// The scenario relies on a tx whose runtime state gas exceeds the remaining
+// pool. It reaches the assembler and fails ConsumeState inside
+// ApplyTransaction. The bug then surfaces if a successor tx in the same batch
+// consumes the inflated state pool that the restore wrongly handed back.
 //
 // Fresh senders (each at nonce 0) are required so a failed tx doesn't
 // nonce-block its successors within the batch.
@@ -1990,7 +1984,7 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 
 	// Initcode that deploys a 100-byte runtime (100 zero bytes) via CODECOPY.
 	// Per byte deployed: 1530 state gas (CPSB) + 200 regular gas. So each
-	// CREATE consumes ~153K state gas on top of the 183.6K intrinsic
+	// CREATE consumes ~153K code-deposit state gas on top of the 183.6K runtime
 	// NEW_ACCOUNT charge — a total of ~337K state per tx.
 	const runtimeLen = 100
 	initHeader := []byte{
@@ -2002,13 +1996,14 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 		0x60, 0x00, //             PUSH1 0 (memory offset)
 		0xf3, //                   RETURN
 	}
-	deployCode := append(initHeader, make([]byte, runtimeLen)...)
+	deployCode := make([]byte, 0, len(initHeader)+runtimeLen)
+	deployCode = append(deployCode, initHeader...)
+	deployCode = append(deployCode, make([]byte, runtimeLen)...)
 
 	// With a 1_000_000 block gas limit, two txs (~337K state each) leave
-	// the pool at ~326K; a third has 184K intrinsic state (fits in pool by
-	// txpool's filter) but needs 337K total (fails ConsumeState during
-	// execution). A fourth tx then succeeds against the wrongly inflated
-	// pool, pushing the block's total state gas past gas_limit.
+	// the pool at ~326K; a third needs 337K total and fails ConsumeState
+	// during execution. A fourth tx then succeeds against the wrongly
+	// inflated pool, pushing the block's total state gas past gas_limit.
 	const numSenders = 4
 	keys := make([]*ecdsa.PrivateKey, numSenders)
 	addrs := make([]common.Address, numSenders)
@@ -2094,9 +2089,8 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 //
 // The scenario: 50 contract creations in batch 1 push cumulative state gas
 // near the block gas limit while keeping cumulative regular gas low (CREATE
-// has ~184K intrinsic state vs ~30K intrinsic regular per tx). The 51st tx
-// has small intrinsic state (so the txpool's state-aware filter admits it
-// into batch 2) but a large code-deposit state on execution. With the pool
+// has ~184K runtime state vs ~30K intrinsic regular per tx). The 51st tx has
+// a large code-deposit state charge. With the pool
 // init seeded from regular gas only, batch 2 starts with a state pool that
 // matches the regular dimension — i.e. far more than the real remaining
 // state budget — and the 51st tx is wrongly accepted.
@@ -2122,7 +2116,7 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 	for _, a := range addrs {
 		alloc[a] = types.GenesisAccount{Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)}
 	}
-	// 10M block limit fits ~54 CREATEs by intrinsic state (184K each ≈ 9.2M
+	// 10M block limit fits ~54 CREATEs by runtime state (184K each ≈ 9.2M
 	// for 50). Leaves ~800K of state headroom for batch 2, which the trigger
 	// tx's ~1.2M total state exceeds.
 	genesis := &types.Genesis{
@@ -2150,12 +2144,12 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 	lowPrice := uint256.NewInt(baseFee)      // baseFee only → batch 2
 
 	// Batch 1 initcode: PUSH1 0, PUSH1 0, RETURN → zero-byte runtime, no
-	// code-deposit state. Per-tx state is just the 184K intrinsic.
+	// code-deposit state. Per-tx state is just the 184K runtime charge.
 	batch1Init := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
 
 	// Batch 2 initcode deploys a ~660-byte runtime via CODECOPY. Per-byte
 	// deposit cost: 1530 state + 200 regular. ~660 bytes → ~1M state on top
-	// of the 184K intrinsic.
+	// of the 184K runtime charge.
 	const triggerRuntimeLen = 660
 	triggerInit := []byte{
 		0x61, byte(triggerRuntimeLen >> 8), byte(triggerRuntimeLen & 0xff), // PUSH2 length
@@ -2635,82 +2629,84 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 	}))
 }
 
-// TestBALDrivenFoldAheadChangesetIntegrity guards against the fold misrouting a
-// block's commitment branch deltas into the wrong block's changeset. The BAL
-// fold computes a pre-window block ahead of its blockResult; if it recorded its
-// deferred branch writes into a later window block's changeset (instead of
-// isolated), that window block's saved diffset would gain entries it must not
-// have, and a later unwind would restore a wrong trie root.
+// TestBALDrivenComputeAheadChangesetIntegrity guards against compute-ahead
+// misrouting a block's commitment branch deltas into the wrong block's changeset.
+// BAL-driven compute-ahead computes a pre-window block ahead of its blockResult;
+// if it recorded its deferred branch writes into a later window block's changeset
+// (instead of isolated), that window block's saved diffset would gain entries it
+// must not have, and a later unwind would restore a wrong trie root.
 //
 // The batch uses a mid-batch changeset window (MaxReorgDepth places windowStart
-// inside the batch) so early blocks fold ahead (pre-window, isolated) while the
+// inside the batch) so early blocks compute ahead (pre-window, isolated) while the
 // later window blocks keep per-block changesets. The check is differential and
 // per-key: the window blocks' CommitmentDomain diffsets must be byte-identical
-// whether the earlier blocks were folded (fold-on) or computed incrementally
-// (fold-off). A leak would show up as extra/changed entries under fold-on — the
-// vacuous NotEmpty check the previous version used could not see that. It also
-// asserts the fold path actually engaged (a real fold count) so a silent
-// degrade-to-incremental can't make the differential pass trivially.
+// whether the earlier blocks were computed ahead (compute-ahead-on) or computed
+// incrementally (compute-ahead-off). A leak would show up as extra/changed entries
+// under compute-ahead-on — the vacuous NotEmpty check the previous version used
+// could not see that. It also asserts the compute-ahead path actually engaged (a
+// real count) so a silent degrade-to-incremental can't make the differential pass
+// trivially.
 //
 // (An end-to-end divergent-fork reorg would be a stronger check, but blockgen
 // randomises ParentBeaconBlockRoot per block, so under Amsterdam — required for
 // BALs — two chains can't share a prefix and a mid-chain parent has no state.)
-func TestBALDrivenFoldAheadChangesetIntegrity(t *testing.T) {
-	off := runBALFoldAheadChangeset(t, false, false)
-	on := runBALFoldAheadChangeset(t, true, false)
+func TestBALDrivenComputeAheadChangesetIntegrity(t *testing.T) {
+	off := runBALComputeAheadChangeset(t, false, false)
+	on := runBALComputeAheadChangeset(t, true, false)
 
-	require.Zero(t, off.folds, "fold-off must not fold any block")
-	require.Positive(t, on.folds, "fold-on must actually fold the pre-window blocks (else the differential is vacuous)")
+	require.Zero(t, off.computedAhead, "compute-ahead-off must not compute any block ahead")
+	require.Positive(t, on.computedAhead, "compute-ahead-on must actually compute the pre-window blocks ahead (else the differential is vacuous)")
 	// Compare the SET OF KEYS each window block's commitment changeset touched,
-	// not the raw diff bytes: per-block folds and a merged batch transition
+	// not the raw diff bytes: per-block compute-ahead and a merged batch transition
 	// legitimately encode the same branches differently (step references), so
 	// byte-equality is too strict. But the set of branches a window block's own
-	// compute touches is fixed by the post-pre-window trie shape — a fold that
-	// leaked a pre-window block's deltas into a window block's changeset would
-	// add keys that block never touched, so the key sets must match.
+	// compute touches is fixed by the post-pre-window trie shape — misrouting
+	// a pre-window block's deltas into a window block's changeset would add
+	// keys that block never touched, so the key sets must match.
 	require.Equal(t, off.windowCommitmentKeys, on.windowCommitmentKeys,
 		"a window block's commitment-changeset key set differs between incremental and "+
-			"fold-ahead — the fold misrouted a pre-window block's branch deltas into a "+
+			"compute-ahead — a pre-window block's branch deltas were misrouted into a "+
 			"window block's changeset")
 }
 
 // TestBALShadowCompute_MatchesIncremental exercises BAL_SHADOW_COMPUTE's success
-// path end-to-end: with fold-ahead AND shadow cross-check on, every folded block
-// is recomputed incrementally and the two roots must agree. runBALFoldAheadChangeset
-// asserts the batch validates cleanly, so a shadow mismatch would fail the block
-// with ErrWrongTrieRoot; a clean run with folds>0 proves the match path ran.
+// path end-to-end: with compute-ahead AND shadow cross-check on, every block
+// computed ahead is recomputed incrementally and the two roots must agree.
+// runBALComputeAheadChangeset asserts the batch validates cleanly, so a shadow
+// mismatch would fail the block with ErrWrongTrieRoot; a clean run with
+// computedAhead>0 proves the match path ran.
 func TestBALShadowCompute_MatchesIncremental(t *testing.T) {
-	res := runBALFoldAheadChangeset(t, true, true)
-	require.Positive(t, res.folds, "the fold must have run so shadow cross-check exercised the match path")
+	res := runBALComputeAheadChangeset(t, true, true)
+	require.Positive(t, res.computedAhead, "compute-ahead must have run so shadow cross-check exercised the match path")
 }
 
-type balFoldResult struct {
+type balComputeAheadResult struct {
 	// windowCommitmentKeys maps each window block number to the sorted set of
 	// CommitmentDomain changeset keys (branch prefixes) it touched — compared
-	// across modes to catch a fold misrouting deltas into the wrong block.
+	// across modes to catch compute-ahead misrouting deltas into the wrong block.
 	windowCommitmentKeys map[uint64][]string
-	folds                int64
+	computedAhead        int64
 }
 
-func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResult {
+func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balComputeAheadResult {
 	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
 	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
 	defer func(prev bool) { dbg.BALShadowCompute = prev }(dbg.BALShadowCompute)
-	dbg.BALDrivenCommitment = foldAhead
+	dbg.BALDrivenCommitment = computeAhead
 	dbg.IgnoreBAL = false
 	dbg.BALShadowCompute = shadow
-	stagedsync.ResetFoldsAheadForTest()
+	stagedsync.ResetComputedAheadForTest()
 
 	const chainLen = 12
 	// maxReorgDepth places the changeset window at maxBlock-depth = 12-4 = 8, so
-	// blocks 1..7 are pre-window (fold candidates) and 8..12 own changesets.
+	// blocks 1..7 are pre-window (compute-ahead candidates) and 8..12 own changesets.
 	const maxReorgDepth = 4
 	const windowStart = chainLen - maxReorgDepth
 
 	ctx := t.Context()
-	// Deterministic key: fold-off and fold-on must execute the identical chain
+	// Deterministic key: compute-ahead-off and compute-ahead-on must execute the identical chain
 	// (same sender → same trie branches) so the only difference between the two
-	// runs is fold-ahead vs incremental. A random key would give each run a
+	// runs is compute-ahead vs incremental. A random key would give each run a
 	// different address and thus different branch keys, making the cross-mode
 	// changeset comparison meaningless (and flaky).
 	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -2746,22 +2742,22 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 	fcuRes, err := updateForkChoice(ctx, m.ExecModule, canonical.TopBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status,
-		"batch with fold-ahead=%v must execute cleanly; validationError=%q", foldAhead, fcuRes.ValidationError)
+		"batch with compute-ahead=%v must execute cleanly; validationError=%q", computeAhead, fcuRes.ValidationError)
 
 	m.ExecModule.WaitIdle(ctx)
 
-	res := balFoldResult{
+	res := balComputeAheadResult{
 		windowCommitmentKeys: map[uint64][]string{},
-		folds:                stagedsync.FoldsAheadPerformedForTest(),
+		computedAhead:        stagedsync.ComputedAheadCountForTest(),
 	}
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		// Confirm blocks carry BALs (checked on the tip, which is inside the
 		// window and so not pruned — pre-window BAL sidecars are pruned beyond
-		// MaxReorgDepth, but the fold reads them in-memory during execution, and
-		// on.folds asserts the fold path actually engaged).
+		// MaxReorgDepth, but compute-ahead reads them in-memory during execution,
+		// and on.computedAhead asserts the compute-ahead path actually engaged).
 		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, canonical.TopBlock.Hash(), canonical.TopBlock.NumberU64())
 		require.NoError(t, err)
-		require.NotEmpty(t, balBytes, "blocks must carry a BAL so BAL-driven fold-ahead actually engages")
+		require.NotEmpty(t, balBytes, "blocks must carry a BAL so BAL-driven compute-ahead actually engages")
 
 		// Window blocks own per-block changesets; capture their CommitmentDomain
 		// deltas for the cross-mode differential.
@@ -2773,8 +2769,8 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 			require.NoError(t, err)
 			require.Truef(t, ok, "window block %d must have a saved diffset", blk.NumberU64())
 			require.NotEmptyf(t, diffs[kv.CommitmentDomain],
-				"window block %d changeset is missing CommitmentDomain deltas (fold-ahead=%v)",
-				blk.NumberU64(), foldAhead)
+				"window block %d changeset is missing CommitmentDomain deltas (compute-ahead=%v)",
+				blk.NumberU64(), computeAhead)
 			keys := make([]string, 0, len(diffs[kv.CommitmentDomain]))
 			for _, d := range diffs[kv.CommitmentDomain] {
 				keys = append(keys, d.Key)
@@ -2786,8 +2782,8 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 	}))
 
 	// End-to-end: FCU back into the window unwinds using those changesets, then
-	// FCU forward re-executes. If the fold-built state were wrong, the unwind
-	// restores a bad root and the forward re-exec fails.
+	// FCU forward re-executes. If the compute-ahead-built state were wrong, the
+	// unwind restores a bad root and the forward re-exec fails.
 	const reorgBackTo = chainLen - 2 // within the window (>= windowStart)
 	back, err := updateForkChoice(ctx, m.ExecModule, canonical.Blocks[reorgBackTo-1].Header())
 	require.NoError(t, err)
@@ -2803,8 +2799,8 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 	fwd, err := updateForkChoice(ctx, m.ExecModule, canonical.TopBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fwd.Status,
-		"forward re-exec after unwind must reach the correct root (fold-ahead=%v); validationError=%q",
-		foldAhead, fwd.ValidationError)
+		"forward re-exec after unwind must reach the correct root (compute-ahead=%v); validationError=%q",
+		computeAhead, fwd.ValidationError)
 	m.ExecModule.WaitIdle(ctx)
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		execProg, err := stages.GetStageProgress(tx, stages.Execution)

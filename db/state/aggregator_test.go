@@ -17,6 +17,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -30,10 +31,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/etl"
@@ -45,6 +46,33 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func TestSetDomainStepsInFrozenFile(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		spec    string
+		want    uint64
+		wantErr bool
+	}{
+		{spec: "", want: 0}, // unset must mean "no override" (use erigondb.toml), matching the node's nil-pointer path
+		{spec: "Inf", want: config3.UnboundedDomainMerge},
+		{spec: "inf", want: config3.UnboundedDomainMerge},
+		{spec: "5", want: 5},
+		{spec: "0", wantErr: true},
+		{spec: "bad", wantErr: true},
+	} {
+		t.Run(tc.spec, func(t *testing.T) {
+			a := &Aggregator{}
+			err := a.SetDomainStepsInFrozenFile(tc.spec)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, a.erigondbDomainStepsInFrozenFile)
+		})
+	}
+}
 
 // takes first 100k keys from file
 func pivotKeysFromKV(dataPath string) ([][]byte, error) {
@@ -65,7 +93,7 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 			break
 		}
 		key, _ := getter.Next(key[:0])
-		listing = append(listing, common.Copy(key))
+		listing = append(listing, bytes.Clone(key))
 		getter.Skip()
 	}
 	decomp.Close()
@@ -213,12 +241,12 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 		n, err := rnd.Read(bk)
 		require.Equal(tb, keySize, n)
 		require.NoError(tb, err)
-		keys[i] = common.Copy(bk[:n])
+		keys[i] = bytes.Clone(bk[:n])
 
 		n, err = rnd.Read(bv[:rnd.IntN(valueSize)+1])
 		require.NoError(tb, err)
 
-		values[i] = common.Copy(bv[:n])
+		values[i] = bytes.Clone(bv[:n])
 	}
 	return keys, values
 }

@@ -269,7 +269,7 @@ func (t *StateTest) Run(tb testing.TB, sd *execctx.SharedDomains, tx kv.Temporal
 	if root != common.Hash(post.Root) {
 		return st, root, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
-	if logs := rlpHash(st.Logs()); logs != common.Hash(post.Logs) {
+	if logs := st.LogsRlpHash(); logs != common.Hash(post.Logs) {
 		return st, root, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
 	}
 	return st, root, nil
@@ -495,8 +495,6 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 		SlotNumber: t.Json.Env.SlotNumber,
 	}
 }
-
-var rlpHash = types.RlpHash
 
 func vmTestBlockHash(n uint64) (common.Hash, error) {
 	return crypto.Keccak256Hash([]byte(new(big.Int).SetUint64(n).String())), nil

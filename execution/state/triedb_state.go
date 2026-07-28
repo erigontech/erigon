@@ -494,8 +494,10 @@ func (tds *TrieDbState) GetTouchedPlainKeys() (plainKeys [][]byte, hashedKeys []
 	}
 	accountHashTouches, accountAddressTouches := tds.buildAccountAddressReads()
 	storageHashTouches, storagePlainKeyTouches := tds.buildPlainStorageReads()
-	plainKeys = append(accountAddressTouches, storagePlainKeyTouches...)
-	hashedKeys = append(accountHashTouches, storageHashTouches...)
+	plainKeys = accountAddressTouches
+	plainKeys = append(plainKeys, storagePlainKeyTouches...)
+	hashedKeys = accountHashTouches
+	hashedKeys = append(hashedKeys, storageHashTouches...)
 	return plainKeys, hashedKeys
 
 }

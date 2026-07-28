@@ -17,6 +17,7 @@
 package state_accessors
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"sync"
@@ -51,7 +52,7 @@ func NewStateEvents() *StateEvents {
 }
 
 func NewStateEventsFromBytes(buf []byte) *StateEvents {
-	return &StateEvents{buf: common.Copy(buf)}
+	return &StateEvents{buf: bytes.Clone(buf)}
 }
 
 func (se *StateEvents) AddValidator(validatorIndex uint64, validator solid.Validator) {
@@ -116,7 +117,7 @@ func (se *StateEvents) ChangeSlashed(validatorIndex uint64, slashed bool) {
 func (se *StateEvents) CopyBytes() []byte {
 	se.mu.Lock()
 	defer se.mu.Unlock()
-	return common.Copy(se.buf)
+	return bytes.Clone(se.buf)
 }
 
 func (se *StateEvents) Reset() {

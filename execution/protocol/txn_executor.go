@@ -30,8 +30,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -402,46 +402,34 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
-	if overflow {
-		return nil, ErrGasUintOverflow
-	}
+	intrinsicGas := intrinsicGasResult.RegularGas
 	if st.msg.Gas() < intrinsicGas {
-		return nil, fmt.Errorf("%w: have %d, want regular %d + state %d = %d",
-			ErrIntrinsicGas, st.msg.Gas(), intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas, intrinsicGas)
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), intrinsicGas)
 	}
-	imdGas := mdgas.MdGas{
-		Regular: intrinsicGasResult.RegularGas,
-		State:   intrinsicGasResult.StateGas,
-	}
-	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), imdGas, rules)
+	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules)
+	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
 	var (
-		prepGas      mdgas.MdGas
-		prepSnapshot = -1
+		runtimeGas      mdgas.MdGas
+		runtimeSnapshot = -1
 	)
 	if rules.IsAmsterdam {
-		if err := st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples, nil); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-		}
-		prepGas = st.gasRemaining
-		prepSnapshot = st.state.PushSnapshot()
-		defer st.state.PopSnapshot(prepSnapshot)
-		_, _, err = st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), &st.gasRemaining)
-		if err != nil {
-			st.state.RevertToSnapshot(prepSnapshot, err)
-			if errors.Is(err, vm.ErrPreExecutionOutOfGas) {
-				return &evmtypes.ExecutionResult{Err: err}, nil
-			}
+		runtimeGas = st.gasRemaining
+		runtimeSnapshot = st.state.PushSnapshot()
+		defer st.state.PopSnapshot(runtimeSnapshot)
+	}
+	st.gasRemaining, _, err = st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), st.gasRemaining)
+	if err != nil {
+		if !rules.IsAmsterdam {
 			return nil, err
 		}
-	} else {
-		verifiedAuthorities, _, verifyErr := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), nil)
-		if verifyErr != nil {
-			return nil, verifyErr
+		st.state.RevertToSnapshot(runtimeSnapshot, err)
+		if errors.Is(err, vm.ErrRuntimeOutOfGas) {
+			return &evmtypes.ExecutionResult{Err: err}, nil
 		}
-		if err := st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples, verifiedAuthorities); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-		}
+		return nil, err
+	}
+	if err = st.warmDelegatedDestination(rules); err != nil {
+		return nil, err
 	}
 
 	var (
@@ -450,9 +438,9 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	)
 
 	ret, st.gasRemaining, _, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
-	if rules.IsAmsterdam && errors.Is(vmerr, vm.ErrPreExecutionOutOfGas) {
-		st.state.RevertToSnapshot(prepSnapshot, vmerr)
-		st.gasRemaining = mdgas.MdGas{State: prepGas.State}
+	if rules.IsAmsterdam && errors.Is(vmerr, vm.ErrRuntimeOutOfGas) {
+		st.state.RevertToSnapshot(runtimeSnapshot, vmerr)
+		st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
 	}
 
 	result := &evmtypes.ExecutionResult{
@@ -560,22 +548,13 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		st.state.SetNonce(msg.From(), nonce+1, tracing.NonceChangeEoACall)
 	}
 
-	// Check clause 7, subtract intrinsic gas if everything is correct
-	// EIP-8037: intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas.
-	// The tx must cover the sum, not just each component individually.
-	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
-	if overflow {
-		return nil, ErrGasUintOverflow
-	}
+	// Check clause 7, subtract intrinsic gas if everything is correct.
+	intrinsicGas := intrinsicGasResult.RegularGas
 	if st.msg.Gas() < intrinsicGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), intrinsicGas)
 	}
 
-	imdGas := mdgas.MdGas{
-		Regular: intrinsicGasResult.RegularGas,
-		State:   intrinsicGasResult.StateGas,
-	}
-	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), imdGas, rules)
+	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules)
 
 	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
 		t.OnGasChange(st.msg.Gas(), st.gasRemaining.Total(), tracing.GasChangeTxIntrinsicGas)
@@ -601,62 +580,52 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	var (
-		ret                  []byte
-		vmerr                error
-		gasUsed              mdgas.MdGasUsage
-		authorizationGasUsed mdgas.MdGasUsage
-		preExecutionFailed   bool
+		ret             []byte
+		vmerr           error
+		gasUsed         mdgas.MdGasUsage
+		authGasUsed     mdgas.MdGasUsage
+		runtimeGas      mdgas.MdGas
+		runtimeSnapshot = -1
 	)
+	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
 	if rules.IsAmsterdam {
-		if err = st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples, nil); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+		runtimeGas = st.gasRemaining
+		runtimeSnapshot = st.state.PushSnapshot()
+		defer st.state.PopSnapshot(runtimeSnapshot)
+	}
+	st.gasRemaining, authGasUsed, vmerr = st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), st.gasRemaining)
+	if vmerr != nil {
+		if !rules.IsAmsterdam {
+			return nil, vmerr
 		}
-		prepGas := st.gasRemaining
-		prepSnapshot := st.state.PushSnapshot()
-		defer st.state.PopSnapshot(prepSnapshot)
-		var authErr error
-		_, authorizationGasUsed, authErr = st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), &st.gasRemaining)
-		if authErr != nil {
-			st.state.RevertToSnapshot(prepSnapshot, authErr)
-			if !errors.Is(authErr, vm.ErrPreExecutionOutOfGas) {
-				return nil, authErr
-			}
-			st.gasRemaining = mdgas.MdGas{State: prepGas.State}
-			gasUsed.Regular = prepGas.Regular
-			vmerr = authErr
-			preExecutionFailed = true
+		st.state.RevertToSnapshot(runtimeSnapshot, vmerr)
+		if !errors.Is(vmerr, vm.ErrRuntimeOutOfGas) {
+			return nil, vmerr
 		}
-
-		if !preExecutionFailed {
-			if contractCreation {
-				ret, _, st.gasRemaining, gasUsed, _, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
-			} else {
-				ret, st.gasRemaining, gasUsed, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
-			}
-			if errors.Is(vmerr, vm.ErrPreExecutionOutOfGas) {
-				if !contractCreation {
-					st.state.RevertToSnapshot(prepSnapshot, vmerr)
-				}
-				st.gasRemaining = mdgas.MdGas{State: prepGas.State}
-				gasUsed = mdgas.MdGasUsage{Regular: prepGas.Regular}
-			} else {
-				gasUsed.Regular += authorizationGasUsed.Regular
-				gasUsed.State += authorizationGasUsed.State
-				gasUsed.StateSpill += authorizationGasUsed.StateSpill
-			}
-		}
+		st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
+		gasUsed = mdgas.MdGasUsage{Regular: runtimeGas.Regular}
+		st.traceRuntimeFailure(runtimeGas, vmerr)
 	} else {
-		verifiedAuthorities, _, verifyErr := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), nil)
-		if verifyErr != nil {
-			return nil, verifyErr
-		}
-		if err = st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples, verifiedAuthorities); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+		if err = st.warmDelegatedDestination(rules); err != nil {
+			return nil, err
 		}
 		if contractCreation {
 			ret, _, st.gasRemaining, gasUsed, _, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
 		} else {
 			ret, st.gasRemaining, gasUsed, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
+		}
+		if rules.IsAmsterdam {
+			if errors.Is(vmerr, vm.ErrRuntimeOutOfGas) {
+				if !contractCreation {
+					st.state.RevertToSnapshot(runtimeSnapshot, vmerr)
+				}
+				st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
+				gasUsed = mdgas.MdGasUsage{Regular: runtimeGas.Regular}
+			} else {
+				gasUsed.Regular += authGasUsed.Regular
+				gasUsed.State += authGasUsed.State
+				gasUsed.StateSpill += authGasUsed.StateSpill
+			}
 		}
 	}
 
@@ -666,26 +635,26 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			refundQuotient = params.RefundQuotientEIP3529
 		}
 		if rules.IsAmsterdam {
-			combined := gasUsed.PlusIntrinsic(imdGas)
+			combined := gasUsed.PlusIntrinsic(intrinsicGas)
 			st.blockStateGasUsed = combined.StateClamped()
 			st.blockRegularGasUsed = max(combined.Regular, intrinsicGasResult.FloorGasCost)
 			st.txnGasUsedB4Refunds = combined.Total()
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 		} else if rules.IsPrague {
-			st.txnGasUsedB4Refunds = imdGas.Regular + gasUsed.Regular
+			st.txnGasUsedB4Refunds = intrinsicGas + gasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 			st.blockRegularGasUsed = st.txnGasUsed
 		} else {
-			st.txnGasUsedB4Refunds = imdGas.Regular + gasUsed.Regular
+			st.txnGasUsedB4Refunds = intrinsicGas + gasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = st.txnGasUsedB4Refunds - refund
 			st.blockRegularGasUsed = st.txnGasUsed
 		}
 		st.refundGas()
 	} else if rules.IsAmsterdam {
-		combined := gasUsed.PlusIntrinsic(imdGas)
+		combined := gasUsed.PlusIntrinsic(intrinsicGas)
 		st.blockStateGasUsed = combined.StateClamped()
 		st.blockRegularGasUsed = max(combined.Regular, intrinsicGasResult.FloorGasCost)
 		st.txnGasUsedB4Refunds = combined.Total()
@@ -693,7 +662,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	} else {
 		// No-refund path: gasBailout (trace_call) or !refunds.
 		// Don't apply Prague floor or refunds — just record raw gas used.
-		st.txnGasUsedB4Refunds = imdGas.Regular + gasUsed.Regular
+		st.txnGasUsedB4Refunds = intrinsicGas + gasUsed.Regular
 		st.txnGasUsed = st.txnGasUsedB4Refunds
 		st.blockRegularGasUsed = st.msg.Gas() // match pre-refactor: consume full gas limit from pool
 	}
@@ -771,157 +740,157 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	return result, nil
 }
 
-func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string, gasRemaining *mdgas.MdGas) ([]accounts.Address, mdgas.MdGasUsage, error) {
-	verifiedAuthorities := make([]accounts.Address, 0)
-	var gasUsed mdgas.MdGasUsage
-	if auths != nil {
-		if !st.evm.ChainRules().IsPrague {
-			return nil, gasUsed, errors.New("SetCode transaction not allowed before Prague fork")
-		}
-		if contractCreation {
-			return nil, gasUsed, errors.New("contract creation not allowed with type4 txs")
-		}
-		if len(auths) == 0 {
-			return nil, gasUsed, errors.New("SetCode transaction must have at least one authorization")
-		}
-		isAmsterdam := st.evm.ChainRules().IsAmsterdam
-		if isAmsterdam && gasRemaining == nil {
-			return nil, gasUsed, errors.New("missing pre-execution gas")
-		}
-		writtenAccounts := map[accounts.Address]struct{}{st.msg.From(): {}}
-		if !st.msg.Value().IsZero() {
-			writtenAccounts[st.msg.To()] = struct{}{}
-		}
-		preTxDelegates := make(map[accounts.Address]bool)
-		delegationSetFor := make(map[accounts.Address]bool)
-		var b [32]byte
-		data := bytes.NewBuffer(nil)
-		for i, auth := range auths {
-			data.Reset()
-
-			// 1. chainId check
-			if !auth.ChainID.IsZero() && chainID != auth.ChainID.String() {
-				log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
-				continue
-			}
-
-			// 2. authority recover
-			authorityPtr, err := auth.RecoverSigner(data, b[:])
-			if err != nil {
-				log.Trace("authority recover failed, skipping", "err", err, "auth index", i)
-				continue
-			}
-			authority := accounts.InternAddress(*authorityPtr)
-
-			// 3. add authority account to accesses_addresses
-			verifiedAuthorities = append(verifiedAuthorities, authority)
-			if isAmsterdam {
-				st.state.AddAddressToAccessList(authority)
-				st.state.MarkAddressAccess(authority, false)
-			}
-
-			// 4. authority code should be empty or already delegated
-			codeHash, err := st.state.GetCodeHash(authority)
-			if err != nil {
-				return nil, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-			}
-			hasDelegation := false
-			if !codeHash.IsEmpty() {
-				_, ok, err := st.state.GetDelegatedDesignation(authority)
-				if err != nil {
-					return nil, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-				}
-				if !ok {
-					log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
-					continue
-				}
-				hasDelegation = true
-			}
-
-			// 5. nonce check
-			authorityNonce, err := st.state.GetNonce(authority)
-			if err != nil {
-				return nil, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-			}
-			if authorityNonce != auth.Nonce {
-				log.Trace("invalid nonce, skipping", "auth index", i)
-				continue
-			}
-
-			exists, err := st.state.Exist(authority)
-			if err != nil {
-				return nil, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-			}
-			if isAmsterdam {
-				if !exists && !consumeRuntimeGas(gasRemaining, &gasUsed, params.StateGasNewAccount, mdgas.StateGas) {
-					return verifiedAuthorities, gasUsed, vm.ErrPreExecutionOutOfGas
-				}
-				if _, written := writtenAccounts[authority]; !written {
-					if !consumeRuntimeGas(gasRemaining, &gasUsed, params.AccountWriteCostEIP8038, mdgas.RegularGas) {
-						return verifiedAuthorities, gasUsed, vm.ErrPreExecutionOutOfGas
-					}
-					writtenAccounts[authority] = struct{}{}
-				}
-				preTxDelegated, seen := preTxDelegates[authority]
-				if !seen {
-					preTxDelegated = hasDelegation
-					preTxDelegates[authority] = preTxDelegated
-				}
-				if auth.Address != (common.Address{}) {
-					if !preTxDelegated && !delegationSetFor[authority] {
-						if !consumeRuntimeGas(gasRemaining, &gasUsed, params.StateGasAuthBase, mdgas.StateGas) {
-							return verifiedAuthorities, gasUsed, vm.ErrPreExecutionOutOfGas
-						}
-					}
-					delegationSetFor[authority] = true
-				}
-			} else if exists {
-				st.state.AddRefund(params.PerEmptyAccountCost - params.PerAuthBaseCost)
-			}
-
-			// 7. set authority code
-			if auth.Address == (common.Address{}) {
-				if err := st.state.SetCode(authority, nil, tracing.CodeChangeAuthorizationClear); err != nil {
-					return nil, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-				}
-			} else {
-				if err := st.state.SetCode(authority, types.AddressToDelegation(accounts.InternAddress(auth.Address)), tracing.CodeChangeAuthorization); err != nil {
-					return nil, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-				}
-			}
-
-			// 8. increase the nonce of authority
-			if err := st.state.SetNonce(authority, authorityNonce+1, tracing.NonceChangeAuthorization); err != nil {
-				return nil, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-			}
-		}
+func (st *TxnExecutor) traceRuntimeFailure(gas mdgas.MdGas, err error) {
+	tracer := st.evm.Config().Tracer
+	if tracer == nil {
+		return
 	}
-
-	return verifiedAuthorities, gasUsed, nil
+	to := st.to()
+	precompile := slices.Contains(vm.ActivePrecompiles(st.evm.ChainRules()), to)
+	if tracer.OnEnter != nil {
+		tracer.OnEnter(0, byte(vm.CALL), st.msg.From(), to, precompile, st.data, gas.Regular, st.value, nil)
+	}
+	if tracer.OnExit != nil {
+		tracer.OnExit(0, nil, gas.Regular, vm.VMErrorFromErr(err), true)
+	}
 }
 
-func consumeRuntimeGas(gas *mdgas.MdGas, used *mdgas.MdGasUsage, amount uint64, typ mdgas.MdGasType) bool {
-	switch typ {
-	case mdgas.RegularGas:
-		if gas.Regular < amount {
-			return false
-		}
-		gas.Regular -= amount
-		used.Regular += amount
-		return true
-	case mdgas.StateGas:
-		spill := amount - min(amount, gas.State)
-		if gas.Regular < spill {
-			return false
-		}
-		gas.State -= amount - spill
-		gas.Regular -= spill
-		used.State += int64(amount)
-		used.StateSpill += spill
-		return true
-	default:
-		panic(fmt.Errorf("unknown gas type: %d", typ))
+func (st *TxnExecutor) warmDelegatedDestination(rules *chain.Rules) error {
+	dst := st.to()
+	if !rules.IsPrague || rules.IsAmsterdam || dst.IsNil() {
+		return nil
 	}
+	delegatedTo, ok, err := st.state.GetDelegatedDesignation(dst)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+	}
+	if ok {
+		st.state.AddAddressToAccessList(delegatedTo)
+	}
+	return nil
+}
+
+func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
+	var gasUsed mdgas.MdGasUsage
+	if auths == nil {
+		return gasRemaining, gasUsed, nil
+	}
+	if !st.evm.ChainRules().IsPrague {
+		return gasRemaining, gasUsed, errors.New("SetCode transaction not allowed before Prague fork")
+	}
+	if contractCreation {
+		return gasRemaining, gasUsed, errors.New("contract creation not allowed with type4 txs")
+	}
+	if len(auths) == 0 {
+		return gasRemaining, gasUsed, errors.New("SetCode transaction must have at least one authorization")
+	}
+	isAmsterdam := st.evm.ChainRules().IsAmsterdam
+	writtenAccounts := map[accounts.Address]struct{}{st.msg.From(): {}}
+	if !st.msg.Value().IsZero() {
+		writtenAccounts[st.msg.To()] = struct{}{}
+	}
+	preTxDelegates := make(map[accounts.Address]bool)
+	delegationSetFor := make(map[accounts.Address]bool)
+	var b [32]byte
+	data := bytes.NewBuffer(nil)
+	for i := range auths {
+		auth := &auths[i]
+		data.Reset()
+
+		// 1. chainId check
+		if !auth.ChainID.IsZero() && chainID != auth.ChainID.String() {
+			log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
+			continue
+		}
+
+		// 2. authority recover
+		authorityPtr, err := auth.RecoverSigner(data, b[:])
+		if err != nil {
+			log.Trace("authority recover failed, skipping", "err", err, "auth index", i)
+			continue
+		}
+		authority := accounts.InternAddress(*authorityPtr)
+
+		// 3. add authority account to accesses_addresses
+		st.state.AddAddressToAccessList(authority)
+		st.state.MarkAddressAccess(authority, false)
+
+		// 4. authority code should be empty or already delegated
+		codeHash, err := st.state.GetCodeHash(authority)
+		if err != nil {
+			return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+		}
+		hasDelegation := !codeHash.IsEmpty()
+		if hasDelegation {
+			_, ok, err := st.state.GetDelegatedDesignation(authority)
+			if err != nil {
+				return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+			}
+			if !ok {
+				log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
+				continue
+			}
+		}
+
+		// 5. nonce check
+		authorityNonce, err := st.state.GetNonce(authority)
+		if err != nil {
+			return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+		}
+		if authorityNonce != auth.Nonce {
+			log.Trace("invalid nonce, skipping", "auth index", i)
+			continue
+		}
+
+		exists, err := st.state.Exist(authority)
+		if err != nil {
+			return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+		}
+		if isAmsterdam {
+			if !exists && !mdgas.Consume(&gasRemaining, &gasUsed, params.StateGasNewAccount, mdgas.StateGas) {
+				return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
+			}
+			if _, written := writtenAccounts[authority]; !written {
+				if !mdgas.Consume(&gasRemaining, &gasUsed, params.AccountWriteCostEIP8038, mdgas.RegularGas) {
+					return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
+				}
+				writtenAccounts[authority] = struct{}{}
+			}
+			preTxDelegated, seen := preTxDelegates[authority]
+			if !seen {
+				preTxDelegated = hasDelegation
+				preTxDelegates[authority] = preTxDelegated
+			}
+			if auth.Address != (common.Address{}) {
+				if !preTxDelegated && !delegationSetFor[authority] {
+					if !mdgas.Consume(&gasRemaining, &gasUsed, params.StateGasAuthBase, mdgas.StateGas) {
+						return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
+					}
+				}
+				delegationSetFor[authority] = true
+			}
+		} else if exists {
+			st.state.AddRefund(params.PerEmptyAccountCost - params.PerAuthBaseCost)
+		}
+
+		// 7. set authority code
+		if auth.Address == (common.Address{}) {
+			if err := st.state.SetCode(authority, nil, tracing.CodeChangeAuthorizationClear); err != nil {
+				return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+			}
+		} else {
+			if err := st.state.SetCode(authority, types.AddressToDelegation(accounts.InternAddress(auth.Address)), tracing.CodeChangeAuthorization); err != nil {
+				return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+			}
+		}
+
+		// 8. increase the nonce of authority
+		if err := st.state.SetNonce(authority, authorityNonce+1, tracing.NonceChangeAuthorization); err != nil {
+			return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+		}
+	}
+
+	return gasRemaining, gasUsed, nil
 }
 
 func (st *TxnExecutor) refundGas() {
@@ -950,7 +919,6 @@ func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Aut
 		IsEIP7623:          rules.IsPrague,
 		IsEIP7976:          rules.IsAmsterdam,
 		IsEIP7981:          rules.IsAmsterdam,
-		IsEIP8037:          rules.IsAmsterdam,
 		IsEIP2780:          rules.IsAmsterdam,
 	})
 }
