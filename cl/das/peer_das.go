@@ -829,28 +829,13 @@ mainloop:
 			var wg sync.WaitGroup
 			for _, sidecar := range result.sidecars {
 				wg.Go(func() {
-					// [Modified in Gloas:EIP7732] Get slot first, then use epoch-based version detection
-					var slot uint64
-					if sidecar.SignedBlockHeader != nil && sidecar.SignedBlockHeader.Header != nil {
-						slot = sidecar.SignedBlockHeader.Header.Slot
-					} else {
-						slot = sidecar.Slot
+					slot, blockRoot, ok := d.resolveColumnSidecarSlotAndRoot(sidecar)
+					if !ok {
+						log.Debug("rejecting column sidecar with inconsistent fork schema", "pid", result.pid)
+						d.rpc.BanPeer(result.pid)
+						return
 					}
-					epoch := slot / d.beaconConfig.SlotsPerEpoch
-					isGloasSidecar := d.beaconConfig.GetCurrentStateVersion(epoch) >= clparams.GloasVersion
-
-					var blockRoot common.Hash
-					if isGloasSidecar {
-						blockRoot = sidecar.BeaconBlockRoot
-					} else {
-						var err error
-						blockRoot, err = sidecar.SignedBlockHeader.Header.HashSSZ()
-						if err != nil {
-							log.Debug("failed to get block root", "err", err)
-							d.rpc.BanPeer(result.pid)
-							return
-						}
-					}
+					isGloasSidecar := sidecar.Version() >= clparams.GloasVersion
 					defer func() {
 						// check if need to schedule recover whenever we download a column sidecar
 						if needToRecoverBlobs &&
@@ -933,6 +918,35 @@ mainloop:
 	}
 
 	return nil
+}
+
+// resolveColumnSidecarSlotAndRoot reads a received column sidecar's slot and
+// block root from the fields populated by the schema it was decoded with. A peer
+// picks that schema via the response fork-digest, independently of the slot the
+// sidecar claims, so it returns ok=false unless the fork implied by the slot
+// agrees with the decoded schema across the Gloas boundary (which removed
+// SignedBlockHeader) — otherwise a peer could reach a field its schema left unset.
+func (d *peerdas) resolveColumnSidecarSlotAndRoot(sidecar *cltypes.DataColumnSidecar) (slot uint64, blockRoot common.Hash, ok bool) {
+	isGloas := sidecar.Version() >= clparams.GloasVersion
+	if isGloas {
+		slot = sidecar.Slot
+	} else {
+		if sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
+			return 0, common.Hash{}, false
+		}
+		slot = sidecar.SignedBlockHeader.Header.Slot
+	}
+	if (d.beaconConfig.GetCurrentStateVersion(slot/d.beaconConfig.SlotsPerEpoch) >= clparams.GloasVersion) != isGloas {
+		return 0, common.Hash{}, false
+	}
+	if isGloas {
+		return slot, sidecar.BeaconBlockRoot, true
+	}
+	root, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+	if err != nil {
+		return 0, common.Hash{}, false
+	}
+	return slot, root, true
 }
 
 func isExpectedColumnDownloadMiss(err error) bool {
