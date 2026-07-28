@@ -137,6 +137,24 @@ type EngineReader interface {
 
 	GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc
 
+	// GetStartTxFunc returns the hook consulted at the very top of
+	// TxnExecutor.Execute, before intrinsic gas or preCheck. Returning
+	// done=true short-circuits the whole transition (system/deposit txs).
+	GetStartTxFunc() evmtypes.StartTxFunc
+
+	// GetGasChargingFunc returns the hook consulted once gas has been
+	// purchased and split for execution, letting a chain charge extra cost
+	// out of the tx's own gas budget and redirect the tip recipient.
+	GetGasChargingFunc() evmtypes.GasChargingFunc
+
+	// GetComputeRefundFunc returns the hook that, when non-nil, replaces
+	// TxnExecutor's built-in refund ladder for this tx.
+	GetComputeRefundFunc() evmtypes.ComputeRefundFunc
+
+	// AmendBlockContext lets a rules engine populate BlockContext fields it
+	// owns (e.g. L2Version) after NewEVMBlockContext has built the context.
+	AmendBlockContext(bc *evmtypes.BlockContext, header *types.Header)
+
 	ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 		gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 		receipts types.Receipts, txns types.Transactions, logger log.Logger) error
