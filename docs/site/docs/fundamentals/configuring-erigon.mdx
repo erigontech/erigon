@@ -166,8 +166,6 @@ These flags manage network connectivity, peer discovery, and traffic control. Se
   * Default: `30303`
 * `--p2p.protocol value`: The version of the `eth` P2P protocol.
   * Default: `68`, `69`
-* `--p2p.allowed-ports value`: A comma-separated list of allowed ports for different P2P protocols.
-  * Default: `30303, 30304, 30305, 30306, 30307`
 * `--nat value`: The NAT port mapping mechanism (See [here](/fundamentals/nat) for more details).
 * `--nodiscover`: Disables peer discovery.
   * Default: `false`
@@ -354,13 +352,6 @@ Flags for controlling logging and performance profiling. See [Logs](/fundamental
 
 Flags related to consensus mechanisms and network forks.
 
-* `--clique.checkpoint value`: The number of blocks after which to save the vote snapshot.
-  * Default: `10`
-* `--clique.snapshots value`: The number of recent vote snapshots to keep in memory.
-  * Default: `1024`
-* `--clique.signatures value`: The number of recent block signatures to keep in memory.
-  * Default: `16384`
-* `--clique.datadir value`: The path to the clique database folder.
 * `--fakepow`: Disables proof-of-work verification.
   * Default: `false`
 * `--gpo.blocks value`: The number of recent blocks to check for gas prices.
