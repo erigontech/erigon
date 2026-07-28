@@ -498,6 +498,41 @@ func TestEIP2780DelegationTargetIsNotReadWhenAccessChargeRunsOutOfGas(t *testing
 	require.NotContains(t, reader.accesses, delegatedTo)
 }
 
+func TestEIP2780RecipientRuntimeOutOfGasPrecedesTransfer(t *testing.T) {
+	const blockGasLimit = 1_000_000
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	value := uint256.NewInt(1)
+	intrinsic := params.TxBaseEIP2780 +
+		params.ColdAccountAccessEIP2780 +
+		params.TransferLogCostEIP2780 +
+		params.TxValueCostEIP2780
+	gasLimit := intrinsic + params.StateGasNewAccount - 1
+
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Release(false)
+	require.NoError(t, ibs.SetBalance(sender, *value, tracing.BalanceChangeUnspecified))
+
+	var logs int
+	ibs.SetHooks(&tracing.Hooks{
+		OnLog: func(*types.Log) {
+			logs++
+		},
+	})
+	evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
+	msg := types.NewMessage(
+		sender, recipient, 0, value, gasLimit,
+		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+		nil, nil, false, false, true, false, nil,
+	)
+
+	result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
+	require.NoError(t, err)
+	require.ErrorIs(t, result.Err, vm.ErrRuntimeOutOfGas)
+	require.Zero(t, logs)
+}
+
 func TestEIP2780CalldataFloorBindsBlockRegularGas(t *testing.T) {
 	const blockGasLimit = 1_000_000
 

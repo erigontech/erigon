@@ -167,18 +167,13 @@ func (c *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Ho
 	return ok
 }
 
-// refillStateGas applies an inline state-gas refill per EIP-8037,
-// in last-in-first-out order: state-gas charges draw from the reservoir
-// first and spill to the regular pool last, so refills credit the regular
-// pool first (up to the spilled amount) and the reservoir with the
-// remainder. This restores the exact pools the charge drew from, so the
-// derived net state-gas usage drops by the full amount (going negative when
-// the matching charge sits in an ancestor or the tx-level intrinsic).
 func (c *CallContext) refillStateGas(amount uint64) {
-	fromGasLeft := min(amount, c.stateGasSpill)
-	c.gas += fromGasLeft
-	c.stateGasSpill -= fromGasLeft
-	c.stateGas += amount - fromGasLeft
+	remaining := c.Gas()
+	used := mdgas.MdGasUsage{State: int64(amount), StateSpill: c.stateGasSpill}
+	mdgas.Refill(&remaining, &used, amount, mdgas.StateGas)
+	c.gas = remaining.Regular
+	c.stateGas = remaining.State
+	c.stateGasSpill = used.StateSpill
 }
 
 func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) (remaining uint64, ok bool) {

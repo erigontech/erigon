@@ -102,6 +102,23 @@ func Consume(remaining *MdGas, used *MdGasUsage, amount uint64, typ MdGasType) b
 	}
 }
 
+// Refill reverses a gas charge, restoring state-gas spill before reservoir gas.
+func Refill(remaining *MdGas, used *MdGasUsage, amount uint64, typ MdGasType) {
+	switch typ {
+	case RegularGas:
+		remaining.Regular += amount
+		used.Regular -= amount
+	case StateGas:
+		spill := min(amount, used.StateSpill)
+		remaining.Regular += spill
+		remaining.State += amount - spill
+		used.State -= int64(amount)
+		used.StateSpill -= spill
+	default:
+		panic(fmt.Errorf("unknown gas type: %d", typ))
+	}
+}
+
 type MdGasType uint8
 
 const (

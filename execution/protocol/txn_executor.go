@@ -106,6 +106,35 @@ type TxnExecutor struct {
 	noFeeBurnAndTip bool
 }
 
+type runtimeGasAccounting struct {
+	auth      mdgas.MdGasUsage
+	recipient mdgas.MdGasUsage
+	frame     mdgas.MdGasUsage
+}
+
+func (g runtimeGasAccounting) total() mdgas.MdGasUsage {
+	return mdgas.MdGasUsage{
+		Regular:    g.auth.Regular + g.recipient.Regular + g.frame.Regular,
+		State:      g.auth.State + g.recipient.State + g.frame.State,
+		StateSpill: g.auth.StateSpill + g.recipient.StateSpill + g.frame.StateSpill,
+	}
+}
+
+func (g *runtimeGasAccounting) consumeAllRegularGas(regular uint64) {
+	*g = runtimeGasAccounting{frame: mdgas.MdGasUsage{Regular: regular}}
+}
+
+func (g *runtimeGasAccounting) refillRecipientState(gasRemaining *mdgas.MdGas, vmerr error) {
+	if g.recipient.State == 0 {
+		return
+	}
+	spill := g.recipient.StateSpill
+	mdgas.Refill(gasRemaining, &g.recipient, uint64(g.recipient.State), mdgas.StateGas)
+	if !errors.Is(vmerr, vm.ErrExecutionReverted) && !mdgas.Consume(gasRemaining, &g.recipient, spill, mdgas.RegularGas) {
+		panic("refilled state-gas spill exceeds regular gas")
+	}
+}
+
 // Message represents a message sent to a contract.
 type Message interface {
 	From() accounts.Address
@@ -409,6 +438,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules)
 	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
 	var (
+		gasUsed         runtimeGasAccounting
 		runtimeGas      mdgas.MdGas
 		runtimeSnapshot = -1
 	)
@@ -418,12 +448,17 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		defer st.state.PopSnapshot(runtimeSnapshot)
 	}
 	st.gasRemaining, _, err = st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), st.gasRemaining)
+	if err == nil && rules.IsAmsterdam && !contractCreation {
+		st.gasRemaining, gasUsed.recipient, err = st.chargeRecipientRuntimeGas(st.gasRemaining)
+	}
 	if err != nil {
 		if !rules.IsAmsterdam {
 			return nil, err
 		}
 		st.state.RevertToSnapshot(runtimeSnapshot, err)
 		if errors.Is(err, vm.ErrRuntimeOutOfGas) {
+			st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
+			st.traceRuntimeFailure(runtimeGas, err)
 			return &evmtypes.ExecutionResult{Err: err}, nil
 		}
 		return nil, err
@@ -438,9 +473,8 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	)
 
 	ret, st.gasRemaining, _, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
-	if rules.IsAmsterdam && errors.Is(vmerr, vm.ErrRuntimeOutOfGas) {
-		st.state.RevertToSnapshot(runtimeSnapshot, vmerr)
-		st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
+	if rules.IsAmsterdam && !contractCreation && (vmerr != nil || vmConfig.RestoreState) {
+		gasUsed.refillRecipientState(&st.gasRemaining, vmerr)
 	}
 
 	result := &evmtypes.ExecutionResult{
@@ -582,8 +616,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	var (
 		ret             []byte
 		vmerr           error
-		gasUsed         mdgas.MdGasUsage
-		authGasUsed     mdgas.MdGasUsage
+		gasUsed         runtimeGasAccounting
 		runtimeGas      mdgas.MdGas
 		runtimeSnapshot = -1
 	)
@@ -593,7 +626,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		runtimeSnapshot = st.state.PushSnapshot()
 		defer st.state.PopSnapshot(runtimeSnapshot)
 	}
-	st.gasRemaining, authGasUsed, vmerr = st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), st.gasRemaining)
+	st.gasRemaining, gasUsed.auth, vmerr = st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), st.gasRemaining)
+	if vmerr == nil && rules.IsAmsterdam && !contractCreation {
+		st.gasRemaining, gasUsed.recipient, vmerr = st.chargeRecipientRuntimeGas(st.gasRemaining)
+	}
 	if vmerr != nil {
 		if !rules.IsAmsterdam {
 			return nil, vmerr
@@ -603,58 +639,56 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			return nil, vmerr
 		}
 		st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
-		gasUsed = mdgas.MdGasUsage{Regular: runtimeGas.Regular}
+		gasUsed.consumeAllRegularGas(runtimeGas.Regular)
 		st.traceRuntimeFailure(runtimeGas, vmerr)
 	} else {
 		if err = st.warmDelegatedDestination(rules); err != nil {
 			return nil, err
 		}
 		if contractCreation {
-			ret, _, st.gasRemaining, gasUsed, _, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
+			ret, _, st.gasRemaining, gasUsed.frame, _, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
 		} else {
-			ret, st.gasRemaining, gasUsed, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
+			ret, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 		}
 		if rules.IsAmsterdam {
-			if errors.Is(vmerr, vm.ErrRuntimeOutOfGas) {
-				if !contractCreation {
-					st.state.RevertToSnapshot(runtimeSnapshot, vmerr)
-				}
+			if contractCreation && errors.Is(vmerr, vm.ErrRuntimeOutOfGas) {
 				st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
-				gasUsed = mdgas.MdGasUsage{Regular: runtimeGas.Regular}
+				gasUsed.consumeAllRegularGas(runtimeGas.Regular)
 			} else {
-				gasUsed.Regular += authGasUsed.Regular
-				gasUsed.State += authGasUsed.State
-				gasUsed.StateSpill += authGasUsed.StateSpill
+				if !contractCreation && (vmerr != nil || vmConfig.RestoreState) {
+					gasUsed.refillRecipientState(&st.gasRemaining, vmerr)
+				}
 			}
 		}
 	}
 
+	totalGasUsed := gasUsed.total()
 	if refunds && !gasBailout {
 		refundQuotient := params.RefundQuotient
 		if rules.IsLondon {
 			refundQuotient = params.RefundQuotientEIP3529
 		}
 		if rules.IsAmsterdam {
-			combined := gasUsed.PlusIntrinsic(intrinsicGas)
+			combined := totalGasUsed.PlusIntrinsic(intrinsicGas)
 			st.blockStateGasUsed = combined.StateClamped()
 			st.blockRegularGasUsed = max(combined.Regular, intrinsicGasResult.FloorGasCost)
 			st.txnGasUsedB4Refunds = combined.Total()
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 		} else if rules.IsPrague {
-			st.txnGasUsedB4Refunds = intrinsicGas + gasUsed.Regular
+			st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 			st.blockRegularGasUsed = st.txnGasUsed
 		} else {
-			st.txnGasUsedB4Refunds = intrinsicGas + gasUsed.Regular
+			st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = st.txnGasUsedB4Refunds - refund
 			st.blockRegularGasUsed = st.txnGasUsed
 		}
 		st.refundGas()
 	} else if rules.IsAmsterdam {
-		combined := gasUsed.PlusIntrinsic(intrinsicGas)
+		combined := totalGasUsed.PlusIntrinsic(intrinsicGas)
 		st.blockStateGasUsed = combined.StateClamped()
 		st.blockRegularGasUsed = max(combined.Regular, intrinsicGasResult.FloorGasCost)
 		st.txnGasUsedB4Refunds = combined.Total()
@@ -662,7 +696,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	} else {
 		// No-refund path: gasBailout (trace_call) or !refunds.
 		// Don't apply Prague floor or refunds — just record raw gas used.
-		st.txnGasUsedB4Refunds = intrinsicGas + gasUsed.Regular
+		st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Regular
 		st.txnGasUsed = st.txnGasUsedB4Refunds
 		st.blockRegularGasUsed = st.msg.Gas() // match pre-refactor: consume full gas limit from pool
 	}
@@ -753,6 +787,41 @@ func (st *TxnExecutor) traceRuntimeFailure(gas mdgas.MdGas, err error) {
 	if tracer.OnExit != nil {
 		tracer.OnExit(0, nil, gas.Regular, vm.VMErrorFromErr(err), true)
 	}
+}
+
+func (st *TxnExecutor) chargeRecipientRuntimeGas(gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
+	var gasUsed mdgas.MdGasUsage
+	dst := st.to()
+	st.state.MarkAddressAccess(dst, false)
+
+	if !st.value.IsZero() {
+		empty, err := st.state.Empty(dst)
+		if err != nil {
+			return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+		}
+		if empty && !mdgas.Consume(&gasRemaining, &gasUsed, params.StateGasNewAccount, mdgas.StateGas) {
+			return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
+		}
+	}
+	if slices.Contains(vm.ActivePrecompiles(st.evm.ChainRules()), dst) {
+		return gasRemaining, gasUsed, nil
+	}
+	delegatedTo, delegated, err := st.state.GetDelegatedDesignation(dst)
+	if err != nil {
+		return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+	}
+	if !delegated {
+		return gasRemaining, gasUsed, nil
+	}
+	accessCost := params.ColdAccountAccessCostEIP8038
+	if st.state.AddressInAccessList(delegatedTo) {
+		accessCost = params.WarmStorageReadCostEIP2929
+	}
+	if !mdgas.Consume(&gasRemaining, &gasUsed, accessCost, mdgas.RegularGas) {
+		return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
+	}
+	st.state.AddAddressToAccessList(delegatedTo)
+	return gasRemaining, gasUsed, nil
 }
 
 func (st *TxnExecutor) warmDelegatedDestination(rules *chain.Rules) error {
