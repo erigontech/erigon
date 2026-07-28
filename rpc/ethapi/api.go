@@ -541,7 +541,9 @@ func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 	return json.Marshal(plain{Raw: r.Raw, Tx: stripped})
 }
 
-// RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
+// RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction.
+// Numeric fields may alias the source transaction (and, on the Bor path, the shared chain config's ChainID);
+// they are read-only after construction.
 type RPCTransaction struct {
 	BlockHash            *common.Hash               `json:"blockHash"`
 	BlockNumber          *hexutil.U256              `json:"blockNumber"`
@@ -576,8 +578,7 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 	// signer, because we assume that signers are backwards-compatible with old
 	// transactions. For non-protected transactions, the homestead signer is used
 	// because the return value of ChainId is zero for those transactions.
-	var zeroChainId uint256.Int
-	chainId := &zeroChainId
+	chainId := new(uint256.Int)
 	result := &RPCTransaction{
 		Type:  hexutil.Uint64(txn.Type()),
 		Gas:   hexutil.Uint64(txn.GetGasLimit()),
