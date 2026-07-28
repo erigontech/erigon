@@ -96,11 +96,6 @@ func (st *Stack) pop1Peek1() (x, y *uint256.Int) {
 	return
 }
 
-func (st *Stack) popHash() [32]byte {
-	st.top--
-	return st.data[st.top].Bytes32()
-}
-
 // pop2Peek1 pops two slots and peeks the third, shaped as popCopy-three-push-one
 // so all indices sit on the guarded st.top.
 func (st *Stack) pop2Peek1() (x, y, z *uint256.Int) {

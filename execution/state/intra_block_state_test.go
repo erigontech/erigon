@@ -1015,38 +1015,22 @@ func TestMakeWriteSetClearsCodeDomainOnEmptyOverride(t *testing.T) {
 	require.Empty(t, got, "clearing code must clear the CodeDomain entry")
 }
 
-// TestAddLogOnLogPointerStability pins the AddLog/OnLog contract for the value
-// log buffer: the hook may mutate the log (the mutation must reach the stored
-// log) and may retain the pointer beyond the callback (it must stay valid across
-// later appends and Reset, which grow and reuse the internal buffer).
-func TestAddLogOnLogPointerStability(t *testing.T) {
+// TestAddLogOnLogHookCopyContract pins the OnLog contract on the AddLog path:
+// the hook sees the emitted contents during the callback, and a copy taken then
+// stays intact after the buffer entry is reused by later blocks.
+func TestAddLogOnLogHookCopyContract(t *testing.T) {
 	t.Parallel()
 
 	ibs := New(NewNoopReader())
-	var retained *types.Log
+	var copied []*types.Log
 	ibs.SetHooks(&tracing.Hooks{
-		OnLog: func(l *types.Log) {
-			retained = l
-			l.Data = []byte{0xbe, 0xef}
-			l.Topics = []common.Hash{{0xca, 0xfe}}
-		},
+		OnLog: func(l *types.Log) { copied = append(copied, l.Copy()) },
 	})
 
 	ibs.SetTxContext(1, 0)
 	ibs.AddLog(&types.Log{Address: common.Address{0x11}, Topics: []common.Hash{{0x01}}, Data: []byte{0x01}})
-	require.NotNil(t, retained)
-	first := retained
+	require.Len(t, copied, 1)
 
-	// (a) the hook owns its copy: its Data and Topics mutations must not leak
-	// into the stored log.
-	raw := ibs.GetRawLogs(0)
-	require.Len(t, raw, 1)
-	require.Equal(t, []byte{0x01}, []byte(raw[0].Data))
-	require.Equal(t, []common.Hash{{0x01}}, raw[0].Topics)
-
-	// (b) churn the internal buffer: many appends (forcing growth) then Reset,
-	// which reuses the backing. A pointer into the buffer would be corrupted;
-	// the stable heap copy handed to OnLog must not be.
 	for i := range 1000 {
 		ibs.AddLog(&types.Log{Address: common.Address{0x22}, Data: []byte{byte(i)}})
 	}
@@ -1054,39 +1038,49 @@ func TestAddLogOnLogPointerStability(t *testing.T) {
 	ibs.SetTxContext(2, 0)
 	ibs.AddLog(&types.Log{Address: common.Address{0x33}, Data: []byte{0x99}})
 
-	require.Equal(t, common.Address{0x11}, first.Address)
-	require.Equal(t, []byte{0xbe, 0xef}, []byte(first.Data))
+	require.Equal(t, common.Address{0x11}, copied[0].Address)
+	require.Equal(t, []common.Hash{{0x01}}, copied[0].Topics)
+	require.Equal(t, []byte{0x01}, []byte(copied[0].Data))
 }
 
-// TestAllocLogOnLogRetentionSurvivesReuse pins the same OnLog contract for the
-// AllocLog path the EVM's makeLog uses: it fills the entry's Topics/Data in
-// place, so a hook copy that shares those buffers would be rewritten by the next
-// log reusing the entry.
-func TestAllocLogOnLogRetentionSurvivesReuse(t *testing.T) {
+// TestNotifyLogHookSeesLiveEntry pins the OnLog contract on the AllocLog path
+// the EVM's makeLog uses: the hook receives the live buffer entry (no defensive
+// copy), so it must copy anything it retains — the entry is rewritten once a
+// later block reuses it.
+func TestNotifyLogHookSeesLiveEntry(t *testing.T) {
 	t.Parallel()
 
 	ibs := New(NewNoopReader())
-	var retained []*types.Log
-	ibs.SetHooks(&tracing.Hooks{OnLog: func(l *types.Log) { retained = append(retained, l) }})
+	var live *types.Log
+	var copied []*types.Log
+	ibs.SetHooks(&tracing.Hooks{
+		OnLog: func(l *types.Log) {
+			live = l
+			copied = append(copied, l.Copy())
+		},
+	})
 
-	emit := func(addr common.Address, topic common.Hash, data []byte) {
+	emit := func(addr common.Address, topic common.Hash, data []byte) *types.Log {
 		lp := ibs.AllocLog(1, len(data))
 		lp.Address = addr
 		lp.Topics[0] = topic
 		copy(lp.Data, data)
 		ibs.NotifyLog(lp)
+		return lp
 	}
 
 	ibs.SetTxContext(1, 0)
-	emit(common.Address{0xaa}, common.Hash{0x01}, []byte{0x11, 0x22})
-	require.Len(t, retained, 1)
+	lp := emit(common.Address{0xaa}, common.Hash{0x01}, []byte{0x11, 0x22})
+	require.Same(t, lp, live)
 
 	ibs.Reset()
 	ibs.SetTxContext(2, 0)
 	emit(common.Address{0xbb}, common.Hash{0x99}, []byte{0xde, 0xad})
 
-	require.Equal(t, []byte{0x11, 0x22}, []byte(retained[0].Data))
-	require.Equal(t, common.Hash{0x01}, retained[0].Topics[0])
+	require.Equal(t, common.Hash{0x01}, copied[0].Topics[0])
+	require.Equal(t, []byte{0x11, 0x22}, []byte(copied[0].Data))
+	require.Equal(t, common.Hash{0x99}, copied[1].Topics[0])
+	require.Equal(t, []byte{0xde, 0xad}, []byte(copied[1].Data))
 }
 
 // TestAllocLogPreservesCapacityAcrossRevert pins that fully reverting a tx's
