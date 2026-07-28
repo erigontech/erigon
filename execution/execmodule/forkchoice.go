@@ -356,10 +356,16 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}, false)
 		return fmt.Errorf("semaphore timeout")
 	}
-	// The semaphore is always released when updateForkChoice returns — the
-	// background commit no longer holds it (the commit runs on
-	// the bg worker, decoupled from the foreground semaphore).
-	defer e.fgRelease()
+	// The foreground slot is released when updateForkChoice returns, unless a
+	// background prune goroutine takes it over (pruneHandedOff): RunPrune shares
+	// the pipeline Sync with the next FCU's RunLoop, so the next FCU must stay
+	// Busy until the prune finishes. In that case the prune goroutine releases.
+	pruneHandedOff := false
+	defer func() {
+		if !pruneHandedOff {
+			e.fgRelease()
+		}
+	}()
 
 	// Retire the in-flight commit-generation chain if every generation has
 	// committed. Safe here: the foreground semaphore is held,
@@ -773,14 +779,15 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			commitTimings = ct
 
-			// Prune: background by default (fcuBackgroundPrune=true).
-			// The goroutine holds an enterForeground/leaveForeground pair so the
-			// commit worker cannot start a commit (and open a conflicting RwTx)
-			// while RunPrune shares the pipeline Sync with the next FCU's RunLoop.
+			// Prune: background by default (fcuBackgroundPrune=true). The prune
+			// goroutine takes over the foreground slot (semaphore + fg count) and
+			// releases it when done, so the next FCU stays Busy — RunPrune shares
+			// the pipeline Sync with the next FCU's RunLoop and opens its own RwTx,
+			// which must not overlap either.
 			if e.fcuBackgroundPrune {
-				e.enterForeground()
+				pruneHandedOff = true
 				go func() {
-					defer e.leaveForeground()
+					defer e.fgRelease()
 					if _, err := e.runForkchoicePrune(initialCycle); err != nil && !errors.Is(err, context.Canceled) {
 						e.logger.Error("Error running background prune", "err", err)
 					}

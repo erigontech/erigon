@@ -869,8 +869,43 @@ func (sd *SharedDomains) InlineTouchKeyDisabled() bool {
 	return sd.disableInlineTouchKey
 }
 
+// HasPrefix reports whether any live key with the prefix exists. The local
+// mem+files answer comes first; parent generations are then scanned so an
+// uncommitted ancestor's keys are visible (a self-destruct in this generation
+// must enumerate storage a not-yet-committed parent wrote). A key found in a
+// parent is resolved through the child-first chain (getLatestMetered), so a
+// clear in a nearer generation — e.g. a create-contract DomainDelPrefix
+// tombstone recorded only in this mem — overrides the ancestor's value rather
+// than falsely reporting the prefix as present.
 func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
-	return sd.mem.HasPrefix(domain, prefix, roTx)
+	if k, v, ok, err := sd.mem.HasPrefix(domain, prefix, roTx); ok || err != nil {
+		return k, v, ok, err
+	}
+	tx, _ := roTx.(kv.TemporalTx)
+	if sd.parent == nil || tx == nil {
+		return nil, nil, false, nil
+	}
+	var firstKey, firstVal []byte
+	for p := sd.parent; p != nil; p = p.parent {
+		err := p.mem.IteratePrefix(domain, prefix, roTx, func(k, v []byte) (bool, error) {
+			lv, _, e := sd.getLatestMetered(domain, tx, k, nil)
+			if e != nil {
+				return false, e
+			}
+			if len(lv) > 0 {
+				firstKey, firstVal = bytes.Clone(k), bytes.Clone(lv)
+				return false, nil
+			}
+			return true, nil
+		})
+		if err != nil {
+			return nil, nil, false, err
+		}
+		if firstKey != nil {
+			return firstKey, firstVal, true, nil
+		}
+	}
+	return nil, nil, false, nil
 }
 
 func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
