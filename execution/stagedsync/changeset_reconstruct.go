@@ -1,6 +1,8 @@
 package stagedsync
 
 import (
+	"bytes"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/db/kv"
@@ -62,9 +64,9 @@ func (r *asOfPrevReader) prevValue(domain kv.Domain, key []byte, txNum uint64) (
 }
 
 func (cc *commitmentCalculator) appendCS(domain kv.Domain, key, val []byte, txNum uint64) {
-	w := csWrite{domain: domain, key: common.Copy(key), txNum: txNum}
+	w := csWrite{domain: domain, key: bytes.Clone(key), txNum: txNum}
 	if val != nil {
-		w.val = common.Copy(val)
+		w.val = bytes.Clone(val)
 	}
 	cc.csPending = append(cc.csPending, w)
 }

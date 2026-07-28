@@ -271,16 +271,16 @@ func (c relations) String() string {
 		if len(result) == 0 {
 			result = "["
 		} else {
-			result = result + ","
+			result += ","
 		}
 
-		result = result + component.Name()
+		result += component.Name()
 	}
 
 	if len(result) == 0 {
 		result = "[]"
 	} else {
-		result = result + "]"
+		result += "]"
 	}
 
 	return result

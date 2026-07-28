@@ -348,7 +348,7 @@ func ExecV3(ctx context.Context,
 		// serial and parallel paths uniformly.
 		if cfg.badBlockHalt && dbg.BadBlockHalt {
 			logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", execStage.LogPrefix()), "err", execErr)
-			os.Exit(1)
+			os.Exit(1) //nolint:gocritic // exitAfterDefer: intentional process halt without running deferred rollback to preserve state
 		}
 		return execErr
 	}
@@ -528,7 +528,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
-func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults ...chan applyResult) error {
+func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults chan applyResult) error {
 	if te.execLoopGroup == nil {
 		return errors.New("no exec group")
 	}
@@ -698,10 +698,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, dbg.DiscardCommitment(), blockLimit, blockNum, startBlockNum, maxBlockNum) {
 				exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 			}
-			var commitCh chan applyResult
-			if len(commitResults) > 0 {
-				commitCh = commitResults[0]
-			}
 			// Heads-up to the commitment calculator, ahead of the block's
 			// txResult/blockResult stream and on its own channel. inputTxNum
 			// has been advanced past this block's tasks by the loop above,
@@ -724,7 +720,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			select {
 			case te.execRequests <- &execRequest{b.NumberU64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				dbBAL, txTasks, applyResults, commitCh, false, exhausted}:
+				dbBAL, txTasks, applyResults, commitResults, false, exhausted}:
 			case <-ctx.Done():
 				return ctx.Err()
 			}

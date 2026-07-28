@@ -68,7 +68,7 @@ func TestCallManyEmptyBundles(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	baseApi := newBaseApiForTest(m)
 	api := newEthApiForTest(baseApi, m.OverlayDB(), nil, nil)
-	debugApi := NewPrivateDebugAPI(baseApi, m.OverlayDB(), nil, 5000000, false)
+	debugApi := NewPrivateDebugAPI(baseApi, m.OverlayDB(), nil, &rpccfg.DebugApiConfig{GasCap: 5000000})
 	ctx := context.Background()
 
 	txIndex := -1

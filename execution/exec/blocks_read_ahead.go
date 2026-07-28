@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"bytes"
 	"context"
 	"sync"
 	"sync/atomic"
@@ -122,7 +123,7 @@ func (bra *BlockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
 	if _, ok := bra.bodies.Get(blockHash); !ok {
 		return
 	}
-	bra.senders.Add(blockHash, common.Copy(senders))
+	bra.senders.Add(blockHash, bytes.Clone(senders))
 }
 
 // warmBody warms state for all transactions in a body using multiple workers.

@@ -1081,7 +1081,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 						if len(v) < 8 {
 							continue
 						}
-						m[string(common.Copy(k))] = common.Copy(v[8:])
+						m[string(bytes.Clone(k))] = bytes.Clone(v[8:])
 						if scanned += len(k) + len(v); scanned >= budget {
 							return
 						}
@@ -1191,10 +1191,8 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			wm.UpdateCacheReads(domain, start)
 		}
 		return v, step, nil
-	} else {
-		if step < maxStep {
-			maxStep = step
-		}
+	} else if step < maxStep {
+		maxStep = step
 	}
 
 	// Check the parent chain's mem batches (read-through chaining for child
@@ -1207,10 +1205,8 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 				wm.UpdateCacheReads(domain, start)
 			}
 			return v, step, nil
-		} else {
-			if step < maxStep {
-				maxStep = step
-			}
+		} else if step < maxStep {
+			maxStep = step
 		}
 	}
 

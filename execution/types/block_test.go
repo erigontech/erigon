@@ -545,12 +545,12 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rlpBytes := common.Copy(writer.Bytes())
+	rlpBytes := bytes.Clone(writer.Bytes())
 	writer.Reset()
 	writer.WriteString(hexutil.Encode(rlpBytes))
 
 	var rawBody RawBody
-	fromHex := common.Copy(common.FromHex(writer.String()))
+	fromHex := bytes.Clone(common.FromHex(writer.String()))
 	bodyReader := bytes.NewReader(fromHex)
 	stream := rlp.NewStream(bodyReader, 0)
 
@@ -877,7 +877,7 @@ func TestBlockRawBodyFromBinaryTxsMatchesEncoded(t *testing.T) {
 			if tr.RandTransaction(txType).MarshalBinary(&buf) != nil {
 				continue
 			}
-			binaryTxn := common.Copy(buf.Bytes())
+			binaryTxn := bytes.Clone(buf.Bytes())
 			if decoded, err := DecodeTransaction(binaryTxn); err == nil {
 				binaryTxs[i], txns[i] = binaryTxn, decoded
 			}

@@ -190,7 +190,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 
 	// Own the bytes now: val may alias a .kv mmap (the foreground exec tx's file generation)
 	// that a background merge can munmap while a concurrent commitment worker reads sd.mem.
-	valWithStep := dataWithTxNum{data: common.Copy(val), txNum: txNum}
+	valWithStep := dataWithTxNum{data: bytes.Clone(val), txNum: txNum}
 	putKeySize := 0
 	putValueSize := 0
 	if domain == kv.StorageDomain {
@@ -753,8 +753,8 @@ func (sd *TemporalMemBatch) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.T
 			v = lv
 		}
 		if len(v) > 0 {
-			firstKey = common.Copy(k)
-			firstVal = common.Copy(v)
+			firstKey = bytes.Clone(k)
+			firstVal = bytes.Clone(v)
 			hasPrefix = true
 			return false, nil // do not continue, end on first occurrence
 		}

@@ -294,11 +294,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			return erigonLogs, nil
 		}
 
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
+		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
 		}
-		if txn == nil {
+		if !ok {
 			continue
 		}
 

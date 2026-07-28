@@ -579,8 +579,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	longerChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
-		switch i {
-		case 0:
+		if i == 0 {
 			_, txn, _, err = contracts.DeploySelfdestruct(transactOptsLonger, contractBackendLonger)
 			if err != nil {
 				t.Fatal(err)
@@ -740,8 +739,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	longerChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
-		switch i {
-		case 0:
+		if i == 0 {
 			_, txn, _, err = contracts.DeploySelfdestruct(transactOptsLonger, contractBackendLonger)
 			if err != nil {
 				t.Fatal(err)
@@ -885,8 +883,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
-		switch i {
-		case 0:
+		if i == 0 {
 			contractAddress, txn, _, err = contracts.DeployRevive(transactOpts, contractBackend)
 			if err != nil {
 				t.Fatal(err)
@@ -1030,8 +1027,7 @@ func TestEip2200Gas(t *testing.T) {
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
-		switch i {
-		case 0:
+		if i == 0 {
 			contractAddress, txn, selfDestruct, err = contracts.DeploySelfdestruct(transactOpts, contractBackend)
 			if err != nil {
 				t.Fatal(err)
@@ -1298,8 +1294,7 @@ func TestWrongIncarnation2(t *testing.T) {
 	longerChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
-		switch i {
-		case 0:
+		if i == 0 {
 			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address.Value()), knownContractAddress, uint256.NewInt(1000), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
@@ -1751,8 +1746,7 @@ func TestTxLookupUnwind(t *testing.T) {
 	chain1, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 		var e error
-		switch i {
-		case 1:
+		if i == 1 {
 			txn, e = types.SignTx(types.NewTransaction(block.TxNonce(address.Value()), address.Value(), uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
 			if e != nil {
 				t.Fatal(e)

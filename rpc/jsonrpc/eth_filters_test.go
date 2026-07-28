@@ -275,6 +275,10 @@ func TestPendingTxsFilterChangesReturnsAllBatches(t *testing.T) {
 	changes, err := api.GetFilterChanges(ctx, ptf)
 	require.NoError(t, err)
 	require.Equal(t, []any{tx0.Hash(), tx1.Hash(), tx2.Hash()}, changes)
+
+	ok, err := api.UninstallFilter(ctx, ptf)
+	require.NoError(t, err)
+	require.True(t, ok)
 }
 
 func TestGetFilterChangesReturnsFilterNotFoundForUnknownID(t *testing.T) {

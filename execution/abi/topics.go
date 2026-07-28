@@ -168,7 +168,8 @@ func parseTopicWithSetter(fields Arguments, topics []common.Hash, setter func(Ar
 		return errors.New("topic/field count mismatch")
 	}
 	// Iterate over all the fields and reconstruct them from topics
-	for i, arg := range fields {
+	for i := range fields {
+		arg := &fields[i]
 		if !arg.Indexed {
 			return errors.New("non-indexed field in topic reconstruction")
 		}
@@ -195,7 +196,7 @@ func parseTopicWithSetter(fields Arguments, topics []common.Hash, setter func(Ar
 			}
 		}
 		// Use the setter function to store the value
-		if err := setter(arg, reconstr); err != nil {
+		if err := setter(*arg, reconstr); err != nil {
 			return err
 		}
 	}

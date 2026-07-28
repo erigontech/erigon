@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"fmt"
 	"math"
-	"slices"
 
 	"github.com/holiman/uint256"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -90,8 +90,9 @@ type calcState struct {
 	// domainReader provides lazy-load from the domain via asOfStateReader.
 	domainReader *calcDomainReader
 
-	// storageEnum enumerates an account's persisted storage subtree for
-	// self-destruct; nil disables the on-disk subtree wipe.
+	// storageEnum is a test injection point; production leaves it nil. The
+	// self-destruct path no longer reads it — the account delete collapses the
+	// subtree — so it exists only to assert that in tests.
 	storageEnum storageEnumerator
 
 	// lazyLoadErr captures the first error encountered during ensureAccount /
@@ -116,7 +117,6 @@ func newCalcState(reader *asOfStateReader, logger log.Logger, logPrefix string) 
 		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
 		domainReader: &calcDomainReader{reader: reader},
-		storageEnum:  &asOfStorageEnumerator{reader: reader},
 		logger:       logger,
 		logPrefix:    logPrefix,
 	}
@@ -245,14 +245,14 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	}
 }
 
-// deleteStorageSubtree zeroes and dirties every storage slot under a
-// self-destructed account, including untouched on-disk slots pulled via
-// storageEnum, so FlushToUpdates emits a DeleteUpdate for each.
+// deleteStorageSubtree handles a self-destructed account's storage. Only slots
+// touched this window (already in the maps) get explicit deletes; the account's
+// own DeleteUpdate collapses the rest of the subtree, so untouched on-disk slots
+// need not be read.
 func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
 	slots := cs.storageState[addr]
-	if slots == nil {
-		slots = make(map[accounts.StorageKey]uint256.Int)
-		cs.storageState[addr] = slots
+	if len(slots) == 0 {
+		return
 	}
 	dirty := cs.storageDirty[addr]
 	if dirty == nil {
@@ -263,45 +263,6 @@ func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
 		slots[key] = uint256.Int{}
 		dirty[key] = true
 	}
-	if cs.storageEnum == nil {
-		return
-	}
-	if err := cs.storageEnum.EachStorageSlot(addr, func(key accounts.StorageKey) error {
-		if _, ok := slots[key]; !ok {
-			slots[key] = uint256.Int{}
-			dirty[key] = true
-		}
-		return nil
-	}); err != nil {
-		// Sticky — a partial subtree wipe yields a wrong root, so fail the
-		// next compute rather than silently leaving stale slots.
-		if cs.lazyLoadErr == nil {
-			cs.lazyLoadErr = fmt.Errorf("deleteStorageSubtree(%x): %w", addr.Value(), err)
-		}
-		if cs.logger != nil {
-			cs.logger.Warn("["+cs.logPrefix+"] commitmentCalculator: SD storage enumeration failed", "addr", addr, "err", err)
-		}
-	}
-}
-
-// hasTxIndex is the BAL change-element constraint: every change
-// (*BalanceChange/*NonceChange/*CodeChange/*StorageChange) carries the tx index
-// within the block at which it was written.
-type hasTxIndex interface{ GetIndex() uint32 }
-
-// finalChangeUpTo returns the latest change whose tx index is ≤ maxTxIndex — the
-// field's value as of that point in the block, for a mid-block (step-boundary)
-// checkpoint fold. Indices are strictly increasing (BlockAccessList.Validate), so
-// a reverse scan stops at the first in-range element. maxTxIndex == MaxUint32
-// selects the block-end value (the whole block).
-func finalChangeUpTo[T hasTxIndex](changes []T, maxTxIndex uint32) (T, bool) {
-	for _, change := range slices.Backward(changes) {
-		if change.GetIndex() <= maxTxIndex {
-			return change, true
-		}
-	}
-	var zero T
-	return zero, false
 }
 
 // LoadFromBAL populates calcState from an EIP-7928 Block Access List rather
@@ -311,8 +272,8 @@ func finalChangeUpTo[T hasTxIndex](changes []T, maxTxIndex uint32) (T, bool) {
 // delete here: after the field changes and lazy-loaded pre-block fields are
 // merged, a touched all-zero account is marked Deleted so FlushToUpdates removes
 // its leaf instead of writing a zero-valued one. Storage reads are ignored.
-func (cs *calcState) LoadFromBAL(bal types.BlockAccessList, emptyRemoval bool, isAura bool, eip8246 bool) {
-	cs.LoadFromBALUpTo(bal, math.MaxUint32, emptyRemoval, isAura, eip8246)
+func (cs *calcState) LoadFromBAL(blockAccessList types.BlockAccessList, emptyRemoval bool, isAura bool, eip8246 bool) {
+	cs.LoadFromBALUpTo(blockAccessList, math.MaxUint32, emptyRemoval, isAura, eip8246)
 }
 
 // LoadFromBALUpTo is LoadFromBAL restricted to changes at tx index ≤ maxTxIndex,
@@ -320,39 +281,13 @@ func (cs *calcState) LoadFromBAL(bal types.BlockAccessList, emptyRemoval bool, i
 // mid-block step boundary (checkpoint) from the same per-tx BAL, then fold the
 // remainder — the BAL carries every change's tx index, so no re-execution is
 // needed. maxTxIndex == math.MaxUint32 is the whole block (== LoadFromBAL).
-func (cs *calcState) LoadFromBALUpTo(bal types.BlockAccessList, maxTxIndex uint32, emptyRemoval bool, isAura bool, eip8246 bool) {
-	writes := &state.WriteSet{}
-	for _, ac := range bal {
-		addr := ac.Address
-		if bc, ok := finalChangeUpTo(ac.BalanceChanges, maxTxIndex); ok {
-			writes.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
-				WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: bc.Value,
-			})
-		}
-		if nc, ok := finalChangeUpTo(ac.NonceChanges, maxTxIndex); ok {
-			writes.SetNonce(addr, &state.VersionedWrite[uint64]{
-				WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}, Val: nc.Value,
-			})
-		}
-		if cc, ok := finalChangeUpTo(ac.CodeChanges, maxTxIndex); ok {
-			writes.SetCode(addr, &state.VersionedWrite[accounts.Code]{
-				WriteHeader: state.WriteHeader{Address: addr, Path: state.CodePath}, Val: accounts.NewCode(cc.Bytecode),
-			})
-		}
-		for _, sc := range ac.StorageChanges {
-			if chg, ok := finalChangeUpTo(sc.Changes, maxTxIndex); ok {
-				writes.SetStorage(addr, sc.Slot, &state.VersionedWrite[uint256.Int]{
-					WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: sc.Slot}, Val: chg.Value,
-				})
-			}
-		}
-	}
-	cs.ApplyWrites(writes, eip8246)
+func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxTxIndex uint32, emptyRemoval bool, isAura bool, eip8246 bool) {
+	cs.ApplyWrites(bal.ToWriteSet(blockAccessList, maxTxIndex), eip8246)
 
 	// EIP-161: a touched account whose merged block-end state is empty is
 	// removed from the trie. The BAL carries no deletion marker, so reconstruct
-	// it here, gated exactly as the incremental path (normalizeWriteSet).
-	for _, ac := range bal {
+	// it here, gated exactly as the incremental path (Normalize).
+	for _, ac := range blockAccessList {
 		acc := cs.accounts[ac.Address]
 		if acc == nil || !acc.dirty || acc.Deleted {
 			continue

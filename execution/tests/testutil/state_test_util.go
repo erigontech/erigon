@@ -95,7 +95,7 @@ type stTransaction struct {
 	GasPrice             *math.HexOrDecimal256 `json:"gasPrice"`
 	MaxFeePerGas         *math.HexOrDecimal256 `json:"maxFeePerGas"`
 	MaxPriorityFeePerGas *math.HexOrDecimal256 `json:"maxPriorityFeePerGas"`
-	Nonce                math.HexOrDecimal64   `json:"nonce"`
+	Nonce                math.HexOrDecimal256  `json:"nonce"`
 	GasLimit             []math.HexOrDecimal64 `json:"gasLimit"`
 	PrivateKey           hexutil.Bytes         `json:"secretKey"`
 	To                   string                `json:"to"`
@@ -269,7 +269,7 @@ func (t *StateTest) Run(tb testing.TB, sd *execctx.SharedDomains, tx kv.Temporal
 	if root != common.Hash(post.Root) {
 		return st, root, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
-	if logs := rlpHash(st.Logs()); logs != common.Hash(post.Logs) {
+	if logs := st.LogsRlpHash(); logs != common.Hash(post.Logs) {
 		return st, root, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
 	}
 	return st, root, nil
@@ -496,8 +496,6 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 	}
 }
 
-var rlpHash = types.RlpHash
-
 func vmTestBlockHash(n uint64) (common.Hash, error) {
 	return crypto.Keccak256Hash([]byte(new(big.Int).SetUint64(n).String())), nil
 }
@@ -590,7 +588,10 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 		feeCap = big.Int(*gasPrice)
 		tipCap = big.Int(*gasPrice)
 	}
-
+	nonce := (*big.Int)(&tx.Nonce)
+	if !nonce.IsUint64() {
+		return nil, fmt.Errorf("invalid txn nonce (overflowed) %q", nonce)
+	}
 	gpi := big.Int(*gasPrice)
 	gasPriceInt := uint256.NewInt(gpi.Uint64())
 
@@ -602,7 +603,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 	msg := types.NewMessage(
 		from,
 		to,
-		uint64(tx.Nonce),
+		nonce.Uint64(),
 		value,
 		uint64(gasLimit),
 		gasPriceInt,

@@ -452,11 +452,11 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			continue
 		}
 
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
+		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
 		}
-		if txn == nil {
+		if !ok {
 			continue
 		}
 
@@ -606,9 +606,12 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), txnHash, false, false), nil
 	}
 
-	txn, err := api._blockReader.TxnByIdxInBlock(ctx, overlayTx, header.Number.Uint64(), txnIndex)
+	txn, ok, err := api._blockReader.TxnByIdxInBlock(ctx, overlayTx, header.Number.Uint64(), txnIndex)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, nil
 	}
 
 	// Check if we have commitment history: this is required to know if state root will be computed for historical state.

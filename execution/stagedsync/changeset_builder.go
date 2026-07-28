@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"bytes"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
 )
@@ -83,7 +82,7 @@ func (b *changesetBuilder) record(domain kv.Domain, key []byte, newVal []byte, t
 	if newVal == nil {
 		running[ks] = nil
 	} else {
-		running[ks] = common.Copy(newVal)
+		running[ks] = bytes.Clone(newVal)
 	}
 }
 

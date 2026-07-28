@@ -361,7 +361,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	var blockAccessListBytes []byte
 	var err error
-	if version >= clparams.GloasVersion && !s.config.IsEIPDisabled(7928) {
+	if version >= clparams.GloasVersion && s.config.IsEIPEnabled(7928, header.Time) {
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}

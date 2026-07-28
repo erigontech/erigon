@@ -568,7 +568,7 @@ func TestHistoryCanPrune(t *testing.T) {
 			err = writer.AddPrevValue(append(addr, val...), i, prev)
 			require.NoError(err)
 
-			prev = common.Copy(val)
+			prev = bytes.Clone(val)
 		}
 
 		require.NoError(writer.Flush(ctx, tx))
@@ -1111,7 +1111,7 @@ func checkHistoryNoDuplicates(t *testing.T, hc *HistoryRoTx) {
 				"duplicate history entry for key %x: same value %x at txNum=%d and txNum=%d",
 				key, val, prev.txNum, txNum)
 		}
-		prevByKey[ks] = prevEntry{val: common.Copy(val), txNum: txNum}
+		prevByKey[ks] = prevEntry{val: bytes.Clone(val), txNum: txNum}
 	}
 }
 
@@ -1328,7 +1328,8 @@ func TestHistoryScanFiles(t *testing.T) {
 		// Recreate domain and re-scan the files
 		scanDirsRes, err := scanDirs(h.dirs)
 		require.NoError(err)
-		require.NoError(h.openFolder(t.Context(), scanDirsRes))
+		_, err = h.openFolder(t.Context(), scanDirsRes)
+		require.NoError(err)
 		// Check the history
 		checkHistoryHistory(t, h, txs)
 	}
@@ -1905,7 +1906,7 @@ func TestHistory_OpenFolder(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(h.dirs)
 	require.NoError(t, err)
-	err = h.openFolder(t.Context(), scanDirsRes)
+	_, err = h.openFolder(t.Context(), scanDirsRes)
 	require.NoError(t, err)
 	h.Close()
 }
