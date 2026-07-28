@@ -831,7 +831,7 @@ mainloop:
 				wg.Go(func() {
 					slot, blockRoot, ok := d.resolveColumnSidecarSlotAndRoot(sidecar)
 					if !ok {
-						log.Debug("rejecting column sidecar with inconsistent fork schema", "pid", result.pid)
+						log.Debug("rejecting malformed or schema-inconsistent column sidecar", "pid", result.pid)
 						d.rpc.BanPeer(result.pid)
 						return
 					}
@@ -921,11 +921,12 @@ mainloop:
 }
 
 // resolveColumnSidecarSlotAndRoot reads a received column sidecar's slot and
-// block root from the fields populated by the schema it was decoded with. A peer
-// picks that schema via the response fork-digest, independently of the slot the
-// sidecar claims, so it returns ok=false unless the fork implied by the slot
-// agrees with the decoded schema across the Gloas boundary (which removed
-// SignedBlockHeader) — otherwise a peer could reach a field its schema left unset.
+// block root from the fields populated by the schema it was decoded with,
+// returning ok=false for a malformed sidecar. A peer picks that schema via the
+// response fork-digest, independently of the slot the sidecar claims, so ok is
+// also false when the fork implied by the slot disagrees with the decoded schema
+// across the Gloas boundary (which removed SignedBlockHeader) — otherwise a peer
+// could reach a field its schema left unset.
 func (d *peerdas) resolveColumnSidecarSlotAndRoot(sidecar *cltypes.DataColumnSidecar) (slot uint64, blockRoot common.Hash, ok bool) {
 	isGloas := sidecar.Version() >= clparams.GloasVersion
 	if isGloas {
