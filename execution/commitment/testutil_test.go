@@ -20,6 +20,7 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"math/bits"
 	"math/rand"
@@ -27,9 +28,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 )
+
+// forceDirectSpill makes ModeDirect collection spill to the etl collector from the
+// first touch, pinning the arena/etl HashSort path regardless of batch size.
+func forceDirectSpill(ut *Updates) { ut.directMemLimit = 0 }
 
 // forEachMode runs fn as a subtest once per Updates mode, named after the mode.
 func forEachMode(t *testing.T, fn func(t *testing.T, mode Mode)) {
@@ -55,7 +59,7 @@ func processSeq(tb testing.TB, ms *MockState, trie *HexPatriciaHashed, plainKeys
 		r, err := trie.Process(ctx, upds, "", nil, WarmupConfig{})
 		upds.Close()
 		require.NoError(tb, err)
-		root = common.Copy(r)
+		root = bytes.Clone(r)
 	}
 	return root
 }
@@ -68,7 +72,7 @@ func processBatch(tb testing.TB, ms *MockState, trie *HexPatriciaHashed, plainKe
 	defer upds.Close()
 	root, err := trie.Process(context.Background(), upds, "", nil, WarmupConfig{})
 	require.NoError(tb, err)
-	return common.Copy(root)
+	return bytes.Clone(root)
 }
 
 // processFreshTrie builds a fresh trie/state, applies the updates in a single ModeDirect batch and

@@ -13,9 +13,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-var (
-	ErrExpiryInThePast = errors.New("expiry is in the past")
-)
+var ErrExpiryInThePast = errors.New("expiry is in the past")
 
 type TopicSubscription struct {
 	topic     *pubsub.Topic

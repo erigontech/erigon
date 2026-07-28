@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -411,7 +412,7 @@ func (c *dataCopy) RequiredGas(input []byte) uint64 {
 	return ToWordSize(uint64(len(input)))*params.IdentityPerWordGas + params.IdentityBaseGas
 }
 func (c *dataCopy) Run(in []byte) ([]byte, error) {
-	return common.Copy(in), nil
+	return bytes.Clone(in), nil
 }
 
 func (c *dataCopy) Name() string {
@@ -864,11 +865,11 @@ func (c *blake2F) Run(input []byte) ([]byte, error) {
 		m [16]uint64
 		t [2]uint64
 	)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		offset := 4 + i*8
 		h[i] = binary.LittleEndian.Uint64(input[offset : offset+8])
 	}
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		offset := 68 + i*8
 		m[i] = binary.LittleEndian.Uint64(input[offset : offset+8])
 	}
@@ -879,7 +880,7 @@ func (c *blake2F) Run(input []byte) ([]byte, error) {
 	blake2b.F(&h, m, t, final, rounds)
 
 	output := make([]byte, 64)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		offset := i * 8
 		binary.LittleEndian.PutUint64(output[offset:offset+8], h[i])
 	}
@@ -968,7 +969,7 @@ func (c *bls12381G1MultiExp) Run(input []byte) ([]byte, error) {
 	scalars := make([]fr.Element, k)
 
 	// Decode point scalar pairs
-	for i := 0; i < k; i++ {
+	for i := range k {
 		off := 160 * i
 		t0, t1, t2 := off, off+128, off+160
 		// Decode G1 point
@@ -1072,7 +1073,7 @@ func (c *bls12381G2MultiExp) Run(input []byte) ([]byte, error) {
 	scalars := make([]fr.Element, k)
 
 	// Decode point scalar pairs
-	for i := 0; i < k; i++ {
+	for i := range k {
 		off := 288 * i
 		t0, t1, t2 := off, off+256, off+288
 		// Decode G2 point
@@ -1128,7 +1129,7 @@ func (c *bls12381Pairing) Run(input []byte) ([]byte, error) {
 	q := make([]bls12381.G2Affine, k)
 
 	// Decode pairs
-	for i := 0; i < k; i++ {
+	for i := range k {
 		off := 384 * i
 		t0, t1, t2 := off, off+128, off+384
 
@@ -1227,7 +1228,7 @@ func decodeBLS12381FieldElement(in []byte) (fp.Element, error) {
 		return fp.Element{}, errors.New("invalid field element length")
 	}
 	// check top bytes
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		if in[i] != byte(0x00) {
 			return fp.Element{}, errBLS12381InvalidFieldElementTopBytes
 		}

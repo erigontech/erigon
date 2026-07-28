@@ -139,7 +139,7 @@ func TestDoCopiesHandlerWriteBuffer(t *testing.T) {
 		_, _ = w.Write(buf)
 		copy(buf, "XXXXX") // simulate fmt reusing its pooled buffer after Write returns
 	})
-	req, err := http.NewRequest("GET", "http://service.internal/", nil)
+	req, err := http.NewRequest("GET", "http://service.internal/", http.NoBody)
 	require.NoError(t, err)
 	resp, err := Do(h, req)
 	require.NoError(t, err)
@@ -164,7 +164,7 @@ func TestDoClosesStreamingBodyOnContextCancel(t *testing.T) {
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	req, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", http.NoBody)
 	require.NoError(t, err)
 
 	errCh := make(chan error, 1)
@@ -199,7 +199,7 @@ func TestDoRecoversHandlerPanic(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		panic("boom")
 	})
-	req, err := http.NewRequest("GET", "http://service.internal/", nil)
+	req, err := http.NewRequest("GET", "http://service.internal/", http.NoBody)
 	require.NoError(t, err)
 	resp, err := Do(h, req)
 	require.NoError(t, err)
@@ -227,7 +227,7 @@ func TestDoThroughChiRouterPreservesStreamingHandoff(t *testing.T) {
 	mux := chi.NewRouter()
 	mux.Get("/", h)
 
-	req, err := http.NewRequest("GET", "http://service.internal/", nil)
+	req, err := http.NewRequest("GET", "http://service.internal/", http.NoBody)
 	require.NoError(t, err)
 	resp, err := Do(mux, req)
 	require.NoError(t, err)
@@ -279,7 +279,7 @@ func fetchPeerResponse(t *testing.T, topic string, payloadSize int, maxResponseB
 
 	require.NoError(t, victim.Connect(ctx, peer.AddrInfo{ID: peerHost.ID(), Addrs: peerHost.Addrs()}))
 
-	req, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", http.NoBody)
 	require.NoError(t, err)
 	req.Header.Set("REQRESP-PEER-ID", peerHost.ID().String())
 	req.Header.Set("REQRESP-TOPIC", topic)
@@ -320,7 +320,7 @@ func fetchPeerEmptyCloseResponse(t *testing.T, topic string) (int, string, strin
 
 	require.NoError(t, victim.Connect(ctx, peer.AddrInfo{ID: peerHost.ID(), Addrs: peerHost.Addrs()}))
 
-	req, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", http.NoBody)
 	require.NoError(t, err)
 	req.Header.Set("REQRESP-PEER-ID", peerHost.ID().String())
 	req.Header.Set("REQRESP-TOPIC", topic)

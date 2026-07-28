@@ -18,6 +18,7 @@ package integrity
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -26,7 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -40,11 +41,11 @@ import (
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -53,7 +54,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
-func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, logger log.Logger) error {
+func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br dbservices.FullBlockReader, failFast bool, logger log.Logger) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -99,7 +100,7 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.Fu
 	return integrityErr
 }
 
-func checkCommitmentRootInFile(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, f state.VisibleFile, recompute bool, logger log.Logger) error {
+func checkCommitmentRootInFile(ctx context.Context, db kv.TemporalRoDB, br dbservices.FullBlockReader, f state.VisibleFile, recompute bool, logger log.Logger) error {
 	tx, err := db.BeginTemporalRo(ctx) // we need separate RoTx per file if we re-compute commitment for more than 1 file
 	if err != nil {
 		return err
@@ -141,7 +142,7 @@ func (info commitmentRootInfo) PartialBlock() bool {
 	return info.txNum < info.blockMaxTxNum
 }
 
-func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, f state.VisibleFile, logger log.Logger) (commitmentRootInfo, error) {
+func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br dbservices.FullBlockReader, f state.VisibleFile, logger log.Logger) (commitmentRootInfo, error) {
 	var info commitmentRootInfo
 	startTxNum := f.StartRootNum()
 	endTxNum := f.EndRootNum()
@@ -570,10 +571,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		return derefCounts{}, nil
 	}
 	trace := logger.Enabled(ctx, log.LvlTrace)
-	workers := dbg.EnvInt("CHECK_COMMITMENT_KVS_DEREF_WORKERS", 4)
-	if workers < 1 {
-		workers = 1
-	}
+	workers := max(dbg.EnvInt("CHECK_COMMITMENT_KVS_DEREF_WORKERS", 4), 1)
 	logger.Info("[integrity] CommitmentKvDeref", "kv", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum, "workers", workers)
 
 	// Open shared decompressors — each worker creates independent readers via MakeGetter()
@@ -622,12 +620,9 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 
 	// Producer: single goroutine iterating commitment keys sequentially.
 	// producerErr is written before return, which triggers defer close(ch).
-	// We wait on producerWg before closing decompressors to avoid use-after-close.
 	var producerErr error
 	var producerWg sync.WaitGroup
-	producerWg.Add(1)
-	go func() {
-		defer producerWg.Done()
+	producerWg.Go(func() {
 		defer close(ch)
 		commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
 		branchKeyBuf := make([]byte, 0, 128)
@@ -660,7 +655,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				return
 			}
 		}
-	}()
+	})
 
 	// Progress reporter
 	var processed atomic.Uint64
@@ -803,7 +798,7 @@ func deriveDecompForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain)
 	return decomp, compression, nil
 }
 
-func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, logger log.Logger) error {
+func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br dbservices.FullBlockReader, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -897,7 +892,7 @@ func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRo
 	return nil
 }
 
-func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, file state.VisibleFile, bucket int, failFast bool, lvl log.Lvl, logger log.Logger) (uint64, error) {
+func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br dbservices.FullBlockReader, file state.VisibleFile, bucket int, failFast bool, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	const numBuckets = 10000
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
@@ -1002,7 +997,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 
 // checkCommitmentHistAtBlkWithIdx checks commitment for blockNum using the pre-built
 // per-domain key index from ChangedKeysPerBlockIdx.
-func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, br services.FullBlockReader, blockNum uint64, idx *ChangedKeysPerBlockIdx, lvl log.Lvl, logger log.Logger) error {
+func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, br dbservices.FullBlockReader, blockNum uint64, idx *ChangedKeysPerBlockIdx, lvl log.Lvl, logger log.Logger) error {
 	logger.Log(lvl, "checking commitment hist at block", "blockNum", blockNum)
 	header, err := br.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
@@ -1108,7 +1103,7 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *
 	return nil
 }
 
-func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, lvl log.Lvl, logger log.Logger) error {
+func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br dbservices.FullBlockReader, blockNum uint64, lvl log.Lvl, logger log.Logger) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -1131,7 +1126,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 // across many sampled blocks; small enough to keep memory bounded (~few hundred MB).
 const checkCommitmentHistWindowSize = 10_000
 
-func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, logger log.Logger) error {
+func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br dbservices.FullBlockReader, from, to uint64, logger log.Logger) error {
 	if from >= to {
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
 	}
@@ -1257,7 +1252,7 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 			// Collect all previous files for no-op write detection.
 			var nextFile state.VisibleFile
 			var prevFiles []state.VisibleFile
-			for j := 0; j < len(files); j++ {
+			for j := range files {
 				if files[j].StartRootNum() == file.EndRootNum() && strings.HasSuffix(files[j].Fullpath(), ".kv") {
 					nextFile = files[j]
 				}
@@ -1666,8 +1661,8 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 		prevCommitmentPaths = append(prevCommitmentPaths, pf.Fullpath())
 	}
 	// Sort newest-first so we check the most recent previous file first.
-	sort.Slice(prevCommitmentPaths, func(i, j int) bool {
-		return prevCommitmentPaths[i] > prevCommitmentPaths[j]
+	slices.SortFunc(prevCommitmentPaths, func(a, b string) int {
+		return cmp.Compare(b, a)
 	})
 	accMissing, err := reverseCheckDomainKeys(ctx, accDecomp, kv.AccountsDomain, accCollector, prevCommitmentPaths, fileName, failFast, logger)
 	if err != nil && !errors.Is(err, ErrIntegrity) {
@@ -1726,7 +1721,7 @@ func reverseCheckDomainKeys(ctx context.Context, decomp *seg.Decompressor, domai
 		defer close(refCh)
 		errCh <- sortedKeys.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error { //nolint:gocritic
 			select {
-			case refCh <- common.Copy(k):
+			case refCh <- bytes.Clone(k):
 				return nil
 			case <-loadCtx.Done():
 				return loadCtx.Err()
@@ -1772,8 +1767,8 @@ func reverseCheckDomainKeys(ctx context.Context, decomp *seg.Decompressor, domai
 		if !hasRef || !bytes.Equal(refKey, key) {
 			// Collect for no-op verification against previous files.
 			missingEntries = append(missingEntries, missingEntry{
-				key: common.Copy(key),
-				val: common.Copy(val),
+				key: bytes.Clone(key),
+				val: bytes.Clone(val),
 			})
 		}
 	}
@@ -1819,8 +1814,8 @@ func verifyMissingAgainstPrevFiles(entries []missingEntry, domain kv.Domain, pre
 	}
 
 	// Sort missing entries by key for merge-join.
-	sort.Slice(entries, func(i, j int) bool {
-		return bytes.Compare(entries[i].key, entries[j].key) < 0
+	slices.SortFunc(entries, func(a, b missingEntry) int {
+		return bytes.Compare(a.key, b.key)
 	})
 
 	// Track which entries are confirmed as no-ops.
@@ -2151,8 +2146,8 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 
 			// Copy data since buffers are reused.
 			item := hashWorkItem{
-				branchKey:   common.Copy(branchKey),
-				branchValue: common.Copy(branchValue),
+				branchKey:   bytes.Clone(branchKey),
+				branchValue: bytes.Clone(branchValue),
 			}
 
 			select {
@@ -2222,7 +2217,7 @@ func verifyHashItem(
 					return key, nil
 				}
 				val, _ := stoReader.Next(valBuf[:0])
-				storageValues[string(plainKey)] = common.Copy(val)
+				storageValues[string(plainKey)] = bytes.Clone(val)
 			} else if preloadedStoValues != nil {
 				strKey := string(plainKey)
 				if val, ok := preloadedStoValues[strKey]; ok {
@@ -2248,7 +2243,7 @@ func verifyHashItem(
 				return key, nil
 			}
 			val, _ := accReader.Next(valBuf[:0])
-			accountValues[string(plainKey)] = common.Copy(val)
+			accountValues[string(plainKey)] = bytes.Clone(val)
 		} else if preloadedAccValues != nil {
 			strKey := string(plainKey)
 			if val, ok := preloadedAccValues[strKey]; ok {
@@ -2301,7 +2296,7 @@ func preloadDomainValues(commitmentFile string, oldDomain, newDomain kv.Domain, 
 		}
 		val, _ := reader.Next(valBuf[:0])
 		if len(key) == expectedKeyLen {
-			values[string(key)] = common.Copy(val)
+			values[string(key)] = bytes.Clone(val)
 		}
 	}
 	return values, nil

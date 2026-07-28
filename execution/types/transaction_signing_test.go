@@ -211,6 +211,60 @@ func TestMakeSignerFromRulesEquivalence(t *testing.T) {
 	}
 }
 
+func TestLegacyOutOfRangeVIsInvalidSig(t *testing.T) {
+	t.Parallel()
+	// v=34 is not a valid legacy v: it is neither the pre-EIP-155 values 27/28 nor
+	// a valid EIP-155 encoding (v >= 35), so it must be rejected as a bad signature
+	// value rather than mis-reported as an invalid chain id.
+	signer := LatestSignerForChainID(uint256.NewInt(1))
+	txn := &LegacyTx{
+		CommonTx: CommonTx{
+			Nonce:    0,
+			GasLimit: 21000,
+			Value:    *uint256.NewInt(0),
+			V:        *uint256.NewInt(34),
+			R:        *uint256.NewInt(1),
+			S:        *uint256.NewInt(1),
+		},
+		GasPrice: *uint256.NewInt(1),
+	}
+	_, err := txn.Sender(*signer)
+	if !errors.Is(err, ErrInvalidSig) {
+		t.Errorf("expected %v for out-of-range legacy v, got %v", ErrInvalidSig, err)
+	}
+}
+
+func TestDeriveChainId(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		v       uint64
+		want    uint64
+		wantErr bool
+	}{
+		{27, 0, false},
+		{28, 0, false},
+		{35, 0, false},
+		{37, 1, false}, // mainnet EIP-155
+		{38, 1, false},
+		{0, 0, true},
+		{29, 0, true},
+		{34, 0, true},
+	} {
+		got, err := DeriveChainId(uint256.NewInt(tc.v))
+		if tc.wantErr {
+			if !errors.Is(err, ErrInvalidSig) {
+				t.Errorf("v=%d: expected ErrInvalidSig, got %v", tc.v, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("v=%d: unexpected error %v", tc.v, err)
+		} else if got.Uint64() != tc.want {
+			t.Errorf("v=%d: chainId=%d, want %d", tc.v, got.Uint64(), tc.want)
+		}
+	}
+}
+
 func TestSignatureValuesError(t *testing.T) {
 	// 1. Setup a valid transaction
 	tx := NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)

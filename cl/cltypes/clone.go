@@ -37,7 +37,7 @@ func (i *IndexedAttestation) Clone() clonable.Clonable {
 
 	*/
 	return &IndexedAttestation{
-		//AttestingIndices: attestingIndices,
+		// AttestingIndices: attestingIndices,
 		Data: &solid.AttestationData{},
 	}
 }

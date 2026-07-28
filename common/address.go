@@ -74,15 +74,12 @@ func (a *Address) checksumHex() []byte {
 	buf := a.hex()
 
 	// compute checksum
-	sha := keccak.NewFastKeccak()
-	//nolint:errcheck
-	sha.Write(buf[2:])
-	hash := sha.Sum(nil)
+	hash := keccak.Sum256(buf[2:])
 
 	for i := 2; i < len(buf); i++ {
 		hashByte := hash[(i-2)/2]
 		if i%2 == 0 {
-			hashByte = hashByte >> 4
+			hashByte >>= 4
 		} else {
 			hashByte &= 0xf
 		}
@@ -134,6 +131,9 @@ func (a *Address) SetBytes(b []byte) { fixedSetBytes(a[:], b) }
 
 // MarshalText returns the hex representation of a.
 func (a Address) MarshalText() ([]byte, error) { return hexutil.Bytes(a[:]).MarshalText() }
+
+// AppendText implements encoding.TextAppender (alloc-free MarshalText).
+func (a Address) AppendText(dst []byte) ([]byte, error) { return hexutil.Bytes(a[:]).AppendText(dst) }
 
 // UnmarshalText parses a hash in hex syntax.
 func (a *Address) UnmarshalText(input []byte) error {

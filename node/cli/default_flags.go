@@ -100,6 +100,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcGasCapFlag,
 	&utils.RpcBlockRangeLimit,
 	&utils.RpcGetLogsMaxResults,
+	&utils.RpcLogQueryLimit,
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
 	&utils.AllowUnprotectedTxs,
@@ -123,6 +124,7 @@ var DefaultFlags = []cli.Flag{
 	&RpcSubscriptionFiltersMaxTxsFlag,
 	&RpcSubscriptionFiltersMaxAddressesFlag,
 	&RpcSubscriptionFiltersMaxTopicsFlag,
+	&RpcSubscriptionFiltersTimeoutFlag,
 
 	&utils.SnapKeepBlocksFlag,
 	&utils.SnapStopFlag,
@@ -166,6 +168,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.VMEnableDebugFlag,
 	&utils.NetworkIdFlag,
 	&utils.PersistReceiptsV2Flag,
+	&utils.PersistReceiptsDistanceFlag,
 	&utils.FakePoWFlag,
 	&utils.GpoBlocksFlag,
 	&utils.GpoPercentileFlag,

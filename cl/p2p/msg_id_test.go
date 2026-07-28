@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common/crypto"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
@@ -43,22 +44,24 @@ func TestMsgID(t *testing.T) {
 	topicLenBytes := utils.Uint64ToLE(topicLen)
 	invalidSnappy := [32]byte{'J', 'U', 'N', 'K'}
 	pMsg := &pubsubpb.Message{Data: invalidSnappy[:], Topic: &tpc}
-	// Create object to hash
-	combinedObj := append(n.MessageDomainInvalidSnappy[:], topicLenBytes...)
+	combinedObj := make([]byte, 0, len(n.MessageDomainInvalidSnappy)+len(topicLenBytes)+len(tpc)+len(pMsg.Data))
+	combinedObj = append(combinedObj, n.MessageDomainInvalidSnappy[:]...)
+	combinedObj = append(combinedObj, topicLenBytes...)
 	combinedObj = append(combinedObj, tpc...)
 	combinedObj = append(combinedObj, pMsg.Data...)
-	hashedData := utils.Sha256(combinedObj)
+	hashedData := crypto.Sha256(combinedObj)
 	msgID := string(hashedData[:20])
 	require.Equal(t, msgID, s.msgId(pMsg), "Got incorrect msg id")
 
 	validObj := [32]byte{'v', 'a', 'l', 'i', 'd'}
 	enc := snappy.Encode(nil, validObj[:])
 	nMsg := &pubsubpb.Message{Data: enc, Topic: &tpc}
-	// Create object to hash
-	combinedObj = append(n.MessageDomainValidSnappy[:], topicLenBytes...)
+	combinedObj = make([]byte, 0, len(n.MessageDomainValidSnappy)+len(topicLenBytes)+len(tpc)+len(validObj))
+	combinedObj = append(combinedObj, n.MessageDomainValidSnappy[:]...)
+	combinedObj = append(combinedObj, topicLenBytes...)
 	combinedObj = append(combinedObj, tpc...)
 	combinedObj = append(combinedObj, validObj[:]...)
-	hashedData = utils.Sha256(combinedObj)
+	hashedData = crypto.Sha256(combinedObj)
 	msgID = string(hashedData[:20])
 	require.Equal(t, msgID, s.msgId(nMsg), "Got incorrect msg id")
 }

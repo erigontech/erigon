@@ -299,11 +299,11 @@ func generateChain(
 			txs = append(txs, txn)
 			balanceStorageKeyPath := computeMappingStorageKey(address1, 1) // balance in slot 1
 			// The trie path for storage is keccak256(address) + keccak256(storage_slot)
-			hashedBalanceKey := crypto.Keccak256(balanceStorageKeyPath[:])
+			hashedBalanceKey := crypto.Keccak256Hash(balanceStorageKeyPath[:])
 
 			sameStoragePrefixAddresses = findAddressesWithMatchingStorageKeyPrefix(balanceStorageKeyPath, 1, 1, 1)
 			sameStorageKeyPath := computeMappingStorageKey(sameStoragePrefixAddresses[0], 1)
-			hashedSiblingKey := crypto.Keccak256(sameStorageKeyPath[:])
+			hashedSiblingKey := crypto.Keccak256Hash(sameStorageKeyPath[:])
 
 			// Assert first nibble of the hashed storage key is the same (trie path)
 			if (hashedSiblingKey[0] >> 4) != (hashedBalanceKey[0] >> 4) {
@@ -363,7 +363,7 @@ func findAddressWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint64,
 	// We need to match the first nNibbles of that hashed value.
 	targetHashedKey := crypto.Keccak256Hash(targetKey[:])
 	targetNibbles := make([]byte, nNibbles)
-	for i := 0; i < nNibbles; i++ {
+	for i := range nNibbles {
 		if i%2 == 0 {
 			targetNibbles[i] = targetHashedKey[i/2] >> 4
 		} else {
@@ -382,7 +382,7 @@ func findAddressWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint64,
 
 		// Compare nibbles of the hashed storage key (the actual trie path)
 		match := true
-		for i := 0; i < nNibbles; i++ {
+		for i := range nNibbles {
 			var nibble byte
 			if i%2 == 0 {
 				nibble = hashedStorageKey[i/2] >> 4
@@ -625,7 +625,7 @@ func CreateTestExecModuleForTracesCollision(t *testing.T) *execmoduletester.Exec
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := accounts.InternCodeHash(crypto.HashData(initCode))
+	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
 	aa := types.CreateAddress2(bb, [32]byte{}, initHash)
 	t.Logf("Destination address: %x\n", aa)
 

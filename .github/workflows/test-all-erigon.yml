@@ -8,6 +8,10 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   tests-mac-linux:
     strategy:
@@ -39,6 +43,7 @@ jobs:
             skip_execution_tests: 'true'
     name: tests-mac-linux (${{ matrix.os }}, ${{ matrix.exec_mode }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
 
     steps:
       - name: Declare runners
@@ -50,6 +55,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-erigon
         id: erigon

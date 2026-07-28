@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math/big"
 	"slices"
-	"sort"
 
 	"github.com/holiman/uint256"
 
@@ -97,9 +96,9 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 	for addr := range *so {
 		addrs = append(addrs, addr)
 	}
-	sort.Slice(addrs, func(i, j int) bool {
-		ai, aj := addrs[i].Value(), addrs[j].Value()
-		return bytes.Compare(ai[:], aj[:]) < 0
+	slices.SortFunc(addrs, func(a, b accounts.Address) int {
+		av, bv := a.Value(), b.Value()
+		return bytes.Compare(av[:], bv[:])
 	})
 
 	err := so.override(ibs, addrs)

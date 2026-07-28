@@ -63,7 +63,7 @@ func (tc *trieReaderTestCtx) TxNum() uint64                                 { re
 func (tc *trieReaderTestCtx) putBranch(nibblePrefix []byte, cells [16]*cell) {
 	var afterMap uint16
 	var encData [16]cellEncodeData
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		if cells[i] != nil {
 			afterMap |= uint16(1) << i
 			encData[i] = cellEncodeDataFromCell(cells[i])
@@ -244,7 +244,7 @@ func TestTrieReader_MultiLevelDescent(t *testing.T) {
 	depth := 12
 
 	// Create branch-hash cells following the actual hashed key path.
-	for d := 0; d < depth; d++ {
+	for d := range depth {
 		var cells [16]*cell
 		cells[hashedKey[d]] = makeBranchCell(dummyHash())
 		ctx.putBranch(hashedKey[:d], cells)
@@ -282,7 +282,7 @@ func TestTrieReader_StorageLookup(t *testing.T) {
 	// To reach depth 64, we need branch-hash cells along the account path.
 	// For simplicity, create a single branch at root pointing to depth 64
 	// via chain of hash cells at key depths.
-	for d := 0; d < 64; d++ {
+	for d := range 64 {
 		var cells [16]*cell
 		cells[hashedKey[d]] = makeBranchCell(dummyHash())
 		ctx.putBranch(hashedKey[:d], cells)
@@ -461,7 +461,7 @@ func TestTrieReader_RoundTripWithHPH_ManyAccounts(t *testing.T) {
 
 	// Generate 100 accounts with distinct addresses.
 	ub := NewUpdateBuilder()
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		addr := fmt.Sprintf("%040x", i+1) // 20-byte hex addresses
 		ub.Balance(addr, uint64(1000+i))
 		ub.Nonce(addr, uint64(i))

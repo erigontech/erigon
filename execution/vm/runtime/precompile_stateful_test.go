@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -105,7 +106,10 @@ func TestStatefulPrecompileDispatch(t *testing.T) {
 	cfg := newStatefulTestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
-	gas := mdgas.MdGas{Regular: 100000}
+	// Value transfer to the not-yet-existing precompile account triggers the
+	// EIP-2780 top-level NEW_ACCOUNT state charge; budget it in the State
+	// dimension so it doesn't spill into Regular.
+	gas := mdgas.MdGas{Regular: 100000, State: params.StateGasNewAccount}
 	value := *uint256.NewInt(7)
 
 	ret, remaining, _, err := vmenv.Call(cfg.Origin, precompileAddr, []byte{0x01}, gas, value, false)

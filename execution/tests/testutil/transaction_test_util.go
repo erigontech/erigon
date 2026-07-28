@@ -86,6 +86,8 @@ func (tt *TransactionTest) Run(chainID *uint256.Int) error {
 			AccessListLen:      uint64(len(msg.AccessList())),
 			StorageKeysLen:     uint64(msg.AccessList().StorageKeys()),
 			IsContractCreation: msg.To().IsNil(),
+			IsSelfTransfer:     !msg.To().IsNil() && msg.To() == sender,
+			HasValue:           !msg.Value().IsZero(),
 			IsEIP2:             rules.IsHomestead,
 			IsEIP2028:          rules.IsIstanbul,
 			IsEIP3860:          rules.IsShanghai,
@@ -93,6 +95,7 @@ func (tt *TransactionTest) Run(chainID *uint256.Int) error {
 			IsEIP7976:          rules.IsAmsterdam,
 			IsEIP7981:          rules.IsAmsterdam,
 			IsEIP8037:          rules.IsAmsterdam,
+			IsEIP2780:          rules.IsAmsterdam,
 		})
 		requiredGas := intrinsicGasResult.RegularGas
 		if rules.IsPrague && intrinsicGasResult.FloorGasCost > requiredGas {

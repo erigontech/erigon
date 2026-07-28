@@ -17,13 +17,13 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"testing"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -110,7 +110,7 @@ func BenchmarkBranchMerger_Merge(b *testing.B) {
 		enc1, err := be.EncodeBranch(bm, tm, am, &cellData)
 		require.NoError(b, err)
 
-		copies[i] = common.Copy(enc1)
+		copies[i] = bytes.Clone(enc1)
 	}
 
 	bmg := NewHexBranchMerger(4096)
@@ -145,7 +145,7 @@ func benchReplacePlainKeys(b *testing.B, data BranchData, buf []byte, fn func(ke
 func encodeSyntheticBranch(b *testing.B, nCells int) (BranchData, uint16) {
 	b.Helper()
 	_, bm, enc := encodeCellRow(b, nCells)
-	return BranchData(common.Copy(enc)), bm
+	return BranchData(bytes.Clone(enc)), bm
 }
 
 // preshortenBranchData shortens keys in enc and returns the shortened data plus
@@ -160,13 +160,13 @@ func preshortenBranchData(b *testing.B, enc BranchData) (BranchData, map[string]
 		} else {
 			short = key[:4]
 		}
-		keyMap[string(short)] = common.Copy(key)
+		keyMap[string(short)] = bytes.Clone(key)
 		return short, nil
 	})
 	if err != nil {
 		b.Fatal(err)
 	}
-	return BranchData(common.Copy(shortened)), keyMap
+	return BranchData(bytes.Clone(shortened)), keyMap
 }
 
 func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
@@ -255,10 +255,10 @@ func BenchmarkGetDeferredUpdate(b *testing.B) {
 	var bitmap uint16
 
 	// Fill cells with realistic data
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		c := &cells[i]
 		c.hashLen = 32
-		for j := 0; j < 32; j++ {
+		for j := range 32 {
 			c.hash[j] = byte(i*32 + j)
 		}
 
@@ -266,17 +266,17 @@ func BenchmarkGetDeferredUpdate(b *testing.B) {
 		switch i % 4 {
 		case 0: // account cell
 			c.accountAddrLen = 20
-			for j := 0; j < 20; j++ {
+			for j := range 20 {
 				c.accountAddr[j] = byte(i + j)
 			}
 		case 1: // storage cell
 			c.storageAddrLen = 52
-			for j := 0; j < 52; j++ {
+			for j := range 52 {
 				c.storageAddr[j] = byte(i + j)
 			}
 		case 2: // extension cell
 			c.extLen = 10
-			for j := 0; j < 10; j++ {
+			for j := range 10 {
 				c.extension[j] = byte(i + j)
 			}
 		case 3: // hash-only cell
@@ -291,11 +291,17 @@ func BenchmarkGetDeferredUpdate(b *testing.B) {
 	prefix := []byte{0x01, 0x02, 0x03}
 	prev := []byte{0x04, 0x05, 0x06}
 
+	enc := NewBranchEncoder(1024)
+	raw, err := enc.EncodeBranch(bitmap, touchMap, afterMap, &cells)
+	if err != nil {
+		b.Fatal(err)
+	}
+
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for b.Loop() {
-		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, prev)
+		upd := getDeferredUpdate(prefix, raw, prev)
 		putDeferredUpdate(upd)
 	}
 }
@@ -309,11 +315,11 @@ func BenchmarkGetDeferredUpdate_FewCells(b *testing.B) {
 	for _, i := range []int{0, 5} {
 		c := &cells[i]
 		c.hashLen = 32
-		for j := 0; j < 32; j++ {
+		for j := range 32 {
 			c.hash[j] = byte(i*32 + j)
 		}
 		c.accountAddrLen = 20
-		for j := 0; j < 20; j++ {
+		for j := range 20 {
 			c.accountAddr[j] = byte(i + j)
 		}
 		bitmap |= uint16(1 << i)
@@ -324,11 +330,17 @@ func BenchmarkGetDeferredUpdate_FewCells(b *testing.B) {
 	prefix := []byte{0x01, 0x02, 0x03}
 	prev := []byte{0x04, 0x05, 0x06}
 
+	enc := NewBranchEncoder(1024)
+	raw, err := enc.EncodeBranch(bitmap, touchMap, afterMap, &cells)
+	if err != nil {
+		b.Fatal(err)
+	}
+
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for b.Loop() {
-		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, prev)
+		upd := getDeferredUpdate(prefix, raw, prev)
 		putDeferredUpdate(upd)
 	}
 }
@@ -339,7 +351,7 @@ func populateUpdates(b *testing.B, upd *Updates, n int) {
 	b.Helper()
 	key := make([]byte, 20)
 	val := make([]byte, 8)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		binary.BigEndian.PutUint64(key[12:], uint64(i))
 		binary.BigEndian.PutUint64(val, uint64(i+1))
 		upd.TouchPlainKey(string(key), val, upd.TouchStorage)

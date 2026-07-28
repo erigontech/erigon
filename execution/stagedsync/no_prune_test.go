@@ -24,9 +24,9 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
@@ -41,8 +41,8 @@ func TestNoPruneSkipsAllPruneStages(t *testing.T) {
 	ctx := context.Background()
 	logger := log.New()
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	tx, err := db.BeginRw(ctx)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -103,8 +103,8 @@ func TestNoPruneFlagBookkeeping(t *testing.T) {
 	ctx := context.Background()
 	logger := log.New()
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	tx, err := db.BeginRw(ctx)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
