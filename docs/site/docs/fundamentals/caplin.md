@@ -48,4 +48,4 @@ When Caplin is running, it exposes a Beacon API that external tools can query. T
 | `--beacon.api.protocol` | `tcp` | Network protocol (`tcp` or `tcp4` or `tcp6`) |
 | `--beacon.api.read.timeout` | `5s` | HTTP server read timeout |
 | `--beacon.api.write.timeout` | `31536000s` (~1 year) | HTTP server write timeout |
-| `--beacon.api.ide.timeout` | `25s` | HTTP server idle timeout (note: flag name is `ide` not `idle` — typo in source) |
+| `--beacon.api.idle.timeout` | `25s` | HTTP server idle timeout |
