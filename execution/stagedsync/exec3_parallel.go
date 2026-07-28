@@ -1874,7 +1874,10 @@ func (result *execResult) finalizeSystemTx(
 	}
 	ibs.SetTrace(txTask.Trace)
 
-	writes := ibs.FinalizedWrites(txTask.Rules())
+	writes, err := ibs.FinalizedWrites(txTask.Rules())
+	if err != nil {
+		return nil, state.ReadSet{}, nil, err
+	}
 	return nil, ibs.VersionedReads(), writes, nil
 }
 

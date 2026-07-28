@@ -36,6 +36,12 @@ func TestVersionedWritesClearTouchedEmptyAccount(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xe1"))
 	spuriousDragon := &chain.Rules{IsSpuriousDragon: true}
 
+	finalizedWrites := func(t *testing.T, ibs *IntraBlockState, rules *chain.Rules) *WriteSet {
+		t.Helper()
+		writes, err := ibs.FinalizedWrites(rules)
+		require.NoError(t, err)
+		return writes
+	}
 	touchedWrites := func(reader StateReader, rules *chain.Rules) *WriteSet {
 		t.Helper()
 		ibs := NewWithVersionMap(reader, NewVersionMap(nil))
@@ -43,13 +49,23 @@ func TestVersionedWritesClearTouchedEmptyAccount(t *testing.T) {
 		ibs.SetTxContext(1, 0)
 		ibs.SetVersion(0)
 		require.NoError(t, ibs.TouchAccount(addr))
-		return ibs.FinalizedWrites(rules)
+		return finalizedWrites(t, ibs, rules)
 	}
 	existingReader := func() StateReader {
 		empty := accounts.NewAccount()
 		return &accountStateReader{
 			accounts: map[accounts.Address]*accounts.Account{addr: &empty},
 		}
+	}
+	afterPriorWrites := func(t *testing.T, prior *WriteSet) *IntraBlockState {
+		t.Helper()
+		vm := NewVersionMap(nil)
+		vm.FlushVersionedWrites(prior, true, "")
+		ibs := NewWithVersionMap(existingReader(), vm)
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(1, 1)
+		ibs.SetVersion(0)
+		return ibs
 	}
 
 	t.Run("serial baseline emits a delete", func(t *testing.T) {
@@ -116,7 +132,7 @@ func TestVersionedWritesClearTouchedEmptyAccount(t *testing.T) {
 		ibs.SetVersion(0)
 		require.NoError(t, ibs.CreateAccount(addr, false))
 
-		writes := ibs.FinalizedWrites(spuriousDragon)
+		writes := finalizedWrites(t, ibs, spuriousDragon)
 		deleted, ok := writes.GetSelfDestruct(addr)
 		require.True(t, ok)
 		require.True(t, deleted.Val)
@@ -130,12 +146,56 @@ func TestVersionedWritesClearTouchedEmptyAccount(t *testing.T) {
 		require.NoError(t, ibs.TouchAccount(addr))
 		require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(1), tracing.BalanceChangeTransfer))
 
-		writes := ibs.FinalizedWrites(spuriousDragon)
+		writes := finalizedWrites(t, ibs, spuriousDragon)
 		_, hasDelete := writes.GetSelfDestruct(addr)
 		require.False(t, hasDelete)
 		balance, ok := writes.GetBalance(addr)
 		require.True(t, ok)
 		require.Equal(t, uint64(1), balance.Val.Uint64())
+	})
+
+	t.Run("prior balance survives a current nonce write", func(t *testing.T) {
+		prior := &WriteSet{}
+		prior.SetBalance(addr, &VersionedWrite[uint256.Int]{
+			WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}},
+			Val:         *uint256.NewInt(1),
+		})
+		ibs := afterPriorWrites(t, prior)
+		require.NoError(t, ibs.SetNonce(addr, 0, tracing.NonceChangeUnspecified))
+
+		writes := finalizedWrites(t, ibs, spuriousDragon)
+		_, deleted := writes.GetSelfDestruct(addr)
+		require.False(t, deleted)
+		reads := ibs.VersionedReads()
+		balanceRead, ok := reads.GetBalance(addr)
+		require.True(t, ok)
+		require.Equal(t, MapRead, balanceRead.Source)
+		require.Equal(t, Version{TxIndex: 0}, balanceRead.Version)
+		nonce, ok := writes.GetNonce(addr)
+		require.True(t, ok)
+		require.Zero(t, nonce.Val)
+	})
+
+	t.Run("prior nonce survives a current balance write", func(t *testing.T) {
+		prior := &WriteSet{}
+		prior.SetNonce(addr, &VersionedWrite[uint64]{
+			WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0}},
+			Val:         1,
+		})
+		ibs := afterPriorWrites(t, prior)
+		require.NoError(t, ibs.SetBalance(addr, uint256.Int{}, tracing.BalanceChangeUnspecified))
+
+		writes := finalizedWrites(t, ibs, spuriousDragon)
+		_, deleted := writes.GetSelfDestruct(addr)
+		require.False(t, deleted)
+		reads := ibs.VersionedReads()
+		nonceRead, ok := reads.GetNonce(addr)
+		require.True(t, ok)
+		require.Equal(t, MapRead, nonceRead.Source)
+		require.Equal(t, Version{TxIndex: 0}, nonceRead.Version)
+		balance, ok := writes.GetBalance(addr)
+		require.True(t, ok)
+		require.True(t, balance.Val.IsZero())
 	})
 
 	t.Run("account from an earlier tx emits a delete", func(t *testing.T) {
@@ -158,7 +218,7 @@ func TestVersionedWritesClearTouchedEmptyAccount(t *testing.T) {
 		ibs.SetVersion(0)
 		require.NoError(t, ibs.TouchAccount(addr))
 
-		writes := ibs.FinalizedWrites(spuriousDragon)
+		writes := finalizedWrites(t, ibs, spuriousDragon)
 		deleted, ok := writes.GetSelfDestruct(addr)
 		require.True(t, ok)
 		require.True(t, deleted.Val)
