@@ -51,6 +51,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -191,7 +192,7 @@ func init() {
 }
 
 func withDataDir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&cobraFlagValues.datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	flags.DirVar(cmd.Flags(), &cobraFlagValues.datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	panicif.Err(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 	panicif.Err(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 }
