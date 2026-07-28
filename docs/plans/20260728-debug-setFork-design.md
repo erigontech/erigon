@@ -332,12 +332,61 @@ Likely-similar gaps in:
   ctx pattern).
 - Downloader.Provider (chain-identity closure captured at
   BindBus).
+- manifest_exchange.Provider (fetch loop bound at BindBus).
 - Every long-lived component built for one-shot lifetime.
 
 **This is a componentization prerequisite**, not a debug_setFork
 implementation detail. Each component's lifecycle needs an inner
 `stopped`/`running` state + a per-Start cancellable context that
 Close cancels, so Close-then-Start becomes a legitimate operation.
+
+## Component contract (refined 2026-07-28)
+
+**Two contracts are exposed** in
+[rpc/rpchelper/interface.go](../../rpc/rpchelper/interface.go);
+each component picks one:
+
+- **`ChainConfigReconfigurable`** (preferred) —
+  `Reconfigure(ctx, newCfg) error`. The component internally does
+  Stop → swap → Start; the caller can't sequence incorrectly, and
+  the component may skip parts of the cycle if the config diff
+  doesn't need them.
+- **`ChainConfigRestartable`** (escape hatch) — the
+  `Stop / SetChainConfig / Start` trio exposed as separate
+  primitives. For components where the orchestrator needs finer
+  sequencing across multiple components (e.g. multi-component
+  handshake during transition).
+
+The orchestrator (Ethereum.SetFork Phase 2) type-asserts each
+captor to figure out which contract it provides.
+
+**Which components need this** (not all 16 captors): 6 top-level
+components with their own long-lived goroutines. Contract choice
+per component is **use-case-specific** — Reconfigure is only
+appropriate when the entire Stop→swap→Start cycle is safe to
+run inside the component with no orchestrator involvement in the
+middle. Where a transition needs another component to do work
+between the Stop and Start phases (e.g. `stop storage → reconfig
+sentry → restart storage`), Restartable is the only fit — it's
+what exposes that ordering to `Ethereum.SetFork`.
+
+| Component | Contract | Reason |
+| --- | --- | --- |
+| `sentry.Provider` | Restartable | Coupled to `sharedP2PServer` passed in from `backend.go`. Backend has to sequence: stop sentry → tear down / rebuild shared server → start sentry. Not atomic within the component. |
+| `storage.Provider` | Restartable | May need external work between Stop and Start (e.g. reconfigure sentry while storage is stopped so p2p is quiet during the aggregator swap). Even where nothing needs to run in between, exposing the trio lets the orchestrator sequence it. |
+| `Caplin` (RunCaplinService) | Restartable | `backend.go` already owns the RunCaplinService goroutine's lifetime and has a cancel/relaunch pattern in place; wrap that as `Stop`/`SetChainConfig`/`Start` rather than inventing a new atomic Reconfigure. |
+| `Downloader.Provider` | Reconfigure | Torrent client + chain-identity + BindAutoPublish + ManifestDiscovery loops all live inside the Provider; nothing external needs to run mid-transition. Revisit if that turns out to be wrong once we wire it up. |
+| `manifest_exchange.Provider` | Reconfigure | Single fetch loop + fork-ID filter closure; fully encapsulated. |
+| `TxPool` | Reconfigure | Existing pauseLock scaffolding extends naturally to pool-clear + config-swap + resume within TxPool. |
+
+The remaining 10 Bucket-A captors don't need explicit reconfigure
+— their config is updated as a side-effect of the top-level
+component's restart (e.g. sentry.Provider's Restart rebuilds
+StatusDataProvider, MultiClient, etc.), or they're already
+quiesced by `Ethereum.SetHead`'s execmodule pause (executor,
+Dispatcher, stagedsync, stageloop), or they don't have persistent
+goroutines that read chainConfig (freezeblocks.RoSnapshots,
+snapshotsync.Merger, receipt_root_validator, privateapi.ethbackend).
 
 Phase 2 is therefore blocked pending that refactor for each
 component in the audit table. Phase 1 (unwind + restart_required)

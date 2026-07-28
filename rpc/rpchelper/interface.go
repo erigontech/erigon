@@ -74,28 +74,41 @@ type ForkController interface {
 	SetFork(ctx context.Context, targetChainName string) (*SetForkResult, error)
 }
 
-// ChainConfigReconfigurable is implemented by every long-lived
-// component that reads chain.Config on its own goroutine.
-// debug_setFork drives components through a Stop → SetChainConfig
-// → Start(ctx) cycle during a fork transition — the transition
-// window has NO active work; each component picks up the new
-// chain.Config cleanly from the stopped state and resumes on it.
+// ChainConfigReconfigurable is the primary "component supports
+// runtime chain-config swap" contract. debug_setFork walks the
+// registered list of Reconfigurables during a fork transition and
+// calls Reconfigure(ctx, newCfg) on each. The component
+// encapsulates the Stop → swap → Start dance internally — the
+// orchestrator can't sequence it incorrectly and the component can
+// short-circuit parts of the cycle if the config diff doesn't need
+// a full restart.
 //
-// This is deliberately the component-model contract rather than an
-// atomic-pointer pattern: chainConfig changes are rare, and the
-// "no active components during config swap" invariant makes the
-// transition trivial to reason about at every captor. Debug_setFork
-// tests that the component model actually supports this contract
-// end-to-end.
+// This is the component-model contract, not an atomic-pointer
+// pattern: chainConfig changes are rare, and the "no active work
+// during config swap" invariant makes the transition trivial to
+// reason about at every captor. debug_setFork tests that the
+// component model actually supports this contract end-to-end.
 type ChainConfigReconfigurable interface {
+	Reconfigure(ctx context.Context, newCfg *chain.Config) error
+}
+
+// ChainConfigRestartable is the alternate contract for components
+// that expose Stop / SetChainConfig / Start as separate primitives
+// (e.g. because a caller needs finer sequencing across multiple
+// components or wants to inspect state between the phases).
+// Reconfigure and Restartable are mutually exclusive per component
+// — the orchestrator type-asserts to figure out which contract a
+// component provides. Reconfigurable is preferred; Restartable is
+// the escape hatch.
+type ChainConfigRestartable interface {
 	// Stop halts the component's background goroutines. After
 	// Stop returns the component holds no active work and no
 	// goroutine reads its captured chain.Config.
-	Stop()
+	Stop() error
 	// SetChainConfig replaces the captured chain.Config pointer.
 	// The component must be Stopped when this is called.
 	SetChainConfig(cfg *chain.Config)
-	// Start(ctx) re-launches background goroutines on the new
+	// Start relaunches background goroutines on the new
 	// chain.Config. Safe after a matching Stop + SetChainConfig.
 	Start(ctx context.Context) error
 }
