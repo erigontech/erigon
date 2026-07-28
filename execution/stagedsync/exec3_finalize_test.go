@@ -947,6 +947,20 @@ func TestFinalizeTxSimple_LondonBurntFees(t *testing.T) {
 		"burnt contract should be existing balance + FeeBurnt")
 }
 
+func TestCalcFeesZeroBurnClearsEmptyBurntAddress(t *testing.T) {
+	t.Parallel()
+	s := londonTransferScenario()
+	empty := accounts.NewAccount()
+	s.accts[s.burntAddr] = &empty
+	s.feeBurnt = uint256.Int{}
+
+	writes := s.runFinalizeTx(t, nil)
+
+	deleted, ok := writes.GetSelfDestruct(s.burntAddr)
+	require.True(t, ok)
+	require.True(t, deleted.Val)
+}
+
 // TestFinalizeTxSimple_NoCoinbaseInVersionMap verifies that when there's no
 // prior coinbase entry in the versionMap, the finalize reads from the
 // stateReader and adds FeeTipped.

@@ -1906,15 +1906,34 @@ func (result *execResult) calcFees(
 	burntAddr := result.ExecutionResult.BurntContractAddress
 	hasBurnt := !burntAddr.IsNil()
 	var newBurntBalance uint256.Int
-	var burntAcc *accounts.Account
+	burntAfterExecution := accounts.NewAccount()
 	if hasBurnt {
-		burntAcc, err = vsReader.ReadAccountData(burntAddr)
+		burntAcc, err := vsReader.ReadAccountData(burntAddr)
 		if err != nil {
 			return nil, err
 		}
 		if burntAcc != nil {
-			newBurntBalance = burntAcc.Balance
+			burntAfterExecution = *burntAcc
 		}
+		if aw, ok := result.TxOut.GetAddress(burntAddr); ok {
+			burntAfterExecution = accounts.NewAccount()
+			if aw.Val != nil {
+				burntAfterExecution = *aw.Val
+			}
+		}
+		if bw, ok := result.TxOut.GetBalance(burntAddr); ok {
+			burntAfterExecution.Balance = bw.Val
+		}
+		if nw, ok := result.TxOut.GetNonce(burntAddr); ok {
+			burntAfterExecution.Nonce = nw.Val
+		}
+		if iw, ok := result.TxOut.GetIncarnation(burntAddr); ok {
+			burntAfterExecution.Incarnation = iw.Val
+		}
+		if cw, ok := result.TxOut.GetCodeHash(burntAddr); ok {
+			burntAfterExecution.CodeHash = cw.Val
+		}
+		newBurntBalance = burntAfterExecution.Balance
 	}
 	// Worker writes coinbase/burnt to TxOut when sender matches (gas-debit
 	// applied to sender under shouldDelayFeeCalc=true). Track Nonce / CodeHash
@@ -1942,11 +1961,6 @@ func (result *execResult) calcFees(
 	}
 	if cw, ok := result.TxOut.GetCreateContract(result.Coinbase); ok {
 		coinbaseCreatedContract = cw.Val
-	}
-	if hasBurnt {
-		if bw, ok := result.TxOut.GetBalance(burntAddr); ok {
-			newBurntBalance = bw.Val
-		}
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
 	// Before EIP-8246, burn the tip only for an actual SELFDESTRUCT of a contract coinbase.
@@ -2033,36 +2047,45 @@ func (result *execResult) calcFees(
 			})
 		}
 	}
-	if hasBurnt && newBurntBalance != oldBurntBalance {
+	burntAfterFees := burntAfterExecution
+	burntAfterFees.Balance = newBurntBalance
+	burntEmptyRemoval := hasBurnt && state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, burntAddr)
+	deleteBurnt := burntEmptyRemoval && burntAfterFees.Balance.IsZero() &&
+		burntAfterFees.Nonce == 0 && burntAfterFees.IsEmptyCodeHash()
+	emitBurnt := hasBurnt && (newBurntBalance != oldBurntBalance || deleteBurnt)
+	if emitBurnt {
 		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
-			burntAddr, burntAcc, newBurntBalance,
-			tracing.BalanceDecreaseGasBuy, state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, burntAddr))
-		addWrites.SetBalance(burntAddr, &state.VersionedWrite[uint256.Int]{
-			WriteHeader: state.WriteHeader{
-				Address: burntAddr,
-				Path:    state.BalancePath,
-				Version: taskVersion,
-				Reason:  tracing.BalanceDecreaseGasBuy,
-			},
-			Val: newBurntBalance,
-		})
-		// Mirror the AddressPath emission above for the burnt address.
-		burntAddrAcc := &accounts.Account{Balance: newBurntBalance}
-		if burntAcc != nil {
-			burntAddrAcc.Nonce = burntAcc.Nonce
-			burntAddrAcc.Incarnation = burntAcc.Incarnation
-			burntAddrAcc.CodeHash = burntAcc.CodeHash
+			burntAddr, &burntAfterExecution, newBurntBalance,
+			tracing.BalanceDecreaseGasBuy, burntEmptyRemoval)
+		if deleteBurnt {
+			addWrites.SetSelfDestruct(burntAddr, &state.VersionedWrite[bool]{
+				WriteHeader: state.WriteHeader{
+					Address: burntAddr,
+					Path:    state.SelfDestructPath,
+					Version: taskVersion,
+				},
+				Val: true,
+			})
 		} else {
-			burntAddrAcc.CodeHash = accounts.EmptyCodeHash
+			addWrites.SetBalance(burntAddr, &state.VersionedWrite[uint256.Int]{
+				WriteHeader: state.WriteHeader{
+					Address: burntAddr,
+					Path:    state.BalancePath,
+					Version: taskVersion,
+					Reason:  tracing.BalanceDecreaseGasBuy,
+				},
+				Val: newBurntBalance,
+			})
+			// Mirror the AddressPath emission above for the burnt address.
+			addWrites.SetAddress(burntAddr, &state.VersionedWrite[*accounts.Account]{
+				WriteHeader: state.WriteHeader{
+					Address: burntAddr,
+					Path:    state.AddressPath,
+					Version: taskVersion,
+				},
+				Val: &burntAfterFees,
+			})
 		}
-		addWrites.SetAddress(burntAddr, &state.VersionedWrite[*accounts.Account]{
-			WriteHeader: state.WriteHeader{
-				Address: burntAddr,
-				Path:    state.AddressPath,
-				Version: taskVersion,
-			},
-			Val: burntAddrAcc,
-		})
 	}
 
 	return addWrites, nil

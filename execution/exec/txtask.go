@@ -662,7 +662,7 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	gasPool *protocol.GasPool,
 	ibs *state.IntraBlockState,
 	chainConfig *chain.Config) *TxResult {
-	var result TxResult
+	result := TxResult{Coinbase: evm.Context.Coinbase}
 
 	if !txTask.InBatch {
 		// this is the first transaction in an AA transaction batch, run all validation frames, then execute execution frames in its own txtask

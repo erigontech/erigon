@@ -24,10 +24,15 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
@@ -153,4 +158,28 @@ func TestCreateReceiptTxIndex(t *testing.T) {
 	require.Equal(t, uint32(firstLogIndex), receipt.FirstLogIndexWithinBlock)
 	require.Len(t, receipt.Logs, 1)
 	require.Equal(t, hexutil.Uint(firstLogIndex), receipt.Logs[0].Index)
+}
+
+func TestExecuteCarriesCoinbaseForAccountAbstraction(t *testing.T) {
+	coinbase := accounts.InternAddress(common.HexToAddress("0xc01aba5e"))
+	config := &chain.Config{AllowAA: true}
+	blockContext := evmtypes.BlockContext{
+		BlockNumber: 1,
+		Coinbase:    coinbase,
+	}
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Release(false)
+	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, vm.Config{})
+
+	txTask := &TxTask{
+		TxIndex:         0,
+		Header:          &types.Header{Number: *uint256.NewInt(1)},
+		Txs:             types.Transactions{&types.AccountAbstractionTransaction{}},
+		Config:          config,
+		EvmBlockContext: blockContext,
+	}
+	result := txTask.Execute(evm, nil, nil, ibs, nil, config, nil, datadir.Dirs{}, false)
+
+	require.ErrorContains(t, result.Err, "account is not deployed")
+	require.Equal(t, coinbase, result.Coinbase)
 }
