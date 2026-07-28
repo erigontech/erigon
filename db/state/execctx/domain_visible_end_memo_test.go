@@ -18,6 +18,7 @@ package execctx
 
 import (
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -75,4 +76,28 @@ func TestDomainVisibleEndMemoConcurrent(t *testing.T) {
 	end, ok := memo.get(rotated, kv.AccountsDomain)
 	require.True(t, ok)
 	require.Equal(t, uint64(800), end)
+}
+
+func TestDomainVisibleEndMemoConcurrentViews(t *testing.T) {
+	t.Parallel()
+
+	var memo domainVisibleEndMemo
+	var mismatches atomic.Uint64
+	var wg sync.WaitGroup
+	for _, viewID := range []uint64{7, 8} {
+		for range 8 {
+			tx := &stubVisibleEndTx{viewID: viewID}
+			wg.Go(func() {
+				for range 100_000 {
+					end, ok := memo.get(tx, kv.AccountsDomain)
+					if !ok || end != viewID*100 {
+						mismatches.Add(1)
+					}
+				}
+			})
+		}
+	}
+	wg.Wait()
+
+	require.Zero(t, mismatches.Load(), "memo returned a frontier from another view")
 }
