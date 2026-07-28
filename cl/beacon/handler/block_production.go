@@ -1387,8 +1387,8 @@ AttLoop:
 		wc := s.ValidatorSet().
 			Get(int(blsExecutionChange.Message.ValidatorIndex)).
 			WithdrawalCredentials()
-		// Check the validator's withdrawal credentials prefix.
-		if wc[0] != byte(a.beaconChainCfg.ETH1AddressWithdrawalPrefixByte) {
+		// A change is only valid while the validator still has BLS withdrawal credentials.
+		if wc[0] != byte(a.beaconChainCfg.BLSWithdrawalPrefixByte) {
 			continue
 		}
 
@@ -1399,6 +1399,9 @@ AttLoop:
 		}
 		blsToExecutionChanges.Append(blsExecutionChange)
 		slashedIndicies = append(slashedIndicies, blsExecutionChange.Message.ValidatorIndex)
+		if blsToExecutionChanges.Len() >= int(a.beaconChainCfg.MaxBlsToExecutionChanges) {
+			break
+		}
 	}
 	return attesterSlashings, proposerSlashings, voluntaryExits, blsToExecutionChanges
 }
