@@ -2607,29 +2607,67 @@ func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) *WriteSet {
 	return sdb.versionedWrites.Finalize()
 }
 
-// clearEmptyAccounts withdraws the record of an account this tx created and
-// left empty. EIP-161 clears such an account at the transaction boundary, so it
-// must not reach the version map as an account that exists — that map is what
-// the next tx in the block reads, and updateAccount already withholds it on the
-// serial path. A created account starts zeroed, so the write-set alone settles
-// emptiness: no state lookup, and so no dependency for the validator to trip
-// over. Genesis is exempt, as it is on the serial path (which runs it under
-// empty rules) and in the apply loop.
+// clearEmptyAccounts mirrors the serial path's EIP-161 cleanup before a
+// parallel transaction's writes are published. Newly created accounts that
+// remain empty are withheld, while pre-existing accounts that end empty emit a
+// deletion so neither can remain visible to later transactions through the
+// version map. Genesis and Aura system-account exceptions match the serial path.
 func (sdb *IntraBlockState) clearEmptyAccounts(chainRules *chain.Rules) {
-	if sdb.blockNum == 0 || chainRules == nil || !chainRules.IsEIP161Enabled() {
+	if sdb.blockNum == 0 || chainRules == nil {
 		return
 	}
-	var empties []accounts.Address
-	sdb.versionedWrites.forEachAddr(func(addr accounts.Address) {
-		if EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) &&
-			sdb.versionedWrites.createdEmpty(addr) {
-			empties = append(empties, addr)
-		}
-	})
-	for _, addr := range empties {
-		sdb.versionMap.DeleteAll(addr, sdb.txIndex)
-		sdb.versionedWrites.deleteAddr(addr)
+	emptyRemoval := chainRules.IsEIP161Enabled()
+	if !emptyRemoval {
+		return
 	}
+	for addr := range sdb.versionedWrites.addrs() {
+		if !EIP161EmptyRemoval(emptyRemoval, chainRules.IsAura, addr) {
+			continue
+		}
+		if sdb.existingAccountEndsEmpty(addr) {
+			sdb.versionMap.DeleteAll(addr, sdb.txIndex)
+			sdb.versionedWrites.deleteAddr(addr)
+			sdb.recordWriteSelfDestruct(addr, true)
+			continue
+		}
+		if sdb.versionedWrites.createdEmpty(addr) {
+			sdb.versionMap.DeleteAll(addr, sdb.txIndex)
+			sdb.versionedWrites.deleteAddr(addr)
+		}
+	}
+}
+
+func (sdb *IntraBlockState) existingAccountEndsEmpty(addr accounts.Address) bool {
+	addressRead, ok := sdb.versionedReads.GetAddress(addr)
+	var account accounts.Account
+	if ok && addressRead.Val != nil && !addressRead.Val.IsNil() {
+		account = *addressRead.Val.Account()
+	} else {
+		// committedBase may hold a record hidden by a prior transaction's delete.
+		if _, created := sdb.versionedWrites.GetAddress(addr); created {
+			return false
+		}
+		committed, ok := sdb.committedBase[addr]
+		if !ok || committed == nil {
+			return false
+		}
+		account = *committed
+	}
+	if destroyed, ok := sdb.versionedWrites.GetSelfDestruct(addr); ok && destroyed.Val {
+		return false
+	}
+
+	if read, ok := sdb.versionedReads.GetBalance(addr); ok {
+		account.Balance = read.Val
+	}
+	if read, ok := sdb.versionedReads.GetNonce(addr); ok {
+		account.Nonce = read.Val
+	}
+	if read, ok := sdb.versionedReads.GetCodeHash(addr); ok {
+		account.CodeHash = read.Val
+	}
+	account, ok = sdb.versionedWrites.accountAfterWrites(addr, account)
+	return ok && account.Empty()
 }
 
 // MergeTxIOInto folds the current transaction's recorded reads, writes and

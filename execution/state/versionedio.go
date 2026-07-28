@@ -2916,6 +2916,25 @@ func GetDep(deps *VersionedIO) map[int]map[int]bool {
 	return newDependencies
 }
 
+func (s *WriteSet) accountAfterWrites(addr accounts.Address, account accounts.Account) (accounts.Account, bool) {
+	if written, ok := s.address[addr]; ok {
+		if written.Val == nil {
+			return accounts.Account{}, false
+		}
+		account = *written.Val
+	}
+	if written, ok := s.balance[addr]; ok {
+		account.Balance = written.Val
+	}
+	if written, ok := s.nonce[addr]; ok {
+		account.Nonce = written.Val
+	}
+	if written, ok := s.codeHash[addr]; ok {
+		account.CodeHash = written.Val
+	}
+	return account, true
+}
+
 // createdEmpty reports whether these writes create addr and leave it empty, with
 // nothing else recorded against it. The AddressPath write carries the account as
 // created, so overlaying the field writes gives its end-of-tx value; anything
@@ -2929,17 +2948,8 @@ func (s *WriteSet) createdEmpty(addr accounts.Address) bool {
 	if !ok || created.Val == nil {
 		return false
 	}
-	acc := *created.Val
-	if vw, ok := s.balance[addr]; ok {
-		acc.Balance = vw.Val
-	}
-	if vw, ok := s.nonce[addr]; ok {
-		acc.Nonce = vw.Val
-	}
-	if vw, ok := s.codeHash[addr]; ok {
-		acc.CodeHash = vw.Val
-	}
-	if !acc.Empty() {
+	account, ok := s.accountAfterWrites(addr, *created.Val)
+	if !ok || !account.Empty() {
 		return false
 	}
 	_, hasCode := s.code[addr]

@@ -1001,29 +1001,30 @@ func lastBalanceChange(ac *types.AccountChanges) *types.BalanceChange {
 }
 
 // TestEngineApiEmptyAccountClearingConsistency pins builder/validator agreement
-// when one transaction leaves a fresh account empty (a SELFDESTRUCT forwarding a
-// zero balance to it) and a later transaction in the same block reads that
-// account's existence through an EIP-7702 authorization. EIP-161 clears the
-// account at the first transaction's boundary, so the authorization must be
-// priced as naming a new account. Each ingredient is also exercised alone, and
-// the same block is validated under both execution modes.
+// when one transaction leaves an account empty and a later EIP-7702
+// authorization reads its existence in the same block.
 func TestEngineApiEmptyAccountClearingConsistency(t *testing.T) {
 	for _, tc := range []struct {
-		name                  string
-		touch, auth, parallel bool
+		name        string
+		touch       bool
+		auth        bool
+		preexisting bool
+		parallel    bool
 	}{
-		{"touch_only", true, false, true},
-		{"authorization_only", false, true, true},
-		{"combined_serial", true, true, false},
-		{"combined_parallel", true, true, true},
+		{name: "touch_only", touch: true, parallel: true},
+		{name: "authorization_only", auth: true, parallel: true},
+		{name: "combined_serial", touch: true, auth: true},
+		{name: "combined_parallel", touch: true, auth: true, parallel: true},
+		{name: "preexisting_combined_serial", touch: true, auth: true, preexisting: true},
+		{name: "preexisting_combined_parallel", touch: true, auth: true, preexisting: true, parallel: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			runEmptyAccountClearingCase(t, tc.touch, tc.auth, tc.parallel)
+			runEmptyAccountClearingCase(t, tc.touch, tc.auth, tc.preexisting, tc.parallel)
 		})
 	}
 }
 
-func runEmptyAccountClearingCase(t *testing.T, doTouch, doAuth, parallel bool) {
+func runEmptyAccountClearingCase(t *testing.T, doTouch, doAuth, preexisting, parallel bool) {
 	prev := dbg.Exec3Parallel
 	dbg.Exec3Parallel = parallel
 	t.Cleanup(func() { dbg.Exec3Parallel = prev })
@@ -1042,11 +1043,12 @@ func runEmptyAccountClearingCase(t *testing.T, doTouch, doAuth, parallel bool) {
 		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil),
 	}
 
-	// A fresh, unfunded account: both the SELFDESTRUCT beneficiary and the
-	// authority signing the authorization.
 	emptyKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	emptyAddr := crypto.PubkeyToAddress(emptyKey.PublicKey)
+	if preexisting {
+		genesis.Alloc[emptyAddr] = types.GenesisAccount{Balance: new(big.Int)}
+	}
 
 	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
 		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,

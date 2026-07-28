@@ -19,10 +19,12 @@ package state
 import (
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -34,14 +36,20 @@ func TestVersionedWritesClearTouchedEmptyAccount(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xe1"))
 	spuriousDragon := &chain.Rules{IsSpuriousDragon: true}
 
-	touchedWrites := func(rules *chain.Rules) *WriteSet {
+	touchedWrites := func(reader StateReader, rules *chain.Rules) *WriteSet {
 		t.Helper()
-		ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
+		ibs := NewWithVersionMap(reader, NewVersionMap(nil))
 		ibs.SetNoMaterialize(true)
 		ibs.SetTxContext(1, 0)
 		ibs.SetVersion(0)
 		require.NoError(t, ibs.TouchAccount(addr))
 		return ibs.FinalizedWrites(rules)
+	}
+	existingReader := func() StateReader {
+		empty := accounts.NewAccount()
+		return &accountStateReader{
+			accounts: map[accounts.Address]*accounts.Account{addr: &empty},
+		}
 	}
 
 	t.Run("serial baseline emits a delete", func(t *testing.T) {
@@ -56,7 +64,7 @@ func TestVersionedWritesClearTouchedEmptyAccount(t *testing.T) {
 	})
 
 	t.Run("versioned path withholds the created account", func(t *testing.T) {
-		writes := touchedWrites(spuriousDragon)
+		writes := touchedWrites(&minimalStateReader{}, spuriousDragon)
 		_, hasAddress := writes.GetAddress(addr)
 		require.False(t, hasAddress, "the create must not reach the write-set")
 		_, hasBalance := writes.GetBalance(addr)
@@ -67,7 +75,7 @@ func TestVersionedWritesClearTouchedEmptyAccount(t *testing.T) {
 
 	t.Run("next tx does not observe the account", func(t *testing.T) {
 		vm := NewVersionMap(nil)
-		vm.FlushVersionedWrites(touchedWrites(spuriousDragon), true, "")
+		vm.FlushVersionedWrites(touchedWrites(&minimalStateReader{}, spuriousDragon), true, "")
 
 		next := NewWithVersionMap(&minimalStateReader{}, vm)
 		next.SetNoMaterialize(true)
@@ -78,11 +86,97 @@ func TestVersionedWritesClearTouchedEmptyAccount(t *testing.T) {
 		require.False(t, exists)
 	})
 
+	t.Run("versioned path deletes an existing empty account", func(t *testing.T) {
+		writes := touchedWrites(existingReader(), spuriousDragon)
+		_, hasBalance := writes.GetBalance(addr)
+		require.False(t, hasBalance)
+		deleted, ok := writes.GetSelfDestruct(addr)
+		require.True(t, ok)
+		require.True(t, deleted.Val)
+	})
+
+	t.Run("next tx does not observe an existing empty account", func(t *testing.T) {
+		reader := existingReader()
+		vm := NewVersionMap(nil)
+		vm.FlushVersionedWrites(touchedWrites(reader, spuriousDragon), true, "")
+
+		next := NewWithVersionMap(reader, vm)
+		next.SetNoMaterialize(true)
+		next.SetTxContext(1, 1)
+		next.SetVersion(0)
+		exists, err := next.Exist(addr)
+		require.NoError(t, err)
+		require.False(t, exists)
+	})
+
+	t.Run("existing account reset to empty emits a delete", func(t *testing.T) {
+		ibs := NewWithVersionMap(existingReader(), NewVersionMap(nil))
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(1, 0)
+		ibs.SetVersion(0)
+		require.NoError(t, ibs.CreateAccount(addr, false))
+
+		writes := ibs.FinalizedWrites(spuriousDragon)
+		deleted, ok := writes.GetSelfDestruct(addr)
+		require.True(t, ok)
+		require.True(t, deleted.Val)
+	})
+
+	t.Run("existing account funded after the touch is retained", func(t *testing.T) {
+		ibs := NewWithVersionMap(existingReader(), NewVersionMap(nil))
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(1, 0)
+		ibs.SetVersion(0)
+		require.NoError(t, ibs.TouchAccount(addr))
+		require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(1), tracing.BalanceChangeTransfer))
+
+		writes := ibs.FinalizedWrites(spuriousDragon)
+		_, hasDelete := writes.GetSelfDestruct(addr)
+		require.False(t, hasDelete)
+		balance, ok := writes.GetBalance(addr)
+		require.True(t, ok)
+		require.Equal(t, uint64(1), balance.Val.Uint64())
+	})
+
+	t.Run("account from an earlier tx emits a delete", func(t *testing.T) {
+		empty := accounts.NewAccount()
+		vm := NewVersionMap(nil)
+		previous := &WriteSet{}
+		previous.SetAddress(addr, &VersionedWrite[*accounts.Account]{
+			WriteHeader: WriteHeader{
+				Address: addr,
+				Path:    AddressPath,
+				Version: Version{TxIndex: 0},
+			},
+			Val: &empty,
+		})
+		vm.FlushVersionedWrites(previous, true, "")
+
+		ibs := NewWithVersionMap(&minimalStateReader{}, vm)
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(1, 1)
+		ibs.SetVersion(0)
+		require.NoError(t, ibs.TouchAccount(addr))
+
+		writes := ibs.FinalizedWrites(spuriousDragon)
+		deleted, ok := writes.GetSelfDestruct(addr)
+		require.True(t, ok)
+		require.True(t, deleted.Val)
+	})
+
 	t.Run("pre-SpuriousDragon keeps the touched account", func(t *testing.T) {
-		writes := touchedWrites(&chain.Rules{})
+		writes := touchedWrites(&minimalStateReader{}, &chain.Rules{})
 		_, hasDelete := writes.GetSelfDestruct(addr)
 		require.False(t, hasDelete)
 		_, hasAddress := writes.GetAddress(addr)
 		require.True(t, hasAddress)
+	})
+
+	t.Run("pre-SpuriousDragon keeps an existing empty account", func(t *testing.T) {
+		writes := touchedWrites(existingReader(), &chain.Rules{})
+		_, hasDelete := writes.GetSelfDestruct(addr)
+		require.False(t, hasDelete)
+		_, hasBalance := writes.GetBalance(addr)
+		require.True(t, hasBalance)
 	})
 }
