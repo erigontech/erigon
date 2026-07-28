@@ -40,16 +40,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
-// initTestBeaconConfig installs cfg as the global config if no test has done so
-// yet. InitGlobalStaticConfig panics on a second call, so tests here must agree
-// on every global-only field; they may differ only in fork epochs, which each
-// test reads from its own local config.
-func initTestBeaconConfig(cfg *clparams.BeaconChainConfig) {
-	if clparams.GetBeaconConfig() == nil {
-		clparams.InitGlobalStaticConfig(cfg, &clparams.CaplinConfig{})
-	}
-}
-
 // maliciousColumnSentinel stands in for a selected custody peer. It answers
 // metadata honestly so it becomes eligible for column requests, then serves a
 // fixed response to every column request.

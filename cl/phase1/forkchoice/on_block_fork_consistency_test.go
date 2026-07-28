@@ -56,38 +56,22 @@ func TestOnBlockRejectsForkSchemaSlotMismatch(t *testing.T) {
 	require.ErrorIs(t, err, ErrForkSchemaSlotMismatch)
 }
 
-// The mirror case: a pre-Gloas schema claiming a Gloas slot must be rejected
-// too, since the Gloas branch reads fields that schema leaves unset.
-func TestOnBlockRejectsPreGloasSchemaAtGloasSlot(t *testing.T) {
-	cfg := &clparams.MainnetBeaconConfig
-	store := buildExAnteStore(t)
-
-	ref := cltypes.NewSignedBeaconBlock(cfg, clparams.DenebVersion)
-	require.NoError(t, utils.DecodeSSZSnappy(ref, diffBlock3aEnc, int(clparams.AltairVersion)))
-
-	mismatched := cltypes.NewSignedBeaconBlock(cfg, clparams.FuluVersion)
-	mismatched.Block.Slot = ref.Block.Slot
-	mismatched.Block.ProposerIndex = ref.Block.ProposerIndex
-	mismatched.Block.ParentRoot = ref.Block.ParentRoot
-	mismatched.Block.StateRoot = ref.Block.StateRoot
-
-	// Activate every fork at genesis so the block's slot implies Gloas while the
-	// decoded schema stays pre-Gloas.
-	gloasCfg := *cfg
-	gloasCfg.AltairForkEpoch = 0
-	gloasCfg.BellatrixForkEpoch = 0
-	gloasCfg.CapellaForkEpoch = 0
-	gloasCfg.DenebForkEpoch = 0
-	gloasCfg.ElectraForkEpoch = 0
-	gloasCfg.FuluForkEpoch = 0
-	gloasCfg.GloasForkEpoch = 0
-	gloasCfg.InitializeForkSchedule()
-	store.beaconCfg = &gloasCfg
-
-	require.Nil(t, mismatched.Block.Body.SignedExecutionPayloadBid, "pre-Gloas schema leaves the bid unset")
-	require.GreaterOrEqual(t, gloasCfg.GetCurrentStateVersion(mismatched.Block.Slot/gloasCfg.SlotsPerEpoch), clparams.GloasVersion,
-		"slot must map to Gloas for the mismatch to exist")
-
-	err := store.OnBlock(context.Background(), mismatched, false, true, true)
-	require.ErrorIs(t, err, ErrForkSchemaSlotMismatch)
+func TestForkSchemaMatchesSlot(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		slotVersion    clparams.StateVersion
+		decodedVersion clparams.StateVersion
+		want           bool
+	}{
+		// Schemas differ only across the Gloas boundary as far as OnBlock is
+		// concerned, so a disagreement below it is not a mismatch.
+		{"both pre-Gloas", clparams.FuluVersion, clparams.DenebVersion, true},
+		{"both Gloas", clparams.GloasVersion, clparams.GloasVersion, true},
+		{"Gloas schema at a pre-Gloas slot", clparams.FuluVersion, clparams.GloasVersion, false},
+		{"pre-Gloas schema at a Gloas slot", clparams.GloasVersion, clparams.FuluVersion, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, forkSchemaMatchesSlot(tc.slotVersion, tc.decodedVersion))
+		})
+	}
 }

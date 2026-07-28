@@ -29,6 +29,16 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
+// initTestBeaconConfig installs cfg as the global config if no test has done so
+// yet. InitGlobalStaticConfig panics on a second call, so tests in this package
+// must agree on every global-only field; they may differ only in fork epochs,
+// which each test reads from its own local config.
+func initTestBeaconConfig(cfg *clparams.BeaconChainConfig) {
+	if clparams.GetBeaconConfig() == nil {
+		clparams.InitGlobalStaticConfig(cfg, &clparams.CaplinConfig{})
+	}
+}
+
 func TestIsExpectedColumnDownloadMiss(t *testing.T) {
 	require.False(t, isExpectedColumnDownloadMiss(nil))
 	require.True(t, isExpectedColumnDownloadMiss(&httpreqresp.PeerResponseError{
