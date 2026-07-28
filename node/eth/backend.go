@@ -215,6 +215,11 @@ type Ethereum struct {
 	// Nil when InternalCL is off or the network has no embedded support.
 	caplinService *caplincomp.CaplinService
 
+	// manifestExchange is the consumer-side chain.toml v2 fetch
+	// component. Stored so SetFork Phase 2 can reach it during
+	// transitions; nil for setups without lifecycle-driven storage.
+	manifestExchange *manifestexchange.Provider
+
 	blockSnapshots *freezeblocks.RoSnapshots
 	blockReader    services.FullBlockReader
 	blockWriter    *blockio.BlockWriter
@@ -896,6 +901,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 
 			mx := &manifestexchange.Provider{}
+			backend.manifestExchange = mx
 
 			// Consumer-side canonical validation + on-disk cache per
 			// docs/plans/20260515-three-layer-snapshot-distribution.md.
@@ -2234,13 +2240,17 @@ func (s *Ethereum) SetHead(ctx context.Context, targetBlock uint64) error {
 	return s.execModule.SetHead(ctx, targetBlock)
 }
 
-// SetFork transitions the node onto a different chain. Validates
-// target has a direct parent/child relationship with the current
-// chain, computes the CutBlock, and delegates to SetHead. Returns
-// RestartRequired=true — the in-process chain.Config swap that
-// would let the running process continue on the new chain is not
-// wired up here; the operator restarts erigon with --chain=<target>
-// against the same datadir to complete the transition.
+// SetFork transitions the node onto a different chain. Validates the
+// target, unwinds to the CutBlock, then walks the registered captor
+// list: Stops the Restartables (Caplin → sentry → storage), swaps
+// chain.Config on the Reconfigurables (txpool, downloader,
+// manifest_exchange) and Restartables, then Starts the Restartables
+// back in the reverse order (storage → sentry → Caplin).
+//
+// Returns RestartRequired=false on success — the process stays alive
+// on the new chain. If any component's Start fails on the new config
+// the return carries RestartRequired=true so the operator restarts
+// erigon with --chain=<target> to complete the transition manually.
 func (s *Ethereum) SetFork(ctx context.Context, targetChainName string) (*rpchelper.SetForkResult, error) {
 	if targetChainName == "" {
 		return nil, errors.New("targetChainName is required")
@@ -2274,7 +2284,7 @@ func (s *Ethereum) SetFork(ctx context.Context, targetChainName string) (*rpchel
 	}
 	if cutBlock == 0 {
 		return nil, fmt.Errorf(
-			"transition target %q resolves to CutBlock=0; refusing (root-chain transitions not supported in Phase 1)",
+			"transition target %q resolves to CutBlock=0; refusing (root-chain transitions not supported)",
 			targetChainName,
 		)
 	}
@@ -2285,7 +2295,7 @@ func (s *Ethereum) SetFork(ctx context.Context, targetChainName string) (*rpchel
 	}
 	if unwoundFrom < cutBlock {
 		return nil, fmt.Errorf(
-			"current head %d is already at or below CutBlock %d for target %q; no unwind needed but chain-config swap not supported in Phase 1",
+			"current head %d is already at or below CutBlock %d for target %q",
 			unwoundFrom, cutBlock, targetChainName,
 		)
 	}
@@ -2294,17 +2304,100 @@ func (s *Ethereum) SetFork(ctx context.Context, targetChainName string) (*rpchel
 		return nil, fmt.Errorf("SetHead(%d): %w", cutBlock, err)
 	}
 
+	restartRequired, swapErr := s.applyForkChainConfigSwap(ctx, target)
+	message := ""
+	if swapErr != nil {
+		message = fmt.Sprintf("Unwound OK but chain-config swap failed: %v. Restart erigon with --chain=%s to complete the transition.", swapErr, targetChainName)
+		s.logger.Error("[SetFork] chain-config swap failed; restart required", "err", swapErr)
+	} else if restartRequired {
+		message = fmt.Sprintf("Unwound OK and partial swap completed. Restart erigon with --chain=%s to complete the transition.", targetChainName)
+	}
+
 	return &rpchelper.SetForkResult{
 		FromChain:       currentName,
 		ToChain:         targetChainName,
 		UnwoundFrom:     unwoundFrom,
 		UnwoundTo:       cutBlock,
-		RestartRequired: true,
-		Message: fmt.Sprintf(
-			"Unwound from %d to CutBlock %d. Chain.Config swap not implemented in Phase 1 — restart erigon with --chain=%s to complete the transition.",
-			unwoundFrom, cutBlock, targetChainName,
-		),
+		RestartRequired: restartRequired || swapErr != nil,
+		Message:         message,
 	}, nil
+}
+
+// applyForkChainConfigSwap drives every ChainConfigRestartable /
+// ChainConfigReconfigurable captor through the target chain.Config.
+// Returns restartRequired=true if any captor's post-swap Start fails
+// (leaving the process in a partially-swapped state; the operator
+// completes the transition via a full erigon restart on the target
+// chain).
+func (s *Ethereum) applyForkChainConfigSwap(ctx context.Context, target *chain.Config) (restartRequired bool, err error) {
+	restartables := s.chainConfigRestartables()
+	reconfigurables := s.chainConfigReconfigurables()
+
+	for name, r := range restartables {
+		if stopErr := r.Stop(); stopErr != nil {
+			return true, fmt.Errorf("stop %s: %w", name, stopErr)
+		}
+	}
+
+	for name, r := range reconfigurables {
+		if rcErr := r.Reconfigure(ctx, target); rcErr != nil {
+			return true, fmt.Errorf("reconfigure %s: %w", name, rcErr)
+		}
+	}
+
+	for _, r := range restartables {
+		r.SetChainConfig(target)
+	}
+
+	s.chainConfig = target
+
+	var startErrs []string
+	for _, name := range []string{"storage", "sentry", "caplin"} {
+		r, ok := restartables[name]
+		if !ok {
+			continue
+		}
+		if startErr := r.Start(ctx); startErr != nil {
+			startErrs = append(startErrs, fmt.Sprintf("start %s: %v", name, startErr))
+		}
+	}
+	if len(startErrs) > 0 {
+		return true, fmt.Errorf("post-swap start failures: %s", strings.Join(startErrs, "; "))
+	}
+	return false, nil
+}
+
+// chainConfigRestartables returns the running captors that implement
+// ChainConfigRestartable, keyed by short name so Start ordering can be
+// expressed explicitly.
+func (s *Ethereum) chainConfigRestartables() map[string]rpchelper.ChainConfigRestartable {
+	m := map[string]rpchelper.ChainConfigRestartable{}
+	if s.sentryProvider != nil {
+		m["sentry"] = s.sentryProvider
+	}
+	if s.components != nil && s.components.Storage != nil {
+		m["storage"] = s.components.Storage
+	}
+	if s.caplinService != nil {
+		m["caplin"] = s.caplinService
+	}
+	return m
+}
+
+// chainConfigReconfigurables returns the captors that implement
+// ChainConfigReconfigurable (single-call swap).
+func (s *Ethereum) chainConfigReconfigurables() map[string]rpchelper.ChainConfigReconfigurable {
+	m := map[string]rpchelper.ChainConfigReconfigurable{}
+	if s.txPool != nil {
+		m["txpool"] = s.txPool
+	}
+	if s.components != nil && s.components.Downloader != nil {
+		m["downloader"] = s.components.Downloader
+	}
+	if s.manifestExchange != nil {
+		m["manifest_exchange"] = s.manifestExchange
+	}
+	return m
 }
 
 func readCurrentBlockNumber(ctx context.Context, db kv.RwDB) (uint64, error) {
