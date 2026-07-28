@@ -29,7 +29,9 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -182,4 +184,28 @@ func TestExecuteCarriesCoinbaseForAccountAbstraction(t *testing.T) {
 
 	require.ErrorContains(t, result.Err, "account is not deployed")
 	require.Equal(t, coinbase, result.Coinbase)
+}
+
+func TestFinalizedWritesDependencyIsRetryable(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xdead"))
+	priorVersion := state.Version{TxIndex: 0}
+	empty := accounts.NewAccount()
+	versionMap := state.NewVersionMap(nil)
+	versionMap.WriteAddress(addr, priorVersion, &empty, true)
+	versionMap.WriteBalance(addr, priorVersion, uint256.Int{}, false)
+
+	ibs := state.NewWithVersionMap(state.NewNoopReader(), versionMap)
+	defer ibs.Release(false)
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(1, 1)
+	ibs.SetVersion(0)
+	require.NoError(t, ibs.SetNonce(addr, 0, tracing.NonceChangeUnspecified))
+
+	_, err := finalizedWrites(ibs, &chain.Rules{IsSpuriousDragon: true})
+
+	var abort protocol.ErrExecAbortError
+	require.ErrorAs(t, err, &abort)
+	require.Equal(t, 0, abort.DependencyTxIndex)
+	require.Nil(t, abort.OriginError)
+	require.False(t, abort.IsError())
 }

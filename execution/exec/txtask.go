@@ -651,7 +651,6 @@ func finalizedWrites(ibs *state.IntraBlockState, rules *chain.Rules, deferredFee
 		}
 		err = protocol.ErrExecAbortError{
 			DependencyTxIndex: ibs.DepTxIndex(),
-			OriginError:       state.ErrDependency,
 		}
 	}()
 	return ibs.FinalizedWrites(rules, deferredFeeAddrs...)
