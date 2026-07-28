@@ -58,7 +58,7 @@ func TestResolveColumnSidecarSlotAndRoot(t *testing.T) {
 	cfg.FuluForkEpoch = 1
 	cfg.GloasForkEpoch = 2
 	cfg.InitializeForkSchedule()
-	clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+	initTestBeaconConfig(&cfg)
 	d := &peerdas{beaconConfig: &cfg}
 	spe := cfg.SlotsPerEpoch
 
