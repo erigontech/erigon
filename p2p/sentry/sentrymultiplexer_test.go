@@ -71,7 +71,7 @@ func TestCreateMultiplexer(t *testing.T) {
 
 	var clients []sentryproto.SentryClient
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		clients = append(clients, newClient(ctrl, i, nil))
 	}
 
@@ -100,7 +100,7 @@ func TestStatus(t *testing.T) {
 	var statusCount int
 	var mu sync.Mutex
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		client := newClient(ctrl, i, nil)
 		client.EXPECT().SetStatus(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, sd *sentryproto.StatusData, co ...grpc.CallOption) (*sentryproto.SetStatusReply, error) {
@@ -163,7 +163,7 @@ func TestSend(t *testing.T) {
 	var statusCount int
 	var mu sync.Mutex
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		client := newClient(ctrl, i, nil)
 		client.EXPECT().SendMessageByMinBlock(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, in *sentryproto.SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
@@ -196,7 +196,7 @@ func TestSend(t *testing.T) {
 
 	statusCount = 0
 
-	for i := byte(0); i < 10; i++ {
+	for i := range byte(10) {
 		sendReply, err = mux.SendMessageById(context.Background(), &sentryproto.SendMessageByIdRequest{
 			Data: &sentryproto.OutboundMessageData{
 				Id: sentryproto.MessageId_BLOCK_BODIES_66,
@@ -333,7 +333,7 @@ func TestMessages(t *testing.T) {
 
 	var clients []sentryproto.SentryClient
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		client := newClient(ctrl, i, nil)
 		client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
@@ -341,7 +341,7 @@ func TestMessages(t *testing.T) {
 				streamServer := &libsentry.SentryStreamS[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}
 
 				go func() {
-					for i := 0; i < 5; i++ {
+					for range 5 {
 						streamServer.Send(&sentryproto.InboundMessage{})
 					}
 
@@ -387,7 +387,7 @@ func TestPeers(t *testing.T) {
 	var statusCount int
 	var mu sync.Mutex
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		client := newClient(ctrl, i, nil)
 		client.EXPECT().AddPeer(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, in *sentryproto.AddPeerRequest, opts ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {
@@ -402,7 +402,7 @@ func TestPeers(t *testing.T) {
 				streamServer := &libsentry.SentryStreamS[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}
 
 				go func() {
-					for i := 0; i < 5; i++ {
+					for range 5 {
 						streamServer.Send(&sentryproto.PeerEvent{})
 					}
 

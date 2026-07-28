@@ -17,6 +17,8 @@ on:
       - synchronize
       - ready_for_review
 
+permissions:
+  contents: read
 
 jobs:
   bor-mainnet-rpc-integ-tests:
@@ -40,6 +42,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Clean Erigon Build Directory
         run: |

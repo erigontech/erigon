@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -52,7 +52,7 @@ import (
 // A BlockTest checks handling of entire blocks.
 type BlockTest struct {
 	json            btJSON
-	br              services.FullBlockReader
+	br              dbservices.FullBlockReader
 	ExperimentalBAL bool
 }
 
@@ -121,7 +121,8 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 		return nil
 	}
 	result := make(types.BlockAccessList, len(bal))
-	for i, ac := range bal {
+	for i := range bal {
+		ac := &bal[i]
 		entry := &types.AccountChanges{
 			Address:        accounts.InternAddress(ac.Address),
 			StorageChanges: make([]*types.SlotChanges, 0, len(ac.StorageChanges)),
@@ -227,6 +228,7 @@ func (bt *BlockTest) newTester(tb testing.TB) (*execmoduletester.ExecModuleTeste
 	mOpts := []execmoduletester.Option{
 		execmoduletester.WithGenesisSpec(bt.genesis(config)),
 		execmoduletester.WithEngine(engine),
+		execmoduletester.WithoutAmsterdamBuilderContracts(),
 	}
 	if bt.ExperimentalBAL {
 		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())

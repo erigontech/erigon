@@ -35,13 +35,11 @@ func (wp *ParallelExecutor) Execute() error {
 		defer close(ch)
 	}
 	for _, job := range wp.jobs {
-		wp.wg.Add(1)
-		go func(job func() error) {
-			defer wp.wg.Done()
+		wp.wg.Go(func() {
 			if err := job(); err != nil {
 				once.Do(func() { errOut = err })
 			}
-		}(job)
+		})
 	}
 	wp.wg.Wait()
 	return errOut
@@ -56,7 +54,7 @@ func ParallellForLoop(numWorkers int, from, to int, f func(int) error) error {
 	// divide the work into numWorkers parts
 	size := (to - from) / numWorkers
 	wp := ParallelExecutor{}
-	for i := 0; i < numWorkers; i++ {
+	for i := range numWorkers {
 		start := from + i*size
 		end := start + size
 		if i == numWorkers-1 {

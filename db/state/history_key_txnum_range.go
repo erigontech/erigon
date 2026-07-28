@@ -21,7 +21,6 @@ import (
 	"container/heap"
 	"encoding/binary"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -205,7 +204,7 @@ func (hi *HistoryKeyTxNumIterDB) Close() {
 
 // setNext copies k (cursor ops invalidate previous return values).
 func (hi *HistoryKeyTxNumIterDB) setNext(k []byte, txNum uint64) {
-	hi.nextKey = common.Copy(k)
+	hi.nextKey = bytes.Clone(k)
 	hi.nextTxNum = txNum
 }
 
@@ -289,7 +288,7 @@ func (hi *HistoryKeyTxNumIterDB) advanceLargeVals() error {
 			hi.nextKey = nil
 			return nil
 		}
-		seek := append(common.Copy(k[:len(k)-8]), hi.startTxKey[:]...)
+		seek := append(bytes.Clone(k[:len(k)-8]), hi.startTxKey[:]...)
 		k, _, err = hi.valsC.Seek(seek)
 		if err != nil {
 			return err
@@ -306,7 +305,7 @@ func (hi *HistoryKeyTxNumIterDB) advanceLargeVals() error {
 		return nil
 	}
 	if hi.nextKey != nil && !bytes.Equal(k[:len(k)-8], hi.nextKey) {
-		seek := append(common.Copy(k[:len(k)-8]), hi.startTxKey[:]...)
+		seek := append(bytes.Clone(k[:len(k)-8]), hi.startTxKey[:]...)
 		k, _, err = hi.valsC.Seek(seek)
 		if err != nil {
 			return err
@@ -324,7 +323,8 @@ func (hi *HistoryKeyTxNumIterDB) scanLargeVals(k []byte) error {
 				hi.nextKey = nil
 				return nil
 			}
-			seek := append(next, hi.startTxKey[:]...)
+			seek := next
+			seek = append(seek, hi.startTxKey[:]...)
 			var err error
 			k, _, err = hi.valsC.Seek(seek)
 			if err != nil {
@@ -333,7 +333,7 @@ func (hi *HistoryKeyTxNumIterDB) scanLargeVals(k []byte) error {
 			continue
 		}
 		if txNum < binary.BigEndian.Uint64(hi.startTxKey[:]) {
-			seek := append(common.Copy(k[:len(k)-8]), hi.startTxKey[:]...)
+			seek := append(bytes.Clone(k[:len(k)-8]), hi.startTxKey[:]...)
 			var err error
 			k, _, err = hi.valsC.Seek(seek)
 			if err != nil {

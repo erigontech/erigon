@@ -44,6 +44,11 @@ var decompressorPool = sync.Pool{
 	},
 }
 
+func putDecoder(reader *zstd.Decoder) {
+	_ = reader.Reset(nil)
+	decompressorPool.Put(reader)
+}
+
 type BeaconSnapshotReader interface {
 	// ReadBlockBySlot reads the block at the given slot.
 	// If the block is not present, it returns nil.
@@ -132,7 +137,7 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 
 	// Decompress this thing
 	reader := decompressorPool.Get().(*zstd.Decoder)
-	defer decompressorPool.Put(reader)
+	defer putDecoder(reader)
 	reader.Reset(bytes.NewReader(buf))
 
 	// Use pooled readers to avoid allocations.
@@ -189,7 +194,7 @@ func (r *beaconSnapshotReader) ReadBeaconBlockBodyBySlot(ctx context.Context, tx
 
 	// Decompress this thing
 	reader := decompressorPool.Get().(*zstd.Decoder)
-	defer decompressorPool.Put(reader)
+	defer putDecoder(reader)
 	reader.Reset(bytes.NewReader(buf))
 
 	// Use pooled readers to avoid allocations.
@@ -262,7 +267,7 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 	}
 	// Decompress this thing
 	reader := decompressorPool.Get().(*zstd.Decoder)
-	defer decompressorPool.Put(reader)
+	defer putDecoder(reader)
 	reader.Reset(bytes.NewReader(buf))
 
 	// Use pooled readers to avoid allocations.

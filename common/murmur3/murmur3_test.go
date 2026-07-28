@@ -114,7 +114,7 @@ func BenchmarkMurmur128(b *testing.B) {
 func TestMurmur128Equivalence(t *testing.T) {
 	rnd := rand.New(rand.NewSource(42))
 	for length := 0; length <= 130; length++ {
-		for trial := 0; trial < 20; trial++ {
+		for range 20 {
 			key := make([]byte, length)
 			rnd.Read(key)
 			seed := rnd.Uint32()

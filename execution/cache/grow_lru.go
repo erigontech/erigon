@@ -33,8 +33,14 @@ import (
 // pre-commits its full configured capacity — the same demand-growth the state
 // caches use — reused across the CodeCache's content and size layers.
 //
-// A write racing a resize may land in the LRU about to be replaced and be
-// dropped; that is a benign cache miss (the value is re-read from the DB).
+// Generation swaps (maybeGrow, Purge) are not fenced against writers — safe
+// only for content-addressed layers, where a key's payload never changes: a
+// write lost in a retired generation is a benign miss, and an entry whose
+// removal a racing copy undid serves correct bytes until its stale stamp
+// drops it on the next read. Do not reuse for mutable-per-key values — those
+// need GenericCache's fenced swap. The onEvict-maintained counters are
+// approximate across grow windows (a lost write is counted but never
+// evicted; a raced removal can subtract twice).
 type growLRU[V any] struct {
 	cur      atomic.Pointer[freelru.ShardedLRU[uint64, V]]
 	onEvict  func(uint64, V)

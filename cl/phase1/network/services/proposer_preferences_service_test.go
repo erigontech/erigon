@@ -59,7 +59,7 @@ var testDependentRoot = common.HexToHash("0xabcdef0123456789abcdef0123456789abcd
 func newProposerPreferencesState(cfg *clparams.BeaconChainConfig, proposers map[uint64]uint64) *state2.CachingBeaconState {
 	s := state2.New(cfg)
 	s.SetSlot(64)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		var pk common.Bytes48
 		pk[0] = byte(i)
 		s.AddValidator(solid.NewValidatorFromParameters(pk, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), 0)

@@ -108,6 +108,48 @@ Filters created with `eth_newFilter`, `eth_newBlockFilter`, and `eth_newPendingT
 
 ---
 
+# Erigon v3.5.2 — Tidal Tails — 2026-07-13
+
+v3.5.2 is a bugfix release recommended for all users, and especially for anyone running 3.5.1 — it fixes a sync-halting trie-root regression introduced there (#22399). It is a drop-in upgrade from 3.5.1 — no re-sync required.
+
+**Bugfixes**
+
+- db/state: clear the StateCache on `SharedDomains` unwind below the reorg window (#22402) by @Sahil-4555 — after the v3.5.1 changeset-isolation backport, a block that failed execution within the reorg window did a disk-noop overlay unwind that left dirty, uncommitted writes in the state cache; on the next run execution read those stale values instead of the database, producing a deterministic trie-root mismatch that halted sync. Closes #22399.
+- rpc, node: fix the nil-pointer panic in the gzip batch flush race (#22383) by @lupin012 — a gzipped JSON-RPC batch with two or more streamable methods invoked the shared gzip-streaming flush hook concurrently from per-call goroutines; `gzipResponseWriter.Flush` is not concurrency-safe, so the calls raced on the underlying gzip writer and could dereference a nil flate compressor, crashing the node. Closes #22334.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.5.1...v3.5.2
+
+---
+
+# Erigon v3.5.1 — Tidal Tails — 2026-07-10
+
+v3.5.1 is a bugfix release recommended for all users. It is a drop-in upgrade from 3.5.0 — no re-sync required.
+
+**Bugfixes**
+
+- execution/stagedsync: fix parallel-execution commitment consistency at step boundaries (#22111, #22135, #22147, #22094) by @awskii, @sudeepdino008 — a block straddling a step boundary left that step's commitment inconsistent with the account/storage/code domains, so published snapshots could mis-serve state-read RPCs (`eth_getProof`, `debug_executionWitness`) and, on a later run, wedge the Execution stage in a zero-progress loop with nothing logged. Closes #21992, #22101.
+- execution/stagedsync: fix log index reset and missing WebSocket notifications in parallel execution (#22155) by @Sahil-4555 — restores `logs` / `newHeads` subscription notifications and correct log indexing when executing in parallel.
+- execution/stagedsync: fix pruning in `stage_custom_trace` (#22052) by @sudeepdino008 — regenerated domains were never pruned and accumulated unbounded in the DB. Closes #22013.
+- cl/persistence: fix caplin historical state reconstruction loop at the Bellatrix transition (#22370) by @Sahil-4555 — a Caplin node could stop advancing at the Merge (Bellatrix) slot; pre-Merge blocks carry an all-zero execution payload header, and reconstruction now detects the zero block hash and skips the EL transaction lookup. Closes #22337.
+- cl/phase1/forkchoice: replace latestMessagesStore interning with a flat per-validator slice (#22355) by @lystopad — the prune scan walked the whole message map on every update and stalled `GetHead` past the attestation deadline. Closes #22351.
+- cl/antiquary: commit reconstructed state in bounded batches (#22348) by @awskii — committing up to 30 minutes of replayed beacon state in a single MDBX transaction could overflow libmdbx and crash on large (100+ GB) archive databases.
+- cl: bound caplin archive blob-column backfill so it can't wedge on Fulu (#22318) by @awskii — prevents an archive node from getting stuck while backfilling blob (data-column) sidecars.
+- cl, db/snapshotsync: caplin snapshot correctness — don't freeze empty block/state roots (#22323) and remove overlapping state snapshots on retire (#22317) by @awskii.
+- cl: allow boundary attestations while head state lags (#22251) by @domiwei — fixes attestation validation at epoch boundaries when the wall-clock slot has advanced but the head state briefly lags behind.
+- rpc/jsonrpc: gate `debug_executionWitness` on `keys[]` completeness and keep preimages for in-block-deleted accounts (#22320) by @awskii — avoids returning an incomplete witness.
+- rpc: remove the state-history check from block-data-only endpoints (#22073) by @Sahil-4555 — endpoints that only need block data no longer error on nodes pruned below the requested block's state history.
+- cmd/utils: allow snapshot reset on upgraded datadirs by restricting the table config (#22291) by @Sahil-4555 — snapshot reset failed to resolve the chain name on upgraded datadirs. Closes #22275.
+
+**Improvements**
+
+- execution: disable gzip compression for the Engine API (#22369) by @taratorio — removes compression overhead on `engine_*` responses, lowering `engine_getPayload` / `getBlobs` latency.
+- p2p: re-resolve the STUN external IP at runtime (#22188) by @lystopad — with `--nat=stun`, a node whose public IP changes while running now re-resolves and re-advertises it instead of keeping the stale startup value.
+- db/version: relax the minor-version check in `Supports` (#22205) by @sudeepdino008 — a newer, backward-readable minor version within a supported major is now accepted, so the binary won't refuse newer minor-versioned files.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.5.0...v3.5.1
+
+---
+
 # Erigon v3.5.0 — Tidal Tails — 2026-06-26
 
 Erigon 3.5.0 is a major release headlined by **parallel block execution becoming the default** and **initial support for Ethereum's upcoming Glamsterdam hardfork**. It is a drop-in upgrade for 3.4.x users — no re-sync required; existing datadirs upgrade their prune configuration automatically (see Breaking Changes).

@@ -17,7 +17,7 @@
 package util
 
 type Result interface { // implements ListenableFuture<Value> {
-	Get() interface{}
+	Get() any
 	IsSuccess() bool
 }
 
@@ -54,8 +54,8 @@ const (
 )
 
 type result struct {
-	resultChannel chan interface{}
-	result        interface{}
+	resultChannel chan any
+	result        any
 	status        ResultStatus
 	reason        ResultStatusReason
 	statusInfo    string
@@ -252,7 +252,7 @@ func (result *result) Status() ResultStatus {
 	}
 */
 
-func (result *result) Get() interface{} {
+func (result *result) Get() any {
 	/*
 		try {
 			if (result==null) {

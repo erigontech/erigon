@@ -55,13 +55,13 @@ func TestFilters_GenerateSubscriptionID(t *testing.T) {
 	t.Parallel()
 	sz := 1000
 	subs := make(chan SubscriptionID, sz)
-	for i := 0; i < sz; i++ {
+	for range sz {
 		go func() {
 			subs <- generateSubscriptionID()
 		}()
 	}
 	set := map[SubscriptionID]struct{}{}
-	for i := 0; i < sz; i++ {
+	for range sz {
 		v := <-subs
 		_, ok := set[v]
 		if ok {
@@ -533,12 +533,12 @@ func TestFilters_AddPendingTxs(t *testing.T) {
 
 				// Add transactions to trigger panic
 				// Initial batch to set the stage
-				for i := 0; i < 4; i++ {
+				for range 4 {
 					f.AddPendingTxs(txID, []types.Transaction{txn})
 				}
 
 				// Adding more transactions in smaller increments to ensure the panic
-				for i := 0; i < 2; i++ {
+				for range 2 {
 					f.AddPendingTxs(txID, []types.Transaction{txn})
 				}
 

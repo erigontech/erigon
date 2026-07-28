@@ -19,13 +19,16 @@ package snapshotsync
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/mvcc"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/version"
@@ -57,7 +60,7 @@ func TestRemoveOverlapsDefersUnlinkWhileViewOpen(t *testing.T) {
 		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, version.V1_0, logger)
 	}
 
-	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
@@ -78,6 +81,61 @@ func TestRemoveOverlapsDefersUnlinkWhileViewOpen(t *testing.T) {
 	require.True(os.IsNotExist(err), "sub-segment must be unlinked once the last View drained")
 }
 
+// OpenFolder retires a segment whose file vanished from disk as close-only, never
+// re-deleting it: if the same file is recreated (e.g. re-downloaded) before the pinning
+// View drains, reclamation must not clobber the recreation. Mirrors db/state's
+// TestAggregatorOpenFolderReclaimKeepsRecreatedFile.
+func TestOpenFolderReclaimKeepsRecreatedFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	// Unix-only: the test's whole point is to unlink a .seg the store still has mmapped (an
+	// external actor removing a live snapshot). Windows forbids deleting a mapped file, so
+	// neither the setup nor the bug it reproduces can occur there.
+	if runtime.GOOS == "windows" {
+		t.Skip("deletes a file that is still mmapped; not possible on Windows")
+	}
+	logger := log.New()
+	tmpDir := t.TempDir()
+	require := require.New(t)
+
+	for from := uint64(0); from < 2_000; from += 1_000 {
+		for _, snT := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, from+1_000, snT.Enum(), tmpDir, version.V1_0, logger)
+		}
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, tmpDir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	v := s.View() // pins the generation that still references the [0,1000) segments
+	// Close the pin even on an early failure: otherwise s.Close leaves fds open (live reader)
+	// and the tmpdir cleanup can't unlink the still-mapped files.
+	vClosed := false
+	defer func() {
+		if !vClosed {
+			v.Close()
+		}
+	}()
+
+	// An external actor removes the [0,1000) files; OpenFolder retires them close-only
+	// (they are already gone from disk), then the same files are recreated before v drains.
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		require.NoError(dir.RemoveFile(filepath.Join(tmpDir, snaptype.SegmentFileName(version.V1_0, 0, 1_000, snT.Enum()))))
+	}
+	require.NoError(s.OpenFolder())
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 1_000, snT.Enum(), tmpDir, version.V1_0, logger)
+	}
+	headersPath := filepath.Join(tmpDir, snaptype.SegmentFileName(version.V1_0, 0, 1_000, snaptype2.Headers.Enum()))
+
+	v.Close() // drains the pinning generation -> reclaims the retired segments (close-only)
+	vClosed = true
+
+	_, err := os.Stat(headersPath)
+	require.NoError(err, "reclaiming a vanished segment must not delete a same-name recreation")
+}
+
 // TestRemoveOverlapsProtectsPendingRetired covers the case where a merge has already
 // retired the subsumed sub-segments (their files still on disk because a reader pins the
 // pre-merge generation) and a later RemoveOverlaps re-discovers those files on disk.
@@ -96,7 +154,7 @@ func TestRemoveOverlapsProtectsPendingRetired(t *testing.T) {
 			createTestSegmentFile(t, from, from+1_000, snT.Enum(), dir, version.V1_0, logger)
 		}
 	}
-	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
@@ -124,6 +182,7 @@ func TestRemoveOverlapsProtectsPendingRetired(t *testing.T) {
 	for _, sn := range subs {
 		s.dirty[sn.Type().Enum()].Delete(sn)
 	}
+	retire(mvcc.RetireReasonMerged, subs)  // subsumed by a covering file -> delete on reclaim
 	s.recalcVisibleFiles(s.alignMin, subs) // retire subs to the current generation
 	s.dirtyLock.Unlock()
 
@@ -173,7 +232,7 @@ func TestReadersRaceRetire(t *testing.T) {
 		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, verOf(i), logger)
 	}
 
-	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
@@ -214,10 +273,8 @@ func TestReadersRaceRetire(t *testing.T) {
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
-	for r := 0; r < 8; r++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -226,7 +283,7 @@ func TestReadersRaceRetire(t *testing.T) {
 					read()
 				}
 			}
-		}()
+		})
 	}
 
 	// Let readers warm up so they are churning Views when retirement hits.
@@ -235,7 +292,7 @@ func TestReadersRaceRetire(t *testing.T) {
 	// Retire subsumed sub-segments concurrently with the readers.
 	require.NoError(s.RemoveOverlaps(nil))
 	for _, f := range subNames {
-		_ = s.Delete(f)
+		_ = s.retireFiles(mvcc.RetireReasonAged, f)
 	}
 
 	time.Sleep(20 * time.Millisecond)

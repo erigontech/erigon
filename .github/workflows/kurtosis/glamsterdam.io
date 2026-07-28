@@ -1,6 +1,6 @@
 participants:
   - cl_type: lighthouse
-    cl_image: ethpandaops/lighthouse:glamsterdam-devnet-5
+    cl_image: ethpandaops/lighthouse:glamsterdam-devnet-6
     el_type: erigon
     el_image: test/erigon:current
     el_log_level: "debug"
@@ -29,9 +29,9 @@ spamoor_params:
     - scenario: setcodetx
       config: {throughput: 20, funding_gas_limit: 200000}
 ethereum_genesis_generator_params:
-  image: ethpandaops/ethereum-genesis-generator:5.3.5
+  image: ethpandaops/ethereum-genesis-generator:6.1.2
 additional_services: [spamoor, assertoor]
 assertoor_params:
   run_stability_check: false  # re-enable once go-eth2-client supports alpha.8 (#21442)
   run_block_proposal_check: true
-  image: ethpandaops/assertoor:master-0ad56fb  # switch to release tag when available (#21441)
+  image: ethpandaops/assertoor:v0.1.3
