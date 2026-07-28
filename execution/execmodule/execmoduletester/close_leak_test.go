@@ -49,17 +49,22 @@ func TestCloseStopsAllGoroutines(t *testing.T) {
 	t.Fatalf("Close leaked goroutines: baseline=%d now=%d\n%s", baseline, n, buf.String())
 }
 
-// stableGoroutines waits until the goroutine count stops decreasing and
-// returns it.
+// stableGoroutines waits until the goroutine count holds steady for a few
+// consecutive samples and returns it.
 func stableGoroutines() int {
+	stable := 0
 	n := runtime.NumGoroutine()
 	for range 100 {
 		runtime.GC()
 		time.Sleep(50 * time.Millisecond)
 		next := runtime.NumGoroutine()
-		if next >= n {
-			return n
+		if next == n {
+			if stable++; stable >= 3 {
+				break
+			}
+			continue
 		}
+		stable = 0
 		n = next
 	}
 	return n
