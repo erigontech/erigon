@@ -152,7 +152,8 @@ func (c *StateCache) GetCodeByHash(codeHash []byte) ([]byte, bool) {
 
 // PutCodeWithHash stores code populating both the addr-keyed path and the
 // codeHash-keyed codeHashToCode layer. Callers should prefer this over Put when they
-// have the codeHash from the account record — avoids a redundant keccak.
+// have the codeHash from the account record — avoids a redundant keccak. Like Put,
+// it bypasses fill admission.
 func (c *StateCache) PutCodeWithHash(addr, code, codeHash []byte, txNum uint64) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
@@ -194,7 +195,9 @@ func (c *StateCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return cc.GetAddrCodeHash(addr)
 }
 
-// PutAddrCodeHashIfFresh conditionally fills a mapping from a current account read view.
+// PutAddrCodeHashIfFresh conditionally records an addr → codeHash mapping.
+// The mapping derives from an account record, so admission checks the accounts
+// frontier even though the mapping lives in the code cache.
 func (c *StateCache) PutAddrCodeHashIfFresh(addr []byte, h [32]byte, txNum, visibleEnd uint64) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
@@ -217,7 +220,8 @@ func (c *StateCache) deleteAddrCodeHash(addr []byte) {
 }
 
 // Put stores data for the given domain and key, stamped with the txNum the
-// value reflects (for txNum/epoch unwind invalidation).
+// value reflects (for txNum/epoch unwind invalidation). It bypasses fill
+// admission: committed updates go through Apply, read fills through FillIfFresh.
 func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, txNum uint64) {
 	cache := c.caches[domain]
 	if cache == nil {
@@ -260,7 +264,8 @@ func (c *StateCache) FillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 	cache.PutIfAbsent(key, bytes.Clone(value), readTxNum)
 }
 
-// Delete removes the data for the given domain and key.
+// Delete removes the data for the given domain and key. Authoritative
+// deletions go through Apply, which also advances the fill-admission frontier.
 func (c *StateCache) Delete(domain kv.Domain, key []byte) {
 	cache := c.caches[domain]
 	if cache == nil {
@@ -273,8 +278,8 @@ func (c *StateCache) Delete(domain kv.Domain, key []byte) {
 func (c *StateCache) Apply(domain kv.Domain, key, value []byte, txNum uint64) {
 	var codeHash []byte
 	if domain == kv.CodeDomain && len(value) > 0 {
-		// Copy before hashing so the stored bytes and codeHash come from the
-		// same copy of the caller-owned buffer.
+		// Clone before hashing so the stored bytes and their codeHash cannot
+		// diverge if the caller reuses its buffer.
 		value = bytes.Clone(value)
 		codeHash = crypto.Keccak256(value)
 	}

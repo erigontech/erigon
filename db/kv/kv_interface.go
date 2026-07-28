@@ -518,8 +518,8 @@ type TemporalDebugTx interface {
 	HistoryStartFrom(domainName Domain) uint64
 
 	DomainProgress(domain Domain) (txNum uint64)
-	// DomainVisibleEnd returns the domain's exact exclusive frontier used for
-	// cache-fill admission. ok is false when an exact frontier is unavailable.
+	// DomainVisibleEnd returns the exact exclusive txNum bound of the tx's
+	// domain read view. ok is false when the backend cannot provide an exact bound.
 	DomainVisibleEnd(domain Domain) (visibleEnd uint64, ok bool)
 	IIProgress(name InvertedIdx) (txNum uint64)
 	StepSize() uint64
