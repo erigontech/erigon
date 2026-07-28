@@ -241,10 +241,8 @@ func TestVersionedWritesClearTouchedEmptyAccount(t *testing.T) {
 	})
 }
 
-// Emptiness turns on the account record, balance, nonce and code hash, so a tx
-// writing none of them cannot have emptied the account. Resolving those fields
-// regardless would leave a storage writer depending on the account's balance,
-// which a concurrent transfer into that account then invalidates.
+// A non-empty code hash or nonce decides EIP-161 emptiness without reading the
+// balance, avoiding conflicts with unrelated balance updates.
 func TestVersionedWritesEmptinessKeepsReadFootprint(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
 	key := accounts.InternKey(common.HexToHash("0x01"))
@@ -274,4 +272,30 @@ func TestVersionedWritesEmptinessKeepsReadFootprint(t *testing.T) {
 	reads := ibs.VersionedReads()
 	_, hasBalanceRead := reads.GetBalance(addr)
 	require.False(t, hasBalanceRead, "a storage write must not depend on the account's balance")
+}
+
+func TestVersionedWritesStorageOnlyClearsExistingEmptyAccount(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+
+	empty := accounts.NewAccount()
+	reader := &accountStateReader{
+		accounts: map[accounts.Address]*accounts.Account{addr: &empty},
+	}
+
+	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(1, 1)
+	ibs.SetVersion(0)
+
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(7)))
+
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	require.NoError(t, err)
+	deleted, ok := writes.GetSelfDestruct(addr)
+	require.True(t, ok)
+	require.True(t, deleted.Val)
 }

@@ -608,16 +608,16 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 }
 
 // emptyFromVersionedFields computes the EIP-161 emptiness verdict for an
-// account that versionedAccountBase resolved as existing, reading the current
-// balance/nonce/codeHash per-field (short-circuiting on the first non-empty
-// field) instead of reconstructing the whole account. The per-field refresh
-// reads apply the same self-destruct gate as the whole-account path.
+// account that versionedAccountBase resolved as existing, reading fields
+// individually instead of reconstructing the whole account. The least
+// independently mutable fields are checked first to reduce validation
+// dependencies without weakening the verdict.
 func (sdb *IntraBlockState) emptyFromVersionedFields(addr accounts.Address, account *accounts.Account) (bool, error) {
-	balance, _, _, err := refreshBalance(sdb, addr, account.Balance)
+	codeHash, _, _, err := refreshCodeHash(sdb, addr, account.CodeHash)
 	if err != nil {
 		return false, err
 	}
-	if !balance.IsZero() {
+	if codeHash != accounts.EmptyCodeHash {
 		return false, nil
 	}
 	nonce, _, _, err := refreshNonce(sdb, addr, account.Nonce)
@@ -627,11 +627,11 @@ func (sdb *IntraBlockState) emptyFromVersionedFields(addr accounts.Address, acco
 	if nonce != 0 {
 		return false, nil
 	}
-	codeHash, _, _, err := refreshCodeHash(sdb, addr, account.CodeHash)
+	balance, _, _, err := refreshBalance(sdb, addr, account.Balance)
 	if err != nil {
 		return false, err
 	}
-	return codeHash == accounts.EmptyCodeHash, nil
+	return balance.IsZero(), nil
 }
 
 // GetBalance retrieves the balance from the given address or 0 if object not found
@@ -2654,13 +2654,7 @@ func (sdb *IntraBlockState) clearEmptyAccounts(chainRules *chain.Rules, deferred
 
 // existingAccountEndsEmpty resolves fields not replaced by an AddressPath write
 // through the version map so prior transactions become validation dependencies.
-// A tx that wrote none of those fields cannot have emptied the account, and
-// resolving them regardless would leave a mere storage writer depending on the
-// account's balance.
 func (sdb *IntraBlockState) existingAccountEndsEmpty(addr accounts.Address) (bool, error) {
-	if !sdb.versionedWrites.wroteAccountFields(addr) {
-		return false, nil
-	}
 	addressRead, ok := sdb.versionedReads.GetAddress(addr)
 	var account accounts.Account
 	if ok && addressRead.Val != nil && !addressRead.Val.IsNil() {
