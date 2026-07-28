@@ -490,13 +490,15 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 			startTrace(gas)
 		}
 		defer func() {
+			traceGasRemaining := gasRemaining
 			if !traceStarted {
 				if parentOutOfGas {
 					return
 				}
 				startTrace(traceStartGas)
+				traceGasRemaining = traceStartGas
 			}
-			evm.captureEnd(depth, typ, traceStartGas, gasRemaining, ret, err)
+			evm.captureEnd(depth, typ, traceStartGas, traceGasRemaining, ret, err)
 		}()
 	}
 

@@ -395,11 +395,16 @@ func TestCreateTraceUsesForwardedGasOnEarlyFailure(t *testing.T) {
 		},
 	}
 	_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
-	var enteredCreateGas, availableCreateGas uint64
+	var enteredCreateGas, exitedCreateGasUsed, availableCreateGas uint64
 	hooks := &tracing.Hooks{
 		OnEnter: func(_ int, typ byte, _, _ accounts.Address, _ bool, _ []byte, gas uint64, _ uint256.Int, _ []byte) {
 			if vm.OpCode(typ) == vm.CREATE2 {
 				enteredCreateGas = gas
+			}
+		},
+		OnExit: func(depth int, _ []byte, gasUsed uint64, _ error, _ bool) {
+			if depth == 1 {
+				exitedCreateGasUsed = gasUsed
 			}
 		},
 		OnOpcode: func(_ uint64, op byte, gas, cost uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
@@ -413,6 +418,7 @@ func TestCreateTraceUsesForwardedGasOnEarlyFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.NotZero(t, availableCreateGas)
 	require.Equal(t, availableCreateGas-availableCreateGas/64, enteredCreateGas)
+	require.Zero(t, exitedCreateGasUsed)
 }
 
 func TestCreateOntoStorageOnlyAccountChargesBeforeCollision(t *testing.T) {
