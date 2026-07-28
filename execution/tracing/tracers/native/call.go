@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
-	"slices"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -315,7 +314,13 @@ func (t *callTracer) OnLog(log *types.Log) {
 	if t.interrupt.Load() {
 		return
 	}
-	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, callLog{Address: log.Address, Topics: slices.Clone(log.Topics), Data: slices.Clone(log.Data), Index: hexutil.Uint64(t.logIndex), Position: hexutil.Uint(len(t.callstack[len(t.callstack)-1].Calls))})
+	// make+copy instead of slices.Clone: Clone turns empty into nil, which
+	// marshals topics as null instead of [].
+	topics := make([]common.Hash, len(log.Topics))
+	copy(topics, log.Topics)
+	data := make(hexutil.Bytes, len(log.Data))
+	copy(data, log.Data)
+	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, callLog{Address: log.Address, Topics: topics, Data: data, Index: hexutil.Uint64(t.logIndex), Position: hexutil.Uint(len(t.callstack[len(t.callstack)-1].Calls))})
 	t.logIndex++
 }
 
