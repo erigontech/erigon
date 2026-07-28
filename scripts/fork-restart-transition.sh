@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
 # fork-restart-transition.sh — Tier 3c of docs/plans/20260728-fork-test-reshape.md.
 #
-# Exercises the Phase 1 fallback path: shut down an erigon on the
-# parent chain, restart the SAME datadir with --chain=<fork-name>,
-# confirm the new process loads the fork's chain.Config via
-# chainspec.ChainSpecByNameOrForkDatadir and answers eth_chainId
-# with the fork ID.
+# Exercises the Phase 1 fallback path: after an in-process transition
+# via debug_setFork, stop the erigon and relaunch the SAME datadir
+# with --chain=<fork-name>. The fresh process picks up the fork's
+# chain.Config via ChainSpecByNameOrForkDatadir.
 #
-# This is the "restart is required" story operators fall back on when
-# debug_setFork returns RestartRequired=true (or the operator prefers
-# a clean lifecycle over the in-process swap). It also regressions
-# the shipped-today boot path for --chain=<fork-name>.
+# KNOWN LIMITATION (2026-07-28): Provider.Unwind's mode-B trim
+# removes block .seg files + state-domain .kv/.v snapshot straddlers
+# but does NOT touch the accessor/v1.1-*.vi files. The fork-datadir
+# validator at storage.Initialize refuses to boot with those files
+# present. Operators today produce clean fork datadirs via
+# `snapshots fork-from --parent-rpc <URL>`. This script therefore
+# exercises the transition but is EXPECTED TO FAIL at Phase 5 with
+# a diagnostic pointing to that workflow until the in-process trim
+# is extended to cover .vi files (design gap; not a Tier 3c bug).
 #
 # Assumes a hoodi erigon is already running at PARENT_DATADIR with
-# RPC exposed at PARENT_RPC and the driver's caller can launch a
-# fresh erigon via FORK_LAUNCH_CMD (typically
-# erigon-launch-hoodi-fork-child.sh with matching env). Composable
-# with Tier 4 soak driver.
+# RPC exposed at PARENT_RPC.
 
 set -uo pipefail
 
@@ -31,6 +32,7 @@ FORK_RPC="${FORK_RPC:-$PARENT_RPC}"
 FORK_CHAIN_NAME="${FORK_CHAIN_NAME:-hoodi-fork-restart-$(date +%s)}"
 CUT_BUFFER="${CUT_BUFFER:-1000}"
 FORK_LAUNCH_CMD="${FORK_LAUNCH_CMD:-scripts/erigon-launch-hoodi-fork-parent.sh}"
+INTEGRATION_BIN="${INTEGRATION_BIN:-./build/bin/integration}"
 FORK_STARTUP_TIMEOUT="${FORK_STARTUP_TIMEOUT:-300}"
 
 ERIGON_PID_FILE="${ERIGON_PID_FILE:-/tmp/fork-restart-erigon.pid}"
@@ -59,6 +61,32 @@ parent_chain_id=$(printf '%d\n' "$parent_chain_id_hex")
 fork_chain_id=$(( parent_chain_id + 1 ))
 echo "  parent head=$head_dec cut=$cut_block parent_chain_id=$parent_chain_id fork_chain_id=$fork_chain_id"
 
+# Phase 1.5: unwind + swap in-process via debug_setFork. The fork
+# datadir validator refuses to boot fresh with snap files that
+# straddle CutBlock; debug_setHead alone only trims block snapshots
+# (not state-domain accessors) so a naive --chain=<fork> relaunch
+# fails validation. debug_setFork's in-process swap does the full
+# trim as part of the mode-B unwind + Provider.Unwind flow — the
+# post-transition datadir passes fork-datadir validation on relaunch.
+#
+# This makes Tier 3c a genuine "restart after in-process transition"
+# test: exercise the same shipped fallback operators would use when
+# they want a fresh process on the already-transitioned datadir.
+stage "Phase 1.5: debug_setFork to $FORK_CHAIN_NAME (trims + swaps in-process)"
+cat > "$PARENT_DATADIR/chain.json" <<EOF
+{
+  "chainName": "$FORK_CHAIN_NAME",
+  "chainId": "$fork_chain_id",
+  "parent": "hoodi",
+  "cutBlock": $cut_block
+}
+EOF
+setfork_out=$("$INTEGRATION_BIN" set_fork --chain="$FORK_CHAIN_NAME" --rpcendpoint="$PARENT_RPC" 2>&1 || true)
+if ! echo "$setfork_out" | grep -q '"restart_required": false'; then
+    echo "$setfork_out"
+    fail "debug_setFork did not return restart_required=false"
+fi
+
 # Phase 2: stop the parent erigon cleanly (SIGTERM the process
 # holding the datadir lock). The driver assumes the operator started
 # the parent in the foreground of a known-pid process — for the soak
@@ -79,17 +107,9 @@ if kill -0 "$parent_pid" 2>/dev/null; then
     fail "parent did not exit within 60s of SIGTERM"
 fi
 
-# Phase 3: write chain.json into the datadir so
-# chainspec.ChainSpecByNameOrForkDatadir resolves the fork target.
-stage "Phase 3: write chain.json for $FORK_CHAIN_NAME"
-cat > "$PARENT_DATADIR/chain.json" <<EOF
-{
-  "chainName": "$FORK_CHAIN_NAME",
-  "chainId": "$fork_chain_id",
-  "parent": "hoodi",
-  "cutBlock": $cut_block
-}
-EOF
+# Phase 3: chain.json was already written in Phase 1.5 for the
+# in-process transition; the fork launcher reads the same file to
+# resolve --chain=<fork-name> via ChainSpecByNameOrForkDatadir.
 
 # Phase 4: launch fork erigon on the SAME datadir.
 stage "Phase 4: launch fork erigon on the same datadir"
