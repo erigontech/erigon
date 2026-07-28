@@ -420,7 +420,7 @@ func (sdb *IntraBlockState) Reset() {
 	// originals in sdb.versionedWrites are no longer referenced after the
 	// boundary call.  Walk the per-path maps and return every VW to its
 	// typed pool before resetting.
-	//sdb.versionedWrites.ReleaseAndReset()
+	sdb.versionedWrites.ReleaseAndReset()
 	sdb.recordAccess = false
 	sdb.accountReadDuration = 0
 	sdb.accountReadCount = 0
