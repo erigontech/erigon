@@ -228,11 +228,10 @@ const (
 	CostPerStateByte        = 1530
 
 	// Pre-multiplied state-gas costs (StateBytesX * CostPerStateByte) for hot paths.
-	StateGasNewAccount        = StateBytesNewAccount * CostPerStateByte
-	StateGasPerStorageSet     = StateBytesPerStorageSet * CostPerStateByte
-	StateGasAuthBase          = StateBytesAuthBase * CostPerStateByte
-	StateGasNewAccountAndAuth = (StateBytesNewAccount + StateBytesAuthBase) * CostPerStateByte
-	StateGasSystemMaxSstores  = StateBytesPerStorageSet * CostPerStateByte * SystemMaxSstoresPerCall
+	StateGasNewAccount       = StateBytesNewAccount * CostPerStateByte
+	StateGasPerStorageSet    = StateBytesPerStorageSet * CostPerStateByte
+	StateGasAuthBase         = StateBytesAuthBase * CostPerStateByte
+	StateGasSystemMaxSstores = StateBytesPerStorageSet * CostPerStateByte * SystemMaxSstoresPerCall
 
 	// EIP-8038: State-access gas cost update. Reprices the EIP-2929 state-access
 	// costs and adds the regular-gas write components (ACCOUNT_WRITE, STORAGE_WRITE)
