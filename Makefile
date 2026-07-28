@@ -299,6 +299,15 @@ $(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)): eest-spec-%: evm.race
 	@EVM_BIN=$(GOBIN)/evm.race bash tools/run-eest-spec-test.sh "$*"
 endif
 
+## check-eest-shards:                  verify EEST shard coverage (stable fork partition + devnet EIP-filter liveness/completeness)
+.PHONY: check-eest-shards
+check-eest-shards:
+	@bash tools/test-fixtures.sh --download-only test-fixtures.json test-fixtures-cache eest_stable eest_devnet
+	@mkdir -p test-fixtures-cache/eest_stable/fixtures/.meta test-fixtures-cache/eest_devnet/fixtures/.meta
+	@tar -xzf test-fixtures-cache/eest_stable.tar.gz -C test-fixtures-cache/eest_stable fixtures/.meta/index.json
+	@tar -xzf test-fixtures-cache/eest_devnet.tar.gz -C test-fixtures-cache/eest_devnet fixtures/.meta/index.json
+	@bash tools/check-eest-shard-coverage.sh
+
 ## test-bench:                         check the benchmarks compile and run
 test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout=5m
 test-bench:
@@ -494,7 +503,7 @@ $(GOBINREL):
 
 $(GOBINREL)/protoc: | $(GOBINREL)
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v35.0/protoc-35.0-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v35.1/protoc-35.1-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
 	cd "$(PROTOC_TMP)" && unzip protoc.zip
 	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
 	mkdir -p "$(PROTOC_INCLUDE)"

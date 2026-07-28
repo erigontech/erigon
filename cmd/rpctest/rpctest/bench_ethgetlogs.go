@@ -162,7 +162,8 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 			return nil
 		}
 		seen := make(map[hexutil.Uint]struct{}, len(logs))
-		for _, l := range logs {
+		for i := range logs {
+			l := &logs[i]
 			if _, ok := seen[l.Index]; ok {
 				return fmt.Errorf("duplicated log_index %d", l.Index)
 			}
@@ -207,7 +208,8 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 			sawAddr := map[common.Address]struct{}{}
 			topicsByPos := [4]map[common.Hash]struct{}{{}, {}, {}, {}}
 			if baseOK {
-				for _, l := range resp.Result {
+				for i := range resp.Result {
+					l := &resp.Result[i]
 					sawAddr[l.Address] = struct{}{}
 					for pos, t := range l.Topics {
 						if pos < 4 {
@@ -282,11 +284,12 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				}
 
 				logsByTopic := make(map[common.Hash][]Log, len(topicsAtPos))
-				for _, l := range resp.Result {
+				for i := range resp.Result {
+					l := &resp.Result[i]
 					if pos < len(l.Topics) {
 						t := l.Topics[pos]
 						if _, ok := topicsAtPos[t]; ok {
-							logsByTopic[t] = append(logsByTopic[t], l)
+							logsByTopic[t] = append(logsByTopic[t], *l)
 						}
 					}
 				}
@@ -438,9 +441,10 @@ func BenchEthGetLogsRandomBlock(erigonURL string, concurentRequests int) error {
 }
 
 func filterLogsByAddr(logs []Log, addr common.Address) (filtered []Log) {
-	for _, log := range logs {
-		if log.Address == addr {
-			filtered = append(filtered, log)
+	for i := range logs {
+		l := &logs[i]
+		if l.Address == addr {
+			filtered = append(filtered, *l)
 		}
 	}
 	return

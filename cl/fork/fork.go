@@ -20,13 +20,15 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
-var NO_GENESIS_TIME_ERR error = errors.New("genesis time is not set")
-var NO_VALIDATOR_ROOT_HASH error = errors.New("genesis validators root is not set")
+var (
+	NO_GENESIS_TIME_ERR    error = errors.New("genesis time is not set")
+	NO_VALIDATOR_ROOT_HASH error = errors.New("genesis validators root is not set")
+)
 
 func ComputeDomain(
 	domainType []byte,
@@ -35,7 +37,7 @@ func ComputeDomain(
 ) ([]byte, error) {
 	var currentVersion32 common.Hash
 	copy(currentVersion32[:], currentVersion[:])
-	forkDataRoot := utils.Sha256(currentVersion32[:], genesisValidatorsRoot[:])
+	forkDataRoot := crypto.Sha256(currentVersion32[:], genesisValidatorsRoot[:])
 	return append(domainType, forkDataRoot[:28]...), nil
 }
 
@@ -47,7 +49,7 @@ func ComputeSigningRoot(
 	if err != nil {
 		return [32]byte{}, err
 	}
-	return utils.Sha256(objRoot[:], domain), nil
+	return crypto.Sha256(objRoot[:], domain), nil
 }
 
 func Domain(fork *cltypes.Fork, epoch uint64, domainType [4]byte, genesisRoot common.Hash) ([]byte, error) {

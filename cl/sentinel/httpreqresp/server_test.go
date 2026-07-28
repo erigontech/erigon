@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -94,6 +95,41 @@ func TestMaxBytesReader(t *testing.T) {
 	}
 }
 
+func TestResponseCodeErrorMessageReturnsBodyReadError(t *testing.T) {
+	resp := &http.Response{
+		Body: io.NopCloser(newMaxBytesReader(bytes.NewReader(bytes.Repeat([]byte{0x80}, 8)), 4)),
+	}
+
+	_, err := ResponseCodeResourceUnavailable.ErrorMessage(resp)
+	require.ErrorIs(t, err, ErrResponseTooLarge)
+}
+
+func TestResponseCodeErrorMessageRejectsOverlongLengthVarint(t *testing.T) {
+	resp := &http.Response{
+		Body: io.NopCloser(bytes.NewReader(bytes.Repeat([]byte{0x80}, 10))),
+	}
+
+	_, err := ResponseCodeResourceUnavailable.ErrorMessage(resp)
+	require.ErrorIs(t, err, errMalformedErrorMessageLength)
+}
+
+func TestResponseCodeErrorMessageCapsDecodedMessage(t *testing.T) {
+	var body bytes.Buffer
+	body.WriteByte(0x01)
+	sw := snappy.NewBufferedWriter(&body)
+	_, err := sw.Write(bytes.Repeat([]byte{'x'}, maxErrorMessageBytes+1))
+	require.NoError(t, err)
+	require.NoError(t, sw.Close())
+
+	resp := &http.Response{
+		Body: io.NopCloser(&body),
+	}
+
+	msg, err := ResponseCodeResourceUnavailable.ErrorMessage(resp)
+	require.NoError(t, err)
+	require.Len(t, msg, maxErrorMessageBytes)
+}
+
 // Do must not retain the handler's write buffer: callers such as http.Error hand Write fmt's
 // pooled buffer, which is reused after the call returns. If Do aliased it, a concurrent reuse of
 // that buffer would race with a caller reading resp.Body (the handshake.ValidatePeer path).
@@ -103,7 +139,7 @@ func TestDoCopiesHandlerWriteBuffer(t *testing.T) {
 		_, _ = w.Write(buf)
 		copy(buf, "XXXXX") // simulate fmt reusing its pooled buffer after Write returns
 	})
-	req, err := http.NewRequest("GET", "http://service.internal/", nil)
+	req, err := http.NewRequest("GET", "http://service.internal/", http.NoBody)
 	require.NoError(t, err)
 	resp, err := Do(h, req)
 	require.NoError(t, err)
@@ -128,7 +164,7 @@ func TestDoClosesStreamingBodyOnContextCancel(t *testing.T) {
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	req, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", http.NoBody)
 	require.NoError(t, err)
 
 	errCh := make(chan error, 1)
@@ -163,7 +199,7 @@ func TestDoRecoversHandlerPanic(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		panic("boom")
 	})
-	req, err := http.NewRequest("GET", "http://service.internal/", nil)
+	req, err := http.NewRequest("GET", "http://service.internal/", http.NoBody)
 	require.NoError(t, err)
 	resp, err := Do(h, req)
 	require.NoError(t, err)
@@ -191,7 +227,7 @@ func TestDoThroughChiRouterPreservesStreamingHandoff(t *testing.T) {
 	mux := chi.NewRouter()
 	mux.Get("/", h)
 
-	req, err := http.NewRequest("GET", "http://service.internal/", nil)
+	req, err := http.NewRequest("GET", "http://service.internal/", http.NoBody)
 	require.NoError(t, err)
 	resp, err := Do(mux, req)
 	require.NoError(t, err)
@@ -243,7 +279,7 @@ func fetchPeerResponse(t *testing.T, topic string, payloadSize int, maxResponseB
 
 	require.NoError(t, victim.Connect(ctx, peer.AddrInfo{ID: peerHost.ID(), Addrs: peerHost.Addrs()}))
 
-	req, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", http.NoBody)
 	require.NoError(t, err)
 	req.Header.Set("REQRESP-PEER-ID", peerHost.ID().String())
 	req.Header.Set("REQRESP-TOPIC", topic)
@@ -263,6 +299,42 @@ func fetchPeerResponse(t *testing.T, topic string, payloadSize int, maxResponseB
 	return resp.StatusCode, resp.Header.Get("REQRESP-RESPONSE-CODE"), body, readErr
 }
 
+func fetchPeerEmptyCloseResponse(t *testing.T, topic string) (int, string, string, []byte, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	victim, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { victim.Close() })
+
+	peerHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { peerHost.Close() })
+
+	peerHost.SetStreamHandler(protocol.ID(topic), func(s network.Stream) {
+		defer s.Close()
+		_ = s.SetDeadline(time.Now().Add(10 * time.Second))
+		_, _ = io.Copy(io.Discard, s)
+	})
+
+	require.NoError(t, victim.Connect(ctx, peer.AddrInfo{ID: peerHost.ID(), Addrs: peerHost.Addrs()}))
+
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", http.NoBody)
+	require.NoError(t, err)
+	req.Header.Set("REQRESP-PEER-ID", peerHost.ID().String())
+	req.Header.Set("REQRESP-TOPIC", topic)
+
+	mux := chi.NewRouter()
+	mux.Get("/", NewRequestHandler(victim))
+	resp, err := Do(mux, req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	body, readErr := io.ReadAll(resp.Body)
+	return resp.StatusCode, resp.Header.Get("REQRESP-RESPONSE-CODE"), resp.Header.Get("REQRESP-TOPIC"), body, readErr
+}
+
 // A peer that floods its response stream must not be able to make the node buffer an unbounded
 // amount of memory: a compliant single-object response streams through in full, but a flood is
 // bounded at the cap and surfaces an explicit ErrResponseTooLarge rather than being silently
@@ -280,6 +352,23 @@ func TestResponseBodyRejectedOnFlood(t *testing.T) {
 		"a single-object flood must surface an explicit too-large error, not be truncated and accepted")
 	require.LessOrEqual(t, len(body), maxSingleObjectResponse,
 		"the caller must never read more than the single-object cap from a flooding peer")
+}
+
+func TestMultiChunkEmptyCloseSynthesizesSuccess(t *testing.T) {
+	status, code, topic, body, err := fetchPeerEmptyCloseResponse(t, communication.DataColumnSidecarsByRangeProtocolV1)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "0", code)
+	require.Equal(t, communication.DataColumnSidecarsByRangeProtocolV1, topic)
+	require.Empty(t, body)
+}
+
+func TestSingleChunkEmptyCloseReturnsBadRequest(t *testing.T) {
+	status, code, _, body, err := fetchPeerEmptyCloseResponse(t, communication.StatusProtocolV1)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, status)
+	require.Empty(t, code)
+	require.Contains(t, string(body), "Read Code: EOF")
 }
 
 // A multi-chunk request that reaches the handler without a caller budget (a caller that failed to

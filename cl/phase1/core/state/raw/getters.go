@@ -27,9 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-var (
-	ErrGetBlockRootAtSlotFuture = errors.New("GetBlockRootAtSlot: slot in the future")
-)
+var ErrGetBlockRootAtSlotFuture = errors.New("GetBlockRootAtSlot: slot in the future")
 
 // Just a bunch of simple getters.
 

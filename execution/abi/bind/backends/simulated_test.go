@@ -1075,7 +1075,7 @@ func TestSimulatedBackend_PendingAndCallContractAmsterdamDefaultGas(t *testing.T
 	const sstoresPerCall = 448
 
 	runtime := program.New()
-	for i := 0; i < sstoresPerCall; i++ {
+	for i := range sstoresPerCall {
 		runtime.Sstore(i, 1)
 	}
 	runtime.Op(vm.STOP)
@@ -1201,11 +1201,9 @@ func TestSimulatedBackend_CallContractRevert(t *testing.T) {
 				if rerr.Error() != "execution reverted: "+val.(string) {
 					t.Errorf("error was malformed: got %v want %v", rerr.Error(), val)
 				}
-			} else {
+			} else if err.Error() != "execution reverted" {
 				// revert(0x0,0x0)
-				if err.Error() != "execution reverted" {
-					t.Errorf("error was malformed: got %v want %v", err, "execution reverted")
-				}
+				t.Errorf("error was malformed: got %v want %v", err, "execution reverted")
 			}
 		}
 		input, err := parsed.Pack("noRevert")

@@ -45,15 +45,19 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		return err
 	}
 
+	maxPayloads := c.beaconConfig.MaxRequestPayloadsLimit()
+	if maxPayloads == 0 {
+		return errors.New("MAX_REQUEST_PAYLOADS is zero")
+	}
 	// Validate count
-	if req.Count > c.beaconConfig.MaxRequestBlocksDeneb {
-		return errors.New("request count exceeds MAX_REQUEST_BLOCKS_DENEB")
+	if req.Count > maxPayloads {
+		return errors.New("request count exceeds MAX_REQUEST_PAYLOADS")
 	}
 	if req.Count == 0 {
 		return nil
 	}
 
-	if cost := min(int(req.Count), int(c.beaconConfig.MaxRequestBlocksDeneb)) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := min(int(req.Count), int(maxPayloads)) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -128,7 +132,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		}
 
 		count++
-		if count >= c.beaconConfig.MaxRequestBlocksDeneb {
+		if count >= maxPayloads {
 			break
 		}
 	}
@@ -144,8 +148,12 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 		return nil
 	}
 
+	maxPayloads := c.beaconConfig.MaxRequestPayloadsLimit()
+	if maxPayloads == 0 {
+		return errors.New("MAX_REQUEST_PAYLOADS is zero")
+	}
 	// Decode request: List[Root, MAX_REQUEST_PAYLOADS]
-	var req solid.HashListSSZ = solid.NewHashList(int(c.beaconConfig.MaxRequestBlocksDeneb))
+	var req solid.HashListSSZ = solid.NewHashList(int(maxPayloads))
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
 		return err
 	}
@@ -153,8 +161,11 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 	if req.Length() == 0 {
 		return nil
 	}
+	if req.Length() > int(maxPayloads) {
+		return errors.New("request count exceeds MAX_REQUEST_PAYLOADS")
+	}
 
-	if cost := min(req.Length(), int(c.beaconConfig.MaxRequestBlocksDeneb)) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := min(req.Length(), int(maxPayloads)) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -175,7 +186,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 
 	count := 0
 	req.Range(func(_ int, blockRoot common.Hash, _ int) bool {
-		if count >= int(c.beaconConfig.MaxRequestBlocksDeneb) {
+		if count >= int(maxPayloads) {
 			return false
 		}
 

@@ -30,9 +30,6 @@ integration stage_exec --prune.to=N
 # To remove all blocks (together with bodies/txs) from db 
 integration stage_headers --reset --datadir=<my_datadir> --chain=<my_chain>
 
-# Exec blocks, but don't commit changes (loose them)
-integration stage_exec --no-commit
-
 # Run txn replay with domains [requires 6th stage to be done before run]
 integration read_domains --chain sepolia account <addr> <addr> ... # read values for given accounts
 ```

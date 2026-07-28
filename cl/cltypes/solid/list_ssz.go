@@ -17,6 +17,7 @@
 package solid
 
 import (
+	"bytes"
 	"encoding/json"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -92,7 +93,6 @@ func (l *ListSSZ[T]) Static() bool {
 func (l *ListSSZ[T]) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	if !l.static {
 		return ssz.EncodeDynamicList(buf, l.list)
-
 	}
 	dst = buf
 	for _, element := range l.list {
@@ -212,7 +212,7 @@ func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {
 		limit:           l.limit,
 		static:          l.static,
 		bytesPerElement: l.bytesPerElement,
-		root:            common.Hash(common.Copy(l.root[:])),
+		root:            common.Hash(bytes.Clone(l.root[:])),
 	}
 	copy(cpy.list, l.list)
 	return cpy

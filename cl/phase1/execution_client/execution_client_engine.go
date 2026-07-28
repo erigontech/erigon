@@ -17,6 +17,7 @@
 package execution_client
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -78,12 +79,13 @@ func NewExecutionClientEngineLocal(
 	txpool txpoolproto.TxpoolClient,
 	beaconCfg *clparams.BeaconChainConfig,
 ) (*ExecutionClientEngine, error) {
-	return &ExecutionClientEngine{
-		engine:    engine,
-		chainRW:   &chainRW,
-		txpool:    txpool,
-		beaconCfg: beaconCfg,
-	}, nil
+	cc := &ExecutionClientEngine{
+		engine:  engine,
+		chainRW: &chainRW,
+		txpool:  txpool,
+	}
+	cc.SetBeaconChainConfig(beaconCfg)
+	return cc, nil
 }
 
 // NewExecutionClientEngineRPC creates a remote engine client that communicates
@@ -106,6 +108,11 @@ func (cc *ExecutionClientEngine) isLocal() bool {
 
 func (cc *ExecutionClientEngine) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig) {
 	cc.beaconCfg = beaconCfg
+	if engineWithCfg, ok := cc.engine.(interface {
+		SetBeaconChainConfig(*clparams.BeaconChainConfig)
+	}); ok {
+		engineWithCfg.SetBeaconChainConfig(beaconCfg)
+	}
 }
 
 // Close releases resources held by the engine client (HTTP connections, goroutines).
@@ -117,7 +124,7 @@ func (cc *ExecutionClientEngine) Close() {
 
 // buildExecutionPayload converts a CL Eth1Block into an Engine API ExecutionPayload.
 func buildExecutionPayload(payload *cltypes.Eth1Block) *engine_types.ExecutionPayload {
-	reversedBaseFeePerGas := common.Copy(payload.BaseFeePerGas[:])
+	reversedBaseFeePerGas := bytes.Clone(payload.BaseFeePerGas[:])
 	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
 		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
 	}
@@ -610,4 +617,8 @@ func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes [
 		proofs[i] = [][]byte{bap.Proof}
 	}
 	return blobs, proofs, nil
+}
+
+func (cc *ExecutionClientEngine) GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+	return cc.engine.GetClientVersionV1(ctx, callerVersion)
 }

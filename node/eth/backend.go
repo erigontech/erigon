@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -63,8 +64,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
@@ -72,6 +73,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi"
@@ -183,7 +185,7 @@ type Ethereum struct {
 	syncUnwindOrder    stagedsync.UnwindOrder
 	syncPruneOrder     stagedsync.PruneOrder
 
-	downloaderClient downloader.Client
+	downloaderClient dbservices.DownloaderClient
 
 	notifications *shards.Notifications
 
@@ -196,8 +198,8 @@ type Ethereum struct {
 	blockBuilderNotifyNewTxns chan struct{}
 	components                *nodebuilder.Builder
 
-	blockSnapshots *freezeblocks.RoSnapshots
-	blockReader    services.FullBlockReader
+	blockSnapshots *blocksnapshots.RoSnapshots
+	blockReader    dbservices.FullBlockReader
 	blockWriter    *blockio.BlockWriter
 	kvRPC          *remotedbserver.KvServer
 	logger         log.Logger
@@ -273,6 +275,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// Assemble the Ethereum object
+	stack.Config().ExecWorkerCount = config.Sync.ExecWorkerCount
 	rawChainDB, err := node.OpenDatabase(ctx, stack.Config(), dbcfg.ChainDB, "", false, logger)
 	if err != nil {
 		return nil, err
@@ -288,7 +291,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return err
 		}
 		if !notChanged {
-			logger.Warn("--persist.receipt changed since the last run, enabling historical receipts cache. full resync will be required to use the new configuration. if you do not need this feature, ignore this warning.", "inDB", config.PersistReceiptsCacheV2, "inConfig", inConfig)
+			logger.Warn("--prune.include-receipts differs from the value stored in the datadir; using the stored value (changing it requires a fresh datadir)", "inDB", config.PersistReceiptsCacheV2, "inConfig", inConfig)
 		}
 		if config.PersistReceiptsCacheV2 {
 			statecfg.EnableHistoricalRCache()
@@ -303,8 +306,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if config.KeepExecutionProofs {
 			statecfg.EnableHistoricalCommitment()
 		}
-		if config.ExperimentalConcurrentCommitment {
-			statecfg.ExperimentalConcurrentCommitment = true
+		if config.ExperimentalParallelCommitment {
+			statecfg.ExperimentalParallelCommitment = true
+		}
+		if config.ExperimentalStreamingCommitment {
+			statecfg.ExperimentalStreamingCommitment = true
 		}
 
 		if err = stages.UpdateMetrics(tx); err != nil {
@@ -340,6 +346,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		stopNode: func() error {
 			return stack.Close()
 		},
+	}
+
+	// Seed erigondb.toml with the first-start commitment regime (--commitment.plainValues)
+	// before genesis-root computation. On a legacy datadir GenesisToBlock resolves erigondb
+	// settings against the real dir and would create erigondb.toml with the default regime,
+	// which the later flag-aware resolve in SetUpBlockReader then reads as pre-existing and
+	// drops the flag. Seeding here first makes --commitment.plainValues stick.
+	if _, err := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, config.Snapshot.NoDownloader, config.CommitmentRefsFirstStart()); err != nil {
+		return nil, err
 	}
 
 	var chainConfig *chain.Config
@@ -659,6 +674,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.sentryProvider.ExecutionP2PMessageListener,
 		backend.sentryProvider.ExecutionP2PMessageSender,
 		backend.sentryProvider.ExecutionP2PPeerPenalizer,
+		backend.sentryProvider.ExecutionP2PPeerTracker,
 	)
 	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher))
 
@@ -709,7 +725,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			ctx,
 			config.TxPool,
 			backend.chainDB,
-			kvcache.NewSimple(),
+			kvcache.NewLatestBatchCache(),
 			sentries,
 			backend.stateDiffClient,
 			blockBuilderNotifyNewTxns,
@@ -747,59 +763,27 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.rpcDaemonStateCache = rpcDaemonStateCache
 	backend.rpcFilters = rpcFilters
 
-	baseApi := jsonrpc.NewBaseApi(
-		backend.rpcFilters,
-		backend.rpcDaemonStateCache,
-		blockReader,
-		httpRpcCfg.WithDatadir,
-		httpRpcCfg.EvmCallTimeout,
-		backend.engine,
-		httpRpcCfg.Dirs,
-		backend.polygonBridge,
-		httpRpcCfg.BlockRangeLimit,
-		httpRpcCfg.GetLogsMaxResults,
-	)
-	ethApiConfig := &jsonrpc.EthApiConfig{
-		GasCap:                      httpRpcCfg.Gascap,
-		FeeCap:                      httpRpcCfg.Feecap,
-		ReturnDataLimit:             httpRpcCfg.ReturnDataLimit,
-		AllowUnprotectedTxs:         httpRpcCfg.AllowUnprotectedTxs,
-		MaxGetProofRewindBlockCount: httpRpcCfg.MaxGetProofRewindBlockCount,
-		SubscribeLogsChannelSize:    httpRpcCfg.WebsocketSubscribeLogsChannelSize,
-		RpcTxSyncDefaultTimeout:     httpRpcCfg.RpcTxSyncDefaultTimeout,
-		RpcTxSyncMaxTimeout:         httpRpcCfg.RpcTxSyncMaxTimeout,
-	}
-	ethApi := jsonrpc.NewEthAPI(
-		baseApi,
-		backend.chainDB,
-		backend.ethRpcClient,
-		backend.txPoolRpcClient,
-		backend.miningRpcClient,
-		ethApiConfig,
-		logger,
-	)
-
-	erigonApi := jsonrpc.NewErigonAPI(baseApi, backend.chainDB, backend.ethRpcClient)
-
-	otsApi := jsonrpc.NewOtterscanAPI(baseApi, backend.chainDB, stack.Config().Http.OtsMaxPageSize)
-
-	mcpServer := mcp.NewErigonMCPServer(ethApi, erigonApi, otsApi, config.Dirs.Log)
-
-	if config.MCPAddress != "" {
-		go func() {
-			logger.Info("serve MCP on", "addr", config.MCPAddress)
-			mcpErr := mcpServer.ServeSSE(config.MCPAddress)
-			if mcpErr != nil {
-				logger.Error("mcpServer.ServeSSE", "err", err)
-				return
-			}
-		}()
-	}
-
 	if config.Shutter.Enabled {
 		if config.TxPool.Disable {
 			panic("can't enable shutter pool when devp2p txpool is disabled")
 		}
+		baseApi := jsonrpc.NewBaseApi(
+			backend.rpcFilters,
+			backend.rpcDaemonStateCache,
+			blockReader,
+			backend.engine,
+			backend.polygonBridge,
+			jsonrpc.NewBaseApiConfig(&httpRpcCfg),
+		)
+		ethApi := jsonrpc.NewEthAPI(
+			baseApi,
+			backend.chainDB,
+			backend.ethRpcClient,
+			backend.txPoolRpcClient,
+			backend.miningRpcClient,
+			jsonrpc.NewEthApiConfig(&httpRpcCfg),
+			logger,
+		)
 		contractBackend := contracts.NewDirectBackend(ethApi)
 		baseTxnProvider := backend.txPool
 		currentBlockNumReader := func(ctx context.Context) (*uint64, error) {
@@ -918,9 +902,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// snapshots not in that set could cause issues. That's an unsolved issue and probably requires
 	// always resetting before resuming/starting a sync.
 	var afterSnapshotDownload func(ctx context.Context) error
-	if backend.components.Downloader != nil && backend.components.Downloader.Downloader != nil {
+	if dp := backend.components.Downloader; dp != nil && dp.Downloader != nil {
 		afterSnapshotDownload = func(ctx context.Context) (err error) {
-			incomplete, err := backend.components.Downloader.Downloader.AddTorrentsFromDisk(ctx)
+			incomplete, err := dp.AddTorrentsFromDisk(ctx)
 			if err != nil {
 				err = fmt.Errorf("adding torrents from disk: %w", err)
 				return
@@ -950,13 +934,21 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
 
-	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentryProvider.Client.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher)
+	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentryProvider.Client.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher, blockReader)
 
 	// for polygon, we only need to download snapshots on start so that all driver components are correctly initialised before any block execution begins
 	onlySnapDownloadOnStart := chainConfig.Bor != nil
 	accum := &execmodule.Accumulation{
 		Accumulator:    backend.notifications.Accumulator,
 		RecentReceipts: backend.notifications.RecentReceipts,
+	}
+	// Test harnesses (e.g. EngineApiTester) set StateCacheBudget small so each
+	// per-fixture ExecModule doesn't allocate the full production cache; 0 keeps
+	// the production default.
+	var domainStateCache *cache.StateCache
+	if config.StateCacheBudget > 0 {
+		b := config.StateCacheBudget
+		domainStateCache = cache.NewStateCache(b, b, b, b)
 	}
 	backend.execModule = execmodule.NewExecModule(
 		ctx,
@@ -969,6 +961,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		hook,
 		accum,
 		execmoduleCache,
+		domainStateCache,
 		logger,
 		backend.engine,
 		config.Sync,
@@ -1107,11 +1100,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	if !dbg.NoBackgroundMaintenance() {
-		go func() {
-			if err := temporalDb.Debug().MergeLoop(ctx); err != nil {
-				logger.Error("snapashot merge loop error", "err", err)
+		// Track the MergeLoop goroutine in bgComponentsEg so that Stop() →
+		// bgComponentsEg.Wait() waits for it to exit before chainDB.Close().
+		// Without this, there is a data race between the goroutine reading
+		// Aggregator fields (in wg.TryAdd) and Close() writing them after
+		// wg.Wait() returns.
+		backend.bgComponentsEg.Go(func() error {
+			if err := temporalDb.Debug().MergeLoop(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error("snapshot merge loop error", "err", err)
 			}
-		}()
+			return nil
+		})
 	}
 
 	return backend, nil
@@ -1153,7 +1152,45 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		entry := engineapi.NewTestingRPCEntry(s.engineBackendRPC, s.logger, s.chainDB)
 		testingEntry = &entry
 	}
-	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService, testingEntry)
+	mcpNamespaces := []string{"eth", "erigon", "ots", "txpool", "net", "admin", "debug", "trace"}
+	apiCfg := httpRpcCfg
+	if config.MCPAddress != "" {
+		apiCfg.API = slices.Clone(httpRpcCfg.API)
+		for _, ns := range mcpNamespaces {
+			if !slices.Contains(apiCfg.API, ns) {
+				apiCfg.API = append(apiCfg.API, ns)
+			}
+		}
+	}
+	// One APIList call even when MCP widens the namespace set, so the HTTP
+	// RPC server and MCP share the BaseApi block/receipt caches instead of
+	// each holding their own.
+	allAPIs := jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &apiCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService, testingEntry)
+	s.apiList = apisForNamespaces(allAPIs, append(slices.Clone(httpRpcCfg.API), "graphql"))
+
+	if config.MCPAddress != "" {
+		mcpSrv := rpc.NewServer(httpRpcCfg.RpcBatchConcurrency, httpRpcCfg.TraceRequests, httpRpcCfg.DebugSingleRequest, httpRpcCfg.RpcStreamingDisable, s.logger, httpRpcCfg.RPCSlowLogThreshold)
+		for _, api := range apisForNamespaces(allAPIs, mcpNamespaces) {
+			if err := mcpSrv.RegisterName(api.Namespace, api.Service); err != nil {
+				return err
+			}
+		}
+		// NonBlockingAcquire on the in-process connection so BeginRo fails
+		// fast (ErrServerOverloaded) instead of blocking MCP handlers when
+		// all DB read slots are held; node/rpcstack.go does the same for HTTP.
+		mcpClient := rpc.DialInProcWithContext(kv.WithNonBlockingAcquire(ctx), mcpSrv, s.logger)
+		s.mcpRPC = mcp.NewErigonMCPServer(mcpClient, config.Dirs.Log, true)
+		s.bgComponentsEg.Go(func() error {
+			s.logger.Info("serve MCP on", "addr", config.MCPAddress, "endpoints", "/mcp (streamable HTTP), /sse + /message (SSE)")
+			mcpErr := s.mcpRPC.ListenAndServe(ctx, config.MCPAddress)
+			mcpClient.Close()
+			mcpSrv.Stop()
+			if mcpErr != nil && !errors.Is(mcpErr, context.Canceled) {
+				s.logger.Error("mcpServer.ListenAndServe", "err", mcpErr)
+			}
+			return mcpErr
+		})
+	}
 
 	s.bgComponentsEg.Go(func() error {
 		err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger)
@@ -1264,9 +1301,9 @@ func (s *Ethereum) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
 	return nodesInfo, nil
 }
 
-func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, kv.TemporalRwDB, error) {
+func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *blocksnapshots.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, kv.TemporalRwDB, error) {
 	snConfig.Snapshot.ChainName = chainConfig.ChainName
-	allSnapshots := freezeblocks.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
+	allSnapshots := blocksnapshots.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
 
 	var allBorSnapshots *heimdall.RoSnapshots
 	var bridgeStore bridge.Store
@@ -1285,7 +1322,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 
-	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, snConfig.Snapshot.NoDownloader)
+	erigonDBSettings, err := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, snConfig.Snapshot.NoDownloader, snConfig.CommitmentRefsFirstStart())
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
@@ -1320,7 +1357,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
 	}
 
-	temporalDb, err := temporal.New(db, agg)
+	temporalDb, err := temporal.New(db, agg, allSnapshots)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
@@ -1409,7 +1446,7 @@ func (s *Ethereum) Start() error {
 	}
 
 	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.notifications.Events, s.notifications.StateChangesConsumer, s.logger)
-	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, stageLoopDispatcher, s.sentryProvider.Client.SetStatus, s.sentryProvider.StatusDataProvider, s.sentryProvider.ExecutionP2PPublisher)
+	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, stageLoopDispatcher, s.sentryProvider.Client.SetStatus, s.sentryProvider.StatusDataProvider, s.sentryProvider.ExecutionP2PPublisher, s.blockReader)
 
 	currentTDProvider := func() *uint256.Int {
 		currentTD, err := readCurrentTotalDifficulty(s.sentryCtx, s.chainDB, s.blockReader)
@@ -1542,6 +1579,11 @@ func (s *Ethereum) Stop() error {
 		}
 	}
 
+	// Drain the in-flight block retire before chainDB.Close.
+	if s.components != nil && s.components.Storage != nil {
+		s.components.Storage.Close()
+	}
+
 	s.chainDB.Close()
 
 	if s.config.Downloader != nil {
@@ -1579,7 +1621,7 @@ func (s *Ethereum) SentryControlServer() *sentry_multi_client.MultiClient {
 	return s.sentryProvider.Client
 }
 
-func (s *Ethereum) BlockIO() (services.FullBlockReader, *blockio.BlockWriter) {
+func (s *Ethereum) BlockIO() (dbservices.FullBlockReader, *blockio.BlockWriter) {
 	return s.blockReader, s.blockWriter
 }
 
@@ -1616,7 +1658,7 @@ func RemoveContents(dirname string) error {
 	return nil
 }
 
-func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader) (*uint256.Int, error) {
+func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader dbservices.FullBlockReader) (*uint256.Int, error) {
 	var currentTD *uint256.Int
 	err := db.View(ctx, func(tx kv.Tx) error {
 		h, err := blockReader.CurrentBlock(tx)
@@ -1656,4 +1698,14 @@ func setBorDefaultTxPoolPriceLimit(config *txpoolcfg.Config, chainConfig *chain.
 		config.MinFeeCap = txpoolcfg.BorDefaultTxPoolPriceLimit
 	}
 	_ = config.MinFeeCap
+}
+
+func apisForNamespaces(apis []rpc.API, namespaces []string) []rpc.API {
+	out := make([]rpc.API, 0, len(apis))
+	for _, api := range apis {
+		if slices.Contains(namespaces, api.Namespace) {
+			out = append(out, api)
+		}
+	}
+	return out
 }

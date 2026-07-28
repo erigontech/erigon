@@ -7,6 +7,9 @@ participants:
     cl_log_level: "debug"
     use_separate_vc: true
     vc_type: lighthouse
+    # Keep lighthouse v7.0.1 here: v8 submits attestations only as Electra
+    # SingleAttestation, which caplin's pre-Electra pool endpoint rejects on
+    # this Deneb network (the pinned ethereum-package can't do Electra genesis).
     vc_image: sigp/lighthouse:v7.0.1
 network_params:
   preset: "minimal"
@@ -16,7 +19,7 @@ additional_services:
 assertoor_params:
   run_stability_check: true
   run_block_proposal_check: true
-  image: ethpandaops/assertoor:v0.0.17
+  image: ethpandaops/assertoor:v0.1.2
   tests:
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/synchronized-check.yaml
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/block-proposal-check.yaml

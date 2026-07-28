@@ -57,7 +57,7 @@ func FullNode3() {
 func FullNode4() {
 	f := &FullNode{}
 	h := common.Hash{}
-	for i := 0; i < 17; i++ {
+	for i := range 17 {
 		f.Children[i] = HashNode{hash: h[:]}
 	}
 	b, err := rlp.EncodeToBytes(f)

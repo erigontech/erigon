@@ -326,11 +326,11 @@ func TestReorgShortBlocks(t *testing.T) {
 func testReorgShort(t *testing.T) {
 	t.Parallel()
 	long := make([]int64, 96)
-	for i := 0; i < len(long); i++ {
+	for i := range long {
 		long[i] = 60
 	}
 	short := make([]int64, len(long)-1)
-	for i := 0; i < len(short); i++ {
+	for i := range short {
 		short[i] = -9
 	}
 	testReorg(t, long, short, 12746192)
@@ -1123,24 +1123,28 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
+	defer st.Release(false)
 	require.NoError(t, err)
 	exist, err := st.Exist(accounts.InternAddress(theAddr))
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should've been removed")
 
 	st = state.New(m.NewHistoryStateReader(1, tx))
+	defer st.Release(false)
 	require.NoError(t, err)
 	exist, err = st.Exist(accounts.InternAddress(theAddr))
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #0")
 
 	st = state.New(m.NewHistoryStateReader(2, tx))
+	defer st.Release(false)
 	require.NoError(t, err)
 	exist, err = st.Exist(accounts.InternAddress(theAddr))
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #1")
 
 	st = state.New(m.NewHistoryStateReader(3, tx))
+	defer st.Release(false)
 	require.NoError(t, err)
 	exist, err = st.Exist(accounts.InternAddress(theAddr))
 	require.NoError(t, err)
@@ -1168,7 +1172,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 
 	// Generate a bunch of fork blocks, each side forking from the canonical chain
 	forks := make([]*blockgen.ChainPack, chain.Length())
-	for i := 0; i < len(forks); i++ {
+	for i := range forks {
 		fork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, i+1, func(j int, b *blockgen.BlockGen) {
 			if j == i {
 				b.SetCoinbase(common.Address{2})
@@ -1495,7 +1499,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := accounts.InternCodeHash(crypto.HashData(initCode))
+	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
 	aa := accounts.InternAddress(types.CreateAddress2(bb, [32]byte{}, initHash))
 	t.Logf("Destination address: %x\n", aa)
 
@@ -1542,6 +1546,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	defer tx.Rollback()
 
 	statedb := state.New(m.NewHistoryStateReader(2, tx))
+	defer statedb.Release(false)
 
 	// If all is correct, then slot 1 and 2 are zero
 	key1 := accounts.InternKey(common.HexToHash("01"))
@@ -1666,6 +1671,7 @@ func TestCVE2020_26265(t *testing.T) {
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		reader := m.NewHistoryStateReader(2, tx)
 		statedb := state.New(reader)
+		defer statedb.Release(false)
 
 		got, err := statedb.GetBalance(aa)
 		if err != nil {
@@ -1739,6 +1745,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		statedb := state.New(m.NewHistoryStateReader(2, tx))
+		defer statedb.Release(false)
 
 		// If all is correct, then both slots are zero
 		key1 := accounts.InternKey(common.HexToHash("01"))
@@ -1827,7 +1834,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := accounts.InternCodeHash(crypto.HashData(initCode))
+	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
 	aa := accounts.InternAddress(types.CreateAddress2(bb, [32]byte{}, initHash))
 	t.Logf("Destination address: %x\n", aa)
 	gspec := &types.Genesis{
@@ -1924,6 +1931,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 
 			statedb := state.New(m.NewStateReader(tx))
+			defer statedb.Release(false)
 			// If all is correct, then slot 1 and 2 are zero
 			key1 := accounts.InternKey(common.HexToHash("01"))
 			got, err := statedb.GetState(aa, key1)
@@ -2032,7 +2040,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := accounts.InternCodeHash(crypto.HashData(initCode))
+	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
 	aa := accounts.InternAddress(types.CreateAddress2(bb, [32]byte{}, initHash))
 	t.Logf("Destination address: %x\n", aa)
 
@@ -2068,6 +2076,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 
 		// Import the canonical chain
 		statedb := state.New(m.NewHistoryStateReader(2, tx))
+		defer statedb.Release(false)
 		got, err := statedb.GetBalance(aa)
 		if err != nil {
 			return err
@@ -2082,6 +2091,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 				t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
 			}
 			statedb = state.New(m.NewHistoryStateReader(1, tx))
+			defer statedb.Release(false)
 			got, err := statedb.GetBalance(aa)
 			if err != nil {
 				return err
@@ -2307,6 +2317,7 @@ func TestEIP1559Transition(t *testing.T) {
 
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		statedb := state.New(m.NewHistoryStateReader(block.NumberU64()+1, tx))
+		defer statedb.Release(false)
 
 		// 3: Ensure that miner received only the tx's tip.
 		actual, err := statedb.GetBalance(accounts.InternAddress(block.Coinbase()))
@@ -2355,6 +2366,7 @@ func TestEIP1559Transition(t *testing.T) {
 	block = chain.Blocks[0]
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		statedb := state.New(m.NewHistoryStateReader(block.NumberU64()+1, tx))
+		defer statedb.Release(false)
 		baseFee := block.BaseFee()
 		tip := block.Transactions()[0].GetEffectiveGasTip(baseFee)
 		effectiveTip := tip.Uint64()

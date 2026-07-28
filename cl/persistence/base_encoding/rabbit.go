@@ -19,7 +19,9 @@ package base_encoding
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
+	"math"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -30,21 +32,34 @@ func WriteRabbits(in []uint64, w io.Writer) error {
 	defer putComp(compressor)
 	compressor.Reset(w)
 
+	var buf [8]byte
+	writeNum := func(v uint64) error {
+		binary.LittleEndian.PutUint64(buf[:], v)
+		n, err := compressor.Write(buf[:])
+		if err != nil {
+			return err
+		}
+		if n != len(buf) {
+			return io.ErrShortWrite
+		}
+		return nil
+	}
+
 	expectedNum := uint64(0)
 	count := 0
 	// write length
-	if err := binary.Write(compressor, binary.LittleEndian, uint64(len(in))); err != nil {
+	if err := writeNum(uint64(len(in))); err != nil {
 		return err
 	}
 	for _, element := range in {
 		if expectedNum != element {
 			// [1,2,5,6]
 			// write contiguous sequence
-			if err := binary.Write(compressor, binary.LittleEndian, uint64(count)); err != nil {
+			if err := writeNum(uint64(count)); err != nil {
 				return err
 			}
 			// write non-contiguous element
-			if err := binary.Write(compressor, binary.LittleEndian, element-expectedNum); err != nil {
+			if err := writeNum(element - expectedNum); err != nil {
 				return err
 			}
 			count = 0
@@ -54,7 +69,7 @@ func WriteRabbits(in []uint64, w io.Writer) error {
 
 	}
 	// write last contiguous sequence
-	if err := binary.Write(compressor, binary.LittleEndian, uint64(count)); err != nil {
+	if err := writeNum(uint64(count)); err != nil {
 		return err
 	}
 	return compressor.Close()
@@ -68,35 +83,69 @@ func ReadRabbits(out []uint64, r io.Reader) ([]uint64, error) {
 	}
 	defer decompressor.Close()
 
-	var length uint64
-	if err := binary.Read(decompressor, binary.LittleEndian, &length); err != nil {
+	var buf [8]byte
+	readNum := func() (uint64, error) {
+		if _, err := io.ReadFull(decompressor, buf[:]); err != nil {
+			return 0, err
+		}
+		return binary.LittleEndian.Uint64(buf[:]), nil
+	}
+
+	length, err := readNum()
+	if err != nil {
 		return nil, err
 	}
 
-	if cap(out) < int(length) {
-		out = make([]uint64, 0, length)
+	if length > uint64(math.MaxInt) {
+		return nil, fmt.Errorf("rabbit: encoded length %d overflows int", length)
+	}
+	if uint64(cap(out)) < length {
+		out = make([]uint64, 0, int(length))
 	}
 	out = out[:0]
-	var count uint64
 	var current uint64
 	active := true
-	for err != io.EOF {
-		err = binary.Read(decompressor, binary.LittleEndian, &count)
+	for {
+		count, err := readNum()
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
 			return nil, err
 		}
+		if current+count < current {
+			return nil, fmt.Errorf("rabbit: index overflow at current=%d count=%d", current, count)
+		}
 		if active {
+			if count > length-uint64(len(out)) {
+				return nil, fmt.Errorf("rabbit: run length %d exceeds remaining %d expected elements", count, length-uint64(len(out)))
+			}
 			for i := current; i < current+count; i++ {
 				out = append(out, i)
 			}
-			current += count
-		} else {
-			current += count
+			if uint64(len(out)) == length {
+				// WriteRabbits stops right after the run that completes the output,
+				// so anything past this point is trailing data.
+				switch _, err := readNum(); {
+				case errors.Is(err, io.EOF):
+					return out, nil
+				case err != nil:
+					return nil, err
+				default:
+					return nil, errors.New("rabbit: trailing data after the final contiguous run")
+				}
+			}
 		}
+		current += count
 		active = !active
+	}
+	if uint64(len(out)) != length {
+		return nil, fmt.Errorf("rabbit: decoded %d elements, header declared %d", len(out), length)
+	}
+	// WriteRabbits always emits a contiguous-run count last, so a stream that stops
+	// while one is still expected is truncated.
+	if active {
+		return nil, errors.New("rabbit: stream ends without a trailing contiguous-run count")
 	}
 	return out, nil
 }

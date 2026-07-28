@@ -90,11 +90,49 @@ func LoadTrieTraceIntoMockState(t testing.TB, path string) (*MockState, [][]byte
 	return ms, plainKeys, updates, trieState
 }
 
+// recordTrace applies the updates to ms, processes them through the trie with a
+// RecordingContext attached, and returns the built trace and the resulting root.
+func recordTrace(t *testing.T, ms *MockState, trie *HexPatriciaHashed, plainKeys [][]byte, updates []Update) (*TrieTrace, []byte) {
+	t.Helper()
+	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+
+	recorder := NewRecordingContext(ms)
+	trie.ResetContext(recorder)
+
+	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer upds.Close()
+	root, err := trie.Process(context.Background(), upds, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+
+	trace, err := BuildTrieTrace(recorder, nil, nil)
+	require.NoError(t, err)
+	return trace, root
+}
+
+// saveTrace writes the trace to a temp file and returns its path.
+func saveTrace(t *testing.T, trace *TrieTrace) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "trace.toml")
+	require.NoError(t, trace.Save(path))
+	return path
+}
+
+// replayTraceFromFile loads a saved trace into a fresh MockState, re-processes its updates
+// through a fresh trie and returns the resulting root.
+func replayTraceFromFile(t *testing.T, path string) []byte {
+	t.Helper()
+	state, replayKeys, replayUpdates, _ := LoadTrieTraceIntoMockState(t, path)
+	trie := NewHexPatriciaHashed(length.Addr, state, DefaultTrieConfig())
+	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, replayKeys, replayUpdates)
+	defer upds.Close()
+	root, err := trie.Process(context.Background(), upds, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	return root
+}
+
 func TestTrieTraceRoundTrip(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
 
-	// Build some account and storage updates
 	plainKeys, updates := NewUpdateBuilder().
 		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
 		Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
@@ -104,38 +142,11 @@ func TestTrieTraceRoundTrip(t *testing.T) {
 			"24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
 		Build()
 
-	// Phase 1: Process with RecordingContext and capture trace
 	state1 := NewMockState(t)
-	err := state1.applyPlainUpdates(plainKeys, updates)
-	require.NoError(t, err)
-
 	trie1 := NewHexPatriciaHashed(length.Addr, state1, DefaultTrieConfig())
-	recorder := NewRecordingContext(state1)
-	trie1.ResetContext(recorder)
+	trace, rootHash1 := recordTrace(t, state1, trie1, plainKeys, updates)
 
-	upds1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-	rootHash1, err := trie1.Process(ctx, upds1, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	upds1.Close()
-
-	// Build trace and save to temp file
-	trace, err := BuildTrieTrace(recorder, nil, nil)
-	require.NoError(t, err)
-
-	tracePath := filepath.Join(t.TempDir(), "trace.toml")
-	err = trace.Save(tracePath)
-	require.NoError(t, err)
-
-	// Phase 2: Load trace into fresh MockState and replay
-	state2, replayKeys, replayUpdates, _ := LoadTrieTraceIntoMockState(t, tracePath)
-
-	trie2 := NewHexPatriciaHashed(length.Addr, state2, DefaultTrieConfig())
-
-	upds2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, replayKeys, replayUpdates)
-	rootHash2, err := trie2.Process(ctx, upds2, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	upds2.Close()
-
+	rootHash2 := replayTraceFromFile(t, saveTrace(t, trace))
 	require.Equal(t, rootHash1, rootHash2, "root hash from replay should match original")
 }
 
@@ -166,53 +177,26 @@ func TestTrieTraceEmptyUpdates(t *testing.T) {
 
 func TestTrieTraceAccountOnlyRoundTrip(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
 
-	// Build account-only updates (no storage)
 	plainKeys, updates := NewUpdateBuilder().
 		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
 		Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
 		Build()
 
 	state1 := NewMockState(t)
-	err := state1.applyPlainUpdates(plainKeys, updates)
-	require.NoError(t, err)
-
 	trie1 := NewHexPatriciaHashed(length.Addr, state1, DefaultTrieConfig())
-	recorder := NewRecordingContext(state1)
-	trie1.ResetContext(recorder)
-
-	upds1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-	rootHash1, err := trie1.Process(ctx, upds1, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	upds1.Close()
-
-	trace, err := BuildTrieTrace(recorder, nil, nil)
-	require.NoError(t, err)
+	trace, rootHash1 := recordTrace(t, state1, trie1, plainKeys, updates)
 	require.Empty(t, trace.Storages, "account-only trace should have no storages")
 	require.NotEmpty(t, trace.Accounts, "account-only trace should have accounts")
 
-	tracePath := filepath.Join(t.TempDir(), "account_only_trace.toml")
-	err = trace.Save(tracePath)
-	require.NoError(t, err)
-
-	// Replay
-	state2, replayKeys, replayUpdates, _ := LoadTrieTraceIntoMockState(t, tracePath)
-	trie2 := NewHexPatriciaHashed(length.Addr, state2, DefaultTrieConfig())
-	upds2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, replayKeys, replayUpdates)
-	rootHash2, err := trie2.Process(ctx, upds2, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	upds2.Close()
-
+	rootHash2 := replayTraceFromFile(t, saveTrace(t, trace))
 	require.Equal(t, rootHash1, rootHash2, "account-only replay root hash should match")
 }
 
 func TestTrieTraceStorageOnlyRoundTrip(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
 
-	// Create an account first, then do storage-only updates.
-	// We need an existing account for storage to make sense in the trie.
+	// The account must exist for its storage to make sense in the trie.
 	plainKeys, updates := NewUpdateBuilder().
 		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1).
 		Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e",
@@ -222,34 +206,11 @@ func TestTrieTraceStorageOnlyRoundTrip(t *testing.T) {
 		Build()
 
 	state1 := NewMockState(t)
-	err := state1.applyPlainUpdates(plainKeys, updates)
-	require.NoError(t, err)
-
 	trie1 := NewHexPatriciaHashed(length.Addr, state1, DefaultTrieConfig())
-	recorder := NewRecordingContext(state1)
-	trie1.ResetContext(recorder)
-
-	upds1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-	rootHash1, err := trie1.Process(ctx, upds1, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	upds1.Close()
-
-	trace, err := BuildTrieTrace(recorder, nil, nil)
-	require.NoError(t, err)
+	trace, rootHash1 := recordTrace(t, state1, trie1, plainKeys, updates)
 	require.NotEmpty(t, trace.Storages, "storage trace should have storages")
 
-	tracePath := filepath.Join(t.TempDir(), "storage_trace.toml")
-	err = trace.Save(tracePath)
-	require.NoError(t, err)
-
-	// Replay
-	state2, replayKeys, replayUpdates, _ := LoadTrieTraceIntoMockState(t, tracePath)
-	trie2 := NewHexPatriciaHashed(length.Addr, state2, DefaultTrieConfig())
-	upds2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, replayKeys, replayUpdates)
-	rootHash2, err := trie2.Process(ctx, upds2, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	upds2.Close()
-
+	rootHash2 := replayTraceFromFile(t, saveTrace(t, trace))
 	require.Equal(t, rootHash1, rootHash2, "storage replay root hash should match")
 }
 
@@ -676,14 +637,8 @@ func TestTrieTraceNonEmptyStateRoundTrip(t *testing.T) {
 		Build()
 
 	state1 := NewMockState(t)
-	err := state1.applyPlainUpdates(plainKeys1, updates1)
-	require.NoError(t, err)
-
 	trie1 := NewHexPatriciaHashed(length.Addr, state1, DefaultTrieConfig())
-	upds1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys1, updates1)
-	_, err = trie1.Process(ctx, upds1, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	upds1.Close()
+	processBatch(t, state1, trie1, plainKeys1, updates1)
 
 	// Snapshot the non-empty trie state
 	trieState, err := trie1.EncodeCurrentState(nil)
@@ -735,7 +690,6 @@ func TestTrieTraceNonEmptyStateRoundTrip(t *testing.T) {
 
 func TestTrieTraceDeleteRoundTrip(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
 
 	// Phase 1: Create accounts
 	plainKeys1, updates1 := NewUpdateBuilder().
@@ -745,36 +699,15 @@ func TestTrieTraceDeleteRoundTrip(t *testing.T) {
 		Build()
 
 	state1 := NewMockState(t)
-	err := state1.applyPlainUpdates(plainKeys1, updates1)
-	require.NoError(t, err)
-
 	trie1 := NewHexPatriciaHashed(length.Addr, state1, DefaultTrieConfig())
-	trie1.ResetContext(state1)
-
-	upds1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys1, updates1)
-	_, err = trie1.Process(ctx, upds1, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	upds1.Close()
+	processBatch(t, state1, trie1, plainKeys1, updates1)
 
 	// Phase 2: Delete one account and record the trace
 	plainKeys2, updates2 := NewUpdateBuilder().
 		Delete("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40").
 		Build()
 
-	err = state1.applyPlainUpdates(plainKeys2, updates2)
-	require.NoError(t, err)
-
-	recorder := NewRecordingContext(state1)
-	trie1.ResetContext(recorder)
-
-	upds2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys2, updates2)
-	rootHash1, err := trie1.Process(ctx, upds2, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	upds2.Close()
-
-	// Build trace — the delete should appear in Updates
-	trace, err := BuildTrieTrace(recorder, nil, nil)
-	require.NoError(t, err)
+	trace, rootHash1 := recordTrace(t, state1, trie1, plainKeys2, updates2)
 
 	// The deleted account should be in Updates but NOT in the Accounts state map
 	require.NotEmpty(t, trace.Updates, "trace must include delete update")
@@ -799,18 +732,6 @@ func TestTrieTraceDeleteRoundTrip(t *testing.T) {
 	require.False(t, inAccountsMap, "deleted key must not appear in trace Accounts map")
 
 	// Phase 3: Save and replay
-	tracePath := filepath.Join(t.TempDir(), "delete_trace.toml")
-	err = trace.Save(tracePath)
-	require.NoError(t, err)
-
-	state2, replayKeys, replayUpdates, _ := LoadTrieTraceIntoMockState(t, tracePath)
-
-	trie2 := NewHexPatriciaHashed(length.Addr, state2, DefaultTrieConfig())
-
-	upds3 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, replayKeys, replayUpdates)
-	rootHash2, err := trie2.Process(ctx, upds3, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	upds3.Close()
-
+	rootHash2 := replayTraceFromFile(t, saveTrace(t, trace))
 	require.Equal(t, rootHash1, rootHash2, "replay with delete should match original root hash")
 }

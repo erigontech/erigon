@@ -1,12 +1,16 @@
 package ethapi
 
 import (
+	"bytes"
+	"encoding/json"
+	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -43,6 +47,21 @@ func TestNewRPCTransaction_SignedLegacy(t *testing.T) {
 	require.NotNil(t, result.V)
 	require.NotNil(t, result.R)
 	require.NotNil(t, result.S)
+}
+
+func TestNewRPCTransaction_SignedLegacyEIP155(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	from := crypto.PubkeyToAddress(key.PublicKey)
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	chainID := uint256.NewInt(1)
+	tx, err := types.SignTx(types.NewTransaction(1, to, uint256.NewInt(0), 21000, uint256.NewInt(1), nil), *types.LatestSignerForChainID(chainID), key)
+	require.NoError(t, err)
+	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
+	// from is recovered with the chain id derived from the EIP-155 v value.
+	require.Equal(t, from, result.From)
+	require.NotNil(t, result.ChainID)
+	require.Equal(t, chainID.ToBig(), (*big.Int)(result.ChainID))
 }
 
 func TestNewRPCTransaction_EIP1559_YParityZero(t *testing.T) {
@@ -86,6 +105,92 @@ func TestNewRPCTransaction_EIP1559_AllZeroSig(t *testing.T) {
 	require.EqualValues(t, 0, result.V.ToInt().Int64())
 	require.EqualValues(t, 0, result.R.ToInt().Int64())
 	require.EqualValues(t, 0, result.S.ToInt().Int64())
+}
+
+func txFields(t *testing.T, r SignTransactionResult) map[string]json.RawMessage {
+	t.Helper()
+	data, err := json.Marshal(r)
+	require.NoError(t, err)
+	var outer struct {
+		Tx json.RawMessage `json:"tx"`
+	}
+	require.NoError(t, json.Unmarshal(data, &outer))
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(outer.Tx, &fields))
+	return fields
+}
+
+func TestSignTransactionResultMarshalJSON_EIP1559(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	chainID := uint256.NewInt(1)
+	tx := &types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{
+			Nonce:    1,
+			GasLimit: 21000,
+			To:       &to,
+		},
+		ChainID: *chainID,
+		TipCap:  *uint256.NewInt(1e9),
+		FeeCap:  *uint256.NewInt(2e9),
+	}
+	var buf bytes.Buffer
+	require.NoError(t, tx.MarshalBinary(&buf))
+
+	fields := txFields(t, SignTransactionResult{Raw: buf.Bytes(), Tx: NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)})
+
+	// EIP-1559 without known baseFee: gasPrice is null (matching Geth).
+	require.Equal(t, "null", string(fields["gasPrice"]), "gasPrice must be null when baseFee is unknown")
+
+	// maxFeePerGas and maxPriorityFeePerGas must be set.
+	require.NotEqual(t, "null", string(fields["maxFeePerGas"]))
+	require.NotEqual(t, "null", string(fields["maxPriorityFeePerGas"]))
+
+	// unsigned tx: v/r/s must be "0x0", not null.
+	require.Equal(t, `"0x0"`, string(fields["v"]))
+	require.Equal(t, `"0x0"`, string(fields["r"]))
+	require.Equal(t, `"0x0"`, string(fields["s"]))
+
+	// block-placement and sender fields must be absent.
+	for _, k := range []string{"from", "blockHash", "blockNumber", "blockTimestamp", "transactionIndex"} {
+		_, present := fields[k]
+		require.False(t, present, "%s must be absent", k)
+	}
+}
+
+func TestSignTransactionResultMarshalJSON_Legacy(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	tx := &types.LegacyTx{
+		CommonTx: types.CommonTx{
+			Nonce:    1,
+			GasLimit: 21000,
+			To:       &to,
+		},
+		GasPrice: *uint256.NewInt(1e9),
+	}
+	var buf bytes.Buffer
+	require.NoError(t, tx.MarshalBinary(&buf))
+
+	fields := txFields(t, SignTransactionResult{Raw: buf.Bytes(), Tx: NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)})
+
+	// Legacy: gasPrice must be set.
+	gasPrice, ok := fields["gasPrice"]
+	require.True(t, ok, "gasPrice must be present")
+	require.NotEqual(t, "null", string(gasPrice))
+
+	// Legacy: maxFeePerGas and maxPriorityFeePerGas are inapplicable and must be null (matching Geth).
+	require.Equal(t, "null", string(fields["maxFeePerGas"]), "maxFeePerGas must be null for legacy tx")
+	require.Equal(t, "null", string(fields["maxPriorityFeePerGas"]), "maxPriorityFeePerGas must be null for legacy tx")
+
+	// unsigned tx: v/r/s must be "0x0", not null.
+	require.Equal(t, `"0x0"`, string(fields["v"]))
+	require.Equal(t, `"0x0"`, string(fields["r"]))
+	require.Equal(t, `"0x0"`, string(fields["s"]))
+}
+
+func TestSignTransactionResultMarshalJSON_NilTx(t *testing.T) {
+	_, err := json.Marshal(SignTransactionResult{Tx: nil})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nil transaction")
 }
 
 func TestNewRPCTransaction_AccessList_AllZeroSig(t *testing.T) {

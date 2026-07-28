@@ -91,6 +91,8 @@ enum Event {
   // client need to close old file descriptors and open new (on new segments),
   // then server can remove old files
   NEW_SNAPSHOT = 3;
+  // SYNCING - sync status changed; data is a serialized SyncingReply
+  SYNCING = 4;
 }
 
 

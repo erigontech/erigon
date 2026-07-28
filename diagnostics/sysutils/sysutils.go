@@ -68,7 +68,7 @@ func averageProceses(procs []*process.Process) []*ProcessInfo {
 	allProcsRepeats := make([][]*ProcessInfo, 0, iterations)
 
 	// Collect all processes N times with a delay of N seconds to calculate average stats.
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		processes := allProcesses(procs)
 		allProcsRepeats = append(allProcsRepeats, processes)
 		time.Sleep(sleepSeconds * time.Second)

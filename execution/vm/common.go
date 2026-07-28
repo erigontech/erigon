@@ -92,9 +92,8 @@ func ToWordSize(size uint64) uint64 {
 
 // See EIP-170 & EIP-7954
 func CheckMaxCodeSize(size int, rules *chain.Rules) error {
-	// Gnosis Chain prior to Shanghai didn't have EIP-170 enabled,
-	// but EIP-3860 (part of Shanghai) requires EIP-170.
-	if !rules.IsSpuriousDragon || (rules.IsAura && !rules.IsShanghai) {
+	// EIP-3860 (Shanghai) requires the code-size limit even where EIP-170 is disabled.
+	if !rules.IsEIP170Enabled() && !rules.IsShanghai {
 		return nil
 	}
 
