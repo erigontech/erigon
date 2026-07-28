@@ -22,10 +22,15 @@ set -uo pipefail
 
 PARENT_DATADIR="${PARENT_DATADIR:-/erigon/tmp/erigon-hoodi-fork-parent}"
 PARENT_RPC="${PARENT_RPC:-http://127.0.0.1:19645}"
-FORK_RPC="${FORK_RPC:-http://127.0.0.1:19745}"
+# The fork erigon reuses the parent's datadir + RPC port because it
+# IS the same process class — only --chain changes across the restart.
+# Using a different launcher (e.g. fork-child) drags in extra flags
+# like --snap.lifecycle-driven-by-storage that don't match the
+# datadir's persisted config and refuse to boot.
+FORK_RPC="${FORK_RPC:-$PARENT_RPC}"
 FORK_CHAIN_NAME="${FORK_CHAIN_NAME:-hoodi-fork-restart-$(date +%s)}"
 CUT_BUFFER="${CUT_BUFFER:-1000}"
-FORK_LAUNCH_CMD="${FORK_LAUNCH_CMD:-scripts/erigon-launch-hoodi-fork-child.sh}"
+FORK_LAUNCH_CMD="${FORK_LAUNCH_CMD:-scripts/erigon-launch-hoodi-fork-parent.sh}"
 FORK_STARTUP_TIMEOUT="${FORK_STARTUP_TIMEOUT:-300}"
 
 ERIGON_PID_FILE="${ERIGON_PID_FILE:-/tmp/fork-restart-erigon.pid}"

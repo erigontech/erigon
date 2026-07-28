@@ -19,24 +19,29 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 var (
-	setForkRpcURL string
-	setForkTarget string
+	setForkRpcURL     string
+	setForkTarget     string
+	setForkTimeoutSec int
 )
 
 func init() {
 	setForkCmd.Flags().StringVar(&setForkRpcURL, "rpcendpoint", "http://127.0.0.1:8545", "JSON-RPC endpoint of the running erigon node")
 	setForkCmd.Flags().StringVar(&setForkTarget, "chain", "", "target chain name to transition into (must be a direct parent/child of the current chain)")
+	setForkCmd.Flags().IntVar(&setForkTimeoutSec, "timeout-sec", 1800, "HTTP timeout for the debug_setFork call (SetHead unwind + captor swap can take >30s)")
 	must(setForkCmd.MarkFlagRequired("chain"))
 	rootCmd.AddCommand(setForkCmd)
 }
@@ -58,7 +63,7 @@ transition manually.`,
 		logger := debug.SetupCobra(cmd, "integration")
 		ctx, _ := common.RootContext()
 
-		client, err := rpc.Dial(setForkRpcURL, logger)
+		client, err := dialWithTimeout(setForkRpcURL, time.Duration(setForkTimeoutSec)*time.Second, logger)
 		if err != nil {
 			logger.Error("dial erigon RPC", "url", setForkRpcURL, "err", err)
 			os.Exit(1)
@@ -77,4 +82,13 @@ transition manually.`,
 			logger.Warn("[set_fork] restart_required=true — restart erigon with --chain=" + result.ToChain + " to complete the transition")
 		}
 	},
+}
+
+// dialWithTimeout builds an rpc.Client whose underlying http.Client
+// uses `timeout` for the whole request round-trip. The default
+// rpc.Dial hard-codes 30s (rpc/http.go:118) which is too short for
+// debug_setFork — a mode-B unwind + captor swap can take minutes.
+func dialWithTimeout(url string, timeout time.Duration, logger log.Logger) (*rpc.Client, error) {
+	httpClient := &http.Client{Timeout: timeout}
+	return rpc.DialHTTPWithClient(url, httpClient, logger)
 }
