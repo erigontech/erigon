@@ -722,6 +722,23 @@ func (p *TxPool) Started() bool {
 func (p *TxPool) Stop()   { p.pauseLock.Lock() }
 func (p *TxPool) Resume() { p.pauseLock.Unlock() }
 
+// Reconfigure is the ChainConfigReconfigurable hook: swap the pool's
+// captured chain.Config atomically under Stop/Resume so no state-reading
+// path observes a torn pointer. Pending transactions are NOT cleared —
+// their validity under the new chain is a policy decision the
+// orchestrator makes separately (typically by driving OnNewBlock with an
+// unwind payload for the target block, which will re-score and drop
+// entries per the new fee rules).
+func (p *TxPool) Reconfigure(_ context.Context, newCfg *chain.Config) error {
+	if newCfg == nil {
+		return fmt.Errorf("txpool.Reconfigure: nil chain.Config")
+	}
+	p.Stop()
+	p.chainConfig = newCfg
+	p.Resume()
+	return nil
+}
+
 // best returns the highest-priority pending transactions that fit within the given gas and RLP space budgets.
 // EIP-8037: availableGas.Regular tracks regular gas; availableGas.State tracks intrinsic
 // state gas. Execution-time state gas (SSTOREs) cannot be predicted here and is

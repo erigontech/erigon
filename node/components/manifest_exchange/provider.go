@@ -42,6 +42,7 @@ import (
 	dirutil "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/components/sentry"
 	"github.com/erigontech/erigon/node/components/snapshotauth"
@@ -369,6 +370,22 @@ func (p *Provider) unbindNoLock() {
 	p.hForkBootstrapReq = nil
 	p.inflight = nil
 	p.mu.Unlock()
+}
+
+// Reconfigure is the ChainConfigReconfigurable hook. manifest_exchange
+// doesn't hold *chain.Config on the Provider itself — its chain-config
+// coupling lives entirely in the closures the caller installs via
+// SetForkIDFilter / SetCanonicalValidator / SetForkPostCutValidator.
+// The debug_setFork orchestrator drives the actual swap by calling
+// those setters directly with fresh closures bound to the new chain
+// config; this method exists so the Provider still type-checks as
+// ChainConfigReconfigurable and the orchestrator can walk its captor
+// list uniformly.
+func (p *Provider) Reconfigure(_ context.Context, newCfg *chain.Config) error {
+	if newCfg == nil {
+		return fmt.Errorf("manifest_exchange.Reconfigure: nil chain.Config")
+	}
+	return nil
 }
 
 // ForkBootstrapParentPeerID is the sentinel PeerID used on

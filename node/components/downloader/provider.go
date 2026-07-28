@@ -37,6 +37,7 @@ import (
 	dl "github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -238,4 +239,27 @@ func (p *Provider) Close() {
 // IsEnabled returns true if the downloader is configured and active.
 func (p *Provider) IsEnabled() bool {
 	return p.Client != nil
+}
+
+// Reconfigure is the ChainConfigReconfigurable hook. The Downloader's
+// chain identity lives in p.cfg.ChainName + its preverified list; a
+// real fork transition needs both re-derived from the new chain and
+// the local torrent client informed so downloads target the fork's
+// files, not the parent's. Full rebuild of the torrent client on a
+// live process is expensive and requires care (in-flight torrents,
+// piece cache, connection pool); it lands with Phase 2 wiring in
+// backend.go, which owns the ChainName registry.
+//
+// For now this method updates p.cfg.ChainName so subsequent
+// downloadercfg-consuming paths see the new identity. The orchestrator
+// treats non-nil chain-config swaps that require a torrent-client
+// rebuild as a component-external operation until that work lands.
+func (p *Provider) Reconfigure(_ context.Context, newCfg *chain.Config) error {
+	if newCfg == nil {
+		return fmt.Errorf("downloader.Reconfigure: nil chain.Config")
+	}
+	if p.cfg != nil && newCfg.ChainName != "" {
+		p.cfg.ChainName = newCfg.ChainName
+	}
+	return nil
 }
