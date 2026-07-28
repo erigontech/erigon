@@ -21,6 +21,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"math"
 	"math/big"
 	"os"
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -237,15 +239,23 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, accounts.ZeroAddress)
 	}
 
-	// Call the code with the given configuration.
-	ret, leftOverGas, _, err := vmenv.Call(
-		sender.Address(),
-		address,
-		input,
-		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules),
-		cfg.Value,
-		false, /* bailout */
-	)
+	gas := mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules)
+	leftOverGas, topLevelCallGasUsed, err := protocol.PrepareTopLevelCall(vmenv, address, cfg.Value, gas)
+	var ret []byte
+	if err == nil {
+		ret, leftOverGas, _, err = vmenv.Call(
+			sender.Address(),
+			address,
+			input,
+			leftOverGas,
+			cfg.Value,
+			false, /* bailout */
+		)
+		protocol.RefillTopLevelCallGas(&leftOverGas, &topLevelCallGasUsed, cfg.EVMConfig.RestoreState, err)
+	} else if errors.Is(err, vm.ErrRuntimeOutOfGas) {
+		leftOverGas = mdgas.MdGas{State: gas.State}
+		protocol.TraceTopLevelCallFailure(vmenv, sender.Address(), address, input, gas, cfg.Value, err)
+	}
 
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
 		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas.Total()}, err)

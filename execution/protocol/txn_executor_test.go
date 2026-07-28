@@ -609,6 +609,29 @@ func TestEIP2780ContractCreationRuntimeOutOfGasKeepsSenderNonce(t *testing.T) {
 	require.False(t, exists)
 }
 
+func TestContractCreationDoesNotWarmZeroAddressDelegationTarget(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = uint64(1_000_000)
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	delegatedTo := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
+
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Release(false)
+	require.NoError(t, ibs.SetCode(accounts.ZeroAddress, types.AddressToDelegation(delegatedTo), tracing.CodeChangeUnspecified))
+
+	evm := newTestEVM(ibs, chain.TestChainOsakaConfig, blockGasLimit)
+	msg := types.NewMessage(
+		sender, accounts.NilAddress, 0, uint256.NewInt(0), 100_000,
+		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+		[]byte{byte(vm.STOP)}, nil, false, false, true, false, nil,
+	)
+	result, err := NewTxnExecutor(evm, msg, new(GasPool).AddGas(blockGasLimit)).Execute(true, false)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	require.False(t, ibs.AddressInAccessList(delegatedTo))
+}
+
 // TestPreCheckErrorOrdering_GasBeforeFeeCap asserts the geth-aligned
 // validation ordering: a tx that fails both block-gas inclusion AND
 // EIP-1559 fee-cap must produce ErrGasLimitReached, not ErrFeeCapTooLow.
