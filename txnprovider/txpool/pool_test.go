@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -41,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -420,11 +422,35 @@ func TestRecoverSignerFromRLP_ValidData(t *testing.T) {
 	pubKey := crypto.PubkeyToAddress(privateKey.PublicKey)
 	chainID := uint64(7078815900)
 
-	auth, err := types.SignAuthorization(privateKey, *uint256.NewInt(chainID), pubKey, 0)
+	var b [33]byte
+	data := bytes.NewBuffer(b[:])
+	data.Reset()
+
+	// Encode RLP data exactly as in the previous implementation
+	authLen := rlp.U64Len(chainID)
+	authLen += 1 + length.Addr
+	authLen += rlp.U64Len(0) // nonce
+	require.NoError(t, rlp.EncodeListPrefix(authLen, data, b[:]))
+	require.NoError(t, rlp.EncodeU64(chainID, data, b[:]))
+	require.NoError(t, types.EncodeOptionalAddress(&pubKey, data, b[:]))
+	require.NoError(t, rlp.EncodeU64(0, data, b[:]))
+
+	// Prepare hash data exactly as before
+	hashData := []byte{params.SetCodeMagicPrefix}
+	hashData = append(hashData, data.Bytes()...)
+	hash := crypto.Keccak256Hash(hashData)
+
+	// Sign the hash
+	sig, err := crypto.Sign(hash[:], privateKey)
 	require.NoError(t, err)
 
-	var b [33]byte
-	recoveredAddress, err := auth.RecoverSigner(bytes.NewBuffer(nil), b[:])
+	// Separate signature components
+	r := uint256.NewInt(0).SetBytes(sig[:32])
+	s := uint256.NewInt(0).SetBytes(sig[32:64])
+	yParity := sig[64]
+
+	// Recover signer using the explicit RecoverSignerFromRLP function
+	recoveredAddress, err := types.RecoverSignerFromRLP(data.Bytes(), yParity, *r, *s)
 	require.NoError(t, err)
 	assert.NotNil(t, recoveredAddress)
 

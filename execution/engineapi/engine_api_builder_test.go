@@ -17,6 +17,7 @@
 package engineapi_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
@@ -35,10 +36,12 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -1000,6 +1003,38 @@ func lastBalanceChange(ac *types.AccountChanges) *types.BalanceChange {
 	return last
 }
 
+// signAuthorization builds an EIP-7702 authorization tuple signed by key.
+func signAuthorization(t *testing.T, key *ecdsa.PrivateKey, chainID *uint256.Int, target common.Address, nonce uint64) types.Authorization {
+	t.Helper()
+	var buf [33]byte
+	data := bytes.NewBuffer(nil)
+
+	authLen := rlp.Uint256Len(*chainID)
+	authLen += 1 + length.Addr
+	authLen += rlp.U64Len(nonce)
+	require.NoError(t, rlp.EncodeListPrefix(authLen, data, buf[:]))
+	require.NoError(t, rlp.EncodeUint256(*chainID, data, buf[:]))
+	require.NoError(t, types.EncodeOptionalAddress(&target, data, buf[:]))
+	require.NoError(t, rlp.EncodeU64(nonce, data, buf[:]))
+
+	hash := crypto.Keccak256Hash(append([]byte{params.SetCodeMagicPrefix}, data.Bytes()...))
+	sig, err := crypto.Sign(hash[:], key)
+	require.NoError(t, err)
+
+	auth := types.Authorization{
+		ChainID: *chainID,
+		Address: target,
+		Nonce:   nonce,
+		YParity: sig[64],
+		R:       *uint256.NewInt(0).SetBytes(sig[:32]),
+		S:       *uint256.NewInt(0).SetBytes(sig[32:64]),
+	}
+	recovered, err := auth.RecoverSigner(bytes.NewBuffer(nil), buf[:])
+	require.NoError(t, err)
+	require.Equal(t, crypto.PubkeyToAddress(key.PublicKey), *recovered)
+	return auth
+}
+
 // TestEngineApiEmptyAccountClearingConsistency pins builder/validator agreement
 // when one transaction leaves an account empty and a later EIP-7702
 // authorization reads its existence in the same block.
@@ -1096,14 +1131,14 @@ func runEmptyAccountClearingCase(t *testing.T, doTouch, doAuth, preexisting, par
 			nonce++
 		}
 		if doAuth {
-			auth, err := types.SignAuthorization(emptyKey, *chainID, common.Address{0xaa}, 0)
-			require.NoError(t, err)
 			send(&types.SetCodeTransaction{
 				DynamicFeeTransaction: types.DynamicFeeTransaction{
 					CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 500_000, To: &senderAddr},
 					ChainID:  *chainID, TipCap: *tipCap, FeeCap: *feeCap,
 				},
-				Authorizations: []types.Authorization{auth},
+				Authorizations: []types.Authorization{
+					signAuthorization(t, emptyKey, chainID, common.Address{0xaa}, 0),
+				},
 			})
 		}
 
