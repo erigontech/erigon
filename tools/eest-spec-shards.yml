@@ -16,6 +16,8 @@
 #   workers               (required) — parallel worker count.
 #   max-allowed-failures  (required) — failure budget; bump only with a comment
 #                                      explaining why and a tracking issue.
+#   expected-tests        (optional) — exact result count. Used by legacy shards
+#                                      to guard the coverage moved out of Go tests.
 #   exec3-parallel        (optional, default false) — pins ERIGON_EXEC3_PARALLEL.
 #   no-ramdisk            (optional, default false) — true keeps the shard's
 #                                      datadirs on disk instead of a RAM-backed
@@ -40,6 +42,10 @@
   workers: 12
   # TODO: reduce to 0 as tests-glamsterdam-devnet@v7.2.0 support lands.
   max-allowed-failures: 1925
+- shard: statetests-legacy
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 108593
 - shard: blocktests-stable-sequential
   workers: 12
   max-allowed-failures: 0
@@ -52,6 +58,39 @@
   # TODO: reduce to 0 as tests-glamsterdam-devnet@v7.2.0 support lands.
   max-allowed-failures: 21877
   exec3-parallel: true
+- shard: blocktests-legacy-sequential
+  workers: 12
+  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
+  max-allowed-failures: 26
+  expected-tests: 113125
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-parallel
+  workers: 12
+  # PoW/TD: https://github.com/erigontech/erigon/issues/22061; parallel writes: https://github.com/erigontech/erigon/issues/21136
+  max-allowed-failures: 41
+  expected-tests: 113125
+  exec3-parallel: true
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-race-berlin-shanghai-cancun
+  workers: 12
+  # PoW/TD: https://github.com/erigontech/erigon/issues/22061; parallel writes: https://github.com/erigontech/erigon/issues/21136
+  max-allowed-failures: 12
+  expected-tests: 57135
+  exec3-parallel: true
+  run: '(_(Berlin|Shanghai|Cancun)$|fork_(Berlin|Shanghai|Cancun)-)'
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-race-other-forks
+  workers: 12
+  # PoW/TD: https://github.com/erigontech/erigon/issues/22061; parallel writes: https://github.com/erigontech/erigon/issues/21136
+  max-allowed-failures: 29
+  expected-tests: 55990
+  exec3-parallel: true
+  exclude:
+    - '/\.meta/'
+    - '::.*(_(Berlin|Shanghai|Cancun)$|fork_(Berlin|Shanghai|Cancun)-)'
 - shard: enginextests-stable-sequential
   workers: 8
   max-allowed-failures: 0
