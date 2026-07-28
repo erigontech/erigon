@@ -60,11 +60,8 @@ type MdGasUsage struct {
 
 // PlusIntrinsic folds intrinsic regular gas into the frame-usage report.
 func (u MdGasUsage) PlusIntrinsic(intrinsicGas uint64) MdGasUsage {
-	return MdGasUsage{
-		Regular:    u.Regular + intrinsicGas,
-		State:      u.State,
-		StateSpill: u.StateSpill,
-	}
+	u.Regular += intrinsicGas
+	return u
 }
 
 // StateClamped returns max(0, State) as uint64. State is signed to model
@@ -90,11 +87,12 @@ func Consume(remaining *MdGas, used *MdGasUsage, amount uint64, typ MdGasType) b
 		used.Regular += amount
 		return true
 	case StateGas:
-		spill := amount - min(amount, remaining.State)
+		stateGas := min(amount, remaining.State)
+		spill := amount - stateGas
 		if remaining.Regular < spill {
 			return false
 		}
-		remaining.State -= amount - spill
+		remaining.State -= stateGas
 		remaining.Regular -= spill
 		used.State += int64(amount)
 		used.StateSpill += spill
@@ -140,7 +138,5 @@ func SplitTxnGasLimit(txnGasLimit, intrinsicGas uint64, rules *chain.Rules) MdGa
 		stateGasReservoir := executionGas - gasLeft
 		return MdGas{Regular: gasLeft, State: stateGasReservoir}
 	}
-	gas := MdGas{Regular: txnGasLimit}
-	gas.Regular -= intrinsicGas
-	return gas
+	return MdGas{Regular: txnGasLimit - intrinsicGas}
 }

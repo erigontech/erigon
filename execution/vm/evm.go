@@ -283,22 +283,11 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	}
 
 	// Invoke tracer hooks that signal entering/exiting a call frame
-	captureStarted := false
 	if evm.Config().Tracer != nil {
+		evm.captureBegin(depth, typ, caller, addr, isPrecompile, input, gas, value, code)
 		defer func(startGas mdgas.MdGas) {
-			if captureStarted {
-				evm.captureEnd(depth, typ, startGas, gasRemaining, ret, err)
-			}
+			evm.captureEnd(depth, typ, startGas, gasRemaining, ret, err)
 		}(gas)
-	}
-	captureFrame := func() {
-		if evm.Config().Tracer != nil {
-			evm.captureBegin(depth, typ, caller, addr, isPrecompile, input, gas, value, code)
-			captureStarted = true
-		}
-	}
-	if !deferCodeResolution {
-		captureFrame()
 	}
 
 	// BAL: record address access even if call fails due to gas/call depth/insufficient balance
@@ -390,20 +379,18 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 	var topLvlFrameStateGas int64
 	var topLvlFrameStateGasSpill uint64
-	if depth == 0 && evm.chainRules.IsAmsterdam && typ == CALL && err == nil {
+	if depth == 0 && evm.chainRules.IsAmsterdam && typ == CALL {
 		gasRemaining, topLvlFrameStateGas, topLvlFrameStateGasSpill, err = evm.chargeTopLevelFrameGas(gasRemaining, addr, topLevelNewAccount, isPrecompile)
-		if errors.Is(err, ErrOutOfGas) {
-			err = ErrRuntimeOutOfGas
-		}
-		if err != nil && !errors.Is(err, ErrOutOfGas) {
-			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, err
+		if err != nil {
+			if errors.Is(err, ErrOutOfGas) {
+				err = ErrRuntimeOutOfGas
+			} else {
+				return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, err
+			}
 		}
 	}
-	if deferCodeResolution {
-		if err == nil {
-			code, err = evm.intraBlockState.ResolveCode(addr)
-		}
-		captureFrame()
+	if deferCodeResolution && err == nil {
+		code, err = evm.intraBlockState.ResolveCode(addr)
 		if err != nil && !errors.Is(err, ErrOutOfGas) {
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}

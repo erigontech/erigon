@@ -355,6 +355,63 @@ func TestEIP2780AuthorizationOutOfGasProducesCallTrace(t *testing.T) {
 	}
 }
 
+func TestEIP2780TopLevelCallTraceStartsBeforeStateChanges(t *testing.T) {
+	const blockGasLimit = 1_000_000
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	for _, tc := range []struct {
+		name       string
+		value      uint64
+		tracerCfg  string
+		wantTxLogs bool
+	}{
+		{name: "zero value", tracerCfg: "{}"},
+		{name: "value transfer log", value: 1, tracerCfg: `{"withLog":true}`, wantTxLogs: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Release(false)
+			require.NoError(t, ibs.SetBalance(sender, *uint256.NewInt(tc.value), tracing.BalanceChangeUnspecified))
+
+			tracer, err := tracers.New("callTracer", &tracers.Context{}, json.RawMessage(tc.tracerCfg))
+			require.NoError(t, err)
+			ibs.SetHooks(tracer.Hooks)
+			blockCtx := evmtypes.BlockContext{
+				CanTransfer: CanTransfer,
+				Transfer:    misc.Transfer,
+				GasLimit:    blockGasLimit,
+			}
+			evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{
+				NoBaseFee: true,
+				Tracer:    tracer.Hooks,
+			})
+			value := uint256.NewInt(tc.value)
+			msg := types.NewMessage(
+				sender, recipient, 0, value, blockGasLimit,
+				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+				nil, nil, false, false, true, false, nil,
+			)
+			tx := types.NewTransaction(0, recipient.Value(), value, blockGasLimit, uint256.NewInt(0), nil)
+
+			tracer.OnTxStart(evm.GetVMContext(), tx, sender)
+			var result *evmtypes.ExecutionResult
+			require.NotPanics(t, func() {
+				result, err = NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
+			})
+			require.NoError(t, err)
+			require.NoError(t, result.Err)
+			tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
+
+			trace, err := tracer.GetResult()
+			require.NoError(t, err)
+			if tc.wantTxLogs {
+				require.Contains(t, string(trace), `"logs"`)
+			}
+		})
+	}
+}
+
 func TestEIP2780RecipientStartsWarm(t *testing.T) {
 	const blockGasLimit = 1_000_000
 

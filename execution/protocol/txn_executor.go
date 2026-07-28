@@ -603,11 +603,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			return nil, vmerr
 		}
 		st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
-		gasUsed.Regular = runtimeGas.Regular
+		gasUsed = mdgas.MdGasUsage{Regular: runtimeGas.Regular}
 		st.traceRuntimeFailure(runtimeGas, vmerr)
-	}
-
-	if vmerr == nil {
+	} else {
 		if err = st.warmDelegatedDestination(rules); err != nil {
 			return nil, err
 		}
