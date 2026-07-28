@@ -158,8 +158,9 @@ type SharedDomains struct {
 	// stateCache is an optional cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
 
-	// Backing frontiers stay fixed while writes remain in mem; flush resets
-	// the memo after writing them into the transaction.
+	// Backing frontiers stay fixed while writes remain in mem: flush moves mem
+	// into the transaction and the paired aggregator-level unwind rewrites
+	// backing rows, so both reset the memo.
 	visibleEnds domainVisibleEndMemo
 
 	// codeStore is the optional two-tier (in-mem + MDBX) codehash-keyed code
@@ -683,6 +684,7 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 
 // Unwind drops [txNumUnwindTo, ∞)
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
+	sd.visibleEnds.reset()
 	sd.mem.Unwind(txNumUnwindTo, changeset)
 	// Tx/epoch-aware unwind of the commitment BranchCache: every cached branch
 	// whose bytes belong to the rolled-back window (txN at/above the unwind
