@@ -2015,6 +2015,13 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		testingEntry = &entry
 	}
 	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService, testingEntry)
+	for i := range s.apiList {
+		if dbg, ok := s.apiList[i].Service.(jsonrpc.PrivateDebugAPI); ok {
+			if impl, ok := dbg.(*jsonrpc.DebugAPIImpl); ok {
+				impl.SetForkController(s)
+			}
+		}
+	}
 
 	s.bgComponentsEg.Go(func() error {
 		err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger)

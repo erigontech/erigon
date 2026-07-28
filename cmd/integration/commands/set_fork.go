@@ -19,6 +19,7 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -60,14 +61,14 @@ transition manually.`,
 		client, err := rpc.Dial(setForkRpcURL, logger)
 		if err != nil {
 			logger.Error("dial erigon RPC", "url", setForkRpcURL, "err", err)
-			panic(err)
+			os.Exit(1)
 		}
 		defer client.Close()
 
 		var result rpchelper.SetForkResult
 		if err := client.CallContext(ctx, &result, "debug_setFork", setForkTarget); err != nil {
 			logger.Error("debug_setFork call failed", "target", setForkTarget, "err", err)
-			panic(err)
+			os.Exit(1)
 		}
 
 		out, _ := json.MarshalIndent(result, "", "  ")

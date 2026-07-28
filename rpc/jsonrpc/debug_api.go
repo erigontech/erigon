@@ -82,6 +82,7 @@ type DebugAPIImpl struct {
 	*BaseAPI
 	db                kv.TemporalRoDB
 	ethBackend        rpchelper.ApiBackend
+	forkController    rpchelper.ForkController // optional; set by SetForkController when the in-process Ethereum backend is reachable
 	GasCap            uint64
 	gethCompatibility bool // Geth-compatible storage iteration order for debug_storageRangeAt
 }
@@ -95,6 +96,15 @@ func NewPrivateDebugAPI(base *BaseAPI, db kv.TemporalRoDB, ethBackend rpchelper.
 		GasCap:            gascap,
 		gethCompatibility: gethCompatibility,
 	}
+}
+
+// SetForkController wires an in-process ForkController for debug_setFork.
+// Called from backend.go where the concrete Ethereum instance is available.
+// The RPC's ethBackend is a gRPC-style client that can't reach Ethereum's
+// SetFork method directly; this hook is the escape hatch that lets the
+// same in-process erigon serve the fork RPC.
+func (api *DebugAPIImpl) SetForkController(fc rpchelper.ForkController) {
+	api.forkController = fc
 }
 
 // SetHead implements debug_setHead. Rewinds the local chain to the specified block number.
@@ -134,6 +144,9 @@ func (api *DebugAPIImpl) SetHead(ctx context.Context, number hexutil.Uint64) err
 // in-process backend to implement rpchelper.ForkController;
 // unavailable via standalone rpcdaemon.
 func (api *DebugAPIImpl) SetFork(ctx context.Context, chainName string) (*rpchelper.SetForkResult, error) {
+	if api.forkController != nil {
+		return api.forkController.SetFork(ctx, chainName)
+	}
 	fc, ok := api.ethBackend.(rpchelper.ForkController)
 	if !ok {
 		return nil, errors.New("debug_setFork is not available in this deployment (requires in-process erigon backend)")
