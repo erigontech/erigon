@@ -2602,72 +2602,34 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 // FinalizedWrites returns the tx's committable write-set on the parallel
 // (versionMap) path: WriteSet.Finalize applies the EIP-6780 wipe and snapshots
 // the recorded IO. No journal reset here — Reset() does that before the next tx.
-func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet, error) {
-	if err := sdb.clearEmptyAccounts(chainRules); err != nil {
-		return nil, err
-	}
-	return sdb.versionedWrites.Finalize(), nil
+func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) *WriteSet {
+	sdb.clearEmptyAccounts(chainRules)
+	return sdb.versionedWrites.Finalize()
 }
 
-// clearEmptyAccounts is the versioned counterpart of updateAccount's
-// emptyRemoval branch, which the serial path reaches through MakeWriteSet: an
-// account this tx leaves empty must be published as a delete, not as an
-// existing empty record. This write-set is flushed to the version map, so it is
-// what the next tx in the block reads, and an empty account cannot survive a
-// transaction boundary once EIP-161 is active.
-func (sdb *IntraBlockState) clearEmptyAccounts(chainRules *chain.Rules) error {
-	// Genesis is exempt, as it is on the serial path (which runs it under empty
-	// rules) and in the apply loop: an alloc may be empty by EIP-161's
-	// code/nonce/balance test yet still carry storage, and clearing it would
-	// drop that storage.
+// clearEmptyAccounts withdraws the record of an account this tx created and
+// left empty. EIP-161 clears such an account at the transaction boundary, so it
+// must not reach the version map as an account that exists — that map is what
+// the next tx in the block reads, and updateAccount already withholds it on the
+// serial path. A created account starts zeroed, so the write-set alone settles
+// emptiness: no state lookup, and so no dependency for the validator to trip
+// over. Genesis is exempt, as it is on the serial path (which runs it under
+// empty rules) and in the apply loop.
+func (sdb *IntraBlockState) clearEmptyAccounts(chainRules *chain.Rules) {
 	if sdb.blockNum == 0 || chainRules == nil || !chainRules.IsEIP161Enabled() {
-		return nil
+		return
 	}
-
-	// An account left empty always has one of these three writes, so they are
-	// also what WriteSet.Normalize considers. Repeats are harmless: Empty
-	// reports false once the delete below has been recorded.
-	var candidates []accounts.Address
-	for addr, vw := range sdb.versionedWrites.Balances() {
-		if vw.Val.IsZero() {
-			candidates = append(candidates, addr)
+	var empties []accounts.Address
+	sdb.versionedWrites.forEachAddr(func(addr accounts.Address) {
+		if EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) &&
+			sdb.versionedWrites.createdEmpty(addr) {
+			empties = append(empties, addr)
 		}
+	})
+	for _, addr := range empties {
+		sdb.versionMap.DeleteAll(addr, sdb.txIndex)
+		sdb.versionedWrites.deleteAddr(addr)
 	}
-	for addr, vw := range sdb.versionedWrites.Nonces() {
-		if vw.Val == 0 {
-			candidates = append(candidates, addr)
-		}
-	}
-	for addr, vw := range sdb.versionedWrites.CodeHashes() {
-		if vw.Val == accounts.EmptyCodeHash {
-			candidates = append(candidates, addr)
-		}
-	}
-
-	for _, addr := range candidates {
-		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
-			continue
-		}
-		// Exist first: Empty reports true for an absent account, and marking one
-		// self-destructed would make Snapshot drop its surviving writes.
-		exists, err := sdb.Exist(addr)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			continue
-		}
-		empty, err := sdb.Empty(addr)
-		if err != nil {
-			return err
-		}
-		if !empty {
-			continue
-		}
-		sdb.versionedWrites.DeleteAccountFields(addr)
-		sdb.recordWriteSelfDestruct(addr, true)
-	}
-	return nil
 }
 
 // MergeTxIOInto folds the current transaction's recorded reads, writes and

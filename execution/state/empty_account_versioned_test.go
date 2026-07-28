@@ -25,9 +25,7 @@ func TestVersionedWritesClearTouchedEmptyAccount(t *testing.T) {
 		ibs.SetTxContext(1, 0)
 		ibs.SetVersion(0)
 		require.NoError(t, ibs.TouchAccount(addr))
-		writes, err := ibs.FinalizedWrites(rules)
-		require.NoError(t, err)
-		return writes
+		return ibs.FinalizedWrites(rules)
 	}
 
 	t.Run("serial baseline emits a delete", func(t *testing.T) {
@@ -41,15 +39,14 @@ func TestVersionedWritesClearTouchedEmptyAccount(t *testing.T) {
 		require.True(t, sd.Val)
 	})
 
-	t.Run("versioned path matches the serial baseline", func(t *testing.T) {
+	t.Run("versioned path withholds the created account", func(t *testing.T) {
 		writes := touchedWrites(spuriousDragon)
-		sd, ok := writes.GetSelfDestruct(addr)
-		require.True(t, ok, "touched-empty account must be published as a delete")
-		require.True(t, sd.Val)
 		_, hasAddress := writes.GetAddress(addr)
-		require.False(t, hasAddress, "the create must not survive into the write-set")
+		require.False(t, hasAddress, "the create must not reach the write-set")
 		_, hasBalance := writes.GetBalance(addr)
 		require.False(t, hasBalance)
+		_, hasDelete := writes.GetSelfDestruct(addr)
+		require.False(t, hasDelete, "nothing was published, so nothing to delete")
 	})
 
 	t.Run("next tx does not observe the account", func(t *testing.T) {

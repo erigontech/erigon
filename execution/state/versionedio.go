@@ -2915,3 +2915,34 @@ func GetDep(deps *VersionedIO) map[int]map[int]bool {
 
 	return newDependencies
 }
+
+// createdEmpty reports whether these writes create addr and leave it EIP-161
+// empty, holding no storage of its own. A created account starts zeroed, so an
+// absent field write counts as zero.
+func (s *WriteSet) createdEmpty(addr accounts.Address) bool {
+	if s == nil {
+		return false
+	}
+	if _, created := s.address[addr]; !created {
+		return false
+	}
+	if vw, ok := s.balance[addr]; ok && !vw.Val.IsZero() {
+		return false
+	}
+	if vw, ok := s.nonce[addr]; ok && vw.Val != 0 {
+		return false
+	}
+	if vw, ok := s.codeHash[addr]; ok && vw.Val != accounts.EmptyCodeHash {
+		return false
+	}
+	if vw, ok := s.code[addr]; ok && len(vw.Val.Bytes) > 0 {
+		return false
+	}
+	if vw, ok := s.createContract[addr]; ok && vw.Val {
+		return false
+	}
+	if vw, ok := s.selfDestruct[addr]; ok && vw.Val {
+		return false
+	}
+	return len(s.storage[addr]) == 0
+}
