@@ -20,6 +20,7 @@ package p2p
 
 import (
 	"errors"
+	"os"
 	"sync"
 
 	"golang.org/x/sys/unix"
@@ -31,11 +32,11 @@ import (
 // netlinkNotifier signals on interface address and link changes via an
 // RTNETLINK multicast socket.
 type netlinkNotifier struct {
-	fd        int
+	file      *os.File
 	events    chan struct{}
-	done      chan struct{}
 	stopped   chan struct{}
 	closeOnce sync.Once
+	closeErr  error
 }
 
 func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
@@ -53,18 +54,18 @@ func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
 		logger.Debug(notifierUnavailableMsg, "err", err)
 		return noopNotifier{}
 	}
-	// A receive timeout lets the read wake periodically to observe Close;
-	// without it Close could block forever on a blocked read.
-	if err := unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &unix.Timeval{Sec: 1}); err != nil {
+	// Nonblocking so os.NewFile registers the socket with the runtime netpoller:
+	// the read parks until a message arrives and Close unblocks it at once,
+	// instead of a receive-timeout loop that wakes on a timer to observe Close.
+	if err := unix.SetNonblock(fd, true); err != nil {
 		_ = unix.Close(fd)
 		logger.Debug(notifierUnavailableMsg, "err", err)
 		return noopNotifier{}
 	}
 
 	n := &netlinkNotifier{
-		fd:      fd,
+		file:    os.NewFile(uintptr(fd), "netlink"),
 		events:  make(chan struct{}, 1),
-		done:    make(chan struct{}),
 		stopped: make(chan struct{}),
 	}
 	go n.loop(logger)
@@ -75,29 +76,22 @@ func (n *netlinkNotifier) Events() <-chan struct{} { return n.events }
 
 func (n *netlinkNotifier) Close() error {
 	n.closeOnce.Do(func() {
-		close(n.done)
+		n.closeErr = n.file.Close()
 		<-n.stopped
 	})
-	return nil
+	return n.closeErr
 }
 
 func (n *netlinkNotifier) loop(logger log.Logger) {
 	defer dbg.LogPanic()
 	defer close(n.stopped)
-	defer func() { _ = unix.Close(n.fd) }()
 
 	buf := make([]byte, 8192)
 	for {
-		select {
-		case <-n.done:
-			return
-		default:
-		}
-
-		nr, _, err := unix.Recvfrom(n.fd, buf, 0)
+		nr, err := n.file.Read(buf)
 		if err != nil {
-			if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EINTR) {
-				continue
+			if errors.Is(err, os.ErrClosed) {
+				return
 			}
 			if errors.Is(err, unix.ENOBUFS) {
 				// The kernel dropped multicast messages because we fell behind.

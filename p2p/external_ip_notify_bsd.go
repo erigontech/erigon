@@ -20,6 +20,7 @@ package p2p
 
 import (
 	"errors"
+	"os"
 	"sync"
 
 	"golang.org/x/sys/unix"
@@ -31,11 +32,11 @@ import (
 // routeNotifier signals on any message from a PF_ROUTE socket, which the kernel
 // emits on address, link and route changes.
 type routeNotifier struct {
-	fd        int
+	file      *os.File
 	events    chan struct{}
-	done      chan struct{}
 	stopped   chan struct{}
 	closeOnce sync.Once
+	closeErr  error
 }
 
 func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
@@ -45,18 +46,18 @@ func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
 		return noopNotifier{}
 	}
 	unix.CloseOnExec(fd)
-	// A receive timeout lets the read wake periodically to observe Close;
-	// without it Close could block forever on a blocked read.
-	if err := unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &unix.Timeval{Sec: 1}); err != nil {
+	// Nonblocking so os.NewFile registers the socket with the runtime netpoller:
+	// the read parks until a message arrives and Close unblocks it at once,
+	// instead of a receive-timeout loop that wakes on a timer to observe Close.
+	if err := unix.SetNonblock(fd, true); err != nil {
 		_ = unix.Close(fd)
 		logger.Debug(notifierUnavailableMsg, "err", err)
 		return noopNotifier{}
 	}
 
 	n := &routeNotifier{
-		fd:      fd,
+		file:    os.NewFile(uintptr(fd), "pf_route"),
 		events:  make(chan struct{}, 1),
-		done:    make(chan struct{}),
 		stopped: make(chan struct{}),
 	}
 	go n.loop(logger)
@@ -67,29 +68,22 @@ func (n *routeNotifier) Events() <-chan struct{} { return n.events }
 
 func (n *routeNotifier) Close() error {
 	n.closeOnce.Do(func() {
-		close(n.done)
+		n.closeErr = n.file.Close()
 		<-n.stopped
 	})
-	return nil
+	return n.closeErr
 }
 
 func (n *routeNotifier) loop(logger log.Logger) {
 	defer dbg.LogPanic()
 	defer close(n.stopped)
-	defer func() { _ = unix.Close(n.fd) }()
 
 	buf := make([]byte, 4096)
 	for {
-		select {
-		case <-n.done:
-			return
-		default:
-		}
-
-		nr, err := unix.Read(n.fd, buf)
+		nr, err := n.file.Read(buf)
 		if err != nil {
-			if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EINTR) {
-				continue
+			if errors.Is(err, os.ErrClosed) {
+				return
 			}
 			if errors.Is(err, unix.ENOBUFS) {
 				// The kernel dropped route messages because we fell behind. A

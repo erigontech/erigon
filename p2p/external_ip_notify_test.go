@@ -17,13 +17,65 @@
 package p2p
 
 import (
+	"context"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
+
+type msgCaptureHandler struct {
+	mu   sync.Mutex
+	msgs []string
+}
+
+func (h *msgCaptureHandler) Log(r *log.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.msgs = append(h.msgs, r.Msg)
+	return nil
+}
+func (h *msgCaptureHandler) Enabled(context.Context, log.Lvl) bool { return true }
+
+func (h *msgCaptureHandler) contains(sub string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, m := range h.msgs {
+		if strings.Contains(m, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRealNetChangeNotifierParks guards the netpoller integration on platforms
+// with a native notifier: the read must block in the poller (not spin on EAGAIN
+// and exit), and Close must return without hanging. Skips where the socket is
+// unavailable (restricted sandbox, unsupported GOOS), so it never flakes.
+func TestRealNetChangeNotifierParks(t *testing.T) {
+	logger := log.New()
+	h := &msgCaptureHandler{}
+	logger.SetHandler(h)
+
+	n := newNetChangeNotifier(logger)
+	if _, ok := n.(noopNotifier); ok {
+		t.Skip("no native network-change notifier on this platform")
+	}
+	if h.contains(notifierUnavailableMsg) {
+		t.Skipf("native notifier unavailable: %v", h.msgs)
+	}
+
+	time.Sleep(150 * time.Millisecond)
+	if h.contains(notifierReadFailedMsg) {
+		t.Fatalf("read exited early instead of parking in the poller: %v", h.msgs)
+	}
+	if err := n.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
 
 func TestNoopNotifierNeverFires(t *testing.T) {
 	t.Parallel()

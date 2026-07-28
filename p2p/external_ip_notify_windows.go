@@ -63,7 +63,11 @@ func (n *addrChangeNotifier) Events() <-chan struct{} { return n.events }
 
 func (n *addrChangeNotifier) Close() error {
 	n.closeOnce.Do(func() {
-		windows.CancelMibChangeNotify2(n.handle)
+		if windows.CancelMibChangeNotify2(n.handle) != nil {
+			// Registration may still be live; keep the context pinned so a late
+			// callback cannot dereference freed memory, leaking a few dozen bytes.
+			return
+		}
 		n.pinner.Unpin()
 	})
 	return nil
