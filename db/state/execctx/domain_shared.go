@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -877,28 +878,30 @@ func (sd *SharedDomains) InlineTouchKeyDisabled() bool {
 // clear in a nearer generation — e.g. a create-contract DomainDelPrefix
 // tombstone recorded only in this mem — overrides the ancestor's value rather
 // than falsely reporting the prefix as present.
+// HasPrefix reports the first live key/value under prefix, chain-correctly: a
+// candidate from the leaf batch (leaf RAM + committed DB) or any parent
+// generation is confirmed through getLatest so a value cleared by a parent
+// generation is not a false positive and a value written only in a parent is
+// still found. Short-circuits on the first live key.
 func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
-	if k, v, ok, err := sd.mem.HasPrefix(domain, prefix, roTx); ok || err != nil {
-		return k, v, ok, err
-	}
-	tx, _ := roTx.(kv.TemporalTx)
-	if sd.parent == nil || tx == nil {
-		return nil, nil, false, nil
+	tx, ok := roTx.(kv.TemporalTx)
+	if sd.parent == nil || !ok {
+		return sd.mem.HasPrefix(domain, prefix, roTx)
 	}
 	var firstKey, firstVal []byte
-	for p := sd.parent; p != nil; p = p.parent {
-		err := p.mem.IteratePrefix(domain, prefix, roTx, func(k, v []byte) (bool, error) {
-			lv, _, e := sd.getLatestMetered(domain, tx, k, nil)
-			if e != nil {
-				return false, e
-			}
-			if len(lv) > 0 {
-				firstKey, firstVal = bytes.Clone(k), bytes.Clone(lv)
-				return false, nil
-			}
-			return true, nil
-		})
-		if err != nil {
+	confirm := func(k, _ []byte) (bool, error) {
+		lv, _, e := sd.getLatestMetered(domain, tx, k, nil)
+		if e != nil {
+			return false, e
+		}
+		if len(lv) > 0 {
+			firstKey, firstVal = bytes.Clone(k), bytes.Clone(lv)
+			return false, nil
+		}
+		return true, nil
+	}
+	for p := sd; p != nil; p = p.parent {
+		if err := p.mem.IteratePrefix(domain, prefix, roTx, confirm); err != nil {
 			return nil, nil, false, err
 		}
 		if firstKey != nil {
@@ -908,8 +911,47 @@ func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) 
 	return nil, nil, false, nil
 }
 
+// IteratePrefix emits every live key under prefix across the whole generation
+// chain, newest-generation-wins with tombstone shadowing: it unions the
+// candidate keys from the leaf batch (leaf RAM + committed DB) and every parent
+// generation's RAM, resolves each through getLatest, and emits only the
+// non-empty ones in key order.
 func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
-	return sd.mem.IteratePrefix(domain, prefix, roTx, it)
+	tx, ok := roTx.(kv.TemporalTx)
+	if sd.parent == nil || !ok {
+		return sd.mem.IteratePrefix(domain, prefix, roTx, it)
+	}
+	seen := make(map[string]struct{})
+	var keys []string
+	collect := func(k, _ []byte) (bool, error) {
+		ks := string(k)
+		if _, dup := seen[ks]; !dup {
+			seen[ks] = struct{}{}
+			keys = append(keys, ks)
+		}
+		return true, nil
+	}
+	for p := sd; p != nil; p = p.parent {
+		if err := p.mem.IteratePrefix(domain, prefix, roTx, collect); err != nil {
+			return err
+		}
+	}
+	slices.Sort(keys)
+	for _, ks := range keys {
+		k := []byte(ks)
+		v, _, err := sd.getLatestMetered(domain, tx, k, nil)
+		if err != nil {
+			return err
+		}
+		if len(v) == 0 {
+			continue
+		}
+		cont, err := it(k, v)
+		if err != nil || !cont {
+			return err
+		}
+	}
+	return nil
 }
 
 func (sd *SharedDomains) Close() {
@@ -1643,9 +1685,16 @@ func (sd *SharedDomains) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs 
 	return sd.mem.IndexRange(name, k, fromTs, toTs, asc, limit, roTx)
 }
 
-// HistorySeek returns the in-flight in-memory historical value of key as of ts.
+// HistorySeek returns the in-flight in-memory historical value of key as of ts,
+// walking the whole generation chain; (nil, false) means no generation has it,
+// so the caller falls back to committed history.
 func (sd *SharedDomains) HistorySeek(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
-	return sd.mem.HistorySeek(domain, key, ts)
+	for p := sd; p != nil; p = p.parent {
+		if v, ok, err := p.mem.HistorySeek(domain, key, ts); err != nil || ok {
+			return v, ok, err
+		}
+	}
+	return nil, false, nil
 }
 
 // DomainPut

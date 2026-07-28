@@ -163,9 +163,19 @@ func (e *ExecModule) runCommit(gen *commitGen) {
 		}
 		// A durable commit failed for a non-shutdown reason: the block was already
 		// reported VALID to the CL, so silently dropping its state would diverge
-		// from consensus. This is unrecoverable in-process — fail hard rather than
-		// retire the generation as if it committed.
-		e.logger.Crit("background commit failed; cannot retire generation", "block", gen.blockNum, "hash", gen.blockHash, "err", err)
+		// from consensus. Crit does not terminate this logger, and returning would
+		// leave the generation un-retired (FCU wedges Busy, drain/shutdown hangs).
+		// Trigger a clean node shutdown (cancels the root context) so the process
+		// restarts and re-derives the state. In a goroutine — stopNode drains this
+		// same worker — and once, so repeated drain failures don't respawn it.
+		e.logger.Crit("background commit failed; shutting down node", "block", gen.blockNum, "hash", gen.blockHash, "err", err)
+		e.commitFatalOnce.Do(func() {
+			go func() {
+				if stopErr := e.stopNode(); stopErr != nil {
+					e.logger.Error("Could not stop node after background commit failure", "err", stopErr)
+				}
+			}()
+		})
 		return
 	}
 	e.markGenCommitted(gen)
@@ -299,4 +309,6 @@ func (e *ExecModule) closeAllGens() {
 	}
 	e.gens = nil
 	e.uncommittedGens = 0
+	// Wake any WaitCommitsDrained/WaitIdle waiter blocked on the generation count.
+	e.fgIdle.Broadcast()
 }

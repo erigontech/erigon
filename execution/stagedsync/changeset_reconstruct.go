@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -25,15 +26,15 @@ type csWrite struct {
 // now, from the post-tx state) so the changeset can be replayed and its prevs
 // resolved at settled compute time — matching exec's block-end flush timing rather
 // than the racy per-tx moment. Non-owned blocks need no changeset.
-func (cc *commitmentCalculator) bufferChangesetWrites(r *txResult) {
+func (cc *commitmentCalculator) bufferChangesetWrites(r *txResult) error {
 	if !cc.ownsChangeset(r.blockNum) {
-		return
+		return nil
 	}
 	if cc.csBuilderBlock != r.blockNum {
 		cc.csPending = cc.csPending[:0]
 		cc.csBuilderBlock = r.blockNum
 	}
-	cc.feedChangeset(r.writes, r.txNum)
+	return cc.feedChangeset(r.writes, r.txNum)
 }
 
 // asOfPrevReader supplies the pre-block value of an account/storage/code key as
@@ -77,7 +78,7 @@ func (cc *commitmentCalculator) appendCS(domain kv.Domain, key, val []byte, txNu
 // storage/code puts carry their new bytes (empty → delete), and a self-destruct
 // cascades a storage-subtree wipe. Prevs are resolved later (at settled compute
 // time) so the replayed ChangeSets3 bytes match exec's.
-func (cc *commitmentCalculator) feedChangeset(writes *state.WriteSet, txNum uint64) {
+func (cc *commitmentCalculator) feedChangeset(writes *state.WriteSet, txNum uint64) error {
 	touched := map[accounts.Address]struct{}{}
 	for addr := range writes.Balances() {
 		touched[addr] = struct{}{}
@@ -162,9 +163,10 @@ func (cc *commitmentCalculator) feedChangeset(writes *state.WriteSet, txNum uint
 			cc.appendCS(kv.StorageDomain, composite, nil, txNum)
 			return nil
 		}); err != nil {
-			cc.logger.Warn("["+cc.logPrefix+"] changeset reconstruct: storage enumeration error", "addr", addr, "err", err)
+			return fmt.Errorf("changeset reconstruct: storage enumeration for %x: %w", addr, err)
 		}
 	}
+	return nil
 }
 
 // buildResultLocalChangeset replays the buffered per-tx writes through a fresh

@@ -422,10 +422,11 @@ func (sd *TemporalMemBatch) memRangeAsOf(domain kv.Domain, fromKey, toKey []byte
 }
 
 // HistorySeek returns the in-memory value in effect at ts: the value of the last
-// recorded change with txNum < ts. ok is true when the key has in-memory history;
-// a ts at or before the first change yields the empty creation-event marker
-// (non-nil empty, true). Returns (nil, false) only when the key has no in-memory
-// history, so the caller can fall back to committed history.
+// recorded change with txNum < ts. Returns (nil, false) when there is no such
+// change — either the key has no in-memory history, or ts precedes its first
+// in-memory write — so the caller falls back to committed history, which holds
+// the value for a key that existed before the overlay (and correctly reports
+// absent for one created in it).
 func (sd *TemporalMemBatch) HistorySeek(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
 	if !sd.inMemHistoryReads {
 		return nil, false, nil
@@ -443,9 +444,6 @@ func (sd *TemporalMemBatch) HistorySeek(domain kv.Domain, key []byte, ts uint64)
 		if e.txNum < ts {
 			return e.data, true, nil
 		}
-	}
-	if len(entries) > 0 {
-		return []byte{}, true, nil
 	}
 	return nil, false, nil
 }

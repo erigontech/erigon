@@ -1391,8 +1391,9 @@ func (b *Block) BlockAccessListHash() *common.Hash   { return b.header.BlockAcce
 // payload (nil when absent). It is not part of the block's RLP encoding or hash.
 func (b *Block) BlockAccessList() []byte { return b.blockAccessList }
 
-// SetBlockAccessList attaches the RLP-encoded BAL sidecar to the block.
-func (b *Block) SetBlockAccessList(bal []byte) { b.blockAccessList = bal }
+// SetBlockAccessList attaches the RLP-encoded BAL sidecar to the block, copying
+// the input so a transaction-owned or later-mutated source cannot alias it.
+func (b *Block) SetBlockAccessList(bal []byte) { b.blockAccessList = bytes.Clone(bal) }
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }

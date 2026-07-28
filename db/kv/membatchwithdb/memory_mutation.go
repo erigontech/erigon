@@ -1143,19 +1143,21 @@ func (v *OverlayTemporalReadView) Apply(_ context.Context, f func(tx kv.Tx) erro
 // Temporal methods — check the installed SD chain before the committed tx.
 
 func (v *OverlayTemporalReadView) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
+	// The installed reader walks the whole generation chain and falls through to
+	// v.temporalTx itself, so its value and error are authoritative — a nil here
+	// is a genuine tombstone, not a cue to re-read the committed tx.
 	if dr, ok := v.MemoryMutation.DomainReader.(domainLatestReader); ok {
-		if val, step, err := dr.GetLatest(name, v.temporalTx, k); err == nil && val != nil {
-			return val, step, nil
-		}
+		return dr.GetLatest(name, v.temporalTx, k)
 	}
 	return v.temporalTx.GetLatest(name, k)
 }
 
 func (v *OverlayTemporalReadView) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+	// Authoritative for the same reason as GetLatest: the reader already honours
+	// parent-generation tombstones and the committed tx, so a false result must
+	// not be overridden by re-checking committed storage the overlay cleared.
 	if dr, ok := v.MemoryMutation.DomainReader.(domainLatestReader); ok {
-		if fk, fv, ok, err := dr.HasPrefix(name, prefix, v.temporalTx); ok || err != nil {
-			return fk, fv, ok, err
-		}
+		return dr.HasPrefix(name, prefix, v.temporalTx)
 	}
 	return v.temporalTx.HasPrefix(name, prefix)
 }
@@ -1168,8 +1170,12 @@ func (v *OverlayTemporalReadView) GetAsOf(name kv.Domain, k []byte, ts uint64) (
 	// Check DomainReader independently — this method shadows MemoryMutation.GetAsOf
 	// and falls through to v.temporalTx (not m.db), so the embedded check never fires.
 	if v.MemoryMutation != nil && v.MemoryMutation.DomainReader != nil {
-		if val, ok, err := v.MemoryMutation.DomainReader.GetAsOf(name, k, ts); err == nil && ok {
-			return val, ok, nil
+		val, ok, err := v.MemoryMutation.DomainReader.GetAsOf(name, k, ts)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			return val, true, nil
 		}
 	}
 	return v.temporalTx.GetAsOf(name, k, ts)
@@ -1187,8 +1193,12 @@ func (v *OverlayTemporalReadView) HistorySeek(name kv.Domain, k []byte, ts uint6
 	// Check DomainReader independently — this method shadows MemoryMutation.HistorySeek
 	// and falls through to v.temporalTx (not m.db), so the embedded check never fires.
 	if v.MemoryMutation != nil && v.MemoryMutation.DomainReader != nil {
-		if val, ok, err := v.MemoryMutation.DomainReader.HistorySeek(name, k, ts); err == nil && ok {
-			return val, ok, nil
+		val, ok, err := v.MemoryMutation.DomainReader.HistorySeek(name, k, ts)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			return val, true, nil
 		}
 	}
 	return v.temporalTx.HistorySeek(name, k, ts)

@@ -1485,6 +1485,89 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 	}
 }
 
+// TestSharedDomain_HasPrefix_ParentChain pins the background-commit generation
+// chain: a child SD's prefix reads must see storage written only in an
+// uncommitted parent generation, and must NOT resurrect committed storage that
+// a parent generation cleared.
+func TestSharedDomain_HasPrefix_ParentChain(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	db := newTestDb(t, uint64(1))
+
+	acc1 := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	acc1slot := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
+	storageK1 := append(append([]byte{}, acc1[:]...), acc1slot[:]...)
+	acc2 := common.HexToAddress("0x1234567890123456789012345678901234567891")
+	acc2slot := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000002")
+	storageK2 := append(append([]byte{}, acc2[:]...), acc2slot[:]...)
+
+	// Commit acc1's storage so it lives in the DB (the "already committed" state a
+	// parent generation may later clear).
+	rwTx0, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(rwTx0.Rollback)
+	base, err := execctx.NewSharedDomains(ctx, rwTx0, log.New())
+	require.NoError(t, err)
+	require.NoError(t, base.DomainPut(kv.StorageDomain, rwTx0, storageK1, []byte{1}, 1, nil))
+	require.NoError(t, base.Flush(ctx, rwTx0))
+	require.NoError(t, rwTx0.Commit())
+	base.Close()
+
+	// Parent generation (uncommitted): write acc2's storage and clear acc1's.
+	rwTxP, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(rwTxP.Rollback)
+	parent, err := execctx.NewSharedDomains(ctx, rwTxP, log.New())
+	require.NoError(t, err)
+	t.Cleanup(parent.Close)
+	require.NoError(t, parent.DomainPut(kv.StorageDomain, rwTxP, storageK2, []byte{2}, 2, nil))
+	require.NoError(t, parent.DomainDelPrefix(kv.StorageDomain, rwTxP, acc1[:], 3))
+
+	// Child generation chained onto the parent, reading a committed snapshot.
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	t.Cleanup(roTx.Rollback)
+	child, err := execctx.NewSharedDomains(ctx, roTx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(child.Close)
+	child.SetParent(parent)
+
+	// Item 3c: storage written only in the parent generation is visible.
+	firstKey, firstVal, ok, err := child.HasPrefix(kv.StorageDomain, acc2[:], roTx)
+	require.NoError(t, err)
+	require.True(t, ok, "parent-generation storage must be visible to the child")
+	require.Equal(t, storageK2, firstKey)
+	require.Equal(t, []byte{2}, firstVal)
+
+	var iterated [][]byte
+	require.NoError(t, child.IteratePrefix(kv.StorageDomain, acc2[:], roTx, func(k, _ []byte) (bool, error) {
+		iterated = append(iterated, bytes.Clone(k))
+		return true, nil
+	}))
+	require.Equal(t, [][]byte{storageK2}, iterated)
+
+	// Item 3b: committed storage cleared by the parent generation must not be
+	// resurrected from the committed tx.
+	firstKey, firstVal, ok, err = child.HasPrefix(kv.StorageDomain, acc1[:], roTx)
+	require.NoError(t, err)
+	require.False(t, ok, "storage cleared by the parent generation must stay cleared")
+	require.Nil(t, firstKey)
+	require.Nil(t, firstVal)
+
+	iterated = nil
+	require.NoError(t, child.IteratePrefix(kv.StorageDomain, acc1[:], roTx, func(k, _ []byte) (bool, error) {
+		iterated = append(iterated, bytes.Clone(k))
+		return true, nil
+	}))
+	require.Empty(t, iterated, "IteratePrefix must not yield parent-cleared storage")
+}
+
 // TestDomainPut_HistoryCorrectness is a property test that verifies history invariants
 // after random sequences of DomainPut calls:
 //  1. GetAsOf returns the correct value at every txNum (history is complete and accurate)

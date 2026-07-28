@@ -247,6 +247,9 @@ type ExecModule struct {
 	commitWorkerStop chan struct{}
 	commitStopOnce   sync.Once
 	commitWg         sync.WaitGroup
+	// commitFatalOnce ensures a failed durable commit triggers node shutdown at
+	// most once, even as the worker drains further generations that also fail.
+	commitFatalOnce sync.Once
 
 	// stateCache is a cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
@@ -351,10 +354,11 @@ func NewExecModule(
 // WaitIdle blocks until any in-flight updateForkChoice goroutine finishes.
 // Call before closing the database to avoid waitTxsAllDoneOnClose hangs.
 func (e *ExecModule) WaitIdle(ctx context.Context) {
-	if err := e.fgAcquire(ctx); err != nil {
-		return // context cancelled — best effort
+	// Best-effort foreground barrier; even if the ctx is cancelled we must still
+	// stop the worker below so it can never run against a closing DB.
+	if err := e.fgAcquire(ctx); err == nil {
+		e.fgRelease()
 	}
-	e.fgRelease()
 	// Stop the background-commit worker and wait for it to drain its queue
 	// (including any in-flight commit tx) so DB-close does not race it.
 	e.stopCommitWorker()

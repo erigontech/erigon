@@ -346,7 +346,10 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		if !r.writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
 			cc.state.ApplyWrites(r.writes, r.rules.IsAmsterdam)
-			cc.bufferChangesetWrites(r)
+			if err := cc.bufferChangesetWrites(r); err != nil {
+				cc.publish(ctx, commitmentResult{blockNum: r.blockNum, txNum: r.txNum, err: err})
+				return
+			}
 		}
 
 		// A computed-ahead block already emitted its interior step checkpoints from
@@ -411,7 +414,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				// ahead of the tx-result stream; fill its account/storage/code diffs
 				// now that the block's writes are buffered.
 				if cc.ownsChangeset(r.BlockNum) {
-					cc.finalizeFoldedChangeset(r.BlockNum, r.BlockHash)
+					cc.finalizeFoldedChangeset(ctx, r)
 				}
 			}
 		case cc.perBlockCompute(r.BlockNum):
@@ -931,10 +934,13 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 // writes are complete — preserving the commitment branch deltas (Diffs[3]) the fold
 // already recorded. A fold computes the root (and Diffs[3]) ahead of the tx-result
 // stream, so 0..2 cannot be built at fold time; this closes that gap.
-func (cc *commitmentCalculator) finalizeFoldedChangeset(blockNum uint64, blockHash common.Hash) {
-	localAcc, err := cc.buildResultLocalChangeset(blockNum)
+func (cc *commitmentCalculator) finalizeFoldedChangeset(ctx context.Context, r *blockResult) {
+	localAcc, err := cc.buildResultLocalChangeset(r.BlockNum)
 	if err != nil {
-		cc.logger.Warn("["+cc.logPrefix+"] changeset reconstruct: reader error", "block", blockNum, "err", err)
+		// A discarded reader error would save only the fold's commitment diffs
+		// (Diffs[3]), leaving account/storage/code state unrestorable on reorg —
+		// surface it so the apply loop fails the block instead.
+		cc.publish(ctx, commitmentResult{blockNum: r.BlockNum, txNum: r.lastTxNum, err: err})
 		return
 	}
 	if localAcc == nil {
@@ -942,14 +948,14 @@ func (cc *commitmentCalculator) finalizeFoldedChangeset(blockNum uint64, blockHa
 	}
 	cc.doms.LockChangesetAccumulator()
 	defer cc.doms.UnlockChangesetAccumulator()
-	cs := cc.doms.GetChangesetByHash(blockNum, blockHash)
+	cs := cc.doms.GetChangesetByHash(r.BlockNum, r.BlockHash)
 	if cs == nil {
 		cs = &changeset.StateChangeSet{}
 	}
 	cs.Diffs[kv.AccountsDomain] = localAcc.Diffs[kv.AccountsDomain]
 	cs.Diffs[kv.StorageDomain] = localAcc.Diffs[kv.StorageDomain]
 	cs.Diffs[kv.CodeDomain] = localAcc.Diffs[kv.CodeDomain]
-	cc.doms.SavePastChangesetAccumulator(blockHash, blockNum, cs)
+	cc.doms.SavePastChangesetAccumulator(r.BlockHash, r.BlockNum, cs)
 }
 
 // asOfStateReader reads account/storage/code at a specific txNum via

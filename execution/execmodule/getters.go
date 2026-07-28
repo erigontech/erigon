@@ -66,15 +66,18 @@ func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.TemporalTx, func(
 	}
 	if sd != nil {
 		if overlay := sd.BlockOverlay(); overlay != nil {
-			// Open a fresh RO tx while still holding the read lock so that
-			// the overlay cannot be closed between our check and the
-			// NewReadView call (TOCTOU avoidance).
+			// Open a fresh RO tx while still holding the read lock so the
+			// generation chain cannot change between the check and building the
+			// view (TOCTOU avoidance). Route through BlockOverlayTemporalTx so
+			// the view chains every ancestor generation's block overlay, not just
+			// the leaf — otherwise reads miss uncommitted block data from earlier
+			// FCUs.
 			roTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
 				e.lock.RUnlock()
 				return nil, nil, err
 			}
-			view := overlay.NewReadView(roTx)
+			view := sd.BlockOverlayTemporalTx(roTx)
 			e.lock.RUnlock()
 			return view, func() { roTx.Rollback() }, nil
 		}
