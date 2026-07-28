@@ -53,7 +53,7 @@ This path offers the simplest validator configuration by using Erigon's embedded
 4. **Validator Swap**: Once Erigon is fully synced, shut down Geth and the external CL client.
 5. **Reconfiguration and Restart**:
    * To restart Erigon, there's no need to specify `--port`. Refer to this [guide](../fundamentals/caplin) for additional Erigon + Caplin configuration recommendations.
-   * Crucially, reconfigure your **validator keys manager** to point directly to the Erigon Beacon API, as Erigon/Caplin now handles both layers internally).
+   * Crucially, reconfigure your **validator keys manager** to point directly to the Erigon Beacon API, as Erigon/Caplin now handles both layers internally.
 6. **Decommission Old Setup**: Verify Erigon/Caplin is proposing and attesting blocks correctly. If confirmed, safely remove Geth, the external CL client, and all their data, including the old JWT secret.
 </TabItem>
 <TabItem value="migrate-to-erigon-+-external-cl" label="Migrate to Erigon + External CL">
