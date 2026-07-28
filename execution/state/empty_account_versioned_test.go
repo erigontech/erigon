@@ -240,3 +240,38 @@ func TestVersionedWritesClearTouchedEmptyAccount(t *testing.T) {
 		require.True(t, hasBalance)
 	})
 }
+
+// Emptiness turns on the account record, balance, nonce and code hash, so a tx
+// writing none of them cannot have emptied the account. Resolving those fields
+// regardless would leave a storage writer depending on the account's balance,
+// which a concurrent transfer into that account then invalidates.
+func TestVersionedWritesEmptinessKeepsReadFootprint(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+
+	contract := accounts.NewAccount()
+	contract.Balance = *uint256.NewInt(1000)
+	contract.Nonce = 1
+	reader := &accountStateReader{
+		accounts: map[accounts.Address]*accounts.Account{addr: &contract},
+	}
+
+	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(1, 1)
+	ibs.SetVersion(0)
+
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(7)))
+
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	require.NoError(t, err)
+	_, deleted := writes.GetSelfDestruct(addr)
+	require.False(t, deleted)
+
+	reads := ibs.VersionedReads()
+	_, hasBalanceRead := reads.GetBalance(addr)
+	require.False(t, hasBalanceRead, "a storage write must not depend on the account's balance")
+}

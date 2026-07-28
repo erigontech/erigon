@@ -2935,6 +2935,25 @@ func (s *WriteSet) accountAfterWrites(addr accounts.Address, account accounts.Ac
 	return account, true
 }
 
+// wroteAccountFields reports whether these writes touch a field EIP-161
+// emptiness turns on: the account record, balance, nonce or code hash.
+func (s *WriteSet) wroteAccountFields(addr accounts.Address) bool {
+	if s == nil {
+		return false
+	}
+	if _, ok := s.address[addr]; ok {
+		return true
+	}
+	if _, ok := s.balance[addr]; ok {
+		return true
+	}
+	if _, ok := s.nonce[addr]; ok {
+		return true
+	}
+	_, ok := s.codeHash[addr]
+	return ok
+}
+
 // createdEmpty reports whether these writes create addr and leave it empty, with
 // nothing else recorded against it. The AddressPath write carries the account as
 // created, so overlaying the field writes gives its end-of-tx value; anything

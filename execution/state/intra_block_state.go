@@ -2654,7 +2654,13 @@ func (sdb *IntraBlockState) clearEmptyAccounts(chainRules *chain.Rules, deferred
 
 // existingAccountEndsEmpty resolves fields not replaced by an AddressPath write
 // through the version map so prior transactions become validation dependencies.
+// A tx that wrote none of those fields cannot have emptied the account, and
+// resolving them regardless would leave a mere storage writer depending on the
+// account's balance.
 func (sdb *IntraBlockState) existingAccountEndsEmpty(addr accounts.Address) (bool, error) {
+	if !sdb.versionedWrites.wroteAccountFields(addr) {
+		return false, nil
+	}
 	addressRead, ok := sdb.versionedReads.GetAddress(addr)
 	var account accounts.Account
 	if ok && addressRead.Val != nil && !addressRead.Val.IsNil() {
