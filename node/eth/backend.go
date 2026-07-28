@@ -2351,6 +2351,9 @@ func (s *Ethereum) applyForkChainConfigSwap(ctx context.Context, target *chain.C
 
 	s.chainConfig = target
 
+	s.applyForkDownloaderIdentity(target)
+	s.applyForkManifestExchangeFilters(target)
+
 	var startErrs []string
 	for _, name := range []string{"storage", "sentry", "caplin"} {
 		r, ok := restartables[name]
@@ -2398,6 +2401,41 @@ func (s *Ethereum) chainConfigReconfigurables() map[string]rpchelper.ChainConfig
 		m["manifest_exchange"] = s.manifestExchange
 	}
 	return m
+}
+
+// applyForkDownloaderIdentity re-runs the chain-identity + fork-cut-block
+// wiring the bootstrap path performs at backend construction, so the
+// running Downloader publishes manifests + accepts peer manifests under
+// the target chain's identity after a SetFork transition.
+func (s *Ethereum) applyForkDownloaderIdentity(target *chain.Config) {
+	if s.components == nil || s.components.Downloader == nil || s.components.Downloader.Downloader == nil {
+		return
+	}
+	if s.genesisBlock == nil {
+		return
+	}
+	dl := s.components.Downloader.Downloader
+	genesisFork, forks := downloader.BuildChainIdentity(target, s.genesisHash, s.genesisBlock.Time())
+	dl.SetChainIdentity(genesisFork, forks)
+	if target.Parent != "" && target.CutBlock > 0 {
+		dl.SetForkCutBlock(target.CutBlock, nil)
+	}
+}
+
+// applyForkManifestExchangeFilters re-installs the consumer-side
+// ForkIDFilter + ForkPostCutValidator closures on manifest_exchange
+// against the target chain.Config — manifest_exchange.Reconfigure
+// itself is a stub because its chain-config coupling lives entirely
+// in these caller-installed closures.
+func (s *Ethereum) applyForkManifestExchangeFilters(target *chain.Config) {
+	if s.manifestExchange == nil || s.genesisBlock == nil {
+		return
+	}
+	localGenesisFork, _ := downloader.BuildChainIdentity(target, s.genesisHash, s.genesisBlock.Time())
+	localH, localT := forkid.GatherForks(target, s.genesisBlock.Time())
+	s.manifestExchange.SetForkIDFilter(manifestexchange.BuildForkIDFilter(
+		localGenesisFork, s.genesisHash, localH, localT))
+	s.manifestExchange.SetForkPostCutValidator(manifestexchange.BuildForkPostCutValidator(target.CutBlock, nil))
 }
 
 func readCurrentBlockNumber(ctx context.Context, db kv.RwDB) (uint64, error) {
