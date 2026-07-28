@@ -75,6 +75,72 @@ func newSmallStateCache() *cache.StateCache {
 	return cache.NewStateCache(b, b, b, b)
 }
 
+type visibleEndCountingDebugTx struct {
+	kv.TemporalDebugTx
+	calls uint64
+	last  uint64
+}
+
+func (tx *visibleEndCountingDebugTx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
+	tx.calls++
+	end, ok := tx.TemporalDebugTx.DomainVisibleEnd(domain)
+	tx.last = end
+	return end, ok
+}
+
+type visibleEndCountingRwTx struct {
+	kv.TemporalRwTx
+	debug *visibleEndCountingDebugTx
+}
+
+func (tx *visibleEndCountingRwTx) Debug() kv.TemporalDebugTx {
+	return tx.debug
+}
+
+func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
+	t.Parallel()
+
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+
+	baseTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer baseTx.Rollback()
+	debug := &visibleEndCountingDebugTx{TemporalDebugTx: baseTx.Debug()}
+	rwTx := &visibleEndCountingRwTx{TemporalRwTx: baseTx, debug: debug}
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	domains.SetStateCacheForTest(stateCache)
+
+	for i := byte(2); i <= 3; i++ {
+		missing := make([]byte, 20)
+		missing[0] = i
+		value, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, missing)
+		require.NoError(t, err)
+		require.Empty(t, value)
+	}
+	require.Equal(t, uint64(1), debug.calls)
+	initialEnd := debug.last
+
+	written := make([]byte, 20)
+	written[0] = 4
+	domains.SetTxNum(20)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, written, encAccount(2), 20, nil))
+	require.NoError(t, domains.Flush(ctx, rwTx))
+
+	missing := make([]byte, 20)
+	missing[0] = 5
+	value, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, missing)
+	require.NoError(t, err)
+	require.Empty(t, value)
+	require.Equal(t, uint64(2), debug.calls)
+	require.Greater(t, debug.last, initialEnd)
+}
+
 // During an in-flight unwind the mem overlay bounds reads of an affected key
 // by maxStep while MDBX still holds the not-yet-deleted dying row inside that
 // bound. A cache hit legitimately below the unwind floor then diverges from

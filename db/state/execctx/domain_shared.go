@@ -81,6 +81,38 @@ type accHolder interface {
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 }
 
+type domainVisibleEndMemo struct {
+	viewID uint64
+	ends   [kv.DomainLen]uint64
+	loaded [kv.DomainLen]bool
+	ok     [kv.DomainLen]bool
+}
+
+func (m *domainVisibleEndMemo) get(tx kv.TemporalTx, domain kv.Domain) (uint64, bool) {
+	viewID := tx.ViewID()
+	if viewID != m.viewID {
+		m.viewID = viewID
+		m.loaded = [kv.DomainLen]bool{}
+	}
+
+	if !m.loaded[domain] {
+		m.ends[domain], m.ok[domain] = tx.Debug().DomainVisibleEnd(domain)
+		m.loaded[domain] = true
+	}
+	return m.ends[domain], m.ok[domain]
+}
+
+func (m *domainVisibleEndMemo) reset() {
+	m.loaded = [kv.DomainLen]bool{}
+}
+
+func (sd *SharedDomains) domainVisibleEnd(tx kv.TemporalTx, domain kv.Domain) (uint64, bool) {
+	if _, ok := tx.(kv.TemporalRwTx); ok {
+		return sd.visibleEnds.get(tx, domain)
+	}
+	return tx.Debug().DomainVisibleEnd(domain)
+}
+
 func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
 	doms, err := NewSharedDomains(ctx, tx, logger)
 	if doms != nil {
@@ -125,6 +157,10 @@ type SharedDomains struct {
 
 	// stateCache is an optional cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
+
+	// Backing frontiers stay fixed while writes remain in mem; flush resets
+	// the memo after writing them into the transaction.
+	visibleEnds domainVisibleEndMemo
 
 	// codeStore is the optional two-tier (in-mem + MDBX) codehash-keyed code
 	// cache, reached via temporalGetter so an addr-keyed reader can serve a
@@ -864,6 +900,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 }
 
 func (sd *SharedDomains) flushMem(ctx context.Context, tx kv.RwTx, opts ...kv.FlushOption) error {
+	defer sd.visibleEnds.reset()
 	if sd.sdCtx.HasPendingUpdate() {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
 			if err := sd.FlushPendingUpdates(ctx, ttx); err != nil {
@@ -1208,7 +1245,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	// View freshness is rechecked while the fill is serialized against
 	// committed cache updates.
 	if sd.stateCache != nil && sd.stateCache.GetCache(domain) != nil {
-		if visibleEnd, ok := tx.Debug().DomainVisibleEnd(domain); ok {
+		if visibleEnd, ok := sd.domainVisibleEnd(tx, domain); ok {
 			readTxNum := (uint64(step)+1)*sd.StepSize() - 1
 			sd.stateCache.FillIfFresh(domain, k, v, readTxNum, visibleEnd)
 		}
@@ -1400,7 +1437,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 		// slipping pre-apply state past the gate. txNum is a conservative upper
 		// bound (>= the resolved account's write txNum), so the mapping drops
 		// on any unwind that reverts that account.
-		if visibleEnd, ok := tx.Debug().DomainVisibleEnd(kv.AccountsDomain); ok {
+		if visibleEnd, ok := sd.domainVisibleEnd(tx, kv.AccountsDomain); ok {
 			sd.stateCache.PutAddrCodeHashIfFresh(addr, fixed, txNum, visibleEnd)
 		}
 	}

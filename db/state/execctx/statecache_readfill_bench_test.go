@@ -66,17 +66,25 @@ func BenchmarkDomainVisibleEnd(b *testing.B) {
 // benchColdNegativeReads drives the full cold-negative SD read: the whole
 // miss stack, plus — when a cache is wired — the exact-frontier lookup and
 // freshness-checked fill.
-func benchColdNegativeReads(b *testing.B, withCache bool) {
+func benchColdNegativeReads(b *testing.B, withCache, writable bool) {
 	db := benchSeedDb(b)
 	ctx := b.Context()
-	roTx, err := db.BeginTemporalRo(ctx)
+	var tx kv.TemporalTx
+	var err error
+	if writable {
+		tx, err = db.BeginTemporalRw(ctx)
+	} else {
+		tx, err = db.BeginTemporalRo(ctx)
+	}
 	require.NoError(b, err)
-	defer roTx.Rollback()
-	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
+	defer tx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	require.NoError(b, err)
 	defer sd.Close()
 	if withCache {
-		sd.SetStateCacheForTest(newSmallStateCache())
+		stateCache := newSmallStateCache()
+		defer stateCache.Close()
+		sd.SetStateCacheForTest(stateCache)
 	}
 
 	key := make([]byte, 20)
@@ -84,7 +92,7 @@ func benchColdNegativeReads(b *testing.B, withCache bool) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		binary.BigEndian.PutUint64(key[12:], uint64(i)+1)
-		v, _, err := sd.GetLatest(kv.AccountsDomain, roTx, key)
+		v, _, err := sd.GetLatest(kv.AccountsDomain, tx, key)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -94,7 +102,15 @@ func benchColdNegativeReads(b *testing.B, withCache bool) {
 	}
 }
 
-func BenchmarkGetLatestColdNegative(b *testing.B) { benchColdNegativeReads(b, true) }
+func BenchmarkGetLatestColdNegative(b *testing.B) { benchColdNegativeReads(b, true, false) }
 
 // The baseline the stamp+fill cost adds to.
-func BenchmarkGetLatestColdNegativeNoCache(b *testing.B) { benchColdNegativeReads(b, false) }
+func BenchmarkGetLatestColdNegativeNoCache(b *testing.B) {
+	benchColdNegativeReads(b, false, false)
+}
+
+func BenchmarkGetLatestColdNegativeRw(b *testing.B) { benchColdNegativeReads(b, true, true) }
+
+func BenchmarkGetLatestColdNegativeRwNoCache(b *testing.B) {
+	benchColdNegativeReads(b, false, true)
+}
