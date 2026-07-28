@@ -1,6 +1,6 @@
 ---
 name: qa-test-results
-description: Read and interpret the results, logs and artifacts of Erigon's QA workflows (the `qa-*.yml` GitHub Actions workflows - tip tracking, sync from scratch, snapshot download, clean exit, stage exec, RPC integration/performance, txpool). Use when asked why a QA test failed, what a QA run measured, how to read a QA test log, what "Deadline reached" / "total sync time below threshold" / "exec_steps_in_db exceeded threshold" mean, or when triaging a red `QA - ...` check on a PR or release branch.
+description: Read and interpret the results, logs and artifacts of Erigon's QA workflows (the `qa-*.yml` GitHub Actions workflows - tip tracking, sync from scratch, snapshot download, clean exit, RPC integration/performance). Use when asked why a QA test failed, what a QA run measured, how to read a QA test log, what "Deadline reached" / "total sync time below threshold" / "exec_steps_in_db exceeded threshold" mean, or when triaging a red `QA - ...` check on a PR or release branch.
 ---
 
 # Reading QA test results
@@ -97,7 +97,28 @@ tip-tracking report:
 Full field-by-field reference, including the metric block that follows it:
 [references/tip-tracking-report.md](references/tip-tracking-report.md).
 
-## The three ways a tip-tracking-family test fails
+**Which step holds the log.** For the sync tests the report and the Erigon
+output you want are in the step **`Run Erigon, wait sync and check ability to
+maintain sync`**. Tip-tracking runs a preparatory step first,
+**`Run previous Erigon version and wait for sync (stabilization step)`**, which
+brings the pre-built DB up to the tip using a *previous* Erigon release — its
+logs are normally irrelevant to the verdict, but if *it* fails (the reference
+version couldn't reach the tip) the branch under test never got to run, so check
+it before blaming the PR.
+
+## The three test categories
+
+The documentation groups the `qa-*` workflows into three families, each with its
+own log shape:
+
+- **Sync tests** — tip-tracking (pre-built DB) and sync-from-scratch (blank DB).
+  Both drive the same tip-tracking Python driver and share the `***` report and
+  thresholds described below.
+- **RPC tests** — integration (response diffs) and performance (latency at rising
+  QPS). Different log format entirely: [references/rpc-tests.md](references/rpc-tests.md).
+- **Miscellaneous** — snapshot download and clean exit. See *Other test families*.
+
+## The three ways a Sync test fails
 
 These cover `qa-tip-tracking*`, `qa-constrained-tip-tracking`,
 `qa-sync-from-scratch*`, `qa-sync-with-externalcl` and
@@ -155,7 +176,27 @@ ERROR: ...` (any `[EROR]` line while the test is active), `SIGSEGV`, and
 `reason`. [references/triage.md](references/triage.md) has the full decision
 tree, including which failures are genuinely environmental.
 
-## Other test families
+## RPC tests
+
+Not a `***`-report log — a per-request pass/fail list (integration) or a
+per-QPS-stage latency list (performance), each with its own verdict location.
+Full log-reading guide: [references/rpc-tests.md](references/rpc-tests.md).
+
+- **integration** — replays ~1000 requests and marks each `OK` or
+  `failed: diff mismatch` (vs stored expected responses on historical data, vs a
+  reference client — geth/nethermind — on tip data). Verdict is in
+  `results/test_report.json` + `output.log` + a `summary.md` echoed into the job
+  summary, **not** in `result-<chain>.json`. The suite retries up to 5× to shake
+  out transient tip inconsistency; a per-test **actual/expected/diff** folder
+  ships in the artifact, also browsable at
+  <http://rpctests.erigon.io/hive/main/index.html>.
+- **performance** — Vegeta at rising QPS; each stage logs
+  `success=…% lat=[max=…]`, then HDR percentiles per method. `outcome=success` in
+  the log is *not* the verdict: the job fails on **change-point detection**, and
+  a red run can reflect an *open change-point issue* from an older regression, not
+  this run.
+
+## Other test families (Miscellaneous)
 
 Each has its own driver, thresholds and report vocabulary:
 
@@ -165,12 +206,6 @@ Each has its own driver, thresholds and report vocabulary:
   `segmentation fault`, or not exiting within the threshold.
 - **stage-exec** — runs `integration stage_exec` and scans for `[EROR]`,
   `catch panic`, `wrong receipt`, `SIGSEGV`, `EXCEPTION`.
-- **RPC integration** — diff count against expected responses; verdict lives in
-  `results/test_report.json` and `output.log`, plus a `summary.md` echoed into
-  the job summary.
-- **RPC performance / txpool** — latency percentiles at increasing QPS, then
-  change-point detection; a run can fail because an *open change-point issue*
-  exists, not because this run was slow.
 
 Details and the per-workflow table (runner labels, driver script, timings,
 artifact names, `--test_name` used in MongoDB):

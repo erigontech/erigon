@@ -145,11 +145,15 @@ Method:
   matrix entries** failed → the parallel executor (`ERIGON_EXEC3_PARALLEL`), not
   execution in general.
 - **RPC integration** — start from the job summary (`summary.md` is echoed
-  there), then `results/test_report.json` for the failing methods and the diff
-  files in the result dir.
-- **RPC performance / txpool** — a red run may reflect an **open change-point
-  issue** from an earlier regression rather than this run. Check the issue
-  tracker state before attributing it to the commit under test.
+  there), then `results/test_report.json` for the failing methods and the
+  per-test actual/expected/diff folders in the result dir (also at
+  <http://rpctests.erigon.io/hive/main/index.html>). A `failed: diff mismatch`
+  that clears on one of the ≤ 5 retries was transient tip inconsistency; one that
+  persists across all attempts is real. Log-reading detail: [rpc-tests.md](rpc-tests.md).
+- **RPC performance** — a red run may reflect an **open change-point
+  issue** from an earlier regression rather than this run. `outcome=success` in
+  the per-method log is not the verdict. Check the issue tracker state before
+  attributing it to the commit under test. Log-reading detail: [rpc-tests.md](rpc-tests.md).
 
 ## 7. What to report
 

@@ -27,10 +27,14 @@ format, same thresholds ([tip-tracking-report.md](tip-tracking-report.md)).
 
 Notes that change how you read a run:
 
+- The report and Erigon output for the verdict live in the GitHub step
+  **`Run Erigon, wait sync and check ability to maintain sync`**.
 - The tip-tracking and Gnosis workflows run a **pre-test stabilisation step**
-  first (`pre_test_step`, previous Erigon version, 120 s tracking). A failure
-  there is *not* a failure of the branch under test — it means the reference
-  datadir was not tracking the tip. Check which step failed before blaming the PR.
+  first (`pre_test_step`, shown as
+  **`Run previous Erigon version and wait for sync (stabilization step)`**,
+  previous Erigon version, 120 s tracking). A failure there is *not* a failure of
+  the branch under test — it means the reference datadir was not tracking the tip.
+  Check which step failed before blaming the PR.
 - `sync-from-scratch` (archive) also runs the **RPC integration suite** against
   the freshly synced datadir afterwards, for mainnet and gnosis. That step can
   fail on its own — check `rpc-test-results-<chain>`.
@@ -48,9 +52,8 @@ Notes that change how you read a run:
 | `qa-snap-download.yml` | `qa-tests/snap-download/run_and_check_snap_download.py` | download doesn't start, doesn't complete, or a phase is left incomplete — `*** Snapshot download completed with failure: <why>`. Reports per-phase `*** <key> snap tot=…`, `*** <key> snap download time: N mins`, `*** Snapshots download time: N mins`. Also aborts on `*** Deadline reached` (8 h). |
 | `qa-clean-exit-block-downloading.yml`, `qa-clean-exit-snapshot-downloading.yml` | `qa-tests/clean-exit/run_and_check_clean_exit.py` | Erigon panics/segfaults, or doesn't exit within the threshold after Ctrl-C. Log form is `*** - <utc> - <msg>`, Erigon lines prefixed `OK->` / `!!->`. Measure: `exit_time_secs`. |
 | `qa-stage-exec.yml` | `qa-tests/stage-exec/run_and_check_stage_exec.py` | a scanned pattern appears: `[EROR] … catch panic`, `[EROR]`, `wrong receipt`, `SIGSEGV`, `panic`, `EXCEPTION`; or a non-zero exit. Matrix: `{resume-nonchaintip, from-0, chaintip} × {serial, parallel}` via `ERIGON_EXEC3_PARALLEL`. A parallel-only failure points at the parallel executor. |
-| `qa-rpc-integration-tests*.yml` (+ `-gnosis`, `-latest`, `-remote`, `-polygon`, `-clients`) | `.github/workflows/scripts/run_rpc_tests_*.sh` | response diffs vs expected (or vs geth/nethermind for `-latest`). Verdict in `results/test_report.json`; `summary.md` is echoed into the job summary, so **the GitHub run summary alone often suffices**. |
-| `qa-rpc-performance-tests.yml`, `qa-rpc-performance-comparison-tests.yml` | `qa-tests/rpc-tests/perf_hdr_analysis.py` + `change-points/change_point_analysis.py` | latency change-point detected → an issue is opened on the internal tracker; the job fails while **any change-point issue is open**. A red run therefore may reflect an older unresolved regression. |
-| `qa-txpool-performance-test.yml` | `qa-tests/tx-pool/*` | throughput/latency plots + change points. |
+| `qa-rpc-integration-tests*.yml` (+ `-gnosis`, `-latest`, `-remote`, `-polygon`, `-clients`) | `.github/workflows/scripts/run_rpc_tests_*.sh` | response diffs vs expected (or vs geth/nethermind for `-latest`). Verdict in `results/test_report.json`; `summary.md` is echoed into the job summary, so **the GitHub run summary alone often suffices**. Log format + per-test diffs: [rpc-tests.md](rpc-tests.md). |
+| `qa-rpc-performance-tests.yml`, `qa-rpc-performance-comparison-tests.yml` | `qa-tests/rpc-tests/perf_hdr_analysis.py` + `change-points/change_point_analysis.py` | latency change-point detected → an issue is opened on the internal tracker; the job fails while **any change-point issue is open**. A red run therefore may reflect an older unresolved regression. Log format: [rpc-tests.md](rpc-tests.md). |
 | `qa-rpc-test-bisection-tool.yml`, `qa-sync-test-bisection-tool.yml` | dispatch-only | bisect a regression across commits; inputs include `test_name`. |
 | `qa-test-report.yml` | `.github/workflows/scripts/test_report/generate-test-report.ts` (`ubuntu-latest`) | never — it renders a pass/fail grid over a date range for the workflows in its `acceptedWorkflows` list. Use it for "was this already failing yesterday?". |
 
