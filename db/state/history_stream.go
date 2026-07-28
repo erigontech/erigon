@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -136,7 +135,7 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		}
 
 		hi.seq.Reset(top.startTxNum, idxVal)
-		txNum, ok := hi.seq.Seek(hi.startTxNum)
+		txNum, _, ok := hi.seq.Seek(hi.startTxNum)
 		if !ok {
 			continue
 		}
@@ -215,7 +214,7 @@ func (hi *HistoryRangeAsOfFiles) Next() ([]byte, []byte, error) {
 	}
 	hi.orderAscend.Assert(hi.kBackup, hi.nextKey)
 	// TODO: remove `common.Copy`. it protecting from some existing bug. https://github.com/erigontech/erigon/issues/12672
-	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
+	return bytes.Clone(hi.kBackup), bytes.Clone(hi.vBackup), nil
 }
 
 // HistoryRangeAsOfDB - returns state range at given time in history
@@ -245,6 +244,11 @@ type HistoryRangeAsOfDB struct {
 func (hi *HistoryRangeAsOfDB) Close() {
 	if hi.valsC != nil {
 		hi.valsC.Close()
+		hi.valsC = nil
+	}
+	if hi.valsCDup != nil {
+		hi.valsCDup.Close()
+		hi.valsCDup = nil
 	}
 }
 
@@ -279,7 +283,7 @@ func (hi *HistoryRangeAsOfDB) advanceLargeVals() error {
 			hi.nextKey = nil
 			return nil
 		}
-		seek = append(common.Copy(firstKey[:len(firstKey)-8]), hi.startTxKey[:]...)
+		seek = append(bytes.Clone(firstKey[:len(firstKey)-8]), hi.startTxKey[:]...)
 	} else {
 		next, ok := kv.NextSubtree(hi.nextKey)
 		if !ok {
@@ -287,7 +291,8 @@ func (hi *HistoryRangeAsOfDB) advanceLargeVals() error {
 			return nil
 		}
 
-		seek = append(next, hi.startTxKey[:]...)
+		seek = next
+		seek = append(seek, hi.startTxKey[:]...)
 	}
 	for k, v, err := hi.valsC.Seek(seek); k != nil; k, v, err = hi.valsC.Seek(seek) {
 		if err != nil {
@@ -394,7 +399,7 @@ func (hi *HistoryRangeAsOfDB) Next() ([]byte, []byte, error) {
 	}
 	hi.orderAscend.Assert(hi.kBackup, hi.nextKey)
 	// TODO: remove `common.Copy`. it protecting from some existing bug. https://github.com/erigontech/erigon/issues/12672
-	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
+	return bytes.Clone(hi.kBackup), bytes.Clone(hi.vBackup), nil
 }
 
 // HistoryChangesIterFiles - producing state-patch for Unwind - return state-patch for Unwind: "what keys changed between `[from, to)` and what was their value BEFORE txNum"
@@ -440,7 +445,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		}
 
 		hi.seq.Reset(top.startTxNum, idxVal)
-		txNum, ok := hi.seq.Seek(hi.startTxNum)
+		txNum, _, ok := hi.seq.Seek(hi.startTxNum)
 		if !ok {
 			continue
 		}
@@ -566,7 +571,7 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			hi.nextKey = nil
 			return nil
 		}
-		seek = append(common.Copy(firstKey[:len(firstKey)-8]), hi.startTxKey[:]...)
+		seek = append(bytes.Clone(firstKey[:len(firstKey)-8]), hi.startTxKey[:]...)
 	} else {
 		next, ok := kv.NextSubtree(hi.nextKey)
 		if !ok {
@@ -574,7 +579,8 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			return nil
 		}
 
-		seek = append(next, hi.startTxKey[:]...)
+		seek = next
+		seek = append(seek, hi.startTxKey[:]...)
 	}
 	for k, v, err := hi.valsC.Seek(seek); k != nil; k, v, err = hi.valsC.Seek(seek) {
 		if err != nil {
@@ -586,7 +592,8 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 				hi.nextKey = nil
 				return nil
 			}
-			seek = append(next, hi.startTxKey[:]...)
+			seek = next
+			seek = append(seek, hi.startTxKey[:]...)
 			continue
 		}
 		if hi.nextKey != nil && bytes.Equal(k[:len(k)-8], hi.nextKey) && bytes.Equal(v, hi.nextVal) {
@@ -953,7 +960,7 @@ func (ht *HistoryTraceKeyDB) advanceSmallVals() error {
 		ht.k = nil
 	}
 	ht.v = ht.v[8:]
-	ht.v = common.Copy(ht.v)
+	ht.v = bytes.Clone(ht.v)
 	return nil
 }
 

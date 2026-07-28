@@ -18,7 +18,6 @@ package ethutils
 
 import (
 	"encoding/json"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -42,20 +41,27 @@ func MarshalReceipt(
 	signed bool,
 	withBlockTimestamp bool,
 ) map[string]any {
-	var chainId *big.Int
+	var chainId *uint256.Int
 	switch t := txn.(type) {
 	case *types.LegacyTx:
 		if t.Protected() {
-			chainId = types.DeriveChainId(&t.V).ToBig()
+			chainId, _ = types.DeriveChainId(&t.V)
 		}
 	default:
-		chainId = txn.GetChainID().ToBig()
+		chainId = txn.GetChainID()
 	}
 
 	var from accounts.Address
 	if signed {
 		signer := types.LatestSignerForChainID(chainId)
 		from, _ = txn.Sender(*signer)
+	}
+
+	// Reuse a Bloom the receipt's source already computed; hash the logs only
+	// when it was left unset (e.g. cache reads that skip bloom derivation).
+	logsBloom := receipt.Bloom
+	if logsBloom.IsEmpty() && len(receipt.Logs) > 0 {
+		logsBloom = types.CreateBloom(types.Receipts{receipt})
 	}
 
 	var logsToMarshal any
@@ -90,14 +96,16 @@ func MarshalReceipt(
 		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
 		"contractAddress":   nil,
 		"logs":              logsToMarshal,
-		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
+		"logsBloom":         logsBloom,
 	}
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
 		fields["effectiveGasPrice"] = (*hexutil.Big)(txn.GetTipCap().ToBig())
 	} else {
 		baseFee := header.BaseFee
-		gasPrice := new(uint256.Int).Add(baseFee, txn.GetEffectiveGasTip(baseFee))
+		effectiveTip := txn.GetEffectiveGasTip(baseFee)
+		var gasPrice uint256.Int
+		gasPrice.Add(baseFee, &effectiveTip)
 		fields["effectiveGasPrice"] = (*hexutil.Big)(gasPrice.ToBig())
 	}
 

@@ -36,7 +36,7 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	// generate updates
 	b.Logf("keys count: %d", keysCount)
 	builder := NewUpdateBuilder()
-	for i := 0; i < keysCount; i++ {
+	for range keysCount {
 		key := make([]byte, length.Addr)
 		rnd.Read(key)
 
@@ -48,7 +48,7 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	err := ms.applyPlainUpdates(pk, updates)
 	require.NoError(b, err)
 
-	hph := NewHexPatriciaHashed(length.Addr, ms)
+	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 	upds := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, nil, nil)
 	defer upds.Close()
 

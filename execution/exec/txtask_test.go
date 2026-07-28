@@ -21,7 +21,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // TestAwaitDrainExitsOnContextCancel reproduces the infinite-loop described in
@@ -82,4 +89,68 @@ func TestAwaitDrainExitsOnContextCancel(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("AwaitDrain did not respect context cancellation – infinite loop detected (issue #18252)")
 	}
+}
+
+// TestCreateReceiptTxIndex verifies the invariant that CreateReceipt assigns the local
+// block transaction index parameter directly to the receipt's TransactionIndex, preventing
+// regressions where the global TxNum is leaked into the receipt during partial block recovery.
+func TestCreateReceiptTxIndex(t *testing.T) {
+	t.Parallel()
+
+	const (
+		txIndex       = 196
+		firstLogIndex = 7
+	)
+	const (
+		txNum           uint64 = 3_548_828_125
+		priorCumGasUsed uint64 = 47_198_456
+		receiptGasUsed  uint64 = 21_000
+		blockNumber     uint64 = 25_200_946
+	)
+
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	to := crypto.PubkeyToAddress(key.PublicKey)
+	config := chain.TestChainBerlinConfig
+	signer := types.MakeSigner(config, blockNumber, 0)
+	signedTx, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{
+			Nonce:    0,
+			To:       &to,
+			Value:    *uint256.NewInt(0),
+			GasLimit: receiptGasUsed,
+		},
+		GasPrice: *uint256.NewInt(1),
+	}, *signer, key)
+	require.NoError(t, err)
+
+	txs := make(types.Transactions, txIndex+1)
+	txs[txIndex] = signedTx
+	txTask := &TxTask{
+		TxNum:   txNum,
+		TxIndex: txIndex,
+		Header:  &types.Header{Number: *uint256.NewInt(blockNumber)},
+		Txs:     txs,
+		Config:  config,
+	}
+	result := &TxResult{
+		Task: txTask,
+		ExecutionResult: evmtypes.ExecutionResult{
+			ReceiptGasUsed: receiptGasUsed,
+		},
+		Logs: []*types.Log{{}},
+	}
+
+	receipt, err := result.CreateReceipt(txTask.TxIndex, priorCumGasUsed+result.ExecutionResult.ReceiptGasUsed, firstLogIndex)
+	require.NoError(t, err)
+
+	require.Equal(t, uint(txIndex), receipt.TransactionIndex)
+	require.NotEqual(t, uint(txNum), receipt.TransactionIndex)
+	require.Equal(t, signedTx.Hash(), receipt.TxHash)
+	require.Equal(t, txTask.BlockHash(), receipt.BlockHash)
+	require.Equal(t, priorCumGasUsed+receiptGasUsed, receipt.CumulativeGasUsed)
+	require.Equal(t, receiptGasUsed, receipt.GasUsed)
+	require.Equal(t, uint32(firstLogIndex), receipt.FirstLogIndexWithinBlock)
+	require.Len(t, receipt.Logs, 1)
+	require.Equal(t, hexutil.Uint(firstLogIndex), receipt.Logs[0].Index)
 }

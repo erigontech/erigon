@@ -1,0 +1,263 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package stagedsync
+
+import (
+	"context"
+	"testing"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+)
+
+// TestShouldComputeOnRequest_GenesisFirstBatch is the regression test for
+// the batch-mode genesis-commitment bug:
+//
+// In BatchCommitments mode the calculator only computes on
+// commitComputeRequest. The very first batch of an exec3 cycle that runs
+// only the genesis block produces lastBlockResult.BlockNum=0. The dedup
+// check used to be `lastBlockResult.BlockNum > lastComputedBlock`, which
+// for the (very common) initial state lastComputedBlock=0 evaluates to
+// `0 > 0 == false`. So the calculator silently skipped computing and
+// publishing — leaving the genesis commitment unwritten to sd. The next
+// exec3 cycle's SeekCommitment then fell back to stage progress, treated
+// blockNum=0 as "no progress" (mirror of bug 2), re-executed genesis,
+// and produced a wrong trie root for block 1.
+//
+// The fix introduces hasComputed so the predicate can distinguish "never
+// computed" from "computed block 0".
+func TestShouldComputeOnRequest_GenesisFirstBatch(t *testing.T) {
+	cc := &commitmentCalculator{
+		lastBlockResult:   &blockResult{BlockNum: 0},
+		lastComputedBlock: 0,
+		hasComputed:       false,
+	}
+	assert.True(t, cc.shouldComputeOnRequest(),
+		"first batch covering only genesis (block 0) MUST compute, "+
+			"otherwise the genesis commitment is never written to sd "+
+			"and the next exec3 cycle's SeekCommitment will fall back "+
+			"to stage progress and re-execute genesis")
+}
+
+// TestShouldComputeOnRequest_AlreadyComputedSameBlock verifies the dedup:
+// after computing block 0, a subsequent commitComputeRequest with no
+// new block boundary should NOT recompute.
+func TestShouldComputeOnRequest_AlreadyComputedSameBlock(t *testing.T) {
+	cc := &commitmentCalculator{
+		lastBlockResult:   &blockResult{BlockNum: 0},
+		lastComputedBlock: 0,
+		hasComputed:       true,
+	}
+	assert.False(t, cc.shouldComputeOnRequest(),
+		"no new block boundary since last compute — skip and publish empty")
+}
+
+// TestShouldComputeOnRequest_AdvancedBlock verifies the normal case:
+// a new block arrived since the last compute, recompute.
+func TestShouldComputeOnRequest_AdvancedBlock(t *testing.T) {
+	cc := &commitmentCalculator{
+		lastBlockResult:   &blockResult{BlockNum: 5},
+		lastComputedBlock: 3,
+		hasComputed:       true,
+	}
+	assert.True(t, cc.shouldComputeOnRequest(),
+		"new block boundary advanced past the last compute — recompute")
+}
+
+// TestShouldComputeOnRequest_NoBlockResult verifies that with no
+// blockResult yet (the calculator was woken before any block landed),
+// we publish the empty result instead of computing against nothing.
+func TestShouldComputeOnRequest_NoBlockResult(t *testing.T) {
+	cc := &commitmentCalculator{
+		lastBlockResult:   nil,
+		lastComputedBlock: 0,
+		hasComputed:       false,
+	}
+	assert.False(t, cc.shouldComputeOnRequest(),
+		"no blockResult to compute against — publish empty so drainBeforeExit unblocks")
+}
+
+// TestShouldComputeOnRequest_BlockZeroAfterAdvance verifies that even if
+// some downstream code re-sends a stale block-0 result, the dedup still
+// fires because we already advanced past it.
+func TestShouldComputeOnRequest_BlockZeroAfterAdvance(t *testing.T) {
+	cc := &commitmentCalculator{
+		lastBlockResult:   &blockResult{BlockNum: 0},
+		lastComputedBlock: 5,
+		hasComputed:       true,
+	}
+	assert.False(t, cc.shouldComputeOnRequest(),
+		"stale block 0 result while we've already computed block 5 — skip")
+}
+
+// TestHandleMessage_TxResultPinsAsOfReaderTxNum is the regression test for
+// the snapshot-loaded lazy-load crash: cc.asOfReader is constructed with
+// txNum=0, and only computeAndPublish / computeAndCheck (which run on
+// blockResult) overwrite that field. But cc.state.ApplyWrites runs on
+// every txResult and triggers ensureAccount / ensureStorage lazy-loads
+// through the same reader. txResults arrive before the first blockResult,
+// so the very first lazy-load fires with asOfReader.txNum=0. On a synced-
+// from-genesis chain that's in-window so seekInFiles handles it
+// gracefully; on a snapshot-loaded chain whose visible window starts
+// well past genesis (e.g. perf-devnet-3 starting at txNum~2.9B) it fails
+// hard with `seekInFiles(invIndex=storage,txNum=0) but data before
+// txNum=N not available` and FCU fails on every block.
+//
+// The fix in handleMessage's *txResult branch pins asOfReader.txNum to
+// the current tx's txNum BEFORE ApplyWrites runs. computeAndPublish /
+// computeAndCheck overwrite the field back to lastTxNum+1 right before
+// ComputeCommitment, so this per-tx setting only affects the lazy-load
+// path and never leaks into the trie fold path.
+//
+// We test the post-condition (asOfReader.txNum == r.txNum after each
+// txResult) — the simplest invariant that catches the absence of the
+// fix. The ordering relative to ApplyWrites (set BEFORE) is enforced by
+// inspection: the test cannot observe a successful lazy-load without
+// pulling in real SharedDomains plumbing, but a missing assignment
+// would leave txNum at its prior value and fail this test directly.
+func TestHandleMessage_TxResultPinsAsOfReaderTxNum(t *testing.T) {
+	asOfReader := &asOfStateReader{txNum: 0}
+	cs := newCalcState(asOfReader, nil, "test")
+	// Disable lazy-load — without a real SharedDomains the asOfReader's
+	// Read would NPE on r.sd.GetAsOf. The fix's contract is independent
+	// of whether the read succeeds: txNum must be pinned before the
+	// load is even attempted.
+	cs.domainReader = nil
+	cc := &commitmentCalculator{
+		asOfReader: asOfReader,
+		state:      cs,
+		// Non-nil doms with stepSize 0 so the step-boundary hook short-circuits;
+		// this test pins asOfReader.txNum, not the checkpoint path.
+		doms: &execctx.SharedDomains{},
+	}
+
+	// A txResult must carry at least one write to enter the fix's
+	// `if len(r.writes) > 0` branch — empty writes have no lazy-loads
+	// to seed and therefore intentionally don't update txNum.
+	// Path/value content irrelevant — domainReader is nil so the lazy-load
+	// path skips the real read. We only need a non-empty write set.
+	someWrites := &state.WriteSet{}
+	someWrites.SetBalance(accounts.NilAddress, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: accounts.NilAddress, Path: state.BalancePath}})
+
+	// First txResult: txNum jumps from 0 to 12345.
+	cc.handleMessage(context.Background(), &txResult{
+		rules:  &chain.Rules{},
+		txNum:  12345,
+		writes: someWrites,
+	})
+	require.Equal(t, uint64(12345), cc.asOfReader.txNum,
+		"asOfReader.txNum must be pinned to the current tx's txNum before "+
+			"ApplyWrites; otherwise lazy-loads triggered by the writes use "+
+			"the stale value (initially 0) and fail on snapshot-loaded chains.")
+
+	// Subsequent txResult: txNum advances to 12346. Verifies the field
+	// is updated on every txResult, not just the first one.
+	cc.handleMessage(context.Background(), &txResult{
+		rules:  &chain.Rules{},
+		txNum:  12346,
+		writes: someWrites,
+	})
+	require.Equal(t, uint64(12346), cc.asOfReader.txNum,
+		"asOfReader.txNum must advance on every txResult (each tx's "+
+			"first-touch lazy-loads need the matching pre-tx baseline).")
+
+	// Empty-writes txResult: the fix's len(writes)>0 guard skips the
+	// pin. asOfReader stays where the prior tx left it. This is the
+	// intended behavior — an empty writeset has no lazy-loads to seed,
+	// so updating txNum would be wasted work and could mask real
+	// regressions in producers that drop writes.
+	cc.handleMessage(context.Background(), &txResult{
+		rules:  &chain.Rules{},
+		txNum:  12347,
+		writes: nil,
+	})
+	require.Equal(t, uint64(12346), cc.asOfReader.txNum,
+		"empty writes → no lazy-load → don't bump txNum; the prior pin stands.")
+}
+
+// TestHandleBlockRequest_EmptyBALFallsToIncremental pins the empty-BAL gate.
+// A genuine empty BAL (0xc0) decodes to a non-nil empty slice, so a nil check
+// alone selects BAL-driven mode and computes zero changes → parent root →
+// spurious wrong-trie-root. Mode selection must gate on len(bal) > 0.
+func TestHandleBlockRequest_EmptyBALFallsToIncremental(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	cc := &commitmentCalculator{
+		pending:       map[uint64]*pendingBlock{},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		// Not the batch's first block and no blockResult seen yet, so the
+		// compute-ahead gate is shut — maybeComputeAhead returns before touching
+		// the (nil) doms/updates, isolating the mode-selection under test.
+		hasFirstBlock:      true,
+		firstBlockNum:      100,
+		hasSeenBlockResult: false,
+	}
+
+	emptyBAL := make(types.BlockAccessList, 0)
+	require.NotNil(t, emptyBAL, "empty BAL must be non-nil to exercise the gate")
+
+	cc.handleBlockRequest(context.Background(), &blockRequest{blockNum: 5, bal: emptyBAL})
+
+	pb, ok := cc.pending[5]
+	require.True(t, ok, "block request must be recorded")
+	assert.Equal(t, calcModeIncremental, pb.mode,
+		"an empty (non-nil) BAL declares no changes and must fall to "+
+			"incremental mode; computing it ahead would compute the parent root and "+
+			"fail an otherwise-valid block with ErrWrongTrieRoot")
+}
+
+// TestComputeAheadCap_StopsComputeAhead pins the orphan guard: once the shared
+// executor context carries a stopCause, the calculator must not compute any
+// block ahead past the coalesce block M — otherwise commitment would advance
+// past the state exec stops at. The signal is read from the context cause, not
+// a shared flag.
+func TestComputeAheadCap_StopsComputeAhead(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	dbg.BALDrivenCommitment = true
+
+	signalCtx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+
+	cc := &commitmentCalculator{
+		signalCtx: signalCtx,
+		pending: map[uint64]*pendingBlock{
+			5: {req: &blockRequest{blockNum: 5, bal: make(types.BlockAccessList, 1)}, mode: calcModeBALDriven},
+		},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 5, // gate open for block 5 without a prior blockResult
+	}
+
+	// Coalesce block M=4: block 5 is past M and must not compute ahead.
+	cancel(&stopCause{block: 4, kind: stopMoreWork})
+	cc.maybeComputeAhead(context.Background(), 5) // must return before computeBlockFromBAL
+
+	assert.False(t, cc.computedAhead[5], "a compute-ahead past the coalesce block M must not run")
+}

@@ -23,8 +23,8 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -51,7 +51,7 @@ type Builder struct {
 	builderCfg            *buildercfg.BuilderConfig
 	chainConfig           *chain.Config
 	engine                rules.Engine
-	blockReader           services.FullBlockReader
+	blockReader           dbservices.FullBlockReader
 	executeBlockCfg       stagedsync.ExecuteBlockCfg
 	notifier              stagedsync.ChainEventNotifier
 	vmConfig              *vm.Config
@@ -69,7 +69,7 @@ func NewBuilder(
 	builderCfg *buildercfg.BuilderConfig,
 	chainConfig *chain.Config,
 	engine rules.Engine,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	executeBlockCfg stagedsync.ExecuteBlockCfg,
 	notifier stagedsync.ChainEventNotifier,
 	vmConfig *vm.Config,
@@ -145,7 +145,7 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 		}
 	}
 
-	sd, err := execctx.NewSharedDomains(b.ctx, compositeTx, b.logger)
+	sd, err := execctx.NewSharedDomains(b.ctx, compositeTx, b.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache())
 	if err != nil {
 		return nil, err
 	}
@@ -155,12 +155,21 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 		sd.SetParent(parentSD)
 	}
 
+	// Wire the parallel commitment trie's context factory. Values still resolve
+	// through the sd/parent mem-batch overlay chain; b.db only backs the fresh
+	// per-worker readers. Mirrors exec3; no-op for the sequential trie.
+	sd.EnableParaTrieDB(b.db)
+
 	executionAt, err := stages.GetStageProgress(compositeTx, stages.Execution)
 	if err != nil {
 		return nil, err
 	}
 	createCfg := StageBuilderCreateBlockCfg(state, b.chainConfig, b.engine, param, b.blockReader)
-	execCfg := StageBuilderExecCfg(state, b.notifier, b.chainConfig, b.engine, b.vmConfig, b.tmpdir, interrupt, param.PayloadId, b.txnProvider, b.blockReader)
+	txnProvider := b.txnProvider
+	if param.CustomTxnProvider != nil {
+		txnProvider = param.CustomTxnProvider
+	}
+	execCfg := StageBuilderExecCfg(state, b.notifier, b.chainConfig, b.engine, b.vmConfig, b.tmpdir, interrupt, param.PayloadId, txnProvider, b.blockReader)
 	finishCfg := StageBuilderFinishCfg(b.chainConfig, b.engine, state, b.sealCancel, b.blockReader, b.latestBlockBuiltStore)
 
 	if err := createBlock(b.ctx, sd, compositeTx, executionAt, createCfg, b.logger); err != nil {

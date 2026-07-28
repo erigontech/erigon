@@ -21,11 +21,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -61,8 +61,8 @@ func (tx *SetCodeTransaction) copy() *SetCodeTransaction {
 
 	cpy.Authorizations = make([]Authorization, len(tx.Authorizations))
 
-	for i, ath := range tx.Authorizations {
-		cpy.Authorizations[i] = *ath.copy()
+	for i := range tx.Authorizations {
+		cpy.Authorizations[i] = *tx.Authorizations[i].copy()
 	}
 
 	return cpy
@@ -176,25 +176,16 @@ func (tx *SetCodeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(SetCodeTxType, []any{
-		&tx.ChainID,
-		tx.Nonce,
-		&tx.TipCap,
-		&tx.FeeCap,
-		tx.GasLimit,
-		tx.To,
-		&tx.Value,
-		tx.Data,
-		tx.AccessList,
-		tx.Authorizations,
-		tx.V, tx.R, tx.S,
+	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
+	hash := prefixedPayloadHash(SetCodeTxType, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen, authorizationsLen)
 	})
 	tx.hash.Store(&hash)
 	return hash
 }
 
 type setCodeTxSigHash struct {
-	ChainID    *big.Int
+	ChainID    *uint256.Int
 	Nonce      uint64
 	GasTipCap  *uint256.Int
 	GasFeeCap  *uint256.Int
@@ -206,7 +197,7 @@ type setCodeTxSigHash struct {
 	AuthList   []Authorization
 }
 
-func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) common.Hash {
+func (tx *SetCodeTransaction) SigningHash(chainID *uint256.Int) common.Hash {
 	return prefixedRlpHash(
 		SetCodeTxType,
 		&setCodeTxSigHash{
@@ -264,17 +255,18 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
-	tx.To = &common.Address{}
 	if kind, size, err := s.Kind(); err != nil {
 		return err
 	} else if kind == rlp.Byte {
-		return fmt.Errorf("wrong size for To: 1")
-	} else if size != 20 {
+		return errors.New("wrong size for To: 1")
+	} else if size != length.Addr {
 		return fmt.Errorf("wrong size for To: %d", size)
 	}
-	if err = s.ReadBytes(tx.To[:]); err != nil {
+	to, err := s.Addr()
+	if err != nil {
 		return err
 	}
+	tx.To = &to
 	if err = s.ReadUint256(&tx.Value); err != nil {
 		return err
 	}

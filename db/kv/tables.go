@@ -18,7 +18,7 @@ package kv
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -156,6 +156,11 @@ const (
 	TblCodeHistoryVals = "CodeHistoryVals"
 	TblCodeIdx         = "CodeIdx"
 
+	// TblCodeCache holds decompressed contract code keyed by keccak(code), the
+	// persistent backing tier for the in-memory code cache so reads skip the
+	// CodeDomain decompression across restarts. Immutable (content-addressed).
+	TblCodeCache = "CodeCache"
+
 	TblCommitmentVals        = "CommitmentVals"
 	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
 	TblCommitmentHistoryVals = "CommitmentHistoryVals"
@@ -260,7 +265,21 @@ const (
 	PendingConsolidations         = "PendingConsolidations"         // slot => queue_diffs
 	// End Electra
 
+	// GLOAS (EIP-7732)
+	BuildersDump                      = "BuildersDump"                   // slot => dump
+	Builders                          = "Builders"                       // slot => queue_diffs
+	BuilderPendingWithdrawalsDump     = "BuilderPendingWithdrawalsDump"  // slot => dump
+	BuilderPendingWithdrawals         = "BuilderPendingWithdrawals"      // slot => queue_diffs
+	PayloadExpectedWithdrawalsDump    = "PayloadExpectedWithdrawalsDump" // slot => dump
+	PayloadExpectedWithdrawals        = "PayloadExpectedWithdrawals"     // slot => queue_diffs
+	ExecutionPayloadAvailabilityTable = "ExecutionPayloadAvailability"   // slot => bitvector SSZ
+	BuilderPendingPaymentsTable       = "BuilderPendingPayments"         // slot => vector SSZ
+	PtcWindowTable                    = "PtcWindow"                      // slot => ptc window SSZ
+	LatestExecutionPayloadBidTable    = "LatestExecutionPayloadBid"      // slot => compressed SSZ
+	// End GLOAS
+
 	StatesProcessingProgress = "StatesProcessingProgress"
+	StatesPruneProgress      = "StatesPruneProgress" // table name => slot
 
 	//Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
@@ -272,9 +291,11 @@ var (
 	// ExperimentalGetProofsLayout is used to keep track whether we store indices to facilitate eth_getProof
 	CommitmentLayoutFlagKey = []byte("CommitmentLayouFlag")
 
-	PruneTypeOlder = []byte("older")
-	PruneHistory   = []byte("pruneHistory")
-	PruneBlocks    = []byte("pruneBlocks")
+	PruneTypeOlder         = []byte("older")
+	PruneHistory           = []byte("pruneHistory")
+	PruneBlocks            = []byte("pruneBlocks")
+	PruneCommitmentHistory = []byte("pruneCommitmentHistory")
+	PruneReceipts          = []byte("pruneReceipts")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 	GenesisKey         = []byte("genesis")
@@ -299,8 +320,6 @@ var (
 // This list will be sorted in `init` method.
 // ChaindataTablesCfg - can be used to find index in sorted version of ChaindataTables list by name
 var ChaindataTables = []string{
-	E2AccountsHistory,
-	E2StorageHistory,
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
@@ -309,7 +328,6 @@ var ChaindataTables = []string{
 	ConfigTable,
 	DatabaseInfo,
 	SyncStageProgress,
-	PlainState,
 	ChangeSets3,
 	Senders,
 	HeadBlockKey,
@@ -352,6 +370,7 @@ var ChaindataTables = []string{
 	TblCodeHistoryKeys,
 	TblCodeHistoryVals,
 	TblCodeIdx,
+	TblCodeCache,
 
 	TblCommitmentVals,
 	TblCommitmentHistoryKeys,
@@ -413,6 +432,7 @@ var ChaindataTables = []string{
 	RandaoMixes,
 	Proposers,
 	StatesProcessingProgress,
+	StatesPruneProgress,
 	InactivityScores,
 	NextSyncCommittee,
 	CurrentSyncCommittee,
@@ -427,10 +447,17 @@ var ChaindataTables = []string{
 	ActiveValidatorIndicies,
 	EffectiveBalancesDump,
 	BalancesDump,
-	AccountChangeSetDeprecated,
-	StorageChangeSetDeprecated,
-	HashedAccountsDeprecated,
-	HashedStorageDeprecated,
+	// GLOAS (EIP-7732)
+	BuildersDump,
+	Builders,
+	BuilderPendingWithdrawalsDump,
+	BuilderPendingWithdrawals,
+	PayloadExpectedWithdrawalsDump,
+	PayloadExpectedWithdrawals,
+	ExecutionPayloadAvailabilityTable,
+	BuilderPendingPaymentsTable,
+	PtcWindowTable,
+	LatestExecutionPayloadBidTable,
 }
 
 const (
@@ -459,7 +486,23 @@ var DownloaderTables = []string{
 }
 
 // ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
-var ChaindataDeprecatedTables = []string{}
+var ChaindataDeprecatedTables = []string{
+	// Pre-E3 plain / hashed state, changeset, and history-index tables.
+	// PlainState / HashedStorage / StorageChangeSet baked the per-account
+	// incarnation counter into the storage key; the rest are dead E2-era
+	// indices. The E3 execution path stores state in kv.AccountsDomain /
+	// kv.StorageDomain / kv.CommitmentDomain, which are incarnation-free.
+	// The `drop_legacy_e2_tables` migration drops these buckets on
+	// databases that still carry them; listing them here marks them as
+	// deprecated so the live schema never recreates them on fresh DBs.
+	PlainState,
+	HashedAccountsDeprecated,
+	HashedStorageDeprecated,
+	AccountChangeSetDeprecated,
+	StorageChangeSetDeprecated,
+	E2AccountsHistory,
+	E2StorageHistory,
+}
 
 // Diagnostics tables
 var DiagnosticsTables = []string{
@@ -491,8 +534,14 @@ type TableCfgItem struct {
 }
 
 var ChaindataTablesCfg = TableCfg{
-	HashedStorageDeprecated: {Flags: DupSort},
-	PlainState:              {Flags: DupSort},
+	// E2-era tables (deprecated; see ChaindataDeprecatedTables). The
+	// DupSort flag is preserved here so that opening an existing E2
+	// database for migration uses the right bucket flags before the
+	// drop_legacy_e2_tables migration drops them.
+	PlainState:                 {Flags: DupSort},
+	HashedStorageDeprecated:    {Flags: DupSort},
+	AccountChangeSetDeprecated: {Flags: DupSort},
+	StorageChangeSetDeprecated: {Flags: DupSort},
 
 	TblAccountVals:        {Flags: DupSort},
 	TblAccountHistoryKeys: {Flags: DupSort},
@@ -588,9 +637,7 @@ func TablesCfgByLabel(label Label) TableCfg {
 	}
 }
 func sortBuckets() {
-	sort.SliceStable(ChaindataTables, func(i, j int) bool {
-		return strings.Compare(ChaindataTables[i], ChaindataTables[j]) < 0
-	})
+	slices.Sort(ChaindataTables)
 }
 
 func init() {
@@ -692,6 +739,8 @@ const (
 	LogAddrIdx    InvertedIdx = 7
 	TracesFromIdx InvertedIdx = 8
 	TracesToIdx   InvertedIdx = 9
+
+	StandaloneIdxLen = 4 // Count of standalone IIs registered via RegisterII (LogTopicIdx..TracesToIdx). Update this when adding a new standalone II.
 )
 
 func (idx InvertedIdx) String() string {
@@ -802,13 +851,6 @@ func String2Domain(in string) (Domain, error) {
 	}
 }
 
-func String2Forkable(in string) (ForkableId, error) {
-	switch in {
-	default:
-		return ForkableId(MaxUint16), fmt.Errorf("unknown forkable name: %s", in)
-	}
-}
-
 const MaxUint16 uint16 = 1<<16 - 1
 
 // --- Deprecated
@@ -869,8 +911,6 @@ const (
 	   	AccountChangeSet has record: bigEndian(N) + A -> X
 	   	PlainState has record: A -> Y
 
-	   See also: docs/programmers_guide/db_walkthrough.MD#table-history-of-accounts
-
 	   As you can see if block N changes much accounts - then all records have repetitive prefix `bigEndian(N)`.
 	   MDBX can store such prefixes only once - by DupSort feature (see `docs/programmers_guide/dupsort.md`).
 	   Both buckets are DupSort-ed and have physical format:
@@ -912,8 +952,6 @@ const (
 	   It allows:
 	     - server task 1. by 1 db operation db.seekInFiles(A+bigEndian(X))
 	     - server task 2. by 1 db operation db.Get(A+0xFF)
-
-	   see also: docs/programmers_guide/db_walkthrough.MD#table-change-sets
 
 	   AccountsHistory:
 

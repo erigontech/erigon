@@ -29,7 +29,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 )
 
@@ -193,8 +192,12 @@ func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
 }
 
 func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
-	b.entries = make([]entryLoc, 0, predictKeysAmount)
-	b.data = make([]byte, 0, predictDataSize)
+	if cap(b.entries) < predictKeysAmount {
+		b.entries = make([]entryLoc, 0, predictKeysAmount)
+	}
+	if cap(b.data) < predictDataSize {
+		b.data = make([]byte, 0, predictDataSize)
+	}
 	return b
 }
 
@@ -315,8 +318,10 @@ func (b *appendSortableBuffer) Reset() {
 	b.size = 0
 }
 func (b *appendSortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
-	b.entries = make(map[string][]byte, predictKeysAmount)
-	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount)
+	b.entries = make(map[string][]byte, predictKeysAmount) // maps have no cap(), always recreate
+	if cap(b.sortedBuf) < predictKeysAmount {
+		b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount)
+	}
 	return b
 }
 
@@ -351,7 +356,7 @@ func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
 	}
 
 	b.size += len(k)*2 + len(v)
-	b.entries[string(k)] = common.Copy(v)
+	b.entries[string(k)] = bytes.Clone(v)
 }
 
 func (b *oldestEntrySortableBuffer) Size() int      { return b.size }
@@ -389,8 +394,10 @@ func (b *oldestEntrySortableBuffer) Reset() {
 	b.size = 0
 }
 func (b *oldestEntrySortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
-	b.entries = make(map[string][]byte, predictKeysAmount)
-	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount)
+	b.entries = make(map[string][]byte, predictKeysAmount) // maps have no cap(), always recreate
+	if cap(b.sortedBuf) < predictKeysAmount {
+		b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount)
+	}
 	return b
 }
 

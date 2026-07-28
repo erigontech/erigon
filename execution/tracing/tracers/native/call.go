@@ -20,6 +20,7 @@
 package native
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"math/big"
@@ -77,7 +78,7 @@ func (f *callFrame) failed() bool {
 }
 
 func (f *callFrame) processOutput(output []byte, err error) {
-	output = common.Copy(output)
+	output = bytes.Clone(output)
 	if err == nil {
 		f.Output = output
 		return
@@ -112,8 +113,8 @@ type callTracer struct {
 	config      callTracerConfig
 	gasLimit    uint64
 	depth       int
-	interrupt   atomic.Bool // Atomic flag to signal execution interruption
-	reason      error       // Textual reason for the interruption
+	interrupt   atomic.Bool           // Atomic flag to signal execution interruption
+	reason      atomic.Pointer[error] // Reason for the interruption, populated by Stop
 	logIndex    uint64
 	logGaps     map[uint64]int
 	precompiles []bool // keep track of whether scopes are for pre-compiles or not
@@ -170,7 +171,7 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from accounts.Address, to account
 		Type:  vm.CALL,
 		From:  from.Value(),
 		To:    toValue,
-		Input: common.Copy(input),
+		Input: bytes.Clone(input),
 		Gas:   t.gasLimit, // gas has intrinsicGas already subtracted
 	}
 	if value != nil {
@@ -216,7 +217,7 @@ func (t *callTracer) OnEnter(depth int, typ byte, from accounts.Address, to acco
 		Type:  vm.OpCode(typ),
 		From:  from.Value(),
 		To:    toValue,
-		Input: common.Copy(input),
+		Input: bytes.Clone(input),
 		Gas:   gas,
 	}
 
@@ -333,12 +334,15 @@ func (t *callTracer) GetResult() (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return res, t.reason
+	if p := t.reason.Load(); p != nil {
+		return res, *p
+	}
+	return res, nil
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.
 func (t *callTracer) Stop(err error) {
-	t.reason = err
+	t.reason.Store(&err)
 	t.interrupt.Store(true)
 }
 

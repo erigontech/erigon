@@ -72,9 +72,9 @@ func MakeTopics(query ...[]any) ([][]common.Hash, error) {
 				blob := new(big.Int).SetUint64(rule).Bytes()
 				copy(topic[length.Hash-len(blob):], blob)
 			case string:
-				topic = crypto.HashData([]byte(rule))
+				topic = crypto.Keccak256Hash([]byte(rule))
 			case []byte:
-				topic = crypto.HashData(rule)
+				topic = crypto.Keccak256Hash(rule)
 
 			default:
 				// todo(rjl493456442) according solidity documentation, indexed event
@@ -89,6 +89,9 @@ func MakeTopics(query ...[]any) ([][]common.Hash, error) {
 				switch {
 				// static byte array
 				case val.Kind() == reflect.Array && reflect.TypeOf(rule).Elem().Kind() == reflect.Uint8:
+					if val.Len() > len(topic) {
+						return nil, fmt.Errorf("indexed byte array too large: [%d]byte", val.Len())
+					}
 					reflect.Copy(reflect.ValueOf(topic[:val.Len()]), val)
 				default:
 					return nil, fmt.Errorf("unsupported indexed type: %T", rule)
@@ -107,7 +110,7 @@ func genIntType(rule int64, size uint) []byte {
 		// extended to length.Hash bytes.
 		topic = [length.Hash]byte{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}
 	}
-	for i := uint(0); i < size; i++ {
+	for i := range size {
 		topic[length.Hash-i-1] = byte(rule >> (i * 8))
 	}
 	return topic[:]
@@ -115,18 +118,42 @@ func genIntType(rule int64, size uint) []byte {
 
 // ParseTopics converts the indexed topic fields into actual log field values.
 func ParseTopics(out any, fields Arguments, topics []common.Hash) error {
+	outValue := reflect.ValueOf(out)
+	if outValue.Kind() != reflect.Pointer || outValue.IsNil() {
+		return fmt.Errorf("abi: cannot unmarshal indexed event fields into %T", out)
+	}
+	outValue = outValue.Elem()
+	if outValue.Kind() != reflect.Struct {
+		return fmt.Errorf("abi: cannot unmarshal indexed event fields into %T", out)
+	}
+
 	return parseTopicWithSetter(fields, topics,
-		func(arg Argument, reconstr any) {
-			field := reflect.ValueOf(out).Elem().FieldByName(ToCamelCase(arg.Name))
-			field.Set(reflect.ValueOf(reconstr))
+		func(arg Argument, reconstr any) error {
+			field := outValue.FieldByName(ToCamelCase(arg.Name))
+			if !field.IsValid() {
+				return fmt.Errorf("abi: field %s can't be found in the given value", arg.Name)
+			}
+			if !field.CanSet() {
+				return fmt.Errorf("abi: field %s cannot be set", arg.Name)
+			}
+			value := reflect.ValueOf(reconstr)
+			if !value.IsValid() || !value.Type().AssignableTo(field.Type()) {
+				return fmt.Errorf("abi: cannot unmarshal %T in to %v", reconstr, field.Type())
+			}
+			field.Set(value)
+			return nil
 		})
 }
 
 // ParseTopicsIntoMap converts the indexed topic field-value pairs into map key-value pairs.
 func ParseTopicsIntoMap(out map[string]any, fields Arguments, topics []common.Hash) error {
+	if out == nil {
+		return errors.New("abi: cannot unpack into a nil map")
+	}
 	return parseTopicWithSetter(fields, topics,
-		func(arg Argument, reconstr any) {
+		func(arg Argument, reconstr any) error {
 			out[arg.Name] = reconstr
+			return nil
 		})
 }
 
@@ -135,13 +162,14 @@ func ParseTopicsIntoMap(out map[string]any, fields Arguments, topics []common.Ha
 //
 // Note, dynamic types cannot be reconstructed since they get mapped to Keccak256
 // hashes as the topic value!
-func parseTopicWithSetter(fields Arguments, topics []common.Hash, setter func(Argument, any)) error {
+func parseTopicWithSetter(fields Arguments, topics []common.Hash, setter func(Argument, any) error) error {
 	// Sanity check that the fields and topics match up
 	if len(fields) != len(topics) {
 		return errors.New("topic/field count mismatch")
 	}
 	// Iterate over all the fields and reconstruct them from topics
-	for i, arg := range fields {
+	for i := range fields {
+		arg := &fields[i]
 		if !arg.Indexed {
 			return errors.New("non-indexed field in topic reconstruction")
 		}
@@ -155,20 +183,22 @@ func parseTopicWithSetter(fields Arguments, topics []common.Hash, setter func(Ar
 			reconstr = topics[i]
 		case FunctionTy:
 			if garbage := binary.BigEndian.Uint64(topics[i][0:8]); garbage != 0 {
-				return fmt.Errorf("bind: got improperly encoded function type, got %v", topics[i].Bytes())
+				return fmt.Errorf("bind: got improperly encoded function type, got %v", topics[i][:])
 			}
 			var tmp [24]byte
 			copy(tmp[:], topics[i][8:32])
 			reconstr = tmp
 		default:
 			var err error
-			reconstr, err = toGoType(0, arg.Type, topics[i].Bytes())
+			reconstr, err = toGoType(0, arg.Type, topics[i][:])
 			if err != nil {
 				return err
 			}
 		}
 		// Use the setter function to store the value
-		setter(arg, reconstr)
+		if err := setter(*arg, reconstr); err != nil {
+			return err
+		}
 	}
 
 	return nil

@@ -18,6 +18,7 @@ package btindex
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -29,10 +30,15 @@ import (
 
 const maxNodesPerBucket = 8
 
+type prefixNode struct {
+	key []byte
+	di  uint64
+}
+
 type prefixBucket struct {
-	firstDI uint64 // first key DI with this 2-byte prefix (MaxUint64 = empty)
-	endDI   uint64 // DI past last key (exclusive upper bound)
-	nodes   []Node // up to 8 cached keys for binary search within bucket
+	firstDI uint64       // first key DI with this 2-byte prefix (MaxUint64 = empty)
+	endDI   uint64       // DI past last key (exclusive upper bound)
+	nodes   []prefixNode // up to 8 cached keys for binary search within bucket
 }
 
 // PrefixIndex is a standalone search engine that replaces BpsTree.
@@ -158,7 +164,7 @@ func (p *PrefixIndex) narrowWithNodes(key []byte, l, r uint64) (nl, nr, exactDI 
 }
 
 // addNode adds a pre-built node to the appropriate prefix bucket.
-func (p *PrefixIndex) addNode(n Node) {
+func (p *PrefixIndex) addNode(n prefixNode) {
 	if len(n.key) < 2 {
 		return
 	}
@@ -244,7 +250,7 @@ func NewPrefixIndex(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLookup data
 		} else {
 			scanState[prefix].nPicks = maxNodesPerBucket
 		}
-		p.buckets[prefix].nodes = make([]Node, 0, scanState[prefix].nPicks)
+		p.buckets[prefix].nodes = make([]prefixNode, 0, scanState[prefix].nPicks)
 	}
 
 	// Pass 2: sequential scan to pick evenly-spaced nodes.
@@ -270,10 +276,8 @@ func NewPrefixIndex(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLookup data
 			}
 
 			if uint32(s.seen) == targetPos {
-				off := offt.Get(di)
-				p.buckets[prefix].nodes = append(p.buckets[prefix].nodes, Node{
+				p.buckets[prefix].nodes = append(p.buckets[prefix].nodes, prefixNode{
 					key: common.Copy(key),
-					off: off,
 					di:  di,
 				})
 				s.curPick++
@@ -286,9 +290,21 @@ func NewPrefixIndex(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLookup data
 	return p
 }
 
+// prefixNodesFromBlob materializes (key, di) pairs from the .bt pivot cache;
+// keys point into keysBlob (addNode copies the ones it keeps).
+func prefixNodesFromBlob(keysBlob []byte, nodeOfftEF *eliasfano32.EliasFano, stride uint64) []prefixNode {
+	nodes := make([]prefixNode, nodeOfftEF.Count())
+	for i := range nodes {
+		off := nodeOfftEF.Get(uint64(i))
+		l := uint64(binary.BigEndian.Uint16(keysBlob[off:]))
+		nodes[i] = prefixNode{key: keysBlob[off+2 : off+2+l], di: uint64(i) * stride}
+	}
+	return nodes
+}
+
 // NewPrefixIndexWithNodes builds a PrefixIndex using pre-built nodes from a .bt file.
 // It still scans .kv to establish bucket ranges, then distributes existing nodes into buckets.
-func NewPrefixIndexWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLookup dataLookupFunc, nodes []Node) *PrefixIndex {
+func NewPrefixIndexWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLookup dataLookupFunc, nodes []prefixNode) *PrefixIndex {
 	p := &PrefixIndex{
 		offt:           offt,
 		dataLookupFunc: dataLookup,
@@ -306,7 +322,6 @@ func NewPrefixIndexWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLo
 
 	// Distribute pre-built nodes into prefix buckets.
 	for i := range nodes {
-		nodes[i].off = offt.Get(nodes[i].di)
 		p.addNode(nodes[i])
 	}
 
@@ -341,10 +356,9 @@ func NewPrefixIndexWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLo
 			// Pick middle key of bucket
 			mid := counts[prefix] / 2
 			if seen[prefix]-1 == mid {
-				p.addNode(Node{
+				p.addNode(prefixNode{
 					key: common.Copy(key),
 					di:  di,
-					off: offt.Get(di),
 				})
 			}
 		}

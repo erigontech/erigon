@@ -138,7 +138,6 @@ func validatorStatusFromValidator(v solid.Validator, currentEpoch uint64, balanc
 		return validatorWithdrawalDone
 	}
 	return validatorWithdrawalPossible
-
 }
 
 func (s validatorStatus) String() string {
@@ -391,7 +390,6 @@ func parseQueryValidatorIndex(syncedData synced_data.SyncedData, id string) (uin
 		return 0, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	return idx, nil
-
 }
 
 func parseQueryValidatorIndicies(syncedData synced_data.SyncedData, ids []string) ([]uint64, error) {
@@ -874,9 +872,9 @@ type validatorIdentityResponse struct {
 		"activation_epoch": "1"
 	}
 	*/
-	Index           uint64         `json:"index"`
+	Index           uint64         `json:"index,string"`
 	Pubkey          common.Bytes48 `json:"pubkey"`
-	ActivationEpoch uint64         `json:"activation_epoch"`
+	ActivationEpoch uint64         `json:"activation_epoch,string"`
 }
 
 func (v *validatorIdentityResponse) EncodeSSZ(buf []byte) ([]byte, error) {

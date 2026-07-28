@@ -3,15 +3,13 @@ package state
 import (
 	"fmt"
 
-	btree2 "github.com/tidwall/btree"
-
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
-// high 16 bits: specify domain/ii/forkables identifier
-// low 16 bits: category - domain(0x0)/history(0x1)/ii(0x2)/forkables(0x3) etc.
+// high 16 bits: specify domain/ii identifier
+// low 16 bits: category - domain(0x0)/history(0x1)/ii(0x2) etc.
 // e.g.
 // 0x0001 0000 - storage domain
 // 0x0001 0001 - storage history
@@ -27,10 +25,6 @@ func FromII(ii kv.InvertedIdx) UniversalEntity {
 	return UniversalEntity(uint32(ii)<<16 | iiCategory)
 }
 
-func FromForkable(f kv.ForkableId) UniversalEntity {
-	return UniversalEntity(uint32(f)<<16 | forkableCategory)
-}
-
 func (ue UniversalEntity) String() string {
 	switch ue.category() {
 	case domainCategory:
@@ -39,18 +33,15 @@ func (ue UniversalEntity) String() string {
 		return fmt.Sprintf("history:%s", kv.InvertedIdx(ue>>16))
 	case iiCategory:
 		return fmt.Sprintf("ii:%s", kv.InvertedIdx(ue>>16))
-	case forkableCategory:
-		return "forkable:" + Registry.Name(kv.ForkableId(ue>>16))
 	default:
 		return fmt.Sprintf("unknown:%d", ue)
 	}
 }
 
 const (
-	domainCategory   = 0x0
-	historyCategory  = 0x1
-	iiCategory       = 0x2
-	forkableCategory = 0x3
+	domainCategory  = 0x0
+	historyCategory = 0x1
+	iiCategory      = 0x2
 )
 
 func (ue UniversalEntity) category() uint16 {
@@ -63,7 +54,7 @@ var (
 	CommitmentDomainUniversal = FromDomain(kv.CommitmentDomain)
 )
 
-type DirtyFilesGetter func() *btree2.BTreeG[*FilesItem]
+type DirtyFilesGetter func() *DirtyFiles
 
 // DependencyIntegrityChecker: used when a dependent domain has
 // references to a dependency domain. e.g. commitment.kv has
@@ -126,7 +117,7 @@ func (d *DependencyIntegrityChecker) EnableInterDomain() {
 // CheckDependentPresent checks if the dependent domain file is present. All/Any are the two quantifiers provided here
 // All: all dependent files are present
 // Any: there exists a dependent file, which is present
-// NOTE: the caller MUST hold a lock on btree2.BTreeG[*filesItem] returned by filesGetter.
+// NOTE: the caller MUST hold a lock on DirtyFiles returned by filesGetter.
 // example:
 // dependency: account
 // is (dependent) commitment.0-2 present?

@@ -25,8 +25,8 @@ import (
 var typeInitFunctions = []func(){}
 var typeInitMutex = sync.Mutex{}
 
-func LocalTypeInit(localIdInitialiser func(govalue interface{}) TypeId,
-	publicIdInitialiser func(domainValue interface{}, id []byte, idVersion Version) (TypeId, error)) {
+func LocalTypeInit(localIdInitialiser func(govalue any) TypeId,
+	publicIdInitialiser func(domainValue any, id []byte, idVersion Version) (TypeId, error)) {
 	typeInitMutex.Lock()
 	if NewLocalTypeId == nil {
 		NewLocalTypeId = localIdInitialiser
@@ -38,7 +38,7 @@ func LocalTypeInit(localIdInitialiser func(govalue interface{}) TypeId,
 	typeInitMutex.Unlock()
 }
 
-var NewLocalTypeId func(govalue interface{}) TypeId
+var NewLocalTypeId func(govalue any) TypeId
 
 var typeIds = map[string]TypeId{}
 var typeIdsMutex = &sync.RWMutex{}
@@ -132,7 +132,7 @@ func (a TypeArray) String() string {
 	return fmt.Sprintf("%s", argTypes)
 }
 
-func (a TypeArray) Type(at interface{}) TypeId {
+func (a TypeArray) Type(at any) TypeId {
 	return a[at.(int)]
 }
 
@@ -153,24 +153,24 @@ func (m TypeMap) String() string {
 	return fmt.Sprintf("%s", argTypes)
 }
 
-func (m TypeMap) Type(at interface{}) TypeId {
+func (m TypeMap) Type(at any) TypeId {
 	return m[at.(string)]
 }
 
 type ArgTypes interface {
 	Len() int
 	String() string
-	Type(at interface{}) TypeId
+	Type(at any) TypeId
 }
 
 type Args interface {
-	Arg(key interface{}) interface{}
+	Arg(key any) any
 	Len() int
 }
 
-type ArgArray []interface{}
+type ArgArray []any
 
-func (a ArgArray) Arg(at interface{}) interface{} {
+func (a ArgArray) Arg(at any) any {
 	return a[at.(int)]
 }
 
@@ -178,9 +178,9 @@ func (a ArgArray) Len() int {
 	return len(a)
 }
 
-type ArgMap map[string]interface{}
+type ArgMap map[string]any
 
-func (m ArgMap) Arg(at interface{}) interface{} {
+func (m ArgMap) Arg(at any) any {
 	return m[at.(string)]
 }
 
@@ -188,13 +188,26 @@ func (m ArgMap) Len() int {
 	return len(m)
 }
 
-var LocalTypeDomain Domain = nil //TODO domain.Wrap(domain.MustDecodeId(encodertype.Base62, cri.EncodedSchemeapp.LocalTypeDomain, "0", nil, nil))
+// LocalTypeDomain is the domain used to build type IDs for Go types via
+// TypeIdOf / newIdFor. It is initialized at package init to a local named
+// domain so TypeIds always have a non-nil domain and a stable string
+// representation.
+var LocalTypeDomain Domain = func() Domain {
+	d, err := NewNamedDomain[string]("local.type")
+	if err != nil {
+		// This only fails if domain construction itself is broken, in which
+		// case the whole package would be unusable. Panic here so the
+		// problem surfaces during init rather than later as a nil deref.
+		panic(fmt.Sprintf("failed to init LocalTypeDomain: %v", err))
+	}
+	return d
+}()
 var Trace = false
 
 var typeids = map[reflect.Type]TypeId{}
 var typeidsMutex = &sync.RWMutex{}
 
-func TypeIdOf(govalue interface{}) TypeId {
+func TypeIdOf(govalue any) TypeId {
 	var err error
 	var gotype reflect.Type
 	var ok bool
@@ -211,7 +224,7 @@ func TypeIdOf(govalue interface{}) TypeId {
 		return nil
 	}
 
-	if gotype.Kind() == reflect.Ptr {
+	if gotype.Kind() == reflect.Pointer {
 		gotype = gotype.Elem()
 	}
 
@@ -251,24 +264,24 @@ func (ti *GoTypeId) AssignableTo(typeId TypeId) bool {
 		if Trace {
 			fmt.Printf("Go Type Assign %v->%v (%v)\n", thisType, assignableType,
 				thisType.AssignableTo(assignableType) ||
-					(thisType.Kind() == reflect.Ptr && (assignableType.Kind() != reflect.Ptr &&
-						thisType.AssignableTo(reflect.PtrTo(assignableType)))) ||
-					((assignableType.Kind() == reflect.Ptr || assignableType.Kind() == reflect.Interface) &&
-						(thisType.Kind() != reflect.Ptr && reflect.PtrTo(thisType).AssignableTo(assignableType))))
+					(thisType.Kind() == reflect.Pointer && (assignableType.Kind() != reflect.Pointer &&
+						thisType.AssignableTo(reflect.PointerTo(assignableType)))) ||
+					((assignableType.Kind() == reflect.Pointer || assignableType.Kind() == reflect.Interface) &&
+						(thisType.Kind() != reflect.Pointer && reflect.PointerTo(thisType).AssignableTo(assignableType))))
 		}
 
 		if thisType.AssignableTo(assignableType) {
 			return true
 		}
 
-		if thisType.Kind() == reflect.Ptr {
-			return (assignableType.Kind() != reflect.Ptr &&
-				thisType.AssignableTo(reflect.PtrTo(assignableType)))
+		if thisType.Kind() == reflect.Pointer {
+			return (assignableType.Kind() != reflect.Pointer &&
+				thisType.AssignableTo(reflect.PointerTo(assignableType)))
 		}
 
-		if assignableType.Kind() == reflect.Ptr || assignableType.Kind() == reflect.Interface {
-			return (thisType.Kind() != reflect.Ptr &&
-				reflect.PtrTo(thisType).AssignableTo(assignableType))
+		if assignableType.Kind() == reflect.Pointer || assignableType.Kind() == reflect.Interface {
+			return (thisType.Kind() != reflect.Pointer &&
+				reflect.PointerTo(thisType).AssignableTo(assignableType))
 		}
 	}
 
@@ -316,10 +329,10 @@ func (info *typeInfo) LocalType() reflect.Type {
 	return info.localType
 }
 
-func TypeIdValues(typeIds interface{}) []TypeId {
+func TypeIdValues(typeIds any) []TypeId {
 	s := reflect.ValueOf(typeIds)
 
-	if s.Kind() == reflect.Ptr {
+	if s.Kind() == reflect.Pointer {
 		s = s.Elem()
 	}
 

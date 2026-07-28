@@ -26,8 +26,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-const SSZSnappyCodec = "ssz_snappy"
-
 type GossipTopic struct {
 	Name     string
 	CodecStr string

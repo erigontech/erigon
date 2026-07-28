@@ -56,6 +56,29 @@ func ReadBeaconState(root fs.FS, version clparams.StateVersion, name string) (*s
 		return nil, err
 	}
 	config := clparams.MainnetBeaconConfig
+	// Ensure all fork epochs up to and including the test version are activated at epoch 0
+	// so that GetCurrentStateVersion returns the correct version for spec tests.
+	if version >= clparams.AltairVersion {
+		config.AltairForkEpoch = 0
+	}
+	if version >= clparams.BellatrixVersion {
+		config.BellatrixForkEpoch = 0
+	}
+	if version >= clparams.CapellaVersion {
+		config.CapellaForkEpoch = 0
+	}
+	if version >= clparams.DenebVersion {
+		config.DenebForkEpoch = 0
+	}
+	if version >= clparams.ElectraVersion {
+		config.ElectraForkEpoch = 0
+	}
+	if version >= clparams.FuluVersion {
+		config.FuluForkEpoch = 0
+	}
+	if version >= clparams.GloasVersion {
+		config.GloasForkEpoch = 0
+	}
 	testState := state.New(&config)
 	if err := utils.DecodeSSZSnappy(testState, sszSnappy, int(version)); err != nil {
 		return nil, err
@@ -134,6 +157,7 @@ func ReadBlockSlot(root fs.FS, index int) (uint64, error) {
 	}
 	return ssz.UnmarshalUint64SSZ(blockBytes[100:108]), nil
 }
+
 func ReadBlocks(root fs.FS, version clparams.StateVersion) ([]*cltypes.SignedBeaconBlock, error) {
 	i := 0
 	blocks := []*cltypes.SignedBeaconBlock{}

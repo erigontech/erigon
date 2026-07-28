@@ -9,12 +9,12 @@ import (
 	"math/rand/v2"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
@@ -41,7 +41,7 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 			break
 		}
 		key, _ := getter.Next(key[:0])
-		listing = append(listing, common.Copy(key))
+		listing = append(listing, bytes.Clone(key))
 		getter.Skip()
 	}
 	decomp.Close()
@@ -70,7 +70,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	values := make([]byte, valueSize)
 
 	dataPath := filepath.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
-	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
+	comp, err := seg.NewCompressor(tb.Context(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
 	bufSize := 8 * datasize.KB
@@ -80,7 +80,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	collector := etl.NewCollector(BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)
 	defer collector.Close()
 
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		key := make([]byte, keySize)
 		n, err := rnd.Read(key)
 		require.Equal(tb, keySize, n)
@@ -121,7 +121,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 
 	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
 	r := seg.NewReader(decomp.MakeGetter(), compressFlags)
-	err = BuildBtreeIndexWithDecompressor(IndexFile, r, ps, tb.TempDir(), 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+	err = BuildBtreeIndexWithDecompressor(IndexFile, strings.TrimSuffix(IndexFile, ".bt")+".kvei", r, ps, tb.TempDir(), 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 	require.NoError(tb, err)
 
 	return compPath
@@ -192,14 +192,14 @@ func generateControlledKV(tb testing.TB, tmp string, prefixes [][]byte, keysPerP
 	btPath := filepath.Join(tmp, fmt.Sprintf("controlled_%d.bt", len(pairs)))
 	ps := background.NewProgressSet()
 	r := seg.NewReader(decomp.MakeGetter(), compressFlags)
-	err = BuildBtreeIndexWithDecompressor(btPath, r, ps, tb.TempDir(), 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+	err = BuildBtreeIndexWithDecompressor(btPath, strings.TrimSuffix(btPath, ".bt")+".kvei", r, ps, tb.TempDir(), 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 	require.NoError(tb, err)
 
 	keys := make([][]byte, len(pairs))
 	vals := make([][]byte, len(pairs))
 	for i, p := range pairs {
-		keys[i] = common.Copy(p.key)
-		vals[i] = common.Copy(p.val)
+		keys[i] = bytes.Clone(p.key)
+		vals[i] = bytes.Clone(p.val)
 	}
 	return decomp.FilePath(), keys, vals
 }
@@ -235,7 +235,7 @@ func generateMinimalKV(tb testing.TB, tmp string, keys, values [][]byte, compres
 // gapKey returns a key that is just past k (last byte incremented).
 // Handles 0xFF overflow by incrementing higher bytes.
 func gapKey(k []byte) []byte {
-	g := common.Copy(k)
+	g := bytes.Clone(k)
 	for i := len(g) - 1; i >= 0; i-- {
 		if g[i] < 0xFF {
 			g[i]++

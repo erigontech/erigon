@@ -139,6 +139,7 @@ const (
 	ErrGetCode           DiscardReason = 36 // Error getting code during AA validation
 	NonceTooDistant      DiscardReason = 37 // Nonce gap between tx and on-chain nonce exceeds MaxNonceGap; tx can never become pending
 	QueuedDormant        DiscardReason = 38 // Sender had no on-chain state change for longer than QueuedDormancyDuration
+	ErrGetSenderInfo     DiscardReason = 39 // Error getting sender nonce/balance from state during validation
 )
 
 func (r DiscardReason) String() string {
@@ -221,6 +222,8 @@ func (r DiscardReason) String() string {
 		return "nonce gap too large: transaction nonce is too far ahead of sender's on-chain nonce"
 	case QueuedDormant:
 		return "queued sender dormant: no on-chain state change for too long"
+	case ErrGetSenderInfo:
+		return "error getting sender state during tx validation"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}

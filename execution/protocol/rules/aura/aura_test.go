@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/rulesconfig"
 )
 
@@ -169,7 +168,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	require.NoError(err)
 
 	config := genesis.Config
-	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, logger), nil)
+	blockReader := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles(), nil)
 	chainRdr := stagedsync.ChainReader{Cfg: config, Db: tx, BlockReader: blockReader}
 	engine := rulesconfig.CreateRulesEngineBareBones(ctx, config, logger)
 	time := uint64(1)
@@ -186,10 +185,11 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 
 	// Set up block 1 state the same way exec3 does for TxIndex == -1:
 	// engine.Initialize + FinalizeTx via InitializeBlockExecution.
-	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger))
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, logger))
 	reader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(tx)))
 	writer := state.NewVersionedWriteCollector(rs)
 	ibs := state.New(reader)
+	defer ibs.Release(false)
 	err = protocol.InitializeBlockExecution(engine, chainRdr, header, config, ibs, writer, logger, nil)
 	require.NoError(err)
 	account, err := reader.ReadAccountData(params.SystemAddress)

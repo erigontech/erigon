@@ -62,13 +62,24 @@ func (a *AttesterSlashing) SetVersion(v clparams.StateVersion) {
 	a.Attestation_2.SetVersion(v)
 }
 
+// SetVersionWithConfig sets the version on both indexed attestations with preset-aware limits.
+func (a *AttesterSlashing) SetVersionWithConfig(v clparams.StateVersion, cfg *clparams.BeaconChainConfig) {
+	a.Attestation_1.SetVersionWithConfig(v, cfg)
+	a.Attestation_2.SetVersionWithConfig(v, cfg)
+}
+
 func (a *AttesterSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, a.Attestation_1, a.Attestation_2)
 }
 
 func (a *AttesterSlashing) DecodeSSZ(buf []byte, version int) error {
-	a.Attestation_1 = NewIndexedAttestation(clparams.StateVersion(version))
-	a.Attestation_2 = NewIndexedAttestation(clparams.StateVersion(version))
+	return a.DecodeSSZWithConfig(buf, version, nil)
+}
+
+// DecodeSSZWithConfig decodes an AttesterSlashing with preset-aware limits.
+func (a *AttesterSlashing) DecodeSSZWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig) error {
+	a.Attestation_1 = NewIndexedAttestationWithConfig(clparams.StateVersion(version), cfg)
+	a.Attestation_2 = NewIndexedAttestationWithConfig(clparams.StateVersion(version), cfg)
 	return ssz2.UnmarshalSSZ(buf, version, a.Attestation_1, a.Attestation_2)
 }
 

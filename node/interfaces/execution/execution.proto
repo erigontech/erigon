@@ -13,7 +13,8 @@ enum ExecutionStatus {
     TooFarAway = 2;
     MissingSegment = 3;
     InvalidForkchoice = 4;
-    Busy = 5; 
+    Busy = 5;
+    ReorgTooDeep = 6;
 }
 
 message ForkChoiceReceipt {

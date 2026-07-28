@@ -17,14 +17,13 @@
 package integrity_test
 
 import (
-	"context"
+	"bytes"
 	"math/rand"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -45,7 +44,7 @@ func TestCheckStateVerify(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 	stepSize := uint64(100)
 
 	dirs := datadir.New(t.TempDir())
@@ -82,7 +81,7 @@ func TestCheckStateVerify(t *testing.T) {
 		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)
 		require.NoError(t, err)
 
-		storageKey := append(common.Copy(addr), loc...)
+		storageKey := append(bytes.Clone(addr), loc...)
 		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
@@ -123,7 +122,7 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 	stepSize := uint64(100)
 
 	dirs := datadir.New(t.TempDir())
@@ -161,17 +160,17 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)
 		require.NoError(t, err)
 
-		storageKey := append(common.Copy(addr), loc...)
+		storageKey := append(bytes.Clone(addr), loc...)
 		storageVal := []byte{addr[0], loc[0]}
 		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, storageVal, txNum, nil)
 		require.NoError(t, err)
 
 		// Save one entry from step 1 (txNum 100-199) for re-writing in step range 2.
 		if txNum == 150 {
-			noopAddr = common.Copy(addr)
-			noopStorageKey = common.Copy(storageKey)
-			noopAccBuf = common.Copy(buf)
-			noopStorageVal = common.Copy(storageVal)
+			noopAddr = bytes.Clone(addr)
+			noopStorageKey = bytes.Clone(storageKey)
+			noopAccBuf = bytes.Clone(buf)
+			noopStorageVal = bytes.Clone(storageVal)
 		}
 
 		blockNum := txNum
@@ -196,7 +195,7 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)
 		require.NoError(t, err)
 
-		storageKey := append(common.Copy(addr), loc...)
+		storageKey := append(bytes.Clone(addr), loc...)
 		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
@@ -239,7 +238,7 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 	stepSize := uint64(100)
 
 	dirs := datadir.New(t.TempDir())
@@ -280,7 +279,7 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 		err = domains.DomainPut(kv.AccountsDomain, tx, addr, accBuf, txNum, nil)
 		require.NoError(t, err)
 
-		storageKey := append(common.Copy(addr), loc...)
+		storageKey := append(bytes.Clone(addr), loc...)
 		storageVal := []byte{addr[0], loc[0]}
 		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, storageVal, txNum, nil)
 		require.NoError(t, err)

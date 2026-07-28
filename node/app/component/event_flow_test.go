@@ -23,11 +23,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/node/app"
 	"github.com/erigontech/erigon/node/app/component"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/app/util"
-	"github.com/stretchr/testify/require"
 )
 
 // --- Test ExecPool (implements util.ExecPool) ---
@@ -37,11 +38,9 @@ type testPool struct {
 }
 
 func (p *testPool) Exec(task func()) {
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
+	p.wg.Go(func() {
 		task()
-	}()
+	})
 }
 
 func (p *testPool) PoolSize() int  { return 4 }
@@ -64,7 +63,7 @@ type DownloadComplete struct{ Path string }
 
 type eventProvider struct {
 	name     string
-	received []interface{}
+	received []any
 	mu       sync.Mutex
 	tracker  *orderTracker
 }
@@ -101,10 +100,10 @@ func (p *eventProvider) HandleFileDeleted(evt FileDeleted) {
 	p.tracker.record(p.name + ":FileDeleted:" + evt.Path)
 }
 
-func (p *eventProvider) getReceived() []interface{} {
+func (p *eventProvider) getReceived() []any {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	out := make([]interface{}, len(p.received))
+	out := make([]any, len(p.received))
 	copy(out, p.received)
 	return out
 }
@@ -190,7 +189,7 @@ func TestEventLoadCompleteness(t *testing.T) {
 	require.NoError(t, bus.SubscribeAsync(handler))
 
 	const N = 10000
-	for i := 0; i < N; i++ {
+	for range N {
 		bus.Publish(FileCreated{Path: "file"})
 	}
 
@@ -210,7 +209,7 @@ func TestEventLoadMultipleSubscribers(t *testing.T) {
 	require.NoError(t, bus.SubscribeAsync(handler2))
 
 	const N = 5000
-	for i := 0; i < N; i++ {
+	for range N {
 		bus.Publish(FileCreated{Path: "file"})
 	}
 
@@ -267,7 +266,7 @@ func TestSyncHandlerTotalOrdering(t *testing.T) {
 	var order []int
 	var mu sync.Mutex
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		idx := i
 		handler := func(evt FileCreated) {
 			mu.Lock()
@@ -290,18 +289,18 @@ func TestSyncHandlerTotalOrdering(t *testing.T) {
 // --- Component Lifecycle + Events Integration ---
 
 func TestComponentLifecycleWithEvents(t *testing.T) {
-	domain, err := component.NewComponentDomain(context.Background(), "evt-lifecycle")
+	domain, err := component.NewComponentDomain(t.Context(), "evt-lifecycle")
 	require.NoError(t, err)
 
 	tracker := &orderTracker{}
 
-	storage, err := component.NewComponent[eventProvider](context.Background(),
+	storage, err := component.NewComponent[eventProvider](t.Context(),
 		component.WithId("storage"),
 		component.WithDomain(domain),
 		component.WithProvider(&eventProvider{name: "storage", tracker: tracker}))
 	require.NoError(t, err)
 
-	dl, err := component.NewComponent[eventProvider](context.Background(),
+	dl, err := component.NewComponent[eventProvider](t.Context(),
 		component.WithId("downloader"),
 		component.WithDomain(domain),
 		component.WithProvider(&eventProvider{name: "downloader", tracker: tracker}),
@@ -309,17 +308,17 @@ func TestComponentLifecycleWithEvents(t *testing.T) {
 	require.NoError(t, err)
 
 	// Start
-	err = dl.Activate(context.Background())
+	err = dl.Activate(t.Context())
 	require.NoError(t, err)
-	_, err = dl.AwaitState(context.Background(), component.Active)
+	_, err = dl.AwaitState(t.Context(), component.Active)
 	require.NoError(t, err)
 	require.Equal(t, component.Active, storage.State())
 
 	// Stop
-	err = dl.Deactivate(context.Background())
+	err = dl.Deactivate(t.Context())
 	require.NoError(t, err)
 
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	waitCtx, waitCancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer waitCancel()
 	_, err = dl.AwaitState(waitCtx, component.Deactivated)
 	require.NoError(t, err)

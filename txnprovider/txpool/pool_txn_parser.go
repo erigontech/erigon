@@ -22,11 +22,10 @@ import (
 	"fmt"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -56,11 +55,10 @@ type TxnParseContext struct {
 	chainID         uint256.Int
 	signer          *types.Signer // cached signer for sender recovery (non-malleable)
 	malleableSigner *types.Signer // cached signer that accepts pre-EIP-2 malleable signatures
-	keccak          keccak.KeccakState
-	bytesReader     bytes.Reader // reusable reader to avoid allocation per parse
-	authBuf         bytes.Buffer // reusable buffer for authorization signer recovery
-	authHashBuf     [32]byte     // reusable hash buffer for authorization signer recovery
-	innerTxBuf      []byte       // reusable buffer for blob wrapper inner tx bytes
+	bytesReader     bytes.Reader  // reusable reader to avoid allocation per parse
+	authBuf         bytes.Buffer  // reusable buffer for authorization signer recovery
+	authHashBuf     [32]byte      // reusable hash buffer for authorization signer recovery
+	innerTxBuf      []byte        // reusable buffer for blob wrapper inner tx bytes
 	withSender      bool
 	allowPreEip2s   bool // Allow s > secp256k1n/2; see EIP-2
 	chainIDRequired bool
@@ -72,12 +70,11 @@ func NewTxnParseContext(chainID uint256.Int) *TxnParseContext {
 	}
 	ctx := &TxnParseContext{
 		withSender: true,
-		keccak:     keccak.NewFastKeccak(),
 	}
 
 	// behave as of London enabled
 	ctx.chainID.Set(&chainID)
-	ctx.signer = types.LatestSignerForChainID(chainID.ToBig())
+	ctx.signer = types.LatestSignerForChainID(&chainID)
 
 	malleable := *ctx.signer
 	malleable.SetMalleable(true)
@@ -112,8 +109,8 @@ func (ctx *TxnParseContext) decodeTxn(txBytes []byte) (types.Transaction, error)
 	// Legacy transactions: full RLP list starting with 0xc0..0xff
 	if txBytes[0] >= 0xc0 {
 		ctx.bytesReader.Reset(txBytes)
-		s, done := rlp.NewStreamFromPool(&ctx.bytesReader, uint64(len(txBytes)))
-		defer done()
+		s := rlp.NewStreamFromPool(&ctx.bytesReader, uint64(len(txBytes)))
+		defer rlp.PutStream(s)
 		legacy := &types.LegacyTx{}
 		if err := legacy.DecodeRLP(s); err != nil {
 			return nil, err
@@ -138,8 +135,8 @@ func (ctx *TxnParseContext) decodeTxn(txBytes []byte) (types.Transaction, error)
 	}
 
 	ctx.bytesReader.Reset(txBytes[1:]) // skip type byte
-	s, done := rlp.NewStreamFromPool(&ctx.bytesReader, uint64(len(txBytes)-1))
-	defer done()
+	s := rlp.NewStreamFromPool(&ctx.bytesReader, uint64(len(txBytes)-1))
+	defer rlp.PutStream(s)
 	if err := txn.DecodeRLP(s); err != nil {
 		return nil, err
 	}
@@ -370,13 +367,11 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// which txn.Hash() would do via rlpHash/prefixedRlpHash + reflection).
 	// For wrapped blob txns, the hash is of the inner tx_payload_body, not the full wrapper.
 	slot.Txn = txn
-	ctx.keccak.Reset()
+	hashInput := txBytes
 	if innerTxBytes != nil {
-		ctx.keccak.Write(innerTxBytes) //nolint:errcheck
-	} else {
-		ctx.keccak.Write(txBytes) //nolint:errcheck
+		hashInput = innerTxBytes
 	}
-	ctx.keccak.Read(slot.IDHash[:]) //nolint:errcheck
+	slot.IDHash = crypto.Keccak256Hash(hashInput)
 
 	if validateHash != nil {
 		if err := validateHash(slot.IDHash[:]); err != nil {
@@ -394,18 +389,28 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	slot.Nonce = txn.GetNonce()
 
 	// Authorization signers for SetCode txns (EIP-7702).
+	// Per EIP-7702, invalid auth tuples (unrecoverable signature, out-of-range
+	// chainID, etc.) do not invalidate the enclosing transaction — at execution
+	// time the spec dictates that "if any step fails for a tuple, processing
+	// continues to the next one". We therefore skip bad tuples here instead of
+	// returning a parse error: failing the parse would (a) drop sibling txns
+	// in the same Transactions/PooledTransactions packet and (b) censor txns
+	// that other clients accept. Only successfully-recovered authorities are
+	// indexed in AuthAndNonces (used for pool-replacement bookkeeping); the
+	// original auth-list length is still available via Txn.GetAuthorizations()
+	// for gas accounting (the sender pays for every tuple regardless).
 	if txn.Type() == types.SetCodeTxType {
 		auths := txn.GetAuthorizations()
 		slot.AuthAndNonces = make([]AuthAndNonce, 0, len(auths))
-		for _, auth := range auths {
+		for i := range auths {
+			auth := &auths[i]
 			if !auth.ChainID.IsUint64() {
-				return 0, fmt.Errorf("%w: authorization chainId is too big: %s", ErrParseTxn, &auth.ChainID)
+				continue
 			}
-			authCopy := auth
 			ctx.authBuf.Reset()
-			authority, err := authCopy.RecoverSigner(&ctx.authBuf, ctx.authHashBuf[:])
+			authority, err := auth.RecoverSigner(&ctx.authBuf, ctx.authHashBuf[:])
 			if err != nil {
-				return 0, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrParseTxn, err, dbg.Stack()) //nolint
+				continue
 			}
 			slot.AuthAndNonces = append(slot.AuthAndNonces, AuthAndNonce{*authority, auth.Nonce})
 		}
@@ -461,7 +466,7 @@ type TxnSlot struct {
 	Size     uint32            // Cached size of the RLP payload (persists after Rlp is set to nil)
 
 	BlobBundles   []PoolBlobBundle // Zero-copy blob data for EIP-4844 wrapped blob txns
-	AuthAndNonces []AuthAndNonce   // Indexed authorization signers + nonces for EIP-7702 txns (type-4)
+	AuthAndNonces []AuthAndNonce   // Recovered authority + nonce for each valid EIP-7702 auth tuple. Tuples with unrecoverable signatures are skipped (per the EIP, they don't invalidate the txn). For total auth-list length (gas billing) use Txn.GetAuthorizations().
 }
 
 // Accessor methods that delegate to the stored Transaction.
@@ -554,10 +559,10 @@ func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstraction
 		deployerData = aaTx.DeployerData
 	}
 	if aaTx.Paymaster != nil {
-		paymaster = aaTx.Paymaster.Bytes()
+		paymaster = aaTx.Paymaster[:]
 	}
 	if aaTx.Deployer != nil {
-		deployer = aaTx.Deployer.Bytes()
+		deployer = aaTx.Deployer[:]
 	}
 	if aaTx.BuilderFee != nil {
 		builderFee = aaTx.BuilderFee.Bytes()

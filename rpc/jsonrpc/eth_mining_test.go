@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -44,7 +45,7 @@ func TestPendingBlock(t *testing.T) {
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	engine := ethash.NewFaker()
-	api := newEthApiForTest(NewBaseApi(ff, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, engine, m.Dirs, nil, 0, 0), nil, nil, nil)
+	api := newEthApiForTest(NewBaseApi(ff, stateCache, m.BlockReader, engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), nil, nil, nil)
 	expect := uint64(12345)
 	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(expect)}))
 	require.NoError(t, err)
@@ -68,7 +69,7 @@ func TestPendingLogs(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	mining := txpoolproto.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
-	expect := []byte{211}
+	expect := hexutil.Bytes{211}
 
 	ch, id := ff.SubscribePendingLogs(1)
 	defer ff.UnsubscribePendingLogs(id)

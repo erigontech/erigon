@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 	"maps"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -128,7 +128,6 @@ type TrieDbState struct {
 	currentBuffer     *Buffer
 	resolveReads      bool
 	retainListBuilder *trie.RetainListBuilder
-	hashBuilder       *trie.HashBuilder
 	incarnationMap    map[accounts.Address]uint64 // Temporary map of incarnation for the cases when contracts are deleted and recreated within 1 block
 }
 
@@ -140,7 +139,6 @@ func NewTrieDbState(root common.Hash, blockNr uint64, stateReader StateReader) *
 		StateReader:       stateReader,
 		blockNr:           blockNr,
 		retainListBuilder: trie.NewRetainListBuilder(),
-		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[accounts.Address]uint64),
 	}
 	return tds
@@ -172,7 +170,6 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		t:              &tcopy,
 		tMu:            new(sync.Mutex),
 		blockNr:        n,
-		hashBuilder:    trie.NewHashBuilder(false),
 		incarnationMap: make(map[accounts.Address]uint64),
 	}
 	return &cpy
@@ -215,7 +212,6 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		currentBuffer:     currentBuffer,
 		resolveReads:      tds.resolveReads,
 		retainListBuilder: tds.retainListBuilder,
-		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[accounts.Address]uint64),
 	}
 	tds.tMu.Unlock()
@@ -240,7 +236,6 @@ func (tds *TrieDbState) WithLastBuffer() *TrieDbState {
 		currentBuffer:     currentBuffer,
 		resolveReads:      tds.resolveReads,
 		retainListBuilder: tds.retainListBuilder.Copy(),
-		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[accounts.Address]uint64),
 	}
 }
@@ -292,8 +287,8 @@ func (tds *TrieDbState) buildPlainStorageReads() ([][]byte, [][]byte) {
 	}
 
 	// Sort indices based on accountAddresses
-	sort.SliceStable(indices, func(i, j int) bool {
-		return bytes.Compare(storagePlainKeys[indices[i]], storagePlainKeys[indices[j]]) < 0
+	slices.SortStableFunc(indices, func(a, b int) int {
+		return bytes.Compare(storagePlainKeys[a], storagePlainKeys[b])
 	})
 
 	// Apply the sorted order to accountAddresses and accountAddressHashes
@@ -391,7 +386,7 @@ func (tds *TrieDbState) buildAccountAddressReads() ([][]byte, [][]byte) {
 			panic("could not reproduce addrHash found in the map")
 		}
 		accountAddresses = append(accountAddresses, addressValue[:])
-		accountAddressHashes = append(accountAddressHashes, addrHash.Bytes())
+		accountAddressHashes = append(accountAddressHashes, addrHash[:])
 	}
 
 	// Create a slice of indices to track original positions
@@ -401,8 +396,8 @@ func (tds *TrieDbState) buildAccountAddressReads() ([][]byte, [][]byte) {
 	}
 
 	// Sort indices based on accountAddresses
-	sort.SliceStable(indices, func(i, j int) bool {
-		return bytes.Compare(accountAddresses[indices[i]], accountAddresses[indices[j]]) < 0
+	slices.SortStableFunc(indices, func(a, b int) int {
+		return bytes.Compare(accountAddresses[a], accountAddresses[b])
 	})
 
 	// Apply the sorted order to accountAddresses and accountAddressHashes
@@ -414,7 +409,7 @@ func (tds *TrieDbState) buildAccountAddressReads() ([][]byte, [][]byte) {
 	}
 
 	// Check if sorting is correct
-	for i := 0; i < len(sortedAccountAddresses); i++ {
+	for i := range sortedAccountAddresses {
 		addrHash := sortedAccountAddressHashes[i]
 		accountAddress := sortedAccountAddresses[i]
 		computedHash := crypto.Keccak256(accountAddress)
@@ -499,8 +494,10 @@ func (tds *TrieDbState) GetTouchedPlainKeys() (plainKeys [][]byte, hashedKeys []
 	}
 	accountHashTouches, accountAddressTouches := tds.buildAccountAddressReads()
 	storageHashTouches, storagePlainKeyTouches := tds.buildPlainStorageReads()
-	plainKeys = append(accountAddressTouches, storagePlainKeyTouches...)
-	hashedKeys = append(accountHashTouches, storageHashTouches...)
+	plainKeys = accountAddressTouches
+	plainKeys = append(plainKeys, storagePlainKeyTouches...)
+	hashedKeys = accountHashTouches
+	hashedKeys = append(hashedKeys, storageHashTouches...)
 	return plainKeys, hashedKeys
 
 }
@@ -628,13 +625,11 @@ func (tds *TrieDbState) ReadAccountDataForDebug(address accounts.Address) (*acco
 func (tds *TrieDbState) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	var account *accounts.Account
 	addressValue := address.Value()
-	addrHash, err := common.HashData(addressValue[:])
-	if err != nil {
-		return nil, err
-	}
+	addrHash := crypto.Keccak256Hash(addressValue[:])
 
 	account, ok := tds.GetAccount(addrHash)
 	if !ok {
+		var err error
 		account, err = tds.StateReader.ReadAccountData(address)
 		if err != nil {
 			return nil, err
@@ -652,7 +647,7 @@ func (tds *TrieDbState) ReadAccountData(address accounts.Address) (*accounts.Acc
 
 func (tds *TrieDbState) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	addressValue := address.Value()
-	addrHash := common.Hash(crypto.Keccak256(addressValue[:]))
+	addrHash := crypto.Keccak256Hash(addressValue[:])
 	if tds.currentBuffer != nil {
 		if _, ok := tds.currentBuffer.deleted[addrHash]; ok {
 			return uint256.Int{}, false, nil
@@ -664,10 +659,7 @@ func (tds *TrieDbState) ReadAccountStorage(address accounts.Address, key account
 		}
 	}
 	keyValue := key.Value()
-	seckey, err := common.HashData(keyValue[:])
-	if err != nil {
-		return uint256.Int{}, false, err
-	}
+	seckey := crypto.Keccak256Hash(keyValue[:])
 
 	storagePlainKey := dbutils.GenerateStoragePlainKey(addressValue, keyValue)
 
@@ -695,7 +687,7 @@ func (tds *TrieDbState) ReadAccountStorage(address accounts.Address, key account
 
 func (tds *TrieDbState) HasStorage(address accounts.Address) (bool, error) {
 	addressValue := address.Value()
-	addrHash := common.Hash(crypto.Keccak256(addressValue[:]))
+	addrHash := crypto.Keccak256Hash(addressValue[:])
 	// check if we know about any storage updates with non-empty values
 	for _, v := range tds.currentBuffer.storageUpdates[addrHash] {
 		if len(v) > 0 {
@@ -720,7 +712,7 @@ func (tds *TrieDbState) readAccountCodeSizeFromTrie(addrHash []byte) (int, bool)
 
 func (tds *TrieDbState) ReadAccountCode(address accounts.Address) (code []byte, err error) {
 	addressValue := address.Value()
-	addrHash := common.Hash(crypto.Keccak256(addressValue[:]))
+	addrHash := crypto.Keccak256Hash(addressValue[:])
 
 	if cached, ok := tds.readAccountCodeFromTrie(addrHash[:]); ok {
 		code, err = cached, nil
@@ -728,15 +720,11 @@ func (tds *TrieDbState) ReadAccountCode(address accounts.Address) (code []byte, 
 		code, err = tds.StateReader.ReadAccountCode(address)
 	}
 	if tds.resolveReads {
-		addrHash, err1 := common.HashData(addressValue[:])
-		if err1 != nil {
-			return nil, err
-		}
 		tds.currentBuffer.accountReads[addrHash] = address
 		// we have to be careful, because the code might change
 		// during the block executuion, so we are always
 		// storing the latest code hash
-		codeHash := accounts.InternCodeHash(crypto.HashData(code))
+		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 		tds.currentBuffer.codeReads[addrHash] = witnesstypes.CodeWithHash{Code: code, CodeHash: codeHash}
 		tds.retainListBuilder.ReadCode(codeHash, code)
 	}
@@ -745,7 +733,7 @@ func (tds *TrieDbState) ReadAccountCode(address accounts.Address) (code []byte, 
 
 func (tds *TrieDbState) ReadAccountCodeSize(address accounts.Address) (codeSize int, err error) {
 	addressValue := address.Value()
-	addrHash := common.Hash(crypto.Keccak256(addressValue[:]))
+	addrHash := crypto.Keccak256Hash(addressValue[:])
 	if cached, ok := tds.readAccountCodeSizeFromTrie(addrHash[:]); ok {
 		return cached, nil
 	} else {
@@ -761,12 +749,8 @@ func (tds *TrieDbState) ReadAccountCodeSize(address accounts.Address) (codeSize 
 			return 0, err
 		}
 
-		codeHash := crypto.HashData(code)
+		codeHash := crypto.Keccak256Hash(code)
 
-		addrHash, err1 := common.HashData(addressValue[:])
-		if err1 != nil {
-			return 0, err1
-		}
 		tds.currentBuffer.accountReads[addrHash] = address
 		// we have to be careful, because the code might change
 		// during the block executuion, so we are always
@@ -800,7 +784,7 @@ func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 
 func (tsw *TrieStateWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	addressValue := address.Value()
-	addrHash := common.Hash(crypto.Keccak256(addressValue[:]))
+	addrHash := crypto.Keccak256Hash(addressValue[:])
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = witnesstypes.AccountWithAddress{Address: addressValue, Account: account}
 	tsw.tds.currentBuffer.accountReads[addrHash] = address
 	if original != nil {
@@ -811,7 +795,7 @@ func (tsw *TrieStateWriter) UpdateAccountData(address accounts.Address, original
 
 func (tsw *TrieStateWriter) DeleteAccount(address accounts.Address, original *accounts.Account) error {
 	addressValue := address.Value()
-	addrHash := common.Hash(crypto.Keccak256(addressValue[:]))
+	addrHash := crypto.Keccak256Hash(addressValue[:])
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = witnesstypes.AccountWithAddress{Address: addressValue, Account: original} // TODO: might be needed to use *AccountWithAddress to point to nil
 	tsw.tds.currentBuffer.accountReads[addrHash] = address
 	if original != nil {
@@ -832,17 +816,14 @@ func (tsw *TrieStateWriter) UpdateAccountCode(address accounts.Address, incarnat
 		tsw.tds.retainListBuilder.CreateCode(codeHash)
 	}
 	addressValue := address.Value()
-	addrHash, err := common.HashData(addressValue[:])
-	if err != nil {
-		return err
-	}
+	addrHash := crypto.Keccak256Hash(addressValue[:])
 	tsw.tds.currentBuffer.codeUpdates[addrHash] = code
 	return nil
 }
 
 func (tsw *TrieStateWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
 	addressValue := address.Value()
-	addrHash := common.Hash(crypto.Keccak256(addressValue[:]))
+	addrHash := crypto.Keccak256Hash(addressValue[:])
 
 	v := value.Bytes()
 	m, ok := tsw.tds.currentBuffer.storageUpdates[addrHash]
@@ -852,10 +833,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address accounts.Address, incarn
 	}
 	tsw.tds.currentBuffer.storageIncarnation[addrHash] = incarnation
 	keyValue := key.Value()
-	seckey, err := common.HashData(keyValue[:])
-	if err != nil {
-		return err
-	}
+	seckey := crypto.Keccak256Hash(keyValue[:])
 	var storageKey common.StorageKey
 	copy(storageKey[:], dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
 
@@ -906,7 +884,7 @@ func (tds *TrieDbState) makeBlockWitness(trace bool, rl trie.RetainDecider, isBi
 
 func (tsw *TrieStateWriter) CreateContract(address accounts.Address) error {
 	addressValue := address.Value()
-	addrHash := common.Hash(crypto.Keccak256(addressValue[:]))
+	addrHash := crypto.Keccak256Hash(addressValue[:])
 	tsw.tds.currentBuffer.created[addrHash] = address
 	tsw.tds.currentBuffer.accountReads[addrHash] = address
 	delete(tsw.tds.currentBuffer.storageUpdates, addrHash)

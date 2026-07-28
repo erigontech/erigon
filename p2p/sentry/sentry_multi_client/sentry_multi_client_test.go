@@ -1,6 +1,7 @@
 package sentry_multi_client
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -10,7 +11,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	proto_sentry "github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -148,6 +153,7 @@ type mockSentryClient struct {
 	sendMessageByIdFunc  func(ctx context.Context, req *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error)
 	sendMessageToAllFunc func(ctx context.Context, req *proto_sentry.OutboundMessageData, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error)
 	handShakeFunc        func(ctx context.Context, req *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error)
+	penalizePeerFunc     func(ctx context.Context, req *proto_sentry.PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
 func (m *mockSentryClient) SendMessageById(ctx context.Context, req *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
@@ -162,8 +168,62 @@ func (m *mockSentryClient) HandShake(ctx context.Context, req *emptypb.Empty, op
 	return m.handShakeFunc(ctx, req, opts...)
 }
 
+func (m *mockSentryClient) PenalizePeer(ctx context.Context, req *proto_sentry.PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	if m.penalizePeerFunc == nil {
+		return &emptypb.Empty{}, nil
+	}
+	return m.penalizePeerFunc(ctx, req, opts...)
+}
+
 type mockBlockReader struct {
-	services.FullBlockReader
+	dbservices.FullBlockReader
+}
+
+// TestBlockRange69_InvalidPacketKicksPeer verifies that an invalid
+// BlockRangeUpdate (e.g. Earliest > Latest) causes the peer to be penalized.
+// This mirrors the Hive `TestBlockRangeUpdateInvalid` simulator check.
+func TestBlockRange69_InvalidPacketKicksPeer(t *testing.T) {
+	ctx := context.Background()
+
+	peerId := &proto_types.H512{
+		Hi: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+		Lo: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+	}
+
+	// Packet with Earliest > Latest is invalid per BlockRangeUpdatePacket.Validate.
+	invalid := eth.BlockRangeUpdatePacket{
+		Earliest:   10,
+		Latest:     8,
+		LatestHash: common.HexToHash("0xdeadbeef"),
+	}
+	payload, err := rlp.EncodeToBytes(&invalid)
+	if err != nil {
+		t.Fatalf("encode packet: %v", err)
+	}
+
+	var penalized *proto_sentry.PenalizePeerRequest
+	mockSentry := &mockSentryClient{
+		penalizePeerFunc: func(_ context.Context, req *proto_sentry.PenalizePeerRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
+			penalized = req
+			return &emptypb.Empty{}, nil
+		},
+	}
+
+	cs := &MultiClient{logger: log.New()}
+
+	if err := cs.blockRange69(ctx, &proto_sentry.InboundMessage{
+		PeerId: peerId,
+		Data:   payload,
+	}, mockSentry); err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+
+	if penalized == nil {
+		t.Fatal("expected PenalizePeer to be called, got nil")
+	}
+	if penalized.Penalty != proto_sentry.PenaltyKind_Kick {
+		t.Fatalf("expected Kick penalty, got %v", penalized.Penalty)
+	}
 }
 
 type mockReceiptsGenerator struct {
@@ -184,10 +244,119 @@ func (m *mockStatusDataProvider) GetStatusData(ctx context.Context) (*proto_sent
 }
 
 type mockFullBlockReader struct {
-	services.FullBlockReader
+	dbservices.FullBlockReader
 	readyFunc func(ctx context.Context) <-chan error
 }
 
 func (m *mockFullBlockReader) Ready(ctx context.Context) <-chan error {
 	return m.readyFunc(ctx)
+}
+
+// balHeaderNumberReader is a minimal dbservices.FullBlockReader stub that resolves
+// hash → block-number via an explicit map. AnswerGetBlockAccessListsQuery only
+// reads HeaderNumber; every other method falls through to the embedded nil
+// interface and would panic if called, which is the correct behaviour — it
+// flags accidental coupling.
+type balHeaderNumberReader struct {
+	dbservices.FullBlockReader
+	byHash map[common.Hash]uint64
+}
+
+func (m *balHeaderNumberReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (*uint64, error) {
+	n, ok := m.byHash[hash]
+	if !ok {
+		return nil, nil
+	}
+	return &n, nil
+}
+
+// TestGetBlockAccessLists71_AnswersAndSends covers the server-side eth/71 BAL
+// handler: decode an inbound GetBlockAccessLists request, look up stored BALs
+// from rawdb via AnswerGetBlockAccessListsQuery, encode a positionally-aligned
+// BlockAccessLists response, send it back to the requesting peer with the
+// matching RequestId. Pairs with the inbound-subscription fix on the *client*
+// side — without both, peers can't actually exchange BALs.
+func TestGetBlockAccessLists71_AnswersAndSends(t *testing.T) {
+	ctx := context.Background()
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	rwTx, err := db.BeginRw(ctx)
+	if err != nil {
+		t.Fatalf("begin rw: %v", err)
+	}
+	defer rwTx.Rollback() // safety net; we Commit below on the happy path
+
+	hashKnown := common.Hash{0x01}
+	hashUnknown := common.Hash{0x02}
+	const knownBlockNum uint64 = 100
+	bal := []byte{0xc3, 0x01, 0x02, 0x03} // short valid RLP non-empty payload
+	if err := rawdb.WriteBlockAccessListBytes(rwTx, hashKnown, knownBlockNum, bal); err != nil {
+		t.Fatalf("WriteBlockAccessListBytes: %v", err)
+	}
+	if err := rwTx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	reader := &balHeaderNumberReader{
+		byHash: map[common.Hash]uint64{hashKnown: knownBlockNum},
+	}
+
+	var sent *proto_sentry.SendMessageByIdRequest
+	mockSentry := &mockSentryClient{
+		sendMessageByIdFunc: func(_ context.Context, req *proto_sentry.SendMessageByIdRequest, _ ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+			sent = req
+			return &proto_sentry.SentPeers{}, nil
+		},
+	}
+
+	cs := &MultiClient{
+		db:          db,
+		blockReader: reader,
+		logger:      log.New(),
+	}
+
+	const reqID uint64 = 0xcafebabe
+	req := eth.GetBlockAccessListsPacket66{
+		RequestId:                 reqID,
+		GetBlockAccessListsPacket: eth.GetBlockAccessListsPacket{hashKnown, hashUnknown},
+	}
+	encoded, err := rlp.EncodeToBytes(&req)
+	if err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+
+	if err := cs.getBlockAccessLists71(ctx, &proto_sentry.InboundMessage{
+		Id:   proto_sentry.MessageId_GET_BLOCK_ACCESS_LISTS_71,
+		Data: encoded,
+		PeerId: &proto_types.H512{
+			Hi: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+			Lo: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+		},
+	}, mockSentry); err != nil {
+		t.Fatalf("getBlockAccessLists71: %v", err)
+	}
+	if sent == nil {
+		t.Fatal("no response sent")
+	}
+	if sent.Data.Id != proto_sentry.MessageId_BLOCK_ACCESS_LISTS_71 {
+		t.Fatalf("response message id: have %v, want BLOCK_ACCESS_LISTS_71", sent.Data.Id)
+	}
+
+	var resp eth.BlockAccessListsPacket66
+	if err := rlp.DecodeBytes(sent.Data.Data, &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.RequestId != reqID {
+		t.Fatalf("RequestId: have %d, want %d", resp.RequestId, reqID)
+	}
+	if got := len(resp.BlockAccessListsPacket); got != 2 {
+		t.Fatalf("response length: have %d, want 2 (positionally aligned to query)", got)
+	}
+	if !bytes.Equal(resp.BlockAccessListsPacket[0], bal) {
+		t.Errorf("response[0] (known+BAL): have %x, want %x", resp.BlockAccessListsPacket[0], bal)
+	}
+	// Unknown block — sentinel 0x80 ("not available"), not padded with anything else.
+	if !bytes.Equal(resp.BlockAccessListsPacket[1], []byte{0x80}) {
+		t.Errorf("response[1] (unknown block): have %x, want 0x80 sentinel", resp.BlockAccessListsPacket[1])
+	}
 }

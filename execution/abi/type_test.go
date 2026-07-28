@@ -22,6 +22,7 @@ package abi
 import (
 	"math/big"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
@@ -119,6 +120,30 @@ func TestTypeRegexp(t *testing.T) {
 	}
 }
 
+func TestTypeRejectsInvalidTupleFieldNames(t *testing.T) {
+	tests := []struct {
+		name      string
+		fieldName string
+	}{
+		{name: "underscore_digit", fieldName: "_1"},
+		{name: "ampersand", fieldName: "&"},
+		{name: "dashes", fieldName: "----"},
+		{name: "dotted", fieldName: "foo.Bar"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewType("tuple", "", []ArgumentMarshaling{{Name: tt.fieldName, Type: "bool"}})
+			if err == nil {
+				t.Fatalf("expected error for field name %q, got nil", tt.fieldName)
+			}
+			if !strings.Contains(err.Error(), "invalid name") {
+				t.Fatalf("expected invalid-name error for %q, got: %v", tt.fieldName, err)
+			}
+		})
+	}
+}
+
 func TestTypeCheck(t *testing.T) {
 	for i, test := range []struct {
 		typ        string
@@ -197,7 +222,7 @@ func TestTypeCheck(t *testing.T) {
 		{"int232", nil, big.NewInt(1), ""},
 		{"int240", nil, big.NewInt(1), ""},
 		{"int248", nil, big.NewInt(1), ""},
-		{"uint30", nil, uint8(1), "abi: cannot use uint8 as type ptr as argument"},
+		{"uint30", nil, "", "unsupported arg type: uint30"},
 		{"uint8", nil, uint16(1), "abi: cannot use uint16 as type uint8 as argument"},
 		{"uint8", nil, uint32(1), "abi: cannot use uint32 as type uint8 as argument"},
 		{"uint8", nil, uint64(1), "abi: cannot use uint64 as type uint8 as argument"},
@@ -272,6 +297,13 @@ func TestTypeCheck(t *testing.T) {
 		{"bytes0", nil, "", "unsupported arg type: bytes0"},
 		{"bytes33", nil, "", "unsupported arg type: bytes33"},
 		{"bytes64", nil, "", "unsupported arg type: bytes64"},
+		// int/uint outside the valid ABI range 8 <= M <= 256 and M % 8 == 0 should be rejected
+		{"int0", nil, "", "unsupported arg type: int0"},
+		{"uint0", nil, "", "unsupported arg type: uint0"},
+		{"int257", nil, "", "unsupported arg type: int257"},
+		{"uint257", nil, "", "unsupported arg type: uint257"},
+		{"int7", nil, "", "unsupported arg type: int7"},
+		{"uint7", nil, "", "unsupported arg type: uint7"},
 		// simple tuple
 		{"tuple", []ArgumentMarshaling{{Name: "a", Type: "uint256"}, {Name: "b", Type: "uint256"}}, struct {
 			A *big.Int
@@ -370,6 +402,25 @@ func TestGetTypeSize(t *testing.T) {
 		result := getTypeSize(typ)
 		if result != data.typSize {
 			t.Errorf("case %d type %q: get type size error: actual: %d expected: %d", i, data.typ, result, data.typSize)
+		}
+	}
+}
+
+// TestNewTypeFixedPointWrongSizeSubmatch is a regression test for a bug in NewType
+// that used the wrong regexp submatch (parsedType[2]) for the first numeric size.
+// For types like fixed128x18, the overall second group is "128x18", not an integer
+// string; the first integer is parsedType[3] ("128"). The bug caused strconv.Atoi
+// to fail with "error parsing variable size" instead of the intended "unsupported
+// arg type" outcome for unimplemented fixed-point encodings.
+func TestNewTypeFixedPointWrongSizeSubmatch(t *testing.T) {
+	t.Parallel()
+	for _, s := range []string{"fixed128x18", "ufixed256x10"} {
+		_, err := NewType(s, "", nil)
+		if err == nil {
+			t.Fatalf("type %q: expected error for unsupported fixed-point type", s)
+		}
+		if !strings.Contains(err.Error(), "unsupported arg type") {
+			t.Fatalf("type %q: got %v; want error containing %q", s, err, "unsupported arg type")
 		}
 	}
 }

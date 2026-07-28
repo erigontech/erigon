@@ -27,11 +27,10 @@ import (
 
 	"github.com/holiman/uint256"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/p2p/event"
 )
 
 // SignerFn is a signer function callback when a contract requires a method to
@@ -135,7 +134,7 @@ func (c *BoundContract) Call(opts *CallOpts, results *[]any, method string, para
 		return err
 	}
 	var (
-		msg    = ethereum.CallMsg{From: opts.From, To: &c.address, Data: input}
+		msg    = CallMsg{From: opts.From, To: &c.address, Data: input}
 		ctx    = ensureContext(opts.Context)
 		code   []byte
 		output []byte
@@ -251,7 +250,7 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 			}
 		}
 		// If the contract surely has code (or code is not needed), estimate the transaction
-		msg := ethereum.CallMsg{From: opts.From, To: contract, GasPrice: gasPrice, Value: value, Data: input}
+		msg := CallMsg{From: opts.From, To: contract, GasPrice: gasPrice, Value: value, Data: input}
 		gasLimit, err = c.transactor.EstimateGas(ensureContext(opts.Context), msg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to estimate gas needed: %w", err)
@@ -294,7 +293,7 @@ func (c *BoundContract) FilterLogs(opts *FilterOpts, name string, query ...[]any
 	// Start the background filtering
 	logs := make(chan types.Log, 128)
 
-	config := ethereum.FilterQuery{
+	config := FilterQuery{
 		Addresses: []common.Address{c.address},
 		Topics:    topics,
 		FromBlock: new(big.Int).SetUint64(opts.Start),
@@ -310,7 +309,8 @@ func (c *BoundContract) FilterLogs(opts *FilterOpts, name string, query ...[]any
 		return nil, nil, err
 	}
 	sub := event.NewSubscription(func(quit <-chan struct{}) error {
-		for _, log := range buff {
+		for i := range buff {
+			log := buff[i]
 			select {
 			case logs <- log:
 			case <-quit:
@@ -340,7 +340,7 @@ func (c *BoundContract) WatchLogs(opts *WatchOpts, name string, query ...[]any) 
 	// Start the background filtering
 	logs := make(chan types.Log, 128)
 
-	config := ethereum.FilterQuery{
+	config := FilterQuery{
 		Addresses: []common.Address{c.address},
 		Topics:    topics,
 	}
@@ -362,7 +362,9 @@ func (c *BoundContract) UnpackLog(out any, event string, log types.Log) error {
 		}
 	}
 	var indexed abi.Arguments
-	for _, arg := range c.abi.Events[event].Inputs {
+	inputs := c.abi.Events[event].Inputs
+	for i := range inputs {
+		arg := inputs[i]
 		if arg.Indexed {
 			indexed = append(indexed, arg)
 		}
@@ -378,7 +380,9 @@ func (c *BoundContract) UnpackLogIntoMap(out map[string]any, event string, log t
 		}
 	}
 	var indexed abi.Arguments
-	for _, arg := range c.abi.Events[event].Inputs {
+	inputs := c.abi.Events[event].Inputs
+	for i := range inputs {
+		arg := inputs[i]
 		if arg.Indexed {
 			indexed = append(indexed, arg)
 		}

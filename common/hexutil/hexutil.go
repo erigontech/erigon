@@ -209,7 +209,7 @@ func CompressNibbles(nibbles []byte, out *[]byte) {
 // LO_NIBBLE(b) = b & 0x0F
 func DecompressNibbles(in []byte, out *[]byte) {
 	tmp := (*out)[:0]
-	for i := 0; i < len(in); i++ {
+	for i := range in {
 		tmp = append(tmp, (in[i]>>4)&0x0F, in[i]&0x0F)
 	}
 	*out = tmp

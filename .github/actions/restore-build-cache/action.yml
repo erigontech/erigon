@@ -30,7 +30,7 @@ runs:
   using: composite
   steps:
     - id: restore
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v5
       with:
         path: ${{ inputs.gocache-path }}
         key: gocache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ github.run_id }}|${{ github.run_attempt }}

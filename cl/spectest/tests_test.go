@@ -18,16 +18,29 @@ package spectest
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/spectest/consensus_tests"
 	"github.com/erigontech/erigon/cl/spectest/spectest"
 	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/common/dbg"
 )
 
+var mainnetDir = filepath.Join("..", "..", "test-fixtures-cache", "cl_mainnet", "tests")
+
 func Test(t *testing.T) {
-	caplinConfig := clparams.CaplinConfig{}
-	clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &caplinConfig)
-	spectest.RunCases(t, consensus_tests.TestFormats, transition.ValidatingMachine, os.DirFS("./tests"))
+	// Skip when run as part of the broader test-all sweep; the dedicated
+	// test-integration-caplin.yml workflow exercises this suite end-to-end
+	// against the cl_mainnet fixtures. Avoids downloading ~677MB of
+	// fixtures for every test-all run.
+	if dbg.EnvBool("ERIGON_SKIP_CL_SPECTEST", false) {
+		t.Skip("ERIGON_SKIP_CL_SPECTEST=true; consensus spec tests are covered by test-integration-caplin")
+	}
+	if clparams.GetBeaconConfig() == nil {
+		caplinConfig := clparams.CaplinConfig{}
+		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &caplinConfig)
+	}
+	spectest.RunCases(t, consensus_tests.TestFormats, transition.ValidatingMachine, os.DirFS(mainnetDir))
 }

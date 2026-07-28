@@ -25,20 +25,20 @@ import (
 type ManagedEventBus struct {
 	serviceBus       *ServiceBus
 	eventBus         EventBus
-	key              interface{}
-	registrations    map[uintptr][]interface{}
+	key              any
+	registrations    map[uintptr][]any
 	registrationLock sync.Mutex
 }
 
-func NewManagedEventBus(serviceBus *ServiceBus, key interface{}) *ManagedEventBus {
-	return &ManagedEventBus{serviceBus, NewEventBus(serviceBus.execPool), key, make(map[uintptr][]interface{}), sync.Mutex{}}
+func NewManagedEventBus(serviceBus *ServiceBus, key any) *ManagedEventBus {
+	return &ManagedEventBus{serviceBus, NewEventBus(serviceBus.execPool), key, make(map[uintptr][]any), sync.Mutex{}}
 }
 
 func (bus *ManagedEventBus) String() string {
 	return fmt.Sprintf("ManagedEventBus [key=%v]", bus.key)
 }
 
-func (bus *ManagedEventBus) Register(object interface{}, fns ...interface{}) (err error) {
+func (bus *ManagedEventBus) Register(object any, fns ...any) (err error) {
 	objectVal := reflect.ValueOf(object)
 	if len(fns) == 0 {
 		for i := 0; i < objectVal.NumMethod(); i++ {
@@ -46,6 +46,13 @@ func (bus *ManagedEventBus) Register(object interface{}, fns ...interface{}) (er
 				fns = append(fns, method.Interface())
 			}
 		}
+	}
+	// reflect.Value.Pointer() only supports kinds with an addressable pointer.
+	// Reject others with a descriptive error instead of panicking.
+	switch objectVal.Kind() {
+	case reflect.Pointer, reflect.Chan, reflect.Map, reflect.Func, reflect.Slice, reflect.UnsafePointer:
+	default:
+		return fmt.Errorf("ManagedEventBus.Register: object kind %s is not supported; pass a pointer", objectVal.Kind())
 	}
 	objectPtr := objectVal.Pointer()
 
@@ -61,8 +68,14 @@ func (bus *ManagedEventBus) Register(object interface{}, fns ...interface{}) (er
 	return err
 }
 
-func (bus *ManagedEventBus) UnregisterAll(object interface{}) error {
-	objectPtr := reflect.ValueOf(object).Pointer()
+func (bus *ManagedEventBus) UnregisterAll(object any) error {
+	objectVal := reflect.ValueOf(object)
+	switch objectVal.Kind() {
+	case reflect.Pointer, reflect.Chan, reflect.Map, reflect.Func, reflect.Slice, reflect.UnsafePointer:
+	default:
+		return fmt.Errorf("ManagedEventBus.UnregisterAll: object kind %s is not supported; pass a pointer", objectVal.Kind())
+	}
+	objectPtr := objectVal.Pointer()
 
 	bus.registrationLock.Lock()
 	for _, fn := range bus.registrations[objectPtr] {
@@ -77,7 +90,7 @@ func (bus *ManagedEventBus) UnregisterAll(object interface{}) error {
 	return nil
 }
 
-func (bus *ManagedEventBus) Unregister(object interface{}, fn interface{}) error {
+func (bus *ManagedEventBus) Unregister(object any, fn any) error {
 	objectPtr := reflect.ValueOf(object).Pointer()
 	bus.registrationLock.Lock()
 	if registrations, ok := bus.registrations[objectPtr]; ok && len(registrations) > 0 {
@@ -87,11 +100,11 @@ func (bus *ManagedEventBus) Unregister(object interface{}, fn interface{}) error
 	return bus.eventBus.Unsubscribe(fn)
 }
 
-func (bus *ManagedEventBus) Post(args ...interface{}) int {
+func (bus *ManagedEventBus) Post(args ...any) int {
 	return bus.eventBus.Publish(args...)
 }
 
-func removeRegistration(registrations map[uintptr][]interface{}, objectPtr uintptr, idx int) {
+func removeRegistration(registrations map[uintptr][]any, objectPtr uintptr, idx int) {
 	if _, ok := registrations[objectPtr]; !ok || idx < 0 {
 		return
 	}
@@ -102,7 +115,7 @@ func removeRegistration(registrations map[uintptr][]interface{}, objectPtr uintp
 	registrations[objectPtr] = registrations[objectPtr][:l-1]
 }
 
-func findRegistrationIndex(registrations map[uintptr][]interface{}, objectPtr uintptr, fn interface{}) int {
+func findRegistrationIndex(registrations map[uintptr][]any, objectPtr uintptr, fn any) int {
 	if _, ok := registrations[objectPtr]; ok {
 		for idx, subscription := range registrations[objectPtr] {
 			//fmt.Printf("%v=%v (%v)\n", subscription, fn, reflect.ValueOf(subscription).Pointer() == reflect.ValueOf(fn).Pointer())

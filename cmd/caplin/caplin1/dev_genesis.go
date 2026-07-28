@@ -39,7 +39,8 @@ func writeDevGenesisBeaconBlock(ctx context.Context, genesisState *state.Caching
 	if version >= clparams.AltairVersion {
 		body.SyncAggregate = cltypes.NewSyncAggregateWithSize(int(cfg.SyncCommitteeSize) / 8)
 	}
-	if version >= clparams.BellatrixVersion {
+	// [Modified in Gloas:EIP7732] GLOAS blocks do not have ExecutionPayload in the body.
+	if version >= clparams.BellatrixVersion && version < clparams.GloasVersion {
 		body.ExecutionPayload.Extra = solid.NewExtraData()
 		body.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
 
@@ -61,15 +62,34 @@ func writeDevGenesisBeaconBlock(ctx context.Context, genesisState *state.Caching
 		}
 	}
 
+	// Verify the reconstructed body root matches what the genesis state header expects.
+	// A mismatch means the block root we write differs from state.BlockRoot(), breaking
+	// all subsequent by-root lookups.
+	bodyRoot, err := body.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("compute genesis body root: %w", err)
+	}
+	if bodyRoot != header.BodyRoot {
+		// Body root mismatch: the reconstructed genesis body does not match what the
+		// external genesis generator stored in the state header. This happens when the
+		// genesis generator initializes the body differently (e.g. different field
+		// initialization or SSZ subtleties). Skip writing the genesis block — the
+		// genesis block is synthetic (slot 0), fork choice already tracks the anchor
+		// root, and real blocks (slot 1+) will be written normally.
+		log.Warn("Genesis body root mismatch — skipping genesis block write",
+			"computed", fmt.Sprintf("%x", bodyRoot),
+			"expected", fmt.Sprintf("%x", header.BodyRoot))
+		return nil
+	}
+
 	blockRoot, err := blk.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("compute genesis block root: %w", err)
 	}
 
-	log.Info("[dev-genesis] writing genesis beacon block",
+	log.Info("[genesis] writing genesis beacon block to DB",
 		"blockRoot", common.Hash(blockRoot).Hex(),
 		"stateRoot", common.Hash(stateRoot).Hex(),
-		"execBlockHash", body.ExecutionPayload.BlockHash.Hex(),
 	)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {

@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -48,20 +49,21 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
-	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/stagedsync"
-	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
-	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -123,6 +125,7 @@ type ExecModuleTester struct {
 	ForkValidator   *execmodule.ForkValidator
 	ExecModule      *execmodule.ExecModule
 	StateCache      *execmodule.Cache
+	domainCache     *cache.StateCache
 	retirementStart chan bool
 	retirementDone  chan struct{}
 	retirementWg    sync.WaitGroup
@@ -136,8 +139,10 @@ type ExecModuleTester struct {
 
 	HistoryV3      bool
 	cfg            ethconfig.Config
-	BlockSnapshots *freezeblocks.RoSnapshots
-	BlockReader    services.FullBlockReader
+	BlockSnapshots *blocksnapshots.RoSnapshots
+	borSnapshots   *heimdall.RoSnapshots
+	blockRetire    dbservices.BlockRetire
+	BlockReader    dbservices.FullBlockReader
 	ReceiptsReader *receipts.Generator
 	posStagedSync  *stagedsync.Sync
 	bgComponentsEg errgroup.Group
@@ -145,8 +150,11 @@ type ExecModuleTester struct {
 
 func (emt *ExecModuleTester) Close() {
 	emt.cancel()
-	if err := emt.bgComponentsEg.Wait(); err != nil {
+	if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
 		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
+	}
+	if emt.blockRetire != nil {
+		emt.blockRetire.Close()
 	}
 	if emt.Engine != nil {
 		emt.Engine.Close()
@@ -154,8 +162,17 @@ func (emt *ExecModuleTester) Close() {
 	if emt.BlockSnapshots != nil {
 		emt.BlockSnapshots.Close()
 	}
+	if emt.borSnapshots != nil {
+		emt.borSnapshots.Close()
+	}
 	if emt.DB != nil {
 		emt.DB.Close()
+	}
+	if emt.domainCache != nil {
+		emt.domainCache.Close()
+	}
+	if emt.tb == nil && emt.Dirs.DataDir != "" {
+		dir.RemoveAll(emt.Dirs.DataDir)
 	}
 }
 
@@ -307,12 +324,6 @@ func WithPruneMode(pm prune.Mode) Option {
 	}
 }
 
-func WithBlockBufferSize(size int) Option {
-	return func(opts *options) {
-		opts.blockBufferSize = size
-	}
-}
-
 func WithTxPool() Option {
 	return func(opts *options) {
 		opts.withTxPool = true
@@ -331,9 +342,34 @@ func WithChainConfig(cfg *chain.Config) Option {
 	}
 }
 
+func WithoutAmsterdamBuilderContracts() Option {
+	return func(opts *options) {
+		opts.skipAmsterdamBuilderContracts = true
+	}
+}
+
 func WithFcuBackgroundCommit() Option {
 	return func(opts *options) {
 		opts.fcuBackgroundCommit = true
+	}
+}
+
+// WithAlwaysGenerateChangesets pins --experimental.always-generate-changesets
+// regardless of the tester default: true for tests that reorg deeper than
+// MaxReorgDepth, false for tests that rely on the windowed-changesets
+// production behaviour.
+func WithAlwaysGenerateChangesets(v bool) Option {
+	return func(opts *options) {
+		opts.alwaysGenerateChangesets = &v
+	}
+}
+
+// WithMaxReorgDepth pins syncCfg.MaxReorgDepth so the changeset window
+// (maxBlockNum-MaxReorgDepth) can be placed mid-batch — leaving earlier blocks
+// pre-window (BAL-fold candidates) and later blocks window (per-block changeset).
+func WithMaxReorgDepth(d uint64) Option {
+	return func(opts *options) {
+		opts.maxReorgDepth = &d
 	}
 }
 
@@ -343,19 +379,28 @@ func WithFcuBackgroundPrune() Option {
 	}
 }
 
+func WithSentryProtocol(protocol uint) Option {
+	return func(opts *options) {
+		opts.sentryProtocol = protocol
+	}
+}
+
 type options struct {
-	stepSize            *uint64
-	experimentalBAL     bool
-	genesis             *types.Genesis
-	chainConfig         *chain.Config
-	key                 *ecdsa.PrivateKey
-	engine              rules.Engine
-	pruneMode           *prune.Mode
-	blockBufferSize     int
-	withTxPool          bool
-	enableDomains       []kv.Domain
-	fcuBackgroundCommit bool
-	fcuBackgroundPrune  bool
+	stepSize                      *uint64
+	experimentalBAL               bool
+	genesis                       *types.Genesis
+	chainConfig                   *chain.Config
+	key                           *ecdsa.PrivateKey
+	engine                        rules.Engine
+	pruneMode                     *prune.Mode
+	withTxPool                    bool
+	enableDomains                 []kv.Domain
+	fcuBackgroundCommit           bool
+	fcuBackgroundPrune            bool
+	alwaysGenerateChangesets      *bool
+	maxReorgDepth                 *uint64
+	sentryProtocol                uint
+	skipAmsterdamBuilderContracts bool
 }
 
 func applyOptions(opts []Option) options {
@@ -364,9 +409,9 @@ func applyOptions(opts []Option) options {
 	opt := options{
 		key:             defaultKey,
 		pruneMode:       &defaultPruneMode,
-		blockBufferSize: 128,
 		chainConfig:     chain.TestChainBerlinConfig,
 		experimentalBAL: false,
+		sentryProtocol:  direct.ETH68,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -380,6 +425,9 @@ func applyOptions(opts []Option) options {
 				address: {Balance: big.NewInt(1 * common.Ether)},
 			},
 		}
+	}
+	if !opt.skipAmsterdamBuilderContracts {
+		addAmsterdamBuilderContracts(opt.genesis)
 	}
 	// engine depends on genesis
 	if opt.engine == nil {
@@ -395,6 +443,28 @@ func applyOptions(opts []Option) options {
 	return opt
 }
 
+func addAmsterdamBuilderContracts(genesis *types.Genesis) {
+	if genesis.Config.AmsterdamTime == nil {
+		return
+	}
+	if genesis.Alloc == nil {
+		genesis.Alloc = types.GenesisAlloc{}
+	}
+	genesis.Alloc[genesis.Config.GetBuilderDepositContract().Value()] = types.GenesisAccount{
+		Balance: new(big.Int),
+		Code:    misc.BuilderDepositRequestCode,
+		Nonce:   1,
+	}
+	slot := common.Hash{}
+	sentinel := common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+	genesis.Alloc[genesis.Config.GetBuilderExitContract().Value()] = types.GenesisAccount{
+		Balance: new(big.Int),
+		Code:    misc.BuilderExitRequestCode,
+		Nonce:   1,
+		Storage: map[common.Hash]common.Hash{slot: sentinel},
+	}
+}
+
 // New creates an ExecModuleTester. When called with no options, it uses
 // sensible defaults (TestChainBerlinConfig, 1 Ether alloc, ethash.NewFaker, etc.).
 // Use With* options to customise.
@@ -405,15 +475,14 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	key := opt.key
 	engine := opt.engine
 	pruneMode := *opt.pruneMode
-	blockBufferSize := opt.blockBufferSize
 	withTxPool := opt.withTxPool
 	tmpdir, err := os.MkdirTemp("", "mock-sentry-*")
 	if err != nil {
 		panic(err)
 	}
 	if tb != nil {
-		// we can't use tb.TempDir() here becuase things like TestExecutionSpecBlockchain
-		// produces test names that cause 'file name too long' errors
+		// we can't use tb.TempDir() here because some tests produce names long
+		// enough to cause 'file name too long' errors when reused as paths
 		tb.Cleanup(func() {
 			dir.RemoveAll(tmpdir)
 		})
@@ -427,7 +496,12 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
 	cfg.TxPool.Disable = !withTxPool
 	cfg.Dirs = dirs
-	cfg.AlwaysGenerateChangesets = true
+	if opt.alwaysGenerateChangesets != nil {
+		cfg.AlwaysGenerateChangesets = *opt.alwaysGenerateChangesets
+	}
+	if opt.maxReorgDepth != nil {
+		cfg.Sync.MaxReorgDepth = *opt.maxReorgDepth
+	}
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
@@ -470,7 +544,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
-	allSnapshots := freezeblocks.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
+	allSnapshots := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
 	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
 
 	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
@@ -487,6 +561,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		stateChangesClient: direct.NewStateDiffClientDirect(erigonGrpcServer),
 		PeerId:             gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots:     allSnapshots,
+		borSnapshots:       allBorSnapshots,
 		BlockReader:        br,
 		ReceiptsReader:     receipts.NewGenerator(dirs, br, engine, nil, 5*time.Second),
 		HistoryV3:          true,
@@ -530,16 +605,10 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 
-	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) ([64]byte, bool) { return [64]byte{}, false }
-	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
-	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
-
-	mock.SentryClient, err = direct.NewSentryClientDirect(direct.ETH68, mock, nil)
+	mock.SentryClient, err = direct.NewSentryClientDirect(opt.sentryProtocol, mock, nil)
 	require.NoError(tb, err)
 	sentries := []sentryproto.SentryClient{mock.SentryClient}
 
-	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
-	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
 	if !cfg.TxPool.Disable {
 		poolCfg := txpoolcfg.DefaultConfig
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServer)
@@ -547,7 +616,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			ctx,
 			poolCfg,
 			mock.DB,
-			kvcache.NewSimple(),
+			kvcache.NewLatestBatchCache(),
 			sentries,
 			stateChangesClient,
 			func() {}, /* builderNotifyNewTxns */
@@ -581,21 +650,15 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		mock.BlockReader,
 	)
 
-	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
-
 	mock.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		mock.Dirs,
 		mock.DB,
 		mock.ChainConfig,
 		mock.Engine,
 		sentries,
-		cfg.Sync,
 		mock.BlockReader,
-		blockBufferSize,
 		statusDataProvider,
 		false,
-		maxBlockBroadcastPeers,
-		false, /* disableBlockDownload */
 		false, /* enableWitProtocol */
 		logger,
 	)
@@ -606,7 +669,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			panic(err)
 		}
 	}
-	mock.sentriesClient.IsMock = true
 
 	snapDownloader := mockDownloader(ctrl, mock.Dirs.Snap)
 
@@ -616,6 +678,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		close(miningCancel)
 	}()
 
+	readAheader := exec.NewBlockReadAheader()
 	blkBuilder := builder.NewBuilder(
 		mock.Ctx,
 		mock.DB,
@@ -635,10 +698,10 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			false, /*badBlockHalt*/
 			dirs,
 			mock.BlockReader,
-			mock.sentriesClient.Hd,
 			gspec,
 			cfg.Sync,
 			false, /*experimentalBAL*/
+			readAheader,
 		),
 		nil, /*notifier*/
 		&vm.Config{},
@@ -650,16 +713,17 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		logger,
 	)
 
-	blockRetire := freezeblocks.NewBlockRetire(1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
+	blockRetire := freezeblocks.NewBlockRetire(mock.Ctx, 1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
+	mock.blockRetire = blockRetire
 	mock.Sync = stagedsync.New(
 		cfg.Sync,
 		stagedsync.DefaultStages(
 			mock.Ctx,
-			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, pruneMode, nil),
-			stagedsync.StageHeadersCfg(mock.sentriesClient.Hd, mock.ChainConfig, cfg.Sync, sendHeaderRequest, propagateNewBlockHashes, penalize, false /* noP2PDiscovery */, mock.BlockReader),
+			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, pruneMode, nil, nil),
+			stagedsync.StageHeadersCfg(mock.BlockReader),
 			stagedsync.StageBlockHashesCfg(mock.Dirs.Tmp, blockWriter),
-			stagedsync.StageBodiesCfg(mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, mock.ChainConfig, mock.BlockReader, blockWriter),
-			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd),
+			stagedsync.StageBodiesCfg(mock.BlockReader, blockWriter),
+			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, readAheader),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				pruneMode,
@@ -672,10 +736,10 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				false, /*badBlockHalt*/
 				dirs,
 				mock.BlockReader,
-				mock.sentriesClient.Hd,
 				gspec,
 				cfg.Sync,
 				false, /*experimentalBAL*/
+				readAheader,
 			),
 			stagedsync.StageTxLookupCfg(pruneMode, dirs.Tmp, mock.BlockReader),
 			stagedsync.StageFinishCfg(),
@@ -695,17 +759,17 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	cfg.Genesis = gspec
-	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil)
+	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil, readAheader)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	// Create validation Sync and PipelineExecutor.
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
-		validationNotifications, mock.BlockReader, blockWriter, logger)
+		validationNotifications, mock.BlockReader, blockWriter, logger, readAheader)
 	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, dispatcher, logger)
 
-	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil)
+	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil, mock.BlockReader)
 
 	mock.StateCache = &execmodule.Cache{}
 	onlySnapDownloadOnStart := cfg.Genesis.Config.Bor != nil
@@ -714,6 +778,10 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		Accumulator:    mock.Notifications.Accumulator,
 		RecentReceipts: mock.Notifications.RecentReceipts,
 	}
+	// Per-instance domain cache, held on the tester so Close releases its
+	// envelope reservation. Uses the production default — the caches jump-grow on
+	// demand, so a small-working-set fixture stays small.
+	mock.domainCache = cache.NewDefaultStateCache()
 	mock.ExecModule = execmodule.NewExecModule(
 		ctx,
 		mock.BlockReader,
@@ -725,17 +793,17 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		hook,
 		accum,
 		mock.StateCache,
+		mock.domainCache,
 		logger,
 		engine,
 		cfg.Sync,
 		cfg.FcuBackgroundPrune,
 		cfg.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
+		readAheader,
 		func() error { return nil },
 	)
 	mock.ForkValidator = mock.ExecModule.ForkValidator()
-
-	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
 
 	mock.StreamWg.Add(1)
 	mock.bgComponentsEg.Go(func() error {
@@ -769,7 +837,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	return mock
 }
 
-func mockDownloader(ctrl *gomock.Controller, snapRoot string) downloader.Client {
+func mockDownloader(ctrl *gomock.Controller, snapRoot string) dbservices.DownloaderClient {
 	snapDownloader := downloaderproto.NewMockDownloaderClient(ctrl)
 
 	snapDownloader.EXPECT().
@@ -805,14 +873,7 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		insertedBlocks[chain.Blocks[i].NumberU64()] = struct{}{}
 	}
 
-	balMap := make(map[common.Hash][]byte)
-	for i, bal := range chain.BlockAccessLists {
-		if len(bal) > 0 {
-			block := chain.Blocks[i]
-			balMap[block.Hash()] = bal
-		}
-	}
-	if err := wr.InsertBlocksAndWaitWithAccessLists(emt.Ctx, chain.Blocks, balMap); err != nil {
+	if err := wr.InsertBlocks(emt.Ctx, chain.Blocks, chain.BlockAccessLists); err != nil {
 		return err
 	}
 
@@ -884,14 +945,7 @@ func (emt *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
 	if rawdb.ReadHeadBlockHash(roTx) != chain.TopBlock.Hash() {
 		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
-	if emt.sentriesClient.Hd.IsBadHeader(chain.TopBlock.Hash()) {
-		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
-	}
 	return nil
-}
-
-func (emt *ExecModuleTester) HeaderDownload() *headerdownload.HeaderDownload {
-	return emt.sentriesClient.Hd
 }
 
 func (emt *ExecModuleTester) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) state.StateReader {
@@ -906,7 +960,7 @@ func (emt *ExecModuleTester) NewStateReader(tx kv.TemporalGetter) state.StateRea
 	return state.NewReaderV3(tx)
 }
 
-func (emt *ExecModuleTester) BlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
+func (emt *ExecModuleTester) BlocksIO() (dbservices.FullBlockReader, *blockio.BlockWriter) {
 	return emt.BlockReader, blockio.NewBlockWriter()
 }
 

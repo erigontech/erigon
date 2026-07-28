@@ -24,8 +24,6 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -95,11 +93,15 @@ func enable1884(jt *JumpTable) {
 }
 
 func opSelfBalance(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error) {
-	balance, err := evm.IntraBlockState().GetBalance(callContext.Contract.Address())
-	if err != nil {
-		return pc, nil, err
+	if !callContext.Contract.selfBalanceCached {
+		balance, err := evm.IntraBlockState().GetBalance(callContext.Contract.addr)
+		if err != nil {
+			return pc, nil, err
+		}
+		callContext.Contract.selfBalance = balance
+		callContext.Contract.selfBalanceCached = true
 	}
-	callContext.Stack.push(balance)
+	callContext.Stack.push(callContext.Contract.selfBalance)
 	return pc, nil, nil
 }
 
@@ -117,8 +119,8 @@ func enable1344(jt *JumpTable) {
 
 // opChainID implements CHAINID opcode
 func opChainID(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error) {
-	chainId, _ := uint256.FromBig(evm.ChainRules().ChainID)
-	callContext.Stack.push(*chainId)
+	chainId := evm.ChainRules().ChainID
+	callContext.Stack.pushRef().Set(chainId)
 	return pc, nil, nil
 }
 
@@ -216,8 +218,8 @@ func opTstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
 	}
-	loc := scope.Stack.pop()
-	val := scope.Stack.pop()
+	loc := scope.Stack.popCopy()
+	val := scope.Stack.popCopy()
 	evm.IntraBlockState().SetTransientState(scope.Contract.Address(), accounts.InternKey(loc.Bytes32()), val)
 	return pc, nil, nil
 }
@@ -242,7 +244,7 @@ func enable3855(jt *JumpTable) {
 
 // opPush0 implements the PUSH0 opcode
 func opPush0(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.push(uint256.Int{})
+	scope.Stack.pushRef().Clear()
 	return pc, nil, nil
 }
 
@@ -269,7 +271,7 @@ func opBlobHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	idx := scope.Stack.peek()
 	if idx.LtUint64(uint64(len(evm.BlobHashes))) {
 		hash := evm.BlobHashes[idx.Uint64()]
-		idx.SetBytes(hash.Bytes())
+		idx.SetBytes(hash[:])
 	} else {
 		idx.Clear()
 	}
@@ -298,13 +300,9 @@ func enable5656(jt *JumpTable) {
 
 // opMcopy implements the MCOPY opcode (https://eips.ethereum.org/EIPS/eip-5656)
 func opMcopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	var (
-		dst    = scope.Stack.pop()
-		src    = scope.Stack.pop()
-		length = scope.Stack.pop()
-	)
 	// These values are checked for overflow during memory expansion calculation
 	// (the memorySize function on the opcode).
+	dst, src, length := scope.Stack.pop3()
 	scope.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
 	return pc, nil, nil
 }
@@ -383,7 +381,13 @@ func enable7843(jt *JumpTable) {
 // enable8037 applies EIP-8037 (State Creation Gas Cost Increase)
 func enable8037(jt *JumpTable) {
 	jt[CREATE].constantGas = params.CreateGasEIP8037
-	jt[CREATE].dynamicGas = gasCreateEip8037
 	jt[CREATE2].constantGas = params.Create2GasEIP8037
-	jt[CREATE2].dynamicGas = gasCreate2Eip8037
+}
+
+// enable8038 applies EIP-8038 (State-access gas cost update)
+func enable8038(jt *JumpTable) {
+	jt[EXTCODESIZE].constantGas = params.ExtCodeWarmAccessGasEIP8038
+	jt[EXTCODECOPY].constantGas = params.ExtCodeWarmAccessGasEIP8038
+	jt[CREATE].constantGas = params.CreateAccessEIP8038
+	jt[CREATE2].constantGas = params.CreateAccessEIP8038
 }

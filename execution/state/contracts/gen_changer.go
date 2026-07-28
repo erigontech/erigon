@@ -9,19 +9,17 @@ import (
 	"reflect"
 	"strings"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/p2p/event"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
 var (
 	_ = big.NewInt
 	_ = strings.NewReader
-	_ = ethereum.NotFound
 	_ = bind.Bind
 	_ = common.Big1
 	_ = types.BloomLookup
@@ -158,7 +156,7 @@ func bindChanger(address common.Address, caller bind.ContractCaller, transactor 
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Changer *ChangerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Changer *ChangerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Changer.Contract.ChangerCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -169,7 +167,7 @@ func (_Changer *ChangerRaw) Transfer(opts *bind.TransactOpts) (types.Transaction
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Changer *ChangerRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Changer *ChangerRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Changer.Contract.ChangerTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -177,7 +175,7 @@ func (_Changer *ChangerRaw) Transact(opts *bind.TransactOpts, method string, par
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Changer *ChangerCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Changer *ChangerCallerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Changer.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -188,7 +186,7 @@ func (_Changer *ChangerTransactorRaw) Transfer(opts *bind.TransactOpts) (types.T
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Changer *ChangerTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Changer *ChangerTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Changer.Contract.contract.Transact(opts, method, params...)
 }
 

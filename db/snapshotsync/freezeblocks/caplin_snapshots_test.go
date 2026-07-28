@@ -17,7 +17,6 @@
 package freezeblocks
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -41,6 +40,6 @@ func TestDumpBeaconBlocksNoPanic(t *testing.T) {
 	// so the loop reaches chooseSegmentEnd and dumpBeaconBlocksRange.
 	// Before the fix this panicked; now it returns an error (no snap dir / empty db).
 	require.NotPanics(t, func() {
-		_ = DumpBeaconBlocks(context.Background(), db, 0, snaptype.CaplinMergeLimit, 0, dirs, 1, log.LvlDebug, log.New())
+		_ = DumpBeaconBlocks(t.Context(), db, 0, snaptype.CaplinMergeLimit, 0, dirs, 1, log.LvlDebug, log.New())
 	})
 }

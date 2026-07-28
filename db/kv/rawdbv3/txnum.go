@@ -179,21 +179,14 @@ func (TxNumsReader) WithCustomReadTxNumFunc(f TxBlockIndex) TxNumsReader {
 	return TxNumsReader{index: f}
 }
 
-// Max - returns maxTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
-func (t TxNumsReader) Max(ctx context.Context, tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
-	var k [8]byte
-	binary.BigEndian.PutUint64(k[:], blockNum)
-	c, err := tx.Cursor(kv.MaxTxNum)
-	if err != nil {
-		return 0, err
-	}
-	defer c.Close()
-
+// MaxWithCursor - returns maxTxNum in given block using a caller-provided cursor.
+// If block not found - return last available value (`latest`/`pending` state).
+// Use this when iterating many blocks to avoid repeated cursor open/close overhead.
+func (t TxNumsReader) MaxWithCursor(ctx context.Context, tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, err error) {
 	maxTxNum, ok, err := t.index.MaxTxNum(ctx, tx, c, blockNum)
 	if err != nil {
 		return 0, err
 	}
-
 	if !ok {
 		_, v, err := c.Last()
 		if err != nil {
@@ -207,22 +200,27 @@ func (t TxNumsReader) Max(ctx context.Context, tx kv.Tx, blockNum uint64) (maxTx
 	return maxTxNum, nil
 }
 
-// Min = `max(blockNum-1)+1` returns minTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
-func (t TxNumsReader) Min(ctx context.Context, tx kv.Tx, blockNum uint64) (minTxNum uint64, err error) {
-	if blockNum == 0 {
-		return 0, nil
-	}
+// Max - returns maxTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
+func (t TxNumsReader) Max(ctx context.Context, tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 	c, err := tx.Cursor(kv.MaxTxNum)
 	if err != nil {
 		return 0, err
 	}
 	defer c.Close()
+	return t.MaxWithCursor(ctx, tx, c, blockNum)
+}
 
+// MinWithCursor - returns minTxNum in given block using a caller-provided cursor.
+// Min = `max(blockNum-1)+1`. If block not found - return last available value (`latest`/`pending` state).
+// Use this when iterating many blocks to avoid repeated cursor open/close overhead.
+func (t TxNumsReader) MinWithCursor(ctx context.Context, tx kv.Tx, c kv.Cursor, blockNum uint64) (minTxNum uint64, err error) {
+	if blockNum == 0 {
+		return 0, nil
+	}
 	minTxNum, ok, err := t.index.MaxTxNum(ctx, tx, c, blockNum-1)
 	if err != nil {
 		return 0, err
 	}
-
 	if !ok {
 		_, v, err := c.Last()
 		if err != nil {
@@ -234,6 +232,16 @@ func (t TxNumsReader) Min(ctx context.Context, tx kv.Tx, blockNum uint64) (minTx
 		return binary.BigEndian.Uint64(v) + 1, nil
 	}
 	return minTxNum + 1, nil
+}
+
+// Min = `max(blockNum-1)+1` returns minTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
+func (t TxNumsReader) Min(ctx context.Context, tx kv.Tx, blockNum uint64) (minTxNum uint64, err error) {
+	c, err := tx.Cursor(kv.MaxTxNum)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+	return t.MinWithCursor(ctx, tx, c, blockNum)
 }
 
 func (t TxNumsReader) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
@@ -385,6 +393,7 @@ type MapTxNum2BlockNumIter struct {
 	tx          kv.Tx
 	ctx         context.Context
 	orderAscend bool
+	cursor      kv.Cursor // persistent cursor for Min/Max lookups; opened lazily on first block change
 
 	blockNum                         uint64
 	minTxNumInBlock, maxTxNumInBlock uint64
@@ -400,6 +409,10 @@ func (i *MapTxNum2BlockNumIter) Close() {
 	if i.it != nil {
 		i.it.Close()
 		i.it = nil
+	}
+	if i.cursor != nil {
+		i.cursor.Close()
+		i.cursor = nil
 	}
 }
 func (i *MapTxNum2BlockNumIter) HasNext() bool { return i.it.HasNext() }
@@ -428,11 +441,17 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 
 	// if block number changed, calculate all related field
 	if blockNumChanged {
-		i.minTxNumInBlock, err = i.txNumsReader.Min(i.ctx, i.tx, blockNum)
+		if i.cursor == nil {
+			i.cursor, err = i.tx.Cursor(kv.MaxTxNum)
+			if err != nil {
+				return
+			}
+		}
+		i.minTxNumInBlock, err = i.txNumsReader.MinWithCursor(i.ctx, i.tx, i.cursor, blockNum)
 		if err != nil {
 			return
 		}
-		i.maxTxNumInBlock, err = i.txNumsReader.Max(i.ctx, i.tx, blockNum)
+		i.maxTxNumInBlock, err = i.txNumsReader.MaxWithCursor(i.ctx, i.tx, i.cursor, blockNum)
 		if err != nil {
 			return
 		}

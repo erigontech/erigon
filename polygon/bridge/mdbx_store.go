@@ -465,7 +465,7 @@ func (s txStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum m
 
 	vBigNum := new(big.Int)
 	for k, v := range eventTxnToBlockNum {
-		err := tx.Put(kv.BorTxLookup, k.Bytes(), vBigNum.SetUint64(v).Bytes())
+		err := tx.Put(kv.BorTxLookup, k[:], vBigNum.SetUint64(v).Bytes())
 		if err != nil {
 			return err
 		}
@@ -477,7 +477,7 @@ func (s txStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum m
 func (s txStore) EventTxnToBlockNum(ctx context.Context, borTxHash common.Hash) (uint64, bool, error) {
 	var blockNum uint64
 
-	v, err := s.tx.GetOne(kv.BorTxLookup, borTxHash.Bytes())
+	v, err := s.tx.GetOne(kv.BorTxLookup, borTxHash[:])
 	if err != nil {
 		return blockNum, false, err
 	}
@@ -522,7 +522,7 @@ func (s txStore) PutEvents(ctx context.Context, events []*EventRecordWithTime) e
 	return nil
 }
 
-// EventsByTimeframe returns events withing [timeFrom, timeTo) interval.
+// EventsByTimeframe returns events within [timeFrom, timeTo) interval.
 func (s txStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint64) ([][]byte, []uint64, error) {
 	var events [][]byte
 	var ids []uint64

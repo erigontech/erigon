@@ -24,12 +24,11 @@ import (
 
 	"github.com/holiman/uint256"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/p2p/event"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
@@ -49,10 +48,11 @@ func NewDirectBackend(api jsonrpc.EthAPI) DirectBackend {
 }
 
 func (b DirectBackend) CodeAt(ctx context.Context, account common.Address, blockNum *uint256.Int) ([]byte, error) {
-	return b.api.GetCode(ctx, account, BlockNumArg(blockNum))
+	blockNrOrHash := BlockNumArg(blockNum)
+	return b.api.GetCode(ctx, account, &blockNrOrHash)
 }
 
-func (b DirectBackend) CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNum *uint256.Int) ([]byte, error) {
+func (b DirectBackend) CallContract(ctx context.Context, callMsg bind.CallMsg, blockNum *uint256.Int) ([]byte, error) {
 	blockNumberOrHash := BlockNumArg(blockNum)
 	var blockNumberOrHashRef = &blockNumberOrHash
 
@@ -60,11 +60,13 @@ func (b DirectBackend) CallContract(ctx context.Context, callMsg ethereum.CallMs
 }
 
 func (b DirectBackend) PendingCodeAt(ctx context.Context, account common.Address) ([]byte, error) {
-	return b.api.GetCode(ctx, account, PendingBlockNumArg())
+	blockNrOrHash := PendingBlockNumArg()
+	return b.api.GetCode(ctx, account, &blockNrOrHash)
 }
 
 func (b DirectBackend) PendingNonceAt(ctx context.Context, account common.Address) (uint64, error) {
-	count, err := b.api.GetTransactionCount(ctx, account, PendingBlockNumArg())
+	blockNrOrHash := PendingBlockNumArg()
+	count, err := b.api.GetTransactionCount(ctx, account, &blockNrOrHash)
 	if err != nil {
 		return 0, err
 	}
@@ -80,7 +82,8 @@ func (b DirectBackend) NonceAt(ctx context.Context, account common.Address, bloc
 		blockRef = rpc.BlockNumber(blockNumber.Int64()).AsBlockReference()
 	}
 
-	count, err := b.api.GetTransactionCount(ctx, account, rpc.BlockNumberOrHash(blockRef))
+	blockNrOrHash := rpc.BlockNumberOrHash(blockRef)
+	count, err := b.api.GetTransactionCount(ctx, account, &blockNrOrHash)
 	if err != nil {
 		return 0, err
 	}
@@ -97,7 +100,7 @@ func (b DirectBackend) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
 	return price.ToInt(), nil
 }
 
-func (b DirectBackend) EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64, error) {
+func (b DirectBackend) EstimateGas(ctx context.Context, call bind.CallMsg) (uint64, error) {
 	callArgs := CallArgsFromCallMsg(call)
 	gas, err := b.api.EstimateGas(ctx, &callArgs, nil, nil, nil)
 	if err != nil {
@@ -118,7 +121,7 @@ func (b DirectBackend) SendTransaction(ctx context.Context, txn types.Transactio
 	return err
 }
 
-func (b DirectBackend) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
+func (b DirectBackend) FilterLogs(ctx context.Context, query bind.FilterQuery) ([]types.Log, error) {
 	rpcLogs, err := b.api.GetLogs(ctx, filters.FilterCriteria(query))
 	if err != nil {
 		return nil, err
@@ -143,7 +146,7 @@ func (b DirectBackend) FilterLogs(ctx context.Context, query ethereum.FilterQuer
 	return res, nil
 }
 
-func (b DirectBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
+func (b DirectBackend) SubscribeFilterLogs(ctx context.Context, query bind.FilterQuery, ch chan<- types.Log) (event.Subscription, error) {
 	resc, closec := make(chan any), make(chan any)
 	ctx = rpc.ContextWithNotifier(ctx, rpc.NewLocalNotifier("eth", resc, closec))
 	_, err := b.api.Logs(ctx, filters.FilterCriteria(query))
@@ -186,7 +189,7 @@ func PendingBlockNumArg() rpc.BlockNumberOrHash {
 	return rpc.BlockNumberOrHash(rpc.PendingBlock)
 }
 
-func CallArgsFromCallMsg(callMsg ethereum.CallMsg) ethapi.CallArgs {
+func CallArgsFromCallMsg(callMsg bind.CallMsg) ethapi.CallArgs {
 	var emptyAddress common.Address
 	var from *common.Address
 	if callMsg.From != emptyAddress {

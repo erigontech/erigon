@@ -12,6 +12,7 @@ linters:
     - gochecksumtype
     - gocritic
     - gosmopolitan
+    - modernize
     - nilnesserr
     - prealloc
     - reassign
@@ -49,16 +50,6 @@ linters:
       enabled-checks:
         - ruleguard
       disabled-checks:
-        - unnecessaryDefer
-        - appendAssign
-        - regexpMust
-        - rangeValCopy
-        - exitAfterDefer
-        - elseif
-        - dupBranchBody
-        - assignOp
-        - singleCaseSwitch
-        - unlambda
         - captLocal
         - commentFormatting
         - ifElseChain
@@ -106,6 +97,9 @@ linters:
       - std-error-handling
     rules:
       - linters:
+          - modernize
+        path: _grpc\.pb\.go
+      - linters:
           - errcheck
         text: not checked
       - linters:
@@ -142,7 +136,6 @@ linters:
       - builtin$
       - examples$
       - testdata
-      - execution-spec-tests
 formatters:
   enable:
     - gofmt
@@ -158,4 +151,3 @@ formatters:
       - builtin$
       - examples$
       - testdata
-      - execution-spec-tests

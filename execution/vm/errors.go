@@ -80,10 +80,16 @@ func (e *ErrStackOverflow) Error() string {
 
 // ErrInvalidOpCode wraps an evm error when an invalid opcode is encountered.
 type ErrInvalidOpCode struct {
-	opcode OpCode
+	opcode  OpCode
+	operand *byte
 }
 
-func (e *ErrInvalidOpCode) Error() string { return fmt.Sprintf("invalid opcode: %s", e.opcode) }
+func (e *ErrInvalidOpCode) Error() string {
+	if e.operand != nil {
+		return fmt.Sprintf("invalid opcode: %s (operand: 0x%02x)", e.opcode, *e.operand)
+	}
+	return fmt.Sprintf("invalid opcode: %s", e.opcode)
+}
 
 func (m *ErrInvalidOpCode) Is(target error) bool {
 	_, is := target.(*ErrInvalidOpCode)
@@ -168,6 +174,11 @@ const (
 
 func vmErrorCodeFromErr(err error) int {
 	switch {
+	case errors.Is(err, ErrWriteProtection):
+		// Checked before ErrOutOfGas: the interpreter wraps a static-context
+		// write protection from a dynamic gas function as "%w: %w" over ErrOutOfGas,
+		// so both match and write protection must take precedence.
+		return VMErrorCodeWriteProtection
 	case errors.Is(err, ErrOutOfGas):
 		return VMErrorCodeOutOfGas
 	case errors.Is(err, ErrCodeStoreOutOfGas):
@@ -184,8 +195,6 @@ func vmErrorCodeFromErr(err error) int {
 		return VMErrorCodeMaxCodeSizeExceeded
 	case errors.Is(err, ErrInvalidJump):
 		return VMErrorCodeInvalidJump
-	case errors.Is(err, ErrWriteProtection):
-		return VMErrorCodeWriteProtection
 	case errors.Is(err, ErrReturnDataOutOfBounds):
 		return VMErrorCodeReturnDataOutOfBounds
 	case errors.Is(err, ErrGasUintOverflow):

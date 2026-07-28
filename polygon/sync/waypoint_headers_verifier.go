@@ -42,7 +42,8 @@ func VerifyCheckpointHeaders(waypoint heimdall.Waypoint, headers []*types.Header
 		return fmt.Errorf("VerifyCheckpointHeaders: %w: %w", ErrFailedToComputeHeadersRootHash, err)
 	}
 
-	if !bytes.Equal(rootHash, waypoint.RootHash().Bytes()) {
+	wpRoot := waypoint.RootHash()
+	if !bytes.Equal(rootHash, wpRoot[:]) {
 		return fmt.Errorf("VerifyCheckpointHeaders: %w", ErrBadHeadersRootHash)
 	}
 

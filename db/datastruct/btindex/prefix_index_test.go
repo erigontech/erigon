@@ -91,14 +91,14 @@ func buildTestPrefixIndexWithNodes(t testing.TB, kvPath string, compressFlags se
 
 	// Build nodes the same way BtIndexWriter does (every M-th key).
 	M := DefaultBtreeM
-	var nodes []Node
+	var nodes []prefixNode
 	g.Reset(0)
 	var key []byte
 	for di := uint64(0); g.HasNext(); di++ {
 		key, _ = g.Next(key[:0])
 		g.Skip()
 		if di > 0 && di%M == 0 {
-			nodes = append(nodes, Node{key: common.Copy(key), di: di})
+			nodes = append(nodes, prefixNode{key: common.Copy(key), di: di})
 		}
 	}
 
@@ -743,14 +743,14 @@ func TestPrefixIndexWithNodesNodeKeysStable(t *testing.T) {
 
 	// Build nodes the same way BtIndexWriter does (every M-th key).
 	M := DefaultBtreeM
-	var nodes []Node
+	var nodes []prefixNode
 	g.Reset(0)
 	var key []byte
 	for di := uint64(0); g.HasNext(); di++ {
 		key, _ = g.Next(key[:0])
 		g.Skip()
 		if di > 0 && di%M == 0 {
-			nodes = append(nodes, Node{key: common.Copy(key), di: di})
+			nodes = append(nodes, prefixNode{key: common.Copy(key), di: di})
 		}
 	}
 	require.NotEmpty(t, nodes)
@@ -1788,7 +1788,7 @@ func TestPrefixIndex_NodeKeyStability(t *testing.T) {
 
 	// Build nodes manually (retain references to key slices).
 	M := DefaultBtreeM
-	var nodes []Node
+	var nodes []prefixNode
 	g.Reset(0)
 	var key []byte
 	for di := uint64(0); g.HasNext(); di++ {
@@ -1797,7 +1797,7 @@ func TestPrefixIndex_NodeKeyStability(t *testing.T) {
 		if di > 0 && di%M == 0 {
 			nodeKey := make([]byte, len(key))
 			copy(nodeKey, key)
-			nodes = append(nodes, Node{key: nodeKey, di: di})
+			nodes = append(nodes, prefixNode{key: nodeKey, di: di})
 		}
 	}
 	require.NotEmpty(t, nodes)

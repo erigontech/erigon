@@ -7,38 +7,102 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout custom actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install actionlint
+        run: |
+          curl -sSfL \
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin actionlint
+
+      - name: Install zizmor
+        run: pip install --break-system-packages zizmor==1.26.1
+
+      # -shellcheck '' disables actionlint's built-in inline-script checking;
+      # the repo's QA workflow run: blocks have many pre-existing shellcheck
+      # warnings that need a separate cleanup pass (#21128).  .sh files are
+      # covered by the dedicated shellcheck step below.
+      # runner.workspace is suppressed: it was dropped from the official context
+      # spec but is still available on self-hosted runners; QA workflows rely on
+      # it until they are migrated to github.workspace / runner.temp.
+      # The "queue" concurrency key (GitHub, 2026-05) is newer than any released
+      # actionlint schema; drop that ignore once actionlint learns the key.
+      - name: actionlint
+        run: |
+          actionlint -shellcheck '' \
+            --ignore '"workspace" is not defined in object type' \
+            --ignore 'unexpected key "queue" for "concurrency" section'
+
+      - name: Actions security audit (zizmor)
+        run: |
+          zizmor --config .github/zizmor.yml --format github .github/workflows/ || {
+            EC=$?; [ "$EC" -lt 14 ] && exit 0 || exit "$EC"
+          }
+
+      # severity=warning catches real bugs (word-splitting, masked exit codes)
+      # without noise from pure style hints.
+      - name: shellcheck
+        run: |
+          find . -name '*.sh' -not -path './.git/*' -not -path '*/node_modules/*' -print0 \
+            | xargs -0 shellcheck --severity=warning
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
+        with:
+          cache-namespace: lint
 
       # golangci-lint internally trims cache entries unused for 5 days,
       # so the cache is self-cleaning even as we save new versions.
+      #
+      # The linter config and the ruleguard rules are part of the key: golangci-lint
+      # compiles rules.go once and caches the result, so a cache restored from before
+      # a rule was edited keeps reporting the old rule — including rules that have
+      # since been deleted. Every restore-key must stay narrower than the config hash
+      # for that to hold.
       - name: Restore golangci-lint cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/golangci-lint
-          key: golangci-lint|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
+          key: golangci-lint|${{ runner.os }}|${{ hashFiles('.golangci.yml', 'rules.go') }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
           restore-keys: |
-            golangci-lint|${{ runner.os }}|${{ hashFiles('go.sum') }}|
-            golangci-lint|${{ runner.os }}|
+            golangci-lint|${{ runner.os }}|${{ hashFiles('.golangci.yml', 'rules.go') }}|${{ hashFiles('go.sum') }}|
+            golangci-lint|${{ runner.os }}|${{ hashFiles('.golangci.yml', 'rules.go') }}|
 
       - run: make lintci
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()
 
+      # Skip in merge-queue runs: a cache saved on the ephemeral merge-queue
+      # ref can't be restored by any later run (matches cleanup-erigon).
       - name: Save golangci-lint cache
-        if: always()
-        uses: actions/cache/save@v4
+        if: ${{ always() && github.event_name != 'merge_group' }}
+        uses: actions/cache/save@v6
         with:
           path: ~/.cache/golangci-lint
-          key: golangci-lint|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
+          key: golangci-lint|${{ runner.os }}|${{ hashFiles('.golangci.yml', 'rules.go') }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true

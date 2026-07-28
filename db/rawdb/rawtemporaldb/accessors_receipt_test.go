@@ -1,7 +1,6 @@
 package rawtemporaldb_test
 
 import (
-	"context"
 	"encoding/binary"
 	"testing"
 
@@ -18,12 +17,12 @@ import (
 func TestAppendReceipt(t *testing.T) {
 	dirs, require := datadir.New(t.TempDir()), require.New(t)
 	db := temporaltest.NewTestDB(t, dirs)
-	tx, err := db.BeginTemporalRw(context.Background())
+	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(err)
 	defer tx.Rollback()
 
 	ttx := tx
-	doms, err := execctx.NewSharedDomains(context.Background(), ttx, log.New())
+	doms, err := execctx.NewSharedDomains(t.Context(), ttx, log.New())
 	require.NoError(err)
 	defer doms.Close()
 
@@ -39,7 +38,7 @@ func TestAppendReceipt(t *testing.T) {
 	err = rawtemporaldb.AppendReceipt(doms.AsPutDel(ttx), 4, 14, 0, 4) // 0 log
 	require.NoError(err)
 
-	err = doms.Flush(context.Background(), tx)
+	err = doms.Flush(t.Context(), tx)
 	require.NoError(err)
 
 	v, ok, err := ttx.HistorySeek(kv.ReceiptDomain, rawtemporaldb.LogIndexAfterTxKey, 0)

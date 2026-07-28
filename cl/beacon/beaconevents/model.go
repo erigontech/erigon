@@ -16,27 +16,32 @@ type EventTopic string
 
 // Operation event topics
 const (
-	OpAttestation       EventTopic = "attestation"
-	OpSingleAttestation EventTopic = "single_attestation"
-	OpVoluntaryExit     EventTopic = "voluntary_exit"
-	OpProposerSlashing  EventTopic = "proposer_slashing"
-	OpAttesterSlashing  EventTopic = "attester_slashing"
-	OpBlsToExecution    EventTopic = "bls_to_execution_change"
-	OpContributionProof EventTopic = "contribution_and_proof"
-	OpBlobSidecar       EventTopic = "blob_sidecar"
-	OpDataColumnSidecar EventTopic = "data_column_sidecar"
+	OpAttestation               EventTopic = "attestation"
+	OpSingleAttestation         EventTopic = "single_attestation"
+	OpVoluntaryExit             EventTopic = "voluntary_exit"
+	OpProposerSlashing          EventTopic = "proposer_slashing"
+	OpAttesterSlashing          EventTopic = "attester_slashing"
+	OpBlsToExecution            EventTopic = "bls_to_execution_change"
+	OpContributionProof         EventTopic = "contribution_and_proof"
+	OpBlobSidecar               EventTopic = "blob_sidecar"
+	OpDataColumnSidecar         EventTopic = "data_column_sidecar"
+	OpPayloadAttestationMessage EventTopic = "payload_attestation_message" // [New in Gloas:EIP7732]
+	OpExecutionPayloadBid       EventTopic = "execution_payload_bid"       // [New in Gloas:EIP7732]
+	OpExecutionPayloadAvailable EventTopic = "execution_payload_available" // [New in Gloas:EIP7732]
 )
 
 type (
 	// Operation event data types
-	AttestationData           = solid.Attestation
-	SingleAttestationData     = solid.SingleAttestation
-	VoluntaryExitData         = cltypes.SignedVoluntaryExit
-	ProposerSlashingData      = cltypes.ProposerSlashing
-	AttesterSlashingData      = cltypes.AttesterSlashing
-	BlsToExecutionChangesData = cltypes.SignedBLSToExecutionChange
-	ContributionAndProofData  = cltypes.SignedContributionAndProof
-	BlobSidecarData           = cltypes.BlobSidecar
+	AttestationData               = solid.Attestation
+	SingleAttestationData         = solid.SingleAttestation
+	VoluntaryExitData             = cltypes.SignedVoluntaryExit
+	ProposerSlashingData          = cltypes.ProposerSlashing
+	AttesterSlashingData          = cltypes.AttesterSlashing
+	BlsToExecutionChangesData     = cltypes.SignedBLSToExecutionChange
+	ContributionAndProofData      = cltypes.SignedContributionAndProof
+	BlobSidecarData               = cltypes.BlobSidecar
+	PayloadAttestationMessageData = cltypes.PayloadAttestationMessage
+	SignedExecutionPayloadBidData = cltypes.SignedExecutionPayloadBid
 )
 
 // DataColumnSidecarData includes block_root and slot for SSE events
@@ -125,6 +130,11 @@ type LightClientFinalityUpdateData struct {
 type LightClientOptimisticUpdateData struct {
 	Version string                              `json:"version"`
 	Data    cltypes.LightClientOptimisticUpdate `json:"data"`
+}
+
+type ExecutionPayloadAvailableData struct {
+	Slot      uint64      `json:"slot,string"`
+	BlockRoot common.Hash `json:"block_root"`
 }
 
 type PayloadAttributesData struct {

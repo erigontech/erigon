@@ -2,15 +2,15 @@ package wit
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/stateless"
-	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
 
 var ProtocolToString = map[uint]string{
-	direct.WIT0: "wit0",
+	WIT1: "wit0",
 }
 
 // Constants to match up protocol versions and messages
@@ -38,6 +38,12 @@ const (
 	PageSize                       = 15 * 1024 * 1024  // 15 MB
 	MaximumCachedWitnessOnARequest = 200 * 1024 * 1024 // 200 MB, the maximum amount of memory a request can demand while getting witness
 	MaximumResponseSize            = 16 * 1024 * 1024  // 16 MB, helps to fast fail check
+
+	// MaxWitnessPages caps the TotalPages a peer may advertise in a response. A
+	// legitimate witness fits in MaximumCachedWitnessOnARequest bytes split into
+	// PageSize chunks; anything larger is attacker-inflated and would drive
+	// unbounded allocation in the response handler.
+	MaxWitnessPages = (MaximumCachedWitnessOnARequest + PageSize - 1) / PageSize
 
 	// RetentionBlocks defines how many recent blocks to keep witness data for
 	RetentionBlocks = 10_000
@@ -122,7 +128,7 @@ func (w *NewWitnessHashesPacket) Name() string { return "NewWitnessHashes" }
 func (w *NewWitnessHashesPacket) Kind() byte   { return NewWitnessHashesMsg }
 
 var ToProto = map[uint]map[uint64]sentryproto.MessageId{
-	direct.WIT0: {
+	WIT1: {
 		NewWitnessMsg:       sentryproto.MessageId_NEW_WITNESS_W0,
 		NewWitnessHashesMsg: sentryproto.MessageId_NEW_WITNESS_HASHES_W0,
 		GetWitnessMsg:       sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
@@ -130,11 +136,19 @@ var ToProto = map[uint]map[uint64]sentryproto.MessageId{
 	},
 }
 
-var FromProto = map[uint]map[sentryproto.MessageId]uint64{
-	direct.WIT0: {
-		sentryproto.MessageId_NEW_WITNESS_W0:        NewWitnessMsg,
-		sentryproto.MessageId_NEW_WITNESS_HASHES_W0: NewWitnessHashesMsg,
-		sentryproto.MessageId_GET_BLOCK_WITNESS_W0:  GetWitnessMsg,
-		sentryproto.MessageId_BLOCK_WITNESS_W0:      WitnessMsg,
-	},
+var FromProto = inverse(ToProto)
+
+func inverse(toProto map[uint]map[uint64]sentryproto.MessageId) map[uint]map[sentryproto.MessageId]uint64 {
+	fromProto := make(map[uint]map[sentryproto.MessageId]uint64, len(toProto))
+	for version, codes := range toProto {
+		inv := make(map[sentryproto.MessageId]uint64, len(codes))
+		for code, id := range codes {
+			if _, ok := inv[id]; ok {
+				panic(fmt.Sprintf("wit/%d: message id %s mapped from multiple message codes", version, id))
+			}
+			inv[id] = code
+		}
+		fromProto[version] = inv
+	}
+	return fromProto
 }

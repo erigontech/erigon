@@ -120,7 +120,7 @@ type blockFees struct {
 type (
 	txGasAndReward struct {
 		gasUsed uint64
-		reward  *big.Int
+		reward  uint256.Int
 	}
 	sortGasAndReward []txGasAndReward
 )
@@ -130,7 +130,7 @@ func (s sortGasAndReward) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 func (s sortGasAndReward) Less(i, j int) bool {
-	return s[i].reward.Cmp(s[j].reward) < 0
+	return s[i].reward.Cmp(&s[j].reward) < 0
 }
 
 // processBlock takes a blockFees structure with the blockNumber, the header and optionally
@@ -197,8 +197,7 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64, chainco
 		baseFee.Set(bf.block.BaseFee())
 	}
 	for i, txn := range bf.block.Transactions() {
-		reward := txn.GetEffectiveGasTip(baseFee)
-		sorter[i] = txGasAndReward{gasUsed: bf.receipts[i].GasUsed, reward: reward.ToBig()}
+		sorter[i] = txGasAndReward{gasUsed: bf.receipts[i].GasUsed, reward: txn.GetEffectiveGasTip(baseFee)}
 	}
 	sort.Sort(sorter)
 
@@ -211,7 +210,7 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64, chainco
 			txIndex++
 			sumGasUsed += sorter[txIndex].gasUsed
 		}
-		bf.results.reward[i] = sorter[txIndex].reward
+		bf.results.reward[i] = sorter[txIndex].reward.ToBig()
 	}
 }
 
@@ -335,13 +334,14 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	}
 
 	var (
-		next         = oldestBlock
 		blockResults = make([]blockResult, blocks)
 		reward       = make([][]*big.Int, blocks)
 		baseFee      = make([]*uint256.Int, blocks+1)
 		gasUsedRatio = make([]float64, blocks)
 		blobBaseFee  = make([]*uint256.Int, blocks+1)
 	)
+	var next atomic.Uint64
+	next.Store(oldestBlock)
 
 	// Pre-fetch chain config once using the main backend (safe: single goroutine).
 	chainconfig := oracle.backend.ChainConfig()
@@ -352,7 +352,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	// to using the main backend sequentially; the others exit immediately to
 	// avoid concurrent access on the shared transaction.
 	g, fetchCtx := errgroup.WithContext(ctx)
-	var seqOnce int32 // CAS flag: 0 = available, 1 = sequential mode claimed
+	var seqOnce atomic.Int32 // CAS flag: 0 = available, 1 = sequential mode claimed
 	for range maxBlockFetchers {
 		g.Go(func() error {
 			localBackend, cleanup, forkErr := oracle.backend.Fork(fetchCtx)
@@ -362,7 +362,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 			if localBackend == nil {
 				// Fork not supported: allow exactly one goroutine to proceed
 				// sequentially on the shared backend; the others exit.
-				if !atomic.CompareAndSwapInt32(&seqOnce, 0, 1) {
+				if !seqOnce.CompareAndSwap(0, 1) {
 					return nil
 				}
 				localBackend = oracle.backend
@@ -374,7 +374,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 				if err := fetchCtx.Err(); err != nil {
 					return err
 				}
-				blockNumber := atomic.AddUint64(&next, 1) - 1
+				blockNumber := next.Add(1) - 1
 				if blockNumber > lastBlock {
 					return nil
 				}

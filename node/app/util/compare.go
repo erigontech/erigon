@@ -23,7 +23,7 @@ import (
 )
 
 type Equatable interface {
-	Equals(other interface{}) bool
+	Equals(other any) bool
 }
 
 // Comparable implementers provide a comparable method to
@@ -35,12 +35,14 @@ type Equatable interface {
 //	zero     , if this == other
 //	positive , if this > other
 type Comparable interface {
-	CompareTo(other interface{}) int
+	CompareTo(other any) int
 }
 
 // Equal checks two values are equal via the Equatable or
-// Comparable interfaces available - otherwise falls back to ==
-func Equal(a, b interface{}) bool {
+// Comparable interfaces available. If neither is implemented
+// and both values have a comparable type, falls back to ==.
+// For uncomparable types (slices, maps, funcs) uses reflect.DeepEqual.
+func Equal(a, b any) bool {
 	if ea, ok := a.(Equatable); ok {
 		return ea.Equals(b)
 	} else if ca, ok := a.(Comparable); ok {
@@ -51,10 +53,16 @@ func Equal(a, b interface{}) bool {
 		return cb.CompareTo(a) == 0
 	}
 
-	return a == b
+	// Guard against panic from comparing slices/maps/funcs with ==.
+	ra := reflect.ValueOf(a)
+	rb := reflect.ValueOf(b)
+	if ra.IsValid() && rb.IsValid() && ra.Type().Comparable() && rb.Type().Comparable() {
+		return a == b
+	}
+	return reflect.DeepEqual(a, b)
 }
 
-type Comparator func(a, b interface{}) int
+type Comparator func(a, b any) int
 
 // CompoundComparator is an array of comparators which provide comparison of an
 // array of values
@@ -65,37 +73,30 @@ type CompoundComparator []Comparator
 // both implement Comparable, otherwise if one is non comparable
 // a type comparison is undertaken otherwise if neither are comparable
 // a Pointer comparison is undertaken
-func Compare(a, b interface{}) int {
+func Compare(a, b any) int {
 	if a == nil {
 		if b == nil {
 			return 0
 		}
 
 		return -1
-	} else {
-		if b == nil {
-			return 1
-		}
+	} else if b == nil {
+		return 1
 	}
 
 	if acomp, ok := a.(Comparable); ok {
 		if bcomp, ok := b.(Comparable); ok {
 			return acomp.CompareTo(bcomp)
+		} else if reflect.ValueOf(reflect.TypeOf(a)).Pointer() > reflect.ValueOf(reflect.TypeOf(b)).Pointer() {
+			return 1
 		} else {
-			if reflect.ValueOf(reflect.TypeOf(a)).Pointer()-reflect.ValueOf(reflect.TypeOf(b)).Pointer() > 0 {
-				return 1
-			}
-
 			return -1
 		}
-	} else {
-		if _, ok := b.(Comparable); ok {
-			if reflect.ValueOf(reflect.TypeOf(a)).Pointer()-reflect.ValueOf(reflect.TypeOf(b)).Pointer() > 0 {
-				return 1
-			}
-
-			return -1
+	} else if _, ok := b.(Comparable); ok {
+		if reflect.ValueOf(reflect.TypeOf(a)).Pointer() > reflect.ValueOf(reflect.TypeOf(b)).Pointer() {
+			return 1
 		}
+		return -1
 	}
 
 	if _, ok := a.(string); ok {
@@ -111,8 +112,8 @@ func Compare(a, b interface{}) int {
 	if va.IsValid() && vb.IsValid() {
 		ka := va.Kind()
 		kb := vb.Kind()
-		if (ka == reflect.Ptr || ka == reflect.Chan || ka == reflect.Map || ka == reflect.Func || ka == reflect.Slice || ka == reflect.UnsafePointer) &&
-			(kb == reflect.Ptr || kb == reflect.Chan || kb == reflect.Map || kb == reflect.Func || kb == reflect.Slice || kb == reflect.UnsafePointer) {
+		if (ka == reflect.Pointer || ka == reflect.Chan || ka == reflect.Map || ka == reflect.Func || ka == reflect.Slice || ka == reflect.UnsafePointer) &&
+			(kb == reflect.Pointer || kb == reflect.Chan || kb == reflect.Map || kb == reflect.Func || kb == reflect.Slice || kb == reflect.UnsafePointer) {
 			pa := va.Pointer()
 			pb := vb.Pointer()
 			if pa < pb {
@@ -137,9 +138,9 @@ func Compare(a, b interface{}) int {
 	return 0
 }
 
-func CompoundCompare(a, b interface{}) int {
-	avals := a.([]interface{})
-	bvals := b.([]interface{})
+func CompoundCompare(a, b any) int {
+	avals := a.([]any)
+	bvals := b.([]any)
 
 	if len(avals) >= len(bvals) {
 		lenb := len(bvals)
@@ -173,14 +174,14 @@ func CompoundCompare(a, b interface{}) int {
 }
 
 // BytesComparator provides a basic comparison on []byte
-func BytesComparator(a, b interface{}) int {
+func BytesComparator(a, b any) int {
 	bytesa := a.([]byte)
 	bytesb := b.([]byte)
 	return bytes.Compare(bytesa, bytesb)
 }
 
 // BytesComparator provides a basic comparison on arrays of []byte
-func BytesArrayComparator(a, b interface{}) int {
+func BytesArrayComparator(a, b any) int {
 	b1 := a.([][]byte)
 	b2 := b.([][]byte)
 
@@ -207,12 +208,12 @@ func BytesArrayComparator(a, b interface{}) int {
 //	Compare implements the comparator function for a list of values
 //
 // passed as an array of interfaces
-func (comparators CompoundComparator) Compare(a, b interface{}) int {
-	var avals []interface{}
-	var bvals []interface{}
+func (comparators CompoundComparator) Compare(a, b any) int {
+	var avals []any
+	var bvals []any
 
-	avals = a.([]interface{})
-	bvals = b.([]interface{})
+	avals = a.([]any)
+	bvals = b.([]any)
 
 	//fmt.Printf("A=%v, b=%v\n", a, b)
 	if len(avals) >= len(bvals) {
@@ -247,7 +248,7 @@ func (comparators CompoundComparator) Compare(a, b interface{}) int {
 }
 
 // StringComparator provides a fast comparison on strings
-func StringComparator(a, b interface{}) int {
+func StringComparator(a, b any) int {
 	s1 := a.(string)
 	s2 := b.(string)
 	min := len(s2)
@@ -270,7 +271,7 @@ func StringComparator(a, b interface{}) int {
 	return 0
 }
 
-func StringsComparator(a, b interface{}) int {
+func StringsComparator(a, b any) int {
 	s1 := a.([]string)
 	s2 := b.([]string)
 	min := len(s2)

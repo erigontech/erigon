@@ -17,7 +17,6 @@
 package membatchwithdb_test
 
 import (
-	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -59,7 +58,7 @@ func TestPutAppendHas(t *testing.T) {
 	// Pure Go backend allows out-of-order Append (no MDBX ordering check).
 	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("AAAA"), []byte("value1.3")))
 
-	require.NoError(t, batch.Flush(context.Background(), rwTx))
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
 
 	exist, err := batch.Has(kv.HeaderNumber, []byte("AAAA"))
 	require.NoError(t, err)
@@ -168,7 +167,7 @@ func TestFlush(t *testing.T) {
 	batch.Put(kv.HeaderNumber, []byte("AAAA"), []byte("value5"))
 	batch.Put(kv.HeaderNumber, []byte("FCAA"), []byte("value5"))
 
-	require.NoError(t, batch.Flush(context.Background(), rwTx))
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
 
 	value, err := rwTx.GetOne(kv.HeaderNumber, []byte("BAAA"))
 	require.NoError(t, err)
@@ -177,6 +176,113 @@ func TestFlush(t *testing.T) {
 	value, err = rwTx.GetOne(kv.HeaderNumber, []byte("AAAA"))
 	require.NoError(t, err)
 	require.Equal(t, value, []byte("value5"))
+}
+
+// TestFlushAppendPath exercises the Append fast-path used when all in-memory
+// keys are strictly greater than the destination's existing max. This is the
+// common shape for canonical FCU advance.
+func TestFlushAppendPath(t *testing.T) {
+	_, rwTx := newTestTx(t)
+
+	initializeDbNonDupSort(rwTx) // seeds AAAA..CCAA
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+	// All keys strictly greater than CCAA → Append path.
+	batch.Put(kv.HeaderNumber, []byte("DAAA"), []byte("v-d"))
+	batch.Put(kv.HeaderNumber, []byte("EAAA"), []byte("v-e"))
+	batch.Put(kv.HeaderNumber, []byte("FAAA"), []byte("v-f"))
+
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
+
+	for k, want := range map[string]string{"DAAA": "v-d", "EAAA": "v-e", "FAAA": "v-f"} {
+		v, err := rwTx.GetOne(kv.HeaderNumber, []byte(k))
+		require.NoError(t, err)
+		require.Equal(t, want, string(v))
+	}
+	// Pre-existing rows must be intact.
+	v, err := rwTx.GetOne(kv.HeaderNumber, []byte("CCAA"))
+	require.NoError(t, err)
+	require.Equal(t, "value3", string(v))
+}
+
+// TestFlushEmptyDestinationPlain exercises the Append fast-path for a plain
+// table when the destination has no existing keys.
+func TestFlushEmptyDestinationPlain(t *testing.T) {
+	_, rwTx := newTestTx(t)
+
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+	batch.Put(kv.HeaderNumber, []byte("AAAA"), []byte("v1"))
+	batch.Put(kv.HeaderNumber, []byte("BBBB"), []byte("v2"))
+
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
+
+	v, err := rwTx.GetOne(kv.HeaderNumber, []byte("AAAA"))
+	require.NoError(t, err)
+	require.Equal(t, "v1", string(v))
+	v, err = rwTx.GetOne(kv.HeaderNumber, []byte("BBBB"))
+	require.NoError(t, err)
+	require.Equal(t, "v2", string(v))
+}
+
+// TestFlushDupsortNonEmptyDestination exercises the Put fallback for a pure
+// DupSort table when the destination already has entries. flushDupsortBucket
+// conservatively uses Put for every dup in this case rather than reasoning
+// about AppendDup's per-key value-ordering precondition.
+func TestFlushDupsortNonEmptyDestination(t *testing.T) {
+	_, rwTx := newTestTx(t)
+
+	initializeDbDupSort(rwTx) // seeds key1=(1.1, 1.3), key3=(3.1, 3.3)
+
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("key2"), []byte("value2.1")))
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("key2"), []byte("value2.2")))
+
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
+
+	c, err := rwTx.CursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer c.Close()
+	var pairs []string
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		require.NoError(t, err)
+		pairs = append(pairs, string(k)+"="+string(v))
+	}
+	require.Equal(t, []string{
+		"key1=value1.1", "key1=value1.3",
+		"key2=value2.1", "key2=value2.2",
+		"key3=value3.1", "key3=value3.3",
+	}, pairs)
+}
+
+// TestFlushEmptyDestinationDupsort exercises the AppendDup fast-path for a
+// pure DupSort table when the destination has no existing keys. The batch
+// writes multiple values per key so the dup handling is actually exercised.
+func TestFlushEmptyDestinationDupsort(t *testing.T) {
+	_, rwTx := newTestTx(t)
+
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("k1"), []byte("v1a")))
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("k1"), []byte("v1b")))
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("k2"), []byte("v2a")))
+
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
+
+	c, err := rwTx.CursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer c.Close()
+	var pairs []string
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		require.NoError(t, err)
+		pairs = append(pairs, string(k)+"="+string(v))
+	}
+	require.Equal(t, []string{"k1=v1a", "k1=v1b", "k2=v2a"}, pairs)
 }
 
 func TestForEach(t *testing.T) {
@@ -188,7 +294,7 @@ func TestForEach(t *testing.T) {
 	require.NoError(t, err)
 	defer batch.Close()
 	batch.Put(kv.HeaderNumber, []byte("FCAA"), []byte("value5"))
-	require.NoError(t, batch.Flush(context.Background(), rwTx))
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
 
 	var keys []string
 	var values []string
@@ -228,7 +334,7 @@ func newTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 	dirs := datadir.New(tb.TempDir())
 	stepSize := uint64(16)
 	db := temporaltest.NewTestDBWithStepSize(tb, dirs, stepSize)
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(tb.Context()) //nolint:gocritic
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -515,7 +621,7 @@ func TestDeleteCurrentDuplicates(t *testing.T) {
 
 	require.NoError(t, cursor.DeleteCurrentDuplicates())
 
-	require.NoError(t, batch.Flush(context.Background(), rwTx))
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
 
 	var keys []string
 	var values []string
@@ -617,7 +723,7 @@ func TestMemoryMutationConcurrentReadWrite(t *testing.T) {
 	require.NoError(t, rwTx.Commit())
 
 	// Open a fresh RO tx as the overlay's backing tx (simulates InsertBlocks).
-	roTx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
@@ -634,13 +740,11 @@ func TestMemoryMutationConcurrentReadWrite(t *testing.T) {
 
 	// Concurrent readers — simulate engine server getters using OverlayReadView.
 	// Each reader opens its own RO tx (just like the real getters do).
-	for r := range readers {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			readerTx, err := db.BeginRo(context.Background())
+	for readerID := range readers {
+		wg.Go(func() {
+			readerTx, err := db.BeginRo(t.Context())
 			if err != nil {
-				t.Errorf("reader %d: BeginRo: %v", id, err)
+				t.Errorf("reader %d: BeginRo: %v", readerID, err)
 				return
 			}
 			defer readerTx.Rollback()
@@ -652,7 +756,7 @@ func TestMemoryMutationConcurrentReadWrite(t *testing.T) {
 				// Read from overlay mem layer.
 				v, err := view.GetOne(kv.HeaderNumber, []byte("overlay-key"))
 				if err != nil {
-					t.Errorf("reader %d: GetOne overlay-key: %v", id, err)
+					t.Errorf("reader %d: GetOne overlay-key: %v", readerID, err)
 					return
 				}
 				if v != nil && string(v) != "overlay-value" {
@@ -662,7 +766,7 @@ func TestMemoryMutationConcurrentReadWrite(t *testing.T) {
 				// Read from DB fallback (via reader's own tx).
 				v, err = view.GetOne(kv.HeaderNumber, []byte("existing-key"))
 				if err != nil {
-					t.Errorf("reader %d: GetOne existing-key: %v", id, err)
+					t.Errorf("reader %d: GetOne existing-key: %v", readerID, err)
 					return
 				}
 				if v != nil && string(v) != "db-value" {
@@ -672,26 +776,24 @@ func TestMemoryMutationConcurrentReadWrite(t *testing.T) {
 				// Has check.
 				_, err = view.Has(kv.HeaderNumber, []byte("overlay-key"))
 				if err != nil {
-					t.Errorf("reader %d: Has: %v", id, err)
+					t.Errorf("reader %d: Has: %v", readerID, err)
 					return
 				}
 			}
-		}(r)
+		})
 	}
 
 	// Concurrent writer — simulate InsertBlocks writing to the overlay.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range iterations {
-			key := []byte(fmt.Sprintf("write-key-%04d", i))
-			val := []byte(fmt.Sprintf("write-val-%04d", i))
+			key := fmt.Appendf(nil, "write-key-%04d", i)
+			val := fmt.Appendf(nil, "write-val-%04d", i)
 			if err := batch.Put(kv.HeaderNumber, key, val); err != nil {
 				t.Errorf("writer: Put: %v", err)
 				return
 			}
 		}
-	}()
+	})
 
 	wg.Wait()
 
@@ -708,12 +810,12 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 
 	// Pre-populate DB.
 	for i := range 100 {
-		key := []byte(fmt.Sprintf("key-%03d", i))
+		key := fmt.Appendf(nil, "key-%03d", i)
 		require.NoError(t, rwTx.Put(kv.HeaderNumber, key, []byte("db-val")))
 	}
 	require.NoError(t, rwTx.Commit())
 
-	roTx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
@@ -724,10 +826,8 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Reader goroutine using OverlayReadView with its own tx.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		readerTx, err := db.BeginRo(context.Background())
+	wg.Go(func() {
+		readerTx, err := db.BeginRo(t.Context())
 		if err != nil {
 			t.Errorf("reader: BeginRo: %v", err)
 			return
@@ -735,21 +835,19 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 		defer readerTx.Rollback()
 		view := batch.NewReadView(readerTx)
 		for i := range 100 {
-			key := []byte(fmt.Sprintf("key-%03d", i))
+			key := fmt.Appendf(nil, "key-%03d", i)
 			_, _ = view.GetOne(kv.HeaderNumber, key)
 			_, _ = view.Has(kv.HeaderNumber, key)
 		}
-	}()
+	})
 
 	// Deleter goroutine.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range 100 {
-			key := []byte(fmt.Sprintf("key-%03d", i))
+			key := fmt.Appendf(nil, "key-%03d", i)
 			_ = batch.Delete(kv.HeaderNumber, key)
 		}
-	}()
+	})
 
 	wg.Wait()
 }

@@ -25,7 +25,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -44,7 +45,8 @@ func init() {
 	RegisterChainSpec(networkname.Bloatnet, Bloatnet)
 
 	// verify registered chains
-	for name, spec := range registeredChainsByName {
+	for name := range registeredChainsByName {
+		spec := registeredChainsByName[name]
 		if spec.IsEmpty() {
 			panic("chain spec is empty for chain " + spec.Name)
 		}
@@ -110,7 +112,8 @@ func ChainSpecByName(chainName string) (Spec, error) {
 // ONLY USED FOR ERROR LOGGING.
 func ChainSpecsByGenesisHash(genesisHash common.Hash) []Spec {
 	var result []Spec
-	for _, spec := range registeredChainsByName {
+	for name := range registeredChainsByName {
+		spec := registeredChainsByName[name]
 		if spec.GenesisHash == genesisHash {
 			result = append(result, spec)
 		}
@@ -151,7 +154,7 @@ var ( // listings filled by init()
 	registeredChainsByName = map[string]Spec{}
 
 	// list of chain IDs that are considered Proof of Stake (PoS) chains
-	chainIdsPoS = []*big.Int{}
+	chainIdsPoS = []*uint256.Int{}
 )
 
 var (
@@ -229,11 +232,11 @@ var chainNamesPoS = []string{
 	networkname.Bloatnet,
 }
 
-func IsChainPoS(chainConfig *chain.Config, currentTDProvider func() *big.Int) bool {
+func IsChainPoS(chainConfig *chain.Config, currentTDProvider func() *uint256.Int) bool {
 	return isChainIDPoS(chainConfig.ChainID) || hasChainPassedTerminalTD(chainConfig, currentTDProvider)
 }
 
-func isChainIDPoS(chainID *big.Int) bool {
+func isChainIDPoS(chainID *uint256.Int) bool {
 	for _, id := range chainIdsPoS {
 		if id.Cmp(chainID) == 0 {
 			return true
@@ -242,7 +245,7 @@ func isChainIDPoS(chainID *big.Int) bool {
 	return false
 }
 
-func hasChainPassedTerminalTD(chainConfig *chain.Config, currentTDProvider func() *big.Int) bool {
+func hasChainPassedTerminalTD(chainConfig *chain.Config, currentTDProvider func() *uint256.Int) bool {
 	if chainConfig.TerminalTotalDifficultyPassed {
 		return true
 	}

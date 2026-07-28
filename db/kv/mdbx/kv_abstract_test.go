@@ -45,7 +45,7 @@ func TestSequence(t *testing.T) {
 	}
 
 	writeDBs, _ := setupDatabases(t, log.New())
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for _, db := range writeDBs {
 		tx, err := db.BeginRw(ctx)
@@ -92,12 +92,16 @@ func TestManagedTx(t *testing.T) {
 		kv.ChaindataTablesCfg = defaultConfig
 	}()
 
-	bucketID := 0
-	bucket1 := kv.ChaindataTables[bucketID]
-	bucket2 := kv.ChaindataTables[bucketID+1]
+	// Pick two tables with matching flags so the cursors on bucket1 and
+	// bucket2 are expected to behave identically across all operations
+	// (Append, Put on an existing key, etc.). Using the first two entries
+	// of the (alphabetically sorted) ChaindataTables list is fragile —
+	// the relative ordering changes when tables are added or removed.
+	bucket1 := kv.TblAccountVals
+	bucket2 := kv.TblStorageVals
 	writeDBs, readDBs := setupDatabases(t, logger)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for _, db := range writeDBs {
 		tx, err := db.BeginRw(ctx)
@@ -149,7 +153,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
 	writeDB := temporaltest.NewTestDB(t, dirs)
@@ -196,7 +200,7 @@ func TestRemoteKvRange(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
 	writeDB := temporaltest.NewTestDB(t, dirs)
-	ctx := context.Background()
+	ctx := t.Context()
 	grpcServer, conn := grpc.NewServer(), bufconn.Listen(1024*1024)
 	go func() {
 		kvServer := remotedbserver.NewKvServer(ctx, writeDB, nil, nil, nil, logger)
@@ -325,7 +329,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 func setupDatabases(t *testing.T, logger log.Logger) (writeDBs []kv.TemporalRwDB, readDBs []kv.RwDB) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	dirs1 := datadir.New(t.TempDir())
 	dirs2 := datadir.New(t.TempDir())
 	writeDBs = []kv.TemporalRwDB{
@@ -377,7 +381,7 @@ func setupDatabases(t *testing.T, logger log.Logger) (writeDBs []kv.TemporalRwDB
 
 func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 	t.Helper()
-	assert, ctx := assert.New(t), context.Background()
+	assert, ctx := assert.New(t), t.Context()
 	require := require.New(t)
 
 	if err := db.View(ctx, func(tx kv.Tx) error {
@@ -478,7 +482,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //	writeDBs, readDBs, closeAll := setupDatabases(ethdb.WithChaindataTables)
 //	defer closeAll()
 //
-//	ctx := context.Background()
+//	ctx := t.Context()
 //
 //	for _, db := range writeDBs {
 //		db := db
@@ -556,7 +560,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //	writeDBs, _, closeAll := setupDatabases(ethdb.WithChaindataTables)
 //	defer closeAll()
 //
-//	ctx := context.Background()
+//	ctx := t.Context()
 //
 //	for _, db := range writeDBs {
 //		db := db

@@ -17,7 +17,6 @@ package seg
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
@@ -44,7 +43,7 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,6 +88,36 @@ func TestDecompressSkip(t *testing.T) {
 	require.Equal(t, 8, int(offset))
 	_, offset = g.Next(nil)
 	require.Equal(t, 16, int(offset))
+}
+
+func TestOpenSequentialView(t *testing.T) {
+	d := prepareLoremDict(t)
+	defer d.Close()
+
+	var want [][]byte
+	g := d.MakeGetter()
+	for g.HasNext() {
+		w, _ := g.Next(nil)
+		want = append(want, w)
+	}
+
+	readAll := func(separateReadahead bool) [][]byte {
+		v, err := d.OpenSequentialView(separateReadahead)
+		require.NoError(t, err)
+		defer v.Close()
+		var got [][]byte
+		vg := v.MakeGetter()
+		for vg.HasNext() {
+			w, _ := vg.Next(nil)
+			got = append(got, w)
+		}
+		return got
+	}
+
+	require.Equal(t, want, readAll(true), "separate MADV_SEQUENTIAL mmap view")
+	require.Equal(t, want, readAll(false), "shared mmap view (MADV_NORMAL)")
+	// the shared view's Close must be a no-op on the decompressor's mmap: a subsequent read still works
+	require.Equal(t, want, readAll(true))
 }
 
 func TestDecompressMatchOK(t *testing.T) {
@@ -149,12 +178,12 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	for i := 0; i < size; i++ {
+	for i := range size {
 		if err = c.AddWord(fmt.Appendf(nil, "word-%d", i)); err != nil {
 			t.Fatal(err)
 		}
@@ -268,7 +297,7 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
 	for k, w := range loremStrings {
@@ -360,7 +389,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		cfg := DefaultCfg
 		cfg.MinPatternScore = 1
 		cfg.Workers = 2
-		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+		c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		defer c.Close()
 		for k, w := range loremStrings {
@@ -382,7 +411,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		cfg := DefaultCfg
 		cfg.MinPatternScore = 1
 		cfg.Workers = 2
-		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+		c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		defer c.Close()
 		err = c.Compress()
@@ -400,7 +429,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		cfg := DefaultCfg
 		cfg.MinPatternScore = 1
 		cfg.Workers = 2
-		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+		c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		defer c.Close()
 		for k, w := range loremStrings {
@@ -422,7 +451,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		cfg := DefaultCfg
 		cfg.MinPatternScore = 1
 		cfg.Workers = 2
-		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+		c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		defer c.Close()
 		err = c.Compress()
@@ -527,12 +556,50 @@ func rmNewLine(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", "")
 }
 
-func TestDecompressTorrent(t *testing.T) {
-	t.Skip()
+func TestDecompressDeepPositionSubtable(t *testing.T) {
+	// 600 words where a common pattern appears at 600 distinct byte positions
+	// force posMaxDepth=10>9, creating subtables and exercising nextPosSubtable.
+	const nWords = 600
+	logger := log.New()
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "deep_pos")
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	require.NoError(t, err)
 
+	words := make([][]byte, nWords)
+	pat := []byte("SUBTABLEPATTERN")
+	for i := range words {
+		words[i] = append(bytes.Repeat([]byte{byte(i % 251)}, i), pat...)
+		require.NoError(t, c.AddWord(words[i]))
+	}
+	require.NoError(t, c.Compress())
+	c.Close()
+
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+
+	require.NotNil(t, d.posArena)
+	require.Greater(t, len(d.posArena.tables), 1, "expected posMaxDepth>9 to create subtables")
+
+	g := d.MakeGetter()
+	for i, want := range words {
+		require.True(t, g.HasNext(), "word %d", i)
+		got, _ := g.Next(nil)
+		require.Equal(t, want, got, "word %d mismatch", i)
+	}
+	require.False(t, g.HasNext())
+}
+
+func TestDecompressTorrent(t *testing.T) {
 	fpath := "/mnt/data/chains/mainnet/snapshots/v1.0-014000-014500-transactions.seg"
 	st, err := os.Stat(fpath)
-	require.NoError(t, err)
+	if err != nil {
+		t.Skipf("requires local snapshot file %s", fpath)
+	}
 	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())
 
 	d, err := NewDecompressor(fpath)
@@ -555,7 +622,7 @@ const N = 100
 func randWord() []byte {
 	size := rand.Intn(256) // size of the word
 	word := make([]byte, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		word[i] = byte(rand.Intn(256))
 	}
 	return word
@@ -566,7 +633,7 @@ func generateRandWords() (WORDS [N][]byte, WORD_FLAGS [N]bool, INPUT_FLAGS []int
 	WORD_FLAGS = [N]bool{} // false - uncompressed word, true - compressed word
 	INPUT_FLAGS = []int{}  // []byte or nil input
 
-	for i := 0; i < N-2; i++ {
+	for i := range N - 2 {
 		WORDS[i] = randWord()
 	}
 	// make sure we have at least 2 emtpy []byte
@@ -583,7 +650,7 @@ func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLA
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -639,7 +706,7 @@ func TestMatchCmpCompressedBinaryKeys(t *testing.T) {
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 
 	// Generate sorted binary keys (20 bytes, like address hashes)
@@ -705,7 +772,9 @@ func TestMatchCmpCompressedBinaryKeys(t *testing.T) {
 		copy(bigger, k)
 		bigger[len(bigger)-1] = 0xff
 		if bytes.Compare(bigger, k) <= 0 {
-			bigger = append(k, 0xff)
+			bigger = make([]byte, len(k)+1)
+			copy(bigger, k)
+			bigger[len(k)] = 0xff
 		}
 		cmp = g.MatchCmp(bigger)
 		require.Equal(t, 1, cmp, "expected buf > word for key %x vs %x", bigger, k)
@@ -731,7 +800,7 @@ func TestMatchCmpUncompressedBinaryKeys(t *testing.T) {
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 
 	keys := make([][]byte, 200)
@@ -791,7 +860,7 @@ func TestMatchCmpEmptyAndNil(t *testing.T) {
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 
 	// Write: nil, empty, short, empty, nil
@@ -835,7 +904,7 @@ func TestMatchAllEdgeCases(t *testing.T) {
 		cfg := DefaultCfg
 		cfg.MinPatternScore = 1
 		cfg.Workers = 2
-		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+		c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		for _, w := range words {
 			require.NoError(t, c.AddWord(w))
@@ -855,7 +924,7 @@ func TestMatchAllEdgeCases(t *testing.T) {
 		cfg := DefaultCfg
 		cfg.MinPatternScore = 1
 		cfg.Workers = 2
-		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+		c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		for _, w := range words {
 			require.NoError(t, c.AddUncompressedWord(w))

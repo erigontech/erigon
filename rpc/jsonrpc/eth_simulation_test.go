@@ -2,6 +2,8 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"testing"
@@ -10,16 +12,40 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
+
+type simulateV1TestService struct{}
+
+func (simulateV1TestService) SimulateV1(context.Context, SimulationRequest, rpc.BlockNumberOrHash) (SimulationResult, error) {
+	return SimulationResult{
+		{
+			"calls": []CallResult{
+				{
+					ReturnData: "0x",
+					GasUsed:    hexutil.Uint64(0x5208),
+					MaxUsedGas: hexutil.Uint64(0x5300),
+					Status:     hexutil.Uint64(types.ReceiptStatusSuccessful),
+				},
+			},
+		},
+	}, nil
+}
+
+type simulateV1ClientBlockResult struct {
+	Calls []CallResult `json:"calls"`
+}
 
 // ─── sanitizeSimulatedBlocks tests ────────────────────────────────────────────
 
@@ -155,7 +181,7 @@ func TestSanitizeBlocksEqualToBase(t *testing.T) {
 // ─── sanitizeCall tests ──────────────────────────────────────────────────────
 
 // newTestSimulator creates a simulator with just the chain config needed for sanitizeCall tests.
-func newTestSimulator(chainID *big.Int) *simulator {
+func newTestSimulator(chainID *uint256.Int) *simulator {
 	return &simulator{
 		chainConfig: &chain.Config{ChainID: chainID},
 	}
@@ -175,7 +201,7 @@ func blockCtx(gasLimit uint64) evmtypes.BlockContext {
 // TestSanitizeCallGasDefaultsToRemainingBlock verifies that when Gas is nil,
 // it defaults to remaining block gas (blockGasLimit - gasUsed), capped by globalGasCap.
 func TestSanitizeCallGasDefaultsToRemainingBlock(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
@@ -188,7 +214,7 @@ func TestSanitizeCallGasDefaultsToRemainingBlock(t *testing.T) {
 // TestSanitizeCallGasDefaultsCappedByGasCap verifies that when Gas is nil and
 // remaining block gas exceeds globalGasCap, the gas is capped to globalGasCap.
 func TestSanitizeCallGasDefaultsCappedByGasCap(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	bc := blockCtx(100_000_000)
 
@@ -201,7 +227,7 @@ func TestSanitizeCallGasDefaultsCappedByGasCap(t *testing.T) {
 // TestSanitizeCallGasDefaultsNoCap verifies that when globalGasCap is 0 (unlimited),
 // remaining block gas is capped by MaxUint64/2.
 func TestSanitizeCallGasDefaultsNoCap(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
@@ -213,7 +239,7 @@ func TestSanitizeCallGasDefaultsNoCap(t *testing.T) {
 
 // TestSanitizeCallUserGasRespected verifies that user-specified gas is used when within limits.
 func TestSanitizeCallUserGasRespected(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	userGas := hexutil.Uint64(5_000_000)
 	args.Gas = &userGas
@@ -227,7 +253,7 @@ func TestSanitizeCallUserGasRespected(t *testing.T) {
 // TestSanitizeCallUserGasCappedByGlobalCap verifies that user-specified gas exceeding
 // globalGasCap is capped down.
 func TestSanitizeCallUserGasCappedByGlobalCap(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	userGas := hexutil.Uint64(100_000_000)
 	args.Gas = &userGas
@@ -240,7 +266,7 @@ func TestSanitizeCallUserGasCappedByGlobalCap(t *testing.T) {
 
 // TestSanitizeCallUserGasNoCap verifies that when globalGasCap is 0, user gas is not capped.
 func TestSanitizeCallUserGasNoCap(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	userGas := hexutil.Uint64(100_000_000)
 	args.Gas = &userGas
@@ -254,7 +280,7 @@ func TestSanitizeCallUserGasNoCap(t *testing.T) {
 
 // TestSanitizeCallBlockGasLimitExceeded verifies that gas + gasUsed exceeding block gas limit is rejected.
 func TestSanitizeCallBlockGasLimitExceeded(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	userGas := hexutil.Uint64(20_000_001)
 	args.Gas = &userGas
@@ -270,7 +296,7 @@ func TestSanitizeCallBlockGasLimitExceeded(t *testing.T) {
 
 // TestSanitizeCallBlockGasLimitExact verifies that gas + gasUsed exactly at block gas limit succeeds.
 func TestSanitizeCallBlockGasLimitExact(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	userGas := hexutil.Uint64(20_000_000)
 	args.Gas = &userGas
@@ -283,7 +309,7 @@ func TestSanitizeCallBlockGasLimitExact(t *testing.T) {
 // TestSanitizeCallChainIDDefaultCopied verifies that the default chain ID is a copy,
 // not a reference to the live chainConfig (preventing aliasing bugs).
 func TestSanitizeCallChainIDDefaultCopied(t *testing.T) {
-	originalID := big.NewInt(1)
+	originalID := uint256.NewInt(1)
 	sim := newTestSimulator(originalID)
 	args := callArgs()
 	bc := blockCtx(30_000_000)
@@ -292,15 +318,15 @@ func TestSanitizeCallChainIDDefaultCopied(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, args.ChainID)
 	// The returned chain ID should equal the original.
-	assert.Equal(t, 0, (*big.Int)(args.ChainID).Cmp(originalID))
+	assert.Equal(t, 0, (*big.Int)(args.ChainID).Cmp(originalID.ToBig()))
 	// But it must be a different pointer — mutating args.ChainID must not affect chainConfig.
 	(*big.Int)(args.ChainID).SetInt64(999)
-	assert.Equal(t, int64(1), originalID.Int64(), "mutating args.ChainID must not affect chainConfig.ChainID")
+	assert.Equal(t, uint64(1), originalID.Uint64(), "mutating args.ChainID must not affect chainConfig.ChainID")
 }
 
 // TestSanitizeCallChainIDMismatch verifies that a mismatched chain ID in args is rejected.
 func TestSanitizeCallChainIDMismatch(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	args.ChainID = (*hexutil.Big)(big.NewInt(999))
 	bc := blockCtx(30_000_000)
@@ -312,7 +338,7 @@ func TestSanitizeCallChainIDMismatch(t *testing.T) {
 
 // TestSanitizeCallChainIDMatch verifies that a matching chain ID in args is accepted.
 func TestSanitizeCallChainIDMatch(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(42))
+	sim := newTestSimulator(uint256.NewInt(42))
 	args := callArgs()
 	args.ChainID = (*hexutil.Big)(big.NewInt(42))
 	bc := blockCtx(30_000_000)
@@ -324,7 +350,7 @@ func TestSanitizeCallChainIDMatch(t *testing.T) {
 // TestSanitizeCallBaseFeeNil verifies that when baseFee is nil (pre-London),
 // GasPrice is set if not provided.
 func TestSanitizeCallBaseFeeNil(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
@@ -337,7 +363,7 @@ func TestSanitizeCallBaseFeeNil(t *testing.T) {
 // TestSanitizeCallBaseFeeSet verifies that when baseFee is provided (post-London),
 // MaxFeePerGas and MaxPriorityFeePerGas are set if not provided.
 func TestSanitizeCallBaseFeeSet(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 	baseFee := uint256.NewInt(1_000_000_000) // 1 gwei
@@ -351,7 +377,7 @@ func TestSanitizeCallBaseFeeSet(t *testing.T) {
 
 // TestSanitizeCallBlobGas verifies that MaxFeePerBlobGas is set when BlobVersionedHashes is provided.
 func TestSanitizeCallBlobGas(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	args.BlobVersionedHashes = []common.Hash{{1}}
 	bc := blockCtx(30_000_000)
@@ -364,7 +390,7 @@ func TestSanitizeCallBlobGas(t *testing.T) {
 // TestSanitizeCallBlobGasNotSetWithoutHashes verifies that MaxFeePerBlobGas is not auto-set
 // when BlobVersionedHashes is nil.
 func TestSanitizeCallBlobGasNotSetWithoutHashes(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
@@ -376,7 +402,7 @@ func TestSanitizeCallBlobGasNotSetWithoutHashes(t *testing.T) {
 // TestSanitizeCallGasDefaultCappedAtEffectiveCapWhenNoGlobalCap tests that with globalGasCap=0
 // and a very large block gas limit, the gas is capped at MaxUint64/2.
 func TestSanitizeCallGasDefaultCappedAtEffectiveCapWhenNoGlobalCap(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	// Use a block gas limit larger than MaxUint64/2 to trigger the cap.
 	hugeGasLimit := uint64(math.MaxUint64/2) + 1000
@@ -392,6 +418,25 @@ func TestSanitizeCallGasDefaultCappedAtEffectiveCapWhenNoGlobalCap(t *testing.T)
 
 func TestTxValidationErrorNil(t *testing.T) {
 	assert.Nil(t, txValidationError(nil))
+}
+
+// TestTxValidationErrorBaseFeeTooLow verifies that txValidationError maps
+// ErrFeeCapTooLow to ErrCodeBaseFeeTooLow (-38012) as required by the Ethereum
+// execution API specification for eth_simulateV1.
+//
+// Regression guard: this mapping was previously incorrect (returned the generic
+// -32602 "Invalid params" code) and was corrected to -38012. This test prevents
+// silent regression if the mapping is accidentally reverted in a future refactor.
+func TestTxValidationErrorBaseFeeTooLow(t *testing.T) {
+	err := fmt.Errorf("%w: address 0x1, feeCap: 0 baseFee: 7", protocol.ErrFeeCapTooLow)
+
+	result := txValidationError(err)
+
+	var customErr *rpc.CustomError
+	require.ErrorAs(t, result, &customErr)
+	assert.Equal(t, rpc.ErrCodeBaseFeeTooLow, customErr.Code,
+		"ErrFeeCapTooLow must map to ErrCodeBaseFeeTooLow (-38012), not ErrCodeInvalidParams (-32602)")
+	assert.Equal(t, err.Error(), customErr.Message)
 }
 
 // ─── error helper tests ──────────────────────────────────────────────────────
@@ -444,7 +489,7 @@ func TestRepairLogsEmpty(t *testing.T) {
 func TestNewSimulatorGasPool(t *testing.T) {
 	req := &SimulationRequest{TraceTransfers: true, Validation: true, ReturnFullTransactions: true}
 	header := &types.Header{Number: *uint256.NewInt(1)}
-	cfg := &chain.Config{ChainID: big.NewInt(1)}
+	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	sim := newSimulator(req, header, cfg, datadir.Dirs{}, nil, rawdbv3.TxNumsReader{}, nil, nil, 50_000_000, 1024, 0, false)
 	assert.Equal(t, uint64(50_000_000), sim.gasPool.Gas())
@@ -456,7 +501,7 @@ func TestNewSimulatorGasPool(t *testing.T) {
 func TestNewSimulatorZeroGasCap(t *testing.T) {
 	req := &SimulationRequest{}
 	header := &types.Header{Number: *uint256.NewInt(1)}
-	cfg := &chain.Config{ChainID: big.NewInt(1)}
+	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	sim := newSimulator(req, header, cfg, datadir.Dirs{}, nil, rawdbv3.TxNumsReader{}, nil, nil, 0, 1024, 0, false)
 	assert.Equal(t, uint64(0), sim.gasPool.Gas())
@@ -478,6 +523,63 @@ func TestSimulationRequestTypes(t *testing.T) {
 	assert.True(t, req.ReturnFullTransactions)
 }
 
+func TestSimulateV1PopulatesMaxUsedGas(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	value := (*hexutil.Big)(big.NewInt(100))
+	gas := hexutil.Uint64(100000)
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{
+			{
+				Calls: []ethapi.CallArgs{
+					{
+						From:  &from,
+						To:    &to,
+						Value: value,
+						Gas:   &gas,
+					},
+				},
+			},
+		},
+		Validation: false,
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+
+	calls, ok := result[0]["calls"].([]CallResult)
+	require.True(t, ok, "expected typed call results")
+	require.Len(t, calls, 1)
+
+	call := calls[0]
+	assert.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(call.Status))
+	assert.Nil(t, call.Error)
+	assert.NotZero(t, uint64(call.MaxUsedGas))
+	assert.GreaterOrEqual(t, uint64(call.MaxUsedGas), uint64(call.GasUsed))
+}
+
+func TestSimulateV1ClientDecodesMaxUsedGas(t *testing.T) {
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("eth", simulateV1TestService{}))
+
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(client.Close)
+
+	var result []simulateV1ClientBlockResult
+	err := client.CallContext(context.Background(), &result, "eth_simulateV1", SimulationRequest{}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	require.Len(t, result[0].Calls, 1)
+
+	call := result[0].Calls[0]
+	assert.Equal(t, uint64(0x5208), uint64(call.GasUsed))
+	assert.Equal(t, uint64(0x5300), uint64(call.MaxUsedGas))
+	assert.GreaterOrEqual(t, uint64(call.MaxUsedGas), uint64(call.GasUsed))
+}
+
 // ─── simulatedCanonicalReader tests ──────────────────────────────────────────
 
 func TestSimulatedCanonicalReaderIsCanonical(t *testing.T) {
@@ -492,6 +594,58 @@ func TestSimulatedCanonicalReaderBadHeaderNumber(t *testing.T) {
 	blockHeight, err := reader.BadHeaderNumber(context.TODO(), nil, common.Hash{})
 	assert.Nil(t, blockHeight)
 	require.Error(t, err)
+}
+
+func TestValidateSimulationRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		blocks    []SimulatedBlock
+		wantCode  int
+		wantError string
+	}{
+		{
+			name:      "too many blocks in request",
+			blocks:    make([]SimulatedBlock, maxSimulateBlocks+1),
+			wantCode:  rpc.ErrCodeClientLimitExceeded,
+			wantError: fmt.Sprintf("too many blocks in request: %d > %d", maxSimulateBlocks+1, maxSimulateBlocks),
+		},
+		{
+			name: "too many calls in block",
+			blocks: []SimulatedBlock{
+				{Calls: make([]ethapi.CallArgs, maxSimulateCallsPerBlock+1)},
+			},
+			wantCode:  rpc.ErrCodeClientLimitExceeded,
+			wantError: fmt.Sprintf("too many calls in block: %d > %d", maxSimulateCallsPerBlock+1, maxSimulateCallsPerBlock),
+		},
+		{
+			name: "too many calls in request",
+			blocks: []SimulatedBlock{
+				{Calls: make([]ethapi.CallArgs, maxSimulateCallsPerBlock)},
+				{Calls: make([]ethapi.CallArgs, maxSimulateCallsPerBlock)},
+				{Calls: make([]ethapi.CallArgs, 1)},
+			},
+			wantCode:  rpc.ErrCodeClientLimitExceeded,
+			wantError: fmt.Sprintf("too many calls: %d > %d", maxSimulateTotalCalls+1, maxSimulateTotalCalls),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateSimulationRequest(tc.blocks)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+
+			var customErr *rpc.CustomError
+			if !errors.As(err, &customErr) {
+				t.Fatalf("expected rpc.CustomError, got %T", err)
+			}
+			if customErr.Code != tc.wantCode {
+				t.Fatalf("unexpected error code: want %d, got %d", tc.wantCode, customErr.Code)
+			}
+			if customErr.Message != tc.wantError {
+				t.Fatalf("unexpected error message: want %q, got %q", tc.wantError, customErr.Message)
+			}
+		})
+	}
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

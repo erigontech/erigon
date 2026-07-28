@@ -17,7 +17,6 @@
 package recsplit
 
 import (
-	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -51,16 +50,16 @@ func TestRecSplit2(t *testing.T) {
 	if err = rs.AddKey([]byte("first_key"), 0); err != nil {
 		t.Error(err)
 	}
-	if err = rs.Build(context.Background()); err == nil {
+	if err = rs.Build(t.Context()); err == nil {
 		t.Errorf("test is expected to fail, too few keys added")
 	}
 	if err = rs.AddKey([]byte("second_key"), 0); err != nil {
 		t.Error(err)
 	}
-	if err = rs.Build(context.Background()); err != nil {
+	if err = rs.Build(t.Context()); err != nil {
 		t.Error(err)
 	}
-	if err = rs.Build(context.Background()); err == nil {
+	if err = rs.Build(t.Context()); err == nil {
 		t.Errorf("test is expected to fail, hash gunction was built already")
 	}
 	if err = rs.AddKey([]byte("key_to_fail"), 0); err == nil {
@@ -90,7 +89,7 @@ func TestRecSplitDuplicate(t *testing.T) {
 	if err := rs.AddKey([]byte("first_key"), 0); err != nil {
 		t.Error(err)
 	}
-	if err := rs.Build(context.Background()); err == nil {
+	if err := rs.Build(t.Context()); err == nil {
 		t.Errorf("test is expected to fail, duplicate key")
 	}
 }
@@ -124,17 +123,17 @@ func TestIndexLookup(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer rs.Close()
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
 				t.Fatal(err)
 			}
 		}
-		if err := rs.Build(context.Background()); err != nil {
+		if err := rs.Build(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 		idx := MustOpen(indexFile)
 		defer idx.Close()
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			reader := NewIndexReader(idx)
 			offset, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 			assert.True(t, ok)
@@ -160,6 +159,11 @@ func TestIndexLookup(t *testing.T) {
 	t.Run("v1", func(t *testing.T) {
 		cfg := cfg
 		cfg.Version = 1
+		test(t, cfg)
+	})
+	t.Run("v2", func(t *testing.T) {
+		cfg := cfg
+		cfg.Version = 2
 		test(t, cfg)
 	})
 }
@@ -344,7 +348,7 @@ func BenchmarkBuild(b *testing.B) {
 
 	// Pre-allocate all keys outside the benchmark loop
 	keys := make([][]byte, KeysN)
-	for j := 0; j < KeysN; j++ {
+	for j := range KeysN {
 		keys[j] = fmt.Appendf(nil, "key %d", j)
 	}
 	b.ResetTimer()
@@ -363,13 +367,13 @@ func BenchmarkBuild(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		for j := 0; j < KeysN; j++ {
+		for j := range KeysN {
 			if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
 				b.Fatal(err)
 			}
 		}
 		b.StartTimer()
-		if err := rs.Build(context.Background()); err != nil {
+		if err := rs.Build(b.Context()); err != nil {
 			b.Fatal(err)
 		}
 		b.StopTimer()
@@ -385,7 +389,7 @@ func BenchmarkAddKeyAndBuild(b *testing.B) {
 	const KeysN = 1_000_000
 
 	keys := make([][]byte, KeysN)
-	for j := 0; j < KeysN; j++ {
+	for j := range KeysN {
 		keys[j] = fmt.Appendf(nil, "key %d", j)
 	}
 
@@ -412,12 +416,12 @@ func BenchmarkAddKeyAndBuild(b *testing.B) {
 					b.Fatal(err)
 				}
 				b.StartTimer()
-				for j := 0; j < KeysN; j++ {
+				for j := range KeysN {
 					if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
 						b.Fatal(err)
 					}
 				}
-				if err := rs.Build(context.Background()); err != nil {
+				if err := rs.Build(b.Context()); err != nil {
 					b.Fatal(err)
 				}
 				b.StopTimer()
@@ -441,18 +445,18 @@ func TestTwoLayerIndex(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer rs.Close()
-		for i := 0; i < N; i++ {
+		for i := range N {
 			if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
 				t.Fatal(err)
 			}
 		}
-		if err := rs.Build(context.Background()); err != nil {
+		if err := rs.Build(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 
 		idx := MustOpen(indexFile)
 		defer idx.Close()
-		for i := 0; i < N; i++ {
+		for i := range N {
 			reader := NewIndexReader(idx)
 			e, _ := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 			if e != uint64(i) {
@@ -482,6 +486,11 @@ func TestTwoLayerIndex(t *testing.T) {
 		cfg.Version = 1
 		test(t, cfg)
 	})
+	t.Run("v2", func(t *testing.T) {
+		cfg := cfg
+		cfg.Version = 2
+		test(t, cfg)
+	})
 }
 
 func TestIndexLookupParallel(t *testing.T) {
@@ -507,17 +516,17 @@ func TestIndexLookupParallel(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer rs.Close()
-			for i := 0; i < N; i++ {
+			for i := range N {
 				if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if err := rs.Build(context.Background()); err != nil {
+			if err := rs.Build(t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			idx := MustOpen(indexFile)
 			defer idx.Close()
-			for i := 0; i < N; i++ {
+			for i := range N {
 				reader := NewIndexReader(idx)
 				offset, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 				assert.True(t, ok)
@@ -570,7 +579,7 @@ func TestParallelMatchesSequential(t *testing.T) {
 		for i, k := range keys {
 			require.NoError(t, rs.AddKey(k, uint64(i*17)))
 		}
-		require.NoError(t, rs.Build(context.Background()))
+		require.NoError(t, rs.Build(t.Context()))
 	}
 
 	seqFile := filepath.Join(tmpDir, "seq.idx")
@@ -595,7 +604,7 @@ func BenchmarkBuildParallel(b *testing.B) {
 	const KeysN = 1_000_000
 
 	keys := make([][]byte, KeysN)
-	for j := 0; j < KeysN; j++ {
+	for j := range KeysN {
 		keys[j] = fmt.Appendf(nil, "key %d", j)
 	}
 
@@ -618,13 +627,13 @@ func BenchmarkBuildParallel(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				for j := 0; j < KeysN; j++ {
+				for j := range KeysN {
 					if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
 						b.Fatal(err)
 					}
 				}
 				b.StartTimer()
-				if err := rs.Build(context.Background()); err != nil {
+				if err := rs.Build(b.Context()); err != nil {
 					b.Fatal(err)
 				}
 				b.StopTimer()

@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -42,6 +43,7 @@ type JsonStreamLogger struct {
 	stream       jsonstream.Stream
 	hexEncodeBuf [128]byte
 	firstCapture bool
+	opcodeSteps  int // steps captured so far; executed-but-suppressed ones don't count
 
 	locations common.Hashes // For sorting
 	storage   map[accounts.Address]Storage
@@ -65,14 +67,19 @@ func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream jsonstream.
 func (l *JsonStreamLogger) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: l.OnTxStart,
-			OnExit:    l.OnExit,
-			OnOpcode:  l.OnOpcode,
+			OnTxStart:           l.OnTxStart,
+			OnSystemCallStartV2: l.OnSystemCallStartV2,
+			OnExit:              l.OnExit,
+			OnOpcode:            l.OnOpcode,
 		},
 	}
 }
 
 func (l *JsonStreamLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
+	l.env = env
+}
+
+func (l *JsonStreamLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
@@ -84,15 +91,19 @@ func (l *JsonStreamLogger) hexWithPrefix(b []byte) string {
 	return string(l.hexEncodeBuf[:2+n])
 }
 
-// formatMemoryWord encodes a memory chunk as a 0x-prefixed 64-char hex string,
-// padding the last word to 32 bytes if needed.
-func (l *JsonStreamLogger) formatMemoryWord(chunk []byte) string {
-	if len(chunk) == 32 {
-		return l.hexWithPrefix(chunk)
+// writeMemoryWordRaw writes a memory word as a JSON string "0x<hex>" directly
+// to the stream without any heap allocations. Pads to 32 bytes if needed.
+func (l *JsonStreamLogger) writeMemoryWordRaw(chunk []byte) {
+	if len(chunk) < 32 {
+		var word [32]byte
+		copy(word[:], chunk)
+		hex.Encode(l.hexEncodeBuf[:], word[:])
+	} else {
+		hex.Encode(l.hexEncodeBuf[:], chunk)
 	}
-	var word [32]byte
-	copy(word[:], chunk)
-	return l.hexWithPrefix(word[:])
+	l.stream.WriteRaw(`"0x`)
+	l.stream.Write(l.hexEncodeBuf[:64]) //nolint:errcheck
+	l.stream.WriteRaw(`"`)
 }
 
 func (l *JsonStreamLogger) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
@@ -116,6 +127,13 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		return
 	default:
 	}
+	// check if already captured the specified number of opcode steps. Execution
+	// keeps going, we just stop recording. Must happen before anything is written
+	// to the stream, otherwise a dangling separator would be emitted.
+	if l.cfg.Limit != 0 && l.cfg.Limit <= l.opcodeSteps {
+		return
+	}
+	l.opcodeSteps++
 	if !l.firstCapture {
 		l.stream.WriteMore()
 	} else {
@@ -169,10 +187,10 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	l.stream.WriteObjectField("depth")
 	l.stream.WriteInt(depth)
 	refund := l.env.IntraBlockState.GetRefund()
-	if refund.Total() != 0 {
+	if refund != 0 {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("refund")
-		l.stream.WriteUint64(l.env.IntraBlockState.GetRefund().Total())
+		l.stream.WriteUint64(refund)
 	}
 
 	if err != nil {
@@ -192,22 +210,23 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		}
 		l.stream.WriteArrayEnd()
 	}
-	if !l.cfg.DisableMemory {
-		memData := memory
+	if l.cfg.EnableMemory && len(memory) > 0 {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("memory")
 		l.stream.WriteArrayStart()
-		for i := 0; i < len(memData); i += 32 {
-			end := i + 32
-			if end > len(memData) {
-				end = len(memData)
-			}
+		for i := 0; i < len(memory); i += 32 {
+			end := min(i+32, len(memory))
 			if i > 0 {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteString(l.formatMemoryWord(memData[i:end]))
+			l.writeMemoryWordRaw(memory[i:end])
 		}
 		l.stream.WriteArrayEnd()
+	}
+	if l.cfg.EnableReturnData && len(rData) > 0 {
+		l.stream.WriteMore()
+		l.stream.WriteObjectField("returnData")
+		l.stream.WriteString(hexutil.Encode(rData))
 	}
 	if outputStorage {
 		l.stream.WriteMore()

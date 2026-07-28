@@ -17,7 +17,6 @@
 package migrations
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -42,7 +41,7 @@ func TestApplyWithInit(t *testing.T) {
 		{
 			"one",
 			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
-				tx, err := db.BeginRw(context.Background())
+				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
 				}
@@ -57,7 +56,7 @@ func TestApplyWithInit(t *testing.T) {
 		{
 			"two",
 			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
-				tx, err := db.BeginRw(context.Background())
+				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
 				}
@@ -77,7 +76,7 @@ func TestApplyWithInit(t *testing.T) {
 	err := migrator.Apply(db, migrationsDB, "", "", logger)
 	require.NoError(err)
 	var applied map[string][]byte
-	err = migrationsDB.View(context.Background(), func(tx kv.Tx) error {
+	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
 
@@ -92,7 +91,7 @@ func TestApplyWithInit(t *testing.T) {
 	// apply again
 	err = migrator.Apply(db, migrationsDB, "", "", logger)
 	require.NoError(err)
-	err = migrationsDB.View(context.Background(), func(tx kv.Tx) error {
+	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
 		require.NoError(err)
 		require.Equal(applied, applied2)
@@ -115,7 +114,7 @@ func TestApplyWithoutInit(t *testing.T) {
 		{
 			"two",
 			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
-				tx, err := db.BeginRw(context.Background())
+				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
 				}
@@ -128,7 +127,7 @@ func TestApplyWithoutInit(t *testing.T) {
 			},
 		},
 	}
-	err := migrationsDB.Update(context.Background(), func(tx kv.RwTx) error {
+	err := migrationsDB.Update(t.Context(), func(tx kv.RwTx) error {
 		return tx.Put(kv.Migrations, []byte(m[0].Name), []byte{1})
 	})
 	require.NoError(err)
@@ -140,7 +139,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	require.NoError(err)
 
 	var applied map[string][]byte
-	err = migrationsDB.View(context.Background(), func(tx kv.Tx) error {
+	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
 
@@ -157,7 +156,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	err = migrator.Apply(db, migrationsDB, "", "", logger)
 	require.NoError(err)
 
-	err = migrationsDB.View(context.Background(), func(tx kv.Tx) error {
+	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
 		require.NoError(err)
 		require.Equal(applied, applied2)
@@ -174,7 +173,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 		{
 			"one",
 			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
-				tx, err := db.BeginRw(context.Background())
+				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
 				}
@@ -194,7 +193,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 			},
 		},
 	}
-	err := migrationsDB.Update(context.Background(), func(tx kv.RwTx) error {
+	err := migrationsDB.Update(t.Context(), func(tx kv.RwTx) error {
 		return tx.Put(kv.Migrations, []byte(m[1].Name), []byte{1}) // apply non-first migration
 	})
 	require.NoError(err)
@@ -206,7 +205,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	require.NoError(err)
 
 	var applied map[string][]byte
-	err = migrationsDB.View(context.Background(), func(tx kv.Tx) error {
+	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
 
@@ -222,7 +221,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	// apply again
 	err = migrator.Apply(db, migrationsDB, "", "", logger)
 	require.NoError(err)
-	err = migrationsDB.View(context.Background(), func(tx kv.Tx) error {
+	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
 		require.NoError(err)
 		require.Equal(applied, applied2)
@@ -238,7 +237,7 @@ func TestValidation(t *testing.T) {
 		{
 			Name: "repeated_name",
 			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
-				tx, err := db.BeginRw(context.Background())
+				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
 				}
@@ -253,7 +252,7 @@ func TestValidation(t *testing.T) {
 		{
 			Name: "repeated_name",
 			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
-				tx, err := db.BeginRw(context.Background())
+				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
 				}
@@ -273,7 +272,7 @@ func TestValidation(t *testing.T) {
 	require.ErrorIs(err, ErrMigrationNonUniqueName)
 
 	var applied map[string][]byte
-	err = migrationsDB.View(context.Background(), func(tx kv.Tx) error {
+	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
 		require.Empty(applied)
@@ -301,7 +300,7 @@ func TestCommitCallRequired(t *testing.T) {
 	require.ErrorIs(err, ErrMigrationCommitNotCalled)
 
 	var applied map[string][]byte
-	err = migrationsDB.View(context.Background(), func(tx kv.Tx) error {
+	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
 		require.Empty(applied)

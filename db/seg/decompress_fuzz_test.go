@@ -18,7 +18,6 @@ package seg
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"math/rand"
 	"path/filepath"
@@ -48,7 +47,7 @@ func FuzzDecompressMatch(f *testing.F) {
 			j = next
 		}
 
-		ctx := context.Background()
+		ctx := t.Context()
 		tmpDir := t.TempDir()
 		file := filepath.Join(tmpDir, fmt.Sprintf("compressed-%d", rand.Int31()))
 		cfg := DefaultCfg

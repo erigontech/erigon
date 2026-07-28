@@ -19,8 +19,8 @@ package polygonp2p
 import (
 	"context"
 	"fmt"
-	"math/big"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -116,7 +116,7 @@ func (s *Service) FetchBlocksBackwards(ctx context.Context, hash common.Hash, hr
 	return s.bbd.DownloadBlocksBackwards(ctx, hash, hr, opts...)
 }
 
-func (s *Service) PublishNewBlock(block *types.Block, td *big.Int) {
+func (s *Service) PublishNewBlock(block *types.Block, td uint256.Int) {
 	s.publisher.PublishNewBlock(block, td)
 }
 

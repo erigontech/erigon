@@ -17,7 +17,6 @@
 package state_test
 
 import (
-	"context"
 	"encoding/binary"
 	"testing"
 	"time"
@@ -42,11 +41,11 @@ import (
 func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
 
-	rwTx, err := db.BeginTemporalRw(context.Background())
+	rwTx, err := db.BeginTemporalRw(f.Context())
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(f.Context(), rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -69,11 +68,11 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		addrData := data[:txs*length.Addr]
 		locData := data[txs*length.Addr : txs*(length.Addr+length.Hash)]
 		addrs := make([]common.Address, 1000)
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			copy(addrs[i][:], addrData[i*length.Addr:(i+1)*length.Addr])
 		}
 		locs := make([]common.Address, 1000)
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			copy(locs[i][:], locData[i*length.Hash:(i+1)*length.Hash])
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -84,10 +83,10 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, txNum, nil)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum][:], buf, txNum, nil)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addrs[txNum].Bytes(), locs[txNum].Bytes()), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, txNum, nil)
+			err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addrs[txNum][:], locs[txNum][:]), []byte{addrs[txNum][:][0], locs[txNum][:][0]}, txNum, nil)
 			require.NoError(t, err)
 
 			var v [8]byte
@@ -111,7 +110,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 
 		}
 
-		err = domains.Flush(context.Background(), rwTx)
+		err = domains.Flush(t.Context(), rwTx)
 		require.NoError(t, err)
 
 		require.NoError(t, err)
@@ -121,21 +120,21 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		err = agg.BuildFiles(txs)
 		require.NoError(t, err)
 
-		rwTx, err = db.BeginTemporalRw(context.Background())
+		rwTx, err = db.BeginTemporalRw(t.Context())
 		require.NoError(t, err)
 		defer rwTx.Rollback()
 
-		_, err := rwTx.PruneSmallBatches(context.Background(), time.Hour)
+		_, err := rwTx.PruneSmallBatches(t.Context(), time.Hour)
 		require.NoError(t, err)
 
 		err = rwTx.Commit()
 		require.NoError(t, err)
 
-		err = agg.MergeLoop(context.Background())
+		err = agg.MergeLoop(t.Context())
 		require.NoError(t, err)
 
 		// Check the history
-		roTx, err := db.BeginTemporalRo(context.Background())
+		roTx, err := db.BeginTemporalRo(t.Context())
 		require.NoError(t, err)
 		defer roTx.Rollback()
 
@@ -156,13 +155,13 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 
 func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 
-	rwTx, err := db.BeginTemporalRw(context.Background())
+	rwTx, err := db.BeginTemporalRw(f.Context())
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(f.Context(), rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -180,11 +179,11 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 		addrData := data[:txs*length.Addr]
 		locData := data[txs*length.Addr : txs*(length.Addr+length.Hash)]
 		addrs := make([]common.Address, 1000)
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			copy(addrs[i][:], addrData[i*length.Addr:(i+1)*length.Addr])
 		}
 		locs := make([]common.Address, 1000)
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			copy(locs[i][:], locData[i*length.Hash:(i+1)*length.Hash])
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -195,24 +194,24 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, txNum, nil)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum][:], buf, txNum, nil)
 			require.NoError(t, err)
 
-			k := composite(addrs[txNum].Bytes(), locs[txNum].Bytes())
-			v := []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}
+			k := composite(addrs[txNum][:], locs[txNum][:])
+			v := []byte{addrs[txNum][:][0], locs[txNum][:][0]}
 			err = domains.DomainPut(kv.StorageDomain, rwTx, k, v, txNum, nil)
 			require.NoError(t, err)
 
 			if (txNum+1)%agg.StepSize() == 0 {
-				_, err := domains.ComputeCommitment(context.Background(), rwTx, true, txNum/10, txNum, "", nil)
+				_, err := domains.ComputeCommitment(t.Context(), rwTx, true, txNum/10, txNum, "", nil)
 				require.NoError(t, err)
 			}
 
-			state[string(addrs[txNum].Bytes())] = buf
-			state[string(addrs[txNum].Bytes())+string(locs[txNum].Bytes())] = []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}
+			state[string(addrs[txNum][:])] = buf
+			state[string(addrs[txNum][:])+string(locs[txNum][:])] = []byte{addrs[txNum][:][0], locs[txNum][:][0]}
 		}
 
-		err = domains.Flush(context.Background(), rwTx)
+		err = domains.Flush(t.Context(), rwTx)
 		require.NoError(t, err)
 
 		err = rwTx.Commit()
@@ -221,17 +220,17 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 		err = agg.BuildFiles(txs)
 		require.NoError(t, err)
 
-		rwTx, err = db.BeginTemporalRw(context.Background())
+		rwTx, err = db.BeginTemporalRw(t.Context())
 		require.NoError(t, err)
 		defer rwTx.Rollback()
 
-		_, err := rwTx.PruneSmallBatches(context.Background(), time.Hour)
+		_, err := rwTx.PruneSmallBatches(t.Context(), time.Hour)
 		require.NoError(t, err)
 
 		err = rwTx.Commit()
 		require.NoError(t, err)
 
-		err = agg.MergeLoop(context.Background())
+		err = agg.MergeLoop(t.Context())
 		require.NoError(t, err)
 	})
 }
@@ -249,7 +248,7 @@ func testFuzzDbAndAggregatorv3(f *testing.F, stepSize uint64) (kv.TemporalRwDB, 
 	f.Cleanup(agg.Close)
 	err = agg.OpenFolder()
 	require.NoError(err)
-	tdb, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(err)
 	return tdb, agg
 }

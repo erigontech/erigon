@@ -384,7 +384,13 @@ func (c *AuRa) VerifyHeader(chain rules.ChainHeaderReader, header *types.Header,
 		log.Error("rules.ErrUnknownAncestor", "parentNum", number-1, "hash", header.ParentHash.String())
 		return rules.ErrUnknownAncestor
 	}
-	return ethash.VerifyHeaderBasics(chain, header, parent, true /*checkTimestamp*/, c.HasGasLimitContract() /*skipGasLimit*/)
+	if err := ethash.VerifyHeaderBasics(chain, header, parent, true /*checkTimestamp*/); err != nil {
+		return err
+	}
+	if !c.HasGasLimitContract() {
+		return misc.VerifyParentGasLimit(chain.Config(), parent, header)
+	}
+	return nil
 }
 
 // nolint
@@ -653,7 +659,7 @@ func (c *AuRa) Prepare(chain rules.ChainHeaderReader, header *types.Header, stat
 func (c *AuRa) rewriteBytecode(blockNum uint64, state *state.IntraBlockState) {
 	for addressValue, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
 		address := accounts.InternAddress(addressValue)
-		state.SetCode(address, rewrittenCode)
+		state.SetCode(address, rewrittenCode, tracing.CodeChangeUnspecified)
 	}
 }
 
@@ -720,7 +726,9 @@ func (c *AuRa) applyRewards(header *types.Header, state *state.IntraBlockState, 
 		return err
 	}
 	for _, r := range rewards {
-		state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock)
+		if err := state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -840,7 +848,7 @@ func isEpochEnd(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, f
 			// block that breaks the invariant that the parent's step < the block's step.
 			self.step.can_propose.store(false, AtomicOrdering::SeqCst);
 		*/
-		return rlp.EncodeToBytes(EpochTransitionProof{SignalNumber: signalNumber.Uint64(), SetProof: pendingTransitionProof, FinalityProof: finalityProofRLP})
+		return rlp.EncodeToBytes(&EpochTransitionProof{SignalNumber: signalNumber.Uint64(), SetProof: pendingTransitionProof, FinalityProof: finalityProofRLP})
 	}
 	return nil, nil
 }
@@ -886,10 +894,7 @@ type SignerFn func(signer common.Address, mimeType string, message []byte) ([]by
 // Authorize injects a private key into the rules engine to mint new blocks with.
 func (c *AuRa) Authorize(signer common.Address, signFn SignerFn) {
 	c.signerMutex.Lock()
-	defer c.signerMutex.Unlock()
-
-	//c.signer = signer
-	//c.signFn = signFn
+	defer c.signerMutex.Unlock() //nolint:gocritic // empty stub requires defer to prevent badLock
 }
 
 func (c *AuRa) GenesisEpochData(header *types.Header, caller rules.SystemCall) ([]byte, error) {
@@ -897,7 +902,7 @@ func (c *AuRa) GenesisEpochData(header *types.Header, caller rules.SystemCall) (
 	if err != nil {
 		return nil, err
 	}
-	res, err := rlp.EncodeToBytes(EpochTransitionProof{SignalNumber: 0, SetProof: setProof, FinalityProof: []byte{}})
+	res, err := rlp.EncodeToBytes(&EpochTransitionProof{SignalNumber: 0, SetProof: setProof, FinalityProof: []byte{}})
 	if err != nil {
 		panic(err)
 	}
@@ -1074,7 +1079,11 @@ func (c *AuRa) IsServiceTransaction(sender accounts.Address, syscall rules.Syste
 	}
 	out, err := syscall(accounts.InternAddress(*c.certifier), packed)
 	if err != nil {
-		panic(err)
+		// Failing closed (treat as non-service tx) is safer than crashing the RPC handler.
+		// One way to hit this: an eth_call against a block whose chain rules don't include
+		// opcodes used by the certifier contract bytecode (e.g. SHR pre-Constantinople).
+		log.Warn("[aura] failed to call certifier", "certifier", *c.certifier, "err", err)
+		return false
 	}
 	res, err := certifierAbi().Unpack("certified", out)
 	if err != nil {
@@ -1200,6 +1209,12 @@ func (c *AuRa) GetTransferFunc() evmtypes.TransferFunc {
 
 func (c *AuRa) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return nil
+}
+
+func (c *AuRa) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
+	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 
 /*

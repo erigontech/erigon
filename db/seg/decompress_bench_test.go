@@ -18,7 +18,6 @@ package seg
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
@@ -103,7 +102,7 @@ func prepareBinaryDict(b testing.TB, keyCount int, keySize int, compressed bool)
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), b.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(b.Context(), b.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(b, err)
 
 	rng := rand.New(rand.NewSource(42))
@@ -276,13 +275,13 @@ func BenchmarkMatchCmpUncompressed(b *testing.B) {
 }
 
 func BenchmarkDecompressTorrent(t *testing.B) {
-	t.Skip()
-
 	//fpath := "/Volumes/wotah/mainnet/snapshots/v1.0-013500-014000-bodies.seg"
 	fpath := "/Volumes/wotah/mainnet/snapshots/v1.0-013500-014000-transactions.seg"
 	//fpath := "./v1.0-006000-006500-transactions.seg"
 	st, err := os.Stat(fpath)
-	require.NoError(t, err)
+	if err != nil {
+		t.Skipf("requires local snapshot file %s", fpath)
+	}
 	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())
 
 	t.Run("init", func(t *testing.B) {

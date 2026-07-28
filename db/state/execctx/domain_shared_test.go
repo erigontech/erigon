@@ -37,7 +37,9 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -68,7 +70,7 @@ func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
 }
 
 func composite(k, k2 []byte) []byte {
-	return append(common.Copy(k), k2...)
+	return append(bytes.Clone(k), k2...)
 }
 
 func TestSharedDomain_Unwind(t *testing.T) {
@@ -82,7 +84,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	db := newTestDb(t, stepSize)
 	//db := wrapDbWithCtx(_db, agg)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
@@ -117,7 +119,7 @@ Loop:
 	var blockNum uint64
 	for ; i < int(maxTx); i++ {
 		txNum := uint64(i)
-		for accs := 0; accs < 256; accs++ {
+		for accs := range 256 {
 			acc := accounts3.Account{
 				Nonce:       txNum,
 				Balance:     *uint256.NewInt(uint64(i*10e6) + uint64(accs*10e2)),
@@ -170,6 +172,136 @@ Loop:
 	goto Loop
 }
 
+// TestSharedDomain_UnwindDoesNotRestoreOverlayForNewKey reproduces the
+// mainnet block-24898955 gas-used mismatch (diff = -17100 = SSTORE_RESET -
+// SSTORE_SET). After a forkchoice-driven unwind, the TemporalMemBatch overlay
+// still holds storage writes made INSIDE the unwound txNum range, because:
+//
+//   - `Unwind` stores `sd.unwindToTxNum` and `sd.unwindChangeset` but does
+//     NOT remove post-target entries from `sd.storage` / `sd.domains[...]`.
+//   - `getLatest` returns `dataWithTxNums[len(...)-1]` without comparing
+//     its txNum against `sd.unwindToTxNum`.
+//   - The `unwindChangeset` fallback only fires on an overlay miss.
+//
+// So a first-time storage write at `txNum=T_write > T_unwind` remains visible
+// after `Unwind(T_unwind)`, and a re-executed SSTORE on that slot charges
+// SSTORE_RESET (2900) instead of SSTORE_SET (20000) — the observed 17100 diff.
+func TestSharedDomain_UnwindDoesNotRestoreOverlayForNewKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	stepSize := uint64(100)
+	db := newTestDb(t, stepSize)
+	ctx := t.Context()
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	stateChangeset := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(stateChangeset)
+
+	// Storage key mirrors a USDT balance slot: 20-byte address + 32-byte slot hash.
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	slot := common.HexToHash("0x5ac7102aad1a639901bc2657323aaed9e90e40c550747c49170f1c82fd664e4f")
+	key := composite(addr[:], slot[:])
+	value := []byte{0x01, 0x02, 0x03, 0x04}
+
+	const unwindTarget uint64 = 50 // pre-write txNum where slot is absent
+	const writeTxNum uint64 = 100  // txNum inside a block that will be unwound
+
+	// 1. Precondition: slot is absent at the unwind target.
+	domains.SetTxNum(unwindTarget)
+	v, _, err := domains.GetLatest(kv.StorageDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Empty(t, v, "precondition: slot must be absent before any writes")
+
+	// 2. Advance txNum and write the slot for the first time (prevVal = nil).
+	domains.SetTxNum(writeTxNum)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, value, writeTxNum, nil))
+
+	// 3. Sanity: write is visible through the overlay.
+	v, _, err = domains.GetLatest(kv.StorageDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Equal(t, value, v, "sanity: write must be visible pre-unwind")
+
+	// 4. Build the domain diff set from the accumulator, then unwind past the write.
+	var diffSet [kv.DomainLen][]kv.DomainEntryDiff
+	for idx, d := range stateChangeset.Diffs {
+		diffSet[idx] = d.GetDiffSet()
+	}
+	domains.Unwind(unwindTarget, &diffSet)
+
+	// 5. Simulate re-execution starting at the unwind target.
+	domains.SetTxNum(unwindTarget)
+
+	// 6. Failing assertion: the slot must be absent again.
+	v, _, err = domains.GetLatest(kv.StorageDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Empty(t, v,
+		"after Unwind(txNum=%d), overlay must not return the write made at txNum=%d (got %x). "+
+			"TemporalMemBatch.getLatest returns the latest entry from sd.storage without "+
+			"consulting sd.unwindToTxNum, and the unwindChangeset fallback is unreachable "+
+			"while the key remains in sd.storage.",
+		unwindTarget, writeTxNum, v)
+}
+
+// Unwind(t) prunes overlay writes in [t, ∞) and keeps [0, t); t is the resume
+// block's begin-system txNum, so the boundary write itself must not survive.
+func TestSharedDomain_UnwindPrunesBoundaryTxNum(t *testing.T) {
+	t.Parallel()
+
+	db := newTestDb(t, uint64(100))
+	ctx := t.Context()
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	keptSlot := common.HexToHash("0x01")
+	keptKey := composite(addr[:], keptSlot[:])
+	keptVal := []byte{0x0a}
+	boundarySlot := common.HexToHash("0x02")
+	boundaryKey := composite(addr[:], boundarySlot[:])
+	boundaryVal := []byte{0x0b}
+	const boundaryTxNum uint64 = 100
+
+	committedCs := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(committedCs)
+	domains.SetTxNum(boundaryTxNum - 1)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, keptKey, keptVal, boundaryTxNum-1, nil))
+
+	unwoundCs := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(unwoundCs)
+	domains.SetTxNum(boundaryTxNum)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, boundaryKey, boundaryVal, boundaryTxNum, nil))
+
+	var diffSet [kv.DomainLen][]kv.DomainEntryDiff
+	for idx, d := range unwoundCs.Diffs {
+		diffSet[idx] = d.GetDiffSet()
+	}
+	domains.Unwind(boundaryTxNum, &diffSet)
+
+	v, _, err := domains.GetLatest(kv.StorageDomain, rwTx, boundaryKey)
+	require.NoError(t, err)
+	require.Empty(t, v, "write at exactly the boundary txNum %d must be pruned", boundaryTxNum)
+
+	v, _, err = domains.GetLatest(kv.StorageDomain, rwTx, keptKey)
+	require.NoError(t, err)
+	require.Equal(t, keptVal, v, "write below the boundary txNum must survive")
+}
+
 // TestNewSharedDomains_StateAheadOfBlocks verifies that when the persisted
 // commitment state is ahead of the TxNums index (catch-up scenario),
 // NewSharedDomains returns ErrBehindCommitment but the SharedDomains itself
@@ -186,7 +318,7 @@ func TestNewSharedDomains_StateAheadOfBlocks(t *testing.T) {
 	require := require.New(t)
 	db := newTestDb(t, stepSize)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Phase 1: write some accounts, compute commitment, flush, and append TxNums up to block N.
 	rwTx, err := db.BeginTemporalRw(ctx)
@@ -203,7 +335,7 @@ func TestNewSharedDomains_StateAheadOfBlocks(t *testing.T) {
 	require.NoError(err)
 
 	addr := make([]byte, length.Addr)
-	for i := uint64(0); i < 4; i++ {
+	for i := range uint64(4) {
 		addr[0] = byte(i)
 		acc := accounts.Account{
 			Nonce:   i,
@@ -243,6 +375,574 @@ func TestNewSharedDomains_StateAheadOfBlocks(t *testing.T) {
 	require.NoError(err)
 }
 
+// TestSharedDomain_RepeatedUnwindAcrossStepBoundary mimics the FCU-driven
+// pattern that left a mainnet node with commitment one step ahead of all
+// other domains: three successive unwinds, each followed by forward execution
+// that re-advances past the step boundary.
+//
+// After the final unwind the commitment "state" key and the commitment values
+// table must not contain entries at a step beyond the unwind target —
+// otherwise the next `SeekCommitment` will return a blockNum > TxNums.Last()
+// and execution will skip blocks.
+func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	stepSize := uint64(10)
+	db := newTestDb(t, stepSize)
+	ctx := t.Context()
+	require := require.New(t)
+
+	// 30 blocks covering 3 steps (0,1,2). Each FCU cycle will unwind back to
+	// the middle of step 0, then re-execute forward, mirroring the ~54-block
+	// unwinds we saw on mainnet.
+	const lastBlock = uint64(29)
+	const unwindTarget = uint64(4) // inside step 0
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
+	}
+
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(err)
+	defer doms.Close()
+	addr := make([]byte, length.Addr)
+	perBlockDiffs := make(map[uint64]*changeset.StateChangeSet)
+	blockHashes := make(map[uint64]common.Hash)
+
+	executeRange := func(from, to uint64) {
+		for bn := from; bn <= to; bn++ {
+			cs := &changeset.StateChangeSet{}
+			doms.SetChangesetAccumulator(cs)
+			for i := range 8 {
+				addr[0] = byte(i)
+				addr[1] = byte(bn)
+				acc := accounts3.Account{Nonce: bn, Balance: *uint256.NewInt(bn*1000 + uint64(i))}
+				pv, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
+				require.NoError(err)
+				require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, accounts3.SerialiseV3(&acc), bn, pv))
+			}
+			rh, err := doms.ComputeCommitment(ctx, rwTx, true, bn, bn, "", nil)
+			require.NoError(err)
+			blockHashes[bn] = common.BytesToHash(rh)
+			doms.SavePastChangesetAccumulator(blockHashes[bn], bn, cs)
+			perBlockDiffs[bn] = cs
+			doms.SetChangesetAccumulator(nil)
+		}
+	}
+
+	unwindTo := func(target uint64, curBlock uint64) {
+		var merged [kv.DomainLen][]kv.DomainEntryDiff
+		for bn := curBlock; bn > target; bn-- {
+			for idx, d := range perBlockDiffs[bn].Diffs {
+				keys := d.GetDiffSet()
+				if merged[idx] == nil {
+					merged[idx] = keys
+				} else {
+					merged[idx] = changeset.MergeDiffSets(merged[idx], keys)
+				}
+			}
+		}
+		doms.Unwind(target, &merged)
+		doms.SetTxNum(target)
+	}
+
+	// Cycle 1: execute 0..lastBlock, flush, unwind, flush.
+	executeRange(0, lastBlock)
+	require.NoError(doms.Flush(ctx, rwTx))
+	unwindTo(unwindTarget, lastBlock)
+	require.NoError(doms.Flush(ctx, rwTx))
+
+	// Cycle 2: re-execute, unwind, flush.
+	executeRange(unwindTarget+1, lastBlock)
+	require.NoError(doms.Flush(ctx, rwTx))
+	unwindTo(unwindTarget, lastBlock)
+	require.NoError(doms.Flush(ctx, rwTx))
+
+	// Cycle 3: re-execute, unwind, flush.
+	executeRange(unwindTarget+1, lastBlock)
+	require.NoError(doms.Flush(ctx, rwTx))
+	unwindTo(unwindTarget, lastBlock)
+	require.NoError(doms.Flush(ctx, rwTx))
+
+	// Verify: commitment "state" key is at blockNum ≤ unwindTarget.
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+	require.NoError(err)
+	require.GreaterOrEqual(len(stateVal), 16, "commitment state record must exist post-unwind (was forward-populated by executeRange)")
+	postBlock := binary.BigEndian.Uint64(stateVal[8:16])
+	require.LessOrEqualf(postBlock, unwindTarget,
+		"commitment state blockNum=%d must be ≤ unwindTarget=%d after repeated unwinds",
+		postBlock, unwindTarget)
+	// Verify: no commitment values table entries with step > unwindTarget/stepSize.
+	maxStep := unwindTarget / stepSize
+	c, err := rwTx.Cursor(kv.TblCommitmentVals)
+	require.NoError(err)
+	defer c.Close()
+	offending := 0
+	var exampleStep uint64
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		require.NoError(err)
+		if len(v) < 8 {
+			continue
+		}
+		step := ^binary.BigEndian.Uint64(v[:8])
+		if step > maxStep {
+			if offending == 0 {
+				exampleStep = step
+			}
+			offending++
+		}
+	}
+	require.Zerof(offending,
+		"%d commitment values entries have step > %d after repeated unwinds (e.g. step %d); "+
+			"these are the \"orphan\" entries that caused mainnet execution to start at stale commitment state",
+		offending, maxStep, exampleStep)
+}
+
+// TestSharedDomain_MergeUnwindAcrossStepBoundary exercises the raw-changeset
+// merge branch of TemporalMemBatch.Merge, which is what ForkValidator.MergeExtendingFork
+// drives in production. It splits the unwind of a step-boundary-crossing range
+// between two SharedDomains: sd1 carries the step-0 slice and sd2 carries the
+// step-1 slice. Merging sd2 into sd1 must preserve every (key, step) entry so
+// the subsequent Flush deletes orphan values-table rows on both sides of the
+// boundary. Under the pre-fix Merge, the collapsed (one-entry-per-real-key)
+// map would have dropped one step per key, leaving step-1 orphans.
+func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	stepSize := uint64(10)
+	db := newTestDb(t, stepSize)
+	ctx := t.Context()
+	require := require.New(t)
+
+	// Blocks 0..14 span step 0 (0..9) and step 1 (10..14).
+	const lastBlock = uint64(14)
+	const unwindTarget = uint64(4) // inside step 0
+	maxStep := unwindTarget / stepSize
+
+	// Phase 1: forward-execute all blocks and flush so the values tables
+	// actually contain step-0 and step-1 entries (otherwise there are no
+	// orphans to miss, and the test trivially passes).
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
+	}
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(err)
+	addr := make([]byte, length.Addr)
+	var perBlockDiffs [lastBlock + 1]*changeset.StateChangeSet
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		cs := &changeset.StateChangeSet{}
+		doms.SetChangesetAccumulator(cs)
+		// Write the same 8 addresses every block so each key accumulates
+		// values at both step 0 and step 1.
+		for i := range 8 {
+			addr[0] = byte(i)
+			acc := accounts3.Account{Nonce: bn, Balance: *uint256.NewInt(bn*1000 + uint64(i))}
+			pv, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
+			require.NoError(err)
+			require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, accounts3.SerialiseV3(&acc), bn, pv))
+		}
+		rh, err := doms.ComputeCommitment(ctx, rwTx, true, bn, bn, "", nil)
+		require.NoError(err)
+		doms.SavePastChangesetAccumulator(common.BytesToHash(rh), bn, cs)
+		perBlockDiffs[bn] = cs
+		doms.SetChangesetAccumulator(nil)
+	}
+	require.NoError(doms.Flush(ctx, rwTx))
+	doms.Close()
+	require.NoError(rwTx.Commit())
+
+	// Merge the per-block diffs for [from..to] into a single changeset,
+	// matching the pattern used by stage_exec's unwind path.
+	mergeRange := func(from, to uint64) *[kv.DomainLen][]kv.DomainEntryDiff {
+		var merged [kv.DomainLen][]kv.DomainEntryDiff
+		for bn := int64(to); bn >= int64(from); bn-- {
+			if perBlockDiffs[bn] == nil {
+				continue
+			}
+			for idx, d := range perBlockDiffs[bn].Diffs {
+				keys := d.GetDiffSet()
+				if merged[idx] == nil {
+					merged[idx] = keys
+				} else {
+					merged[idx] = changeset.MergeDiffSets(merged[idx], keys)
+				}
+			}
+		}
+		return &merged
+	}
+
+	// Phase 2: on a fresh tx, split the unwind between two SharedDomains.
+	// sd1 gets diffs for blocks 5..9 (step-0 entries only); sd2 gets diffs
+	// for blocks 10..14 (step-1 entries only). Both Unwind to the same
+	// target, so neither the collapsed nor the raw merge can short-circuit
+	// on unwindToTxNum.
+	rwTx, err = db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+
+	sd1, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(err)
+	sd1.Unwind(unwindTarget, mergeRange(unwindTarget+1, 9))
+	sd1.SetTxNum(unwindTarget)
+
+	sd2, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(err)
+	sd2.Unwind(unwindTarget, mergeRange(10, lastBlock))
+	sd2.SetTxNum(unwindTarget)
+
+	// Merge sd2 into sd1. Both sides carry a non-nil unwindChangeset, so
+	// TemporalMemBatch.Merge takes the raw-merge branch.
+	require.NoError(sd1.Merge(ctx, unwindTarget, sd2, unwindTarget))
+
+	// Flush replays the combined raw changeset against MDBX.
+	require.NoError(sd1.Flush(ctx, rwTx))
+	sd1.Close()
+
+	// Assertion 1: the commitment "state" key must decode to a blockNum
+	// ≤ unwindTarget. This is the check that actually fails under the
+	// collapsed-merge bug: the collapsed map keeps one entry per real key
+	// (the higher-step one via MergeDiffSets' sorted tiebreaker), Flush
+	// deletes that step's row and re-writes the restoration value at the
+	// unwind step — but the value carried by the retained entry is the
+	// pre-step-1-write value (block 9's state), not the unwindTarget's
+	// state (block 4). A later GetLatest then sees blockNum=9 > target=4.
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+	require.NoError(err)
+	require.GreaterOrEqual(len(stateVal), 16, "commitment state record must exist after Merge+Flush")
+	postBlock := binary.BigEndian.Uint64(stateVal[8:16])
+	require.LessOrEqualf(postBlock, unwindTarget,
+		"commitment state blockNum=%d must be ≤ unwindTarget=%d after Merge+Flush; "+
+			"raw changeset merge lost the step-0 restoration value",
+		postBlock, unwindTarget)
+
+	// Assertion 2: no values-table entry at step > maxStep. The PR's
+	// single-SharedDomains tests catch leftover step-1 rows this way; the
+	// Merge path's collapsed tiebreaker happens to delete the step-1 row
+	// (while corrupting the restored value), so this assertion is mostly
+	// belt-and-braces — still worth guarding against a future regression
+	// that drops entries outright instead of just mis-writing them.
+	checkTableForOrphans := func(table string) {
+		c, err := rwTx.Cursor(table)
+		require.NoError(err)
+		defer c.Close()
+		offending := 0
+		var exampleStep uint64
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			require.NoError(err)
+			if len(v) < 8 {
+				continue
+			}
+			step := ^binary.BigEndian.Uint64(v[:8])
+			if step > maxStep {
+				if offending == 0 {
+					exampleStep = step
+				}
+				offending++
+			}
+		}
+		require.Zerof(offending,
+			"table %s has %d orphan values entries at step > %d after Merge+Flush (e.g. step %d)",
+			table, offending, maxStep, exampleStep)
+	}
+	checkTableForOrphans(kv.TblAccountVals)
+	checkTableForOrphans(kv.TblCommitmentVals)
+}
+
+// TestSharedDomain_UnwindAcrossStepBoundary reproduces the mainnet corruption
+// where the commitment domain's persisted "state" key (and branch entries)
+// stayed at a step beyond the unwind target after a forkchoice-driven unwind.
+//
+// Scenario: write accounts + commitment across two steps (blocks that span
+// step boundary), flush, then unwind to a block inside the earlier step, flush.
+// After unwind the commitment "state" key should decode to a blockNum ≤ the
+// unwind target — otherwise execution will later start at commitment.blockNum+1
+// against accounts that are still at the unwind-target's state, producing
+// "nonce too high" errors.
+func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	stepSize := uint64(10)
+	db := newTestDb(t, stepSize)
+	ctx := t.Context()
+	require := require.New(t)
+
+	// Phase 1: register txNums for blocks 0..14 (spans step 0 [0..9] and step 1 [10..19]).
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+	const lastBlock = uint64(14)
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		// Each block gets 1 txNum for simplicity: maxTxNum(bn) = bn.
+		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
+	}
+
+	// Phase 2: forward execution of all 15 blocks — write accounts + commitment per block.
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(err)
+	stateChangeset := &changeset.StateChangeSet{}
+	doms.SetChangesetAccumulator(stateChangeset)
+
+	var perBlockDiffs [lastBlock + 1]*changeset.StateChangeSet
+	blockHashes := make([]common.Hash, lastBlock+1)
+	addr := make([]byte, length.Addr)
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		cs := &changeset.StateChangeSet{}
+		doms.SetChangesetAccumulator(cs)
+		// Write a handful of account updates so commitment has real branches.
+		for i := range 8 {
+			addr[0] = byte(i)
+			addr[1] = byte(bn)
+			acc := accounts3.Account{Nonce: bn, Balance: *uint256.NewInt(bn*1000 + uint64(i))}
+			pv, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
+			require.NoError(err)
+			require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, accounts3.SerialiseV3(&acc), bn, pv))
+		}
+		rh, err := doms.ComputeCommitment(ctx, rwTx, true, bn, bn, "", nil)
+		require.NoError(err)
+		require.NotEmpty(rh)
+		blockHashes[bn] = common.BytesToHash(rh)
+		doms.SavePastChangesetAccumulator(blockHashes[bn], bn, cs)
+		perBlockDiffs[bn] = cs
+		doms.SetChangesetAccumulator(nil)
+	}
+	require.NoError(doms.Flush(ctx, rwTx))
+	doms.Close()
+	require.NoError(rwTx.Commit())
+
+	// Phase 3: read the commitment "state" key — should decode to blockNum=lastBlock.
+	rwTx, err = db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+	require.NoError(err)
+	require.GreaterOrEqual(len(stateVal), 16)
+	commitTxNum := binary.BigEndian.Uint64(stateVal[:8])
+	commitBlock := binary.BigEndian.Uint64(stateVal[8:16])
+	require.Equal(lastBlock, commitBlock, "pre-unwind: commitment state should be at last block")
+	require.Equal(lastBlock, commitTxNum, "pre-unwind: commitment state txNum")
+
+	// Phase 4: unwind to block 4 (end of step 0). The per-block diffs for
+	// blocks 5..14 are merged and passed to the domain-level Unwind.
+	const unwindTarget = uint64(4)
+	var merged [kv.DomainLen][]kv.DomainEntryDiff
+	for bn := uint64(lastBlock); bn > unwindTarget; bn-- {
+		for idx, d := range perBlockDiffs[bn].Diffs {
+			currentKeys := d.GetDiffSet()
+			if merged[idx] == nil {
+				merged[idx] = currentKeys
+			} else {
+				merged[idx] = changeset.MergeDiffSets(merged[idx], currentKeys)
+			}
+		}
+	}
+	require.NoError(rwTx.Unwind(ctx, unwindTarget, &merged))
+
+	// Phase 5: the commitment "state" key should now decode to blockNum ≤ unwindTarget.
+	stateVal, _, err = rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+	require.NoError(err)
+	require.GreaterOrEqual(len(stateVal), 16, "post-unwind: commitment state record must exist (was populated in phase 2)")
+	postTxNum := binary.BigEndian.Uint64(stateVal[:8])
+	postBlock := binary.BigEndian.Uint64(stateVal[8:16])
+	require.LessOrEqualf(postBlock, unwindTarget,
+		"post-unwind: commitment state blockNum=%d must be ≤ unwindTarget=%d (txNum=%d)",
+		postBlock, unwindTarget, postTxNum)
+	// Fix: also confirm no values table entries exist above the unwind-target step.
+	maxStep := unwindTarget / stepSize // step 0 for target 4
+	c, err := rwTx.Cursor(kv.TblCommitmentVals)
+	require.NoError(err)
+	defer c.Close()
+	offending := 0
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		require.NoError(err)
+		if len(v) < 8 {
+			continue
+		}
+		step := ^binary.BigEndian.Uint64(v[:8])
+		if step > maxStep {
+			offending++
+		}
+	}
+	require.Zerof(offending,
+		"post-unwind: %d commitment values entries have step > %d (maxStep for unwindTarget=%d)",
+		offending, maxStep, unwindTarget)
+}
+
+// TestSharedDomain_UnwindWithDeleteAcrossStepBoundary is the delete-path
+// analogue of TestSharedDomain_RepeatedUnwindAcrossStepBoundary — PR review
+// correctly raised that deletes go through a slightly different on-disk
+// shape than live writes and deserve their own coverage. The forward flush
+// emits a tombstone dup (`^step || nil`, 8 bytes) rather than `^step || v`,
+// and getLatestFromDb treats a first-dup whose value is 8 bytes long as
+// "key absent". If the SharedDomains Flush path drops the delete-diff when
+// collapsing `unwindChangeset`, the step-1 tombstone survives in MDBX —
+// and because ^1 sorts before ^0 in DupSort, the orphan tombstone becomes
+// the new "latest" even though the older step-0 entry was restored. The
+// account then appears deleted rather than being returned to its
+// pre-unwind value.
+//
+// The test must go through doms.Unwind()+doms.Flush() (not rwTx.Unwind
+// directly) because the buggy code paths live in TemporalMemBatch.Unwind
+// (building unwindChangeset) and TemporalMemBatch.Flush (replaying it).
+func TestSharedDomain_UnwindWithDeleteAcrossStepBoundary(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	stepSize := uint64(10)
+	db := newTestDb(t, stepSize)
+	ctx := t.Context()
+	require := require.New(t)
+
+	// Blocks 0..19 span step 0 (0..9) and step 1 (10..19).
+	const lastBlock = uint64(19)
+	const unwindTarget = uint64(4) // inside step 0
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
+	}
+
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(err)
+	defer doms.Close()
+
+	addr := make([]byte, length.Addr)
+	addr[0] = 0x42
+
+	perBlockDiffs := make(map[uint64]*changeset.StateChangeSet)
+	executeBlock := func(bn uint64, fn func()) {
+		cs := &changeset.StateChangeSet{}
+		doms.SetChangesetAccumulator(cs)
+		fn()
+		rh, err := doms.ComputeCommitment(ctx, rwTx, true, bn, bn, "", nil)
+		require.NoError(err)
+		doms.SavePastChangesetAccumulator(common.BytesToHash(rh), bn, cs)
+		perBlockDiffs[bn] = cs
+		doms.SetChangesetAccumulator(nil)
+	}
+
+	// Forward execution:
+	//   block 0 (step 0): write addr = {nonce=1, balance=100}
+	//   block 5 (step 0): overwrite addr = {nonce=2, balance=200}
+	//   block 15 (step 1): delete addr
+	// After Flush, MDBX has two dups for addr:
+	//   (^0, acc2)       — current step-0 value (acc1 was replaced by acc2)
+	//   (^1, tombstone)  — the delete tombstone at step 1 (just 8 bytes)
+	acc1 := accounts3.Account{Nonce: 1, Balance: *uint256.NewInt(100)}
+	acc2 := accounts3.Account{Nonce: 2, Balance: *uint256.NewInt(200)}
+	acc1Bytes := accounts3.SerialiseV3(&acc1)
+	acc2Bytes := accounts3.SerialiseV3(&acc2)
+
+	pv0, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
+	require.NoError(err)
+	executeBlock(0, func() {
+		require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, acc1Bytes, 0, pv0))
+	})
+	pv5, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
+	require.NoError(err)
+	executeBlock(5, func() {
+		require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, acc2Bytes, 5, pv5))
+	})
+	pv15, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
+	require.NoError(err)
+	executeBlock(15, func() {
+		require.NoError(doms.DomainDel(kv.AccountsDomain, rwTx, addr, 15, pv15))
+	})
+	require.NoError(doms.Flush(ctx, rwTx))
+
+	// Sanity: post-forward, addr is absent (deleted in block 15).
+	v, _, err := rwTx.GetLatest(kv.AccountsDomain, addr)
+	require.NoError(err)
+	require.Empty(v, "post-forward: addr must be absent (was deleted in block 15)")
+
+	// Unwind to block 4 — crosses the step boundary. Route the unwind
+	// through doms.Unwind()+doms.Flush() so the SharedDomains layer's
+	// collapse-then-replay logic is actually exercised. (rwTx.Unwind
+	// directly would bypass TemporalMemBatch.Unwind and never hit the bug.)
+	var merged [kv.DomainLen][]kv.DomainEntryDiff
+	for bn := lastBlock; bn > unwindTarget; bn-- {
+		cs, ok := perBlockDiffs[bn]
+		if !ok {
+			continue
+		}
+		for idx, d := range cs.Diffs {
+			keys := d.GetDiffSet()
+			if merged[idx] == nil {
+				merged[idx] = keys
+			} else {
+				merged[idx] = changeset.MergeDiffSets(merged[idx], keys)
+			}
+		}
+	}
+	doms.Unwind(unwindTarget, &merged)
+	doms.SetTxNum(unwindTarget)
+	require.NoError(doms.Flush(ctx, rwTx))
+
+	// Assertion 1: addr must be restored to acc1 (the block-0 value).
+	// Pre-fix failure mode: TemporalMemBatch.Unwind collapses both diff
+	// entries into the same "addr" map key; only one survives (the
+	// sorted-last one, which is the step-0 entry). Flush replays only
+	// that one, leaving the step-1 tombstone in MDBX. DupSort orders
+	// dups by their raw bytes, so (^1, tombstone) sorts before (^0, acc1);
+	// SeekExact returns the tombstone, getLatestFromDb sees an 8-byte
+	// value, and the caller reads "addr is absent" instead of acc1.
+	v, _, err = rwTx.GetLatest(kv.AccountsDomain, addr)
+	require.NoError(err)
+	require.NotEmptyf(v,
+		"post-unwind: addr must be restored (got empty slice — step-1 tombstone "+
+			"was not cleaned up; getLatestFromDb reads it as 'deleted')")
+	var post accounts3.Account
+	require.NoError(accounts3.DeserialiseV3(&post, v))
+	require.Equal(uint64(1), post.Nonce,
+		"post-unwind: nonce must be block-0 value (1); got %d — restore wrote "+
+			"wrong step entry or was shadowed by a stale higher-step tombstone",
+		post.Nonce)
+	require.Equal(uint64(100), post.Balance.Uint64())
+
+	// Assertion 2: no addr rows with step > unwindTarget/stepSize. This
+	// is the direct orphan-tombstone check — the ^1 tombstone must be gone.
+	maxStep := unwindTarget / stepSize
+	c, err := rwTx.CursorDupSort(kv.TblAccountVals)
+	require.NoError(err)
+	defer c.Close()
+	offending := 0
+	var exampleStep uint64
+	for k, v, err := c.SeekExact(addr); k != nil; k, v, err = c.NextDup() {
+		require.NoError(err)
+		if len(v) < 8 {
+			continue
+		}
+		step := ^binary.BigEndian.Uint64(v[:8])
+		if step > maxStep {
+			if offending == 0 {
+				exampleStep = step
+			}
+			offending++
+		}
+	}
+	require.Zerof(offending,
+		"post-unwind: addr has %d dups at step > %d (example step %d); "+
+			"step-1 tombstone for the deleted account was not cleaned up",
+		offending, maxStep, exampleStep)
+}
+
 func TestSharedDomain_StorageIter(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -256,7 +956,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	db := newTestDb(t, stepSize)
 	//db := wrapDbWithCtx(_db, agg)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
@@ -277,7 +977,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	var blockNum uint64
 	for ; i < int(maxTx); i++ {
 		txNum := uint64(i)
-		for accs := 0; accs < noaccounts; accs++ {
+		for accs := range noaccounts {
 			acc := accounts3.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i*10e6) + uint64(accs*10e2)),
@@ -294,7 +994,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 			require.NoError(t, err)
 			binary.BigEndian.PutUint64(l0[16:24], uint64(accs))
 
-			for locs := 0; locs < 1000; locs++ {
+			for locs := range 1000 {
 				binary.BigEndian.PutUint64(l0[24:], uint64(locs))
 				pv, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, append(k0, l0...))
 				require.NoError(t, err)
@@ -346,7 +1046,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	txNum, _, err := domains.SeekCommitment(ctx, rwTx)
 	require.NoError(t, err)
-	for accs := 0; accs < noaccounts; accs++ {
+	for accs := range noaccounts {
 		k0[0] = byte(accs)
 		pv, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, k0)
 		require.NoError(t, err)
@@ -400,7 +1100,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	require := require.New(t)
 	db := newTestDb(t, stepSize)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(err)
 	defer rwTx.Rollback()
@@ -436,7 +1136,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		return buf
 	}
 	addr := acc(1)
-	for i := uint64(0); i < stepSize; i++ {
+	for i := range stepSize {
 		txNum := i
 		if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, acc(i), txNum, nil); err != nil {
 			panic(err)
@@ -565,7 +1265,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 	}
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 
 	stepSize := uint64(1)
@@ -580,14 +1280,14 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 
 	acc1 := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	acc1slot1 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
-	storageK1 := append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...)
+	storageK1 := append(append([]byte{}, acc1[:]...), acc1slot1[:]...)
 	acc2 := common.HexToAddress("0x1234567890123456789012345678901234567891")
 	acc2slot2 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000002")
-	storageK2 := append(append([]byte{}, acc2.Bytes()...), acc2slot2.Bytes()...)
+	storageK2 := append(append([]byte{}, acc2[:]...), acc2slot2[:]...)
 
 	// --- check 1: non-existing storage ---
 	{
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx1)
+		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1[:], rwTtx1)
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -600,10 +1300,10 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx1)
+		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1[:], rwTtx1)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), firstKey)
 		require.Equal(t, []byte{1}, firstVal)
 		// check after flush
 		err = sd.Flush(ctx, rwTtx1)
@@ -620,7 +1320,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		t.Cleanup(c1.Close)
 		k, v, err := c1.Next()
 		require.NoError(t, err)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), k)
+		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), k)
 		wantValueBytes := make([]byte, 8)                      // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(1)) // step num
 		wantValueBytes = append(wantValueBytes, byte(1))       // value we wrote to the storage slot
@@ -640,14 +1340,14 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, uint64(0), roTtx1.Debug().TxNumsInFiles(kv.StorageDomain))
 
 		// finally, verify SharedDomains.HasPrefix returns true
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx1)
+		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1[:], roTtx1)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), firstKey)
 		require.Equal(t, []byte{1}, firstVal)
 
 		// check some other non-existing storages for non-existence after write operation
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc2.Bytes(), roTtx1)
+		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc2[:], roTtx1)
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -665,10 +1365,10 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK2, []byte{2}, 2, nil)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx2)
+		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1[:], rwTtx2)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), firstKey)
 		require.Equal(t, []byte{1}, firstVal)
 		// check after flush
 		err = sd.Flush(ctx, rwTtx2)
@@ -699,7 +1399,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		t.Cleanup(c2.Close)
 		k, v, err := c2.Next() // acc2 storage from step 2 will be there
 		require.NoError(t, err)
-		require.Equal(t, append(append([]byte{}, acc2.Bytes()...), acc2slot2.Bytes()...), k)
+		require.Equal(t, append(append([]byte{}, acc2[:]...), acc2slot2[:]...), k)
 		wantValueBytes := make([]byte, 8)                      // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(2)) // step num
 		wantValueBytes = append(wantValueBytes, byte(2))       // value we wrote to the storage slot
@@ -716,10 +1416,10 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, uint64(2), roTtx2.Debug().TxNumsInFiles(kv.StorageDomain))
 
 		// finally, verify SharedDomains.HasPrefix returns true
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx2)
+		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1[:], roTtx2)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), firstKey)
 		require.Equal(t, []byte{1}, firstVal)
 		roTtx2.Rollback()
 	}
@@ -729,10 +1429,10 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx4, err := db.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		t.Cleanup(rwTtx4.Rollback)
-		err = sd.DomainDelPrefix(kv.StorageDomain, rwTtx4, acc1.Bytes(), 3)
+		err = sd.DomainDelPrefix(kv.StorageDomain, rwTtx4, acc1[:], 3)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx4)
+		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1[:], rwTtx4)
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -746,7 +1446,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		roTtx3, err := db.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		t.Cleanup(roTtx3.Rollback)
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx3)
+		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1[:], roTtx3)
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -762,10 +1462,10 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		err = sd.DomainPut(kv.StorageDomain, rwTtx5, storageK1, []byte{3}, 4, nil)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx5)
+		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1[:], rwTtx5)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), firstKey)
 		require.Equal(t, []byte{3}, firstVal)
 		// check after flush
 		err = sd.Flush(ctx, rwTtx5)
@@ -776,10 +1476,10 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		roTtx4, err := db.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		t.Cleanup(roTtx4.Rollback)
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx4)
+		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1[:], roTtx4)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), firstKey)
 		require.Equal(t, []byte{3}, firstVal)
 		roTtx4.Rollback()
 	}
@@ -808,7 +1508,7 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 	domainCases := []domainCase{
 		{
 			domain:  kv.AccountsDomain,
-			makeKey: func() []byte { return common.Copy(addr) },
+			makeKey: func() []byte { return bytes.Clone(addr) },
 			makeVal: func(i int) []byte {
 				acc := accounts3.Account{
 					Nonce:    uint64(i),
@@ -821,13 +1521,13 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 		},
 		{
 			domain:          kv.StorageDomain,
-			makeKey:         func() []byte { return common.Copy(storageKey) },
+			makeKey:         func() []byte { return bytes.Clone(storageKey) },
 			makeVal:         func(i int) []byte { return binary.BigEndian.AppendUint64(nil, uint64(i)) },
 			historyKeyTable: kv.TblStorageHistoryKeys,
 		},
 		{
 			domain:          kv.CodeDomain,
-			makeKey:         func() []byte { return common.Copy(addr) },
+			makeKey:         func() []byte { return bytes.Clone(addr) },
 			makeVal:         func(i int) []byte { return binary.BigEndian.AppendUint64(nil, uint64(i)) },
 			historyKeyTable: kv.TblCodeHistoryKeys,
 		},
@@ -836,7 +1536,7 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 	for _, dc := range domainCases {
 		t.Run(dc.domain.String(), func(t *testing.T) {
 			t.Parallel()
-			ctx := context.Background()
+			ctx := t.Context()
 			stepSize := uint64(1000)
 			db := newTestDb(t, stepSize)
 
@@ -881,7 +1581,7 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 			}
 
 			// Execute writes in txNum order
-			for txNum := uint64(0); txNum < totalTxs; txNum++ {
+			for txNum := range totalTxs {
 				if writes[txNum] < 0 {
 					continue
 				}
@@ -923,7 +1623,7 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 			// (i.e. no duplicate history entries for consecutive identical values).
 			expectedChanges := 0
 			var prevWrittenVal []byte
-			for txNum := uint64(0); txNum < totalTxs; txNum++ {
+			for txNum := range totalTxs {
 				if writes[txNum] < 0 {
 					continue
 				}
@@ -949,10 +1649,73 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 	}
 }
 
+// History records the value as of BEFORE a txNum, so when a key is written
+// more than once at the same txNum only the first write's prev is correct.
+// The parallel executor's block cache flushes an EIP-8246 balance-preserving
+// SELFDESTRUCT as DomainDel followed by DomainPut at one txNum; recording the
+// put's intermediate "deleted" prev makes GetAsOf(ts <= txNum) lose the
+// pre-existing account.
+func TestDomainSameTxNumUpdate_HistoryKeepsFirstPrev(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		second func(domains *execctx.SharedDomains, rwTx kv.TemporalRwTx, key []byte, v1 []byte) error
+	}{
+		{name: "del-then-put", second: func(domains *execctx.SharedDomains, rwTx kv.TemporalRwTx, key []byte, v1 []byte) error {
+			err := domains.DomainDel(kv.AccountsDomain, rwTx, key, 10, nil)
+			if err != nil {
+				return err
+			}
+			return domains.DomainPut(kv.AccountsDomain, rwTx, key, v1, 10, nil)
+		}},
+		{name: "put-then-put", second: func(domains *execctx.SharedDomains, rwTx kv.TemporalRwTx, key []byte, v1 []byte) error {
+			interim := accounts3.Account{Nonce: 7, Balance: *uint256.NewInt(7), CodeHash: accounts.EmptyCodeHash}
+			err := domains.DomainPut(kv.AccountsDomain, rwTx, key, accounts3.SerialiseV3(&interim), 10, nil)
+			if err != nil {
+				return err
+			}
+			return domains.DomainPut(kv.AccountsDomain, rwTx, key, v1, 10, nil)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := t.Context()
+			db := newTestDb(t, 1000)
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+			key := make([]byte, length.Addr)
+			key[0] = 0xAB
+			acc0 := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+			v0 := accounts3.SerialiseV3(&acc0)
+			acc1 := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(2), CodeHash: accounts.EmptyCodeHash}
+			v1 := accounts3.SerialiseV3(&acc1)
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, key, v0, 5, nil))
+			require.NoError(t, tc.second(domains, rwTx, key, v1))
+			require.NoError(t, domains.Flush(ctx, rwTx))
+			got, ok, err := rwTx.GetAsOf(kv.AccountsDomain, key, 10)
+			require.NoError(t, err)
+			require.True(t, ok, "value before txNum 10 must exist (written at txNum 5)")
+			require.Equal(t, v0, got, "GetAsOf(10) must see the txNum-5 value, not the same-txNum intermediate")
+			got, ok, err = rwTx.GetAsOf(kv.AccountsDomain, key, 11)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.Equal(t, v1, got, "GetAsOf(11) must see the final txNum-10 value")
+			got, ok, err = rwTx.GetAsOf(kv.AccountsDomain, key, 5)
+			require.NoError(t, err)
+			require.False(t, ok, "the key was created at txNum 5, so before it there is nothing to find")
+			require.Empty(t, got, "GetAsOf(5) is before the first write")
+		})
+	}
+}
+
 func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 
 	stepSize := uint64(1)
@@ -967,7 +1730,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 
 	acc1Addr := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	acc1Slot := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
-	storageK1 := append(append([]byte{}, acc1Addr.Bytes()...), acc1Slot.Bytes()...)
+	storageK1 := append(append([]byte{}, acc1Addr[:]...), acc1Slot[:]...)
 	storageV1 := []byte{1}
 	acc1 := accounts.NewAccount()
 	acc1.Balance.SetUint64(1)
@@ -975,24 +1738,24 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 
 	// --- check 1: non-existing account & storage and empty commitment trie ---
 	{
-		acc1Value, _, err := sd1.GetLatest(kv.AccountsDomain, db1RwTx, acc1Addr.Bytes())
+		acc1Value, _, err := sd1.GetLatest(kv.AccountsDomain, db1RwTx, acc1Addr[:])
 		require.NoError(t, err)
 		require.Nil(t, acc1Value)
 
-		acc1SlotValue, _, err := sd1.GetLatest(kv.StorageDomain, db1RwTx, acc1Slot.Bytes())
+		acc1SlotValue, _, err := sd1.GetLatest(kv.StorageDomain, db1RwTx, acc1Slot[:])
 		require.NoError(t, err)
 		require.Nil(t, acc1SlotValue)
 
 		rootHash, err := sd1.GetCommitmentContext().Trie().RootHash()
 		require.NoError(t, err)
-		require.Equal(t, empty.RootHash.Bytes(), rootHash)
+		require.Equal(t, empty.RootHash[:], rootHash)
 	}
 
 	// --- check 2: write state in db1 and verify is present in history ---
 	txNum := uint64(1)
 	{
 		// write account and storage in db1
-		err = sd1.DomainPut(kv.AccountsDomain, db1RwTx, acc1Addr.Bytes(), acc1Encoded, txNum, nil)
+		err = sd1.DomainPut(kv.AccountsDomain, db1RwTx, acc1Addr[:], acc1Encoded, txNum, nil)
 		require.NoError(t, err)
 		err = sd1.DomainPut(kv.StorageDomain, db1RwTx, storageK1, storageV1, txNum, nil)
 		require.NoError(t, err)
@@ -1012,7 +1775,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		t.Cleanup(c1.Close)
 		k, v, err := c1.Next()
 		require.NoError(t, err)
-		require.Equal(t, acc1Addr.Bytes(), k)
+		require.Equal(t, acc1Addr[:], k)
 		wantValueBytes := make([]byte, 8)                       // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(1))  // step num
 		wantValueBytes = append(wantValueBytes, acc1Encoded...) // value we wrote to the account
@@ -1026,7 +1789,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		t.Cleanup(c2.Close)
 		k, v, err = c2.Next()
 		require.NoError(t, err)
-		require.Equal(t, append(append([]byte{}, acc1Addr.Bytes()...), acc1Slot.Bytes()...), k)
+		require.Equal(t, append(append([]byte{}, acc1Addr[:]...), acc1Slot[:]...), k)
 		wantValueBytes = make([]byte, 8)                       // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(1)) // step num
 		wantValueBytes = append(wantValueBytes, storageV1...)  // value we wrote to the storage slot
@@ -1066,7 +1829,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		// check that the initial commitment trie is empty in db2
 		initialRootHash, err := sd2.GetCommitmentContext().Trie().RootHash()
 		require.NoError(t, err)
-		require.Equal(t, empty.RootHash.Bytes(), initialRootHash)
+		require.Equal(t, empty.RootHash[:], initialRootHash)
 
 		// double-check: if we try to compute the initial commitment trie root in db2, it is empty
 		initialRootHash, err = sd2.ComputeCommitment(ctx, roTx2, false, blockNum, toTxNum, "", nil)
@@ -1074,7 +1837,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 			return
 		}
 		require.NoError(t, err)
-		require.Equal(t, empty.RootHash.Bytes(), initialRootHash)
+		require.Equal(t, empty.RootHash[:], initialRootHash)
 
 		// test core: touch in sd2 the changed keys in [fromTxNum, toTxNum+1) using historical state changes from db1
 		accountChanges, storageChanges, err := sd2.TouchChangedKeysFromHistory(db1RoTx, fromTxNum, toTxNum+1)
@@ -1091,4 +1854,143 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, expectedRootHash, rootHash)
 	}
+}
+
+// Deleting an already-absent key must not record a redundant empty->empty
+// history entry, for every prevVal shape an absent key can take:
+//   - nil (same batch, resolved via sd.mem GetLatest)
+//   - []byte{} (explicit — the EIP-161 0x04 path, rw_v3.go:356)
+//   - []byte{} from a flushed DB tombstone (fresh SharedDomains, getLatestFromDb)
+//
+// Covers all three domains DomainDel handles: Accounts, Storage, Code.
+func TestSharedDomain_DeleteAbsentKeyIsNoop(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	addr := common.HexToAddress("0x0000000000000000000000000000000000000004")
+	slot := common.HexToHash("0x5ac7102aad1a639901bc2657323aaed9e90e40c550747c49170f1c82fd664e4f")
+
+	acc := accounts3.Account{Nonce: 1, Balance: *uint256.NewInt(1000)}
+	cases := []struct {
+		name   string
+		domain kv.Domain
+		idx    kv.InvertedIdx
+		key    []byte
+		value  []byte
+	}{
+		{"accounts", kv.AccountsDomain, kv.AccountsHistoryIdx, addr[:], accounts3.SerialiseV3(&acc)},
+		{"storage", kv.StorageDomain, kv.StorageHistoryIdx, composite(addr[:], slot[:]), []byte{0x01, 0x02, 0x03, 0x04}},
+		{"code", kv.CodeDomain, kv.CodeHistoryIdx, addr[:], []byte{0x60, 0x00, 0x60, 0x00}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			db := newTestDb(t, 100)
+			ctx := t.Context()
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+
+			const createTxNum, deleteTxNum uint64 = 1, 2
+
+			domains.SetTxNum(createTxNum)
+			require.NoError(t, domains.DomainPut(tc.domain, rwTx, tc.key, tc.value, createTxNum, nil))
+
+			domains.SetTxNum(deleteTxNum)
+			require.NoError(t, domains.DomainDel(tc.domain, rwTx, tc.key, deleteTxNum, nil))
+
+			// Same-batch redundant deletes: nil, then an explicit empty slice.
+			domains.SetTxNum(3)
+			require.NoError(t, domains.DomainDel(tc.domain, rwTx, tc.key, 3, nil))
+			domains.SetTxNum(4)
+			require.NoError(t, domains.DomainDel(tc.domain, rwTx, tc.key, 4, []byte{}))
+
+			// Flush the tombstone to the tx, then a fresh SharedDomains: GetLatest
+			// now resolves prevVal from getLatestFromDb, which returns []byte{}
+			// (non-nil) for a tombstone — the shape that slipped past == nil.
+			require.NoError(t, domains.Flush(ctx, rwTx))
+			domains.Close()
+
+			domains2, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer domains2.Close()
+
+			domains2.SetTxNum(5)
+			require.NoError(t, domains2.DomainDel(tc.domain, rwTx, tc.key, 5, nil))
+			domains2.SetTxNum(6)
+			require.NoError(t, domains2.DomainDel(tc.domain, rwTx, tc.key, 6, []byte{}))
+			require.NoError(t, domains2.Flush(ctx, rwTx))
+
+			it, err := rwTx.IndexRange(tc.idx, tc.key, 0, -1, order.Asc, -1)
+			require.NoError(t, err)
+			txNums, err := stream.ToArrayU64(it)
+			require.NoError(t, err)
+
+			require.Equal(t, []uint64{createTxNum, deleteTxNum}, txNums,
+				"only the create and the real delete must be recorded; every redundant delete (same-batch nil, explicit []byte{}, and post-flush DB tombstone) must be a no-op")
+		})
+	}
+}
+
+func TestBlockOverlay_DomainReadsRegression(t *testing.T) {
+	ctx := context.Background()
+	stepSize := uint64(10)
+	db := newTestDb(t, stepSize)
+
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	err = sd.InitBlockOverlay(tx, t.TempDir())
+	require.NoError(t, err)
+
+	txNum := uint64(42)
+	key := []byte("some-test-key")
+	value := []byte("some-test-value")
+
+	// Put value into a domain (e.g. ReceiptDomain) in sd
+	err = sd.DomainPut(kv.ReceiptDomain, tx, key, value, txNum, nil)
+	require.NoError(t, err)
+
+	// --- Production path: overlay.NewReadView returns *MemoryMutation ---
+	// This is the path exercised by Filters.WithTemporalOverlay and
+	// Filters.WithOverlay in the RPC layer.
+	overlay := sd.BlockOverlay()
+	require.NotNil(t, overlay)
+	readViewTx := overlay.NewReadView(tx)
+	require.NotNil(t, readViewTx)
+
+	gotVal, ok, err := readViewTx.GetAsOf(kv.ReceiptDomain, key, txNum+1)
+	require.NoError(t, err)
+	require.True(t, ok, "NewReadView (*MemoryMutation) GetAsOf must find in-memory receipt data")
+	require.Equal(t, value, gotVal)
+
+	gotValHist, ok, err := readViewTx.HistorySeek(kv.ReceiptDomain, key, txNum+1)
+	require.NoError(t, err)
+	require.True(t, ok, "NewReadView (*MemoryMutation) HistorySeek must find in-memory receipt data")
+	require.Equal(t, value, gotValHist)
+
+	// --- Secondary path: overlay.NewTemporalReadView returns *OverlayTemporalReadView ---
+	overlayTx := sd.BlockOverlayTemporalTx(tx)
+	require.NotNil(t, overlayTx)
+
+	gotVal2, ok, err := overlayTx.GetAsOf(kv.ReceiptDomain, key, txNum+1)
+	require.NoError(t, err)
+	require.True(t, ok, "NewTemporalReadView GetAsOf must find in-memory receipt data")
+	require.Equal(t, value, gotVal2)
+
+	gotValHist2, ok, err := overlayTx.HistorySeek(kv.ReceiptDomain, key, txNum+1)
+	require.NoError(t, err)
+	require.True(t, ok, "NewTemporalReadView HistorySeek must find in-memory receipt data")
+	require.Equal(t, value, gotValHist2)
 }

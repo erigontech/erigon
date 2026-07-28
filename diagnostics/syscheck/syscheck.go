@@ -58,13 +58,13 @@ func CheckKernelAllocationHints(ctx context.Context, log log.Logger) {
 			logHint(
 				"vm.overcommit_memory=0 can cause allocation failures under load; set to 1",
 				"current", v,
-				"fix", `echo "vm.overcommit_memory = 1" | sudo tee -a /etc/sysctl.d/99-erigon.conf && sudo sysctl -p /etc/sysctl.d/99-erigon.conf`,
+				"fix", `echo 'vm.overcommit_memory = 1' | sudo tee -a /etc/sysctl.d/99-erigon.conf && sudo sysctl -p /etc/sysctl.d/99-erigon.conf`,
 			)
 		case 2:
 			logHint(
 				"vm.overcommit_memory=2 (strict) may cause allocation failures for large mmap/fork workloads; consider 1",
 				"current", v,
-				"fix", `echo "vm.overcommit_memory = 1" | sudo tee -a /etc/sysctl.d/99-erigon.conf && sudo sysctl -p /etc/sysctl.d/99-erigon.conf`,
+				"fix", `echo 'vm.overcommit_memory = 1' | sudo tee -a /etc/sysctl.d/99-erigon.conf && sudo sysctl -p /etc/sysctl.d/99-erigon.conf`,
 			)
 		default:
 			log.Info("vm.overcommit_memory looks OK", "current", v)
@@ -82,7 +82,7 @@ func CheckKernelAllocationHints(ctx context.Context, log log.Logger) {
 				"vm.max_map_count is low for large memory-mapped databases; raise it",
 				"current", v,
 				"recommended", wantMaxMap,
-				"fix", fmt.Sprintf(`echo "vm.max_map_count = %d" | sudo tee -a /etc/sysctl.d/99-erigon.conf && sudo sysctl -p /etc/sysctl.d/99-erigon.conf`, wantMaxMap),
+				"fix", fmt.Sprintf(`echo 'vm.max_map_count = %d' | sudo tee -a /etc/sysctl.d/99-erigon.conf && sudo sysctl -p /etc/sysctl.d/99-erigon.conf`, wantMaxMap),
 			)
 		} else {
 			log.Info("vm.max_map_count looks OK", "current", v)
@@ -109,7 +109,7 @@ func CheckKernelAllocationHints(ctx context.Context, log log.Logger) {
 					return 0
 				}(),
 				"suggestion", "Consider adding a small swapfile (e.g., 4–8 GiB) to improve fork reliability.",
-				"fix", `sudo fallocate -l 8G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && echo "/swapfile none swap sw 0 0" | sudo tee -a /etc/fstab && sudo swapon -a`,
+				"fix", `sudo fallocate -l 8G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab && sudo swapon -a`,
 			)
 		}
 	} else {
