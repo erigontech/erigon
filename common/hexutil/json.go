@@ -118,8 +118,10 @@ func (b *Big) ToInt() *big.Int {
 	return (*big.Int)(b)
 }
 
-// ToUint256 converts b to a uint256.Int.
-func (b *Big) ToUint256() *uint256.Int { return uint256.MustFromBig(b.ToInt()) }
+// ToUint256 converts b to a uint256.Int and reports whether it overflows 256 bits.
+func (b *Big) ToUint256() (*uint256.Int, bool) {
+	return uint256.FromBig((*big.Int)(b))
+}
 
 // String returns the hex encoding of b.
 func (b *Big) String() string {
