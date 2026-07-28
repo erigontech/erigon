@@ -251,27 +251,28 @@ func (l *RPCLog) UnmarshalJSON(input []byte) error {
 
 type RPCLogs []*RPCLog
 
+// Copy deep-copies the logs into freshly allocated shared backing arrays.
 func (logs Logs) Copy() Logs {
 	if logs == nil {
 		return nil
 	}
-	var nt, nd int
+	var totalTopics, totalData int
 	for _, l := range logs {
-		nt += len(l.Topics)
-		nd += len(l.Data)
+		totalTopics += len(l.Topics)
+		totalData += len(l.Data)
 	}
-	topicsBuf := make([]common.Hash, nt)
-	dataBuf := make([]byte, nd)
+	topics := make([]common.Hash, totalTopics)
+	data := make([]byte, totalData)
 	backing := make([]Log, len(logs))
 	out := make(Logs, len(logs))
-	to, do := 0, 0
-	for i := range logs {
-		lt, ld := len(logs[i].Topics), len(logs[i].Data)
-		backing[i].Topics = topicsBuf[to : to+lt : to+lt]
-		backing[i].Data = dataBuf[do : do+ld : do+ld]
-		to, do = to+lt, do+ld
-		logs[i].CopyTo(&backing[i])
-		out[i] = &backing[i]
+	for i, l := range logs {
+		dst := &backing[i]
+		nt, nd := len(l.Topics), len(l.Data)
+		// Capped so a later append to one copied log cannot bleed into the next.
+		dst.Topics, dst.Data = topics[:nt:nt], data[:nd:nd]
+		topics, data = topics[nt:], data[nd:]
+		l.CopyTo(dst)
+		out[i] = dst
 	}
 	return out
 }
