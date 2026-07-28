@@ -191,10 +191,14 @@ func TestEncodeBig(t *testing.T) {
 }
 
 func BenchmarkEncodeBig(b *testing.B) {
+	inputs := make([]*big.Int, len(encodeBigTests))
+	for i, test := range encodeBigTests {
+		inputs[i] = test.input.(*big.Int)
+	}
 	b.ReportAllocs()
 	for b.Loop() {
-		for _, test := range encodeBigTests {
-			EncodeBig(test.input.(*big.Int))
+		for _, bigint := range inputs {
+			EncodeBig(bigint)
 		}
 	}
 }
