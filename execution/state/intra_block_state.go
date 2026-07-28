@@ -238,7 +238,6 @@ type sdProbeEntry struct {
 func New(stateReader StateReader) *IntraBlockState {
 	return &IntraBlockState{
 		stateReader:       stateReader,
-		revisions:         revisionsPool.Get().(*revisions),
 		stateObjects:      map[accounts.Address]*stateObject{},
 		stateObjectsDirty: map[accounts.Address]struct{}{},
 		nilAccounts:       map[accounts.Address]struct{}{},
@@ -394,7 +393,7 @@ func (sdb *IntraBlockState) Reset() {
 	}
 	clear(sdb.balanceInc)
 	sdb.journal.Reset()
-	sdb.revisions.reset()
+	sdb.revisions = sdb.revisions.put()
 	sdb.refund = uint64(0)
 	sdb.txIndex = 0
 	sdb.sdProbeEpoch++
@@ -435,7 +434,6 @@ func (sdb *IntraBlockState) Release(parallel bool) {
 	journal := sdb.journal
 	sdb.stateObjects = nil
 	sdb.journal = nil
-	sdb.revisions = sdb.revisions.put()
 
 	if parallel {
 		go releaseResources(stateObjects, journal)
@@ -2299,9 +2297,10 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 }
 
 // Snapshot returns an identifier for the current revision of the state.
-// revisions is non-nil for the whole life of the IntraBlockState (New takes it
-// from the pool, Release returns it), keeping this call-free at the call sites.
 func (sdb *IntraBlockState) PushSnapshot() int {
+	if sdb.revisions == nil {
+		sdb.revisions = revisionsPool.Get().(*revisions)
+	}
 	return sdb.revisions.snapshot(sdb.journal)
 }
 
@@ -2694,7 +2693,7 @@ func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 // no not lock
 func (sdb *IntraBlockState) clearJournalAndRefund() {
 	sdb.journal.Reset()
-	sdb.revisions.reset()
+	sdb.revisions = sdb.revisions.put()
 	sdb.refund = uint64(0)
 }
 
