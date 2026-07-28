@@ -95,14 +95,15 @@ type P2PNode struct {
 	// OtterSync's wait gate.
 	InitialStateReady <-chan struct{}
 
-	dCore       *dl.Downloader
-	cfg         *downloadercfg.Cfg
-	pool        *testPool
-	workers     *workerpool.WorkerPool
-	unregPeer   execp2p.UnregisterFunc
-	v2Publisher *dl.RollingV2Publisher // lazy — constructed on first PublishV2Manifest
-	ctx         context.Context
-	cancel      context.CancelFunc
+	dCore        *dl.Downloader
+	cfg          *downloadercfg.Cfg
+	pool         *testPool
+	workers      *workerpool.WorkerPool
+	unregPeer    execp2p.UnregisterFunc
+	v2Publisher  *dl.RollingV2Publisher // lazy — constructed on first PublishV2Manifest
+	perNodeENRFP string                 // set by UsePerNodeENRFingerprint; empty ⇒ use shared harnessENRFP default
+	ctx          context.Context
+	cancel       context.CancelFunc
 
 	// storageProvider is non-nil only for storageModeProvider nodes: the
 	// real storage.Provider that owns the bus, orchestrator, lifecycle
@@ -387,10 +388,40 @@ func (n *P2PNode) ensureV2Publisher() *dl.RollingV2Publisher {
 	if n.v2Publisher == nil {
 		pub, err := dl.NewRollingV2Publisher(n.Dirs.Snap, dl.NewAtomicTorrentFS(n.Dirs.Snap), n.dCore)
 		require.NoError(n.T, err)
-		pub.SetENRFingerprint(harnessENRFP)
+		fp := harnessENRFP
+		if n.perNodeENRFP != "" {
+			fp = n.perNodeENRFP
+		}
+		pub.SetENRFingerprint(fp)
 		n.v2Publisher = pub
 	}
 	return n.v2Publisher
+}
+
+// UsePerNodeENRFingerprint switches this node from the shared
+// harnessENRFP default to a per-node fingerprint derived from its
+// own live sentry LocalNode enode ID (mirroring production, where
+// backend.go feeds Downloader.SetSelfENRFingerprint from
+// p2p.LocalNode().Node().ID()). Call it BEFORE PublishV2Manifest to
+// exercise the multi-node "each per-node V2 sidecar has its own
+// infohash" invariant real deployments hit. Restart tests + tests
+// that assert stable infohashes across nodes leave this OFF and
+// keep the shared default.
+func (n *P2PNode) UsePerNodeENRFingerprint() {
+	n.T.Helper()
+	if n.Sentry == nil {
+		n.T.Fatal("UsePerNodeENRFingerprint: sentry not initialised (mockSentry mode?)")
+	}
+	for _, srv := range n.Sentry.Servers {
+		if p2pServer := srv.GetP2PServer(); p2pServer != nil {
+			if ln := p2pServer.LocalNode(); ln != nil {
+				n.perNodeENRFP = dl.ENRFingerprint([32]byte(ln.Node().ID()))
+				n.dCore.SetSelfENRFingerprint(n.perNodeENRFP)
+				return
+			}
+		}
+	}
+	n.T.Fatal("UsePerNodeENRFingerprint: no p2p server available")
 }
 
 // SetPublisherDelegationSource wires a delegation source onto the rolling
