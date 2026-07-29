@@ -232,7 +232,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 
 		isBatchFull := se.isApplyingBlocks && se.readState().SizeEstimateBeforeCommitment() >= se.cfg.batchSize.Bytes()
-		// havePartialBlock: partial first block isn't validated, compute root ASAP for fail-fast.
+		// havePartialBlock: a resumed block isn't always fully validated (prefix
+		// reconstruction is best-effort), so compute the root ASAP for fail-fast.
 		needCalcRoot := se.isApplyingBlocks && (isBatchFull || havePartialBlock)
 		havePartialBlock = false
 
@@ -334,9 +335,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 	}(time.Now())
 
 	if len(tasks) > 0 {
-		// During the first block execution, we may have half-block data in the snapshots.
-		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
-		// So we need to skip that check for the first block, if we find half-executed data (startTxIndex>0).
+		// During the first block execution, we may have half-block data in the
+		// snapshots, so tasks may start mid-block (startTxIndex > 0). The prefix
+		// receipts and gas are then reconstructed below when possible.
 		startTxIndex = max(tasks[0].(*exec.TxTask).TxIndex, 0)
 	}
 
