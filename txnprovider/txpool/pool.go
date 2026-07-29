@@ -1666,6 +1666,15 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 		p.senderLastActivity[senderID] = blockNum
 		nonce, balance, err := senders.info(cacheView, senderID)
 		if err != nil {
+			if errors.Is(err, ErrSenderIDNotRegistered) {
+				// stateChanges yielded a senderID via senders.getID, which
+				// only returns IDs present in senderIDs → senderID2Addr.
+				// Getting here means the maps diverged between the two
+				// reads — a real invariant break that self-heal wouldn't
+				// fix. Surface it as an error rather than panicking.
+				logger.Warn("[txpool] OnNewBlock: sendersWithChangedState senderID unmapped", "senderID", senderID)
+				return announcements, err
+			}
 			return announcements, err
 		}
 		p.onSenderStateChange(senderID, nonce, balance, blockGasLimit, logger)
@@ -1673,9 +1682,23 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 
 	// Don't touch senderLastActivity for queuedSenders — these senders did not
 	// change state on-chain, so the dormancy timer should not be reset.
+	//
+	// queuedSenders is populated from p.queued.best.ms, whose entries are
+	// supposed to be reachable via senderID2Addr. A soak run on 2026-07-28
+	// (40 clean mode_b iters, then panic) showed the invariant broken:
+	// a stale metaTxn in p.queued.best.ms whose senderID had been evicted
+	// by flushLocked. Root cause not yet found; the defensive skip below
+	// keeps the node alive so future occurrences give observability.
+	// Self-heal (remove the orphan mt from the sub-pool) is a follow-up
+	// once we can build a deterministic reproducer.
 	for senderID := range queuedSenders {
 		nonce, balance, err := senders.info(cacheView, senderID)
 		if err != nil {
+			if errors.Is(err, ErrSenderIDNotRegistered) {
+				logger.Warn("[txpool] OnNewBlock: queued.best.ms senderID unmapped — skipping (see senders.go ErrSenderIDNotRegistered)",
+					"senderID", senderID, "blockNum", blockNum)
+				continue
+			}
 			return announcements, err
 		}
 		p.onSenderStateChange(senderID, nonce, balance, blockGasLimit, logger)

@@ -2340,3 +2340,95 @@ func TestQueuedTxnPromotedAfterStaleAddLocal(t *testing.T) {
 	asrt.Equal(1, pending, "queued tx must be promoted after re-evaluation")
 	asrt.Equal(0, queued, "queued must be empty after promotion")
 }
+
+// TestOnNewBlock_QueuedOrphanSenderIDDoesNotPanic reproduces the
+// invariant break observed on the continuous unwind soak
+// (2026-07-28: 40 successful mode_b iters, then panic "must not
+// happen" in senders.info). p.queued.best.ms held a metaTxn whose
+// senderID had been evicted from senderID2Addr by flushLocked —
+// the queuedSenders loop in addTxnsOnNewBlock then called
+// senders.info(evictedID) and crashed the process.
+//
+// The test constructs the divergence manually (add txn → force
+// eviction) since the natural triggering sequence hasn't been
+// isolated yet. Before the fix, the pool panics inside OnNewBlock.
+// After the fix, the pool logs a warning + skips the orphan
+// senderID and OnNewBlock returns cleanly.
+func TestOnNewBlock_QueuedOrphanSenderIDDoesNotPanic(t *testing.T) {
+	req := require.New(t)
+	logger := log.New()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	ch := make(chan Announcements, 100)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	cfg := txpoolcfg.DefaultConfig
+
+	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewSimple(), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	req.NoError(err)
+	req.NotNil(pool)
+
+	var addr1 [20]byte
+	addr1[0] = 1
+	h0 := gointerfaces.ConvertHashToH256([32]byte{})
+
+	serialiseAcc := func(nonce uint64) []byte {
+		a := accounts3.Account{
+			Nonce: nonce, Balance: *uint256.NewInt(1 * common.Ether),
+			CodeHash: accounts.EmptyCodeHash, Incarnation: 1,
+		}
+		return accounts3.SerialiseV3(&a)
+	}
+
+	writeTestSenderState(t, ctx, coreDB, logger, addr1, serialiseAcc(0), 0)
+	initChange := &remoteproto.StateChangeBatch{
+		StateVersionId: 0, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 0, BlockHash: h0}},
+	}
+	initChange.ChangeBatch[0].Changes = append(initChange.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr1),
+		Data:    serialiseAcc(0),
+	})
+	req.NoError(pool.OnNewBlock(ctx, initChange, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	// Add a nonce=5 tx so addr1 lands in queued (nonce gap: DB says 0, tx says 5).
+	txn := newTestTxnSlot(5, 0, 300_000, 300_000, 100_000)
+	txn.IDHash[0] = 1
+	var slots TxnSlots
+	slots.Append(txn, addr1[:], true)
+	_, err = pool.AddLocalTxns(ctx, slots)
+	req.NoError(err)
+
+	_, _, queued := pool.CountContent()
+	req.Equal(1, queued, "nonce-gap tx must land in queued so p.queued.best.ms holds it")
+
+	// Simulate the invariant break flushLocked would introduce if the
+	// discardLocked path ever left a stale queued.best.ms entry: manually
+	// evict the txn's senderID from senderID2Addr while keeping the mt
+	// pointer in the queued sub-pool. That's exactly the observed state
+	// at panic time in the soak — how the pool got there is the still-
+	// open root-cause question.
+	pool.lock.Lock()
+	senderID := txn.SenderID
+	addr, existed := pool.senders.senderID2Addr[senderID]
+	req.True(existed, "test scaffold precondition: sender should be registered before we evict it")
+	delete(pool.senders.senderID2Addr, senderID)
+	delete(pool.senders.senderIDs, addr)
+	pool.lock.Unlock()
+
+	// Deliver a subsequent block that doesn't touch addr1. The queuedSenders
+	// loop in addTxnsOnNewBlock iterates p.queued.best.ms, encounters our
+	// orphan senderID, calls senders.info — pre-fix this panicked, post-fix
+	// it logs a warning and skips.
+	h1 := gointerfaces.ConvertHashToH256([32]byte{1})
+	nextBlock := &remoteproto.StateChangeBatch{
+		StateVersionId: 1, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1, BlockHash: h1}},
+	}
+	req.NotPanics(func() {
+		err := pool.OnNewBlock(ctx, nextBlock, TxnSlots{}, TxnSlots{}, TxnSlots{})
+		req.NoError(err)
+	}, "OnNewBlock must not panic when p.queued.best.ms references an evicted senderID")
+}

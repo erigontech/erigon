@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"math/bits"
@@ -212,10 +213,20 @@ func (sc *sendersBatch) getOrCreateID(addr common.Address, logger log.Logger) (u
 	return id, traced
 }
 
+// ErrSenderIDNotRegistered indicates senderID→address lookup missed.
+// The panic-if-missing invariant assumed p.all had ANY txn for the ID
+// whenever a sub-pool still referenced it; a long-lived soak (2026-07-28,
+// 40 successful mode_b iters) reproduced a case where p.queued.best.ms
+// held a stale metaTxn after its senderID had been evicted by
+// flushLocked. Callers must now handle this — either by skipping the
+// stale entry or by driving a self-heal that removes the orphan from
+// the sub-pool.
+var ErrSenderIDNotRegistered = errors.New("sender id not registered")
+
 func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (uint64, uint256.Int, error) {
 	addr, ok := sc.senderID2Addr[id]
 	if !ok {
-		panic("must not happen")
+		return 0, uint256.Int{}, ErrSenderIDNotRegistered
 	}
 	encoded, err := cacheView.Get(addr[:])
 	if err != nil {
