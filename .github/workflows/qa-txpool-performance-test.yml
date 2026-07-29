@@ -288,7 +288,7 @@ jobs:
             --repo erigon \
             --commit $(git rev-parse HEAD) \
             --branch "$GITHUB_REF_NAME" \
-            --test_name txpool-performance \
+            --test_name txpool-performance-commitment-${{ matrix.commitment_mode }} \
             --runner "$RUNNER_NAME" \
             --outcome $TEST_RESULT \
             --result_file "$GITHUB_WORKSPACE/outputs_kurtosis.json"

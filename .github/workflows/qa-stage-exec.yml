@@ -138,7 +138,7 @@ jobs:
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
-        TEST_NAME: ${{ matrix.test_name }}
+        TEST_NAME: ${{ matrix.test_name }}-commitment-${{ matrix.commitment_mode }}
         MODE_NAME: ${{ matrix.mode_name }}
         COMMITMENT_MODE: ${{ matrix.commitment_mode }}
       run: |
