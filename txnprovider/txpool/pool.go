@@ -721,9 +721,6 @@ func (p *TxPool) Started() bool {
 }
 
 // best returns the highest-priority pending transactions that fit within the given gas and RLP space budgets.
-// EIP-8037: availableGas.Regular tracks regular gas; availableGas.State tracks intrinsic
-// state gas. Execution-time state gas (SSTOREs) cannot be predicted here and is
-// enforced by applyTransaction in the block assembler.
 func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	availableGas mdgas.FullMdGas,
 	yielded mapset.Set[[32]byte], availableRlpSpace int) (bool, int, error) {
@@ -844,25 +841,21 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			IsEIP7623:          isEIP7623,
 			IsEIP7976:          isAmsterdam,
 			IsEIP7981:          isAmsterdam,
-			IsEIP8037:          isAmsterdam,
 			IsEIP2780:          isAmsterdam,
 			IsAATxn:            isAATxn,
 		})
-		intrinsicRegularGas := intrinsicGasResult.RegularGas
-		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicRegularGas {
-			intrinsicRegularGas = intrinsicGasResult.FloorGasCost
+		intrinsicGas := intrinsicGasResult.RegularGas
+		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicGas {
+			intrinsicGas = intrinsicGasResult.FloorGasCost
 		}
-		if intrinsicRegularGas > availableGas.Regular {
+		if intrinsicGas > availableGas.Regular {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
 			continue
 		}
-		// EIP-8037: filter by intrinsic state gas. Execution-time state gas
-		// (SSTOREs) is unpredictable and enforced in applyTransaction instead.
-		if intrinsicGasResult.StateGas > availableGas.State {
+		if isAmsterdam && mt.TxnSlot.GetGas() > availableGas.State {
 			continue
 		}
-		availableGas.Regular -= intrinsicRegularGas
-		availableGas.State -= intrinsicGasResult.StateGas
+		availableGas.Regular -= intrinsicGas
 		availableGas.Blob -= blobCount * params.GasPerBlob
 		availableRlpSpace -= len(rlpTxn)
 		txns.Txns[count] = rlpTxn
@@ -1046,16 +1039,12 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		IsEIP7623:          isPrague,
 		IsEIP7976:          isAmsterdam,
 		IsEIP7981:          isAmsterdam,
-		IsEIP8037:          isAmsterdam,
 		IsEIP2780:          isAmsterdam,
 		IsAATxn:            isAATxn,
 	})
-	gas := mdgas.MdGas{
-		Regular: intrinsicGasResult.RegularGas,
-		State:   intrinsicGasResult.StateGas,
-	}
-	if isPrague && intrinsicGasResult.FloorGasCost > gas.Regular {
-		gas.Regular = intrinsicGasResult.FloorGasCost
+	gas := intrinsicGasResult.RegularGas
+	if isPrague && intrinsicGasResult.FloorGasCost > gas {
+		gas = intrinsicGasResult.FloorGasCost
 	}
 
 	if txn.Traced {
@@ -1067,7 +1056,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.GasUintOverflow, nil
 	}
-	if gas.Total() > txn.GetGas() {
+	if gas > txn.GetGas() {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > txn.gas idHash=%x gas=%d, txn.gas=%d", txn.IDHash, gas, txn.GetGas()))
 		}
