@@ -17,10 +17,13 @@
 package downloader
 
 import (
+	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 )
 
@@ -37,6 +40,53 @@ var ErrForkPreMergeCut = errors.New("fork chain.Config: CutBlock is pre-merge �
 // being re-pointed at a fork config without being cleared. The fix is
 // to use `erigon snapshots fork-from` to produce a clean fork datadir.
 var ErrForkDatadirHasPostCutData = errors.New("fork chain.Config: datadir has snap files past CutBlock from the parent's lineage — use `erigon snapshots fork-from` to produce a clean fork datadir, or point --datadir at an empty directory")
+
+// BuildStepToBlockFromMaxTxNum walks kv.MaxTxNum and records the first
+// block whose maxTxNum crosses each step boundary. Result[step] is the
+// block at which the given step starts.
+//
+// Cheap enough to run at startup: one linear cursor scan, no seeks.
+// Cost ≈ blocks * ns/cursor-op — a fully-synced hoodi datadir (~3.3M
+// blocks) takes on the order of seconds.
+//
+// A stepSize of 0 returns an empty map (the caller should skip
+// classification refinement when no stepSize is available).
+func BuildStepToBlockFromMaxTxNum(ctx context.Context, tx kv.Tx, stepSize uint64) (StepToBlock, error) {
+	result := StepToBlock{}
+	if stepSize == 0 {
+		return result, nil
+	}
+	c, err := tx.Cursor(kv.MaxTxNum)
+	if err != nil {
+		return nil, fmt.Errorf("BuildStepToBlockFromMaxTxNum: open cursor: %w", err)
+	}
+	defer c.Close()
+	result[0] = 0
+	lastStep := uint64(0)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, fmt.Errorf("BuildStepToBlockFromMaxTxNum: cursor scan: %w", err)
+		}
+		if len(k) != 8 || len(v) != 8 {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		blockNum := binary.BigEndian.Uint64(k)
+		maxTxNum := binary.BigEndian.Uint64(v)
+		currentStep := maxTxNum / stepSize
+		if currentStep > lastStep {
+			for s := lastStep + 1; s <= currentStep; s++ {
+				result[s] = blockNum
+			}
+			lastStep = currentStep
+		}
+	}
+	return result, nil
+}
 
 // ValidateForkDatadir checks that a (possibly-fork) chain.Config is
 // runnable against a given snap dir. Non-fork configs (Parent == "")
@@ -63,6 +113,20 @@ var ErrForkDatadirHasPostCutData = errors.New("fork chain.Config: datadir has sn
 // Provider opens any handles. A non-nil return means erigon should
 // abort with the error message; the caller decides exit behaviour.
 func ValidateForkDatadir(cfg *chain.Config, snapDir string) error {
+	return ValidateForkDatadirWithStepMap(cfg, snapDir, nil)
+}
+
+// ValidateForkDatadirWithStepMap is the same as ValidateForkDatadir
+// but accepts a resolved step→block map so state files can classify
+// as pre-cut instead of the conservative "straddle" default. Storage
+// providers pass a map built via BuildStepToBlockFromMaxTxNum against
+// the running chaindata — every step whose block boundary is ≤
+// cutBlock is provably pre-cut (state authored by the parent chain
+// before the cut) and safe to keep across a fork restart. Without
+// the map, in-process debug_setFork's mode-B trim leaves the datadir
+// in a state that ValidateForkDatadir rejects on the very next
+// --chain=<fork-name> restart.
+func ValidateForkDatadirWithStepMap(cfg *chain.Config, snapDir string, stepToBlock StepToBlock) error {
 	if cfg == nil {
 		return fmt.Errorf("ValidateForkDatadir: nil chain.Config")
 	}
@@ -96,7 +160,10 @@ func ValidateForkDatadir(cfg *chain.Config, snapDir string) error {
 	// Reuse the copy planner's classifier as the conflict detector:
 	// every file in the dir should be PreCut or Unknown (non-range
 	// chain-wide config). Anything else is a conflict.
-	plan, err := BuildCopyPlan(snapDir, cfg.CutBlock, StepToBlock{})
+	if stepToBlock == nil {
+		stepToBlock = StepToBlock{}
+	}
+	plan, err := BuildCopyPlan(snapDir, cfg.CutBlock, stepToBlock)
 	if err != nil {
 		return fmt.Errorf("ValidateForkDatadir: scan snap dir: %w", err)
 	}

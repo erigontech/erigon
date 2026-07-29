@@ -135,3 +135,44 @@ func TestValidateForkDatadir_RejectsNilConfig(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nil chain.Config")
 }
+
+// TestValidateForkDatadirWithStepMap_PreCutStateFilesAccepted pins the
+// fix for the Tier 3c restart-transition gap: after debug_setFork's
+// in-process mode-B trim leaves state files whose step range covers
+// only pre-cut blocks, the validator with an empty step map treats
+// them all as straddle and refuses --chain=<fork> boot. With a real
+// step→block map (built from rawdbv3.TxNums via
+// BuildStepToBlockFromMaxTxNum in storage.Initialize), those known-
+// pre-cut files classify correctly and the boot succeeds.
+func TestValidateForkDatadirWithStepMap_PreCutStateFilesAccepted(t *testing.T) {
+	// Step 2520 = block 19_990_000, step 2521 = block 20_010_000
+	// (straddles cut), step 2522 = block 20_020_000 (post-cut).
+	stepToBlock := StepToBlock{
+		2519: 19_980_000,
+		2520: 19_990_000,
+		2521: 20_010_000,
+		2522: 20_020_000,
+	}
+	cfg := forkChainConfigForValidate(t, 20_000_000 /* cut */, 15_000_000 /* merge */)
+
+	snapDir := t.TempDir()
+	// Pre-cut state file — must be accepted with the real step map.
+	preCutFile := "v2.0-accounts.2519-2520.kv"
+	require.NoError(t, os.WriteFile(filepath.Join(snapDir, preCutFile), []byte("x"), 0o644))
+
+	// Empty-map behavior: state file classifies as straddle → error.
+	err := ValidateForkDatadirWithStepMap(cfg, snapDir, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "straddles cut")
+
+	// Real-map behavior: same file classifies as pre-cut → accepted.
+	require.NoError(t, ValidateForkDatadirWithStepMap(cfg, snapDir, stepToBlock),
+		"pre-cut state file must classify correctly when the step map is supplied")
+
+	// Sanity: post-cut file still rejected even with the real map.
+	postCutFile := "v2.0-accounts.2521-2522.kv"
+	require.NoError(t, os.WriteFile(filepath.Join(snapDir, postCutFile), []byte("x"), 0o644))
+	err = ValidateForkDatadirWithStepMap(cfg, snapDir, stepToBlock)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), postCutFile)
+}

@@ -397,11 +397,30 @@ func (p *Provider) Initialize(deps Deps) error {
 	p.republishChainToml = deps.RepublishChainToml
 
 	// Fork-config datadir guards: refuse pre-merge cut or a datadir
-	// already populated with parent-lineage post-cut files. Runs before
-	// any disk handle opens so the failure mode is "abort startup with
-	// a clear hint" rather than corrupting an existing datadir or
-	// failing later mid-sweep. No-op for non-fork chains (Parent == "").
-	if err := downloader.ValidateForkDatadir(p.ChainConfig, config.Dirs.Snap); err != nil {
+	// already populated with parent-lineage post-cut files. Runs
+	// before any disk handle opens (beyond ChainDB which is passed
+	// in via Deps) so the failure mode is "abort startup with a
+	// clear hint" rather than corrupting an existing datadir. No-op
+	// for non-fork chains (Parent == "").
+	//
+	// For fork chains, build a step→block map from rawdbv3.TxNums so
+	// state files whose step range provably resolves to a pre-cut
+	// block don't get flagged as "straddle" by the classifier's
+	// conservative empty-map default. Without this, an in-process
+	// debug_setFork's mode-B trim leaves the datadir in a state
+	// that ValidateForkDatadir rejects on the very next
+	// --chain=<fork-name> restart — the shipped fallback path fails.
+	var stepToBlock downloader.StepToBlock
+	if p.ChainConfig.Parent != "" && deps.Aggregator != nil {
+		if err := p.ChainDB.View(ctx, func(tx kv.Tx) error {
+			var berr error
+			stepToBlock, berr = downloader.BuildStepToBlockFromMaxTxNum(ctx, tx, deps.Aggregator.StepSize())
+			return berr
+		}); err != nil {
+			return fmt.Errorf("storage: build step→block map for fork validation: %w", err)
+		}
+	}
+	if err := downloader.ValidateForkDatadirWithStepMap(p.ChainConfig, config.Dirs.Snap, stepToBlock); err != nil {
 		return fmt.Errorf("storage: fork datadir validation: %w", err)
 	}
 
