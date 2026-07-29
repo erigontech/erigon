@@ -214,15 +214,9 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 			}
 
 			if d.balance != nil || d.nonce != nil || d.incarnation != nil || d.codeHash != nil || d.codeWritten {
-				// LightCollector emits only fields that changed vs the per-TX
-				// `original` snapshot, so missing fields here mean "unchanged"
-				// — we must read the current base (from blockCache when present,
-				// else directly from the domain) and overlay only the present
-				// fields. Without this, an unchanged field would silently reset
-				// to zero. See TestLightCollectorNoncePreservation* for the
-				// scenario this defends against.
-				// Exception: a self-destructed account's base stays empty — the
-				// destruction cleared every field, so nothing may be resurrected.
+				// A WriteSet may contain only the changed account fields, so
+				// overlay it on the current state. Self-destruct is the exception:
+				// its base stays empty so cleared fields cannot be resurrected.
 				acc := accounts.NewAccount()
 				if !d.selfDestruct {
 					if blockCache != nil {
@@ -655,15 +649,7 @@ func (c *versionedWriteCollector) UpdateAccountCode(address accounts.Address, in
 }
 
 func (c *versionedWriteCollector) DeleteAccount(address accounts.Address, original *accounts.Account) error {
-	// MIRROR-OF: LightCollector.DeleteAccount — kept symmetric so that
-	// future searches for one find the other. Both collectors emit only
-	// SelfDestructPath; the IncarnationPath needed by the parallel
-	// commitment calculator for the SD-of-pre-existing-contract case is
-	// emitted via IBS.Selfdestruct's versionWritten (intra_block_state.go
-	// around line 1430), not via either DeleteAccount. If a future caller
-	// ever invokes DeleteAccount outside the IBS.Selfdestruct path on a
-	// pre-existing contract, both implementations would need an
-	// IncarnationPath emit here.
+	// IBS records any accompanying incarnation change separately.
 	c.writes.SetSelfDestruct(address, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: address, Path: SelfDestructPath}, Val: true})
 
 	c.rs.accountsMutex.Lock()
@@ -702,76 +688,6 @@ func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, 
 }
 
 func (c *versionedWriteCollector) CreateContract(_ accounts.Address) error { return nil }
-
-// LightCollector is a lightweight StateWriter that accumulates VersionedWrites
-// without the rs.accounts locking of versionedWriteCollector. It is used by
-// parallel workers to capture MakeWriteSet output (collector-format writes with
-// all 4 account fields per address) alongside the normal IBS VersionedWrites.
-// The captured writes are later used in finalize to skip full IBS reconstruction.
-type LightCollector struct {
-	writes *WriteSet
-}
-
-func NewLightCollector() *LightCollector {
-	return &LightCollector{writes: &WriteSet{}}
-}
-
-// TakeWrites returns the accumulated writes and resets the collector.
-func (c *LightCollector) TakeWrites() *WriteSet {
-	writes := c.writes
-	c.writes = &WriteSet{}
-	return writes
-}
-
-func (c *LightCollector) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
-	var accountCopy accounts.Account
-	accountCopy.Copy(account)
-	accountCopy.PrevIncarnation = account.PrevIncarnation
-
-	if original.Incarnation > accountCopy.Incarnation {
-		c.writes.SetSelfDestruct(address, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: address, Path: SelfDestructPath}, Val: true})
-	}
-
-	// Only emit fields that changed vs `original`. In the parallel executor
-	// `original` comes from the worker's block-origin snapshot (pre-block
-	// values), so emitting an unchanged field would carry a stale block-
-	// origin value that overwrites a later TX's update on apply (e.g. a
-	// balance-only transfer overwriting an earlier TX's nonce increment).
-	// See TestLightCollectorNoncePreservation* for the exact scenario.
-	if !accountCopy.Balance.Eq(&original.Balance) {
-		c.writes.SetBalance(address, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: address, Path: BalancePath}, Val: accountCopy.Balance})
-	}
-	if accountCopy.Nonce != original.Nonce {
-		c.writes.SetNonce(address, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: address, Path: NoncePath}, Val: accountCopy.Nonce})
-	}
-	// Emit on up-revs only — a down-rev would clobber a same-block SD-side cell.
-	if accountCopy.Incarnation > original.Incarnation {
-		c.writes.SetIncarnation(address, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: address, Path: IncarnationPath}, Val: accountCopy.Incarnation})
-	}
-	if accountCopy.CodeHash != original.CodeHash {
-		c.writes.SetCodeHash(address, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: address, Path: CodeHashPath}, Val: accountCopy.CodeHash})
-	}
-	return nil
-}
-
-func (c *LightCollector) UpdateAccountCode(address accounts.Address, _ uint64, codeHash accounts.CodeHash, code []byte) error {
-	c.writes.SetCode(address, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: address, Path: CodePath}, Val: accounts.Code{Hash: codeHash, Bytes: code}})
-	return nil
-}
-
-func (c *LightCollector) DeleteAccount(address accounts.Address, _ *accounts.Account) error {
-	c.writes.SetSelfDestruct(address, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: address, Path: SelfDestructPath}, Val: true})
-	return nil
-}
-
-func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64, key accounts.StorageKey, _, value uint256.Int) error {
-	// Always emit — deduplication happens in the BlockStateCache write buffer.
-	// The buffer compares with pre-block committed values at flush time.
-	c.writes.SetStorage(address, key, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: address, Path: StoragePath, Key: key}, Val: value})
-	return nil
-}
-
-func (c *LightCollector) CreateContract(_ accounts.Address) error { return nil }
 
 // NotifyAccumulator drives txpool state-diff notifications from VersionedWrites.
 // It reconstructs account state from the per-field writes and calls
