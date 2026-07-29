@@ -372,7 +372,7 @@ func TestCreate2OntoExistingAccountSkipsNewAccountCharge(t *testing.T) {
 	require.Equal(t, availableCreateGas-availableCreateGas/64, enteredCreateGas)
 }
 
-func TestCreateTraceUsesActualGasOnEarlyFailure(t *testing.T) {
+func TestCreateTraceOnEarlyFailure(t *testing.T) {
 	for _, tt := range []struct {
 		name      string
 		config    *chain.Config
@@ -407,14 +407,17 @@ func TestCreateTraceUsesActualGasOnEarlyFailure(t *testing.T) {
 				}
 				_ = s.CommitBlock(vmctx.Rules(tt.config), w)
 				var enteredCreateGas, exitedCreateGasUsed, availableCreateGas uint64
+				var enteredCreateCount, exitedCreateCount int
 				hooks := &tracing.Hooks{
 					OnEnter: func(_ int, typ byte, _, _ accounts.Address, _ bool, _ []byte, gas uint64, _ uint256.Int, _ []byte) {
 						if vm.OpCode(typ) == vm.CREATE2 {
+							enteredCreateCount++
 							enteredCreateGas = gas
 						}
 					},
 					OnExit: func(depth int, _ []byte, gasUsed uint64, _ error, _ bool) {
 						if depth == 1 {
+							exitedCreateCount++
 							exitedCreateGasUsed = gasUsed
 						}
 					},
@@ -428,11 +431,14 @@ func TestCreateTraceUsesActualGasOnEarlyFailure(t *testing.T) {
 				_, _, _, err = vmenv.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Regular: 500_000}, uint256.Int{}, false)
 				require.NoError(t, err)
 				require.NotZero(t, availableCreateGas)
-				expectedCreateGas := availableCreateGas
-				if tt.forwarded {
-					expectedCreateGas -= expectedCreateGas / 64
+				if !tt.forwarded {
+					require.Zero(t, enteredCreateCount)
+					require.Zero(t, exitedCreateCount)
+					return
 				}
-				require.Equal(t, expectedCreateGas, enteredCreateGas)
+				require.Equal(t, 1, enteredCreateCount)
+				require.Equal(t, 1, exitedCreateCount)
+				require.Equal(t, availableCreateGas-availableCreateGas/64, enteredCreateGas)
 				require.Zero(t, exitedCreateGasUsed)
 			},
 		)

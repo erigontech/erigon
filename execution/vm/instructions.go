@@ -1040,7 +1040,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	var childGasUsed mdgas.MdGasUsage
 	if suberr == nil {
 		res, addr, returnGas, childGasUsed, suberr = evm.createPrepared(scope.Contract.Address(), codeAndHash, gas, value, address, typ, preparation)
-	} else if evm.Config().Tracer != nil {
+	} else if forwarded && evm.Config().Tracer != nil {
 		evm.captureBegin(evm.depth, typ, scope.Contract.Address(), address, false, codeAndHash.code, gas, value, nil)
 		evm.captureEnd(evm.depth, typ, gas, returnGas, nil, suberr)
 	}
