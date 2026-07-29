@@ -69,7 +69,6 @@ quit
 		fmt.Fprintln(os.Stderr, "Error: could not create temp file for LLDB script:", err)
 		os.Exit(1)
 	}
-
 	// No defer cleanup: on success syscall.Exec replaces the process, and the
 	// exec'd lldb still needs the script file, so it is only removed on failure.
 	_, err = tmpFile.WriteString(lldbScript)
@@ -77,7 +76,6 @@ quit
 	if err != nil || closeErr != nil {
 		_ = dir.RemoveFile(tmpFile.Name())
 		fmt.Fprintln(os.Stderr, "Error: could not write or close LLDB script:", err, closeErr)
-		dir.RemoveFile(tmpFile.Name())
 		os.Exit(1)
 	}
 
@@ -93,7 +91,6 @@ quit
 	if err != nil {
 		_ = dir.RemoveFile(tmpFile.Name())
 		fmt.Fprintln(os.Stderr, "Failed to restart under LLDB:", err)
-		dir.RemoveFile(tmpFile.Name())
 		os.Exit(1)
 	}
 }
