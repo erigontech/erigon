@@ -672,11 +672,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	snapDownloader := mockDownloader(ctrl, mock.Dirs.Snap)
 
-	miningCancel := make(chan struct{})
-	go func() {
-		<-mock.Ctx.Done()
-		close(miningCancel)
-	}()
+	// Never closed: finishBlock sends to it concurrently to abort an in-flight seal.
+	sealCancel := make(chan struct{})
 
 	readAheader := exec.NewBlockReadAheader()
 	blkBuilder := builder.NewBuilder(
@@ -707,7 +704,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		&vm.Config{},
 		dirs.Tmp,
 		mock.TxPool,
-		miningCancel,
+		sealCancel,
 		latestBlockBuiltStore,
 		nil, /*sdProvider*/
 		logger,

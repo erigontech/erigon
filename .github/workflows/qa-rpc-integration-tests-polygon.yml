@@ -137,6 +137,23 @@ jobs:
             exit 1
           fi
 
+      - name: Generate Summary
+        if: always()
+        env:
+          RESULT: ${{ steps.test_step.outputs.TEST_RESULT || job.status }}
+        run: |
+          # Render structured results (which tests failed + overall stats) into the
+          # run summary page. The reporter never fails the job and always prints
+          # something, even when the run died before producing a report.
+          SUMMARY=$(python3 "$GITHUB_WORKSPACE/.github/workflows/scripts/render_rpc_summary.py" \
+            --result-dir "$TEST_RESULT_DIR" \
+            --workflow "$GITHUB_WORKFLOW" \
+            --chain "$CHAIN" \
+            --result "$RESULT")
+          printf '%s\n' "$SUMMARY"
+          printf '%s\n' "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p "$TEST_RESULT_DIR" 2>/dev/null && printf '%s\n' "$SUMMARY" > "$TEST_RESULT_DIR/summary.md" || true
+
       - name: Stop Erigon RpcDaemon
         if: always()
         working-directory: ${{ github.workspace }}/build/bin
