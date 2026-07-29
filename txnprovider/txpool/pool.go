@@ -1666,15 +1666,6 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 		p.senderLastActivity[senderID] = blockNum
 		nonce, balance, err := senders.info(cacheView, senderID)
 		if err != nil {
-			if errors.Is(err, ErrSenderIDNotRegistered) {
-				// stateChanges yielded a senderID via senders.getID, which
-				// only returns IDs present in senderIDs → senderID2Addr.
-				// Getting here means the maps diverged between the two
-				// reads — a real invariant break that self-heal wouldn't
-				// fix. Surface it as an error rather than panicking.
-				logger.Warn("[txpool] OnNewBlock: sendersWithChangedState senderID unmapped", "senderID", senderID)
-				return announcements, err
-			}
 			return announcements, err
 		}
 		p.onSenderStateChange(senderID, nonce, balance, blockGasLimit, logger)
@@ -1683,21 +1674,19 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	// Don't touch senderLastActivity for queuedSenders — these senders did not
 	// change state on-chain, so the dormancy timer should not be reset.
 	//
-	// queuedSenders is populated from p.queued.best.ms, whose entries are
-	// supposed to be reachable via senderID2Addr. A soak run on 2026-07-28
-	// (40 clean mode_b iters, then panic) showed the invariant broken:
-	// a stale metaTxn in p.queued.best.ms whose senderID had been evicted
-	// by flushLocked. Root cause not yet found; the defensive skip below
-	// keeps the node alive so future occurrences give observability.
-	// Self-heal (remove the orphan mt from the sub-pool) is a follow-up
-	// once we can build a deterministic reproducer.
+	// queuedSenders is populated from p.queued.best.ms; the invariant is that
+	// every mt still in a sub-pool has its senderID in senders.senderID2Addr.
+	// A 2026-07-28 soak run (40 clean mode_b iters, then crash after ~13h)
+	// tripped a divergence and panicked here. Root cause not yet isolated
+	// (no deterministic reproducer). Rather than mask with self-heal, the
+	// call below propagates ErrSenderIDNotRegistered up the stack with a
+	// dump of the observed state so the next occurrence gives us data to
+	// close the gap.
 	for senderID := range queuedSenders {
 		nonce, balance, err := senders.info(cacheView, senderID)
 		if err != nil {
 			if errors.Is(err, ErrSenderIDNotRegistered) {
-				logger.Warn("[txpool] OnNewBlock: queued.best.ms senderID unmapped — skipping (see senders.go ErrSenderIDNotRegistered)",
-					"senderID", senderID, "blockNum", blockNum)
-				continue
+				p.dumpQueuedOrphanDiagnostic(senderID, blockNum, logger)
 			}
 			return announcements, err
 		}
@@ -1867,6 +1856,45 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	// Remove from mined cache as we are now "resurrecting" it to a sub-pool
 	p.deleteMinedBlobTxn(hashStr)
 	return txpoolcfg.NotSet
+}
+
+// dumpQueuedOrphanDiagnostic emits everything we know about a queued
+// metaTxn whose senderID is missing from senders.senderID2Addr. Fires
+// from OnNewBlock's queuedSenders loop before returning
+// ErrSenderIDNotRegistered. The soak that first tripped this crashed
+// with just "panic: must not happen" and no state context — the dump
+// gives the next occurrence enough evidence to isolate the divergence
+// path (which mt, which sub-pool it thinks it's in, whether p.all
+// still knows about it, etc.).
+func (p *TxPool) dumpQueuedOrphanDiagnostic(senderID uint64, blockNum uint64, logger log.Logger) {
+	logger.Error("[txpool] queued.best.ms senderID unregistered — capturing diagnostic",
+		"senderID", senderID,
+		"blockNum", blockNum,
+		"queued.best.len", p.queued.best.Len(),
+		"queued.worst.len", p.queued.worst.Len(),
+		"pending.best.len", p.pending.best.Len(),
+		"baseFee.best.len", p.baseFee.best.Len(),
+		"all.count(senderID)", p.all.count(senderID),
+		"senderID2Addr.len", len(p.senders.senderID2Addr),
+		"senderIDs.len", len(p.senders.senderIDs),
+		"byHash.len", len(p.byHash),
+		"deletedTxns.len", len(p.deletedTxns),
+	)
+	for _, mt := range p.queued.best.ms {
+		if mt.TxnSlot.SenderID != senderID {
+			continue
+		}
+		logger.Error("[txpool] orphan mt in queued.best.ms",
+			"senderID", senderID,
+			"nonce", mt.TxnSlot.Nonce,
+			"idHash", fmt.Sprintf("%x", mt.TxnSlot.IDHash),
+			"bestIndex", mt.bestIndex,
+			"worstIndex", mt.worstIndex,
+			"currentSubPool", mt.currentSubPool,
+			"in_p.all", p.all.get(mt.TxnSlot.SenderID, mt.TxnSlot.Nonce) != nil,
+			"in_p.byHash", p.byHash[string(mt.TxnSlot.IDHash[:])] != nil,
+		)
+	}
 }
 
 // dropping transaction from all sub-structures and from db

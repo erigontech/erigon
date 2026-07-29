@@ -2341,20 +2341,23 @@ func TestQueuedTxnPromotedAfterStaleAddLocal(t *testing.T) {
 	asrt.Equal(0, queued, "queued must be empty after promotion")
 }
 
-// TestOnNewBlock_QueuedOrphanSenderIDDoesNotPanic reproduces the
-// invariant break observed on the continuous unwind soak
-// (2026-07-28: 40 successful mode_b iters, then panic "must not
-// happen" in senders.info). p.queued.best.ms held a metaTxn whose
-// senderID had been evicted from senderID2Addr by flushLocked —
-// the queuedSenders loop in addTxnsOnNewBlock then called
-// senders.info(evictedID) and crashed the process.
+// TestOnNewBlock_QueuedOrphanSenderIDReturnsError pins the invariant
+// break observed on the continuous unwind soak (2026-07-28: 40 clean
+// mode_b iters, then crash after ~13h). p.queued.best.ms held a
+// metaTxn whose senderID had been evicted from senderID2Addr; the
+// queuedSenders loop in addTxnsOnNewBlock called senders.info and
+// panicked "must not happen".
+//
+// Post-fix: senders.info returns ErrSenderIDNotRegistered instead of
+// panicking. The queuedSenders loop propagates the error through
+// OnNewBlock's return AND dumps a diagnostic to the log. That
+// surfaces every future occurrence (with state context — bestIndex,
+// currentSubPool, whether p.all still has the mt, etc.) so we can
+// close the root cause rather than mask it with a self-heal.
 //
 // The test constructs the divergence manually (add txn → force
-// eviction) since the natural triggering sequence hasn't been
-// isolated yet. Before the fix, the pool panics inside OnNewBlock.
-// After the fix, the pool logs a warning + skips the orphan
-// senderID and OnNewBlock returns cleanly.
-func TestOnNewBlock_QueuedOrphanSenderIDDoesNotPanic(t *testing.T) {
+// eviction) since the natural triggering path hasn't been isolated.
+func TestOnNewBlock_QueuedOrphanSenderIDReturnsError(t *testing.T) {
 	req := require.New(t)
 	logger := log.New()
 
@@ -2419,16 +2422,19 @@ func TestOnNewBlock_QueuedOrphanSenderIDDoesNotPanic(t *testing.T) {
 	pool.lock.Unlock()
 
 	// Deliver a subsequent block that doesn't touch addr1. The queuedSenders
-	// loop in addTxnsOnNewBlock iterates p.queued.best.ms, encounters our
-	// orphan senderID, calls senders.info — pre-fix this panicked, post-fix
-	// it logs a warning and skips.
+	// loop iterates p.queued.best.ms, encounters our orphan senderID, calls
+	// senders.info — pre-fix this panicked; post-fix it returns
+	// ErrSenderIDNotRegistered (via OnNewBlock's error return) after dumping
+	// diagnostic state to the log.
 	h1 := gointerfaces.ConvertHashToH256([32]byte{1})
 	nextBlock := &remoteproto.StateChangeBatch{
 		StateVersionId: 1, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
 		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1, BlockHash: h1}},
 	}
+	var onbErr error
 	req.NotPanics(func() {
-		err := pool.OnNewBlock(ctx, nextBlock, TxnSlots{}, TxnSlots{}, TxnSlots{})
-		req.NoError(err)
+		onbErr = pool.OnNewBlock(ctx, nextBlock, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	}, "OnNewBlock must not panic when p.queued.best.ms references an evicted senderID")
+	req.ErrorIs(onbErr, ErrSenderIDNotRegistered,
+		"OnNewBlock must surface the invariant break as an error, not silently succeed")
 }
