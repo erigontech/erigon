@@ -239,7 +239,7 @@ func DerivePriorReceiptsWithGas(
 		blockNum := header.Number.Uint64()
 		cached := make(types.Receipts, 0, startTxIndex)
 		allCached := true
-		for i := 0; i < startTxIndex && i < len(txns); i++ {
+		for i := range startTxIndex {
 			txNum := blockStartTxNum + uint64(i)
 			receipt, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
 				BlockNum:      blockNum,
