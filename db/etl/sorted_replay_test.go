@@ -19,6 +19,7 @@ package etl
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
 	"sort"
 	"testing"
 
@@ -227,4 +228,19 @@ func TestSortednessBreaksLoadStaysCorrect(t *testing.T) {
 			require.Equal(t, stableSortByKey(input), loadStream(t, c))
 		})
 	}
+}
+
+type emptyProvider struct{}
+
+func (emptyProvider) Next() ([]byte, []byte, error) { return nil, nil, io.EOF }
+func (emptyProvider) Dispose()                      {}
+func (emptyProvider) Wait() error                   { return nil }
+func (emptyProvider) String() string                { return "empty" }
+
+// A recorded run is never empty; the sequential driver must fail loudly on a
+// truncated spill instead of silently dropping the run.
+func TestReplaySequentiallyEmptyRunErrors(t *testing.T) {
+	err := replaySequentially("test", []dataProvider{emptyProvider{}}, func(k, v []byte) error { return nil })
+	require.Error(t, err)
+	require.ErrorIs(t, err, io.EOF)
 }
