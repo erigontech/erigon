@@ -142,11 +142,23 @@ type sortableBuffer struct {
 	entries     []entryLoc
 	data        []byte
 	optimalSize int
+	unsorted    bool
 }
+
+// inputSorted reports whether keys arrived in non-decreasing order, which lets
+// Collector.Load replay flushed runs sequentially instead of heap-merging them.
+func (b *sortableBuffer) inputSorted() bool { return !b.unsorted }
 
 // Put adds key and value to the buffer. These slices will not be accessed later,
 // so no copying is necessary
 func (b *sortableBuffer) Put(k, v []byte) {
+	if !b.unsorted && len(b.entries) > 0 {
+		last := &b.entries[len(b.entries)-1]
+		prevKey := b.data[last.offset : last.offset+max(last.keyLen, 0)]
+		if bytes.Compare(prevKey, k) > 0 {
+			b.unsorted = true
+		}
+	}
 	e := entryLoc{
 		offset:         int32(len(b.data)),    //nolint:gosec
 		keyLen:         int32(len(k)),         //nolint:gosec
@@ -204,6 +216,7 @@ func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer
 func (b *sortableBuffer) Reset() {
 	b.entries = b.entries[:0]
 	b.data = b.data[:0]
+	b.unsorted = false
 }
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
