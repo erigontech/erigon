@@ -672,19 +672,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	snapDownloader := mockDownloader(ctrl, mock.Dirs.Snap)
 
-	// miningCancel is a best-effort interrupt channel: finishBlock sends to it
-	// (non-blocking) to cancel an in-flight sealing task, so we must never close
-	// it while finishBlock may be concurrently selecting on it — doing so would
-	// race (close vs send on the same channel). Use a buffered channel and send
-	// a value on shutdown instead of closing.
-	miningCancel := make(chan struct{}, 1)
-	go func() {
-		<-mock.Ctx.Done()
-		select {
-		case miningCancel <- struct{}{}:
-		default:
-		}
-	}()
+	// Never closed: finishBlock sends to it concurrently to abort an in-flight seal.
+	miningCancel := make(chan struct{})
 
 	readAheader := exec.NewBlockReadAheader()
 	blkBuilder := builder.NewBuilder(
