@@ -28,6 +28,44 @@ without recurrence.
 
 ## OPEN
 
+### 2. `seedLeftoverBlocks` header/tx range mismatch on mode-B unwind
+
+- **Signature:** `storage.Provider.Unwind: snapshot-trim: seedLeftoverBlocks([X, Y]): seedLeftoverBlocks: tx range [X, Z) does not match headers [A, B)`
+- **First seen:** 2026-07-29T10:53:31 UTC
+  - Cycle log: `/tmp/continuous-soak/soak.cycle0001-20260729T075825.log`
+  - Erigon log: `/tmp/erigon-hoodi.log`
+  - Binary commit: `7938098e91` (built with the txpool panic+diagnostic fix)
+  - Ran 8 iterations clean (mode_a + mode_a2 + mode_b × 8); iter 9 mode_b failed
+  - Iter 9 mode_b: pre_head=3310510, target=3157217, depth=153293 (deep regime)
+  - Actual concrete signature:
+    ```
+    tx range [3157000, 3158000) does not match headers [3150000, 3160000)
+    ```
+  - Headers file is a merged 10k-block chunk `[3150000, 3160000)`; tx
+    file is an unmerged 1k-block chunk `[3157000, 3158000)`. The
+    strict range-parity check at
+    [provider_unwind_snapshot_rebuild.go:348-350](../../node/components/storage/provider_unwind_snapshot_rebuild.go#L348-L350)
+    refuses to seed leftover blocks when the three ranges (headers,
+    bodies, tx) aren't identical.
+- **Reproduction:** in-soak only; no isolated reproducer. The
+  triggering condition is a mode-B unwind whose target lands in a
+  block window where headers has already been merged into a wider
+  file but tx hasn't caught up.
+- **Root cause:** race between retire/merge for headers (which merge
+  into 10k chunks) and tx (which lag or merge on a different
+  cadence). seedLeftoverBlocks assumes symmetry. Either:
+    - the retire/merge coordination needs to make them symmetric
+      before unwind can trim, or
+    - seedLeftoverBlocks needs to handle asymmetric ranges (pick
+      the narrowest containing tx chunk and iterate headers'
+      corresponding sub-range).
+- **Fix:** none landed. This is the SECOND rare issue surfaced by
+  the soak this week; needs its own investigation session.
+- **Diagnostic hook:** the error message names all three ranges —
+  enough state to identify which files disagreed. Additional context
+  (merge history, retire cadence) needs a log-side capture that
+  isn't there yet.
+
 ### 1. `txpool.OnNewBlock` orphan senderID in `p.queued.best.ms`
 
 - **Signature:** `panic: txpool.OnNewBlock queued.best.ms senderID=N not in senderID2Addr`
