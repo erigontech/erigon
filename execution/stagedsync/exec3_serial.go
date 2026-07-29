@@ -401,8 +401,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 						se.blockGasUsed += priorGasUsed.BlockRegular
 						se.blockStateGasUsed += priorGasUsed.BlockState
 						se.blobGasUsed = priorGasUsed.Blob
-						for _, tx := range txTask.Txs[startTxIndex:] {
-							se.blobGasUsed += tx.GetBlobGas()
+						for _, txn := range txTask.Txs[startTxIndex:] {
+							se.blobGasUsed += txn.GetBlobGas()
 						}
 						priorComplete = true
 					}

@@ -2966,8 +2966,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					be.blockStateGasUsed += priorGasUsed.BlockState
 					be.blockGasUsed = max(be.blockRegularGasUsed, be.blockStateGasUsed)
 					be.blobGasUsed = priorGasUsed.Blob
-					for _, tx := range txs[startTxIndex:] {
-						be.blobGasUsed += tx.GetBlobGas()
+					for _, txn := range txs[startTxIndex:] {
+						be.blobGasUsed += txn.GetBlobGas()
 					}
 					receiptsComplete = true
 				}
