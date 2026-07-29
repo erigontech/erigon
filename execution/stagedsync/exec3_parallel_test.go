@@ -1562,6 +1562,77 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 	}
 }
 
+func TestParallelResumeRestoresGasPool(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	tx0 := signSelfSendTx(t, 0, 0, 1, 21000, config, 0)
+	tx1 := signSelfSendTx(t, 1, 0, 1, 30000, config, 0)
+
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(1_000_000_000)
+		if err := putter.DomainPut(kv.AccountsDomain, senderIsCoinbaseKey.rawAddress[:], accounts.SerialiseV3(&acc), 0, nil); err != nil {
+			return err
+		}
+		return rawtemporaldb.AppendReceipt(putter, 0, 21000, 0, 1)
+	})
+
+	txTask := &exec.TxTask{
+		Header: &types.Header{
+			Number:   *uint256.NewInt(1),
+			GasLimit: 42000,
+		},
+		TxNum:   2,
+		TxIndex: 1,
+		Config:  config,
+		Txs:     types.Transactions{tx0, tx1},
+	}
+
+	pe, roTx := newResumeTestExec(t, db, config)
+	be := newBlockExec(1, common.Hash{}, protocol.NewGasPool(42000, 0), nil, make(chan applyResult, 4), nil, false, nil)
+	eTask := &execTask{Task: txTask}
+	be.tasks = []*execTask{eTask}
+	be.results = []*execResult{nil}
+	be.execTasks.setInProgress(0)
+
+	txResult := &exec.TxResult{
+		Task: &taskVersion{
+			execTask: eTask,
+			version: state.Version{
+				BlockNum:    1,
+				TxIndex:     1,
+				Incarnation: 1,
+				TxNum:       2,
+			},
+		},
+		ExecutionResult: evmtypes.ExecutionResult{
+			ReceiptGasUsed:      21000,
+			BlockRegularGasUsed: 21000,
+		},
+	}
+
+	res, err := be.nextResult(context.Background(), pe, txResult, roTx)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.ErrorIs(t, res.Err, rules.ErrInvalidBlock)
+	require.ErrorContains(t, res.Err, "block gas used overflow")
+}
+
+func TestConsumePriorGas(t *testing.T) {
+	gasPool := protocol.NewGasPool(100, 30)
+
+	err := consumePriorGas(gasPool, &protocol.GasUsed{
+		BlockRegular: 40,
+		BlockState:   60,
+		Blob:         10,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, uint64(60), gasPool.RegularGasAvailable())
+	require.Equal(t, uint64(40), gasPool.StateGasAvailable())
+	require.Equal(t, uint64(20), gasPool.BlobGas())
+}
+
 func TestResumeReconstructionReplaysAmsterdamGasDimensions(t *testing.T) {
 	db := newResumeTestDB(t)
 	config := chain.AllProtocolChanges

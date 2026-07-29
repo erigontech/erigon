@@ -468,6 +468,22 @@ func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.T
 	return priorReceipts, priorGasUsed, nil
 }
 
+func consumePriorGas(gasPool *protocol.GasPool, gasUsed *protocol.GasUsed) error {
+	if gasUsed == nil {
+		return nil
+	}
+	if err := gasPool.ConsumeRegular(gasUsed.BlockRegular); err != nil {
+		return fmt.Errorf("regular gas: %w", err)
+	}
+	if err := gasPool.ConsumeState(gasUsed.BlockState); err != nil {
+		return fmt.Errorf("state gas: %w", err)
+	}
+	if err := gasPool.SubBlobGas(gasUsed.Blob); err != nil {
+		return fmt.Errorf("blob gas: %w", err)
+	}
+	return nil
+}
+
 func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHash common.Hash) {
 	defer func() {
 		if rec := recover(); rec != nil {

@@ -58,12 +58,12 @@ func newSerialResumeTestExec(t *testing.T, db kv.TemporalRwDB, config *chain.Con
 func TestSerialResumeValidatesRestoredBlockGas(t *testing.T) {
 	config := chain.TestChainBerlinConfig
 
-	run := func(t *testing.T, headerGasUsed uint64) error {
+	run := func(t *testing.T, headerGasUsed, blockGasLimit, suffixGasLimit uint64) error {
 		db := newResumeTestDB(t)
 		engine := ethash.NewFaker()
 
 		tx0 := signSelfSendTx(t, 0, 1, 1, 21000, config, 0)
-		tx1 := signSelfSendTx(t, 1, 1, 1, 21000, config, 0)
+		tx1 := signSelfSendTx(t, 1, 1, 1, suffixGasLimit, config, 0)
 		txs := types.Transactions{tx0, tx1}
 
 		expectedReceipts := types.Receipts{
@@ -72,7 +72,7 @@ func TestSerialResumeValidatesRestoredBlockGas(t *testing.T) {
 		}
 		header := &types.Header{
 			Number:      *uint256.NewInt(1),
-			GasLimit:    10_000_000,
+			GasLimit:    blockGasLimit,
 			GasUsed:     headerGasUsed,
 			ReceiptHash: types.DeriveSha(expectedReceipts),
 			Bloom:       types.CreateBloom(expectedReceipts),
@@ -120,13 +120,19 @@ func TestSerialResumeValidatesRestoredBlockGas(t *testing.T) {
 	}
 
 	t.Run("restored gas matches header", func(t *testing.T) {
-		require.NoError(t, run(t, 42000))
+		require.NoError(t, run(t, 42000, 10_000_000, 21000))
 	})
 
 	t.Run("suffix-only gas in header is rejected", func(t *testing.T) {
-		err := run(t, 21000)
+		err := run(t, 21000, 10_000_000, 21000)
 		require.ErrorIs(t, err, rules.ErrInvalidBlock)
 		require.ErrorContains(t, err, "gas used by execution: 42000")
 		require.ErrorContains(t, err, "resumed block with reconstructed prefix")
+	})
+
+	t.Run("prefix gas reduces the suffix gas pool", func(t *testing.T) {
+		err := run(t, 42000, 42000, 30000)
+		require.ErrorIs(t, err, rules.ErrInvalidBlock)
+		require.ErrorContains(t, err, "gas limit reached")
 	})
 }

@@ -340,12 +340,37 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		startTxIndex = max(tasks[0].(*exec.TxTask).TxIndex, 0)
 	}
 
+	priorComplete := startTxIndex == 0
+	var priorReceipts types.Receipts
+	var priorGasUsed *protocol.GasUsed
+	if startTxIndex > 0 {
+		firstTask := tasks[0].(*exec.TxTask)
+		if len(firstTask.Txs) > 0 {
+			blockStartTxNum := firstTask.TxNum - uint64(firstTask.TxIndex)
+			priorReceipts, priorGasUsed, err = se.reconstructPriorReceipts(ctx, se.applyTx, firstTask.Header, firstTask.Txs, startTxIndex, blockStartTxNum)
+			if err != nil {
+				se.logger.Warn(fmt.Sprintf("[%s] failed to reconstruct prior receipts for partial block", se.logPrefix),
+					"block", firstTask.BlockNumber(), "startTxIndex", startTxIndex, "err", err)
+			} else {
+				se.blockGasUsed += priorGasUsed.BlockRegular
+				se.blockStateGasUsed += priorGasUsed.BlockState
+				se.blobGasUsed += priorGasUsed.Blob
+				priorComplete = true
+			}
+		}
+	}
+
 	var gasPool *protocol.GasPool
 	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
 
 		if gasPool == nil {
 			gasPool = protocol.NewGasPool(task.BlockGasLimit(), se.cfg.chainConfig.GetMaxBlobGasPerBlock(tasks[0].BlockTime()))
+			if priorComplete && startTxIndex > 0 {
+				if err := consumePriorGas(gasPool, priorGasUsed); err != nil {
+					return false, fmt.Errorf("%w, block=%d: restore prior block gas: %w", rules.ErrInvalidBlock, txTask.BlockNumber(), err)
+				}
+			}
 		}
 
 		txTask.ResetGasPool(gasPool)
@@ -387,25 +412,11 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				chainReader := consensuschain.NewReader(se.cfg.chainConfig, se.applyTx, se.cfg.blockReader, se.logger)
 
 				finalizeReceipts := blockReceipts
-				priorComplete := startTxIndex == 0
-				if startTxIndex > 0 && len(txTask.Txs) > 0 {
-					firstTask := tasks[0].(*exec.TxTask)
-					blockStartTxNum := firstTask.TxNum - uint64(firstTask.TxIndex)
-					priorReceipts, priorGasUsed, priorErr := se.reconstructPriorReceipts(ctx, se.applyTx, txTask.Header, txTask.Txs, startTxIndex, blockStartTxNum)
-					if priorErr != nil {
-						se.logger.Warn(fmt.Sprintf("[%s] failed to reconstruct prior receipts for partial block", se.logPrefix),
-							"block", txTask.BlockNumber(), "startTxIndex", startTxIndex, "err", priorErr)
-					} else {
-						finalizeReceipts = priorReceipts
-						finalizeReceipts = append(finalizeReceipts, blockReceipts...)
-						se.blockGasUsed += priorGasUsed.BlockRegular
-						se.blockStateGasUsed += priorGasUsed.BlockState
-						se.blobGasUsed = priorGasUsed.Blob
-						for _, txn := range txTask.Txs[startTxIndex:] {
-							se.blobGasUsed += txn.GetBlobGas()
-						}
-						priorComplete = true
-					}
+				if priorComplete && startTxIndex > 0 {
+					finalizeReceipts = priorReceipts
+					finalizeReceipts = append(finalizeReceipts, blockReceipts...)
+				}
+				if startTxIndex > 0 {
 					// Fill suffix metadata even when reconstruction fails and
 					// validation remains disabled.
 					receipts.DeriveFields(finalizeReceipts, txTask.BlockHash())
@@ -460,7 +471,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					}
 					// This tx's own blob gas was accumulated above; fold in the
 					// pre-resume cumulative so ApplyTxIndexes persists correct values.
-					se.blobGasUsed += cumBlobGasUsed
+					if !priorComplete {
+						se.blobGasUsed += cumBlobGasUsed
+					}
 					receipt, err = result.CreateReceipt(txTask.TxIndex, cumGasUsed+result.ExecutionResult.ReceiptGasUsed, logIndexAfterTx)
 					if err != nil {
 						return err

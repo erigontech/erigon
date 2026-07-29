@@ -2298,11 +2298,14 @@ type blockExecutor struct {
 	// final blockGasUsed = max(regular, state) matches EIP-8037 / EIP-7778
 	// block-level accounting and equals what the builder set in header.GasUsed
 	// via protocol.SetGasUsed (= max(cumRegular, cumState)).
-	blockRegularGasUsed uint64
-	blockStateGasUsed   uint64
-	blockGasUsed        uint64
-	blobGasUsed         uint64
-	gasPool             *protocol.GasPool
+	blockRegularGasUsed  uint64
+	blockStateGasUsed    uint64
+	blockGasUsed         uint64
+	blobGasUsed          uint64
+	gasPool              *protocol.GasPool
+	resumePrefixPrepared bool
+	resumePrefixComplete bool
+	resumePrefixReceipts types.Receipts
 
 	execFailed, execAborted []int
 
@@ -2428,11 +2431,52 @@ func (be *blockExecutor) tooManyRetries(tx, txIndex int, label string, origin er
 		rules.ErrInvalidBlock, be.blockNum, txIndex, be.tasks[tx].TxHash(), label, be.txIncarnations[tx], len(be.tasks)))
 }
 
+func (be *blockExecutor) prepareResumePrefix(ctx context.Context, pe *parallelExecutor, applyTx kv.TemporalTx) error {
+	if be.resumePrefixPrepared {
+		return nil
+	}
+	be.resumePrefixPrepared = true
+	if len(be.tasks) == 0 || be.blockNum == 0 {
+		return nil
+	}
+
+	firstTask, ok := be.tasks[0].Task.(*exec.TxTask)
+	if !ok {
+		return nil
+	}
+	startTxIndex := be.tasks[0].Version().TxIndex
+	if startTxIndex <= 0 || firstTask.Header == nil || len(firstTask.Txs) == 0 {
+		return nil
+	}
+
+	blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex)
+	priorReceipts, priorGasUsed, err := pe.reconstructPriorReceipts(ctx, applyTx, firstTask.Header, firstTask.Txs, startTxIndex, blockStartTxNum)
+	if err != nil {
+		pe.logger.Warn("["+pe.logPrefix+"] failed to reconstruct prior receipts for partial block",
+			"block", be.blockNum, "startTxIndex", startTxIndex, "err", err)
+		return nil
+	}
+	if err := consumePriorGas(be.gasPool, priorGasUsed); err != nil {
+		return fmt.Errorf("block gas used overflow while restoring resumed prefix: %w", err)
+	}
+
+	be.resumePrefixReceipts = priorReceipts
+	be.blockRegularGasUsed += priorGasUsed.BlockRegular
+	be.blockStateGasUsed += priorGasUsed.BlockState
+	be.blockGasUsed = max(be.blockRegularGasUsed, be.blockStateGasUsed)
+	be.blobGasUsed = priorGasUsed.Blob
+	be.resumePrefixComplete = true
+	return nil
+}
+
 func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, res *exec.TxResult, applyTx kv.TemporalTx) (result *blockResult, err error) {
 	task, ok := res.Task.(*taskVersion)
 
 	if !ok {
 		return nil, fmt.Errorf("unexpected task type: %T", res.Task)
+	}
+	if err := be.prepareResumePrefix(ctx, pe, applyTx); err != nil {
+		return be.invalidBlockResult(fmt.Errorf("%w: block=%d: %w", rules.ErrInvalidBlock, be.blockNum, err)), nil
 	}
 
 	tx := task.index
@@ -2711,7 +2755,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						}
 						cumulativeGasUsed = cumGasUsed
 						firstLogIndex = logIndexAfterTx
-						be.blobGasUsed = cumBlobGasUsed
+						if !be.resumePrefixComplete {
+							be.blobGasUsed = cumBlobGasUsed
+						}
 					}
 				}
 
@@ -2957,23 +3003,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		if isPartial && be.blockNum > 0 && header != nil {
 			startTxIndex := be.tasks[0].Version().TxIndex
 			receiptsComplete = startTxIndex == 0
-			if startTxIndex > 0 && len(txs) > 0 {
-				blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex)
-				priorReceipts, priorGasUsed, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, blockStartTxNum)
-				if err != nil {
-					pe.logger.Warn("["+pe.logPrefix+"] failed to reconstruct prior receipts for partial block",
-						"block", be.blockNum, "startTxIndex", startTxIndex, "err", err)
-				} else {
-					blockReceipts = append(priorReceipts, blockReceipts...)
-					be.blockRegularGasUsed += priorGasUsed.BlockRegular
-					be.blockStateGasUsed += priorGasUsed.BlockState
-					be.blockGasUsed = max(be.blockRegularGasUsed, be.blockStateGasUsed)
-					be.blobGasUsed = priorGasUsed.Blob
-					for _, txn := range txs[startTxIndex:] {
-						be.blobGasUsed += txn.GetBlobGas()
-					}
-					receiptsComplete = true
-				}
+			if startTxIndex > 0 && be.resumePrefixComplete {
+				completeReceipts := be.resumePrefixReceipts
+				completeReceipts = append(completeReceipts, blockReceipts...)
+				blockReceipts = completeReceipts
+				receiptsComplete = true
 			}
 			// Fill suffix metadata even when reconstruction fails and validation
 			// remains disabled.
