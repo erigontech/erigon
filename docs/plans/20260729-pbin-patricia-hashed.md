@@ -172,12 +172,12 @@ func pbinCommonPrefixBits(a, b *pbinBitpath) int16 // XOR + LeadingZeros64, clam
 - Create: `execution/commitment/pbin_branch.go`
 - Create: `execution/commitment/pbin_cell_test.go`
 
-- [ ] write failing cell encode/decode round-trip tests with prefix bit length drawn from `[0, 529)` (guards H4)
-- [ ] write failing tests for record decode rejecting inconsistent `prefixBitLen`/byte length and non-zero pad bits (guards H3)
-- [ ] define `pbinCell` with a tree-key-space `bitpath` prefix and plain-key fields; **use one prefix, not two** — HPH's `hashedExtension`/`extension` split exists to hold hashed and plain spaces separately, whereas PBin derives the tree key from the plain key on demand. No `stateHash` field: a leaf hash is `H(0x00||key||value)` with nothing to memoize
-- [ ] define the grid as `[528][2]pbinCell` with row-indexed arrays `[528]` and depth-indexed arrays `[529]`, plus `reset`/`resetForReuse` clearing `bitLen`
-- [ ] implement the PBin branch record codec with `prefixBitLen` as an explicit uvarint **bit** count, always encoding both cells (`bitmap = afterMap`, no merge path)
-- [ ] run tests - must pass before task 6
+- [x] write failing cell encode/decode round-trip tests with prefix bit length drawn from `[0, 529)` (guards H4)
+- [x] write failing tests for record decode rejecting inconsistent `prefixBitLen`/byte length and non-zero pad bits (guards H3)
+- [x] define `pbinCell` with a tree-key-space `bitpath` prefix and plain-key fields; **use one prefix, not two** — HPH's `hashedExtension`/`extension` split exists to hold hashed and plain spaces separately, whereas PBin derives the tree key from the plain key on demand. No `stateHash` field: a leaf hash is `H(0x00||key||value)` with nothing to memoize
+- [x] define the grid as `[528][2]pbinCell` with row-indexed arrays `[528]` and depth-indexed arrays `[529]`, plus `reset`/`resetForReuse` clearing `bitLen`
+- [x] implement the PBin branch record codec with `prefixBitLen` as an explicit uvarint **bit** count, always encoding both cells (`bitmap = afterMap`, no merge path)
+- [x] run tests - must pass before task 6
 
 ### Task 6: node merkelization
 
