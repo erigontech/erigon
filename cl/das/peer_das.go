@@ -706,7 +706,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []c
 		for _, block := range blocks {
 			slots = append(slots, block.GetSlot())
 		}
-		log.Debug("DownloadColumnsAndRecoverBlobs", "elapsed time", time.Since(begin), "slots", slots)
+		log.Debug("DownloadColumnsAndRecoverBlobs", "elapsed", time.Since(begin), "slots", slots)
 	}()
 
 	// initialize the download request
