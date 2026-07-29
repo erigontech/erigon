@@ -92,6 +92,8 @@ models:
         resolver: true
       logs:
         resolver: true
+      miner:
+        resolver: true
   Pending:
     fields:
       account:
@@ -105,6 +107,12 @@ models:
       from:
         resolver: true
       to:
+        resolver: true
+      createdContract:
+        resolver: true
+  Log:
+    fields:
+      account:
         resolver: true
 
 omit_getters: true
