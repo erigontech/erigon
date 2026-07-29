@@ -56,20 +56,16 @@ func (a *Allocator) Get() Buffer {
 	return b
 }
 
-// sortedRun holds one flushed run's key boundaries, captured after Sort —
-// every run is internally sorted by construction. Runs align 1:1 with
-// Collector.dataProviders; an async flush fills its run in the flush goroutine,
-// which completes before mergeSortFiles reads it (provider.Wait).
+// sortedRun holds a flushed run's key boundaries. An async flush fills it in
+// the flush goroutine; provider.Wait orders that before mergeSortFiles reads it.
 type sortedRun struct {
 	first []byte
 	last  []byte
 	valid bool
 }
 
-// canReplaySequentially reports whether runs can be replayed one after another
-// instead of heap-merged: every run must be sorted and consecutive runs must not
-// overlap. An equal boundary key is fine — the heap breaks key ties by run order,
-// which sequential replay preserves.
+// Equal boundary keys are fine: the heap breaks key ties by run order, which
+// sequential replay preserves.
 func canReplaySequentially(runs []*sortedRun, providers int) bool {
 	if len(runs) != providers {
 		return false
@@ -320,10 +316,8 @@ func (c *Collector) Close() {
 	c.allFlushed = false
 }
 
-// mergeSortFiles merges the elements of the providers into globally sorted order
-// and feeds them to loadFunc. Each provider (run) is internally sorted. When runs
-// additionally do not overlap, they are replayed one after another; otherwise a
-// k-way merge heap orders elements across runs, breaking key ties by run order.
+// mergeSortFiles feeds the providers' elements to loadFunc in globally sorted
+// order: sequential replay when runs don't overlap, k-way heap merge otherwise.
 func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs, runs []*sortedRun) (err error) {
 	for _, provider := range providers {
 		if err := provider.Wait(); err != nil {
@@ -391,8 +385,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 
 func replaySequentially(logPrefix string, providers []dataProvider, process func(key, value []byte) error) error {
 	for i, provider := range providers {
-		// A recorded run is never empty, so EOF on the first read means a
-		// truncated or corrupt spill; fail loudly like the heap path does.
+		// A run is never empty: EOF on the first read means a truncated spill.
 		key, value, err := provider.Next()
 		if err != nil {
 			return fmt.Errorf("%s: reading first element of run %d of %d (provider=%s): %w",
