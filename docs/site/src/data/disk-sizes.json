@@ -40,6 +40,30 @@
         "measured_at": "2026-07-21",
         "source": "manual"
       }
+    },
+    "sepolia": {
+      "archive": {
+        "bytes": 1095748761644,
+        "display": "1.10 TB",
+        "measured_at": "2026-07-29",
+        "source": "manual"
+      }
+    },
+    "hoodi": {
+      "archive": {
+        "bytes": 133727771520,
+        "display": "133.73 GB",
+        "measured_at": "2026-07-29",
+        "source": "manual"
+      }
+    },
+    "chiado": {
+      "archive": {
+        "bytes": 29643543816,
+        "display": "29.64 GB",
+        "measured_at": "2026-07-29",
+        "source": "manual"
+      }
     }
   }
 }
