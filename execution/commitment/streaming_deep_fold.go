@@ -288,15 +288,15 @@ func storageRootFromSingleChild(base *HexPatriciaHashed) (cell, error) {
 
 // newDeferredStorageWorker yields a pooled trie worker for a deferring storage fold
 // and a release that returns it to the pool and frees its context.
-func newDeferredStorageWorker(ctx context.Context, pool *trieWorkerPool, factory TrieContextFactory, traceW io.Writer) (*HexPatriciaHashed, func()) {
-	w := pool.get()
+func newDeferredStorageWorker(ctx context.Context, accountKeyLen int16, cfg TrieConfig, factory TrieContextFactory, traceW io.Writer) (*HexPatriciaHashed, func()) {
+	w := NewHexPatriciaHashed(accountKeyLen, nil, cfg)
 	wctx, cleanup := factory(ctx)
 	w.ResetContext(wctx)
 	w.SetTraceWriter(traceW)
 	w.branchEncoder.setDeferUpdates(true)
 	w.SetLeaveDeferredForCaller(true)
 	return w, func() {
-		pool.put(w)
+		w.Release()
 		if cleanup != nil {
 			cleanup()
 		}

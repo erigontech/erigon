@@ -128,22 +128,19 @@ func TestParallelPatriciaHashedSkeletonReset(t *testing.T) {
 
 // Every checkout must be config-correct whether it hit the shared pool or
 // constructed fresh — that fungibility is what lets workers cross instances.
-func TestWorkerPoolCheckoutAppliesConfig(t *testing.T) {
+func TestWorkerCheckoutAppliesConfig(t *testing.T) {
 	cfg := DefaultTrieConfig()
 	cfg.MemoizationOff = true
-
-	var wp trieWorkerPool
-	wp.init(length.Addr, cfg)
 
 	stale := NewHexPatriciaHashed(2*length.Addr, nil, DefaultTrieConfig())
 	stale.Release()
 
 	for range 2 {
-		w := wp.get()
+		w := NewHexPatriciaHashed(length.Addr, nil, cfg)
 		assert.Equal(t, int16(length.Addr), w.accountKeyLen)
 		assert.True(t, w.memoizationOff)
 		assert.Equal(t, cfg, w.cfg)
-		wp.put(w)
+		w.Release()
 	}
 }
 

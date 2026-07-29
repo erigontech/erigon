@@ -27,34 +27,13 @@ import (
 	"sync/atomic"
 )
 
-// trieWorkerPool hands out HexPatriciaHashed workers backed by the package-level
-// hphPool. Every checkout re-applies this instance's config, so workers are
-// fungible across instances and survive instance teardown in the shared pool.
-type trieWorkerPool struct {
-	accountKeyLen int16
-	cfg           TrieConfig
-}
-
-func (wp *trieWorkerPool) init(accountKeyLen int16, cfg TrieConfig) {
-	wp.accountKeyLen = accountKeyLen
-	wp.cfg = cfg
-}
-
-func (wp *trieWorkerPool) get() *HexPatriciaHashed {
-	return NewHexPatriciaHashed(wp.accountKeyLen, nil, wp.cfg)
-}
-
-func (wp *trieWorkerPool) put(w *HexPatriciaHashed) {
-	w.Release()
-}
-
 // ParallelPatriciaHashed is the trie-side of the parallel commitment pipeline.
 type ParallelPatriciaHashed struct {
 	template       *HexPatriciaHashed
 	trieCtxFactory TrieContextFactory
-	workerPool     trieWorkerPool
 
 	accountKeyLen int16
+	cfg           TrieConfig
 	numWorkers    int
 
 	rootHash atomic.Pointer[[]byte]
@@ -72,8 +51,8 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 		trieCtxFactory: ctxFactory,
 		accountKeyLen:  accountKeyLen,
 		numWorkers:     runtime.NumCPU(),
+		cfg:            cfg,
 	}
-	p.workerPool.init(accountKeyLen, cfg)
 	return p
 }
 

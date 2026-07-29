@@ -127,7 +127,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		child := root.children[childIdx]
 		ni, ch := nib, child
 		g.Go(func() error {
-			w := p.workerPool.get()
+			w := NewHexPatriciaHashed(p.accountKeyLen, nil, p.cfg)
 			w.mountTo(base, ni)
 			if p.template != nil && p.template.traceW != nil {
 				w.traceW = tracePrefix(p.template.traceW, fmt.Sprintf("[mnt %x] ", ni))
@@ -154,7 +154,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 				return foldStorageRoot(gctx, foldSem, p.newStorageWorker, pu, n, pth, accountFresh)
 			})
 			if buildErr != nil {
-				p.workerPool.put(w)
+				w.Release()
 				return fmt.Errorf("mount[%x] build: %w", ni, buildErr)
 			}
 			var tf time.Time
@@ -167,7 +167,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 				foldDur[ni] = time.Since(tf)
 			}
 			if err != nil {
-				p.workerPool.put(w)
+				w.Release()
 				return fmt.Errorf("mount[%x] fold: %w", ni, err)
 			}
 			cells[ni] = c
@@ -175,7 +175,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			if deferred := w.TakeDeferredUpdates(); len(deferred) > 0 {
 				pu.appendDeferred(deferred)
 			}
-			p.workerPool.put(w)
+			w.Release()
 			return nil
 		})
 		childIdx++
@@ -249,7 +249,7 @@ func (p *ParallelPatriciaHashed) newStorageWorker(ctx context.Context) (*HexPatr
 	if p.template != nil {
 		traceW = p.template.traceW
 	}
-	return newDeferredStorageWorker(ctx, &p.workerPool, p.trieCtxFactory, traceW)
+	return newDeferredStorageWorker(ctx, p.accountKeyLen, p.cfg, p.trieCtxFactory, traceW)
 }
 
 // setAccountStorageRoot writes the folded storage-root cell sr onto the account leaf.
