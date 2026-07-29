@@ -25,18 +25,19 @@ import (
 	dirutil "github.com/erigontech/erigon/common/dir"
 )
 
-// TrimPostCutSiblings removes every file under snapDir/{history,idx,accessor}
-// whose step range extends past cutStep — i.e., files that provably
+// TrimPostCutSiblings removes every accessor/history/idx file whose
+// step range extends past cutStep — i.e., files that provably
 // contain post-cut state history or indexes. Also drops the matching
 // .torrent sidecar for each removed file so a subsequent Downloader
 // SetInventory re-scan doesn't try to reseed them.
 //
-// Provider.Unwind's regenerateBoundaryStepFiles already handles
-// domain/*.kv files (regen straddlers, remove entirely-past); this
-// helper is the fork-transition equivalent for the SIBLING files
-// (accessor/*.vi + accessor/*.efi + history/*.v + idx/*.ef). Without
-// it, an in-process debug_setFork leaves those siblings on disk and
-// the fork-datadir validator on the next --chain=<fork-name> restart
+// Scans snapDir/{accessor,history,idx} in full AND snapDir/domain
+// for sibling accessor kinds (.bt, .kvei, .kvi, .vi, .efi) that live
+// alongside primary .kv files. Primary .kv itself is excluded here —
+// Provider.Unwind's regenerateBoundaryStepFiles handles kv boundary
+// truncation separately. Without this pass, an in-process
+// debug_setFork leaves domain-side accessors on disk and the
+// fork-datadir validator on the next --chain=<fork-name> restart
 // classifies them as post-cut straddlers and refuses to boot.
 //
 // Called from Ethereum.ApplyPostSwapHooks after the chain-config
@@ -51,10 +52,15 @@ func TrimPostCutSiblings(snapDir string, cutStep uint64) (int, error) {
 		return 0, nil
 	}
 	removed := 0
-	// Order matters: remove index files (.vi/.efi/.bt/.kvi) before
+	// Order matters: remove index files (.vi/.efi/.bt/.kvi/.kvei) before
 	// their source (.v/.ef/.kv) so a mid-way crash doesn't leave a
 	// live index pointing at a missing source.
-	for _, sub := range []string{"accessor", "history", "idx"} {
+	//
+	// domain/ hosts primary .kv files alongside their accessor siblings
+	// (.bt / .kvei / .kvi). The primary .kv is filtered by
+	// isPostCutStateSibling so regenerate-boundary-step-files' truncation
+	// path stays authoritative for it; the siblings get trimmed here.
+	for _, sub := range []string{"accessor", "history", "idx", "domain"} {
 		dir := filepath.Join(snapDir, sub)
 		info, err := os.Stat(dir)
 		if err != nil {
@@ -95,17 +101,27 @@ func TrimPostCutSiblings(snapDir string, cutStep uint64) (int, error) {
 	return removed, nil
 }
 
-// isPostCutStateSibling returns true iff a filename in the
-// snapshots/{accessor,history,idx} tree has a step range that
-// contains any post-cut txNum — either entirely past the cut OR
-// straddling it. Both classes fail the fork-datadir validator on
-// the next --chain=<fork-name> restart, so both must be trimmed.
+// isPostCutStateSibling returns true iff a filename in the state
+// snapshot tree has a step range that contains any post-cut txNum —
+// either entirely past the cut OR straddling it. Both classes fail
+// the fork-datadir validator on the next --chain=<fork-name>
+// restart, so both must be trimmed.
+//
+// Excludes primary .kv files under domain/ — regenerate-boundary-
+// step-files (Provider.Unwind) owns kv boundary truncation. Every
+// other state-file extension is treated as an accessor sibling: the
+// domain-side (.bt, .kvi, .kvei), the history side (.v, .vi), the
+// index side (.ef, .efi).
 //
 // Uses the same ParseFileName the copy planner uses so we get the
 // same From/To interpretation. Anything unparseable is skipped
 // (returns false) — matches the copy planner's conservative
 // treatment of chain-wide config files.
 func isPostCutStateSibling(basename string, cutStep uint64) bool {
+	// Primary .kv is owned by regen; skip.
+	if strings.HasSuffix(basename, ".kv") {
+		return false
+	}
 	parsed, isState, _ := parseSiblingFileName(basename)
 	if !isState {
 		return false
@@ -115,11 +131,9 @@ func isPostCutStateSibling(basename string, cutStep uint64) bool {
 	}
 	// The file covers steps [From, To). cutStep is the step containing
 	// cutTxNum. A file with To > cutStep covers step cutStep or later,
-	// meaning it includes txNums at or past the cut. Domain/*.kv gets
-	// truncated separately by regenerate-boundary-step-files; sibling
-	// accessor/history/idx files have no boundary-regen path, so
-	// straddlers must be dropped whole. The fork's next retire cycle
-	// produces fresh boundary files covering only pre-cut data.
+	// meaning it includes txNums at or past the cut. Straddlers must be
+	// dropped whole; the fork's next retire cycle produces fresh
+	// boundary files covering only pre-cut data.
 	return parsed.To > cutStep
 }
 

@@ -53,7 +53,18 @@ func TestTrimPostCutSiblings_RemovesPostCutAndStraddlers(t *testing.T) {
 		"idx/v2.0-storage.288-296.ef":           true,
 		"idx/v2.0-storage.299-300.ef":           false, // straddler → trim
 		"idx/v2.0-storage.300-304.ef":           false,
-		"domain/v3.0-receipt.288-296.kv":        true, // domain dir untouched by this helper
+		// domain/ hosts primary .kv (untouched — regen owns those)
+		// alongside accessor siblings (.bt, .kvei, .kvi) that this
+		// helper trims by step-range rule.
+		"domain/v3.0-receipt.288-296.kv":       true,  // pre-cut primary → keep
+		"domain/v3.0-receipt.299-300.kv":       true,  // straddling primary → keep (regen truncates)
+		"domain/v3.0-receipt.300-304.kv":       true,  // post-cut primary → keep (regen's job)
+		"domain/v1.1-accounts.288-296.bt":      true,  // pre-cut accessor → keep
+		"domain/v1.1-accounts.299-300.bt":      false, // straddling accessor → trim
+		"domain/v1.1-accounts.300-304.bt":      false, // post-cut accessor → trim
+		"domain/v1.1-accounts.288-296.kvei":    true,
+		"domain/v1.1-accounts.299-300.kvei":    false, // straddler .kvei → trim
+		"domain/v1.1-accounts.300-304.kvei":    false, // post-cut .kvei → trim
 	}
 	for path := range files {
 		full := filepath.Join(dir, path)
@@ -63,9 +74,10 @@ func TestTrimPostCutSiblings_RemovesPostCutAndStraddlers(t *testing.T) {
 
 	removed, err := TrimPostCutSiblings(dir, 299)
 	require.NoError(t, err)
-	// 8 primaries removed (accessor: 4, history: 2, idx: 2); torrent
-	// sidecars aren't counted in the return.
-	require.Equal(t, 8, removed)
+	// 12 primaries removed: accessor 4 + history 2 + idx 2 +
+	// domain-side 4 (.bt x2 + .kvei x2). Torrent sidecars aren't
+	// counted in the return.
+	require.Equal(t, 12, removed)
 
 	for path, expectKept := range files {
 		_, err := os.Stat(filepath.Join(dir, path))
