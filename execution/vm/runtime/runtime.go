@@ -202,6 +202,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		vmenv  = NewEnv(cfg)
 		sender = cfg.Origin
 		rules  = vmenv.ChainRules()
+		gas    = mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules)
 	)
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
 	canTransfer, err := vmenv.Context.CanTransfer(cfg.State, sender, cfg.Value)
@@ -209,17 +210,16 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		return nil, common.Address{}, mdgas.MdGas{}, err
 	}
 	if !canTransfer {
-		return nil, common.Address{}, mdgas.MdGas{}, vm.ErrInsufficientBalance
+		return nil, common.Address{}, gas, vm.ErrInsufficientBalance
 	}
 	nonce, err := cfg.State.GetNonce(sender)
 	if err != nil {
 		return nil, common.Address{}, mdgas.MdGas{}, err
 	}
 	if nonce+1 < nonce {
-		return nil, common.Address{}, mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules), vm.ErrNonceUintOverflow
+		return nil, common.Address{}, gas, vm.ErrNonceUintOverflow
 	}
 	address := accounts.InternAddress(types.CreateAddress(sender.Value(), nonce))
-	gas := mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules)
 	leftOverGas, topLevelGasUsed, err := protocol.PrepareTopLevelCreate(vmenv, address, gas)
 	var code []byte
 	var createdAddress accounts.Address

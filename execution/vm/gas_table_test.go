@@ -373,52 +373,70 @@ func TestCreate2OntoExistingAccountSkipsNewAccountCharge(t *testing.T) {
 }
 
 func TestCreateTraceUsesActualGasOnEarlyFailure(t *testing.T) {
-	t.Parallel()
-	tx, sd := testTemporalTxSD(t)
-	txNum, _, err := sd.SeekCommitment(t.Context(), tx)
-	require.NoError(t, err)
-	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-	s := state.New(r)
-	defer s.Release(false)
-	initCode := program.New().Push(0).Return(0, 0).Bytes()
-	salt := uint256.NewInt(0)
-	factory := accounts.InternAddress(common.HexToAddress("0xfac0"))
-	factoryCode := program.New().Mstore(initCode, 0).Push(salt).Push(len(initCode)).Push(0).Push(1).Op(vm.CREATE2).Bytes()
-	s.CreateAccount(factory, true)
-	s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
-	vmctx := evmtypes.BlockContext{
-		CanTransfer: func(_ evmtypes.IntraBlockState, _ accounts.Address, value uint256.Int) (bool, error) {
-			return value.IsZero(), nil
-		},
-		Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
-			return nil
-		},
+	for _, tt := range []struct {
+		name      string
+		config    *chain.Config
+		forwarded bool
+	}{
+		{name: "Amsterdam", config: chain.AllProtocolChanges},
+		{name: "pre-Amsterdam", config: chain.TestChainOsakaConfig, forwarded: true},
+	} {
+		t.Run(
+			tt.name,
+			func(t *testing.T) {
+				t.Parallel()
+				tx, sd := testTemporalTxSD(t)
+				txNum, _, err := sd.SeekCommitment(t.Context(), tx)
+				require.NoError(t, err)
+				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+				s := state.New(r)
+				defer s.Release(false)
+				initCode := program.New().Push(0).Return(0, 0).Bytes()
+				salt := uint256.NewInt(0)
+				factory := accounts.InternAddress(common.HexToAddress("0xfac0"))
+				factoryCode := program.New().Mstore(initCode, 0).Push(salt).Push(len(initCode)).Push(0).Push(1).Op(vm.CREATE2).Bytes()
+				s.CreateAccount(factory, true)
+				s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+				vmctx := evmtypes.BlockContext{
+					CanTransfer: func(_ evmtypes.IntraBlockState, _ accounts.Address, value uint256.Int) (bool, error) {
+						return value.IsZero(), nil
+					},
+					Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+						return nil
+					},
+				}
+				_ = s.CommitBlock(vmctx.Rules(tt.config), w)
+				var enteredCreateGas, exitedCreateGasUsed, availableCreateGas uint64
+				hooks := &tracing.Hooks{
+					OnEnter: func(_ int, typ byte, _, _ accounts.Address, _ bool, _ []byte, gas uint64, _ uint256.Int, _ []byte) {
+						if vm.OpCode(typ) == vm.CREATE2 {
+							enteredCreateGas = gas
+						}
+					},
+					OnExit: func(depth int, _ []byte, gasUsed uint64, _ error, _ bool) {
+						if depth == 1 {
+							exitedCreateGasUsed = gasUsed
+						}
+					},
+					OnOpcode: func(_ uint64, op byte, gas, cost uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
+						if vm.OpCode(op) == vm.CREATE2 {
+							availableCreateGas = gas - cost
+						}
+					},
+				}
+				vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, tt.config, vm.Config{Tracer: hooks})
+				_, _, _, err = vmenv.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Regular: 500_000}, uint256.Int{}, false)
+				require.NoError(t, err)
+				require.NotZero(t, availableCreateGas)
+				expectedCreateGas := availableCreateGas
+				if tt.forwarded {
+					expectedCreateGas -= expectedCreateGas / 64
+				}
+				require.Equal(t, expectedCreateGas, enteredCreateGas)
+				require.Zero(t, exitedCreateGasUsed)
+			},
+		)
 	}
-	_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
-	var enteredCreateGas, exitedCreateGasUsed, availableCreateGas uint64
-	hooks := &tracing.Hooks{
-		OnEnter: func(_ int, typ byte, _, _ accounts.Address, _ bool, _ []byte, gas uint64, _ uint256.Int, _ []byte) {
-			if vm.OpCode(typ) == vm.CREATE2 {
-				enteredCreateGas = gas
-			}
-		},
-		OnExit: func(depth int, _ []byte, gasUsed uint64, _ error, _ bool) {
-			if depth == 1 {
-				exitedCreateGasUsed = gasUsed
-			}
-		},
-		OnOpcode: func(_ uint64, op byte, gas, cost uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
-			if vm.OpCode(op) == vm.CREATE2 {
-				availableCreateGas = gas - cost
-			}
-		},
-	}
-	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{Tracer: hooks})
-	_, _, _, err = vmenv.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Regular: 500_000}, uint256.Int{}, false)
-	require.NoError(t, err)
-	require.NotZero(t, availableCreateGas)
-	require.Equal(t, availableCreateGas, enteredCreateGas)
-	require.Zero(t, exitedCreateGasUsed)
 }
 
 var createGasTests = []struct {
