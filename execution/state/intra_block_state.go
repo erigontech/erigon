@@ -28,7 +28,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -57,6 +56,11 @@ type revision struct {
 type revisions struct {
 	nextId int
 	valid  []revision
+	buf    [16]revision
+}
+
+func (r *revisions) init() {
+	r.valid = r.buf[:0]
 }
 
 func (r *revisions) snapshot(journal *journal) int {
@@ -67,9 +71,6 @@ func (r *revisions) snapshot(journal *journal) int {
 }
 
 func (r *revisions) returnSnapshot(id int) {
-	if r == nil {
-		return
-	}
 	if lv := len(r.valid); lv > 0 && r.valid[lv-1].id == id {
 		r.valid = r.valid[0 : lv-1]
 		if r.nextId == id+1 {
@@ -79,20 +80,12 @@ func (r *revisions) returnSnapshot(id int) {
 }
 
 func (r *revisions) reset() {
-	if r != nil {
+	if cap(r.valid) > maxRetainedRevisionsCap {
+		r.valid = r.buf[:0]
+	} else {
 		r.valid = r.valid[:0]
-		r.nextId = 0
 	}
-}
-
-func (r *revisions) put() *revisions {
-	if r != nil {
-		r.reset()
-		if len(r.valid) < 128 {
-			revisionsPool.Put(r)
-		}
-	}
-	return nil
+	r.nextId = 0
 }
 
 func (r *revisions) revertToSnapshot(revid int) int {
@@ -115,11 +108,12 @@ func (r *revisions) revertToSnapshot(revid int) int {
 	return snapshot.journalIndex
 }
 
-var revisionsPool = sync.Pool{
-	New: func() any {
-		return &revisions{0, make([]revision, 0, 2048)}
-	},
-}
+// Snapshot depth tracks EVM call depth: the inline buf covers typical depth
+// alloc-free, deeper stacks spill to the heap, and legal depth (1024 calls
+// plus a few outer tx-level snapshots) grows to at most cap 1280. A slice
+// beyond 2048 means push/pop discipline is broken somewhere — fall back to
+// the inline buf on reset instead of retaining it for the IBS lifetime.
+const maxRetainedRevisionsCap = 2048
 
 // BalanceIncrease represents the increase of balance of an account that did not require
 // reading the account first
@@ -174,7 +168,6 @@ type IntraBlockState struct {
 	// Journal of state modifications. This is the backbone of
 	// Snapshot and RevertToSnapshot.
 	journal      *journal
-	revisions    *revisions
 	trace        bool
 	tracingHooks *tracing.Hooks
 	balanceInc   map[accounts.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
@@ -225,6 +218,8 @@ type IntraBlockState struct {
 	// SelfDestructPath=true account must read as a live, balance-preserving,
 	// empty-code account rather than a destroyed one.
 	eip8246 bool
+
+	revisions revisions
 }
 
 type sdProbeEntry struct {
@@ -236,7 +231,7 @@ type sdProbeEntry struct {
 
 // Create a new state from a given trie
 func New(stateReader StateReader) *IntraBlockState {
-	return &IntraBlockState{
+	ibs := &IntraBlockState{
 		stateReader:       stateReader,
 		stateObjects:      map[accounts.Address]*stateObject{},
 		stateObjectsDirty: map[accounts.Address]struct{}{},
@@ -251,6 +246,8 @@ func New(stateReader StateReader) *IntraBlockState {
 		trace:             false,
 		dep:               UnknownDep,
 	}
+	ibs.revisions.init()
+	return ibs
 }
 
 func NewWithVersionMap(stateReader StateReader, mvhm *VersionMap) *IntraBlockState {
@@ -398,7 +395,7 @@ func (sdb *IntraBlockState) Reset() {
 	}
 	clear(sdb.balanceInc)
 	sdb.journal.Reset()
-	sdb.revisions = sdb.revisions.put()
+	sdb.revisions.reset()
 	sdb.refund = uint64(0)
 	sdb.txIndex = 0
 	sdb.sdProbeEpoch++
@@ -2325,9 +2322,6 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 
 // Snapshot returns an identifier for the current revision of the state.
 func (sdb *IntraBlockState) PushSnapshot() int {
-	if sdb.revisions == nil {
-		sdb.revisions = revisionsPool.Get().(*revisions)
-	}
 	return sdb.revisions.snapshot(sdb.journal)
 }
 
@@ -2720,7 +2714,7 @@ func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 // no not lock
 func (sdb *IntraBlockState) clearJournalAndRefund() {
 	sdb.journal.Reset()
-	sdb.revisions = sdb.revisions.put()
+	sdb.revisions.reset()
 	sdb.refund = uint64(0)
 }
 
@@ -2738,14 +2732,10 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 //
 // Cancun fork:
 // - Reset transient storage (EIP-1153)
-//
-// Prague fork:
-// - Add authorities to access list (EIP-7702)
-// - Add delegated designation (if it exists for dst) to access list (EIP-7702)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase accounts.Address, dst accounts.Address,
-	precompiles []accounts.Address, list types.AccessList, authorities []accounts.Address) error {
+	precompiles []accounts.Address, list types.AccessList) {
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(sender.Handle()) || !dst.IsNil() && dbg.TraceAccount(dst.Handle())) {
-		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v, %v\n", sdb.blockNum, sdb.txIndex, sdb.version, sender, coinbase, dst, precompiles, list, rules, authorities)
+		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v\n", sdb.blockNum, sdb.txIndex, sdb.version, sender, coinbase, dst, precompiles, list, rules)
 	}
 	sdb.eip8246 = rules.IsAmsterdam
 	if rules.IsBerlin {
@@ -2772,48 +2762,15 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 			al.AddAddress(coinbase)
 		}
 	}
-	if rules.IsPrague {
-		for _, addr := range authorities {
-			sdb.AddAddressToAccessList(addr)
-		}
-
-		if !dst.IsNil() {
-			dd, ok, err := sdb.GetDelegatedDesignation(dst)
-			if err != nil {
-				return err
-			}
-			if ok {
-				sdb.AddAddressToAccessList(dd)
-			}
-		}
-	}
 	// Reset transient storage at the beginning of transaction execution
 	clear(sdb.transientStorage)
 	sdb.versionedReads.access = nil
 	sdb.recordAccess = true
 
-	// EIP-3651 makes the coinbase warm (Shanghai+). EIP-7928 BAL must include
-	// it even when the block has no priority-fee transfer to the coinbase
-	// (i.e. nothing else in the tx writes to the coinbase). Without this, txns
-	// that produce no fee for the coinbase leave its address out of the BAL
-	// and the validator-side BAL hash diverges from the spec sidecar.
-	// recordAccess was just enabled and the access set reset, so
-	// MarkAddressAccess will actually take effect here (unlike when called
-	// from verifyAuthorities, which runs before Prepare).
+	// EIP-7928 records the EIP-3651 coinbase access even without a priority fee.
 	if rules.IsShanghai {
 		sdb.MarkAddressAccess(coinbase, true)
 	}
-	// EIP-7702 authorities: txn_executor.verifyAuthorities calls
-	// MarkAddressAccess for each recovered authority before Prepare runs, so
-	// that mark is a no-op. Re-mark here so the authority is captured in the
-	// BAL even when the EVM never touches the authority during execution
-	// (e.g. authorization fails the nonce check after recovery).
-	if rules.IsPrague {
-		for _, addr := range authorities {
-			sdb.MarkAddressAccess(addr, false)
-		}
-	}
-	return nil
 }
 
 // AddAddressToAccessList adds the given address to the access list
