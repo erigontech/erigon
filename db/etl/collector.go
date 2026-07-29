@@ -58,13 +58,14 @@ func (a *Allocator) Put(b Buffer) {
 }
 
 func (a *Allocator) Get() Buffer {
+	var b Buffer
 	select {
-	case b := <-a.freeList:
-		b.Reset()
-		return b
+	case b = <-a.freeList:
 	default:
-		return a.newBuf()
+		b = a.newBuf()
 	}
+	b.Reset()
+	return b
 }
 
 // Collector performs the job of ETL Transform, but can also be used without "E" (Extract) part
