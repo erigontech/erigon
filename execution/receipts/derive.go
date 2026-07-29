@@ -59,6 +59,22 @@ func DeriveForRange(
 	gp *protocol.GasPool,
 	getHeader GetHeaderFunc,
 ) (types.Receipts, error) {
+	receipts, _, err := deriveForRange(ctx, cfg, engine, header, txns, fromIdx, toIdx, ibs, gp, getHeader)
+	return receipts, err
+}
+
+func deriveForRange(
+	ctx context.Context,
+	cfg *chain.Config,
+	engine rules.EngineReader,
+	header *types.Header,
+	txns types.Transactions,
+	fromIdx int,
+	toIdx int,
+	ibs *state.IntraBlockState,
+	gp *protocol.GasPool,
+	getHeader GetHeaderFunc,
+) (types.Receipts, *protocol.GasUsed, error) {
 	if fromIdx < 0 {
 		fromIdx = 0
 	}
@@ -66,7 +82,7 @@ func DeriveForRange(
 		toIdx = len(txns)
 	}
 	if fromIdx >= toIdx {
-		return nil, nil
+		return nil, new(protocol.GasUsed), nil
 	}
 
 	blockNum := header.Number.Uint64()
@@ -80,14 +96,14 @@ func DeriveForRange(
 	for i := 0; i < fromIdx; i++ {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, nil, ctx.Err()
 		default:
 		}
 		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 		_, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm)
 		if err != nil {
-			return nil, fmt.Errorf("receipts.DeriveForRange: replay tx %d (warmup): %w", i, err)
+			return nil, nil, fmt.Errorf("receipts.DeriveForRange: replay tx %d (warmup): %w", i, err)
 		}
 	}
 
@@ -96,7 +112,7 @@ func DeriveForRange(
 	for i := fromIdx; i < toIdx; i++ {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, nil, ctx.Err()
 		default:
 		}
 		ibs.SetTxContext(blockNum, i)
@@ -117,15 +133,15 @@ func DeriveForRange(
 		receipt, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm)
 		close(txDone)
 		if err != nil {
-			return nil, fmt.Errorf("receipts.DeriveForRange: replay tx %d: %w", i, err)
+			return nil, nil, fmt.Errorf("receipts.DeriveForRange: replay tx %d: %w", i, err)
 		}
 		if evm.Cancelled() {
-			return nil, fmt.Errorf("receipts.DeriveForRange: execution aborted (context cancelled)")
+			return nil, nil, fmt.Errorf("receipts.DeriveForRange: execution aborted (context cancelled)")
 		}
 		receipts = append(receipts, receipt)
 	}
 
-	return receipts, nil
+	return receipts, gasUsed, nil
 }
 
 // DeriveBlockReceipts replays all transactions in a block and returns their receipts.
@@ -161,10 +177,21 @@ func DeriveFields(receipts types.Receipts, blockHash common.Hash) {
 	}
 }
 
+func gasUsedFromCachedReceipts(cached types.Receipts, txns types.Transactions) *protocol.GasUsed {
+	cumulativeGasUsed := cached.CumulativeGasUsed()
+	gasUsed := &protocol.GasUsed{
+		Receipt:      cumulativeGasUsed,
+		BlockRegular: cumulativeGasUsed,
+	}
+	for _, txn := range txns {
+		gasUsed.Blob += txn.GetBlobGas()
+	}
+	return gasUsed
+}
+
 // DerivePriorReceipts returns receipts for transactions 0..startTxIndex-1.
-// It first tries to read them from RCacheV2 (persistent receipt cache). If all
-// prior receipts are cached, no replay is needed. Otherwise falls back to
-// replaying via DeriveForRange.
+// Pre-Amsterdam it uses RCacheV2 when the full prefix is cached. Amsterdam
+// blocks are replayed because receipts do not preserve both block-gas dimensions.
 //
 // Used when execution resumes mid-block from a snapshot boundary and Finalize
 // needs the full receipt set for requests hash computation.
@@ -181,36 +208,56 @@ func DerivePriorReceipts(
 	gp *protocol.GasPool,
 	getHeader GetHeaderFunc,
 ) (types.Receipts, error) {
+	receipts, _, err := DerivePriorReceiptsWithGas(ctx, cfg, engine, header, txns, startTxIndex, blockStartTxNum, tx, ibs, gp, getHeader)
+	return receipts, err
+}
+
+// DerivePriorReceiptsWithGas also returns the block gas totals accumulated by
+// the prefix transactions.
+func DerivePriorReceiptsWithGas(
+	ctx context.Context,
+	cfg *chain.Config,
+	engine rules.EngineReader,
+	header *types.Header,
+	txns types.Transactions,
+	startTxIndex int,
+	blockStartTxNum uint64,
+	tx kv.TemporalTx,
+	ibs *state.IntraBlockState,
+	gp *protocol.GasPool,
+	getHeader GetHeaderFunc,
+) (types.Receipts, *protocol.GasUsed, error) {
 	if startTxIndex <= 0 {
-		return nil, nil
+		return nil, new(protocol.GasUsed), nil
+	}
+	if startTxIndex > len(txns) {
+		return nil, nil, fmt.Errorf("start transaction index %d exceeds transaction count %d", startTxIndex, len(txns))
 	}
 
-	// Try RCacheV2 first — read each prior receipt from the persistent cache.
-	blockHash := header.Hash()
-	blockNum := header.Number.Uint64()
-	cached := make(types.Receipts, 0, startTxIndex)
-	allCached := true
-	for i := 0; i < startTxIndex && i < len(txns); i++ {
-		// blockStartTxNum = firstTask.TxNum - firstTask.TxIndex, which is
-		// already the first user tx's txNum (system tx has TxIndex=-1).
-		txNum := blockStartTxNum + uint64(i)
-		receipt, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
-			BlockNum:      blockNum,
-			BlockHash:     blockHash,
-			TxnHash:       txns[i].Hash(),
-			TxNum:         txNum,
-			DontCalcBloom: true,
-		})
-		if err != nil || !ok {
-			allCached = false
-			break
+	if !cfg.IsAmsterdam(header.Time) {
+		blockHash := header.Hash()
+		blockNum := header.Number.Uint64()
+		cached := make(types.Receipts, 0, startTxIndex)
+		allCached := true
+		for i := 0; i < startTxIndex && i < len(txns); i++ {
+			txNum := blockStartTxNum + uint64(i)
+			receipt, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
+				BlockNum:      blockNum,
+				BlockHash:     blockHash,
+				TxnHash:       txns[i].Hash(),
+				TxNum:         txNum,
+				DontCalcBloom: true,
+			})
+			if err != nil || !ok {
+				allCached = false
+				break
+			}
+			cached = append(cached, receipt)
 		}
-		cached = append(cached, receipt)
-	}
-	if allCached && len(cached) == startTxIndex {
-		return cached, nil
+		if allCached && len(cached) == startTxIndex {
+			return cached, gasUsedFromCachedReceipts(cached, txns[:startTxIndex]), nil
+		}
 	}
 
-	// Fall back to replay.
-	return DeriveForRange(ctx, cfg, engine, header, txns, 0, startTxIndex, ibs, gp, getHeader)
+	return deriveForRange(ctx, cfg, engine, header, txns, 0, startTxIndex, ibs, gp, getHeader)
 }

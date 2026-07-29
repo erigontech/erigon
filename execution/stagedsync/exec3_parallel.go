@@ -679,7 +679,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					// sd.mem already has all TX writes when we reach here.
 
 					var blockValidatorWaiter *blockValidator
-					if applyResult.BlockNum > 0 && !applyResult.isPartial { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+					if shouldValidateBlockPostExecution(applyResult.BlockNum, applyResult.receiptsComplete) {
 						checkBloom := !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
 						checkReceipts := checkBloom && pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum)
 
@@ -2956,18 +2956,24 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			receiptsComplete = startTxIndex == 0
 			if startTxIndex > 0 && len(txs) > 0 {
 				blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex)
-				priorReceipts, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, blockStartTxNum)
+				priorReceipts, priorGasUsed, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, blockStartTxNum)
 				if err != nil {
 					pe.logger.Warn("["+pe.logPrefix+"] failed to reconstruct prior receipts for partial block",
 						"block", be.blockNum, "startTxIndex", startTxIndex, "err", err)
 				} else {
 					blockReceipts = append(priorReceipts, blockReceipts...)
+					be.blockRegularGasUsed += priorGasUsed.BlockRegular
+					be.blockStateGasUsed += priorGasUsed.BlockState
+					be.blockGasUsed = max(be.blockRegularGasUsed, be.blockStateGasUsed)
+					be.blobGasUsed = priorGasUsed.Blob
+					for _, tx := range txs[startTxIndex:] {
+						be.blobGasUsed += tx.GetBlobGas()
+					}
 					receiptsComplete = true
 				}
 			}
-			// The post-exec validator, which fills receipt blooms for full
-			// blocks, skips partial ones — do it here, even when prior receipts
-			// couldn't be reconstructed (the suffix receipts still need blooms).
+			// Fill suffix metadata even when reconstruction fails and validation
+			// remains disabled.
 			receipts.DeriveFields(blockReceipts, be.blockHash)
 		}
 

@@ -64,3 +64,16 @@ func TestDeriveFieldsPreservesExistingBloom(t *testing.T) {
 
 	assert.Equal(t, preset, withPresetBloom.Bloom)
 }
+
+func TestGasUsedFromCachedReceipts(t *testing.T) {
+	cached := types.Receipts{
+		{CumulativeGasUsed: 21000},
+		{CumulativeGasUsed: 51000},
+	}
+
+	gasUsed := gasUsedFromCachedReceipts(cached, nil)
+
+	assert.Equal(t, uint64(51000), gasUsed.Receipt)
+	assert.Equal(t, uint64(51000), gasUsed.BlockRegular)
+	assert.Zero(t, gasUsed.BlockState)
+}

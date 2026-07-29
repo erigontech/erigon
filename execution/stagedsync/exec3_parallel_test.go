@@ -1478,6 +1478,7 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 	// RecentReceipts.Add in the apply loop.
 	assert.True(res.isPartial)
 	assert.False(res.receiptsComplete)
+	assert.False(shouldValidateBlockPostExecution(res.BlockNum, res.receiptsComplete))
 }
 
 // TestParallelResumeReconstructsPriorReceipts pins the block-end prefix
@@ -1540,7 +1541,8 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 	txResult := &exec.TxResult{
 		Task: tVersion,
 		ExecutionResult: evmtypes.ExecutionResult{
-			ReceiptGasUsed: 10000,
+			ReceiptGasUsed:      10000,
+			BlockRegularGasUsed: 10000,
 		},
 	}
 
@@ -1550,12 +1552,51 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 
 	assert.True(res.isPartial)
 	assert.True(res.receiptsComplete)
+	assert.Equal(uint64(31000), res.BlockGasUsed)
+	assert.True(shouldValidateBlockPostExecution(res.BlockNum, res.receiptsComplete))
 	if assert.Len(res.Receipts, 2) {
 		assert.Equal(uint(0), res.Receipts[0].TransactionIndex)
 		assert.Equal(uint64(21000), res.Receipts[0].CumulativeGasUsed)
 		assert.Equal(uint(1), res.Receipts[1].TransactionIndex)
 		assert.Equal(uint64(31000), res.Receipts[1].CumulativeGasUsed)
 	}
+}
+
+func TestResumeReconstructionReplaysAmsterdamGasDimensions(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.AllProtocolChanges
+	header := &types.Header{
+		Number:   *uint256.NewInt(1),
+		GasLimit: 10_000_000,
+	}
+	to := common.HexToAddress("0x01")
+	unsignedTx := &types.LegacyTx{
+		CommonTx: types.CommonTx{
+			To:       &to,
+			Value:    *uint256.NewInt(1),
+			GasLimit: 1_000_000,
+		},
+		GasPrice: *uint256.NewInt(1),
+	}
+	tx, err := types.SignTx(unsignedTx, *types.MakeSigner(config, 1, 0), senderIsCoinbaseKey.key)
+	require.NoError(t, err)
+
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(1_000_000_000)
+		return putter.DomainPut(kv.AccountsDomain, senderIsCoinbaseKey.rawAddress[:], accounts.SerialiseV3(&acc), 0, nil)
+	})
+
+	pe, roTx := newResumeTestExec(t, db, config)
+	priorReceipts, priorGasUsed, err := pe.reconstructPriorReceipts(
+		context.Background(), roTx, header, types.Transactions{tx}, 1, 1,
+	)
+	require.NoError(t, err)
+	require.Len(t, priorReceipts, 1)
+	assert.Equal(t, priorReceipts[0].CumulativeGasUsed, priorGasUsed.Receipt)
+	assert.NotZero(t, priorGasUsed.BlockRegular)
+	assert.NotZero(t, priorGasUsed.BlockState)
+	assert.Less(t, priorGasUsed.BlockGasUsed(), priorGasUsed.Receipt)
 }
 
 // TestParallelResumeReconstructionFailureIsNonFatal pins the failure policy when
@@ -1621,6 +1662,7 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 	assert.NoError(err)
 	if assert.NotNil(res) {
 		assert.False(res.receiptsComplete)
+		assert.False(shouldValidateBlockPostExecution(res.BlockNum, res.receiptsComplete))
 	}
 }
 

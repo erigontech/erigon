@@ -391,18 +391,23 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				if startTxIndex > 0 && len(txTask.Txs) > 0 {
 					firstTask := tasks[0].(*exec.TxTask)
 					blockStartTxNum := firstTask.TxNum - uint64(firstTask.TxIndex)
-					priorReceipts, priorErr := se.reconstructPriorReceipts(ctx, se.applyTx, txTask.Header, txTask.Txs, startTxIndex, blockStartTxNum)
+					priorReceipts, priorGasUsed, priorErr := se.reconstructPriorReceipts(ctx, se.applyTx, txTask.Header, txTask.Txs, startTxIndex, blockStartTxNum)
 					if priorErr != nil {
 						se.logger.Warn(fmt.Sprintf("[%s] failed to reconstruct prior receipts for partial block", se.logPrefix),
 							"block", txTask.BlockNumber(), "startTxIndex", startTxIndex, "err", priorErr)
 					} else {
 						finalizeReceipts = priorReceipts
 						finalizeReceipts = append(finalizeReceipts, blockReceipts...)
+						se.blockGasUsed += priorGasUsed.BlockRegular
+						se.blockStateGasUsed += priorGasUsed.BlockState
+						se.blobGasUsed = priorGasUsed.Blob
+						for _, tx := range txTask.Txs[startTxIndex:] {
+							se.blobGasUsed += tx.GetBlobGas()
+						}
 						priorComplete = true
 					}
-					// The post-exec validator, which fills receipt blooms for full
-					// blocks, skips partial ones — do it here, even when prior
-					// receipts couldn't be reconstructed (suffix still needs blooms).
+					// Fill suffix metadata even when reconstruction fails and
+					// validation remains disabled.
 					receipts.DeriveFields(finalizeReceipts, txTask.BlockHash())
 				}
 
@@ -420,11 +425,10 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				checkBloom := !se.cfg.vmConfig.StatelessExec && !se.cfg.vmConfig.NoReceipts
 				checkReceipts := checkBloom && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber())
 
-				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
-					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+				if shouldValidateBlockPostExecution(txTask.BlockNumber(), priorComplete) {
 					// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
 					blockGasUsed := max(se.blockGasUsed, se.blockStateGasUsed)
-					if err := validateBlockPostExecution(se.cfg.engine, se.cfg.chainConfig, txTask.Header, blockGasUsed, se.blobGasUsed, checkReceipts, checkBloom, blockReceipts, txTask.Txs, se.logger); err != nil {
+					if err := validateBlockPostExecution(se.cfg.engine, se.cfg.chainConfig, txTask.Header, blockGasUsed, se.blobGasUsed, checkReceipts, checkBloom, finalizeReceipts, txTask.Txs, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
