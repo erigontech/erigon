@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/stretchr/testify/require"
 )
 
@@ -82,4 +83,17 @@ func Test_TrieContext_BranchCopiesData(t *testing.T) {
 
 	branch[1] = 8
 	require.Equal(t, []byte{9, 2, 3}, reader.branchData)
+}
+
+// Test_NewSharedDomainsCommitmentContext_RejectsBinVariant pins that a variant
+// without commitment state save/restore is refused at construction rather than
+// mid-block, where encodeCommitmentState would fail after a full Process.
+func Test_NewSharedDomainsCommitmentContext_RejectsBinVariant(t *testing.T) {
+	t.Parallel()
+
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantBinPatriciaTrie
+	require.Panics(t, func() {
+		NewSharedDomainsCommitmentContext(nil, commitment.ModeDirect, t.TempDir(), cfg)
+	})
 }

@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"fmt"
+	"sync"
 
 	keccak "github.com/erigontech/fastkeccak"
 
@@ -86,9 +87,22 @@ func pbinTreeKeyStorage(addr, slot []byte) []byte {
 // BASIC_DATA for an account, the slot's own leaf for storage. The CODE_HASH
 // sibling shares the stem and is written by the engine during the same visit,
 // so it needs no key of its own here.
+//
+// The digest cache is borrowed per call rather than captured: Updates.NewEmpty
+// copies the hasher value, so a captured cache would be written by two buffers
+// hashing concurrently. Every hit is validated against the address it was built
+// from, so borrowing another goroutine's cache stays correct.
 func pbinKeyHasher() keyHasher {
-	var c pbinDigestCache
-	return c.treeKey
+	var pool sync.Pool
+	return func(plainKey []byte) []byte {
+		c, _ := pool.Get().(*pbinDigestCache)
+		if c == nil {
+			c = new(pbinDigestCache)
+		}
+		key := c.treeKey(plainKey)
+		pool.Put(c)
+		return key
+	}
 }
 
 // pbinDigestCache memoizes the two hash-derived key components across a run of

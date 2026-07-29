@@ -19,8 +19,10 @@ package commitment
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
 )
@@ -217,6 +219,39 @@ func TestPBinKeyHasherRejectsMalformedPlainKey(t *testing.T) {
 	hasher := pbinKeyHasher()
 	require.Panics(t, func() { hasher(make([]byte, 33)) })
 	require.Panics(t, func() { hasher(nil) })
+}
+
+// TestPBinKeyHasherSharedAcrossBuffers hashes through two Updates buffers that
+// share one hasher value (Updates.NewEmpty copies it) from two goroutines. Run
+// under -race this fails if the hasher keeps a cache the copies can both write.
+func TestPBinKeyHasherSharedAcrossBuffers(t *testing.T) {
+	t.Parallel()
+
+	addrs := [][]byte{
+		pbinTestAddr(t, "0102030405060708090a0b0c0d0e0f1011121314"),
+		pbinTestAddr(t, "cafebabe000000000000000000000000deadbeef"),
+	}
+	slots := []uint64{0, 64, 256, 1000}
+
+	base := NewUpdates(ModeDirect, t.TempDir(), pbinKeyHasher())
+	clone := base.NewEmpty()
+
+	var wg sync.WaitGroup
+	for _, buf := range []*Updates{base, clone} {
+		wg.Go(func() {
+			for range 50 {
+				for _, addr := range addrs {
+					assert.Equal(t, pbinTreeKeyAccount(addr, pbinBasicDataLeafKey), buf.hashKey(addr))
+					for _, slot := range slots {
+						plainKey := pbinTestConcat(addr, pbinTestSlot(slot))
+						assert.Equal(t, pbinTreeKeyStorage(addr, pbinTestSlot(slot)), buf.hashKey(plainKey),
+							"addr %x slot %d", addr, slot)
+					}
+				}
+			}
+		})
+	}
+	wg.Wait()
 }
 
 // TestPBinDigestCacheMatchesFreshDerivation drives one hasher across interleaved

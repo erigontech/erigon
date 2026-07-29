@@ -222,6 +222,11 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 	if variant == "" {
 		variant = commitment.VariantHexPatriciaTrie
 	}
+	if variant == commitment.VariantBinPatriciaTrie {
+		// encodeCommitmentState/restorePatriciaState are hex-only, so this variant
+		// would fail after a full Process instead of at configuration time.
+		panic("commitment variant " + string(variant) + " has no state save/restore and cannot back a domain commitment context")
+	}
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 		tmpDir:        tmpDir,
