@@ -31,53 +31,30 @@ import (
 )
 
 func TestCanReplaySequentially(t *testing.T) {
-	sr := func(first, last byte) sortedRun {
-		return sortedRun{first: []byte{first}, last: []byte{last}, sorted: true}
+	sr := func(first, last byte) *sortedRun {
+		return &sortedRun{first: []byte{first}, last: []byte{last}, valid: true}
 	}
 	for _, tc := range []struct {
 		name      string
-		runs      []sortedRun
+		runs      []*sortedRun
 		providers int
 		want      bool
 	}{
 		{"empty", nil, 0, true},
-		{"single_sorted", []sortedRun{sr(1, 2)}, 1, true},
-		{"single_unsorted", []sortedRun{{}}, 1, false},
-		{"disjoint", []sortedRun{sr(1, 2), sr(3, 4)}, 2, true},
-		{"equal_boundary", []sortedRun{sr(1, 2), sr(2, 4)}, 2, true},
-		{"overlap", []sortedRun{sr(1, 3), sr(2, 4)}, 2, false},
-		{"one_unsorted", []sortedRun{sr(1, 2), {}}, 2, false},
-		{"count_mismatch", []sortedRun{sr(1, 2)}, 2, false},
-		{"later_overlap", []sortedRun{sr(1, 2), sr(3, 9), sr(4, 5)}, 3, false},
+		{"single", []*sortedRun{sr(1, 2)}, 1, true},
+		{"single_unfilled", []*sortedRun{{}}, 1, false},
+		{"single_nil", []*sortedRun{nil}, 1, false},
+		{"disjoint", []*sortedRun{sr(1, 2), sr(3, 4)}, 2, true},
+		{"equal_boundary", []*sortedRun{sr(1, 2), sr(2, 4)}, 2, true},
+		{"overlap", []*sortedRun{sr(1, 3), sr(2, 4)}, 2, false},
+		{"one_unfilled", []*sortedRun{sr(1, 2), {}}, 2, false},
+		{"count_mismatch", []*sortedRun{sr(1, 2)}, 2, false},
+		{"later_overlap", []*sortedRun{sr(1, 2), sr(3, 9), sr(4, 5)}, 3, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, canReplaySequentially(tc.runs, tc.providers))
 		})
 	}
-}
-
-func TestSortableBufferInputSorted(t *testing.T) {
-	require := require.New(t)
-	b := NewSortableBuffer(1 * datasize.MB)
-	require.True(b.inputSorted())
-
-	b.Put([]byte{1}, []byte{10})
-	require.True(b.inputSorted())
-	b.Put([]byte{1}, []byte{5}) // equal key: still sorted, dup values in any order
-	require.True(b.inputSorted())
-	b.Put([]byte{2}, nil)
-	require.True(b.inputSorted())
-
-	b.Put([]byte{1}, []byte{7}) // regression breaks sortedness
-	require.False(b.inputSorted())
-	b.Put([]byte{9}, nil) // once broken, stays broken
-	require.False(b.inputSorted())
-
-	b.Reset()
-	require.True(b.inputSorted())
-	b.Put(nil, []byte{1})
-	b.Put([]byte{}, []byte{2}) // nil and empty keys compare equal
-	require.True(b.inputSorted())
 }
 
 func collectMonotoneDups(t *testing.T, c *Collector, numKeys, valsPerKey int) {
@@ -103,7 +80,7 @@ func TestCollectorRecordsRuns(t *testing.T) {
 		require.Len(t, c.runs, len(c.dataProviders))
 		require.True(t, canReplaySequentially(c.runs, len(c.dataProviders)))
 	})
-	t.Run("unsorted_input_is_not", func(t *testing.T) {
+	t.Run("overlapping_runs_are_not", func(t *testing.T) {
 		c := NewCollector(t.Name(), t.TempDir(), NewSortableBuffer(16*datasize.KB), log.New())
 		defer c.Close()
 		k := make([]byte, 8)
@@ -211,7 +188,11 @@ func dumpTable(t *testing.T, tx kv.Tx, table string) []sortableBufferEntry {
 	return out
 }
 
-func TestUnsortedInputFallsBackToHeap(t *testing.T) {
+// TestSortednessBreaksLoadStaysCorrect pins correctness when the producer breaks
+// key order: whichever driver the run boundaries select, the loaded stream must
+// equal the stable global sort. Intra-run breaks may still yield non-overlapping
+// runs (sequential replay, legally); overlapping runs take the heap.
+func TestSortednessBreaksLoadStaysCorrect(t *testing.T) {
 	const n = 3000
 	for _, tc := range []struct {
 		name    string
@@ -243,7 +224,6 @@ func TestUnsortedInputFallsBackToHeap(t *testing.T) {
 			}
 
 			require.Greater(t, len(c.dataProviders), 1)
-			require.False(t, canReplaySequentially(c.runs, len(c.dataProviders)))
 			require.Equal(t, stableSortByKey(input), loadStream(t, c))
 		})
 	}
