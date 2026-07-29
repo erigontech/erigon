@@ -54,11 +54,26 @@ head_hex=$(rpc_call "$PARENT_RPC" '{"jsonrpc":"2.0","method":"eth_blockNumber","
 [[ "$head_hex" != "null" && -n "$head_hex" ]] || fail "eth_blockNumber returned null — is the parent erigon running at $PARENT_RPC?"
 head_dec=$(printf '%d\n' "$head_hex")
 [[ "$head_dec" -gt "$CUT_BUFFER" ]] || fail "parent head=$head_dec too low; need > CUT_BUFFER=$CUT_BUFFER"
-cut_block=$(( head_dec - CUT_BUFFER ))
-parent_chain_id_hex=$(rpc_call "$PARENT_RPC" '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' '.result')
-parent_chain_id=$(printf '%d\n' "$parent_chain_id_hex")
-fork_chain_id=$(( parent_chain_id + 1 ))
-echo "  parent head=$head_dec cut=$cut_block parent_chain_id=$parent_chain_id fork_chain_id=$fork_chain_id"
+current_chain_id_hex=$(rpc_call "$PARENT_RPC" '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' '.result')
+current_chain_id=$(printf '%d\n' "$current_chain_id_hex")
+
+# TARGET_IS_PARENT (from the soak driver) splits the direction:
+# parent→fork writes chain.json + fresh cutBlock + fresh chainId;
+# fork→parent skips chain.json (target already in the registry) and
+# leaves expected_post_chain_id unset for Phase 5 to detect via
+# inequality with the pre-transition value.
+target_is_parent="${TARGET_IS_PARENT:-false}"
+
+if [[ "$target_is_parent" == "true" ]]; then
+    cut_block=0
+    expected_post_chain_id=""
+    echo "  head=$head_dec current_chain_id=$current_chain_id target=$FORK_CHAIN_NAME (fork→parent)"
+else
+    cut_block=$(( head_dec - CUT_BUFFER ))
+    fork_chain_id=$(( current_chain_id + 1 ))
+    expected_post_chain_id=$fork_chain_id
+    echo "  head=$head_dec cut=$cut_block current_chain_id=$current_chain_id fork_chain_id=$fork_chain_id"
+fi
 
 # Phase 1.5: unwind + swap in-process via debug_setFork. The fork
 # datadir validator refuses to boot fresh with snap files that
@@ -72,7 +87,8 @@ echo "  parent head=$head_dec cut=$cut_block parent_chain_id=$parent_chain_id fo
 # test: exercise the same shipped fallback operators would use when
 # they want a fresh process on the already-transitioned datadir.
 stage "Phase 1.5: debug_setFork to $FORK_CHAIN_NAME (trims + swaps in-process)"
-cat > "$PARENT_DATADIR/chain.json" <<EOF
+if [[ "$target_is_parent" != "true" ]]; then
+    cat > "$PARENT_DATADIR/chain.json" <<EOF
 {
   "chainName": "$FORK_CHAIN_NAME",
   "chainId": "$fork_chain_id",
@@ -80,6 +96,7 @@ cat > "$PARENT_DATADIR/chain.json" <<EOF
   "cutBlock": $cut_block
 }
 EOF
+fi
 ucan_file="$PARENT_DATADIR/fork-transition-ucan-$FORK_CHAIN_NAME.b64"
 "$INTEGRATION_BIN" mint_fork_transition \
     --trust-root-key="$TRUST_ROOT_KEY" \
@@ -128,7 +145,17 @@ fork_pid=$!
 echo "$fork_pid" > "$ERIGON_PID_FILE"
 echo "  fork erigon pid=$fork_pid"
 
+# Cleanup only fires on FAILURE. On success, we leave the fork
+# erigon running so the soak driver's next iter can query it as the
+# now-current parent. The alternative (unconditional SIGTERM on
+# exit) killed the erigon between iters and iter 2's Phase 1 saw
+# no RPC. Callers running fork-restart-transition.sh standalone
+# should manage the fork erigon lifecycle themselves.
+keep_running=false
 cleanup() {
+    if $keep_running; then
+        return
+    fi
     if [[ -f "$ERIGON_PID_FILE" ]]; then
         local p
         p=$(cat "$ERIGON_PID_FILE")
@@ -142,27 +169,47 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Phase 5: wait for the fork's RPC to answer eth_chainId.
+# Phase 5: wait for the target's RPC to answer eth_chainId.
+# parent→fork asserts against fork_chain_id (driver computed it);
+# fork→parent has no known-value assertion (parent's chain_id lives
+# in the registry) and instead waits for any chain_id != pre-transition.
 stage "Phase 5: wait for fork RPC"
-actual="<no rpc yet>" # bind so set -u doesn't kill the post-loop check when the RPC never answered
+actual="<no rpc yet>"
+matched=false
 for i in $(seq 1 "$FORK_STARTUP_TIMEOUT"); do
     fork_chain_id_hex=$(rpc_call "$FORK_RPC" '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' '.result' 2>/dev/null || echo "null")
     if [[ "$fork_chain_id_hex" != "null" && -n "$fork_chain_id_hex" ]]; then
         actual=$(printf '%d\n' "$fork_chain_id_hex")
-        if [[ "$actual" == "$fork_chain_id" ]]; then
-            echo "  fork RPC ready after ${i}s: eth_chainId=$actual (=$fork_chain_id)"
-            break
+        if [[ -n "$expected_post_chain_id" ]]; then
+            if [[ "$actual" == "$expected_post_chain_id" ]]; then
+                echo "  fork RPC ready after ${i}s: eth_chainId=$actual (=$expected_post_chain_id)"
+                matched=true
+                break
+            fi
+            echo "  t=${i}s: eth_chainId=$actual (want $expected_post_chain_id) — still transitioning?"
+        else
+            if [[ "$actual" != "$current_chain_id" ]]; then
+                echo "  target RPC ready after ${i}s: eth_chainId=$actual (was $current_chain_id pre-transition)"
+                matched=true
+                break
+            fi
+            echo "  t=${i}s: eth_chainId=$actual still equals pre-transition value — waiting for swap"
         fi
-        echo "  t=${i}s: eth_chainId=$actual (want $fork_chain_id) — still transitioning?"
     fi
     if ! kill -0 "$fork_pid" 2>/dev/null; then
         fail "fork erigon exited before RPC became ready"
     fi
     sleep 1
 done
-if [[ "$actual" != "$fork_chain_id" ]]; then
-    fail "fork erigon RPC did not report fork chain_id=$fork_chain_id within ${FORK_STARTUP_TIMEOUT}s (last=$actual)"
+if ! $matched; then
+    if [[ -n "$expected_post_chain_id" ]]; then
+        fail "fork erigon RPC did not report chain_id=$expected_post_chain_id within ${FORK_STARTUP_TIMEOUT}s (last=$actual)"
+    else
+        fail "fork erigon RPC did not swap chain_id away from $current_chain_id within ${FORK_STARTUP_TIMEOUT}s (last=$actual)"
+    fi
 fi
+
+keep_running=true
 
 echo
 echo "PASS: restart-between-transitions loaded $FORK_CHAIN_NAME cleanly (parent shutdown + fork bootstrap on same datadir)"

@@ -1888,8 +1888,17 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
 		clparams.ConfigurableCheckpointsURLs = checkpointUrls
 	}
-	cfg.CaplinConfig.CustomConfigPath = ctx.String(CaplinCustomConfigFlag.Name)
-	cfg.CaplinConfig.CustomGenesisStatePath = ctx.String(CaplinCustomGenesisFlag.Name)
+	// IsSet guard so an unset CLI flag doesn't wipe a value that
+	// SetEthConfig's fork auto-wire (spec.Config.Parent branch) may
+	// have populated from disk. Without the guard, calling this
+	// function last silently blanks out the fork's cl-config /
+	// genesis.ssz paths and Caplin's IsDevnet flips to false.
+	if ctx.IsSet(CaplinCustomConfigFlag.Name) {
+		cfg.CaplinConfig.CustomConfigPath = ctx.String(CaplinCustomConfigFlag.Name)
+	}
+	if ctx.IsSet(CaplinCustomGenesisFlag.Name) {
+		cfg.CaplinConfig.CustomGenesisStatePath = ctx.String(CaplinCustomGenesisFlag.Name)
+	}
 }
 
 // CheckExclusive verifies that only a single instance of the provided flags was

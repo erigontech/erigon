@@ -20,7 +20,11 @@ set -uo pipefail
 
 PARENT_DATADIR="${PARENT_DATADIR:-/erigon/tmp/erigon-hoodi-fork-parent}"
 PARENT_RPC="${PARENT_RPC:-http://127.0.0.1:19645}"
-FORK_RPC="${FORK_RPC:-http://127.0.0.1:19745}"
+# Fork erigon in the restart-model path reuses the parent's datadir
+# AND its RPC port (per fork-restart-transition.sh header) — only
+# --chain changes across the restart. Default FORK_RPC to
+# $PARENT_RPC so the driver polls the port the fork actually opens.
+FORK_RPC="${FORK_RPC:-$PARENT_RPC}"
 ITER="${ITER:-10}"
 DWELL_MAX_SEC="${DWELL_MAX_SEC:-300}"
 CUT_BUFFER="${CUT_BUFFER:-1000}"
@@ -135,6 +139,7 @@ for ((iter=1; iter<=ITER; iter++)); do
         FORK_CHAIN_NAME="$target" PARENT_DATADIR="$PARENT_DATADIR" \
           PARENT_RPC="$PARENT_RPC" FORK_RPC="$FORK_RPC" \
           CUT_BUFFER="$CUT_BUFFER" \
+          TARGET_IS_PARENT="$target_is_parent" \
           "$RESTART_SCRIPT" || iter_ok=false
         ;;
       *)
