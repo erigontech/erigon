@@ -13,7 +13,14 @@ type DomainCfg struct {
 	Compression seg.FileCompression
 	CompressCfg seg.Cfg
 	Accessors   Accessors // list of indexes for given domain
-	ValuesTable string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
+	// ValuesTable holds the domain values, in one of three layouts:
+	//   KeysTable set (plain):   seqID(8) -> value
+	//   LargeValues (plain):     key + invStep(8) -> value
+	//   otherwise (DupSort):     key -> invStep(8) + value
+	ValuesTable string
+	// KeysTable, when set, enables the seqID-indexed layout (for large/random-keyed
+	// domains): DupSort, bareKey -> invStep(8) + seqID(8).
+	KeysTable   string
 	LargeValues bool
 
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
@@ -28,7 +35,11 @@ type DomainCfg struct {
 }
 
 func (d DomainCfg) Tables() []string {
-	return []string{d.ValuesTable, d.Hist.ValuesTable, d.Hist.IiCfg.KeysTable, d.Hist.IiCfg.ValuesTable}
+	tables := []string{d.ValuesTable, d.Hist.ValuesTable, d.Hist.IiCfg.KeysTable, d.Hist.IiCfg.ValuesTable}
+	if d.KeysTable != "" {
+		tables = append(tables, d.KeysTable)
+	}
+	return tables
 }
 
 func (d DomainCfg) GetVersions() VersionTypes {

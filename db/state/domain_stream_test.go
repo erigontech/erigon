@@ -394,14 +394,21 @@ func TestDomainLatestIterFile_PrefersFilesOverDB_LargeValues(t *testing.T) {
 	dt.Close()
 
 	// Delete step 1 entry from DB, leaving only the stale step 0 entry (V0).
-	// For LargeValues the DB key is userKey || ^step (8 bytes).
+	// For the seqID-indexed layout the step lives in the keys table dup
+	// (bareKey -> ^step || seqID); drop the step-1 dup there.
 	tx, err = db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	var step1Key [16]byte // [userKey (8 bytes) || ^step1 (8 bytes)]
-	copy(step1Key[:8], key[:])
-	binary.BigEndian.PutUint64(step1Key[8:], ^uint64(1))
-	require.NoError(tx.Delete(d.ValuesTable, step1Key[:]))
+	var invStep1 [8]byte
+	binary.BigEndian.PutUint64(invStep1[:], ^uint64(1))
+	kc, err := tx.RwCursorDupSort(d.KeysTable) //nolint:gocritic // closed explicitly before Commit
+	require.NoError(err)
+	dup, err := kc.SeekBothRange(key[:], invStep1[:])
+	require.NoError(err)
+	if len(dup) >= 8 && bytes.Equal(dup[:8], invStep1[:]) {
+		require.NoError(kc.DeleteCurrent())
+	}
+	kc.Close()
 	require.NoError(tx.Commit())
 
 	// DebugRangeLatest (which uses DomainLatestIterFile) should return V1

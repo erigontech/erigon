@@ -426,9 +426,9 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 	require.LessOrEqualf(postBlock, unwindTarget,
 		"commitment state blockNum=%d must be ≤ unwindTarget=%d after repeated unwinds",
 		postBlock, unwindTarget)
-	// Verify: no commitment values table entries with step > unwindTarget/stepSize.
+	// Verify: no commitment keys-table entries with step > unwindTarget/stepSize.
 	maxStep := unwindTarget / stepSize
-	c, err := rwTx.Cursor(kv.TblCommitmentVals)
+	c, err := rwTx.Cursor(kv.TblCommitmentKeys)
 	require.NoError(err)
 	defer c.Close()
 	offending := 0
@@ -605,7 +605,7 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 			table, offending, maxStep, exampleStep)
 	}
 	checkTableForOrphans(kv.TblAccountVals)
-	checkTableForOrphans(kv.TblCommitmentVals)
+	checkTableForOrphans(kv.TblCommitmentKeys)
 }
 
 // TestSharedDomain_UnwindAcrossStepBoundary reproduces the mainnet corruption
@@ -709,9 +709,9 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	require.LessOrEqualf(postBlock, unwindTarget,
 		"post-unwind: commitment state blockNum=%d must be ≤ unwindTarget=%d (txNum=%d)",
 		postBlock, unwindTarget, postTxNum)
-	// Fix: also confirm no values table entries exist above the unwind-target step.
+	// Fix: also confirm no keys-table entries exist above the unwind-target step.
 	maxStep := unwindTarget / stepSize // step 0 for target 4
-	c, err := rwTx.Cursor(kv.TblCommitmentVals)
+	c, err := rwTx.Cursor(kv.TblCommitmentKeys)
 	require.NoError(err)
 	defer c.Close()
 	offending := 0
