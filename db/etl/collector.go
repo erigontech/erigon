@@ -56,24 +56,26 @@ func (a *Allocator) Get() Buffer {
 	return b
 }
 
-// sortedRun describes one flushed run: whether its keys arrived already sorted,
-// and if so its first/last key. Runs align 1:1 with Collector.dataProviders.
+// sortedRun holds one flushed run's key boundaries, captured after Sort —
+// every run is internally sorted by construction. Runs align 1:1 with
+// Collector.dataProviders; an async flush fills its run in the flush goroutine,
+// which completes before mergeSortFiles reads it (provider.Wait).
 type sortedRun struct {
-	first  []byte
-	last   []byte
-	sorted bool
+	first []byte
+	last  []byte
+	valid bool
 }
 
 // canReplaySequentially reports whether runs can be replayed one after another
 // instead of heap-merged: every run must be sorted and consecutive runs must not
 // overlap. An equal boundary key is fine — the heap breaks key ties by run order,
 // which sequential replay preserves.
-func canReplaySequentially(runs []sortedRun, providers int) bool {
+func canReplaySequentially(runs []*sortedRun, providers int) bool {
 	if len(runs) != providers {
 		return false
 	}
 	for i := range runs {
-		if !runs[i].sorted {
+		if runs[i] == nil || !runs[i].valid {
 			return false
 		}
 		if i > 0 && bytes.Compare(runs[i-1].last, runs[i].first) > 0 {
@@ -90,7 +92,7 @@ type Collector struct {
 	logPrefix     string
 	tmpdir        string
 	dataProviders []dataProvider
-	runs          []sortedRun
+	runs          []*sortedRun
 	logLvl        log.Lvl
 	bufType       int
 	allFlushed    bool
@@ -147,32 +149,18 @@ func (c *Collector) Allocator(a *Allocator) *Collector {
 func runBoundaries(buf Buffer) sortedRun {
 	first, _ := buf.Get(0)
 	last, _ := buf.Get(buf.Len() - 1)
-	return sortedRun{sorted: true, first: bytes.Clone(first), last: bytes.Clone(last)}
-}
-
-// bufferRun captures run metadata from buf. Must be called before flushing:
-// an async flush sorts the buffer concurrently. First/last keys are read in
-// insertion order, so they only bound the run when the input arrived sorted.
-func bufferRun(buf Buffer) sortedRun {
-	type inputSortTracker interface{ inputSorted() bool }
-	t, ok := buf.(inputSortTracker)
-	if !ok || !t.inputSorted() || buf.Len() == 0 {
-		return sortedRun{}
-	}
-	return runBoundaries(buf)
+	return sortedRun{first: bytes.Clone(first), last: bytes.Clone(last), valid: true}
 }
 
 func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	if c.buf.Len() == 0 {
 		return nil
 	}
-	run := bufferRun(c.buf)
+	run := &sortedRun{}
 
 	if canStoreInRam && len(c.dataProviders) == 0 {
 		c.buf.Sort()
-		if !run.sorted { // after Sort even unsorted input forms a sorted run
-			run = runBoundaries(c.buf)
-		}
+		*run = runBoundaries(c.buf)
 		provider := KeepInRAM(c.buf)
 		c.allFlushed = true
 		c.dataProviders = append(c.dataProviders, provider)
@@ -183,7 +171,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	// go bg - but without server overloading
 	doInBackground := c.sortAndFlushInBackground && c.sortAndFlushInBackgroundActive.CompareAndSwap(false, true)
 	if !doInBackground {
-		provider, err := FlushToDisk(c.logPrefix, c.buf, c.tmpdir, c.logLvl)
+		provider, err := FlushToDisk(c.logPrefix, c.buf, c.tmpdir, c.logLvl, run)
 		if err != nil {
 			return err
 		}
@@ -201,7 +189,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 		c.buf = getBufferByType(c.bufType, datasize.ByteSize(fullBuf.SizeLimit()))
 		c.buf.Prealloc(prevLen/8, prevSize/8)
 	}
-	provider, err := FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, c.logLvl, c.allocator, &c.sortAndFlushInBackgroundActive)
+	provider, err := FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, c.logLvl, c.allocator, &c.sortAndFlushInBackgroundActive, run)
 	if err != nil {
 		return err
 	}
@@ -336,7 +324,7 @@ func (c *Collector) Close() {
 // and feeds them to loadFunc. Each provider (run) is internally sorted. When runs
 // additionally do not overlap, they are replayed one after another; otherwise a
 // k-way merge heap orders elements across runs, breaking key ties by run order.
-func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs, runs []sortedRun) (err error) {
+func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs, runs []*sortedRun) (err error) {
 	for _, provider := range providers {
 		if err := provider.Wait(); err != nil {
 			return err
