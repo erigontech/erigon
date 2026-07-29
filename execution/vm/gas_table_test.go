@@ -421,56 +421,6 @@ func TestCreateTraceUsesActualGasOnEarlyFailure(t *testing.T) {
 	require.Zero(t, exitedCreateGasUsed)
 }
 
-func TestCreateOntoStorageOnlyAccountChargesBeforeCollision(t *testing.T) {
-	t.Parallel()
-	for _, tt := range []struct {
-		name      string
-		gas       mdgas.MdGas
-		wantErr   error
-		wantState uint64
-	}{
-		{
-			name:    "insufficient gas",
-			gas:     mdgas.MdGas{Regular: params.StateGasNewAccount - 1},
-			wantErr: vm.ErrRuntimeOutOfGas,
-		},
-		{
-			name:      "collision refills charge",
-			gas:       mdgas.MdGas{Regular: 500_000, State: params.StateGasNewAccount},
-			wantErr:   vm.ErrContractAddressCollision,
-			wantState: params.StateGasNewAccount,
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			s := state.New(state.NewNoopReader())
-			defer s.Release(false)
-			caller := accounts.InternAddress(common.HexToAddress("0xcafe"))
-			target := accounts.InternAddress(types.CreateAddress(caller.Value(), 0))
-			s.CreateAccount(caller, false)
-			s.CreateAccount(target, true)
-			require.NoError(t, s.SetState(target, accounts.ZeroKey, *uint256.NewInt(1)))
-			vmctx := evmtypes.BlockContext{
-				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
-				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
-					return nil
-				},
-			}
-			empty, err := s.Empty(target)
-			require.NoError(t, err)
-			require.True(t, empty)
-			hasStorage, err := s.HasStorage(target)
-			require.NoError(t, err)
-			require.True(t, hasStorage)
-			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{})
-			_, _, gasRemaining, gasUsed, err := vmenv.Create(caller, nil, tt.gas, uint256.Int{}, nil, false)
-			require.ErrorIs(t, err, tt.wantErr)
-			require.Equal(t, tt.wantState, gasRemaining.State)
-			require.Zero(t, gasUsed.State)
-		})
-	}
-}
-
 var createGasTests = []struct {
 	code    string
 	eip3860 bool

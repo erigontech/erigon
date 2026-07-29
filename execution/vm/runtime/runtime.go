@@ -204,17 +204,34 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		rules  = vmenv.ChainRules()
 	)
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
-
-	// Call the code with the given configuration.
-	code, address, leftOverGas, _, err := vmenv.Create(
-		sender,
-		input,
-		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules),
-		cfg.Value,
-		nil,
-		false,
-	)
-	return code, address.Value(), leftOverGas, err
+	canTransfer, err := vmenv.Context.CanTransfer(cfg.State, sender, cfg.Value)
+	if err != nil {
+		return nil, common.Address{}, mdgas.MdGas{}, err
+	}
+	if !canTransfer {
+		return nil, common.Address{}, mdgas.MdGas{}, vm.ErrInsufficientBalance
+	}
+	nonce, err := cfg.State.GetNonce(sender)
+	if err != nil {
+		return nil, common.Address{}, mdgas.MdGas{}, err
+	}
+	if nonce+1 < nonce {
+		return nil, common.Address{}, mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules), vm.ErrNonceUintOverflow
+	}
+	address := accounts.InternAddress(types.CreateAddress(sender.Value(), nonce))
+	gas := mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules)
+	leftOverGas, topLevelGasUsed, err := protocol.PrepareTopLevelCreate(vmenv, address, gas)
+	var code []byte
+	var createdAddress accounts.Address
+	if err == nil {
+		code, createdAddress, leftOverGas, _, err = vmenv.Create(sender, input, leftOverGas, cfg.Value, nil, false)
+		protocol.RefillTopLevelGas(&leftOverGas, &topLevelGasUsed, cfg.EVMConfig.RestoreState, err)
+	} else if errors.Is(err, vm.ErrRuntimeOutOfGas) {
+		cfg.State.SetNonce(sender, nonce+1, tracing.NonceChangeContractCreator)
+		leftOverGas = mdgas.MdGas{State: gas.State}
+		protocol.TraceTopLevelFailure(vmenv, vm.CREATE, sender, address, input, gas, leftOverGas, cfg.Value, err)
+	}
+	return code, createdAddress.Value(), leftOverGas, err
 }
 
 // Call executes the code given by the contract's address. It will return the
@@ -251,10 +268,10 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 			cfg.Value,
 			false, /* bailout */
 		)
-		protocol.RefillTopLevelCallGas(&leftOverGas, &topLevelCallGasUsed, cfg.EVMConfig.RestoreState, err)
+		protocol.RefillTopLevelGas(&leftOverGas, &topLevelCallGasUsed, cfg.EVMConfig.RestoreState, err)
 	} else if errors.Is(err, vm.ErrRuntimeOutOfGas) {
 		leftOverGas = mdgas.MdGas{State: gas.State}
-		protocol.TraceTopLevelCallFailure(vmenv, sender.Address(), address, input, gas, leftOverGas, cfg.Value, err)
+		protocol.TraceTopLevelFailure(vmenv, vm.CALL, sender.Address(), address, input, gas, leftOverGas, cfg.Value, err)
 	}
 
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
