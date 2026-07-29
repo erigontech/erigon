@@ -17,10 +17,10 @@
 package metrics
 
 import (
+	"cmp"
 	"fmt"
 	"reflect"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -63,15 +63,18 @@ func NewSet() *Set {
 }
 
 func (s *Set) Describe(ch chan<- *prometheus.Desc) {
-	lessFunc := func(i, j int) bool {
-		return s.a[i].name < s.a[j].name
+	cmpA := func(a, b *namedMetric) int {
+		return cmp.Compare(a.name, b.name)
+	}
+	cmpAV := func(a, b *namedMetricVec) int {
+		return cmp.Compare(a.name, b.name)
 	}
 	s.mu.Lock()
-	if !sort.SliceIsSorted(s.a, lessFunc) {
-		sort.Slice(s.a, lessFunc)
+	if !slices.IsSortedFunc(s.a, cmpA) {
+		slices.SortFunc(s.a, cmpA)
 	}
-	if !sort.SliceIsSorted(s.av, lessFunc) {
-		sort.Slice(s.av, lessFunc)
+	if !slices.IsSortedFunc(s.av, cmpAV) {
+		slices.SortFunc(s.av, cmpAV)
 	}
 	sa := append([]*namedMetric(nil), s.a...)
 	sav := append([]*namedMetricVec(nil), s.av...)
@@ -85,15 +88,18 @@ func (s *Set) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (s *Set) Collect(ch chan<- prometheus.Metric) {
-	lessFunc := func(i, j int) bool {
-		return s.a[i].name < s.a[j].name
+	cmpA := func(a, b *namedMetric) int {
+		return cmp.Compare(a.name, b.name)
+	}
+	cmpAV := func(a, b *namedMetricVec) int {
+		return cmp.Compare(a.name, b.name)
 	}
 	s.mu.Lock()
-	if !sort.SliceIsSorted(s.a, lessFunc) {
-		sort.Slice(s.a, lessFunc)
+	if !slices.IsSortedFunc(s.a, cmpA) {
+		slices.SortFunc(s.a, cmpA)
 	}
-	if !sort.SliceIsSorted(s.av, lessFunc) {
-		sort.Slice(s.av, lessFunc)
+	if !slices.IsSortedFunc(s.av, cmpAV) {
+		slices.SortFunc(s.av, cmpAV)
 	}
 	sa := append([]*namedMetric(nil), s.a...)
 	sav := append([]*namedMetricVec(nil), s.av...)
@@ -209,6 +215,46 @@ func (s *Set) GetOrCreateCounter(name string, help ...string) (prometheus.Counte
 	return getOrCreate(s, name, func() (prometheus.Counter, error) {
 		return newCounter(name, help...)
 	})
+}
+
+// GetOrCreateCounterVec returns registered CounterVec in s with the given name
+// or creates new CounterVec if s doesn't contain CounterVec with the given name.
+//
+// name must be valid Prometheus-compatible metric with possible labels.
+// For instance,
+//
+//   - foo
+//   - foo{bar="baz"}
+//   - foo{bar="baz",aaa="b"}
+//
+// labels are the labels associated with the CounterVec.
+//
+// The returned CounterVec is safe to use from concurrent goroutines.
+func (s *Set) GetOrCreateCounterVec(name string, labels []string, help ...string) (*prometheus.CounterVec, error) {
+	return getOrCreateVec(s, name, func() (*prometheus.CounterVec, error) {
+		return newCounterVec(name, labels, help...)
+	})
+}
+
+// newCounterVec creates a new Prometheus CounterVec.
+func newCounterVec(name string, labels []string, help ...string) (*prometheus.CounterVec, error) {
+	name, constLabels, err := parseMetric(name)
+	if err != nil {
+		return nil, err
+	}
+
+	helpStr := "counter metric"
+	if len(help) > 0 {
+		helpStr = strings.Join(help, ", ")
+	}
+
+	cv := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name:        name,
+		Help:        helpStr,
+		ConstLabels: constLabels,
+	}, labels)
+
+	return cv, nil
 }
 
 // NewGauge registers and returns gauge with the given name.

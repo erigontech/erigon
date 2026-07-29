@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -41,7 +41,7 @@ func (br *BlockRetire) retireBorBlocks(
 	minBlockNum uint64,
 	maxBlockNum uint64,
 	lvl log.Lvl,
-	seeder downloader.SeederClient,
+	seeder dbservices.SeederClient,
 ) (bool, error) {
 	select {
 	case <-ctx.Done():
@@ -73,7 +73,7 @@ func (br *BlockRetire) retireBorBlocks(
 			}
 
 			logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "type", snap,
-				"range", fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
+				"range", fmt.Sprintf("%s-%s", common.PrettyExact(blockFrom), common.PrettyExact(blockTo)))
 
 			var firstKeyGetter snaptype.FirstKeyGetter
 
@@ -112,7 +112,7 @@ func (br *BlockRetire) retireBorBlocks(
 func (br *BlockRetire) MergeBorBlocks(
 	ctx context.Context,
 	lvl log.Lvl,
-	seeder downloader.SeederClient,
+	seeder dbservices.SeederClient,
 ) (mergedBlocks bool, err error) {
 	notifier, logger, _, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, int(br.workers.Load())
 	snapshots := br.borSnapshots()
@@ -131,7 +131,7 @@ func (br *BlockRetire) MergeBorBlocks(
 		}
 		return seeder.Seed(ctx, mergedFiles)
 	}
-	if err := merger.Merge(ctx, &snapshots.RoSnapshots, heimdall.SnapshotTypes(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
+	if err := merger.Merge(ctx, &snapshots.BaseRoSnapshots, heimdall.SnapshotTypes(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
 		return false, err
 	}
 
@@ -161,11 +161,12 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, _max uint64) {
 	var toDel []string
 	l := make([]snaptype.FileInfo, 0, len(list))
 
-	for _, f := range list {
+	for i := range list {
+		f := &list[i]
 		if !(f.Type.Enum() == heimdall.Enums.Spans || f.Type.Enum() == heimdall.Enums.Events) {
 			continue
 		}
-		l = append(l, f)
+		l = append(l, *f)
 	}
 
 	// added overhead to make sure we don't delete in the
@@ -174,12 +175,14 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, _max uint64) {
 		_max -= 500_001
 	}
 
-	for _, f := range l {
+	for i := range l {
+		f := &l[i]
 		if _max < f.From {
 			continue
 		}
 
-		for _, a := range active {
+		for j := range active {
+			a := &active[j]
 			if a.Type.Enum() != heimdall.Enums.Spans {
 				continue
 			}

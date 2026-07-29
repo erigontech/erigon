@@ -1249,7 +1249,7 @@ func TestAllFilesDataOnly_NoneVisible(t *testing.T) {
 
 	// Create 5 data files, no accessors at all
 	numFiles := 5
-	for i := 0; i < numFiles; i++ {
+	for i := range numFiles {
 		from, to := RootNum(uint64(i)*repo.stepSize), RootNum(uint64(i+1)*repo.stepSize)
 		dataFile, _ := repo.schema.DataFile(v, from, to)
 		populateFiles(t, dirs, repo.schema, []string{dataFile})

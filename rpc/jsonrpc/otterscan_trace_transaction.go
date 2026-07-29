@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"math/big"
 
@@ -87,7 +88,7 @@ func (t *TransactionTracer) OnEnter(depth int, typRaw byte, from accounts.Addres
 	t.depth = depth
 	typ := vm.OpCode(typRaw)
 
-	inputCopy := common.Copy(input)
+	inputCopy := bytes.Clone(input)
 	_value := new(big.Int)
 	_value.Set(value.ToBig())
 
@@ -132,5 +133,5 @@ func (t *TransactionTracer) OnExit(depth int, output []byte, gasUsed uint64, err
 	pop := t.stack[lastIdx]
 	t.stack = t.stack[:lastIdx]
 
-	pop.Output = common.Copy(output)
+	pop.Output = bytes.Clone(output)
 }

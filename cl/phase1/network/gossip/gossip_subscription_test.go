@@ -468,10 +468,10 @@ func (s *TopicSubscriptionsTestSuite) TestConcurrentAccess() {
 	done := make(chan bool, numGoroutines)
 
 	// Spawn multiple goroutines that perform operations concurrently
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(id int) {
 			defer func() { done <- true }()
-			for j := 0; j < numOperations; j++ {
+			for range numOperations {
 				topic := "/eth2/abcd1234/test_topic/ssz_snappy"
 
 				// Try to get all topics
@@ -484,7 +484,7 @@ func (s *TopicSubscriptionsTestSuite) TestConcurrentAccess() {
 	}
 
 	// Wait for all goroutines to complete
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		<-done
 	}
 

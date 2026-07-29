@@ -98,7 +98,14 @@ func (b *BuilderPendingWithdrawal) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (b *BuilderPendingWithdrawal) Clone() clonable.Clonable {
-	return &BuilderPendingWithdrawal{}
+	if b == nil {
+		return &BuilderPendingWithdrawal{}
+	}
+	return &BuilderPendingWithdrawal{
+		FeeRecipient: b.FeeRecipient,
+		Amount:       b.Amount,
+		BuilderIndex: b.BuilderIndex,
+	}
 }
 
 func (b *BuilderPendingWithdrawal) HashSSZ() ([32]byte, error) {
@@ -107,16 +114,17 @@ func (b *BuilderPendingWithdrawal) HashSSZ() ([32]byte, error) {
 
 // BuilderPendingPayment represents a pending payment for a builder.
 type BuilderPendingPayment struct {
-	Weight     uint64                    `json:"weight,string"`
-	Withdrawal *BuilderPendingWithdrawal `json:"withdrawal"`
+	Weight        uint64                    `json:"weight,string"`
+	Withdrawal    *BuilderPendingWithdrawal `json:"withdrawal"`
+	ProposerIndex uint64                    `json:"proposer_index,string"`
 }
 
 func (b *BuilderPendingPayment) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(&b.Weight, b.Withdrawal)
+	return merkle_tree.HashTreeRoot(&b.Weight, b.Withdrawal, b.ProposerIndex)
 }
 
 func (b *BuilderPendingPayment) EncodingSizeSSZ() int {
-	return 8 + new(BuilderPendingWithdrawal).EncodingSizeSSZ() // weight + withdrawal (static)
+	return 8 + new(BuilderPendingWithdrawal).EncodingSizeSSZ() + 8
 }
 
 func (b *BuilderPendingPayment) Static() bool {
@@ -124,17 +132,27 @@ func (b *BuilderPendingPayment) Static() bool {
 }
 
 func (b *BuilderPendingPayment) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, b.Weight, b.Withdrawal)
+	return ssz2.MarshalSSZ(buf, b.Weight, b.Withdrawal, b.ProposerIndex)
 }
 
 func (b *BuilderPendingPayment) DecodeSSZ(buf []byte, version int) error {
 	b.Withdrawal = new(BuilderPendingWithdrawal)
-	return ssz2.UnmarshalSSZ(buf, version, &b.Weight, b.Withdrawal)
+	return ssz2.UnmarshalSSZ(buf, version, &b.Weight, b.Withdrawal, &b.ProposerIndex)
 }
 
 func (b *BuilderPendingPayment) Clone() clonable.Clonable {
+	if b == nil {
+		return &BuilderPendingPayment{Withdrawal: &BuilderPendingWithdrawal{}}
+	}
+	withdrawal := (*BuilderPendingWithdrawal)(nil)
+	if b.Withdrawal != nil {
+		withdrawal = b.Withdrawal.Clone().(*BuilderPendingWithdrawal)
+	} else {
+		withdrawal = &BuilderPendingWithdrawal{}
+	}
 	return &BuilderPendingPayment{
-		Weight:     0,
-		Withdrawal: &BuilderPendingWithdrawal{},
+		Weight:        b.Weight,
+		Withdrawal:    withdrawal,
+		ProposerIndex: b.ProposerIndex,
 	}
 }

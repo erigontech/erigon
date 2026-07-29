@@ -31,8 +31,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -114,7 +114,7 @@ type Worker struct {
 	chainRoTx   kv.TemporalTx
 	chainTx     kv.TemporalTx
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 	in          *QueueWithRetry
 	rs          *state.StateV3Buffered
 	stateWriter state.StateWriter
@@ -170,7 +170,7 @@ func (rw *Worker) installWorkerGetHash(txTask Task) {
 	})
 }
 
-func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, chainDb kv.TemporalRoDB, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *ResultsQueue, engine rules.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
+func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, chainDb kv.TemporalRoDB, in *QueueWithRetry, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *ResultsQueue, engine rules.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
 	lock := &sync.RWMutex{}
 
 	w := &Worker{
@@ -344,9 +344,7 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 		case withTx:
 			typedWriter.SetTx(rw.chainTx)
 		default:
-			// Writers that don't implement withPutter or withTx (e.g.
-			// NoopWriter, LightCollector) don't need a DB transaction —
-			// they accumulate writes in memory only. This is not an error.
+			// Writers without a DB-backed sink do not need a transaction.
 		}
 
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
@@ -562,18 +560,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 		result.TraceTos = callTracer.Tos()
 	}
 
-	// Capture collector-format writes from LightCollector (parallel workers).
-	// MakeWriteSet already wrote to rw.stateWriter; extract the accumulated
-	// writes so finalize can use them directly without IBS reconstruction.
-	if lc, ok := rw.stateWriter.(*state.LightCollector); ok {
-		result.CollectorWrites = lc.TakeWrites()
-	}
-
 	return result
 }
 
 func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
-	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
+	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *QueueWithRetry, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
 	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func(), err error) {
 	reconWorkers = make([]*Worker, workerCount)
 
@@ -581,7 +572,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 	rws = NewResultsQueue(resultsSize, workerCount)
 
 	g, gctx := errgroup.WithContext(ctx)
-	for i := 0; i < workerCount; i++ {
+	for i := range workerCount {
 		reconWorkers[i] = NewWorker(gctx, background, metrics, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
 
 		if rs != nil {
@@ -597,7 +588,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 		}
 	}
 	if background {
-		for i := 0; i < workerCount; i++ {
+		for i := range workerCount {
 			g.Go(func() error {
 				return reconWorkers[i].Run()
 			})

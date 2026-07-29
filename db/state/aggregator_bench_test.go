@@ -31,7 +31,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
@@ -386,10 +385,10 @@ func Benchmark_BTree_SeekThenNext(b *testing.B) {
 				panic("mistmatch")
 			}
 
-			prevKey := common.Copy(keys[p])
+			prevKey := bytes.Clone(keys[p])
 			ntimer := time.Duration(0)
 			nextKeys := 5000
-			for j := 0; j < nextKeys; j++ {
+			for range nextKeys {
 				ntime := time.Now()
 
 				if !cur.Next() {
@@ -612,7 +611,7 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 			break
 		}
 		key, _ := getter.Next(key[:0])
-		listing = append(listing, common.Copy(key))
+		listing = append(listing, bytes.Clone(key))
 		getter.Skip()
 	}
 	decomp.Close()
@@ -637,7 +636,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	collector := etl.NewCollector(btindex.BtreeLogPrefix+" genCompress", tmp, etl.NewSortableBuffer(bufSize), logger)
 	defer collector.Close()
 
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		key := make([]byte, keySize)
 		n, err := rnd.Read(key)
 		require.Equal(tb, keySize, n)

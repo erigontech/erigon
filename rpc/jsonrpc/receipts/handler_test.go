@@ -65,7 +65,7 @@ func TestGetBlockHeaders(t *testing.T) {
 	}
 
 	var blocks []*types.Block
-	for i := uint64(0); i < limit; i++ {
+	for i := range limit {
 		block, err := backend.BlockReader.BlockByNumber(backend.Ctx, tx, i)
 		require.NoError(t, err)
 		blocks = append(blocks, block)
@@ -75,7 +75,7 @@ func TestGetBlockHeaders(t *testing.T) {
 	require.NoError(t, err)
 
 	getHashes := func(from, limit uint64) (hashes []common.Hash) {
-		for i := uint64(0); i < limit; i++ {
+		for i := range limit {
 			hashes = append(hashes, blocks[from-1-i].Hash())
 		}
 		return hashes

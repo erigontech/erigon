@@ -87,7 +87,7 @@ func Test_WitnessTracer_CapturedNodesReconstructRoot(t *testing.T) {
 	for i, a := range extAccts {
 		builder.Balance(common.Bytes2Hex(a), uint64(i+1))
 	}
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		a, _ := generateKeyWithHashedPrefix(nil, length.Addr)
 		builder.Balance(common.Bytes2Hex(a), uint64(100+i))
 	}

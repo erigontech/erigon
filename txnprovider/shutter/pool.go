@@ -297,20 +297,25 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			continue
 		}
 		accessList := txn.GetAccessList()
+		isAATxn := txn.Type() == types.AccountAbstractionTxType
+		to := txn.GetTo()
+		txnSender, senderOk := txn.GetSender()
 		intrinsicGasResult, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 			Data:               txn.GetData(),
 			AuthorizationsLen:  uint64(len(txn.GetAuthorizations())),
 			AccessListLen:      uint64(len(accessList)),
 			StorageKeysLen:     uint64(accessList.StorageKeys()),
 			IsContractCreation: txn.IsContractDeploy(),
+			IsSelfTransfer:     senderOk && to != nil && txnSender.Value() == *to,
+			HasValue:           !txn.GetValue().IsZero(),
 			IsEIP2:             true,
 			IsEIP2028:          true,
 			IsEIP3860:          isEIP3860,
 			IsEIP7623:          isEIP7623,
 			IsEIP7976:          isAmsterdam,
 			IsEIP7981:          isAmsterdam,
-			IsEIP8037:          isAmsterdam,
-			IsAATxn:            txn.Type() == types.AccountAbstractionTxType,
+			IsEIP2780:          isAmsterdam,
+			IsAATxn:            isAATxn,
 		})
 		if overflow {
 			sender, _ := txn.GetSender()
@@ -322,31 +327,31 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			)
 			continue
 		}
-		intrinsicRegularGas := intrinsicGasResult.RegularGas
-		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicRegularGas {
-			intrinsicRegularGas = intrinsicGasResult.FloorGasCost
+		intrinsicGas := intrinsicGasResult.RegularGas
+		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicGas {
+			intrinsicGas = intrinsicGasResult.FloorGasCost
 		}
 		blobGas := txn.GetBlobGas()
-		if intrinsicRegularGas > availableGas.Regular {
+		if intrinsicGas > availableGas.Regular {
 			sender, _ := txn.GetSender()
 			p.logger.Warn(
 				"skipping decrypted txn: insufficient regular gas",
 				"hash", txn.Hash(),
 				"type", txn.Type(),
 				"sender", sender,
-				"intrinsicRegularGas", intrinsicRegularGas,
+				"intrinsicGas", intrinsicGas,
 				"availableRegular", availableGas.Regular,
 			)
 			continue
 		}
-		if intrinsicGasResult.StateGas > availableGas.State {
+		if isAmsterdam && txn.GetGasLimit() > availableGas.State {
 			sender, _ := txn.GetSender()
 			p.logger.Warn(
 				"skipping decrypted txn: insufficient state gas",
 				"hash", txn.Hash(),
 				"type", txn.Type(),
 				"sender", sender,
-				"intrinsicStateGas", intrinsicGasResult.StateGas,
+				"gasLimit", txn.GetGasLimit(),
 				"availableState", availableGas.State,
 			)
 			continue
@@ -363,8 +368,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			)
 			continue
 		}
-		availableGas.Regular -= intrinsicRegularGas
-		availableGas.State -= intrinsicGasResult.StateGas
+		availableGas.Regular -= intrinsicGas
 		availableGas.Blob -= blobGas
 		decryptedTxnsGas += txn.GetGasLimit()
 		txns = append(txns, txn)

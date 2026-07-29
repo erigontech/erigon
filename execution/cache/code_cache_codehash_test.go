@@ -34,7 +34,7 @@ func makeCodeHash(i int) []byte {
 }
 
 func TestCodeCache_GetByCodeHash_HitAfterPut(t *testing.T) {
-	c := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	addr := makeAddr(1)
 	code := []byte{0x60, 0x80, 0x60, 0x40, 0x52} // small contract preamble
 	codeHash := makeCodeHash(0xab)
@@ -61,7 +61,7 @@ func TestCodeCache_GetByCodeHash_HitAfterPut(t *testing.T) {
 func TestCodeCache_GetByCodeHash_DistinctAddrsSameCode(t *testing.T) {
 	// The point of codeHashToCode: many addresses sharing one codeHash all hit a
 	// single entry once any one of them has been populated.
-	c := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	code := []byte{0x60, 0x80, 0x60, 0x40, 0x52}
 	codeHash := makeCodeHash(0xcd)
 
@@ -82,7 +82,7 @@ func TestCodeCache_GetByCodeHash_DistinctAddrsSameCode(t *testing.T) {
 }
 
 func TestCodeCache_PutWithCodeHash_EmptyHashOrCodeIsNoOp(t *testing.T) {
-	c := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	addr := makeAddr(1)
 	code := []byte{0x60, 0x00}
 
@@ -97,20 +97,22 @@ func TestCodeCache_PutWithCodeHash_EmptyHashOrCodeIsNoOp(t *testing.T) {
 	require.Nil(t, v)
 }
 
-func TestCodeCache_PutWithCodeHash_RespectsCodeCapacity(t *testing.T) {
-	// 8-byte cap: 32-byte codeHash + 4-byte code > 32. New codeHashToCode puts must
-	// no-op when the layer is full. Use tiny code to keep math obvious.
-	c := NewCodeCache(8, 1*datasize.MB)
+func TestCodeCache_PutWithCodeHash_EvictsColdestWhenFull(t *testing.T) {
+	// Tiny byte budget → a 1-entry freelru cap. The second put must EVICT the
+	// coldest entry (LRU), not freeze the layer: the newest code is retrievable
+	// and the oldest is gone.
+	c := closeOnCleanup(t, NewCodeCache(8, 1*datasize.MB))
 	c.PutWithCodeHash(makeAddr(1), []byte{1, 2, 3, 4}, makeCodeHash(1), 0)
-	// Second put exceeds the codeHashToCode budget — must no-op.
 	c.PutWithCodeHash(makeAddr(2), []byte{5, 6, 7, 8}, makeCodeHash(2), 0)
 
 	_, ok := c.GetByCodeHash(makeCodeHash(2))
-	assert.False(t, ok, "second codeHashToCode entry should not exist when capacity is exceeded")
+	assert.True(t, ok, "newest codeHashToCode entry must be present after eviction (no freeze)")
+	_, ok = c.GetByCodeHash(makeCodeHash(1))
+	assert.False(t, ok, "coldest codeHashToCode entry must have been evicted")
 }
 
 func TestCodeCache_CodeSize_PopulatedAlongsideBytes(t *testing.T) {
-	c := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	code := []byte{0x60, 0x80, 0x60, 0x40, 0x52, 0x60, 0x10}
 	codeHash := makeCodeHash(0xee)
 
@@ -127,7 +129,7 @@ func TestCodeCache_CodeSize_PopulatedAlongsideBytes(t *testing.T) {
 }
 
 func TestCodeCache_CodeSize_DirectPutAndGet(t *testing.T) {
-	c := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	codeHash := makeCodeHash(0xff)
 
 	// Direct Put without going through the bytes layer.
@@ -139,7 +141,7 @@ func TestCodeCache_CodeSize_DirectPutAndGet(t *testing.T) {
 }
 
 func TestCodeCache_CodeSize_EmptyHashOrNegativeIsNoOp(t *testing.T) {
-	c := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	c.PutCodeSizeByCodeHash(nil, 100, 0)
 	c.PutCodeSizeByCodeHash(makeCodeHash(1), -1, 0)
 	_, ok := c.GetCodeSizeByCodeHash(makeCodeHash(1))
@@ -151,7 +153,7 @@ func TestCodeCache_CodeSize_EmptyHashOrNegativeIsNoOp(t *testing.T) {
 // =============================================================================
 
 func BenchmarkCodeCache_GetByCodeHash_Hit(b *testing.B) {
-	c := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+	c := closeOnCleanup(b, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 	code := bytes.Repeat([]byte{0x5b}, 2048) // 2 KiB typical contract size
 	codeHash := makeCodeHash(0x11)
 	c.PutWithCodeHash(makeAddr(1), code, codeHash, 0)
@@ -166,7 +168,7 @@ func BenchmarkCodeCache_GetByCodeHash_Hit(b *testing.B) {
 }
 
 func BenchmarkCodeCache_GetByCodeHash_Miss(b *testing.B) {
-	c := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+	c := closeOnCleanup(b, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 	missHash := makeCodeHash(0x22)
 
 	b.ResetTimer()
@@ -179,7 +181,7 @@ func BenchmarkCodeCache_GetByCodeHash_Miss(b *testing.B) {
 // path. Compare against GetByCodeHash to verify the codeHashToCode lookup is at least
 // as fast (one map probe vs two: addr→hash then hash→code).
 func BenchmarkCodeCache_Get_AddrLevel_Hit(b *testing.B) {
-	c := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+	c := closeOnCleanup(b, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 	code := bytes.Repeat([]byte{0x5b}, 2048)
 	addr := makeAddr(1)
 	c.PutWithCodeHash(addr, code, makeCodeHash(0x33), 0)
@@ -198,7 +200,7 @@ func BenchmarkCodeCache_Get_AddrLevel_Hit(b *testing.B) {
 // Without codeHashToCode every fresh addr would pay a file read. With codeHashToCode every
 // caller that already knows the hash hits one shared entry.
 func BenchmarkCodeCache_GetByCodeHash_ManyAddrs_OneCode(b *testing.B) {
-	c := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+	c := closeOnCleanup(b, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 	code := bytes.Repeat([]byte{0x5b}, 2048)
 	codeHash := makeCodeHash(0x44)
 	c.PutWithCodeHash(makeAddr(1), code, codeHash, 0) // populate once
@@ -214,12 +216,12 @@ func BenchmarkCodeCache_GetByCodeHash_ManyAddrs_OneCode(b *testing.B) {
 }
 
 // TestCodeCache_Unwind_DropsUnwoundCodeEverywhere verifies the (txNum, epoch)
-// model the user requires (#21752): code deployed on a fork that is later
+// model: code deployed on a fork that is later
 // unwound must stop being discoverable on EVERY layer — addr→code, the
 // content-addressed codeHash→code, and the size layer — not just the addr
 // layer. The code's value is invariant for a hash, but its existence is not.
 func TestCodeCache_Unwind_DropsUnwoundCodeEverywhere(t *testing.T) {
-	c := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+	c := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 
 	addr := makeAddr(1)
 	code := bytes.Repeat([]byte{0x60}, 64)
@@ -252,7 +254,7 @@ func TestCodeCache_Unwind_DropsUnwoundCodeEverywhere(t *testing.T) {
 // TestCodeCache_Unwind_BelowFloorSurvives verifies code deployed below the
 // unwind floor (still live after the unwind) stays warm on all layers.
 func TestCodeCache_Unwind_BelowFloorSurvives(t *testing.T) {
-	c := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+	c := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 
 	addr := makeAddr(2)
 	code := bytes.Repeat([]byte{0x61}, 32)
@@ -272,7 +274,7 @@ func TestCodeCache_Unwind_BelowFloorSurvives(t *testing.T) {
 // on the live fork (current epoch) after an unwind makes it discoverable again,
 // even though a stale entry at the same txNum was left behind.
 func TestCodeCache_Unwind_RedeployRevives(t *testing.T) {
-	c := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+	c := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 
 	addr := makeAddr(3)
 	code := bytes.Repeat([]byte{0x62}, 48)

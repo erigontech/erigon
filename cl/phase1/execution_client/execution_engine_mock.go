@@ -324,6 +324,45 @@ func (c *MockExecutionEngineGetBodiesByRangeCall) DoAndReturn(f func(context.Con
 	return c
 }
 
+// GetClientVersionV1 mocks base method.
+func (m *MockExecutionEngine) GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetClientVersionV1", ctx, callerVersion)
+	ret0, _ := ret[0].([]engine_types.ClientVersionV1)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetClientVersionV1 indicates an expected call of GetClientVersionV1.
+func (mr *MockExecutionEngineMockRecorder) GetClientVersionV1(ctx, callerVersion any) *MockExecutionEngineGetClientVersionV1Call {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetClientVersionV1", reflect.TypeOf((*MockExecutionEngine)(nil).GetClientVersionV1), ctx, callerVersion)
+	return &MockExecutionEngineGetClientVersionV1Call{Call: call}
+}
+
+// MockExecutionEngineGetClientVersionV1Call wrap *gomock.Call
+type MockExecutionEngineGetClientVersionV1Call struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockExecutionEngineGetClientVersionV1Call) Return(arg0 []engine_types.ClientVersionV1, arg1 error) *MockExecutionEngineGetClientVersionV1Call {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockExecutionEngineGetClientVersionV1Call) Do(f func(context.Context, *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error)) *MockExecutionEngineGetClientVersionV1Call {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockExecutionEngineGetClientVersionV1Call) DoAndReturn(f func(context.Context, *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error)) *MockExecutionEngineGetClientVersionV1Call {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // HasBlock mocks base method.
 func (m *MockExecutionEngine) HasBlock(ctx context.Context, hash common.Hash) (bool, error) {
 	m.ctrl.T.Helper()

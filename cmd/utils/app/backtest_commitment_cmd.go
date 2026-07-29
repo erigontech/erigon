@@ -141,7 +141,7 @@ func doBacktestCommitment(ctx context.Context, args backtestCommitmentArgs, logg
 	}
 	defer clean()
 	blockReader, _ := snaps.BlockRetire.IO()
-	db, err := temporal.New(chainDB, snaps.Aggregator)
+	db, err := temporal.New(chainDB, snaps.Aggregator, snaps.BlockSnaps)
 	if err != nil {
 		return err
 	}

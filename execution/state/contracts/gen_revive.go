@@ -156,7 +156,7 @@ func bindRevive(address common.Address, caller bind.ContractCaller, transactor b
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Revive *ReviveRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Revive *ReviveRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Revive.Contract.ReviveCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -167,7 +167,7 @@ func (_Revive *ReviveRaw) Transfer(opts *bind.TransactOpts) (types.Transaction, 
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Revive *ReviveRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Revive *ReviveRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Revive.Contract.ReviveTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -175,7 +175,7 @@ func (_Revive *ReviveRaw) Transact(opts *bind.TransactOpts, method string, param
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Revive *ReviveCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Revive *ReviveCallerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Revive.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -186,7 +186,7 @@ func (_Revive *ReviveTransactorRaw) Transfer(opts *bind.TransactOpts) (types.Tra
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Revive *ReviveTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Revive *ReviveTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Revive.Contract.contract.Transact(opts, method, params...)
 }
 

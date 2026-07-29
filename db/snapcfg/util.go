@@ -458,12 +458,12 @@ func KnownCfgOrDevnet(networkName string) *Cfg {
 // from erigon-snapshot/webseed, which used to ship one one-key TOML file per
 // chain; the only consumers want the URL list, so the TOML wrapper was dropped.
 var EmbeddedWebseeds = map[string][]string{
-	networkname.Mainnet:  {"v1:https://erigon34-v1-snapshots-mainnet.erigon.network"},
-	networkname.Sepolia:  {"v1:https://erigon34-v1-snapshots-sepolia.erigon.network"},
-	networkname.Gnosis:   {"v1:https://erigon34-v1-snapshots-gnosis.erigon.network"},
-	networkname.Chiado:   {"v1:https://erigon34-v1-snapshots-chiado.erigon.network"},
-	networkname.Hoodi:    {"v1:https://erigon34-v1-snapshots-hoodi.erigon.network"},
-	networkname.Bloatnet: {"v1:https://erigon34-v1-snapshots-bloatnet.erigon.network"},
+	networkname.Mainnet:  {"v1:https://erigon36-v1-snapshots-mainnet.erigon.network"},
+	networkname.Sepolia:  {"v1:https://erigon36-v1-snapshots-sepolia.erigon.network"},
+	networkname.Gnosis:   {"v1:https://erigon36-v1-snapshots-gnosis.erigon.network"},
+	networkname.Chiado:   {"v1:https://erigon36-v1-snapshots-chiado.erigon.network"},
+	networkname.Hoodi:    {"v1:https://erigon36-v1-snapshots-hoodi.erigon.network"},
+	networkname.Bloatnet: {"v1:https://erigon36-v1-snapshots-bloatnet.erigon.network"},
 }
 
 // GetEmbeddedWebseeds returns the webseed URLs for a single chain.

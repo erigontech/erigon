@@ -35,7 +35,7 @@ func (api *APIImpl) NewPendingTransactionFilter(_ context.Context) (string, erro
 	if api.filters == nil {
 		return "", rpc.ErrNotificationsUnsupported
 	}
-	txsCh, id := api.filters.SubscribePendingTxs(32)
+	txsCh, id := api.filters.SubscribePendingTxs(32, rpchelper.ProtocolHTTP)
 	go func() {
 		for txs := range txsCh {
 			api.filters.AddPendingTxs(id, txs)
@@ -49,7 +49,7 @@ func (api *APIImpl) NewBlockFilter(_ context.Context) (string, error) {
 	if api.filters == nil {
 		return "", rpc.ErrNotificationsUnsupported
 	}
-	ch, id := api.filters.SubscribeNewHeads(32)
+	ch, id := api.filters.SubscribeNewHeads(32, rpchelper.ProtocolHTTP)
 	go func() {
 		for block := range ch {
 			api.filters.AddPendingBlock(id, block)
@@ -63,7 +63,10 @@ func (api *APIImpl) NewFilter(_ context.Context, crit filters.FilterCriteria) (s
 	if api.filters == nil {
 		return "", rpc.ErrNotificationsUnsupported
 	}
-	logs, id := api.filters.SubscribeLogs(256, crit)
+	logs, id, err := api.filters.SubscribeLogs(256, crit, rpchelper.ProtocolHTTP)
+	if err != nil {
+		return "", err
+	}
 	go func() {
 		for lg := range logs {
 			api.filters.AddLogs(id, lg)
@@ -101,37 +104,33 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 	stub := make([]any, 0)
 	// remove 0x
 	cutIndex := strings.TrimPrefix(index, "0x")
-	// Validate the id exists for any subscription type first to distinguish "never created" from "no changes yet".
-	exists := api.filters.HasHeadsSubscription(rpchelper.HeadsSubID(cutIndex)) ||
-		api.filters.HasPendingTxsSubscription(rpchelper.PendingTxsSubID(cutIndex)) ||
-		api.filters.HasSubscription(rpchelper.LogsSubID(cutIndex))
-	if !exists {
+	ft, ok := api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex))
+	if !ok {
 		return nil, rpc.ErrFilterNotFound
 	}
-
-	// Identify the subscription type by probing each store; if none have data yet, return empty slice
-	if blocks, ok := api.filters.ReadPendingBlocks(rpchelper.HeadsSubID(cutIndex)); ok {
-		for _, v := range blocks {
-			stub = append(stub, v.Hash())
-		}
-		return stub, nil
-	}
-	if txs, ok := api.filters.ReadPendingTxs(rpchelper.PendingTxsSubID(cutIndex)); ok {
-		if len(txs) > 0 {
-			for _, txn := range txs[0] {
-				stub = append(stub, txn.Hash())
+	switch ft {
+	case rpchelper.FilterTypeHeads:
+		if blocks, ok := api.filters.ReadPendingBlocks(rpchelper.HeadsSubID(cutIndex)); ok {
+			for _, v := range blocks {
+				stub = append(stub, v.Hash())
 			}
-			return stub, nil
 		}
-		return stub, nil
-	}
-	if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
-		for _, v := range logs {
-			stub = append(stub, v)
+	case rpchelper.FilterTypePendingTxs:
+		if txs, ok := api.filters.ReadPendingTxs(rpchelper.PendingTxsSubID(cutIndex)); ok {
+			for _, batch := range txs {
+				for _, txn := range batch {
+					stub = append(stub, txn.Hash())
+				}
+			}
 		}
-		return stub, nil
+	case rpchelper.FilterTypeLogs:
+		if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
+			for _, v := range logs {
+				stub = append(stub, v)
+			}
+		}
 	}
-	return []any{}, nil
+	return stub, nil
 }
 
 // GetFilterLogs implements eth_getFilterLogs.
@@ -142,7 +141,7 @@ func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log
 		return nil, rpc.ErrNotificationsUnsupported
 	}
 	cutIndex := strings.TrimPrefix(index, "0x")
-	if found := api.filters.HasSubscription(rpchelper.LogsSubID(cutIndex)); !found {
+	if ft, ok := api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex)); !ok || ft != rpchelper.FilterTypeLogs {
 		return nil, rpc.ErrFilterNotFound
 	}
 	if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
@@ -156,7 +155,7 @@ func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log
 // the channel closes or the client goes away. subscribe is called inside the goroutine
 // and must return the item channel plus an unsubscribe func. notify receives an emit
 // func that sends a payload to the client, logging on failure.
-func subscribeRPC[T any](ctx context.Context, apiFilters *rpchelper.Filters, subscribe func() (<-chan T, func()), notify func(emit func(payload any), item T), closedWarn string) (*rpc.Subscription, error) {
+func subscribeRPC[T any](ctx context.Context, apiFilters *rpchelper.Filters, subscribe func() (<-chan T, func(), error), notify func(emit func(payload any), item T), closedWarn string) (*rpc.Subscription, error) {
 	if apiFilters == nil {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
@@ -165,11 +164,14 @@ func subscribeRPC[T any](ctx context.Context, apiFilters *rpchelper.Filters, sub
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
 
+	ch, unsubscribe, err := subscribe()
+	if err != nil {
+		return nil, err
+	}
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {
 		defer dbg.LogPanic()
-		ch, unsubscribe := subscribe()
 		defer unsubscribe()
 
 		emit := func(payload any) {
@@ -197,9 +199,9 @@ func subscribeRPC[T any](ctx context.Context, apiFilters *rpchelper.Filters, sub
 // NewHeads send a notification each time a new (header) block is appended to the chain.
 func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 	return subscribeRPC(ctx, api.filters,
-		func() (<-chan *types.Header, func()) {
-			headers, id := api.filters.SubscribeNewHeads(32)
-			return headers, func() { api.filters.UnsubscribeHeads(id) }
+		func() (<-chan *types.Header, func(), error) {
+			headers, id := api.filters.SubscribeNewHeads(32, rpchelper.ProtocolWS)
+			return headers, func() { api.filters.UnsubscribeHeads(id) }, nil
 		},
 		func(emit func(payload any), h *types.Header) {
 			if h != nil {
@@ -221,9 +223,9 @@ func (api *APIImpl) NewPendingTransactionsWithBody(ctx context.Context) (*rpc.Su
 
 func (api *APIImpl) subscribePendingTransactions(ctx context.Context, chanSize int, fullTx bool) (*rpc.Subscription, error) {
 	return subscribeRPC(ctx, api.filters,
-		func() (<-chan []types.Transaction, func()) {
-			txsCh, id := api.filters.SubscribePendingTxs(chanSize)
-			return txsCh, func() { api.filters.UnsubscribePendingTxs(id) }
+		func() (<-chan []types.Transaction, func(), error) {
+			txsCh, id := api.filters.SubscribePendingTxs(chanSize, rpchelper.ProtocolWS)
+			return txsCh, func() { api.filters.UnsubscribePendingTxs(id) }, nil
 		},
 		func(emit func(payload any), txs []types.Transaction) {
 			for _, t := range txs {
@@ -242,9 +244,12 @@ func (api *APIImpl) subscribePendingTransactions(ctx context.Context, chanSize i
 // Logs send a notification each time a new log appears.
 func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc.Subscription, error) {
 	return subscribeRPC(ctx, api.filters,
-		func() (<-chan *types.Log, func()) {
-			logs, id := api.filters.SubscribeLogs(api.SubscribeLogsChannelSize, crit)
-			return logs, func() { api.filters.UnsubscribeLogs(id) }
+		func() (<-chan *types.Log, func(), error) {
+			logs, id, err := api.filters.SubscribeLogs(api.SubscribeLogsChannelSize, crit, rpchelper.ProtocolWS)
+			if err != nil {
+				return nil, nil, err
+			}
+			return logs, func() { api.filters.UnsubscribeLogs(id) }, nil
 		},
 		func(emit func(payload any), h *types.Log) {
 			if h != nil {
@@ -257,9 +262,12 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 // TransactionReceipts send a notification each time a new receipt appears.
 func (api *APIImpl) TransactionReceipts(ctx context.Context, crit filters.ReceiptsFilterCriteria) (*rpc.Subscription, error) {
 	return subscribeRPC(ctx, api.filters,
-		func() (<-chan *remoteproto.SubscribeReceiptsReply, func()) {
-			receipts, id := api.filters.SubscribeReceipts(api.SubscribeLogsChannelSize, crit)
-			return receipts, func() { api.filters.UnsubscribeReceipts(id) }
+		func() (<-chan *remoteproto.SubscribeReceiptsReply, func(), error) {
+			receipts, id, err := api.filters.SubscribeReceipts(api.SubscribeLogsChannelSize, crit)
+			if err != nil {
+				return nil, nil, err
+			}
+			return receipts, func() { api.filters.UnsubscribeReceipts(id) }, nil
 		},
 		func(emit func(payload any), protoReceipt *remoteproto.SubscribeReceiptsReply) {
 			if protoReceipt != nil {

@@ -56,11 +56,13 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -673,7 +675,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = r.Chain
-	allSnapshots := freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, log.Root())
+	allSnapshots := blocksnapshots.NewRoSnapshots(freezingCfg, dirs.Snap, log.Root())
 	if err := allSnapshots.OpenFolder(); err != nil {
 		return err
 	}
@@ -1482,7 +1484,7 @@ func (m *MakeDepositArgs) Run(ctx *Context) error {
 		return err
 	}
 
-	messageToSign := utils.Sha256(depositMessageRootForSigning[:], domain)
+	messageToSign := crypto.Sha256(depositMessageRootForSigning[:], domain)
 
 	signature := privateKeyBls.Sign(messageToSign[:])
 	signatureBytes := signature.Bytes()

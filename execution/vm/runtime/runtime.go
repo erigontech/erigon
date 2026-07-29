@@ -21,6 +21,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"math"
 	"math/big"
 	"os"
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -98,7 +100,7 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.GetHashFn == nil {
 		cfg.GetHashFn = func(n uint64) (common.Hash, error) {
-			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
+			return crypto.Keccak256Hash([]byte(new(big.Int).SetUint64(n).String())), nil
 		}
 	}
 }
@@ -142,7 +144,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		sender  = cfg.Origin
 		rules   = vmenv.ChainRules()
 	)
-	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil, nil)
+	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
 	cfg.State.CreateAccount(address, true)
 	// set the receiver's (the executing contract) code for execution.
 	cfg.State.SetCode(address, code, tracing.CodeChangeUnspecified)
@@ -154,7 +156,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		sender,
 		contractAsAddress,
 		input,
-		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules),
 		cfg.Value,
 		false, /* bailout */
 	)
@@ -201,13 +203,13 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		sender = cfg.Origin
 		rules  = vmenv.ChainRules()
 	)
-	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil, nil)
+	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
 
 	// Call the code with the given configuration.
-	code, address, leftOverGas, _, err := vmenv.Create(
+	code, address, leftOverGas, _, _, err := vmenv.Create(
 		sender,
 		input,
-		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules),
 		cfg.Value,
 		nil,
 		false,
@@ -231,21 +233,29 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 	}
 	statedb := cfg.State
 	rules := vmenv.ChainRules()
-	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil, nil)
+	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
 
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
 		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, accounts.ZeroAddress)
 	}
 
-	// Call the code with the given configuration.
-	ret, leftOverGas, _, err := vmenv.Call(
-		sender.Address(),
-		address,
-		input,
-		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
-		cfg.Value,
-		false, /* bailout */
-	)
+	gas := mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules)
+	leftOverGas, topLevelCallGasUsed, err := protocol.PrepareTopLevelCall(vmenv, address, cfg.Value, gas)
+	var ret []byte
+	if err == nil {
+		ret, leftOverGas, _, err = vmenv.Call(
+			sender.Address(),
+			address,
+			input,
+			leftOverGas,
+			cfg.Value,
+			false, /* bailout */
+		)
+		protocol.RefillTopLevelCallGas(&leftOverGas, &topLevelCallGasUsed, cfg.EVMConfig.RestoreState, err)
+	} else if errors.Is(err, vm.ErrRuntimeOutOfGas) {
+		leftOverGas = mdgas.MdGas{State: gas.State}
+		protocol.TraceTopLevelCallFailure(vmenv, sender.Address(), address, input, gas, cfg.Value, err)
+	}
 
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
 		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas.Total()}, err)

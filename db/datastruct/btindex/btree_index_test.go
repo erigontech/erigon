@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -112,14 +113,14 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 
 	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		k := c.Key()
 		require.Equal(t, keys[i], k)
 		c.Next()
 	}
 	c.Close()
 
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoErrorf(t, err, "i=%d", i)
 		require.Equalf(t, keys[i], cur.key, "i=%d", i)
@@ -128,7 +129,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		// require.EqualValues(t, uint64(i), cur.Value())
 	}
 	for i := 1; i < len(keys); i++ {
-		alt := common.Copy(keys[i])
+		alt := bytes.Clone(keys[i])
 		for j := len(alt) - 1; j >= 0; j-- {
 			if alt[j] > 0 {
 				alt[j] -= 1
@@ -172,7 +173,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
 	require.NotNil(t, c)
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		k := c.Key()
 		if !bytes.Equal(keys[i], k) {
 			fmt.Printf("\tinvalid, want %x\n", keys[i])
@@ -181,7 +182,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	}
 	c.Close()
 
-	for i := 0; i < 10000; i++ {
+	for i := range 10000 {
 		c, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
 		require.Equal(t, keys[i], c.Key())
@@ -205,8 +206,8 @@ func writeV0Index(tb testing.TB, dataPath, indexPath string, compressed seg.File
 	f, err := os.Create(indexPath)
 	require.NoError(tb, err)
 	defer f.Close()
-	w := getBufioWriter(f)
-	defer putBufioWriter(w)
+	w := bufiopool.Writer(f)
+	defer bufiopool.PutWriter(w)
 
 	if count > 0 {
 		ef := eliasfano32.NewEliasFano(count, uint64(r.Size()))
@@ -221,7 +222,7 @@ func writeV0Index(tb testing.TB, dataPath, indexPath string, compressed seg.File
 			key, _ = r.Next(key[:0])
 			ef.AddOffset(pos)
 			if di%m == 0 {
-				nodes = append(nodes, v0node{key: common.Copy(key), di: di})
+				nodes = append(nodes, v0node{key: bytes.Clone(key), di: di})
 			}
 			di++
 			pos, _ = r.Skip()
@@ -597,7 +598,7 @@ func TestBpsTree_Seek(t *testing.T) {
 	//tr := newTrie()
 	ef := eliasfano32.NewEliasFano(uint64(keyCount), ps[len(ps)-1])
 	for i := 0; i < len(ps); i++ {
-		//tr.insert(Node{i: uint64(i), key: common.Copy(keys[i]), off: ps[i]})
+		//tr.insert(Node{i: uint64(i), key: bytes.Clone(keys[i]), off: ps[i]})
 		ef.AddOffset(ps[i])
 	}
 	ef.Build()
@@ -635,8 +636,8 @@ func (b *mockIndexReader) newCursor(k, v []byte, di uint64, g *seg.Reader) *Curs
 	return &Cursor{
 		ef:     b.ef,
 		getter: g,
-		key:    common.Copy(k),
-		value:  common.Copy(v),
+		key:    bytes.Clone(k),
+		value:  bytes.Clone(v),
 		d:      di,
 	}
 }

@@ -331,6 +331,149 @@ func TestEIP7981IntrinsicGas(t *testing.T) {
 	}
 }
 
+// TestEIP2780IntrinsicGas covers EIP-2780 (Reduce Intrinsic Transaction Gas):
+// the flat intrinsic decomposes into TX_BASE plus per-recipient and per-value
+// charges, with self-transfers exempt from the recipient and value charges.
+// The reference cases mirror the EIP-2780 specification's reference table.
+func TestEIP2780IntrinsicGas(t *testing.T) {
+	cases := map[string]struct {
+		creation        bool
+		selfTransfer    bool
+		hasValue        bool
+		expectedRegular uint64
+	}{
+		"self transfer zero value": {
+			selfTransfer:    true,
+			expectedRegular: params.TxBaseEIP2780,
+		},
+		"self transfer non-zero value": {
+			selfTransfer:    true,
+			hasValue:        true,
+			expectedRegular: params.TxBaseEIP2780,
+		},
+		"eoa zero value": {
+			expectedRegular: params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780,
+		},
+		"eoa non-zero value": {
+			hasValue:        true,
+			expectedRegular: params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780 + params.TransferLogCostEIP2780 + params.TxValueCostEIP2780,
+		},
+		"creation zero value": {
+			creation:        true,
+			expectedRegular: params.TxBaseEIP2780 + params.CreateAccessEIP2780,
+		},
+		"creation non-zero value": {
+			creation:        true,
+			hasValue:        true,
+			expectedRegular: params.TxBaseEIP2780 + params.CreateAccessEIP2780 + params.TransferLogCostEIP2780,
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+				IsContractCreation: c.creation,
+				IsSelfTransfer:     c.selfTransfer,
+				HasValue:           c.hasValue,
+				IsEIP2:             true,
+				IsEIP2028:          true,
+				IsEIP3860:          true,
+				IsEIP7623:          true,
+				IsEIP7976:          true,
+				IsEIP7981:          true,
+				IsEIP2780:          true,
+			})
+			assert.False(t, overflow)
+			assert.Equal(t, IntrinsicGasCalcResult{
+				RegularGas:   c.expectedRegular,
+				FloorGasCost: c.expectedRegular,
+			}, result)
+		})
+	}
+}
+
+func TestEIP2780ContractCreationStateGasIsRuntime(t *testing.T) {
+	result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+		IsContractCreation: true,
+		IsEIP2:             true,
+		IsEIP2028:          true,
+		IsEIP3860:          true,
+		IsEIP7623:          true,
+		IsEIP7976:          true,
+		IsEIP7981:          true,
+		IsEIP2780:          true,
+	})
+	assert.False(t, overflow)
+	expected := params.TxBaseEIP2780 + params.CreateAccessEIP2780
+	assert.Equal(t, IntrinsicGasCalcResult{RegularGas: expected, FloorGasCost: expected}, result)
+}
+
+func TestEIP2780AuthorizationStateGasIsRuntime(t *testing.T) {
+	result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+		AuthorizationsLen: 2,
+		IsEIP2:            true,
+		IsEIP2028:         true,
+		IsEIP7623:         true,
+		IsEIP7976:         true,
+		IsEIP7981:         true,
+		IsEIP2780:         true,
+	})
+	assert.False(t, overflow)
+	assert.Equal(t, IntrinsicGasCalcResult{
+		RegularGas:   params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780 + 2*params.RegularPerAuthBaseCostEIP8038,
+		FloorGasCost: params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780,
+	}, result)
+}
+
+func TestAmsterdamAAIntrinsicGas(t *testing.T) {
+	cases := map[string]struct {
+		accessListLen     uint64
+		storageKeysLen    uint64
+		authorizationsLen uint64
+		expectedRegular   uint64
+	}{
+		"access list address only": {
+			accessListLen:   1,
+			expectedRegular: params.TxAAGas + params.TxAccessListAddressGasEIP8038,
+		},
+		"access list address and storage key": {
+			accessListLen:   1,
+			storageKeysLen:  1,
+			expectedRegular: params.TxAAGas + params.TxAccessListAddressGasEIP8038 + params.TxAccessListStorageKeyGasEIP8038,
+		},
+		"access list address and three keys": {
+			accessListLen:   1,
+			storageKeysLen:  3,
+			expectedRegular: params.TxAAGas + params.TxAccessListAddressGasEIP8038 + 3*params.TxAccessListStorageKeyGasEIP8038,
+		},
+		"single authorization": {
+			authorizationsLen: 1,
+			expectedRegular:   params.TxAAGas + params.PerAuthRegularCostEIP8038,
+		},
+		"two authorizations": {
+			authorizationsLen: 2,
+			expectedRegular:   params.TxAAGas + 2*params.PerAuthRegularCostEIP8038,
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+				AccessListLen:     c.accessListLen,
+				StorageKeysLen:    c.storageKeysLen,
+				AuthorizationsLen: c.authorizationsLen,
+				IsEIP2:            true,
+				IsEIP2028:         true,
+				IsEIP2780:         true,
+				IsAATxn:           true,
+			})
+			assert.False(t, overflow)
+			assert.Equal(t, IntrinsicGasCalcResult{
+				RegularGas:   c.expectedRegular,
+				FloorGasCost: params.TxAAGas,
+			}, result)
+		})
+	}
+}
+
 // TestEIP7981NotActive verifies that when IsEIP7981 is false (but EIP-7976 is on),
 // the EIP-7976 floor formula is used and the access list is NOT included in the
 // floor or added to the standard intrinsic gas.
