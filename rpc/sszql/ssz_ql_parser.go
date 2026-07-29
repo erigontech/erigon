@@ -49,8 +49,8 @@ func parseQueryWithPathAndFilter(path Path, filter Filter) string {
 }
 
 func generateProof(res *SSZQLResponse) []Proof {
-	var proofs []Proof
-	for i, _ := range res.Results {
+	proofs := make([]Proof, 0, len(res.Results))
+	for i := range res.Results {
 		proof := Proof("proof of query" + strconv.Itoa(i))
 		proofs = append(proofs, proof)
 		res.Proofs = append(res.Proofs, proof)
