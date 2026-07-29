@@ -373,12 +373,20 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			ic := ii.beginForTests()
 			defer ic.Close()
 
-			// Unlike HashSeekingPrune, TableScanningPrune does not honor `limit` for the
-			// key range: a single forced call prunes the whole [txFrom, txTo) range.
+			// `limit` bounds txn keys per call, so the range takes several passes.
 			pruneTo := uint64(pruneIters) * pruneLimit
-			stat, err := ic.TableScanningPrune(t.Context(), tx, 0, pruneTo, pruneLimit, logEvery, true, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
-			require.NoError(t, err)
-			t.Logf("pruned tx=%d vals=%d", stat.PruneCountTx, stat.PruneCountValues)
+			var stat *InvertedIndexPruneStat
+			for i := range pruneIters {
+				var err error
+				stat, err = ic.TableScanningPrune(t.Context(), tx, 0, pruneTo, pruneLimit, logEvery, true, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
+				require.NoError(t, err)
+				if i == 0 {
+					require.EqualValues(t, pruneLimit, stat.PruneCountTx)
+					require.NotEqual(t, prune.Done, stat.Progress)
+				}
+				t.Logf("[%d] pruned tx=%d vals=%d progress=%s", i, stat.PruneCountTx, stat.PruneCountValues, stat.Progress)
+			}
+			require.Equal(t, prune.Done, stat.Progress)
 
 			// [0, pruneTo) fully pruned
 			it, err := ic.IdxRange(nil, 0, int(pruneTo), order.Asc, -1, tx)
