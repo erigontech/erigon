@@ -95,6 +95,57 @@ type EVM struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
+	storageKeys *storageKeyCache
+}
+
+// storageKeyCacheSize must comfortably exceed a contract's live slot count,
+// or conflict misses dominate.
+const storageKeyCacheSize = 1024
+
+// slotIndex masks rather than divides, so the size has to be a power of two.
+var _ [0]struct{} = [storageKeyCacheSize & (storageKeyCacheSize - 1)]struct{}{}
+
+// storageKeyCache memoizes InternKey by the source stack word. Interning is a
+// pure function and a live handle keeps its entry alive, so the cache never
+// goes stale and is never cleared. Words are stored beside the handles because
+// that is cheaper than recovering them via handle.Value(); the pointer-free
+// words go last so the GC scan stops at the handles.
+type storageKeyCache struct {
+	handles [storageKeyCacheSize]accounts.StorageKey
+	words   [storageKeyCacheSize]uint256.Int
+}
+
+// slotIndex mixes all four limbs: keccak-derived slots differ across the whole
+// word, array and scalar slots only in the lowest.
+func slotIndex(word *uint256.Int) uint64 {
+	return (word[0] ^ word[1] ^ word[2] ^ word[3]) & (storageKeyCacheSize - 1)
+}
+
+// A nil handle marks an unused entry; the zero word is a legitimate key.
+func (c *storageKeyCache) fill(i uint64, word *uint256.Int) accounts.StorageKey {
+	h := accounts.InternKey(word.Bytes32())
+	c.words[i], c.handles[i] = *word, h
+	return h
+}
+
+// internStorageKey returns word interned as a StorageKey, skipping unique.Make
+// for words seen before. The 40KB table is allocated lazily so EVMs that never
+// touch storage don't pay for it.
+func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
+	c := evm.storageKeys
+	if c == nil {
+		return evm.internFirstStorageKey(word)
+	}
+	i := slotIndex(word)
+	if h := c.handles[i]; h != accounts.NilKey && c.words[i] == *word {
+		return h
+	}
+	return c.fill(i, word)
+}
+
+func (evm *EVM) internFirstStorageKey(word *uint256.Int) accounts.StorageKey {
+	evm.storageKeys = new(storageKeyCache)
+	return evm.storageKeys.fill(slotIndex(word), word)
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
