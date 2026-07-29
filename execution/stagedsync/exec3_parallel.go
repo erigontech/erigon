@@ -961,8 +961,8 @@ func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3B
 	defer pe.Unlock()
 
 	for _, worker := range pe.execWorkers {
-		// parallel workers hold thier own tx don't pass in an externals tx
-		worker.ResetState(rs, nil, nil, state.NewLightCollector(), nil)
+		// Parallel workers hold their own transaction.
+		worker.ResetState(rs, nil, nil, state.NewNoopWriter(), nil)
 	}
 
 	return nil
@@ -1990,9 +1990,6 @@ func (result *execResult) calcFees(
 
 	addWrites := &state.WriteSet{}
 	if emitCoinbase {
-		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
-			result.Coinbase, coinbaseAcc, newCoinbaseBalance,
-			tracing.BalanceIncreaseRewardTransactionFee, coinbaseEmptyRemoval)
 		if coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero() {
 			addWrites.SetSelfDestruct(result.Coinbase, &state.VersionedWrite[bool]{
 				WriteHeader: state.WriteHeader{
@@ -2041,9 +2038,6 @@ func (result *execResult) calcFees(
 		}
 	}
 	if hasBurnt && newBurntBalance != oldBurntBalance {
-		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
-			burntAddr, burntAcc, newBurntBalance,
-			tracing.BalanceDecreaseGasBuy, state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, burntAddr))
 		addWrites.SetBalance(burntAddr, &state.VersionedWrite[uint256.Int]{
 			WriteHeader: state.WriteHeader{
 				Address: burntAddr,
@@ -2786,26 +2780,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// + fees) when reading via the version map fallback
 					// chain.
 					be.versionMap.FlushVersionedWrites(merged, true, "")
-
-					// Update CollectorWrites with fee-adjusted balances (coinbase /
-					// burnt) so the BlockStateCache sees the correct accumulated fees.
-					if !txResult.CollectorWrites.IsEmpty() {
-						for addr, w := range addWrites.Balances() {
-							if existing, ok := txResult.CollectorWrites.GetBalance(addr); ok {
-								existing.Val = w.Val
-								existing.Reason = w.Reason
-							} else {
-								txResult.CollectorWrites.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Reason: w.Reason}, Val: w.Val})
-							}
-						}
-					}
 				}
 
 				{
-					// Build clean write set from versionMap WriteSet — not CollectorWrites.
-					// The WriteSet has the raw versionWritten output from the validated
-					// incarnation. Normalize filters no-ops, stale incarnations,
-					// and resolves account values from the versionMap.
+					// Build a clean write set from the validated incarnation's
+					// versioned writes. Normalize filters no-ops and stale
+					// incarnations, and resolves account values from the version map.
 					resultIncarnation := txResult.Version().Incarnation
 					rawWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 					// domainStorageKeys: enumerate every storage slot currently

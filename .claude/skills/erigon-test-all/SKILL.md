@@ -21,6 +21,21 @@ make eest-spec-enginextests-stable-sequential # engine-x tests vs eest_stable (E
 make eest-spec-enginextests-stable-parallel  # same, but with ERIGON_EXEC3_PARALLEL=true
 make eest-spec-statetests-devnet             # …vs eest_devnet fixtures
 make eest-spec-blocktests-devnet             # devnet blocktests (always parallel exec3)
+make eest-spec-statetests-legacy             # pinned legacy Cancun state-test archive
+make eest-spec-blocktests-legacy-consensus-sequential
+                                             # Hive consensus fixture selection;
+                                             # -parallel and -race variants too
+make eest-spec-blocktests-legacy-constantinople-sequential
+                                             # Hive legacy fixture selection;
+                                             # -parallel plus three race partitions:
+                                             # ...-race-constantinople,
+                                             # ...-race-constantinople-fix, and
+                                             # ...-race-other-forks
+make eest-spec-blocktests-legacy-cancun-sequential
+                                             # Hive legacy-cancun selection;
+                                             # -parallel plus two race partitions:
+                                             # ...-race-berlin-shanghai-cancun and
+                                             # ...-race-other-forks
 make eest-spec-enginextests-benchmark-1m-sequential
                                              # engine-x benchmark fixtures @ 1M gas target
                                              # (with per-test --time stats);
@@ -42,7 +57,7 @@ The shard list / failure budgets / `exec3-parallel` flags live in `tools/eest-sp
 One side prerequisite still applies for tests `make test-all` does run:
 
 ```bash
-git submodule update --init --recursive --force            # only for legacy-tests (TestLegacyCancunState)
+git submodule update --init --recursive --force            # legacy RLP, transaction, and difficulty fixtures
 ```
 
 The CI workflow handles this in `setup-erigon`; locally you must do it yourself.

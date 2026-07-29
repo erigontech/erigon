@@ -141,22 +141,8 @@ func TestFlushToUpdates_DeletedWithoutIncarnation_EmitsDelete(t *testing.T) {
 // values, the trie leaf must survive with the actual values rather
 // than being zeroed by the SD-with-incarnation branch.
 //
-// Note: under the *current* ApplyWrites semantics this state is
-// unreachable from a real LightCollector writeset, because
-// `BalancePath` always clears `Deleted` (see
-// TestApplyWrites_BalancePathClearsDeleted) and LightCollector emits
-// `SelfDestructPath` before the `BalancePath` reset. The test
-// populates cs.accounts directly to cover the FlushToUpdates branch
-// in isolation against future ApplyWrites changes (e.g. write-order
-// races, refactors that drop the Deleted-clearing in BalancePath, or
-// new code paths that produce Deleted+RetainedBalance writesets).
-//
-// The actual `extcodehash_subcall_create2_oog[fork_Amsterdam-...]`
-// regression that prompted this defensive case is fixed upstream by
-// the removal of the redundant `IncarnationPath > 0` clause in
-// `Normalize` (the OOG path leaves Nonce=0 → empty-account
-// → DeleteUpdate, not Deleted+RetainedBalance). End-to-end coverage
-// of that path lives in the eest_devnet suite, not in this unit test.
+// ApplyWrites normally clears Deleted when applying a retained balance.
+// Populate cs.accounts directly to cover this defensive FlushToUpdates branch.
 func TestFlushToUpdates_DeletedWithRetainedBalance_EmitsRegularUpdate(t *testing.T) {
 	cs := newTestCalcState()
 	// 0x2adc25... is the CREATE2 deterministic address from the failing
@@ -360,12 +346,7 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 		Incarnation: preBlockIncarnation,
 	}
 
-	// Build the raw writeset that IBS.Selfdestruct produces in production
-	// (intra_block_state.go around line 1430). LightCollector.DeleteAccount
-	// also runs, but its CollectorWrites output is NOT the source for
-	// rawWrites — exec3_parallel.go:2478 reads be.blockIO.WriteSet, which
-	// is fed by versionWritten. So these are the writes the calc actually
-	// sees.
+	// Build the authoritative versioned writes produced by self-destruct.
 	ver := state.Version{TxIndex: 0, Incarnation: 0}
 	rawWrites := newWS().
 		inc(addr, ver, original.Incarnation).
