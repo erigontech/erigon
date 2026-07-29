@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 )
 
-// newSerialResumeTestExec wires a serialExecutor with a real worker over db.
 func newSerialResumeTestExec(t *testing.T, db kv.TemporalRwDB, config *chain.Config, engine rules.Engine) *serialExecutor {
 	logger := log.New()
 	roTx, err := db.BeginTemporalRo(context.Background())
@@ -50,11 +49,6 @@ func newSerialResumeTestExec(t *testing.T, db kv.TemporalRwDB, config *chain.Con
 	return se
 }
 
-// TestSerialResumeValidatesRestoredBlockGas pins the serial resumed-block path:
-// the suffix executes against latest state, the prefix replays from history, and
-// post-execution validation checks full-block gas and receipts. A header carrying
-// only the suffix gas must be rejected — proving validation runs with restored
-// totals rather than batch-local ones.
 func TestSerialResumeValidatesRestoredBlockGas(t *testing.T) {
 	config := chain.TestChainBerlinConfig
 
@@ -78,8 +72,6 @@ func TestSerialResumeValidatesRestoredBlockGas(t *testing.T) {
 			Bloom:       types.CreateBloom(expectedReceipts),
 		}
 
-		// The prefix tx0 ran in an earlier batch: seed its post-state as latest
-		// (pre-state as history) plus its receipt-domain row.
 		seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
 			preState := accounts.NewAccount()
 			preState.Balance = *uint256.NewInt(1_000_000_000)
@@ -127,7 +119,6 @@ func TestSerialResumeValidatesRestoredBlockGas(t *testing.T) {
 		err := run(t, 21000, 10_000_000, 21000)
 		require.ErrorIs(t, err, rules.ErrInvalidBlock)
 		require.ErrorContains(t, err, "gas used by execution: 42000")
-		require.ErrorContains(t, err, "resumed block with reconstructed prefix")
 	})
 
 	t.Run("prefix gas reduces the suffix gas pool", func(t *testing.T) {

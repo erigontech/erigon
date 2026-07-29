@@ -743,9 +743,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						// than bare-returning — a bare return here would strand the exec
 						// loop in a terminal mustDeliver send on a full applyResults and
 						// wedge pe.wait. No cancel: mirror the blockResult.Err path.
-						if applyResult.isPartial {
-							err = fmt.Errorf("resumed block with reconstructed prefix: %w", err)
-						}
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						fail.consider(applyResult.BlockNum, applyResult.BlockHash, true, fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err))
 						finalized = true
