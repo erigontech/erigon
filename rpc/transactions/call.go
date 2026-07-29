@@ -220,20 +220,15 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	}
 	r.evm.Reset(txCtx, ibs)
 
-	// done is closed on return to stop the watcher goroutine before it can
-	// cancel the shared EVM for a subsequent call.
-	done := make(chan struct{})
-	defer close(done) // runs before cancel() (LIFO), so goroutine exits cleanly on success
-
+	// Cancel the EVM if the context is done while the call is running. The
+	// deferred stop() runs before cancel() (LIFO), so on normal return the
+	// callback can never fire and cancel the shared EVM during a later call.
 	var timedOut atomic.Bool
-	go func() {
-		select {
-		case <-ctx.Done():
-			timedOut.Store(true)
-			r.evm.Cancel()
-		case <-done:
-		}
-	}()
+	stop := context.AfterFunc(ctx, func() {
+		timedOut.Store(true)
+		r.evm.Cancel()
+	})
+	defer stop()
 
 	gp := new(protocol.GasPool).AddGas(r.message.Gas()).AddBlobGas(r.message.BlobGas())
 
