@@ -772,14 +772,14 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 
 			offset, ok := idxReader.TwoLayerLookup(ht.key)
 			if !ok {
-				ht.logger.Debug("weird thing - no offset found for %s in file %s", hexutil.Encode(ht.key), item.src.decompressor.FileName())
+				ht.logger.Debug("weird thing - no offset found", "key", hexutil.Encode(ht.key), "file", item.src.decompressor.FileName())
 				moveToNextFileFn()
 				continue
 			}
 			getter.Reset(offset)
 			gkey, _ := getter.Next(ht.efbuf[:0]) // skip key
 			if !bytes.Equal(gkey, ht.key) {
-				ht.logger.Debug("weird thing - key mismatch for %s in file %s", hexutil.Encode(ht.key), item.src.decompressor.FileName())
+				ht.logger.Debug("weird thing - key mismatch", "key", hexutil.Encode(ht.key), "file", item.src.decompressor.FileName())
 				moveToNextFileFn()
 				continue
 			}

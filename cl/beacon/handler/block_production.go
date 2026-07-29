@@ -2152,7 +2152,7 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 		}
 		committeeBits := candidate.CommitteeBits.GetOnIndices()
 		if len(committeeBits) != 1 {
-			log.Warn("invalid candidate commitee bit length %v in attestation pool.", len(committeeBits))
+			log.Warn("invalid candidate committee bit length in attestation pool", "len", len(committeeBits))
 			continue
 		}
 		candCommitteeBit := uint64(committeeBits[0])
