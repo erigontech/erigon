@@ -27,12 +27,49 @@ import (
 	"sync/atomic"
 )
 
+// trieWorkerPool caches scrubbed HexPatriciaHashed workers across Process calls;
+// only put may insert, so every pooled worker is already reset for reuse.
+type trieWorkerPool struct {
+	pool          sync.Pool
+	accountKeyLen int16
+	cfg           TrieConfig
+}
+
+func (wp *trieWorkerPool) init(accountKeyLen int16, cfg TrieConfig) {
+	wp.accountKeyLen = accountKeyLen
+	wp.cfg = cfg
+}
+
+func (wp *trieWorkerPool) get() *HexPatriciaHashed {
+	if w, ok := wp.pool.Get().(*HexPatriciaHashed); ok {
+		w.accountKeyLen = wp.accountKeyLen
+		w.applyConfig(wp.cfg)
+		return w
+	}
+	return NewHexPatriciaHashed(wp.accountKeyLen, nil, wp.cfg)
+}
+
+func (wp *trieWorkerPool) put(w *HexPatriciaHashed) {
+	w.resetForReuse()
+	wp.pool.Put(w)
+}
+
+// drain hands cached workers back to the shared constructor pool instead of the GC.
+func (wp *trieWorkerPool) drain() {
+	for {
+		w, ok := wp.pool.Get().(*HexPatriciaHashed)
+		if !ok {
+			return
+		}
+		w.Release()
+	}
+}
+
 // ParallelPatriciaHashed is the trie-side of the parallel commitment pipeline.
 type ParallelPatriciaHashed struct {
 	template       *HexPatriciaHashed
 	trieCtxFactory TrieContextFactory
-	workerPool     sync.Pool
-	cfg            TrieConfig
+	workerPool     trieWorkerPool
 
 	accountKeyLen int16
 	numWorkers    int
@@ -51,21 +88,10 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 		template:       NewHexPatriciaHashed(accountKeyLen, nil, cfg),
 		trieCtxFactory: ctxFactory,
 		accountKeyLen:  accountKeyLen,
-		cfg:            cfg,
 		numWorkers:     runtime.NumCPU(),
 	}
-	p.resetPool()
+	p.workerPool.init(accountKeyLen, cfg)
 	return p
-}
-
-func (p *ParallelPatriciaHashed) resetPool() {
-	akl := p.accountKeyLen
-	cfg := p.cfg
-	p.workerPool = sync.Pool{
-		New: func() any {
-			return NewHexPatriciaHashed(akl, nil, cfg)
-		},
-	}
 }
 
 // SetNumWorkers overrides the worker count for the next Process call; n <= 0 falls back to runtime.NumCPU.
@@ -110,13 +136,13 @@ func (p *ParallelPatriciaHashed) RootTrie() *HexPatriciaHashed {
 	return p.template
 }
 
-// Reset clears the published root hash, drops pooled workers, and resets the template so the instance can be reused.
+// Reset clears the published root hash and resets the template so the instance
+// can be reused; pooled workers stay cached for the next Process call.
 func (p *ParallelPatriciaHashed) Reset() {
 	if p.template != nil {
 		p.template.Reset()
 	}
 	p.rootHash.Store(nil)
-	p.resetPool()
 	if p.streaming != nil {
 		p.streaming.Reset()
 	}
@@ -129,7 +155,7 @@ func (p *ParallelPatriciaHashed) Release() {
 		p.template = nil
 	}
 	p.rootHash.Store(nil)
-	p.resetPool()
+	p.workerPool.drain()
 	if p.streaming != nil {
 		p.streaming.Release()
 		p.streaming = nil

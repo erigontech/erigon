@@ -127,7 +127,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		child := root.children[childIdx]
 		ni, ch := nib, child
 		g.Go(func() error {
-			w := p.workerPool.Get().(*HexPatriciaHashed)
+			w := p.workerPool.get()
 			w.mountTo(base, ni)
 			if p.template != nil && p.template.traceW != nil {
 				w.traceW = tracePrefix(p.template.traceW, fmt.Sprintf("[mnt %x] ", ni))
@@ -154,8 +154,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 				return foldStorageRoot(gctx, foldSem, p.newStorageWorker, pu, n, pth, accountFresh)
 			})
 			if buildErr != nil {
-				w.resetForReuse()
-				p.workerPool.Put(w)
+				p.workerPool.put(w)
 				return fmt.Errorf("mount[%x] build: %w", ni, buildErr)
 			}
 			var tf time.Time
@@ -168,8 +167,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 				foldDur[ni] = time.Since(tf)
 			}
 			if err != nil {
-				w.resetForReuse()
-				p.workerPool.Put(w)
+				p.workerPool.put(w)
 				return fmt.Errorf("mount[%x] fold: %w", ni, err)
 			}
 			cells[ni] = c
@@ -177,8 +175,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			if deferred := w.TakeDeferredUpdates(); len(deferred) > 0 {
 				pu.appendDeferred(deferred)
 			}
-			w.resetForReuse()
-			p.workerPool.Put(w)
+			p.workerPool.put(w)
 			return nil
 		})
 		childIdx++
