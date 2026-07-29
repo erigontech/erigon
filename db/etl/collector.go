@@ -56,6 +56,35 @@ func (a *Allocator) Get() Buffer {
 	return b
 }
 
+// sortedRun holds one flushed run's key boundaries, captured after Sort —
+// every run is internally sorted by construction. Runs align 1:1 with
+// Collector.dataProviders; an async flush fills its run in the flush goroutine,
+// which completes before mergeSortFiles reads it (provider.Wait).
+type sortedRun struct {
+	first []byte
+	last  []byte
+	valid bool
+}
+
+// canReplaySequentially reports whether runs can be replayed one after another
+// instead of heap-merged: every run must be sorted and consecutive runs must not
+// overlap. An equal boundary key is fine — the heap breaks key ties by run order,
+// which sequential replay preserves.
+func canReplaySequentially(runs []*sortedRun, providers int) bool {
+	if len(runs) != providers {
+		return false
+	}
+	for i := range runs {
+		if runs[i] == nil || !runs[i].valid {
+			return false
+		}
+		if i > 0 && bytes.Compare(runs[i-1].last, runs[i].first) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // Collector performs the job of ETL Transform, but can also be used without "E" (Extract) part
 // as a Collect Transform Load
 type Collector struct {
@@ -63,6 +92,7 @@ type Collector struct {
 	logPrefix     string
 	tmpdir        string
 	dataProviders []dataProvider
+	runs          []*sortedRun
 	logLvl        log.Lvl
 	bufType       int
 	allFlushed    bool
@@ -116,27 +146,37 @@ func (c *Collector) Allocator(a *Allocator) *Collector {
 	return c
 }
 
+func runBoundaries(buf Buffer) sortedRun {
+	first, _ := buf.Get(0)
+	last, _ := buf.Get(buf.Len() - 1)
+	return sortedRun{first: bytes.Clone(first), last: bytes.Clone(last), valid: true}
+}
+
 func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	if c.buf.Len() == 0 {
 		return nil
 	}
+	run := &sortedRun{}
 
 	if canStoreInRam && len(c.dataProviders) == 0 {
 		c.buf.Sort()
+		*run = runBoundaries(c.buf)
 		provider := KeepInRAM(c.buf)
 		c.allFlushed = true
 		c.dataProviders = append(c.dataProviders, provider)
+		c.runs = append(c.runs, run)
 		return nil
 	}
 
 	// go bg - but without server overloading
 	doInBackground := c.sortAndFlushInBackground && c.sortAndFlushInBackgroundActive.CompareAndSwap(false, true)
 	if !doInBackground {
-		provider, err := FlushToDisk(c.logPrefix, c.buf, c.tmpdir, c.logLvl)
+		provider, err := FlushToDisk(c.logPrefix, c.buf, c.tmpdir, c.logLvl, run)
 		if err != nil {
 			return err
 		}
 		c.dataProviders = append(c.dataProviders, provider)
+		c.runs = append(c.runs, run)
 		c.buf.Reset()
 		return nil
 	}
@@ -149,11 +189,12 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 		c.buf = getBufferByType(c.bufType, datasize.ByteSize(fullBuf.SizeLimit()))
 		c.buf.Prealloc(prevLen/8, prevSize/8)
 	}
-	provider, err := FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, c.logLvl, c.allocator, &c.sortAndFlushInBackgroundActive)
+	provider, err := FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, c.logLvl, c.allocator, &c.sortAndFlushInBackgroundActive, run)
 	if err != nil {
 		return err
 	}
 	c.dataProviders = append(c.dataProviders, provider)
+	c.runs = append(c.runs, run)
 	return nil
 }
 
@@ -253,7 +294,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	simpleLoad := func(k, v []byte) error {
 		return loadFunc(k, v, currentTable, loadNextFunc)
 	}
-	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf); err != nil {
+	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.runs); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
 	//logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
@@ -275,23 +316,105 @@ func (c *Collector) Close() {
 		}
 		c.dataProviders = nil
 	}
+	c.runs = nil
 	c.allFlushed = false
 }
 
-// mergeSortFiles uses merge-sort to order the elements stored within the slice of providers,
-// regardless of ordering within the files the elements will be processed in order.
-// The first pass reads the first element from each of the providers and populates a heap with the key/value/provider index.
-// Later, the heap is popped to get the first element, the record is processed using the LoadFunc, and the provider is asked
-// for the next item, which is then added back to the heap.
-// The subsequent iterations pop the heap again and load up the provider associated with it to get the next element after processing LoadFunc.
-// this continues until all providers have reached their EOF.
-func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs, buf Buffer) (err error) {
+// mergeSortFiles merges the elements of the providers into globally sorted order
+// and feeds them to loadFunc. Each provider (run) is internally sorted. When runs
+// additionally do not overlap, they are replayed one after another; otherwise a
+// k-way merge heap orders elements across runs, breaking key ties by run order.
+func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs, runs []*sortedRun) (err error) {
 	for _, provider := range providers {
 		if err := provider.Wait(); err != nil {
 			return err
 		}
 	}
 
+	var prevK, prevV []byte
+	var i int
+	process := func(key, value []byte) error {
+		i++
+		if i%1024 == 0 {
+			if err := common.Stopped(args.Quit); err != nil {
+				return err
+			}
+		}
+		switch args.BufferType {
+		case SortableOldestAppearedBuffer:
+			// SortableOldestAppearedBuffer must guarantee that only 1 oldest value of key will appear
+			// but because size of buffer is limited - each flushed file does guarantee "oldest appeared"
+			// property, but files may overlap. files are sorted, just skip repeated keys here
+			if !bytes.Equal(prevK, key) {
+				if err := loadFunc(key, value); err != nil {
+					return err
+				}
+				prevK = key
+			}
+		case SortableAppendBuffer:
+			if !bytes.Equal(prevK, key) {
+				if prevK != nil {
+					if err := loadFunc(prevK, prevV); err != nil {
+						return err
+					}
+				}
+				prevK = key
+				prevV = bytes.Clone(value) // copy needed: prevV is mutated by append below; value may point into read-only mmap
+			} else {
+				prevV = append(prevV, value...)
+			}
+		default:
+			return loadFunc(key, value)
+		}
+		return nil
+	}
+
+	if canReplaySequentially(runs, len(providers)) {
+		err = replaySequentially(logPrefix, providers, process)
+	} else {
+		err = mergeViaHeap(logPrefix, providers, process)
+	}
+	if err != nil {
+		return err
+	}
+
+	if args.BufferType == SortableAppendBuffer {
+		if prevK != nil {
+			if err = loadFunc(prevK, prevV); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func replaySequentially(logPrefix string, providers []dataProvider, process func(key, value []byte) error) error {
+	for i, provider := range providers {
+		// A recorded run is never empty, so EOF on the first read means a
+		// truncated or corrupt spill; fail loudly like the heap path does.
+		key, value, err := provider.Next()
+		if err != nil {
+			return fmt.Errorf("%s: reading first element of run %d of %d (provider=%s): %w",
+				logPrefix, i, len(providers), provider, err)
+		}
+		for {
+			if err := process(key, value); err != nil {
+				return err
+			}
+			key, value, err = provider.Next()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				return fmt.Errorf("%s: error while reading next element from disk: %w", logPrefix, err)
+			}
+		}
+	}
+	return nil
+}
+
+func mergeViaHeap(logPrefix string, providers []dataProvider, process func(key, value []byte) error) (err error) {
 	h := &Heap{}
 	heapInit(h)
 	for i, provider := range providers {
@@ -304,64 +427,18 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		}
 	}
 
-	var prevK, prevV []byte
-
-	var i int
-	// Main loading loop
 	for h.Len() > 0 {
-		i++
-		if i%1024 == 0 {
-			if err := common.Stopped(args.Quit); err != nil {
-				return err
-			}
-		}
-
 		element := heapPop(h)
 		provider := providers[element.TimeIdx]
-
-		// SortableOldestAppearedBuffer must guarantee that only 1 oldest value of key will appear
-		// but because size of buffer is limited - each flushed file does guarantee "oldest appeared"
-		// property, but files may overlap. files are sorted, just skip repeated keys here
-		if args.BufferType == SortableOldestAppearedBuffer {
-			if !bytes.Equal(prevK, element.Key) {
-				if err = loadFunc(element.Key, element.Value); err != nil {
-					return err
-				}
-				prevK = element.Key
-			}
-		} else if args.BufferType == SortableAppendBuffer {
-			if !bytes.Equal(prevK, element.Key) {
-				if prevK != nil {
-					if err = loadFunc(prevK, prevV); err != nil {
-						return err
-					}
-				}
-				prevK = element.Key
-				prevV = bytes.Clone(element.Value) // copy needed: prevV is mutated by append below; element.Value may point into read-only mmap
-			} else {
-				prevV = append(prevV, element.Value...)
-			}
-		} else {
-			if err = loadFunc(element.Key, element.Value); err != nil {
-				return err
-			}
+		if err := process(element.Key, element.Value); err != nil {
+			return err
 		}
-
 		if element.Key, element.Value, err = provider.Next(); err == nil {
 			heapPush(h, element)
 		} else if !errors.Is(err, io.EOF) {
 			return fmt.Errorf("%s: error while reading next element from disk: %w", logPrefix, err)
 		}
 	}
-
-	if args.BufferType == SortableAppendBuffer {
-		if prevK != nil {
-			if err = loadFunc(prevK, prevV); err != nil {
-				return err
-			}
-		}
-	}
-
 	return nil
 }
 

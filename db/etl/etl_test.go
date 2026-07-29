@@ -639,7 +639,7 @@ func TestAppendAcrossMemProviders(t *testing.T) {
 	buf0.Put([]byte{3}, []byte{30})
 	buf0.Put([]byte{4}, []byte{100})
 	buf0.Put([]byte{4}, []byte{101})
-	fileProvider, err := FlushToDisk("test", buf0, tmpdir, log.LvlInfo)
+	fileProvider, err := FlushToDisk("test", buf0, tmpdir, log.LvlInfo, nil)
 	require.NoError(t, err)
 
 	buf1 := NewAppendBuffer(BufferOptimalSize)
@@ -659,7 +659,7 @@ func TestAppendAcrossMemProviders(t *testing.T) {
 	}
 
 	err = mergeSortFiles("test", providers, loadFunc,
-		TransformArgs{BufferType: SortableAppendBuffer}, NewAppendBuffer(1))
+		TransformArgs{BufferType: SortableAppendBuffer}, nil)
 	require.NoError(t, err)
 
 	require.Len(t, results, 4)
@@ -808,7 +808,7 @@ func TestMixedProvidersMergeSortFiles(t *testing.T) {
 		v := fmt.Appendf(nil, "file-val-%02d", i)
 		fileBuf.Put(k, v)
 	}
-	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo)
+	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo, nil)
 	require.NoError(t, err)
 	require.NotNil(t, fileProvider)
 
@@ -835,7 +835,7 @@ func TestMixedProvidersMergeSortFiles(t *testing.T) {
 		return nil
 	}
 
-	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, nil)
 	require.NoError(t, err)
 
 	// Should have all 10 entries in sorted order
@@ -871,7 +871,7 @@ func TestMixedProvidersInterleavedKeys(t *testing.T) {
 		v := fmt.Appendf(nil, "file-%04d", i)
 		fileBuf.Put(k, v)
 	}
-	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo)
+	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo, nil)
 	require.NoError(t, err)
 
 	// Memory provider: odd keys
@@ -893,7 +893,7 @@ func TestMixedProvidersInterleavedKeys(t *testing.T) {
 		return nil
 	}
 
-	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, nil)
 	require.NoError(t, err)
 
 	require.Len(t, keys, 10)
@@ -920,7 +920,7 @@ func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 	// File provider with 1 key
 	fileBuf := NewSortableBuffer(BufferOptimalSize)
 	fileBuf.Put([]byte("aaa"), []byte("file-aaa"))
-	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo)
+	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo, nil)
 	require.NoError(t, err)
 
 	// Memory provider with multiple keys - GetRef returns slices into sortableBuffer.data
@@ -946,7 +946,7 @@ func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 		return nil
 	}
 
-	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, nil)
 	require.NoError(t, err)
 
 	require.Len(t, entries, 4)
@@ -976,7 +976,7 @@ func BenchmarkFileDataProviderNext(b *testing.B) {
 			for b.Loop() {
 				b.StopTimer()
 				tmpdir, _ := os.MkdirTemp("", "bench-fdp-")
-				provider, err := FlushToDisk("bench", buf, tmpdir, log.LvlInfo)
+				provider, err := FlushToDisk("bench", buf, tmpdir, log.LvlInfo, nil)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -1480,7 +1480,7 @@ func TestVmtouchMmap(t *testing.T) {
 	const n = 1_000_000
 	buf := makeSortedBuffer(32, 1024, n) // ~1GB file
 
-	provider, err := FlushToDisk("test", buf, tmpdir, log.LvlInfo)
+	provider, err := FlushToDisk("test", buf, tmpdir, log.LvlInfo, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
