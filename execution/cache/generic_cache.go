@@ -316,8 +316,12 @@ func (c *GenericCache[T]) Get(key []byte) (T, bool) {
 // maxStep — the same coherence the BranchCache read applies for commitment.
 func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	h := maphash.Hash(key)
-	// Snapshot before loading the generation so an entry from the retiring
-	// generation is judged by coherence that still carries its unwind.
+	// Snapshot coherence before loading the generation. Clear publishes the
+	// replacement generation before lifting the unwind floor, so an entry
+	// captured from the retiring generation is always judged by coherence that
+	// still carries its unwind. A replacement-generation entry judged by an old
+	// snapshot can only cause a safe miss because dropStale rechecks the current
+	// generation before removing it.
 	coh := c.coh.Snapshot()
 	lru := c.data.Load()
 	e, ok := lru.Get(h)
@@ -379,8 +383,9 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Sample the epoch under the stripe so Clear cannot split the stamp from
-	// the generation where the entry lands.
+	// Sample the epoch under the stripe. Clear holds every stripe across the
+	// generation swap and coherence reset, so the stamp cannot belong to a
+	// different generation from the one where the entry lands.
 	ep := c.coh.Epoch()
 	lru := c.data.Load()
 	existing, hasExisting := lru.Get(h)
@@ -474,8 +479,12 @@ func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
 	}
 }
 
-// Clear removes all entries, restores the starting capacity, and starts a new
-// coherence generation. The generation swap and accounting reset fence writers.
+// Clear removes all entries and restores the starting capacity. It starts an
+// empty coherence generation by advancing the epoch and lifting the unwind
+// floor, so subsequent puts are not constrained by an unwind that belongs to
+// the retired data. The accounting reset, data swap, and coherence reset run
+// with every put stripe held, so a racing writer cannot split those
+// publications.
 func (c *GenericCache[T]) Clear() {
 	// Shrink back to the start size and return the grown budget to the envelope,
 	// keeping the cache adaptive across fork-validation/reset (it regrows on
@@ -495,9 +504,9 @@ func (c *GenericCache[T]) Clear() {
 	c.shardCount = shards
 	c.curCap.Store(c.startCap)
 	c.data.Store(next)
-	// Reset coherence only after the swap: paired with GetWithTxNum's
-	// snapshot-before-load ordering, an entry captured from the retiring
-	// generation is then always judged by pre-reset coherence that still
+	// Reset coherence only after publishing the empty generation. Paired with
+	// GetWithTxNum's snapshot-before-load ordering, this ensures an entry from
+	// the retiring generation is judged by pre-Reset coherence that still
 	// carries the unwind.
 	c.coh.Reset()
 	for i := range c.putStripes {

@@ -174,6 +174,8 @@ func TestBranchCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	key := []byte{0x00}
 	preClearEpoch := c.coh.Epoch()
 	c.Clear()
+	// Model a writer that sampled the epoch before Clear and published after
+	// its target tier was emptied.
 	c.store(key, &branchCacheEntry{data: []byte("dead-fork-branch"), txN: 200, epoch: preClearEpoch})
 	c.Unwind(150)
 

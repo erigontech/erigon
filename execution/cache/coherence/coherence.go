@@ -50,7 +50,9 @@ func (g *Gen) Init() {
 	g.state.Store(&gen{epoch: 0, floor: math.MaxUint64})
 }
 
-// Reset starts an empty cache generation without reusing an epoch.
+// Reset starts an empty cache generation without reusing an epoch. It advances
+// the epoch and lifts the unwind floor in one CAS, so concurrent Reset and
+// Unwind calls cannot lose a generation change.
 func (g *Gen) Reset() {
 	for {
 		cur := g.state.Load()

@@ -119,7 +119,9 @@ type BranchCache struct {
 
 	// coh is the (epoch, floor) unwind-coherence primitive shared with the state
 	// and code caches: an entry is valid iff written in the current epoch OR its
-	// txN is below the unwind floor. See execution/cache/coherence.
+	// txN is below the unwind floor. Serving reads snapshot coherence before
+	// lookup, while Clear empties every tier before Reset; together those
+	// orderings keep the lifted floor from revalidating a retired entry.
 	coh coherence.Gen
 }
 
@@ -642,6 +644,8 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	if isCommitmentStateKey(prefix) {
 		return nil, 0, false
 	}
+	// Snapshot before lookup so an entry captured while Clear empties the tiers
+	// retains the pre-Clear unwind floor used to judge it.
 	coh := c.coh.Snapshot()
 	entry, ok := c.lookup(prefix)
 	if !ok {
@@ -717,7 +721,10 @@ func (c *BranchCache) Unwind(unwindToTxN uint64) {
 	c.coh.Unwind(unwindToTxN)
 }
 
-// Clear empties every tier, resets stats, and starts a new coherence generation.
+// Clear empties the root, trunk, pinned, and tail tiers, resets their stats, and
+// starts a new coherence generation. Coherence is reset only after every tier
+// is empty, so snapshot-before-lookup readers cannot pair a retired entry with
+// the lifted unwind floor.
 func (c *BranchCache) Clear() {
 	c.root.Store(nil)
 	c.clearTrunk()

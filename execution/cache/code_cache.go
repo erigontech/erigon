@@ -153,7 +153,9 @@ type CodeCache struct {
 
 	// Unwind coherence shared by every layer (content-addressed ones included):
 	// an entry is valid iff written in the current epoch OR its txNum is below
-	// the unwind floor. See execution/cache/coherence.
+	// the unwind floor. Serving reads snapshot coherence before loading a layer,
+	// while Clear purges every layer before Reset; together those orderings keep
+	// the lifted floor from revalidating a retired entry.
 	coh coherence.Gen
 
 	// addrBindMu serializes addr→code binding writers so PutIfAbsent's
@@ -274,6 +276,8 @@ func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
 // path can apply the same step bound the DomainCache/BranchCache reads do.
 func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 	k := common.BytesToAddress(addr)
+	// Snapshot before either layer read so an entry captured while Clear purges
+	// the layers retains the pre-Clear unwind floor used to judge it.
 	coh := c.coh.Snapshot()
 	vID, ok := c.addrToHash.Get(k)
 	if !ok {
@@ -507,7 +511,9 @@ func (c *CodeCache) Delete(addr []byte) {
 	c.addrToHash.Remove(common.BytesToAddress(addr))
 }
 
-// Clear removes every layer and starts a new coherence generation.
+// Clear removes every layer, resets accounting, and starts a new coherence
+// generation. Coherence is reset only after every purge, so snapshot-before-
+// read paths cannot pair a retired entry with the lifted unwind floor.
 func (c *CodeCache) Clear() {
 	c.addrToHash.Purge()
 	c.addrToCodeHash.Purge()

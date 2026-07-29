@@ -303,8 +303,14 @@ func TestGenericCache_CapacityEvictionAtomicWithPut_NoSizeDrift(t *testing.T) {
 	require.Zero(t, c.SizeBytes(), "capacity eviction raced the update-path delta")
 }
 
-// Clear owns every put stripe through its generation reset. This test queues
-// Clear before Put so the entry must be stamped in the post-Clear generation.
+// The failure mode is a pre-Clear epoch stamped on post-Clear storage. If Clear
+// reused that epoch value, a later unwind could reach the same value and treat
+// the entry as current even though its txNum is above the unwind floor.
+//
+// The test holds the key's stripe, then queues Clear before Put. Waiting beyond
+// the mutex starvation threshold makes the unlock hand the stripe to Clear
+// first. Clear must keep the stripe through the data and coherence generation
+// changes, so Put stamps the post-Clear epoch and a later unwind invalidates it.
 func TestGenericCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
 	defer c.Close()
@@ -336,7 +342,7 @@ func TestGenericCache_ClearRacingPut_EpochAlias(t *testing.T) {
 // pre-Reset coherence that still carries the unwind.
 //
 // The reader gates on the fence reaching the key's stripe — the last one the
-// sweep locks — so its Get lands next to the Init that follows.
+// sweep locks — so its Get lands next to the Reset that follows.
 func TestGenericCache_ClearRacingGet_DeadEntryStaysDead(t *testing.T) {
 	var key []byte
 	for i := 0; ; i++ {
