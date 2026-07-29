@@ -39,7 +39,7 @@ type gen struct {
 // next read. The floor only ever decreases, so a shallower later unwind can't
 // resurrect entries a deeper one invalidated.
 //
-// The zero value is not usable — call Init from constructors.
+// Constructors must call Init.
 type Gen struct {
 	state atomic.Pointer[gen]
 }
