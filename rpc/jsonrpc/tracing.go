@@ -110,6 +110,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	if err != nil {
 		return err
 	}
+	defer ibs.Release(false)
 
 	var precompiles vm.PrecompiledContracts
 	if config.BlockOverrides != nil {
@@ -305,6 +306,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	if err != nil {
 		return err
 	}
+	defer ibs.Release(false)
 
 	var precompiles vm.PrecompiledContracts
 	if config != nil {
@@ -402,6 +404,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 		return fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 	ibs := state.New(stateReader)
+	defer ibs.Release(false)
 
 	baseFee, err := overrideBaseFee(config, header.BaseFee)
 	if err != nil {
@@ -519,6 +522,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	ibs := state.New(stateReader)
+	defer ibs.Release(false)
 
 	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
 

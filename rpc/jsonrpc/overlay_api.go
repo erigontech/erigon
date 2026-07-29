@@ -166,6 +166,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	statedb := state.New(stateReader)
+	defer statedb.Release(false)
 
 	header := block.HeaderNoCopy()
 
@@ -324,24 +325,26 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 					continue
 				}
 				statedb := state.New(stateReader)
-
-				if stateOverride != nil {
-					err = stateOverride.Override(statedb, nil, rules)
+				func() {
+					defer statedb.Release(false)
+					if stateOverride != nil {
+						err = stateOverride.Override(statedb, nil, rules)
+						if err != nil {
+							results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
+							return
+						}
+					}
+					blockLogs, err := api.replayBlock(ctx, uint64(blockNumber), statedb, chainConfig, tx)
 					if err != nil {
 						results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
-						continue
+						return
 					}
-				}
-				blockLogs, err := api.replayBlock(ctx, uint64(blockNumber), statedb, chainConfig, tx)
-				if err != nil {
-					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
-					continue
-				}
-				log.Debug("[GetLogs]", "len(blockLogs)", len(blockLogs))
-				logs := filterLogs(blockLogs, crit.Addresses, crit.Topics)
-				log.Debug("[GetLogs]", "len(logs)", len(logs))
+					log.Debug("[GetLogs]", "len(blockLogs)", len(blockLogs))
+					logs := filterLogs(blockLogs, crit.Addresses, crit.Topics)
+					log.Debug("[GetLogs]", "len(logs)", len(logs))
 
-				results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Logs: logs}
+					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Logs: logs}
+				}()
 			}
 		})
 	}

@@ -1142,6 +1142,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 
 	ibs := state.New(stateReader)
+	defer ibs.Release(false)
 
 	_, storeEVM, cleanup := setupEVMTimeout(ctx, api.evmCallTimeout)
 	defer cleanup()
@@ -1240,6 +1241,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 		initialIbs := state.New(stateReader)
+		defer initialIbs.Release(false)
 		if err = sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}
@@ -1358,6 +1360,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
+	defer ibs.Release(false)
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
 		txns, msgs, callParams, parentNrOrHash, parentHeader, true /* gasBailout */, traceConfig)
@@ -1564,6 +1567,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 					return nil, nil, err
 				}
 			}
+			initialIbs.Release(false)
 		} else if !txFinalized {
 			if err = ibs.FinalizeTx(chainRules, noop); err != nil {
 				return nil, nil, err
@@ -1756,6 +1760,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	traceResult.Output = bytes.Clone(execResult.ReturnData)
 	if traceTypeStateDiff {
 		initialIbs := state.New(cloneReader)
+		defer initialIbs.Release(false)
 		if !txFinalized {
 			if err = ibs.FinalizeTx(chainRules, sd); err != nil {
 				return nil, err
@@ -1860,6 +1865,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 
 	ibs := state.New(stateReader)
+	defer ibs.Release(false)
 
 	var ot OeTracer
 	ot.config, err = parseOeTracerConfig(nil)
@@ -1921,6 +1927,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 			return nil, err
 		}
 		initialIbs := state.New(stateReader)
+		defer initialIbs.Release(false)
 		if err = sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}
