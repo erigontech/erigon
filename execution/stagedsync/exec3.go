@@ -461,7 +461,7 @@ func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.T
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 		return te.cfg.blockReader.Header(ctx, applyTx, hash, number)
 	}
-	priorReceipts, priorGasUsed, err := receipts.DerivePriorReceiptsWithGas(ctx, te.cfg.chainConfig, te.cfg.engine, header, txs, startTxIndex, blockStartTxNum, applyTx, priorIbs, priorGp, getHeader)
+	priorReceipts, priorGasUsed, err := receipts.DerivePriorReceipts(ctx, te.cfg.chainConfig, te.cfg.engine, header, txs, startTxIndex, blockStartTxNum, applyTx, priorIbs, priorGp, getHeader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to reconstruct prior receipts for partial block %d (startTxIndex %d): %w", header.Number.Uint64(), startTxIndex, err)
 	}

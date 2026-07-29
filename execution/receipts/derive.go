@@ -189,32 +189,14 @@ func gasUsedFromCachedReceipts(cached types.Receipts, txns types.Transactions) *
 	return gasUsed
 }
 
-// DerivePriorReceipts returns receipts for transactions 0..startTxIndex-1.
+// DerivePriorReceipts returns receipts for transactions 0..startTxIndex-1,
+// together with the block gas totals they accumulated.
 // Pre-Amsterdam it uses RCacheV2 when the full prefix is cached. Amsterdam
 // blocks are replayed because receipts do not preserve both block-gas dimensions.
 //
 // Used when execution resumes mid-block from a snapshot boundary and Finalize
 // needs the full receipt set for requests hash computation.
 func DerivePriorReceipts(
-	ctx context.Context,
-	cfg *chain.Config,
-	engine rules.EngineReader,
-	header *types.Header,
-	txns types.Transactions,
-	startTxIndex int,
-	blockStartTxNum uint64,
-	tx kv.TemporalTx,
-	ibs *state.IntraBlockState,
-	gp *protocol.GasPool,
-	getHeader GetHeaderFunc,
-) (types.Receipts, error) {
-	receipts, _, err := DerivePriorReceiptsWithGas(ctx, cfg, engine, header, txns, startTxIndex, blockStartTxNum, tx, ibs, gp, getHeader)
-	return receipts, err
-}
-
-// DerivePriorReceiptsWithGas also returns the block gas totals accumulated by
-// the prefix transactions.
-func DerivePriorReceiptsWithGas(
 	ctx context.Context,
 	cfg *chain.Config,
 	engine rules.EngineReader,
