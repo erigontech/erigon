@@ -318,7 +318,8 @@ func TestPBinUnfoldDescendsThroughPrefix(t *testing.T) {
 			cell := &pph.grid.rows[0][branchBit]
 			require.Equal(t, pbinNodeBranch, cell.kind)
 			require.Equal(t, int16(0), cell.prefix.bitLen, "the whole prefix moved into the descent key")
-			require.Equal(t, pph.grid.root.hash, cell.hash)
+			require.Equal(t, int16(0), cell.hashLen,
+				"the prefix is inside the branch hash, so moving it out of the cell invalidates it")
 
 			u = pph.needUnfolding(&full)
 			require.Equal(t, pbinUnfolding{action: pbinUnfoldRecord}, u)

@@ -17,8 +17,13 @@
 package commitment
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"math/bits"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // PBinPatriciaHashed computes commitment over EIP-8297's partitioned binary
@@ -26,14 +31,26 @@ import (
 // node model: arity is 2, there is no extension node and no storage root, and a
 // leaf commits its complete tree key.
 type PBinPatriciaHashed struct {
-	grid       pbinGrid
-	currentKey pbinBitpath // path from the root to the deepest active row, one bit per level
-	ctx        PatriciaContext
-	hasher     pbinHasher
+	grid          pbinGrid
+	currentKey    pbinBitpath // path from the root to the deepest active row, one bit per level
+	ctx           PatriciaContext
+	hasher        pbinHasher
+	branchEncoder pbinBranchEncoder
+	counters      pbinCounters
 
 	rootChecked bool // whether the root record is known to be absent
 	rootTouched bool
 	rootPresent bool
+}
+
+// pbinCounters measures what keeping a single hash per branch cell costs. A
+// probe diverging inside a stored prefix invalidates that hash, and rebuilding
+// it needs a branch read the descent itself would not have made. Storing both
+// child hashes per cell instead is a wire-format change, so it waits on these
+// numbers.
+type pbinCounters struct {
+	splitsInsidePrefix uint64
+	materializeReads   uint64
 }
 
 func NewPBinPatriciaHashed(ctx PatriciaContext) *PBinPatriciaHashed {
@@ -153,6 +170,9 @@ func (pph *PBinPatriciaHashed) unfold(probe *pbinBitpath, u pbinUnfolding) error
 	if err != nil {
 		return err
 	}
+	if u.action == pbinUnfoldSplit {
+		pph.counters.splitsInsidePrefix++
+	}
 	bit := upCell.prefix.bit(consumed - 1)
 	if touched {
 		g.touchMap[row] = uint16(1) << bit
@@ -161,6 +181,7 @@ func (pph *PBinPatriciaHashed) unfold(probe *pbinBitpath, u pbinUnfolding) error
 		g.afterMap[row] = uint16(1) << bit
 	}
 	g.rows[row][bit].fillFromUpperCell(upCell, consumed)
+	pph.rehashAfterPrefixChange(&g.rows[row][bit])
 
 	if consumed > 1 {
 		head := upCell.prefix.slice(0, consumed-1)
@@ -227,7 +248,8 @@ func (pph *PBinPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bo
 
 // fillFromUpperCell moves a cell one level down, dropping the prefix bits the
 // descent has taken over. skip counts those bits and includes the one the new
-// row branches on.
+// row branches on. It re-cuts the prefix, so the caller owes the cell a
+// rehashAfterPrefixChange.
 func (c *pbinCell) fillFromUpperCell(up *pbinCell, skip int16) {
 	c.reset()
 	if skip < up.prefix.bitLen {
@@ -246,6 +268,267 @@ func (c *pbinCell) fillFromUpperCell(up *pbinCell, skip int16) {
 	if up.hashLen > 0 {
 		c.hash = up.hash
 	}
+	c.children, c.childrenSet = up.children, up.childrenSet
 	c.loaded = up.loaded
 	c.Update = up.Update
+}
+
+// fillFromLowerCell moves the sole survivor of a collapsed row into the cell
+// above, prepending the bits the row consumed: the ones the parent already
+// descended plus the one the row branched on.
+func (c *pbinCell) fillFromLowerCell(low *pbinCell, head *pbinBitpath, bit uint64) {
+	prefix := *head
+	prefix.appendBit(bit)
+	prefix.append(&low.prefix)
+	*c = *low
+	c.prefix = prefix
+}
+
+// rehashAfterPrefixChange restores the invariant that a set hashLen means the
+// hash covers the prefix the cell holds now. A cell that knows its children
+// re-derives; one that does not is marked stale for materializeBranch.
+func (pph *PBinPatriciaHashed) rehashAfterPrefixChange(c *pbinCell) {
+	if c.kind != pbinNodeBranch {
+		return
+	}
+	if c.childrenSet {
+		c.hash = pph.hasher.branchHash(&c.prefix, &c.children[0], &c.children[1])
+		c.hashLen = length.Hash
+		return
+	}
+	c.hash, c.hashLen = common.Hash{}, 0
+}
+
+// fold reduces currentKey by one row: it hashes what the row holds into the cell
+// above and, when the row stays a branch, writes the row's record.
+func (pph *PBinPatriciaHashed) fold() error {
+	g := &pph.grid
+	if g.activeRows == 0 {
+		return errors.New("pbin: cannot fold with no active rows")
+	}
+	row := g.activeRows - 1
+	if err := pbinCheckCellMaps(g.touchMap[row], g.afterMap[row]); err != nil {
+		return err
+	}
+	depth := g.depths[row]
+	if pph.currentKey.bitLen != depth-1 {
+		return fmt.Errorf("pbin: row %d at depth %d folds under a %d-bit key", row, depth, pph.currentKey.bitLen)
+	}
+
+	var upCell *pbinCell
+	var bit uint64
+	var upDepth int16
+	if row == 0 {
+		upCell = &g.root
+	} else {
+		upDepth = g.depths[row-1]
+		bit = pph.currentKey.bit(upDepth - 1)
+		upCell = &g.rows[row-1][bit]
+	}
+
+	var err error
+	switch kind, _ := afterMapUpdateKind(g.afterMap[row]); kind {
+	case updateKindDelete:
+		err = pph.foldDelete(row, bit, upCell)
+	case updateKindPropagate:
+		err = pph.foldPropagate(row, bit, upDepth, depth, upCell)
+	case updateKindBranch:
+		err = pph.foldBranch(row, bit, upDepth, depth, upCell)
+	}
+	if err != nil {
+		return err
+	}
+	g.activeRows--
+	pph.currentKey.truncate(max(upDepth-1, 0))
+	return nil
+}
+
+// foldBranch hashes a row that keeps both cells and stores it as one record,
+// keyed by the bit path down to the branch bit.
+func (pph *PBinPatriciaHashed) foldBranch(row int, bit uint64, upDepth, depth int16, upCell *pbinCell) error {
+	g := &pph.grid
+	if n := bits.OnesCount16(g.afterMap[row]); n != 2 {
+		return fmt.Errorf("pbin: branch fold at row %d keeps %d cells, want 2", row, n)
+	}
+	pph.propagateTouch(row, bit)
+
+	childPath := pph.currentKey
+	childPath.appendBit(0)
+	left, err := pph.hashRowCell(&g.rows[row][0], &childPath)
+	if err != nil {
+		return err
+	}
+	childPath.setBitAt(depth-1, 1)
+	right, err := pph.hashRowCell(&g.rows[row][1], &childPath)
+	if err != nil {
+		return err
+	}
+
+	key := pbinEncodeBitPath(&pph.currentKey)
+	record, err := pph.branchEncoder.encode(g.touchMap[row], g.afterMap[row], &g.rows[row])
+	if err != nil {
+		return err
+	}
+	if err = pph.ctx.PutBranch(key, bytes.Clone(record), nil); err != nil {
+		return fmt.Errorf("pbin: write branch at %x: %w", key, err)
+	}
+
+	prefix := pph.currentKey.slice(upDepth, depth-1)
+	upCell.reset()
+	upCell.kind = pbinNodeBranch
+	upCell.prefix = prefix
+	upCell.children, upCell.childrenSet = [2]common.Hash{left, right}, true
+	upCell.hash = pph.hasher.branchHash(&prefix, &left, &right)
+	upCell.hashLen = length.Hash
+	return nil
+}
+
+// foldPropagate collapses a row down to its sole survivor. The node moves up
+// rather than being rewritten, so no record is written and the bits the row
+// consumed are prepended to the survivor's own prefix.
+func (pph *PBinPatriciaHashed) foldPropagate(row int, bit uint64, upDepth, depth int16, upCell *pbinCell) error {
+	g := &pph.grid
+	pph.propagateTouch(row, bit)
+
+	childBit := bits.TrailingZeros16(g.afterMap[row])
+	child := &g.rows[row][childBit]
+
+	head := pph.currentKey.slice(upDepth, depth-1)
+	upCell.fillFromLowerCell(child, &head, uint64(childBit))
+	// The row's own bit is part of what moves up: dropping it still hashes, and
+	// still gives the wrong root.
+	if want := depth - upDepth + child.prefix.bitLen; upCell.prefix.bitLen != want {
+		return fmt.Errorf("pbin: propagate at row %d formed a %d-bit prefix, want %d", row, upCell.prefix.bitLen, want)
+	}
+	pph.rehashAfterPrefixChange(upCell)
+	return nil
+}
+
+// foldDelete drops a row that kept nothing, taking the record it came from with
+// it.
+func (pph *PBinPatriciaHashed) foldDelete(row int, bit uint64, upCell *pbinCell) error {
+	g := &pph.grid
+	if g.touchMap[row] != 0 {
+		if row == 0 {
+			pph.rootTouched, pph.rootPresent = true, false
+		} else {
+			g.touchMap[row-1] |= uint16(1) << bit
+			g.afterMap[row-1] &^= uint16(1) << bit
+		}
+	}
+	upCell.reset()
+	if !g.branchBefore[row] {
+		return nil
+	}
+	key := pbinEncodeBitPath(&pph.currentKey)
+	if err := pph.ctx.PutBranch(key, nil, nil); err != nil {
+		return fmt.Errorf("pbin: delete branch at %x: %w", key, err)
+	}
+	return nil
+}
+
+// propagateTouch carries a modification to the row above. A fold that leaves a
+// node behind also marks the root present: without it the next unfold reads
+// touched and absent, and drops the whole subtree.
+func (pph *PBinPatriciaHashed) propagateTouch(row int, bit uint64) {
+	if pph.grid.touchMap[row] == 0 {
+		return
+	}
+	if row == 0 {
+		pph.rootTouched, pph.rootPresent = true, true
+		return
+	}
+	pph.grid.touchMap[row-1] |= uint16(1) << bit
+}
+
+// hashRowCell hashes one cell of a folding row and writes the result back, so
+// the record the row produces carries every child hash a later read needs.
+func (pph *PBinPatriciaHashed) hashRowCell(c *pbinCell, path *pbinBitpath) (common.Hash, error) {
+	h, err := pph.cellHash(c, path)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if c.kind == pbinNodeBranch {
+		c.hash, c.hashLen = h, length.Hash
+	}
+	return h, nil
+}
+
+// cellHash resolves whatever a cell is missing — a leaf's state, a branch's
+// stale hash — and hands it to the one hasher.
+func (pph *PBinPatriciaHashed) cellHash(c *pbinCell, path *pbinBitpath) (common.Hash, error) {
+	switch c.kind {
+	case pbinNodeLeaf:
+		if err := pph.loadCellState(c); err != nil {
+			return common.Hash{}, err
+		}
+	case pbinNodeBranch:
+		if !c.childrenSet && c.hashLen == 0 {
+			if err := pph.materializeBranch(c, path); err != nil {
+				return common.Hash{}, err
+			}
+		}
+	}
+	return pph.hasher.cellHash(c, path)
+}
+
+// loadCellState fills a leaf cell whose plain key arrived from a record and
+// whose value therefore did not.
+func (pph *PBinPatriciaHashed) loadCellState(c *pbinCell) error {
+	if c.accountAddrLen > 0 && !c.loaded.account() {
+		update, err := pph.ctx.Account(c.accountAddr[:c.accountAddrLen])
+		if err != nil {
+			return fmt.Errorf("pbin: read account %x: %w", c.accountAddr[:c.accountAddrLen], err)
+		}
+		c.setFromUpdate(update)
+		c.loaded = c.loaded.addFlag(cellLoadAccount)
+	}
+	if c.storageAddrLen > 0 && !c.loaded.storage() {
+		update, err := pph.ctx.Storage(c.storageAddr[:c.storageAddrLen])
+		if err != nil {
+			return fmt.Errorf("pbin: read storage %x: %w", c.storageAddr[:c.storageAddrLen], err)
+		}
+		c.setFromUpdate(update)
+		c.loaded = c.loaded.addFlag(cellLoadStorage)
+	}
+	return nil
+}
+
+// materializeBranch rebuilds a branch cell's hash under the prefix it holds now
+// by reading its own record. A split shortens a survivor's prefix without moving
+// its record, so the key is the cell's path followed by that prefix.
+func (pph *PBinPatriciaHashed) materializeBranch(c *pbinCell, path *pbinBitpath) error {
+	nodeKey := *path
+	nodeKey.append(&c.prefix)
+	key := pbinEncodeBitPath(&nodeKey)
+
+	data, _, err := pph.ctx.Branch(key)
+	if err != nil {
+		return fmt.Errorf("pbin: read branch at %x: %w", key, err)
+	}
+	if len(data) == 0 {
+		return fmt.Errorf("%w at %x (%d bits)", errPBinMissingBranch, key, nodeKey.bitLen)
+	}
+	pph.counters.materializeReads++
+
+	var cells [2]pbinCell
+	if _, _, err = pbinDecodeBranch(data, &cells); err != nil {
+		return fmt.Errorf("pbin: decode branch at %x: %w", key, err)
+	}
+	childPath := nodeKey
+	childPath.appendBit(0)
+	left, err := pph.cellHash(&cells[0], &childPath)
+	if err != nil {
+		return err
+	}
+	childPath.setBitAt(nodeKey.bitLen, 1)
+	right, err := pph.cellHash(&cells[1], &childPath)
+	if err != nil {
+		return err
+	}
+
+	c.children, c.childrenSet = [2]common.Hash{left, right}, true
+	c.hash = pph.hasher.branchHash(&c.prefix, &left, &right)
+	c.hashLen = length.Hash
+	return nil
 }

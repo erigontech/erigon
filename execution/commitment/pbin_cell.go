@@ -39,9 +39,15 @@ const (
 // the one prefix is always tree-key-space bits. There is no memoized leaf hash
 // either — H(0x00||key||value) commits the complete key and has nothing worth
 // caching.
+//
+// A branch cell's prefix is inside its hash, so re-cutting the prefix
+// invalidates it. Two invariants keep that from going unnoticed: a non-zero
+// hashLen means hash covers the prefix the cell holds now, and childrenSet means
+// the cell can re-derive the hash for any prefix without touching the database.
 type pbinCell struct {
 	prefix      pbinBitpath
 	hash        common.Hash
+	children    [2]common.Hash
 	accountAddr common.Address
 	storageAddr [length.Addr + length.Hash]byte
 
@@ -49,9 +55,12 @@ type pbinCell struct {
 	storageAddrLen int16
 	hashLen        int16
 	kind           pbinNodeKind
+	childrenSet    bool
 	loaded         loadFlags
 	Update
 }
+
+func (c *pbinCell) setFromUpdate(u *Update) { c.Update.Merge(u) }
 
 func (c *pbinCell) reset() {
 	*c = pbinCell{}

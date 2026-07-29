@@ -94,6 +94,9 @@ func (h *pbinHasher) cellHash(c *pbinCell, path *pbinBitpath) (common.Hash, erro
 	case pbinNodeEmpty:
 		return pbinEmptyTreeHash, nil
 	case pbinNodeBranch:
+		if c.childrenSet {
+			return h.branchHash(&c.prefix, &c.children[0], &c.children[1]), nil
+		}
 		if c.hashLen != length.Hash {
 			return common.Hash{}, fmt.Errorf("%w: branch cell holds %d hash bytes", errPBinCellHash, c.hashLen)
 		}

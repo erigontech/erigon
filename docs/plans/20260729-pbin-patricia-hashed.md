@@ -212,15 +212,17 @@ func pbinCommonPrefixBits(a, b *pbinBitpath) int16 // XOR + LeadingZeros64, clam
 - Modify: `execution/commitment/pbin_patricia_hashed.go`
 - Create: `execution/commitment/pbin_fold_test.go`
 
-- [ ] write failing grid-seeded unit tests: hand-build one row, fold it, assert the emitted hash equals the oracle's `merkelize` of that node and that the record bytes round-trip
-- [ ] write a failing test for a split whose survivor is a **leaf**, asserting no branch record is read
-- [ ] write failing tests forcing splits inside prefixes at several depths, asserting each rehashed node matches the oracle
-- [ ] implement `pbinFold` dispatching the three kinds — delete / propagate / branch — mirroring `hex_patricia_hashed.go:2031-2038`
-- [ ] implement `pbinFoldBranch` writing records keyed by the encoded bit path, asserting `(touchMap|afterMap) &^ 0b11 == 0` at entry and `popcount(afterMap) == 2` (guards H12)
-- [ ] implement `pbinFoldPropagate` accumulating the child's prefix bits into the parent cell and writing **no** record, asserting `prefixBits == depth - upDepth - 1` (guards H12)
-- [ ] implement materialize-on-split with the leaf-survivor short circuit, plus a debug assert that a cell whose prefix bit length changed has `hashLen == 0` (guards H1)
-- [ ] add instrumentation counters for splits-inside-prefix and extra `ctx.Branch` reads
-- [ ] run tests - must pass before task 9
+- [x] write failing grid-seeded unit tests: hand-build one row, fold it, assert the emitted hash equals the oracle's `merkelize` of that node and that the record bytes round-trip
+- [x] write a failing test for a split whose survivor is a **leaf**, asserting no branch record is read
+- [x] write failing tests forcing splits inside prefixes at several depths, asserting each rehashed node matches the oracle
+- [x] implement `pbinFold` dispatching the three kinds — delete / propagate / branch — mirroring `hex_patricia_hashed.go:2031-2038` — landed as the methods `fold`/`foldBranch`/`foldPropagate`/`foldDelete`, same reasoning as Task 7's `unfold`
+- [x] implement `pbinFoldBranch` writing records keyed by the encoded bit path, asserting `(touchMap|afterMap) &^ 0b11 == 0` at entry and `popcount(afterMap) == 2` (guards H12)
+- [x] implement `pbinFoldPropagate` accumulating the child's prefix bits into the parent cell and writing **no** record, asserting `prefixBits == depth - upDepth - 1` (guards H12) — landed as the equivalent post-condition on the assembled prefix, which also catches a dropped branch bit
+- [x] implement materialize-on-split with the leaf-survivor short circuit, plus a debug assert that a cell whose prefix bit length changed has `hashLen == 0` (guards H1) — landed as `rehashAfterPrefixChange`, which enforces the invariant rather than asserting it: a cell that knows its children re-derives, one that does not is marked stale and materializes on demand
+- [x] add instrumentation counters for splits-inside-prefix and extra `ctx.Branch` reads
+- [x] run tests - must pass before task 9
+
+⚠️ **Scope note (discovered here, resolved here).** Decision 8 covered only `needUnfolding`-reported splits, but a cell's node prefix also changes on the *normal* descent: `unfold` consuming a branch cell's prefix leaves the cell holding none of it, and the propagate that follows hands it back. Both directions invalidate a hash the prefix sits inside, and the propagate direction cannot be fixed by a record read at fold time without re-reading every descended node. Resolved by carrying the two child hashes in memory on cells this run built (`pbinCell.children`/`childrenSet`, not serialised), so a prefix change re-derives instead of re-reading; materialize-on-split stays the fallback for cells that arrived from a record. One Task 7 assertion (`pbin_unfold_test.go`, descended cell keeps the parent's hash) encoded the wrong behaviour and now pins `hashLen == 0`.
 
 ### Task 9: drive loop, Process and RootHash
 
@@ -286,7 +288,7 @@ func pbinCommonPrefixBits(a, b *pbinBitpath) int16 // XOR + LeadingZeros64, clam
 *Items requiring manual intervention, measurement, or follow-on milestones — no checkboxes*
 
 **Decisions deferred to data:**
-- Split-rehash strategy. M0 ships materialize-on-split. If the Task 8 counters show split-inside-prefix reads dominating, revisit storing `left||right` (64 B) per cell instead of a 32-byte child hash — a wire-format change needing its own migration story.
+- Split-rehash strategy. M0 ships materialize-on-split, narrowed by Task 8's in-memory child hashes to cells that arrived from a record — a node this run folded re-derives for free. `pbinCounters.materializeReads` measures what is left. If it stays non-trivial, promote the two child hashes into the record itself and the hazard disappears, at 32 B per branch cell and a migration story.
 - Record the one-prefix-per-cell rationale (Task 5) here and in the commit body rather than as a source comment.
 
 **Out of scope, in rough dependency order:**
