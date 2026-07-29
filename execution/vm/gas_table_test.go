@@ -258,17 +258,21 @@ func TestEIP7928SStoreReadRequiresAffordableAccess(t *testing.T) {
 	tests := []struct {
 		name       string
 		gas        uint64
+		warm       bool
 		expectRead bool
+		expectErr  bool
 	}{
-		{"stipend plus one", params.SstoreSentryGasEIP2200 + 1, false},
-		{"cold access minus one", params.ColdStorageAccessCostEIP8038 - 1, false},
-		{"cold access", params.ColdStorageAccessCostEIP8038, true},
+		{name: "stipend plus one", gas: params.SstoreSentryGasEIP2200 + 1, expectErr: true},
+		{name: "cold access minus one", gas: params.ColdStorageAccessCostEIP8038 - 1, expectErr: true},
+		{name: "cold access", gas: params.ColdStorageAccessCostEIP8038, expectRead: true, expectErr: true},
+		{name: "warm access", gas: params.WarmStorageReadCostEIP2929 + params.StorageWriteCostEIP8038 + params.StateGasPerStorageSet, warm: true, expectRead: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			versionMap := state.NewVersionMap(nil)
 			reader := state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, state.NewNoopReader())
 			statedb := state.NewWithVersionMap(reader, versionMap)
+			defer statedb.Release(false)
 			statedb.SetTxContext(1, 0)
 			contract := accounts.InternAddress(common.HexToAddress("0x1000"))
 			slot := accounts.InternKey(common.HexToHash("0x01"))
@@ -286,6 +290,9 @@ func TestEIP7928SStoreReadRequiresAffordableAccess(t *testing.T) {
 			vmenv := vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chain.AllProtocolChanges, vm.Config{})
 			rules := vmenv.ChainRules()
 			statedb.Prepare(rules, accounts.ZeroAddress, accounts.ZeroAddress, contract, vm.ActivePrecompiles(rules), nil)
+			if tt.warm {
+				statedb.AddSlotToAccessList(contract, slot)
+			}
 			_, _, _, err := vmenv.Call(
 				accounts.ZeroAddress,
 				contract,
@@ -294,7 +301,11 @@ func TestEIP7928SStoreReadRequiresAffordableAccess(t *testing.T) {
 				uint256.Int{},
 				false,
 			)
-			require.ErrorIs(t, err, vm.ErrOutOfGas)
+			if tt.expectErr {
+				require.ErrorIs(t, err, vm.ErrOutOfGas)
+			} else {
+				require.NoError(t, err)
+			}
 			reads := statedb.VersionedReads()
 			_, read := reads.GetStorage(contract, slot)
 			require.Equal(t, tt.expectRead, read)
@@ -306,6 +317,7 @@ func TestEIP7928SystemCallReadsAbsentTarget(t *testing.T) {
 	versionMap := state.NewVersionMap(nil)
 	reader := state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, state.NewNoopReader())
 	statedb := state.NewWithVersionMap(reader, versionMap)
+	defer statedb.Release(false)
 	statedb.SetTxContext(1, -1)
 	target := accounts.InternAddress(common.HexToAddress("0x1000"))
 	vmenv := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, statedb, chain.AllProtocolChanges, vm.Config{})
@@ -313,7 +325,7 @@ func TestEIP7928SystemCallReadsAbsentTarget(t *testing.T) {
 		params.SystemAddress,
 		target,
 		nil,
-		mdgas.MdGas{Regular: math.MaxUint64, State: params.StateGasSystemMaxSstores},
+		mdgas.MdGas{Regular: math.MaxUint64 - params.StateGasSystemMaxSstores, State: params.StateGasSystemMaxSstores},
 		uint256.Int{},
 		false,
 	)

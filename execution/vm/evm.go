@@ -215,7 +215,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	}
 
 	p, isPrecompile := evm.precompile(addr)
-	syscall := isSystemCall(caller)
 	var code []byte
 	if !isPrecompile {
 		code, err = evm.intraBlockState.ResolveCode(addr)
@@ -242,6 +241,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	if depth > int(params.CallCreateDepth) {
 		return nil, gasRemaining, mdgas.MdGasUsage{}, ErrDepth
 	}
+	syscall := isSystemCall(caller)
 
 	if typ == CALL || typ == CALLCODE {
 		// Fail if we're trying to transfer more than the available balance.
