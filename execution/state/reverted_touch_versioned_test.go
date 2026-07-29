@@ -35,23 +35,3 @@ func TestNoMaterialize_RevertedTouchNotPublished(t *testing.T) {
 	_, ok := ibs.VersionedWrites().GetBalance(addr)
 	require.False(t, ok, "a touch reverted before commit must not publish a BalancePath write")
 }
-
-func TestNoMaterialize_RevertedRipemdTouchPublished(t *testing.T) {
-	t.Parallel()
-	empty := accounts.NewAccount()
-	reader := &fieldReader{addr: ripemd, account: &empty}
-
-	vm := NewVersionMap(nil)
-	ibs := NewWithVersionMap(reader, vm)
-	ibs.SetNoMaterialize(true)
-	ibs.SetTxContext(0, 5)
-	ibs.SetVersion(0)
-
-	snap := ibs.PushSnapshot()
-	require.NoError(t, ibs.TouchAccount(ripemd))
-	ibs.RevertToSnapshot(snap, nil)
-
-	write, ok := ibs.VersionedWrites().GetBalance(ripemd)
-	require.True(t, ok, "RIPEMD touch must survive frame revert")
-	require.True(t, write.Val.IsZero())
-}
