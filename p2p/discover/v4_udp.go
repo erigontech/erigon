@@ -116,6 +116,13 @@ type replyMatcher struct {
 	// reply contains the most recent reply. This field is safe for reading after errc has
 	// received a value.
 	reply v4wire.Packet
+
+	// timedOut is set when the matcher's deadline has passed and errTimeout
+	// has been sent on errc. The matcher stays in plist for one additional
+	// respTimeout period so that a late reply is still recognised as
+	// "matched" (preventing errUnsolicitedReply) even though the requesting
+	// goroutine has already been notified of the timeout.
+	timedOut bool
 }
 
 type replyMatchFunc func(v4wire.Packet) (matched bool, requestDone bool)
@@ -461,7 +468,9 @@ func (t *UDPv4) loop() {
 			// Remove pending replies whose deadline is too far in the
 			// future. These can occur if the system clock jumped
 			// backwards after the deadline was assigned.
-			p.errc <- errClockWarp
+			if !p.timedOut {
+				p.errc <- errClockWarp
+			}
 			plist.Remove(el)
 		}
 		nextTimeout = nil
@@ -474,7 +483,9 @@ func (t *UDPv4) loop() {
 		select {
 		case <-t.closeCtx.Done():
 			for el := plist.Front(); el != nil; el = el.Next() {
-				el.Value.(*replyMatcher).errc <- errClosed
+				if !el.Value.(*replyMatcher).timedOut {
+					el.Value.(*replyMatcher).errc <- errClosed
+				}
 			}
 			return
 
@@ -486,16 +497,21 @@ func (t *UDPv4) loop() {
 			var matched bool // whether any replyMatcher considered the reply acceptable.
 			for p, el := range iterList[*replyMatcher](plist) {
 				if p.from == r.from && p.ptype == r.data.Kind() && p.ip == r.ip {
-					ok, requestDone := p.callback(r.data)
-					matched = matched || ok
-					p.reply = r.data
-					// Remove the matcher if callback indicates that all replies have been received.
-					if requestDone {
-						p.errc <- nil
+					if p.timedOut {
+						matched = true
 						plist.Remove(el)
+					} else {
+						ok, requestDone := p.callback(r.data)
+						matched = matched || ok
+						p.reply = r.data
+						// Remove the matcher if callback indicates that all replies have been received.
+						if requestDone {
+							p.errc <- nil
+							plist.Remove(el)
+						}
+						// Reset the continuous timeout counter (time drift detection)
+						contTimeouts = 0
 					}
-					// Reset the continuous timeout counter (time drift detection)
-					contTimeouts = 0
 				}
 			}
 			r.matched <- matched
@@ -506,9 +522,14 @@ func (t *UDPv4) loop() {
 			// Notify and remove callbacks whose deadline is in the past.
 			for p, el := range iterList[*replyMatcher](plist) {
 				if now.After(p.deadline) || now.Equal(p.deadline) {
-					p.errc <- errTimeout
-					plist.Remove(el)
-					contTimeouts++
+					if p.timedOut {
+						plist.Remove(el)
+					} else {
+						p.errc <- errTimeout
+						p.timedOut = true
+						p.deadline = p.deadline.Add(respTimeout)
+						contTimeouts++
+					}
 				}
 			}
 			// If we've accumulated too many timeouts, do an NTP time sync check
