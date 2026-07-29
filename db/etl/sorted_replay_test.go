@@ -93,6 +93,36 @@ func TestCollectorRecordsRuns(t *testing.T) {
 		require.Len(t, c.runs, len(c.dataProviders))
 		require.False(t, canReplaySequentially(c.runs, len(c.dataProviders)))
 	})
+	t.Run("single_in_ram_run", func(t *testing.T) {
+		c := NewCollector(t.Name(), t.TempDir(), NewSortableBuffer(16*datasize.KB), log.New())
+		defer c.Close()
+		var input []sortableBufferEntry
+		k, v := make([]byte, 8), make([]byte, 8)
+		for i := range 10 {
+			binary.BigEndian.PutUint64(k, uint64(10-i))
+			binary.BigEndian.PutUint64(v, uint64(i))
+			require.NoError(t, c.Collect(k, v))
+			input = append(input, sortableBufferEntry{bytes.Clone(k), bytes.Clone(v)})
+		}
+		require.Equal(t, stableSortByKey(input), loadStream(t, c))
+		require.Len(t, c.dataProviders, 1)
+		require.True(t, canReplaySequentially(c.runs, 1))
+	})
+	t.Run("flushed_runs_plus_unflushed_tail", func(t *testing.T) {
+		c := NewCollector(t.Name(), t.TempDir(), NewSortableBuffer(16*datasize.KB), log.New())
+		defer c.Close()
+		collectMonotoneDups(t, c, 1000, 3)
+		flushed := len(c.dataProviders)
+		require.Greater(t, flushed, 1)
+		tailKey := make([]byte, 8)
+		binary.BigEndian.PutUint64(tailKey, 1000)
+		require.NoError(t, c.Collect(tailKey, []byte("tail")))
+		stream := loadStream(t, c) // Load flushes the tail buffer as one more run
+		require.Len(t, stream, 1000*3+1)
+		require.Len(t, c.dataProviders, flushed+1)
+		require.Len(t, c.runs, flushed+1)
+		require.True(t, canReplaySequentially(c.runs, flushed+1))
+	})
 }
 
 func loadStream(t *testing.T, c *Collector) []sortableBufferEntry {
@@ -227,6 +257,67 @@ func TestSortednessBreaksLoadStaysCorrect(t *testing.T) {
 			require.Equal(t, stableSortByKey(input), loadStream(t, c))
 		})
 	}
+}
+
+// TestEqualBoundaryKeySpansRuns pins cross-run handling of a key that ends one
+// run and starts the next (equal boundaries stay sequential-eligible): append
+// concatenates in run order, oldest-appeared keeps the first run's value, and
+// the plain buffer emits both entries in run order — all matching the heap.
+func TestEqualBoundaryKeySpansRuns(t *testing.T) {
+	be8 := func(i int) []byte {
+		b := make([]byte, 8)
+		binary.BigEndian.PutUint64(b, uint64(i))
+		return b
+	}
+	fill := func(t *testing.T, c *Collector) {
+		t.Helper()
+		for i := range 5 {
+			require.NoError(t, c.Collect(be8(i), be8(i)))
+		}
+		require.NoError(t, c.Flush()) // run 0: keys 0..4
+		require.NoError(t, c.Collect(be8(4), be8(104)))
+		for i := 5; i < 9; i++ { // run 1 (flushed by Load): keys 4..8
+			require.NoError(t, c.Collect(be8(i), be8(i)))
+		}
+	}
+	load := func(t *testing.T, mkBuf func() Buffer, forceHeap bool) []sortableBufferEntry {
+		t.Helper()
+		c := NewCollector(t.Name(), t.TempDir(), mkBuf(), log.New())
+		defer c.Close()
+		fill(t, c)
+		if forceHeap {
+			c.runs = nil
+		}
+		stream := loadStream(t, c)
+		if !forceHeap {
+			require.Len(t, c.dataProviders, 2)
+			require.True(t, canReplaySequentially(c.runs, 2))
+		}
+		return stream
+	}
+	streams := func(t *testing.T, mkBuf func() Buffer) (fast, heap []sortableBufferEntry) {
+		return load(t, mkBuf, false), load(t, mkBuf, true)
+	}
+
+	t.Run("append_buffer", func(t *testing.T) {
+		fast, heap := streams(t, func() Buffer { return NewAppendBuffer(16 * datasize.KB) })
+		require.Equal(t, heap, fast)
+		require.Len(t, fast, 9)
+		require.Equal(t, sortableBufferEntry{be8(4), append(be8(4), be8(104)...)}, fast[4])
+	})
+	t.Run("oldest_appeared_buffer", func(t *testing.T) {
+		fast, heap := streams(t, func() Buffer { return NewOldestEntryBuffer(16 * datasize.KB) })
+		require.Equal(t, heap, fast)
+		require.Len(t, fast, 9)
+		require.Equal(t, sortableBufferEntry{be8(4), be8(4)}, fast[4])
+	})
+	t.Run("plain_buffer", func(t *testing.T) {
+		fast, heap := streams(t, func() Buffer { return NewSortableBuffer(16 * datasize.KB) })
+		require.Equal(t, heap, fast)
+		require.Len(t, fast, 10)
+		require.Equal(t, sortableBufferEntry{be8(4), be8(4)}, fast[4])
+		require.Equal(t, sortableBufferEntry{be8(4), be8(104)}, fast[5])
+	})
 }
 
 type emptyProvider struct{}
