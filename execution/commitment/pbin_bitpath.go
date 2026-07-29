@@ -122,33 +122,32 @@ func (p *pbinBitpath) append(o *pbinBitpath) {
 }
 
 func (p *pbinBitpath) hasPrefix(o *pbinBitpath) bool {
-	return o.bitLen <= p.bitLen && pbinCommonPrefixBits(p, o) == o.bitLen
+	return o.bitLen <= p.bitLen && pbinCommonPrefixBitsAt(p, 0, o) == o.bitLen
 }
 
-// pbinCommonPrefixBits reports how many leading bits a and b share, never more
-// than the shorter path holds.
-func pbinCommonPrefixBits(a, b *pbinBitpath) int16 {
-	limit := min(a.bitLen, b.bitLen)
+// pbinCommonPrefixBitsAt reports how many leading bits of prefix agree with key
+// read from bit `from`, never past the end of either operand. It is the one
+// divergence primitive: bits past a path's length are masked to zero, so a whole
+// word can be compared at a time and the answer clamped to what both hold.
+func pbinCommonPrefixBitsAt(key *pbinBitpath, from int16, prefix *pbinBitpath) int16 {
+	limit := min(key.bitLen-from, prefix.bitLen)
+	if limit <= 0 {
+		return 0
+	}
+	shift := uint(from % 64)
 	n := int16(0)
-	for i := 0; i < pbinPathWords && n < limit; i++ {
-		if x := a.w[i] ^ b.w[i]; x != 0 {
+	for wi := int(from / 64); n < limit; wi++ {
+		w := key.w[wi] << shift
+		if shift != 0 && wi+1 < pbinPathWords {
+			w |= key.w[wi+1] >> (64 - shift)
+		}
+		if x := w ^ prefix.w[n/64]; x != 0 {
 			n += int16(bits.LeadingZeros64(x))
 			break
 		}
 		n += 64
 	}
 	return min(n, limit)
-}
-
-// pbinCommonPrefixBitsAt reports how many leading bits of prefix agree with key
-// read from bit `from`, never past the end of either operand.
-func pbinCommonPrefixBitsAt(key *pbinBitpath, from int16, prefix *pbinBitpath) int16 {
-	limit := min(key.bitLen-from, prefix.bitLen)
-	n := int16(0)
-	for n < limit && key.bit(from+n) == prefix.bit(n) {
-		n++
-	}
-	return n
 }
 
 // pbinAppendPackedBits appends the path's bits MSB-first, zero-padded to a byte

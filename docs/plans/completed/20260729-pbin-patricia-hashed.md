@@ -271,7 +271,7 @@ func pbinCommonPrefixBits(a, b *pbinBitpath) int16 // XOR + LeadingZeros64, clam
 ### Task 12: Verify acceptance criteria
 
 - [x] verify all requirements from Overview are implemented and M0 scope boundaries were respected — `VariantBinPatriciaTrie`/`PBinPatriciaHashed`/`pbinKeyHasher` appear outside the `pbin_*` files only at the three additive `commitment.go` sites, so nothing reaches the domain layer
-- [x] verify no shared type, interface or signature was modified: `git diff --stat` shows `commitment.go` as the only pre-existing non-test file, additive only — 22 files, 6,289 insertions, 0 deletions; `commitment.go` +11/-0
+- [x] verify no shared type, interface or signature was modified: `git diff --stat` shows `commitment.go` as the only pre-existing non-test file, additive only — every other touched file is new; `commitment.go` +11/-0
 - [x] verify every hazard in the register except H6 has a named passing test
 - [x] verify every new package-level identifier carries the `pbin` prefix and the package compiles without collision — 274 identifiers checked by AST walk; the only ones not starting at position 0 are `errPBin*` and `NewPBinPatriciaHashed`, where Go's `err`/`New` convention precedes the marker
 - [x] run the package test suite: `go test ./execution/commitment/...`

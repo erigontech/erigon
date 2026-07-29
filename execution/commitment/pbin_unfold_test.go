@@ -40,8 +40,15 @@ func pbinTestSpecCell(t *testing.T, kind pbinNodeKind, spec string) pbinCell {
 	c := pbinTestEmptyCell()
 	c.kind = kind
 	c.prefix = pbinTestPathFromBits(t, pbinTestBitSpec(t, spec))
-	c.hash = common.Hash{0xB1, byte(len(spec))}
-	c.hashLen = length.Hash
+	switch kind {
+	case pbinNodeLeaf:
+		// A stored leaf always names a plain key; a record without one is rejected.
+		c.storageAddrLen = length.Addr + length.Hash
+		c.storageAddr[0], c.storageAddr[1] = 0xB1, byte(len(spec))
+	case pbinNodeBranch:
+		c.hash = common.Hash{0xB1, byte(len(spec))}
+		c.hashLen = length.Hash
+	}
 	return c
 }
 
@@ -51,6 +58,33 @@ func pbinTestPutRecord(t *testing.T, ms *MockState, path pbinBitpath, cells [2]p
 	rec, err := enc.encode(0b11, 0b11, &cells)
 	require.NoError(t, err)
 	require.NoError(t, ms.PutBranch(pbinEncodeBitPath(&path), bytes.Clone(rec), nil))
+}
+
+func pbinTestPutRootCell(t *testing.T, ms *MockState, c pbinCell) {
+	t.Helper()
+	rec, err := pbinAppendCell(nil, &c)
+	require.NoError(t, err)
+	require.NoError(t, ms.PutBranch(pbinRootKey, rec, nil))
+}
+
+// pbinTestPutTopRecord seeds a node record at the empty path together with the
+// root cell that names it — the pair a stored tree always writes.
+func pbinTestPutTopRecord(t *testing.T, ms *MockState, cells [2]pbinCell) {
+	t.Helper()
+	pbinTestPutRecord(t, ms, pbinBitpath{}, cells)
+	pbinTestPutRootCell(t, ms, pbinTestSpecCell(t, pbinNodeBranch, ""))
+}
+
+// pbinTestUnfoldStep opens one more row, loading the root cell first when the
+// grid is still empty.
+func pbinTestUnfoldStep(t *testing.T, pph *PBinPatriciaHashed, probe *pbinBitpath) {
+	t.Helper()
+	u := pph.needUnfolding(probe)
+	if u.action == pbinUnfoldRoot {
+		require.NoError(t, pph.unfold(probe, u))
+		u = pph.needUnfolding(probe)
+	}
+	require.NoError(t, pph.unfold(probe, u))
 }
 
 // TestPBinNeedUnfolding guards H9: the hex engine's cpl+1 hides a terminator
@@ -69,10 +103,10 @@ func TestPBinNeedUnfolding(t *testing.T) {
 		want        pbinUnfolding
 	}{
 		{
-			name:  "an unchecked empty root reads the root record",
+			name:  "an unchecked empty root reads the root cell record",
 			root:  pbinTestEmptyCell(),
 			probe: "1010",
-			want:  pbinUnfolding{action: pbinUnfoldRecord},
+			want:  pbinUnfolding{action: pbinUnfoldRoot},
 		},
 		{
 			name:        "a checked empty root needs nothing",
@@ -138,13 +172,13 @@ func TestPBinNeedUnfoldingSelectsCellByBranchBit(t *testing.T) {
 	t.Parallel()
 
 	pph, ms := pbinTestEngine(t)
-	pbinTestPutRecord(t, ms, pbinBitpath{}, [2]pbinCell{
+	pbinTestPutTopRecord(t, ms, [2]pbinCell{
 		pbinTestSpecCell(t, pbinNodeLeaf, "000"),
 		pbinTestSpecCell(t, pbinNodeBranch, "111"),
 	})
 
 	probe := pbinTestPathFromBits(t, pbinTestBitSpec(t, "0000"))
-	require.NoError(t, pph.unfold(&probe, pph.needUnfolding(&probe)))
+	pbinTestUnfoldStep(t, pph, &probe)
 	require.Equal(t, 1, pph.grid.activeRows)
 	require.Equal(t, int16(1), pph.grid.depths[0])
 
@@ -182,11 +216,11 @@ func TestPBinUnfoldEmptyPrefixBranchRecord(t *testing.T) {
 	childPath := pbinTestPathFromBits(t, pbinTestBitSpec(t, "1"))
 
 	pph, ms := pbinTestEngine(t)
-	pbinTestPutRecord(t, ms, pbinBitpath{}, rootCells)
+	pbinTestPutTopRecord(t, ms, rootCells)
 	pbinTestPutRecord(t, ms, childPath, childCells)
 
 	probe := pbinTestPathFromBits(t, pbinTestBitSpec(t, "1101"))
-	require.NoError(t, pph.unfold(&probe, pph.needUnfolding(&probe)))
+	pbinTestUnfoldStep(t, pph, &probe)
 	require.Equal(t, 1, pph.grid.activeRows)
 
 	u := pph.needUnfolding(&probe)
@@ -209,13 +243,13 @@ func TestPBinUnfoldEmptyPrefixBranchRecordMissing(t *testing.T) {
 	t.Parallel()
 
 	pph, ms := pbinTestEngine(t)
-	pbinTestPutRecord(t, ms, pbinBitpath{}, [2]pbinCell{
+	pbinTestPutTopRecord(t, ms, [2]pbinCell{
 		pbinTestSpecCell(t, pbinNodeLeaf, "010"),
 		pbinTestSpecCell(t, pbinNodeBranch, ""),
 	})
 
 	probe := pbinTestPathFromBits(t, pbinTestBitSpec(t, "1101"))
-	require.NoError(t, pph.unfold(&probe, pph.needUnfolding(&probe)))
+	pbinTestUnfoldStep(t, pph, &probe)
 	require.ErrorIs(t, pph.unfold(&probe, pph.needUnfolding(&probe)), errPBinMissingBranch)
 }
 
@@ -226,7 +260,7 @@ func TestPBinUnfoldEmptyRoot(t *testing.T) {
 	probe := pbinPathFromBytes(pbinTreeKeyAccount(pbinOracleAddr(1), pbinBasicDataLeafKey))
 
 	u := pph.needUnfolding(&probe)
-	require.Equal(t, pbinUnfolding{action: pbinUnfoldRecord}, u)
+	require.Equal(t, pbinUnfolding{action: pbinUnfoldRoot}, u)
 	require.NoError(t, pph.unfold(&probe, u))
 
 	require.Equal(t, 0, pph.grid.activeRows)
@@ -345,14 +379,14 @@ func TestPBinUnfoldDeletedSubtree(t *testing.T) {
 	childPath := pbinTestPathFromBits(t, pbinTestBitSpec(t, "1"))
 
 	pph, ms := pbinTestEngine(t)
-	pbinTestPutRecord(t, ms, pbinBitpath{}, [2]pbinCell{
+	pbinTestPutTopRecord(t, ms, [2]pbinCell{
 		pbinTestSpecCell(t, pbinNodeLeaf, "010"),
 		pbinTestSpecCell(t, pbinNodeBranch, ""),
 	})
 	pbinTestPutRecord(t, ms, childPath, childCells)
 
 	probe := pbinTestPathFromBits(t, pbinTestBitSpec(t, "1101"))
-	require.NoError(t, pph.unfold(&probe, pph.needUnfolding(&probe)))
+	pbinTestUnfoldStep(t, pph, &probe)
 
 	pph.grid.touchMap[0], pph.grid.afterMap[0] = 0b10, 0
 	require.NoError(t, pph.unfold(&probe, pph.needUnfolding(&probe)))

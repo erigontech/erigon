@@ -72,6 +72,56 @@ func TestPBinResetReuse(t *testing.T) {
 	require.Equal(t, want, pbinTestProcess(t, fresh, corpus.plainKeys, corpus.updates), "fresh engine over the same state agrees")
 }
 
+// TestPBinResetReuseTouchingOneKey is the reuse case a re-run of the whole
+// corpus hides: after Reset the engine must find the leaves it is not told about
+// again. A tree confined to one zone has a non-empty root prefix, so its top
+// record is not at the zero-bit key and only the root cell record names it.
+func TestPBinResetReuseTouchingOneKey(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(71)
+	corpus := new(pbinTestCorpus).
+		storage(addr, pbinOracleSlot(256), 0x01).
+		storage(addr, pbinOracleSlot(257), 0x02)
+
+	pph, ms := pbinTestEngine(t)
+	require.NoError(t, ms.applyPlainUpdates(corpus.plainKeys, corpus.updates))
+	want := corpus.oracleRoot(t)
+	require.Equal(t, want, pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates))
+
+	touchOne := new(pbinTestCorpus).storage(addr, pbinOracleSlot(257), 0x02)
+
+	pph.Reset()
+	require.Equal(t, want, pbinTestProcess(t, pph, touchOne.plainKeys, touchOne.updates),
+		"the untouched sibling must survive a reset")
+
+	fresh := NewPBinPatriciaHashed(ms)
+	require.Equal(t, want, pbinTestProcess(t, fresh, touchOne.plainKeys, touchOne.updates))
+}
+
+// TestPBinResetReuseSingleLeaf covers the shape that writes no node record at
+// all: a one-leaf tree lives entirely in the root cell record.
+func TestPBinResetReuseSingleLeaf(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(72)
+	first := new(pbinTestCorpus).storage(addr, pbinOracleSlot(1000), 0x01)
+	second := new(pbinTestCorpus).storage(pbinOracleAddr(73), pbinOracleSlot(2000), 0x02)
+
+	pph, ms := pbinTestEngine(t)
+	require.NoError(t, ms.applyPlainUpdates(first.plainKeys, first.updates))
+	require.Equal(t, first.oracleRoot(t), pbinTestProcess(t, pph, first.plainKeys, first.updates))
+
+	require.NoError(t, ms.applyPlainUpdates(second.plainKeys, second.updates))
+	both := new(pbinTestCorpus).
+		storage(addr, pbinOracleSlot(1000), 0x01).
+		storage(pbinOracleAddr(73), pbinOracleSlot(2000), 0x02)
+
+	pph.Reset()
+	require.Equal(t, both.oracleRoot(t), pbinTestProcess(t, pph, second.plainKeys, second.updates),
+		"the leaf that was the whole tree must survive a reset")
+}
+
 // TestPBinResetClearsTrieState is the state-level half of the reuse contract:
 // Reset leaves the engine indistinguishable from a new one but keeps the
 // context, which the Trie interface hands over separately.

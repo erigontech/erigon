@@ -21,9 +21,9 @@
 // derivation, behind pbinHasher so the suite can be swapped.
 //
 // M0 scope: in-memory Process over the account and storage zones, ModeDirect
-// only. Code chunking, deletion, commitment state save/restore and parallel
-// mounting are out — BASIC_DATA carries code_size 0, and a delete arriving on
-// the update stream is rejected rather than applied.
+// only. Code chunking, deletion and parallel mounting are out — BASIC_DATA
+// carries code_size 0, and a delete is rejected rather than applied, whether it
+// arrives on the update stream or as an absent state read over a live leaf.
 
 package commitment
 
@@ -95,8 +95,8 @@ func (pph *PBinPatriciaHashed) SetTraceWriter(w io.Writer) { pph.traceW = w }
 // EnableCsvMetrics is a no-op: the binary engine collects no metrics in M0.
 func (pph *PBinPatriciaHashed) EnableCsvMetrics(string) {}
 
-// Reset drops the tree, keeping the context. What survives is in the context, so
-// the next run rebuilds whatever it descends into from stored records.
+// Reset drops the in-memory tree, keeping the context. The next run rebuilds
+// what it descends into from stored records, starting at the root cell record.
 func (pph *PBinPatriciaHashed) Reset() {
 	pph.grid.resetForReuse()
 	pph.currentKey = pbinBitpath{}
@@ -117,6 +117,13 @@ var (
 	errPBinMissingBranch     = errors.New("pbin: branch record missing")
 	errPBinDeleteUnsupported = errors.New("pbin: EIP-8297 defines no deletion")
 )
+
+// pbinRootKey names the record holding the root cell. It is the empty key, which
+// pbinAppendBitPath never produces — every encoded path carries at least the
+// trailing bit-count byte — so it cannot collide with a node record. The root is
+// the one node no descent can name: every other node is found by the path that
+// reaches it, while the root's own prefix is stored nowhere else.
+var pbinRootKey = []byte{}
 
 // Process folds the update stream into the tree and returns the new root.
 // HashSort hands keys over in tree-key order, which is descent order, so the
@@ -141,6 +148,9 @@ func (pph *PBinPatriciaHashed) Process(ctx context.Context, updates *Updates, lo
 			return nil, fmt.Errorf("pbin: final fold: %w", err)
 		}
 	}
+	if err = pph.storeRoot(); err != nil {
+		return nil, err
+	}
 	if onProgress != nil {
 		onProgress(&CommitProgress{KeyIndex: processed, UpdateCount: processed})
 	}
@@ -163,11 +173,6 @@ func (pph *PBinPatriciaHashed) processKey(treeKey, plainKey []byte, stateUpdate 
 		var err error
 		if update, err = pph.stateOf(plainKey); err != nil {
 			return err
-		}
-		// A key with no state reads back as a delete; under EIP-8297 that means
-		// there is no leaf here, not that one has to be removed.
-		if update.Deleted() {
-			return nil
 		}
 	}
 	if err := pph.followAndUpdate(treeKey, plainKey, update); err != nil {
@@ -234,17 +239,33 @@ func (pph *PBinPatriciaHashed) updateCell(plainKey []byte, probe *pbinBitpath, u
 	g := &pph.grid
 	var c *pbinCell
 	var depth int16
+	var row int
+	var bit uint64
 	if g.activeRows == 0 {
 		c = &g.root
-		pph.rootTouched, pph.rootPresent = true, true
 	} else {
-		row := g.activeRows - 1
+		row = g.activeRows - 1
 		depth = g.depths[row]
 		if probe.bitLen < depth {
 			return fmt.Errorf("pbin: a %d-bit key cannot be updated in a row at depth %d", probe.bitLen, depth)
 		}
-		bit := probe.bit(depth - 1)
+		bit = probe.bit(depth - 1)
 		c = &g.rows[row][bit]
+	}
+
+	// A key with no state reads back as a delete. Landing on an empty slot means
+	// there simply is no leaf here; landing on one means the leaf has to go, which
+	// EIP-8297 does not define.
+	if update.Deleted() {
+		if c.kind == pbinNodeLeaf {
+			return fmt.Errorf("%w: %x", errPBinDeleteUnsupported, plainKey)
+		}
+		return nil
+	}
+
+	if g.activeRows == 0 {
+		pph.rootTouched, pph.rootPresent = true, true
+	} else {
 		g.touchMap[row] |= uint16(1) << bit
 		g.afterMap[row] |= uint16(1) << bit
 	}
@@ -289,12 +310,60 @@ func (pph *PBinPatriciaHashed) RootHash() ([]byte, error) {
 	return hash[:], nil
 }
 
+// storeRoot persists the root cell so a later engine can find the tree. Without
+// it a root sitting under a non-empty prefix — every tree confined to one zone —
+// is unreachable, and a run that finds nothing rebuilds from the touched keys
+// alone.
+func (pph *PBinPatriciaHashed) storeRoot() error {
+	if !pph.rootTouched {
+		return nil
+	}
+	var record []byte
+	if pph.grid.root.kind != pbinNodeEmpty {
+		var err error
+		if record, err = pbinAppendCell(nil, &pph.grid.root); err != nil {
+			return err
+		}
+	}
+	if err := pph.ctx.PutBranch(pbinRootKey, record, nil); err != nil {
+		return fmt.Errorf("pbin: write root cell: %w", err)
+	}
+	return nil
+}
+
+// loadRoot reads the stored root cell into the grid. An absent record means the
+// tree is empty; anything below the root is reached from the root's own prefix.
+func (pph *PBinPatriciaHashed) loadRoot() error {
+	pph.rootChecked = true
+	data, _, err := pph.ctx.Branch(pbinRootKey)
+	if err != nil {
+		return fmt.Errorf("pbin: read root cell: %w", err)
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	pph.grid.root.reset()
+	pos, err := pbinDecodeCell(data, 0, &pph.grid.root)
+	if err != nil {
+		return fmt.Errorf("pbin: decode root cell: %w", err)
+	}
+	if pos != len(data) {
+		return fmt.Errorf("%w: %d trailing bytes after the root cell", errPBinMalformedBranch, len(data)-pos)
+	}
+	// Present but untouched: unfold reads these to decide whether the row it opens
+	// survives, and a loaded root that reads absent takes the tree with it.
+	pph.rootPresent = true
+	return nil
+}
+
 // pbinUnfoldAction is what needUnfolding tells unfold to do about one cell.
 type pbinUnfoldAction uint8
 
 const (
 	// pbinUnfoldNone means the probe key's slot is already in the grid.
 	pbinUnfoldNone pbinUnfoldAction = iota
+	// pbinUnfoldRoot means the grid has no root cell yet: read the root record.
+	pbinUnfoldRoot
 	// pbinUnfoldRecord means the cell points straight at a stored node: read it.
 	pbinUnfoldRecord
 	// pbinUnfoldDescend means the probe key agrees with the cell's whole prefix,
@@ -327,7 +396,7 @@ func (pph *PBinPatriciaHashed) needUnfolding(probe *pbinBitpath) pbinUnfolding {
 			if pph.rootChecked {
 				return pbinUnfolding{}
 			}
-			return pbinUnfolding{action: pbinUnfoldRecord}
+			return pbinUnfolding{action: pbinUnfoldRoot}
 		}
 		cell = &pph.grid.root
 	} else {
@@ -365,6 +434,9 @@ func (pph *PBinPatriciaHashed) unfold(probe *pbinBitpath, u pbinUnfolding) error
 	if u.action == pbinUnfoldNone {
 		return nil
 	}
+	if u.action == pbinUnfoldRoot {
+		return pph.loadRoot()
+	}
 	g := &pph.grid
 
 	var upCell *pbinCell
@@ -372,9 +444,6 @@ func (pph *PBinPatriciaHashed) unfold(probe *pbinBitpath, u pbinUnfolding) error
 	var upDepth int16
 
 	if g.activeRows == 0 {
-		if pph.rootChecked && g.root.kind == pbinNodeEmpty {
-			return nil
-		}
 		upCell = &g.root
 		touched, present = pph.rootTouched, pph.rootPresent
 	} else {
@@ -451,10 +520,6 @@ func (pph *PBinPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bo
 		return fmt.Errorf("pbin: read branch at %x: %w", key, err)
 	}
 	if len(data) == 0 {
-		if !pph.rootChecked && pph.currentKey.bitLen == 0 {
-			pph.rootChecked = true
-			return nil
-		}
 		return fmt.Errorf("%w at %x (%d bits)", errPBinMissingBranch, key, pph.currentKey.bitLen)
 	}
 

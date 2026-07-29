@@ -17,14 +17,33 @@
 package commitment
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	keccak "github.com/erigontech/fastkeccak"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 )
+
+// leafHash is H(0x00 || key || value) over the complete tree key. The engine
+// builds this preimage from a cell in leafCellHash; spelling it out from a key
+// and a value is what lets a test state the expected hash directly.
+func (h *pbinHasher) leafHash(key, value []byte) common.Hash {
+	if len(key) != pbinAccountKeyLength && len(key) != pbinStorageKeyLength {
+		panic(fmt.Sprintf("pbin: leaf key of %d bytes is neither zone length", len(key)))
+	}
+	if len(value) != pbinValueLength {
+		panic(fmt.Sprintf("pbin: leaf value of %d bytes, want %d", len(value), pbinValueLength))
+	}
+	buf := append(h.buf[:0], pbinLeafTag)
+	buf = append(buf, key...)
+	buf = append(buf, value...)
+	return keccak.Sum256(buf)
+}
 
 func pbinTestPathFromBits(t *testing.T, bits []byte) pbinBitpath {
 	t.Helper()
@@ -316,7 +335,7 @@ func TestPBinCellHashBuildsCorpusRoots(t *testing.T) {
 			a, b := corpus.entries[0], corpus.entries[1]
 
 			aPath, bPath := pbinPathFromBytes(a.key), pbinPathFromBytes(b.key)
-			shared := pbinCommonPrefixBits(&aPath, &bPath)
+			shared := pbinCommonPrefixBitsAt(&aPath, 0, &bPath)
 			prefix := aPath.slice(0, shared)
 
 			left, right := a, b

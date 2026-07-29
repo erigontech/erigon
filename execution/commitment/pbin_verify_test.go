@@ -46,12 +46,13 @@ var (
 	errPBinVerifyPosition  = errors.New("pbin verify: leaf sits where its key does not")
 )
 
-// recordPaths decodes the key of every live record. A record put with no data is
-// a deletion and names no node.
+// recordPaths decodes the key of every live node record. A record put with no
+// data is a deletion and names no node; the root cell record is keyed outside the
+// bit-path space and is read through rootCell.
 func (v *pbinVerifier) recordPaths() ([]pbinBitpath, error) {
 	paths := make([]pbinBitpath, 0, len(v.ms.cm))
 	for key, data := range v.ms.cm {
-		if len(data) == 0 {
+		if len(data) == 0 || key == string(pbinRootKey) {
 			continue
 		}
 		p, err := pbinDecodeBitPath([]byte(key))
@@ -93,14 +94,36 @@ func (v *pbinVerifier) rootPath() (pbinBitpath, error) {
 	return roots[0], nil
 }
 
-// recomputeRoot hashes the whole record set bottom up. The root node starts at
-// depth 0, so its prefix is its entire path.
+// rootCell decodes the record holding the root cell, the entry point the rest of
+// the record set hangs off.
+func (v *pbinVerifier) rootCell() (pbinCell, error) {
+	var c pbinCell
+	data, _, err := v.ms.Branch(pbinRootKey)
+	if err != nil {
+		return c, err
+	}
+	if len(data) == 0 {
+		return c, errPBinVerifyNoRecords
+	}
+	pos, err := pbinDecodeCell(data, 0, &c)
+	if err != nil {
+		return c, fmt.Errorf("pbin verify: root cell: %w", err)
+	}
+	if pos != len(data) {
+		return c, fmt.Errorf("pbin verify: %d trailing bytes after the root cell", len(data)-pos)
+	}
+	return c, nil
+}
+
+// recomputeRoot hashes the whole record set bottom up, entering at the stored
+// root cell rather than guessing which record has no ancestor.
 func (v *pbinVerifier) recomputeRoot() ([]byte, error) {
-	root, err := v.rootPath()
+	c, err := v.rootCell()
 	if err != nil {
 		return nil, err
 	}
-	return v.nodeHash(&root, &root)
+	var start pbinBitpath
+	return v.cellHash(&start, &c)
 }
 
 func (v *pbinVerifier) nodeHash(nodePath, prefix *pbinBitpath) ([]byte, error) {
@@ -196,11 +219,22 @@ func (v *pbinVerifier) recordAt(nodePath *pbinBitpath) ([2]pbinCell, error) {
 // treeKey(plainKey). A slot routed into the wrong zone still builds a tree that
 // hashes consistently, so position against derivation is what catches it (H8).
 func (v *pbinVerifier) checkPlainKeys() (int, error) {
-	paths, err := v.recordPaths()
+	root, err := v.rootCell()
 	if err != nil {
 		return 0, err
 	}
 	leaves := 0
+	if root.kind == pbinNodeLeaf {
+		var start pbinBitpath
+		if err = v.checkLeafPosition(&start, &root); err != nil {
+			return 0, err
+		}
+		leaves++
+	}
+	paths, err := v.recordPaths()
+	if err != nil {
+		return 0, err
+	}
 	for _, path := range paths {
 		cells, err := v.recordAt(&path)
 		if err != nil {
@@ -213,21 +247,28 @@ func (v *pbinVerifier) checkPlainKeys() (int, error) {
 			}
 			start := path
 			start.appendBit(uint64(bit))
-			key, _, err := v.leaf(&start, c)
-			if err != nil {
+			if err = v.checkLeafPosition(&start, c); err != nil {
 				return 0, err
-			}
-			want, err := pbinVerifyDerivedKey(c, key)
-			if err != nil {
-				return 0, err
-			}
-			if !bytes.Equal(want, key) {
-				return 0, fmt.Errorf("%w: stored at %x, derives %x", errPBinVerifyPosition, key, want)
 			}
 			leaves++
 		}
 	}
 	return leaves, nil
+}
+
+func (v *pbinVerifier) checkLeafPosition(start *pbinBitpath, c *pbinCell) error {
+	key, _, err := v.leaf(start, c)
+	if err != nil {
+		return err
+	}
+	want, err := pbinVerifyDerivedKey(c, key)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(want, key) {
+		return fmt.Errorf("%w: stored at %x, derives %x", errPBinVerifyPosition, key, want)
+	}
+	return nil
 }
 
 // pbinVerifyDerivedKey re-derives a leaf's tree key from its plain key. The
@@ -352,17 +393,31 @@ func TestPBinVerifyRootRecordIsUnique(t *testing.T) {
 	require.Equal(t, pph.grid.root.prefix, root, "the root record's path is the root node's prefix")
 }
 
-// TestPBinVerifyEmptyStateHasNoRecords checks the recompute refuses to invent a
-// tree: a root that is a bare leaf writes no record at all.
-func TestPBinVerifyEmptyStateHasNoRecords(t *testing.T) {
+// TestPBinVerifySingleLeafRoot checks the one shape that writes no node record:
+// a root that is a bare leaf is still recoverable, because the root cell record
+// carries it.
+func TestPBinVerifySingleLeafRoot(t *testing.T) {
 	t.Parallel()
 
 	corpus := new(pbinTestCorpus).storage(pbinOracleAddr(55), pbinOracleSlot(1000), 0x01)
 	pph, ms := pbinTestEngine(t)
 	require.NoError(t, ms.applyPlainUpdates(corpus.plainKeys, corpus.updates))
-	pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates)
+	root := pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates)
 
 	v := &pbinVerifier{t: t, ms: ms}
+	paths, err := v.recordPaths()
+	require.NoError(t, err)
+	require.Empty(t, paths, "a bare-leaf root has no node record")
+
+	pbinTestVerifyRecords(t, ms, root, 1)
+}
+
+// TestPBinVerifyEmptyStateHasNoRecords checks the recompute refuses to invent a
+// tree out of a state nothing was ever written to.
+func TestPBinVerifyEmptyStateHasNoRecords(t *testing.T) {
+	t.Parallel()
+
+	v := &pbinVerifier{t: t, ms: NewMockState(t)}
 	_, err := v.recomputeRoot()
 	require.ErrorIs(t, err, errPBinVerifyNoRecords)
 }

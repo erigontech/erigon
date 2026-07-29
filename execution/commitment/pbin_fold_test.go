@@ -466,13 +466,13 @@ func TestPBinFoldDeleteDropsRecord(t *testing.T) {
 
 	pph, ms := pbinTestEngine(t)
 	key := pbinBitpath{}
-	pbinTestPutRecord(t, ms, key, [2]pbinCell{
+	pbinTestPutTopRecord(t, ms, [2]pbinCell{
 		pbinTestSpecCell(t, pbinNodeLeaf, "010"),
 		pbinTestSpecCell(t, pbinNodeLeaf, "110"),
 	})
 
 	probe := pbinTestPathFromBits(t, pbinTestBitSpec(t, "0101"))
-	require.NoError(t, pph.unfold(&probe, pph.needUnfolding(&probe)))
+	pbinTestUnfoldStep(t, pph, &probe)
 	require.True(t, pph.grid.branchBefore[0])
 	pph.grid.touchMap[0], pph.grid.afterMap[0] = 0b11, 0
 

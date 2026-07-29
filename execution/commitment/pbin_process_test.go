@@ -19,6 +19,7 @@ package commitment
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // pbinTestCorpus collects plain-key updates in the two shapes the engine
@@ -308,6 +310,31 @@ func TestPBinProcessMissingStateIsAbsent(t *testing.T) {
 	require.Equal(t, present.oracleRoot(t), root, "keys with no state contribute no leaf")
 }
 
+// TestPBinProcessRejectsDeletedLeaf is the case an absent state read must not be
+// confused with: the key already holds a leaf, so "no state" means the leaf has
+// to go — which EIP-8297 does not define. Skipping it would leave the stale leaf
+// in the tree and return a root with no error.
+func TestPBinProcessRejectsDeletedLeaf(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(23)
+	corpus := new(pbinTestCorpus).
+		storage(addr, pbinOracleSlot(256), 0x01).
+		storage(addr, pbinOracleSlot(257), 0x02)
+
+	pph, ms := pbinTestEngine(t)
+	require.NoError(t, ms.applyPlainUpdates(corpus.plainKeys, corpus.updates))
+	pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates)
+
+	gone := new(pbinTestCorpus).storage(addr, pbinOracleSlot(257), 0x02)
+	require.NoError(t, ms.applyPlainUpdates(gone.plainKeys, []Update{{Flags: DeleteUpdate}}))
+
+	pph.Reset()
+	upd := WrapKeyUpdates(t, ModeDirect, pbinKeyHasher(), gone.plainKeys, gone.updates)
+	_, err := pph.Process(context.Background(), upd, "", nil, WarmupConfig{})
+	require.ErrorIs(t, err, errPBinDeleteUnsupported)
+}
+
 // TestPBinProcessRepeatedKeyKeepsOneLeaf checks a stem touched twice in one run
 // still holds a single leaf, so the second visit updates rather than splits.
 func TestPBinProcessRepeatedKeyKeepsOneLeaf(t *testing.T) {
@@ -336,4 +363,99 @@ func TestPBinProcessEmptyUpdatesKeepsEmptyRoot(t *testing.T) {
 	pph, _ := pbinTestEngine(t)
 	root := pbinTestProcess(t, pph, nil, nil)
 	require.Equal(t, make([]byte, length.Hash), root)
+}
+
+var errPBinTestContext = errors.New("pbin test: context failure")
+
+// pbinFailingContext fails one context call, letting a chosen number through
+// first, so each read and write the engine makes can be checked to reach the
+// caller instead of being swallowed.
+type pbinFailingContext struct {
+	PatriciaContext
+	method string
+	skip   int
+	seen   int
+}
+
+func (c *pbinFailingContext) trip(method string) error {
+	if c.method != method {
+		return nil
+	}
+	c.seen++
+	if c.seen <= c.skip {
+		return nil
+	}
+	return errPBinTestContext
+}
+
+func (c *pbinFailingContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	if err := c.trip("Branch"); err != nil {
+		return nil, 0, err
+	}
+	return c.PatriciaContext.Branch(prefix)
+}
+
+func (c *pbinFailingContext) PutBranch(prefix, data, prevData []byte) error {
+	if err := c.trip("PutBranch"); err != nil {
+		return err
+	}
+	return c.PatriciaContext.PutBranch(prefix, data, prevData)
+}
+
+func (c *pbinFailingContext) Account(plainKey []byte) (*Update, error) {
+	if err := c.trip("Account"); err != nil {
+		return nil, err
+	}
+	return c.PatriciaContext.Account(plainKey)
+}
+
+func (c *pbinFailingContext) Storage(plainKey []byte) (*Update, error) {
+	if err := c.trip("Storage"); err != nil {
+		return nil, err
+	}
+	return c.PatriciaContext.Storage(plainKey)
+}
+
+// TestPBinProcessSurfacesContextErrors runs a second batch over a stored tree —
+// the path that reads the root cell, a node record, a leaf's state and a branch
+// it has to rebuild — and fails one call at a time.
+func TestPBinProcessSurfacesContextErrors(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(81)
+	stored := new(pbinTestCorpus).
+		storage(addr, pbinOracleSlot(256), 0x01).
+		storage(addr, pbinOracleSlot(257), 0x02).
+		account(pbinOracleAddr(82), 3, 4, common.Hash{0x82})
+	touch := new(pbinTestCorpus).
+		storage(addr, pbinOracleSlot(258), 0x03).
+		account(pbinOracleAddr(82), 5, 6, common.Hash{0x82})
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		skip   int
+	}{
+		{"root cell read", "Branch", 0},
+		{"node record read", "Branch", 1},
+		{"storage state read", "Storage", 0},
+		{"account state read", "Account", 0},
+		{"node record write", "PutBranch", 0},
+		{"root cell write", "PutBranch", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			pph, ms := pbinTestEngine(t)
+			require.NoError(t, ms.applyPlainUpdates(stored.plainKeys, stored.updates))
+			pbinTestProcess(t, pph, stored.plainKeys, stored.updates)
+			require.NoError(t, ms.applyPlainUpdates(touch.plainKeys, touch.updates))
+
+			pph.Reset()
+			pph.ResetContext(&pbinFailingContext{PatriciaContext: ms, method: tc.method, skip: tc.skip})
+			upd := WrapKeyUpdates(t, ModeDirect, pbinKeyHasher(), touch.plainKeys, touch.updates)
+			_, err := pph.Process(context.Background(), upd, "", nil, WarmupConfig{})
+			require.ErrorIs(t, err, errPBinTestContext)
+		})
+	}
 }

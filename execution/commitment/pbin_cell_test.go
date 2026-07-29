@@ -139,7 +139,7 @@ func TestPBinBranchCodecIsCanonical(t *testing.T) {
 
 	again, err := enc.encode(0b11, 0b11, &got)
 	require.NoError(t, err)
-	require.Equal(t, want, []byte(again))
+	require.Equal(t, want, again)
 }
 
 // pbinTestRecord assembles a record by hand so decode can be probed with bytes
@@ -196,6 +196,11 @@ func TestPBinBranchDecodeRejects(t *testing.T) {
 		{"account address of the wrong length", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldLeaf|pbinFieldAccountAddr, 0, nil, pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, 21))...))},
 		{"storage address of the wrong length", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldLeaf|pbinFieldStorageAddr, 0, nil, pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, 51))...))},
 		{"trailing bytes", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldBranch, 0, nil), []byte{0x00})},
+		// A leaf resolves its value through its plain key, so one without a plain
+		// key would hash a zero-valued state instead of failing.
+		{"leaf without a plain key", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldLeaf, 0, nil))},
+		{"leaf naming both plain keys", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldLeaf|pbinFieldAccountAddr|pbinFieldStorageAddr, 0, nil,
+			append(pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, length.Addr)), pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, length.Addr+length.Hash))...)...))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -305,20 +310,6 @@ func pbinTestRequireRowEmpty(t *testing.T, g *pbinGrid, row int) {
 	require.Zero(t, g.afterMap[row])
 }
 
-func TestPBinGridReset(t *testing.T) {
-	t.Parallel()
-
-	g := new(pbinGrid)
-	pbinTestFillGrid(g, 3)
-	g.reset()
-
-	require.Zero(t, g.activeRows)
-	require.Equal(t, pbinTestEmptyCell(), g.root)
-	for row := range 3 {
-		pbinTestRequireRowEmpty(t, g, row)
-	}
-}
-
 // resetForReuse only has to clear what the finished run left live; rows above
 // activeRows are initialized by unfold before anything reads them.
 func TestPBinGridResetForReuse(t *testing.T) {
@@ -338,7 +329,7 @@ func TestPBinGridResetForReuse(t *testing.T) {
 }
 
 // A row consumes at least the bit it splits on, so 528 rows cover the deepest
-// path; depth is inclusive of a full-length path and needs one entry more.
+// path.
 func TestPBinGridBounds(t *testing.T) {
 	t.Parallel()
 
@@ -346,5 +337,4 @@ func TestPBinGridBounds(t *testing.T) {
 	require.Equal(t, pbinMaxPathBits, len(g.rows))
 	require.Equal(t, pbinGridRows, len(g.depths))
 	require.Equal(t, 2, len(g.rows[0]))
-	require.Equal(t, pbinGridRows+1, pbinMaxDepths)
 }

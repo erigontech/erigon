@@ -46,20 +46,19 @@ var (
 	errPBinCellMaps        = errors.New("pbin: branch maps address more than two cells")
 )
 
-// pbinBranchData is one serialised binary node. It is deliberately not
+// pbinBranchEncoder serialises a binary node. The payload is deliberately not
 // BranchData: a 66-byte tree-key prefix does not fit the shared codec's cell
 // fields, and PatriciaContext moves branch payloads as opaque bytes.
-type pbinBranchData []byte
-
-// pbinBranchEncoder serialises a binary node. Every record carries both child
-// cells, so a record read back replaces its predecessor outright and no
-// merge-with-previous path exists — at arity 2 the untouched sibling is the
-// whole other half of the subtree, and merging is what loses it.
+//
+// Every record carries both child cells, so a record read back replaces its
+// predecessor outright and no merge-with-previous path exists — at arity 2 the
+// untouched sibling is the whole other half of the subtree, and merging is what
+// loses it.
 type pbinBranchEncoder struct {
 	buf []byte
 }
 
-func (e *pbinBranchEncoder) encode(touchMap, afterMap uint16, cells *[2]pbinCell) (pbinBranchData, error) {
+func (e *pbinBranchEncoder) encode(touchMap, afterMap uint16, cells *[2]pbinCell) ([]byte, error) {
 	if err := pbinCheckCellMaps(touchMap, afterMap); err != nil {
 		return nil, err
 	}
@@ -157,6 +156,13 @@ func pbinDecodeCell(data []byte, pos int, c *pbinCell) (int, error) {
 	switch fields & pbinFieldKind {
 	case pbinFieldLeaf:
 		c.kind = pbinNodeLeaf
+		// A leaf without a plain key hashes a zero-valued state instead of failing,
+		// so the shape is rejected here rather than reaching the hasher.
+		switch fields & (pbinFieldAccountAddr | pbinFieldStorageAddr) {
+		case pbinFieldAccountAddr, pbinFieldStorageAddr:
+		default:
+			return 0, fmt.Errorf("%w: leaf cell fields %08b name no single plain key", errPBinMalformedBranch, fields)
+		}
 	case pbinFieldBranch:
 		c.kind = pbinNodeBranch
 	default:

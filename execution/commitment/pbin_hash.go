@@ -60,21 +60,6 @@ func pbinAppendBitPrefix(dst []byte, p *pbinBitpath) []byte {
 	return p.appendPackedBits(binary.BigEndian.AppendUint16(dst, uint16(p.bitLen)))
 }
 
-// leafHash is H(0x00 || key || value) over the complete tree key, so a leaf's
-// hash does not depend on where in the tree it sits.
-func (h *pbinHasher) leafHash(key, value []byte) common.Hash {
-	if len(key) != pbinAccountKeyLength && len(key) != pbinStorageKeyLength {
-		panic(fmt.Sprintf("pbin: leaf key of %d bytes is neither zone length", len(key)))
-	}
-	if len(value) != pbinValueLength {
-		panic(fmt.Sprintf("pbin: leaf value of %d bytes, want %d", len(value), pbinValueLength))
-	}
-	buf := append(h.buf[:0], pbinLeafTag)
-	buf = append(buf, key...)
-	buf = append(buf, value...)
-	return keccak.Sum256(buf)
-}
-
 // branchHash is H(0x01 || encode_bit_prefix(prefix) || left || right). An absent
 // child passes pbinEmptyTreeHash rather than being omitted.
 func (h *pbinHasher) branchHash(prefix *pbinBitpath, left, right *common.Hash) common.Hash {

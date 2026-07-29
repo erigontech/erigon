@@ -67,14 +67,9 @@ func (c *pbinCell) reset() {
 	c.Update.Reset()
 }
 
-const (
-	// pbinGridRows bounds the active rows: a row consumes at least the bit it
-	// splits on, so one row per path bit is enough.
-	pbinGridRows = pbinMaxPathBits
-	// pbinMaxDepths bounds anything indexed by bit depth, which is inclusive of a
-	// full-length path and so runs one past the row count.
-	pbinMaxDepths = pbinMaxPathBits + 1
-)
+// pbinGridRows bounds the active rows: a row consumes at least the bit it splits
+// on, so one row per path bit is enough.
+const pbinGridRows = pbinMaxPathBits
 
 // pbinGrid is the unfolded part of the tree: one row per level of descent, two
 // cells per row. touchMap/afterMap are uint16 so the OnesCount16 /
@@ -90,21 +85,12 @@ type pbinGrid struct {
 	activeRows   int
 }
 
-func (g *pbinGrid) reset() {
-	g.resetRows(len(g.rows))
-}
-
 // resetForReuse clears only the rows the finished run left live. Rows above
 // activeRows keep stale cells, which is safe because unfold initializes a row
 // before anything reads it.
 func (g *pbinGrid) resetForReuse() {
-	g.resetRows(g.activeRows)
-}
-
-func (g *pbinGrid) resetRows(rows int) {
 	g.root.reset()
-	g.activeRows = 0
-	for row := range rows {
+	for row := range g.activeRows {
 		g.rows[row][0].reset()
 		g.rows[row][1].reset()
 		g.depths[row] = 0
@@ -112,4 +98,5 @@ func (g *pbinGrid) resetRows(rows int) {
 		g.touchMap[row] = 0
 		g.afterMap[row] = 0
 	}
+	g.activeRows = 0
 }

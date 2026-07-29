@@ -65,8 +65,8 @@ func TestPBinCommonPrefixBits(t *testing.T) {
 			if tc.flipAt >= 0 {
 				b = pbinFlipBit(b, tc.flipAt)
 			}
-			require.Equal(t, tc.want, pbinCommonPrefixBits(&a, &b))
-			require.Equal(t, tc.want, pbinCommonPrefixBits(&b, &a))
+			require.Equal(t, tc.want, pbinCommonPrefixBitsAt(&a, 0, &b))
+			require.Equal(t, tc.want, pbinCommonPrefixBitsAt(&b, 0, &a))
 		})
 	}
 }
@@ -80,8 +80,8 @@ func TestPBinCommonPrefixBits_ShorterPathIsPrefix(t *testing.T) {
 	long := pbinTestPath(t, 0xAA, 528)
 	short := pbinTestPath(t, 0xAA, 272)
 
-	require.Equal(t, int16(272), pbinCommonPrefixBits(&short, &long))
-	require.Equal(t, int16(272), pbinCommonPrefixBits(&long, &short))
+	require.Equal(t, int16(272), pbinCommonPrefixBitsAt(&short, 0, &long))
+	require.Equal(t, int16(272), pbinCommonPrefixBitsAt(&long, 0, &short))
 }
 
 // Words carrying set bits beyond bitLen must not be read as real path bits
@@ -97,8 +97,8 @@ func TestPBinCommonPrefixBits_IgnoresBitsBeyondBitLen(t *testing.T) {
 		dirty.w[i] = ^uint64(0)
 	}
 
-	require.Equal(t, int16(272), pbinCommonPrefixBits(&dirty, &long))
-	require.Equal(t, int16(272), pbinCommonPrefixBits(&long, &dirty))
+	require.Equal(t, int16(272), pbinCommonPrefixBitsAt(&dirty, 0, &long))
+	require.Equal(t, int16(272), pbinCommonPrefixBitsAt(&long, 0, &dirty))
 
 	clean := pbinTestPath(t, 0xAA, 272)
 	dirty.maskTail()
@@ -238,4 +238,33 @@ func FuzzPBinBitPathCodec(f *testing.F) {
 			require.Equal(t, data, pbinEncodeBitPath(&q))
 		}
 	})
+}
+
+// The word-at-a-time divergence scan must agree with a bit-by-bit walk at every
+// offset, including the ones that straddle a word boundary.
+func TestPBinCommonPrefixBitsAt_MatchesNaiveScan(t *testing.T) {
+	t.Parallel()
+
+	naive := func(key *pbinBitpath, from int16, prefix *pbinBitpath) int16 {
+		limit := min(key.bitLen-from, prefix.bitLen)
+		n := int16(0)
+		for n < limit && key.bit(from+n) == prefix.bit(n) {
+			n++
+		}
+		return n
+	}
+
+	key := pbinTestPath(t, 0x6D, pbinMaxPathBits)
+	for _, from := range []int16{0, 1, 7, 63, 64, 65, 127, 128, 271, 272, 511, 512, 527, 528} {
+		for _, want := range []int16{0, 1, 63, 64, 65, 128, 271} {
+			p := key.slice(from, min(from+want, key.bitLen))
+			require.Equalf(t, naive(&key, from, &p), pbinCommonPrefixBitsAt(&key, from, &p),
+				"from %d, %d-bit prefix", from, p.bitLen)
+			for flip := int16(0); flip < p.bitLen; flip++ {
+				d := pbinFlipBit(p, flip)
+				require.Equalf(t, naive(&key, from, &d), pbinCommonPrefixBitsAt(&key, from, &d),
+					"from %d, %d-bit prefix flipped at %d", from, p.bitLen, flip)
+			}
+		}
+	}
 }
