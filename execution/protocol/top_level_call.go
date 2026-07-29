@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
@@ -111,6 +112,10 @@ func TraceTopLevelFailure(evm *vm.EVM, typ vm.OpCode, sender, recipient accounts
 	precompile := typ == vm.CALL && slices.Contains(vm.ActivePrecompiles(evm.ChainRules()), recipient)
 	if tracer.OnEnter != nil {
 		tracer.OnEnter(0, byte(typ), sender, recipient, precompile, input, startGas.Regular, value, nil)
+	}
+	if tracer.OnGasChange != nil {
+		tracer.OnGasChange(0, startGas.Regular, tracing.GasChangeCallInitialBalance)
+		tracer.OnGasChange(startGas.Regular, gasRemaining.Regular, tracing.GasChangeCallFailedExecution)
 	}
 	if tracer.OnExit != nil {
 		tracer.OnExit(0, nil, startGas.Regular-gasRemaining.Regular, vm.VMErrorFromErr(err), true)

@@ -826,14 +826,14 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 
 		// 1. chainId check
 		if !auth.ChainID.IsZero() && chainID != auth.ChainID.String() {
-			log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
+			log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "authIndex", i)
 			continue
 		}
 
 		// 2. authority recover
 		authorityPtr, err := auth.RecoverSigner(data, b[:])
 		if err != nil {
-			log.Trace("authority recover failed, skipping", "err", err, "auth index", i)
+			log.Trace("authority recover failed, skipping", "err", err, "authIndex", i)
 			continue
 		}
 		authority := accounts.InternAddress(*authorityPtr)
@@ -854,7 +854,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 				return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
 			if !ok {
-				log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
+				log.Debug("authority code is not empty or not delegated, skipping", "authIndex", i)
 				continue
 			}
 		}
@@ -865,7 +865,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 		if authorityNonce != auth.Nonce {
-			log.Trace("invalid nonce, skipping", "auth index", i)
+			log.Trace("invalid nonce, skipping", "authIndex", i)
 			continue
 		}
 

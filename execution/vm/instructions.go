@@ -1004,16 +1004,19 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		}
 		address = accounts.InternAddress(types.CreateAddress(scope.Contract.Address().Value(), nonce))
 	}
-
-	preparation, suberr := evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
-	scope.Contract.selfBalanceCached = false
-	var res []byte
-	var addr accounts.Address
+	gas := scope.Gas()
+	returnGas := gas
+	var preparation createPreparation
+	var suberr error
+	if evm.chainRules.IsAmsterdam {
+		preparation, suberr = evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
+	}
+	forwarded := false
 	if suberr == nil {
 		if preparation.chargeNewAccount && !scope.useMdGas(params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
 			return pc, nil, ErrOutOfGas
 		}
-		gas := scope.Gas()
+		gas = scope.Gas()
 		if evm.chainRules.IsTangerineWhistle {
 			gas.Regular -= gas.Regular / 64
 		}
@@ -1023,21 +1026,33 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		}
 		scope.useGas(gas.Regular, evm.Config().Tracer, gasChangeReason)
 		scope.stateGas = 0
-		var returnGas mdgas.MdGas
-		var childGasUsed mdgas.MdGasUsage
+		returnGas = gas
+		forwarded = true
+		if !evm.chainRules.IsAmsterdam {
+			preparation, suberr = evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
+			if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow {
+				returnGas = mdgas.MdGas{}
+			}
+		}
+	}
+	var res []byte
+	var addr accounts.Address
+	var childGasUsed mdgas.MdGasUsage
+	if suberr == nil {
 		res, addr, returnGas, childGasUsed, suberr = evm.createPrepared(scope.Contract.Address(), codeAndHash, gas, value, address, typ, preparation)
+	} else if forwarded && evm.Config().Tracer != nil {
+		evm.captureBegin(evm.depth, typ, scope.Contract.Address(), address, false, codeAndHash.code, gas, value, nil)
+		evm.captureEnd(evm.depth, typ, gas, returnGas, nil, suberr)
+	}
+	scope.Contract.selfBalanceCached = false
+	if forwarded {
 		scope.restoreChildGas(returnGas, evm.config.Tracer)
 		if suberr != nil && preparation.chargeNewAccount {
 			scope.refillStateGas(params.StateGasNewAccount)
 		} else if suberr == nil {
 			scope.stateGasSpill += childGasUsed.StateSpill
 		}
-	} else if evm.Config().Tracer != nil {
-		traceGas := scope.Gas()
-		evm.captureBegin(evm.depth, typ, scope.Contract.Address(), address, false, codeAndHash.code, traceGas, value, nil)
-		evm.captureEnd(evm.depth, typ, traceGas, traceGas, nil, suberr)
 	}
-
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
 	// rule) and treat as an error, if the ruleset is frontier we must
@@ -1053,7 +1068,6 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		result.SetBytes(addrVal[:])
 	}
 	scope.Stack.push(result)
-
 	if suberr == ErrExecutionReverted {
 		evm.returnData = res // set REVERT data to return data buffer
 		return pc, res, nil

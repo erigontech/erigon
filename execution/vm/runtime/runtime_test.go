@@ -136,6 +136,62 @@ func TestCall(t *testing.T) {
 	}
 }
 
+func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Release(false)
+	const gasLimit = uint64(500_000)
+	_, _, gasRemaining, err := Create(
+		[]byte{byte(vm.STOP)},
+		&Config{
+			GasLimit: gasLimit,
+			Value:    *uint256.NewInt(1),
+			State:    statedb,
+		},
+		0,
+	)
+	require.ErrorIs(t, err, vm.ErrInsufficientBalance)
+	require.Equal(t, mdgas.MdGas{Regular: gasLimit}, gasRemaining)
+}
+
+func TestCreateRuntimeOutOfGasEmitsCallGasChanges(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Release(false)
+	type gasChange struct {
+		old    uint64
+		new    uint64
+		reason tracing.GasChangeReason
+	}
+	var gasChanges []gasChange
+	hooks := &tracing.Hooks{
+		OnGasChange: func(old, newGas uint64, reason tracing.GasChangeReason) {
+			if reason == tracing.GasChangeCallInitialBalance || reason == tracing.GasChangeCallFailedExecution {
+				gasChanges = append(gasChanges, gasChange{old: old, new: newGas, reason: reason})
+			}
+		},
+	}
+	gasLimit := uint64(params.StateGasNewAccount - 1)
+	_, _, _, err := Create(
+		[]byte{byte(vm.STOP)},
+		&Config{
+			EVMConfig: vm.Config{Tracer: hooks},
+			GasLimit:  gasLimit,
+			State:     statedb,
+		},
+		0,
+	)
+	require.ErrorIs(t, err, vm.ErrRuntimeOutOfGas)
+	require.Equal(
+		t,
+		[]gasChange{
+			{old: 0, new: gasLimit, reason: tracing.GasChangeCallInitialBalance},
+			{old: gasLimit, new: 0, reason: tracing.GasChangeCallFailedExecution},
+		},
+		gasChanges,
+	)
+}
+
 func TestCallChargesAmsterdamNewAccountStateGas(t *testing.T) {
 	t.Parallel()
 
