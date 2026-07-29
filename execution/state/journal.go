@@ -508,11 +508,9 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		// read-set entry causes ValidateVersion to miss the dependency, allowing
 		// stale reads to pass validation and produce incorrect results.
 		//
-		// The touch's BalancePath=0 write must be undone, though: leaving it orphaned
-		// lets Normalize's EIP-161 pass delete an account whose touch was rolled back.
-		// Mirror kindBalance — drop the write if the touch created it, else restore
-		// the prior value.
-		if s.versionMap != nil {
+		// The touch's BalancePath=0 write must be undone, except for RIPEMD's
+		// consensus rule that keeps the account dirty across frame reverts.
+		if s.versionMap != nil && je.account != ripemd {
 			if je.committed() {
 				s.versionedWrites.DelBalance(je.account)
 			} else if _, ok := s.versionedWrites.GetBalance(je.account); ok {
