@@ -95,7 +95,7 @@ type stTransaction struct {
 	GasPrice             *math.HexOrDecimal256 `json:"gasPrice"`
 	MaxFeePerGas         *math.HexOrDecimal256 `json:"maxFeePerGas"`
 	MaxPriorityFeePerGas *math.HexOrDecimal256 `json:"maxPriorityFeePerGas"`
-	Nonce                math.HexOrDecimal64   `json:"nonce"`
+	Nonce                math.HexOrDecimal256  `json:"nonce"`
 	GasLimit             []math.HexOrDecimal64 `json:"gasLimit"`
 	PrivateKey           hexutil.Bytes         `json:"secretKey"`
 	To                   string                `json:"to"`
@@ -252,27 +252,25 @@ func (t *StateTest) checkError(subtest StateSubtest, err error) error {
 // prevent per-subtest state from polluting the long-lived branch cache.
 func (t *StateTest) Run(tb testing.TB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, error) {
 	st, root, _, err := t.RunNoVerify(tb, sd, tx, subtest, vmconfig, dirs)
+	return st, root, t.checkResult(subtest, st, root, err)
+}
 
+func (t *StateTest) checkResult(subtest StateSubtest, st *state.IntraBlockState, root common.Hash, err error) error {
 	checkedErr := t.checkError(subtest, err)
 	if checkedErr != nil {
-		return st, root, checkedErr
+		return checkedErr
 	}
 	if err != nil {
-		// Error was expected — check post-state root if specified
-		post := t.Json.Post[subtest.Fork][subtest.Index]
-		if post.Root != (common.UnprefixedHash{}) && root != common.Hash(post.Root) {
-			return st, root, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
-		}
-		return st, root, nil
+		return nil
 	}
 	post := t.Json.Post[subtest.Fork][subtest.Index]
 	if root != common.Hash(post.Root) {
-		return st, root, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
+		return fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
-	if logs := rlpHash(st.Logs()); logs != common.Hash(post.Logs) {
-		return st, root, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
+	if logs := st.LogsRlpHash(); logs != common.Hash(post.Logs) {
+		return fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
 	}
-	return st, root, nil
+	return nil
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb, post-state root
@@ -496,8 +494,6 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 	}
 }
 
-var rlpHash = types.RlpHash
-
 func vmTestBlockHash(n uint64) (common.Hash, error) {
 	return crypto.Keccak256Hash([]byte(new(big.Int).SetUint64(n).String())), nil
 }
@@ -590,7 +586,10 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 		feeCap = big.Int(*gasPrice)
 		tipCap = big.Int(*gasPrice)
 	}
-
+	nonce := (*big.Int)(&tx.Nonce)
+	if !nonce.IsUint64() {
+		return nil, fmt.Errorf("invalid txn nonce (overflowed) %q", nonce)
+	}
 	gpi := big.Int(*gasPrice)
 	gasPriceInt := uint256.NewInt(gpi.Uint64())
 
@@ -602,7 +601,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 	msg := types.NewMessage(
 		from,
 		to,
-		uint64(tx.Nonce),
+		nonce.Uint64(),
 		value,
 		uint64(gasLimit),
 		gasPriceInt,

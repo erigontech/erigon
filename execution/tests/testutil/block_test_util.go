@@ -121,7 +121,8 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 		return nil
 	}
 	result := make(types.BlockAccessList, len(bal))
-	for i, ac := range bal {
+	for i := range bal {
+		ac := &bal[i]
 		entry := &types.AccountChanges{
 			Address:        accounts.InternAddress(ac.Address),
 			StorageChanges: make([]*types.SlotChanges, 0, len(ac.StorageChanges)),
@@ -227,6 +228,7 @@ func (bt *BlockTest) newTester(tb testing.TB) (*execmoduletester.ExecModuleTeste
 	mOpts := []execmoduletester.Option{
 		execmoduletester.WithGenesisSpec(bt.genesis(config)),
 		execmoduletester.WithEngine(engine),
+		execmoduletester.WithoutAmsterdamBuilderContracts(),
 	}
 	if bt.ExperimentalBAL {
 		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())

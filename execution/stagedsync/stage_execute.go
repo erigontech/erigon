@@ -17,6 +17,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -269,7 +270,7 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 		copy(address[:], k[:length.Addr])
 		copy(location[:], k[length.Addr:])
 		if accumulator != nil {
-			accumulator.ChangeStorage(address, currentInc, location, common.Copy(v))
+			accumulator.ChangeStorage(address, currentInc, location, bytes.Clone(v))
 		}
 		if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.StorageDomain)) {
 			if v == nil {

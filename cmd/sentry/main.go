@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/node/debug"
@@ -57,7 +58,7 @@ func init() {
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	rootCmd.Flags().StringVar(&sentryAddr, "sentry.api.addr", "localhost:9091", "grpc addresses")
-	rootCmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	flags.DirVar(rootCmd.Flags(), &datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	rootCmd.Flags().StringVar(&natSetting, utils.NATFlag.Name, utils.NATFlag.Value, utils.NATFlag.Usage)
 	rootCmd.Flags().IntVar(&port, utils.ListenPortFlag.Name, utils.ListenPortFlag.Value, utils.ListenPortFlag.Usage)
 	rootCmd.Flags().StringSliceVar(&staticPeers, utils.StaticPeersFlag.Name, []string{}, utils.StaticPeersFlag.Usage)
@@ -115,10 +116,14 @@ var rootCmd = &cobra.Command{
 }
 
 func main() {
-	ctx, cancel := common.RootContext()
-	defer cancel()
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
+	if err := run(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+}
+
+func run() error {
+	ctx, cancel := common.RootContext()
+	defer cancel()
+	return rootCmd.ExecuteContext(ctx)
 }

@@ -179,11 +179,11 @@ func (r *memBlockReader) BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint
 func (r *memBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {
 	return 0, 0, false, nil
 }
-func (r *memBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, error) {
+func (r *memBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, bool, error) {
 	if blockNum == r.num && i >= 0 && i < len(r.block.Transactions()) {
-		return r.block.Transactions()[i], nil
+		return r.block.Transactions()[i], true, nil
 	}
-	return nil, nil
+	return nil, false, nil
 }
 func (r *memBlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) ([][]byte, error) {
 	return nil, nil

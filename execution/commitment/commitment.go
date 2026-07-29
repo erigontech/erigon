@@ -273,9 +273,9 @@ func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
-	upd.prefix = common.Copy(prefix)
-	upd.raw = common.Copy(raw)
-	upd.prev = common.Copy(prev)
+	upd.prefix = bytes.Clone(prefix)
+	upd.raw = bytes.Clone(raw)
+	upd.prev = bytes.Clone(prev)
 	upd.encoded = nil
 
 	return upd
@@ -389,7 +389,7 @@ func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error 
 		if err != nil {
 			return err
 		}
-		upd.encoded = common.Copy(merged)
+		upd.encoded = bytes.Clone(merged)
 		return nil
 	}
 	upd.encoded = upd.raw
@@ -533,8 +533,8 @@ func (be *BranchEncoder) CollectUpdate(
 		}
 	}
 
-	prefixCopy := common.Copy(prefix)
-	updateCopy := common.Copy(update)
+	prefixCopy := bytes.Clone(prefix)
+	updateCopy := bytes.Clone(update)
 	if err = ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
@@ -1333,8 +1333,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 				panic("unexpected cell " + c.FullString())
 			}
 			if c.extLen > 0 {
-				switch tv {
-				case VariantHexPatriciaTrie:
+				if tv == VariantHexPatriciaTrie {
 					stat.ExtSize += uint64(c.extLen)
 				}
 				stat.ExtCount++
@@ -1772,7 +1771,7 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 			t.keys[dedupKey] = struct{}{}
 		}
 	case ModeUpdate:
-		pivot := &KeyUpdate{hashedKey: common.Copy(hashedKey), update: new(Update)}
+		pivot := &KeyUpdate{hashedKey: bytes.Clone(hashedKey), update: new(Update)}
 		t.tree.ReplaceOrInsert(pivot)
 	default:
 	}

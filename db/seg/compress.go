@@ -33,7 +33,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -472,14 +471,14 @@ func (db *DictionaryBuilder) Pop() any {
 
 func (db *DictionaryBuilder) processWord(chars []byte, score uint64) {
 	if db.Len()+1 <= db.softLimit {
-		heap.Push(db, &Pattern{word: common.Copy(chars), score: score})
+		heap.Push(db, &Pattern{word: bytes.Clone(chars), score: score})
 		return
 	}
 
 	// RemoveFile the element with smallest score
 	elem := heap.Pop(db).(*Pattern)
 	if elem == nil {
-		heap.Push(db, &Pattern{word: common.Copy(chars), score: score})
+		heap.Push(db, &Pattern{word: bytes.Clone(chars), score: score})
 		return
 	}
 	elem.word = append(elem.word[:0], chars...)

@@ -348,7 +348,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					return ctx.Err()
 				case <-logEvery.C:
 					logger.Info(fmt.Sprintf("[%s] Total difficulty index: %s/%s", logPrefix,
-						common.PrettyCounter(header.Number.Uint64()), common.PrettyCounter(blockReader.FrozenBlocks())))
+						common.PrettyExact(header.Number.Uint64()), common.PrettyExact(blockReader.FrozenBlocks())))
 				default:
 				}
 				return nil
@@ -381,7 +381,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %s/%s", logPrefix, common.PrettyCounter(blockNum), common.PrettyCounter(blockReader.FrozenBlocks())))
+					logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %s/%s", logPrefix, common.PrettyExact(blockNum), common.PrettyExact(blockReader.FrozenBlocks())))
 				default:
 				}
 				if baseTxNum+txAmount == 0 {

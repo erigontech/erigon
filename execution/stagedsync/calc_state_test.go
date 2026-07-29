@@ -141,22 +141,8 @@ func TestFlushToUpdates_DeletedWithoutIncarnation_EmitsDelete(t *testing.T) {
 // values, the trie leaf must survive with the actual values rather
 // than being zeroed by the SD-with-incarnation branch.
 //
-// Note: under the *current* ApplyWrites semantics this state is
-// unreachable from a real LightCollector writeset, because
-// `BalancePath` always clears `Deleted` (see
-// TestApplyWrites_BalancePathClearsDeleted) and LightCollector emits
-// `SelfDestructPath` before the `BalancePath` reset. The test
-// populates cs.accounts directly to cover the FlushToUpdates branch
-// in isolation against future ApplyWrites changes (e.g. write-order
-// races, refactors that drop the Deleted-clearing in BalancePath, or
-// new code paths that produce Deleted+RetainedBalance writesets).
-//
-// The actual `extcodehash_subcall_create2_oog[fork_Amsterdam-...]`
-// regression that prompted this defensive case is fixed upstream by
-// the removal of the redundant `IncarnationPath > 0` clause in
-// `Normalize` (the OOG path leaves Nonce=0 → empty-account
-// → DeleteUpdate, not Deleted+RetainedBalance). End-to-end coverage
-// of that path lives in the eest_devnet suite, not in this unit test.
+// ApplyWrites normally clears Deleted when applying a retained balance.
+// Populate cs.accounts directly to cover this defensive FlushToUpdates branch.
 func TestFlushToUpdates_DeletedWithRetainedBalance_EmitsRegularUpdate(t *testing.T) {
 	cs := newTestCalcState()
 	// 0x2adc25... is the CREATE2 deterministic address from the failing
@@ -360,12 +346,7 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 		Incarnation: preBlockIncarnation,
 	}
 
-	// Build the raw writeset that IBS.Selfdestruct produces in production
-	// (intra_block_state.go around line 1430). LightCollector.DeleteAccount
-	// also runs, but its CollectorWrites output is NOT the source for
-	// rawWrites — exec3_parallel.go:2478 reads be.blockIO.WriteSet, which
-	// is fed by versionWritten. So these are the writes the calc actually
-	// sees.
+	// Build the authoritative versioned writes produced by self-destruct.
 	ver := state.Version{TxIndex: 0, Incarnation: 0}
 	rawWrites := newWS().
 		inc(addr, ver, original.Incarnation).
@@ -547,11 +528,12 @@ func (m *mockStorageEnum) EachStorageSlot(addr accounts.Address, fn func(key acc
 	return nil
 }
 
-// TestSDOfPreExistingContract_DeletesUntouchedSlots checks that a self-destruct
-// deletes the whole persisted storage subtree, not just the EVM-touched slots.
-func TestSDOfPreExistingContract_DeletesUntouchedSlots(t *testing.T) {
+// TestSDOfPreExistingContract_DropsSubtreeViaAccountDelete pins that a
+// self-destruct emits no per-slot deletes for untouched on-disk storage: the
+// account DeleteUpdate collapses the subtree, so the injected enumerator must
+// not be consulted.
+func TestSDOfPreExistingContract_DropsSubtreeViaAccountDelete(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x40, 0x55, 0xca, 0xe5})
-	// On-disk slots never read/written this block, so they never enter storageState.
 	untouched1 := accounts.InternKey(common.Hash{0x11})
 	untouched2 := accounts.InternKey(common.Hash{0x22})
 
@@ -570,24 +552,24 @@ func TestSDOfPreExistingContract_DeletesUntouchedSlots(t *testing.T) {
 	cs.FlushToUpdates(updates)
 
 	addrBytes := addr.Value()
-	gotSlots := map[common.Hash]commitment.Update{}
+	storageUpdates := 0
+	var accountUpdate *commitment.Update
 	require.NoError(t, updates.HashSort(t.Context(), nil, func(_, k []byte, u *commitment.Update) error {
-		if len(k) == 52 && bytes.Equal(k[:20], addrBytes[:]) {
-			var h common.Hash
-			copy(h[:], k[20:])
-			gotSlots[h] = *u
+		switch {
+		case len(k) == 52 && bytes.Equal(k[:20], addrBytes[:]):
+			storageUpdates++
+		case len(k) == 20 && bytes.Equal(k, addrBytes[:]):
+			cp := *u
+			accountUpdate = &cp
 		}
 		return nil
 	}))
 
-	require.Len(t, gotSlots, 2,
-		"both untouched on-disk slots must be deleted on SD (matches serial's DomainDelPrefix)")
-	for _, sk := range []accounts.StorageKey{untouched1, untouched2} {
-		u, ok := gotSlots[sk.Value()]
-		require.True(t, ok, "untouched slot %x must emit a delete", sk.Value())
-		assert.Equal(t, commitment.DeleteUpdate, u.Flags,
-			"untouched slot %x must emit DeleteUpdate", sk.Value())
-	}
+	assert.Zero(t, storageUpdates,
+		"self-destruct must not enumerate/emit per-slot deletes for untouched on-disk slots — the account delete collapses the subtree")
+	require.NotNil(t, accountUpdate, "the self-destructed account must emit an update")
+	assert.Equal(t, commitment.DeleteUpdate, accountUpdate.Flags,
+		"a fully self-destructed account emits DeleteUpdate, which collapses its storage subtree in the trie")
 }
 
 func lookupKeyUpdate(t *testing.T, updates *commitment.Updates, plainKey string) *commitment.Update {

@@ -851,8 +851,8 @@ func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 				return
 			case <-chkEvery.C:
 				a.logger.Trace("[agg] waiting for files",
-					"building files", a.buildingFiles.Load(),
-					"merging files", a.mergingFiles.Load())
+					"buildingFiles", a.buildingFiles.Load(),
+					"mergingFiles", a.mergingFiles.Load())
 			}
 		}
 	}()
@@ -1400,7 +1400,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 				fullStat.Accumulate(stat)
 				return true, nil
 			}
-			at.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err, "is deadline?", errors.Is(err, context.DeadlineExceeded))
+			at.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err, "isDeadline", errors.Is(err, context.DeadlineExceeded))
 			return false, err
 		}
 		if stat == nil || stat.PrunedNothing() {
@@ -1439,7 +1439,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 				)
 			} else {
 				at.a.logger.Info("[prune] state",
-					"until commit", time.Until(started.Add(timeout)).String(),
+					"untilCommit", time.Until(started.Add(timeout)).String(),
 					//"pruneLimit", pruneLimit,
 					//"aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
 					"stepsRangeInDB", at.stepsRangeInDBAsStr(tx),
@@ -1870,7 +1870,8 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		cr := r.domain[kv.CommitmentDomain]
 
 		restorePrevRange := false
-		for k, dr := range &r.domain {
+		for k := range r.domain {
+			dr := &r.domain[k]
 			kd := kv.Domain(k)
 			if kd == kv.CommitmentDomain || cr.values.Equal(&dr.values) {
 				continue
@@ -1893,7 +1894,8 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 			}
 		}
 		if restorePrevRange {
-			for k, dr := range &r.domain {
+			for k := range r.domain {
+				dr := &r.domain[k]
 				r.domain[k].values = MergeRange{}
 				at.a.logger.Debug("findMergeRange: commitment range is different than accounts or storage, cancel kv merge",
 					at.d[k].d.FilenameBase, dr.values.String("", at.StepSize()))

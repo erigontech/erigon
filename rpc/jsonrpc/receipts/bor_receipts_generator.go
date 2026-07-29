@@ -70,6 +70,7 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 	if err != nil {
 		return nil, err
 	}
+	defer ibs.Release(false)
 
 	txNum, err := txNumsReader.Max(ctx, tx, block.NumberU64())
 	if err != nil {
@@ -98,6 +99,7 @@ func (g *BorGenerator) GenerateBorLogs(ctx context.Context, msgs []*types.Messag
 	if err != nil {
 		return nil, err
 	}
+	defer ibs.Release(false)
 
 	_, _, logIdxAfterTx, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 	if err != nil {
@@ -126,15 +128,13 @@ func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *protocol.GasPool, ibs *s
 	var logIndex uint
 	if receiptWithFirstLogIdx {
 		logIndex = logIdxAfterTx
-	} else {
+	} else if logIdxAfterTx >= uint(len(receiptLogs)) {
 		// this check is a hack put in place because for cases where a block had only one tx, which was system
 		// e.g. 50075104 on bor.
 		// the receipt calculation stored 0 for logIdxAfterTx, which leads to underflow
 		// this check allows to adjust for that error (first logIndex is 0 for such cases)
 		// can be removed when receipt files fixed and all users are sure to have it (v2.2)
-		if logIdxAfterTx >= uint(len(receiptLogs)) {
-			logIndex = logIdxAfterTx - uint(len(receiptLogs))
-		}
+		logIndex = logIdxAfterTx - uint(len(receiptLogs))
 	}
 	for i, l := range receiptLogs {
 		l.TxIndex = hexutil.Uint(txIndex)
