@@ -17,6 +17,7 @@
 package coherence
 
 import (
+	"math"
 	"sync"
 	"testing"
 
@@ -71,4 +72,44 @@ func TestGen_ConcurrentUnwindNoTear(t *testing.T) {
 	wg.Wait()
 	require.Equal(t, uint32(unwinds), g.Epoch())
 	require.True(t, g.IsStale(1, 0), "deepest floor reached 1")
+}
+
+func TestGen_ResetAdvancesEpochAndLiftsFloor(t *testing.T) {
+	var g Gen
+	g.Init()
+	g.Unwind(50)
+
+	g.Reset()
+
+	s := g.Snapshot()
+	require.Equal(t, uint32(2), s.epoch)
+	require.Equal(t, uint64(math.MaxUint64), s.floor)
+}
+
+func TestGen_SnapshotKeepsDeadEntryStaleAcrossReset(t *testing.T) {
+	var g Gen
+	g.Init()
+	entryEpoch := g.Epoch()
+	g.Unwind(50)
+	read := g.Snapshot()
+
+	g.Reset()
+
+	require.True(t, read.IsStale(60, entryEpoch))
+	require.False(t, g.IsStale(60, entryEpoch))
+}
+
+func TestGen_ConcurrentResetAndUnwindPreserveEveryEpochBump(t *testing.T) {
+	var g Gen
+	g.Init()
+
+	const operations = 200
+	var wg sync.WaitGroup
+	for range operations {
+		wg.Go(g.Reset)
+		wg.Go(func() { g.Unwind(50) })
+	}
+	wg.Wait()
+
+	require.Equal(t, uint32(operations*2), g.Epoch())
 }

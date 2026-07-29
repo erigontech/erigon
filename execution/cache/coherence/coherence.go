@@ -39,7 +39,7 @@ type gen struct {
 // next read. The floor only ever decreases, so a shallower later unwind can't
 // resurrect entries a deeper one invalidated.
 //
-// The zero value is not usable — call Init (constructors and Clear).
+// The zero value is not usable — call Init from constructors.
 type Gen struct {
 	state atomic.Pointer[gen]
 }
@@ -48,6 +48,20 @@ type Gen struct {
 // predates the nonexistent floor, so all reads are valid until the first unwind).
 func (g *Gen) Init() {
 	g.state.Store(&gen{epoch: 0, floor: math.MaxUint64})
+}
+
+// Reset starts an empty cache generation without reusing an epoch.
+func (g *Gen) Reset() {
+	for {
+		cur := g.state.Load()
+		epoch := uint32(0)
+		if cur != nil {
+			epoch = cur.epoch
+		}
+		if g.state.CompareAndSwap(cur, &gen{epoch: epoch + 1, floor: math.MaxUint64}) {
+			return
+		}
+	}
 }
 
 // Epoch returns the current epoch, for stamping freshly written entries.
@@ -71,7 +85,7 @@ func (g *Gen) IsStale(txNum uint64, epoch uint32) bool {
 
 // Snapshot is an immutable (epoch, floor) pair for judging entries against
 // the coherence state captured at a chosen point — e.g. before loading a
-// cache generation, so a concurrent Clear's re-init (fresh epoch, lifted
+// cache generation, so a concurrent Clear's reset (new epoch, lifted
 // floor) cannot revalidate a dead entry captured from the retiring
 // generation.
 type Snapshot struct {

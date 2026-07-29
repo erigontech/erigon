@@ -316,14 +316,8 @@ func (c *GenericCache[T]) Get(key []byte) (T, bool) {
 // maxStep — the same coherence the BranchCache read applies for commitment.
 func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	h := maphash.Hash(key)
-	// Snapshot coherence before loading the generation: judged against the live
-	// state instead, a Clear landing between the load and the staleness check
-	// re-inits coherence (fresh epoch, lifted floor) and revalidates a dead
-	// entry captured from the retiring generation. Paired with Clear re-initing
-	// only after its swap, an old-generation entry is always judged by a
-	// pre-init snapshot that still carries the unwind. A live entry judged by a
-	// pre-Clear snapshot only degrades to a miss (dropStale re-checks and keeps
-	// it).
+	// Snapshot before loading the generation so an entry from the retiring
+	// generation is judged by coherence that still carries its unwind.
 	coh := c.coh.Snapshot()
 	lru := c.data.Load()
 	e, ok := lru.Get(h)
@@ -385,9 +379,8 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Sample the epoch under the stripe: Clear resets the epoch counter inside
-	// the fence, so a stamp read outside could alias a future epoch and let a
-	// dead-fork entry survive a later unwind.
+	// Sample the epoch under the stripe so Clear cannot split the stamp from
+	// the generation where the entry lands.
 	ep := c.coh.Epoch()
 	lru := c.data.Load()
 	existing, hasExisting := lru.Get(h)
@@ -481,13 +474,8 @@ func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
 	}
 }
 
-// Clear removes all entries from the cache. It also resets the (epoch,
-// unwindFloor) coherence pair: with no entries left, no stale (txNum, epoch)
-// can survive, so a fresh floor keeps subsequent Puts at the live epoch
-// serviceable. Mirrors CodeCache.Clear (which already did this — the two had
-// drifted). The counter reset and the generation swap run with every put
-// stripe held — like maybeGrow's — so a racing put can neither land in the
-// retired generation nor add its size after the reset.
+// Clear removes all entries, restores the starting capacity, and starts a new
+// coherence generation. The generation swap and accounting reset fence writers.
 func (c *GenericCache[T]) Clear() {
 	// Shrink back to the start size and return the grown budget to the envelope,
 	// keeping the cache adaptive across fork-validation/reset (it regrows on
@@ -507,11 +495,11 @@ func (c *GenericCache[T]) Clear() {
 	c.shardCount = shards
 	c.curCap.Store(c.startCap)
 	c.data.Store(next)
-	// Re-init coherence only after the swap: paired with GetWithTxNum's
+	// Reset coherence only after the swap: paired with GetWithTxNum's
 	// snapshot-before-load ordering, an entry captured from the retiring
-	// generation is then always judged by pre-init coherence that still
+	// generation is then always judged by pre-reset coherence that still
 	// carries the unwind.
-	c.coh.Init()
+	c.coh.Reset()
 	for i := range c.putStripes {
 		c.putStripes[i].Unlock()
 	}

@@ -166,6 +166,21 @@ func TestBranchCache_Clear(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestBranchCache_ClearRacingPut_EpochAlias(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+	c.Unwind(300)
+
+	key := []byte{0x00}
+	preClearEpoch := c.coh.Epoch()
+	c.Clear()
+	c.store(key, &branchCacheEntry{data: []byte("dead-fork-branch"), txN: 200, epoch: preClearEpoch})
+	c.Unwind(150)
+
+	_, _, ok := c.Get(key)
+	require.False(t, ok, "pre-Clear epoch must not alias the live epoch after a later unwind")
+}
+
 // TestBranchCache_Stats verifies the format of the stats string is
 // deterministic and contains the expected per-tier counts.
 func TestBranchCache_Stats(t *testing.T) {

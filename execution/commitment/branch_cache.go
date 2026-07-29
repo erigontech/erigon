@@ -642,6 +642,7 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	if isCommitmentStateKey(prefix) {
 		return nil, 0, false
 	}
+	coh := c.coh.Snapshot()
 	entry, ok := c.lookup(prefix)
 	if !ok {
 		return nil, 0, false
@@ -651,7 +652,7 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	// the read falls through to the reverted domain and repopulates. The floor
 	// is the first unwound txN (>= matches GenericCache: an entry stamped exactly
 	// at the floor belongs to a rolled-back block).
-	if c.coh.IsStale(entry.txN, entry.epoch) {
+	if coh.IsStale(entry.txN, entry.epoch) {
 		c.Invalidate(prefix)
 		c.staleEvicted.Add(1)
 		return nil, 0, false
@@ -716,10 +717,7 @@ func (c *BranchCache) Unwind(unwindToTxN uint64) {
 	c.coh.Unwind(unwindToTxN)
 }
 
-// Clear empties the cache and resets stats counters across ALL tiers
-// (root slot, LRU tail). Use on Reset / fork-validation paths to
-// ensure stale entries from one trie root are not served against a
-// different root.
+// Clear empties every tier, resets stats, and starts a new coherence generation.
 func (c *BranchCache) Clear() {
 	c.root.Store(nil)
 	c.clearTrunk()
@@ -742,7 +740,7 @@ func (c *BranchCache) Clear() {
 	c.tailMisses.Store(0)
 	c.bytesServed.Store(0)
 	c.staleEvicted.Store(0)
-	c.coh.Init()
+	c.coh.Reset()
 }
 
 // Stats returns a one-line summary of the cache tiers' hit/miss counters plus

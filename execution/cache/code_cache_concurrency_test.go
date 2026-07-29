@@ -24,6 +24,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/maphash"
 )
@@ -137,4 +138,23 @@ func TestCodeCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, fresh, v, "round %d: PutIfAbsent raced past a concurrent Put", round)
 	}
+}
+
+func TestCodeCache_ClearRacingPut_EpochAlias(t *testing.T) {
+	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
+	cc.Unwind(300)
+
+	addr := make([]byte, 20)
+	addr[0] = 0xef
+	code := []byte("dead-fork-code")
+	codeID := maphash.Hash(code)
+	preClearEpoch := cc.coh.Epoch()
+
+	cc.Clear()
+	cc.addrToHash.Add(common.BytesToAddress(addr), versionedAddressID{addrID: codeID, txNum: 200, epoch: preClearEpoch})
+	cc.hashToCode.Add(codeID, codeEntry{code: code, txNum: 200, epoch: preClearEpoch})
+	cc.Unwind(150)
+
+	_, ok := cc.Get(addr)
+	require.False(t, ok, "pre-Clear epoch must not alias the live epoch after a later unwind")
 }

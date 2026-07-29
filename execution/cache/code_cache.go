@@ -185,13 +185,6 @@ type CodeCache struct {
 	closed atomic.Bool
 }
 
-// isStale reports whether an entry stamped (txNum, epoch) reflects dead-fork
-// state after an unwind: it was written in a superseded epoch and its txNum is
-// at or above the unwind floor (the first unwound txNum). Mirrors GenericCache.
-func (c *CodeCache) isStale(txNum uint64, epoch uint32) bool {
-	return c.coh.IsStale(txNum, epoch)
-}
-
 // putContent is the shared insert path for the content-addressed code layers
 // (hashToCode, codeHashToCode, codeSizeByCodeHash). Each is a freelru.ShardedLRU
 // of per-key-immutable entries carrying a (txNum, epoch) stamp: a live entry is
@@ -281,12 +274,13 @@ func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
 // path can apply the same step bound the DomainCache/BranchCache reads do.
 func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 	k := common.BytesToAddress(addr)
+	coh := c.coh.Snapshot()
 	vID, ok := c.addrToHash.Get(k)
 	if !ok {
 		c.addrMisses.Add(1)
 		return nil, 0, false
 	}
-	if c.isStale(vID.txNum, vID.epoch) {
+	if coh.IsStale(vID.txNum, vID.epoch) {
 		c.addrToHash.Remove(k)
 		c.addrMisses.Add(1)
 		return nil, 0, false
@@ -298,7 +292,7 @@ func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 		c.codeMisses.Add(1)
 		return nil, 0, false
 	}
-	if c.isStale(ce.txNum, ce.epoch) {
+	if coh.IsStale(ce.txNum, ce.epoch) {
 		c.hashToCode.Remove(vID.addrID) // OnEvict decrements codeSize
 		c.codeMisses.Add(1)
 		return nil, 0, false
@@ -348,7 +342,7 @@ func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum ui
 	bindAddr := overwriteAddr
 	if !bindAddr {
 		e, ok := c.addrToHash.Get(a)
-		bindAddr = !ok || c.isStale(e.txNum, e.epoch)
+		bindAddr = !ok || c.coh.IsStale(e.txNum, e.epoch)
 	}
 	if bindAddr {
 		c.addrToHash.Add(a, versionedAddressID{addrID: codeID, codeHash: keyHash, txNum: txNum, epoch: ep})
@@ -367,11 +361,12 @@ func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum ui
 // replace coldest entries.
 func (c *CodeCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	k := common.BytesToAddress(addr)
+	coh := c.coh.Snapshot()
 	e, ok := c.addrToCodeHash.Get(k)
 	if !ok {
 		return [32]byte{}, false
 	}
-	if c.isStale(e.txNum, e.epoch) {
+	if coh.IsStale(e.txNum, e.epoch) {
 		c.addrToCodeHash.Remove(k)
 		return [32]byte{}, false
 	}
@@ -402,6 +397,7 @@ func (c *CodeCache) DeleteAddrCodeHash(addr []byte) {
 // single codeHashToCode entry after the first population.
 func (c *CodeCache) GetByCodeHash(codeHash []byte) ([]byte, bool) {
 	h := maphash.Hash(codeHash)
+	coh := c.coh.Snapshot()
 	ce, ok := c.codeHashToCode.Get(h)
 	if !ok || len(ce.code) == 0 {
 		c.codeHashMisses.Add(1)
@@ -413,7 +409,7 @@ func (c *CodeCache) GetByCodeHash(codeHash []byte) ([]byte, bool) {
 		c.codeHashMisses.Add(1)
 		return nil, false
 	}
-	if c.isStale(ce.txNum, ce.epoch) {
+	if coh.IsStale(ce.txNum, ce.epoch) {
 		c.codeHashToCode.Remove(h) // OnEvict decrements codeHashCodeSize
 		c.codeHashMisses.Add(1)
 		return nil, false
@@ -470,6 +466,7 @@ func (c *CodeCache) putWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 // the file-accessor + decompression stack for the full bytes.
 func (c *CodeCache) GetCodeSizeByCodeHash(codeHash []byte) (int, bool) {
 	h := maphash.Hash(codeHash)
+	coh := c.coh.Snapshot()
 	e, ok := c.codeSizeByCodeHash.Get(h)
 	if !ok {
 		c.codeSizeMisses.Add(1)
@@ -480,7 +477,7 @@ func (c *CodeCache) GetCodeSizeByCodeHash(codeHash []byte) (int, bool) {
 		c.codeSizeMisses.Add(1)
 		return 0, false
 	}
-	if c.isStale(e.txNum, e.epoch) {
+	if coh.IsStale(e.txNum, e.epoch) {
 		c.codeSizeByCodeHash.Remove(h) // OnEvict decrements codeSizeEntries
 		c.codeSizeMisses.Add(1)
 		return 0, false
@@ -510,8 +507,7 @@ func (c *CodeCache) Delete(addr []byte) {
 	c.addrToHash.Remove(common.BytesToAddress(addr))
 }
 
-// Clear hard-resets every layer and the epoch/floor. Use on Reset /
-// fork-validation paths where no entry may carry over.
+// Clear removes every layer and starts a new coherence generation.
 func (c *CodeCache) Clear() {
 	c.addrToHash.Purge()
 	c.addrToCodeHash.Purge()
@@ -521,7 +517,7 @@ func (c *CodeCache) Clear() {
 	c.codeSize.Store(0)
 	c.codeHashCodeSize.Store(0)
 	c.codeSizeEntries.Store(0)
-	c.coh.Init()
+	c.coh.Reset()
 }
 
 // Close returns the content layers' envelope reservations. Idempotent.
