@@ -159,11 +159,11 @@ func pbinCommonPrefixBits(a, b *pbinBitpath) int16 // XOR + LeadingZeros64, clam
 **Files:**
 - Create: `execution/commitment/pbin_oracle_test.go`
 
-- [ ] transcribe the spec's `LeafNode`, `BranchNode`, `_insert` and `merkelize` (`eip:112-222`) as a naive in-memory Go tree, Keccak-256, no optimisation
-- [ ] implement `encode_bit_prefix` exactly per `eip:196-201` and define the empty-tree hash as 32 zero bytes per `eip:208`
-- [ ] add corpus builders: empty; single key (root **is** a leaf, `eip:133-135`); two keys diverging at bit 0; two diverging at bit 527; a split-inside-prefix triple forcing `node.prefix[matched+1:]`; a mined deep-shared-prefix cluster
-- [ ] write tests asserting the oracle is self-consistent: permutation independence and prefix-freedom over every corpus
-- [ ] run tests - must pass before task 5
+- [x] transcribe the spec's `LeafNode`, `BranchNode`, `_insert` and `merkelize` (`eip:112-222`) as a naive in-memory Go tree, Keccak-256, no optimisation
+- [x] implement `encode_bit_prefix` exactly per `eip:196-201` and define the empty-tree hash as 32 zero bytes per `eip:208`
+- [x] add corpus builders: empty; single key (root **is** a leaf, `eip:133-135`); two keys diverging at bit 0; two diverging at bit 527; a split-inside-prefix triple forcing `node.prefix[matched+1:]`; a mined deep-shared-prefix cluster
+- [x] write tests asserting the oracle is self-consistent: permutation independence and prefix-freedom over every corpus
+- [x] run tests - must pass before task 5
 
 ### Task 5: pbinCell, grid, and branch record codec
 
