@@ -115,7 +115,7 @@ type pbinDigestCache struct {
 	stem   [32]byte
 	valid  bool
 
-	groupIndex [32]byte
+	groupIndex [31]byte
 	groupHash  [32]byte
 	groupValid bool
 
@@ -133,14 +133,18 @@ func (c *pbinDigestCache) stemDigest(addr32 *[32]byte) *[32]byte {
 	return &c.stem
 }
 
-func (c *pbinDigestCache) groupDigest(addr32, treeIndex *[32]byte) *[32]byte {
-	if c.groupValid && c.addr32 == *addr32 && c.groupIndex == *treeIndex {
+// groupDigest hashes addr32 || tree_index, where tree_index is slot>>8 as a
+// 32-byte big-endian value: a zero byte followed by the slot's top 31 bytes.
+func (c *pbinDigestCache) groupDigest(addr32, slot32 *[32]byte) *[32]byte {
+	idx := (*[31]byte)(slot32[:31])
+	if c.groupValid && c.addr32 == *addr32 && c.groupIndex == *idx {
 		return &c.groupHash
 	}
 	copy(c.buf[:32], addr32[:])
-	copy(c.buf[32:], treeIndex[:])
+	c.buf[32] = 0
+	copy(c.buf[33:], idx[:])
 	c.groupHash = keccak.Sum256(c.buf[:])
-	c.groupIndex = *treeIndex
+	c.groupIndex = *idx
 	c.groupValid = true
 	return &c.groupHash
 }
@@ -156,12 +160,10 @@ func (c *pbinDigestCache) storageKey(addr, slot []byte) []byte {
 	if pbinSlotInHeader(&slot32) {
 		return pbinTreeKey(pbinAccountZone, c.stemDigest(&addr32)[:], pbinHeaderStorageOffset+slot32[31])
 	}
-	treeIndex, subIndex := pbinSplitSlot(&slot32)
-
 	var position [64]byte
 	copy(position[:32], c.stemDigest(&addr32)[:])
-	copy(position[32:], c.groupDigest(&addr32, &treeIndex)[:])
-	return pbinTreeKey(pbinStorageZone, position[:], subIndex)
+	copy(position[32:], c.groupDigest(&addr32, &slot32)[:])
+	return pbinTreeKey(pbinStorageZone, position[:], slot32[31])
 }
 
 func (c *pbinDigestCache) treeKey(plainKey []byte) []byte {
@@ -191,12 +193,4 @@ func pbinSlotInHeader(slot *[32]byte) bool {
 		}
 	}
 	return slot[31] < pbinCodeOffset-pbinHeaderStorageOffset
-}
-
-// pbinSplitSlot divides a slot into its storage group and position within it.
-// STEM_SUBTREE_WIDTH is 256, so the division is a one-byte shift and the
-// sub-index is the raw low byte — which is what co-locates adjacent slots.
-func pbinSplitSlot(slot *[32]byte) (treeIndex [32]byte, subIndex byte) {
-	copy(treeIndex[1:], slot[:31])
-	return treeIndex, slot[31]
 }
