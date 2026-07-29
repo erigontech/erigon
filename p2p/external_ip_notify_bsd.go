@@ -55,8 +55,12 @@ func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
 		return noopNotifier{}
 	}
 
+	return newRouteNotifierFromFile(os.NewFile(uintptr(fd), "pf_route"), logger)
+}
+
+func newRouteNotifierFromFile(file *os.File, logger log.Logger) *routeNotifier {
 	n := &routeNotifier{
-		file:    os.NewFile(uintptr(fd), "pf_route"),
+		file:    file,
 		events:  make(chan struct{}, 1),
 		stopped: make(chan struct{}),
 	}

@@ -63,8 +63,12 @@ func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
 		return noopNotifier{}
 	}
 
+	return newNetlinkNotifierFromFile(os.NewFile(uintptr(fd), "netlink"), logger)
+}
+
+func newNetlinkNotifierFromFile(file *os.File, logger log.Logger) *netlinkNotifier {
 	n := &netlinkNotifier{
-		file:    os.NewFile(uintptr(fd), "netlink"),
+		file:    file,
 		events:  make(chan struct{}, 1),
 		stopped: make(chan struct{}),
 	}
