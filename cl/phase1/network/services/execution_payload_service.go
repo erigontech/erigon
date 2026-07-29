@@ -41,7 +41,7 @@ type seenEnvelopeKey struct {
 	builderIndex    uint64
 }
 
-// pendingEnvelopeKey tracks envelopes waiting for their block to arrive.
+// pendingEnvelopeKey tracks envelopes waiting for their block or data columns.
 // We use (blockRoot, envelopeHash) as key instead of just blockRoot because:
 //   - Multiple envelopes (including forged ones) may arrive before the block
 //   - Using only blockRoot would cause later arrivals to overwrite earlier ones
@@ -52,7 +52,7 @@ type pendingEnvelopeKey struct {
 	envelopeHash common.Hash
 }
 
-// envelopeJob represents a pending envelope waiting for its block to arrive
+// envelopeJob represents an envelope waiting for its dependencies.
 type envelopeJob struct {
 	envelope     *cltypes.SignedExecutionPayloadEnvelope
 	creationTime time.Time
@@ -73,7 +73,7 @@ type executionPayloadService struct {
 	// Cache to track seen envelopes: (beaconBlockRoot, builderIndex) -> struct{}
 	seenEnvelopesCache *lru.Cache[seenEnvelopeKey, struct{}]
 
-	// Pending envelopes waiting for block to arrive
+	// Pending envelopes waiting for their dependencies
 	pendingEnvelopes sync.Map // pendingEnvelopeKey -> *envelopeJob
 	pendingCount     atomic.Int32
 	pendingCond      *sync.Cond
@@ -174,8 +174,12 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	// Process the execution payload through forkchoice
 	// Note: bid matching and signature verification are done in OnExecutionPayload.validateEnvelopeAgainstBlock
 	if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true); err != nil {
-		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
-			return fmt.Errorf("%w: %v", ErrIgnore, err)
+		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+			s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope)
+			return fmt.Errorf("%w: %w", ErrIgnore, err)
+		}
+		if errors.Is(err, forkchoice.ErrIgnore) {
+			return fmt.Errorf("%w: %w", ErrIgnore, err)
 		}
 		return fmt.Errorf("failed to process execution payload: %w", err)
 	}
@@ -270,7 +274,7 @@ func (s *executionPayloadService) loop(ctx context.Context) {
 	}
 }
 
-// processPendingEnvelopes checks and processes any pending envelopes whose blocks have arrived
+// processPendingEnvelopes retries pending envelopes whose blocks have arrived.
 func (s *executionPayloadService) processPendingEnvelopes(ctx context.Context) {
 	s.pendingEnvelopes.Range(func(key, value any) bool {
 		pendingKey := key.(pendingEnvelopeKey)
@@ -278,9 +282,10 @@ func (s *executionPayloadService) processPendingEnvelopes(ctx context.Context) {
 
 		// Check expiry
 		if time.Since(job.creationTime) > pendingEnvelopeExpiry {
-			s.pendingEnvelopes.Delete(pendingKey)
-			s.pendingCount.Add(-1)
-			log.Trace("Pending envelope expired", "blockRoot", pendingKey.blockRoot)
+			if _, loaded := s.pendingEnvelopes.LoadAndDelete(pendingKey); loaded {
+				s.pendingCount.Add(-1)
+				log.Trace("Pending envelope expired", "blockRoot", pendingKey.blockRoot)
+			}
 			return true
 		}
 
@@ -290,12 +295,14 @@ func (s *executionPayloadService) processPendingEnvelopes(ctx context.Context) {
 			return true // Block still not here, keep waiting
 		}
 
-		// Block arrived, remove from pending and process
-		s.pendingEnvelopes.Delete(pendingKey)
-		s.pendingCount.Add(-1)
-
-		// Re-run full validation via ProcessMessage
-		if err := s.ProcessMessage(ctx, nil, job.envelope); err != nil {
+		err := s.ProcessMessage(ctx, nil, job.envelope)
+		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+			return true
+		}
+		if _, loaded := s.pendingEnvelopes.LoadAndDelete(pendingKey); loaded {
+			s.pendingCount.Add(-1)
+		}
+		if err != nil {
 			log.Trace("Failed to process pending envelope", "blockRoot", pendingKey.blockRoot, "err", err)
 		}
 		return true
