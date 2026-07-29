@@ -2426,7 +2426,9 @@ func (s *Ethereum) applyForkTrimPostCutSiblings(target *chain.Config) {
 		return
 	}
 	// Cut txnum → step: the step containing the cut. Files whose
-	// ToStep exceeds cutStep+1 include post-cut txNums.
+	// ToStep exceeds cutStep cover step cutStep or later, meaning
+	// they contain at-cut or post-cut txNums — both classes fail
+	// the fork-datadir validator on the next --chain restart.
 	var cutTxNum uint64
 	if err := s.chainDB.View(context.Background(), func(tx kv.Tx) error {
 		v, verr := rawdbv3.TxNums.Max(context.Background(), tx, target.CutBlock)

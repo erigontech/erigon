@@ -96,9 +96,10 @@ func TrimPostCutSiblings(snapDir string, cutStep uint64) (int, error) {
 }
 
 // isPostCutStateSibling returns true iff a filename in the
-// snapshots/{accessor,history,idx} tree has a step range whose
-// ToStep exceeds cutStep+1 — meaning the file's contents provably
-// include post-cut data.
+// snapshots/{accessor,history,idx} tree has a step range that
+// contains any post-cut txNum — either entirely past the cut OR
+// straddling it. Both classes fail the fork-datadir validator on
+// the next --chain=<fork-name> restart, so both must be trimmed.
 //
 // Uses the same ParseFileName the copy planner uses so we get the
 // same From/To interpretation. Anything unparseable is skipped
@@ -112,11 +113,14 @@ func isPostCutStateSibling(basename string, cutStep uint64) bool {
 	if parsed.To == 0 {
 		return false
 	}
-	// The file covers steps [From, To). If To > cutStep+1, some of the
-	// covered txNums are past the cut. Regen boundary handles the
-	// straddler-at-cut file separately; this pass is for entirely-past
-	// or straddling accessors that the domain path doesn't touch.
-	return parsed.To > cutStep+1
+	// The file covers steps [From, To). cutStep is the step containing
+	// cutTxNum. A file with To > cutStep covers step cutStep or later,
+	// meaning it includes txNums at or past the cut. Domain/*.kv gets
+	// truncated separately by regenerate-boundary-step-files; sibling
+	// accessor/history/idx files have no boundary-regen path, so
+	// straddlers must be dropped whole. The fork's next retire cycle
+	// produces fresh boundary files covering only pre-cut data.
+	return parsed.To > cutStep
 }
 
 // parsedStepRange holds the From/To step boundaries extracted from a

@@ -24,26 +24,34 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestTrimPostCutSiblings_RemovesOnlyPostCut pins the fork-transition
-// post-swap cleanup: sibling files (accessor/*.vi/.efi, history/*.v,
-// idx/*.ef) whose step range exceeds cutStep+1 must be removed;
-// pre-cut siblings must survive. Also confirms the .torrent sidecar
-// gets dropped alongside its primary.
-func TestTrimPostCutSiblings_RemovesOnlyPostCut(t *testing.T) {
+// TestTrimPostCutSiblings_RemovesPostCutAndStraddlers pins the
+// fork-transition post-swap cleanup: sibling files (accessor/*.vi/.efi,
+// history/*.v, idx/*.ef) whose step range extends into or past cutStep
+// must be removed — both entirely-post-cut files AND boundary
+// straddlers. The fork-datadir validator (ValidateForkDatadir via
+// classifyRange) rejects both, so both must go for a clean fork boot.
+// Pre-cut siblings survive; .torrent sidecars are dropped alongside
+// their primary.
+func TestTrimPostCutSiblings_RemovesPostCutAndStraddlers(t *testing.T) {
 	dir := t.TempDir()
 
-	// Layout: cutStep=299 (so files with ToStep <= 300 keep, ToStep > 300 trim).
+	// Layout: cutStep=299 — the step containing the cut txNum. Any
+	// file with To > 299 covers step 299 or later and contains
+	// at-cut or post-cut data.
 	files := map[string]bool{ // path relative to snap dir → expect kept
-		"accessor/v1.1-code.288-296.vi":         true, // pre-cut
+		"accessor/v1.1-code.288-296.vi":         true, // pre-cut (To=296 <= cutStep)
 		"accessor/v1.1-code.288-296.vi.torrent": true,
-		"accessor/v1.1-code.299-300.vi":         true,  // straddles the boundary but To==300==cutStep+1 → kept
-		"accessor/v1.1-code.300-304.vi":         false, // post-cut → trim
+		"accessor/v1.1-code.299-300.vi":         false, // straddles boundary step (To=300 > cutStep=299) → trim
+		"accessor/v1.1-code.299-300.vi.torrent": false,
+		"accessor/v1.1-code.300-304.vi":         false, // entirely post-cut → trim
 		"accessor/v1.1-code.300-304.vi.torrent": false,
-		"accessor/v2.1-storage.299-300.efi":     true,
+		"accessor/v2.1-storage.299-300.efi":     false, // straddler → trim
 		"accessor/v2.1-storage.300-304.efi":     false,
 		"history/v2.0-storage.288-296.v":        true,
+		"history/v2.0-storage.299-300.v":        false, // straddler → trim
 		"history/v2.0-storage.300-304.v":        false,
 		"idx/v2.0-storage.288-296.ef":           true,
+		"idx/v2.0-storage.299-300.ef":           false, // straddler → trim
 		"idx/v2.0-storage.300-304.ef":           false,
 		"domain/v3.0-receipt.288-296.kv":        true, // domain dir untouched by this helper
 	}
@@ -55,8 +63,9 @@ func TestTrimPostCutSiblings_RemovesOnlyPostCut(t *testing.T) {
 
 	removed, err := TrimPostCutSiblings(dir, 299)
 	require.NoError(t, err)
-	// 4 post-cut primaries (accessor: 2, history: 1, idx: 1); torrent sidecars aren't counted.
-	require.Equal(t, 4, removed)
+	// 8 primaries removed (accessor: 4, history: 2, idx: 2); torrent
+	// sidecars aren't counted in the return.
+	require.Equal(t, 8, removed)
 
 	for path, expectKept := range files {
 		_, err := os.Stat(filepath.Join(dir, path))
