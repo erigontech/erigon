@@ -427,15 +427,16 @@ func TestTransientStorage(t *testing.T) {
 	}
 }
 
-func TestReleaseReturnsRevisionsToPool(t *testing.T) {
+func TestReleaseResetsRevisions(t *testing.T) {
 	t.Parallel()
 	state := New(nil)
 
 	state.PushSnapshot()
-	require.NotNil(t, state.revisions)
+	require.NotEmpty(t, state.revisions.valid)
 
 	state.Release(false)
-	require.Nil(t, state.revisions)
+	require.Empty(t, state.revisions.valid)
+	require.Zero(t, state.revisions.nextId)
 }
 
 func TestVersionMapReadWriteDelete(t *testing.T) {

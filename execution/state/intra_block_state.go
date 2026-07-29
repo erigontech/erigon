@@ -431,7 +431,7 @@ func (sdb *IntraBlockState) Release(parallel bool) {
 	journal := sdb.journal
 	sdb.stateObjects = nil
 	sdb.journal = nil
-	sdb.revisions = sdb.revisions.put()
+	sdb.revisions.reset()
 
 	if parallel {
 		go releaseResources(stateObjects, journal)
