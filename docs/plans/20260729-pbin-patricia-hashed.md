@@ -134,12 +134,12 @@ func pbinCommonPrefixBits(a, b *pbinBitpath) int16 // XOR + LeadingZeros64, clam
 - Create: `execution/commitment/pbin_keys.go`
 - Create: `execution/commitment/pbin_keys_test.go`
 
-- [ ] write failing tests reproducing the EIP's vectors (`eip:583-630`), each asserting the **full** 34/66-byte key against a `keccak` computed inline in the test body rather than via the helper under test: BASIC_DATA key; slot 5 → sub-index `0x45`; slot 1000 → `tree_index 3`/`sub_index 0xE8` with `tree_index` as 32-byte big-endian
-- [ ] write failing zone-routing tests at slots 63/64/255/256 and for the 12-byte address padding (guards H8)
-- [ ] implement `pbinAddr32`, `pbinTreeKeyAccount(addr, subIdx)`, `pbinTreeKeyStorage(addr, slot)` with the `slot < 64` account-zone route
-- [ ] implement the two-level digest cache: `H(addr32)` per address, `H(addr32||tree_index)` per 256-slot group, with `tree_index` encoded as 32-byte big-endian
-- [ ] provide a `keyHasher`-compatible `func([]byte) []byte` returning the primary leaf's tree key, and assert `len` is 34 or 66 at every construction site
-- [ ] run tests - must pass before task 3
+- [x] write failing tests reproducing the EIP's vectors (`eip:583-630`), each asserting the **full** 34/66-byte key against a `keccak` computed inline in the test body rather than via the helper under test: BASIC_DATA key; slot 5 → sub-index `0x45`; slot 1000 → `tree_index 3`/`sub_index 0xE8` with `tree_index` as 32-byte big-endian
+- [x] write failing zone-routing tests at slots 63/64/255/256 and for the 12-byte address padding (guards H8)
+- [x] implement `pbinAddr32`, `pbinTreeKeyAccount(addr, subIdx)`, `pbinTreeKeyStorage(addr, slot)` with the `slot < 64` account-zone route
+- [x] implement the two-level digest cache: `H(addr32)` per address, `H(addr32||tree_index)` per 256-slot group, with `tree_index` encoded as 32-byte big-endian
+- [x] provide a `keyHasher`-compatible `func([]byte) []byte` returning the primary leaf's tree key, and assert `len` is 34 or 66 at every construction site
+- [x] run tests - must pass before task 3
 
 ### Task 3: Leaf value encoding
 
