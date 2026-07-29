@@ -1599,6 +1599,46 @@ func TestResumeReconstructionReplaysAmsterdamGasDimensions(t *testing.T) {
 	assert.Less(t, priorGasUsed.BlockGasUsed(), priorGasUsed.Receipt)
 }
 
+func TestResumeReconstructionReplaysBlobGas(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.AllProtocolChanges
+	header := &types.Header{
+		Number:        *uint256.NewInt(1),
+		GasLimit:      10_000_000,
+		ExcessBlobGas: common.NewUint64(0),
+	}
+	to := common.HexToAddress("0x01")
+	unsignedTx := &types.BlobTx{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{
+				To:       &to,
+				GasLimit: 1_000_000,
+			},
+			ChainID: *config.ChainID,
+			FeeCap:  *uint256.NewInt(1),
+		},
+		MaxFeePerBlobGas:    *uint256.NewInt(1_000_000),
+		BlobVersionedHashes: []common.Hash{{1}, {1, 2}},
+	}
+	tx, err := types.SignTx(unsignedTx, *types.MakeSigner(config, 1, 0), senderIsCoinbaseKey.key)
+	require.NoError(t, err)
+
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(1_000_000_000_000)
+		return putter.DomainPut(kv.AccountsDomain, senderIsCoinbaseKey.rawAddress[:], accounts.SerialiseV3(&acc), 0, nil)
+	})
+
+	pe, roTx := newResumeTestExec(t, db, config)
+	priorReceipts, priorGasUsed, err := pe.reconstructPriorReceipts(
+		context.Background(), roTx, header, types.Transactions{tx}, 1, 1,
+	)
+	require.NoError(t, err)
+	require.Len(t, priorReceipts, 1)
+	assert.NotZero(t, priorGasUsed.Blob)
+	assert.Equal(t, unsignedTx.GetBlobGas(), priorGasUsed.Blob)
+}
+
 // TestParallelResumeReconstructionFailureIsNonFatal pins the failure policy when
 // prior receipts cannot be reconstructed: reconstruction is best-effort, so the
 // batch proceeds (prior receipts absent, block left not receipts-complete)

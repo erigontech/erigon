@@ -76,4 +76,19 @@ func TestGasUsedFromCachedReceipts(t *testing.T) {
 	assert.Equal(t, uint64(51000), gasUsed.Receipt)
 	assert.Equal(t, uint64(51000), gasUsed.BlockRegular)
 	assert.Zero(t, gasUsed.BlockState)
+	assert.Zero(t, gasUsed.Blob)
+}
+
+func TestGasUsedFromCachedReceiptsCountsBlobGas(t *testing.T) {
+	cached := types.Receipts{
+		{CumulativeGasUsed: 21000},
+		{CumulativeGasUsed: 42000},
+	}
+	blobTxn := &types.BlobTx{BlobVersionedHashes: []common.Hash{{1}, {1, 2}}}
+	txns := types.Transactions{&types.LegacyTx{}, blobTxn}
+
+	gasUsed := gasUsedFromCachedReceipts(cached, txns)
+
+	assert.NotZero(t, blobTxn.GetBlobGas())
+	assert.Equal(t, blobTxn.GetBlobGas(), gasUsed.Blob)
 }
