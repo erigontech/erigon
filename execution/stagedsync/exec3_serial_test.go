@@ -127,5 +127,6 @@ func TestSerialResumeValidatesRestoredBlockGas(t *testing.T) {
 		err := run(t, 21000)
 		require.ErrorIs(t, err, rules.ErrInvalidBlock)
 		require.ErrorContains(t, err, "gas used by execution: 42000")
+		require.ErrorContains(t, err, "resumed block with reconstructed prefix")
 	})
 }
