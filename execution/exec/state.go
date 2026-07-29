@@ -472,6 +472,9 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
+	if rw.ibs != nil {
+		rw.ibs.Release(true)
+	}
 	rw.ibs = state.New(rw.stateReader)
 
 	switch reader.(type) {
