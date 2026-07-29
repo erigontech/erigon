@@ -302,6 +302,13 @@ func (pph *PBinPatriciaHashed) RootHash() ([]byte, error) {
 	if pph.grid.activeRows != 0 {
 		return nil, fmt.Errorf("pbin: root hash requested with %d rows still open", pph.grid.activeRows)
 	}
+	// A run that touches no key never descends, so nothing has pulled the stored
+	// root in yet and an untouched grid would report the empty tree.
+	if !pph.rootChecked {
+		if err := pph.loadRoot(); err != nil {
+			return nil, err
+		}
+	}
 	var path pbinBitpath
 	hash, err := pph.cellHash(&pph.grid.root, &path)
 	if err != nil {
@@ -769,19 +776,30 @@ func (pph *PBinPatriciaHashed) cellHash(c *pbinCell, path *pbinBitpath) (common.
 
 // loadCellState fills a leaf cell whose plain key arrived from a record and
 // whose value therefore did not.
+// The leaf is already in the tree, so an absent read means it has to go, which
+// EIP-8297 does not define. Applying it would hash a zero-valued leaf and return
+// a root with no error.
 func (pph *PBinPatriciaHashed) loadCellState(c *pbinCell) error {
 	if c.accountAddrLen > 0 && !c.loaded.account() {
-		update, err := pph.ctx.Account(c.accountAddr[:c.accountAddrLen])
+		plainKey := c.accountAddr[:c.accountAddrLen]
+		update, err := pph.ctx.Account(plainKey)
 		if err != nil {
-			return fmt.Errorf("pbin: read account %x: %w", c.accountAddr[:c.accountAddrLen], err)
+			return fmt.Errorf("pbin: read account %x: %w", plainKey, err)
+		}
+		if update.Deleted() {
+			return fmt.Errorf("%w: %x", errPBinDeleteUnsupported, plainKey)
 		}
 		c.setFromUpdate(update)
 		c.loaded = c.loaded.addFlag(cellLoadAccount)
 	}
 	if c.storageAddrLen > 0 && !c.loaded.storage() {
-		update, err := pph.ctx.Storage(c.storageAddr[:c.storageAddrLen])
+		plainKey := c.storageAddr[:c.storageAddrLen]
+		update, err := pph.ctx.Storage(plainKey)
 		if err != nil {
-			return fmt.Errorf("pbin: read storage %x: %w", c.storageAddr[:c.storageAddrLen], err)
+			return fmt.Errorf("pbin: read storage %x: %w", plainKey, err)
+		}
+		if update.Deleted() {
+			return fmt.Errorf("%w: %x", errPBinDeleteUnsupported, plainKey)
 		}
 		c.setFromUpdate(update)
 		c.loaded = c.loaded.addFlag(cellLoadStorage)

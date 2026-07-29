@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -145,10 +146,32 @@ func TestPBinResetClearsTrieState(t *testing.T) {
 	require.False(t, pph.rootTouched)
 	require.False(t, pph.rootPresent)
 	require.Same(t, ms, pph.ctx)
+}
 
+// TestPBinRootHashAfterResetLoadsStoredRoot pins the zero-update path the domain
+// layer takes: it asks for the root without processing anything, so RootHash has
+// to reach the stored tree rather than report the empty-tree hash.
+func TestPBinRootHashAfterResetLoadsStoredRoot(t *testing.T) {
+	t.Parallel()
+
+	corpus := new(pbinTestCorpus).
+		storage(pbinOracleAddr(81), pbinOracleSlot(256), 0x01).
+		storage(pbinOracleAddr(81), pbinOracleSlot(257), 0x02)
+
+	pph, ms := pbinTestEngine(t)
+	require.NoError(t, ms.applyPlainUpdates(corpus.plainKeys, corpus.updates))
+	want := corpus.oracleRoot(t)
+	require.Equal(t, want, pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates))
+
+	pph.Reset()
 	root, err := pph.RootHash()
 	require.NoError(t, err)
-	require.Equal(t, make([]byte, 32), root)
+	require.Equal(t, want, root)
+
+	fresh := NewPBinPatriciaHashed(ms)
+	empty, err := fresh.Process(context.Background(), WrapKeyUpdates(t, ModeDirect, pbinKeyHasher(), nil, nil), "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	require.Equal(t, want, empty, "a run with no updates must not shrink the tree to empty")
 }
 
 // TestPBinResetContext swaps the state under a released-and-reused engine.

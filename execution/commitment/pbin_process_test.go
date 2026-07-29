@@ -335,6 +335,33 @@ func TestPBinProcessRejectsDeletedLeaf(t *testing.T) {
 	require.ErrorIs(t, err, errPBinDeleteUnsupported)
 }
 
+// TestPBinProcessRejectsDeletedSibling is the same hazard reached through the
+// fold rather than the update stream: the vanished leaf is never touched, so it
+// is rehydrated from its branch record and hashed with whatever the state read
+// returns. Applying an absent read there would hash a zero-valued leaf and
+// return a root with no error.
+func TestPBinProcessRejectsDeletedSibling(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(24)
+	corpus := new(pbinTestCorpus).
+		storage(addr, pbinOracleSlot(256), 0x01).
+		storage(addr, pbinOracleSlot(257), 0x02)
+
+	pph, ms := pbinTestEngine(t)
+	require.NoError(t, ms.applyPlainUpdates(corpus.plainKeys, corpus.updates))
+	pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates)
+
+	gone := new(pbinTestCorpus).storage(addr, pbinOracleSlot(256), 0x01)
+	require.NoError(t, ms.applyPlainUpdates(gone.plainKeys, []Update{{Flags: DeleteUpdate}}))
+
+	touched := new(pbinTestCorpus).storage(addr, pbinOracleSlot(257), 0x02)
+	pph.Reset()
+	upd := WrapKeyUpdates(t, ModeDirect, pbinKeyHasher(), touched.plainKeys, touched.updates)
+	_, err := pph.Process(context.Background(), upd, "", nil, WarmupConfig{})
+	require.ErrorIs(t, err, errPBinDeleteUnsupported)
+}
+
 // TestPBinProcessRepeatedKeyKeepsOneLeaf checks a stem touched twice in one run
 // still holds a single leaf, so the second visit updates rather than splits.
 func TestPBinProcessRepeatedKeyKeepsOneLeaf(t *testing.T) {
