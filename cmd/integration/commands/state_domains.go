@@ -98,7 +98,7 @@ var readDomains = &cobra.Command{
 			}
 			addr, err := hex.DecodeString(strings.TrimPrefix(args[i], "0x"))
 			if err != nil {
-				logger.Warn("invalid address passed", "str", args[i], "at position", i, "err", err)
+				logger.Warn("invalid address passed", "str", args[i], "position", i, "err", err)
 				continue
 			}
 			addrs = append(addrs, addr)
