@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"path/filepath"
+	"sort"
 
 	"github.com/holiman/uint256"
 
@@ -53,6 +54,64 @@ import (
 func chunkAlignedToBlock(toBlock uint64) uint64 {
 	next := toBlock + 1
 	return next - (next % uint64(snaptype.Erigon2MinSegmentSize))
+}
+
+// dumpStraddleDiagnostic emits every inventory candidate we could
+// have picked as the straddle file for each block-part type at
+// toBlock, sorted by span (widest first). Fires from
+// rebuildBlockStraddles when seedLeftoverBlocks fails so the log
+// captures whether the picked-widest choice was really the only
+// option or if a narrower matching set was available.
+func (p *Provider) dumpStraddleDiagnostic(toBlock, newToBlock uint64) {
+	if p.Inventory == nil || p.logger == nil {
+		return
+	}
+	p.logger.Error("[storage] Provider.Unwind: seedLeftoverBlocks failed — dumping straddle candidates",
+		"toBlock", toBlock,
+		"newToBlock", newToBlock,
+		"leftoverRange", fmt.Sprintf("[%d, %d]", newToBlock, toBlock),
+	)
+	for _, typeEnum := range []snaptype.Enum{
+		snaptype2.Enums.Headers,
+		snaptype2.Enums.Bodies,
+		snaptype2.Enums.Transactions,
+	} {
+		type cand struct {
+			name string
+			from uint64
+			to   uint64
+		}
+		var candidates []cand
+		for _, e := range p.Inventory.BlockFiles() {
+			if e.FromBlock > toBlock || e.ToBlock <= toBlock {
+				continue
+			}
+			info, _, ok := snaptype.ParseFileName(p.snapDir, e.Name)
+			if !ok {
+				continue
+			}
+			if info.Type == nil || info.Type.Enum() != typeEnum {
+				continue
+			}
+			candidates = append(candidates, cand{name: e.Name, from: info.From, to: info.To})
+		}
+		sort.Slice(candidates, func(i, j int) bool {
+			return (candidates[i].to - candidates[i].from) > (candidates[j].to - candidates[j].from)
+		})
+		if len(candidates) == 0 {
+			p.logger.Error("[storage] straddle candidate", "type", typeEnum.String(), "candidates", "<none>")
+			continue
+		}
+		for i, c := range candidates {
+			p.logger.Error("[storage] straddle candidate",
+				"type", typeEnum.String(),
+				"rank", i,
+				"span", c.to-c.from,
+				"range", fmt.Sprintf("[%d, %d)", c.from, c.to),
+				"name", c.name,
+			)
+		}
+	}
 }
 
 // straddleBlockFileForType finds the single block-snapshot .seg file
@@ -227,6 +286,13 @@ func (p *Provider) rebuildBlockStraddles(ctx context.Context, tx kv.RwTx, toBloc
 				"toBlock", toBlock, "newToBlock", newToBlock, "headersRange", fmt.Sprintf("[%d,%d)", hFI.From, hFI.To))
 		}
 		if err := seedLeftoverBlocks(ctx, tx, p.snapDir, *hFI, *bFI, tFI, newToBlock, toBlock, p.BlockReader); err != nil {
+			// Dump every inventory candidate we saw per block-part
+			// type — the strict range-parity check leaves us with no
+			// valid triple whenever headers/bodies merged into wider
+			// chunks than tx (or vice versa). The dump surfaces which
+			// files were picked so the next occurrence names the
+			// asymmetry rather than just its symptom.
+			p.dumpStraddleDiagnostic(toBlock, newToBlock)
 			return nil, nil, fmt.Errorf("seedLeftoverBlocks([%d, %d]): %w", newToBlock, toBlock, err)
 		}
 	}
