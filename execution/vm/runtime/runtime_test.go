@@ -136,6 +136,77 @@ func TestCall(t *testing.T) {
 	}
 }
 
+func TestCallChargesAmsterdamNewAccountStateGas(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.TemporalDB(t)
+	tx, domains := testutil.TemporalTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	defer statedb.Release(false)
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1000"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
+	value := uint256.NewInt(1)
+	require.NoError(t, statedb.SetBalance(sender, *value, tracing.BalanceChangeUnspecified))
+
+	const gasLimit = uint64(500_000)
+	_, gasRemaining, err := Call(recipient, nil, &Config{
+		ChainConfig: chain.AllProtocolChanges,
+		Origin:      sender,
+		GasLimit:    gasLimit,
+		Value:       *value,
+		State:       statedb,
+	})
+	require.NoError(t, err)
+	require.Equal(t, mdgas.MdGas{Regular: gasLimit - params.StateGasNewAccount}, gasRemaining)
+}
+
+func TestCallChargesAmsterdamDelegationTargetAccess(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.TemporalDB(t)
+	tx, domains := testutil.TemporalTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	defer statedb.Release(false)
+
+	recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
+	delegatedTo := accounts.InternAddress(common.HexToAddress("0x3000"))
+	require.NoError(t, statedb.SetCode(recipient, types.AddressToDelegation(delegatedTo), tracing.CodeChangeUnspecified))
+	require.NoError(t, statedb.SetCode(delegatedTo, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+
+	const gasLimit = uint64(100_000)
+	_, gasRemaining, err := Call(recipient, nil, &Config{
+		ChainConfig: chain.AllProtocolChanges,
+		GasLimit:    gasLimit,
+		State:       statedb,
+	})
+	require.NoError(t, err)
+	require.Equal(t, mdgas.MdGas{Regular: gasLimit - params.ColdAccountAccessCostEIP8038}, gasRemaining)
+	require.True(t, statedb.AddressInAccessList(delegatedTo))
+}
+
+func TestCallWarmsPragueDelegationTarget(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.TemporalDB(t)
+	tx, domains := testutil.TemporalTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	defer statedb.Release(false)
+
+	recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
+	delegatedTo := accounts.InternAddress(common.HexToAddress("0x3000"))
+	require.NoError(t, statedb.SetCode(recipient, types.AddressToDelegation(delegatedTo), tracing.CodeChangeUnspecified))
+	require.NoError(t, statedb.SetCode(delegatedTo, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+
+	_, _, err := Call(recipient, nil, &Config{
+		ChainConfig: chain.TestChainOsakaConfig,
+		GasLimit:    100_000,
+		State:       statedb,
+	})
+	require.NoError(t, err)
+	require.True(t, statedb.AddressInAccessList(delegatedTo))
+}
+
 func BenchmarkCall(b *testing.B) {
 	var definition = `[{"constant":true,"inputs":[],"name":"seller","outputs":[{"name":"","type":"address"}],"type":"function"},{"constant":false,"inputs":[],"name":"abort","outputs":[],"type":"function"},{"constant":true,"inputs":[],"name":"value","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":false,"inputs":[],"name":"refund","outputs":[],"type":"function"},{"constant":true,"inputs":[],"name":"buyer","outputs":[{"name":"","type":"address"}],"type":"function"},{"constant":false,"inputs":[],"name":"confirmReceived","outputs":[],"type":"function"},{"constant":true,"inputs":[],"name":"state","outputs":[{"name":"","type":"uint8"}],"type":"function"},{"constant":false,"inputs":[],"name":"confirmPurchase","outputs":[],"type":"function"},{"inputs":[],"type":"constructor"},{"anonymous":false,"inputs":[],"name":"Aborted","type":"event"},{"anonymous":false,"inputs":[],"name":"PurchaseConfirmed","type":"event"},{"anonymous":false,"inputs":[],"name":"ItemReceived","type":"event"},{"anonymous":false,"inputs":[],"name":"Refunded","type":"event"}]`
 
@@ -961,13 +1032,13 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 
 	vmenv := NewEnv(cfg)
 	rules := vmenv.ChainRules()
-	statedb.Prepare(rules, systemAddr, cfg.Coinbase, target, vm.ActivePrecompiles(rules), nil, nil)
+	statedb.Prepare(rules, systemAddr, cfg.Coinbase, target, vm.ActivePrecompiles(rules), nil)
 
 	ret, _, _, err := vmenv.Call(
 		systemAddr,
 		target,
 		nil,
-		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules),
 		uint256.Int{}, // value = 0
 		false,
 	)

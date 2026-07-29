@@ -1017,7 +1017,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 						if len(v) < 8 {
 							continue
 						}
-						m[string(bytes.Clone(k))] = bytes.Clone(v[8:])
+						m[string(k)] = bytes.Clone(v[8:])
 						if scanned += len(k) + len(v); scanned >= budget {
 							return
 						}
