@@ -51,23 +51,6 @@ func TestUpdates_NewEmpty_PreservesStreaming(t *testing.T) {
 	require.NotZero(t, sink.touches, "rotated buffer did not forward touch to the streamer")
 }
 
-func TestStreamingWorkerPoolSurvivesReset(t *testing.T) {
-	sc := NewStreamingCommitter(nil, length.Addr, DefaultTrieConfig())
-	defer sc.Release()
-
-	const tag = 7
-	for range 4 {
-		w := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
-		w.mountedNib = tag
-		sc.workerPool.pool.Put(w)
-	}
-	sc.Reset()
-
-	got := sc.workerPool.get()
-	require.Equal(t, tag, got.mountedNib, "Reset must keep cached workers instead of discarding the pool")
-	sc.workerPool.put(got)
-}
-
 func streamingRoot(t *testing.T, workers int, keys [][]byte, upds []Update, idxOrder []int) ([]byte, *MockState) {
 	t.Helper()
 	sc, ms := newStreamingFixture(t, keys, upds, workers)

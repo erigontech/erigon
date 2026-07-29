@@ -126,21 +126,25 @@ func TestParallelPatriciaHashedSkeletonReset(t *testing.T) {
 	require.NotNil(t, p.template, "Reset preserves the template")
 }
 
-func TestParallelWorkerPoolSurvivesReset(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
-	defer p.Release()
+// Every checkout must be config-correct whether it hit the shared pool or
+// constructed fresh — that fungibility is what lets workers cross instances.
+func TestWorkerPoolCheckoutAppliesConfig(t *testing.T) {
+	cfg := DefaultTrieConfig()
+	cfg.MemoizationOff = true
 
-	const tag = 7
-	for range 4 {
-		w := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
-		w.mountedNib = tag
-		p.workerPool.pool.Put(w)
+	var wp trieWorkerPool
+	wp.init(length.Addr, cfg)
+
+	stale := NewHexPatriciaHashed(2*length.Addr, nil, DefaultTrieConfig())
+	stale.Release()
+
+	for range 2 {
+		w := wp.get()
+		assert.Equal(t, int16(length.Addr), w.accountKeyLen)
+		assert.True(t, w.memoizationOff)
+		assert.Equal(t, cfg, w.cfg)
+		wp.put(w)
 	}
-	p.Reset()
-
-	got := p.workerPool.get()
-	assert.Equal(t, tag, got.mountedNib, "Reset must keep cached workers instead of discarding the pool")
-	p.workerPool.put(got)
 }
 
 func TestParallelPatriciaHashedSkeletonRelease(t *testing.T) {
