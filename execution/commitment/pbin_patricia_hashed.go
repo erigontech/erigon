@@ -21,7 +21,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/bits"
+	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
@@ -41,6 +43,8 @@ type PBinPatriciaHashed struct {
 
 	siblingKey [pbinAccountKeyLength]byte // scratch for the CODE_HASH key of the account being visited
 
+	traceW io.Writer // nil = disabled
+
 	rootChecked bool // whether the root record is known to be absent
 	rootTouched bool
 	rootPresent bool
@@ -56,8 +60,46 @@ type pbinCounters struct {
 	materializeReads   uint64
 }
 
+// pbinPool recycles engines: the grid is the better part of a megabyte, and
+// Release leaves a pooled engine in the state a fresh one starts in.
+var pbinPool sync.Pool
+
 func NewPBinPatriciaHashed(ctx PatriciaContext) *PBinPatriciaHashed {
-	return &PBinPatriciaHashed{ctx: ctx}
+	pph, ok := pbinPool.Get().(*PBinPatriciaHashed)
+	if !ok {
+		pph = &PBinPatriciaHashed{}
+	}
+	pph.ctx = ctx
+	return pph
+}
+
+func (pph *PBinPatriciaHashed) Variant() TrieVariant { return VariantBinPatriciaTrie }
+
+func (pph *PBinPatriciaHashed) ResetContext(ctx PatriciaContext) { pph.ctx = ctx }
+
+// SetTraceWriter enables tracing. M0 traces one line per run: the counters the
+// split-rehash decision is waiting on.
+func (pph *PBinPatriciaHashed) SetTraceWriter(w io.Writer) { pph.traceW = w }
+
+// EnableCsvMetrics is a no-op: the binary engine collects no metrics in M0.
+func (pph *PBinPatriciaHashed) EnableCsvMetrics(string) {}
+
+// Reset drops the tree, keeping the context. What survives is in the context, so
+// the next run rebuilds whatever it descends into from stored records.
+func (pph *PBinPatriciaHashed) Reset() {
+	pph.grid.resetForReuse()
+	pph.currentKey = pbinBitpath{}
+	pph.rootChecked, pph.rootTouched, pph.rootPresent = false, false, false
+}
+
+// Release returns the engine to the pool. The caller must not use it afterwards.
+func (pph *PBinPatriciaHashed) Release() {
+	pph.Reset()
+	pph.ctx = nil
+	pph.traceW = nil
+	pph.counters = pbinCounters{}
+	pph.branchEncoder.buf = pph.branchEncoder.buf[:0]
+	pbinPool.Put(pph)
 }
 
 var (
@@ -90,6 +132,10 @@ func (pph *PBinPatriciaHashed) Process(ctx context.Context, updates *Updates, lo
 	}
 	if onProgress != nil {
 		onProgress(&CommitProgress{KeyIndex: processed, UpdateCount: processed})
+	}
+	if pph.traceW != nil {
+		fmt.Fprintf(pph.traceW, "pbin: keys=%d splitsInsidePrefix=%d materializeReads=%d\n",
+			processed, pph.counters.splitsInsidePrefix, pph.counters.materializeReads)
 	}
 	return pph.RootHash()
 }

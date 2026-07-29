@@ -142,6 +142,9 @@ const (
 	VariantHexPatriciaTrie      TrieVariant = "hex-patricia-hashed"
 	VariantParallelHexPatricia  TrieVariant = "hex-parallel-patricia-hashed"
 	VariantStreamingHexPatricia TrieVariant = "hex-streaming-patricia-hashed"
+	// VariantBinPatriciaTrie is EIP-8297's binary tree. It is not wired to the
+	// domain layer: commitment state save/restore has no binary implementation.
+	VariantBinPatriciaTrie TrieVariant = "bin-patricia-hashed"
 )
 
 // InitializeTrieAndUpdates constructs the trie + updates buffer from cfg.
@@ -158,6 +161,12 @@ func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *
 		trie.SetStreamingCommitter(sc)
 		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
 		tree.SetStreamingCommitter(sc)
+		return trie, tree
+	case VariantBinPatriciaTrie:
+		// ModeDirect regardless of the argument: the parallel prefix trie is a
+		// hex-nibble structure and the binary key space has no nibbles.
+		trie := NewPBinPatriciaHashed(nil)
+		tree := NewUpdates(ModeDirect, tmpdir, pbinKeyHasher())
 		return trie, tree
 	case VariantHexPatriciaTrie:
 		fallthrough
@@ -1205,6 +1214,8 @@ func ParseTrieVariant(s string) TrieVariant {
 	switch s {
 	case "parallel":
 		trieVariant = VariantParallelHexPatricia
+	case "bin":
+		trieVariant = VariantBinPatriciaTrie
 	case "hex":
 		fallthrough
 	default:

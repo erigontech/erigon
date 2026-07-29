@@ -245,11 +245,13 @@ func pbinCommonPrefixBits(a, b *pbinBitpath) int16 // XOR + LeadingZeros64, clam
 - Modify: `execution/commitment/commitment.go`
 - Create: `execution/commitment/pbin_variant_test.go`
 
-- [ ] write `TestInitializeTrieAndUpdates_BinVariant` first as the red test, asserting the constructed type, `Variant()`, and `Mode() == ModeDirect`
-- [ ] add `VariantBinPatriciaTrie` plus a case in `ParseTrieVariant`/`InitializeTrieAndUpdates` — **additive only**
-- [ ] implement the remaining `Trie` methods to satisfy the interface unchanged: `Reset`, `ResetContext`, `Release`, `Variant`, `SetTraceWriter`, `EnableCsvMetrics`
-- [ ] write a test asserting `Reset` then reuse produces the same root as a fresh engine
-- [ ] run tests - must pass before task 11
+- [x] write `TestInitializeTrieAndUpdates_BinVariant` first as the red test, asserting the constructed type, `Variant()`, and `Mode() == ModeDirect`
+- [x] add `VariantBinPatriciaTrie` plus a case in `ParseTrieVariant`/`InitializeTrieAndUpdates` — **additive only**
+- [x] implement the remaining `Trie` methods to satisfy the interface unchanged: `Reset`, `ResetContext`, `Release`, `Variant`, `SetTraceWriter`, `EnableCsvMetrics`
+- [x] write a test asserting `Reset` then reuse produces the same root as a fresh engine
+- [x] run tests - must pass before task 11
+
+**Registration notes.** `InitializeTrieAndUpdates` pins `ModeDirect` for this variant whatever mode the caller passes, mirroring how the parallel variant pins `ModeParallel`: `ModeParallel` allocates a hex-nibble prefix trie that has no meaning at arity 2. `SetTraceWriter` traces one line per run — the Task 8 counters — which is also how Task 12 reads them. `EnableCsvMetrics` is a no-op: M0 collects no metrics. `Release` pools the engine as the hex one does, since the grid is ~439 KB.
 
 ### Task 11: hazard guards and differential fuzzing
 
