@@ -1198,6 +1198,7 @@ func (e *EngineServer) HandleForkChoice(
 	if status == execmodule.ExecutionStatusReorgTooDeep {
 		return nil, &engine_helpers.ReorgTooDeepErr
 	}
+	// engine_forkchoiceUpdated restricts payload statuses to VALID, INVALID, and SYNCING — never ACCEPTED.
 	if status == execmodule.ExecutionStatusBusy ||
 		status == execmodule.ExecutionStatusMissingSegment ||
 		status == execmodule.ExecutionStatusTooFarAway {
