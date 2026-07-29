@@ -6,15 +6,12 @@
 # with --chain=<fork-name>. The fresh process picks up the fork's
 # chain.Config via ChainSpecByNameOrForkDatadir.
 #
-# KNOWN LIMITATION (2026-07-28): Provider.Unwind's mode-B trim
-# removes block .seg files + state-domain .kv/.v snapshot straddlers
-# but does NOT touch the accessor/v1.1-*.vi files. The fork-datadir
-# validator at storage.Initialize refuses to boot with those files
-# present. Operators today produce clean fork datadirs via
-# `snapshots fork-from --parent-rpc <URL>`. This script therefore
-# exercises the transition but is EXPECTED TO FAIL at Phase 5 with
-# a diagnostic pointing to that workflow until the in-process trim
-# is extended to cover .vi files (design gap; not a Tier 3c bug).
+# The transition emits every artefact `snapshots fork-from` would
+# produce: post-cut file trim (TrimPostCutSiblings — accessor/v1.1-*.vi,
+# .efi, history/*.v, idx/*.ef), cl-config.<fork>.yaml (shared writer,
+# byte-identical to fork-from output), parent-cut.<fork>.json. The
+# fork-datadir validator on the next --chain=<fork-name> boot sees a
+# clean layout.
 #
 # Assumes a hoodi erigon is already running at PARENT_DATADIR with
 # RPC exposed at PARENT_RPC.

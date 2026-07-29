@@ -171,9 +171,9 @@ A bash driver that:
 Success criteria: the script exits 0 and the erigon log shows no
 component wedge messages.
 
-### 3c-status (2026-07-29): partial — restart-fallback needs artifact parity with `snapshots fork-from`
+### 3c-status (2026-07-29): artifact-parity gap closed; empirical Tier 4 run pending
 
-Landed:
+Landed since the previous status entry:
 
 - `1f89878d11` — real step→block map in ValidateForkDatadir. Fork
   datadir validator no longer classifies known-pre-cut state files as
@@ -181,30 +181,28 @@ Landed:
 - `73517e6183` — `TrimPostCutSiblings` post-swap hook. Removes
   accessor/history/idx files whose step range extends past cut+1.
   Standalone Tier 3c now boots cleanly.
+- `1317a36817` — shared fork CL-config writer (`cl/clparams/forkexport`).
+  Both `snapshots fork-from` and in-process `applyForkWriteCLConfig`
+  emit byte-identical `cl-config.<fork>.yaml` — pinned by
+  `TestWriteForkCLConfig_TwoEntryPointsMatch`.
+- `abcd5f8a01` — `applyForkWriteParentCut` post-swap hook. Emits
+  `parent-cut.<fork>.json` from the local datadir header without an
+  RPC round-trip; structurally equivalent to `CaptureParentCut`'s
+  live output (only `Source` + `SourceRef` legitimately differ).
 
-Blocked:
+Not landed:
 
-- The debug_setFork RPC transition trims files correctly but does
-  NOT emit the other artifacts the fork erigon expects on boot:
-    - `cl-config.yaml` (Caplin config; `snapshots fork-from`
-      derives it from parent's beacon config)
-    - `parent-cut.json` sidecar (block-cut marker consumed by
-      downstream tools)
-    - Cleared txpool DB entries (parent-chain txns still in
-      chaindata; fork boot logs a warning per rejected txn but
-      doesn't fail)
-- Tier 4 smoke iter with model=restart therefore fails at Phase 5
-  (fork erigon boots + validates the datadir but the public HTTP
-  RPC doesn't open — likely waiting on Caplin subsystem readiness
-  that never fires without cl-config.yaml).
+- Txpool DB cleanup — parent-chain txns remain in chaindata after
+  transition. Fork boot logs a warning per rejected txn but does not
+  fail; the pending items get re-scored against the fork's chain.Config
+  on the next `OnNewBlock` unwind. Cosmetic today, not blocking.
 
-To close 3c end-to-end, debug_setFork's post-swap hooks must produce
-the same artifact set `snapshots fork-from` produces:
-`cmd/snapshots/forkfrom/forkfrom.go writeForkCLConfig` +
-whatever parent-cut.json emitter lives in that path. A separate PR.
-Until then, the shipped operator workflow for restart transitions
-remains `snapshots fork-from` (documented in the fork-restart-
-transition.sh header).
+Empirical: the last recorded soak run predates the CL config + parent-
+cut landings. Tier 4 model=restart needs a fresh smoke run to confirm
+the fork erigon's HTTP RPC now opens (the previous failure mode was
+Caplin waiting on `cl-config.yaml` that no path emitted). The Tier 4
+soak (`fork-soak-until-stopped.sh`) is the vehicle — the UCAN gating
+soak currently in flight will exercise both models.
 
 ### 3c. Restart-between-transitions path
 
