@@ -42,6 +42,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/devgenesis"
+	"github.com/erigontech/erigon/cl/clparams/forkexport"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
@@ -2005,7 +2006,17 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 					log.Info("[fork] CL artefact not present in datadir", "label", label, "checked", path, "err", statErr)
 				}
 			}
-			maybeSet(&cfg.CaplinConfig.CustomConfigPath, filepath.Join(nodeConfig.Dirs.DataDir, "cl-config.yaml"), "cl-config.yaml")
+			// Prefer the fork-name-scoped file (cl-config.<fork-name>.yaml)
+			// produced by forkexport.WriteForkCLConfig. Fall back to the
+			// legacy fixed name (cl-config.yaml) for backward compatibility
+			// with datadirs produced by older snapshots fork-from runs.
+			forkScoped := filepath.Join(nodeConfig.Dirs.DataDir, forkexport.ForkCLConfigFilename(spec.Config.ChainName))
+			legacy := filepath.Join(nodeConfig.Dirs.DataDir, "cl-config.yaml")
+			if fi, statErr := os.Stat(forkScoped); statErr == nil && !fi.IsDir() {
+				maybeSet(&cfg.CaplinConfig.CustomConfigPath, forkScoped, forkexport.ForkCLConfigFilename(spec.Config.ChainName))
+			} else {
+				maybeSet(&cfg.CaplinConfig.CustomConfigPath, legacy, "cl-config.yaml")
+			}
 			maybeSet(&cfg.CaplinConfig.CustomGenesisStatePath, filepath.Join(nodeConfig.Dirs.DataDir, "genesis.ssz"), "genesis.ssz")
 		}
 	}

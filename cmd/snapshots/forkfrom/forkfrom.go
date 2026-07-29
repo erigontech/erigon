@@ -31,13 +31,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/urfave/cli/v2"
-	"gopkg.in/yaml.v3"
 
-	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clparams/forkexport"
 	"github.com/erigontech/erigon/common/log/v3"
 	dl "github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/execution/chain"
@@ -310,45 +308,15 @@ func action(ctx *cli.Context) error {
 		"files_copied", files,
 		"bytes_copied", bytes)
 
-	// Emit cl-config.yaml — parent's BeaconChainConfig with ConfigName
-	// overridden to the fork's name. Enables the auto-wired
-	// CustomConfigPath path at fork erigon boot.
-	if err := writeForkCLConfig(newDatadir, cut.ParentChain, derived.ChainName, logger); err != nil {
-		logger.Warn("[fork-from] emit cl-config.yaml skipped", "err", err)
+	// Emit cl-config.<fork-name>.yaml via the shared forkexport writer
+	// so this offline path and the in-process debug_setFork post-swap
+	// hook produce byte-identical output — asserted by
+	// TestWriteForkCLConfig_TwoEntryPointsMatch in cl/clparams/forkexport.
+	if _, err := forkexport.WriteForkCLConfig(newDatadir, cut.ParentChain, derived.ChainName, logger); err != nil {
+		logger.Warn("[fork-from] emit cl-config skipped", "err", err)
 	}
 
 	logger.Info("[fork-from] EL-side complete; pair with genesis.ssz + validator setup (Phase 2c-CL M4+) before starting erigon")
-	return nil
-}
-
-// writeForkCLConfig emits <newDatadir>/cl-config.yaml by loading the
-// parent chain's BeaconChainConfig from clparams and overriding the
-// ConfigName to the fork's chain name. The fork inherits every other
-// consensus parameter from the parent — sufficient for a Flavour-1
-// fork whose Caplin runs against the parent's CL via checkpoint sync.
-// A true shadow fork (distinct GENESIS_FORK_VERSION,
-// GenesisValidatorsRoot, MinGenesisTime, post-cut fork versions) needs
-// operator-supplied overrides + a fresh genesis.ssz; that's a later
-// milestone.
-func writeForkCLConfig(newDatadir, parentChain, forkChainName string, logger log.Logger) error {
-	_, beaconCfg, _, err := clparams.GetConfigsByNetworkName(parentChain)
-	if err != nil {
-		return fmt.Errorf("get parent CL config: %w", err)
-	}
-	// Copy so we don't mutate the package-level default.
-	cfg := *beaconCfg
-	cfg.ConfigName = forkChainName
-
-	body, err := yaml.Marshal(&cfg)
-	if err != nil {
-		return fmt.Errorf("marshal beacon config: %w", err)
-	}
-	path := filepath.Join(newDatadir, "cl-config.yaml")
-	if err := os.WriteFile(path, body, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	logger.Info("[fork-from] cl-config.yaml written",
-		"path", path, "parent_config", beaconCfg.ConfigName, "fork_config", cfg.ConfigName)
 	return nil
 }
 

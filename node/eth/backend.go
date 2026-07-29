@@ -43,6 +43,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clparams/forkexport"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/validator/devvalidator"
@@ -2307,6 +2308,24 @@ func (s *Ethereum) ApplyPostSwapHooks(target *chain.Config) {
 	s.applyForkChainConfigPersist(target)
 	s.applyForkRPCCacheInvalidate()
 	s.applyForkTrimPostCutSiblings(target)
+	s.applyForkWriteCLConfig(target)
+}
+
+// applyForkWriteCLConfig emits the fork's CL config artefact
+// (cl-config.<fork-name>.yaml) via the shared forkexport writer.
+// Same writer + same output filename as `snapshots fork-from`, so a
+// datadir prepared by either entry point boots identically under
+// --chain=<fork-name>. No-op for non-fork chains.
+func (s *Ethereum) applyForkWriteCLConfig(target *chain.Config) {
+	if target.Parent == "" {
+		return
+	}
+	path, err := forkexport.WriteForkCLConfig(s.config.Dirs.DataDir, target.Parent, target.ChainName, s.logger)
+	if err != nil {
+		s.logger.Warn("[fork] emit cl-config skipped", "err", err)
+		return
+	}
+	s.logger.Info("[fork] cl-config written", "path", path)
 }
 
 // applyForkTrimPostCutSiblings removes accessor/history/idx files
