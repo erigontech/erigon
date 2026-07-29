@@ -260,13 +260,13 @@ func pbinCommonPrefixBits(a, b *pbinBitpath) int16 // XOR + LeadingZeros64, clam
 - Create: `execution/commitment/pbin_hazard_test.go`
 - Create: `execution/commitment/pbin_fuzz_test.go`
 
-- [ ] implement an independent branch-record recompute oracle: walk every written record, decode, recompute bottom-up, assert it reproduces the root
-- [ ] implement a bit-space plain-key validator asserting `treeKey(plainKey) == branchPath || cellPrefix` for every written record (guards H8)
-- [ ] write the two-phase sibling test: `Process` batch A writing both children, then batch B touching one child, asserting the root equals the oracle over A∪B (guards H2)
-- [ ] write the mined deep-shared-prefix corpus test and assert oracle equality (guards H1)
-- [ ] write permutation-independence tests porting `Test_HexPatriciaHashed_UniqueRepresentation`/`2`/`BrokenUniqueRepr` (`hex_patricia_hashed_test.go:157-249`)
-- [ ] write a differential fuzzer over `Process` against the oracle with a **low-entropy slot generator** — random 32-byte slots essentially never share a stem, so a default corpus never exercises sub-index sharing
-- [ ] run tests - must pass before task 12
+- [x] implement an independent branch-record recompute oracle: walk every written record, decode, recompute bottom-up, assert it reproduces the root — landed as `pbinVerifier`, which finds the root record as the one no other record is a bit-prefix of
+- [x] implement a bit-space plain-key validator asserting `treeKey(plainKey) == branchPath || cellPrefix` for every written record (guards H8)
+- [x] write the two-phase sibling test: `Process` batch A writing both children, then batch B touching one child, asserting the root equals the oracle over A∪B (guards H2)
+- [x] write the mined deep-shared-prefix corpus test and assert oracle equality (guards H1)
+- [x] write permutation-independence tests porting `Test_HexPatriciaHashed_UniqueRepresentation`/`2`/`BrokenUniqueRepr` (`hex_patricia_hashed_test.go:157-249`)
+- [x] write a differential fuzzer over `Process` against the oracle with a **low-entropy slot generator** — random 32-byte slots essentially never share a stem, so a default corpus never exercises sub-index sharing
+- [x] run tests - must pass before task 12
 
 ### Task 12: Verify acceptance criteria
 
@@ -275,7 +275,7 @@ func pbinCommonPrefixBits(a, b *pbinBitpath) int16 // XOR + LeadingZeros64, clam
 - [ ] verify every hazard in the register except H6 has a named passing test
 - [ ] verify every new package-level identifier carries the `pbin` prefix and the package compiles without collision
 - [ ] run the package test suite: `go test ./execution/commitment/...`
-- [ ] run fuzzers briefly: `go test ./execution/commitment/ -run=Fuzz -fuzz=FuzzPBin -fuzztime=60s`
+- [ ] run fuzzers briefly, one target per invocation — `-fuzz` refuses a regex matching several: `go test ./execution/commitment/ -run=Fuzz -fuzz=FuzzPBinBitPathCodec -fuzztime=60s` then the same for `FuzzPBinProcessMatchesOracle`
 - [ ] verify `go build ./...` and `go vet ./execution/commitment/...` are clean
 - [ ] record the Task 8 instrumentation counters under Post-Completion
 
