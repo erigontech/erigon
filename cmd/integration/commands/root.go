@@ -19,9 +19,7 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
@@ -38,29 +36,12 @@ import (
 	"github.com/erigontech/erigon/node/logging"
 )
 
-func expandHomeDir(dirpath string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return dirpath
-	}
-	prefix := fmt.Sprintf("~%c", os.PathSeparator)
-	if strings.HasPrefix(dirpath, prefix) {
-		return filepath.Join(home, dirpath[len(prefix):])
-	} else if dirpath == "~" {
-		return home
-	}
-	return dirpath
-}
-
 var rootCmd = &cobra.Command{
 	Use:   "integration",
 	Short: "long and heavy integration tests for Erigon",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		datadirCli = expandHomeDir(datadirCli)
 		if chaindata == "" {
 			chaindata = filepath.Join(datadirCli, "chaindata")
-		} else {
-			chaindata = expandHomeDir(chaindata)
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {

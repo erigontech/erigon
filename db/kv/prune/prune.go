@@ -149,8 +149,8 @@ func HashSeekingPrune(
 		select {
 		case <-logEvery.C:
 			txNum := binary.BigEndian.Uint64(txnm)
-			logger.Info("[snapshots] prune index", "name", filenameBase, "pruned tx", stat.PruneCountTx,
-				"pruned values", stat.PruneCountValues,
+			logger.Info("[snapshots] prune index", "name", filenameBase, "prunedTx", stat.PruneCountTx,
+				"prunedValues", stat.PruneCountValues,
 				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(stepSize), float64(txNum)/float64(stepSize)))
 		default:
 		}
