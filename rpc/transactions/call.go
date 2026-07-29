@@ -215,6 +215,9 @@ func (r *ReusableCaller) DoCallWithNewGas(
 		}
 		r.evm.SetPrecompiles(precompiles)
 	}
+	if prev := r.evm.IntraBlockState(); prev != nil {
+		prev.Release(false)
+	}
 	r.evm.Reset(txCtx, ibs)
 
 	// done is closed on return to stop the watcher goroutine before it can
