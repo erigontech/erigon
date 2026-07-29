@@ -17,6 +17,7 @@
 package builder
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -32,7 +33,8 @@ type BlockBuilderFunc func(param *Parameters, interrupt *atomic.Bool) (*types.Bl
 // BlockBuilder wraps a goroutine that builds Proof-of-Stake payloads (PoS "mining")
 type BlockBuilder struct {
 	interrupt atomic.Bool
-	syncCond  *sync.Cond
+	mu        sync.Mutex
+	done      chan struct{}
 	result    *types.BlockWithReceipts
 	err       error
 	view      ScopedReadView // pinned by-block read snapshot; released when the build goroutine exits
@@ -43,15 +45,13 @@ type BlockBuilder struct {
 func (b *BlockBuilder) Cancel() { b.interrupt.Store(true) }
 
 func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTimeSecs uint64) *BlockBuilder {
-	builder := new(BlockBuilder)
-	builder.syncCond = sync.NewCond(new(sync.Mutex))
+	builder := &BlockBuilder{done: make(chan struct{})}
 	builder.view = param.ScopedView
-	terminated := make(chan struct{})
 
 	go func() {
-		defer close(terminated)
 		// Release the pinned read snapshot (its roTx) when the build goroutine
-		// exits — on success, error, timeout-driven Stop, or panic. Idempotent.
+		// exits — on success, error, timeout-driven Stop, or panic. Registered
+		// before the result defer, so it runs after done is closed. Idempotent.
 		defer func() {
 			if builder.view != nil {
 				builder.view.Release()
@@ -67,11 +67,11 @@ func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTimeSecs
 				result = nil
 			}
 
-			builder.syncCond.L.Lock()
-			defer builder.syncCond.L.Unlock()
+			builder.mu.Lock()
 			builder.result = result
 			builder.err = err
-			builder.syncCond.Broadcast()
+			builder.mu.Unlock()
+			close(builder.done)
 		}()
 
 		log.Info("Building block...")
@@ -81,7 +81,7 @@ func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTimeSecs
 			log.Warn("Failed to build a block", "err", err)
 		} else {
 			block := result.Block
-			log.Info("Built block", "hash", block.Hash(), "height", block.NumberU64(), "txs", len(block.Transactions()), "executionRequests", len(result.Requests), "gas used %", 100*float64(block.GasUsed())/float64(block.GasLimit()), "time", time.Since(t))
+			log.Info("Built block", "hash", block.Hash(), "height", block.NumberU64(), "txs", len(block.Transactions()), "executionRequests", len(result.Requests), "gasUsedPct", 100*float64(block.GasUsed())/float64(block.GasLimit()), "time", time.Since(t))
 		}
 	}()
 
@@ -91,10 +91,10 @@ func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTimeSecs
 		select {
 		case <-timer.C:
 			log.Warn("Stopping block builder due to max build time exceeded")
-			_, _ = builder.Stop()
+			_, _ = builder.Stop(context.Background())
 			log.Debug("Stopped block builder due to max build time exceeded")
 			return
-		case <-terminated:
+		case <-builder.done:
 			return
 		}
 	}()
@@ -102,21 +102,23 @@ func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTimeSecs
 	return builder
 }
 
-func (b *BlockBuilder) Stop() (*types.BlockWithReceipts, error) {
+func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, error) {
 	b.interrupt.Store(true)
 
-	b.syncCond.L.Lock()
-	defer b.syncCond.L.Unlock()
-	for b.result == nil && b.err == nil {
-		b.syncCond.Wait()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-b.done:
 	}
 
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	return b.result, b.err
 }
 
 func (b *BlockBuilder) Block() *types.Block {
-	b.syncCond.L.Lock()
-	defer b.syncCond.L.Unlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
 	if b.result == nil {
 		return nil

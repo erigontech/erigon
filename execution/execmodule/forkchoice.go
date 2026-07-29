@@ -685,7 +685,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			if blockHashBlockNum != nil {
 				hashBlockNum = strconv.FormatUint(*blockHashBlockNum, 10)
 			}
-			e.logger.Warn("bad forkchoice", "head", headHash, "head block", headNum, "hash", blockHash, "hash block", hashBlockNum)
+			e.logger.Warn("bad forkchoice", "head", headHash, "headBlock", headNum, "hash", blockHash, "hashBlockNum", hashBlockNum)
 		}
 		currentContext.Close()
 		currentContext = nil

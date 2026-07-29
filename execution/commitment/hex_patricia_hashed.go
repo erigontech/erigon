@@ -1584,7 +1584,7 @@ func (hph *HexPatriciaHashed) needFolding(hashedKey []byte) bool {
 }
 
 // Process-cumulative trie-compute counters feeding the KVReadLevelledMetrics
-// "skip ratio"/"reset ratio" Debug log at the end of ComputeCommitment.
+// "skipRatio"/"resetRatio" Debug log at the end of ComputeCommitment.
 var (
 	hadToLoad   atomic.Uint64
 	skippedLoad atomic.Uint64
@@ -2629,8 +2629,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		log.Debug("commitment finished, counters updated (no reset)",
 			//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
 			//"hadToReset", common.PrettyCounter(hadToReset.Load()),
-			"skip ratio", fmt.Sprintf("%.1f%%", 100*(float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))),
-			"reset ratio", fmt.Sprintf("%.1f%%", 100*(float64(hadToReset.Load())/float64(hadToLoad.Load()))),
+			"skipRatio", fmt.Sprintf("%.1f%%", 100*(float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))),
+			"resetRatio", fmt.Sprintf("%.1f%%", 100*(float64(hadToReset.Load())/float64(hadToLoad.Load()))),
 			"keys", common.PrettyCounter(ki), "spent", time.Since(start),
 		)
 		ends := make([]uint64, 0, len(hph.hadToLoadL))

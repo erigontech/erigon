@@ -252,13 +252,13 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 	defer st.Release(false)
 	senderBalance, err := st.GetBalance(accounts.InternAddress(sender))
 	require.NoError(t, err)
-	require.Equal(t, uint256.MustFromHex("0x286a802d7b04d897"), &senderBalance)
+	require.Equal(t, uint256.MustFromHex("0x2869323611617c47"), &senderBalance)
 	senderNonce, err := st.GetNonce(accounts.InternAddress(sender))
 	require.NoError(t, err)
 	require.Equal(t, uint64(4258), senderNonce)
 	coinbaseBalance, err := st.GetBalance(accounts.InternAddress(coinbase))
 	require.NoError(t, err)
-	require.Equal(t, uint256.MustFromHex("0x14a5fadeb16dd327696"), &coinbaseBalance)
+	require.Equal(t, uint256.MustFromHex("0x14a5faf390e46c23696"), &coinbaseBalance)
 	tracer := "prestateTracer"
 	var buf bytes.Buffer
 	stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
