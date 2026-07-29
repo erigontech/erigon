@@ -831,3 +831,89 @@ func TestNodeEncode_NoAlloc(t *testing.T) {
 	})
 	require.Zero(t, allocs)
 }
+
+func Test_BtreeIndex_GetValSize(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	logger := log.New()
+	keyCount, M := 1200, 30
+	compressFlags := seg.CompressVals
+
+	dataPath := generateKV(t, tmp, 20, 3000, keyCount, logger, compressFlags)
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
+	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
+	require.NoError(t, err)
+	defer bt.Close()
+	defer kv.Close()
+
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, keys)
+
+	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+
+	for i, key := range keys {
+		_, v, _, found, err := bt.Get(key, getter)
+		require.NoErrorf(t, err, "i=%d", i)
+		require.Truef(t, found, "i=%d", i)
+
+		size, sizeFound, err := bt.GetValSize(key, getter)
+		require.NoErrorf(t, err, "i=%d", i)
+		require.Truef(t, sizeFound, "i=%d", i)
+		require.Equalf(t, len(v), size, "i=%d", i)
+	}
+
+	for i := range keys {
+		miss := bytes.Clone(keys[i])
+		miss[0] ^= 0xff
+		_, v, _, found, err := bt.Get(miss, getter)
+		require.NoErrorf(t, err, "i=%d", i)
+		size, sizeFound, err := bt.GetValSize(miss, getter)
+		require.NoErrorf(t, err, "i=%d", i)
+		require.Equalf(t, found, sizeFound, "i=%d", i)
+		require.Equalf(t, len(v), size, "i=%d", i)
+	}
+}
+
+func Benchmark_BtreeIndex_GetVsGetValSize(b *testing.B) {
+	tmp := b.TempDir()
+	logger := log.New()
+	keyCount, M := 10000, 256
+	compressFlags := seg.CompressVals
+
+	dataPath := generateKV(b, tmp, 20, 3000, keyCount, logger, compressFlags)
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
+	buildBtreeIndex(b, dataPath, indexPath, compressFlags, 1, logger, true)
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
+	require.NoError(b, err)
+	defer bt.Close()
+	defer kv.Close()
+
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(b, err)
+
+	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+
+	b.Run("Get", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; b.Loop(); i++ {
+			_, _, _, _, err := bt.Get(keys[i%len(keys)], getter)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("GetValSize", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; b.Loop(); i++ {
+			_, _, err := bt.GetValSize(keys[i%len(keys)], getter)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}

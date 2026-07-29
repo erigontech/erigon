@@ -691,6 +691,25 @@ func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile 
 	return lookup, v, offsetInFile, found, nil
 }
 
+// GetValSize - exact match of key, returning only the value's size. Skips
+// value decompression, so it allocates nothing.
+func (b *BtIndex) GetValSize(lookup []byte, gr *seg.Reader) (size int, found bool, err error) {
+	if b.Empty() {
+		return 0, false, nil
+	}
+	if b.bplus == nil {
+		panic(fmt.Errorf("GetValSize: `b.bplus` is nil: %s", gr.FileName()))
+	}
+	size, found, err = b.bplus.GetValSize(gr, lookup)
+	if err != nil {
+		if errors.Is(err, ErrBtIndexLookupBounds) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return size, found, nil
+}
+
 // Seek moves cursor to position where key >= x.
 // Then if x == nil - first key returned
 //

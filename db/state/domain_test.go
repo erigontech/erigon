@@ -3761,3 +3761,70 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 		})
 	}
 }
+
+func TestDomain_GetLatestValSize(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	logger := log.New()
+
+	check := func(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
+		t.Helper()
+		require := require.New(t)
+		err := db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
+			collateAndMerge(t, tx, d, txs)
+			return nil
+		})
+		require.NoError(err)
+
+		domainRoTx := d.beginForTests()
+		defer domainRoTx.Close()
+		roTx, err := db.BeginRo(t.Context())
+		require.NoError(err)
+		defer roTx.Rollback()
+
+		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
+			var k [8]byte
+			binary.BigEndian.PutUint64(k[:], keyNum)
+			label := fmt.Sprintf("keyNum=%d", keyNum)
+
+			sizeF, sizeFoundF, err := domainRoTx.getLatestFromFilesValSize(k[:], 0)
+			require.NoError(err, label)
+			vf, foundInFiles, _, _, err := domainRoTx.getLatestFromFiles(k[:], 0)
+			require.NoError(err, label)
+			require.Equal(foundInFiles, sizeFoundF, label)
+			require.Equal(len(vf), sizeF, label)
+
+			v, _, found, err := domainRoTx.GetLatest(k[:], roTx)
+			require.NoError(err, label)
+			require.True(found, label)
+
+			size, sizeFound, err := domainRoTx.GetLatestValSize(k[:], roTx)
+			require.NoError(err, label)
+			require.True(sizeFound, label)
+			require.Equal(len(v), size, label)
+		}
+
+		var missing [8]byte
+		binary.BigEndian.PutUint64(missing[:], 1000)
+		size, sizeFound, err := domainRoTx.GetLatestValSize(missing[:], roTx)
+		require.NoError(err)
+		require.False(sizeFound)
+		require.Zero(size)
+		_, _, found, err := domainRoTx.GetLatest(missing[:], roTx)
+		require.NoError(err)
+		require.False(found)
+	}
+
+	t.Run("btree accessor", func(t *testing.T) {
+		db, d, txs := filledDomain(t, logger)
+		check(t, db, d, txs)
+	})
+	t.Run("hashmap accessor", func(t *testing.T) {
+		db, d, txs := filledDomainWithHashMapAccessor(t, logger)
+		check(t, db, d, txs)
+	})
+}

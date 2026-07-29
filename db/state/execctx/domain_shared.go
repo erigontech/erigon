@@ -1296,8 +1296,9 @@ func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte, txNum uint64
 
 	// Fast path: when we can resolve codeHash from the account cache AND
 	// the size is in the size cache, return without loading bytes.
+	var codeHash []byte
 	if sd.stateCache != nil {
-		if codeHash := sd.codeHashForAddr(tx, addr, txNum); len(codeHash) > 0 {
+		if codeHash = sd.codeHashForAddr(tx, addr, txNum); len(codeHash) > 0 {
 			if size, ok := sd.stateCache.GetCodeSizeByHash(codeHash); ok {
 				return size, true, nil
 			}
@@ -1310,7 +1311,23 @@ func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte, txNum uint64
 		}
 	}
 
-	// Cold path: authoritative read via the normal SD.GetLatest chain.
+	// Size-only cold path: code values are compressed in .kv files, so
+	// materializing them just to take len() dominates read allocations.
+	size, found, answered, err := sd.getLatestValSize(kv.CodeDomain, tx, addr)
+	if err != nil {
+		return 0, false, err
+	}
+	if answered {
+		if !found || size == 0 {
+			return 0, false, nil
+		}
+		if sd.stateCache != nil && len(codeHash) > 0 {
+			sd.stateCache.PutCodeSizeByHash(codeHash, size, txNum)
+		}
+		return size, true, nil
+	}
+
+	// Fallback: authoritative read via the normal SD.GetLatest chain.
 	// Populates L1, codeHashToCode, and (via PutWithCodeHash) the size layer for
 	// future callers.
 	v, _, err := sd.GetLatest(kv.CodeDomain, tx, addr)
@@ -1321,6 +1338,46 @@ func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte, txNum uint64
 		return 0, false, nil
 	}
 	return len(v), true, nil
+}
+
+// getLatestValSize resolves only the size of the latest value, mirroring
+// getLatestMetered's read layering (mem → parent mem → stateCache → aggTx).
+// answered=false means this path cannot serve the read (bounded by an
+// in-flight unwind, or the aggregator doesn't expose size reads) and the
+// caller must fall back to a full GetLatest.
+func (sd *SharedDomains) getLatestValSize(domain kv.Domain, tx kv.TemporalTx, k []byte) (size int, found bool, answered bool, err error) {
+	maxStep := kv.NoStepBound
+
+	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
+		return len(v), true, true, nil
+	} else if step < maxStep {
+		maxStep = step
+	}
+	if sd.parent != nil {
+		if v, step, ok := sd.parent.mem.GetLatest(domain, k); ok {
+			return len(v), true, true, nil
+		} else if step < maxStep {
+			maxStep = step
+		}
+	}
+	if sd.stateCache != nil {
+		if v, cTxNum, ok := sd.stateCache.GetWithTxNum(domain, k); ok && servableUnderBound(kv.Step(cTxNum/sd.StepSize()), maxStep) {
+			return len(v), true, true, nil
+		}
+	}
+	if maxStep != kv.NoStepBound {
+		return 0, false, false, nil
+	}
+
+	type valSizeGetter interface {
+		GetLatestValSize(domain kv.Domain, k []byte, tx kv.Tx) (int, bool, error)
+	}
+	aggTx, ok := tx.AggTx().(valSizeGetter)
+	if !ok {
+		return 0, false, false, nil
+	}
+	size, found, err = aggTx.GetLatestValSize(domain, k, tx)
+	return size, found, true, err
 }
 
 // GetCode returns the contract code at addr. The fast path resolves the
