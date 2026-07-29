@@ -1,8 +1,6 @@
 # Erigon Agent Guidelines
 
-This file provides guidance for AI agents working with this codebase.
-
-**Requirements**: Go 1.25+, GCC 10+ or Clang, 32GB+ RAM, SSD/NVMe storage
+Use B2-level English. Use programming terminology freely and exactly 
 
 ## Build & Test
 
@@ -118,7 +116,7 @@ If a user explicitly directs an agent to add any other skip in the current turn 
 
 Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace configs optional`
 
-Do not add `Co-Authored-By: Claude` or `🤖 Generated with Claude Code` lines to commits, PRs, or issues — Claude attribution is disabled repo-wide via `.claude/settings.json` (`includeCoAuthoredBy: false`).
+Don't sign commits, pr's, issues, comments.
 
 Run `make lint` before every push. The linter is non-deterministic — run it repeatedly until clean.
 
