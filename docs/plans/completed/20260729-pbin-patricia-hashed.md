@@ -311,9 +311,9 @@ Hazard → guard, all passing (H6 is N/A in M0, H14 is a review item):
 
 ### Task 13: [Final] Update documentation
 
-- [ ] add a package-level doc comment on `pbin_patricia_hashed.go` naming the EIP, the Keccak suite choice and the M0 scope boundaries
-- [ ] update `CLAUDE.md` if new patterns were discovered
-- [ ] move this plan to `docs/plans/completed/`
+- [x] add a package-level doc comment on `pbin_patricia_hashed.go` naming the EIP, the Keccak suite choice and the M0 scope boundaries — landed as a file-header comment separated from `package commitment` by a blank line, matching the package's own convention; attaching it would have made it the doc comment for all of `commitment`, which this engine does not own
+- [x] update `CLAUDE.md` if new patterns were discovered — no change: the `pbin` prefix rule is plan-local, and nothing repo-wide came out of M0
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

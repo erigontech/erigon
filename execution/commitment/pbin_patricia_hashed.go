@@ -14,6 +14,17 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
+// PBinPatriciaHashed — commitment over EIP-8297's partitioned binary tree.
+//
+// The EIP leaves its hash function open and names Keccak-256 as a candidate;
+// this engine uses Keccak-256 both for node hashing and for tree-key
+// derivation, behind pbinHasher so the suite can be swapped.
+//
+// M0 scope: in-memory Process over the account and storage zones, ModeDirect
+// only. Code chunking, deletion, commitment state save/restore and parallel
+// mounting are out — BASIC_DATA carries code_size 0, and a delete arriving on
+// the update stream is rejected rather than applied.
+
 package commitment
 
 import (
