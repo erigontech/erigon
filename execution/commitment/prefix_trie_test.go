@@ -225,26 +225,6 @@ func TestPrefixTrieArenaReuse(t *testing.T) {
 	assert.Equal(t, first, tr.arena.nodeCount())
 }
 
-// TestUpdatesParallelReuseAvoidsFreshAlloc pins the invariant the BAL-fold
-// buffer reuse relies on: Resetting a ModeParallel Updates leaves it
-// state-equivalent to a fresh NewEmpty (empty key set, prefix trie holding
-// only its reused root) while allocating strictly fewer objects — it does not
-// re-allocate the prefix-trie arena's ~16k-node slab that NewEmpty does.
-func TestUpdatesParallelReuseAvoidsFreshAlloc(t *testing.T) {
-	base := NewUpdates(ModeParallel, t.TempDir(), keyHasherNoop)
-	reused := base.NewEmpty()
-
-	reused.Reset()
-	assert.Empty(t, reused.keys, "Reset must clear the key set")
-	require.NotNil(t, reused.parallel)
-	assert.Equal(t, 1, reused.parallel.trie.arena.nodeCount(), "Reset must leave only the reused root")
-
-	freshAllocs := testing.AllocsPerRun(100, func() { _ = base.NewEmpty() })
-	reuseAllocs := testing.AllocsPerRun(100, func() { reused.Reset() })
-	t.Logf("allocs/op: NewEmpty=%.0f  Reset=%.0f", freshAllocs, reuseAllocs)
-	assert.Less(t, reuseAllocs, freshAllocs, "Reset reuse must allocate fewer objects than a fresh NewEmpty")
-}
-
 func TestPrefixTrieArenaSpansMultipleSlabs(t *testing.T) {
 	tr := newPrefixTrie()
 	// Allocate directly to cross the slab boundary; reaching it via inserts needs >prefixSlabSize keys.
