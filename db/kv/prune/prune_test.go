@@ -495,6 +495,72 @@ func TestDupSortPrune_ProductionLike(t *testing.T) {
 	t.Logf("survivors=%d", len(got))
 }
 
+// TestTableScanningPrune_KeyLimitIsResumable pins that a non-zero limit bounds
+// how many txn keys one call prunes, and that the unfinished range is reported
+// as InProgress with a resume position — marking it Done would silently strand
+// the keys past the limit.
+func TestTableScanningPrune_KeyLimitIsResumable(t *testing.T) {
+	db := openTestDupSortDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const txTo uint64 = 10
+	// txNums 0..14, two dups each; 10..14 are out of the prune range.
+	for txNum := range uint64(15) {
+		var k [8]byte
+		binary.BigEndian.PutUint64(k[:], txNum)
+		require.NoError(t, tx.Put(testDupSortTable, k[:], userKey(txNum)))
+		require.NoError(t, tx.Put(testDupSortTable, k[:], userKey(txNum+1000)))
+	}
+
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+
+	// ValueProgress=Done with TxFrom/TxTo already matching keeps these calls to the
+	// key phase, so no values cursor is needed.
+	prunePass := func(limit uint64, keyProgress prune.Progress, lastPrunedKey []byte) *prune.Stat {
+		t.Helper()
+		keysCursor, err := tx.RwCursorDupSort(testDupSortTable)
+		require.NoError(t, err)
+		defer keysCursor.Close()
+		prevStat := &prune.Stat{
+			TxFrom: 0, TxTo: txTo,
+			KeyProgress:   keyProgress,
+			LastPrunedKey: lastPrunedKey,
+			ValueProgress: prune.Done,
+		}
+		stat, err := prune.TableScanningPrune(
+			t.Context(), "test", "ii",
+			0, txTo, limit, 1, logEvery, log.New(),
+			keysCursor, nil, false, prevStat, prune.DefaultStorageMode,
+		)
+		require.NoError(t, err)
+		return stat
+	}
+
+	stat := prunePass(3, prune.First, nil)
+	require.EqualValues(t, 3, stat.PruneCountTx, "limit must bound the number of txn keys pruned")
+	require.Equal(t, prune.InProgress, stat.KeyProgress, "a limited scan must not claim the range is Done")
+	require.NotNil(t, stat.LastPrunedKey, "limited scan must save a resume position")
+	require.EqualValues(t, 3, binary.BigEndian.Uint64(stat.LastPrunedKey), "resume at the first unpruned key")
+
+	keys, dups := countDupSortTable(t, tx)
+	require.Equal(t, 12, keys, "txNums 3..14 remain")
+	require.Equal(t, 24, dups)
+
+	stat2 := prunePass(0, stat.KeyProgress, stat.LastPrunedKey)
+	require.EqualValues(t, 7, stat2.PruneCountTx, "resumed scan prunes the remaining in-range keys")
+	require.Equal(t, prune.Done, stat2.KeyProgress)
+	require.Nil(t, stat2.LastPrunedKey)
+
+	keys, dups = countDupSortTable(t, tx)
+	require.Equal(t, 5, keys, "only out-of-range txNums 10..14 remain")
+	require.Equal(t, 10, dups)
+}
+
 func BenchmarkTableScanningPrune(b *testing.B) {
 	db := openTestDB(b)
 	defer db.Close()

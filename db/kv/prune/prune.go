@@ -249,6 +249,12 @@ func TableScanningPrune(
 			if txNum >= txTo {
 				break
 			}
+			if limit == 0 {
+				stat.LastPrunedKey = bytes.Clone(txnb)
+				stat.KeyProgress = InProgress
+				return stat, nil
+			}
+			limit--
 			stat.PruneCountTx++
 			if throttling != nil {
 				time.Sleep(*throttling)

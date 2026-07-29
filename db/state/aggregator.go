@@ -97,9 +97,6 @@ type Aggregator struct {
 	buildingFiles atomic.Bool
 	mergingFiles  atomic.Bool
 
-	maxCollationTxNum          atomic.Uint64
-	lastFlushedCommitmentTxNum atomic.Uint64
-
 	//warmupWorking          atomic.Bool
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -1707,9 +1704,6 @@ func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pr
 	const targetSteps = 1.5
 
 	toTxNum := a.EndTxNumMinimax() + a.StepSize()
-	if cap := a.maxCollationTxNum.Load(); cap > 0 && toTxNum > cap {
-		toTxNum = cap
-	}
 	a.BuildFilesInBackground(toTxNum)
 
 	prevSteps := float64(0)
@@ -1734,9 +1728,6 @@ func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pr
 		prevSteps = stepsInDB
 
 		toTxNum = a.EndTxNumMinimax() + a.StepSize()
-		if cap := a.maxCollationTxNum.Load(); cap > 0 && toTxNum > cap {
-			toTxNum = cap
-		}
 		a.BuildFilesInBackground(toTxNum)
 
 		time.Sleep(100 * time.Millisecond)
@@ -2287,22 +2278,6 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 						"Removing only the snapshots is not enough: an earlier build may have already populated chaindata with values read from a corrupt snapshot file.")
 				close(fin)
 				return
-			}
-		}
-
-		// Cap to maxCollationTxNum if set (prevents domain files extending past block files).
-		if cap := a.maxCollationTxNum.Load(); cap > 0 {
-			maxStep := kv.Step(cap / a.StepSize())
-			if lastInDB > maxStep {
-				lastInDB = maxStep
-			}
-		}
-
-		if flushedTxNum := a.lastFlushedCommitmentTxNum.Load(); flushedTxNum > 0 {
-			stepSize := a.StepSize()
-			safeStep := kv.Step(flushedTxNum/stepSize) - 1
-			if flushedTxNum >= stepSize && lastInDB > safeStep {
-				lastInDB = safeStep
 			}
 		}
 
