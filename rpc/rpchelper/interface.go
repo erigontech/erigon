@@ -70,8 +70,14 @@ type SetForkResult struct {
 // ApiBackend to this interface at construction; nil ⇒ debug_setFork
 // returns an actionable "not available" error. In-process erigon
 // (node/eth.Ethereum) implements it; standalone rpcdaemon does not.
+//
+// authorityUCAN is the caller's proof of authority: a base64-encoded
+// CBOR UCAN carrying fork:transition:<targetChainName> and signed by
+// (or delegated from) a trust root the node's operator accepts.
+// Empty or invalid UCANs cause SetFork to reject before any state
+// changes.
 type ForkController interface {
-	SetFork(ctx context.Context, targetChainName string) (*SetForkResult, error)
+	SetFork(ctx context.Context, targetChainName, authorityUCAN string) (*SetForkResult, error)
 }
 
 // ChainConfigReconfigurable is the primary "component supports

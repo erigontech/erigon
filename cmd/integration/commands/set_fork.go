@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -33,15 +34,19 @@ import (
 )
 
 var (
-	setForkRpcURL     string
-	setForkTarget     string
-	setForkTimeoutSec int
+	setForkRpcURL         string
+	setForkTarget         string
+	setForkTimeoutSec     int
+	setForkAuthorityUCAN  string
+	setForkAuthorityFile  string
 )
 
 func init() {
 	setForkCmd.Flags().StringVar(&setForkRpcURL, "rpcendpoint", "http://127.0.0.1:8545", "JSON-RPC endpoint of the running erigon node")
 	setForkCmd.Flags().StringVar(&setForkTarget, "chain", "", "target chain name to transition into (must be a direct parent/child of the current chain)")
 	setForkCmd.Flags().IntVar(&setForkTimeoutSec, "timeout-sec", 1800, "HTTP timeout for the debug_setFork call (SetHead unwind + captor swap can take >30s)")
+	setForkCmd.Flags().StringVar(&setForkAuthorityUCAN, "authority-ucan", "", "base64-encoded fork-transition UCAN (mutually exclusive with --authority-ucan-file)")
+	setForkCmd.Flags().StringVar(&setForkAuthorityFile, "authority-ucan-file", "", "path to a file containing the base64-encoded fork-transition UCAN")
 	must(setForkCmd.MarkFlagRequired("chain"))
 	rootCmd.AddCommand(setForkCmd)
 }
@@ -63,6 +68,12 @@ transition manually.`,
 		logger := debug.SetupCobra(cmd, "integration")
 		ctx, _ := common.RootContext()
 
+		authorityUCAN, err := loadAuthorityUCAN(setForkAuthorityUCAN, setForkAuthorityFile)
+		if err != nil {
+			logger.Error("resolve authority UCAN", "err", err)
+			os.Exit(1)
+		}
+
 		client, err := dialWithTimeout(setForkRpcURL, time.Duration(setForkTimeoutSec)*time.Second, logger)
 		if err != nil {
 			logger.Error("dial erigon RPC", "url", setForkRpcURL, "err", err)
@@ -71,7 +82,7 @@ transition manually.`,
 		defer client.Close()
 
 		var result rpchelper.SetForkResult
-		if err := client.CallContext(ctx, &result, "debug_setFork", setForkTarget); err != nil {
+		if err := client.CallContext(ctx, &result, "debug_setFork", setForkTarget, authorityUCAN); err != nil {
 			logger.Error("debug_setFork call failed", "target", setForkTarget, "err", err)
 			os.Exit(1)
 		}
@@ -91,4 +102,27 @@ transition manually.`,
 func dialWithTimeout(url string, timeout time.Duration, logger log.Logger) (*rpc.Client, error) {
 	httpClient := &http.Client{Timeout: timeout}
 	return rpc.DialHTTPWithClient(url, httpClient, logger)
+}
+
+// loadAuthorityUCAN resolves the caller-provided UCAN. Exactly one of
+// --authority-ucan or --authority-ucan-file must be supplied; the file
+// form is preferred for shell hygiene (avoids the token appearing in
+// process listings and shell history).
+func loadAuthorityUCAN(inline, file string) (string, error) {
+	inline = strings.TrimSpace(inline)
+	file = strings.TrimSpace(file)
+	switch {
+	case inline != "" && file != "":
+		return "", fmt.Errorf("--authority-ucan and --authority-ucan-file are mutually exclusive")
+	case inline != "":
+		return inline, nil
+	case file != "":
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			return "", fmt.Errorf("read %s: %w", file, err)
+		}
+		return strings.TrimSpace(string(raw)), nil
+	default:
+		return "", fmt.Errorf("one of --authority-ucan or --authority-ucan-file is required")
+	}
 }

@@ -2267,11 +2267,14 @@ func (s *Ethereum) SetHead(ctx context.Context, targetBlock uint64) error {
 	return s.execModule.SetHead(ctx, targetBlock)
 }
 
-// SetFork transitions the node onto a different chain. Thin wrapper
-// over fork.Controller.Transition — Ethereum satisfies fork.Runtime
-// (below) so the same transition logic drives both the debug_setFork
-// RPC and any offline caller (e.g. the integration binary).
-func (s *Ethereum) SetFork(ctx context.Context, targetChainName string) (*rpchelper.SetForkResult, error) {
+// SetFork transitions the node onto a different chain. Verifies the
+// caller's UCAN authority against the operator's configured trust
+// roots before delegating to fork.Controller. Verification failure
+// returns without touching any state.
+func (s *Ethereum) SetFork(ctx context.Context, targetChainName, authorityUCAN string) (*rpchelper.SetForkResult, error) {
+	if err := s.verifyForkTransitionAuthority(targetChainName, authorityUCAN); err != nil {
+		return nil, err
+	}
 	return forkcomp.New(s).Transition(ctx, targetChainName)
 }
 

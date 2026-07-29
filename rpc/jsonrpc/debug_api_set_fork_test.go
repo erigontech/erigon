@@ -31,13 +31,15 @@ import (
 // the type-assert-and-delegate path with a stub.
 type forkControllerBackend struct {
 	rpchelper.ApiBackend
-	got     string
-	returns *rpchelper.SetForkResult
-	err     error
+	got         string
+	gotUCAN     string
+	returns     *rpchelper.SetForkResult
+	err         error
 }
 
-func (b *forkControllerBackend) SetFork(_ context.Context, chainName string) (*rpchelper.SetForkResult, error) {
+func (b *forkControllerBackend) SetFork(_ context.Context, chainName, authorityUCAN string) (*rpchelper.SetForkResult, error) {
 	b.got = chainName
+	b.gotUCAN = authorityUCAN
 	return b.returns, b.err
 }
 
@@ -50,7 +52,7 @@ func TestDebugSetFork_UnavailableWhenBackendLacksForkController(t *testing.T) {
 	t.Parallel()
 
 	api := &DebugAPIImpl{ethBackend: bareBackend{}}
-	result, err := api.SetFork(context.Background(), "target-chain")
+	result, err := api.SetFork(context.Background(), "target-chain", "any-ucan")
 	require.Nil(t, result)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not available in this deployment")
@@ -73,10 +75,11 @@ func TestDebugSetFork_DelegatesToForkController(t *testing.T) {
 		},
 	}
 	api := &DebugAPIImpl{ethBackend: fc}
-	result, err := api.SetFork(context.Background(), "hoodi-fork-42")
+	result, err := api.SetFork(context.Background(), "hoodi-fork-42", "b64-ucan-blob")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "hoodi-fork-42", fc.got, "RPC must forward chainName")
+	require.Equal(t, "b64-ucan-blob", fc.gotUCAN, "RPC must forward authorityUCAN unchanged")
 	require.Equal(t, "hoodi", result.FromChain)
 	require.Equal(t, "hoodi-fork-42", result.ToChain)
 	require.Equal(t, uint64(100), result.UnwoundFrom)
@@ -92,7 +95,7 @@ func TestDebugSetFork_PropagatesControllerError(t *testing.T) {
 
 	fc := &forkControllerBackend{err: errors.New("target chain has no direct parent relationship with current")}
 	api := &DebugAPIImpl{ethBackend: fc}
-	result, err := api.SetFork(context.Background(), "some-fork")
+	result, err := api.SetFork(context.Background(), "some-fork", "b64-ucan-blob")
 	require.Nil(t, result)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no direct parent relationship")
