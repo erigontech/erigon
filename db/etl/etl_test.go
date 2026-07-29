@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -48,6 +49,20 @@ func decodeHex(in string) []byte {
 		panic(err)
 	}
 	return payload
+}
+
+func TestAllocatorReuseSurvivesGC(t *testing.T) {
+	a := NewAllocator(1, func() Buffer {
+		return NewSortableBuffer(etlSmallBufRAM).Prealloc(1_024, int(etlSmallBufRAM/32))
+	})
+	b1 := a.Get()
+	a.Put(b1)
+	runtime.GC()
+	runtime.GC()
+	b2 := a.Get()
+	if b1 != b2 {
+		t.Fatal("expected the returned buffer to be reused after GC, got a fresh allocation")
+	}
 }
 
 func TestEmptyValueIsNotANil(t *testing.T) {
@@ -1396,7 +1411,7 @@ func TestBufferSortShortKey(t *testing.T) {
 	}
 }
 
-// TestBufferSortAfterReset verifies that reusing a buffer after Load (as sync.Pool
+// TestBufferSortAfterReset verifies that reusing a buffer after Load (as Allocator
 // does for sortableBuffer) produces correct sort order on the second use.
 // For sortableBuffer this guards against stale prefix values when clear(prefixes) is missing:
 // nil/empty-key slots inherit the old uint64 from the previous sort.
@@ -1417,7 +1432,7 @@ func TestBufferSortAfterReset(t *testing.T) {
 		t.Run(bt.name, func(t *testing.T) {
 			buf := bt.new()
 			collectSorted(t, buf, firstPairs) // warms up backing arrays
-			buf.Reset()                       // explicit reset, as sync.Pool reuse does
+			buf.Reset()                       // explicit reset, as Allocator reuse does
 			got := collectSorted(t, buf, secondPairs)
 			require.True(t, slices.IsSortedFunc(got, bytes.Compare), "keys not sorted after reset: %x", got)
 		})

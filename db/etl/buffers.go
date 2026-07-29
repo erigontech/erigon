@@ -25,7 +25,6 @@ import (
 	"slices"
 	"sort"
 	"strconv"
-	"sync"
 
 	"github.com/c2h5oh/datasize"
 
@@ -81,16 +80,12 @@ var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var 
 
 // 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
 var etlSmallBufRAM = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
-var SmallSortableBuffers = NewAllocator(&sync.Pool{
-	New: func() any {
-		return NewSortableBuffer(etlSmallBufRAM).Prealloc(1_024, int(etlSmallBufRAM/32))
-	},
+var SmallSortableBuffers = NewAllocator(16, func() Buffer {
+	return NewSortableBuffer(etlSmallBufRAM).Prealloc(1_024, int(etlSmallBufRAM/32))
 })
 var etlLargeBufRAM = BufferOptimalSize
-var LargeSortableBuffers = NewAllocator(&sync.Pool{
-	New: func() any {
-		return NewSortableBuffer(etlLargeBufRAM).Prealloc(1_024, int(etlLargeBufRAM/32))
-	},
+var LargeSortableBuffers = NewAllocator(2, func() Buffer {
+	return NewSortableBuffer(etlLargeBufRAM).Prealloc(1_024, int(etlLargeBufRAM/32))
 })
 
 type Buffer interface {

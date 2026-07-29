@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
@@ -36,24 +35,36 @@ type LoadNextFunc func(originalK, k, v []byte) error
 type LoadFunc func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error
 type simpleLoadFunc func(k, v []byte) error
 
+// Allocator recycles buffers through a bounded free-list. Unlike sync.Pool it
+// is not drained on GC: the buffers are few, large and continuously reused, so
+// rebuilding them every GC cycle is pure churn.
 type Allocator struct {
-	p *sync.Pool
+	freeList chan Buffer
+	newBuf   func() Buffer
 }
 
-func NewAllocator(p *sync.Pool) *Allocator { return &Allocator{p: p} }
+func NewAllocator(capacity int, newBuf func() Buffer) *Allocator {
+	return &Allocator{freeList: make(chan Buffer, capacity), newBuf: newBuf}
+}
+
 func (a *Allocator) Put(b Buffer) {
 	if b == nil {
 		return
 	}
-	//if cast, ok := b.(*sortableBuffer); ok {
-	//	log.Warn("[dbg] return buf", "cap(cast.data)", cap(cast.data), "cap(cast.lens)", cap(cast.lens))
-	//}
-	a.p.Put(b)
+	select {
+	case a.freeList <- b:
+	default:
+	}
 }
+
 func (a *Allocator) Get() Buffer {
-	b := a.p.Get().(Buffer)
-	b.Reset()
-	return b
+	select {
+	case b := <-a.freeList:
+		b.Reset()
+		return b
+	default:
+		return a.newBuf()
+	}
 }
 
 // Collector performs the job of ETL Transform, but can also be used without "E" (Extract) part
