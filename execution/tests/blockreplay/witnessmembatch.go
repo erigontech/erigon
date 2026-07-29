@@ -205,12 +205,19 @@ func (w *witnessMemBatch) writeSetDiff(want *Outputs) []string {
 			if _, ok := wantKeys[k]; ok {
 				continue // in want — its value is checked by the output diff
 			}
+			post, _, _ := w.TemporalMemBatch.GetLatest(domain, []byte(k))
 			if deletedPrefixLen > 0 && len(k) >= deletedPrefixLen {
 				if _, del := deleted[k[:deletedPrefixLen]]; del {
-					continue // slot/code of a selfdestructed account
+					// Every slot/code write under a self-destructed account must
+					// be a tombstone; a surviving live value is a real divergence
+					// (CollectOutputs never rescans deleted accounts, so this is
+					// the only place it is caught).
+					if len(post) > 0 {
+						diffs = append(diffs, fmt.Sprintf("live %s write under deleted account: %x", kind, k))
+					}
+					continue
 				}
 			}
-			post, _, _ := w.TemporalMemBatch.GetLatest(domain, []byte(k))
 			if !bytes.Equal(post, base[k]) {
 				diffs = append(diffs, fmt.Sprintf("extra %s write changes state: %x", kind, k))
 			}

@@ -112,13 +112,16 @@ func Capture(
 	if fx.BALBytes, err = rawdb.ReadBlockAccessListBytes(tx, hash, blockNum); err != nil {
 		return nil, fmt.Errorf("read block access list %d: %w", blockNum, err)
 	}
-	captureAncestors(ctx, tx, blockReader, block.Header(), fx)
+	if err := captureAncestors(ctx, tx, blockReader, block.Header(), fx); err != nil {
+		return nil, err
+	}
 	return fx, nil
 }
 
 // captureAncestors records the last 256 ancestor hashes (BLOCKHASH range) so
-// replay can answer the BLOCKHASH opcode without a DB.
-func captureAncestors(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, header *types.Header, fx *Fixture) {
+// replay can answer the BLOCKHASH opcode without a DB. Fails on any gap: a
+// silently skipped ancestor would make BLOCKHASH return zero and diverge.
+func captureAncestors(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, header *types.Header, fx *Fixture) error {
 	n := header.Number.Uint64()
 	lo := uint64(0)
 	if n > 256 {
@@ -126,11 +129,15 @@ func captureAncestors(ctx context.Context, tx kv.TemporalTx, blockReader dbservi
 	}
 	for a := lo; a < n; a++ {
 		h, ok, err := blockReader.CanonicalHash(ctx, tx, a)
-		if err != nil || !ok {
-			continue
+		if err != nil {
+			return fmt.Errorf("capture ancestor %d canonical hash: %w", a, err)
+		}
+		if !ok {
+			return fmt.Errorf("capture ancestor %d: canonical hash missing (BLOCKHASH would diverge)", a)
 		}
 		fx.Ancestors[a] = h
 	}
+	return nil
 }
 
 // Replay re-executes the fixture's block against an in-memory reader with no DB.

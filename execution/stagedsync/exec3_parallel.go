@@ -255,14 +255,16 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// exits immediately, and closes rootResults, which the apply loop's normal
 	// close-handling absorbs. Used by ephemeral single-block replay over a flat
 	// witness (no trie). Real staged sync leaves this non-nil.
-	if dbg.DiscardCommitment() {
+	if pe.cfg.discardCommitment {
 		commitResults = nil
 	}
-	// Only wire the BAL fold-ahead pipeline when BAL-driven commitment is on.
-	// A nil channel leaves the per-block alloc+send and calculator select arm
-	// inert (the receive on nil blocks forever, so the loop stays gated on cc.in).
+	// Only wire the BAL fold-ahead pipeline when BAL-driven commitment is on AND
+	// the commit stream is live. Under exec-only (commitResults nil) the calculator
+	// exits before draining blockRequests, so a live channel would let executeBlocks'
+	// blocking send wedge once a bulk replay exceeds the buffer. A nil channel leaves
+	// the per-block alloc+send and calculator select arm inert.
 	var blockRequests chan *blockRequest
-	if dbg.BALDrivenCommitment {
+	if dbg.BALDrivenCommitment && commitResults != nil {
 		blockRequests = make(chan *blockRequest, 2_048)
 	}
 

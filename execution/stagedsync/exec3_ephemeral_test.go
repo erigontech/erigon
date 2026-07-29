@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -120,6 +119,9 @@ func setupEphemeralReplay(tb testing.TB, fx *blockreplay.Fixture) (*ephemeralRep
 	cfg := StageExecuteBlocksCfg(db, prune.DefaultMode, 512*datasize.MB,
 		chainspec.Mainnet.Config, engine, &vm.Config{}, nil, false, false,
 		dirs, br, chainspec.Mainnet.Genesis, syncCfg, false, nil)
+	// The witness carries a flat post-state, no commitment trie — always run
+	// exec-only regardless of the env (the flag is read only at package init).
+	cfg.discardCommitment = true
 
 	num := block.NumberU64()
 	inputTxNum := ephemeralSeedTxNum + 1
@@ -158,13 +160,12 @@ func (r *ephemeralReplay) exec(tx kv.TemporalRwTx, doms *execctx.SharedDomains) 
 
 // verify checks the post-state (Flush -> outputs read via the domains) against
 // the authoritative canonical outputs — the data, not the trie root. It first
-// requires the replay's write-set to equal the reference key set exactly (an
-// extra or missing account/storage/code write fails), then compares values —
-// so a state-only extra write commitment-off replay can't otherwise see is
-// caught.
+// flags any state-changing write the replay made outside the reference set (a
+// commitment-off replay can't otherwise catch an extra write), then compares
+// values — which also catches reference keys the replay failed to write.
 func (r *ephemeralReplay) verify(tx kv.TemporalRwTx, doms *execctx.SharedDomains, writeSet *blockreplay.WitnessWriteSet, expected *blockreplay.Outputs) error {
 	if diffs := writeSet.Diff(expected); len(diffs) > 0 {
-		return fmt.Errorf("write-set mismatch (%d differences): %s", len(diffs), strings.Join(diffs, " | "))
+		return fmt.Errorf("write-set has extra writes (%d): %s", len(diffs), strings.Join(diffs, " | "))
 	}
 	got, err := blockreplay.CollectOutputs(state.NewReaderV3(doms.AsGetter(tx)), expected)
 	if err != nil {
@@ -181,9 +182,7 @@ func (r *ephemeralReplay) verify(tx kv.TemporalRwTx, doms *execctx.SharedDomains
 // StopTimer/StartTimer. Each run is checked against the fixture's authoritative
 // canonical outputs, so the measurement is of verified-correct execution.
 func BenchmarkEphemeralParallelReplay(b *testing.B) {
-	if !dbg.DiscardCommitment() {
-		b.Fatal("set DISCARD_COMMITMENT=true: the witness carries no commitment trie")
-	}
+	// Exec-only is set on cfg by setupEphemeralReplay; no env needed.
 	fx, err := blockreplay.Load(fixturePath(b))
 	require.NoError(b, err)
 	require.NotNil(b, fx.Outputs, "fixture missing captured outputs; recapture with `integration capture_block`")

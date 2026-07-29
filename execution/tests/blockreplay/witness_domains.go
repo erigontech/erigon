@@ -21,11 +21,13 @@ import (
 // seam. The returned SharedDomains serves the block's reads as "latest"; the
 // caller runs the parallel executor against it and must never Flush.
 // WitnessWriteSet exposes the replay's post-Seal write-set so the ephemeral
-// verifier can require it to equal the reference output key set exactly.
+// verifier can flag state-changing writes the replay made outside the reference
+// output set.
 type WitnessWriteSet struct{ mem *witnessMemBatch }
 
-// Diff returns the key-set differences between the replay's write-set and want,
-// in both directions (extra and missing writes). Empty when they match exactly.
+// Diff returns the replay's state-changing writes that fall outside want (extra
+// writes); missing reference keys are caught separately by the value diff. Empty
+// when the replay wrote nothing beyond the reference set.
 func (ws *WitnessWriteSet) Diff(want *Outputs) []string { return ws.mem.writeSetDiff(want) }
 
 func NewWitnessDomains(ctx context.Context, tx kv.TemporalRwTx, fx *Fixture, seedTxNum uint64, logger log.Logger) (*execctx.SharedDomains, *WitnessWriteSet, error) {

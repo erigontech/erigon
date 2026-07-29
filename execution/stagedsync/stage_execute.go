@@ -82,6 +82,11 @@ type ExecuteBlockCfg struct {
 
 	experimentalBAL bool
 	readAheader     *exec.BlockReadAheader
+	// discardCommitment runs execution without computing/persisting commitment
+	// (exec-only). Initialized from dbg.DiscardCommitment() at the stage boundary;
+	// the ephemeral single-block replay harness sets it directly since the env is
+	// read only at package init.
+	discardCommitment bool
 }
 
 func StageExecuteBlocksCfg(
@@ -107,22 +112,23 @@ func StageExecuteBlocksCfg(
 	}
 
 	return ExecuteBlockCfg{
-		db:              db,
-		prune:           pm,
-		batchSize:       batchSize,
-		chainConfig:     chainConfig,
-		engine:          engine,
-		vmConfig:        vmConfig,
-		dirs:            dirs,
-		notifications:   notifications,
-		stateStream:     stateStream,
-		badBlockHalt:    badBlockHalt,
-		blockReader:     blockReader,
-		genesis:         genesis,
-		historyV3:       true,
-		syncCfg:         syncCfg,
-		experimentalBAL: experimentalBAL,
-		readAheader:     readAheader,
+		db:                db,
+		prune:             pm,
+		batchSize:         batchSize,
+		chainConfig:       chainConfig,
+		engine:            engine,
+		vmConfig:          vmConfig,
+		dirs:              dirs,
+		notifications:     notifications,
+		stateStream:       stateStream,
+		badBlockHalt:      badBlockHalt,
+		blockReader:       blockReader,
+		genesis:           genesis,
+		historyV3:         true,
+		syncCfg:           syncCfg,
+		experimentalBAL:   experimentalBAL,
+		readAheader:       readAheader,
+		discardCommitment: dbg.DiscardCommitment(),
 	}
 }
 
