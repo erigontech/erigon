@@ -659,7 +659,7 @@ func TestAppendAcrossMemProviders(t *testing.T) {
 	}
 
 	err = mergeSortFiles("test", providers, loadFunc,
-		TransformArgs{BufferType: SortableAppendBuffer}, NewAppendBuffer(1))
+		TransformArgs{BufferType: SortableAppendBuffer}, nil)
 	require.NoError(t, err)
 
 	require.Len(t, results, 4)
@@ -835,7 +835,7 @@ func TestMixedProvidersMergeSortFiles(t *testing.T) {
 		return nil
 	}
 
-	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, nil)
 	require.NoError(t, err)
 
 	// Should have all 10 entries in sorted order
@@ -893,7 +893,7 @@ func TestMixedProvidersInterleavedKeys(t *testing.T) {
 		return nil
 	}
 
-	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, nil)
 	require.NoError(t, err)
 
 	require.Len(t, keys, 10)
@@ -946,7 +946,7 @@ func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 		return nil
 	}
 
-	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, nil)
 	require.NoError(t, err)
 
 	require.Len(t, entries, 4)
