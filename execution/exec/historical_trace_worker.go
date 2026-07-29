@@ -561,7 +561,7 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 		if err != nil {
 			return err
 		}
-		log.Info("[custom_trace] batch start", "blocks", fmt.Sprintf("%.1fm-%.1fm", float64(fromBlock)/1_000_000, float64(toBlock)/1_000_000), "steps", fmt.Sprintf("%.2f-%.2f", fromStep, toStep), "workers", cfg.Workers)
+		log.Info("[custom_trace] batch start", "blocks", fmt.Sprintf("%s-%s", common.PrettyExact(fromBlock), common.PrettyExact(toBlock)), "steps", fmt.Sprintf("%.2f-%.2f", fromStep, toStep), "workers", cfg.Workers)
 	}
 
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header, err error) {
