@@ -171,6 +171,41 @@ A bash driver that:
 Success criteria: the script exits 0 and the erigon log shows no
 component wedge messages.
 
+### 3c-status (2026-07-29): partial — restart-fallback needs artifact parity with `snapshots fork-from`
+
+Landed:
+
+- `1f89878d11` — real step→block map in ValidateForkDatadir. Fork
+  datadir validator no longer classifies known-pre-cut state files as
+  straddle (~200 → 44 false positives).
+- `73517e6183` — `TrimPostCutSiblings` post-swap hook. Removes
+  accessor/history/idx files whose step range extends past cut+1.
+  Standalone Tier 3c now boots cleanly.
+
+Blocked:
+
+- The debug_setFork RPC transition trims files correctly but does
+  NOT emit the other artifacts the fork erigon expects on boot:
+    - `cl-config.yaml` (Caplin config; `snapshots fork-from`
+      derives it from parent's beacon config)
+    - `parent-cut.json` sidecar (block-cut marker consumed by
+      downstream tools)
+    - Cleared txpool DB entries (parent-chain txns still in
+      chaindata; fork boot logs a warning per rejected txn but
+      doesn't fail)
+- Tier 4 smoke iter with model=restart therefore fails at Phase 5
+  (fork erigon boots + validates the datadir but the public HTTP
+  RPC doesn't open — likely waiting on Caplin subsystem readiness
+  that never fires without cl-config.yaml).
+
+To close 3c end-to-end, debug_setFork's post-swap hooks must produce
+the same artifact set `snapshots fork-from` produces:
+`cmd/snapshots/forkfrom/forkfrom.go writeForkCLConfig` +
+whatever parent-cut.json emitter lives in that path. A separate PR.
+Until then, the shipped operator workflow for restart transitions
+remains `snapshots fork-from` (documented in the fork-restart-
+transition.sh header).
+
 ### 3c. Restart-between-transitions path
 
 **Location:** [scripts/fork-restart-transition.sh](../../scripts/fork-restart-transition.sh) (new)
