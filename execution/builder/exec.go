@@ -315,9 +315,8 @@ func getNextTransactions(
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
 		txnprovider.WithBlockTime(header.Time),
-		// EIP-8037: remaining regular gas is the primary budget; remaining state
-		// gas filters by intrinsic state gas. Execution-time state gas (SSTOREs)
-		// is enforced by post-execution rollback in the block assembler.
+		// EIP-8037: runtime state gas is enforced by post-execution rollback
+		// in the block assembler.
 		txnprovider.WithGasTarget(mdgas.NewFullMdGas(
 			header.GasLimit-gasUsed.BlockRegular,
 			header.GasLimit-gasUsed.BlockState,

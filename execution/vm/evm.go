@@ -214,39 +214,6 @@ func (evm *EVM) SetPrecompiles(precompiles PrecompiledContracts) {
 	evm.precompiles = precompiles
 }
 
-// chargeTopLevelFrameGas applies the EIP-2780 depth-0 top-level frame charges:
-// NEW_ACCOUNT state gas for an account-creating value transfer, and the
-// EIP-7702 delegated-recipient cold access. Returns ErrOutOfGas if a charge
-// can't be covered.
-func (evm *EVM) chargeTopLevelFrameGas(gasRemaining mdgas.MdGas, addr accounts.Address, topLevelNewAccount bool, isPrecompile bool) (mdgas.MdGas, int64, uint64, error) {
-	var topLvlFrameStateGas int64
-	var topLvlFrameStateGasSpill uint64
-	if topLevelNewAccount {
-		charged, spill, ok := useMdGas(gasRemaining, params.StateGasNewAccount, mdgas.StateGas, nil, tracing.GasChangeIgnored)
-		if !ok {
-			return gasRemaining, topLvlFrameStateGas, 0, ErrOutOfGas
-		}
-		gasRemaining = charged
-		topLvlFrameStateGasSpill = spill
-		topLvlFrameStateGas = int64(params.StateGasNewAccount)
-	}
-	if !isPrecompile {
-		dd, isDelegated, err := evm.intraBlockState.GetDelegatedDesignation(addr)
-		if err != nil {
-			return gasRemaining, topLvlFrameStateGas, topLvlFrameStateGasSpill, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-		}
-		if isDelegated {
-			cold := coldAccountAccessCost(evm.chainRules)
-			if gasRemaining.Regular < cold {
-				return gasRemaining, topLvlFrameStateGas, topLvlFrameStateGasSpill, ErrOutOfGas
-			}
-			gasRemaining.Regular -= cold
-			evm.intraBlockState.AddAddressToAccessList(dd)
-		}
-	}
-	return gasRemaining, topLvlFrameStateGas, topLvlFrameStateGasSpill, nil
-}
-
 func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, input []byte, gas mdgas.MdGas, value uint256.Int, bailout bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	if evm.abort.Load() {
 		return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, nil
@@ -316,16 +283,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	snapshot := evm.intraBlockState.PushSnapshot()
 	defer evm.intraBlockState.PopSnapshot(snapshot)
 
-	// EIP-2780 top-level frame charge for value transfers that create new account state.
-	var topLevelNewAccount bool
-	if depth == 0 && evm.chainRules.IsAmsterdam && typ == CALL && !value.IsZero() {
-		empty, err := evm.intraBlockState.Empty(addr)
-		if err != nil {
-			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-		}
-		topLevelNewAccount = empty
-	}
-
 	if typ == CALL {
 		exist, err := evm.intraBlockState.Exist(addr)
 		if err != nil {
@@ -374,20 +331,8 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		}
 	}
 
-	var topLvlFrameStateGas int64
-	var topLvlFrameStateGasSpill uint64
-	if depth == 0 && evm.chainRules.IsAmsterdam && typ == CALL && err == nil {
-		gasRemaining, topLvlFrameStateGas, topLvlFrameStateGasSpill, err = evm.chargeTopLevelFrameGas(gasRemaining, addr, topLevelNewAccount, isPrecompile)
-		if err != nil && !errors.Is(err, ErrOutOfGas) {
-			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, err
-		}
-	}
-
 	// It is allowed to call precompiles, even via delegatecall
-	if err != nil {
-		// A top-level frame charge above ran out of gas; skip execution and
-		// fall through to the revert handling below.
-	} else if isPrecompile {
+	if isPrecompile {
 		ret, gasRemaining.Regular, err = RunPrecompiledContract(p, input, gasRemaining.Regular, evm.Config().Tracer)
 	} else if len(code) == 0 {
 		// If the account has no code, we can abort here
@@ -433,8 +378,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		}
 		ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, input, readOnly)
 	}
-	gasUsed.State += topLvlFrameStateGas
-	gasUsed.StateSpill += topLvlFrameStateGasSpill
 	// When an error was returned by the EVM or when setting the creation code
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in Homestead this also counts for code storage gas errors.
@@ -524,14 +467,6 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 			gasUsed.State = 0
 		}
 		gasUsed.Regular = deriveFrameRegularGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
-		// depth-0 create refills the intrinsic NEW_ACCOUNT (nothing created on error, no new leaf when account existed with balance only populated)
-		if depth == 0 && evm.chainRules.IsAmsterdam {
-			if err != nil {
-				gasUsed.State = -int64(params.StateGasNewAccount)
-			} else if wasBalanceOnly {
-				gasUsed.State -= int64(params.StateGasNewAccount)
-			}
-		}
 	}()
 
 	if evm.Config().Tracer != nil {
@@ -610,6 +545,20 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 		}
 		wasBalanceOnly = !empty
 	}
+	var topLevelStateGasSpill uint64
+	if depth == 0 && evm.chainRules.IsAmsterdam && !wasBalanceOnly {
+		charged, spill, ok := useMdGas(gasRemaining, params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored)
+		if !ok {
+			if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
+				evm.config.Tracer.OnGasChange(gasRemaining.Regular, 0, tracing.GasChangeCallFailedExecution)
+			}
+			gasRemaining = mdgas.MdGas{State: gas.State}
+			err = ErrRuntimeOutOfGas
+			return nil, accounts.NilAddress, gasRemaining, mdgas.MdGasUsage{}, wasBalanceOnly, err
+		}
+		gasRemaining = charged
+		topLevelStateGasSpill = spill
+	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.PushSnapshot()
 	defer evm.intraBlockState.PopSnapshot(snapshot)
@@ -636,7 +585,11 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 		return nil, address, gasRemaining, mdgas.MdGasUsage{}, wasBalanceOnly, nil
 	}
 
-	ret, gasRemaining, gasUsed, err = evm.Run(contract, gas, nil, false)
+	ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, nil, false)
+	if depth == 0 && evm.chainRules.IsAmsterdam && !wasBalanceOnly {
+		gasUsed.State += int64(params.StateGasNewAccount)
+		gasUsed.StateSpill += topLevelStateGasSpill
+	}
 
 	// EIP-170: Contract code size limit
 	if err == nil {
