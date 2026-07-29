@@ -1535,7 +1535,9 @@ func (dt *DomainRoTx) getLatestFromFilesValSize(k []byte, maxTxNum uint64) (size
 	hi, lo := dt.ht.iit.hashKey(k)
 
 	if useCache && dt.getFromFileCache != nil {
-		if cv, ok := dt.getFromFileCache.Get(hi); ok {
+		// A nil cached value is ambiguous — it marks both "key is in no file" and
+		// an empty value stored in a file — so those are resolved from the files.
+		if cv, ok := dt.getFromFileCache.Get(hi); ok && cv.v != nil {
 			return len(cv.v), true, nil
 		}
 	}

@@ -3817,6 +3817,16 @@ func TestDomain_GetLatestValSize(t *testing.T) {
 		_, _, found, err := domainRoTx.GetLatest(missing[:], roTx)
 		require.NoError(err)
 		require.False(found)
+
+		var cached [8]byte
+		binary.BigEndian.PutUint64(cached[:], 1001)
+		vf, foundInFiles, _, _, err := domainRoTx.getLatestFromFiles(cached[:], 0)
+		require.NoError(err)
+		require.NotNil(domainRoTx.getFromFileCache)
+		sizeF, sizeFoundF, err := domainRoTx.getLatestFromFilesValSize(cached[:], 0)
+		require.NoError(err)
+		require.Equal(foundInFiles, sizeFoundF)
+		require.Equal(len(vf), sizeF)
 	}
 
 	t.Run("btree accessor", func(t *testing.T) {

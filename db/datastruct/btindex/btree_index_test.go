@@ -878,6 +878,67 @@ func Test_BtreeIndex_GetValSize(t *testing.T) {
 	}
 }
 
+// A nil lookup key must resolve the same way in GetValSize as in Get - including
+// over a file whose first key is empty - and must not materialize a value.
+func Test_BtreeIndex_GetValSize_EmptyKey(t *testing.T) {
+	logger := log.New()
+	compressFlags := seg.CompressVals
+
+	check := func(t *testing.T, dataPath string) {
+		t.Helper()
+		indexPath := filepath.Join(filepath.Dir(dataPath), filepath.Base(dataPath)+".bti")
+		buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+
+		kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, DefaultBtreeM, compressFlags, false)
+		require.NoError(t, err)
+		defer bt.Close()
+		defer kv.Close()
+
+		getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+
+		_, v, _, found, err := bt.Get(nil, getter)
+		require.NoError(t, err)
+
+		size, sizeFound, err := bt.GetValSize(nil, getter)
+		require.NoError(t, err)
+		require.Equal(t, found, sizeFound)
+		require.Equal(t, len(v), size)
+
+		allocs := testing.AllocsPerRun(100, func() {
+			if _, _, err := bt.GetValSize(nil, getter); err != nil {
+				t.Fatal(err)
+			}
+		})
+		require.Zero(t, allocs)
+	}
+
+	t.Run("first key not empty", func(t *testing.T) {
+		tmp := t.TempDir()
+		check(t, generateKV(t, tmp, 20, 3000, 100, logger, compressFlags))
+	})
+	t.Run("first key empty", func(t *testing.T) {
+		tmp := t.TempDir()
+		dataPath := filepath.Join(tmp, "emptyfirstkey.kv")
+		comp, err := seg.NewCompressor(t.Context(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
+		require.NoError(t, err)
+		w := seg.NewWriter(comp, compressFlags)
+		for _, pair := range [][2]string{{"", strings.Repeat("first-value", 100)}, {"a", "second"}, {"b", "third"}} {
+			_, err = w.Write([]byte(pair[0]))
+			require.NoError(t, err)
+			_, err = w.Write([]byte(pair[1]))
+			require.NoError(t, err)
+		}
+		require.NoError(t, comp.Compress())
+		comp.Close()
+
+		keys, err := pivotKeysFromKV(dataPath)
+		require.NoError(t, err)
+		require.Empty(t, keys[0])
+
+		check(t, dataPath)
+	})
+}
+
 func Benchmark_BtreeIndex_GetVsGetValSize(b *testing.B) {
 	tmp := b.TempDir()
 	logger := log.New()
