@@ -186,28 +186,29 @@ datadir
 ### Erigon3 datadir size
 
 Measured on Erigon 3.6 `--prune.mode=archive` nodes, July 2026. `snapshots` counts only the block files
-(headers, bodies, transactions) that sit in the directory itself, not its sub-folders.
+(headers, bodies, transactions) that sit in the directory itself, not its sub-folders. Each column is one node, so
+totals can differ a few percent from the table above, which is measured on freshly synced nodes.
 
-| Path                | eth-mainnet (block 25.6M) | gnosis (block 47.4M) |
-|---------------------|---------------------------|----------------------|
-| `chaindata`         | 22G                       | 9G                   |
-| `snapshots`         | 928G                      | 265G                 |
-| `snapshots/domain`  | 389G                      | 211G                 |
-| `snapshots/idx`     | 310G                      | 127G                 |
-| `snapshots/history` | 238G                      | 37G                  |
-| `snapshots/accessor`| 132G                      | 31G                  |
-| total               | 2.0T                      | 681G                 |
+| Path                 | eth-mainnet | gnosis    | sepolia   | hoodi     | chiado   |
+|----------------------|-------------|-----------|-----------|-----------|----------|
+| `chaindata`          | 22.75 GB    | 9.63 GB   | 12.87 GB  | 6.78 GB   | 2.40 GB  |
+| `snapshots`          | 996.40 GB   | 284.82 GB | 614.90 GB | 33.38 GB  | 12.91 GB |
+| `snapshots/domain`   | 417.66 GB   | 227.03 GB | 237.26 GB | 52.39 GB  | 7.17 GB  |
+| `snapshots/idx`      | 332.72 GB   | 136.67 GB | 115.95 GB | 25.47 GB  | 3.44 GB  |
+| `snapshots/history`  | 255.60 GB   | 39.28 GB  | 68.93 GB  | 8.00 GB   | 2.33 GB  |
+| `snapshots/accessor` | 141.61 GB   | 33.73 GB  | 45.85 GB  | 7.70 GB   | 1.39 GB  |
+| total                | 2.17 TB     | 731.16 GB | 1.10 TB   | 133.73 GB | 29.64 GB |
 
 Data that is off by default, measured on the same nodes:
 
-| Flag                                 | eth-mainnet | gnosis |
-|--------------------------------------|-------------|--------|
-| `--prune.include-receipts`           | +411G       | +230G  |
-| `--prune.include-commitment-history` | +4.0T       | -      |
-| `--caplin.blocks-archive`, `--caplin.blobs-archive`, `--caplin.states-archive` | +2.3T | +468G |
+| Flag                                 | eth-mainnet | gnosis     | sepolia    | hoodi      | chiado    |
+|--------------------------------------|-------------|------------|------------|------------|-----------|
+| `--prune.include-receipts`           | +441.42 GB  | +246.74 GB | +135.15 GB | +11.31 GB  | +3.38 GB  |
+| `--prune.include-commitment-history` | +4.40 TB    | -          | +1.09 TB   | +182.27 GB | +57.35 GB |
+| `--caplin.blocks-archive`, `--caplin.blobs-archive`, `--caplin.states-archive` | +2.48 TB | +501.00 GB | +1.40 TB | +135.28 GB | - |
 
 Caplin numbers are the backfilled beacon blocks, blob sidecars and beacon state snapshots. They exclude the beacon
-chain db every node with the embedded Consensus Layer keeps anyway. Blob sidecars dominate: 2T of the mainnet 2.3T.
+chain db every node with the embedded Consensus Layer keeps anyway. Blob sidecars dominate: 2.17 TB of the mainnet 2.48 TB.
 
 ### Erigon3 changes from Erigon2
 
