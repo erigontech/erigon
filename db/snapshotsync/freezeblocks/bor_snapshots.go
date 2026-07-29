@@ -73,7 +73,7 @@ func (br *BlockRetire) retireBorBlocks(
 			}
 
 			logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "type", snap,
-				"range", fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
+				"range", fmt.Sprintf("%s-%s", common.PrettyExact(blockFrom), common.PrettyExact(blockTo)))
 
 			var firstKeyGetter snaptype.FirstKeyGetter
 
