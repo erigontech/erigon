@@ -1,6 +1,6 @@
 # Erigon Agent Guidelines
 
-Use B2-level English. Use programming terminology freely and exactly 
+Use B2-level English in code, comments, github. Use programming terminology freely and exactly
 
 ## Build & Test
 
