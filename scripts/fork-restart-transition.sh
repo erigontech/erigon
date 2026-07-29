@@ -134,6 +134,7 @@ trap cleanup EXIT
 
 # Phase 5: wait for the fork's RPC to answer eth_chainId.
 stage "Phase 5: wait for fork RPC"
+actual="<no rpc yet>" # bind so set -u doesn't kill the post-loop check when the RPC never answered
 for i in $(seq 1 "$FORK_STARTUP_TIMEOUT"); do
     fork_chain_id_hex=$(rpc_call "$FORK_RPC" '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' '.result' 2>/dev/null || echo "null")
     if [[ "$fork_chain_id_hex" != "null" && -n "$fork_chain_id_hex" ]]; then

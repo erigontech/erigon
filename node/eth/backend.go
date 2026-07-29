@@ -64,6 +64,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -2296,15 +2297,60 @@ func (s *Ethereum) SwapChainConfig(target *chain.Config) { s.chainConfig = targe
 // ApplyPostSwapHooks satisfies fork.Runtime — runtime-specific fixups
 // the captor interfaces don't cover: Downloader chain-identity re-
 // derivation, manifest_exchange filter re-installation, Caplin launch
-// closure rebind, DB-side chainConfig update + RPC cache invalidation
-// so eth_chainId + BaseAPI.chainConfig read the target chain post-
-// swap.
+// closure rebind, DB-side chainConfig update + RPC cache invalidation,
+// and post-cut sibling trim so the fork datadir survives a subsequent
+// --chain=<fork-name> restart.
 func (s *Ethereum) ApplyPostSwapHooks(target *chain.Config) {
 	s.applyForkDownloaderIdentity(target)
 	s.applyForkManifestExchangeFilters(target)
 	s.applyForkCaplinLaunchRebind(target)
 	s.applyForkChainConfigPersist(target)
 	s.applyForkRPCCacheInvalidate()
+	s.applyForkTrimPostCutSiblings(target)
+}
+
+// applyForkTrimPostCutSiblings removes accessor/history/idx files
+// whose step range extends past the cut. Provider.Unwind's
+// regenerateBoundaryStepFiles handles domain/*.kv (regen straddlers,
+// remove entirely-past); this hook is the fork-transition counterpart
+// for the sibling files (accessor/*.vi, accessor/*.efi, history/*.v,
+// idx/*.ef). Without it, an in-process debug_setFork transitions
+// cleanly but the very next --chain=<fork-name> restart hits the
+// fork-datadir validator and aborts with straddle-file errors.
+func (s *Ethereum) applyForkTrimPostCutSiblings(target *chain.Config) {
+	if target.Parent == "" || target.CutBlock == 0 {
+		return
+	}
+	if s.components == nil || s.components.Storage == nil || s.components.Storage.Aggregator == nil {
+		return
+	}
+	stepSize := s.components.Storage.Aggregator.StepSize()
+	if stepSize == 0 {
+		return
+	}
+	// Cut txnum → step: the step containing the cut. Files whose
+	// ToStep exceeds cutStep+1 include post-cut txNums.
+	var cutTxNum uint64
+	if err := s.chainDB.View(context.Background(), func(tx kv.Tx) error {
+		v, verr := rawdbv3.TxNums.Max(context.Background(), tx, target.CutBlock)
+		if verr != nil {
+			return verr
+		}
+		cutTxNum = v
+		return nil
+	}); err != nil {
+		s.logger.Warn("[fork] cut txnum lookup failed; skipping sibling trim", "err", err)
+		return
+	}
+	cutStep := cutTxNum / stepSize
+	removed, err := downloader.TrimPostCutSiblings(s.config.Dirs.Snap, cutStep)
+	if err != nil {
+		s.logger.Warn("[fork] trim post-cut siblings", "err", err, "removed", removed, "cutStep", cutStep)
+		return
+	}
+	if removed > 0 {
+		s.logger.Info("[fork] trimmed post-cut sibling files", "removed", removed, "cutStep", cutStep)
+	}
 }
 
 // applyForkChainConfigPersist writes the target chain.Config to the
