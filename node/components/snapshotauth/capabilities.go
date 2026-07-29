@@ -68,6 +68,21 @@ const (
 	// which parent state was vetted. See memory/fork-trust-root-model-
 	// 2026-05-24.
 	CapForkedFromPrefix = "fork:from:"
+
+	// CapForkTransitionPrefix is the prefix of a fork-transition
+	// capability that authorises the audience to invoke debug_setFork
+	// against a running node for a specific target fork. Dynamic
+	// (parsed prefix-wise via ParseForkTransitionCapability); form is
+	// fork:transition:<fork-chain-name>. Binding the capability to a
+	// specific chain name prevents a UCAN issued for one fork from
+	// authorising transitions to another.
+	//
+	// Verified in-process by Ethereum.SetFork before delegating to
+	// fork.Controller — reaching the RPC no longer implies control
+	// over chain identity. Operators mint transition caps via
+	// MintForkTransitionUCAN (short-lived; hours-to-days) rather than
+	// reusing the long-lived fork-authority UCAN.
+	CapForkTransitionPrefix = "fork:transition:"
 )
 
 // AllCapabilities is the canonical set the package recognises.
@@ -135,6 +150,9 @@ func validateCapability(c string) error {
 	if _, ok := ParseForkedFromCapability(c); ok {
 		return nil
 	}
+	if _, ok := ParseForkTransitionCapability(c); ok {
+		return nil
+	}
 	return fmt.Errorf("unknown capability %q", c)
 }
 
@@ -166,6 +184,38 @@ func ForkedFromCapability(parentTrustRootPubkey []byte) (string, error) {
 		return "", fmt.Errorf("ForkedFromCapability: pubkey length %d (want %d)", len(parentTrustRootPubkey), PubKeyLen)
 	}
 	return CapForkedFromPrefix + hex.EncodeToString(parentTrustRootPubkey), nil
+}
+
+// ForkTransitionCapability builds a fork-transition capability for a
+// specific fork chain name: fork:transition:<name>. Bearer of a UCAN
+// carrying this cap can invoke debug_setFork against a node whose
+// operator accepts the UCAN's issuer trust root, for THAT fork
+// specifically. Different fork name → separate cap → replay across
+// forks is impossible.
+func ForkTransitionCapability(forkChainName string) (string, error) {
+	name := strings.TrimSpace(forkChainName)
+	if name == "" {
+		return "", fmt.Errorf("ForkTransitionCapability: empty fork chain name")
+	}
+	if strings.ContainsAny(name, " \t\n\r") {
+		return "", fmt.Errorf("ForkTransitionCapability: fork chain name %q contains whitespace", forkChainName)
+	}
+	return CapForkTransitionPrefix + name, nil
+}
+
+// ParseForkTransitionCapability reports whether cap is a
+// fork-transition capability and, if so, returns the fork chain name
+// it binds. ok=false for any non-fork-transition capability or for
+// an empty target name.
+func ParseForkTransitionCapability(capability string) (forkChainName string, ok bool) {
+	if !strings.HasPrefix(capability, CapForkTransitionPrefix) {
+		return "", false
+	}
+	name := strings.TrimPrefix(capability, CapForkTransitionPrefix)
+	if name == "" {
+		return "", false
+	}
+	return name, true
 }
 
 // ParseForkedFromCapability reports whether cap is a forked-from
