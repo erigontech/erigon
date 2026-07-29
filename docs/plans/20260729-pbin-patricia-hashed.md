@@ -147,12 +147,12 @@ func pbinCommonPrefixBits(a, b *pbinBitpath) int16 // XOR + LeadingZeros64, clam
 - Create: `execution/commitment/pbin_values.go`
 - Create: `execution/commitment/pbin_values_test.go`
 
-- [ ] write failing tests pinning BASIC_DATA byte offsets 0/4/8/16 against hand-written hex — **not** against the encoder, since the Task 4 oracle shares this encoder and cannot catch its bugs
-- [ ] write a failing test asserting a balance `>= 2^128` returns an error rather than truncating
-- [ ] write failing tests for the CODE_HASH leaf value and for storage values left-padded to exactly 32 bytes
-- [ ] implement `pbinEncodeBasicData` per `eip:332-339`: `version(1) || reserved(3) || code_size(4) || nonce(8) || balance(16)` big-endian
-- [ ] implement `pbinCodeHashValue` and `pbinEncodeStorageValue`
-- [ ] run tests - must pass before task 4
+- [x] write failing tests pinning BASIC_DATA byte offsets 0/4/8/16 against hand-written hex — **not** against the encoder, since the Task 4 oracle shares this encoder and cannot catch its bugs
+- [x] write a failing test asserting a balance `>= 2^128` returns an error rather than truncating
+- [x] write failing tests for the CODE_HASH leaf value and for storage values left-padded to exactly 32 bytes
+- [x] implement `pbinEncodeBasicData` per `eip:332-339`: `version(1) || reserved(3) || code_size(4) || nonce(8) || balance(16)` big-endian
+- [x] implement `pbinCodeHashValue` and `pbinEncodeStorageValue`
+- [x] run tests - must pass before task 4
 
 ### Task 4: EIP reference oracle in the test package
 
