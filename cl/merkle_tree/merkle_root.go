@@ -28,15 +28,30 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/ssz"
 )
+
+// maxStackLeaves covers every SSZ schema we hash, so the leaf buffer stays off the
+// heap; anything larger falls back to make. The array is zeroed on every call, so
+// it is sized to the schemas we actually see rather than generously.
+const maxStackLeaves = 32
 
 // HashTreeRoot returns the hash for a given schema of objects.
 // IMPORTANT: DATA TYPE MUST IMPLEMENT HASHABLE
 // SUPPORTED PRIMITIVES: uint64, *uint64 and []byte
 func HashTreeRoot(schema ...any) ([32]byte, error) {
-	// Calculate the total number of leaves needed based on the schema length
-	leaves := make([]byte, NextPowerOfTwo(uint64(len(schema)*length.Hash)))
+	if len(schema) == 0 {
+		return [32]byte{}, errors.New("empty schema")
+	}
+	var stack [maxStackLeaves * length.Hash]byte // stack-allocation for most of cases
+	size := math.NextPowerOfTwo(uint64(len(schema) * length.Hash))
+	var leaves []byte
+	if size <= uint64(len(stack)) {
+		leaves = stack[:size]
+	} else {
+		leaves = make([]byte, size)
+	}
 	pos := 0
 
 	// Iterate over each element in the schema
@@ -70,7 +85,7 @@ func HashTreeRoot(schema ...any) ([32]byte, error) {
 			copy(leaves[pos:], root[:])
 		default:
 			// If the element does not match any supported types, panic with an error message
-			panic(fmt.Sprintf("Can't create TreeRoot: unsported type %T at index %d", i, obj))
+			panic(fmt.Sprintf("Can't create TreeRoot: unsupported type %T at index %d", obj, i))
 		}
 
 		// Move the position pointer to the next leaf
@@ -128,7 +143,7 @@ func MerkleRootFromFlatLeaves(leaves []byte, out []byte) (err error) {
 		copy(out, leaves)
 		return
 	}
-	return globalHasher.merkleizeTrieLeavesFlat(leaves, out, NextPowerOfTwo(uint64((len(leaves)+31)/32)))
+	return globalHasher.merkleizeTrieLeavesFlat(leaves, out, math.NextPowerOfTwo(uint64((len(leaves)+31)/32)))
 }
 
 func MerkleRootFromFlatFromIntermediateLevel(nodes []byte, out []byte, leavesLen, intermediateLevel int) (err error) {
@@ -136,7 +151,7 @@ func MerkleRootFromFlatFromIntermediateLevel(nodes []byte, out []byte, leavesLen
 		copy(out, nodes)
 		return
 	}
-	return globalHasher.merkleizeTrieLeavesFlatWithStart(nodes, out, NextPowerOfTwo(uint64((leavesLen+31)/32)), uint64(intermediateLevel))
+	return globalHasher.merkleizeTrieLeavesFlatWithStart(nodes, out, math.NextPowerOfTwo(uint64((leavesLen+31)/32)), uint64(intermediateLevel))
 }
 
 func MerkleRootFromFlatFromIntermediateLevelWithLimit(nodes []byte, out []byte, limit, intermediateLevel int) (err error) {
@@ -165,7 +180,7 @@ func MerkleProof(depth, proofIndex int, schema ...any) ([][32]byte, error) {
 		schema = append(schema, make([]byte, 32))
 	}
 
-	for i := 0; i < depth; i++ {
+	for i := range depth {
 		// Hash the left branch
 		if proofIndex >= int(currentSizeDepth)/2 {
 			proof[depth-i-1], err = HashTreeRoot(schema[0 : currentSizeDepth/2]...)

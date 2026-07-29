@@ -17,6 +17,8 @@
 package evmtypes
 
 import (
+	"bytes"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -81,11 +83,6 @@ type ExecutionResult struct {
 	FeeTipped            uint256.Int
 	FeeBurnt             uint256.Int
 	BurntContractAddress accounts.Address
-
-	// SelfDestructedWithBalance holds accounts that were selfdestructed during
-	// execution but received ETH after the SELFDESTRUCT opcode ran (EIP-7708).
-	// Captured before SoftFinalise clears the journal.
-	SelfDestructedWithBalance []AddressAndBalance
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -103,7 +100,7 @@ func (result *ExecutionResult) Return() []byte {
 	if result.Err != nil {
 		return nil
 	}
-	return common.Copy(result.ReturnData)
+	return bytes.Clone(result.ReturnData)
 }
 
 // Revert returns the concrete revert reason if the execution is aborted by `REVERT`
@@ -112,7 +109,7 @@ func (result *ExecutionResult) Revert() []byte {
 	if !result.Reverted {
 		return nil
 	}
-	return common.Copy(result.ReturnData)
+	return bytes.Clone(result.ReturnData)
 }
 
 type (
@@ -131,21 +128,12 @@ type (
 	PostApplyMessageFunc func(ibs IntraBlockState, sender accounts.Address, coinbase accounts.Address, result *ExecutionResult, chainRules *chain.Rules)
 )
 
-type AddressAndBalance struct {
-	Address common.Address
-	Balance uint256.Int
-}
-
 // IntraBlockState is an EVM database for full state querying.
 type IntraBlockState interface {
 	SubBalance(accounts.Address, uint256.Int, tracing.BalanceChangeReason) error
 	AddBalance(accounts.Address, uint256.Int, tracing.BalanceChangeReason) error
 	GetBalance(accounts.Address) (uint256.Int, error)
-
-	GetRemovedAccountsWithBalance() []AddressAndBalance
-
 	AddLog(*types.Log)
-
 	SetHooks(hooks *tracing.Hooks)
 	Trace() bool
 	BlockNumber() uint64

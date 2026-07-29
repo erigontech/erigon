@@ -512,7 +512,9 @@ func encodeBodiesResponse(bodies []*engine_types.ExecutionPayloadBodyV2, version
 			entry.Available = true
 			entry.Transactions = body.Transactions
 			entry.Withdrawals = body.Withdrawals
-			entry.BlockAccessList = body.BlockAccessList
+			if body.BlockAccessList != nil {
+				entry.BlockAccessList = *body.BlockAccessList
+			}
 		}
 		entries.Append(entry)
 	}

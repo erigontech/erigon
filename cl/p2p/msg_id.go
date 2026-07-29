@@ -1,8 +1,10 @@
 package p2p
 
 import (
-	"github.com/erigontech/erigon/cl/utils"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
+
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 // Spec:BeaconConfig()
@@ -42,7 +44,7 @@ func (s *p2pManager) msgId(pmsg *pubsubpb.Message) string {
 		combinedData = append(combinedData, topicLenBytes...)
 		combinedData = append(combinedData, topic...)
 		combinedData = append(combinedData, pmsg.Data...)
-		h := utils.Sha256(combinedData)
+		h := crypto.Sha256(combinedData)
 		return string(h[:20])
 	}
 	totalLength := len(s.cfg.NetworkConfig.MessageDomainValidSnappy) +
@@ -55,6 +57,6 @@ func (s *p2pManager) msgId(pmsg *pubsubpb.Message) string {
 	combinedData = append(combinedData, topicLenBytes...)
 	combinedData = append(combinedData, topic...)
 	combinedData = append(combinedData, decodedData...)
-	h := utils.Sha256(combinedData)
+	h := crypto.Sha256(combinedData)
 	return string(h[:20])
 }

@@ -402,10 +402,11 @@ func TestSSZRESTBuiltPayloadRoundTrip(t *testing.T) {
 
 func TestSSZRESTBodiesResponseRoundTrip(t *testing.T) {
 	withdrawal := &types.Withdrawal{Index: 1, Validator: 2, Address: common.HexToAddress("0x03"), Amount: 4}
+	blockAccessList := hexutil.Bytes{0xba, 0x11}
 	body := &engine_types.ExecutionPayloadBodyV2{
 		Transactions:    []hexutil.Bytes{{0x01, 0x02}},
 		Withdrawals:     []*types.Withdrawal{withdrawal},
-		BlockAccessList: hexutil.Bytes{0xba, 0x11},
+		BlockAccessList: &blockAccessList,
 	}
 
 	for _, tc := range []struct {
@@ -437,7 +438,7 @@ func TestSSZRESTBodiesResponseRoundTrip(t *testing.T) {
 				require.Empty(t, entries[0].Withdrawals)
 			}
 			if tc.wantBAL {
-				require.Equal(t, body.BlockAccessList, entries[0].BlockAccessList)
+				require.Equal(t, *body.BlockAccessList, entries[0].BlockAccessList)
 			} else {
 				require.Empty(t, entries[0].BlockAccessList)
 			}

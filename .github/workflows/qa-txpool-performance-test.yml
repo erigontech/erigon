@@ -16,6 +16,9 @@ on:
     paths:
       - '.github/workflows/qa-txpool-performance-test.yml'
 
+permissions:
+  contents: read
+
 jobs:
   tx_pool_assertoor_test:
     name: tx_pool_assertoor_test (${{ matrix.exec_mode }})
@@ -39,6 +42,8 @@ jobs:
     steps:
       - name: Fast checkout git repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Login to Docker Hub
         uses: docker/login-action@v4

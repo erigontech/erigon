@@ -41,14 +41,14 @@ func TestStaticValidatorTable_RefillsRestoredShortTable(t *testing.T) {
 	}
 
 	table := NewStaticValidatorTable()
-	for i := 0; i < persisted; i++ {
+	for i := range persisted {
 		require.NoError(t, table.AddValidator(vals[i], uint64(i), 0))
 	}
 	// Simulate a restore where the processing slot advanced past genesis.
 	table.SetSlot(1000)
 	require.Equal(t, persisted, staticTableLen(table))
 
-	for i := 0; i < full; i++ {
+	for i := range full {
 		require.NoError(t, table.AddValidator(vals[i], uint64(i), 0))
 	}
 	require.Equal(t, full, staticTableLen(table))

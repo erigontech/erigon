@@ -46,13 +46,12 @@ func (g *ClosingWaitGroup) Wait() { g.wg.Wait() }
 // TryGo is sync.WaitGroup.Go with the close latch: it runs f in a registered
 // goroutine, or returns false without running it once BeginClose has latched.
 func (g *ClosingWaitGroup) TryGo(f func()) bool {
-	if !g.TryAdd() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closing {
 		return false
 	}
-	go func() {
-		defer g.Done()
-		f()
-	}()
+	g.wg.Go(f)
 	return true
 }
 

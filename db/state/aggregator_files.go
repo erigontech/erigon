@@ -20,30 +20,30 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-type FilesForMerge struct {
+type visibleFilesForMerge struct {
 	d     [kv.DomainLen][]*FilesItem
 	dHist [kv.DomainLen][]*FilesItem
 	dIdx  [kv.DomainLen][]*FilesItem
 	ii    [kv.StandaloneIdxLen][]*FilesItem
 }
 
-func (sf *FilesForMerge) DomainFiles(name kv.Domain) []*FilesItem {
+func (sf *visibleFilesForMerge) DomainFiles(name kv.Domain) []*FilesItem {
 	return sf.d[name]
 }
 
-func (sf *FilesForMerge) DomainHistoryFiles(name kv.Domain) []*FilesItem {
+func (sf *visibleFilesForMerge) DomainHistoryFiles(name kv.Domain) []*FilesItem {
 	return sf.dHist[name]
 }
 
-func (sf *FilesForMerge) DomainInvertedIndexFiles(name kv.Domain) []*FilesItem {
+func (sf *visibleFilesForMerge) DomainInvertedIndexFiles(name kv.Domain) []*FilesItem {
 	return sf.dIdx[name]
 }
 
-func (sf *FilesForMerge) InvertedIndexFiles(id int) []*FilesItem {
+func (sf *visibleFilesForMerge) InvertedIndexFiles(id int) []*FilesItem {
 	return sf.ii[id]
 }
 
-func (sf *FilesForMerge) Close() {
+func (sf *visibleFilesForMerge) Close() {
 	clist := make([][]*FilesItem, 0, 3*int(kv.DomainLen)+kv.StandaloneIdxLen)
 	for id := range sf.d {
 		clist = append(clist, sf.d[id], sf.dIdx[id], sf.dHist[id])
@@ -57,8 +57,8 @@ func (sf *FilesForMerge) Close() {
 	}
 }
 
-func (at *AggregatorRoTx) FilesInRange(r *Ranges) (*FilesForMerge, error) {
-	sf := &FilesForMerge{}
+func (at *AggregatorRoTx) filesInRange(r *Ranges) (*visibleFilesForMerge, error) {
+	sf := &visibleFilesForMerge{}
 	for id := range at.d {
 		if at.d[id].d.Disable {
 			continue

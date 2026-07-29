@@ -11,10 +11,10 @@ func TestShardedLRUBasic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 500; i++ {
+	for i := range 500 {
 		l.Set([]byte{byte(i), byte(i >> 8)}, i)
 	}
-	for i := 0; i < 500; i++ {
+	for i := range 500 {
 		v, ok := l.Get([]byte{byte(i), byte(i >> 8)})
 		if !ok || v != i {
 			t.Fatalf("Get(%d) = %d,%v want %d,true", i, v, ok, i)
@@ -49,7 +49,7 @@ func TestShardedLRUDeleteByHashMatchesRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		l.Set([]byte{byte(i)}, i)
 	}
 	l.Range(func(h uint64, v int) bool {
@@ -77,16 +77,14 @@ func TestShardedLRUConcurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
-	for w := 0; w < 32; w++ {
-		wg.Add(1)
-		go func(base int) {
-			defer wg.Done()
-			for i := 0; i < 2000; i++ {
-				k := []byte{byte(base), byte(i), byte(i >> 8)}
-				l.Set(k, base*i)
+	for w := range 32 {
+		wg.Go(func() {
+			for i := range 2000 {
+				k := []byte{byte(w), byte(i), byte(i >> 8)}
+				l.Set(k, w*i)
 				l.Get(k)
 			}
-		}(w)
+		})
 	}
 	wg.Wait()
 }
@@ -96,14 +94,35 @@ func TestShardedLRUMoreShardsThanSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Shard count capped at size (50) then rounded down to a power of two = 32,
-	// not collapsed to a single shard.
-	if len(l.shards) != 32 {
-		t.Fatalf("shard count = %d want 32", len(l.shards))
+	// 50/2 = 25 shards max to keep per-shard capacity >= 2, rounded down to 16.
+	if len(l.shards) != 16 {
+		t.Fatalf("shard count = %d want 16", len(l.shards))
 	}
 	l.Set([]byte("k"), 42)
 	if v, ok := l.Get([]byte("k")); !ok || v != 42 {
 		t.Fatalf("Get after Set = %d,%v want 42,true", v, ok)
+	}
+}
+
+// TestShardedLRUMinShardCapacity pins that for size >= 2 no shard is built with
+// capacity 1, where two colliding keys would evict each other.
+func TestShardedLRUMinShardCapacity(t *testing.T) {
+	for _, tc := range []struct{ size, shards int }{
+		{100, 256},
+		{50, 256},
+		{512, 256},
+		{2, 256},
+		{1024, 16},
+	} {
+		l, err := NewShardedLRU[int](tc.size, tc.shards)
+		if err != nil {
+			t.Fatalf("size=%d shards=%d: %v", tc.size, tc.shards, err)
+		}
+		n := len(l.shards)
+		if smallest := tc.size / n; smallest < 2 {
+			t.Errorf("size=%d shards=%d: %d shards → smallest holds %d, want >= 2",
+				tc.size, tc.shards, n, smallest)
+		}
 	}
 }
 
@@ -204,44 +223,36 @@ func TestMapConcurrentAccess(t *testing.T) {
 	n := 100
 
 	// Concurrent writes
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+	for i := range n {
+		wg.Go(func() {
 			key := []byte{byte(i)}
 			m.Set(key, i)
-		}(i)
+		})
 	}
 	wg.Wait()
 
 	// Concurrent reads
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+	for i := range n {
+		wg.Go(func() {
 			key := []byte{byte(i)}
 			m.Get(key)
-		}(i)
+		})
 	}
 	wg.Wait()
 
 	// Concurrent mixed operations
-	for i := 0; i < n; i++ {
-		wg.Add(3)
-		go func(i int) {
-			defer wg.Done()
+	for i := range n {
+		wg.Go(func() {
 			key := []byte{byte(i)}
 			m.Set(key, i*2)
-		}(i)
-		go func(i int) {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			key := []byte{byte(i)}
 			m.Get(key)
-		}(i)
-		go func(i int) {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			m.Len()
-		}(i)
+		})
 	}
 	wg.Wait()
 }
@@ -347,7 +358,7 @@ func TestMapDeterminism(t *testing.T) {
 	seed := uint64(999)
 
 	// Run the same sequence of operations multiple times
-	for run := 0; run < 10; run++ {
+	for run := range 10 {
 		SetSeed(seed)
 		m := NewMap[int]()
 
@@ -555,44 +566,36 @@ func TestLRUConcurrentAccess(t *testing.T) {
 	n := 100
 
 	// Concurrent writes
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+	for i := range n {
+		wg.Go(func() {
 			key := []byte{byte(i)}
 			l.Set(key, i)
-		}(i)
+		})
 	}
 	wg.Wait()
 
 	// Concurrent reads
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+	for i := range n {
+		wg.Go(func() {
 			key := []byte{byte(i)}
 			l.Get(key)
-		}(i)
+		})
 	}
 	wg.Wait()
 
 	// Concurrent mixed operations
-	for i := 0; i < n; i++ {
-		wg.Add(3)
-		go func(i int) {
-			defer wg.Done()
+	for i := range n {
+		wg.Go(func() {
 			key := []byte{byte(i)}
 			l.Set(key, i*2)
-		}(i)
-		go func(i int) {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			key := []byte{byte(i)}
 			l.Get(key)
-		}(i)
-		go func(i int) {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			l.Len()
-		}(i)
+		})
 	}
 	wg.Wait()
 }

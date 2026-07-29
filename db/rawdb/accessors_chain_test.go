@@ -194,7 +194,7 @@ func TestWriteTransactions_SequentialTxnIDs(t *testing.T) {
 	defer tx.Rollback()
 
 	txs := make([]types.Transaction, 5)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		txs[i] = types.NewTransaction(uint64(i), common.HexToAddress("0x1234"), uint256.NewInt(uint64(i*100)), 21000, uint256.NewInt(1000000000), []byte{})
 	}
 
@@ -204,7 +204,7 @@ func TestWriteTransactions_SequentialTxnIDs(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify each transaction was stored with the correct sequential ID
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		expectedTxnID := baseTxnID.At(i)
 		key := make([]byte, 8)
 		binary.BigEndian.PutUint64(key, expectedTxnID)
@@ -252,7 +252,7 @@ func TestWriteTransactions_UniqueKeys(t *testing.T) {
 	defer tx.Rollback()
 
 	txs := make([]types.Transaction, 5)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		txs[i] = types.NewTransaction(uint64(i), common.HexToAddress("0x1234"), uint256.NewInt(uint64(i*100)), 21000, uint256.NewInt(1000000000), []byte{})
 	}
 
@@ -264,7 +264,7 @@ func TestWriteTransactions_UniqueKeys(t *testing.T) {
 	usedKeys := make(map[string]bool)
 	keysList := make([][]byte, 0, 5)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		expectedTxnID := baseTxnID.At(i)
 		key := make([]byte, 8)
 		binary.BigEndian.PutUint64(key, expectedTxnID)
@@ -327,6 +327,33 @@ func TestWriteRawTransactions_UniqueKeys(t *testing.T) {
 		currID := binary.BigEndian.Uint64(keysList[i])
 		require.Equal(t, prevID+1, currID, "Transaction IDs should be sequential (ID %d should be %d but got %d)", i, prevID+1, currID)
 	}
+}
+
+func TestTxnByIdxInBlock(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+	defer tx.Rollback()
+
+	const blockNum = uint64(1)
+	blockHash := common.HexToHash("0xb10c")
+
+	txn := types.NewTransaction(0, common.HexToAddress("0x1234"), uint256.NewInt(100), 21000, uint256.NewInt(1000000000), nil)
+	err := rawdb.WriteBody(tx, blockHash, blockNum, &types.Body{Transactions: []types.Transaction{txn}})
+	require.NoError(t, err)
+
+	got, ok, err := rawdb.TxnByIdxInBlock(tx, blockHash, blockNum, 0)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, txn.Hash(), got.Hash())
+
+	got, ok, err = rawdb.TxnByIdxInBlock(tx, blockHash, blockNum, 1_000_000)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Nil(t, got)
+
+	got, ok, err = rawdb.TxnByIdxInBlock(tx, common.HexToHash("0xdead"), blockNum, 0)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Nil(t, got)
 }
 
 // Tests block header storage and retrieval operations.
@@ -1316,7 +1343,7 @@ func checkReceiptsRLP(have, want types.Receipts) error {
 	if len(have) != len(want) {
 		return fmt.Errorf("receipts sizes mismatch: have %d, want %d", len(have), len(want))
 	}
-	for i := 0; i < len(want); i++ {
+	for i := range want {
 		rlpHave, err := rlp.EncodeToBytes(have[i])
 		if err != nil {
 			return err

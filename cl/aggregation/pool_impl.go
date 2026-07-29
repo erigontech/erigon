@@ -34,9 +34,7 @@ import (
 
 var ErrIsSuperset = errors.New("attestation is superset of existing attestation")
 
-var (
-	blsAggregate = bls.AggregateSignatures
-)
+var blsAggregate = bls.AggregateSignatures
 
 type aggregationPoolImpl struct {
 	// config

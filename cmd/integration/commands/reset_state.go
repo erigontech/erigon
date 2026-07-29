@@ -46,13 +46,12 @@ var cmdResetState = &cobra.Command{
 	Use:   "reset_state",
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
 		}
-		ctx := cmd.Context()
 		defer db.Close()
 
 		sn, borSn, _, _, _, _, err := allSnapshots(ctx, db, logger)
@@ -95,9 +94,8 @@ var cmdClearBadBlocks = &cobra.Command{
 	Use:   "clear_bad_blocks",
 	Short: "Clear table with bad block hashes to allow to process this blocks one more time",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := debug.SetupCobra(cmd, "integration")
-		ctx := cmd.Context()
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return err
@@ -160,7 +158,7 @@ func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots, borSn 
 
 	dbg := tx.Debug()
 	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d)\n", rawdbhelpers.IdxStepsCountV3(tx, stepSize), _lb, _lt)
-	for i := 0; i < int(kv.DomainLen); i++ {
+	for i := range int(kv.DomainLen) {
 		d := kv.Domain(i)
 		cfg := statecfg.Schema.GetDomainCfg(d)
 		keysSteps := rawdbhelpers.IdxStepsInDB(tx, cfg.Hist.IiCfg.KeysTable, stepSize)
@@ -211,7 +209,7 @@ func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots, borSn 
 	fmt.Fprintf(w, "Note: progress for commitment domain (in terms of txNum) is not presented.\n")
 	fmt.Fprint(w, "\n \t\t historyStartFrom \t\t progress(txnum) \t\t progress(step)\n")
 
-	for i := 0; i < int(kv.DomainLen); i++ {
+	for i := range int(kv.DomainLen) {
 		d := kv.Domain(i)
 		txNum := dbg.DomainProgress(d)
 		step := txNum / stepSize

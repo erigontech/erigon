@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding"
 	"errors"
+	"maps"
 	"reflect"
 	"strconv"
 	"strings"
@@ -116,9 +117,7 @@ func WithInfo[T comparable](info map[any]any) domainFeature {
 			if d.info == nil {
 				d.info = make(map[any]any)
 			}
-			for key, value := range info {
-				d.info[key] = value
-			}
+			maps.Copy(d.info, info)
 		}
 	})
 }
@@ -242,8 +241,7 @@ func (d *domain[T]) CompareTo(other any) int {
 		return 1
 	}
 
-	switch otherTyped := other.(type) {
-	case Domain:
+	if otherTyped, ok := other.(Domain); ok {
 		return bytes.Compare(d.id.asBytes(), otherTyped.Id().asBytes())
 	}
 

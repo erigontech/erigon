@@ -229,7 +229,6 @@ func TestReadBeaconBlockHeader(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, headerRoot, blockRoot)
-
 }
 
 func TestWriteExecutionBlockNumber(t *testing.T) {

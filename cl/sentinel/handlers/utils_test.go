@@ -68,7 +68,8 @@ func populateDatabaseWithBlocks(t *testing.T, store *tests.MockBlockReader, tx k
 					BodyRoot:      bodyRoot,
 				},
 			},
-			canonical))
+			canonical,
+		))
 		blocks = append(blocks, block)
 	}
 	return blocks

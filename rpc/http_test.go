@@ -27,7 +27,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -233,4 +235,41 @@ func TestWithGzipStreamingHookPanicsOnNilHook(t *testing.T) {
 	require.Panics(t, func() {
 		WithGzipStreamingHook(context.Background(), nil)
 	})
+}
+
+func signJwt(t *testing.T, secret []byte) string {
+	t.Helper()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"iat": time.Now().Unix()})
+	signed, err := token.SignedString(secret)
+	require.NoError(t, err)
+	return signed
+}
+
+// Auth-scheme names are case-insensitive (RFC 7235 §2.1).
+func TestCheckJwtSecretAuthScheme(t *testing.T) {
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	token := signJwt(t, secret)
+
+	cases := []struct {
+		name   string
+		header string
+		want   bool
+	}{
+		{"canonical scheme", "Bearer " + token, true},
+		{"lowercase scheme", "bearer " + token, true},
+		{"uppercase scheme", "BEARER " + token, true},
+		{"mixed case scheme", "BeArEr " + token, true},
+		{"empty header", "", false},
+		{"scheme without token", "Bearer ", false},
+		{"header shorter than scheme", "Bear", false},
+		{"other scheme", "Basic " + token, false},
+		{"foreign secret", "Bearer " + signJwt(t, []byte("fedcba9876543210fedcba9876543210")), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "http://url.com", nil)
+			r.Header.Set("Authorization", tc.header)
+			require.Equal(t, tc.want, CheckJwtSecret(httptest.NewRecorder(), r, secret))
+		})
+	}
 }

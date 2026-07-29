@@ -267,7 +267,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 					}
 					b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards",
 						"slot", currentSlot, "to", targetSlot,
-						"slots/sec", fmt.Sprintf("%.1f", slotSec),
+						"slots/sec", fmt.Sprintf("%.2f", slotSec),
 						"progress", fmt.Sprintf("%.1f%%", progress),
 						"eta", utils.ETA(currentSlot-targetSlot, slotSec))
 				}

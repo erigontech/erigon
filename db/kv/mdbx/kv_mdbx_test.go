@@ -738,7 +738,7 @@ func testCloseWaitsAfterTxBegin(
 	t.Helper()
 	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
 	var txs []kv.Getter
-	for i := 0; i < count; i++ {
+	for range count {
 		tx, err := txBeginFunc(db)
 		require.NoError(t, err)
 		txs = append(txs, tx)
@@ -834,7 +834,7 @@ func TestDB_Batch(t *testing.T) {
 	// Iterate over multiple updates in separate goroutines.
 	n := 2
 	ch := make(chan error, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go func(i int) {
 			ch <- db.Batch(func(tx kv.RwTx) error {
 				return tx.Put(table, u64tob(uint64(i)), []byte{})
@@ -843,7 +843,7 @@ func TestDB_Batch(t *testing.T) {
 	}
 
 	// Check all responses to make sure there's no error.
-	for i := 0; i < n; i++ {
+	for range n {
 		if err := <-ch; err != nil {
 			t.Fatal(err)
 		}
@@ -851,7 +851,7 @@ func TestDB_Batch(t *testing.T) {
 
 	// Ensure data is correct.
 	if err := db.View(t.Context(), func(tx kv.Tx) error {
-		for i := 0; i < n; i++ {
+		for i := range n {
 			v, err := tx.GetOne(table, u64tob(uint64(i)))
 			if err != nil {
 				panic(err)
@@ -931,7 +931,7 @@ func TestDB_BatchFull(t *testing.T) {
 	go put(3)
 
 	// Check all responses to make sure there's no error.
-	for i := 0; i < size; i++ {
+	for range size {
 		if err := <-ch; err != nil {
 			t.Fatal(err)
 		}
@@ -976,7 +976,7 @@ func TestDB_BatchTime(t *testing.T) {
 	// Batch must trigger by time alone.
 
 	// Check all responses to make sure there's no error.
-	for i := 0; i < size; i++ {
+	for range size {
 		if err := <-ch; err != nil {
 			t.Fatal(err)
 		}
@@ -1102,7 +1102,7 @@ func BenchmarkDB_Delete(b *testing.B) {
 	}
 
 	if err := db.Update(b.Context(), func(tx kv.RwTx) error {
-		for i := 0; i < len(keys); i++ {
+		for i := range keys {
 			err := tx.Put(table, keys[i], keys[i])
 			if err != nil {
 				return err

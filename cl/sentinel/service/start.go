@@ -59,7 +59,8 @@ func createSentinel(
 	peerDasStateReader peerdasstate.PeerDasStateReader,
 	p2p p2p.P2PManager,
 	initialStatus *cltypes.Status,
-	logger log.Logger) (*sentinel.Sentinel, *enode.LocalNode, error) {
+	logger log.Logger,
+) (*sentinel.Sentinel, *enode.LocalNode, error) {
 	sent, err := sentinel.New(
 		ctx,
 		cfg,
@@ -102,7 +103,8 @@ func StartSentinelService(
 	dataColumnStorage blob_storage.DataColumnStorage,
 	PeerDasStateReader peerdasstate.PeerDasStateReader,
 	p2p p2p.P2PManager,
-	logger log.Logger) (sentinelproto.SentinelClient, *enode.LocalNode, error) {
+	logger log.Logger,
+) (sentinelproto.SentinelClient, *enode.LocalNode, error) {
 	sent, localNode, err := createSentinel(
 		ctx,
 		cfg,
@@ -139,7 +141,7 @@ func StartServe(
 	}
 	// Create a gRPC server
 	gRPCserver := grpc.NewServer(grpc.Creds(creds))
-	//go server.ListenToGossip()
+	// go server.ListenToGossip()
 	// Regiser our server as a gRPC server
 	sentinelproto.RegisterSentinelServer(gRPCserver, server)
 	if err := gRPCserver.Serve(lis); err != nil {

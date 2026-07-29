@@ -281,7 +281,7 @@ func initSeparatedLogging(
 
 	mux := log.MultiHandler(consoleHandler, log.LvlFilterHandler(dirLevel, userLog))
 	logger.SetHandler(mux)
-	logger.Info("logging to file system", "log dir", dirPath, "file prefix", filePrefix, "log level", dirLevel, "json", dirJson)
+	logger.Info("logging to file system", "logDir", dirPath, "filePrefix", filePrefix, "logLevel", dirLevel, "json", dirJson)
 }
 
 // GetLogLevel parses a log level given as a name ("info") or a numeric string ("3").
