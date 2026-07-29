@@ -26,8 +26,7 @@ import (
 )
 
 // BenchmarkLoadMonotoneDupKeys mimics the ii indexKeys workload: monotone BE8
-// keys with several values per key, spilled to multiple runs. bufSize forces
-// ~10 runs per iteration.
+// keys, several values per key, spilled to ~10 runs per iteration via bufSize.
 func BenchmarkLoadMonotoneDupKeys(b *testing.B) {
 	logger := log.New()
 	key := make([]byte, 8)

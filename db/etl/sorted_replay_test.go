@@ -191,8 +191,7 @@ func dumpTable(t *testing.T, tx kv.Tx, table string) []sortableBufferEntry {
 
 // TestSortednessBreaksLoadStaysCorrect pins correctness when the producer breaks
 // key order: whichever driver the run boundaries select, the loaded stream must
-// equal the stable global sort. Intra-run breaks may still yield non-overlapping
-// runs (sequential replay, legally); overlapping runs take the heap.
+// equal the stable global sort.
 func TestSortednessBreaksLoadStaysCorrect(t *testing.T) {
 	const n = 3000
 	for _, tc := range []struct {
@@ -237,8 +236,7 @@ func (emptyProvider) Dispose()                      {}
 func (emptyProvider) Wait() error                   { return nil }
 func (emptyProvider) String() string                { return "empty" }
 
-// A recorded run is never empty; the sequential driver must fail loudly on a
-// truncated spill instead of silently dropping the run.
+// The sequential driver must fail loudly on a truncated spill, not drop the run.
 func TestReplaySequentiallyEmptyRunErrors(t *testing.T) {
 	err := replaySequentially("test", []dataProvider{emptyProvider{}}, func(k, v []byte) error { return nil })
 	require.Error(t, err)
