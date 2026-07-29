@@ -36,7 +36,8 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 
 	require.NoError(t, ibs.TouchAccount(addr))
 
-	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	require.NoError(t, err)
 	_, hasAddress := writes.GetAddress(addr)
 	require.False(t, hasAddress)
 	_, hasBalance := writes.GetBalance(addr)
@@ -63,7 +64,8 @@ func TestFinalizedWritesKeepCreatedEmptyBeforeEIP161(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xe1})
 	require.NoError(t, ibs.TouchAccount(addr))
 
-	writes := ibs.FinalizedWrites(&chain.Rules{})
+	writes, err := ibs.FinalizedWrites(&chain.Rules{})
+	require.NoError(t, err)
 	_, ok := writes.GetAddress(addr)
 	require.True(t, ok)
 }
@@ -77,7 +79,8 @@ func TestFinalizedWritesKeepCreatedEmptyAtGenesis(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xe1})
 	require.NoError(t, ibs.TouchAccount(addr))
 
-	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	require.NoError(t, err)
 	_, ok := writes.GetAddress(addr)
 	require.True(t, ok)
 }
@@ -90,10 +93,11 @@ func TestFinalizedWritesKeepCreatedEmptyAuraSystemAccount(t *testing.T) {
 
 	require.NoError(t, ibs.TouchAccount(params.SystemAddress))
 
-	writes := ibs.FinalizedWrites(&chain.Rules{
+	writes, err := ibs.FinalizedWrites(&chain.Rules{
 		IsSpuriousDragon: true,
 		IsAura:           true,
 	})
+	require.NoError(t, err)
 	_, ok := writes.GetAddress(params.SystemAddress)
 	require.True(t, ok)
 }

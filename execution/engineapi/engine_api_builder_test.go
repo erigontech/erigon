@@ -1104,3 +1104,371 @@ func lastBalanceChange(ac *types.AccountChanges) *types.BalanceChange {
 	}
 	return last
 }
+
+// TestEngineApiEmptyAccountClearingConsistency pins builder/validator agreement
+// when one transaction leaves an account empty and a later EIP-7702
+// authorization reads its existence in the same block.
+func TestEngineApiEmptyAccountClearingConsistency(t *testing.T) {
+	for _, tc := range []emptyAccountClearingCase{
+		{name: "touch_only", touch: true, parallel: true},
+		{name: "authorization_only", authorize: true, parallel: true},
+		{name: "combined_serial", touch: true, authorize: true},
+		{name: "combined_parallel", touch: true, authorize: true, parallel: true},
+		{name: "preexisting_combined_serial", touch: true, authorize: true, preexisting: true},
+		{name: "preexisting_combined_parallel", touch: true, authorize: true, preexisting: true, parallel: true},
+		{name: "combined_amsterdam_parallel", touch: true, authorize: true, amsterdam: true, parallel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runEmptyAccountClearingCase(t, tc)
+		})
+	}
+}
+
+type emptyAccountClearingCase struct {
+	name        string
+	touch       bool
+	authorize   bool
+	preexisting bool
+	amsterdam   bool
+	parallel    bool
+}
+
+func runEmptyAccountClearingCase(t *testing.T, tc emptyAccountClearingCase) {
+	prev := dbg.Exec3Parallel
+	dbg.Exec3Parallel = tc.parallel
+	t.Cleanup(func() { dbg.Exec3Parallel = prev })
+
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	if !tc.amsterdam {
+		genesis.Config.AmsterdamTime = nil
+	}
+
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(senderKey.PublicKey)
+	genesis.Alloc[senderAddr] = types.GenesisAccount{
+		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil),
+	}
+
+	emptyKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	emptyAddr := crypto.PubkeyToAddress(emptyKey.PublicKey)
+	if tc.preexisting {
+		genesis.Alloc[emptyAddr] = types.GenesisAccount{Balance: new(big.Int)}
+	}
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		signer := types.LatestSignerForChainID(chainID)
+		rpcClient := eat.Transactor.RpcClient()
+		feeCap, tipCap := uint256.NewInt(1_000_000_000), uint256.NewInt(1_000_000_000)
+		gasLimit := func(preAmsterdam uint64) uint64 {
+			if tc.amsterdam {
+				return params.MaxTxnGasLimit
+			}
+			return preAmsterdam
+		}
+
+		send := func(txn types.Transaction) {
+			signed, err := types.SignTx(txn, *signer, senderKey)
+			require.NoError(t, err)
+			_, err = rpcClient.SendTransaction(signed)
+			require.NoError(t, err)
+		}
+
+		// Deploy in its own block so EIP-6780 keeps the contract alive and the
+		// SELFDESTRUCT only forwards its (zero) balance.
+		// runtime: PUSH20 <empty account> ; SELFDESTRUCT
+		// init:    PUSH22 <runtime> ; PUSH1 0 ; MSTORE ; PUSH1 0x16 ; PUSH1 0x0a ; RETURN
+		initCode := append([]byte{0x75, 0x73}, emptyAddr[:]...)
+		initCode = append(initCode, 0xff, 0x60, 0x00, 0x52, 0x60, 0x16, 0x60, 0x0a, 0xf3)
+		send(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 0, GasLimit: gasLimit(200_000), Data: initCode},
+			ChainID:  *chainID, TipCap: *tipCap, FeeCap: *feeCap,
+		})
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		selfDestructor := types.CreateAddress(senderAddr, 0)
+		code, err := rpcClient.GetCode(selfDestructor, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.NotEmpty(t, code)
+
+		nonce := uint64(1)
+		if tc.touch {
+			send(&types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: nonce, GasLimit: gasLimit(200_000), To: &selfDestructor},
+				ChainID:  *chainID, TipCap: *tipCap, FeeCap: *feeCap,
+			})
+			nonce++
+		}
+		if tc.authorize {
+			send(&types.SetCodeTransaction{
+				DynamicFeeTransaction: types.DynamicFeeTransaction{
+					CommonTx: types.CommonTx{Nonce: nonce, GasLimit: gasLimit(500_000), To: &senderAddr},
+					ChainID:  *chainID, TipCap: *tipCap, FeeCap: *feeCap,
+				},
+				Authorizations: []types.Authorization{
+					signAuthorization(t, emptyKey, chainID, common.Address{0xaa}, 0),
+				},
+			})
+		}
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		if tc.amsterdam {
+			want := uint64(params.StateGasNewAccount + params.StateGasAuthBase)
+			require.Equal(t, want, uint64(payload.ExecutionPayload.GasUsed))
+			return
+		}
+
+		var want uint64
+		if tc.touch {
+			want += 28603 // 21000 + PUSH20 + SELFDESTRUCT + cold beneficiary
+		}
+		if tc.authorize {
+			want += 46000 // 21000 + PerEmptyAccountCost, no existing-account refund
+		}
+		require.Equal(t, want, uint64(payload.ExecutionPayload.GasUsed))
+	})
+}
+
+// TestEngineApiEmptyCoinbaseTipped pins builder/validator agreement when a
+// transaction touches an empty fee recipient. EIP-161 judges emptiness after the
+// tip lands, so the transaction's own write-set — which predates it — must not
+// settle the fee recipient's fate either way: it survives a tip and is cleared
+// without one.
+func TestEngineApiEmptyCoinbaseTipped(t *testing.T) {
+	for _, tc := range []emptyCoinbaseCase{
+		{name: "touched_serial", touchFeeRecipient: true},
+		{name: "touched_parallel", touchFeeRecipient: true, parallel: true},
+		{name: "untouched_parallel", parallel: true},
+		{name: "touched_zero_tip_serial", touchFeeRecipient: true, zeroTip: true},
+		{name: "touched_zero_tip_parallel", touchFeeRecipient: true, zeroTip: true, parallel: true},
+		{name: "touched_amsterdam_serial", touchFeeRecipient: true, amsterdam: true},
+		{name: "touched_amsterdam_parallel", touchFeeRecipient: true, amsterdam: true, parallel: true},
+		{name: "touched_zero_tip_amsterdam_parallel", touchFeeRecipient: true, zeroTip: true, amsterdam: true, parallel: true},
+		{name: "system_address_zero_tip_amsterdam_serial", zeroTip: true, systemAddress: true, amsterdam: true},
+		{name: "system_address_zero_tip_amsterdam_parallel", zeroTip: true, systemAddress: true, amsterdam: true, parallel: true},
+		{name: "touched_zero_tip_then_authorized_amsterdam_serial", touchFeeRecipient: true, zeroTip: true, authorizeFeeRecipient: true, amsterdam: true},
+		{name: "touched_zero_tip_then_authorized_amsterdam_parallel", touchFeeRecipient: true, zeroTip: true, authorizeFeeRecipient: true, amsterdam: true, parallel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runEmptyCoinbaseCase(t, tc)
+		})
+	}
+}
+
+type emptyCoinbaseCase struct {
+	name                  string
+	touchFeeRecipient     bool
+	zeroTip               bool
+	systemAddress         bool
+	authorizeFeeRecipient bool
+	amsterdam             bool
+	parallel              bool
+}
+
+func runEmptyCoinbaseCase(t *testing.T, tc emptyCoinbaseCase) {
+	touchFeeRecipient, zeroTip, parallel := tc.touchFeeRecipient, tc.zeroTip, tc.parallel
+	prev := dbg.Exec3Parallel
+	dbg.Exec3Parallel = parallel
+	t.Cleanup(func() { dbg.Exec3Parallel = prev })
+
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	if !tc.amsterdam {
+		genesis.Config.AmsterdamTime = nil
+	}
+
+	feeRecipient := genesis.Coinbase
+	if tc.systemAddress {
+		feeRecipient = params.SystemAddress.Value()
+		genesis.Coinbase = feeRecipient
+	}
+	genesis.Alloc[feeRecipient] = types.GenesisAccount{Balance: new(big.Int)}
+
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(senderKey.PublicKey)
+	genesis.Alloc[senderAddr] = types.GenesisAccount{
+		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil),
+	}
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		signer := types.LatestSignerForChainID(chainID)
+		rpcClient := eat.Transactor.RpcClient()
+
+		to := &senderAddr
+		if touchFeeRecipient {
+			to = &feeRecipient
+		}
+		tipCap := uint256.NewInt(1_000_000_000)
+		if zeroTip {
+			tipCap = uint256.NewInt(0)
+		}
+		txn, err := types.SignTx(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 0, GasLimit: 100_000, To: to},
+			ChainID:  *chainID,
+			TipCap:   *tipCap,
+			FeeCap:   *uint256.NewInt(1_000_000_000),
+		}, *signer, senderKey)
+		require.NoError(t, err)
+		_, err = rpcClient.SendTransaction(txn)
+		require.NoError(t, err)
+
+		if tc.authorizeFeeRecipient {
+			txn, err = types.SignTx(&types.SetCodeTransaction{
+				DynamicFeeTransaction: types.DynamicFeeTransaction{
+					CommonTx: types.CommonTx{Nonce: 1, GasLimit: params.MaxTxnGasLimit, To: &senderAddr},
+					ChainID:  *chainID,
+					TipCap:   *uint256.NewInt(0),
+					FeeCap:   *uint256.NewInt(1_000_000_000),
+				},
+				Authorizations: []types.Authorization{
+					signAuthorization(t, coinbaseKey, chainID, common.Address{0xaa}, 0),
+				},
+			}, *signer, senderKey)
+			require.NoError(t, err)
+			_, err = rpcClient.SendTransaction(txn)
+			require.NoError(t, err)
+		}
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		wantTxnCount := 1
+		if tc.authorizeFeeRecipient {
+			wantTxnCount++
+		}
+		require.Len(t, payload.ExecutionPayload.Transactions, wantTxnCount)
+
+		if tc.amsterdam {
+			// EIP-7928: the assembler's and the validator's account lists must
+			// agree on the fee recipient too.
+			bal := decodeAndValidateBAL(t, payload)
+			block, err := eat.RpcApiClient.GetBlockByNumber(ctx, rpc.BlockNumber(payload.ExecutionPayload.BlockNumber), false)
+			require.NoError(t, err)
+			require.NotNil(t, block.BlockAccessListHash)
+			require.Equal(t, bal.Hash(), *block.BlockAccessListHash)
+			if tc.systemAddress {
+				changes := findAccountChanges(bal, params.SystemAddress)
+				require.NotNil(t, changes)
+				require.Empty(t, changes.StorageChanges)
+				require.Empty(t, changes.StorageReads)
+				require.Empty(t, changes.BalanceChanges)
+				require.Empty(t, changes.NonceChanges)
+				require.Empty(t, changes.CodeChanges)
+			}
+		}
+		if tc.authorizeFeeRecipient {
+			wantGasUsed := uint64(params.StateGasNewAccount + params.StateGasAuthBase)
+			require.Equal(t, wantGasUsed, uint64(payload.ExecutionPayload.GasUsed))
+			code, err := rpcClient.GetCode(feeRecipient, rpc.LatestBlock)
+			require.NoError(t, err)
+			require.NotEmpty(t, code)
+		}
+
+		balance, err := rpcClient.GetBalance(feeRecipient, rpc.LatestBlock)
+		require.NoError(t, err)
+		if zeroTip {
+			require.Zero(t, balance.Sign(), "an untipped fee recipient must not receive a balance")
+			return
+		}
+		require.Positive(t, balance.Sign(), "fee recipient must keep the tip it was credited")
+	})
+}
+
+// TestEngineApiZeroAmountWithdrawal pins the block access list of a zero-amount
+// withdrawal: EIP-7928 lists the recipient regardless of the amount, with no
+// balance change, and the validator must accept the block it built. An empty
+// recipient is also cleared per EIP-161, whether fresh or pre-existing.
+func TestEngineApiZeroAmountWithdrawal(t *testing.T) {
+	for _, tc := range []zeroWithdrawalCase{
+		{name: "preexisting_serial", preexisting: true},
+		{name: "preexisting_parallel", preexisting: true, parallel: true},
+		{name: "fresh_serial"},
+		{name: "fresh_parallel", parallel: true},
+		{name: "funded_serial", funded: true},
+		{name: "funded_parallel", funded: true, parallel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runZeroWithdrawalCase(t, tc)
+		})
+	}
+}
+
+type zeroWithdrawalCase struct {
+	name        string
+	preexisting bool
+	funded      bool
+	parallel    bool
+}
+
+func runZeroWithdrawalCase(t *testing.T, tc zeroWithdrawalCase) {
+	prev := dbg.Exec3Parallel
+	dbg.Exec3Parallel = tc.parallel
+	t.Cleanup(func() { dbg.Exec3Parallel = prev })
+
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+
+	target := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	if tc.preexisting {
+		genesis.Alloc[target] = types.GenesisAccount{Balance: new(big.Int)}
+	}
+	if tc.funded {
+		genesis.Alloc[target] = types.GenesisAccount{Balance: big.NewInt(1)}
+	}
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx, engineapitester.WithWithdrawals([]*types.Withdrawal{
+			{Index: 0, Validator: 0, Address: target, Amount: 0},
+		}))
+		require.NoError(t, err)
+
+		bal := decodeAndValidateBAL(t, payload)
+		changes := findAccountChanges(bal, accounts.InternAddress(target))
+		require.NotNil(t, changes, "a withdrawal recipient must appear in the block access list")
+		require.Empty(t, changes.BalanceChanges,
+			"a zero-amount withdrawal must not produce a balance change")
+		block, err := eat.RpcApiClient.GetBlockByNumber(ctx, rpc.BlockNumber(payload.ExecutionPayload.BlockNumber), false)
+		require.NoError(t, err)
+		require.NotNil(t, block.BlockAccessListHash)
+		require.Equal(t, bal.Hash(), *block.BlockAccessListHash)
+
+		balance, err := eat.Transactor.RpcClient().GetBalance(target, rpc.LatestBlock)
+		require.NoError(t, err)
+		if tc.funded {
+			require.Equal(t, int64(1), balance.Int64(), "the recipient's balance must be unchanged")
+			return
+		}
+		require.Zero(t, balance.Sign(), "an account left empty must not gain a balance")
+	})
+}

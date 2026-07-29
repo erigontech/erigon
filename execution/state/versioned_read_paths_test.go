@@ -545,7 +545,7 @@ func TestVersionedRead_E2_StaleMapReadCaughtAtCommit(t *testing.T) {
 	assert.Equal(t, *uint256.NewInt(99), got, "read-once returns the recorded value")
 
 	var io VersionedIO
-	ibs.MergeTxIOInto(&io)
+	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
 	valid := mvhm.ValidateVersion(10, &io, func(rv, wv Version) VersionValidity {
 		if rv == wv {
 			return VersionValid
@@ -580,6 +580,57 @@ func TestVersionedRead_F_MVReadResultDependencyPanics(t *testing.T) {
 		assert.ErrorIs(t, err, ErrDependency)
 	}()
 	_, _ = ibs.GetBalance(addr)
+}
+
+func TestVersionedRead_F_SelfDestructDependencyPanics(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	reader := NewReaderV3(domains.AsGetter(tx))
+	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Release(false)
+	ibs.SetTxContext(1, 5)
+
+	addr := accounts.InternAddress([20]byte{0xf1})
+	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, false)
+
+	defer func() {
+		r := recover()
+		require.NotNil(t, r, "must panic on self-destruct dependency")
+		err, ok := r.(error)
+		require.True(t, ok)
+		assert.ErrorIs(t, err, ErrDependency)
+	}()
+	_, _ = ibs.GetBalance(addr)
+}
+
+func TestVersionedRead_F_LaterSelfDestructDoesNotReplaceFirstProbe(t *testing.T) {
+	t.Parallel()
+	account := accounts.NewAccount()
+	account.Nonce = 7
+	mvhm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(&refreshReader{account: &account}, mvhm)
+	defer ibs.Release(false)
+	ibs.SetTxContext(1, 5)
+
+	addr := accounts.InternAddress([20]byte{0xf2})
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+
+	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
+	_, err = ibs.GetNonce(addr)
+	require.NoError(t, err)
+
+	var io VersionedIO
+	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
+	valid := mvhm.ValidateVersion(5, &io, func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}, false, "")
+	require.Equal(t, VersionInvalid, valid)
 }
 
 // writeSet hit at MVReadResultDone, but readSet has a stale version

@@ -58,21 +58,27 @@ func RederiveBlockAccessList(
 	balIO := &state.VersionedIO{}
 	noopWriter := state.NewNoopWriter()
 	ibs.SetTxContext(blockNum, -1)
+	hashFn := protocol.GetHashFn(header, getHeader)
+	blockContext := protocol.NewEVMBlockContext(header, hashFn, engine, accounts.NilAddress, cfg)
+	blockRules := blockContext.Rules(cfg)
 	err := protocol.InitializeBlockExecution(engine, chainReader, header, cfg, ibs, noopWriter, logger, nil)
 	if err != nil {
 		return nil, fmt.Errorf("bal.RederiveBlockAccessList: initialize block %d: %w", blockNum, err)
 	}
-	ibs.MergeTxIOInto(balIO)
+	initWrites, err := ibs.FinalizedWrites(blockRules)
+	if err != nil {
+		return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize init writes for block %d: %w", blockNum, err)
+	}
+	ibs.MergeTxIOInto(balIO, initWrites)
 	// Publish this phase's writes to the versionMap so the next phase observes
 	// them across the ResetVersionedIO below — the cross-tx carrier the parallel
 	// executor and block builder also use. Without it a later tx's balance write
 	// (e.g. the accumulating coinbase fee) can't see the running value and the
 	// per-tx BAL change is lost.
-	ibs.FlushWritesToVersionMap()
+	ibs.FlushWritesToVersionMap(initWrites)
 	ibs.ResetVersionedIO()
 	gasUsed := new(protocol.GasUsed)
 	gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(cfg.GetMaxBlobGasPerBlock(header.Time))
-	hashFn := protocol.GetHashFn(header, getHeader)
 	vmCfg := vm.Config{}
 	receipts := make(types.Receipts, 0, len(txns))
 	for i, txn := range txns {
@@ -93,8 +99,12 @@ func RederiveBlockAccessList(
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("bal.RederiveBlockAccessList: execution aborted replaying tx %d of block %d: %w", i, blockNum, ctx.Err())
 		}
-		ibs.MergeTxIOInto(balIO)
-		ibs.FlushWritesToVersionMap()
+		txWrites, err := ibs.FinalizedWrites(blockRules)
+		if err != nil {
+			return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize tx %d writes for block %d: %w", i, blockNum, err)
+		}
+		ibs.MergeTxIOInto(balIO, txWrites)
+		ibs.FlushWritesToVersionMap(txWrites)
 		ibs.ResetVersionedIO()
 		receipts = append(receipts, receipt)
 	}
@@ -109,6 +119,10 @@ func RederiveBlockAccessList(
 	if err != nil {
 		return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize block %d: %w", blockNum, err)
 	}
-	ibs.MergeTxIOInto(balIO)
+	finalWrites, err := ibs.FinalizedWrites(blockRules)
+	if err != nil {
+		return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize block %d writes: %w", blockNum, err)
+	}
+	ibs.MergeTxIOInto(balIO, finalWrites)
 	return balIO.AsBlockAccessList(), nil
 }

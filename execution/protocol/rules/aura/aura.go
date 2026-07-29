@@ -720,12 +720,15 @@ func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, h
 	return nil
 }
 
-func (c *AuRa) applyRewards(header *types.Header, state *state.IntraBlockState, syscall rules.SystemCall) error {
-	rewards, err := c.CalculateRewards(nil, header, nil, syscall)
+func (c *AuRa) applyRewards(config *chain.Config, header *types.Header, state *state.IntraBlockState, syscall rules.SystemCall) error {
+	rewards, err := c.CalculateRewards(config, header, nil, syscall)
 	if err != nil {
 		return err
 	}
 	for _, r := range rewards {
+		if config.IsEIPEnabled(7928, header.Time) && r.Amount.IsZero() {
+			continue
+		}
 		if err := state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock); err != nil {
 			return err
 		}
@@ -738,7 +741,7 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
-	if err := c.applyRewards(header, state, syscall); err != nil {
+	if err := c.applyRewards(config, header, state, syscall); err != nil {
 		return nil, err
 	}
 

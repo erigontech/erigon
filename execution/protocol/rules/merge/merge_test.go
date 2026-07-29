@@ -27,9 +27,13 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/aura"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -181,4 +185,73 @@ func TestFinalizeWithdrawalStateErrorPropagates(t *testing.T) {
 
 	require.ErrorIs(t, err, boom)
 	require.Contains(t, err.Error(), "withdrawal 7")
+}
+
+func TestFinalizeZeroRewardOmittedFromBlockAccessList(t *testing.T) {
+	stepDuration := uint64(1)
+	startStep := uint64(0)
+	blockReward := uint64(0)
+	beneficiary := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	auraEngine, err := aura.NewAuRa(&chain.AuRaConfig{
+		StepDuration: &stepDuration,
+		StartStep:    &startStep,
+		BlockReward:  &blockReward,
+		Validators:   &chain.ValidatorSetJson{List: []common.Address{beneficiary}},
+	}, memdb.NewTestDB(t, dbcfg.ChainDB))
+	require.NoError(t, err)
+
+	header := &types.Header{
+		Coinbase:   beneficiary,
+		Difficulty: *ProofOfStakeDifficulty,
+		Number:     *uint256.NewInt(1),
+	}
+	ibs := newFinalizeBlockAccessListState(t)
+	_, err = New(auraEngine).Finalize(amsterdamConfig(), header, ibs, nil, nil, nil, nil, nil, false, log.New())
+	require.NoError(t, err)
+
+	require.Empty(t, finalizeBlockAccessList(t, ibs))
+}
+
+func TestFinalizeZeroWithdrawalToSystemAddressIncludedInBlockAccessList(t *testing.T) {
+	header := &types.Header{
+		Difficulty: *ProofOfStakeDifficulty,
+		Number:     *uint256.NewInt(1),
+	}
+	ibs := newFinalizeBlockAccessListState(t)
+	var eth1Engine rules.Engine
+	_, err := New(eth1Engine).Finalize(amsterdamConfig(), header, ibs, nil, nil, []*types.Withdrawal{{
+		Address: params.SystemAddress.Value(),
+	}}, nil, nil, false, log.New())
+	require.NoError(t, err)
+
+	bal := finalizeBlockAccessList(t, ibs)
+	require.Len(t, bal, 1)
+	require.Equal(t, params.SystemAddress, bal[0].Address)
+	require.Empty(t, bal[0].BalanceChanges)
+}
+
+func newFinalizeBlockAccessListState(t *testing.T) *state.IntraBlockState {
+	t.Helper()
+	ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+	ibs.SetTxContext(1, 0)
+	ibs.StartAccessRecording()
+	t.Cleanup(func() { ibs.Release(false) })
+	return ibs
+}
+
+func finalizeBlockAccessList(t *testing.T, ibs *state.IntraBlockState) types.BlockAccessList {
+	t.Helper()
+	writes, err := ibs.FinalizedWrites(&chain.Rules{
+		IsSpuriousDragon: true,
+		IsAmsterdam:      true,
+	})
+	require.NoError(t, err)
+	io := state.NewVersionedIO(1)
+	ibs.MergeTxIOInto(io, writes)
+	return io.AsBlockAccessList()
+}
+
+func amsterdamConfig() *chain.Config {
+	amsterdam := uint64(0)
+	return &chain.Config{AmsterdamTime: &amsterdam}
 }

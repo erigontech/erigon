@@ -1061,7 +1061,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	// The call-level BAL must not include SYSTEM_ADDRESS when the syscall only
 	// performs the sender-side touch and no actual account access.
 	var io state.VersionedIO
-	statedb.MergeTxIOInto(&io)
+	statedb.MergeTxIOInto(&io, statedb.VersionedWrites())
 	bal := io.AsBlockAccessList()
 	for _, accountChanges := range bal {
 		require.NotEqual(t, systemAddr, accountChanges.Address,

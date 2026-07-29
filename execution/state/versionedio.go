@@ -2871,28 +2871,50 @@ func GetDep(deps *VersionedIO) map[int]map[int]bool {
 	return newDependencies
 }
 
-func (s *WriteSet) createdEmpty(addr accounts.Address) bool {
-	created, ok := s.address[addr]
-	if !ok || created.Val == nil {
-		return false
+// AccountAfterWrites overlays addr's recorded field writes onto account and
+// returns it as this tx leaves it. A record write replaces the base outright, so
+// ok is false when that write carries no account for the fields to overlay onto.
+func (s *WriteSet) AccountAfterWrites(addr accounts.Address, account accounts.Account) (accounts.Account, bool) {
+	if written, ok := s.address[addr]; ok {
+		if written.Val == nil {
+			return accounts.Account{}, false
+		}
+		account = *written.Val
 	}
-	account := *created.Val
 	if written, ok := s.balance[addr]; ok {
 		account.Balance = written.Val
 	}
 	if written, ok := s.nonce[addr]; ok {
 		account.Nonce = written.Val
 	}
+	if written, ok := s.incarnation[addr]; ok {
+		account.Incarnation = written.Val
+	}
 	if written, ok := s.codeHash[addr]; ok {
 		account.CodeHash = written.Val
 	}
-	if !account.Empty() {
+	return account, true
+}
+
+// createdEmpty reports whether these writes create addr and leave it empty, with
+// nothing else recorded against it. The AddressPath write carries the account as
+// created, so overlaying the field writes gives its end-of-tx value; anything
+// beyond those fields — code, storage, a creation or destruction marker — would
+// be orphaned by withholding the record, so it disqualifies addr instead.
+func (s *WriteSet) createdEmpty(addr accounts.Address) bool {
+	if s == nil {
+		return false
+	}
+	created, ok := s.address[addr]
+	if !ok || created.Val == nil {
+		return false
+	}
+	account, ok := s.AccountAfterWrites(addr, *created.Val)
+	if !ok || !account.Empty() {
 		return false
 	}
 	_, hasCode := s.code[addr]
-	_, hasIncarnation := s.incarnation[addr]
 	_, destroyed := s.selfDestruct[addr]
 	_, createdContract := s.createContract[addr]
-	_, hasCodeSize := s.codeSize[addr]
-	return !hasCode && !hasIncarnation && !destroyed && !createdContract && !hasCodeSize && len(s.storage[addr]) == 0
+	return !hasCode && !destroyed && !createdContract && len(s.storage[addr]) == 0
 }
