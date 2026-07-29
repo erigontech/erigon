@@ -266,10 +266,8 @@ func (cc *commitmentCalculator) Start(ctx context.Context) {
 func (cc *commitmentCalculator) Stop() {
 	close(cc.done)
 	cc.wg.Wait()
-	if cc.balUpdates != nil {
-		cc.balUpdates.Close()
-		cc.balUpdates = nil
-	}
+	// Not closed here: the shared commitment context may still reference it
+	// (post-exec ComputeCommitment); GC reclaims it when the calculator drops.
 	if cc.roTx != nil {
 		cc.roTx.Rollback()
 	}
