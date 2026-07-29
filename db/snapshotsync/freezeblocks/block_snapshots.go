@@ -867,9 +867,9 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			if lvl >= log.LvlInfo {
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
-				logger.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				logger.Log(lvl, "[snapshots] Dumping txs", "blockNum", blockNum, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			} else {
-				logger.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum)
+				logger.Log(lvl, "[snapshots] Dumping txs", "blockNum", blockNum)
 			}
 		default:
 		}
@@ -954,7 +954,7 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom,
 			if lvl >= log.LvlInfo {
 				dbg.ReadMemStats(&m)
 			}
-			logger.Log(lvl, "[snapshots] Dumping headers", "block num", blockNum,
+			logger.Log(lvl, "[snapshots] Dumping headers", "blockNum", blockNum,
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 			)
 		default:
@@ -1036,7 +1036,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 			if lvl >= log.LvlInfo {
 				dbg.ReadMemStats(&m)
 			}
-			logger.Log(lvl, "[snapshots] Wrote into file", "block num", blockNum,
+			logger.Log(lvl, "[snapshots] Wrote into file", "blockNum", blockNum,
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 			)
 		default:
