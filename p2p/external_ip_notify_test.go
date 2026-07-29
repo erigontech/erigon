@@ -51,6 +51,12 @@ func (h *msgCaptureHandler) contains(sub string) bool {
 	return false
 }
 
+func (h *msgCaptureHandler) snapshot() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.msgs...)
+}
+
 // TestRealNetChangeNotifierParks guards the netpoller integration on platforms
 // with a native notifier: the read must block in the poller (not spin on EAGAIN
 // and exit), and Close must return without hanging. Skips where the socket is
@@ -65,15 +71,23 @@ func TestRealNetChangeNotifierParks(t *testing.T) {
 		t.Skip("no native network-change notifier on this platform")
 	}
 	if h.contains(notifierUnavailableMsg) {
-		t.Skipf("native notifier unavailable: %v", h.msgs)
+		t.Skipf("native notifier unavailable: %v", h.snapshot())
 	}
 
 	time.Sleep(150 * time.Millisecond)
 	if h.contains(notifierReadFailedMsg) {
-		t.Fatalf("read exited early instead of parking in the poller: %v", h.msgs)
+		t.Fatalf("read exited early instead of parking in the poller: %v", h.snapshot())
 	}
-	if err := n.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+
+	closed := make(chan error, 1)
+	go func() { closed <- n.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close hung: read did not unblock via the poller")
 	}
 }
 
