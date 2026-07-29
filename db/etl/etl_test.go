@@ -31,6 +31,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/assert"
@@ -1550,4 +1551,16 @@ func TestVmtouchMmap(t *testing.T) {
 		}
 	}
 	vmtouch("AFTER full scan")
+}
+
+func TestAllocatorIdleDrain(t *testing.T) {
+	a := NewAllocator(4, func() Buffer { return NewSortableBuffer(64 * 1024) })
+	a.Put(a.Get())
+	require.Equal(t, 1, len(a.freeList))
+
+	a.drainIfIdleSince(time.Now().Add(-time.Hour))
+	require.Equal(t, 1, len(a.freeList), "recently used allocator must keep its buffers")
+
+	a.drainIfIdleSince(time.Now().Add(time.Hour))
+	require.Equal(t, 0, len(a.freeList), "idle allocator must release buffers to GC")
 }

@@ -78,9 +78,12 @@ func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
 
-// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectors
+// Estimate of concurrently running collectors during buildFiles:
+// domains use 2 each, histories 1 each, indices 2 each.
+const concurrentCollectors = 3*2 + 3*1 + 4*2
+
 var etlSmallBufRAM = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
-var SmallSortableBuffers = NewAllocator(17, func() Buffer {
+var SmallSortableBuffers = NewAllocator(concurrentCollectors, func() Buffer {
 	return NewSortableBuffer(etlSmallBufRAM).Prealloc(1_024, int(etlSmallBufRAM/32))
 })
 var etlLargeBufRAM = BufferOptimalSize

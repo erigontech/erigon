@@ -22,7 +22,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 
@@ -41,16 +44,62 @@ type simpleLoadFunc func(k, v []byte) error
 type Allocator struct {
 	freeList chan Buffer
 	newBuf   func() Buffer
+	lastUse  atomic.Int64
 }
 
+// ETL is phase-based: heavy during sync, near-idle after. The janitor empties
+// idle free-lists so GC can reclaim the buffers between phases; a new phase
+// just refills once.
+const allocatorIdleTimeout = 2 * time.Minute
+
+var (
+	allocatorsMu sync.Mutex
+	allocators   []*Allocator
+	janitorOnce  sync.Once
+)
+
 func NewAllocator(capacity int, newBuf func() Buffer) *Allocator {
-	return &Allocator{freeList: make(chan Buffer, capacity), newBuf: newBuf}
+	a := &Allocator{freeList: make(chan Buffer, capacity), newBuf: newBuf}
+	a.markUse()
+	allocatorsMu.Lock()
+	allocators = append(allocators, a)
+	allocatorsMu.Unlock()
+	janitorOnce.Do(func() {
+		go func() {
+			for range time.Tick(time.Minute) {
+				cutoff := time.Now().Add(-allocatorIdleTimeout)
+				allocatorsMu.Lock()
+				live := slices.Clone(allocators)
+				allocatorsMu.Unlock()
+				for _, a := range live {
+					a.drainIfIdleSince(cutoff)
+				}
+			}
+		}()
+	})
+	return a
+}
+
+func (a *Allocator) markUse() { a.lastUse.Store(time.Now().UnixNano()) }
+
+func (a *Allocator) drainIfIdleSince(cutoff time.Time) {
+	if a.lastUse.Load() > cutoff.UnixNano() {
+		return
+	}
+	for {
+		select {
+		case <-a.freeList:
+		default:
+			return
+		}
+	}
 }
 
 func (a *Allocator) Put(b Buffer) {
 	if b == nil {
 		return
 	}
+	a.markUse()
 	select {
 	case a.freeList <- b:
 	default:
@@ -58,6 +107,7 @@ func (a *Allocator) Put(b Buffer) {
 }
 
 func (a *Allocator) Get() Buffer {
+	a.markUse()
 	var b Buffer
 	select {
 	case b = <-a.freeList:
