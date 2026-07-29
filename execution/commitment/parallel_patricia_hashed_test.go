@@ -140,6 +140,7 @@ func TestParallelWorkerPoolSurvivesReset(t *testing.T) {
 
 	got := p.workerPool.get()
 	assert.Equal(t, tag, got.mountedNib, "Reset must keep cached workers instead of discarding the pool")
+	p.workerPool.put(got)
 }
 
 func TestParallelPatriciaHashedSkeletonRelease(t *testing.T) {

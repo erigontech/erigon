@@ -65,6 +65,7 @@ func TestStreamingWorkerPoolSurvivesReset(t *testing.T) {
 
 	got := sc.workerPool.get()
 	require.Equal(t, tag, got.mountedNib, "Reset must keep cached workers instead of discarding the pool")
+	sc.workerPool.put(got)
 }
 
 func streamingRoot(t *testing.T, workers int, keys [][]byte, upds []Update, idxOrder []int) ([]byte, *MockState) {
