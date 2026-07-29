@@ -2098,51 +2098,6 @@ func (writes *WriteSet) StripBalanceWrite(addr accounts.Address, readSet ReadSet
 	return
 }
 
-// SetAccountBalanceOrDelete replaces the BalancePath write for addr. If the
-// address has no existing writes in the set, all four account fields (balance,
-// nonce, incarnation, codeHash) are emitted so that applyVersionedWrites can
-// reconstruct a complete account. Without the full set, it would create an
-// account with nonce=0, incarnation=0, empty codeHash — wiping the real values.
-//
-// When emptyRemoval is true (EIP-161 SpuriousDragon), if the final account
-// would be empty (balance=0, nonce=0, empty code), the existing writes for
-// this address are stripped and a SelfDestructPath entry is emitted instead.
-func (writes *WriteSet) SetAccountBalanceOrDelete(addr accounts.Address, acc *accounts.Account, val uint256.Int, reason tracing.BalanceChangeReason, emptyRemoval bool) *WriteSet {
-	if writes == nil {
-		writes = &WriteSet{}
-	}
-	if acc == nil {
-		a := accounts.NewAccount()
-		acc = &a
-	}
-
-	// EIP-161: if the final account is empty, delete it.
-	if emptyRemoval && val.IsZero() && acc.Nonce == 0 && acc.IsEmptyCodeHash() {
-		writes.deleteAddr(addr)
-		writes.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath}, Val: true})
-		return writes
-	}
-
-	if bw, ok := writes.balance[addr]; ok {
-		bw.Val = val
-		bw.Reason = reason
-		return writes
-	}
-	if writes.hasAddr(addr) {
-		// The worker already wrote another field for this addr (e.g. Nonce on a
-		// miner self-send where sender == coinbase); append only Balance so the
-		// pre-block snapshot acc does not clobber those post-execution writes.
-		writes.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Reason: reason}, Val: val})
-		return writes
-	}
-	// Account not in writes — emit complete account fields.
-	writes.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Reason: reason}, Val: val})
-	writes.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: acc.Nonce})
-	writes.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath}, Val: acc.Incarnation})
-	writes.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath}, Val: acc.CodeHash})
-	return writes
-}
-
 // note that TxIndex starts at -1 (the begin system tx)
 type VersionedIO struct {
 	inputs  []versionedReadSet
