@@ -105,3 +105,52 @@ func TestWriteForkCLConfig_UnknownParentChainErrors(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "parent CL config")
 }
+
+// TestWriteForkGenesisSSZ_TwoEntryPointsMatch pins the genesis.ssz
+// byte-equivalence contract: `snapshots fork-from` and
+// Ethereum.applyForkWriteGenesisSSZ share the same writer and must
+// land byte-identical files in two independent datadirs. Uses
+// "sepolia" as the parent — its genesis is embedded in the binary
+// (no network call), so this test runs offline.
+func TestWriteForkGenesisSSZ_TwoEntryPointsMatch(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	pathA, err := WriteForkGenesisSSZ(dirA, "sepolia", "sepolia-fork-1", log.Root())
+	require.NoError(t, err)
+	pathB, err := WriteForkGenesisSSZ(dirB, "sepolia", "sepolia-fork-1", log.Root())
+	require.NoError(t, err)
+
+	require.Equal(t, ForkGenesisSSZFilename, filepath.Base(pathA))
+	require.Equal(t, ForkGenesisSSZFilename, filepath.Base(pathB))
+
+	bodyA, err := os.ReadFile(pathA)
+	require.NoError(t, err)
+	bodyB, err := os.ReadFile(pathB)
+	require.NoError(t, err)
+	require.Equal(t, bodyA, bodyB,
+		"two invocations for the same parent must emit byte-identical genesis.ssz — divergence here breaks the invariant that offline `snapshots fork-from` and in-process debug_setFork prepare interchangeable datadirs")
+	require.NotEmpty(t, bodyA, "genesis.ssz must not be empty")
+}
+
+// TestWriteForkGenesisSSZ_RejectsEmptyInputs enforces the fail-fast
+// contract at the writer boundary — parallel to WriteForkCLConfig's
+// checks.
+func TestWriteForkGenesisSSZ_RejectsEmptyInputs(t *testing.T) {
+	_, err := WriteForkGenesisSSZ("", "sepolia", "sepolia-fork-1", log.Root())
+	require.ErrorContains(t, err, "empty datadir")
+
+	_, err = WriteForkGenesisSSZ(t.TempDir(), "", "sepolia-fork-1", log.Root())
+	require.ErrorContains(t, err, "empty parentChain")
+
+	_, err = WriteForkGenesisSSZ(t.TempDir(), "sepolia", "", log.Root())
+	require.ErrorContains(t, err, "empty forkChainName")
+}
+
+// TestWriteForkGenesisSSZ_UnknownParentChainErrors mirrors the CL
+// config variant — an unknown parent means we can't derive genesis.
+func TestWriteForkGenesisSSZ_UnknownParentChainErrors(t *testing.T) {
+	_, err := WriteForkGenesisSSZ(t.TempDir(), "not-a-real-chain", "not-a-real-chain-fork-1", log.Root())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "resolve parent network id")
+}

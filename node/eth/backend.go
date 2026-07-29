@@ -2313,7 +2313,25 @@ func (s *Ethereum) ApplyPostSwapHooks(target *chain.Config) {
 	s.applyForkRPCCacheInvalidate()
 	s.applyForkTrimPostCutSiblings(target)
 	s.applyForkWriteCLConfig(target)
+	s.applyForkWriteGenesisSSZ(target)
 	s.applyForkWriteParentCut(target)
+}
+
+// applyForkWriteGenesisSSZ emits the fork's genesis.ssz sourced from
+// the parent chain's genesis. Companion to applyForkWriteCLConfig —
+// Caplin's IsDevnet/HaveInvalidDevnetParams gate refuses to start
+// with only a CustomConfigPath set, so a fork datadir needs both.
+// No-op for non-fork chains.
+func (s *Ethereum) applyForkWriteGenesisSSZ(target *chain.Config) {
+	if target.Parent == "" {
+		return
+	}
+	path, err := forkexport.WriteForkGenesisSSZ(s.config.Dirs.DataDir, target.Parent, target.ChainName, s.logger)
+	if err != nil {
+		s.logger.Warn("[fork] emit genesis.ssz skipped", "err", err)
+		return
+	}
+	s.logger.Info("[fork] genesis.ssz written", "path", path)
 }
 
 // applyForkWriteParentCut emits the fork's parent-cut artefact

@@ -30,8 +30,14 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/common/log/v3"
 )
+
+// ForkGenesisSSZFilename is Caplin's fixed genesis-state file name.
+// Not fork-scoped: Caplin's CustomGenesisStatePath auto-wiring in
+// cmd/utils/flags.go looks for exactly "genesis.ssz" in the datadir.
+const ForkGenesisSSZFilename = "genesis.ssz"
 
 // ForkCLConfigFilename returns the datadir-relative filename for a
 // fork chain's CL config artefact. The name embeds the fork chain
@@ -100,6 +106,58 @@ func WriteForkCLConfig(datadir, parentChain, forkChainName string, logger log.Lo
 			"path", path,
 			"parent_config", beaconCfg.ConfigName,
 			"fork_config", cfg.ConfigName)
+	}
+	return path, nil
+}
+
+// WriteForkGenesisSSZ emits <datadir>/genesis.ssz for a fork chain,
+// sourced from the parent's genesis via initial_state.GetGenesisState.
+// Companion to WriteForkCLConfig: Caplin's HaveInvalidDevnetParams
+// gate requires both CustomConfigPath AND CustomGenesisStatePath to
+// be non-empty once either is set, so emitting cl-config.yaml without
+// genesis.ssz would leave Caplin refusing to start.
+//
+// A Flavour-1 shadow fork inherits the parent's CL genesis unchanged.
+// Filename is the fixed "genesis.ssz" (not fork-scoped) because
+// Caplin's auto-wire in cmd/utils/flags.go looks for exactly that name.
+func WriteForkGenesisSSZ(datadir, parentChain, forkChainName string, logger log.Logger) (string, error) {
+	if datadir == "" {
+		return "", fmt.Errorf("WriteForkGenesisSSZ: empty datadir")
+	}
+	if parentChain == "" {
+		return "", fmt.Errorf("WriteForkGenesisSSZ: empty parentChain")
+	}
+	if forkChainName == "" {
+		return "", fmt.Errorf("WriteForkGenesisSSZ: empty forkChainName")
+	}
+	_, _, parentNetworkID, err := clparams.GetConfigsByNetworkName(parentChain)
+	if err != nil {
+		return "", fmt.Errorf("resolve parent network id: %w", err)
+	}
+	if !initial_state.IsGenesisStateSupported(parentNetworkID) {
+		return "", fmt.Errorf("parent chain %q has no supported genesis-state source (network id %d)", parentChain, parentNetworkID)
+	}
+	genState, err := initial_state.GetGenesisState(parentNetworkID)
+	if err != nil {
+		return "", fmt.Errorf("fetch parent genesis state: %w", err)
+	}
+	if genState == nil {
+		return "", fmt.Errorf("parent chain %q returned nil genesis state", parentChain)
+	}
+	encoded, err := genState.EncodeSSZ(nil)
+	if err != nil {
+		return "", fmt.Errorf("ssz-encode parent genesis: %w", err)
+	}
+	path := filepath.Join(datadir, ForkGenesisSSZFilename)
+	if err := os.WriteFile(path, encoded, 0o644); err != nil {
+		return "", fmt.Errorf("write %s: %w", path, err)
+	}
+	if logger != nil {
+		logger.Info("genesis.ssz written",
+			"path", path,
+			"parent_chain", parentChain,
+			"fork_chain", forkChainName,
+			"bytes", len(encoded))
 	}
 	return path, nil
 }

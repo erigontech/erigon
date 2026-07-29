@@ -315,6 +315,9 @@ func action(ctx *cli.Context) error {
 	if _, err := forkexport.WriteForkCLConfig(newDatadir, cut.ParentChain, derived.ChainName, logger); err != nil {
 		logger.Warn("[fork-from] emit cl-config skipped", "err", err)
 	}
+	if _, err := forkexport.WriteForkGenesisSSZ(newDatadir, cut.ParentChain, derived.ChainName, logger); err != nil {
+		logger.Warn("[fork-from] emit genesis.ssz skipped", "err", err)
+	}
 
 	logger.Info("[fork-from] EL-side complete; pair with genesis.ssz + validator setup (Phase 2c-CL M4+) before starting erigon")
 	return nil
