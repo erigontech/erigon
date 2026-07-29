@@ -13,10 +13,13 @@ type DomainCfg struct {
 	Compression seg.FileCompression
 	CompressCfg seg.Cfg
 	Accessors   Accessors // list of indexes for given domain
-	ValuesTable string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
-	// KeysTable, when set, enables the seqID-indexed layout (for large/random-keyed domains):
-	//   KeysTable   (DupSort): bareKey -> invStep(8) + seqID(8)
-	//   ValuesTable (plain):   seqID(8) -> value
+	// ValuesTable holds the domain values, in one of three layouts:
+	//   KeysTable set (plain):   seqID(8) -> value
+	//   LargeValues (plain):     key + invStep(8) -> value
+	//   otherwise (DupSort):     key -> invStep(8) + value
+	ValuesTable string
+	// KeysTable, when set, enables the seqID-indexed layout (for large/random-keyed
+	// domains): DupSort, bareKey -> invStep(8) + seqID(8).
 	KeysTable   string
 	LargeValues bool
 

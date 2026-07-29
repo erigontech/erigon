@@ -240,11 +240,19 @@ func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb kv.Step) {
 			return 0
 		}
 		defer c.Close()
-		_, dup, err := c.First()
-		if err != nil || len(dup) < 8 {
-			return 0
+		// First dup of a key is that key's latest step, but the latest step of the
+		// whole domain can belong to any key, so every key has to be visited.
+		for k, dup, err := c.First(); k != nil; k, dup, err = c.NextNoDup() {
+			if err != nil {
+				d.logger.Warn("[agg] Domain.maxStepInDBNoHistory", "err", err)
+				return 0
+			}
+			if len(dup) < 8 {
+				continue
+			}
+			lstInDb = max(lstInDb, kv.Step(^binary.BigEndian.Uint64(dup[:8])))
 		}
-		return kv.Step(^binary.BigEndian.Uint64(dup[:8]))
+		return lstInDb
 	}
 	firstKey, err := kv.FirstKey(tx, d.ValuesTable)
 	if err != nil {

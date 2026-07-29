@@ -3708,6 +3708,34 @@ func TestDomain_IndirectPruneNoOrphans(t *testing.T) {
 	require.Equal(a1, v)
 }
 
+// TestDomain_IndirectMaxStepInDB pins that maxStepInDBNoHistory of a
+// seqID-indexed domain reports the latest step across all keys, not just the
+// latest step of the lexicographically-smallest key.
+func TestDomain_IndirectMaxStepInDB(t *testing.T) {
+	t.Parallel()
+
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CodeDomain, 16, logger)
+	require.NotEmpty(t, d.KeysTable, "test requires a seqID-indexed domain")
+	ctx := t.Context()
+	require := require.New(t)
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	dt := d.beginForTests()
+	defer dt.Close()
+	w := dt.NewWriter()
+	defer w.Close()
+
+	require.NoError(w.PutWithPrev([]byte("keyAAAAA"), []byte("a"), 2, nil))
+	require.NoError(w.PutWithPrev([]byte("keyBBBBB"), []byte("b"), 18, nil))
+	require.NoError(w.Flush(ctx, tx))
+
+	require.Equal(kv.Step(1), d.maxStepInDBNoHistory(tx))
+}
+
 // TestDomain_UnwindRestoresDeletionMarker is a regression test for the bug
 // where unwind() fails to restore empty tombstones. When a slot is deleted
 // then re-written within the same step, unwinding the re-write must restore
