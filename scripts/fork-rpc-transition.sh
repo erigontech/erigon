@@ -41,24 +41,41 @@ rpc_call() {
         --data "$1" "$PARENT_RPC" | jq -r "$2"
 }
 
-# Phase 1: probe parent RPC and pick a CutBlock.
-stage "Phase 1: query parent RPC"
+# Phase 1: probe RPC for head + current chain identity.
+stage "Phase 1: query RPC"
 head_hex=$(rpc_call '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' '.result')
-[[ "$head_hex" != "null" && -n "$head_hex" ]] || fail "eth_blockNumber returned null — is the parent erigon running at $PARENT_RPC?"
+[[ "$head_hex" != "null" && -n "$head_hex" ]] || fail "eth_blockNumber returned null — is the erigon running at $PARENT_RPC?"
 head_dec=$(printf '%d\n' "$head_hex")
-[[ "$head_dec" -gt "$CUT_BUFFER" ]] || fail "parent head=$head_dec too low; need > CUT_BUFFER=$CUT_BUFFER"
-cut_block=$(( head_dec - CUT_BUFFER ))
-echo "  parent head=$head_dec cut_block=$cut_block"
+[[ "$head_dec" -gt "$CUT_BUFFER" ]] || fail "head=$head_dec too low; need > CUT_BUFFER=$CUT_BUFFER"
 
-parent_chain_id_hex=$(rpc_call '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' '.result')
-parent_chain_id=$(printf '%d\n' "$parent_chain_id_hex")
-fork_chain_id=$(( parent_chain_id + 1 ))
-echo "  parent chain_id=$parent_chain_id fork chain_id=$fork_chain_id"
+current_chain_id_hex=$(rpc_call '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' '.result')
+current_chain_id=$(printf '%d\n' "$current_chain_id_hex")
 
-# Phase 2: write chain.json for the fork target into the parent datadir.
-stage "Phase 2: write chain.json for $FORK_CHAIN_NAME"
-chain_json="$PARENT_DATADIR/chain.json"
-cat > "$chain_json" <<EOF
+# Direction detection. When TARGET_IS_PARENT is set, we skip the
+# fork-config emit + relax the unwound_to assertion; the transition
+# is fork→parent (no new cut, RPC unwinds to the fork's cutBlock or
+# reports a no-op if we're already at it). Otherwise the target is a
+# fresh fork and we compute a cut off the current head.
+target_is_parent="${TARGET_IS_PARENT:-false}"
+
+if [[ "$target_is_parent" == "true" ]]; then
+    cut_block=0
+    # expected_post_chain_id left unset — for fork→parent, the target's
+    # chain_id lives in the parent's built-in chainspec (not derivable
+    # here without a lookup). Phase 5 falls back to asserting the
+    # chain_id changed instead of matching a specific value.
+    expected_post_chain_id=""
+    echo "  head=$head_dec current_chain_id=$current_chain_id target=$FORK_CHAIN_NAME (fork→parent)"
+    stage "Phase 2: fork→parent — target chain.Config already registered, no chain.json emit"
+else
+    cut_block=$(( head_dec - CUT_BUFFER ))
+    fork_chain_id=$(( current_chain_id + 1 ))
+    expected_post_chain_id=$fork_chain_id
+    echo "  head=$head_dec cut_block=$cut_block current_chain_id=$current_chain_id fork_chain_id=$fork_chain_id"
+
+    stage "Phase 2: write chain.json for $FORK_CHAIN_NAME"
+    chain_json="$PARENT_DATADIR/chain.json"
+    cat > "$chain_json" <<EOF
 {
   "chainName": "$FORK_CHAIN_NAME",
   "chainId": "$fork_chain_id",
@@ -66,7 +83,8 @@ cat > "$chain_json" <<EOF
   "cutBlock": $cut_block
 }
 EOF
-echo "  wrote $chain_json"
+    echo "  wrote $chain_json"
+fi
 
 # Phase 3a: mint a fork-transition UCAN for this specific target.
 stage "Phase 3a: mint fork-transition UCAN"
@@ -98,18 +116,37 @@ json_block=$(echo "$result_json" | awk '/^{/,/^}/')
 [[ -n "$json_block" ]] || fail "no JSON block in set_fork output"
 
 restart_required=$(echo "$json_block" | jq -r '.restart_required')
+unwound_from=$(echo "$json_block" | jq -r '.unwound_from')
 unwound_to=$(echo "$json_block" | jq -r '.unwound_to')
 to_chain=$(echo "$json_block" | jq -r '.to_chain')
 
 [[ "$restart_required" == "false" ]] || fail "restart_required=$restart_required (want false — in-process swap should succeed)"
-[[ "$unwound_to" == "$cut_block" ]] || fail "unwound_to=$unwound_to (want $cut_block)"
 [[ "$to_chain" == "$FORK_CHAIN_NAME" ]] || fail "to_chain=$to_chain (want $FORK_CHAIN_NAME)"
 
-# Phase 5: confirm the RPC now reports the fork chain.
-stage "Phase 5: confirm eth_chainId now returns fork chain_id"
+if [[ "$target_is_parent" == "true" ]]; then
+    # Fork→parent: the RPC unwinds to the fork's own cutBlock (stored
+    # in the fork's chain.Config, not derivable here from head-buffer).
+    # If we're already at or before that cut, unwound_to == unwound_from
+    # is expected (no-op). We can't compute the exact expected value
+    # without reading the fork's chain.Config; assert only that the
+    # transition didn't advance the head.
+    [[ "$unwound_to" -le "$unwound_from" ]] || fail "fork→parent unwound_to=$unwound_to > unwound_from=$unwound_from (transition advanced head — should never happen)"
+    echo "  fork→parent: unwound_from=$unwound_from unwound_to=$unwound_to (no-op or unwind to fork's cutBlock)"
+else
+    [[ "$unwound_to" == "$cut_block" ]] || fail "unwound_to=$unwound_to (want $cut_block)"
+fi
+
+# Phase 5: confirm the RPC now reports the target chain.
+stage "Phase 5: confirm eth_chainId reflects the transition"
 post_chain_id_hex=$(rpc_call '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' '.result')
 post_chain_id=$(printf '%d\n' "$post_chain_id_hex")
-[[ "$post_chain_id" == "$fork_chain_id" ]] || fail "post-transition eth_chainId=$post_chain_id (want $fork_chain_id) — chain.Config swap did not stick"
+if [[ -n "$expected_post_chain_id" ]]; then
+    [[ "$post_chain_id" == "$expected_post_chain_id" ]] || fail "post-transition eth_chainId=$post_chain_id (want $expected_post_chain_id) — chain.Config swap did not stick"
+else
+    # fork→parent: assert the chain_id changed away from the fork's value.
+    [[ "$post_chain_id" != "$current_chain_id" ]] || fail "post-transition eth_chainId=$post_chain_id still equals pre-transition value — chain.Config swap did not stick"
+    echo "  fork→parent chain_id: $current_chain_id → $post_chain_id"
+fi
 
 echo
 echo "PASS: $FORK_CHAIN_NAME transition completed in-process — no restart required"
