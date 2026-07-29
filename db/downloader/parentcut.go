@@ -49,6 +49,11 @@ const (
 	// file (forward-distributed via repo or out-of-band). The on-wire result
 	// matches the original capture byte-for-byte.
 	CaptureFile ParentCutCaptureSource = "file"
+	// CaptureInProcess means the cut was built from the running node's
+	// own chainDB during an in-process debug_setFork transition — no
+	// RPC round-trip. Consumers can tell an operator's live-RPC
+	// capture apart from a self-capture by this label.
+	CaptureInProcess ParentCutCaptureSource = "in_process"
 )
 
 // ParentCut is the deterministic record of a fork's cut point: the
@@ -158,8 +163,8 @@ func (p *ParentCut) Validate() error {
 	if p.CutBlockTimestamp == 0 {
 		return fmt.Errorf("parent-cut: cut_block_timestamp is zero")
 	}
-	if p.Source != CaptureLive && p.Source != CaptureFile {
-		return fmt.Errorf("parent-cut: source %q is not %q or %q", p.Source, CaptureLive, CaptureFile)
+	if p.Source != CaptureLive && p.Source != CaptureFile && p.Source != CaptureInProcess {
+		return fmt.Errorf("parent-cut: source %q is not %q, %q, or %q", p.Source, CaptureLive, CaptureFile, CaptureInProcess)
 	}
 	if p.ParentManifestHash != "" {
 		// 20-byte hex info-hash; tolerate omission for root chains
@@ -195,6 +200,86 @@ func (p *ParentCut) MarshalCanonical() ([]byte, error) {
 		return nil, fmt.Errorf("parent-cut marshal canonical: %w", err)
 	}
 	return append(out, '\n'), nil
+}
+
+// ParentCutFilename returns the datadir-relative filename for a
+// fork chain's parent-cut artefact. The name embeds the fork chain
+// name so a datadir can carry multiple parent-cut records across
+// successive transitions without collisions. Mirrors
+// forkexport.ForkCLConfigFilename's fork-name-scoped convention;
+// empty forkChainName falls back to the pre-fork "parent-cut.json"
+// for backward compatibility with datadirs produced by older
+// snapshots fork-from runs (which supplied the path directly).
+func ParentCutFilename(forkChainName string) string {
+	if forkChainName == "" {
+		return "parent-cut.json"
+	}
+	return "parent-cut." + forkChainName + ".json"
+}
+
+// CaptureParentCutFromLocal builds a ParentCut from an in-process
+// erigon's own state (chainDB + explicit chain identity) instead of
+// a live RPC round-trip. Emits a ParentCut whose consumer-meaningful
+// fields (CutBlock, hashes, timestamp, parent manifest ref) match
+// what CaptureParentCut would produce against the same parent node's
+// RPC. Used by debug_setFork's post-swap hook so a fork transition
+// emits the same parent-cut artefact snapshots fork-from produces
+// offline.
+//
+// Metadata differs: Source records "in_process" so consumers can
+// tell an operator's live-RPC capture apart from the in-process
+// transition's self-capture. CapturedAt is time.Now — the two paths
+// legitimately happen at different wall-clock times.
+//
+// getHeader is injected so callers reuse whatever header-access
+// primitive fits (BlockReader for the running node, direct rawdb
+// for tests). Returns nil + error on any read failure so the caller
+// can decide whether to abort the transition or continue.
+func CaptureParentCutFromLocal(
+	parentChain string,
+	parentChainID uint64,
+	cutBlock uint64,
+	parentManifestName, parentManifestHash string,
+	getHeader func(cutBlock uint64) (hash common.Hash, parentHash common.Hash, timestamp uint64, difficulty *big.Int, err error),
+) (*ParentCut, error) {
+	if parentChain == "" {
+		return nil, fmt.Errorf("CaptureParentCutFromLocal: empty parentChain")
+	}
+	if parentChainID == 0 {
+		return nil, fmt.Errorf("CaptureParentCutFromLocal: parentChainID is 0")
+	}
+	if getHeader == nil {
+		return nil, fmt.Errorf("CaptureParentCutFromLocal: nil getHeader")
+	}
+	hash, parentHash, timestamp, difficulty, err := getHeader(cutBlock)
+	if err != nil {
+		return nil, fmt.Errorf("read cut block %d: %w", cutBlock, err)
+	}
+	if (hash == common.Hash{}) {
+		return nil, fmt.Errorf("no header at cut block %d", cutBlock)
+	}
+	// Same post-merge guard as the live-RPC path.
+	if difficulty != nil && difficulty.Sign() > 0 {
+		return nil, fmt.Errorf("cut block %d is pre-merge (difficulty %s != 0); Erigon does not support PoW processing", cutBlock, difficulty.String())
+	}
+	p := &ParentCut{
+		Schema:             ParentCutSchemaVersion,
+		ParentChain:        parentChain,
+		ParentChainID:      parentChainID,
+		CutBlock:           cutBlock,
+		CutBlockHash:       hash,
+		CutBlockTimestamp:  timestamp,
+		CutBlockParentHash: parentHash,
+		ParentManifestName: parentManifestName,
+		ParentManifestHash: parentManifestHash,
+		Source:             CaptureInProcess,
+		SourceRef:          "in-process",
+		CapturedAt:         time.Now().Unix(),
+	}
+	if err := p.Validate(); err != nil {
+		return nil, fmt.Errorf("in-process parent-cut failed validation: %w", err)
+	}
+	return p, nil
 }
 
 // SaveParentCut writes a canonical parent-cut.json to path. Truncates

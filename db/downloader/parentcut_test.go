@@ -17,6 +17,7 @@
 package downloader
 
 import (
+	"math/big"
 	"os"
 	"path/filepath"
 	"testing"
@@ -145,6 +146,99 @@ func TestParentCut_SaveRejectsInvalidStruct(t *testing.T) {
 	bad := validParentCut()
 	bad.ParentChain = "" // invalidates
 	require.Error(t, SaveParentCut(path, bad))
+}
+
+// TestParentCutFilename_Convention pins the fork-name-scoped
+// naming convention consumers rely on to auto-wire the artefact
+// at fork erigon boot (mirroring forkexport.ForkCLConfigFilename).
+func TestParentCutFilename_Convention(t *testing.T) {
+	require.Equal(t, "parent-cut.hoodi-fork-42.json", ParentCutFilename("hoodi-fork-42"))
+	require.Equal(t, "parent-cut.json", ParentCutFilename(""))
+}
+
+// TestCaptureParentCutFromLocal_EquivalentToLiveCapture asserts the
+// in-process capture (backend.go applyForkWriteParentCut) produces
+// a ParentCut structurally equivalent to what CaptureParentCut
+// against the same parent state would produce. Metadata fields
+// (Source, SourceRef, CapturedAt) legitimately differ; the
+// consumer-meaningful fields must match.
+func TestCaptureParentCutFromLocal_EquivalentToLiveCapture(t *testing.T) {
+	const (
+		parentChain   = "mainnet"
+		parentChainID = uint64(1)
+		cutBlock      = uint64(23760000)
+	)
+	hash := common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+	parentHash := common.HexToHash("0xfedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210")
+	timestamp := uint64(1735689600)
+
+	getHeader := func(uint64) (common.Hash, common.Hash, uint64, *big.Int, error) {
+		return hash, parentHash, timestamp, nil, nil // post-merge: difficulty=0/nil
+	}
+	local, err := CaptureParentCutFromLocal(
+		parentChain, parentChainID, cutBlock,
+		"chain.v2.abcdef.toml", "20004fef6f6b652bde5f7c20e67e33cbc3e059d3",
+		getHeader,
+	)
+	require.NoError(t, err)
+
+	// Simulate what CaptureParentCut against the same parent state would produce.
+	// CapturedAt is metadata — legitimately differs; not compared below.
+	live := &ParentCut{
+		Schema:             ParentCutSchemaVersion,
+		ParentChain:        parentChain,
+		ParentChainID:      parentChainID,
+		CutBlock:           cutBlock,
+		CutBlockHash:       hash,
+		CutBlockTimestamp:  timestamp,
+		CutBlockParentHash: parentHash,
+		ParentManifestName: "chain.v2.abcdef.toml",
+		ParentManifestHash: "20004fef6f6b652bde5f7c20e67e33cbc3e059d3",
+		Source:             CaptureLive,
+		SourceRef:          "https://parent.example/rpc",
+	}
+
+	// Metadata (Source, SourceRef) may differ; explicit assertion so
+	// a future change to consumer-meaningful fields breaks LOUD.
+	require.NotEqual(t, live.Source, local.Source, "Source is expected to differ (live vs in_process)")
+	require.NotEqual(t, live.SourceRef, local.SourceRef, "SourceRef is expected to differ")
+
+	// Consumer-meaningful fields must match exactly.
+	require.Equal(t, live.Schema, local.Schema)
+	require.Equal(t, live.ParentChain, local.ParentChain)
+	require.Equal(t, live.ParentChainID, local.ParentChainID)
+	require.Equal(t, live.CutBlock, local.CutBlock)
+	require.Equal(t, live.CutBlockHash, local.CutBlockHash)
+	require.Equal(t, live.CutBlockTimestamp, local.CutBlockTimestamp)
+	require.Equal(t, live.CutBlockParentHash, local.CutBlockParentHash)
+	require.Equal(t, live.ParentManifestName, local.ParentManifestName)
+	require.Equal(t, live.ParentManifestHash, local.ParentManifestHash)
+}
+
+// TestCaptureParentCutFromLocal_RejectsPreMerge covers the shared
+// safety check: a difficulty > 0 indicates pre-merge, and Erigon
+// doesn't support PoW execution — the capture must refuse.
+func TestCaptureParentCutFromLocal_RejectsPreMerge(t *testing.T) {
+	getHeader := func(uint64) (common.Hash, common.Hash, uint64, *big.Int, error) {
+		return common.HexToHash("0xab"), common.Hash{}, 1, big.NewInt(1), nil
+	}
+	_, err := CaptureParentCutFromLocal("mainnet", 1, 100, "", "", getHeader)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "pre-merge")
+}
+
+// TestCaptureParentCutFromLocal_RejectsInvalidInputs enforces the
+// fail-fast contract at the writer boundary.
+func TestCaptureParentCutFromLocal_RejectsInvalidInputs(t *testing.T) {
+	getHeader := func(uint64) (common.Hash, common.Hash, uint64, *big.Int, error) {
+		return common.HexToHash("0xab"), common.Hash{}, 1, nil, nil
+	}
+	_, err := CaptureParentCutFromLocal("", 1, 100, "", "", getHeader)
+	require.ErrorContains(t, err, "empty parentChain")
+	_, err = CaptureParentCutFromLocal("mainnet", 0, 100, "", "", getHeader)
+	require.ErrorContains(t, err, "parentChainID is 0")
+	_, err = CaptureParentCutFromLocal("mainnet", 1, 100, "", "", nil)
+	require.ErrorContains(t, err, "nil getHeader")
 }
 
 func TestStripURLCredentials(t *testing.T) {

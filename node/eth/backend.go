@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math/big"
 	"os"
 	"path/filepath"
 	"slices"
@@ -2309,6 +2310,80 @@ func (s *Ethereum) ApplyPostSwapHooks(target *chain.Config) {
 	s.applyForkRPCCacheInvalidate()
 	s.applyForkTrimPostCutSiblings(target)
 	s.applyForkWriteCLConfig(target)
+	s.applyForkWriteParentCut(target)
+}
+
+// applyForkWriteParentCut emits the fork's parent-cut artefact
+// (parent-cut.<fork-name>.json) via the shared in-process capture
+// helper. Same struct shape as offline `snapshots fork-from`
+// produces; only Source ("in_process" vs "live") + CapturedAt
+// differ per the artefact's own documented metadata. No-op for
+// non-fork chains.
+func (s *Ethereum) applyForkWriteParentCut(target *chain.Config) {
+	if target.Parent == "" || target.CutBlock == 0 {
+		return
+	}
+	if s.chainConfig == nil || s.chainConfig.ChainID == nil {
+		return
+	}
+	// Parent chain identity comes from the CURRENT s.chainConfig at
+	// the moment of transition — that's the pre-swap parent we're
+	// forking FROM. SwapChainConfig runs BEFORE the post-swap hooks
+	// so s.chainConfig now == target; we need target.Parent for the
+	// parent chain name and read the parent's ChainID via the
+	// chainspec registry.
+	parentSpec, err := chainspec.ChainSpecByName(target.Parent)
+	if err != nil || parentSpec.Config == nil || parentSpec.Config.ChainID == nil {
+		s.logger.Warn("[fork] parent chain spec not resolvable; skipping parent-cut emit", "parent", target.Parent, "err", err)
+		return
+	}
+	parentChainID := parentSpec.Config.ChainID.Uint64()
+
+	getHeader := func(cutBlock uint64) (common.Hash, common.Hash, uint64, *big.Int, error) {
+		var (
+			hash       common.Hash
+			parentHash common.Hash
+			timestamp  uint64
+			difficulty *big.Int
+		)
+		if err := s.chainDB.View(context.Background(), func(tx kv.Tx) error {
+			canonicalHash, herr := rawdb.ReadCanonicalHash(tx, cutBlock)
+			if herr != nil {
+				return herr
+			}
+			header := rawdb.ReadHeader(tx, canonicalHash, cutBlock)
+			if header == nil {
+				return fmt.Errorf("no header at block %d hash %x", cutBlock, canonicalHash)
+			}
+			hash = header.Hash()
+			parentHash = header.ParentHash
+			timestamp = header.Time
+			difficulty = header.Difficulty.ToBig()
+			return nil
+		}); err != nil {
+			return common.Hash{}, common.Hash{}, 0, nil, err
+		}
+		return hash, parentHash, timestamp, difficulty, nil
+	}
+
+	cut, err := downloader.CaptureParentCutFromLocal(
+		target.Parent,
+		parentChainID,
+		target.CutBlock,
+		"", // parent manifest name — leave empty; consumers can fill in from chain.toml if needed
+		"",
+		getHeader,
+	)
+	if err != nil {
+		s.logger.Warn("[fork] emit parent-cut skipped", "err", err)
+		return
+	}
+	path := filepath.Join(s.config.Dirs.DataDir, downloader.ParentCutFilename(target.ChainName))
+	if err := downloader.SaveParentCut(path, cut); err != nil {
+		s.logger.Warn("[fork] save parent-cut", "err", err, "path", path)
+		return
+	}
+	s.logger.Info("[fork] parent-cut written", "path", path)
 }
 
 // applyForkWriteCLConfig emits the fork's CL config artefact
