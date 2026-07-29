@@ -390,17 +390,24 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 }
 
 func replaySequentially(logPrefix string, providers []dataProvider, process func(key, value []byte) error) error {
-	for _, provider := range providers {
+	for i, provider := range providers {
+		// A recorded run is never empty, so EOF on the first read means a
+		// truncated or corrupt spill; fail loudly like the heap path does.
+		key, value, err := provider.Next()
+		if err != nil {
+			return fmt.Errorf("%s: reading first element of run %d of %d (provider=%s): %w",
+				logPrefix, i, len(providers), provider, err)
+		}
 		for {
-			key, value, err := provider.Next()
+			if err := process(key, value); err != nil {
+				return err
+			}
+			key, value, err = provider.Next()
 			if err != nil {
 				if errors.Is(err, io.EOF) {
 					break
 				}
 				return fmt.Errorf("%s: error while reading next element from disk: %w", logPrefix, err)
-			}
-			if err := process(key, value); err != nil {
-				return err
 			}
 		}
 	}
