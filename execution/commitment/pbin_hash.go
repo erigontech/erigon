@@ -45,11 +45,26 @@ var pbinEmptyTreeHash common.Hash
 
 var errPBinCellHash = errors.New("pbin: cell cannot be hashed")
 
-// pbinHasher is the one place H is applied, so swapping the hash function is a
-// change to this type alone. Every preimage fits its single scratch buffer, so
-// each node costs one hash call and no allocation. Its zero value is ready.
+// pbinHashFn is H. EIP-8297 leaves the hash open and names Keccak-256 among the
+// candidates (eip:511-513); the execution-specs reference hashes with BLAKE3, so
+// tests substitute it to compare roots against that reference. Key derivation
+// hashes too, so a suite is only fully swapped when pbinDigestCache is swapped
+// with it.
+type pbinHashFn func([]byte) common.Hash
+
+// pbinHasher applies H to node preimages. Every preimage fits its single scratch
+// buffer, so each node costs one hash call and no allocation. Its zero value is
+// ready and hashes with Keccak-256.
 type pbinHasher struct {
 	buf [pbinHashBufLen]byte
+	sum pbinHashFn
+}
+
+func (h *pbinHasher) hash(preimage []byte) common.Hash {
+	if h.sum != nil {
+		return h.sum(preimage)
+	}
+	return keccak.Sum256(preimage)
 }
 
 // pbinAppendBitPrefix is the spec's encode_bit_prefix (eip:196-201): a two-byte
@@ -66,7 +81,7 @@ func (h *pbinHasher) branchHash(prefix *pbinBitpath, left, right *common.Hash) c
 	buf := pbinAppendBitPrefix(append(h.buf[:0], pbinBranchTag), prefix)
 	buf = append(buf, left[:]...)
 	buf = append(buf, right[:]...)
-	return keccak.Sum256(buf)
+	return h.hash(buf)
 }
 
 // cellHash is the only way a cell becomes a hash. Keeping it single is what
@@ -108,7 +123,7 @@ func (h *pbinHasher) leafCellHash(c *pbinCell, path *pbinBitpath) (common.Hash, 
 	if err != nil {
 		return common.Hash{}, err
 	}
-	return keccak.Sum256(append(buf, value[:]...)), nil
+	return h.hash(append(buf, value[:]...)), nil
 }
 
 // pbinLeafValue picks the encoding the key's own position names: the zone byte

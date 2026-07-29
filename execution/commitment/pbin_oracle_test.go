@@ -164,9 +164,33 @@ func pbinOracleEncodeBitPrefix(prefix []byte) []byte {
 }
 
 func pbinOracleMerkelize(node pbinOracleNode) [32]byte {
+	return pbinOracleMerkelizeWith(node, nil)
+}
+
+// pbinOracleMerkelizeWith merkelizes under an explicit H. A nil sum means
+// Keccak-256; the execution-specs reference uses BLAKE3, so its vectors are
+// replayed by passing blake3 here.
+func pbinOracleMerkelizeWith(node pbinOracleNode, sum func([]byte) [32]byte) [32]byte {
 	var out [32]byte
 	if node == nil {
 		return out
+	}
+	if sum != nil {
+		var pre []byte
+		switch n := node.(type) {
+		case *pbinOracleLeaf:
+			pre = append(pre, pbinOracleLeafTag)
+			pre = append(pre, n.key...)
+			pre = append(pre, n.value...)
+		case *pbinOracleBranch:
+			left := pbinOracleMerkelizeWith(n.left, sum)
+			right := pbinOracleMerkelizeWith(n.right, sum)
+			pre = append(pre, pbinOracleBranchTag)
+			pre = append(pre, pbinOracleEncodeBitPrefix(n.prefix)...)
+			pre = append(pre, left[:]...)
+			pre = append(pre, right[:]...)
+		}
+		return sum(pre)
 	}
 	h := sha3.NewLegacyKeccak256()
 	switch n := node.(type) {

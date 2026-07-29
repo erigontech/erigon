@@ -111,6 +111,8 @@ func pbinKeyHasher() keyHasher {
 // correct; changing address invalidates the group entry, which is bound to the
 // address as well as the index (eip:411-414).
 type pbinDigestCache struct {
+	sum pbinHashFn
+
 	addr32 [32]byte
 	stem   [32]byte
 	valid  bool
@@ -122,11 +124,18 @@ type pbinDigestCache struct {
 	buf [64]byte
 }
 
+func (c *pbinDigestCache) hash(preimage []byte) [32]byte {
+	if c.sum != nil {
+		return c.sum(preimage)
+	}
+	return keccak.Sum256(preimage)
+}
+
 func (c *pbinDigestCache) stemDigest(addr32 *[32]byte) *[32]byte {
 	if c.valid && c.addr32 == *addr32 {
 		return &c.stem
 	}
-	c.stem = keccak.Sum256(addr32[:])
+	c.stem = c.hash(addr32[:])
 	c.addr32 = *addr32
 	c.valid = true
 	c.groupValid = false
@@ -143,7 +152,7 @@ func (c *pbinDigestCache) groupDigest(addr32, slot32 *[32]byte) *[32]byte {
 	copy(c.buf[:32], addr32[:])
 	c.buf[32] = 0
 	copy(c.buf[33:], idx[:])
-	c.groupHash = keccak.Sum256(c.buf[:])
+	c.groupHash = c.hash(c.buf[:])
 	c.groupIndex = *idx
 	c.groupValid = true
 	return &c.groupHash
