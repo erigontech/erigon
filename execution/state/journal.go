@@ -512,7 +512,12 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		// lets Normalize's EIP-161 pass delete an account whose touch was rolled back.
 		// Mirror kindBalance — drop the write if the touch created it, else restore
 		// the prior value.
-		if s.versionMap != nil {
+		//
+		// RIPEMD-160 is the exception: touchAccount bumps its dirty count so the
+		// touch outlives the revert and EIP-161 still sweeps it. Undoing the write
+		// here would drop that sweep on the versioned path only, leaving the
+		// account in the trie and diverging from serial's root.
+		if s.versionMap != nil && je.account != ripemd {
 			if je.committed() {
 				s.versionedWrites.DelBalance(je.account)
 			} else if _, ok := s.versionedWrites.GetBalance(je.account); ok {
