@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -473,11 +474,19 @@ func ParseDir(name string) (res []FileInfo, err error) {
 		}
 		return nil, err
 	}
+	return parseDirEntries(name, files)
+}
 
+func parseDirEntries(name string, files []os.DirEntry) (res []FileInfo, err error) {
 	for _, f := range files {
 		fileInfo, err := f.Info()
 		if err != nil {
-			return nil, err
+			// Deleted between ReadDir and this stat: merged-over segments are unlinked
+			// concurrently with directory scans.
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("ParseDir: %s: %w", name, err)
 		}
 		if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 {
 			continue
