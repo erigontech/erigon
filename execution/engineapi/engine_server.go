@@ -1198,7 +1198,9 @@ func (e *EngineServer) HandleForkChoice(
 	if status == execmodule.ExecutionStatusReorgTooDeep {
 		return nil, &engine_helpers.ReorgTooDeepErr
 	}
-	if status == execmodule.ExecutionStatusBusy {
+	if status == execmodule.ExecutionStatusBusy ||
+		status == execmodule.ExecutionStatusMissingSegment ||
+		status == execmodule.ExecutionStatusTooFarAway {
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
 	if status == execmodule.ExecutionStatusBadBlock {
