@@ -113,6 +113,28 @@ func TestGrowGloasContributionsGrowsAmortized(t *testing.T) {
 	require.Greater(t, cap(applied), len(applied))
 }
 
+func TestGrowGloasContributionsReusesSpareCapacity(t *testing.T) {
+	applied := make([]gloasVoteContribution, 1, 8)
+	applied[0].set = true
+
+	grown := growGloasContributions(applied, 2)
+
+	require.Len(t, grown, 2)
+	require.Equal(t, 8, cap(grown))
+	require.True(t, &applied[0] == &grown[0])
+	require.True(t, grown[0].set)
+}
+
+func TestGrowGloasContributionsClearsNewlyExposedEntries(t *testing.T) {
+	applied := make([]gloasVoteContribution, 2, 8)
+	applied[1].set = true
+	applied = applied[:1]
+
+	grown := growGloasContributions(applied, 2)
+
+	require.False(t, grown[1].set)
+}
+
 func TestGloasMarksDirtyWeightTree(t *testing.T) {
 	f := newGloasWeightTreeTestStore()
 	f.gloasWeightTree.state = &checkpointState{}
