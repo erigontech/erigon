@@ -250,6 +250,10 @@ type ExecModule struct {
 	// commitFatalOnce ensures a failed durable commit triggers node shutdown at
 	// most once, even as the worker drains further generations that also fail.
 	commitFatalOnce sync.Once
+	// commitPoisoned (guarded by fgMu) is set when a durable commit fails: each
+	// generation flushes only its own delta, so a queued descendant must not
+	// commit over the hole left by a failed parent while shutdown propagates.
+	commitPoisoned bool
 
 	// stateCache is a cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
@@ -354,18 +358,25 @@ func NewExecModule(
 // WaitIdle blocks until any in-flight updateForkChoice goroutine finishes.
 // Call before closing the database to avoid waitTxsAllDoneOnClose hangs.
 func (e *ExecModule) WaitIdle(ctx context.Context) {
-	// Best-effort foreground barrier; even if the ctx is cancelled we must still
-	// stop the worker below so it can never run against a closing DB.
-	if err := e.fgAcquire(ctx); err == nil {
+	if e.fgAcquire(ctx) == nil {
+		// Foreground is idle. Drain + commit any queued generations (the worker's
+		// stop path runs them), then release the generation chain now that no
+		// reader can be in flight — drainCommittedGens keeps the newest alive as
+		// Events.LatestSD until here.
 		e.fgRelease()
+		e.stopCommitWorker()
+		e.closeAllGens()
+		return
 	}
-	// Stop the background-commit worker and wait for it to drain its queue
-	// (including any in-flight commit tx) so DB-close does not race it.
+	// Timed out with a foreground op still holding the semaphore: closing the
+	// generation chain now would wipe SDs that op is still reading through, and
+	// parking its later commit in the stopped worker's channel would leak an open
+	// roTx and hang chainDB.Close. Poison so that late enqueueCommit rolls back
+	// instead of parking, stop the worker, leave the gens for the owning op (the
+	// process is exiting anyway), and log loudly.
+	e.poisonCommits()
 	e.stopCommitWorker()
-	// Close the generation(s) still held — drainCommittedGens deliberately
-	// keeps the newest alive as Events.LatestSD; release it now that the
-	// worker has stopped and no foreground/RPC reader can be in flight.
-	e.closeAllGens()
+	e.logger.Warn("WaitIdle: foreground op still active at shutdown; not closing generations")
 }
 
 // stopCommitWorker signals the background-commit worker to drain and exit,

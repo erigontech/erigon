@@ -793,6 +793,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			// the pipeline Sync with the next FCU's RunLoop and opens its own RwTx,
 			// which must not overlap either.
 			if e.fcuBackgroundPrune {
+				// Settle pending updates + unwind state before handing the
+				// semaphore to the prune goroutine: a fast prune could otherwise
+				// fgRelease before the deferred cleanup runs, letting the next
+				// acquirer observe unsettled state. OnceFunc, so the outer defer
+				// is then a no-op.
+				cleanupBeforeSemaRelease()
 				pruneHandedOff = true
 				go func() {
 					defer e.fgRelease()

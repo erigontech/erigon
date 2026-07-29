@@ -859,57 +859,14 @@ func (sd *SharedDomains) InlineTouchKeyDisabled() bool {
 	return sd.disableInlineTouchKey
 }
 
-// HasPrefix reports whether any live key with the prefix exists. The local
-// mem+files answer comes first; parent generations are then scanned so an
-// uncommitted ancestor's keys are visible (a self-destruct in this generation
-// must enumerate storage a not-yet-committed parent wrote). A key found in a
-// parent is resolved through the child-first chain (getLatestMetered), so a
-// clear in a nearer generation — e.g. a create-contract DomainDelPrefix
-// tombstone recorded only in this mem — overrides the ancestor's value rather
-// than falsely reporting the prefix as present.
-// HasPrefix reports the first live key/value under prefix, chain-correctly: a
-// candidate from the leaf batch (leaf RAM + committed DB) or any parent
-// generation is confirmed through getLatest so a value cleared by a parent
-// generation is not a false positive and a value written only in a parent is
-// still found. Short-circuits on the first live key.
-func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
-	tx, ok := roTx.(kv.TemporalTx)
-	if sd.parent == nil || !ok {
-		return sd.mem.HasPrefix(domain, prefix, roTx)
-	}
-	var firstKey, firstVal []byte
-	confirm := func(k, _ []byte) (bool, error) {
-		lv, _, e := sd.getLatestMetered(domain, tx, k, nil)
-		if e != nil {
-			return false, e
-		}
-		if len(lv) > 0 {
-			firstKey, firstVal = bytes.Clone(k), bytes.Clone(lv)
-			return false, nil
-		}
-		return true, nil
-	}
-	for p := sd; p != nil; p = p.parent {
-		if err := p.mem.IteratePrefix(domain, prefix, roTx, confirm); err != nil {
-			return nil, nil, false, err
-		}
-		if firstKey != nil {
-			return firstKey, firstVal, true, nil
-		}
-	}
-	return nil, nil, false, nil
-}
-
-// IteratePrefix emits every live key under prefix across the whole generation
-// chain, newest-generation-wins with tombstone shadowing: it unions the
-// candidate keys from the leaf batch (leaf RAM + committed DB) and every parent
-// generation's RAM, resolves each through getLatest, and emits only the
-// non-empty ones in key order.
-func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
-	tx, ok := roTx.(kv.TemporalTx)
-	if sd.parent == nil || !ok {
-		return sd.mem.IteratePrefix(domain, prefix, roTx, it)
-	}
+// collectPrefixCandidates unions the candidate keys under prefix from the leaf
+// batch (leaf RAM + committed DB) and every parent generation's RAM, returned in
+// key order. Collection runs inside each mem's read lock but only appends keys;
+// callers resolve values afterwards (getLatest re-locks), so no read lock is
+// ever held across a second acquisition — see the recursive-RLock hazard on
+// sync.RWMutex. The whole candidate set is materialized before resolution, so a
+// self-destruct enumerating a large contract's storage holds all its slot keys.
+func (sd *SharedDomains) collectPrefixCandidates(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]string, error) {
 	seen := make(map[string]struct{})
 	var keys []string
 	collect := func(k, _ []byte) (bool, error) {
@@ -922,10 +879,49 @@ func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.
 	}
 	for p := sd; p != nil; p = p.parent {
 		if err := p.mem.IteratePrefix(domain, prefix, roTx, collect); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	slices.Sort(keys)
+	return keys, nil
+}
+
+// HasPrefix reports the first live key/value under prefix in key order, chain-
+// correctly across the generation chain: a candidate cleared by a nearer
+// generation is skipped and one written only in a parent is still found.
+func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
+	tx, ok := roTx.(kv.TemporalTx)
+	if sd.parent == nil || !ok {
+		return sd.mem.HasPrefix(domain, prefix, roTx)
+	}
+	keys, err := sd.collectPrefixCandidates(domain, prefix, roTx)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	for _, ks := range keys {
+		k := []byte(ks)
+		v, _, err := sd.getLatestMetered(domain, tx, k, nil)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		if len(v) > 0 {
+			return k, bytes.Clone(v), true, nil
+		}
+	}
+	return nil, nil, false, nil
+}
+
+// IteratePrefix emits every live key under prefix across the whole generation
+// chain in key order, newest-generation-wins with tombstone shadowing.
+func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
+	tx, ok := roTx.(kv.TemporalTx)
+	if sd.parent == nil || !ok {
+		return sd.mem.IteratePrefix(domain, prefix, roTx, it)
+	}
+	keys, err := sd.collectPrefixCandidates(domain, prefix, roTx)
+	if err != nil {
+		return err
+	}
 	for _, ks := range keys {
 		k := []byte(ks)
 		v, _, err := sd.getLatestMetered(domain, tx, k, nil)

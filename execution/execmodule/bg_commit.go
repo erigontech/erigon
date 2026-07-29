@@ -93,10 +93,17 @@ func (e *ExecModule) leaveForeground() {
 	e.fgMu.Unlock()
 }
 
-// enqueueCommit hands a completed generation to the background commit
-// worker. Non-blocking by design (buffered channel) so the foreground FCU
-// is never blocked handing off its commit.
+// enqueueCommit hands a completed generation to the background commit worker.
+// Non-blocking so the foreground FCU never blocks handing off its commit (the
+// channel is buffered and the maxInFlightCommits backpressure keeps it from
+// filling). Once the commit stream is poisoned (failed commit or shutdown) the
+// worker no longer drains, so roll the generation's roTx back rather than park
+// it forever — a leaked open reader would hang chainDB.Close.
 func (e *ExecModule) enqueueCommit(gen *commitGen) {
+	if e.commitIsPoisoned() {
+		gen.roTx.Rollback()
+		return
+	}
 	e.commitCh <- gen
 }
 
@@ -151,6 +158,12 @@ func (e *ExecModule) runCommit(gen *commitGen) {
 		return
 	}
 
+	// A prior generation's durable commit failed: do not advance the DB past the
+	// hole it left. Skip every remaining generation while shutdown propagates.
+	if e.commitIsPoisoned() {
+		return
+	}
+
 	err := e.runPostForkchoice(gen.sd, gen.roTx, gen.finishProgressBefore, gen.isSynced, gen.initialCycle)
 	// roTx is rolled back inside runForkchoiceFlushCommit between Flush and
 	// Commit; this is a safety net (Rollback is idempotent).
@@ -163,11 +176,14 @@ func (e *ExecModule) runCommit(gen *commitGen) {
 		}
 		// A durable commit failed for a non-shutdown reason: the block was already
 		// reported VALID to the CL, so silently dropping its state would diverge
-		// from consensus. Crit does not terminate this logger, and returning would
+		// from consensus. Poison the queue first (synchronously) so no already-
+		// enqueued descendant commits its delta over this hole before shutdown
+		// propagates. Crit does not terminate this logger, and returning would
 		// leave the generation un-retired (FCU wedges Busy, drain/shutdown hangs).
 		// Trigger a clean node shutdown (cancels the root context) so the process
 		// restarts and re-derives the state. In a goroutine — stopNode drains this
 		// same worker — and once, so repeated drain failures don't respawn it.
+		e.poisonCommits()
 		e.logger.Crit("background commit failed; shutting down node", "block", gen.blockNum, "hash", gen.blockHash, "err", err)
 		e.commitFatalOnce.Do(func() {
 			go func() {
@@ -271,6 +287,21 @@ func (e *ExecModule) genSuperseded(gen *commitGen) bool {
 	e.fgMu.Lock()
 	defer e.fgMu.Unlock()
 	return gen.epoch != e.genEpoch
+}
+
+// poisonCommits marks the commit stream dead after a failed durable commit, so
+// no queued or future generation commits its delta over the resulting hole.
+func (e *ExecModule) poisonCommits() {
+	e.fgMu.Lock()
+	e.commitPoisoned = true
+	e.fgMu.Unlock()
+}
+
+// commitIsPoisoned reports whether a durable commit has failed.
+func (e *ExecModule) commitIsPoisoned() bool {
+	e.fgMu.Lock()
+	defer e.fgMu.Unlock()
+	return e.commitPoisoned
 }
 
 // addGen appends a new in-flight generation to the chain.
