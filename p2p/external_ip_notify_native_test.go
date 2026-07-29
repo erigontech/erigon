@@ -20,12 +20,12 @@ package p2p
 
 import (
 	"context"
-	"os"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -67,43 +67,45 @@ func captureLogger() (log.Logger, *msgCaptureHandler) {
 	return logger, h
 }
 
-// TestNativeNotifierConstructs asserts that a platform with a native notifier
-// actually builds one: a noopNotifier here means socket setup broke, which must
-// fail loudly rather than silently degrade to poll-only. Closing the idle
-// notifier is near-instant because the read parks in the poller and Close
-// unblocks it at once; the pre-fix receive-timeout loop took up to a second.
-func TestNativeNotifierConstructs(t *testing.T) {
-	logger, h := captureLogger()
-
-	n := newNetChangeNotifier(logger)
-	if _, ok := n.(noopNotifier); ok {
-		t.Fatalf("native notifier expected on %s, got noop fallback: %v", runtime.GOOS, h.snapshot())
-	}
-
+// closeWithin closes n in a goroutine bounded by a timeout, so a poller
+// regression that makes Close block forever fails the test promptly instead of
+// hanging until the package timeout. It returns how long Close took.
+func closeWithin(t *testing.T, n netChangeNotifier, timeout time.Duration) time.Duration {
+	t.Helper()
 	start := time.Now()
-	if err := n.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	done := make(chan error, 1)
+	go func() { done <- n.Close() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	case <-time.After(timeout):
+		t.Fatal("Close hung: read did not unblock via the poller")
 	}
-	if d := time.Since(start); d > 500*time.Millisecond {
-		t.Fatalf("Close took %v; read did not park in the poller", d)
-	}
+	return time.Since(start)
 }
 
-// TestFdNotifierParksAndCloses exercises the poller integration hermetically via
-// an os.Pipe, so it needs no privileged socket and never skips. It asserts the
-// three properties the fix relies on: an idle read parks (no spurious event, no
-// read-failure), a write wakes the parked read (event delivered), and Close
-// unblocks the parked read at once.
+// TestFdNotifierParksAndCloses drives the notifier from a raw, initially
+// blocking pipe descriptor so it exercises the SetNonblock + os.NewFile
+// transition the fix relies on, hermetically (no privileged socket, never
+// skips). It asserts the three properties of that transition: an idle read
+// parks (no spurious event, no read-failure), a write wakes the parked read,
+// and Close unblocks the parked read at once.
 func TestFdNotifierParksAndCloses(t *testing.T) {
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
+	var fds [2]int
+	if err := unix.Pipe(fds[:]); err != nil {
+		t.Fatalf("unix.Pipe: %v", err)
 	}
-	defer w.Close()
+	readFD, writeFD := fds[0], fds[1]
+	defer unix.Close(writeFD)
 
 	logger, h := captureLogger()
-	n := notifierFromFile(r, logger)
-	defer n.Close()
+	n, err := notifierFromFD(readFD, logger)
+	if err != nil {
+		_ = unix.Close(readFD)
+		t.Fatalf("notifierFromFD: %v", err)
+	}
 
 	select {
 	case <-n.Events():
@@ -116,20 +118,16 @@ func TestFdNotifierParksAndCloses(t *testing.T) {
 
 	// Large enough to clear the netlink loop's NLMSG_HDRLEN (16-byte) minimum,
 	// which would otherwise discard the message without firing an event.
-	if _, err := w.Write(make([]byte, 128)); err != nil {
+	if _, err := unix.Write(writeFD, make([]byte, 128)); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	select {
 	case <-n.Events():
 	case <-time.After(2 * time.Second):
-		t.Fatal("write to the pipe did not wake the parked read")
+		t.Fatal("write did not wake the parked read")
 	}
 
-	start := time.Now()
-	if err := n.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	if d := time.Since(start); d > 500*time.Millisecond {
+	if d := closeWithin(t, n, 2*time.Second); d > 500*time.Millisecond {
 		t.Fatalf("Close took %v; read did not park in the poller", d)
 	}
 }

@@ -43,6 +43,7 @@ type addrChangeNotifier struct {
 	handle    windows.Handle
 	pinner    runtime.Pinner
 	closeOnce sync.Once
+	closeErr  error
 }
 
 func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
@@ -63,14 +64,15 @@ func (n *addrChangeNotifier) Events() <-chan struct{} { return n.events }
 
 func (n *addrChangeNotifier) Close() error {
 	n.closeOnce.Do(func() {
-		if windows.CancelMibChangeNotify2(n.handle) != nil {
+		if err := windows.CancelMibChangeNotify2(n.handle); err != nil {
 			// Registration may still be live; keep the context pinned so a late
 			// callback cannot dereference freed memory, leaking a few dozen bytes.
+			n.closeErr = err
 			return
 		}
 		n.pinner.Unpin()
 	})
-	return nil
+	return n.closeErr
 }
 
 // onUnicastIPAddressChange is the process-wide notify callback. It runs on an OS

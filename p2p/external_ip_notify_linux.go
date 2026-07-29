@@ -54,26 +54,32 @@ func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
 		logger.Debug(notifierUnavailableMsg, "err", err)
 		return noopNotifier{}
 	}
-	// Nonblocking so os.NewFile registers the socket with the runtime netpoller:
-	// the read parks until a message arrives and Close unblocks it at once,
-	// instead of a receive-timeout loop that wakes on a timer to observe Close.
-	if err := unix.SetNonblock(fd, true); err != nil {
+
+	n, err := newNetlinkNotifierFromFD(fd, "netlink", logger)
+	if err != nil {
 		_ = unix.Close(fd)
 		logger.Debug(notifierUnavailableMsg, "err", err)
 		return noopNotifier{}
 	}
-
-	return newNetlinkNotifierFromFile(os.NewFile(uintptr(fd), "netlink"), logger)
+	return n
 }
 
-func newNetlinkNotifierFromFile(file *os.File, logger log.Logger) *netlinkNotifier {
+// newNetlinkNotifierFromFD takes ownership of fd. On error fd is left open for
+// the caller to close; on success the returned notifier owns it via Close.
+func newNetlinkNotifierFromFD(fd int, name string, logger log.Logger) (*netlinkNotifier, error) {
+	// Nonblocking so os.NewFile registers the socket with the runtime netpoller:
+	// the read parks until a message arrives and Close unblocks it at once,
+	// instead of a receive-timeout loop that wakes on a timer to observe Close.
+	if err := unix.SetNonblock(fd, true); err != nil {
+		return nil, err
+	}
 	n := &netlinkNotifier{
-		file:    file,
+		file:    os.NewFile(uintptr(fd), name),
 		events:  make(chan struct{}, 1),
 		stopped: make(chan struct{}),
 	}
 	go n.loop(logger)
-	return n
+	return n, nil
 }
 
 func (n *netlinkNotifier) Events() <-chan struct{} { return n.events }

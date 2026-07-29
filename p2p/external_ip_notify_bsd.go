@@ -46,26 +46,32 @@ func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
 		return noopNotifier{}
 	}
 	unix.CloseOnExec(fd)
-	// Nonblocking so os.NewFile registers the socket with the runtime netpoller:
-	// the read parks until a message arrives and Close unblocks it at once,
-	// instead of a receive-timeout loop that wakes on a timer to observe Close.
-	if err := unix.SetNonblock(fd, true); err != nil {
+
+	n, err := newRouteNotifierFromFD(fd, "pf_route", logger)
+	if err != nil {
 		_ = unix.Close(fd)
 		logger.Debug(notifierUnavailableMsg, "err", err)
 		return noopNotifier{}
 	}
-
-	return newRouteNotifierFromFile(os.NewFile(uintptr(fd), "pf_route"), logger)
+	return n
 }
 
-func newRouteNotifierFromFile(file *os.File, logger log.Logger) *routeNotifier {
+// newRouteNotifierFromFD takes ownership of fd. On error fd is left open for the
+// caller to close; on success the returned notifier owns it via Close.
+func newRouteNotifierFromFD(fd int, name string, logger log.Logger) (*routeNotifier, error) {
+	// Nonblocking so os.NewFile registers the socket with the runtime netpoller:
+	// the read parks until a message arrives and Close unblocks it at once,
+	// instead of a receive-timeout loop that wakes on a timer to observe Close.
+	if err := unix.SetNonblock(fd, true); err != nil {
+		return nil, err
+	}
 	n := &routeNotifier{
-		file:    file,
+		file:    os.NewFile(uintptr(fd), name),
 		events:  make(chan struct{}, 1),
 		stopped: make(chan struct{}),
 	}
 	go n.loop(logger)
-	return n
+	return n, nil
 }
 
 func (n *routeNotifier) Events() <-chan struct{} { return n.events }

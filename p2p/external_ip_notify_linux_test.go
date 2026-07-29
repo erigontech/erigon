@@ -18,12 +18,12 @@
 
 package p2p
 
-import (
-	"os"
+import "github.com/erigontech/erigon/common/log/v3"
 
-	"github.com/erigontech/erigon/common/log/v3"
-)
-
-func notifierFromFile(file *os.File, logger log.Logger) netChangeNotifier {
-	return newNetlinkNotifierFromFile(file, logger)
+func notifierFromFD(fd int, logger log.Logger) (netChangeNotifier, error) {
+	n, err := newNetlinkNotifierFromFD(fd, "netlink-test", logger)
+	if err != nil {
+		return nil, err
+	}
+	return n, nil
 }
