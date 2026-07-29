@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"math/bits"
@@ -38,6 +39,8 @@ type PBinPatriciaHashed struct {
 	branchEncoder pbinBranchEncoder
 	counters      pbinCounters
 
+	siblingKey [pbinAccountKeyLength]byte // scratch for the CODE_HASH key of the account being visited
+
 	rootChecked bool // whether the root record is known to be absent
 	rootTouched bool
 	rootPresent bool
@@ -57,7 +60,177 @@ func NewPBinPatriciaHashed(ctx PatriciaContext) *PBinPatriciaHashed {
 	return &PBinPatriciaHashed{ctx: ctx}
 }
 
-var errPBinMissingBranch = errors.New("pbin: branch record missing")
+var (
+	errPBinMissingBranch     = errors.New("pbin: branch record missing")
+	errPBinDeleteUnsupported = errors.New("pbin: EIP-8297 defines no deletion")
+)
+
+// Process folds the update stream into the tree and returns the new root.
+// HashSort hands keys over in tree-key order, which is descent order, so the
+// grid only ever walks the path between two consecutive keys.
+//
+// M0 ignores warmup: the engine runs against an in-memory context, so there is
+// no page cache to pre-warm.
+func (pph *PBinPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) ([]byte, error) {
+	var processed uint64
+	err := updates.HashSort(ctx, nil, func(treeKey, plainKey []byte, stateUpdate *Update) error {
+		if err := pph.processKey(treeKey, plainKey, stateUpdate); err != nil {
+			return err
+		}
+		processed++
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("pbin: process %s: %w", logPrefix, err)
+	}
+	for pph.grid.activeRows > 0 {
+		if err = pph.fold(); err != nil {
+			return nil, fmt.Errorf("pbin: final fold: %w", err)
+		}
+	}
+	if onProgress != nil {
+		onProgress(&CommitProgress{KeyIndex: processed, UpdateCount: processed})
+	}
+	return pph.RootHash()
+}
+
+// processKey routes one update into the tree. An account fans out to two leaves
+// visited back to back — BASIC_DATA and the CODE_HASH sibling at the next
+// sub-index — which is what lets the shared keyHasher stay a one-key function.
+func (pph *PBinPatriciaHashed) processKey(treeKey, plainKey []byte, stateUpdate *Update) error {
+	if stateUpdate != nil && stateUpdate.Deleted() {
+		return fmt.Errorf("%w: update for %x", errPBinDeleteUnsupported, plainKey)
+	}
+	update := stateUpdate
+	if update == nil {
+		var err error
+		if update, err = pph.stateOf(plainKey); err != nil {
+			return err
+		}
+		// A key with no state reads back as a delete; under EIP-8297 that means
+		// there is no leaf here, not that one has to be removed.
+		if update.Deleted() {
+			return nil
+		}
+	}
+	if err := pph.followAndUpdate(treeKey, plainKey, update); err != nil {
+		return err
+	}
+	if len(plainKey) != length.Addr {
+		return nil
+	}
+	codeKey, err := pph.codeHashKey(treeKey)
+	if err != nil {
+		return err
+	}
+	return pph.followAndUpdate(codeKey, plainKey, update)
+}
+
+func (pph *PBinPatriciaHashed) stateOf(plainKey []byte) (*Update, error) {
+	if len(plainKey) == length.Addr {
+		update, err := pph.ctx.Account(plainKey)
+		if err != nil {
+			return nil, fmt.Errorf("pbin: read account %x: %w", plainKey, err)
+		}
+		return update, nil
+	}
+	update, err := pph.ctx.Storage(plainKey)
+	if err != nil {
+		return nil, fmt.Errorf("pbin: read storage %x: %w", plainKey, err)
+	}
+	return update, nil
+}
+
+// codeHashKey is the CODE_HASH leaf beside a BASIC_DATA key: same stem, next
+// sub-index (eip:311-320). The two sit adjacent in key order, so visiting them
+// together never walks the descent backwards.
+func (pph *PBinPatriciaHashed) codeHashKey(basicDataKey []byte) ([]byte, error) {
+	if len(basicDataKey) != pbinAccountKeyLength || basicDataKey[pbinAccountKeyLength-1] != pbinBasicDataLeafKey {
+		return nil, fmt.Errorf("pbin: %x is not a BASIC_DATA key", basicDataKey)
+	}
+	copy(pph.siblingKey[:], basicDataKey)
+	pph.siblingKey[pbinAccountKeyLength-1] = pbinCodeHashLeafKey
+	return pph.siblingKey[:], nil
+}
+
+// followAndUpdate moves the grid onto treeKey and writes the update into the
+// cell that lands there.
+func (pph *PBinPatriciaHashed) followAndUpdate(treeKey, plainKey []byte, update *Update) error {
+	probe := pbinPathFromBytes(treeKey)
+	for !probe.hasPrefix(&pph.currentKey) {
+		if err := pph.fold(); err != nil {
+			return err
+		}
+	}
+	for u := pph.needUnfolding(&probe); u.action != pbinUnfoldNone; u = pph.needUnfolding(&probe) {
+		if err := pph.unfold(&probe, u); err != nil {
+			return err
+		}
+	}
+	return pph.updateCell(plainKey, &probe, update)
+}
+
+// updateCell writes one leaf into the deepest open row. Unfolding has already
+// made the target either empty — a new leaf, whose prefix is the rest of the
+// key — or the same leaf touched again.
+func (pph *PBinPatriciaHashed) updateCell(plainKey []byte, probe *pbinBitpath, update *Update) error {
+	g := &pph.grid
+	var c *pbinCell
+	var depth int16
+	if g.activeRows == 0 {
+		c = &g.root
+		pph.rootTouched, pph.rootPresent = true, true
+	} else {
+		row := g.activeRows - 1
+		depth = g.depths[row]
+		if probe.bitLen < depth {
+			return fmt.Errorf("pbin: a %d-bit key cannot be updated in a row at depth %d", probe.bitLen, depth)
+		}
+		bit := probe.bit(depth - 1)
+		c = &g.rows[row][bit]
+		g.touchMap[row] |= uint16(1) << bit
+		g.afterMap[row] |= uint16(1) << bit
+	}
+
+	switch c.kind {
+	case pbinNodeEmpty:
+		c.kind = pbinNodeLeaf
+		c.prefix = probe.slice(depth, probe.bitLen)
+	case pbinNodeLeaf:
+	default:
+		return fmt.Errorf("pbin: update for a %d-bit key lands on a branch cell", probe.bitLen)
+	}
+
+	switch len(plainKey) {
+	case length.Addr:
+		c.accountAddrLen = int16(len(plainKey))
+		copy(c.accountAddr[:], plainKey)
+		c.loaded = c.loaded.addFlag(cellLoadAccount)
+	case length.Addr + length.Hash:
+		c.storageAddrLen = int16(len(plainKey))
+		copy(c.storageAddr[:], plainKey)
+		c.loaded = c.loaded.addFlag(cellLoadStorage)
+	default:
+		return fmt.Errorf("pbin: plain key of %d bytes is neither an account nor a storage key", len(plainKey))
+	}
+	c.setFromUpdate(update)
+	return nil
+}
+
+// RootHash hashes whatever the root cell holds. A one-key tree's root is the
+// leaf itself (eip:133-135) and an empty tree is 32 zero bytes (eip:208), both
+// of which fall out of hashing the cell rather than special-casing the shape.
+func (pph *PBinPatriciaHashed) RootHash() ([]byte, error) {
+	if pph.grid.activeRows != 0 {
+		return nil, fmt.Errorf("pbin: root hash requested with %d rows still open", pph.grid.activeRows)
+	}
+	var path pbinBitpath
+	hash, err := pph.cellHash(&pph.grid.root, &path)
+	if err != nil {
+		return nil, err
+	}
+	return hash[:], nil
+}
 
 // pbinUnfoldAction is what needUnfolding tells unfold to do about one cell.
 type pbinUnfoldAction uint8

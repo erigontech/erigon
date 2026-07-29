@@ -230,14 +230,14 @@ func pbinCommonPrefixBits(a, b *pbinBitpath) int16 // XOR + LeadingZeros64, clam
 - Modify: `execution/commitment/pbin_patricia_hashed.go`
 - Create: `execution/commitment/pbin_process_test.go`
 
-- [ ] write a failing test asserting `RootHash()` on a fresh engine is 32 zero bytes, not `empty.RootHash` (guards H11)
-- [ ] write a failing test for a one-key tree asserting the root **is** the leaf hash `H(0x00||key||value)` (`eip:133-135`), and for a two-key tree asserting it is the branch hash
-- [ ] write failing `Process` tests over `MockState` for account-only, storage-only and mixed corpora, asserting root equality with the oracle
-- [ ] implement `pbinUpdateCell`, the key-path descent, and the `Process` drive loop
-- [ ] implement `RootHash` including the root-as-leaf case
-- [ ] implement the account fan-out: write the `CODE_HASH` leaf at `sub_index+1` during the same stem visit, leaving `Updates`/`HashSort`/`TouchPlainKey` untouched
-- [ ] reject deletes originating from the **update stream** only; a missing-key `ctx.Account`/`ctx.Storage` read returns `DeleteUpdate` (`patricia_state_mock_test.go:92-95`, `:129-134`) and MUST be treated as absent, not as a delete (guards H13)
-- [ ] run tests - must pass before task 10
+- [x] write a failing test asserting `RootHash()` on a fresh engine is 32 zero bytes, not `empty.RootHash` (guards H11)
+- [x] write a failing test for a one-key tree asserting the root **is** the leaf hash `H(0x00||key||value)` (`eip:133-135`), and for a two-key tree asserting it is the branch hash
+- [x] write failing `Process` tests over `MockState` for account-only, storage-only and mixed corpora, asserting root equality with the oracle
+- [x] implement `pbinUpdateCell`, the key-path descent, and the `Process` drive loop — landed as the methods `updateCell`/`followAndUpdate`/`processKey`, same reasoning as Task 7's `unfold`
+- [x] implement `RootHash` including the root-as-leaf case
+- [x] implement the account fan-out: write the `CODE_HASH` leaf at `sub_index+1` during the same stem visit, leaving `Updates`/`HashSort`/`TouchPlainKey` untouched
+- [x] reject deletes originating from the **update stream** only; a missing-key `ctx.Account`/`ctx.Storage` read returns `DeleteUpdate` (`patricia_state_mock_test.go:92-95`, `:129-134`) and MUST be treated as absent, not as a delete (guards H13)
+- [x] run tests - must pass before task 10
 
 ### Task 10: variant registration
 
