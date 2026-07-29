@@ -185,12 +185,12 @@ func pbinCommonPrefixBits(a, b *pbinBitpath) int16 // XOR + LeadingZeros64, clam
 - Create: `execution/commitment/pbin_hash.go`
 - Create: `execution/commitment/pbin_hash_test.go`
 
-- [ ] write failing tests asserting each node hash matches the Task 4 oracle for hand-built shapes: single leaf, one branch, nested branch with non-empty prefix, branch with **empty** prefix
-- [ ] write a failing node-level test asserting the empty subtree is 32 zero bytes, explicitly not `empty.RootHash` (guards H11)
-- [ ] implement `pbinLeafHash = H(0x00 || key || value)` over the complete 34/66-byte key
-- [ ] implement `pbinBranchHash = H(0x01 || encode_bit_prefix(prefix) || left || right)` with one scratch buffer sized 133 B (1 tag + 2 count + 66 prefix + 64 children)
-- [ ] implement exactly **one** cell hasher — do not port both `computeCellHash` and `witnessComputeCellHashWithStorage` (guards H14)
-- [ ] run tests - must pass before task 7
+- [x] write failing tests asserting each node hash matches the Task 4 oracle for hand-built shapes: single leaf, one branch, nested branch with non-empty prefix, branch with **empty** prefix
+- [x] write a failing node-level test asserting the empty subtree is 32 zero bytes, explicitly not `empty.RootHash` (guards H11)
+- [x] implement `pbinLeafHash = H(0x00 || key || value)` over the complete 34/66-byte key
+- [x] implement `pbinBranchHash = H(0x01 || encode_bit_prefix(prefix) || left || right)` with one scratch buffer sized 133 B (1 tag + 2 count + 66 prefix + 64 children)
+- [x] implement exactly **one** cell hasher — do not port both `computeCellHash` and `witnessComputeCellHashWithStorage` (guards H14)
+- [x] run tests - must pass before task 7
 
 ### Task 7: unfold and needUnfolding
 
@@ -290,7 +290,7 @@ func pbinCommonPrefixBits(a, b *pbinBitpath) int16 // XOR + LeadingZeros64, clam
 - Record the one-prefix-per-cell rationale (Task 5) here and in the commit body rather than as a source comment.
 
 **Out of scope, in rough dependency order:**
-- Code chunks (`chunkify_code`, `eip:374-397`), including the stateful PUSHDATA boundary byte and content-addressed overflow chunks shared between contracts.
+- Code chunks (`chunkify_code`, `eip:374-397`), including the stateful PUSHDATA boundary byte and content-addressed overflow chunks shared between contracts. Discovered in Task 6: `Update` carries **no code size**, and adding one is an external API change, so M0 encodes BASIC_DATA `code_size` as 0. Both the engine and the oracle see the same value, so the M0 gate still holds, but a conformance claim needs a real code size sourced alongside code chunking.
 - Deletion semantics. EIP-8297 never removes entries, but erigon's `StorageDomain` represents never-written and explicitly-zeroed identically (`execution/state/rw_v3.go:965` calls `DomainDel` on an empty value). Production needs a tombstone-capable encoding or a documented deviation. Under EIP-8297 SELFDESTRUCT must **not** remove storage leaves, which removes the rationale for erigon's storage-subtree collapse.
 - Commitment state save/restore (re-arms H6). `SetState`/`EncodeCurrentState` are concrete `*HexPatriciaHashed` methods and `commitmentdb` type-switches on them (`commitment_context.go:895-901`, `:935-949`, panics at `:103`, silently no-ops `SetCollapseTracer` at `:411`). Promoting a `StatefulTrie` interface is an external API change, deliberately excluded from M0; `:411` should error rather than no-op before any variant ships.
 - Parallel mounting. `mountedNib 0..15` plus a depth-63 fold wall does not translate to arity 2; a 2-way root split silently serialises rather than failing.
