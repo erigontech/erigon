@@ -27,7 +27,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"sync"
 
@@ -46,6 +45,7 @@ var blockTestCommand = cli.Command{
 		&DumpFlag,
 		&JSONOutputFlag,
 		&RunFlag,
+		&ExcludeFlag,
 		&VerbosityFlag,
 		&WorkersFlag,
 	},
@@ -65,10 +65,14 @@ func blockTestCmd(_ context.Context, ctx *cli.Command) error {
 	if workers == 0 {
 		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
 	}
+	filter, err := compileTestFilter(ctx.String(RunFlag.Name), ctx.StringSlice(ExcludeFlag.Name))
+	if err != nil {
+		return err
+	}
 
 	if len(path) != 0 {
-		collected := collectFiles(path)
-		results, err := runBlockTestsParallel(ctx, collected, workers)
+		collected := filter.filterFiles(collectFiles(path))
+		results, err := runBlockTestsParallel(ctx, collected, workers, filter)
 		if err != nil {
 			return err
 		}
@@ -82,7 +86,7 @@ func blockTestCmd(_ context.Context, ctx *cli.Command) error {
 		if len(fname) == 0 {
 			return nil
 		}
-		results, err := runBlockTest(ctx, fname)
+		results, err := runBlockTest(ctx, fname, filter)
 		if err != nil {
 			return err
 		}
@@ -98,11 +102,11 @@ type fileResult struct {
 	err     error
 }
 
-func runBlockTestsParallel(ctx *cli.Command, files []string, workers uint64) ([]testResult, error) {
+func runBlockTestsParallel(ctx *cli.Command, files []string, workers uint64, filter testFilter) ([]testResult, error) {
 	if workers == 1 {
 		results := make([]testResult, 0, len(files)*4) // pre-allocate: most files have a few tests
 		for _, fname := range files {
-			r, err := runBlockTest(ctx, fname)
+			r, err := runBlockTest(ctx, fname, filter)
 			if err != nil {
 				return nil, err
 			}
@@ -129,7 +133,7 @@ func runBlockTestsParallel(ctx *cli.Command, files []string, workers uint64) ([]
 	for range workers {
 		wg.Go(func() {
 			for item := range fileCh {
-				r, err := runBlockTest(ctx, item.fname)
+				r, err := runBlockTest(ctx, item.fname, filter)
 				resultCh <- fileResult{index: item.index, results: r, err: err}
 			}
 		})
@@ -188,7 +192,7 @@ func collectFiles(path string) []string {
 	return out
 }
 
-func runBlockTest(ctx *cli.Command, fname string) ([]testResult, error) {
+func runBlockTest(ctx *cli.Command, fname string, filter testFilter) ([]testResult, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
 		return nil, err
@@ -199,18 +203,13 @@ func runBlockTest(ctx *cli.Command, fname string) ([]testResult, error) {
 		return nil, err
 	}
 
-	re, err := regexp.Compile(ctx.String(RunFlag.Name))
-	if err != nil {
-		return nil, fmt.Errorf("invalid regex -%s: %v", RunFlag.Name, err)
-	}
-
 	// Pull out keys to sort and ensure tests are run in order
 	keys := slices.Sorted(maps.Keys(tests))
 
 	// Run all the tests
 	results := make([]testResult, 0, len(keys))
 	for _, name := range keys {
-		if !re.MatchString(name) {
+		if !filter.includeCase(fname, name) {
 			continue
 		}
 
