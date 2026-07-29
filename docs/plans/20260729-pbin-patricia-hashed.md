@@ -270,14 +270,44 @@ func pbinCommonPrefixBits(a, b *pbinBitpath) int16 // XOR + LeadingZeros64, clam
 
 ### Task 12: Verify acceptance criteria
 
-- [ ] verify all requirements from Overview are implemented and M0 scope boundaries were respected
-- [ ] verify no shared type, interface or signature was modified: `git diff --stat` shows `commitment.go` as the only pre-existing non-test file, additive only
-- [ ] verify every hazard in the register except H6 has a named passing test
-- [ ] verify every new package-level identifier carries the `pbin` prefix and the package compiles without collision
-- [ ] run the package test suite: `go test ./execution/commitment/...`
-- [ ] run fuzzers briefly, one target per invocation — `-fuzz` refuses a regex matching several: `go test ./execution/commitment/ -run=Fuzz -fuzz=FuzzPBinBitPathCodec -fuzztime=60s` then the same for `FuzzPBinProcessMatchesOracle`
-- [ ] verify `go build ./...` and `go vet ./execution/commitment/...` are clean
-- [ ] record the Task 8 instrumentation counters under Post-Completion
+- [x] verify all requirements from Overview are implemented and M0 scope boundaries were respected — `VariantBinPatriciaTrie`/`PBinPatriciaHashed`/`pbinKeyHasher` appear outside the `pbin_*` files only at the three additive `commitment.go` sites, so nothing reaches the domain layer
+- [x] verify no shared type, interface or signature was modified: `git diff --stat` shows `commitment.go` as the only pre-existing non-test file, additive only — 22 files, 6,289 insertions, 0 deletions; `commitment.go` +11/-0
+- [x] verify every hazard in the register except H6 has a named passing test
+- [x] verify every new package-level identifier carries the `pbin` prefix and the package compiles without collision — 274 identifiers checked by AST walk; the only ones not starting at position 0 are `errPBin*` and `NewPBinPatriciaHashed`, where Go's `err`/`New` convention precedes the marker
+- [x] run the package test suite: `go test ./execution/commitment/...`
+- [x] run fuzzers briefly, one target per invocation — `-fuzz` refuses a regex matching several: `go test ./execution/commitment/ -run=Fuzz -fuzz=FuzzPBinBitPathCodec -fuzztime=60s` then the same for `FuzzPBinProcessMatchesOracle`
+- [x] verify `go build ./...` and `go vet ./execution/commitment/...` are clean
+- [x] record the Task 8 instrumentation counters under Post-Completion
+
+**Verification results.**
+
+| Check | Result |
+|-------|--------|
+| `go test ./execution/commitment/...` | ok, 9.6s |
+| `go vet ./execution/commitment/...` | clean |
+| `go build ./...` | clean |
+| `FuzzPBinBitPathCodec -fuzztime=60s` | pass, 8.2M execs, 0 new interesting |
+| `FuzzPBinProcessMatchesOracle -fuzztime=60s` | pass, 231k execs, 97 new interesting |
+
+Hazard → guard, all passing (H6 is N/A in M0, H14 is a review item):
+
+| Hazard | Guard |
+|--------|-------|
+| H1 | `TestPBinFoldSplitInsidePrefixMatchesOracle`, `TestPBinSplitInsideStoredPrefix`, `TestPBinDeepSharedPrefixCorpus` |
+| H2 | `TestPBinUntouchedSiblingSurvivesBatch` |
+| H3 | `TestPBinBranchDecodeRejects` (`pbin_cell_test.go:172`) |
+| H4 | `TestPBinBranchCodecRoundTripPrefixBitLengths` (`pbin_cell_test.go:63`) |
+| H5 | `FuzzPBinBitPathCodec`, `TestPBinBitPathNeverEncodesToStateKey` |
+| H7 | `TestPBinUnfoldEmptyPrefixBranchRecord` |
+| H8 | `TestPBinStorageZoneRouting`, `TestPBinAddr`, `pbinVerifier.checkPlainKeys` |
+| H9 | `TestPBinNeedUnfolding` |
+| H10 | `TestPBinCommonPrefixBits_IgnoresBitsBeyondBitLen`, `TestPBinCommonPrefixBits_ShorterPathIsPrefix` |
+| H11 | `TestPBinEmptyTreeHash`, `TestPBinRootHashEmptyEngine`, `TestPBinOracleEmptyTreeHash` |
+| H12 | `TestPBinFoldRejectsInconsistentGrid`, `TestPBinFoldBranchRejectsWrongArity` |
+| H13 | `TestPBinProcessRejectsStreamDelete`, `TestPBinProcessMissingStateIsAbsent` |
+| H14 | `pbinHasher.cellHash` is the only cell hasher; `PBinPatriciaHashed.cellHash` delegates to it and `leafCellHash` is reachable only through it |
+
+⚠️ **Fuzz-harness note.** `FuzzPBinProcessMatchesOracle` at the documented invocation can end in `context deadline exceeded`. It is the harness, not the engine: Go's default `-fuzzminimizetime` is 60s, so a newly interesting input found late in a 60s run keeps minimizing past the coordinator's shutdown deadline. Symptom is `execs` falling to 0/sec near the end. Adding `-fuzzminimizetime=2s` holds ~4,900 exec/s throughout and exits clean. Separately checked that no input is slow: 20,000 generated corpora ran with a worst case of 23ms.
 
 ### Task 13: [Final] Update documentation
 
@@ -289,8 +319,23 @@ func pbinCommonPrefixBits(a, b *pbinBitpath) int16 // XOR + LeadingZeros64, clam
 
 *Items requiring manual intervention, measurement, or follow-on milestones — no checkboxes*
 
+**Task 8 instrumentation counters (measured in Task 12).**
+
+`splitsInsidePrefix` counts probes diverging inside a cell's prefix; `materializeReads` counts the `ctx.Branch` reads that follow, i.e. the ones the descent alone would not have made.
+
+| Corpus | keys | leaves | splitsInsidePrefix | materializeReads |
+|--------|-----:|-------:|-------------------:|-----------------:|
+| mixed, one batch | 54 | 60 | 59 | 0 |
+| deep shared prefix, one batch | 4 | 8 | 7 | 0 |
+| mixed, two batches | 54 | 60 | 59 | 6 |
+| deep shared prefix, two batches | 4 | 8 | 7 | 0 |
+| mixed, one key per batch | 54 | 60 | 59 | 33 |
+| fuzz generator space, 2,000 runs | 200,329 | — | 79,437 | 751 |
+
+Splits inside a prefix are the common case, not the exception — roughly one per key. What makes them cheap is Task 8's in-memory child hashes: **within a single `Process` call `materializeReads` is 0**, because every cell that splits was built by that same run and re-derives. A read costs only when a cell arrives from a record an earlier batch wrote, so the counter tracks batch granularity rather than tree shape — 6 reads at two batches, 33 at one key per batch (the drive loop's worst case), and 751 over 200,329 keys in the fuzz space (0.37% of keys, 0.95% of splits).
+
 **Decisions deferred to data:**
-- Split-rehash strategy. M0 ships materialize-on-split, narrowed by Task 8's in-memory child hashes to cells that arrived from a record — a node this run folded re-derives for free. `pbinCounters.materializeReads` measures what is left. If it stays non-trivial, promote the two child hashes into the record itself and the hazard disappears, at 32 B per branch cell and a migration story.
+- Split-rehash strategy. M0 ships materialize-on-split, narrowed by Task 8's in-memory child hashes to cells that arrived from a record — a node this run folded re-derives for free. The numbers above say the residual is small and, crucially, driven by how work is batched rather than by the corpus. Promoting the two child hashes into the record (32 B per branch cell, plus a migration story) would remove the hazard outright, but on M0 evidence it buys under 1% of splits; revisit against production batch sizes, where a batch spans one block and the cross-batch fraction will be higher than these tests show.
 - Record the one-prefix-per-cell rationale (Task 5) here and in the commit body rather than as a source comment.
 
 **Out of scope, in rough dependency order:**
