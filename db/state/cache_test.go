@@ -12,6 +12,12 @@ import (
 // A returned cache must survive GC cycles: the free-list must not be drained
 // the way sync.Pool is, else warm caches are rebuilt at whole-process GC cadence.
 func TestDomainGetFromFileCacheSurvivesGC(t *testing.T) {
+	prevLimit, prevEnabled := domainGetFromFileCacheLimit, domainGetFromFileCacheEnabled
+	domainGetFromFileCacheLimit, domainGetFromFileCacheEnabled = 128, true
+	t.Cleanup(func() {
+		domainGetFromFileCacheLimit, domainGetFromFileCacheEnabled = prevLimit, prevEnabled
+	})
+
 	v := newDomainVisible(kv.AccountsDomain, nil)
 
 	c := v.newGetFromFileCache()
