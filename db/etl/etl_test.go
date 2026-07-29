@@ -391,7 +391,9 @@ func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
 	var err error
 	valueMap := make(map[string][]byte)
 	valueMap["value"] = append(v, 0xAA)
-	k1 := append(k, 0xAA)
+	k1 := make([]byte, len(k)+1)
+	copy(k1, k)
+	k1[len(k)] = 0xAA
 	out, err := json.Marshal(valueMap)
 	if err != nil {
 		panic(err)
@@ -404,7 +406,9 @@ func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
 
 	valueMap = make(map[string][]byte)
 	valueMap["value"] = append(v, 0xBB)
-	k2 := append(k, 0xBB)
+	k2 := make([]byte, len(k)+1)
+	copy(k2, k)
+	k2[len(k)] = 0xBB
 	out, err = json.Marshal(valueMap)
 	if err != nil {
 		panic(err)
@@ -531,7 +535,7 @@ func TestAppendAndSortPrefixes(t *testing.T) {
 	require := require.New(t)
 
 	key := common.FromHex("ed7229d50cde8de174cc64a882a0833ca5f11669")
-	key1 := append(common.Copy(key), make([]byte, 16)...)
+	key1 := append(bytes.Clone(key), make([]byte, 16)...)
 
 	keys := make([]string, 0)
 	for i := 10; i >= 0; i-- {
@@ -650,7 +654,7 @@ func TestAppendAcrossMemProviders(t *testing.T) {
 	type kv struct{ k, v []byte }
 	var results []kv
 	loadFunc := func(k, v []byte) error {
-		results = append(results, kv{common.Copy(k), common.Copy(v)})
+		results = append(results, kv{bytes.Clone(k), bytes.Clone(v)})
 		return nil
 	}
 
@@ -825,8 +829,8 @@ func TestMixedProvidersMergeSortFiles(t *testing.T) {
 	loadFunc := func(k, v []byte) error {
 		// Must copy because providers return zero-copy references
 		results = append(results, sortableBufferEntry{
-			key:   common.Copy(k),
-			value: common.Copy(v),
+			key:   bytes.Clone(k),
+			value: bytes.Clone(v),
 		})
 		return nil
 	}

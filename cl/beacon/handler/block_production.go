@@ -63,8 +63,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -1389,8 +1387,8 @@ AttLoop:
 		wc := s.ValidatorSet().
 			Get(int(blsExecutionChange.Message.ValidatorIndex)).
 			WithdrawalCredentials()
-		// Check the validator's withdrawal credentials prefix.
-		if wc[0] != byte(a.beaconChainCfg.ETH1AddressWithdrawalPrefixByte) {
+		// A change is only valid while the validator still has BLS withdrawal credentials.
+		if wc[0] != byte(a.beaconChainCfg.BLSWithdrawalPrefixByte) {
 			continue
 		}
 
@@ -1401,6 +1399,9 @@ AttLoop:
 		}
 		blsToExecutionChanges.Append(blsExecutionChange)
 		slashedIndicies = append(slashedIndicies, blsExecutionChange.Message.ValidatorIndex)
+		if blsToExecutionChanges.Len() >= int(a.beaconChainCfg.MaxBlsToExecutionChanges) {
+			break
+		}
 	}
 	return attesterSlashings, proposerSlashings, voluntaryExits, blsToExecutionChanges
 }
@@ -1473,6 +1474,44 @@ func (a *ApiHandler) PostEthV2BlindedBlocks(w http.ResponseWriter, r *http.Reque
 	return resp, err
 }
 
+func validateBlindedBlockRequest(block *cltypes.SignedBlindedBeaconBlock, version clparams.StateVersion) error {
+	if version < clparams.BellatrixVersion {
+		return errors.New("blinded blocks are unsupported before Bellatrix")
+	}
+	if block == nil || block.Block == nil {
+		return errors.New("missing block")
+	}
+	if block.Block.Body == nil {
+		return errors.New("missing block body")
+	}
+	if block.Block.Body.ExecutionPayload == nil {
+		return errors.New("missing execution payload header")
+	}
+	return nil
+}
+
+func validateBuilderPayload(blockPayload *cltypes.Eth1Block, executionRequests *cltypes.ExecutionRequests, expectedVersion clparams.StateVersion) error {
+	if blockPayload == nil {
+		return errors.New("builder returned nil execution payload")
+	}
+	if blockPayload.Version() != expectedVersion {
+		return fmt.Errorf("builder execution payload version mismatch: got %s, expected %s", blockPayload.Version(), expectedVersion)
+	}
+	if blockPayload.Extra == nil {
+		return errors.New("builder execution payload missing extra data")
+	}
+	if blockPayload.Transactions == nil {
+		return errors.New("builder execution payload missing transactions")
+	}
+	if expectedVersion.AfterOrEqual(clparams.CapellaVersion) && blockPayload.Withdrawals == nil {
+		return errors.New("builder execution payload missing withdrawals")
+	}
+	if expectedVersion.AfterOrEqual(clparams.ElectraVersion) && executionRequests == nil {
+		return errors.New("builder response missing execution requests")
+	}
+	return nil
+}
+
 func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request, apiVersion int) (*beaconhttp.BeaconResponse, error) {
 	ethVersion := r.Header.Get("Eth-Consensus-Version")
 	version, err := a.parseEthConsensusVersion(ethVersion, apiVersion)
@@ -1482,17 +1521,26 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	if version >= clparams.GloasVersion {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, cltypes.ErrGloasCannotBlind)
 	}
+	defer r.Body.Close()
+	contentType, err := requestContentType(r)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err)
+	}
+	if contentType != "application/json" && contentType != "application/octet-stream" {
+		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, fmt.Errorf("unsupported content type: %s", contentType))
+	}
+	isJSON := contentType == "application/json"
 
 	// todo: broadcast_validation
 
 	signedBlindedBlock := cltypes.NewSignedBlindedBeaconBlock(a.beaconChainCfg, version)
 	signedBlindedBlock.Block.SetVersion(version)
 	b, err := io.ReadAll(r.Body)
-	defer r.Body.Close()
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	if r.Header.Get("Content-Type") == "application/json" {
+	if isJSON {
+		signedBlindedBlock.Block.Body.ExecutionPayload = nil
 		if err := json.Unmarshal(b, signedBlindedBlock); err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
@@ -1501,6 +1549,12 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 	}
+	if err := validateBlindedBlockRequest(signedBlindedBlock, version); err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	if isJSON {
+		signedBlindedBlock.Block.SetVersion(version)
+	}
 	// submit and unblind the signedBlindedBlock
 	blockPayload, blobsBundle, executionRequests, err := a.builderClient.SubmitBlindedBlocks(r.Context(), signedBlindedBlock)
 	if err != nil {
@@ -1508,21 +1562,11 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	}
 
 	if signedBlindedBlock.Version().AfterOrEqual(clparams.FuluVersion) {
-		requestsList := cltypes.GetExecutionRequestsList(a.beaconChainCfg, executionRequests)
-		requestsHash := cltypes.ComputeExecutionRequestHash(requestsList)
-		header, err := blockPayload.RlpHeader(&signedBlindedBlock.Block.ParentRoot, requestsHash)
-		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
-		}
-		rawBlock := types.RawBlock{Header: header, Body: blockPayload.Body()}
-		blockRlpSize := rawBlock.EncodingSize()
-		blockRlpSize += rlp.ListPrefixLen(blockRlpSize)
-		if blockRlpSize > params.MaxRlpBlockSize {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("block payload rlp size exceeds the limit: %d > %d", blockRlpSize, params.MaxRlpBlockSize))
-		}
-
 		log.Info("Successfully submitted blinded block", "block_num", signedBlindedBlock.Block.Body.ExecutionPayload.BlockNumber, "api_version", apiVersion)
 		return newBeaconResponse(nil), nil
+	}
+	if err := validateBuilderPayload(blockPayload, executionRequests, version); err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 
 	signedBlock, err := signedBlindedBlock.Unblind(blockPayload)
@@ -2111,7 +2155,7 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 		}
 		committeeBits := candidate.CommitteeBits.GetOnIndices()
 		if len(committeeBits) != 1 {
-			log.Warn("invalid candidate commitee bit length %v in attestation pool.", len(committeeBits))
+			log.Warn("invalid candidate committee bit length in attestation pool", "len", len(committeeBits))
 			continue
 		}
 		candCommitteeBit := uint64(committeeBits[0])

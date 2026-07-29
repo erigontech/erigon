@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/testforks"
@@ -92,6 +93,75 @@ func newTestSetCodeTxnSlot(nonce uint64, senderID uint64, tip, feeCap uint64, ga
 		Nonce:    nonce,
 		SenderID: senderID,
 	}
+}
+
+func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := memdb.NewTestPoolDB(t)
+	pool, err := New(
+		ctx,
+		make(chan Announcements, 1),
+		db,
+		coreDB,
+		txpoolcfg.DefaultConfig,
+		kvcache.New(kvcache.DefaultCoherentConfig),
+		chain.AllProtocolChanges,
+		nil,
+		nil,
+		func() {},
+		nil,
+		nil,
+		log.New(),
+		WithFeeCalculator(nil),
+	)
+	require.NoError(t, err)
+
+	sender := common.Address{0x01}
+	account := accounts3.Account{
+		Balance:  *uint256.NewInt(1 * common.Ether),
+		CodeHash: accounts.EmptyCodeHash,
+	}
+	change := &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: 200_000,
+		BlockGasLimit:       1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHeight: 0,
+			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{}),
+			Changes: []*remoteproto.AccountChange{{
+				Action:  remoteproto.Action_UPSERT,
+				Address: gointerfaces.ConvertAddressToH160(sender),
+				Data:    accounts3.SerialiseV3(&account),
+			}},
+		}},
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	const gasLimit = uint64(100_000)
+	slot := newTestTxnSlot(0, 0, 300_000, 300_000, gasLimit)
+	slot.IDHash[0] = 1
+	slot.Rlp = []byte{1}
+	slot.Size = uint32(len(slot.Rlp))
+	var slots TxnSlots
+	slots.Append(slot, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, slots)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	var selected TxnsRlp
+	_, count, err := pool.best(
+		ctx,
+		1,
+		&selected,
+		0,
+		mdgas.NewFullMdGas(gasLimit, gasLimit-1, math.MaxUint64),
+		nil,
+		math.MaxInt,
+	)
+	require.NoError(t, err)
+	require.Zero(t, count)
 }
 
 func writeTestSenderState(t *testing.T, ctx context.Context, coreDB kv.TemporalRwDB, logger log.Logger, addr [20]byte, value []byte, txNum uint64) {
@@ -2339,4 +2409,81 @@ func TestQueuedTxnPromotedAfterStaleAddLocal(t *testing.T) {
 	pending, _, queued = pool.CountContent()
 	asrt.Equal(1, pending, "queued tx must be promoted after re-evaluation")
 	asrt.Equal(0, queued, "queued must be empty after promotion")
+}
+
+// TestOnNewBlockRefreshesDepthMetrics pins that the txpool_pending/basefee/queued
+// gauges reflect the live sub-pool sizes after each block. They must not depend on
+// logStats, which only runs on the LogEvery tick (forced to 3 minutes for every node
+// in cmd/utils/flags.go) — coupling the gauges to it left dashboards reading a value
+// up to 3 minutes stale while the pool churned every block.
+func TestOnNewBlockRefreshesDepthMetrics(t *testing.T) {
+	asrt := assert.New(t)
+	req := require.New(t)
+	logger := log.New()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	ch := make(chan Announcements, 100)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	cfg := txpoolcfg.DefaultConfig
+	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewLatestBatchCache(), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	req.NoError(err)
+	req.NotNil(pool)
+
+	var addr1 [20]byte
+	addr1[0] = 1
+	h0 := gointerfaces.ConvertHashToH256([32]byte{})
+	serialiseAcc := func(nonce uint64) []byte {
+		a := accounts3.Account{
+			Nonce: nonce, Balance: *uint256.NewInt(1 * common.Ether),
+			CodeHash: accounts.EmptyCodeHash, Incarnation: 1,
+		}
+		return accounts3.SerialiseV3(&a)
+	}
+
+	writeTestSenderState(t, ctx, coreDB, logger, addr1, serialiseAcc(0), 0)
+	initChange := &remoteproto.StateChangeBatch{
+		StateVersionId: 0, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 0, BlockHash: h0}},
+	}
+	initChange.ChangeBatch[0].Changes = append(initChange.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr1),
+		Data:    serialiseAcc(0),
+	})
+	req.NoError(pool.OnNewBlock(ctx, initChange, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	// Executable txn (nonce 0 == on-chain nonce) → pending; nonce-gapped txn (nonce 3) → queued.
+	execTxn := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	execTxn.IDHash[0] = 1
+	gappedTxn := newTestTxnSlot(3, 0, 300_000, 300_000, 100_000)
+	gappedTxn.IDHash[0] = 2
+	var slots TxnSlots
+	slots.Append(execTxn, addr1[:], true)
+	slots.Append(gappedTxn, addr1[:], true)
+	_, err = pool.AddLocalTxns(ctx, slots)
+	req.NoError(err)
+
+	_, _, wantQueued := pool.CountContent()
+	req.Positive(wantQueued, "test needs a non-empty queued pool to be meaningful")
+
+	// Poison the gauges so a stale reading can't accidentally match the live count.
+	const sentinel = -12345
+	pendingSubCounter.SetInt(sentinel)
+	basefeeSubCounter.SetInt(sentinel)
+	queuedSubCounter.SetInt(sentinel)
+
+	// A subsequent block that touches no pool sender must still refresh the gauges.
+	h1 := gointerfaces.ConvertHashToH256([32]byte{1})
+	block1 := &remoteproto.StateChangeBatch{
+		StateVersionId: 1, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1, BlockHash: h1}},
+	}
+	req.NoError(pool.OnNewBlock(ctx, block1, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	pending, baseFee, queued := pool.CountContent()
+	asrt.EqualValues(pending, pendingSubCounter.GetValue(), "pending gauge stale after OnNewBlock")
+	asrt.EqualValues(baseFee, basefeeSubCounter.GetValue(), "baseFee gauge stale after OnNewBlock")
+	asrt.EqualValues(queued, queuedSubCounter.GetValue(), "queued gauge stale after OnNewBlock")
 }

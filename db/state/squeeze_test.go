@@ -17,7 +17,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -81,12 +80,12 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 		n, err := rnd.Read(bk)
 		require.Equal(tb, keySize, n)
 		require.NoError(tb, err)
-		keys[i] = common.Copy(bk[:n])
+		keys[i] = bytes.Clone(bk[:n])
 
 		n, err = rnd.Read(bv[:rnd.IntN(valueSize)+1])
 		require.NoError(tb, err)
 
-		values[i] = common.Copy(bv[:n])
+		values[i] = bytes.Clone(bv[:n])
 	}
 	return keys, values
 }
@@ -416,7 +415,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 }
 
 func composite(k, k2 []byte) []byte {
-	return append(common.Copy(k), k2...)
+	return append(bytes.Clone(k), k2...)
 }
 
 // makeAccountAddr generates a deterministic 20-byte account address with uniform
@@ -559,7 +558,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.CommitmentDomain, tx, someKey, common.Copy(aux[:]), txNum, nil)
+		err = domains.DomainPut(kv.CommitmentDomain, tx, someKey, bytes.Clone(aux[:]), txNum, nil)
 		require.NoError(t, err)
 		maxWrite = txNum
 	}

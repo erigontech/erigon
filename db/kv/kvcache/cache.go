@@ -411,7 +411,7 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 
 	defer c.lock.Unlock()
 
-	v = c.add(common.Copy(k), common.Copy(v), r, id).V
+	v = c.add(bytes.Clone(k), bytes.Clone(v), r, id).V
 	return v, nil
 }
 
@@ -436,7 +436,7 @@ func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err
 
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	v = c.addCode(common.Copy(k), common.Copy(v), r, id).V
+	v = c.addCode(bytes.Clone(k), bytes.Clone(v), r, id).V
 	return v, nil
 }
 func (c *Coherent) removeOldest(r *CoherentRoot) {

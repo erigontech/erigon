@@ -20,6 +20,10 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   benchmarks:
     name: benchmarks (${{ matrix.exec_mode }})

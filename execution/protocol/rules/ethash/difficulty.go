@@ -110,7 +110,7 @@ func calcDifficultyHomestead(time, parentTime uint64, parentDifficulty uint256.I
 	} else if x >= 100 {
 		x = 99
 	} else {
-		x = x - 1
+		x--
 	}
 	z := new(uint256.Int).SetUint64(x)
 	adjust.Mul(adjust, z) // adjust: (pdiff / 2048) * max((time - ptime) / 10 - 1, 99)
@@ -155,7 +155,7 @@ func makeDifficultyCalculator(bombDelay uint64) func(time, parentTime uint64, pa
 		xNeg := x >= c
 		if xNeg {
 			// x is now _negative_ adjustment factor
-			x = x - c // - ( (t-p)/p -( 2 or 1) )
+			x -= c // - ( (t-p)/p -( 2 or 1) )
 		} else {
 			x = c - x // (2 or 1) - (t-p)/9
 		}
