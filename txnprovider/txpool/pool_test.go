@@ -2341,23 +2341,25 @@ func TestQueuedTxnPromotedAfterStaleAddLocal(t *testing.T) {
 	asrt.Equal(0, queued, "queued must be empty after promotion")
 }
 
-// TestOnNewBlock_QueuedOrphanSenderIDReturnsError pins the invariant
-// break observed on the continuous unwind soak (2026-07-28: 40 clean
-// mode_b iters, then crash after ~13h). p.queued.best.ms held a
-// metaTxn whose senderID had been evicted from senderID2Addr; the
-// queuedSenders loop in addTxnsOnNewBlock called senders.info and
-// panicked "must not happen".
+// TestOnNewBlock_QueuedOrphanSenderIDPanicsWithDiagnostic pins the
+// invariant break observed on the continuous unwind soak (2026-07-28:
+// 40 clean mode_b iters, then crash after ~13h). p.queued.best.ms
+// held a metaTxn whose senderID had been evicted from senderID2Addr;
+// the queuedSenders loop in addTxnsOnNewBlock called senders.info and
+// panicked "must not happen" with no state context.
 //
 // Post-fix: senders.info returns ErrSenderIDNotRegistered instead of
-// panicking. The queuedSenders loop propagates the error through
-// OnNewBlock's return AND dumps a diagnostic to the log. That
-// surfaces every future occurrence (with state context — bestIndex,
-// currentSubPool, whether p.all still has the mt, etc.) so we can
-// close the root cause rather than mask it with a self-heal.
+// panicking directly. The queuedSenders loop then (a) dumps a rich
+// diagnostic to the log (bestIndex, currentSubPool, whether p.all
+// still has the mt, etc.), and (b) panics with a marker pointing at
+// the diagnostic. Loud stop was chosen over log-and-continue because
+// Fetch.ConnectCore only logs Warn on OnNewBlock errors — a soft
+// return would let the soak run past corrupted state instead of
+// halting for post-mortem while the datadir is still salvageable.
 //
 // The test constructs the divergence manually (add txn → force
 // eviction) since the natural triggering path hasn't been isolated.
-func TestOnNewBlock_QueuedOrphanSenderIDReturnsError(t *testing.T) {
+func TestOnNewBlock_QueuedOrphanSenderIDPanicsWithDiagnostic(t *testing.T) {
 	req := require.New(t)
 	logger := log.New()
 
@@ -2431,10 +2433,20 @@ func TestOnNewBlock_QueuedOrphanSenderIDReturnsError(t *testing.T) {
 		StateVersionId: 1, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
 		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1, BlockHash: h1}},
 	}
-	var onbErr error
-	req.NotPanics(func() {
-		onbErr = pool.OnNewBlock(ctx, nextBlock, TxnSlots{}, TxnSlots{}, TxnSlots{})
-	}, "OnNewBlock must not panic when p.queued.best.ms references an evicted senderID")
-	req.ErrorIs(onbErr, ErrSenderIDNotRegistered,
-		"OnNewBlock must surface the invariant break as an error, not silently succeed")
+	// The queuedSenders loop MUST panic here (loud stop) after dumping
+	// the diagnostic. Silent skip would let the soak keep running past
+	// corrupted state; a soft error return would just log-and-continue
+	// in Fetch. Panic is the only signal that stops the soak driver
+	// while the datadir is still salvageable for post-mortem.
+	panicMsg := ""
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicMsg = fmt.Sprintf("%v", r)
+			}
+		}()
+		_ = pool.OnNewBlock(ctx, nextBlock, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	}()
+	req.Contains(panicMsg, "senderID2Addr",
+		"OnNewBlock must panic (loud stop) with a message pointing at the invariant break — got %q", panicMsg)
 }

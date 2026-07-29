@@ -1686,7 +1686,16 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 		nonce, balance, err := senders.info(cacheView, senderID)
 		if err != nil {
 			if errors.Is(err, ErrSenderIDNotRegistered) {
+				// Dump diagnostic BEFORE panicking so the state fields
+				// hit the log file even if the crash flushes buffers
+				// abruptly. Panic (not return error) because Fetch's
+				// ConnectCore just logs-and-continues — a soft error
+				// there would mean the divergence keeps recurring in
+				// the running process instead of stopping the soak
+				// while the datadir is still salvageable for post-
+				// mortem.
 				p.dumpQueuedOrphanDiagnostic(senderID, blockNum, logger)
+				panic(fmt.Sprintf("txpool.OnNewBlock queued.best.ms senderID=%d not in senderID2Addr — see diagnostic above; datadir preserved for post-mortem", senderID))
 			}
 			return announcements, err
 		}
