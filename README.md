@@ -73,14 +73,25 @@ System Requirements
 RAM: >=32GB, [Golang >= 1.25](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
 architecture.
 
-- ArchiveNode Ethereum Mainnet: 1.6TB (May 2025). FullNode: 1.1TB (May 2025)
-- ArchiveNode Gnosis: 640GB (May 2025). FullNode: 300GB (June 2024)
-- ArchiveNode Polygon Mainnet: 4.1TB (April 2024). FullNode: 2Tb (April 2024)
+Disk space, July 2026:
+
+| Chain            | Archive | Full   | Minimal |
+|------------------|---------|--------|---------|
+| Ethereum Mainnet | 2TB     | 420GB  | 380GB   |
+| Gnosis           | 675GB   | 220GB  | 205GB   |
+| Sepolia          | 1.1TB   | -      | -       |
+| Hoodi            | 134GB   | -      | -       |
+| Chiado           | 30GB    | -      | -       |
+
+Sizes grow with the chain. Archive figures are measured on Erigon 3.6 nodes running `--prune.mode=archive` with default
+pruning options; enabling receipts or commitment history adds a lot on top — see [Erigon3 datadir size](#erigon3-datadir-size).
+The same figures are published, with more detail, on the
+[hardware requirements](https://docs.erigon.tech/get-started/hardware-requirements) page.
 
 SSD or NVMe. We do not recommend HDD — on HDD, Erigon will always stay a few blocks behind the chain tip but will not fall further behind.
 Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like
 gp3): Blocks Execution is slow
-on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
+on [cloud-network-drives](https://docs.erigon.tech/help-center/known-issues#cloud-network-drives)
 
 🔬 More details on [Erigon3 datadir size](#erigon3-datadir-size)
 
@@ -96,7 +107,6 @@ These are the approximate sync times for syncing from scratch to the tip of the 
 |------------|-----------------|----------------|----------------|
 | Ethereum   | 7 Hours, 55 Minutes | 4 Hours, 23 Minutes | 1 Hour, 41 Minutes |
 | Gnosis     | 2 Hours, 10 Minutes | 1 Hour, 5 Minutes  | 33 Minutes      |
-| Polygon    | 1 Day, 21 Hours    | 21 Hours, 41 Minutes | 11 Hours, 54 Minutes |
 
 Usage
 =====
@@ -116,8 +126,7 @@ make erigon
 
 Use `--datadir` to choose where to store data.
 
-Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet,
-and `--chain=amoy` for Polygon Amoy.
+Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/).
 For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside
 Erigon (https://docs.gnosischain.com/category/step--3---run-consensus-client).
 
@@ -142,11 +151,12 @@ datadir
         history   # Historical values 
         idx       # InvertedIndices: can search/filtering/union/intersect them - to find historical data. like eth_getLogs or trace_transaction
         accessor # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
+    caplin        # embedded Consensus Layer: beacon chain db and its snapshots
     txpool        # pending transactions. safe to remove.
     nodes         # p2p peers. safe to remove.
     temp          # used to sort data bigger than RAM. can grow to ~100gb. cleaned at startup.
    
-# There is 4 domains: account, storage, code, commitment 
+# There is 6 domains: account, storage, code, commitment, receipt, rcache. Last one only with `--prune.include-receipts`.
 ```
 
 See the [lib](db/downloader/README.md) and [cmd](cmd/downloader/README.md) READMEs for more information.
@@ -175,33 +185,29 @@ datadir
 
 ### Erigon3 datadir size
 
-```sh
-# eth-mainnet - archive - Nov 2024
+Measured on Erigon 3.6 `--prune.mode=archive` nodes, July 2026. `snapshots` counts only the block files
+(headers, bodies, transactions) that sit in the directory itself, not its sub-folders.
 
-du -hsc /erigon/chaindata
-15G 	/erigon/chaindata
+| Path                | eth-mainnet (block 25.6M) | gnosis (block 47.4M) |
+|---------------------|---------------------------|----------------------|
+| `chaindata`         | 22G                       | 9G                   |
+| `snapshots`         | 928G                      | 265G                 |
+| `snapshots/domain`  | 389G                      | 211G                 |
+| `snapshots/idx`     | 310G                      | 127G                 |
+| `snapshots/history` | 238G                      | 37G                  |
+| `snapshots/accessor`| 132G                      | 31G                  |
+| total               | 2.0T                      | 681G                 |
 
-du -hsc /erigon/snapshots/* 
-120G 	/erigon/snapshots/accessor
-300G	/erigon/snapshots/domain
-280G	/erigon/snapshots/history
-430G	/erigon/snapshots/idx
-2.3T	/erigon/snapshots
-```
+Data that is off by default, measured on the same nodes:
 
-```sh
-# bor-mainnet - archive - Nov 2024
+| Flag                                 | eth-mainnet | gnosis |
+|--------------------------------------|-------------|--------|
+| `--prune.include-receipts`           | +411G       | +230G  |
+| `--prune.include-commitment-history` | +4.0T       | -      |
+| `--caplin.blocks-archive`, `--caplin.blobs-archive`, `--caplin.states-archive` | +2.3T | +468G |
 
-du -hsc /erigon/chaindata
-20G 	/erigon/chaindata
-
-du -hsc /erigon/snapshots/* 
-360G	/erigon-data/snapshots/accessor
-1.1T	/erigon-data/snapshots/domain
-750G	/erigon-data/snapshots/history
-1.5T	/erigon-data/snapshots/idx
-4.9T	/erigon/snapshots
-```
+Caplin numbers are the backfilled beacon blocks, blob sidecars and beacon state snapshots. They exclude the beacon
+chain db every node with the embedded Consensus Layer keeps anyway. Blob sidecars dominate: 2T of the mainnet 2.3T.
 
 ### Erigon3 changes from Erigon2
 
@@ -214,7 +220,7 @@ du -hsc /erigon/snapshots/*
 - **Validator mode**: added. `--internalcl` is enabled by default. to disable use `--externalcl`.
 - **Store most of data in immutable files (segments/snapshots):**
     - can symlink/mount latest state to fast drive and history to cheap drive
-  - `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
+  - `chaindata` is tens of gb (22gb on an archive mainnet node). It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
 - **`--prune` flags changed**: see `--prune.mode` (default: `full`, archive: `archive`, EIP-4444: `minimal`)
 - **Other changes:**
     - ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
@@ -295,7 +301,7 @@ directory `--datadir` does not have to match the name of the chain in `--chain`.
 
 ### Block Production (PoS Validator)
 
-Block production is fully supported for Ethereum & Gnosis Chain. It is still experimental for Polygon.
+Block production is fully supported for Ethereum & Gnosis Chain.
 
 ### Config Files TOML
 
@@ -360,8 +366,9 @@ Engine API.
 Caplin is enabled by default. To disable it and use the Engine API instead, use the `--externalcl` flag. From that point
 on, an external Consensus Layer will no longer be needed.
 
-Caplin also has an archival mode for historical states and blocks. it can be enabled through the `--caplin.archive`
-flag.
+Caplin also has an archival mode for historical blocks, blobs and states, enabled through `--caplin.blocks-archive`,
+`--caplin.blobs-archive` and `--caplin.states-archive` (the latter turns on block archival as well). All three are off
+by default and cost a lot of disk — see [Erigon3 datadir size](#erigon3-datadir-size).
 In order to enable the caplin's Beacon API, the flag `--beacon.api=<namespaces>` must be added.
 e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. 
 Note: enabling the Beacon API will lead to a 6 GB higher RAM usage
@@ -706,7 +713,7 @@ Windows users may run erigon in 3 possible ways:
   would on a regular Linux distribution. You can point your data also to any of the mounted Windows partitions (
   eg. `/mnt/c/[...]`, `/mnt/d/[...]` etc) but in such case be advised performance is impacted: this is due to the fact
   those mount points use `DrvFS` which is
-  a [network file system](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
+  a [network file system](https://docs.erigon.tech/help-center/known-issues#cloud-network-drives)
   and, additionally, MDBX locks the db for exclusive access which implies only one process at a time can access data.
   This has consequences on the running of `rpcdaemon` which has to be configured as [Remote DB](#json-rpc-daemon) even if
   it is executed on the very same computer. If instead your data is hosted on the native Linux filesystem non
