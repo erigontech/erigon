@@ -2593,11 +2593,29 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	return nil
 }
 
-// FinalizedWrites returns the tx's committable write-set on the parallel
-// (versionMap) path: WriteSet.Finalize applies the EIP-6780 wipe and snapshots
-// the recorded IO. No journal reset here — Reset() does that before the next tx.
-func (sdb *IntraBlockState) FinalizedWrites() *WriteSet {
+// FinalizedWrites returns the parallel path's committable write set. Before
+// snapshotting recorded IO, it withholds fresh empty accounts under EIP-161 and
+// applies the EIP-6780 storage wipe. Reset clears journal state for the next tx.
+func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) *WriteSet {
+	sdb.withholdCreatedEmptyAccounts(chainRules)
 	return sdb.versionedWrites.Finalize()
+}
+
+func (sdb *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules) {
+	if sdb.blockNum == 0 || chainRules == nil || !chainRules.IsEIP161Enabled() {
+		return
+	}
+	for addr := range sdb.versionedWrites.address {
+		if !EIP161EmptyRemoval(true, chainRules.IsAura, addr) {
+			continue
+		}
+		read, ok := sdb.versionedReads.GetAddress(addr)
+		if !ok || (read.Val != nil && !read.Val.IsNil()) || !sdb.versionedWrites.createdEmpty(addr) {
+			continue
+		}
+		sdb.versionMap.DeleteAll(addr, sdb.txIndex)
+		sdb.versionedWrites.deleteAddr(addr)
+	}
 }
 
 // MergeTxIOInto folds the current transaction's recorded reads, writes and

@@ -17,6 +17,7 @@
 package engineapi_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
@@ -35,16 +36,120 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 )
+
+func signAuthorization(t *testing.T, key *ecdsa.PrivateKey, chainID *uint256.Int, target common.Address, nonce uint64) types.Authorization {
+	t.Helper()
+	var buf [33]byte
+	data := bytes.NewBuffer(nil)
+
+	authLen := rlp.Uint256Len(*chainID)
+	authLen += 1 + length.Addr
+	authLen += rlp.U64Len(nonce)
+	require.NoError(t, rlp.EncodeListPrefix(authLen, data, buf[:]))
+	require.NoError(t, rlp.EncodeUint256(*chainID, data, buf[:]))
+	require.NoError(t, types.EncodeOptionalAddress(&target, data, buf[:]))
+	require.NoError(t, rlp.EncodeU64(nonce, data, buf[:]))
+
+	hash := crypto.Keccak256Hash(append([]byte{params.SetCodeMagicPrefix}, data.Bytes()...))
+	sig, err := crypto.Sign(hash[:], key)
+	require.NoError(t, err)
+
+	auth := types.Authorization{
+		ChainID: *chainID,
+		Address: target,
+		Nonce:   nonce,
+		YParity: sig[64],
+		R:       *uint256.NewInt(0).SetBytes(sig[:32]),
+		S:       *uint256.NewInt(0).SetBytes(sig[32:64]),
+	}
+	recovered, err := auth.RecoverSigner(bytes.NewBuffer(nil), buf[:])
+	require.NoError(t, err)
+	require.Equal(t, crypto.PubkeyToAddress(key.PublicKey), *recovered)
+	return auth
+}
+
+func TestEngineApiClearsFreshTouchedEmptyAccount(t *testing.T) {
+	parallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
+
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.Config.AmsterdamTime = nil
+
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(senderKey.PublicKey)
+	genesis.Alloc[senderAddr] = types.GenesisAccount{
+		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil),
+	}
+
+	emptyKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	emptyAddr := crypto.PubkeyToAddress(emptyKey.PublicKey)
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		signer := types.LatestSignerForChainID(chainID)
+		rpcClient := eat.Transactor.RpcClient()
+		feeCap := uint256.NewInt(1_000_000_000)
+
+		send := func(txn types.Transaction) {
+			signed, err := types.SignTx(txn, *signer, senderKey)
+			require.NoError(t, err)
+			_, err = rpcClient.SendTransaction(signed)
+			require.NoError(t, err)
+		}
+
+		initCode := append([]byte{0x75, 0x73}, emptyAddr[:]...)
+		initCode = append(initCode, 0xff, 0x60, 0x00, 0x52, 0x60, 0x16, 0x60, 0x0a, 0xf3)
+		send(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 0, GasLimit: 200_000, Data: initCode},
+			ChainID:  *chainID, TipCap: *feeCap, FeeCap: *feeCap,
+		})
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		selfDestructor := types.CreateAddress(senderAddr, 0)
+		send(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 1, GasLimit: 200_000, To: &selfDestructor},
+			ChainID:  *chainID, TipCap: *feeCap, FeeCap: *feeCap,
+		})
+		send(&types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: 2, GasLimit: 500_000, To: &senderAddr},
+				ChainID:  *chainID, TipCap: *feeCap, FeeCap: *feeCap,
+			},
+			Authorizations: []types.Authorization{
+				signAuthorization(t, emptyKey, chainID, common.Address{0xaa}, 0),
+			},
+		})
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		require.Equal(t, uint64(74_603), uint64(payload.ExecutionPayload.GasUsed))
+	})
+}
 
 func TestEngineApiBuiltBlockStateMatchesValidation(t *testing.T) {
 	ctx := t.Context()
