@@ -92,15 +92,15 @@ empty tree  = [0x00] * 32
 
 ## Technical Details
 
-**bitpath** (`pbin_bitpath.go`)
+**bitpath** (`pbin_bitpath.go`) — named `pbinBitpath` per the `pbin` prefix rule, which wins over this sketch.
 ```go
-type bitpath struct {
+type pbinBitpath struct {
 	w      [9]uint64 // big-endian words; byte order == descent order
 	bitLen int16     // 0..528
 }
-func (p *bitpath) bit(d int16) uint64
-func (p *bitpath) maskTail()
-func pbinCommonPrefixBits(a, b *bitpath) int16 // XOR + LeadingZeros64, clamped by min(aLen,bLen)
+func (p *pbinBitpath) bit(d int16) uint64
+func (p *pbinBitpath) maskTail()
+func pbinCommonPrefixBits(a, b *pbinBitpath) int16 // XOR + LeadingZeros64, clamped by min(aLen,bLen)
 ```
 
 **Values** (`pbin_values.go`) — BASIC_DATA is 32 bytes (`eip:332-339`): `version(1) || reserved(3) || code_size(4) || nonce(8) || balance(16)`, big-endian. `Update.Balance` is a `uint256.Int` (`commitment.go:2187`) but the EIP field is 16 bytes, so balances `>= 2^128` **error** rather than truncate. Storage values are left-padded to exactly 32 bytes (`eip:132`).
@@ -120,13 +120,13 @@ func pbinCommonPrefixBits(a, b *bitpath) int16 // XOR + LeadingZeros64, clamped 
 - Create: `execution/commitment/pbin_bitpath.go`
 - Create: `execution/commitment/pbin_bitpath_test.go`
 
-- [ ] write failing tests for `pbinCommonPrefixBits` at bit lengths 271, 272, 273, 527, 528; a case seeding `w[]` with `0xFF` beyond `bitLen`; and a 272-bit path that is a bitwise prefix of a 528-bit path asserting the result is 272 (guards H10)
-- [ ] write a failing fuzz test for codec round-trip across every bit length 0..528, plus explicit non-canonical-padding rejection cases (guards H5)
-- [ ] write a failing unit test asserting no valid encoding equals the literal `"state"` (`0x7374617465`)
-- [ ] implement `bitpath` with `[9]uint64` words, `bitLen int16`, `MaxPathBits = 528`, and `bit`/`slice`/`append`/`hasPrefix`/`maskTail`
-- [ ] implement `pbinCommonPrefixBits` using XOR + `bits.LeadingZeros64`, clamped by `min(aLen, bLen)`
-- [ ] implement `pbinEncodeBitPath`/`pbinDecodeBitPath` as `packBitsMSBFirst(path) || byte(bitLen mod 8)`, rejecting non-canonical padding on read; `bitLen == 0` encodes to a single `0x00`
-- [ ] run tests - must pass before task 2
+- [x] write failing tests for `pbinCommonPrefixBits` at bit lengths 271, 272, 273, 527, 528; a case seeding `w[]` with `0xFF` beyond `bitLen`; and a 272-bit path that is a bitwise prefix of a 528-bit path asserting the result is 272 (guards H10)
+- [x] write a failing fuzz test for codec round-trip across every bit length 0..528, plus explicit non-canonical-padding rejection cases (guards H5)
+- [x] write a failing unit test asserting no valid encoding equals the literal `"state"` (`0x7374617465`)
+- [x] implement `bitpath` with `[9]uint64` words, `bitLen int16`, `MaxPathBits = 528`, and `bit`/`slice`/`append`/`hasPrefix`/`maskTail` — as `pbinBitpath`/`pbinMaxPathBits` per the naming rule
+- [x] implement `pbinCommonPrefixBits` using XOR + `bits.LeadingZeros64`, clamped by `min(aLen, bLen)`
+- [x] implement `pbinEncodeBitPath`/`pbinDecodeBitPath` as `packBitsMSBFirst(path) || byte(bitLen mod 8)`, rejecting non-canonical padding on read; `bitLen == 0` encodes to a single `0x00`
+- [x] run tests - must pass before task 2
 
 ### Task 2: EIP-8297 tree key derivation and zone routing
 
