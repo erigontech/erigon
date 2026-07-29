@@ -954,5 +954,4 @@ func (sc *StreamingCommitter) Release() {
 	}
 	sc.deferredForCaller = nil
 	sc.rootValid, sc.rootSeeded = false, false
-	sc.workerPool.drain()
 }

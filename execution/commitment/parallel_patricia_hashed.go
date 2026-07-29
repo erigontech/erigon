@@ -27,10 +27,10 @@ import (
 	"sync/atomic"
 )
 
-// trieWorkerPool caches scrubbed HexPatriciaHashed workers across Process calls;
-// only put may insert, so every pooled worker is already reset for reuse.
+// trieWorkerPool hands out HexPatriciaHashed workers backed by the package-level
+// hphPool. Every checkout re-applies this instance's config, so workers are
+// fungible across instances and survive instance teardown in the shared pool.
 type trieWorkerPool struct {
-	pool          sync.Pool
 	accountKeyLen int16
 	cfg           TrieConfig
 }
@@ -41,28 +41,11 @@ func (wp *trieWorkerPool) init(accountKeyLen int16, cfg TrieConfig) {
 }
 
 func (wp *trieWorkerPool) get() *HexPatriciaHashed {
-	if w, ok := wp.pool.Get().(*HexPatriciaHashed); ok {
-		w.accountKeyLen = wp.accountKeyLen
-		w.applyConfig(wp.cfg)
-		return w
-	}
 	return NewHexPatriciaHashed(wp.accountKeyLen, nil, wp.cfg)
 }
 
 func (wp *trieWorkerPool) put(w *HexPatriciaHashed) {
-	w.resetForReuse()
-	wp.pool.Put(w)
-}
-
-// drain hands cached workers back to the shared constructor pool instead of the GC.
-func (wp *trieWorkerPool) drain() {
-	for {
-		w, ok := wp.pool.Get().(*HexPatriciaHashed)
-		if !ok {
-			return
-		}
-		w.Release()
-	}
+	w.Release()
 }
 
 // ParallelPatriciaHashed is the trie-side of the parallel commitment pipeline.
@@ -155,7 +138,6 @@ func (p *ParallelPatriciaHashed) Release() {
 		p.template = nil
 	}
 	p.rootHash.Store(nil)
-	p.workerPool.drain()
 	if p.streaming != nil {
 		p.streaming.Release()
 		p.streaming = nil
