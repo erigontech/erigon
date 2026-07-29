@@ -198,13 +198,13 @@ func pbinCommonPrefixBits(a, b *pbinBitpath) int16 // XOR + LeadingZeros64, clam
 - Create: `execution/commitment/pbin_patricia_hashed.go`
 - Create: `execution/commitment/pbin_unfold_test.go`
 
-- [ ] write a failing table test of `(cellPrefix, probeKey) → expected pbinNeedUnfolding result` covering `cpl == 0`, `cpl == len(prefix)` (full match, descend), and `cpl < len(prefix)` (split signal) (guards H9)
-- [ ] write a failing test unfolding a stored branch record whose `prefixBitLen == 0`, asserting it is descended into rather than treated as leaf or empty (guards H7)
-- [ ] write failing unfold tests for divergence at bits 0, 63, 64, 65, 271 and 527
-- [ ] create `PBinPatriciaHashed` with the grid, `currentKey bitpath`, context and Keccak state
-- [ ] implement `pbinNeedUnfolding` with bit reads and clamped common-prefix, dropping hex terminator arithmetic and `clampToAccountBoundary`; its return contract MUST distinguish "prefix fully matched" from "diverges inside prefix"
-- [ ] implement `pbinUnfold`/`pbinUnfoldBranchNode` reading the parent's stored cell prefix to reconstruct the descent key, with an explicit node-kind flag so a zero-length prefix is not overloaded
-- [ ] run tests - must pass before task 8
+- [x] write a failing table test of `(cellPrefix, probeKey) → expected pbinNeedUnfolding result` covering `cpl == 0`, `cpl == len(prefix)` (full match, descend), and `cpl < len(prefix)` (split signal) (guards H9)
+- [x] write a failing test unfolding a stored branch record whose `prefixBitLen == 0`, asserting it is descended into rather than treated as leaf or empty (guards H7)
+- [x] write failing unfold tests for divergence at bits 0, 63, 64, 65, 271 and 527
+- [x] create `PBinPatriciaHashed` with the grid, `currentKey bitpath`, context and Keccak state
+- [x] implement `pbinNeedUnfolding` with bit reads and clamped common-prefix, dropping hex terminator arithmetic and `clampToAccountBoundary`; its return contract MUST distinguish "prefix fully matched" from "diverges inside prefix" — landed as the method `needUnfolding` returning `pbinUnfolding{action, matched}`; the `pbin` prefix rule covers package-level identifiers only, and methods on `PBinPatriciaHashed` cannot collide with the hex engine's
+- [x] implement `pbinUnfold`/`pbinUnfoldBranchNode` reading the parent's stored cell prefix to reconstruct the descent key, with an explicit node-kind flag so a zero-length prefix is not overloaded — landed as the methods `unfold`/`unfoldBranchNode`
+- [x] run tests - must pass before task 8
 
 ### Task 8: fold primitives
 

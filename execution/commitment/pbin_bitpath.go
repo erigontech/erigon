@@ -140,6 +140,17 @@ func pbinCommonPrefixBits(a, b *pbinBitpath) int16 {
 	return min(n, limit)
 }
 
+// pbinCommonPrefixBitsAt reports how many leading bits of prefix agree with key
+// read from bit `from`, never past the end of either operand.
+func pbinCommonPrefixBitsAt(key *pbinBitpath, from int16, prefix *pbinBitpath) int16 {
+	limit := min(key.bitLen-from, prefix.bitLen)
+	n := int16(0)
+	for n < limit && key.bit(from+n) == prefix.bit(n) {
+		n++
+	}
+	return n
+}
+
 // pbinAppendPackedBits appends the path's bits MSB-first, zero-padded to a byte
 // boundary.
 func (p *pbinBitpath) appendPackedBits(dst []byte) []byte {
