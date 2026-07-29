@@ -59,8 +59,10 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/txnprovider"
+	txnpool "github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 type blockingTxnProvider struct {
@@ -88,6 +90,35 @@ func (p *blockingTxnProvider) ProvideTxns(ctx context.Context, _ ...txnprovider.
 	}
 	p.emptyOnce.Do(func() { close(p.exhausted) })
 	return nil, nil
+}
+
+type rewindingTxnProvider struct {
+	pool  *txnpool.TxPool
+	head  *remoteproto.StateChangeBatch
+	ready chan struct{}
+	once  sync.Once
+	err   error
+}
+
+func (p *rewindingTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	p.once.Do(func() {
+		p.err = p.pool.OnNewBlock(ctx, p.head, txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{})
+		close(p.ready)
+	})
+	if p.err != nil {
+		return nil, p.err
+	}
+	return p.pool.ProvideTxns(ctx, opts...)
+}
+
+func txPoolHead(block *types.Block) *remoteproto.StateChangeBatch {
+	return &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: block.BaseFee().Uint64(),
+		BlockGasLimit:       block.GasLimit(),
+		ChangeBatch: []*remoteproto.StateChange{
+			{BlockHeight: block.NumberU64()},
+		},
+	}
 }
 
 func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
@@ -679,6 +710,65 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 	validation, err := validateChain(ctx, m.ExecModule, built.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+}
+
+func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+
+	parent := chainPack.TopBlock
+	provider := &rewindingTxnProvider{
+		pool:  m.TxPool,
+		head:  txPoolHead(chainPack.Blocks[len(chainPack.Blocks)-2]),
+		ready: make(chan struct{}),
+	}
+	parentBeaconBlockRoot := randomHash()
+	payloadID, err := assembleBlock(ctx, m.ExecModule, &builder.Parameters{
+		ParentHash:            parent.Hash(),
+		Timestamp:             parent.Time() + 1,
+		PrevRandao:            parent.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		CustomTxnProvider:     provider,
+	})
+	require.NoError(t, err)
+
+	select {
+	case <-provider.ready:
+	case <-time.After(10 * time.Second):
+		t.Fatal("builder did not reach transaction selection")
+	}
+
+	requestCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := m.ExecModule.GetAssembledBlock(requestCtx, payloadID)
+		resultCh <- err
+	}()
+
+	var requestErr error
+	blocked := false
+	select {
+	case requestErr = <-resultCh:
+	case <-time.After(time.Second):
+		blocked = true
+	}
+
+	require.NoError(t, m.TxPool.OnNewBlock(ctx, txPoolHead(parent), txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{}))
+	if blocked {
+		select {
+		case <-resultCh:
+		case <-time.After(10 * time.Second):
+			t.Fatal("GetAssembledBlock did not return after restoring the txpool head")
+		}
+		t.Fatal("GetAssembledBlock remained blocked after context cancellation while the txpool was behind the builder parent")
+	}
+	require.ErrorIs(t, requestErr, context.Canceled)
 }
 
 func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
