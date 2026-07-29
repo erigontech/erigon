@@ -178,7 +178,7 @@ func (s *Service) Run(ctx context.Context) error {
 		orderedAndNoGaps := true
 		knownEventID := lastFetchedEventId
 
-		for i := 0; i < len(events); i++ {
+		for i := range events {
 			if events[i].ID == knownEventID+1 {
 				knownEventID = events[i].ID
 				continue
@@ -382,10 +382,8 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 		if eventLimit != nil {
 			if *eventLimit == 0 {
 				endId = 0
-			} else {
-				if endId > startId && endId-startId >= *eventLimit {
-					endId = startId + *eventLimit - 1
-				}
+			} else if endId > startId && endId-startId >= *eventLimit {
+				endId = startId + *eventLimit - 1
 			}
 		}
 

@@ -21,18 +21,17 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -45,9 +44,7 @@ import (
 
 // TestCorsHandler makes sure CORS are properly handled on the http server.
 func TestCorsHandler(t *testing.T) {
-	srv := createAndStartServer(t, &httpConfig{CorsAllowedOrigins: []string{"test", "test.com"}}, false, &wsConfig{})
-	defer srv.stop()
-	url := "http://" + srv.listenAddr()
+	url := startHTTPServer(t, nil, []string{"test", "test.com"}, nil)
 
 	resp := rpcRequest(t, url, "origin", "test.com")
 	defer resp.Body.Close()
@@ -60,13 +57,15 @@ func TestCorsHandler(t *testing.T) {
 
 // TestVhosts makes sure vhosts is properly handled on the http server.
 func TestVhosts(t *testing.T) {
-	srv := createAndStartServer(t, &httpConfig{Vhosts: []string{"test"}}, false, &wsConfig{})
-	defer srv.stop()
-	url := "http://" + srv.listenAddr()
+	url := startHTTPServer(t, nil, nil, []string{"test"})
 
 	resp := rpcRequest(t, url, "host", "test")
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	respUpper := rpcRequest(t, url, "host", "TeSt:1234")
+	defer respUpper.Body.Close()
+	assert.Equal(t, http.StatusOK, respUpper.StatusCode)
 
 	resp2 := rpcRequest(t, url, "host", "bad")
 	defer resp2.Body.Close()
@@ -75,9 +74,7 @@ func TestVhosts(t *testing.T) {
 
 // TestVhostsAny makes sure vhosts any is properly handled on the http server.
 func TestVhostsAny(t *testing.T) {
-	srv := createAndStartServer(t, &httpConfig{Vhosts: []string{"any"}}, false, &wsConfig{})
-	defer srv.stop()
-	url := "http://" + srv.listenAddr()
+	url := startHTTPServer(t, nil, nil, []string{"any"})
 
 	resp := rpcRequest(t, url, "host", "test")
 	defer resp.Body.Close()
@@ -159,124 +156,51 @@ func TestWebsocketOrigins(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		srv := createAndStartServer(t, &httpConfig{}, true, &wsConfig{Origins: common.CliString2Array(tc.spec)})
-		url := fmt.Sprintf("ws://%v", srv.listenAddr())
-		for _, origin := range tc.expOk {
-			if err := wsRequest(t, url, origin); err != nil {
-				t.Errorf("spec '%v', origin '%v': expected ok, got %v", tc.spec, origin, err)
+		t.Run(tc.spec, func(t *testing.T) {
+			url := startWSServer(t, common.CliString2Array(tc.spec))
+			for _, origin := range tc.expOk {
+				if err := wsRequest(t, url, origin); err != nil {
+					t.Errorf("spec '%v', origin '%v': expected ok, got %v", tc.spec, origin, err)
+				}
 			}
-		}
-		for _, origin := range tc.expFail {
-			if err := wsRequest(t, url, origin); err == nil {
-				t.Errorf("spec '%v', origin '%v': expected not to allow,  got ok", tc.spec, origin)
+			for _, origin := range tc.expFail {
+				if err := wsRequest(t, url, origin); err == nil {
+					t.Errorf("spec '%v', origin '%v': expected not to allow,  got ok", tc.spec, origin)
+				}
 			}
-		}
-		srv.stop()
-	}
-}
-
-// TestIsWebsocket tests if an incoming websocket upgrade request is handled properly.
-func TestIsWebsocket(t *testing.T) {
-	r, _ := http.NewRequest("GET", "/", nil)
-
-	assert.False(t, isWebsocket(r))
-	r.Header.Set("upgrade", "websocket")
-	assert.False(t, isWebsocket(r))
-	r.Header.Set("connection", "upgrade")
-	assert.True(t, isWebsocket(r))
-	r.Header.Set("connection", "upgrade,keep-alive")
-	assert.True(t, isWebsocket(r))
-	r.Header.Set("connection", " UPGRADE,keep-alive")
-	assert.True(t, isWebsocket(r))
-}
-
-func Test_checkPath(t *testing.T) {
-	tests := []struct {
-		req      *http.Request
-		prefix   string
-		expected bool
-	}{
-		{
-			req:      &http.Request{URL: &url.URL{Path: "/test"}},
-			prefix:   "/test",
-			expected: true,
-		},
-		{
-			req:      &http.Request{URL: &url.URL{Path: "/testing"}},
-			prefix:   "/test",
-			expected: true,
-		},
-		{
-			req:      &http.Request{URL: &url.URL{Path: "/"}},
-			prefix:   "/test",
-			expected: false,
-		},
-		{
-			req:      &http.Request{URL: &url.URL{Path: "/fail"}},
-			prefix:   "/test",
-			expected: false,
-		},
-		{
-			req:      &http.Request{URL: &url.URL{Path: "/"}},
-			prefix:   "",
-			expected: true,
-		},
-		{
-			req:      &http.Request{URL: &url.URL{Path: "/fail"}},
-			prefix:   "",
-			expected: false,
-		},
-		{
-			req:      &http.Request{URL: &url.URL{Path: "/"}},
-			prefix:   "/",
-			expected: true,
-		},
-		{
-			req:      &http.Request{URL: &url.URL{Path: "/testing"}},
-			prefix:   "/",
-			expected: true,
-		},
-	}
-
-	for i, tt := range tests {
-		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			assert.Equal(t, tt.expected, checkPath(tt.req, tt.prefix))
 		})
 	}
 }
 
-func createAndStartServer(t *testing.T, conf *httpConfig, ws bool, wsConf *wsConfig) *httpServer {
+// newTestRPCServer creates a bare rpc.Server like the production wiring in
+// cmd/rpcdaemon/cli does.
+func newTestRPCServer(t *testing.T) *rpc.Server {
 	t.Helper()
 
-	// Ensure RpcConcurrencyLimit is always set so admission control wiring is exercised.
-	// A high value avoids interfering with existing tests while still activating the path.
-	if conf.RpcConcurrencyLimit == 0 {
-		conf.RpcConcurrencyLimit = 1000
-	}
-	srv := newHTTPServer(testlog.Logger(t, log.LvlError), rpccfg.DefaultHTTPTimeouts)
-	require.NoError(t, srv.enableRPC(nil, *conf, nil))
-	if ws {
-		require.NoError(t, srv.enableWS(nil, *wsConf, nil))
-	}
-	require.NoError(t, srv.setListenAddr("localhost", 0))
-	require.NoError(t, srv.start())
+	srv := rpc.NewServer(50, false /* traceRequests */, false /* debugSingleRequest */, true, testlog.Logger(t, log.LvlError), 0)
+	t.Cleanup(srv.Stop)
 	return srv
 }
 
-func createAndStartServerWithAllowList(t *testing.T, conf httpConfig, ws bool, wsConf wsConfig) *httpServer {
+// startHTTPServer starts a test HTTP server wrapped in the production handler stack.
+func startHTTPServer(t *testing.T, allowList rpc.AllowList, cors, vhosts []string) string {
 	t.Helper()
 
-	srv := newHTTPServer(testlog.Logger(t, log.LvlError), rpccfg.DefaultHTTPTimeouts)
+	srv := newTestRPCServer(t)
+	srv.SetAllowList(allowList)
+	ts := httptest.NewServer(NewHTTPHandlerStack(srv, cors, vhosts, false, 1000, true))
+	t.Cleanup(ts.Close)
+	return ts.URL
+}
 
-	allowList := rpc.AllowList(map[string]struct{}{"net_version": {}}) //don't allow RPC modules
+// startWSServer starts a test WebSocket server with the production websocket handler.
+func startWSServer(t *testing.T, origins []string) string {
+	t.Helper()
 
-	require.NoError(t, srv.enableRPC(nil, conf, allowList))
-	if ws {
-		require.NoError(t, srv.enableWS(nil, wsConf, allowList))
-	}
-	require.NoError(t, srv.setListenAddr("localhost", 0))
-	require.NoError(t, srv.start())
-	return srv
+	srv := newTestRPCServer(t)
+	ts := httptest.NewServer(srv.WebsocketHandler(origins, nil, false, testlog.Logger(t, log.LvlError)))
+	t.Cleanup(ts.Close)
+	return "ws://" + ts.Listener.Addr().String()
 }
 
 // wsRequest attempts to open a WebSocket connection to the given URL.
@@ -289,23 +213,26 @@ func wsRequest(t *testing.T, url, browserOrigin string) error {
 		headers.Set("Origin", browserOrigin)
 	}
 	//nolint
-	conn, _, err := websocket.DefaultDialer.Dial(url, headers)
-	if conn != nil {
-		conn.Close()
+	conn, resp, err := websocket.Dial(context.Background(), url, &websocket.DialOptions{HTTPHeader: headers})
+	if err != nil {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return err
 	}
-	return err
+	return conn.Close(websocket.StatusNormalClosure, "")
 }
 
 func TestAllowList(t *testing.T) {
-	srv := createAndStartServerWithAllowList(t, httpConfig{}, false, wsConfig{})
-	defer srv.stop()
+	allowList := rpc.AllowList(map[string]struct{}{"net_version": {}}) //don't allow RPC modules
+	url := startHTTPServer(t, allowList, nil, nil)
 
-	assert.False(t, testCustomRequest(t, srv, "rpc_modules"))
+	assert.False(t, testCustomRequest(t, url, "rpc_modules"))
 }
 
-func testCustomRequest(t *testing.T, srv *httpServer, method string) bool {
+func testCustomRequest(t *testing.T, url, method string) bool {
 	body := bytes.NewReader(fmt.Appendf(nil, `{"jsonrpc":"2.0","id":1,"method":"%s"}`, method))
-	req, _ := http.NewRequest("POST", "http://"+srv.listenAddr(), body)
+	req, _ := http.NewRequest("POST", url, body)
 	req.Header.Set("content-type", "application/json")
 
 	client := http.DefaultClient
@@ -358,8 +285,11 @@ func TestHTTP2H2C(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
 	}
-	srv := createAndStartServer(t, &httpConfig{}, false, &wsConfig{})
-	defer srv.stop()
+	srv := newTestRPCServer(t)
+	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
+	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{Timeouts: rpccfg.DefaultHTTPTimeouts}, handler)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = httpSrv.Shutdown(context.Background()) })
 
 	// Create an HTTP/2 cleartext client.
 	transport := &http.Transport{}
@@ -368,7 +298,7 @@ func TestHTTP2H2C(t *testing.T) {
 	client := &http.Client{Transport: transport}
 
 	body := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"rpc_modules","params":[]}`)
-	resp, err := client.Post("http://"+srv.listenAddr(), "application/json", body)
+	resp, err := client.Post("http://"+addr.String(), "application/json", body)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -418,12 +348,10 @@ func TestRPCAdmissionHandler(t *testing.T) {
 		h := newRPCAdmissionHandler(limit, blockingHandler)
 
 		var wg sync.WaitGroup
-		for i := 0; i < limit; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for range limit {
+			wg.Go(func() {
 				h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", nil))
-			}()
+			})
 		}
 
 		// Give goroutines time to enter the handler and increment the counter.
@@ -444,30 +372,31 @@ func TestRPCAdmissionHandler(t *testing.T) {
 	})
 }
 
-// TestWsConnectionLimit verifies that WsConnectionLimit rejects excess WebSocket
-// connections with HTTP 503 and allows new ones once a slot is freed.
+// TestWsConnectionLimit verifies that the WebSocket connection limiter rejects
+// excess WebSocket connections with HTTP 503 and allows new ones once a slot
+// is freed.
 func TestWsConnectionLimit(t *testing.T) {
 	const limit = 1
-	srv := createAndStartServer(t, &httpConfig{}, true, &wsConfig{
-		Origins:           []string{"*"},
-		WsConnectionLimit: limit,
-	})
-	defer srv.stop()
-	url := fmt.Sprintf("ws://%v", srv.listenAddr())
+	srv := newTestRPCServer(t)
+	limiter := NewWSConnectionLimiter(limit, srv.WebsocketHandler([]string{"*"}, nil, false, testlog.Logger(t, log.LvlError)))
+	wsLimiter := limiter.(*wsConnectionLimiter)
+	ts := httptest.NewServer(limiter)
+	t.Cleanup(ts.Close)
+	url := "ws://" + ts.Listener.Addr().String()
 
 	// First connection should succeed.
-	conn1, resp1, err := websocket.DefaultDialer.Dial(url, nil)
-	if resp1 != nil {
+	conn1, resp1, err := websocket.Dial(context.Background(), url, nil)
+	if err != nil && resp1 != nil {
 		resp1.Body.Close()
 	}
 	require.NoError(t, err, "first connection should succeed")
 
 	// Wait until the server increments its counter.
-	require.Eventually(t, func() bool { return srv.wsLimiter.count.Load() == 1 },
+	require.Eventually(t, func() bool { return wsLimiter.count.Load() == 1 },
 		5*time.Second, 5*time.Millisecond)
 
 	// While first connection is open the second must be rejected.
-	_, resp, err2 := websocket.DefaultDialer.Dial(url, nil)
+	_, resp, err2 := websocket.Dial(context.Background(), url, nil)
 	require.Error(t, err2, "second connection should be rejected")
 	if resp != nil {
 		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
@@ -475,17 +404,17 @@ func TestWsConnectionLimit(t *testing.T) {
 	}
 
 	// Close first connection and wait for the counter to drop.
-	conn1.Close()
-	require.Eventually(t, func() bool { return srv.wsLimiter.count.Load() == 0 },
+	require.NoError(t, conn1.Close(websocket.StatusNormalClosure, ""))
+	require.Eventually(t, func() bool { return wsLimiter.count.Load() == 0 },
 		5*time.Second, 5*time.Millisecond)
 
 	// A new connection should now succeed.
-	conn3, resp3, err := websocket.DefaultDialer.Dial(url, nil)
-	if resp3 != nil {
+	conn3, resp3, err := websocket.Dial(context.Background(), url, nil)
+	if err != nil && resp3 != nil {
 		resp3.Body.Close()
 	}
 	require.NoError(t, err, "connection after limit released should succeed")
-	conn3.Close()
+	require.NoError(t, conn3.Close(websocket.StatusNormalClosure, ""))
 }
 
 // TestNewWSConnectionLimiter tests the standalone NewWSConnectionLimiter handler.

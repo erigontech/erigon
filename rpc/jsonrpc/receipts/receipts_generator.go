@@ -17,13 +17,14 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -35,13 +36,14 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 type Generator struct {
 	stateCache    kvcache.Cache
 	receiptsCache *lru.Cache[common.Hash, types.Receipts]
-	receiptCache  *lru.Cache[common.Hash, *types.Receipt]
+	receiptCache  *lru.Cache[uint64, *types.Receipt] // keyed by txNum: avoids TxnByIdxInBlock (snapshot read) on cache hit
 
 	// blockExecMutex ensuring that only 1 block with given hash
 	// executed at a time - all parallel requests for same hash will wait for results
@@ -55,7 +57,7 @@ type Generator struct {
 	receiptCacheTrace  bool
 	evmTimeout         time.Duration
 
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 	txNumReader rawdbv3.TxNumsReader
 	engine      rules.EngineReader
 
@@ -78,13 +80,13 @@ var (
 	receiptsExecConcurrency = dbg.EnvInt("R_EXEC_CONCURRENCY", max(1, runtime.GOMAXPROCS(0)/2))
 )
 
-func NewGenerator(dirs datadir.Dirs, blockReader services.FullBlockReader, engine rules.EngineReader, stateCache kvcache.Cache, evmTimeout time.Duration, filters ...*rpchelper.Filters) *Generator {
+func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, engine rules.EngineReader, stateCache kvcache.Cache, evmTimeout time.Duration, filters ...*rpchelper.Filters) *Generator {
 	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit) //TODO: is handling both of them a good idea though...?
 	if err != nil {
 		panic(err)
 	}
 
-	receiptCache, err := lru.New[common.Hash, *types.Receipt](receiptsCacheLimit * 100) // think they should be connected in some of that way
+	receiptCache, err := lru.New[uint64, *types.Receipt](receiptsCacheLimit * 100) // think they should be connected in some of that way
 	if err != nil {
 		panic(err)
 	}
@@ -126,8 +128,32 @@ func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash
 	return g.receiptsCache.Get(blockHash)
 }
 
-func (g *Generator) GetCachedReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, bool) {
-	return g.receiptCache.Get(hash)
+func (g *Generator) GetCachedReceipt(ctx context.Context, txNum uint64) (*types.Receipt, bool) {
+	return g.receiptCache.Get(txNum)
+}
+
+// TryGetCachedReceipt is a fast path that avoids calling TxnByIdxInBlock.
+// TxnByIdxInBlock opens snapshot segments (Bodies + Transactions) or reads MDBX just to obtain
+// the txnHash, which is then used only to key the execution mutex in GetReceipt. When the receipt
+// is already cached, that I/O and decode are unnecessary — TryGetCachedReceipt short-circuits them.
+//
+// Only safe for callers that do not require postState (i.e. pass postState=nil to GetReceipt).
+// receiptCache (per-tx, keyed by txNum) is checked first because it is populated by every
+// eth_getLogs / eth_getTransactionReceipt call. receiptsCache (block-level) is only populated
+// by eth_getBlockReceipts, so it is checked second to avoid an unnecessary lookup in the common case.
+func (g *Generator) TryGetCachedReceipt(blockHash common.Hash, txNum uint64, txIndex int) (*types.Receipt, bool) {
+	if receipt, ok := g.receiptCache.Get(txNum); ok {
+		if receipt.BlockHash == blockHash && len(receipt.PostState) == 0 {
+			return receipt, true
+		}
+		// stale or postState mismatch — let GetReceipt evict under its mutex
+	}
+	if txIndex >= 0 {
+		if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > txIndex {
+			return receipts[txIndex], true
+		}
+	}
+	return nil, false
 }
 
 var rpcDisableRCache = dbg.EnvBool("RPC_DISABLE_RCACHE", false)
@@ -171,12 +197,12 @@ func (g *Generator) addToCacheReceipts(header *types.Header, receipts types.Rece
 	g.receiptsCache.Add(header.Hash(), receipts)
 }
 
-func (g *Generator) addToCacheReceipt(hash common.Hash, receipt *types.Receipt) {
+func (g *Generator) addToCacheReceipt(txNum uint64, receipt *types.Receipt) {
 	if rpcDisableRLRU {
 		return
 	}
-	//g.receiptCache.Add(hash, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
-	g.receiptCache.Add(hash, receipt)
+	//g.receiptCache.Add(txNum, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
+	g.receiptCache.Add(txNum, receipt)
 }
 
 type PostStateInfo struct {
@@ -185,6 +211,7 @@ type PostStateInfo struct {
 }
 
 func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *PostStateInfo) (_ *types.Receipt, err error) {
+	tx = g.filters.WithTemporalOverlay(tx)
 	blockHash := header.Hash()
 	blockNum := header.Number.Uint64()
 	txnHash := txn.Hash()
@@ -215,13 +242,13 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	mu := g.txnExecMutex.lock(txnHash)
 	defer g.txnExecMutex.unlock(mu, txnHash)
-	if receipt, ok := g.receiptCache.Get(txnHash); ok {
+	if receipt, ok := g.receiptCache.Get(txNum); ok {
 		if receipt.BlockHash == blockHash && // elegant way to handle reorgs
 			calculatePostState == (len(receipt.PostState) != 0) { // verify if the expected postState matches the actual postState on cache. Otherwise re-calculate it
 			return receipt, nil
 		}
 
-		g.receiptCache.Remove(txnHash) // remove old receipt with same hash, but different blockHash OR different postState
+		g.receiptCache.Remove(txNum) // remove old receipt with same txNum, but different blockHash OR different postState
 	}
 
 	// Now the snapshot have not the `postState` field. Therefore, for pre-Byzantium blocks,
@@ -241,7 +268,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			return nil, err
 		}
 		if ok && receiptFromDB != nil && !dbg.AssertEnabled {
-			g.addToCacheReceipt(txnHash, receiptFromDB)
+			g.addToCacheReceipt(txNum, receiptFromDB)
 			return receiptFromDB, nil
 		}
 	}
@@ -298,11 +325,10 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		var stateWriter state.StateWriter
 
 		if calculatePostState && postState.CommitmentHistory {
-			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root())
+			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 			if err != nil {
 				return nil, err
 			}
-			sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
 
 			genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, 0)
 			if err != nil {
@@ -331,7 +357,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			}()
 
 			// re-run previous txs of the blocks
-			for txnIndex := 0; txnIndex < index; txnIndex++ {
+			for txnIndex := range index {
 				currTxn := postState.Txns[txnIndex]
 
 				genEnv.ibs.SetTxContext(blockNum, txnIndex)
@@ -412,11 +438,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	receipt.FirstLogIndexWithinBlock = firstLogIndex
 
 	for i := range receipt.Logs {
-		receipt.Logs[i].TxIndex = uint(index)
-		receipt.Logs[i].Index = uint(firstLogIndex + uint32(i))
+		receipt.Logs[i].TxIndex = hexutil.Uint(index)
+		receipt.Logs[i].Index = hexutil.Uint(firstLogIndex + uint32(i))
 	}
 
-	g.addToCacheReceipt(txnHash, receipt)
+	g.addToCacheReceipt(txNum, receipt)
 
 	if dbg.AssertEnabled && receiptFromDB != nil {
 		g.assertEqualReceipts(receipt, receiptFromDB)
@@ -424,7 +450,8 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	return receipt, nil
 }
 
-func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (_ types.Receipts, err error) {
+func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (_ types.Receipts, err error) {
+	tx = g.filters.WithTemporalOverlay(tx)
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
 
@@ -457,13 +484,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return nil, err
 	}
 
-	// Check if we have commitment history: this is required to know if state root will be computed or left zero for historical state.
-	var commitmentHistory bool
-	commitmentHistory, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
-	if err != nil {
-		return nil, err
-	}
-	calculatePostState := (commitmentHistory || g.blockReader.FrozenBlocks() == 0) && !cfg.IsByzantium(blockNum)
+	calculatePostState := (opts.CommitmentHistoryEnabled || g.blockReader.FrozenBlocks() == 0) && !cfg.IsByzantium(blockNum)
 
 	// Now the snapshot have not the `postState` field. Therefore, for pre-Byzantium blocks,
 	// we must skip persistent receipts and re-calculate
@@ -522,12 +543,11 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}
 
 		var stateWriter state.StateWriter
-		if commitmentHistory {
-			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root())
+		if opts.CommitmentHistoryEnabled {
+			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 			if err != nil {
 				return nil, err
 			}
-			sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
 			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
 			latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
 			if err != nil {
@@ -581,7 +601,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			}
 
 			var stateRoot []byte
-			if commitmentHistory {
+			if opts.CommitmentHistoryEnabled {
 				sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
 				latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
 				if err != nil {
@@ -612,9 +632,9 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 	// When assertions are enabled, receipts are *always* computed (i.e. receipt cache V2 is skipped)
 	// Hence, we need commitment history to correctly compute the `root` field for pre-Byzantium receipts
-	if dbg.AssertEnabled && (commitmentHistory || cfg.IsByzantium(blockNum)) {
+	if dbg.AssertEnabled && (opts.CommitmentHistoryEnabled || cfg.IsByzantium(blockNum)) {
 		computedReceiptsRoot := types.DeriveSha(receipts)
-		blockReceiptsRoot := block.Header().ReceiptHash
+		blockReceiptsRoot := block.ReceiptHash()
 		if computedReceiptsRoot != blockReceiptsRoot {
 			panic(fmt.Sprintf("assert: computedReceiptsRoot=%s, blockReceiptsRoot=%s", computedReceiptsRoot.Hex(), blockReceiptsRoot.Hex()))
 		}
@@ -662,6 +682,7 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 }
 
 func (g *Generator) GetReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block, txNumsReader rawdbv3.TxNumsReader) (types.Receipts, error) {
+	tx = g.filters.WithTemporalOverlay(tx)
 	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
 		return receipts, nil
 	}

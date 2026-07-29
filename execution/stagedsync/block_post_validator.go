@@ -2,79 +2,51 @@ package stagedsync
 
 import (
 	"fmt"
-	"sync"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 )
 
-// BlockPostExecutionValidator validates block state after execution (gas used, receipts, etc.)
-type BlockPostExecutionValidator interface {
-	Process(blockGasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts,
-		header *types.Header, txns types.Transactions,
-		chainConfig *chain.Config, logger log.Logger) error
-	Wait() error
+type blockValidator struct {
+	done chan error // buffered(1); written once, then re-stuffed on each Wait
 }
 
-// blockPostExecutionValidator is a synchronous implementation of BlockPostExecutionValidator
-type blockPostExecutionValidator struct{}
-
-func newBlockPostExecutionValidator() BlockPostExecutionValidator {
-	return &blockPostExecutionValidator{}
-}
-
-func (v *blockPostExecutionValidator) Process(blockGasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts,
+func newBlockValidator(engine rules.Engine, blockGasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool, receipts types.Receipts,
 	header *types.Header, txns types.Transactions,
-	chainConfig *chain.Config, logger log.Logger) error {
-	return protocol.BlockPostValidation(blockGasUsed, blobGasUsed, checkReceipts, receipts, header, txns, chainConfig, logger)
-}
-
-func (v *blockPostExecutionValidator) Wait() error {
-	return nil
-}
-
-// parallelBlockPostExecutionValidator is an asynchronous implementation of BlockPostExecutionValidator.
-// Process() is non-blocking and spawns a goroutine, Wait() blocks until all validations complete.
-type parallelBlockPostExecutionValidator struct {
-	mu  sync.Mutex
-	wg  sync.WaitGroup
-	err error
-}
-
-func newParallelBlockPostExecutionValidator() BlockPostExecutionValidator {
-	return &parallelBlockPostExecutionValidator{}
-}
-
-func (v *parallelBlockPostExecutionValidator) Process(blockGasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts,
-	header *types.Header, txns types.Transactions,
-	chainConfig *chain.Config, logger log.Logger) error {
-	v.wg.Add(1)
-	v.mu.Lock()
-	if v.err != nil {
-		v.mu.Unlock()
-		return v.err
-	}
-	v.mu.Unlock()
+	chainConfig *chain.Config, logger log.Logger) *blockValidator {
+	bv := &blockValidator{done: make(chan error, 1)}
 	go func() {
-		defer v.wg.Done()
-		if err := protocol.BlockPostValidation(blockGasUsed, blobGasUsed, checkReceipts, receipts, header, txns, chainConfig, logger); err != nil {
-			v.mu.Lock()
-			if v.err == nil {
-				v.err = err
-			}
-			v.mu.Unlock()
-		}
+		bv.done <- validateBlockPostExecution(engine, chainConfig, header, blockGasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 	}()
-	return nil
+	return bv
 }
 
-func (v *parallelBlockPostExecutionValidator) Wait() error {
-	v.wg.Wait()
-	if v.err != nil {
-		return fmt.Errorf("%w, %w", rules.ErrInvalidBlock, v.err)
+func validateBlockPostExecution(engine rules.Engine, chainConfig *chain.Config, header *types.Header,
+	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	err := engine.ValidateBlockPostExecution(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
+	switch {
+	case err != nil && dbg.LogHashMismatchReason():
+		ethutils.LogReceipts(log.LvlWarn, "post-execution validation failed", receipts, txns, chainConfig, header, logger)
+	case err == nil && dbg.TraceLogs && dbg.TraceBlock(header.Number.Uint64()):
+		ethutils.LogReceipts(log.LvlInfo, "trace logs", receipts, txns, chainConfig, header, logger)
+	}
+	return err
+}
+
+// Safe on nil receiver and idempotent (re-stuffs the result after each read).
+func (bv *blockValidator) Wait() error {
+	if bv == nil {
+		return nil
+	}
+	err := <-bv.done
+	bv.done <- err
+	if err != nil {
+		return fmt.Errorf("%w, %w", rules.ErrInvalidBlock, err)
 	}
 	return nil
 }

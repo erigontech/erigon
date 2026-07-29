@@ -17,6 +17,7 @@
 package execution_client
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -40,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 var ErrNotSupported = errors.New("operation not supported in engine API mode")
@@ -77,12 +79,13 @@ func NewExecutionClientEngineLocal(
 	txpool txpoolproto.TxpoolClient,
 	beaconCfg *clparams.BeaconChainConfig,
 ) (*ExecutionClientEngine, error) {
-	return &ExecutionClientEngine{
-		engine:    engine,
-		chainRW:   &chainRW,
-		txpool:    txpool,
-		beaconCfg: beaconCfg,
-	}, nil
+	cc := &ExecutionClientEngine{
+		engine:  engine,
+		chainRW: &chainRW,
+		txpool:  txpool,
+	}
+	cc.SetBeaconChainConfig(beaconCfg)
+	return cc, nil
 }
 
 // NewExecutionClientEngineRPC creates a remote engine client that communicates
@@ -105,6 +108,11 @@ func (cc *ExecutionClientEngine) isLocal() bool {
 
 func (cc *ExecutionClientEngine) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig) {
 	cc.beaconCfg = beaconCfg
+	if engineWithCfg, ok := cc.engine.(interface {
+		SetBeaconChainConfig(*clparams.BeaconChainConfig)
+	}); ok {
+		engineWithCfg.SetBeaconChainConfig(beaconCfg)
+	}
 }
 
 // Close releases resources held by the engine client (HTTP connections, goroutines).
@@ -116,7 +124,7 @@ func (cc *ExecutionClientEngine) Close() {
 
 // buildExecutionPayload converts a CL Eth1Block into an Engine API ExecutionPayload.
 func buildExecutionPayload(payload *cltypes.Eth1Block) *engine_types.ExecutionPayload {
-	reversedBaseFeePerGas := common.Copy(payload.BaseFeePerGas[:])
+	reversedBaseFeePerGas := bytes.Clone(payload.BaseFeePerGas[:])
 	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
 		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
 	}
@@ -151,6 +159,16 @@ func buildExecutionPayload(payload *cltypes.Eth1Block) *engine_types.ExecutionPa
 		*request.ExcessBlobGas = hexutil.Uint64(payload.ExcessBlobGas)
 	}
 
+	if payload.Version() >= clparams.GloasVersion {
+		bal := hexutil.Bytes{}
+		if payload.BlockAccessList != nil {
+			bal = payload.BlockAccessList.Bytes()
+		}
+		request.BlockAccessList = &bal
+		slotNumber := hexutil.Uint64(payload.SlotNumber)
+		request.SlotNumber = &slotNumber
+	}
+
 	return request
 }
 
@@ -181,8 +199,8 @@ func (cc *ExecutionClientEngine) NewPayload(
 		payloadStatus, err = cc.engine.NewPayloadV3(ctx, request, versionedHashes, beaconParentRoot)
 	case clparams.ElectraVersion, clparams.FuluVersion:
 		payloadStatus, err = cc.engine.NewPayloadV4(ctx, request, versionedHashes, beaconParentRoot, executionRequestsList)
-	default:
-		return PayloadStatusNone, fmt.Errorf("unsupported payload version: %d", payload.Version())
+	default: // Gloas+ (Amsterdam)
+		payloadStatus, err = cc.engine.NewPayloadV5(ctx, request, versionedHashes, beaconParentRoot, executionRequestsList)
 	}
 	if err != nil {
 		return PayloadStatusNone, fmt.Errorf("engine NewPayload failed: %w", err)
@@ -242,21 +260,18 @@ func (cc *ExecutionClientEngine) SupportInsertion() bool {
 	return cc.isLocal()
 }
 
-func (cc *ExecutionClientEngine) InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error {
+func (cc *ExecutionClientEngine) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
 	if !cc.isLocal() {
 		return ErrNotSupported
 	}
-	if wait {
-		return cc.chainRW.InsertBlocksAndWait(ctx, blocks)
-	}
-	return cc.chainRW.InsertBlocks(ctx, blocks)
+	return cc.chainRW.InsertBlocks(ctx, blocks, bals)
 }
 
-func (cc *ExecutionClientEngine) InsertBlock(ctx context.Context, block *types.Block) error {
+func (cc *ExecutionClientEngine) InsertBlock(ctx context.Context, block *types.Block, bal []byte) error {
 	if !cc.isLocal() {
 		return ErrNotSupported
 	}
-	return cc.chainRW.InsertBlockAndWait(ctx, block)
+	return cc.chainRW.InsertBlock(ctx, block, bal)
 }
 
 func (cc *ExecutionClientEngine) CurrentHeader(ctx context.Context) (*types.Header, error) {
@@ -361,6 +376,8 @@ func (cc *ExecutionClientEngine) GetAssembledBlock(ctx context.Context, id []byt
 
 	// Select Engine API version based on CL state version.
 	switch {
+	case version >= clparams.GloasVersion:
+		return cc.getAssembledBlockV6(ctx, id, version)
 	case version >= clparams.FuluVersion:
 		return cc.getAssembledBlockV5(ctx, id, version)
 	case version >= clparams.ElectraVersion:
@@ -443,6 +460,14 @@ func (cc *ExecutionClientEngine) getAssembledBlockV5(ctx context.Context, id []b
 	return cc.getAssembledBlockFromResponse(resp, version)
 }
 
+func (cc *ExecutionClientEngine) getAssembledBlockV6(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+	resp, err := cc.engine.GetPayloadV6(ctx, hexutil.Bytes(id))
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV6 failed: %w", err)
+	}
+	return cc.getAssembledBlockFromResponse(resp, version)
+}
+
 func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clparams.StateVersion, beaconCfg *clparams.BeaconChainConfig) (*cltypes.Eth1Block, error) {
 	block := cltypes.NewEth1Block(version, beaconCfg)
 	block.ParentHash = ep.ParentHash
@@ -506,6 +531,21 @@ func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clpa
 		}
 	}
 
+	// GLOAS fields
+	if ep.SlotNumber != nil {
+		block.SlotNumber = uint64(*ep.SlotNumber)
+	}
+	if ep.BlockAccessList != nil && len(*ep.BlockAccessList) > 0 {
+		maxBytes := uint64(1073741824) // MAX_BYTES_PER_TRANSACTION default
+		if beaconCfg != nil {
+			maxBytes = beaconCfg.MaxBytesPerTransaction
+		}
+		block.BlockAccessList = solid.NewByteListSSZ(maxBytes)
+		if err := block.BlockAccessList.SetBytes(*ep.BlockAccessList); err != nil {
+			return nil, err
+		}
+	}
+
 	return block, nil
 }
 
@@ -525,6 +565,9 @@ func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes [
 		}
 		resp, err := cc.txpool.GetBlobs(ctx, req)
 		if err != nil {
+			if errors.Is(err, txpool.ErrPoolDisabled) {
+				return nil, nil, nil
+			}
 			return nil, nil, fmt.Errorf("txpool GetBlobs: %w", err)
 		}
 		blobsWithProof := resp.BlobsWithProofs
@@ -574,4 +617,8 @@ func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes [
 		proofs[i] = [][]byte{bap.Proof}
 	}
 	return blobs, proofs, nil
+}
+
+func (cc *ExecutionClientEngine) GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+	return cc.engine.GetClientVersionV1(ctx, callerVersion)
 }

@@ -31,13 +31,12 @@ import (
 	"path/filepath"
 
 	"github.com/holiman/uint256"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/consensuschain"
@@ -100,7 +99,7 @@ type input struct {
 	Txs   []*txWithKey       `json:"txs,omitempty"`
 }
 
-func Main(ctx *cli.Context) error {
+func Main(_ context.Context, ctx *cli.Command) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	var (
 		err     error
@@ -121,10 +120,10 @@ func Main(ctx *cli.Context) error {
 	if ctx.Bool(TraceFlag.Name) {
 		// Configure the EVM logger
 		logConfig := &trace_logger.LogConfig{
-			DisableStack:      ctx.Bool(TraceDisableStackFlag.Name),
-			DisableMemory:     ctx.Bool(TraceDisableMemoryFlag.Name),
-			DisableReturnData: ctx.Bool(TraceDisableReturnDataFlag.Name),
-			Debug:             true,
+			DisableStack:     ctx.Bool(TraceDisableStackFlag.Name),
+			EnableMemory:     !ctx.Bool(TraceDisableMemoryFlag.Name),
+			EnableReturnData: !ctx.Bool(TraceDisableReturnDataFlag.Name),
+			Debug:            true,
 		}
 		var prevFile *os.File
 		// This one closes the last file
@@ -209,7 +208,7 @@ func Main(ctx *cli.Context) error {
 		vmConfig.ExtraEips = extraEips
 	}
 	// Set the chain id
-	chainConfig.ChainID = big.NewInt(ctx.Int64(ChainIDFlag.Name))
+	chainConfig.ChainID = new(uint256.Int).SetUint64(ctx.Uint64(ChainIDFlag.Name))
 
 	var txsWithKeys []*txWithKey
 	if txStr != stdinSelector {
@@ -286,12 +285,15 @@ func Main(ctx *cli.Context) error {
 	}
 	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
 
+	var missingBlockHash bool
 	getHash := func(num uint64) (common.Hash, error) {
 		if prestate.Env.BlockHashes == nil {
+			missingBlockHash = true
 			return common.Hash{}, fmt.Errorf("getHash(%d) invoked, no blockhashes provided", num)
 		}
 		h, ok := prestate.Env.BlockHashes[math.HexOrDecimal64(num)]
 		if !ok {
+			missingBlockHash = true
 			return common.Hash{}, fmt.Errorf("getHash(%d) invoked, blockhash for that block not provided", num)
 		}
 		return h, nil
@@ -329,22 +331,41 @@ func Main(ctx *cli.Context) error {
 	chainReader := consensuschain.NewReader(chainConfig, tx, nil, t8logger)
 	result, err := protocol.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, t8logger)
 
+	// A blockhash requested during execution but not supplied in the env input is a
+	// hard input error (t8n exit code 4), not a per-transaction rejection.
+	if missingBlockHash {
+		return NewError(ErrorMissingBlockhash, errors.New("getHash invoked for a block whose hash was not provided in the env input"))
+	}
 	if err != nil {
 		return fmt.Errorf("error on EBE: %w", err)
 	}
 
 	// state root calculation
-	root, err := CalculateStateRoot(tx, blockNum, txNum)
+	root, err := CalculateStateRoot(sd, tx, blockNum, txNum)
 	if err != nil {
 		return err
 	}
 	result.StateRoot = *root
 
+	// Persist the post-execution state so the alloc dumper (which reads tx) sees it.
+	if err = sd.Flush(context.Background(), tx); err != nil {
+		return err
+	}
+	// Record the block→txNum mapping the dumper needs to read the post-state as-of.
+	if err = rawdbv3.TxNums.Append(tx, blockNum, txNum); err != nil {
+		return err
+	}
+
+	// Match the reference t8n output, which emits null (not []) when empty.
+	if len(result.Receipts) == 0 {
+		result.Receipts = nil
+	}
+
 	// Dump the execution result
 	body, _ := rlp.EncodeToBytes(txs)
 	collector := make(Alloc)
 
-	dumper := state.NewDumper(tx, rawdbv3.TxNums, prestate.Env.Number)
+	dumper := state.NewDumper(tx, rawdbv3.TxNums, blockNum)
 	dumper.DumpToCollector(context.Background(), collector, false, false, common.Address{}, 0)
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 }
@@ -391,31 +412,16 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 }
 
 func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
-	gasPrice, value := uint256.NewInt(0), uint256.NewInt(0)
-	var overflow bool
-	var chainId uint256.Int
-
-	if txJson.Value != nil {
-		value, overflow = uint256.FromBig(txJson.Value.ToInt())
-		if overflow {
-			return nil, errors.New("value field caused an overflow (uint256)")
+	deref := func(b *hexutil.U256) uint256.Int {
+		if b == nil {
+			return uint256.Int{}
 		}
+		return uint256.Int(*b)
 	}
-
-	if txJson.GasPrice != nil {
-		gasPrice, overflow = uint256.FromBig(txJson.GasPrice.ToInt())
-		if overflow {
-			return nil, errors.New("gasPrice field caused an overflow (uint256)")
-		}
-	}
-
-	if txJson.ChainID != nil {
-		cid, overflow := uint256.FromBig(txJson.ChainID.ToInt())
-		if overflow {
-			return nil, errors.New("chainId field caused an overflow (uint256)")
-		}
-		chainId = *cid
-	}
+	value := deref(txJson.Value)
+	gasPrice := deref(txJson.GasPrice)
+	chainId := deref(txJson.ChainID)
+	v, r, s := deref(txJson.V), deref(txJson.R), deref(txJson.S)
 
 	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
 		if txJson.Type == types.LegacyTxType {
@@ -423,11 +429,14 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    *value,
+					Value:    value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
+					V:        v,
+					R:        r,
+					S:        s,
 				},
-				GasPrice: *gasPrice,
+				GasPrice: gasPrice,
 			}, nil
 		}
 
@@ -436,41 +445,33 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    *value,
+					Value:    value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
+					V:        v,
+					R:        r,
+					S:        s,
 				},
-				GasPrice: *gasPrice,
+				GasPrice: gasPrice,
 			},
 			ChainID:    chainId,
 			AccessList: *txJson.Accesses,
 		}, nil
 	} else if txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType {
-		var tipCap, feeCap uint256.Int
-		if txJson.MaxPriorityFeePerGas != nil {
-			tc, overflow := uint256.FromBig(txJson.MaxPriorityFeePerGas.ToInt())
-			if overflow {
-				return nil, errors.New("maxPriorityFeePerGas field caused an overflow (uint256)")
-			}
-			tipCap = *tc
-		}
-
-		if txJson.MaxFeePerGas != nil {
-			fc, overflow := uint256.FromBig(txJson.MaxFeePerGas.ToInt())
-			if overflow {
-				return nil, errors.New("maxFeePerGas field caused an overflow (uint256)")
-			}
-			feeCap = *fc
-		}
+		tipCap := deref(txJson.MaxPriorityFeePerGas)
+		feeCap := deref(txJson.MaxFeePerGas)
 
 		if txJson.Type == types.DynamicFeeTxType {
 			return &types.DynamicFeeTransaction{
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    *value,
+					Value:    value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
+					V:        v,
+					R:        r,
+					S:        s,
 				},
 				ChainID:    chainId,
 				TipCap:     tipCap,
@@ -479,9 +480,10 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			}, nil
 		}
 
-		auths := make([]types.Authorization, 0)
-		for _, auth := range *txJson.Authorizations {
-			a, err := auth.ToAuthorization()
+		jsonAuths := *txJson.Authorizations
+		auths := make([]types.Authorization, 0, len(jsonAuths))
+		for i := range jsonAuths {
+			a, err := jsonAuths[i].ToAuthorization()
 			if err != nil {
 				return nil, err
 			}
@@ -494,9 +496,12 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    *value,
+					Value:    value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
+					V:        v,
+					R:        r,
+					S:        s,
 				},
 				ChainID:    chainId,
 				TipCap:     tipCap,
@@ -581,7 +586,7 @@ func saveFile(baseDir, filename string, data any) error {
 
 // dispatchOutput writes the output data to either stderr or stdout, or to the specified
 // files
-func dispatchOutput(ctx *cli.Context, baseDir string, result *protocol.EphemeralExecResult, alloc Alloc, body hexutil.Bytes) error {
+func dispatchOutput(ctx *cli.Command, baseDir string, result *protocol.EphemeralExecResult, alloc Alloc, body hexutil.Bytes) error {
 	stdOutObject := make(map[string]any)
 	stdErrObject := make(map[string]any)
 	dispatch := func(baseDir, fName, name string, obj any) error {
@@ -644,54 +649,11 @@ func NewHeader(env stEnv) *types.Header {
 	return &header
 }
 
-func CalculateStateRoot(tx kv.TemporalRwTx, blockNum uint64, txNum uint64) (*common.Hash, error) {
-	// Generate hashed state
-	c, err := tx.RwCursor(kv.PlainState)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close()
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-	if err != nil {
-		return nil, fmt.Errorf("NewSharedDomains: %w", err)
-	}
-	defer domains.Close()
-
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return nil, fmt.Errorf("interate over plain state: %w", err)
-		}
-		var newK []byte
-		if len(k) == length.Addr {
-			newK = make([]byte, length.Hash)
-		} else {
-			newK = make([]byte, length.Hash*2+length.Incarnation)
-		}
-		h.Sha.Reset()
-		//nolint:errcheck
-		h.Sha.Write(k[:length.Addr])
-		//nolint:errcheck
-		h.Sha.Read(newK[:length.Hash])
-		if len(k) > length.Addr {
-			copy(newK[length.Hash:], k[length.Addr:length.Addr+length.Incarnation])
-			h.Sha.Reset()
-			//nolint:errcheck
-			h.Sha.Write(k[length.Addr+length.Incarnation:])
-			//nolint:errcheck
-			h.Sha.Read(newK[length.Hash+length.Incarnation:])
-			if err = tx.Put(kv.HashedStorageDeprecated, newK, common.Copy(v)); err != nil {
-				return nil, fmt.Errorf("insert hashed key: %w", err)
-			}
-		} else {
-			if err = tx.Put(kv.HashedAccountsDeprecated, newK, common.Copy(v)); err != nil {
-				return nil, fmt.Errorf("insert hashed key: %w", err)
-			}
-		}
-	}
-	c.Close()
-	root, err := domains.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
+func CalculateStateRoot(sd *execctx.SharedDomains, tx kv.TemporalRwTx, blockNum uint64, txNum uint64) (*common.Hash, error) {
+	// Compute the commitment on the SharedDomains that executed the block: it holds
+	// the touched-key set (prestate + execution) that ComputeCommitment needs. A
+	// fresh SharedDomains would see no changes and return the empty-trie root.
+	root, err := sd.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
 	if err != nil {
 		return nil, err
 	}

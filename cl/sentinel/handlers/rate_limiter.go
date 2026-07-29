@@ -123,21 +123,24 @@ func newPeerRateLimiter() *peerRateLimiter {
 	// Rate limits aligned with Lighthouse/Lodestar.
 	// Format: maxTokens (burst), refillRate (tokens/second)
 	// Lighthouse uses ~128 tokens per 10s for block requests, 5/15s for status, etc.
-	blockRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}   // 128 per 10s
-	blobRate := protocolRateConfig{maxTokens: 72, refillRate: 7.2}      // 72 per 10s
-	dataColRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8} // 128 per 10s
-	lcRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}      // 128 per 10s
-	pingRate := protocolRateConfig{maxTokens: 2, refillRate: 0.2}       // 2 per 10s
-	goodbyeRate := protocolRateConfig{maxTokens: 1, refillRate: 0.1}    // 1 per 10s
-	statusRate := protocolRateConfig{maxTokens: 5, refillRate: 0.33}    // 5 per 15s
-	metadataRate := protocolRateConfig{maxTokens: 2, refillRate: 0.2}   // 2 per 10s
+	blockRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}       // 128 per 10s
+	blobRate := protocolRateConfig{maxTokens: 72, refillRate: 7.2}          // 72 per 10s
+	dataColRate := protocolRateConfig{maxTokens: 16384, refillRate: 1638.4} // 16384 per 10s (proportional to blockRate × NumberOfColumns)
+	lcRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}          // 128 per 10s
+	pingRate := protocolRateConfig{maxTokens: 2, refillRate: 0.2}           // 2 per 10s
+	goodbyeRate := protocolRateConfig{maxTokens: 1, refillRate: 0.1}        // 1 per 10s
+	statusRate := protocolRateConfig{maxTokens: 5, refillRate: 0.33}        // 5 per 15s
+	metadataRate := protocolRateConfig{maxTokens: 2, refillRate: 0.2}       // 2 per 10s
 
 	rl.protocolLimits[communication.BeaconBlocksByRangeProtocolV2] = blockRate
 	rl.protocolLimits[communication.BeaconBlocksByRootProtocolV2] = blockRate
+	rl.protocolLimits[communication.BeaconBlocksByHeadProtocolV1] = blockRate
 	rl.protocolLimits[communication.BlobSidecarByRangeProtocolV1] = blobRate
 	rl.protocolLimits[communication.BlobSidecarByRootProtocolV1] = blobRate
 	rl.protocolLimits[communication.DataColumnSidecarsByRangeProtocolV1] = dataColRate
 	rl.protocolLimits[communication.DataColumnSidecarsByRootProtocolV1] = dataColRate
+	rl.protocolLimits[communication.ExecutionPayloadEnvelopesByRangeProtocolV1] = blockRate
+	rl.protocolLimits[communication.ExecutionPayloadEnvelopesByRootProtocolV1] = blockRate
 	rl.protocolLimits[communication.PingProtocolV1] = pingRate
 	rl.protocolLimits[communication.GoodbyeProtocolV1] = goodbyeRate
 	rl.protocolLimits[communication.StatusProtocolV1] = statusRate

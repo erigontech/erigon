@@ -32,12 +32,13 @@ import (
 )
 
 type hasher struct {
-	sha                  keccak.KeccakState
+	sha      keccak.KeccakState
+	bw       *ByteArrayWriter
+	callback func(common.Hash, Node)
+
 	valueNodesRlpEncoded bool
-	buffers              [1024 * 1024]byte
 	prefixBuf            [8]byte
-	bw                   *ByteArrayWriter
-	callback             func(common.Hash, Node)
+	buffers              [1024 * 1024]byte
 }
 
 const rlpPrefixLength = 4
@@ -206,7 +207,7 @@ func (h *hasher) hashChildren(original Node, bufOffset int) ([]byte, error) {
 
 	case *DuoNode:
 		i1, i2 := n.childrenIdx()
-		for i := 0; i < 17; i++ {
+		for i := range 17 {
 			var child Node
 
 			if i == int(i1) {
@@ -299,7 +300,18 @@ func (h *hasher) valueNodeToBuffer(vn ValueNode, buffer []byte, pos int) (int, e
 }
 
 func (h *hasher) accountNodeToBuffer(ac *AccountNode, buffer []byte, pos int) (int, error) {
-	acRlp := make([]byte, ac.EncodingLengthForHashing())
+	encLen := int(ac.EncodingLengthForHashing())
+	const accountRlpScratchSize = 128
+	// Reuse the end of the pre-allocated buffers to avoid heap allocation when
+	// the account RLP fits in the scratch region. Fall back to a dedicated
+	// allocation if the encoding grows beyond the scratch capacity.
+	var acRlp []byte
+	if encLen <= accountRlpScratchSize && len(h.buffers) >= accountRlpScratchSize {
+		start := len(h.buffers) - accountRlpScratchSize
+		acRlp = h.buffers[start : start+encLen]
+	} else {
+		acRlp = make([]byte, encLen)
+	}
 	ac.EncodeForHashing(acRlp)
 	enc := rlp.RlpEncodedBytes(acRlp)
 	h.bw.Setup(buffer, pos)

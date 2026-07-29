@@ -399,8 +399,6 @@ hours: [OtterSync](https://erigon.substack.com/p/erigon-3-alpha-2-introducing-bl
 
 **Flat KV storage.** Erigon uses a key-value database and stores accounts and storage in a straightforward way.
 
-<code> 🔬 See our detailed DB walkthrough [here](./docs/programmers_guide/db_walkthrough.MD).</code>
-
 **Preprocessing**. For some operations, Erigon uses temporary files to preprocess data before inserting it into the main
 DB. That reduces write amplification and DB inserts are orders of magnitude quicker.
 
@@ -455,14 +453,13 @@ go mod tidy
 | engine    | 9090  | TCP       | gRPC Server                 | Private       |
 | engine    | 42069 | TCP & UDP | Snap sync (Bittorrent)      | Public        |
 | engine    | 8551  | TCP       | Engine API (JWT auth)       | Private       |
-| sentry    | 30303 | TCP & UDP | eth/69 peering              | Public        |
-| sentry    | 30304 | TCP & UDP | eth/70 peering              | Public        |
+| sentry    | 30303 | TCP & UDP | eth peering (all versions)  | Public        |
 | sentry    | 9091  | TCP       | incoming gRPC Connections   | Private       |
 | rpcdaemon | 8545  | TCP       | HTTP & WebSockets & GraphQL | Private       |
 | mcp       | 8553  | TCP       | MCP server (AI assistants)  | Private       |
 | shutter   | 23102 | TCP       | Peering                     | Public        |
 
-Typically, 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
+Typically, 30303 is exposed to the internet to allow incoming peering connections. 9090 is exposed only
 internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).
 Port 8551 (JWT authenticated) is exposed only internally for [Engine API] JSON-RPC queries from the Consensus Layer
 node.

@@ -55,11 +55,10 @@ func newLocalNode(
 	}
 	localNode := enode.NewLocalNode(db, privKey)
 
-	udpEntry := enr.UDP(udpPort)
-	tcpEntry := enr.TCP(tcpPort)
-
-	localNode.Set(udpEntry)
-	localNode.Set(tcpEntry)
+	localNode.Set(enr.UDP(udpPort))
+	if tcpPort != 0 {
+		localNode.Set(enr.TCP(tcpPort))
+	}
 	localNode.SetFallbackUDP(udpPort)
 
 	// Determine the IP to advertise in the ENR:
@@ -132,14 +131,15 @@ func NewUDPv5Listener(ctx context.Context, cfg *P2PConfig, discCfg discover.Conf
 	if err != nil {
 		return nil, err
 	}
+	boundUDPPort := conn.LocalAddr().(*net.UDPAddr).Port
 
-	localNode, err := newLocalNode(ctx, discCfg.PrivateKey, ip, cfg.ExternalIP, port, int(cfg.TCPPort), cfg.TmpDir, logger)
+	localNode, err := newLocalNode(ctx, discCfg.PrivateKey, ip, cfg.ExternalIP, boundUDPPort, int(cfg.TCPPort), cfg.TmpDir, logger)
 	if err != nil {
 		return nil, err
 	}
 
 	// Start stream handlers
-	net, err := discover.ListenV5(conn, localNode, discCfg)
+	net, err := discover.ListenV5(ctx, conn, localNode, discCfg)
 	if err != nil {
 		return nil, err
 	}

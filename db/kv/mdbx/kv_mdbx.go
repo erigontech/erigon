@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	_ "github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -144,8 +145,8 @@ func (opts MdbxOpts) WithMetrics() MdbxOpts                    { opts.metrics = 
 // Flags
 func (opts MdbxOpts) HasFlag(flag uint) bool           { return opts.flags&flag != 0 }
 func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts { opts.flags = f(opts.flags); return opts }
-func (opts MdbxOpts) AddFlags(flags uint) MdbxOpts     { opts.flags = opts.flags | flags; return opts }
-func (opts MdbxOpts) RemoveFlags(flags uint) MdbxOpts  { opts.flags = opts.flags &^ flags; return opts }
+func (opts MdbxOpts) AddFlags(flags uint) MdbxOpts     { opts.flags |= flags; return opts }
+func (opts MdbxOpts) RemoveFlags(flags uint) MdbxOpts  { opts.flags &^= flags; return opts }
 func (opts MdbxOpts) boolToFlag(enabled bool, flag uint) MdbxOpts {
 	if enabled {
 		return opts.AddFlags(flag)
@@ -177,6 +178,12 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	opts.dirtySpace = uint64(16 * datasize.MB)
 	if tb != nil {
 		opts.dirtySpace = uint64(2 * datasize.MB)
+		// Parallel unit tests pile 16GB VA reservations into the Go race heap
+		// window ("too many address space collisions for -race mode"); cap them.
+		// Benchmarks run sequentially and can need the full map.
+		if _, isBench := tb.(*testing.B); !isBench {
+			opts.mapSize = 1 * datasize.GB
+		}
 	}
 	opts.shrinkThreshold = 0 // disable
 	opts.pageSize = 4096
@@ -185,7 +192,7 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 
 var ErrDBDoesNotExists = errors.New("can't create database - because opening in `Accede` mode. probably another (main) process can create it")
 
-func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
+func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	if dbg.DirtySpace() > 0 {
 		opts = opts.DirtySpace(dbg.DirtySpace()) //nolint
 	}
@@ -221,6 +228,11 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			env.Close()
+		}
+	}()
 	if opts.label == dbcfg.ChainDB && opts.verbosity != -1 {
 		err = env.SetDebug(mdbx.LogLvl(opts.verbosity), mdbx.DbgDoNotChange, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
 		if err != nil {
@@ -342,20 +354,21 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
 		if err = env.SetSyncPeriod(opts.syncPeriod); err != nil {
-			env.Close()
 			return nil, err
 		}
 	}
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncBytes != nil {
 		if err = env.SetSyncBytes(uint(opts.syncBytes.Bytes())); err != nil {
-			env.Close()
 			return nil, err
 		}
 	}
 
 	if opts.roTxsLimiter == nil {
-		targetSemCount := int64(runtime.GOMAXPROCS(-1) * 16)
+		// Golang panics over 10K threads.
+		// RoTx doesn't create thread, but if user's goroutine facing PageFault in RoTx - such goroutine gets out of CPU-bounded-threads-pool (to unlimited-IO-bounded-threads-pool).
+		// So, 9K goroutines can produce 0 new threads (if no PageFaults) - or 9K io-threads (if read only cold data).
+		targetSemCount := int64(9_000)
 		opts.roTxsLimiter = semaphore.NewWeighted(targetSemCount) // 1 less than max to allow unlocking to happen
 	}
 
@@ -371,6 +384,8 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 		txsCountMutex:         txsCountMutex,
 		txsAllDoneOnCloseCond: sync.NewCond(txsCountMutex),
+
+		liveTxs: make(map[*MdbxTx]liveTxInfo),
 
 		leakDetector: dbg.NewLeakDetector("db."+string(opts.label), dbg.SlowTx()),
 
@@ -453,6 +468,13 @@ type MdbxKV struct {
 	txsCountMutex         *sync.Mutex
 	txsAllDoneOnCloseCond *sync.Cond
 
+	// liveTxs tracks all currently-open chaindata txs so we can dump the
+	// stacks of concurrent txs when a commit observes openTxs > 1 — answering
+	// "who held a tx alive while I was committing?" for diagnostic purposes.
+	// Keyed by the *MdbxTx pointer. Protected by txsCountMutex.
+	liveTxs       map[*MdbxTx]liveTxInfo
+	liveTxCounter uint64
+
 	leakDetector *dbg.LeakDetector
 
 	// MaxBatchSize is the maximum size of a batch. Default value is
@@ -515,6 +537,20 @@ func (db *MdbxKV) openDBIs(buckets []string) error {
 	})
 }
 
+// mdbxTraceTx enables per-tx lifecycle logging and concurrent-tx stack dumps on
+// ChainDB. Read once at startup so enabling/disabling requires a restart.
+// When false, all tracer code paths early-return — zero overhead in production.
+var mdbxTraceTx = os.Getenv("MDBX_TRACE_TX") == "true"
+
+// liveTxInfo is a diagnostic record for a currently-open chaindata tx.
+// Lets us dump the stacks of concurrent txs when a commit observes openTxs>1.
+type liveTxInfo struct {
+	id       uint64
+	kind     string // "ro" or "rw"
+	openedAt time.Time
+	stack    string
+}
+
 func (db *MdbxKV) trackTxBegin() bool {
 	db.txsCountMutex.Lock()
 	defer db.txsCountMutex.Unlock()
@@ -524,6 +560,82 @@ func (db *MdbxKV) trackTxBegin() bool {
 		db.txsCount++
 	}
 	return isOpen
+}
+
+// registerLiveTx records an open chaindata tx with its stack so concurrent-tx
+// dumps at commit time can identify it. No-op unless MDBX_TRACE_TX=true and
+// the DB is ChainDB (avoids per-alloc overhead on every ancillary DB tx).
+func (db *MdbxKV) registerLiveTx(tx *MdbxTx, readOnly bool) {
+	if !mdbxTraceTx || db.opts.label != dbcfg.ChainDB {
+		return
+	}
+	kind := "rw"
+	if readOnly {
+		kind = "ro"
+	}
+	stack := dbg.Stack()
+	openedAt := time.Now()
+
+	db.txsCountMutex.Lock()
+	db.liveTxCounter++
+	id := db.liveTxCounter
+	db.liveTxs[tx] = liveTxInfo{
+		id:       id,
+		kind:     kind,
+		openedAt: openedAt,
+		stack:    stack,
+	}
+	count := db.txsCount
+	db.txsCountMutex.Unlock()
+
+	db.log.Trace("MDBX_TX_OPEN", "id", id, "kind", kind, "count", count, "stack", stack)
+}
+
+// unregisterLiveTx removes a tx from the live set and logs a close event.
+// No-op unless MDBX_TRACE_TX=true and the DB is ChainDB.
+func (db *MdbxKV) unregisterLiveTx(tx *MdbxTx, event string) {
+	if !mdbxTraceTx || db.opts.label != dbcfg.ChainDB {
+		return
+	}
+	db.txsCountMutex.Lock()
+	info, ok := db.liveTxs[tx]
+	if ok {
+		delete(db.liveTxs, tx)
+	}
+	count := db.txsCount
+	db.txsCountMutex.Unlock()
+
+	if !ok {
+		return
+	}
+	db.log.Trace("MDBX_TX_"+event, "id", info.id, "kind", info.kind, "count", count, "stack", dbg.Stack())
+}
+
+// dumpConcurrentTxs prints the stacks of all live chaindata txs EXCEPT the
+// one currently committing. Called only when a commit observes openTxs>1,
+// to pinpoint which other tx was held alive during the commit window.
+func (db *MdbxKV) dumpConcurrentTxs(committer *MdbxTx) {
+	if !mdbxTraceTx || db.opts.label != dbcfg.ChainDB {
+		return
+	}
+	db.txsCountMutex.Lock()
+	snapshot := make([]liveTxInfo, 0, len(db.liveTxs))
+	committerID := uint64(0)
+	if info, ok := db.liveTxs[committer]; ok {
+		committerID = info.id
+	}
+	for tx, info := range db.liveTxs {
+		if tx == committer {
+			continue
+		}
+		snapshot = append(snapshot, info)
+	}
+	db.txsCountMutex.Unlock()
+
+	now := time.Now()
+	for _, info := range snapshot {
+		db.log.Trace("CONCURRENT_TX", "committer_id", committerID, "id", info.id, "kind", info.kind, "alive", now.Sub(info.openedAt), "stack", info.stack)
+	}
 }
 
 func (db *MdbxKV) hasTxsAllDoneAndClosed() bool {
@@ -610,13 +722,15 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, db.opts.label, stack2.Trace().String())
 	}
 
-	return &MdbxTx{
+	mt := &MdbxTx{
 		ctx:      ctx,
 		db:       db,
 		tx:       tx,
 		readOnly: true,
 		traceID:  db.leakDetector.Add(),
-	}, nil
+	}
+	db.registerLiveTx(mt, true)
+	return mt, nil
 }
 
 func (db *MdbxKV) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -651,12 +765,14 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 		return nil, fmt.Errorf("%w, lable: %s, trace: %s", err, db.opts.label, stack2.Trace().String())
 	}
 
-	return &MdbxTx{
+	mt := &MdbxTx{
 		db:      db,
 		tx:      tx,
 		ctx:     ctx,
 		traceID: db.leakDetector.Add(),
-	}, nil
+	}
+	db.registerLiveTx(mt, false)
+	return mt, nil
 }
 
 type MdbxTx struct {
@@ -771,6 +887,99 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) 
 	defer tx.Rollback()
 
 	return f(tx)
+}
+
+func rawCursor(c kv.Cursor) *mdbx.Cursor {
+	if dc, ok := c.(*MdbxDupSortCursor); ok {
+		return dc.c
+	}
+	return c.(*MdbxCursor).c
+}
+
+const maxDistributeCursors = 4096
+
+// DistributeCursors partitions bucket into n approximately equal-count key
+// ranges using mdbx's b-tree distribution. Fast on db >> RAM: it touches only
+// the b-tree branch nodes. Interior boundaries point into tx-owned pages — clone
+// them before any same-tx write (a range-delete invalidates them).
+func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
+	if n <= 1 {
+		return [][]byte{from, nil}, nil
+	}
+	n = min(n, maxDistributeCursors) // n is derived from table size; cap it so a multi-TB table doesn't open tens of thousands of cursors
+
+	firstC, err := tx.Cursor(table)
+	if err != nil {
+		return nil, err
+	}
+	defer firstC.Close()
+	var fk []byte
+	if from == nil {
+		fk, _, err = firstC.First()
+	} else {
+		fk, _, err = firstC.Seek(from)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if fk == nil { // empty table, or `from` is past the last key
+		return [][]byte{from, nil}, nil
+	}
+
+	// Read positions through kv.Cursor.Current: it normalizes the not-found/EOF
+	// signal, sparing us platform-specific mdbx error codes.
+	wrappers := make([]kv.Cursor, n)
+	cursors := make([]*mdbx.Cursor, n)
+	for i := range wrappers {
+		cw, err := tx.Cursor(table)
+		if err != nil {
+			return nil, err
+		}
+		defer cw.Close()
+		wrappers[i], cursors[i] = cw, rawCursor(cw)
+	}
+
+	// Distribute at the lowest branch level (Depth-2), not the leaves: keeps the
+	// count-traversal in branch pages (cheap, cacheable) instead of faulting cold
+	// leaves on a >>RAM table. Balance stays within ~1%; 42 only for shallow trees.
+	deepness := uint(42)
+	if st, err := tx.BucketStat(table); err == nil && st.Depth > 2 {
+		deepness = st.Depth - 2
+	}
+	// allSet is false when the range had fewer positions than n: the surplus
+	// cursors are left hollow, and Current() normalizes them to a nil key below.
+	allSet, err := mdbx.DistributeCursors(rawCursor(firstC), nil, cursors, deepness)
+	if err != nil {
+		return nil, err
+	}
+
+	keys := make([][]byte, 0, n)
+	for _, cw := range wrappers {
+		k, _, err := cw.Current()
+		if err != nil {
+			return nil, err
+		}
+		if k == nil { // hollow surplus cursor: Current normalizes ENODATA to nil
+			break
+		}
+		keys = append(keys, k)
+	}
+	if allSet && len(keys) > 0 {
+		keys = keys[:len(keys)-1] // last cursor pins the table's last key; nil closes the final range
+	}
+
+	bounds := make([][]byte, 0, len(keys)+2)
+	bounds = append(bounds, from)
+	var prev []byte
+	for _, k := range keys {
+		if prev != nil && bytes.Equal(k, prev) {
+			continue // clustered keys collapsed to one boundary
+		}
+		bounds = append(bounds, k)
+		prev = k
+	}
+	bounds = append(bounds, nil)
+	return bounds, nil
 }
 
 func (tx *MdbxTx) Apply(_ context.Context, f func(tx kv.Tx) error) (err error) {
@@ -994,6 +1203,46 @@ func (tx *MdbxTx) ClearTable(bucket string) error {
 	return tx.tx.Drop(mdbx.DBI(dbi), false)
 }
 
+// DeleteRange removes keys in [from, to) using mdbx's native bulk range-delete,
+// which cuts whole pages and branches out of the B-tree at once. to==nil deletes
+// through the last key. Returns the number of keys removed.
+func (tx *MdbxTx) DeleteRange(table string, from, to []byte) (uint64, error) {
+	beginC, err := tx.RwCursor(table)
+	if err != nil {
+		return 0, err
+	}
+	defer beginC.Close()
+	bk, _, err := beginC.Seek(from)
+	if err != nil {
+		return 0, err
+	}
+	if bk == nil {
+		return 0, nil
+	}
+
+	begin := rawCursor(beginC)
+	var end *mdbx.Cursor
+	endIncluding := true // nil end => delete through the last key
+	if to != nil {
+		endC, err := tx.RwCursor(table)
+		if err != nil {
+			return 0, err
+		}
+		defer endC.Close()
+		ek, _, err := endC.Seek(to)
+		if err != nil {
+			return 0, err
+		}
+		if ek != nil {
+			if bytes.Compare(bk, ek) >= 0 {
+				return 0, nil // empty range
+			}
+			end, endIncluding = rawCursor(endC), false
+		}
+	}
+	return begin.DeleteRange(end, endIncluding)
+}
+
 func (tx *MdbxTx) DropTable(bucket string) error {
 	if cfg, ok := tx.db.buckets[bucket]; !(ok && cfg.IsDeprecated) {
 		return fmt.Errorf("%w, bucket: %s", kv.ErrAttemptToDeleteNonDeprecatedBucket, bucket)
@@ -1014,6 +1263,7 @@ func (tx *MdbxTx) Commit() error {
 		return nil
 	}
 	defer func() {
+		tx.db.unregisterLiveTx(tx, "COMMIT")
 		tx.tx = nil
 		tx.db.trackTxEnd()
 		if tx.readOnly {
@@ -1038,14 +1288,37 @@ func (tx *MdbxTx) Commit() error {
 		if err != nil {
 			tx.db.opts.log.Error("failed to record mdbx summaries", "err", err)
 		}
-
-		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
-		//kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
-		//kv.DbGcWorkPnlMergeCalls.Set(uint64(latency.GCDetails.WorkPnlMergeCalls))
-		//
-		//kv.DbGcSelfPnlMergeTime.Update(latency.GCDetails.SelfPnlMergeTime.Seconds())
-		//kv.DbGcSelfPnlMergeVolume.Set(uint64(latency.GCDetails.SelfPnlMergeVolume))
-		//kv.DbGcSelfPnlMergeCalls.Set(uint64(latency.GCDetails.SelfPnlMergeCalls))
+	}
+	// Per-commit diagnostic log. Pairs with the MDBX_TX_OPEN/COMMIT/ROLLBACK
+	// tracer and the CONCURRENT_TX dumper — only useful when actively
+	// investigating GC / openTxs behavior. Gated behind the same env var so
+	// production runs don't get a log line per chaindata commit.
+	if mdbxTraceTx && tx.db.opts.label == dbcfg.ChainDB {
+		openTxs := tx.db.txsCount
+		tx.db.opts.log.Info("[mdbx] commit",
+			"whole", latency.Whole,
+			"gc", latency.GCWallClock,
+			"write", latency.Write,
+			"sync", latency.Sync,
+			"openTxs", openTxs,
+			"gcLoops", latency.GCDetails.Wloops,
+			"gcCoalesce", latency.GCDetails.Coalescences,
+			"gcWorkRsteps", latency.GCDetails.WorkRsteps,
+			"gcWorkRxpages", latency.GCDetails.WorkRxpages,
+			"gcWorkCounter", latency.GCDetails.WorkCounter,
+			"gcSelfRsteps", latency.GCDetails.SelfRsteps,
+			"gcSelfXpages", latency.GCDetails.SelfXpages,
+			"gcSelfCounter", latency.GCDetails.SelfCounter,
+			"gcWipes", latency.GCDetails.Wipes,
+			"gcFlushes", latency.GCDetails.Flushes,
+			"gcKicks", latency.GCDetails.Kicks,
+		)
+		// openTxs includes the committer itself — >1 means at least one other
+		// tx was held alive during this commit. Dump its stack so we can
+		// identify the callsite.
+		if openTxs > 1 {
+			tx.db.dumpConcurrentTxs(tx)
+		}
 	}
 
 	return nil
@@ -1057,6 +1330,7 @@ func (tx *MdbxTx) Rollback() {
 	}
 	tx.closeCursors()
 	tx.tx.Abort()
+	tx.db.unregisterLiveTx(tx, "ROLLBACK")
 	tx.tx = nil
 	tx.db.trackTxEnd()
 	if tx.readOnly {
@@ -1235,6 +1509,14 @@ func (tx *MdbxTx) DBSize() (uint64, error) {
 	return info.Geo.Current, err
 }
 
+func (db *MdbxKV) DBSize() (uint64, error) {
+	info, err := db.env.Info(nil)
+	if err != nil {
+		return 0, err
+	}
+	return info.Geo.Current, nil
+}
+
 func (tx *MdbxTx) RwCursor(bucket string) (kv.RwCursor, error) {
 	b := tx.db.buckets[bucket]
 	if b.Flags&kv.DupSort != 0 {
@@ -1345,7 +1627,7 @@ func (c *MdbxCursor) Prev() (k, v []byte, err error) {
 func (c *MdbxCursor) Current() ([]byte, []byte, error) {
 	k, v, err := c.c.Get(nil, nil, mdbx.GetCurrent)
 	if err != nil {
-		if mdbx.IsNotFound(err) {
+		if mdbx.IsNotFound(err) || mdbx.IsNoData(err) {
 			return nil, nil, nil
 		}
 		return []byte{}, nil, err
@@ -1457,7 +1739,7 @@ func (c *MdbxCursorPseudoDupSort) LastDup() ([]byte, error) {
 		if mdbx.IsNotFound(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("in FirstDup: tbl=%s, %w", c.bucketName, err)
+		return nil, fmt.Errorf("in LastDup: tbl=%s, %w", c.bucketName, err)
 	}
 	return v, nil
 }
@@ -1610,7 +1892,16 @@ func (c *MdbxDupSortCursor) PutNoDupData(k, v []byte) error {
 	if err := c.c.Put(k, v, mdbx.NoDupData); err != nil {
 		return fmt.Errorf("label: %s, in PutNoDupData: %w", c.label, err)
 	}
+	return nil
+}
 
+// PutCurrent replaces the current dup entry in-place. The cursor must be
+// positioned (e.g. via SeekBothRange) on the entry to replace.
+// Saves one CGo call vs DeleteCurrent()+Put() for the update path.
+func (c *MdbxDupSortCursor) PutCurrent(k, v []byte) error {
+	if err := c.c.PutCurrent(k, v); err != nil {
+		return fmt.Errorf("label: %s, in PutCurrent: %w", c.label, err)
+	}
 	return nil
 }
 

@@ -63,7 +63,7 @@ type ttFork struct {
 	IntrinsicGas *math.HexOrDecimal256 `json:"intrinsicGas"`
 }
 
-func (tt *TransactionTest) Run(chainID *big.Int) error {
+func (tt *TransactionTest) Run(chainID *uint256.Int) error {
 	validateTx := func(rlpData hexutil.Bytes, signer types.Signer, rules *chain.Rules) (*common.Address, *common.Hash, uint64, error) {
 		tx, err := types.DecodeTransaction(rlpData)
 		if err != nil {
@@ -86,11 +86,15 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 			AccessListLen:      uint64(len(msg.AccessList())),
 			StorageKeysLen:     uint64(msg.AccessList().StorageKeys()),
 			IsContractCreation: msg.To().IsNil(),
+			IsSelfTransfer:     !msg.To().IsNil() && msg.To() == sender,
+			HasValue:           !msg.Value().IsZero(),
 			IsEIP2:             rules.IsHomestead,
 			IsEIP2028:          rules.IsIstanbul,
 			IsEIP3860:          rules.IsShanghai,
 			IsEIP7623:          rules.IsPrague,
-			IsEIP8037:          rules.IsAmsterdam,
+			IsEIP7976:          rules.IsAmsterdam,
+			IsEIP7981:          rules.IsAmsterdam,
+			IsEIP2780:          rules.IsAmsterdam,
 		})
 		requiredGas := intrinsicGasResult.RegularGas
 		if rules.IsPrague && intrinsicGasResult.FloorGasCost > requiredGas {

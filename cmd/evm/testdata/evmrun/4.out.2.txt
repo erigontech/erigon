@@ -1,1 +1,1 @@
-^\z
+^\{"stateRoot": "0xad1024c87b5548e77c937aa50f72b6cb620d278f4dd79bae7f78f71ff75af458"\}\n\z

@@ -17,7 +17,7 @@
 package cli
 
 import (
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/utils"
 )
@@ -44,19 +44,27 @@ var DefaultFlags = []cli.Flag{
 	&PruneBlocksDistanceFlag,
 	&PruneModeFlag,
 	&utils.KeepExecutionProofsFlag,
+	&utils.CommitmentHistoryDistanceFlag,
 	&utils.FcuTimeoutFlag,
 	&utils.FcuBackgroundPruneFlag,
 	&utils.FcuBackgroundCommitFlag,
+	&utils.ExecBatchedIOFlag,
+	&utils.ExecStateCacheFlag,
+	&utils.ExecWorkersFlag,
+	&utils.ExecSerialFlag,
+	&utils.ExecNoMergeFlag,
+	&utils.ExecNoPruneFlag,
+	&utils.ExecNoBackgroundMaintenanceFlag,
 	&BatchSizeFlag,
 	&BodyCacheLimitFlag,
 	&DatabaseVerbosityFlag,
 	&PrivateApiAddr,
 	&PrivateApiRateLimit,
 	&EtlBufferSizeFlag,
-	&TLSFlag,
-	&TLSCertFlag,
-	&TLSKeyFlag,
-	&TLSCACertFlag,
+	&utils.TLSFlag,
+	&utils.TLSCertFlag,
+	&utils.TLSKeyFlag,
+	&utils.TLSCACertFlag,
 	&StateStreamDisableFlag,
 	&ExperimentalBALFlag,
 	&SyncLoopThrottleFlag,
@@ -89,8 +97,11 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcAccessListFlag,
 	&utils.RpcTraceCompatFlag,
 	&utils.RpcGethCompatFlag,
+	&utils.WitnessCacheBlocksFlag,
 	&utils.RpcGasCapFlag,
 	&utils.RpcBlockRangeLimit,
+	&utils.RpcGetLogsMaxResults,
+	&utils.RpcLogQueryLimit,
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
 	&utils.AllowUnprotectedTxs,
@@ -114,12 +125,14 @@ var DefaultFlags = []cli.Flag{
 	&RpcSubscriptionFiltersMaxTxsFlag,
 	&RpcSubscriptionFiltersMaxAddressesFlag,
 	&RpcSubscriptionFiltersMaxTopicsFlag,
+	&RpcSubscriptionFiltersTimeoutFlag,
 
 	&utils.SnapKeepBlocksFlag,
 	&utils.SnapStopFlag,
 	&utils.SnapStateStopFlag,
 	&utils.SnapSkipStateSnapshotDownloadFlag,
 	&utils.SnapP2PManifestFlag,
+	&utils.SnapChainTomlURLFlag,
 	&utils.SnapDownloadToBlockFlag,
 	&utils.DbPageSizeFlag,
 	&utils.DbSizeLimitFlag,
@@ -136,7 +149,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.TorrentVerbosityFlag,
 	&utils.ListenPortFlag,
 	&utils.P2pProtocolVersionFlag,
-	&utils.P2pProtocolAllowedPorts,
 	&utils.NATFlag,
 	&utils.NoDiscoverFlag,
 	&utils.DiscoveryV4Flag,
@@ -157,6 +169,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.VMEnableDebugFlag,
 	&utils.NetworkIdFlag,
 	&utils.PersistReceiptsV2Flag,
+	&utils.PersistReceiptsDistanceFlag,
 	&utils.FakePoWFlag,
 	&utils.GpoBlocksFlag,
 	&utils.GpoPercentileFlag,
@@ -174,7 +187,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.DisableIPV6,
 	&utils.NoDownloaderFlag,
 	&utils.DownloaderVerifyFlag,
-	&HealthCheckFlag,
+	&utils.HealthCheckFlag,
 	&utils.HeimdallURLFlag,
 	&utils.WebSeedsFlag,
 	&utils.WithoutHeimdallFlag,
@@ -193,6 +206,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinSubscribeAllTopicsFlag,
 	&utils.CaplinMaxPeerCount,
 	&utils.CaplinEnableUPNPlag,
+	&utils.CaplinLocalDiscoveryFlag,
 	&utils.CaplinNATFlag,
 	&utils.CaplinMaxInboundTrafficPerPeerFlag,
 	&utils.CaplinMaxOutboundTrafficPerPeerFlag,
@@ -252,11 +266,13 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.GDBMeFlag,
 
-	&utils.ExperimentalConcurrentCommitmentFlag,
+	&utils.ExperimentalParallelCommitmentFlag,
+	&utils.ExperimentalStreamingCommitmentFlag,
 
 	&utils.MCPDisableFlag,
 	&utils.MCPAddrFlag,
 	&utils.MCPPortFlag,
 
 	&utils.ErigondbDomainStepsInFrozenFileFlag,
+	&utils.CommitmentPlainValuesFlag,
 }

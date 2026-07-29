@@ -18,6 +18,7 @@ package historical_states_reader_test
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -66,19 +67,25 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 }
 
 func TestStateAntiquaryCapella(t *testing.T) {
-	t.Skip("oom on CI")
+	if os.Getenv("ERIGON_RUN_HEAVY_TESTS") == "" {
+		t.Skip("oom-prone; set ERIGON_RUN_HEAVY_TESTS=1 to run")
+	}
 	blocks, preState, postState := tests.GetCapellaRandom()
 	runTest(t, blocks, preState, postState)
 }
 
 func TestStateAntiquaryPhase0(t *testing.T) {
-	t.Skip("oom on CI")
+	if os.Getenv("ERIGON_RUN_HEAVY_TESTS") == "" {
+		t.Skip("oom-prone; set ERIGON_RUN_HEAVY_TESTS=1 to run")
+	}
 	blocks, preState, postState := tests.GetPhase0Random()
 	runTest(t, blocks, preState, postState)
 }
 
 func TestStateAntiquaryBellatrix(t *testing.T) {
-	t.Skip("oom on CI")
+	if os.Getenv("ERIGON_RUN_HEAVY_TESTS") == "" {
+		t.Skip("oom-prone; set ERIGON_RUN_HEAVY_TESTS=1 to run")
+	}
 	blocks, preState, postState := tests.GetBellatrixRandom()
 	runTest(t, blocks, preState, postState)
 }

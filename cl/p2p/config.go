@@ -6,12 +6,12 @@ import (
 	"net"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/libp2p/go-libp2p"
 	mplex "github.com/libp2p/go-libp2p-mplex"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
-	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/multiformats/go-multiaddr"
 )
@@ -48,7 +48,6 @@ func multiAddressBuilder(ipAddr string, port uint) (multiaddr.Multiaddr, error) 
 }
 
 func buildOptions(cfg *P2PConfig, privateKey *ecdsa.PrivateKey) ([]libp2p.Option, error) {
-
 	listen, err := multiAddressBuilder(cfg.IpAddr, cfg.TCPPort)
 	if err != nil {
 		return nil, err
@@ -66,9 +65,8 @@ func buildOptions(cfg *P2PConfig, privateKey *ecdsa.PrivateKey) ([]libp2p.Option
 	options := []libp2p.Option{
 		privKeyOption(privateKey),
 		libp2p.ListenAddrs(listen),
-		libp2p.UserAgent("erigon/caplin"),
+		libp2p.UserAgent("erigon/caplin/" + version.NodeVersion()),
 		libp2p.Transport(tcp.NewTCPTransport),
-		libp2p.Transport(libp2pquic.NewTransport),
 		libp2p.Muxer("/mplex/6.7.0", mplex.DefaultTransport),
 		libp2p.DefaultMuxers,
 		libp2p.Ping(false),

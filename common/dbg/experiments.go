@@ -38,12 +38,15 @@ import (
 var (
 	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
-	noMemstat            = EnvBool("NO_MEMSTAT", false)
-	saveHeapProfile      = EnvBool("SAVE_HEAP_PROFILE", false)
-	heapProfileFilePath  = EnvString("HEAP_PROFILE_FILE_PATH", "")
-	heapProfileThreshold = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
-	heapProfileFrequency = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
-	StagesOnlyBlocks     = EnvBool("STAGES_ONLY_BLOCKS", false)
+	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", 0)
+
+	saveHeapProfile             = EnvBool("SAVE_HEAP_PROFILE", false)
+	heapProfileFilePath         = EnvString("HEAP_PROFILE_FILE_PATH", "")
+	heapProfileThresholdPercent = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
+	heapProfileFrequency        = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
+	noMemstat                   = EnvBool("NO_MEMSTAT", false)
+
+	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
@@ -56,9 +59,11 @@ var (
 
 	//state v3
 	noPrune              = EnvBool("NO_PRUNE", false)
-	noMerge              = EnvBool("NO_MERGE", false)              // don't merge Domain/Hist/II
-	noMergeHistory       = EnvBool("NO_MERGE_HISTORY", false)      // don't merge Hist/II but still merge Domain
-	noDeepMergeHistory   = EnvBool("NO_DEEP_MERGE_HISTORY", false) // merge Hist/II only up to 2 steps (small+fast), skip larger merges
+	noRetire             = EnvBool("NO_RETIRE", false)              // kill-switch: don't delete aged frozen files (history/II + block snapshots)
+	noMerge              = EnvBool("NO_MERGE", false)               // don't merge Domain/Hist/II
+	noBackgroundE3Build  = EnvBool("NO_BACKGROUND_E3_BUILD", false) // suppress background E3 file build / merge / retire goroutines
+	noMergeHistory       = EnvBool("NO_MERGE_HISTORY", false)       // don't merge Hist/II but still merge Domain
+	noDeepMergeHistory   = EnvBool("NO_DEEP_MERGE_HISTORY", false)  // merge Hist/II only up to 2 steps (small+fast), skip larger merges
 	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
 	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 
@@ -73,12 +78,14 @@ var (
 	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1) // allows 1 kind of snapshots to be built simultaneously
 
 	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
-	OnlyCreateDB    = EnvBool("ONLY_CREATE_DB", false)
+	// kill-switch: set SNAPSHOT_MADV_SEQUENTIAL=false to skip MADV_SEQUENTIAL in seg.OpenSequentialView
+	SnapshotMadvSequential = EnvBool("SNAPSHOT_MADV_SEQUENTIAL", true)
+	OnlyCreateDB           = EnvBool("ONLY_CREATE_DB", false)
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
-	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", false)
-	numWorkers           = runtime.NumCPU() / 2
+	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", true)
+	numWorkers           = runtime.NumCPU()
 	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
 	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
 	CompressWorkers      = EnvInt("COMPRESS_WORKERS", 0) // 0 means "not set": online presets default to 1, offline presets use RAM/CPU estimates
@@ -89,34 +96,62 @@ var (
 
 	MergeThrottleMs = EnvInt("ERIGON_MERGE_THROTTLE_MS", 0)
 
+	// Trace is the umbrella switch: TRACE=true force-enables opcode + gas tracing
+	// for every tx (it makes IntraBlockState.Trace() true and turns on the
+	// instruction/gas sub-flags below), for debugging a single fixture end-to-end.
+	Trace                 = EnvBool("TRACE", false)
 	TraceAccounts         = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys        = EnvStrings("TRACE_STATE_KEYS", ",", nil)
-	TraceInstructions     = EnvBool("TRACE_INSTRUCTIONS", false)
+	TraceInstructions     = EnvBool("TRACE_INSTRUCTIONS", false) || Trace
 	TraceTransactionIO    = EnvBool("TRACE_TRANSACTION_IO", false)
 	TraceDomainIO         = EnvBool("TRACE_DOMAIN_IO", false)
 	TraceNoopIO           = EnvBool("TRACE_NOOP_IO", false)
 	TraceLogs             = EnvBool("TRACE_LOGS", false)
-	TraceGas              = EnvBool("TRACE_GAS", false)
-	TraceDynamicGas       = EnvBool("TRACE_DYNAMIC_GAS", false)
+	TraceGas              = EnvBool("TRACE_GAS", false) || Trace
+	TraceDynamicGas       = EnvBool("TRACE_DYNAMIC_GAS", false) || Trace
 	TraceApply            = EnvBool("TRACE_APPLY", false)
+	TraceTouchKey         = EnvBool("TRACE_TOUCH_KEY", false)
 	TraceBlockAccessLists = EnvBool("TRACE_BLOCK_ACCESS_LISTS", false)
 	TraceBlocks           = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes        = EnvInts("TRACE_TXINDEXES", ",", nil)
 	TraceUnwinds          = EnvBool("TRACE_UNWINDS", false)
 	traceDomains          = EnvStrings("TRACE_DOMAINS", ",", nil)
 	StopAfterBlock        = EnvUint("STOP_AFTER_BLOCK", 0)
+	BadBlockHalt          = EnvBool("BAD_BLOCK_HALT", false)
 	IgnoreBAL             = EnvBool("IGNORE_BAL", false)
 	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
-	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
-	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
-	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
-	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
+	// BALDrivenCommitment folds a block's commitment from its BAL ahead of the
+	// per-tx result stream, overlapping execution. On by default; set
+	// BAL_DRIVEN_COMMITMENT=false (or IGNORE_BAL=true) to fall back to the
+	// incremental path if it ever misbehaves.
+	BALDrivenCommitment = EnvBool("BAL_DRIVEN_COMMITMENT", true)
+	// BALShadowCompute (requires BALDrivenCommitment) also computes each
+	// BAL-driven block incrementally and asserts both roots match before
+	// publishing; without it the BAL-driven root is published directly.
+	BALShadowCompute     = EnvBool("BAL_SHADOW_COMPUTE", false)
+	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
+	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
+	UseStateCache        = EnvBool("USE_STATE_CACHE", true)
+	UseCodeStore         = EnvBool("USE_CODE_STORE", true)
+	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", false)
+	AssertStateCache     = EnvBool("ASSERT_STATE_CACHE", false)
+	ReadAhead            = EnvBool("READ_AHEAD", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
 
-	RpcDropResponse = EnvBool("RPC_DROP_RESPONSE", false)
+	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
+	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", estimate.HalfCPUs())
+
+	PerfProfiles = EnvBool("PERF_PROFILES", false)
 )
+
+func init() {
+	if PerfProfiles {
+		runtime.SetBlockProfileRate(1)
+		runtime.SetMutexProfileFraction(1)
+	}
+}
 
 func ReadMemStats(m *runtime.MemStats) {
 	if noMemstat {
@@ -125,12 +160,25 @@ func ReadMemStats(m *runtime.MemStats) {
 	runtime.ReadMemStats(m)
 }
 
-func DiscardCommitment() bool    { return discardCommitment }
-func NoPrune() bool              { return noPrune }
-func NoMerge() bool              { return noMerge }
-func NoMergeHistory() bool       { return noMergeHistory }
-func NoDeepMergeHistory() bool   { return noDeepMergeHistory }
-func PruneTotalDifficulty() bool { return pruneTotalDifficulty }
+func DiscardCommitment() bool       { return discardCommitment }
+func NoPrune() bool                 { return noPrune }
+func NoRetire() bool                { return noRetire }
+func NoMerge() bool                 { return noMerge }
+func NoBackgroundMaintenance() bool { return noBackgroundE3Build }
+func NoMergeHistory() bool          { return noMergeHistory }
+func NoDeepMergeHistory() bool      { return noDeepMergeHistory }
+func PruneTotalDifficulty() bool    { return pruneTotalDifficulty }
+
+// CLI-override setters for the performance toggles that also have env-var
+// twins. The env var sets the initial value at package init; the CLI layer
+// calls these at node startup only when the user explicitly set the flag.
+func SetIgnoreBAL(b bool)               { IgnoreBAL = b }
+func SetUseStateCache(b bool)           { UseStateCache = b }
+func SetReadAhead(b bool)               { ReadAhead = b }
+func SetExec3Workers(n int)             { Exec3Workers = n }
+func SetNoPrune(b bool)                 { noPrune = b }
+func SetNoMerge(b bool)                 { noMerge = b }
+func SetNoBackgroundMaintenance(b bool) { noBackgroundE3Build = b }
 
 var (
 	dirtySace     uint64
@@ -223,10 +271,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 		opt(&options)
 	}
 
-	var logger log.Logger
-	if options.logger != nil {
-		logger = *options.logger
-	}
+	logger := common.Deref(options.logger)
 
 	var memStats runtime.MemStats
 	if options.memStats != nil {
@@ -236,14 +281,19 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	}
 
 	totalMemory := estimate.TotalMemory()
+	threshold := (totalMemory / 100) * heapProfileThresholdPercent
+	aboveThreshold := memStats.Alloc >= threshold
 	if logger != nil {
 		logger.Info(
-			"[Experiment] heap profile threshold check",
+			"[Experiment] heap check",
+			"threshold", common.ByteCount(threshold),
 			"alloc", common.ByteCount(memStats.Alloc),
+			"aboveThreshold", aboveThreshold,
+			"sys", common.ByteCount(memStats.Sys),
 			"total", common.ByteCount(totalMemory),
 		)
 	}
-	if memStats.Alloc < (totalMemory/100)*heapProfileThreshold {
+	if !aboveThreshold {
 		return
 	}
 

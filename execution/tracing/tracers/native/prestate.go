@@ -55,6 +55,10 @@ type account struct {
 	CodeHash *common.Hash                `json:"codeHash,omitempty"`
 	Nonce    uint64                      `json:"nonce,omitempty"`
 	Storage  map[common.Hash]common.Hash `json:"storage,omitempty"`
+	// empty records whether the account existed before the tx, decided at first
+	// lookup (before Storage is populated by SLOAD/SSTORE) so that later reads of
+	// its own storage during the tx don't retroactively make it look non-empty.
+	empty bool
 }
 
 func (a *account) exists() bool {
@@ -74,8 +78,8 @@ type prestateTracer struct {
 	to        accounts.Address
 	gasLimit  uint64 // Amount of gas bought for the whole tx
 	config    prestateTracerConfig
-	interrupt atomic.Bool // Atomic flag to signal execution interruption
-	reason    error       // Textual reason for the interruption
+	interrupt atomic.Bool           // Atomic flag to signal execution interruption
+	reason    atomic.Pointer[error] // Reason for the interruption, populated by Stop
 	created   map[accounts.Address]bool
 	deleted   map[accounts.Address]bool
 }
@@ -110,29 +114,15 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: t.OnTxStart,
-			OnTxEnd:   t.OnTxEnd,
-			OnOpcode:  t.OnOpcode,
-			OnExit:    t.OnExit,
+			OnTxStart:           t.OnTxStart,
+			OnSystemCallStartV2: t.OnSystemCallStartV2,
+			OnTxEnd:             t.OnTxEnd,
+			OnOpcode:            t.OnOpcode,
+			OnExit:              t.OnExit,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
 	}, nil
-}
-
-// CaptureEnd is called after the call finishes to finalize the tracing.
-func (t *prestateTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
-	if t.config.DiffMode {
-		return
-	}
-
-	if t.create {
-		// Keep existing account prior to contract creation at that address
-		if s := t.pre[t.to]; s != nil && !s.exists() {
-			// Exclude newly created contract.
-			delete(t.pre, t.to)
-		}
-	}
 }
 
 // ExitHook is invoked when the processing of a message ends.
@@ -199,10 +189,9 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 		size := stackData[stackLen-3]
 		init, err := tracers.GetMemoryCopyPadded(scope.MemoryData(), int64(offset.Uint64()), int64(size.Uint64()))
 		if err != nil {
-			t.Stop(fmt.Errorf("failed to copy CREATE2 in prestate tracer input err: %s", err))
 			return
 		}
-		inithash := accounts.InternCodeHash(crypto.HashData(init))
+		inithash := accounts.InternCodeHash(crypto.Keccak256Hash(init))
 		salt := stackData[stackLen-4]
 		addr := accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), inithash))
 		t.lookupAccount(addr)
@@ -237,7 +226,9 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	// Add accounts with authorizations to the prestate before they get applied.
 	var b [32]byte
 	data := bytes.NewBuffer(nil)
-	for _, auth := range tx.GetAuthorizations() {
+	auths := tx.GetAuthorizations()
+	for i := range auths {
+		auth := &auths[i]
 		data.Reset()
 		addr, err := auth.RecoverSigner(data, b[:])
 		if err != nil {
@@ -249,6 +240,11 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	if t.create && t.config.DiffMode {
 		t.created[t.to] = true
 	}
+}
+
+func (t *prestateTracer) OnSystemCallStartV2(env *tracing.VMContext) {
+	t.env = env
+	t.lookupAccount(env.Coinbase)
 }
 
 func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
@@ -263,8 +259,8 @@ func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	if t.config.IncludeEmpty {
 		return
 	}
-	for addr := range t.pre {
-		if s := t.pre[addr]; s != nil && !s.exists() {
+	for addr, s := range t.pre {
+		if s.empty {
 			delete(t.pre, addr)
 		}
 	}
@@ -283,26 +279,24 @@ func (t *prestateTracer) processDiffState() {
 
 		newBalance, _ := t.env.IntraBlockState.GetBalance(addr)
 		newNonce, _ := t.env.IntraBlockState.GetNonce(addr)
-		newCode, _ := t.env.IntraBlockState.GetCode(addr)
-		newCodeHash := empty.CodeHash
-		if len(newCode) > 0 {
-			newCodeHash = crypto.HashData(newCode)
-		}
+		// GetCode returns empty bytes for both deleted and codeless accounts;
+		// GetCodeHash distinguishes them (deleted → zero hash).
+		codeHash, _ := t.env.IntraBlockState.GetCodeHash(addr)
+		newCodeHash := codeHash.Value()
 
-		if newBalance.ToBig().Cmp(t.pre[addr].Balance) != 0 {
+		newBalanceBig := newBalance.ToBig()
+		if newBalanceBig.Cmp(state.Balance) != 0 {
 			modified = true
-			postAccount.Balance = newBalance.ToBig()
+			postAccount.Balance = newBalanceBig
 		}
-		if newNonce != t.pre[addr].Nonce {
+		if newNonce != state.Nonce {
 			modified = true
 			postAccount.Nonce = newNonce
 		}
 
-		// Empty code hashes are excluded from the prestate, so default
-		// to EmptyCodeHash to match what GetCodeHash returns for codeless accounts.
 		prevCodeHash := empty.CodeHash
-		if t.pre[addr].CodeHash != nil {
-			prevCodeHash = *t.pre[addr].CodeHash
+		if state.CodeHash != nil {
+			prevCodeHash = *state.CodeHash
 		}
 
 		if newCodeHash != prevCodeHash {
@@ -311,10 +305,8 @@ func (t *prestateTracer) processDiffState() {
 		}
 
 		if !t.config.DisableCode {
-			var prevCode []byte
-			if t.pre[addr].Code != nil {
-				prevCode = *t.pre[addr].Code
-			}
+			newCode, _ := t.env.IntraBlockState.GetCode(addr)
+			prevCode := common.Deref(state.Code)
 			if !bytes.Equal(newCode, prevCode) {
 				modified = true
 				postAccount.Code = &newCode
@@ -325,13 +317,13 @@ func (t *prestateTracer) processDiffState() {
 			for key, val := range state.Storage {
 				// don't include the empty slot
 				if val == (common.Hash{}) {
-					delete(t.pre[addr].Storage, key)
+					delete(state.Storage, key)
 				}
 
 				newVal, _ := t.env.IntraBlockState.GetState(addr, accounts.InternKey(key))
 				if new(uint256.Int).SetBytes(val[:]).Eq(&newVal) {
 					// Omit unchanged slots
-					delete(t.pre[addr].Storage, key)
+					delete(state.Storage, key)
 				} else {
 					modified = true
 					if !newVal.IsZero() {
@@ -366,12 +358,15 @@ func (t *prestateTracer) GetResult() (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.RawMessage(res), t.reason
+	if p := t.reason.Load(); p != nil {
+		return json.RawMessage(res), *p
+	}
+	return json.RawMessage(res), nil
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.
 func (t *prestateTracer) Stop(err error) {
-	t.reason = err
+	t.reason.Store(&err)
 	t.interrupt.Store(true)
 }
 
@@ -393,9 +388,10 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 
 	if len(code) > 0 {
 		acc.Code = &code
-		codeHash := crypto.HashData(code)
+		codeHash := crypto.Keccak256Hash(code)
 		acc.CodeHash = &codeHash
 	}
+	acc.empty = !acc.exists()
 	// The code must be fetched first for the emptiness check.
 	if t.config.DisableCode {
 		acc.Code = nil

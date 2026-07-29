@@ -82,7 +82,7 @@ func (tf *AtomicTorrentFS) writeFile(name string, r io.Reader) (err error) {
 		}
 		// I wonder if in some circumstances os.Rename can fail but the source file is gone. I doubt
 		// it.
-		err = errors.Join(dir.RemoveFile(f.Name()))
+		err = errors.Join(err, dir.RemoveFile(f.Name()))
 	}()
 	closed := false
 	defer func() {

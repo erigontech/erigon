@@ -1,3 +1,8 @@
+---
+name: hive-test
+description: Run Ethereum Hive integration tests against a local Erigon build, including engine, RPC compatibility, standard EEST, BAL/Amsterdam EEST, and RLP suites. Use when setting up an ephemeral Hive environment, selecting or running Hive suites, interpreting Hive failures, or cleaning up Hive test resources.
+---
+
 # Skill: hive-test
 
 Run Ethereum Hive integration tests against a local Erigon build. Works from a clean
@@ -27,7 +32,7 @@ The user may specify one or more test suites in any combination:
 | `auth` | ethereum/engine | Engine auth |
 | `rpc-compat` | ethereum/rpc | RPC compatibility |
 | `eest` | ethereum/eels/consume-engine | Execution Spec Tests (version auto-discovered) |
-| `eest-bal` | ethereum/eels/consume-engine | EEST BAL amsterdam fixtures (version auto-discovered) |
+| `eest-devnet` | ethereum/eels/consume-engine | EEST devnet (BAL/glamsterdam) fixtures (version auto-discovered) |
 | `eest-rlp` | ethereum/eels/consume-rlp | EEST RLP block import (BlockchainTest, all forks) |
 
 ### Groups
@@ -41,7 +46,7 @@ The user may specify one or more test suites in any combination:
 - `/hive-test withdrawals api` - Run withdrawals and API suites
 - `/hive-test engine` - Run all engine suites
 - `/hive-test engine rpc-compat` - Run all engine suites plus rpc-compat
-- `/hive-test eest-bal` - Run BAL-specific EEST tests
+- `/hive-test eest-devnet` - Run devnet EEST tests (BAL/glamsterdam)
 - `/hive-test eest-rlp` - Run EEST RLP block-import tests
 - `/hive-test all` - Run everything
 
@@ -57,7 +62,7 @@ The user may specify one or more test suites in any combination:
 
 Sources of truth: `.github/workflows/test-hive.yml` (`max-allowed-failures` per matrix
 entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
-(`max-failures`, default 0) for eest shards.
+(`max-failures` per matrix entry, currently 0 everywhere) for eest shards.
 
 | Suite | Max Allowed Failures |
 |-------|---------------------|
@@ -69,13 +74,15 @@ entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
 | rpc-compat | 0 |
 | eest (consume-engine) | 0 |
 | eest-rlp | 0 |
-| eest-bal (CI shard: `glamsterdam-devnet`) | 1 (`test_block_regular_gas_limit` — `GAS_USED_OVERFLOW` vs `GAS_ALLOWANCE_EXCEEDED` error classification mismatch) |
+| eest-devnet (CI shard: `glamsterdam-devnet`) | 0 |
 
 Note: Failure counts are version-dependent and may change with newer fixtures.
-The CI `glamsterdam-devnet` shard runs BAL EIPs (`8024|7708|7778|7843|7928|7954|8037`)
-against `bal@v5.6.1/fixtures_bal.tar.gz` from the `devnets/bal/3` branch, with
-`--experimental.bal` enabled on the erigon side. Reproduce locally by aligning
-the `eest-bal` invocation with these arguments.
+The CI `glamsterdam-devnet` shard runs BAL EIPs (`7708|7778|7843|7928|7954|7976|7981|8024|8037`)
+against the URL and hive `branch` pinned under the `eest_devnet`
+entry in `test-fixtures.json` (currently `tests-bal@v7.3.2` / `devnets/bal/7`),
+with `--experimental.bal` enabled on the erigon side. Reproduce locally by
+aligning the invocation with those values — `make eest-devnet` reads them
+from the manifest via `jq` and applies them automatically.
 
 ## Procedure
 

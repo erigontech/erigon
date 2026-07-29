@@ -25,15 +25,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/vm"
@@ -42,23 +43,25 @@ import (
 var stateTestCommand = cli.Command{
 	Action:    stateTestCmd,
 	Name:      "statetest",
-	Usage:     "executes the given state tests",
+	Usage:     "Executes the given state tests. Filenames can be fed via standard input (batch mode) or as an argument (one-off execution).",
 	ArgsUsage: "<file>",
+	Flags: []cli.Flag{
+		&BenchFlag,
+		&DebugFlag,
+		&DumpFlag,
+		&JSONOutputFlag,
+		&MachineFlag,
+		&RunFlag,
+		&ExcludeFlag,
+		&WorkersFlag,
+		&DisableMemoryFlag,
+		&DisableStackFlag,
+		&DisableStorageFlag,
+		&DisableReturnDataFlag,
+	},
 }
 
-// StatetestResult contains the execution status after running a state test, any
-// error that might have occurred and a dump of the final state if requested.
-type StatetestResult struct {
-	Name  string       `json:"name"`
-	Pass  bool         `json:"pass"`
-	Root  *common.Hash `json:"stateRoot,omitempty"`
-	Fork  string       `json:"fork"`
-	Error string       `json:"error,omitempty"`
-	State *state.Dump  `json:"state,omitempty"`
-	Stats *execStats   `json:"benchStats,omitempty"`
-}
-
-func stateTestCmd(ctx *cli.Context) error {
+func stateTestCmd(_ context.Context, ctx *cli.Command) error {
 	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
 	if machineFriendlyOutput {
 		log.Root().SetHandler(log.DiscardHandler())
@@ -68,10 +71,10 @@ func stateTestCmd(ctx *cli.Context) error {
 
 	// Configure the EVM logger
 	config := &logger.LogConfig{
-		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
-		DisableStack:      ctx.Bool(DisableStackFlag.Name),
-		DisableStorage:    ctx.Bool(DisableStorageFlag.Name),
-		DisableReturnData: ctx.Bool(DisableReturnDataFlag.Name),
+		EnableMemory:     !ctx.Bool(DisableMemoryFlag.Name),
+		DisableStack:     ctx.Bool(DisableStackFlag.Name),
+		DisableStorage:   ctx.Bool(DisableStorageFlag.Name),
+		EnableReturnData: !ctx.Bool(DisableReturnDataFlag.Name),
 	}
 	cfg := vm.Config{}
 	if machineFriendlyOutput {
@@ -80,96 +83,176 @@ func stateTestCmd(ctx *cli.Context) error {
 		cfg.Tracer = logger.NewStructLogger(config).Tracer().Hooks
 	}
 
-	if len(ctx.Args().First()) != 0 {
-		return runStateTest(ctx.Args().First(), cfg, ctx.Bool(MachineFlag.Name), ctx.Bool(BenchFlag.Name))
+	workers := ctx.Uint64(WorkersFlag.Name)
+	if workers == 0 {
+		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
 	}
+	filter, err := compileTestFilter(ctx.String(RunFlag.Name), ctx.StringSlice(ExcludeFlag.Name))
+	if err != nil {
+		return err
+	}
+
+	path := ctx.Args().First()
+	if len(path) != 0 {
+		collected := filter.filterFiles(collectFiles(path))
+		results, err := runStateTestsParallel(ctx, cfg, collected, workers, filter)
+		if err != nil {
+			return err
+		}
+		report(ctx, results)
+		return nil
+	}
+	// Otherwise, read filenames from stdin and execute back-to-back.
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		fname := scanner.Text()
 		if len(fname) == 0 {
 			return nil
 		}
-		if err := runStateTest(fname, cfg, ctx.Bool(MachineFlag.Name), ctx.Bool(BenchFlag.Name)); err != nil {
+		results, err := runStateTest(ctx, cfg, fname, filter)
+		if err != nil {
 			return err
 		}
+		report(ctx, results)
 	}
 	return nil
+}
+
+func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, files []string, workers uint64, filter testFilter) ([]testResult, error) {
+	if workers == 1 {
+		results := make([]testResult, 0, len(files)*4) // pre-allocate
+		for _, fname := range files {
+			r, err := runStateTest(ctx, cfg, fname, filter)
+			if err != nil {
+				return nil, err
+			}
+			results = append(results, r...)
+		}
+		return results, nil
+	}
+	var (
+		wg     sync.WaitGroup
+		fileCh = make(chan struct {
+			index int
+			fname string
+		}, len(files))
+		resultCh = make(chan fileResult, len(files))
+	)
+	for i, fname := range files {
+		fileCh <- struct {
+			index int
+			fname string
+		}{i, fname}
+	}
+	close(fileCh)
+
+	for range workers {
+		wg.Go(func() {
+			for item := range fileCh {
+				r, err := runStateTest(ctx, cfg, item.fname, filter)
+				resultCh <- fileResult{index: item.index, results: r, err: err}
+			}
+		})
+	}
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	ordered := make([]fileResult, len(files))
+	for fr := range resultCh {
+		if fr.err != nil {
+			return nil, fr.err
+		}
+		ordered[fr.index] = fr
+	}
+	// Pre-estimate total results
+	total := 0
+	for _, fr := range ordered {
+		total += len(fr.results)
+	}
+	results := make([]testResult, 0, total)
+	for _, fr := range ordered {
+		results = append(results, fr.results...)
+	}
+	return results, nil
 }
 
 // runStateTest loads the state-test given by fname, and executes the test.
-func runStateTest(fname string, cfg vm.Config, jsonOut bool, bench bool) error {
-	// Load the test content from the input file
+func runStateTest(ctx *cli.Command, cfg vm.Config, fname string, filter testFilter) ([]testResult, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var stateTests map[string]testutil.StateTest
 	if err = json.Unmarshal(src, &stateTests); err != nil {
-		return err
+		return nil, err
 	}
 
-	// Iterate over all the stateTests, run them and aggregate the results
-	results, err := aggregateResultsFromStateTests(stateTests, cfg, jsonOut, bench)
-	if err != nil {
-		return err
-	}
+	bench := ctx.Bool(BenchFlag.Name)
+	// Emit the per-test stateRoot line on stderr only when running sequentially.
+	// In parallel mode (workers > 1) the stderr writes from concurrent goroutines
+	// interleave non-deterministically, which defeats differential fuzzing tools
+	// (e.g. goevmlab) that rely on per-test ordering.
+	emitStateRoot := ctx.Uint64(WorkersFlag.Name) == 1
+	results := make([]testResult, 0, len(stateTests))
 
-	out, _ := json.MarshalIndent(results, "", "  ")
-	fmt.Println(string(out))
-	return nil
-}
-
-func aggregateResultsFromStateTests(
-	stateTests map[string]testutil.StateTest, cfg vm.Config,
-	jsonOut bool, bench bool) ([]StatetestResult, error) {
+	// One temp datadir & DB per file; per-subtest isolation comes from tx rollback.
 	tmpDir, err := os.MkdirTemp("", "erigon-statetest-*")
 	if err != nil {
 		return nil, err
 	}
 	defer dir.RemoveAll(tmpDir)
 	dirs := datadir.New(tmpDir)
-
 	db := temporaltest.NewTestDB(nil, dirs)
 	defer db.Close()
 
-	tx, txErr := db.BeginTemporalRw(context.Background())
-	if txErr != nil {
-		return nil, txErr
-	}
-	defer tx.Rollback()
-	results := make([]StatetestResult, 0, len(stateTests))
-
-	for key, test := range stateTests {
+	for key := range stateTests {
+		if !filter.includeCase(fname, key) {
+			continue
+		}
+		test := stateTests[key]
 		for _, st := range test.Subtests() {
-			// Run the test and aggregate the result
-			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true}
+			result := &testResult{Name: key, Fork: st.Fork, Pass: true}
 
-			statedb, root, err := test.Run(nil, tx, st, cfg, dirs)
-			if err != nil {
-				// Test failed, mark as so and dump any state to aid debugging
-				result.Pass, result.Error = false, err.Error()
-			}
+			func() {
+				tx, err := db.BeginTemporalRw(context.Background())
+				if err != nil {
+					result.Pass, result.Error = false, err.Error()
+					return
+				}
+				defer tx.Rollback()
 
-			// print state root for evmlab tracing
-			if statedb != nil {
-				result.Root = &root
-				if jsonOut {
-					_, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%#x\"}\n", root.Bytes())
-					if printErr != nil {
-						log.Warn("Failed to write to stderr", "err", printErr)
+				// Per-subtest SD: closed without Flush so its writes never enter the branch cache.
+				sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+				if err != nil {
+					result.Pass, result.Error = false, err.Error()
+					return
+				}
+				defer sd.Close()
+
+				statedb, root, err := test.Run(nil, sd, tx, st, cfg, dirs)
+				if err != nil {
+					result.Pass, result.Error = false, err.Error()
+				}
+				if statedb != nil {
+					h := common.Hash(root)
+					result.Root = &h
+					if emitStateRoot {
+						if _, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%#x\"}\n", h[:]); printErr != nil {
+							log.Warn("Failed to write to stderr", "err", printErr)
+						}
 					}
 				}
-			}
-
-			// if benchmark requested rerun test w/o verification and collect stats
-			if bench {
-				_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {
-					_, _, gasUsed, _ := test.RunNoVerify(nil, tx, st, cfg, dirs)
-					return nil, gasUsed, nil
-				})
-
-				result.Stats = &stats
-			}
+				if bench {
+					// Reuse the subtest's tx+sd: a second concurrent rwtx on the same env would deadlock.
+					_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {
+						_, _, gasUsed, _ := test.RunNoVerify(nil, sd, tx, st, cfg, dirs)
+						return nil, gasUsed, nil
+					})
+					result.Stats = &stats
+				}
+			}()
 
 			results = append(results, *result)
 		}

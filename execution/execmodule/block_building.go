@@ -84,16 +84,19 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int {
 	blockValue := uint256.NewInt(0)
 	txs := br.Block.Transactions()
+	var gas, txValue uint256.Int
 	for i := range txs {
-		gas := new(uint256.Int).SetUint64(br.Receipts[i].GasUsed)
+		gas.SetUint64(br.Receipts[i].GasUsed)
+
 		effectiveTip := txs[i].GetEffectiveGasTip(baseFee)
-		txValue := new(uint256.Int).Mul(gas, effectiveTip)
-		blockValue.Add(blockValue, txValue)
+
+		txValue.Mul(&gas, &effectiveTip)
+		blockValue.Add(blockValue, &txValue)
 	}
 	return blockValue
 }
 
-func (e *ExecModule) GetAssembledBlock(_ context.Context, payloadID uint64) (AssembledBlockResult, error) {
+func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error) {
 	if !e.semaphore.TryAcquire(1) {
 		return AssembledBlockResult{Busy: true}, nil
 	}
@@ -103,7 +106,7 @@ func (e *ExecModule) GetAssembledBlock(_ context.Context, payloadID uint64) (Ass
 	if !ok {
 		return AssembledBlockResult{}, nil
 	}
-	blockWithReceipts, err := bldr.Stop()
+	blockWithReceipts, err := bldr.Stop(ctx)
 	if err != nil {
 		e.logger.Error("Failed to build PoS block", "err", err)
 		return AssembledBlockResult{}, err

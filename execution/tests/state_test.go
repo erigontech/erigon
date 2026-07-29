@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -38,73 +37,36 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
 func TestStateCornerCases(t *testing.T) {
-	t.Parallel()
-
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
-	}
-
-	st := new(testutil.TestMatcher)
-
-	testDir := path.Join(cornersDir, "state")
-	st.Walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
-		tmpDir, err := os.MkdirTemp("", "erigon-test-*")
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { dir.RemoveAll(tmpDir) })
-		dirs := datadir.New(tmpDir)
-		db := temporaltest.NewTestDB(t, dirs)
-		for _, subtest := range test.Subtests() {
-			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
-			t.Run(key, func(t *testing.T) {
-				withTrace(t, func(vmconfig vm.Config) error {
-					tx := beginRwNoContention(t, db)
-					defer tx.Rollback()
-					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
-					tx.Rollback()
-					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
-						// Ignore expected errors
-						return nil
-					}
-					return st.CheckFailure(t, err)
-				})
-			})
-		}
-	})
+	stateTestSetup(t)
+	runStateTests(t, new(testutil.TestMatcher), filepath.Join(cornersDir, "state"))
 }
 
-func TestState(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
+// stateTestSetup applies the parallel/log/Windows-skip boilerplate shared by
+// state-test runners.
+func stateTestSetup(t *testing.T) {
+	t.Helper()
 	t.Parallel()
-
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
 	}
-	defer log.Root().SetHandler(log.Root().GetHandler())
+	prev := log.Root().GetHandler()
+	t.Cleanup(func() { log.Root().SetHandler(prev) })
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+}
 
-	st := new(testutil.TestMatcher)
-	// Corresponds to GeneralStateTests from ethereum/tests:
-	// see https://github.com/ethereum/execution-spec-tests/releases/tag/v5.0.0
-	testDir := filepath.Join(eestDir, "state_tests", "static", "state_tests")
-
-	// Slow tests
-	st.Slow(`^stPreCompiledContracts/precompsEIP2929Cancun`)
-
-	// Very slow tests
-	st.SkipLoad(`^stTimeConsuming/`)
-
+// runStateTests walks testDir and runs each StateTest's subtests through the
+// shared per-subtest harness (temp datadir, fresh DB, withTrace). The matcher
+// is supplied by the caller pre-configured with any Slow/SkipLoad/Whitelist
+// patterns.
+func runStateTests(t *testing.T, st *testutil.TestMatcher, testDir string) {
+	t.Helper()
 	st.Walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
 		tmpDir, err := os.MkdirTemp("", "erigon-test-*")
 		if err != nil {
@@ -119,7 +81,12 @@ func TestState(t *testing.T) {
 				withTrace(t, func(vmconfig vm.Config) error {
 					tx := beginRwNoContention(t, db)
 					defer tx.Rollback()
-					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
+					sd, sdErr := execctx.NewSharedDomains(context.Background(), tx, log.New())
+					if sdErr != nil {
+						return sdErr
+					}
+					defer sd.Close()
+					_, _, err = test.Run(t, sd, tx, subtest, vmconfig, dirs)
 					tx.Rollback()
 					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors
@@ -174,7 +141,7 @@ func withTrace(t *testing.T, test func(vm.Config) error) {
 	t.Error(err)
 	buf := new(bytes.Buffer)
 	w := bufio.NewWriter(buf)
-	tracer := logger.NewJSONLogger(&logger.LogConfig{DisableMemory: true}, w)
+	tracer := logger.NewJSONLogger(&logger.LogConfig{EnableMemory: false}, w)
 	config.Tracer = tracer.Tracer().Hooks
 	err2 := test(config)
 	if !reflect.DeepEqual(err, err2) {

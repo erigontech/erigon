@@ -22,15 +22,13 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
-var (
-	ErrNoGoodPeer = errors.New("no good peer found")
-)
+var ErrNoGoodPeer = errors.New("no good peer found")
 
 var (
 	peersCandidateRefreshInterval = time.Second * 15
 	allCustodyIndices             = func() map[uint64]bool {
 		indices := make(map[uint64]bool)
-		for i := uint64(0); i < 128; i++ {
+		for i := range uint64(128) {
 			indices[i] = true
 		}
 		return indices
@@ -104,7 +102,9 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 
 			// request metadata
 			metadata := &cltypes.Metadata{}
-			if err := c.simpleReuqest(ctx, pid, communication.MetadataProtocolV3, metadata, []byte{}); err != nil {
+			// Prefer v3 but accept v2 for peers that haven't upgraded yet.
+			metadataTopic := communication.MetadataProtocolV3 + "," + communication.MetadataProtocolV2
+			if err := c.simpleReuqest(ctx, pid, metadataTopic, metadata, []byte{}); err != nil {
 				log.Debug("[peerSelector] failed to request peer metadata", "peer", pid, "err", err)
 				continue
 			}
@@ -129,7 +129,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 			data := &peerData{pid: pid, mask: custodyIndices}
 			c.peerMetaCache.Add(peerKey, data)
 			newPeers = append(newPeers, *data)
-			log.Debug("[peerSelector] added peer", "peer", pid, "custodies", len(custodyIndices))
+			log.Trace("[peerSelector] added peer", "peer", pid, "custodies", len(custodyIndices))
 		}
 		c.peersMutex.Lock()
 		c.peersQueue = newPeers

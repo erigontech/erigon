@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/execution/chain"
@@ -57,8 +58,9 @@ type Task interface {
 
 	Version() state.Version
 	VersionMap() *state.VersionMap
+	GetBlockStateCache() *state.BlockStateCache
 	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
-	VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites
+	VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
 	ResetGasPool(*protocol.GasPool)
 
@@ -74,6 +76,7 @@ type Task interface {
 	BlockTime() uint64
 	BlockGasLimit() uint64
 	BlockRoot() common.Hash
+	BlockHeader() *types.Header
 
 	Rules() *chain.Rules
 
@@ -103,20 +106,13 @@ type TxResult struct {
 	Err               error
 	Coinbase          accounts.Address
 	TxIn              state.ReadSet
-	TxOut             state.VersionedWrites
+	TxOut             *state.WriteSet
 
 	Receipt *types.Receipt
 	Logs    []*types.Log
 
-	TraceFroms        map[accounts.Address]struct{}
-	TraceTos          map[accounts.Address]struct{}
-	AccessedAddresses state.AccessSet
-
-	// CollectorWrites holds collector-format writes (all 4 account fields per
-	// address) produced by MakeWriteSet during worker execution. Used by the
-	// parallel finalize path to skip full IBS reconstruction: fee-calc balance
-	// adjustments are applied directly to these writes.
-	CollectorWrites state.VersionedWrites
+	TraceFroms map[accounts.Address]struct{}
+	TraceTos   map[accounts.Address]struct{}
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -153,7 +149,7 @@ func (r *TxResult) CreateNextReceipt(prev *types.Receipt) (*types.Receipt, error
 func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLogIndex uint32) (*types.Receipt, error) {
 	logIndex := firstLogIndex
 	for i := range r.Logs {
-		r.Logs[i].Index = uint(logIndex)
+		r.Logs[i].Index = hexutil.Uint(logIndex)
 		logIndex++
 	}
 
@@ -172,7 +168,7 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 
 	for _, l := range receipt.Logs {
 		l.TxHash = receipt.TxHash
-		l.BlockNumber = blockNum
+		l.BlockNumber = hexutil.Uint64(blockNum)
 		l.BlockHash = receipt.BlockHash
 	}
 	if r.ExecutionResult.Failed() {
@@ -220,7 +216,6 @@ type TxTask struct {
 	HistoryExecution   bool // use history reader for that txn instead of state reader
 	BalanceIncreaseSet map[accounts.Address]uint256.Int
 
-	Incarnation           int
 	Tracer                *calltracer.CallTracer
 	Hooks                 *tracing.Hooks
 	Config                *chain.Config
@@ -236,6 +231,10 @@ type TxTask struct {
 	signer       *types.Signer
 	dependencies []int
 	rules        *chain.Rules
+
+	// BlockStateCache holds pre-block account state for stable committed reads.
+	// Shared across all tasks in the same block. Set by the parallel executor.
+	BlockStateCache *state.BlockStateCache
 }
 
 func (t *TxTask) compare(other Task) int {
@@ -345,6 +344,10 @@ func (t *TxTask) BlockRoot() common.Hash {
 	return t.Header.Root
 }
 
+func (t *TxTask) BlockHeader() *types.Header {
+	return t.Header
+}
+
 func (t *TxTask) BlockTime() uint64 {
 	if t.Header == nil {
 		return 0
@@ -377,7 +380,34 @@ func (t *TxTask) ResetTx(txNum uint64, txIndex int) {
 }
 
 func (t *TxTask) GasPool() *protocol.GasPool {
-	return t.gasPool
+	if t.gasPool != nil {
+		return t.gasPool
+	}
+	// Parallel exec paths never set the per-task gas pool because workers
+	// cannot safely share the block pool (SubGas is a write — concurrent
+	// workers would race on speculative tx depletion). The shared block
+	// pool is consumed in the post-execution validation loop.
+	//
+	// Returning nil here would make preCheck's CheckBlockGasInclusion
+	// silently no-op (gp==nil short-circuit), so a tx whose gas exceeds
+	// the block limit slips past that check and fails on the next one in
+	// preCheck order (CheckEip1559TxGasFeeCap → ErrFeeCapTooLow when
+	// feeCap < baseFee). Serial returns ErrGasLimitReached for the same
+	// tx; the eest engine matrix asserts the serial error variant and
+	// rejects the parallel one (issue surfaced on PR #21017's
+	// hive-eest parallel legs as GAS_ALLOWANCE_EXCEEDED vs
+	// INSUFFICIENT_MAX_FEE_PER_GAS).
+	//
+	// Hand out a fresh per-invocation pool sized to the block gas limit
+	// so CheckBlockGasInclusion fires for the "tx alone exceeds the block
+	// limit" case (pool depletion across multiple txs is still caught
+	// post-execution by the validation loop against the shared pool).
+	// Each Execute call gets its own pool, so retries at higher
+	// incarnations start with a fresh budget.
+	if t.Header == nil || t.Config == nil {
+		return nil
+	}
+	return protocol.NewGasPool(t.Header.GasLimit, t.Config.GetMaxBlobGasPerBlock(t.Header.Time))
 }
 
 func (t *TxTask) ResetGasPool(gasPool *protocol.GasPool) {
@@ -408,12 +438,16 @@ func (t *TxTask) VersionMap() *state.VersionMap {
 	return nil
 }
 
+func (t *TxTask) GetBlockStateCache() *state.BlockStateCache {
+	return t.BlockStateCache
+}
+
 func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.ReadSet {
 	return ibs.VersionedReads()
 }
 
-func (t *TxTask) VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites {
-	return ibs.VersionedWrites(false)
+func (t *TxTask) VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet {
+	return ibs.VersionedWrites()
 }
 
 func (t *TxTask) IsBlockEnd() bool {
@@ -492,7 +526,9 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			return ret, err
 		}
 		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
-		if result.Err == nil {
+		if result.Err == nil && !ibs.IsVersioned() {
+			// The versionMap path finalizes from the write-set after the switch;
+			// the serial path commits the init writes here.
 			result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		}
 	case txTask.IsBlockEnd():
@@ -557,17 +593,11 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}()
 
 		if result.Err == nil {
-			// Capture residual-balance selfdestructs before SoftFinalise clears the
-			// journal.  These are accounts selfdestructed in this tx that also received
-			// ETH after the SELFDESTRUCT opcode (EIP-7708 case 2).  SoftFinalise calls
-			// clearJournalAndRefund, so GetRemovedAccountsWithBalance returns nothing
-			// afterwards.
-			result.ExecutionResult.SelfDestructedWithBalance = ibs.GetRemovedAccountsWithBalance()
-
-			// TODO these can be removed - use result instead
-			// Update the state with pending changes
-			ibs.SoftFinalise()
-			//txTask.Error = ibs.FinalizeTx(rules, noop)
+			// The versionMap path produces its write-set from the recorded IO
+			// after the switch; only the serial path clears pending changes here.
+			if !ibs.IsVersioned() {
+				ibs.SoftFinalise()
+			}
 			result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
 		}
 
@@ -575,13 +605,21 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if result.Err == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
-			panic(err)
+		// Genesis (block 0, txIndex -1) resolves `ibs` to the throwaway versioned
+		// IBS that GenesisToBlock builds, whatever the executor. Its writes reach
+		// the executor only through MakeWriteSet(stateWriter); the FinalizedWrites
+		// write-set is not applied for it, so keep genesis on the MakeWriteSet path.
+		isGenesis := txTask.TxIndex == -1 && txTask.BlockNumber() == 0
+		if ibs.IsVersioned() && !isGenesis {
+			result.TxOut = ibs.FinalizedWrites()
+		} else {
+			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
+				panic(err)
+			}
+			result.TxOut = txTask.VersionedWrites(ibs)
 		}
 
-		result.AccessedAddresses = ibs.AccessedAddresses()
 		result.TxIn = txTask.VersionedReads(ibs)
-		result.TxOut = txTask.VersionedWrites(ibs)
 	}
 
 	return &result
@@ -632,13 +670,14 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 			result.Err = outerErr
 			return &result
 		}
-		log.Info("✅[aa] validated AA bundle", "len", startIdx-endIdx)
+		log.Info("✅[aa] validated AA bundle", "len", endIdx-startIdx+1)
 
 		result.ValidationResults = validationResults
 	}
 
 	if len(result.ValidationResults) == 0 {
 		result.Err = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
+		return &result
 	}
 
 	aaTxn = txTask.Tx().(*types.AccountAbstractionTransaction) // type cast checked earlier
@@ -653,8 +692,11 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 
 	result.ExecutionResult.ReceiptGasUsed = gasUsed
 	result.ExecutionResult.BlockRegularGasUsed = gasUsed
-	// Update the state with pending changes
-	ibs.SoftFinalise()
+	// The versionMap path produces its write-set from the recorded IO after
+	// the switch; only the serial path clears pending changes here.
+	if !ibs.IsVersioned() {
+		ibs.SoftFinalise()
+	}
 	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
 
 	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
@@ -907,6 +949,7 @@ func (q *QueueWithRetry) Release() {
 		<-q.newTasks
 	}
 	// Clear retry heap, keep backing array.
+	clear(q.retires)
 	q.retires = q.retires[:0]
 	q.parked = q.newTasks
 	q.newTasks = nil

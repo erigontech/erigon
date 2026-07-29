@@ -24,15 +24,16 @@ import (
 	"strconv"
 
 	"github.com/spf13/cobra"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 	"gopkg.in/natefinch/lumberjack.v2"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/metrics"
 )
 
 // Determine the log dir path based on the given urfave context
-func LogDirPath(ctx *cli.Context) string {
+func LogDirPath(ctx *cli.Command) string {
 	dirPath := ""
 	if !ctx.Bool(LogDirDisableFlag.Name) {
 		dirPath = ctx.String(LogDirPathFlag.Name)
@@ -56,7 +57,7 @@ func LogDirPath(ctx *cli.Context) string {
 // and it would make sense to choose one over another
 func SetupLoggerCtx(
 	filePrefix string,
-	ctx *cli.Context,
+	ctx *cli.Command,
 	consoleDefaultLevel log.Lvl,
 	dirDefaultLevel log.Lvl,
 	rootHandler bool,
@@ -70,16 +71,16 @@ func SetupLoggerCtx(
 
 	// Priority: LogConsoleVerbosityFlag (if explicitly set) > LogVerbosityFlag (if explicitly set) > default
 	if ctx.IsSet(LogConsoleVerbosityFlag.Name) {
-		if level, err := tryGetLogLevel(ctx.String(LogConsoleVerbosityFlag.Name)); err == nil {
+		if level, err := GetLogLevel(ctx.String(LogConsoleVerbosityFlag.Name)); err == nil {
 			consoleLevel = level
 		}
 	} else if ctx.IsSet(LogVerbosityFlag.Name) {
-		if level, err := tryGetLogLevel(ctx.String(LogVerbosityFlag.Name)); err == nil {
+		if level, err := GetLogLevel(ctx.String(LogVerbosityFlag.Name)); err == nil {
 			consoleLevel = level
 		}
 	}
 
-	dirLevel, dErr := tryGetLogLevel(ctx.String(LogDirVerbosityFlag.Name))
+	dirLevel, dErr := GetLogLevel(ctx.String(LogDirVerbosityFlag.Name))
 	if dErr != nil {
 		dirLevel = dirDefaultLevel
 	}
@@ -132,16 +133,16 @@ func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 		dirJson = false
 	}
 
-	consoleLevel, lErr := tryGetLogLevel(cmd.Flags().Lookup(LogConsoleVerbosityFlag.Name).Value.String())
+	consoleLevel, lErr := GetLogLevel(cmd.Flags().Lookup(LogConsoleVerbosityFlag.Name).Value.String())
 	if lErr != nil {
 		// try verbosity flag
-		consoleLevel, lErr = tryGetLogLevel(cmd.Flags().Lookup(LogVerbosityFlag.Name).Value.String())
+		consoleLevel, lErr = GetLogLevel(cmd.Flags().Lookup(LogVerbosityFlag.Name).Value.String())
 		if lErr != nil {
 			consoleLevel = log.LvlInfo
 		}
 	}
 
-	dirLevel, dErr := tryGetLogLevel(cmd.Flags().Lookup(LogDirVerbosityFlag.Name).Value.String())
+	dirLevel, dErr := GetLogLevel(cmd.Flags().Lookup(LogDirVerbosityFlag.Name).Value.String())
 	if dErr != nil {
 		dirLevel = log.LvlInfo
 	}
@@ -187,22 +188,22 @@ func SetupLogger(filePrefix string) log.Logger {
 	var consoleJson = *logJson || *logConsoleJson
 	var dirJson = logDirJson
 
-	consoleLevel, lErr := tryGetLogLevel(*logConsoleVerbosity)
+	consoleLevel, lErr := GetLogLevel(*logConsoleVerbosity)
 	if lErr != nil {
 		// try verbosity flag
-		consoleLevel, lErr = tryGetLogLevel(*logVerbosity)
+		consoleLevel, lErr = GetLogLevel(*logVerbosity)
 		if lErr != nil {
 			consoleLevel = log.LvlInfo
 		}
 	}
 
-	dirLevel, dErr := tryGetLogLevel(*logDirVerbosity)
+	dirLevel, dErr := GetLogLevel(*logDirVerbosity)
 	if dErr != nil {
 		dirLevel = log.LvlInfo
 	}
 
-	if logDirPrefix != nil && len(*logDirPrefix) > 0 {
-		filePrefix = *logDirPrefix
+	if prefix := common.Deref(logDirPrefix); prefix != "" {
+		filePrefix = prefix
 	}
 
 	initSeparatedLogging(log.Root(), filePrefix, *logDirPath, consoleLevel, dirLevel, consoleJson, *dirJson)
@@ -283,7 +284,8 @@ func initSeparatedLogging(
 	logger.Info("logging to file system", "log dir", dirPath, "file prefix", filePrefix, "log level", dirLevel, "json", dirJson)
 }
 
-func tryGetLogLevel(s string) (log.Lvl, error) {
+// GetLogLevel parses a log level given as a name ("info") or a numeric string ("3").
+func GetLogLevel(s string) (log.Lvl, error) {
 	lvl, err := log.LvlFromString(s)
 	if err != nil {
 		l, err := strconv.Atoi(s)

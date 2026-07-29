@@ -67,7 +67,6 @@ lsof -nP -iUDP:<port> 2>/dev/null
 | `--ws.port` | `8546` | `8646` | `8746` | `8846` |
 | `--torrent.port` | `42069` | `42169` | `42269` | `42369` |
 | `--port` | `30303` | `30403` | `30503` | `30603` |
-| `--p2p.allowed-ports` | `30303-30307` | `30403-30407` | `30503-30507` | `30603-30607` |
 | `--caplin.discovery.port` | `4000` | `4100` | `4200` | `4300` |
 | `--caplin.discovery.tcpport` | `4001` | `4101` | `4201` | `4301` |
 | `--sentinel.port` | `7777` | `7877` | `7977` | `8077` |
@@ -98,7 +97,6 @@ When an offset is needed, construct the flags as follows (example for offset +10
 --ws.port=8646 \
 --torrent.port=42169 \
 --port=30403 \
---p2p.allowed-ports=30403,30404,30405,30406,30407 \
 --caplin.discovery.port=4100 \
 --caplin.discovery.tcpport=4101 \
 --sentinel.port=7877 \
@@ -106,7 +104,7 @@ When an offset is needed, construct the flags as follows (example for offset +10
 --mcp.port=8653
 ```
 
-Note: `--private.api.addr` takes a full `host:port` value. `--p2p.allowed-ports` must list 5 consecutive ports starting from the base `--port` value.
+Note: `--private.api.addr` takes a full `host:port` value.
 
 ### Step 4: Start Erigon
 

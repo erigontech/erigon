@@ -96,6 +96,13 @@ func (a *Attestation) EncodingSizeSSZ() (size int) {
 
 // DecodeSSZ decodes the provided buffer into the Attestation instance.
 func (a *Attestation) DecodeSSZ(buf []byte, version int) error {
+	return a.DecodeSSZWithConfig(buf, version, nil)
+}
+
+// DecodeSSZWithConfig decodes the provided buffer into the Attestation instance,
+// using the given beacon config to determine preset-aware limits (e.g. minimal vs mainnet).
+// If cfg is nil, mainnet defaults are used.
+func (a *Attestation) DecodeSSZWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig) error {
 	clversion := clparams.StateVersion(version)
 	if clversion.AfterOrEqual(clparams.ElectraVersion) {
 		// The CommitteeBits size depends on MAX_COMMITTEES_PER_SLOT which differs between
@@ -111,7 +118,11 @@ func (a *Attestation) DecodeSSZ(buf []byte, version int) error {
 		if committeeBitsBytes <= 0 {
 			return ssz.ErrLowBufferSize
 		}
-		a.AggregationBits = NewBitList(0, aggregationBitsSizeElectra)
+		aggrBitsLimit := aggregationBitsSizeElectra
+		if cfg != nil && cfg.MaxCommitteesPerSlot > 0 {
+			aggrBitsLimit = int(cfg.MaxCommitteesPerSlot) * maxValidatorsPerCommittee
+		}
+		a.AggregationBits = NewBitList(0, aggrBitsLimit)
 		a.Data = &AttestationData{}
 		a.CommitteeBits = NewBitVector(committeeBitsBytes * 8)
 		return ssz2.UnmarshalSSZ(buf, version, a.AggregationBits, a.Data, a.Signature[:], a.CommitteeBits)
@@ -161,9 +172,13 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 
 	// For Electra, the committee bits are present in the JSON
 	if bytes.Contains(data, []byte("committee_bits")) {
-		// Electra case
+		// Electra case — preserve existing limit if SetBeaconConfig was called
+		aggrBitsLimit := aggregationBitsSizeElectra
+		if a.AggregationBits != nil && a.AggregationBits.Cap() > 0 {
+			aggrBitsLimit = a.AggregationBits.Cap()
+		}
 		var temp tempAttestation
-		temp.AggregationBits = NewBitList(0, aggregationBitsSizeElectra)
+		temp.AggregationBits = NewBitList(0, aggrBitsLimit)
 		temp.CommitteeBits = &BitVector{} // UnmarshalJSON self-sizes from the hex bytes
 		if err := json.Unmarshal(data, &temp); err != nil {
 			return err
@@ -228,14 +243,18 @@ func (s *SingleAttestation) Static() bool {
 	return true
 }
 
-func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int, committeeLen int, maxCommittees int) *Attestation {
+func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int, committeeLen int, maxCommittees int, cfg *clparams.BeaconChainConfig) *Attestation {
 	committeeBits := NewBitVector(maxCommittees)
 	committeeBits.SetBitAt(int(s.CommitteeIndex), true)
 	// flip the bit for the validator and also mark the last bit
 	bytes := make([]byte, committeeLen/8+1)
 	bytes[memberIndexInCommittee/8] |= 1 << (memberIndexInCommittee % 8)
 	bytes[committeeLen/8] |= 1 << (committeeLen % 8)
-	aggregationBits := BitlistFromBytes(bytes, aggregationBitsSizeElectra)
+	aggrBitsLimit := aggregationBitsSizeElectra
+	if cfg != nil && cfg.MaxCommitteesPerSlot > 0 {
+		aggrBitsLimit = int(cfg.MaxCommitteesPerSlot) * maxValidatorsPerCommittee
+	}
+	aggregationBits := BitlistFromBytes(bytes, aggrBitsLimit)
 	return &Attestation{
 		AggregationBits: aggregationBits,
 		Data:            s.Data,

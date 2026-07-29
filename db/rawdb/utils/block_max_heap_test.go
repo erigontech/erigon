@@ -77,6 +77,6 @@ func newB(id uint64, hash []byte) *utils.BlockId {
 }
 
 func lastByte(b *utils.BlockId) byte {
-	by := b.Hash.Bytes()
+	by := b.Hash[:]
 	return by[len(by)-1]
 }

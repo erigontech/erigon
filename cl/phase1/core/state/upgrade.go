@@ -17,7 +17,9 @@
 package state
 
 import (
-	"sort"
+	"cmp"
+	"fmt"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -199,14 +201,12 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		return true
 	})
 	// sort
-	sort.Slice(validators, func(i, j int) bool {
-		vi, vj := validators[i].validator, validators[j].validator
-		if vi.ActivationEligibilityEpoch() == vj.ActivationEligibilityEpoch() {
-			//  If eligibility epochs are equal, compare indices
-			return validators[i].index < validators[j].index
+	slices.SortFunc(validators, func(a, b tempValidator) int {
+		ae, be := a.validator.ActivationEligibilityEpoch(), b.validator.ActivationEligibilityEpoch()
+		if ae == be {
+			return cmp.Compare(a.index, b.index)
 		}
-		// Otherwise, sort by activationEligibilityEpoch
-		return vi.ActivationEligibilityEpoch() < vj.ActivationEligibilityEpoch()
+		return cmp.Compare(ae, be)
 	})
 
 	for _, v := range validators {
@@ -219,8 +219,8 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		}
 		curValidator := v.validator
 		// Do NOT directly modify the validator in the validator set, because we need to mark validatorSet as dirty in BeaconState
-		//curValidator.SetEffectiveBalance(0)
-		//curValidator.SetActivationEligibilityEpoch(b.BeaconConfig().FarFutureEpoch)
+		// curValidator.SetEffectiveBalance(0)
+		// curValidator.SetActivationEligibilityEpoch(b.BeaconConfig().FarFutureEpoch)
 		b.SetEffectiveBalanceForValidatorAtIndex(int(v.index), 0)
 		b.SetActivationEligibilityEpochForValidatorAtIndex(int(v.index), b.BeaconConfig().FarFutureEpoch)
 		// Use bls.G2_POINT_AT_INFINITY as a signature field placeholder
@@ -268,12 +268,151 @@ func (b *CachingBeaconState) UpgradeToFulu() error {
 		if err != nil {
 			return err
 		}
-		for j := 0; j < len(proposerIndices); j++ {
+		for j := range proposerIndices {
 			lookahead.Set(i*int(b.BeaconConfig().SlotsPerEpoch)+j, proposerIndices[j])
 		}
 	}
 	b.SetProposerLookahead(lookahead)
 
 	log.Info("Upgrade to Fulu complete")
+	return nil
+}
+
+func (b *CachingBeaconState) UpgradeToGloas() error {
+	b.previousStateRoot = common.Hash{}
+	epoch := Epoch(b.BeaconState)
+	cfg := b.BeaconConfig()
+
+	// Update fork version
+	forkData := b.Fork()
+	forkData.Epoch = epoch
+	forkData.PreviousVersion = forkData.CurrentVersion
+	forkData.CurrentVersion = utils.Uint32ToBytes4(uint32(cfg.GloasForkVersion))
+	b.SetFork(forkData)
+
+	// Get the latest block hash from the previous execution payload header
+	latestBlockHash := b.LatestExecutionPayloadHeader().BlockHash
+
+	// Replace latest_execution_payload_header with latest_execution_payload_bid
+	// The bid contains only the block_hash from the previous header
+	// Compute the execution_requests_root for an empty ExecutionRequests
+	emptyRequests := cltypes.NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion)
+	emptyRequestsRoot, err := emptyRequests.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("UpgradeToGloas: failed to hash empty execution requests: %w", err)
+	}
+
+	bid := &cltypes.ExecutionPayloadBid{
+		ParentBlockHash:       common.Hash{},
+		BlockHash:             latestBlockHash,
+		BuilderIndex:          0,
+		Slot:                  0,
+		Value:                 0,
+		BlobKzgCommitments:    *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+		ExecutionRequestsRoot: emptyRequestsRoot,
+		PrevRandao:            common.Hash{},
+		GasLimit:              b.LatestExecutionPayloadHeader().GasLimit,
+		ParentBlockRoot:       common.Hash{},
+	}
+	b.SetLatestExecutionPayloadBid(bid)
+
+	// Initialize builder-related fields
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](int(cfg.BuilderRegistryLimit), new(cltypes.Builder).EncodingSizeSSZ())
+	b.SetBuilders(builders)
+
+	b.SetNextWithdrawalBuilderIndex(0)
+
+	// Initialize execution_payload_availability to all 1s (all prior slots had payloads)
+	for i := uint64(0); i < cfg.SlotsPerHistoricalRoot; i++ {
+		b.SetExecutionPayloadAvailability(i, true)
+	}
+
+	// Initialize builder_pending_payments with empty payments
+	builderPendingPayments := solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * cfg.SlotsPerEpoch))
+	for i := 0; i < int(2*cfg.SlotsPerEpoch); i++ {
+		builderPendingPayments.Set(i, &cltypes.BuilderPendingPayment{
+			Withdrawal: &cltypes.BuilderPendingWithdrawal{},
+		})
+	}
+	b.SetBuilderPendingPayments(builderPendingPayments)
+
+	// Initialize empty builder_pending_withdrawals
+	builderPendingWithdrawals := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](int(cfg.BuilderPendingWithdrawalsLimit), new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
+	b.SetBuilderPendingWithdrawals(builderPendingWithdrawals)
+
+	// Set latest_block_hash
+	b.SetLatestBlockHash(latestBlockHash)
+
+	// Initialize empty payload_expected_withdrawals
+	payloadExpectedWithdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ())
+	b.SetPayloadExpectedWithdrawals(payloadExpectedWithdrawals)
+
+	// Initialize ptc_window: first epoch zeros, remaining epochs computed via ComputePTC
+	if err := b.InitializePtcWindow(); err != nil {
+		return fmt.Errorf("upgrade to Gloas: %w", err)
+	}
+
+	// Note: deposit_requests_start_index is intentionally preserved as-is from the
+	// pre-state, matching the consensus spec (specs/gloas/fork.md) and Lighthouse.
+	// Even if it is still UNSET (2^64-1), it must not be modified during the upgrade.
+
+	// Update the state version
+	b.SetVersion(clparams.GloasVersion)
+
+	// Onboard builders from pending deposits
+	if err := b.onboardBuildersFromPendingDeposits(); err != nil {
+		return err
+	}
+
+	log.Info("Upgrade to Gloas complete")
+	return nil
+}
+
+// onboardBuildersFromPendingDeposits processes pending deposits to onboard builders at the fork.
+// Applies any pending deposit for builders, effectively onboarding builders at the fork.
+// [New in Gloas:EIP7732]
+func (b *CachingBeaconState) onboardBuildersFromPendingDeposits() error {
+	cfg := b.BeaconConfig()
+
+	// Build a set of validator pubkeys
+	validatorPubkeys := make(map[common.Bytes48]struct{})
+	b.ValidatorSet().Range(func(_ int, v solid.Validator, _ int) bool {
+		validatorPubkeys[v.PublicKey()] = struct{}{}
+		return true
+	})
+
+	// Process pending deposits
+	pendingDeposits := b.GetPendingDeposits()
+	newPendingDeposits := solid.NewPendingDepositList(cfg)
+
+	for i := 0; i < pendingDeposits.Len(); i++ {
+		deposit := pendingDeposits.Get(i)
+
+		// Deposits for existing validators stay in pending queue
+		if _, isValidator := validatorPubkeys[deposit.PubKey]; isValidator {
+			newPendingDeposits.Append(deposit)
+			continue
+		}
+
+		isExistingBuilder := IsBuilderPubkey(b, deposit.PubKey)
+		hasBuilderCredentials := IsBuilderWithdrawalCredential(deposit.WithdrawalCredentials, cfg)
+
+		if !isExistingBuilder {
+			if !hasBuilderCredentials {
+				newPendingDeposits.Append(deposit)
+				continue
+			}
+			if IsPendingValidator(cfg, newPendingDeposits, deposit.PubKey) {
+				newPendingDeposits.Append(deposit)
+				continue
+			}
+		}
+
+		if err := ApplyDepositForBuilder(b, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature, deposit.Slot); err != nil {
+			return err
+		}
+	}
+
+	b.SetPendingDeposits(newPendingDeposits)
 	return nil
 }

@@ -309,27 +309,26 @@ func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, e
 }
 
 func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address, chainConfig *chain.Config, receipts types.Receipts) (*big.Int, error) {
-	fee := big.NewInt(0)
-	gasUsed := big.NewInt(0)
+	var fee, gasUsed, totalFees uint256.Int
+	isLondon := chainConfig.IsLondon(block.NumberU64())
+	baseFee := block.BaseFee()
 
-	totalFees := big.NewInt(0)
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		if !chainConfig.IsLondon(block.NumberU64()) {
-			fee.Set(txn.GetTipCap().ToBig())
+		if !isLondon {
+			fee.Set(txn.GetTipCap())
 		} else {
-			baseFee := block.BaseFee()
-			gasPrice := new(uint256.Int).Add(baseFee, txn.GetEffectiveGasTip(baseFee))
-			fee.Set(gasPrice.ToBig())
+			effectiveTip := txn.GetEffectiveGasTip(baseFee)
+			fee.Add(baseFee, &effectiveTip)
 		}
 
 		gasUsed.SetUint64(receipt.GasUsed)
-		fee.Mul(fee, gasUsed)
+		fee.Mul(&fee, &gasUsed)
 
-		totalFees.Add(totalFees, fee)
+		totalFees.Add(&totalFees, &fee)
 	}
 
-	return totalFees, nil
+	return totalFees.ToBig(), nil
 }
 
 func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, []common.Address, error) {
@@ -362,14 +361,27 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 	}
 	defer tx.Rollback()
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, number.Uint64())
-	if err != nil {
-		return nil, err
-	}
-
-	b, _, err := api.getBlockWithSenders(ctx, number, tx)
-	if err != nil {
-		return nil, err
+	var b *types.Block
+	if number == rpc.PendingBlockNumber {
+		b, _, err = api.getBlockWithSenders(ctx, number, tx)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+		if err != nil {
+			if errors.As(err, &rpc.BlockNotFoundErr{}) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		if err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
+			return nil, err
+		}
+		b, _, err = api.getBlockWithSenders(ctx, rpc.BlockNumber(blockNum), tx)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if b == nil {
 		return nil, nil

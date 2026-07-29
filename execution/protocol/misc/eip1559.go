@@ -34,25 +34,11 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
-// VerifyEip1559Header verifies some header attributes which were changed in EIP-1559,
-// - gas limit check
-// - basefee check
-func VerifyEip1559Header(config *chain.Config, parent, header *types.Header, skipGasLimit bool) error {
-	if !skipGasLimit {
-		// Verify that the gas limit remains within allowed bounds
-		parentGasLimit := parent.GasLimit
-		if !config.IsLondon(parent.Number.Uint64()) {
-			parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
-		}
-		if err := VerifyGaslimit(parentGasLimit, header.GasLimit); err != nil {
-			return err
-		}
-	}
-	// Verify the header is not malformed
+// VerifyEip1559Header checks base fee only; gas limit is in VerifyParentGasLimit.
+func VerifyEip1559Header(config *chain.Config, parent, header *types.Header) error {
 	if header.BaseFee == nil {
 		return errors.New("header is missing baseFee")
 	}
-	// Verify the baseFee is correct based on the parent header.
 	expectedBaseFee := CalcBaseFee(config, parent)
 	if header.BaseFee.Cmp(expectedBaseFee) != 0 {
 		return fmt.Errorf("invalid baseFee: have %s, want %s, parentBaseFee %s, parentGasUsed %d",

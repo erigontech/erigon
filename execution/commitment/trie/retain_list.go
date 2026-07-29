@@ -30,6 +30,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -115,18 +116,12 @@ type DefaultProofRetainer struct {
 // set onto the FlatDBTrieLoader via SetProofRetainer before performing its Load
 // operation in order to appropriately collect the proof elements.
 func NewProofRetainer(addr common.Address, a *accounts.Account, storageKeys []common.Hash, rl *RetainList) (*DefaultProofRetainer, error) {
-	addrHash, err := common.HashData(addr[:])
-	if err != nil {
-		return nil, err
-	}
+	addrHash := crypto.Keccak256Hash(addr[:])
 	accHexKey := rl.AddKey(addrHash[:])
 
 	storageHexKeys := make([][]byte, len(storageKeys))
 	for i, sk := range storageKeys {
-		storageHash, err := common.HashData(sk[:])
-		if err != nil {
-			return nil, err
-		}
+		storageHash := crypto.Keccak256Hash(sk[:])
 
 		var compactEncoded [72]byte
 		copy(compactEncoded[:32], addrHash[:])
@@ -359,10 +354,6 @@ func (rl *RetainList) ensureInited() {
 // come in monotonically ascending order, we optimise for this, though
 // the function would still work if the order is different
 func (rl *RetainList) Retain(prefix []byte) bool {
-	// if bytes.HasPrefix(prefix, common.FromHex("0x0d05")) {
-	// 	fmt.Println("here!!!!!")
-	// }
-
 	rl.ensureInited()
 	if len(prefix) < rl.minLength {
 		return true

@@ -53,7 +53,9 @@ func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 		return
 	}
 	m := c.Metrics()
-	log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", c.limit)
+	if m.Hits > 0 {
+		log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", c.limit)
+	}
 }
 
 func newDomainVisible(name kv.Domain, files visibleFiles) *domainVisible {
@@ -63,7 +65,7 @@ func newDomainVisible(name kv.Domain, files visibleFiles) *domainVisible {
 	}
 	limit := domainGetFromFileCacheLimit
 	if name == kv.CodeDomain {
-		limit = limit / 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
+		limit /= 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
 	}
 	if limit == 0 {
 		domainGetFromFileCacheEnabled = false

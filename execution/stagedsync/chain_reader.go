@@ -18,13 +18,14 @@ package stagedsync
 
 import (
 	"context"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -33,7 +34,7 @@ import (
 type ChainReader struct {
 	Cfg         *chain.Config
 	Db          kv.Tx
-	BlockReader services.FullBlockReader
+	BlockReader dbservices.FullBlockReader
 	Logger      log.Logger
 }
 
@@ -99,7 +100,7 @@ func (cr ChainReader) HasBlock(hash common.Hash, number uint64) bool {
 }
 
 // GetTd retrieves the total difficulty from the database by hash and number.
-func (cr ChainReader) GetTd(hash common.Hash, number uint64) *big.Int {
+func (cr ChainReader) GetTd(hash common.Hash, number uint64) *uint256.Int {
 	td, err := rawdb.ReadTd(cr.Db, hash, number)
 	if err != nil {
 		cr.Logger.Error("ReadTd failed", "err", err)

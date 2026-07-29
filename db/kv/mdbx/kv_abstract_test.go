@@ -92,9 +92,13 @@ func TestManagedTx(t *testing.T) {
 		kv.ChaindataTablesCfg = defaultConfig
 	}()
 
-	bucketID := 0
-	bucket1 := kv.ChaindataTables[bucketID]
-	bucket2 := kv.ChaindataTables[bucketID+1]
+	// Pick two tables with matching flags so the cursors on bucket1 and
+	// bucket2 are expected to behave identically across all operations
+	// (Append, Put on an existing key, etc.). Using the first two entries
+	// of the (alphabetically sorted) ChaindataTables list is fragile —
+	// the relative ordering changes when tables are added or removed.
+	bucket1 := kv.TblAccountVals
+	bucket2 := kv.TblStorageVals
 	writeDBs, readDBs := setupDatabases(t, logger)
 
 	ctx := t.Context()

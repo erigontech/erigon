@@ -20,9 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -146,7 +146,7 @@ func (r headerReader) GetHeaderByHash(common.Hash) *types.Header {
 	return nil
 }
 
-func (r headerReader) GetTd(common.Hash, uint64) *big.Int {
+func (r headerReader) GetTd(common.Hash, uint64) *uint256.Int {
 	return nil
 }
 
@@ -297,7 +297,6 @@ func newValidator(t *testing.T, testHeimdall *testHeimdall, blocks map[uint64]*t
 			execmoduletester.WithKey(validatorKey),
 			execmoduletester.WithPruneMode(prune.DefaultMode),
 			execmoduletester.WithEngine(bor),
-			execmoduletester.WithBlockBufferSize(1024),
 		),
 		testHeimdall,
 		blocks,
@@ -350,7 +349,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 
 	validators := make([]validator, noValidators)
 
-	for i := 0; i < noValidators; i++ {
+	for i := range noValidators {
 		validators[i] = newValidator(t, heimdall, blocks)
 	}
 
@@ -368,7 +367,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 
 	lastProposerIndex := -1
 
-	for bi := 0; bi < chainLength; bi++ {
+	for bi := range chainLength {
 		for vi, v := range validators {
 			block := chains[vi].Blocks[bi]
 			receipts := chains[vi].Receipts[bi]
@@ -435,7 +434,7 @@ func TestSendBlock(t *testing.T) {
 
 	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
 		Block: sealedBlocks[0],
-		TD:    big.NewInt(1), // This is ignored anyway
+		TD:    *uint256.NewInt(1), // This is ignored anyway
 	})
 
 	if err != nil {

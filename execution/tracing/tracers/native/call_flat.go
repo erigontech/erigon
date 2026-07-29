@@ -254,7 +254,10 @@ func (t *flatCallTracer) GetResult() (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return res, t.tracer.reason
+	if p := t.tracer.reason.Load(); p != nil {
+		return res, *p
+	}
+	return res, nil
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.
@@ -297,10 +300,9 @@ func flatFromNested(input *callFrame, traceAddress []int, convertErrs bool, ctx 
 	}
 
 	output = append(output, *frame)
-	for i, childCall := range input.Calls {
+	for i := range input.Calls {
 		childAddr := childTraceAddress(traceAddress, i)
-		childCallCopy := childCall
-		flat, err := flatFromNested(&childCallCopy, childAddr, convertErrs, ctx)
+		flat, err := flatFromNested(&input.Calls[i], childAddr, convertErrs, ctx)
 		if err != nil {
 			return nil, err
 		}

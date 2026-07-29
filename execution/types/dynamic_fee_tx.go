@@ -20,9 +20,9 @@
 package types
 
 import (
+	"bytes"
 	"errors"
 	"io"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -42,7 +42,7 @@ type DynamicFeeTransaction struct {
 
 func (tx *DynamicFeeTransaction) GetFeeCap() *uint256.Int { return &tx.FeeCap }
 func (tx *DynamicFeeTransaction) GetTipCap() *uint256.Int { return &tx.TipCap }
-func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
+func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) uint256.Int {
 	return CalcEffectiveGasTip(baseFee, tx.GetTipCap, tx.GetFeeCap)
 }
 
@@ -57,7 +57,7 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 			TransactionMisc: TransactionMisc{},
 			Nonce:           tx.Nonce,
 			To:              tx.To, // TODO: copy pointed-to address
-			Data:            common.Copy(tx.Data),
+			Data:            bytes.Clone(tx.Data),
 			GasLimit:        tx.GasLimit,
 			Value:           tx.Value,
 			V:               tx.V,
@@ -317,24 +317,16 @@ func (tx *DynamicFeeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(DynamicFeeTxType, []any{
-		&tx.ChainID,
-		tx.Nonce,
-		&tx.TipCap,
-		&tx.FeeCap,
-		tx.GasLimit,
-		tx.To,
-		&tx.Value,
-		tx.Data,
-		tx.AccessList,
-		tx.V, tx.R, tx.S,
+	payloadSize, accessListLen := tx.payloadSize()
+	hash := prefixedPayloadHash(DynamicFeeTxType, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen)
 	})
 	tx.hash.Store(&hash)
 	return hash
 }
 
 type dynamicFeeTxSigHash struct {
-	ChainID    *big.Int
+	ChainID    *uint256.Int
 	Nonce      uint64
 	GasTipCap  *uint256.Int
 	GasFeeCap  *uint256.Int
@@ -345,7 +337,7 @@ type dynamicFeeTxSigHash struct {
 	AccessList AccessList
 }
 
-func (tx *DynamicFeeTransaction) SigningHash(chainID *big.Int) common.Hash {
+func (tx *DynamicFeeTransaction) SigningHash(chainID *uint256.Int) common.Hash {
 	return prefixedRlpHash(
 		DynamicFeeTxType,
 		&dynamicFeeTxSigHash{

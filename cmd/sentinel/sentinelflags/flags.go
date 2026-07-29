@@ -18,7 +18,7 @@ package sentinelflags
 
 import (
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var CliFlags = []cli.Flag{
@@ -30,6 +30,7 @@ var CliFlags = []cli.Flag{
 	&SentinelServerAddr,
 	&SentinelTcpPort,
 	&NoDiscovery,
+	&LocalDiscovery,
 	&BootnodesFlag,
 	&SentinelStaticPeersFlag,
 }

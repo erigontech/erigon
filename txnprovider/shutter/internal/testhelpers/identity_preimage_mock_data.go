@@ -50,7 +50,7 @@ func TestMustMockIdentityPreimages(t *testing.T, count uint64) shutter.IdentityP
 
 func MockIdentityPreimages(count uint64) (shutter.IdentityPreimages, error) {
 	ips := make([]*shutter.IdentityPreimage, count)
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		var err error
 		ips[i], err = Uint64ToIdentityPreimage(i)
 		if err != nil {
@@ -66,8 +66,10 @@ func MakeSlotIdentityPreimage(slot uint64) (*shutter.IdentityPreimage, error) {
 	// zeros as well). This ensures the block identity preimage is always alphanumerically before
 	// any transaction identity preimages, because sender addresses cannot be that small.
 	var buf bytes.Buffer
-	buf.Write(common.BigToHash(common.Big0).Bytes())
-	buf.Write(common.BigToHash(new(big.Int).SetUint64(slot)).Bytes()[12:])
+	zeroHash := common.BigToHash(common.Big0)
+	slotHash := common.BigToHash(new(big.Int).SetUint64(slot))
+	buf.Write(zeroHash[:])
+	buf.Write(slotHash[12:])
 	return shutter.IdentityPreimageFromBytes(buf.Bytes())
 }
 

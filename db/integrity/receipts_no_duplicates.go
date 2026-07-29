@@ -6,15 +6,15 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/db/services"
 )
 
 // CheckReceiptsNoDups performs integrity checks on receipts to ensure no duplicates exist.
 // This function uses parallel processing for improved performance.
-func CheckReceiptsNoDups(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+func CheckReceiptsNoDups(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) (err error) {
 	defer func() {
 		log.Info("[integrity] ReceiptsNoDups: done", "err", err)
 	}()
@@ -33,13 +33,19 @@ func CheckReceiptsNoDups(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB,
 
 	receiptProgress := tx.Debug().DomainProgress(kv.ReceiptDomain)
 	fromBlock := uint64(1)
-	toBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, receiptProgress)
+	toBlock, ok, err := txNumsReader.FindBlockNum(ctx, tx, receiptProgress)
+	if err != nil {
+		return fmt.Errorf("findBlockNum(%d) fails: %w", receiptProgress, err)
+	}
+	if !ok {
+		return fmt.Errorf("findBlockNum(%d) not found", receiptProgress)
+	}
 
 	log.Info("[integrity] ReceiptsNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
 	return parallelChunkCheck(ctx, sc.NewSampler(), fromBlock, toBlock, db, blockReader, failFast, string(ReceiptsNoDups), ReceiptsNoDupsRange)
 }
 
-func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) (err error) {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -120,7 +126,7 @@ func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 	return nil
 }
 
-func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) (err error) {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -201,7 +207,7 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 	return nil
 }
 
-func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) (err error) {
 	if err := checkCumGas(ctx, fromBlock, toBlock, db, blockReader, failFast); err != nil {
 		return err
 	}

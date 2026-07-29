@@ -17,11 +17,34 @@
 package cli
 
 import (
+	"net/http"
 	"net/url"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
+	"github.com/erigontech/erigon/execution/types"
 )
+
+// TestIsWebsocket tests if an incoming websocket upgrade request is detected properly.
+func TestIsWebsocket(t *testing.T) {
+	r, _ := http.NewRequest("GET", "/", nil)
+
+	require.False(t, isWebsocket(r))
+	r.Header.Set("upgrade", "websocket")
+	require.False(t, isWebsocket(r))
+	r.Header.Set("connection", "upgrade")
+	require.True(t, isWebsocket(r))
+	r.Header.Set("connection", "upgrade,keep-alive")
+	require.True(t, isWebsocket(r))
+	r.Header.Set("connection", " UPGRADE,keep-alive")
+	require.True(t, isWebsocket(r))
+}
 
 func TestParseSocketUrl(t *testing.T) {
 	t.Run("sock", func(t *testing.T) {
@@ -33,5 +56,17 @@ func TestParseSocketUrl(t *testing.T) {
 		socketUrl, err := url.Parse("tcp://localhost:1234")
 		require.NoError(t, err)
 		require.Equal(t, "localhost:1234", socketUrl.Host+socketUrl.EscapedPath())
+	})
+}
+
+// TestRemoteRulesEngineFinalizeDelegates guards the BAL-regeneration path on a
+// datadir-less rpcdaemon: block replay runs Initialize and Finalize on the
+// remote engine wrapper, so Finalize must delegate rather than panic.
+func TestRemoteRulesEngineFinalizeDelegates(t *testing.T) {
+	e := &remoteRulesEngine{engine: merge.New(ethash.NewFaker())}
+	header := &types.Header{Number: *uint256.NewInt(1)} // zero difficulty → PoS header
+	require.NotPanics(t, func() {
+		_, err := e.Finalize(&chain.Config{}, header, nil, nil, nil, nil, nil, nil, false, log.New())
+		require.NoError(t, err)
 	})
 }

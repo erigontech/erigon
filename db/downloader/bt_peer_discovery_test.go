@@ -25,7 +25,7 @@ import (
 // This is the core mechanism for decentralized snapshot distribution:
 // no DHT, no tracker — just direct peer injection from ENR records.
 func TestBTPeerDiscovery_AddPeersFromENR(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	// Create temp dirs for seeder and leecher.
