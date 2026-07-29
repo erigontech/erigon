@@ -24,6 +24,7 @@ PARENT_DATADIR="${PARENT_DATADIR:-/erigon/tmp/erigon-hoodi-fork-parent}"
 PARENT_RPC="${PARENT_RPC:-http://127.0.0.1:19645}"
 FORK_CHAIN_NAME="${FORK_CHAIN_NAME:-hoodi-fork-rpc-$(date +%s)}"
 CUT_BUFFER="${CUT_BUFFER:-1000}"
+TRUST_ROOT_KEY="${TRUST_ROOT_KEY:-$PARENT_DATADIR/fork-test-trust-root.hex}"
 
 INTEGRATION_BIN="${INTEGRATION_BIN:-./build/bin/integration}"
 
@@ -33,6 +34,7 @@ fail() { echo "FAIL: $1" >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || fail "jq is required"
 [[ -d "$PARENT_DATADIR" ]] || fail "PARENT_DATADIR=$PARENT_DATADIR does not exist"
 [[ -x "$INTEGRATION_BIN" ]] || fail "INTEGRATION_BIN=$INTEGRATION_BIN is not executable (run: make integration)"
+[[ -s "$TRUST_ROOT_KEY" ]] || fail "TRUST_ROOT_KEY=$TRUST_ROOT_KEY missing — the parent launcher provisions it; check the running erigon was started via erigon-launch-hoodi-fork-parent.sh"
 
 rpc_call() {
     curl -s --max-time 5 -X POST -H "Content-Type: application/json" \
@@ -66,9 +68,23 @@ cat > "$chain_json" <<EOF
 EOF
 echo "  wrote $chain_json"
 
-# Phase 3: run integration set_fork.
-stage "Phase 3: integration set_fork --chain=$FORK_CHAIN_NAME"
-result_json=$("$INTEGRATION_BIN" set_fork --chain="$FORK_CHAIN_NAME" --rpcendpoint="$PARENT_RPC" 2>&1)
+# Phase 3a: mint a fork-transition UCAN for this specific target.
+stage "Phase 3a: mint fork-transition UCAN"
+ucan_file="$PARENT_DATADIR/fork-transition-ucan-$FORK_CHAIN_NAME.b64"
+"$INTEGRATION_BIN" mint_fork_transition \
+    --trust-root-key="$TRUST_ROOT_KEY" \
+    --chain="$FORK_CHAIN_NAME" \
+    --validity=1h \
+    --out="$ucan_file" 2>&1 | tail -5
+[[ -s "$ucan_file" ]] || fail "mint_fork_transition produced no output at $ucan_file"
+echo "  UCAN written to $ucan_file ($(wc -c < "$ucan_file") bytes)"
+
+# Phase 3b: run integration set_fork with the UCAN attached.
+stage "Phase 3b: integration set_fork --chain=$FORK_CHAIN_NAME"
+result_json=$("$INTEGRATION_BIN" set_fork \
+    --chain="$FORK_CHAIN_NAME" \
+    --rpcendpoint="$PARENT_RPC" \
+    --authority-ucan-file="$ucan_file" 2>&1)
 echo "$result_json"
 
 # Phase 4: parse + assert the SetForkResult payload.

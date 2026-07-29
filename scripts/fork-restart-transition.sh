@@ -34,6 +34,7 @@ CUT_BUFFER="${CUT_BUFFER:-1000}"
 FORK_LAUNCH_CMD="${FORK_LAUNCH_CMD:-scripts/erigon-launch-hoodi-fork-parent.sh}"
 INTEGRATION_BIN="${INTEGRATION_BIN:-./build/bin/integration}"
 FORK_STARTUP_TIMEOUT="${FORK_STARTUP_TIMEOUT:-300}"
+TRUST_ROOT_KEY="${TRUST_ROOT_KEY:-$PARENT_DATADIR/fork-test-trust-root.hex}"
 
 ERIGON_PID_FILE="${ERIGON_PID_FILE:-/tmp/fork-restart-erigon.pid}"
 
@@ -43,6 +44,7 @@ fail() { echo "FAIL: $1" >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || fail "jq is required"
 [[ -d "$PARENT_DATADIR" ]] || fail "PARENT_DATADIR=$PARENT_DATADIR does not exist"
 [[ -x "$FORK_LAUNCH_CMD" ]] || fail "FORK_LAUNCH_CMD=$FORK_LAUNCH_CMD is not executable"
+[[ -s "$TRUST_ROOT_KEY" ]] || fail "TRUST_ROOT_KEY=$TRUST_ROOT_KEY missing — parent launcher provisions it; check parent was started via erigon-launch-hoodi-fork-parent.sh"
 
 rpc_call() {
     local url="$1" body="$2" filt="$3"
@@ -81,7 +83,18 @@ cat > "$PARENT_DATADIR/chain.json" <<EOF
   "cutBlock": $cut_block
 }
 EOF
-setfork_out=$("$INTEGRATION_BIN" set_fork --chain="$FORK_CHAIN_NAME" --rpcendpoint="$PARENT_RPC" 2>&1 || true)
+ucan_file="$PARENT_DATADIR/fork-transition-ucan-$FORK_CHAIN_NAME.b64"
+"$INTEGRATION_BIN" mint_fork_transition \
+    --trust-root-key="$TRUST_ROOT_KEY" \
+    --chain="$FORK_CHAIN_NAME" \
+    --validity=1h \
+    --out="$ucan_file" >/dev/null 2>&1
+[[ -s "$ucan_file" ]] || fail "mint_fork_transition produced no UCAN at $ucan_file"
+
+setfork_out=$("$INTEGRATION_BIN" set_fork \
+    --chain="$FORK_CHAIN_NAME" \
+    --rpcendpoint="$PARENT_RPC" \
+    --authority-ucan-file="$ucan_file" 2>&1 || true)
 if ! echo "$setfork_out" | grep -q '"restart_required": false'; then
     echo "$setfork_out"
     fail "debug_setFork did not return restart_required=false"
