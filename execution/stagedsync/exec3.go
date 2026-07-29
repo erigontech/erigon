@@ -473,7 +473,7 @@ func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.T
 func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHash common.Hash) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			te.logger.Warn("hook paniced: %s", rec, "stack", dbg.Stack())
+			te.logger.Warn("hook panicked", "panic", rec, "stack", dbg.Stack())
 		}
 	}()
 
