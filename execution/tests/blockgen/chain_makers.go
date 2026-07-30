@@ -556,6 +556,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// Reset versioned I/O before finalize to capture system call I/O cleanly
 			if ibs.IsVersioned() {
 				ibs.ResetVersionedIO()
+				ibs.StartAccessRecording()
 			}
 			// Finalize and seal the block
 			syscall := func(contract accounts.Address, data []byte) ([]byte, error) {

@@ -2771,6 +2771,11 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 	}
 }
 
+// StartAccessRecording enables versioned access tracking outside transaction preparation.
+func (sdb *IntraBlockState) StartAccessRecording() {
+	sdb.recordAccess = true
+}
+
 // MarkReadsInternal marks all versioned reads for addr as internal.
 // Internal reads are kept for parallel-execution conflict detection
 // but excluded from the block access list (BAL).  This is used when
