@@ -1010,6 +1010,9 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	var suberr error
 	if evm.chainRules.IsAmsterdam {
 		preparation, suberr = evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
+		if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow {
+			return pc, nil, suberr
+		}
 	}
 	forwarded := false
 	if suberr == nil {

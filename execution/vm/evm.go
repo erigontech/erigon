@@ -419,7 +419,6 @@ func (c *codeAndHash) Hash() accounts.CodeHash {
 
 type createPreparation struct {
 	callerNonce          uint64
-	collision            bool
 	chargeNewAccount     bool
 	incrementCallerNonce bool
 }
@@ -454,19 +453,6 @@ func (evm *EVM) prepareCreate(caller accounts.Address, address accounts.Address,
 		evm.intraBlockState.AddAddressToAccessList(address)
 	}
 	evm.intraBlockState.MarkAddressAccess(address, false)
-	targetCodeHash, err := evm.intraBlockState.GetCodeHash(address)
-	if err != nil {
-		return preparation, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-	}
-	targetNonce, err := evm.intraBlockState.GetNonce(address)
-	if err != nil {
-		return preparation, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-	}
-	targetHasStorage, err := evm.intraBlockState.HasStorage(address)
-	if err != nil {
-		return preparation, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-	}
-	preparation.collision = targetNonce != 0 || !targetCodeHash.IsEmpty() || targetHasStorage
 	if evm.chainRules.IsAmsterdam && nested {
 		preparation.chargeNewAccount, err = evm.intraBlockState.Empty(address)
 		if err != nil {
@@ -474,6 +460,22 @@ func (evm *EVM) prepareCreate(caller accounts.Address, address accounts.Address,
 		}
 	}
 	return preparation, nil
+}
+
+func (evm *EVM) hasCreateCollision(address accounts.Address) (bool, error) {
+	targetCodeHash, err := evm.intraBlockState.GetCodeHash(address)
+	if err != nil {
+		return false, err
+	}
+	targetNonce, err := evm.intraBlockState.GetNonce(address)
+	if err != nil {
+		return false, err
+	}
+	targetHasStorage, err := evm.intraBlockState.HasStorage(address)
+	if err != nil {
+		return false, err
+	}
+	return targetNonce != 0 || !targetCodeHash.IsEmpty() || targetHasStorage, nil
 }
 
 func (evm *EVM) OverlayCreate(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool) ([]byte, accounts.Address, mdgas.MdGas, mdgas.MdGasUsage, error) {
@@ -531,7 +533,14 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 	if preparation.incrementCallerNonce {
 		evm.intraBlockState.SetNonce(caller, preparation.callerNonce+1, tracing.NonceChangeContractCreator)
 	}
-	if preparation.collision {
+	var collision bool
+	collision, err = evm.hasCreateCollision(address)
+	if err != nil {
+		gasRemaining = mdgas.MdGas{}
+		err = fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		return
+	}
+	if collision {
 		err = ErrContractAddressCollision
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 			evm.Config().Tracer.OnGasChange(gasRemaining.Regular, 0, tracing.GasChangeCallFailedExecution)

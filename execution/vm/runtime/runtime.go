@@ -205,6 +205,17 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		gas    = mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules)
 	)
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
+	if !rules.IsAmsterdam {
+		code, address, leftOverGas, _, err := vmenv.Create(
+			sender,
+			input,
+			gas,
+			cfg.Value,
+			nil,
+			false,
+		)
+		return code, address.Value(), leftOverGas, err
+	}
 	canTransfer, err := vmenv.Context.CanTransfer(cfg.State, sender, cfg.Value)
 	if err != nil {
 		return nil, common.Address{}, mdgas.MdGas{}, err

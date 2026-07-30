@@ -19,7 +19,7 @@
 #                                              Hive legacy suite
 #   blocktests-legacy-cancun-{sequential,parallel}
 #                                              Hive legacy-cancun suite
-#   blocktests-legacy-cancun-race-{berlin-shanghai-cancun,other-forks}
+#   blocktests-legacy-cancun-race-{berlin,shanghai,cancun,london,paris,other-forks}
 #                                              race-detector partition of the
 #                                              Hive legacy-cancun suite
 #   enginextests-stable-sequential             engine-x tests vs. eest_stable

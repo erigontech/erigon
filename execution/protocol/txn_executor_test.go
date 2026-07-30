@@ -18,6 +18,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -92,6 +93,15 @@ type codeAccessRecordingReader struct {
 
 func (r *codeAccessRecordingReader) OnCodeAccess(addr accounts.Address, _ []byte) {
 	r.accesses = append(r.accesses, addr)
+}
+
+type accountErrorReader struct {
+	state.StateReader
+	err error
+}
+
+func (r *accountErrorReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	return nil, r.err
 }
 
 // TestEIP7825_GasPoolPreservedOnReject verifies that when a transaction is
@@ -607,6 +617,46 @@ func TestEIP2780ContractCreationRuntimeOutOfGasKeepsSenderNonce(t *testing.T) {
 	exists, err := ibs.Exist(created)
 	require.NoError(t, err)
 	require.False(t, exists)
+}
+
+func TestEIP2780ContractCreationNonceReadErrorIsExecutionFailure(t *testing.T) {
+	t.Parallel()
+	const blockGasLimit = 1_000_000
+	const gasLimit = 100_000
+	backendErr := errors.New("nonce read failed")
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	versionMap := state.NewVersionMap(nil)
+	versionMap.WriteBalance(sender, state.Version{TxIndex: 0}, *uint256.NewInt(1), true)
+	statedb := state.NewWithVersionMap(
+		&accountErrorReader{StateReader: state.NewNoopReader(), err: backendErr},
+		versionMap,
+	)
+	defer statedb.Release(false)
+	statedb.SetTxContext(1, 1)
+	evm := newTestEVM(statedb, chain.AllProtocolChanges, blockGasLimit)
+	msg := types.NewMessage(
+		sender,
+		accounts.NilAddress,
+		0,
+		uint256.NewInt(0),
+		gasLimit,
+		uint256.NewInt(0),
+		uint256.NewInt(0),
+		uint256.NewInt(0),
+		[]byte{byte(vm.STOP)},
+		nil,
+		false,
+		false,
+		true,
+		false,
+		nil,
+	)
+	executor := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0))
+	executor.noFeeBurnAndTip = true
+	result, err := executor.Execute(true, false)
+	require.Nil(t, result)
+	require.ErrorIs(t, err, backendErr)
+	require.ErrorIs(t, err, ErrTxnExecutionFailed)
 }
 
 func TestEIP2780ContractCreationFrameStartsAfterRuntimeCharge(t *testing.T) {
