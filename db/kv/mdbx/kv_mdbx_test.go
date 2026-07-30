@@ -125,7 +125,7 @@ func TestRange(t *testing.T) {
 	t.Run("Asc", func(t *testing.T) {
 		_, tx, _ := BaseCase(t)
 
-		// [from, to)
+		//[from, to)
 		it, err := tx.Range("Table", []byte("key1"), []byte("key3"), order.Asc, kv.Unlim)
 		require.NoError(t, err)
 		require.True(t, it.HasNext())
@@ -157,7 +157,7 @@ func TestRange(t *testing.T) {
 	t.Run("Desc", func(t *testing.T) {
 		_, tx, _ := BaseCase(t)
 
-		// [from, to)
+		//[from, to)
 		it, err := tx.Range("Table", []byte("key3"), []byte("key1"), order.Desc, kv.Unlim)
 		require.NoError(t, err)
 		require.True(t, it.HasNext())
@@ -191,7 +191,7 @@ func TestRangeDupSort(t *testing.T) {
 	t.Run("Asc", func(t *testing.T) {
 		_, tx, _ := BaseCase(t)
 
-		// [from, to)
+		//[from, to)
 		it, err := tx.RangeDupSort("Table", []byte("key1"), nil, nil, order.Asc, -1)
 		require.NoError(t, err)
 		defer it.Close()
@@ -226,7 +226,7 @@ func TestRangeDupSort(t *testing.T) {
 	t.Run("Desc", func(t *testing.T) {
 		_, tx, _ := BaseCase(t)
 
-		// [from, to)
+		//[from, to)
 		it, err := tx.RangeDupSort("Table", []byte("key1"), nil, nil, order.Desc, -1)
 		require.NoError(t, err)
 		require.True(t, it.HasNext())
@@ -384,8 +384,8 @@ func TestHasDelete(t *testing.T) {
 	defer c.Close()
 	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1")))
 	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.3")))
-	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1"))) // valid but already deleted
-	require.NoError(t, c.DeleteExact([]byte("key2"), []byte("value1.1"))) // valid key but wrong value
+	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1"))) //valid but already deleted
+	require.NoError(t, c.DeleteExact([]byte("key2"), []byte("value1.1"))) //valid key but wrong value
 
 	res, err := tx.Has(table, []byte("key1"))
 	require.NoError(t, err)
@@ -397,7 +397,7 @@ func TestHasDelete(t *testing.T) {
 
 	res, err = tx.Has(table, []byte("key3"))
 	require.NoError(t, err)
-	require.True(t, res) // There is another key3 left
+	require.True(t, res) //There is another key3 left
 
 	res, err = tx.Has(table, []byte("k"))
 	require.NoError(t, err)
@@ -591,8 +591,8 @@ func TestNextDups(t *testing.T) {
 	defer c.Close()
 	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1")))
 	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.3")))
-	require.NoError(t, c.DeleteExact([]byte("key3"), []byte("value3.1"))) // valid but already deleted
-	require.NoError(t, c.DeleteExact([]byte("key3"), []byte("value3.3"))) // valid key but wrong value
+	require.NoError(t, c.DeleteExact([]byte("key3"), []byte("value3.1"))) //valid but already deleted
+	require.NoError(t, c.DeleteExact([]byte("key3"), []byte("value3.3"))) //valid key but wrong value
 
 	require.NoError(t, tx.Put(table, []byte("key2"), []byte("value1.1")))
 	require.NoError(t, c.Put([]byte("key2"), []byte("value1.2")))
@@ -1180,7 +1180,7 @@ func TestSequenceOps(t *testing.T) {
 func BenchmarkDB_ResetSequence(b *testing.B) {
 	_db := BaseCaseDBForBenchmark(b)
 	table := "Table"
-	// db := _db.(*MdbxKV)
+	//db := _db.(*MdbxKV)
 	ctx := b.Context()
 
 	tx, err := _db.BeginRw(ctx)

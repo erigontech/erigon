@@ -624,7 +624,7 @@ func runPeer(
 				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
-			// log.Info(fmt.Sprintf("[%s] GetReceiptsMsg", peerID))
+			//log.Info(fmt.Sprintf("[%s] GetReceiptsMsg", peerID))
 		case eth.ReceiptsMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -634,7 +634,7 @@ func runPeer(
 				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
-			// log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peerID))
+			//log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peerID))
 		case eth.NewBlockHashesMsg:
 			if msg.Size > maxNewBlockHashesBytes {
 				msg.Discard()
@@ -663,7 +663,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
-			// log.Debug("NewBlockMsg from", "peerId", fmt.Sprintf("%x", peerID)[:20], "name", peerInfo.peer.Name())
+			//log.Debug("NewBlockMsg from", "peerId", fmt.Sprintf("%x", peerID)[:20], "name", peerInfo.peer.Name())
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewPooledTransactionHashesMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
@@ -995,7 +995,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			// TODO: remember handshake reply per peer ID and return eth-related Status info (see ethPeerInfo in geth)
 			return nil
 		},
-		// Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
+		//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
 		FromProto: eth.FromProto[protocol],
 		ToProto:   eth.ToProto[protocol],
 	})
@@ -1415,7 +1415,7 @@ func (ss *GrpcServer) getBlockHeaders(ctx context.Context, bestHash common.Hash,
 }
 
 func (ss *GrpcServer) PenalizePeer(_ context.Context, req *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
-	// log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%s", req.GetPeerId()))
+	//log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%s", req.GetPeerId()))
 	peerID := ConvertH512ToPeerID(req.PeerId)
 	peerInfo := ss.getPeer(peerID)
 	if ss.statusData != nil && peerInfo != nil && !peerInfo.peer.Info().Network.Static && !peerInfo.peer.Info().Network.Trusted {
@@ -1460,7 +1460,7 @@ func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) []*PeerInfo {
 		}
 		deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
 		height := peerInfo.Height()
-		// fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
+		//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
 		if deadlines < maxPermitsPerPeer {
 			heap.Push(&byMinBlock, PeerRef{pi: peerInfo, height: height})
 			if byMinBlock.Len() > peerCount {
@@ -1499,7 +1499,7 @@ func (ss *GrpcServer) findPeerByMinBlock(minBlock uint64) (*PeerInfo, bool) {
 		}
 		if peerInfo.MinBlock() >= minBlock {
 			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
-			// fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
+			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
 			if deadlines < maxPermitsPerPeer {
 				permits := maxPermitsPerPeer - deadlines
 				if permits > maxPermits {
@@ -1544,8 +1544,8 @@ func (ss *GrpcServer) SendMessageById(_ context.Context, inreq *sentryproto.Send
 	peerID := ConvertH512ToPeerID(inreq.PeerId)
 	peerInfo := ss.getPeer(peerID)
 	if peerInfo == nil {
-		// TODO: enable after support peer to sentry mapping
-		// return reply, fmt.Errorf("peer not found: %s", peerID)
+		//TODO: enable after support peer to sentry mapping
+		//return reply, fmt.Errorf("peer not found: %s", peerID)
 		return reply, nil
 	}
 

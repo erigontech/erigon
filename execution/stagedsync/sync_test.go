@@ -311,7 +311,7 @@ func TestUnwind(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
-	// check that at unwind disabled stage not appear
+	//check that at unwind disabled stage not appear
 	flow = flow[:0]
 	state.unwindOrder = []*Stage{s[2], s[1], s[0]}
 	_ = state.UnwindTo(100, UnwindReason{}, tx)
@@ -573,11 +573,11 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 	_, err := state.Run(nil, tx, true /* initialCycle */, false)
 	assert.Error(t, errInterrupted, err)
 
-	// state = NewState(s)
-	// state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	// err = state.LoadUnwindInfo(tx)
-	// require.NoError(t, err)
-	// state.UnwindTo(500, common.Hash{})
+	//state = NewState(s)
+	//state.unwindOrder = []*Stage{s[0], s[1], s[2]}
+	//err = state.LoadUnwindInfo(tx)
+	//require.NoError(t, err)
+	//state.UnwindTo(500, common.Hash{})
 	_, err = state.Run(nil, tx, true /* initialCycle */, false)
 	require.NoError(t, err)
 

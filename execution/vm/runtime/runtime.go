@@ -135,7 +135,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 			return nil, nil, err
 		}
 		defer sd.Close()
-		// cfg.w = state.NewWriter(sd, nil)
+		//cfg.w = state.NewWriter(sd, nil)
 		cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
 	}
 	var (
@@ -195,7 +195,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 			return nil, [20]byte{}, mdgas.MdGas{}, err
 		}
 		defer sd.Close()
-		// cfg.w = state.NewWriter(sd, nil)
+		//cfg.w = state.NewWriter(sd, nil)
 		cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
 	}
 	var (

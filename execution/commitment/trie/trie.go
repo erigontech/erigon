@@ -332,7 +332,7 @@ func (t *Trie) Update(key, value []byte) {
 }
 
 func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
-	// make account copy. There are some pointer into big.Int
+	//make account copy. There are some pointer into big.Int
 	value := new(accounts.Account)
 	value.Copy(acc)
 

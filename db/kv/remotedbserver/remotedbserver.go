@@ -76,7 +76,7 @@ type KvServer struct {
 	historySnapshots   Snapshots
 	ctx                context.Context
 
-	// v3 fields
+	//v3 fields
 	txIdGen    atomic.Uint64
 	txsMapLock *sync.RWMutex
 	txs        map[uint64]*threadSafeTx
@@ -235,7 +235,7 @@ func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 	type CursorInfo struct {
 		bucket string
 		c      kv.Cursor
-		k, v   []byte // fields to save current position of cursor - used when Tx reopen
+		k, v   []byte //fields to save current position of cursor - used when Tx reopen
 	}
 	cursors := map[uint32]*CursorInfo{}
 

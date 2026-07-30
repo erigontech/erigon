@@ -1467,9 +1467,9 @@ func doBtSearch(ctx context.Context, cliCtx *cli.Command) error {
 	} else {
 		fmt.Printf("seek: %x, -> nil\n", seek)
 	}
-	// var a = accounts.Account{}
-	// accounts.DeserialiseV3(&a, cur.Value())
-	// fmt.Printf("a: nonce=%d\n", a.Nonce)
+	//var a = accounts.Account{}
+	//accounts.DeserialiseV3(&a, cur.Value())
+	//fmt.Printf("a: nonce=%d\n", a.Nonce)
 	return nil
 }
 
@@ -2094,7 +2094,7 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil)
 	caplinSchema := caplinsnapschema.NewCaplinSchema(dirs, 1000, stateSnapTypes)
 
-	// to := int64(-1)
+	//to := int64(-1)
 	for _, snapt := range snaptype.CaplinSnapshotTypes {
 		_, _, err := CheckFilesForSchema(caplinSchema.Get(snapt.Enum()), CheckFilesParams{
 			checkLastFileTo: -1,
@@ -2152,7 +2152,7 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	// Check block sanity
 	if err := filepath.WalkDir(snapDir, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { // it's ok if some file get removed during walk
+			if os.IsNotExist(err) { //it's ok if some file get removed during walk
 				return nil
 			}
 			return err
@@ -2299,7 +2299,7 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 
 	if err := filepath.WalkDir(dirs.SnapDomain, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { // it's ok if some file get removed during walk
+			if os.IsNotExist(err) { //it's ok if some file get removed during walk
 				return nil
 			}
 			return err
@@ -2411,7 +2411,7 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 
 	if err := filepath.WalkDir(dirs.SnapIdx, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { // it's ok if some file get removed during walk
+			if os.IsNotExist(err) { //it's ok if some file get removed during walk
 				return nil
 			}
 			return err
@@ -2537,7 +2537,7 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	intervals := []interval{}
 	if err := filepath.WalkDir(snapDir, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { // it's ok if some file get removed during walk
+			if os.IsNotExist(err) { //it's ok if some file get removed during walk
 				return nil
 			}
 			return err
@@ -2652,7 +2652,7 @@ func doClearIndexing(ctx context.Context, cliCtx *cli.Command) error {
 func deleteFilesWithExtensions(dir string, extensions []string) error {
 	return filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { // it's ok if some file get removed during walk
+			if os.IsNotExist(err) { //it's ok if some file get removed during walk
 				return nil
 			}
 			return err
@@ -2856,7 +2856,7 @@ func doDecompressSpeed(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	defer decompressor.Close()
 	func() {
-		// defer decompressor.MadvSequential().DisableReadAhead()
+		//defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
 		view, err := decompressor.OpenSequentialView(true)
@@ -2872,7 +2872,7 @@ func doDecompressSpeed(ctx context.Context, cliCtx *cli.Command) error {
 		logger.Info("decompress speed", "took", time.Since(t))
 	}()
 	func() {
-		// defer decompressor.MadvSequential().DisableReadAhead()
+		//defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
 		view, err := decompressor.OpenSequentialView(true)
@@ -3105,7 +3105,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		res.CaplinStateSnaps.LogStat("caplin-state")
 	}
 
-	// res.BorSnaps.LogStat("bor")
+	//res.BorSnaps.LogStat("bor")
 	var bridgeStore bridge.Store
 	var heimdallStore heimdall.Store
 	if chainConfig.Bor != nil {
@@ -3452,8 +3452,8 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	}
 	defer clean()
 
-	// defer br.MadvNormal().DisableReadAhead()
-	// defer agg.MadvNormal().DisableReadAhead()
+	//defer br.MadvNormal().DisableReadAhead()
+	//defer agg.MadvNormal().DisableReadAhead()
 
 	if err := agg.SetDomainStepsInFrozenFile(cliCtx.String(utils.ErigondbDomainStepsInFrozenFileFlag.Name)); err != nil {
 		return err
@@ -3474,7 +3474,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 		return err
 	}
 
-	// agg.LimitRecentHistoryWithoutFiles(0)
+	//agg.LimitRecentHistoryWithoutFiles(0)
 
 	var to uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {

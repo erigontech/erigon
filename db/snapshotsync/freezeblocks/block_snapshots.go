@@ -310,9 +310,9 @@ func (br *BlockRetire) MergeBlocks(
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(true), snapshots.BlocksAvailable())
 	if len(rangesToMerge) == 0 {
 		//TODO: enable, but optimize to reduce chain-tip impact
-		// if err := snapshots.RemoveOverlaps(); err != nil {
-		// 	return false, err
-		// }
+		//if err := snapshots.RemoveOverlaps(); err != nil {
+		//	return false, err
+		//}
 		return false, nil
 	}
 	merged = true
@@ -407,7 +407,7 @@ func (br *BlockRetire) BuildFilesInBackground(
 		defer stopOnClose()
 
 		if br.snBuildAllowed != nil {
-			// we are inside own goroutine - it's fine to block here
+			//we are inside own goroutine - it's fine to block here
 			if err := br.snBuildAllowed.Acquire(ctx, 1); err != nil {
 				if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
 					br.logger.Warn("[snapshots] retire blocks", "err", err)

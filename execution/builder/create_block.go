@@ -91,7 +91,7 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 
 	current := cfg.builder.BuiltBlock
 	*current = exec.AssembledBlock{}    // always start with a clean state
-	var txPoolLocals []accounts.Address // txPoolV2 has no concept of local addresses (yet?)
+	var txPoolLocals []accounts.Address //txPoolV2 has no concept of local addresses (yet?)
 	coinbase := accounts.InternAddress(cfg.builder.BuilderConfig.Etherbase)
 
 	const (

@@ -25,7 +25,7 @@ func TestCache2(t *testing.T) {
 
 	test := func(queryTxNum, expectedBlk, cacheMissFirstTime, cacheMissSecondTime uint64) {
 		cache := NewBlockTxNumLookupCache(100)
-		// q := cache.NewQuery(ran)
+		//q := cache.NewQuery(ran)
 		cacheMiss = 0
 		answer, err := cache.Find(ran, queryTxNum, b2tx)
 		require.NoError(t, err)

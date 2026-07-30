@@ -158,7 +158,7 @@ func TestEliasFanoSeek(t *testing.T) {
 			_, err := it.Next()
 			require.NoError(t, err)
 		}
-		// save all fields values
+		//save all fields values
 		v1, v2, v3, v4, v5 := it.upperIdx, it.upperMask, it.lowerIdx, it.upper, it.itemsIterated
 		// seek to same item and check new fields
 		it.Seek(ef.Max())
@@ -749,7 +749,7 @@ func checkSeek(t *testing.T, j int, ef *EliasFano, vals []uint64) {
 		_, err := efi.Next()
 		require.NoError(t, err)
 	}
-	// save all fields values
+	//save all fields values
 	v1, v2, v3, v4, v5 := efi.upperIdx, efi.upperMask, efi.lowerIdx, efi.upper, efi.itemsIterated
 	// seek to same item and check new fields
 	efi.Seek(vals[j])

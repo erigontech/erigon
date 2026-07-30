@@ -40,7 +40,7 @@ type Config struct {
 	BlobSlots           uint64 // Total number of blobs (not txns) allowed per account
 	TotalBlobPoolLimit  uint64 // Total number of blobs (not txns) allowed within the txpool
 	PriceBump           uint64 // Price bump percentage to replace an already existing transaction
-	BlobPriceBump       uint64 // Price bump percentage to replace an existing 4844 blob txn (type-3)
+	BlobPriceBump       uint64 //Price bump percentage to replace an existing 4844 blob txn (type-3)
 	// MaxNonceGap is the maximum allowed gap between a sender's on-chain nonce and the nonce of a
 	// queued transaction. Transactions whose nonce exceeds the on-chain nonce by more than this
 	// value are considered "zombie" transactions that can never become pending (they would require
@@ -60,7 +60,7 @@ type Config struct {
 	CommitEvery            time.Duration
 	LogEvery               time.Duration
 
-	// txpool db
+	//txpool db
 	MdbxPageSize    datasize.ByteSize
 	MdbxDBSizeLimit datasize.ByteSize
 	MdbxGrowthStep  datasize.ByteSize

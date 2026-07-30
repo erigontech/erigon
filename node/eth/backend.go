@@ -883,9 +883,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			case b := <-backend.minedBlocks:
 				backend.minedBlockObservers.Notify(b)
 
-				// p2p
-				// backend.sentryProvider.Client.BroadcastNewBlock(context.Background(), b, b.Difficulty())
-				// rpcdaemon
+				//p2p
+				//backend.sentryProvider.Client.BroadcastNewBlock(context.Background(), b, b.Difficulty())
+				//rpcdaemon
 				if err := backend.miningRPC.BroadcastMinedBlock(b); err != nil {
 					logger.Error("txpool rpc mined block broadcast", "err", err)
 				}

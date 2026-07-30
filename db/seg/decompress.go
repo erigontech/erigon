@@ -250,7 +250,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	}
 	// read patterns from file
 	d.data = d.mmapHandle1[:d.size]
-	defer d.MadvNormal().DisableReadAhead() // speedup opening on slow drives
+	defer d.MadvNormal().DisableReadAhead() //speedup opening on slow drives
 
 	d.version = d.data[0]
 
@@ -319,7 +319,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		l, n := binary.Uvarint(data[dictPos:])
 		dictPos += uint64(n)
 		patterns = append(patterns, data[dictPos:dictPos+l])
-		// fmt.Printf("depth = %d, pattern = [%x]\n", depth, data[dictPos:dictPos+l])
+		//fmt.Printf("depth = %d, pattern = [%x]\n", depth, data[dictPos:dictPos+l])
 		dictPos += l
 	}
 	d.dictWords = len(patterns)
@@ -423,7 +423,7 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 		return 0, nil
 	}
 	if depth == depths[0] {
-		// fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pattern=[%x]\n", depth, maxDepth, code, bits, pattern)
+		//fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pattern=[%x]\n", depth, maxDepth, code, bits, pattern)
 		cw := arena.allocCW(code, word(patterns[0]), byte(bits), nil)
 		table.insertWord(cw)
 		return 1, nil
@@ -460,7 +460,7 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 	}
 	if depth == depths[0] {
 		p := poss[0]
-		// fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pos=%d\n", depth, maxDepth, code, bits, p)
+		//fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pos=%d\n", depth, maxDepth, code, bits, p)
 		entry := posEntry{pos: uint32(p), bits: uint8(bits)}
 		if table.bitLen == bits {
 			table.entries[code] = entry
@@ -779,7 +779,7 @@ type Getter struct {
 	posMask    uint16     // cached d.posDict.mask, avoids pointer chain on hot path
 	posEntries []posEntry // cached d.posDict.entries, avoids pointer chain on hot path
 	data       []byte
-	// less hot fields
+	//less hot fields
 	posTables   []posTable // posArena.tables; only used for the subtable path
 	patternDict *patternTable
 	d           *Decompressor

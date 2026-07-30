@@ -190,7 +190,7 @@ func (i Index) HasFile(info FileInfo, dirEntries []string, logger log.Logger) bo
 			i.Version.Current = fileVer
 		} else {
 			panic("FileVersion is too low, try to rm idx files")
-			// return false
+			//return false
 		}
 	}
 

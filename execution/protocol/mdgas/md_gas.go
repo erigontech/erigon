@@ -145,10 +145,10 @@ func (t MdGasType) String() string {
 // See process_transaction in EIP-8037.
 func SplitTxnGasLimit(txnGasLimit, intrinsicGas uint64, rules *chain.Rules) MdGas {
 	if rules.IsAmsterdam {
-		// execution_gas = tx.gas - intrinsic_gas
-		// regular_gas_budget = TX_MAX_GAS_LIMIT - intrinsic_gas
-		// gas_left = min(regular_gas_budget, execution_gas)
-		// state_gas_reservoir = execution_gas - gas_left
+		//execution_gas = tx.gas - intrinsic_gas
+		//regular_gas_budget = TX_MAX_GAS_LIMIT - intrinsic_gas
+		//gas_left = min(regular_gas_budget, execution_gas)
+		//state_gas_reservoir = execution_gas - gas_left
 		executionGas := txnGasLimit - intrinsicGas
 		regularGasBudget := params.MaxTxnGasLimit - intrinsicGas
 		gasLeft := min(regularGasBudget, executionGas)

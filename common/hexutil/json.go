@@ -448,9 +448,9 @@ func checkNumberText(input []byte) (raw []byte, err error) {
 func wrapTypeError(err error, typ reflect.Type) error {
 	// keeping compatibility with go ethereum tests
 	// nolint:errorlint
-	// if _, ok := err.(*decError); ok {
-	// 	return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}
-	// }
+	//if _, ok := err.(*decError); ok {
+	//	return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}
+	//}
 	var dec *decError
 	if errors.As(err, &dec) {
 		return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}

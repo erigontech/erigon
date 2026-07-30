@@ -123,7 +123,7 @@ func (tr *TRand) RandHeader() *Header {
 		WithdrawalsHash:       &wHash,                                     // *common.Hash
 		BlobGasUsed:           tr.RandUint64(),                            // *uint64
 		ExcessBlobGas:         tr.RandUint64(),                            // *uint64
-		ParentBeaconBlockRoot: &pHash,                                     // *common.Hash
+		ParentBeaconBlockRoot: &pHash,                                     //*common.Hash
 	}
 }
 

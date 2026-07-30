@@ -726,7 +726,7 @@ func benchmarkExecWorkers(n int, b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for range n {
 			wp.Submit(func() {
-				// time.Sleep(100 * time.Microsecond)
+				//time.Sleep(100 * time.Microsecond)
 				allDone.Done()
 			})
 		}

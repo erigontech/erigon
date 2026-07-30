@@ -164,7 +164,7 @@ func (tm *TestMatcher) Walk(t *testing.T, dir string, runTest any) {
 	}
 	err = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { // skip magically disappeared files
+			if os.IsNotExist(err) { //skip magically disappeared files
 				return nil
 			}
 			return err

@@ -69,7 +69,7 @@ type History struct {
 }
 
 func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*History, error) {
-	// if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
+	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	if cfg.Accessors == 0 {
 		cfg.Accessors = statecfg.AccessorHashMap
 	}
@@ -373,7 +373,7 @@ func (h *History) Scan(ctx context.Context, toTxNum uint64) error {
 		return err
 	}
 
-	// h.reCalcVisibleFiles(toTxNum) // TODO: what need here?
+	//h.reCalcVisibleFiles(toTxNum) // TODO: what need here?
 
 	salt, err := GetStateIndicesSalt(h.dirs, false, h.logger)
 	if err != nil {
@@ -394,9 +394,9 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 	}
 	binary.BigEndian.PutUint64(w.ii.txNumBytes[:], txNum)
 
-	// defer func() {
+	//defer func() {
 	//	fmt.Printf("addPrevValue [%p;tx=%d] '%x' -> '%x'\n", w, w.ii.txNum, key1, original)
-	// }()
+	//}()
 
 	if w.largeValues {
 		lk := len(k)
@@ -633,7 +633,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 
 	cnt := 0
 	var histKeyBuf []byte
-	// log.Warn("[dbg] collate", "name", h.filenameBase, "sampling", h.historyValuesOnCompressedPage)
+	//log.Warn("[dbg] collate", "name", h.filenameBase, "sampling", h.historyValuesOnCompressedPage)
 
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		txNum := binary.BigEndian.Uint64(v)
@@ -971,7 +971,7 @@ func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 		ht.readers = make([]*recsplit.IndexReader, len(ht.files))
 	}
 	{
-		// assert
+		//assert
 		for _, f := range ht.files {
 			if f.src.index == nil {
 				panic("assert: file has nil index " + f.src.decompressor.FileName())
@@ -988,10 +988,10 @@ func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 
 func (ht *HistoryRoTx) canHashPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
 	minIdxTx, maxIdxTx := ht.iit.ii.minTxNumInDB(tx), ht.iit.ii.maxTxNumInDB(tx)
-	// defer func() {
+	//defer func() {
 	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepRecentTxInDB=%d; result %t\n",
 	//		ht.h.filenameBase, untilTx, ht.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, ht.h.keepRecentTxInDB, minIdxTx < txTo)
-	// }()
+	//}()
 
 	if ht.h.SnapshotsDisabled {
 		if ht.h.KeepRecentTxnInDB >= maxIdxTx {
@@ -1087,7 +1087,7 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limi
 }
 
 func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
-	// fmt.Printf(" pruneH[%s] %t, %d-%d\n", ht.h.filenameBase, ht.CanPruneUntil(rwTx), txFrom, txTo)
+	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", ht.h.filenameBase, ht.CanPruneUntil(rwTx), txFrom, txTo)
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 
 	var (
@@ -1188,7 +1188,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 	g := ht.statelessGetter(historyItem.i)
 	g.Reset(offset)
-	// fmt.Printf("[dbg] hist.seek: offset=%d\n", offset)
+	//fmt.Printf("[dbg] hist.seek: offset=%d\n", offset)
 	v, _ := g.Next(nil)
 	if traceGetAsOf == ht.h.FilenameBase {
 		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.FilenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
@@ -1308,7 +1308,7 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 		ctx:        ctx, logger: ht.h.logger,
 	}
 	if err := hi.init(ht.iit.files); err != nil {
-		hi.Close() // it's responsibility of constructor (our) to close resource on error
+		hi.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 
@@ -1325,7 +1325,7 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 	}
 	binary.BigEndian.PutUint64(dbit.startTxKey[:], dbStartTxNum)
 	if err := dbit.advance(); err != nil {
-		dbit.Close() // it's responsibility of constructor (our) to close resource on error
+		dbit.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 
@@ -1379,7 +1379,7 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		}
 	}
 	if err := s.advance(); err != nil {
-		s.Close() // it's responsibility of constructor (our) to close resource on error
+		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil
@@ -1408,7 +1408,7 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(dbFrom))
 	}
 	if err := s.advance(); err != nil {
-		s.Close() // it's responsibility of constructor (our) to close resource on error
+		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil

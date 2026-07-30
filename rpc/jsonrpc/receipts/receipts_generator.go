@@ -193,7 +193,7 @@ func (g *Generator) addToCacheReceipts(header *types.Header, receipts types.Rece
 	if rpcDisableRLRU {
 		return
 	}
-	// g.receiptsCache.Add(header.Hash(), receipts.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
+	//g.receiptsCache.Add(header.Hash(), receipts.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
 	g.receiptsCache.Add(header.Hash(), receipts)
 }
 
@@ -201,7 +201,7 @@ func (g *Generator) addToCacheReceipt(txNum uint64, receipt *types.Receipt) {
 	if rpcDisableRLRU {
 		return
 	}
-	// g.receiptCache.Add(txNum, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
+	//g.receiptCache.Add(txNum, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
 	g.receiptCache.Add(txNum, receipt)
 }
 
@@ -218,7 +218,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	calculatePostState := postState != nil
 
-	// if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
+	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	var receiptFromDB, receipt *types.Receipt
 	var firstLogIndex, logIdxAfterTx uint32
 	var cumGasUsed uint64
@@ -455,7 +455,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
 
-	// if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
+	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	var receiptsFromDB types.Receipts
 	receipts := make(types.Receipts, len(block.Transactions()))
 	defer func() {

@@ -560,9 +560,9 @@ func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 		}
 	}
 
-	// defer func() {
-	// 	fmt.Printf("addValue     [%p;tx=%d] '%x' -> '%x'\n", w, w.h.ii.txNum, fullkey, value)
-	// }()
+	//defer func() {
+	//	fmt.Printf("addValue     [%p;tx=%d] '%x' -> '%x'\n", w, w.h.ii.txNum, fullkey, value)
+	//}()
 
 	if err := w.values.Collect(k, w.aux2); err != nil {
 		return err
@@ -610,7 +610,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 		if err != nil || !ok {
 			return nil, false, 0, err
 		}
-		// fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
+		//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
 		return v, true, offset, nil
 	}
 	if dt.d.Accessors.Has(statecfg.AccessorHashMap) {
@@ -754,7 +754,7 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 
 	// Don't use `d.compress` config in collate. Because collat+build must be very-very fast (to keep db small).
 	// Compress files only in `merge` which ok to be slow.
-	// comp := seg.NewWriter(coll.valuesComp, seg.CompressNone) //
+	//comp := seg.NewWriter(coll.valuesComp, seg.CompressNone) //
 	compress := seg.CompressNone
 	if stepTo-stepFrom > DomainMinStepsToCompress {
 		compress = d.Compression
@@ -815,7 +815,7 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 		return Collation{}, nil
 	}
 
-	{ // assert
+	{ //assert
 		if txFrom%d.stepSize != 0 {
 			panic(fmt.Errorf("assert: unexpected txFrom=%d", txFrom))
 		}
@@ -1186,14 +1186,14 @@ func (d *Domain) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*Fi
 		}
 		return []string{fPath}
 	})
-	// return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep uint64) []string {
+	//return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep uint64) []string {
 	//	var files []string
 	//	if d.Accessors.Has(AccessorHashMap) {
 	//		files = append(files, d.kviAccessorNewFilePath(fromStep, toStep))
 	//		files = append(files, d.kvExistenceIdxNewFilePath(fromStep, toStep))
 	//	}
 	//	return files
-	// })
+	//})
 }
 
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
@@ -1783,7 +1783,7 @@ func (dt *DomainRoTx) DebugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit 
 		h:           &CursorHeap{},
 	}
 	if err := s.init(dt); err != nil {
-		s.Close() // it's responsibility of constructor (our) to close resource on error
+		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil
@@ -1801,7 +1801,7 @@ func (dt *DomainRoTx) DebugRangeLatestFromFiles(fromKey, toKey []byte, limit int
 		h:           &CursorHeap{},
 	}
 	if err := s.init(dt); err != nil {
-		s.Close() // it's responsibility of constructor (our) to close resource on error
+		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil
@@ -1844,7 +1844,7 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 	case "commitment":
 		mxPrunableDComm.Set(delta)
 	}
-	// fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.filenameBase, sm, maxStepToPrune, untilStep)
+	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.filenameBase, sm, maxStepToPrune, untilStep)
 	return sm <= min(maxStepToPrune, untilStep) && dt.files.EndTxNum() > 0, maxStepToPrune
 }
 
@@ -1875,8 +1875,8 @@ func (dt *DomainRoTx) canScanPruneDomainTables(tx kv.Tx, untilTx uint64) (can bo
 	case "commitment":
 		mxPrunableDComm.Set(delta)
 	}
-	// fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.FilenameBase, minStep, maxStepToPrune, untilTx)
-	// println("in d", dt.d.FilenameBase, done, prg.TxTo)
+	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.FilenameBase, minStep, maxStepToPrune, untilTx)
+	//println("in d", dt.d.FilenameBase, done, prg.TxTo)
 	return !done, maxStepToPrune
 }
 

@@ -79,15 +79,15 @@ func TestMultiAddressBuilderWithID(t *testing.T) {
 }
 
 // TODO: reimplement this test with the new RLP decoder at some point
-// func TestConvertToMultiAddr(t *testing.T) {
-// 	var r enr.Record
-// 	if err := rlp.DecodeBytes(pyRecord, &r); err != nil {
-// 		t.Fatalf("can't decode: %v", err)
-// 	}
-// 	n, err := enode.New(enode.ValidSchemes, &r)
-// 	if err != nil {
-// 		t.Fatalf("cannot create new node: %v", err)
-// 	}
+//func TestConvertToMultiAddr(t *testing.T) {
+//	var r enr.Record
+//	if err := rlp.DecodeBytes(pyRecord, &r); err != nil {
+//		t.Fatalf("can't decode: %v", err)
+//	}
+//	n, err := enode.New(enode.ValidSchemes, &r)
+//	if err != nil {
+//		t.Fatalf("cannot create new node: %v", err)
+//	}
 //
 //	testCases := []struct {
 //		nodes    []*enode.Node

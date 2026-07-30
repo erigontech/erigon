@@ -53,19 +53,19 @@ type validatorStatus int
 var validatorJsonTemplate = "{\"index\":\"%d\",\"status\":\"%s\",\"balance\":\"%d\",\"validator\":{\"pubkey\":\"0x%x\",\"withdrawal_credentials\":\"0x%x\",\"effective_balance\":\"%d\",\"slashed\":%t,\"activation_eligibility_epoch\":\"%d\",\"activation_epoch\":\"%d\",\"exit_epoch\":\"%d\",\"withdrawable_epoch\":\"%d\"}}"
 
 const (
-	validatorPendingInitialized validatorStatus = 1  // "pending_initialized"
-	validatorPendingQueued      validatorStatus = 2  // "pending_queued"
-	validatorActiveOngoing      validatorStatus = 3  // "active_ongoing"
-	validatorActiveExiting      validatorStatus = 4  // "active_exiting"
-	validatorActiveSlashed      validatorStatus = 5  // "active_slashed"
-	validatorExitedUnslashed    validatorStatus = 6  // "exited_unslashed"
-	validatorExitedSlashed      validatorStatus = 7  // "exited_slashed"
-	validatorWithdrawalPossible validatorStatus = 8  // "withdrawal_possible"
-	validatorWithdrawalDone     validatorStatus = 9  // "withdrawal_done"
-	validatorActive             validatorStatus = 10 // "active"
-	validatorPending            validatorStatus = 11 // "pending"
-	validatorExited             validatorStatus = 12 // "exited"
-	validatorWithdrawal         validatorStatus = 13 // "withdrawal"
+	validatorPendingInitialized validatorStatus = 1  //"pending_initialized"
+	validatorPendingQueued      validatorStatus = 2  //"pending_queued"
+	validatorActiveOngoing      validatorStatus = 3  //"active_ongoing"
+	validatorActiveExiting      validatorStatus = 4  //"active_exiting"
+	validatorActiveSlashed      validatorStatus = 5  //"active_slashed"
+	validatorExitedUnslashed    validatorStatus = 6  //"exited_unslashed"
+	validatorExitedSlashed      validatorStatus = 7  //"exited_slashed"
+	validatorWithdrawalPossible validatorStatus = 8  //"withdrawal_possible"
+	validatorWithdrawalDone     validatorStatus = 9  //"withdrawal_done"
+	validatorActive             validatorStatus = 10 //"active"
+	validatorPending            validatorStatus = 11 //"pending"
+	validatorExited             validatorStatus = 12 //"exited"
+	validatorWithdrawal         validatorStatus = 13 //"withdrawal"
 )
 
 func validatorStatusFromString(s string) (validatorStatus, error) {

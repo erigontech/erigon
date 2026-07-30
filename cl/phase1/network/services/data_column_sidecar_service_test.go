@@ -249,7 +249,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenIncorrectSubnet_Retu
 		// Epoch: (testSlot - 100) / 32,
 		// Root:  [32]byte{1},
 	}
-	// t.mockForkChoice.Ancestors[(testSlot-100)/32*32] = [32]byte{1}
+	//t.mockForkChoice.Ancestors[(testSlot-100)/32*32] = [32]byte{1}
 
 	// Mock ViewHeadState to avoid panic
 	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
@@ -307,7 +307,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenSlotTooOld_ReturnsEr
 		// Epoch: (testSlot + 100) / 32,
 		// Root:  [32]byte{1},
 	}
-	// t.mockForkChoice.Ancestors[(testSlot+100)/32*32] = [32]byte{1}
+	//t.mockForkChoice.Ancestors[(testSlot+100)/32*32] = [32]byte{1}
 
 	// Execute
 	sidecar := createMockDataColumnSidecar(testSlot, 0)
@@ -339,7 +339,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidInclusionProo
 		// Epoch: (testSlot - 100) / 32,
 		// Root:  [32]byte{1},
 	}
-	// t.mockForkChoice.Ancestors[(testSlot-100)/32*32] = [32]byte{1}
+	//t.mockForkChoice.Ancestors[(testSlot-100)/32*32] = [32]byte{1}
 
 	// Mock ViewHeadState to avoid panic
 	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
@@ -379,7 +379,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidKZGProofs_Ret
 		// Epoch: (testSlot - 100) / 32,
 		// Root:  [32]byte{1},
 	}
-	// t.mockForkChoice.Ancestors[(testSlot-100)/32*32] = [32]byte{1}
+	//t.mockForkChoice.Ancestors[(testSlot-100)/32*32] = [32]byte{1}
 
 	// Mock ViewHeadState to avoid panic
 	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {

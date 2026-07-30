@@ -56,17 +56,17 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
 	tb.Cleanup(db.Close)
 
-	// TODO: tests will fail if set histCfg.Compression = CompressKeys | CompressValues
+	//TODO: tests will fail if set histCfg.Compression = CompressKeys | CompressValues
 	salt := uint32(1)
 	cfg := statecfg.Schema.AccountsDomain
 
 	cfg.Hist.IiCfg.Accessors = statecfg.AccessorHashMap
 	cfg.Hist.HistoryLargeValues = largeValues
 
-	// perf of tests
+	//perf of tests
 	cfg.Hist.IiCfg.Compression = seg.CompressNone
 	cfg.Hist.Compression = seg.CompressNone
-	// cfg.hist.historyValuesOnCompressedPage = 16
+	//cfg.hist.historyValuesOnCompressedPage = 16
 	aggregationStep := uint64(16)
 	h, err := NewHistory(cfg.Hist, aggregationStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 	require.NoError(tb, err)
@@ -140,7 +140,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 				vi := 0
 				updates, ok := values[string(keyBuf)]
 				require.Truef(t, ok, "key not found in values")
-				// require.Len(t, updates, int(ef.Count()), "updates count mismatch")
+				//require.Len(t, updates, int(ef.Count()), "updates count mismatch")
 
 				for efIt.HasNext() {
 					txNum, err := efIt.Next()
@@ -802,20 +802,20 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 		require.EqualValues(t, 1, stat.PruneCountValues)
 		require.EqualValues(t, 1, stat.PruneCountTx)
 
-		// TODO: figure out pretty way to deal with it.
-		// // prune exactly pruneLimit*pruneIters transactions
-		// for i := 0; i < pruneIters; i++ {
-		// 	stat, err = hc.Prune(t.Context(), rwTx, 0, 1000, pruneLimit, true, logEvery)
-		// 	require.NoError(t, err)
-		// 	t.Logf("[%d] stats: %v", i, stat)
-		// }
-		// icc, err := rwTx.CursorDupSort(h.ValuesTable)
-		// require.NoError(t, err)
-		// defer icc.Close()
-		// key, _, err := icc.First()
-		// require.NoError(t, err)
-		// require.NotNil(t, key)
-		// require.EqualValues(t, pruneIters*int(pruneLimit), binary.BigEndian.Uint64(key[len(key)-8:])-1)
+		//TODO: figure out pretty way to deal with it.
+		//// prune exactly pruneLimit*pruneIters transactions
+		//for i := 0; i < pruneIters; i++ {
+		//	stat, err = hc.Prune(t.Context(), rwTx, 0, 1000, pruneLimit, true, logEvery)
+		//	require.NoError(t, err)
+		//	t.Logf("[%d] stats: %v", i, stat)
+		//}
+		//icc, err := rwTx.CursorDupSort(h.ValuesTable)
+		//require.NoError(t, err)
+		//defer icc.Close()
+		//key, _, err := icc.First()
+		//require.NoError(t, err)
+		//require.NotNil(t, key)
+		//require.EqualValues(t, pruneIters*int(pruneLimit), binary.BigEndian.Uint64(key[len(key)-8:])-1)
 	})
 }
 
@@ -833,9 +833,9 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 	tb.Cleanup(h.Close)
 
 	ctx := tb.Context()
-	// tx, err := db.BeginRw(ctx)
-	// require.NoError(tb, err)
-	// defer tx.Rollback()
+	//tx, err := db.BeginRw(ctx)
+	//require.NoError(tb, err)
+	//defer tx.Rollback()
 
 	err := db.Update(ctx, func(tx kv.RwTx) error {
 		hc := h.beginForTests()
@@ -898,8 +898,8 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 				var v [8]byte
 				binary.BigEndian.PutUint64(k[:], keyNum)
 				binary.BigEndian.PutUint64(v[:], valNum)
-				k[0] = 1   // mark key to simplify debug
-				v[0] = 255 // mark value to simplify debug
+				k[0] = 1   //mark key to simplify debug
+				v[0] = 255 //mark value to simplify debug
 				err = writer.AddPrevValue(k[:], txNum, prevVal[keyNum])
 				require.NoError(tb, err)
 				prevVal[keyNum] = v[:]
@@ -939,12 +939,12 @@ func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
 			var k [8]byte
 			var v [8]byte
 			label := fmt.Sprintf("txNum=%d, keyNum=%d", txNum, keyNum)
-			// fmt.Printf("label=%s\n", label)
+			//fmt.Printf("label=%s\n", label)
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], valNum)
 			k[0], v[0] = 0x01, 0xff
 			val, ok, err := hc.historySeekInFiles(k[:], txNum+1)
-			// require.Equal(t, ok, txNum < 976)
+			//require.Equal(t, ok, txNum < 976)
 			if ok {
 				require.NoError(t, err, label)
 				if txNum >= keyNum {
@@ -1538,14 +1538,14 @@ func TestHistoryRange2(t *testing.T) {
 		}
 		var firstKey [8]byte
 		binary.BigEndian.PutUint64(firstKey[:], 1)
-		firstKey[0] = 1 // mark key to simplify debug
+		firstKey[0] = 1 //mark key to simplify debug
 
 		var keys, vals []string
 		t.Run("before merge", func(t *testing.T) {
 			hc, require := h.beginForTests(), require.New(t)
 			defer hc.Close()
 
-			{ // check IdxRange
+			{ //check IdxRange
 				idxIt, err := hc.IdxRange(firstKey[:], -1, -1, order.Asc, -1, roTx)
 				require.NoError(err)
 				defer idxIt.Close()
@@ -1857,7 +1857,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 			k, _, err := iter.Next()
 			require.NoError(err)
 			keys = append(keys, k)
-			// vals = append(vals, fmt.Sprintf("%x", v))
+			//vals = append(vals, fmt.Sprintf("%x", v))
 		}
 
 		slices.SortFunc(writtenKeys, bytes.Compare)
@@ -1867,12 +1867,12 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 		require.Equal(fmt.Sprintf("%#x", writtenKeys), fmt.Sprintf("%#x", keys))
 	}
 
-	// LargeHistoryValues: don't support various keys len
-	// TODO: write hist test for non-various keys len
-	// t.Run("large_values", func(t *testing.T) {
-	// 	db, h, keys, txs := writeSomeHistory(t, true, logger)
-	// 	test(t, h, db, keys, txs)
-	// })
+	//LargeHistoryValues: don't support various keys len
+	//TODO: write hist test for non-various keys len
+	//t.Run("large_values", func(t *testing.T) {
+	//	db, h, keys, txs := writeSomeHistory(t, true, logger)
+	//	test(t, h, db, keys, txs)
+	//})
 	t.Run("small_values", func(t *testing.T) {
 		db, h, keys, txs := writeSomeHistory(t, false, logger)
 		test(t, h, db, keys, txs)

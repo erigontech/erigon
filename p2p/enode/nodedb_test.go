@@ -67,7 +67,7 @@ func BenchmarkNodeDBGeometry(b *testing.B) {
 		DirtySpace(uint64(32 * datasize.MB))
 
 	doBench := func(b *testing.B, db kv.RwDB) {
-		// b.ReportAllocs()
+		//b.ReportAllocs()
 		time.Sleep(200 * time.Millisecond) // give for OS a bit time between bench runs - to reduce cumulative effect
 		b.ResetTimer()
 		var worst time.Duration

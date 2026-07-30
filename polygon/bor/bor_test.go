@@ -81,7 +81,7 @@ func (h *testHeimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.
 	}
 
 	if h.currentSpan == nil || spanID == 0 {
-		nextSpan.StartBlock = 1 // 256
+		nextSpan.StartBlock = 1 //256
 	} else {
 		if spanID != uint64(h.currentSpan.Id+1) {
 			return nil, errors.New("Can't initialize span: non consecutive span")
@@ -330,15 +330,15 @@ func TestVerifyHeader(t *testing.T) {
 }
 
 func TestVerifyRun(t *testing.T) {
-	// testVerify(t, 5, 8)
+	//testVerify(t, 5, 8)
 }
 
 func TestVerifySprint(t *testing.T) {
-	// testVerify(t, 10, 4, int(polychain.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
+	//testVerify(t, 10, 4, int(polychain.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
 }
 
 func TestVerifySpan(t *testing.T) {
-	// testVerify(t, 10, 4 /*100**/ *int(polychain.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
+	//testVerify(t, 10, 4 /*100**/ *int(polychain.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
 }
 
 func testVerify(t *testing.T, noValidators int, chainLength int) {

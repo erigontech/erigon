@@ -254,7 +254,7 @@ func (r *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, h
 	for i := range senders {
 		senders[i].SetBytes(reply.Senders[i*20 : (i+1)*20])
 	}
-	if len(senders) == block.Transactions().Len() { // it's fine if no senders provided - they can be lazy recovered
+	if len(senders) == block.Transactions().Len() { //it's fine if no senders provided - they can be lazy recovered
 		block.SendersToTxs(senders)
 	}
 	return block, senders, nil
@@ -364,7 +364,7 @@ type BlockReader struct {
 	borSn        *heimdall.RoSnapshots
 	txNumsReader rawdbv3.TxNumsReader
 
-	// files are immutable: no reorgs, on updates - means no invalidation needed
+	//files are immutable: no reorgs, on updates - means no invalidation needed
 	headerByNumCache   *lru.Cache[uint64, *types.Header]
 	canonicalHashCache *lru.Cache[uint64, common.Hash]
 }
@@ -687,15 +687,15 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 }
 
 func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (h *types.Header, err error) {
-	// TODO: investigate why code blolow causing getting error `Could not set forkchoice                 app=caplin stage=ForkChoice err="execution Client RPC failed to retrieve ForkChoiceUpdate response, err: unknown ancestor"`
-	// maxBlockNumInFiles := r.sn.BlocksAvailable()
-	// if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-	// 	if tx == nil {
-	// 		return nil, nil
-	// 	}
-	// 	h = rawdb.ReadHeader(tx, hash, blockHeight)
-	// 	return h, nil
-	// }
+	//TODO: investigate why code blolow causing getting error `Could not set forkchoice                 app=caplin stage=ForkChoice err="execution Client RPC failed to retrieve ForkChoiceUpdate response, err: unknown ancestor"`
+	//maxBlockNumInFiles := r.sn.BlocksAvailable()
+	//if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+	//	if tx == nil {
+	//		return nil, nil
+	//	}
+	//	h = rawdb.ReadHeader(tx, hash, blockHeight)
+	//	return h, nil
+	//}
 	if tx != nil {
 		h = rawdb.ReadHeader(tx, hash, blockHeight)
 		if h != nil {

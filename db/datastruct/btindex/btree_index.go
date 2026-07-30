@@ -457,7 +457,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, existenceFilterPath strin
 
 		p.Processed.Add(1)
 	}
-	// logger.Warn("empty keys", "key lengths", ks, "total emptys", emptys, "total", kv.Count()/2)
+	//logger.Warn("empty keys", "key lengths", ks, "total emptys", emptys, "total", kv.Count()/2)
 	if err := iw.Build(); err != nil {
 		return err
 	}

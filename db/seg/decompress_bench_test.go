@@ -80,16 +80,16 @@ func BenchmarkDecompressSkip(b *testing.B) {
 		}
 	})
 
-	// b.Run("matchcmp_non_existing_key", func(b *testing.B) {
-	// 	b.ReportAllocs()
-	// 	g := d.MakeGetter()
-	// 	for b.Loop() {
-	// 		_ = g.MatchCmp([]byte("longlongword"))
-	// 		if !g.HasNext() {
-	// 			g.Reset(0)
-	// 		}
-	// 	}
-	// })
+	//b.Run("matchcmp_non_existing_key", func(b *testing.B) {
+	//	b.ReportAllocs()
+	//	g := d.MakeGetter()
+	//	for b.Loop() {
+	//		_ = g.MatchCmp([]byte("longlongword"))
+	//		if !g.HasNext() {
+	//			g.Reset(0)
+	//		}
+	//	}
+	//})
 }
 
 // prepareBinaryDict creates a file with sorted binary keys (like storage keys).
@@ -275,9 +275,9 @@ func BenchmarkMatchCmpUncompressed(b *testing.B) {
 }
 
 func BenchmarkDecompressTorrent(t *testing.B) {
-	// fpath := "/Volumes/wotah/mainnet/snapshots/v1.0-013500-014000-bodies.seg"
+	//fpath := "/Volumes/wotah/mainnet/snapshots/v1.0-013500-014000-bodies.seg"
 	fpath := "/Volumes/wotah/mainnet/snapshots/v1.0-013500-014000-transactions.seg"
-	// fpath := "./v1.0-006000-006500-transactions.seg"
+	//fpath := "./v1.0-006000-006500-transactions.seg"
 	st, err := os.Stat(fpath)
 	if err != nil {
 		t.Skipf("requires local snapshot file %s", fpath)

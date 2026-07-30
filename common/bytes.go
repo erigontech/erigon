@@ -155,7 +155,7 @@ func ToBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s)
 
 func KeyCmp(key1, key2 []byte) (int, bool) {
 	switch {
-	// both keys are empty
+	//both keys are empty
 	case len(key1) == 0 && len(key2) == 0:
 		return 0, true
 	//	key1 is empty

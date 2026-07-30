@@ -106,7 +106,7 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithEngine(engine))
 
 	difficulty := uint256.MustFromDecimal("340282366920938463463374607431768211454")
-	// Populate a sample valid header for a Pre-merge block
+	//Populate a sample valid header for a Pre-merge block
 	// - actually sampled from 5000th block in chiado
 	validPreMergeHeader := &types.Header{
 		ParentHash:  common.HexToHash("0x102482332de853f2f8967263e77e71d4fddf68fd5d84b750b2ddb7e501052097"),
@@ -126,7 +126,7 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	}
 
 	syscallCustom := func(accounts.Address, []byte, *state.IntraBlockState, *types.Header, bool) ([]byte, error) {
-		// Packing as constructor gives the same effect as unpacking the returned value
+		//Packing as constructor gives the same effect as unpacking the returned value
 		json := `[{"inputs": [{"internalType": "uint256","name": "blockGasLimit","type": "uint256"}],"stateMutability": "nonpayable","type": "constructor"}]`
 		fakeAbi, err := abi.JSON(strings.NewReader(json))
 		require.NoError(err)
@@ -137,11 +137,11 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	require.NoError(m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, validPreMergeHeader, nil, syscallCustom, nil, nil))
 
 	invalidPreMergeHeader := validPreMergeHeader
-	invalidPreMergeHeader.GasLimit = 12_123456 // a different, wrong gasLimit
+	invalidPreMergeHeader.GasLimit = 12_123456 //a different, wrong gasLimit
 	require.Error(m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, invalidPreMergeHeader, nil, syscallCustom, nil, nil))
 
 	invalidPostMergeHeader := invalidPreMergeHeader
-	invalidPostMergeHeader.Difficulty.Clear() // zero difficulty detected as PoS
+	invalidPostMergeHeader.Difficulty.Clear() //zero difficulty detected as PoS
 	require.NoError(m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, invalidPostMergeHeader, nil, syscallCustom, nil, nil))
 }
 

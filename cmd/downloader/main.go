@@ -68,8 +68,8 @@ import (
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 
-	_ "github.com/erigontech/erigon/db/snaptype2"     // hack
-	_ "github.com/erigontech/erigon/polygon/heimdall" // hack
+	_ "github.com/erigontech/erigon/db/snaptype2"     //hack
+	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 )
 
 func main() {
@@ -114,7 +114,7 @@ var (
 
 var cobraFlagValues struct {
 	webseeds string
-	// preverifiedSource string
+	//preverifiedSource string
 	datadir      string
 	chainTomlURL string
 }
@@ -602,11 +602,11 @@ func manifest(ctx context.Context, logger log.Logger) error {
 
 	extList := []string{
 		".torrent",
-		// ".seg", ".idx", // e2
-		// ".kv", ".kvi", ".bt", ".kvei", // e3 domain
-		// ".v", ".vi", // e3 hist
-		// ".ef", ".efi", // e3 idx
-		".txt", // salt-state.txt, salt-blocks.txt, manifest.txt
+		//".seg", ".idx", // e2
+		//".kv", ".kvi", ".bt", ".kvei", // e3 domain
+		//".v", ".vi", //e3 hist
+		//".ef", ".efi", //e3 idx
+		".txt", //salt-state.txt, salt-blocks.txt, manifest.txt
 	}
 	l, _ := dir.ListFiles(dirs.Snap, extList...)
 	for _, fPath := range l {
@@ -645,7 +645,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	tf := downloader.NewAtomicTorrentFS(dirs.Snap)
 
 	if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
-		// removePieceCompletionStorage(snapDir)
+		//removePieceCompletionStorage(snapDir)
 		files, err := downloader.AllTorrentPaths(dirs)
 		if err != nil {
 			return err

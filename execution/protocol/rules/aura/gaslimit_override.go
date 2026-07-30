@@ -76,7 +76,7 @@ func (c *AuRa) GetBlockGasLimitFromContract(_ *chain.Config, syscall rules.Syste
 }
 
 func (c *AuRa) verifyGasLimitOverride(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscallCustom rules.SysCallCustom) error {
-	// IsPoSHeader check is necessary as merge.go calls Initialize on AuRa indiscriminately
+	//IsPoSHeader check is necessary as merge.go calls Initialize on AuRa indiscriminately
 	gasLimitOverride := c.HasGasLimitContract() && !misc.IsPoSHeader(header)
 	if gasLimitOverride {
 		syscallPrevHeader := func(addr accounts.Address, data []byte) ([]byte, error) {

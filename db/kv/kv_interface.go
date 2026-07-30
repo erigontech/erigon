@@ -624,7 +624,7 @@ type TemporalPutDel interface {
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not perform append
 	DomainPut(domain Domain, k, v []byte, txNum uint64, prevVal []byte) error
-	// DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
+	//DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
 
 	// DomainDel
 	// Optimizations:
@@ -792,12 +792,12 @@ var (
 		DbGcSelfXpages   = metrics.NewCounter(`db_gc{phase="self_xpages"}`)                //nolint
 	*/
 
-	// DbGcWorkPnlMergeTime   = metrics.GetOrCreateSummary(`db_gc_pnl_seconds{phase="work_merge_time"}`) //nolint
-	// DbGcWorkPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="work_merge_volume"}`)               //nolint
-	// DbGcWorkPnlMergeCalls  = metrics.NewCounter(`db_gc{phase="work_merge_calls"}`)                    //nolint
-	// DbGcSelfPnlMergeTime   = metrics.GetOrCreateSummary(`db_gc_pnl_seconds{phase="slef_merge_time"}`) //nolint
-	// DbGcSelfPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="self_merge_volume"}`)               //nolint
-	// DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
+	//DbGcWorkPnlMergeTime   = metrics.GetOrCreateSummary(`db_gc_pnl_seconds{phase="work_merge_time"}`) //nolint
+	//DbGcWorkPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="work_merge_volume"}`)               //nolint
+	//DbGcWorkPnlMergeCalls  = metrics.NewCounter(`db_gc{phase="work_merge_calls"}`)                    //nolint
+	//DbGcSelfPnlMergeTime   = metrics.GetOrCreateSummary(`db_gc_pnl_seconds{phase="slef_merge_time"}`) //nolint
+	//DbGcSelfPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="self_merge_volume"}`)               //nolint
+	//DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
 )
 
 // ErrReadTxLimitExceeded is returned by BeginRo when the read-tx semaphore is full and no slot is

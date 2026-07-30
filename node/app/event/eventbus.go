@@ -127,7 +127,7 @@ func (hmap *handlerMap) publish(bus *eventBus, args []any, argIndex int) int {
 		nextArgMap := hmap.nextArgMap
 
 		for mapType, nextMap := range nextArgMap {
-			// fmt.Printf("%s->%s (%v)\n", argType, mapType, argType == mapType || argType.AssignableTo(mapType))
+			//fmt.Printf("%s->%s (%v)\n", argType, mapType, argType == mapType || argType.AssignableTo(mapType))
 			if argType == mapType || argType.AssignableTo(mapType) {
 				// fmt.Printf("%s->%s\n", argType, mapType)
 				// TODO need to recurse so we cover all paths ?
@@ -269,7 +269,7 @@ func (handler *eventHandler) doPublish(bus *eventBus, logEnabled bool, args ...a
 				"async", handler.async,
 				"callback", fmt.Sprint(handler.callBack),
 				"args", fmt.Sprint(args...),
-				// TODO Stack().
+				//TODO Stack().
 				"err", err)
 		}
 	}()

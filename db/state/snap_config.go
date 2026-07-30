@@ -35,7 +35,7 @@ type SnapshotCreationConfig struct {
 
 	// preverified can have larger files than that indicated by `MergeSteps.last`.
 	// This is because previously, different values might have been used.
-	// Preverified       snapcfg.Preverified
+	//Preverified       snapcfg.Preverified
 	PreverifiedParsed []*SnapInfo
 }
 
@@ -46,7 +46,7 @@ type SnapshotConfig struct {
 	// is aligned to those of the root entity.
 	RootAligned bool
 
-	// Integrity *DependencyIntegrityChecker
+	//Integrity *DependencyIntegrityChecker
 
 	Schema SnapNameSchema
 

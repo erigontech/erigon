@@ -63,9 +63,9 @@ func finishBlock(tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) erro
 	current := cfg.builderState.BuiltBlock
 
 	// Short circuit when receiving duplicate result caused by resubmitting.
-	// if w.chain.HasBlock(block.Hash(), block.NumberU64()) {
-	// 	continue
-	// }
+	//if w.chain.HasBlock(block.Hash(), block.NumberU64()) {
+	//	continue
+	//}
 
 	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals)
 	// Only embed the BAL hash in the header for Amsterdam+ chains.
@@ -81,13 +81,13 @@ func finishBlock(tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) erro
 	}
 	*current = exec.AssembledBlock{} // hack to clean global data
 
-	// sealHash := engine.SealHash(block.Header())
+	//sealHash := engine.SealHash(block.Header())
 	// Reject duplicate sealing work due to resubmitting.
-	// if sealHash == prev {
-	// 	s.Done()
-	// 	return nil
-	// }
-	// prev = sealHash
+	//if sealHash == prev {
+	//	s.Done()
+	//	return nil
+	//}
+	//prev = sealHash
 	cfg.latestBlockBuiltStore.AddBlockBuilt(block)
 
 	// Tests may set pre-calculated nonce

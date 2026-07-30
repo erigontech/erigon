@@ -92,7 +92,7 @@ func TestForwardCompatibility(t *testing.T) {
 		features := No | Enums
 		err := onlyKnownFeatures(features)
 		require.NoError(t, err)
-		assert.Equal(t, No|Enums, features) // no side-effects
+		assert.Equal(t, No|Enums, features) //no side-effects
 	})
 	t.Run("disallow_unknown", func(t *testing.T) {
 		features := Features(0xff)

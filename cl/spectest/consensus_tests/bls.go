@@ -28,7 +28,7 @@ type BlsAggregateVerify struct{}
 func (b *BlsAggregateVerify) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
 	t.Skipf("Skipping BLS because it is done by library")
 	return
-	// var meta struct {
+	//var meta struct {
 	//	Input struct {
 	//		Pubkeys   []hexutil.Bytes `yaml:"pubkeys"`
 	//		Messages  []common.Hash      `yaml:"messages"`
@@ -36,8 +36,8 @@ func (b *BlsAggregateVerify) Run(t *testing.T, root fs.FS, c spectest.TestCase) 
 	//	} `yaml:"input"`
 	//	Output bool `yaml:"output"`
 	//}
-	// if err := spectest.ReadMeta(root, "data.yaml", &meta); err != nil {
-	// 	return err
-	// }
-	// return spectest.ErrorHandlerNotImplemented
+	//if err := spectest.ReadMeta(root, "data.yaml", &meta); err != nil {
+	//	return err
+	//}
+	//return spectest.ErrorHandlerNotImplemented
 }

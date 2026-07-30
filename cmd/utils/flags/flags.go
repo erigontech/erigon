@@ -183,7 +183,7 @@ func DBPageSizeFlagUnmarshal(cliCtx *cli.Command, flagName, flagUsage string) da
 }
 
 func isPowerOfTwo(n uint64) bool {
-	if n == 0 { // corner case: if n is zero it will also consider as power 2
+	if n == 0 { //corner case: if n is zero it will also consider as power 2
 		return true
 	}
 	return n&(n-1) == 0

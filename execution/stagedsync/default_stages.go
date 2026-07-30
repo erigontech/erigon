@@ -137,7 +137,7 @@ func DefaultStages(
 		//		cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
 		//		return PruneCustomTrace(p, tx, cfg, ctx, logger)
 		//	},
-		// },
+		//},
 		{
 			ID:          stages.TxLookup,
 			Description: "Generate txn lookup index",
@@ -340,7 +340,7 @@ var DefaultForwardOrder = UnwindOrder{
 	// Stages below don't use Internet
 	stages.Senders,
 	stages.Execution,
-	// stages.CustomTrace,
+	//stages.CustomTrace,
 	stages.TxLookup,
 	stages.Finish,
 }
@@ -356,7 +356,7 @@ var DefaultUnwindOrder = UnwindOrder{
 	stages.Finish,
 	stages.TxLookup,
 
-	// stages.CustomTrace,
+	//stages.CustomTrace,
 	stages.Execution,
 	stages.Senders,
 

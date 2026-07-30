@@ -651,7 +651,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		if g.HasNext() {
 			key, _ := g.Next(nil)
 			val, _ := g.Next(nil)
-			// fmt.Printf("heap push %s [%d] %x\n", item.decompressor.FilePath(), item.endTxNum, key)
+			//fmt.Printf("heap push %s [%d] %x\n", item.decompressor.FilePath(), item.endTxNum, key)
 			heap.Push(&cp, &CursorItem{
 				t:          FILE_CURSOR,
 				kvReader:   g,

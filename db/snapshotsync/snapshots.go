@@ -164,7 +164,7 @@ func CanRetire(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) (blo
 	} else if blockFrom%10_000 == 0 {
 		maxJump = 10_000
 	}
-	// roundedTo1K := (to / 1_000) * 1_000
+	//roundedTo1K := (to / 1_000) * 1_000
 	jump := min(maxJump, roundedTo1K-blockFrom)
 	switch { // only next segment sizes are allowed
 	case jump >= mergeLimit:
@@ -493,8 +493,8 @@ type BaseRoSnapshots struct {
 	downloadReady atomic.Bool
 	segmentsReady atomic.Bool
 
-	types []snaptype.Type // immutable
-	enums []snaptype.Enum // immutable
+	types []snaptype.Type //immutable
+	enums []snaptype.Enum //immutable
 
 	// baseSegType is the type Ranges reports against — each collection picks the one whose
 	// ranges stand for its coverage. Immutable.
@@ -785,7 +785,7 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSe
 				}
 			}
 
-			// protect from overlaps
+			//protect from overlaps
 			for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
 				newVisibleSegments[len(newVisibleSegments)-1].src = nil
 				newVisibleSegments = newVisibleSegments[:len(newVisibleSegments)-1]
@@ -804,7 +804,7 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSe
 		prevEnd := newVisibleSegments[0].from
 		for i, seg := range newVisibleSegments {
 			if seg.from != prevEnd {
-				newVisibleSegments = newVisibleSegments[:i] // remove tail if see gap
+				newVisibleSegments = newVisibleSegments[:i] //remove tail if see gap
 				break
 			}
 			prevEnd = seg.to
@@ -1080,8 +1080,8 @@ func AllTypedSegments(dir string, types []snaptype.Type) (res []snaptype.FileInf
 func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic bool) error {
 	wg := &errgroup.Group{}
 	wg.SetLimit(estimate.HalfCPUs())
-	// fmt.Println("RS", s)
-	// defer fmt.Println("Done RS", s)
+	//fmt.Println("RS", s)
+	//defer fmt.Println("Done RS", s)
 
 	// Read full directory listing once for efficient index file lookups
 	var dirEntries []string
@@ -1602,7 +1602,7 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 	}
 
 	dir, tmpDir := dirs.Snap, dirs.Tmp
-	// log.Log(lvl, "[snapshots] Build indices", "from", min)
+	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 
 	ps := background.NewProgressSet()
 	startIndexingTime := time.Now()

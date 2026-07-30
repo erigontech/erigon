@@ -316,7 +316,7 @@ func (req *requestGenerator) PingErigonRpc() PingResult {
 
 func NewRequestGenerator(target string, logger log.Logger) RequestGenerator {
 	// TODO
-	// rpc.DialHTTPWithClient(target, &http.Client{
+	//rpc.DialHTTPWithClient(target, &http.Client{
 	//		Timeout: time.Second * 10,
 	//	}, logger)
 

@@ -117,7 +117,7 @@ func WordsAmount2PagesAmount(wordsAmount int, pageSize int) (pagesAmount int) {
 		return 0
 	}
 	if pageSize > 0 {
-		pagesAmount = (wordsAmount-1)/pageSize + 1 // amount of pages
+		pagesAmount = (wordsAmount-1)/pageSize + 1 //amount of pages
 	}
 	return pagesAmount
 }

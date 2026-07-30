@@ -54,7 +54,7 @@ var ErrIteratorExhausted = errors.New("iterator exhausted")
 //	}
 type Uno[V any] interface {
 	Next() (V, error)
-	// NextBatch() ([]V, error)
+	//NextBatch() ([]V, error)
 	HasNext() bool
 	Close()
 }

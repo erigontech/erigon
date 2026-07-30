@@ -621,8 +621,8 @@ func (c *component) AwaitState(ctx context.Context, state State) (State, error) 
 		}
 
 		if sourceComponent == c && event.Current() == state {
-			// fmt.Printf("%p Await Received Component State Changed [%v->%v]\n",
-			// 	c, event.Previous(), event.Current())
+			//fmt.Printf("%p Await Received Component State Changed [%v->%v]\n",
+			//	c, event.Previous(), event.Current())
 			_ = c.serviceBus().Unregister(c, subscriber)
 			statechan <- state
 		}
@@ -635,7 +635,7 @@ func (c *component) AwaitState(ctx context.Context, state State) (State, error) 
 	}
 
 	c.RUnlock()
-	// fmt.Printf("%T:%p (%v) Await: %v\n", component, component, component.State(), state)
+	//fmt.Printf("%T:%p (%v) Await: %v\n", component, component, component.State(), state)
 	result, ok := <-statechan
 
 	if !ok {
@@ -969,7 +969,7 @@ func (c *component) activateDependencies(ctx context.Context, activationList []*
 }
 
 func (c *component) activateProvider(ctx context.Context, onActivity onActivity) {
-	// fmt.Println("activateProvider", c.Id())
+	//fmt.Println("activateProvider", c.Id())
 	if c.context.Err() != nil {
 		c.setState(Deactivated, false)
 		onActivity(ctx, c, c.context.Err())
@@ -978,10 +978,10 @@ func (c *component) activateProvider(ctx context.Context, onActivity onActivity)
 
 	// TODO - not sure if this is usefukl - as
 	// it can leave things hanging - needs invetigation
-	// if ctx.Err() != nil {
-	// 	onActivity(ctx, c, c.context.Err())
-	// 	return
-	// }
+	//if ctx.Err() != nil {
+	//	onActivity(ctx, c, c.context.Err())
+	//	return
+	//}
 
 	if activatable, ok := c.provider.(Activatable); ok {
 		err := activatable.Activate(withComponent(ctx, c))
@@ -1128,7 +1128,7 @@ func (c *component) deactivateProvider(ctx context.Context, onActivity onActivit
 		c.setState(Deactivating, false)
 		onActivity(ctx, c, nil)
 
-		// fmt.Printf("%T:%p Deactivating: %v\n", component, component, component.State())
+		//fmt.Printf("%T:%p Deactivating: %v\n", component, component, component.State())
 
 		if deactivatable, ok := c.provider.(Deactivatable); ok {
 			err := deactivatable.Deactivate(withComponent(ctx, c))
@@ -1297,8 +1297,8 @@ func (c *component) doOnComponentStateChanged(event *ComponentStateChanged) {
 	}
 
 	if sourceComponent != c {
-		// fmt.Printf("%s Received Component State Changed [%v->%v] from: %s:%p\n",
-		// 	c.Id(), event.Previous(), event.Current(), sourceComponent.Id(), sourceComponent)
+		//fmt.Printf("%s Received Component State Changed [%v->%v] from: %s:%p\n",
+		//	c.Id(), event.Previous(), event.Current(), sourceComponent.Id(), sourceComponent)
 
 		var allDependenciesActivated bool
 		var allDependenciesDeactivated bool
@@ -1368,7 +1368,7 @@ func (c *component) onDependenciesActive(ctx context.Context, onActivity onActiv
 		return
 	}
 
-	// fmt.Printf("onDependenciesActive: %s\n", c.Id())
+	//fmt.Printf("onDependenciesActive: %s\n", c.Id())
 
 	if recoverable, ok := c.provider.(Recoverable); ok {
 		err := recoverable.Recover(withComponent(ctx, c))
@@ -1442,7 +1442,7 @@ func (c *component) GetDependency(context context.Context, selector app.TypedSel
 	defer c.RUnlock()
 
 	for _, dependent := range c.Dependencies() {
-		// dependentType := reflect.TypeOf(dependent)
+		//dependentType := reflect.TypeOf(dependent)
 		if /*processorType == dependentType ||*/
 		/*(processorType.Kind() == reflect.Interface && dependentType.Implements(processorType)) &&*/ selector.Test(context, dependent) {
 			return c

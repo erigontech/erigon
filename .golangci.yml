@@ -50,6 +50,7 @@ linters:
       enabled-checks:
         - ruleguard
       disabled-checks:
+        - commentFormatting # disabled to avoid unnecessary friction on local lints and CI for minor whitespace changes without functional benefit
         - ifElseChain
         - sloppyReassign
         - sprintfQuotedString

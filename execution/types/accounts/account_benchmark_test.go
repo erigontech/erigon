@@ -165,11 +165,11 @@ func BenchmarkEncodingAccountForStorage(b *testing.B) {
 	b.ResetTimer()
 	for _, test := range accountCases {
 
-		// buf := make([]byte, test.acc.EncodingLengthForStorage())
+		//buf := make([]byte, test.acc.EncodingLengthForStorage())
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
 			for b.Loop() {
 				SerialiseV3(test.acc)
-				// test.acc.EncodeForStorage(buf) performance has degraded a bit because we are not using the same buf now
+				//test.acc.EncodeForStorage(buf) performance has degraded a bit because we are not using the same buf now
 			}
 		})
 	}

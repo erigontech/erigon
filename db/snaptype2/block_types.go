@@ -94,7 +94,7 @@ var (
 		Enums.Salt,
 		"salt",
 		snaptype.Versions{
-			Current:      version.ZeroVersion, // 2,
+			Current:      version.ZeroVersion, //2,
 			MinSupported: version.ZeroVersion,
 		},
 		nil,

@@ -233,7 +233,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	err = state.SqueezeCommitmentFiles(t.Context(), state.AggTx(rwTx), log.New())
 	require.NoError(t, err)
 
-	// agg.recalcVisibleFiles(matgh.MaxUint64)
+	//agg.recalcVisibleFiles(matgh.MaxUint64)
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
@@ -369,7 +369,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		}
 		tx.Rollback()
 		agg.Close()
-		// db.Close()
+		//db.Close()
 	}
 
 	agg = testAgg(t, db, agg.Dirs(), agg.StepSize(), log.New())
@@ -386,9 +386,9 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	for _, b := range buckets {
 		if strings.Contains(strings.ToLower(b), kv.CommitmentDomain.String()) {
-			// size, err := rwTx.BucketSize(b)
-			// require.NoError(t, err)
-			// t.Logf("cleaned table %s: %d keys", b, size)
+			//size, err := rwTx.BucketSize(b)
+			//require.NoError(t, err)
+			//t.Logf("cleaned table %s: %d keys", b, size)
 
 			err = rwTx.ClearTable(b)
 			require.NoError(t, err)
@@ -399,7 +399,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	for _, fn := range fPaths {
 		if strings.Contains(fn, kv.CommitmentDomain.String()) {
 			require.NoError(t, dir.RemoveFile(fn))
-			// t.Logf("removed file %s", filepath.Base(fn))
+			//t.Logf("removed file %s", filepath.Base(fn))
 		}
 	}
 	err = agg.OpenFolder()
@@ -544,7 +544,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		n, err = rnd.Read(loc)
 		require.NoError(t, err)
 		require.Equal(t, length.Hash, n)
-		// keys[txNum-1] = append(addr, loc...)
+		//keys[txNum-1] = append(addr, loc...)
 		acc := accounts.Account{
 			Nonce:       1,
 			Balance:     *uint256.NewInt(rnd.Uint64()),
@@ -588,7 +588,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	// anotherAgg.SetTx(rwTx)
+	//anotherAgg.SetTx(rwTx)
 	startTx := anotherAgg.EndTxNumMinimax()
 	dom2, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
@@ -846,7 +846,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev)
-			// err = domains.UpdateAccountCode(keys[j], vals[i], nil)
+			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
 			require.NoError(t, err)
 		}
 		rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
@@ -872,7 +872,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		diffs[idx] = changesetAt5.Diffs[idx].GetDiffSet()
 	}
 	err = rwTx.Unwind(ctx, pruneFrom, &diffs)
-	// err = domains.Unwind(t.Context(), rwTx, 0, pruneFrom, &diffs)
+	//err = domains.Unwind(t.Context(), rwTx, 0, pruneFrom, &diffs)
 	require.NoError(t, err)
 
 	domains.SetChangesetAccumulator(changesetAt3)
@@ -892,8 +892,8 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev)
 			require.NoError(t, err)
-			// err = domains.UpdateAccountCode(keys[j], vals[i], nil)
-			// require.NoError(t, err)
+			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
+			//require.NoError(t, err)
 		}
 
 		rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
@@ -939,8 +939,8 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev)
 			require.NoError(t, err)
-			// err = domains.UpdateAccountCode(keys[j], vals[i], nil)
-			// require.NoError(t, err)
+			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
+			//require.NoError(t, err)
 		}
 
 		rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)

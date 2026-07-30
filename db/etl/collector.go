@@ -45,9 +45,9 @@ func (a *Allocator) Put(b Buffer) {
 	if b == nil {
 		return
 	}
-	// if cast, ok := b.(*sortableBuffer); ok {
-	// 	log.Warn("[dbg] return buf", "cap(cast.data)", cap(cast.data), "cap(cast.lens)", cap(cast.lens))
-	// }
+	//if cast, ok := b.(*sortableBuffer); ok {
+	//	log.Warn("[dbg] return buf", "cap(cast.data)", cap(cast.data), "cap(cast.lens)", cap(cast.lens))
+	//}
 	a.p.Put(b)
 }
 func (a *Allocator) Get() Buffer {
@@ -212,7 +212,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		i++
 
 		isNil := (c.bufType == SortableSliceBuffer && v == nil) ||
-			(c.bufType == SortableAppendBuffer && len(v) == 0) || // backward compatibility
+			(c.bufType == SortableAppendBuffer && len(v) == 0) || //backward compatibility
 			(c.bufType == SortableOldestAppearedBuffer && len(v) == 0)
 		if isNil && !args.EmptyVals {
 			if canUseAppend {
@@ -256,12 +256,12 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
-	// logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
+	//logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
 	return nil
 }
 
 func (c *Collector) Close() {
-	if c.buf != nil { // idempotency
+	if c.buf != nil { //idempotency
 		if c.allocator != nil {
 			c.allocator.Put(c.buf)
 			c.buf = nil
@@ -269,7 +269,7 @@ func (c *Collector) Close() {
 			c.buf.Reset()
 		}
 	}
-	if c.dataProviders != nil { // idempotency
+	if c.dataProviders != nil { //idempotency
 		for _, p := range c.dataProviders {
 			p.Dispose()
 		}

@@ -80,7 +80,7 @@ type HistoricalTraceWorker struct {
 }
 
 type TraceConsumer interface {
-	// Reduce receiving results of execution. They are sorted and have no gaps.
+	//Reduce receiving results of execution. They are sorted and have no gaps.
 	Reduce(br *BlockResult, task *TxResult, tx kv.TemporalTx) error
 }
 
@@ -187,7 +187,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 		}
 
 		// Block initialisation
-		// fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
+		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 			ret, err := protocol.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, *rw.vmCfg)
 			return ret, err
@@ -335,7 +335,7 @@ func (rw *HistoricalTraceWorker) ResetTx(chainTx kv.TemporalTx) {
 	if chainTx != nil {
 		rw.chainTx = chainTx
 		rw.stateReader.SetTx(rw.chainTx)
-		// rw.stateWriter.SetTx(rw.chainTx)
+		//rw.stateWriter.SetTx(rw.chainTx)
 		rw.chain = consensuschain.NewReader(rw.execArgs.ChainConfig, rw.chainTx, rw.execArgs.BlockReader, rw.logger)
 	}
 }
@@ -640,7 +640,7 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 				Config:          cfg.ChainConfig,
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,
-				// Trace:            true,
+				//Trace:            true,
 			}
 
 			in.Add(ctx, txTask)
@@ -653,7 +653,7 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 			t.Hash()
 		}
 	}
-	in.Close() // no more work. no retries in map-reduce. means can close here.
+	in.Close() //no more work. no retries in map-reduce. means can close here.
 
 	if err := workers.Wait(); err != nil {
 		return fmt.Errorf("WorkersPool: %w", err)

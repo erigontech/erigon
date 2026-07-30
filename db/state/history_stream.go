@@ -612,7 +612,7 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 				}
 			}
 		}
-		// fmt.Printf("[seek=%x][RET=%t] '%x' '%x'\n", seek, bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]), k, v)
+		//fmt.Printf("[seek=%x][RET=%t] '%x' '%x'\n", seek, bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]), k, v)
 		if !bytes.Equal(seek[:len(seek)-8], k[:len(k)-8]) /*|| int(binary.BigEndian.Uint64(k[len(k)-8:])) > hi.endTxNum */ {
 			if len(seek) != len(k) {
 				seek = append(append(seek[:0], k[:len(k)-8]...), hi.startTxKey[:]...)

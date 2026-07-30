@@ -141,7 +141,7 @@ func TestManagedTx(t *testing.T) {
 		}
 
 		t.Run("filter "+msg, func(t *testing.T) {
-			// testPrefixFilter(t, db, bucket1)
+			//testPrefixFilter(t, db, bucket1)
 		})
 		t.Run("multiple cursors "+msg, func(t *testing.T) {
 			testMultiCursor(t, db, bucket1, bucket2)
@@ -335,8 +335,8 @@ func setupDatabases(t *testing.T, logger log.Logger) (writeDBs []kv.TemporalRwDB
 	writeDBs = []kv.TemporalRwDB{
 		temporaltest.NewTestDB(t, dirs1),
 		temporaltest.NewTestDB(t, dirs2),
-		// mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").MustOpen(),
-		// mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").MustOpen(), // for remote db
+		//mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").MustOpen(),
+		//mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").MustOpen(), // for remote db
 	}
 
 	conn := bufconn.Listen(1024 * 1024)
@@ -478,7 +478,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 	}
 }
 
-// func TestMultipleBuckets(t *testing.T) {
+//func TestMultipleBuckets(t *testing.T) {
 //	writeDBs, readDBs, closeAll := setupDatabases(ethdb.WithChaindataTables)
 //	defer closeAll()
 //
@@ -556,7 +556,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //	}
 //}
 
-// func TestReadAfterPut(t *testing.T) {
+//func TestReadAfterPut(t *testing.T) {
 //	writeDBs, _, closeAll := setupDatabases(ethdb.WithChaindataTables)
 //	defer closeAll()
 //

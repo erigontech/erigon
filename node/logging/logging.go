@@ -274,7 +274,7 @@ func initSeparatedLogging(
 		Filename:   logFilePath,
 		MaxSize:    100, // megabytes
 		MaxBackups: 3,
-		MaxAge:     28, // days
+		MaxAge:     28, //days
 		Compress:   true,
 	}
 	userLog := log.StreamHandler(lumberjack, dirFormat)

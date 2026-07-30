@@ -2118,7 +2118,7 @@ func TestGolangBindings(t *testing.T) {
 	if out, err := tidier.CombinedOutput(); err != nil {
 		t.Fatalf("failed to tidy Go module file: %v\n%s", err, out)
 	}
-	// Test the entire package and report any failures
+	//Test the entire package and report any failures
 	cmd := exec.CommandContext(context.Background(), gocmd, "test", "-v", "-count", "1")
 	cmd.Dir = pkg
 	if out, err := cmd.CombinedOutput(); err != nil {

@@ -70,7 +70,7 @@ var runCommand = cli.Command{
 // the initialized Genesis structure
 func readGenesis(genesisPath string) *types.Genesis {
 	// Make sure we have a valid genesis JSON
-	// genesisPath := ctx.Args().First()
+	//genesisPath := ctx.Args().First()
 	if len(genesisPath) == 0 {
 		utils.Fatalf("Must supply path to genesis JSON file")
 	}
@@ -225,7 +225,7 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 			var err error
 			// If - is specified, it means that code comes from stdin
 			if codeFileFlag == "-" {
-				// Try reading from stdin
+				//Try reading from stdin
 				if hexcode, err = io.ReadAll(os.Stdin); err != nil {
 					return fmt.Errorf("could not load code from stdin: %w", err)
 				}

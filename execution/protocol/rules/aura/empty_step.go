@@ -76,11 +76,11 @@ func (s *EmptyStep) LessOrEqual(other *EmptyStep) bool {
 
 // Returns `true` if the message has a valid signature by the expected proposer in the message's step.
 func (s *EmptyStep) verify(validators ValidatorSet) (bool, error) { //nolint
-	// sRlp, err := EmptyStepRlp(s.step, s.parentHash)
-	// if err != nil {
-	// 	return false, err
-	// }
-	// message := crypto.Keccak256(sRlp)
+	//sRlp, err := EmptyStepRlp(s.step, s.parentHash)
+	//if err != nil {
+	//	return false, err
+	//}
+	//message := crypto.Keccak256(sRlp)
 
 	/*
 		let correct_proposer = step_proposer(validators, &self.parent_hash, self.step);

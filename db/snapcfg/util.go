@@ -166,7 +166,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			continue
 		}
 
-		// typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
+		//typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
 		typeName := name[lastSep+1 : dot]
 		include := false
 		idxIndex := 0
@@ -352,7 +352,7 @@ func newCfg(networkName string, preverified Preverified) *Cfg {
 type Cfg struct {
 	ExpectBlocks      uint64
 	Preverified       Preverified          // immutable
-	PreverifiedParsed []*snaptype.FileInfo // Preverified field after `snaptype.ParseFileName("", p.Name)`
+	PreverifiedParsed []*snaptype.FileInfo //Preverified field after `snaptype.ParseFileName("", p.Name)`
 	// The preverified list were loaded from local storage. That means they were committed after an
 	// initial sync completed successfully.
 	Local       bool

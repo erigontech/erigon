@@ -250,11 +250,11 @@ func (etp *EncryptedTxnsPool) handleEncryptedTxnSubmissionEvent(ctx context.Cont
 		// TODO looks like we have an issue on unwind
 		//
 
-		// return fmt.Errorf(
-		// 	"unexpected new encrypted txn submission index is lte last: %d >= %d",
-		// 	lastEncryptedTxnSubmission.TxnIndex,
-		// 	encryptedTxnSubmission.TxnIndex,
-		// )
+		//return fmt.Errorf(
+		//	"unexpected new encrypted txn submission index is lte last: %d >= %d",
+		//	lastEncryptedTxnSubmission.TxnIndex,
+		//	encryptedTxnSubmission.TxnIndex,
+		//)
 	}
 
 	etp.addSubmission(encryptedTxnSubmission)

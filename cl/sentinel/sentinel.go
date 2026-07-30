@@ -162,7 +162,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 	if s.started {
 		s.logger.Warn("[Sentinel] already running")
 	}
-	// var err error
+	//var err error
 	/*s.listener, err = s.createListener()
 	if err != nil {
 		return nil, fmt.Errorf("failed creating sentinel listener err=%w", err)
@@ -193,14 +193,14 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		},
 	})
 	s.subManager = NewGossipManager(s.ctx)
-	// s.subManager.Start(s.ctx)
+	//s.subManager.Start(s.ctx)
 
 	go s.listenForPeers()
 	go s.proactiveSubnetPeerSearch() // Proactively search for peers when subnet coverage is low
 	_, connected, _ := s.GetPeersCount()
 	recordPeerMetrics(connected)
 	go s.updatePeerMetrics()
-	// go s.forkWatcher()
+	//go s.forkWatcher()
 
 	return s.LocalNode(), nil
 }
@@ -222,8 +222,8 @@ func (s *Sentinel) updatePeerMetrics() {
 }
 
 func (s *Sentinel) Stop() {
-	// s.listener.Close()
-	// s.subManager.Close()
+	//s.listener.Close()
+	//s.subManager.Close()
 	s.cancel()
 	s.p2p.Host().Close()
 }

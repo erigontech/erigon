@@ -139,11 +139,11 @@ func Connect(creds credentials.TransportCredentials, dialAddress string) (*grpc.
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(creds))
 	}
 
-	// if opts.inMemConn != nil {
-	// 	dialOpts = append(dialOpts, grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) {
-	// 		return opts.inMemConn.Dial()
-	// 	}))
-	// }
+	//if opts.inMemConn != nil {
+	//	dialOpts = append(dialOpts, grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) {
+	//		return opts.inMemConn.Dial()
+	//	}))
+	//}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

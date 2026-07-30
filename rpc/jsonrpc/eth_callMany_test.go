@@ -129,7 +129,7 @@ func TestCallMany(t *testing.T) {
 	hexBytes, _ = hex.DecodeString(transferAddr2)
 	transferCallData := hexutil.Bytes(hexBytes)
 
-	// submit 3 Transactions and commit the results
+	//submit 3 Transactions and commit the results
 	transactOpts, _ := bind.NewKeyedTransactorWithChainID(key, chainID)
 	transactOpts1, _ := bind.NewKeyedTransactorWithChainID(key1, chainID)
 	transactOpts2, _ := bind.NewKeyedTransactorWithChainID(key2, chainID)

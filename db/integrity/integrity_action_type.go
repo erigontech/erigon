@@ -145,7 +145,7 @@ var FastChecks = []Check{
 var SlowChecks = []Check{StateVerify}
 var DeprecatedChecks = []Check{
 	BorEvents, BorSpans, BorCheckpoints,
-	CommitmentKvDeref, // StateVerify - will overcome
+	CommitmentKvDeref, //StateVerify - will overcome
 	StateProgress,
 }
 var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)

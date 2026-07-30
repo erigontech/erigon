@@ -104,12 +104,12 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 				t.Fatalf("Receipt CumulativeGasUsed mismatch, want %v, have %v", receipt.CumulativeGasUsed, dec.CumulativeGasUsed)
 			}
 			assert.Equal(t, uint32(receipt.Logs[0].Index), dec.FirstLogIndexWithinBlock)
-			// if len(dec.Logs) != len(receipt.Logs) {
-			// 	t.Fatalf("Receipt log number mismatch, want %v, have %v", len(receipt.Logs), len(dec.Logs))
-			// }
-			// for i := 0; i < len(dec.Logs); i++ {
-			// 	if dec.Logs[i].Address != receipt.Logs[i].Address {
-			// 		t.Fatalf("Receipt log %d address mismatch, want %v, have %v", i, receipt.Logs[i].Address, dec.Logs[i].Address)
+			//if len(dec.Logs) != len(receipt.Logs) {
+			//	t.Fatalf("Receipt log number mismatch, want %v, have %v", len(receipt.Logs), len(dec.Logs))
+			//}
+			//for i := 0; i < len(dec.Logs); i++ {
+			//	if dec.Logs[i].Address != receipt.Logs[i].Address {
+			//		t.Fatalf("Receipt log %d address mismatch, want %v, have %v", i, receipt.Logs[i].Address, dec.Logs[i].Address)
 			//	}
 			//	if !reflect.DeepEqual(dec.Logs[i].Topics, receipt.Logs[i].Topics) {
 			//		t.Fatalf("Receipt log %d topics mismatch, want %v, have %v", i, receipt.Logs[i].Topics, dec.Logs[i].Topics)

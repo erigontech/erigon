@@ -44,14 +44,14 @@ func BenchmarkBpsTreeSeek(t *testing.B) {
 	getter.Reset(0)
 
 	t.ReportAllocs()
-	// r := rand.New(rand.NewSource(0))
+	//r := rand.New(rand.NewSource(0))
 	for t.Loop() {
 		if !getter.HasNext() {
 			getter.Reset(0)
 		}
 		key, _ = getter.Next(key[:0])
 		getter.Skip()
-		// _, err := bt.Seek(getter, keys[r.Intn(len(keys))])
+		//_, err := bt.Seek(getter, keys[r.Intn(len(keys))])
 		c, err := bt.Seek(getter, key)
 		require.NoError(t, err)
 		c.Close()

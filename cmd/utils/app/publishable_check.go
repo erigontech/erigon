@@ -39,7 +39,7 @@ func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (
 	dataFiles := make([]state.SnapInfo, 0)
 	if err := filepath.WalkDir(schema.DataDirectory(), func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { // it's ok if some file get removed during walk
+			if os.IsNotExist(err) { //it's ok if some file get removed during walk
 				return nil
 			}
 			return err

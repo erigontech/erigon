@@ -309,9 +309,9 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchCode)
 	case kv.StorageDomain:
 		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchStorage)
-	// case kv.CommitmentDomain, kv.ReceiptDomain:
+	//case kv.CommitmentDomain, kv.ReceiptDomain:
 	default:
-		// panic(fmt.Errorf("TouchKey: unknown domain %s", d))
+		//panic(fmt.Errorf("TouchKey: unknown domain %s", d))
 	}
 }
 
@@ -880,8 +880,8 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 	// state could be equal but txnum/blocknum could be different.
 	// We do skip only full matches
 	if bytes.Equal(prevState, encodedState) {
-		// fmt.Printf("[commitment] skip store txn %d block %d (prev b=%d t=%d) rh %x\n",/
-		// 	binary.BigEndian.Uint64(prevState[8:16]), binary.BigEndian.Uint64(prevState[:8]), dc.ht.iit.txNum, blockNum, rh)
+		//fmt.Printf("[commitment] skip store txn %d block %d (prev b=%d t=%d) rh %x\n",/
+		//	binary.BigEndian.Uint64(prevState[8:16]), binary.BigEndian.Uint64(prevState[:8]), dc.ht.iit.txNum, blockNum, rh)
 		return nil
 	}
 

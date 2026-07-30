@@ -150,17 +150,17 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	}
 
 	// dontt know how to madv part of file in golang yet
-	// if idx.dataStructureVersion == 1 && idx.lessFalsePositives {
-	// 	if len(idx.existenceV1) > 0 {
-	// 		if err := mmap.MadviseWillNeed(idx.existence); err != nil {
-	// 			panic(err)
-	// 		}
-	// 	}
-	// 	// pos := 1 + 8 + idx.bytesPerRec*int(idx.keyCount)
-	// 	// if err := mmap.MadviseWillNeed(idx.data[:pos]); err != nil {
-	// 	// 	panic(err)
-	// 	// }
-	// }
+	//if idx.dataStructureVersion == 1 && idx.lessFalsePositives {
+	//	if len(idx.existenceV1) > 0 {
+	//		if err := mmap.MadviseWillNeed(idx.existence); err != nil {
+	//			panic(err)
+	//		}
+	//	}
+	//	//pos := 1 + 8 + idx.bytesPerRec*int(idx.keyCount)
+	//	//if err := mmap.MadviseWillNeed(idx.data[:pos]); err != nil {
+	//	//	panic(err)
+	//	//}
+	//}
 
 	idx.sharedReader = NewIndexReader(idx)
 	return idx, nil

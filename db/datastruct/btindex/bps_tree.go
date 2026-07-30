@@ -129,7 +129,7 @@ type BpsTreeIterator struct {
 
 //// If data[i] == key, returns 0 (equal) and value, nil err
 //// if data[i] <> key, returns comparation result and nil value and error -- to be able to compare later
-// func (b *BpsTree) matchKeyValue(g ArchiveGetter, i uint64, key []byte) (int, []byte, error) {
+//func (b *BpsTree) matchKeyValue(g ArchiveGetter, i uint64, key []byte) (int, []byte, error) {
 //	if i >= b.offt.Count() {
 //		return 0, nil, ErrBtIndexLookupBounds
 //	}
@@ -145,7 +145,7 @@ type BpsTreeIterator struct {
 //	return 0, val, nil
 //}
 //
-// func (b *BpsTree) lookupKeyWGetter(g ArchiveGetter, i uint64) ([]byte, uint64) {
+//func (b *BpsTree) lookupKeyWGetter(g ArchiveGetter, i uint64) ([]byte, uint64) {
 //	if i >= b.offt.Count() {
 //		return nil, 0
 //	}
@@ -341,7 +341,7 @@ func (b *BpsTree) bs(x []byte) (dl, dr uint64, klo, khi []byte) {
 // If found item.key has a prefix of key, returns item.key
 // if key is greater than all keys, returns nil
 func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
-	// b.trace = true
+	//b.trace = true
 	if b.trace {
 		fmt.Printf("seek %x\n", seekKey)
 	}

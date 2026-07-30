@@ -297,7 +297,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 			sd.SetInMemHistoryReads(false)
 		}
 
-		// receiptsInDB := rawdb.ReadReceiptsByNumber(tx, progress(tx, stages.Execution)+1)
+		//receiptsInDB := rawdb.ReadReceiptsByNumber(tx, progress(tx, stages.Execution)+1)
 
 		execAtBlock = progress(tx, stages.Execution)
 

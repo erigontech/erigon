@@ -246,7 +246,7 @@ func (e *ExecModule) unwindIfNeeded(
 			}
 			currentParentHash = currentHeader.ParentHash
 			if currentHeader.Number.Sign() == 0 {
-				panic("assert:uint64 underflow") // uint-underflow
+				panic("assert:uint64 underflow") //uint-underflow
 			}
 			currentParentNumber = currentHeader.Number.Uint64() - 1
 			isCanonicalHash, err = e.isCanonicalHash(ctx, tx, currentParentHash)

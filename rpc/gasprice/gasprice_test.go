@@ -87,7 +87,7 @@ func TestSuggestPrice(t *testing.T) {
 		Default:    uint256.NewInt(common.GWei),
 	}
 
-	m := newTestBackend(t) // , big.NewInt(16), c.pending)
+	m := newTestBackend(t) //, big.NewInt(16), c.pending)
 	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)

@@ -260,7 +260,7 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *sentryproto
 		}
 		return fmt.Errorf("send header response 66: %w", err)
 	}
-	// cs.logger.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", ConvertH512ToPeerID(inreq.PeerId), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
+	//cs.logger.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", ConvertH512ToPeerID(inreq.PeerId), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
 	return nil
 }
 
@@ -339,7 +339,7 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *sentryproto.
 		}
 		return fmt.Errorf("send bodies response: %w", err)
 	}
-	// cs.logger.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg responseLen %d", ConvertH512ToPeerID(inreq.PeerId), len(b)))
+	//cs.logger.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg responseLen %d", ConvertH512ToPeerID(inreq.PeerId), len(b)))
 	return nil
 }
 

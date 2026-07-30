@@ -72,16 +72,16 @@ func TestSendRawTransaction(t *testing.T) {
 		require.NoError(err)
 		require.Equal(expectedValue, jsonTx.Value.Uint64())
 	}
-	// send same txn second time and expect error
+	//send same txn second time and expect error
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
 	require.Error(err)
 	expectedErr := txpoolproto.ImportResult_name[int32(txpoolproto.ImportResult_ALREADY_EXISTS)] + ": " + txpoolcfg.AlreadyKnown.String()
 	require.Equal(expectedErr, err.Error())
 	m.ReceiveWg.Wait()
-	// TODO: make propagation easy to test - now race
-	// time.Sleep(time.Second)
-	// sent := m.SentMessage(0)
-	// require.Equal(eth.ToProto[m.MultiClient.Protocol()][eth.NewPooledTransactionHashesMsg], sent.Id)
+	//TODO: make propagation easy to test - now race
+	//time.Sleep(time.Second)
+	//sent := m.SentMessage(0)
+	//require.Equal(eth.ToProto[m.MultiClient.Protocol()][eth.NewPooledTransactionHashesMsg], sent.Id)
 }
 
 func TestSendRawTransactionUnprotected(t *testing.T) {

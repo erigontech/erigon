@@ -385,7 +385,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				default:
 				}
 				if baseTxNum+txAmount == 0 {
-					panic(baseTxNum + txAmount) // uint-underflow
+					panic(baseTxNum + txAmount) //uint-underflow
 				}
 				maxTxNum := baseTxNum + txAmount - 1
 				// What can happen if chaindata is deleted is that maybe header.seg progress is lower or higher than

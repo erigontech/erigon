@@ -130,7 +130,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 		{
 			name: "validator not found",
 			mock: func() {
-				// t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(int(mockEpoch))
+				//t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(int(mockEpoch))
 			},
 			msg:     mockMsg2,
 			wantErr: true,
@@ -251,6 +251,6 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 }
 
 func TestVoluntaryExit(t *testing.T) {
-	// t.Skip("issue #14997")
+	//t.Skip("issue #14997")
 	suite.Run(t, new(voluntaryExitTestSuite))
 }

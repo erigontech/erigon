@@ -535,7 +535,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 
 		for addrHash, accountWithAddress := range b.accountUpdates {
 			if accountWithAddress.Account != nil {
-				// fmt.Println("updateTrieRoots b.accountUpdates", addrHash.String(), account.Incarnation)
+				//fmt.Println("updateTrieRoots b.accountUpdates", addrHash.String(), account.Incarnation)
 				tds.t.UpdateAccount(addrHash[:], accountWithAddress.Account)
 			} else {
 				tds.t.Delete(addrHash[:])
@@ -551,7 +551,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			for keyHash, v := range m {
 				cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
 				if len(v) > 0 {
-					// fmt.Printf("Update storage trie addrHash %x, keyHash %x: %x\n", addrHash, keyHash, v)
+					//fmt.Printf("Update storage trie addrHash %x, keyHash %x: %x\n", addrHash, keyHash, v)
 					if forward {
 						tds.t.Update(cKey, v)
 					} else {
@@ -584,9 +584,9 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				ok, root := tds.t.DeepHash(addrHash[:])
 				if ok {
 					accountWithAddress.Account.Root = root
-					// fmt.Printf("(b)Set %x root for addrHash %x\n", root, addrHash)
+					//fmt.Printf("(b)Set %x root for addrHash %x\n", root, addrHash)
 				} else {
-					// fmt.Printf("(b)Set empty root for addrHash %x\n", addrHash)
+					//fmt.Printf("(b)Set empty root for addrHash %x\n", addrHash)
 					accountWithAddress.Account.Root = trie.EmptyRoot
 				}
 			}
@@ -840,7 +840,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address accounts.Address, incarn
 	storagePlainKey := dbutils.GenerateStoragePlainKey(addressValue, keyValue)
 	tsw.tds.currentBuffer.storageReads[storageKey] = storagePlainKey
 	m[seckey] = v
-	// fmt.Printf("WriteAccountStorage %x %x: %x, buffer %d\n", addrHash, seckey, value, len(tsw.tds.buffers))
+	//fmt.Printf("WriteAccountStorage %x %x: %x, buffer %d\n", addrHash, seckey, value, len(tsw.tds.buffers))
 	return nil
 }
 

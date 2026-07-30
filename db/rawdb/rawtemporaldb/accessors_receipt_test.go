@@ -69,7 +69,7 @@ func TestAppendReceipt(t *testing.T) {
 	require.NoError(err)
 	require.False(ok)
 
-	// block1
+	//block1
 	cumGasUsed, _, logIdxAfterTx, err := rawtemporaldb.ReceiptAsOf(ttx, 0)
 	require.NoError(err)
 	require.Equal(uint32(0), logIdxAfterTx)
@@ -85,7 +85,7 @@ func TestAppendReceipt(t *testing.T) {
 	require.Equal(uint32(1), logIdxAfterTx)
 	require.Equal(uint64(11), cumGasUsed)
 
-	// block2
+	//block2
 	cumGasUsed, _, logIdxAfterTx, err = rawtemporaldb.ReceiptAsOf(ttx, 3)
 	require.NoError(err)
 	require.Equal(uint32(1), logIdxAfterTx)

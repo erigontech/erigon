@@ -111,7 +111,7 @@ func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, 
 	case ActionCode:
 		accountChange.Action = ActionUpsertCode
 	case ActionRemove:
-		// panic("")
+		//panic("")
 	}
 	accountChange.Incarnation = incarnation
 	accountChange.Data = data
@@ -152,7 +152,7 @@ func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, cod
 	case ActionUpsert:
 		accountChange.Action = ActionUpsertCode
 	case ActionRemove:
-		// panic("")
+		//panic("")
 	}
 	accountChange.Incarnation = incarnation
 	accountChange.Code = code

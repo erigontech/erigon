@@ -126,10 +126,10 @@ func defaultTorrentClientConfig() *torrent.ClientConfig {
 	// better don't increase because erigon periodically producing "new seedable files" - and adding them to downloader.
 	// it must not impact chain tip sync - so, limit resources to minimum by default.
 	// but when downloader is started as a separated process - rise it to max
-	// torrentConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", min(16, max(2, runtime.NumCPU()-2)))
+	//torrentConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", min(16, max(2, runtime.NumCPU()-2)))
 
-	torrentConfig.MinDialTimeout = 6 * time.Second    // default: 3s
-	torrentConfig.HandshakesTimeout = 8 * time.Second // default: 4s
+	torrentConfig.MinDialTimeout = 6 * time.Second    //default: 3s
+	torrentConfig.HandshakesTimeout = 8 * time.Second //default: 4s
 
 	// This needs to be at least the chunk size of requests we expect to service for peers. This has
 	// been as high as 8 MiB unintentionally, but the piece size for all previous torrents has been
@@ -177,7 +177,7 @@ func New(
 		return t.SetInfoBytes(info.InfoBytes)
 	}
 
-	// torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
+	//torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
 
 	torrentConfig.ExtendedHandshakeClientVersion = version
@@ -227,9 +227,9 @@ func New(
 		// and then downstream Erigon filters with dir or console.
 		modifyLevel: func(level *slog.Level, names []string) {
 			// Demote tracker messages one whole level.
-			// if slices.Contains(names, "tracker") {
-			// 	*level -= 4
-			// }
+			//if slices.Contains(names, "tracker") {
+			//	*level -= 4
+			//}
 		},
 	}
 
@@ -258,9 +258,9 @@ func New(
 	// Check torrent slogger levels and how they route through to erigon log, and anywhere else.
 	for _, level := range []slog.Level{
 		slog.LevelDebug,
-		// slog.LevelInfo,
-		// slog.LevelWarn,
-		// slog.LevelError,
+		//slog.LevelInfo,
+		//slog.LevelWarn,
+		//slog.LevelError,
 	} {
 		err = torrentConfig.Slogger.Handler().Handle(ctx, slog.NewRecord(time.Now(), level, "test torrent config slogger level", 0))
 		if err != nil {

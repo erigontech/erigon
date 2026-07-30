@@ -347,9 +347,9 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "incompatible config in DB",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
-				// if ethconfig.EnableHistoryV4InTest {
-				// 	t.Skip("fix me")
-				// }
+				//if ethconfig.EnableHistoryV4InTest {
+				//	t.Skip("fix me")
+				//}
 				// Commit the 'old' genesis block with Homestead transition at #2.
 				// Advance to block #4, past the homestead transition block of customg.
 				key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")

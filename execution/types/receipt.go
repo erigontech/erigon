@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
-// (go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go)
+//(go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go)
 
 var errShortTypedReceipt = errors.New("typed receipt too short")
 
@@ -542,7 +542,7 @@ func (rs Receipts) AssertLogIndex(blockNum uint64) {
 		}
 		logIndex += len(r.Logs)
 
-		// no duplicates
+		//no duplicates
 		if len(r.Logs) <= 1 {
 			continue
 		}

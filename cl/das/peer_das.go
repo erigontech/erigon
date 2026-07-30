@@ -819,7 +819,7 @@ mainloop:
 					continue
 				}
 				log.Debug("failed to download columns from peer", "pid", result.pid, "err", result.err)
-				// d.rpc.BanPeer(result.pid)
+				//d.rpc.BanPeer(result.pid)
 				continue
 			}
 			if len(result.sidecars) == 0 {

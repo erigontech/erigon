@@ -1721,7 +1721,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		priceBump := p.cfg.PriceBump
 
 		if mt.TxnSlot.TxType() == BlobTxnType {
-			// Blob txn threshold checks for replace txn
+			//Blob txn threshold checks for replace txn
 			priceBump = p.cfg.BlobPriceBump
 			blobFeeThreshold, overflow := (&uint256.Int{}).MulDivOverflow(
 				found.TxnSlot.GetBlobFeeCap(),
@@ -1736,7 +1736,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 			}
 		}
 
-		// Regular txn threshold checks
+		//Regular txn threshold checks
 		tipThreshold := uint256.NewInt(0)
 		tipThreshold = tipThreshold.Mul(found.TxnSlot.GetTipCap(), uint256.NewInt(100+priceBump))
 		tipThreshold.Div(tipThreshold, &u256.N100)
@@ -1745,7 +1745,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		feecapThreshold.Div(feecapThreshold, &u256.N100)
 
 		if mt.TxnSlot.GetValue().Cmp(found.TxnSlot.GetValue()) > 0 {
-			// Potential latent overdraft attack
+			//Potential latent overdraft attack
 			tipThreshold.Mul(tipThreshold, uint256.NewInt(uint64(p.all.count(mt.TxnSlot.SenderID))))
 		}
 		if mt.TxnSlot.GetTipCap().Cmp(tipThreshold) < 0 || mt.TxnSlot.GetFeeCap().Cmp(feecapThreshold) < 0 {
@@ -2486,7 +2486,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 func (p *TxPool) flushNoFsync(ctx context.Context) (written uint64, err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	// it's important that write db txn is done inside lock, to make last writes visible for all read operations
+	//it's important that write db txn is done inside lock, to make last writes visible for all read operations
 	if err := p.poolDB.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		err = p.flushLocked(tx)
 		if err != nil {
@@ -2544,7 +2544,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 				delete(p.senders.senderIDs, addr)
 			}
 		}
-		// fmt.Printf("del:%d,%d,%d\n", mt.TxnSlot.senderID, mt.TxnSlot.nonce, mt.TxnSlot.tip)
+		//fmt.Printf("del:%d,%d,%d\n", mt.TxnSlot.senderID, mt.TxnSlot.nonce, mt.TxnSlot.tip)
 		has, err := tx.Has(kv.PoolTransaction, idHash)
 		if err != nil {
 			return err

@@ -65,7 +65,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	defer upds.Close()
 
 	fmt.Printf("1. Generated %d updates\n", len(updates))
-	// renderUpdates(branchNodeUpdates)
+	//renderUpdates(branchNodeUpdates)
 
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
@@ -76,7 +76,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	t.Logf("rootHash %x\n", firstRootHash)
 
 	hph.Reset()
-	// hph.SetTraceWriter(os.Stderr)
+	//hph.SetTraceWriter(os.Stderr)
 	plainKeys, updates = NewUpdateBuilder().
 		Storage("03", "58", "050506").
 		Build()
@@ -137,7 +137,7 @@ func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 	require.NotEmpty(t, hashBeforeEmptyUpdate)
 
 	fmt.Printf("1. Applied %d updates\n", len(updates))
-	// renderUpdates(branchNodeUpdates)
+	//renderUpdates(branchNodeUpdates)
 
 	// generate empty updates and do NOT reset tree
 	plainKeys, updates = NewUpdateBuilder().Build()
@@ -234,9 +234,9 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 	plainKeys, updates := fixtureBaseWithCode().Build()
 
 	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq, DefaultTrieConfig())
-	// trieSequential.SetTraceWriter(os.Stderr)
+	//trieSequential.SetTraceWriter(os.Stderr)
 	trieBatch := NewHexPatriciaHashed(length.Addr, stateBatch, DefaultTrieConfig())
-	// trieBatch.SetTraceWriter(os.Stderr)
+	//trieBatch.SetTraceWriter(os.Stderr)
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
 
@@ -401,7 +401,7 @@ func Test_HexPatriciaHashed_Sepolia(t *testing.T) {
 	}
 
 	hph := NewHexPatriciaHashed(length.Addr, state, DefaultTrieConfig())
-	// hph.SetTraceWriter(os.Stderr)
+	//hph.SetTraceWriter(os.Stderr)
 
 	for _, testData := range tests {
 		builder := NewUpdateBuilder()
@@ -457,7 +457,7 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	t.Parallel()
 
-	// trie := NewHexPatriciaHashed(length.Hash, nil, nil, WarmupConfig{})
+	//trie := NewHexPatriciaHashed(length.Hash, nil, nil, WarmupConfig{})
 	var s state
 	s.Root = make([]byte, 128)
 	rnd := rand.New(rand.NewSource(42))
@@ -876,8 +876,8 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 		Nonce("14c4d3bba7f5009599257d3701785d34c7f2aa27", 1).
 		Nonce("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 169356).
 		Storage("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d1664244ae1a444448f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
-		// Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "0000000000000000018ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "8989").
-		// Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "9f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e77777778033", "8989").
+		//Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "0000000000000000018ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "8989").
+		//Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "9f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e77777778033", "8989").
 		Storage("88e76c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d22222222e1a8a05f8f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
 		Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6000000).
 		Nonce("eabf041afbb6c6059fbd25eab0d3202db84e842d", 1).
@@ -890,8 +890,8 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, sequential, plainKeys, updates)
 
-	// sequential.SetTraceWriter(os.Stderr)
-	// batch.SetTraceWriter(os.Stderr)
+	//sequential.SetTraceWriter(os.Stderr)
+	//batch.SetTraceWriter(os.Stderr)
 	somewhere := 6
 	somewhereRoot := make([]byte, 0)
 
@@ -1139,7 +1139,7 @@ func TestCell_fillFromFields(t *testing.T) {
 	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 	require.NoError(t, err)
 
-	// original := bytes.Clone(enc)
+	//original := bytes.Clone(enc)
 	fmt.Printf("%s\n", enc.String())
 
 	tm, am, decRow, err := enc.decodeCells()
@@ -1323,33 +1323,33 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 	trieOne := NewHexPatriciaHashed(length.Addr, msOne, DefaultTrieConfig())
 	plainKeys, updates = sortUpdatesByHashIncrease(t, trieOne, plainKeys, updates)
 
-	// rnd := rand.New(rand.NewSource(345))
-	// noise := make([]byte, 32)
-	// prefixes := make(map[string][][]byte)
-	// prefixesCnt := make(map[string]int)
-	// for i := 0; i < 5000000; i++ {
-	// 	rnd.Read(noise)
+	//rnd := rand.New(rand.NewSource(345))
+	//noise := make([]byte, 32)
+	//prefixes := make(map[string][][]byte)
+	//prefixesCnt := make(map[string]int)
+	//for i := 0; i < 5000000; i++ {
+	//	rnd.Read(noise)
 	//	//hashed := trieOne.KeyToHexNibbleHash(noise)
 	//	trieOne.keccak.Reset()
 	//	trieOne.keccak.Write(noise)
 	//	hashed := make([]byte, 32)
 	//	trieOne.keccak.Read(hashed)
 	//	prefixesCnt[string(hashed[:5])]++
-	// 	if c := prefixesCnt[string(hashed[:5])]; c < 5 {
-	// 		prefixes[string(hashed[:5])] = append(prefixes[string(hashed[:5])], bytes.Clone(noise))
-	// 	}
-	// }
+	//	if c := prefixesCnt[string(hashed[:5])]; c < 5 {
+	//		prefixes[string(hashed[:5])] = append(prefixes[string(hashed[:5])], bytes.Clone(noise))
+	//	}
+	//}
 	//
-	// count := 0
-	// for pref, cnt := range prefixesCnt {
-	// 	if cnt > 1 {
-	// 		for _, noise := range prefixes[pref] {
-	// 			fmt.Printf("%x %x\n", pref, noise)
-	// 			count++
+	//count := 0
+	//for pref, cnt := range prefixesCnt {
+	//	if cnt > 1 {
+	//		for _, noise := range prefixes[pref] {
+	//			fmt.Printf("%x %x\n", pref, noise)
+	//			count++
 	//		}
 	//	}
 	//}
-	// fmt.Printf("total %d\n", count)
+	//fmt.Printf("total %d\n", count)
 
 	trieTwo := NewHexPatriciaHashed(length.Addr, msTwo, DefaultTrieConfig())
 

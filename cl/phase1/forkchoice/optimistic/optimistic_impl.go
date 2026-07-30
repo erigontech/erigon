@@ -25,7 +25,7 @@ import (
 
 type optimisticStoreImpl struct {
 	opMutex         sync.RWMutex
-	optimisticRoots sync.Map // map[common.Hash]*opNode
+	optimisticRoots sync.Map //map[common.Hash]*opNode
 }
 
 func NewOptimisticStore() OptimisticStore {

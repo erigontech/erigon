@@ -337,12 +337,12 @@ func (logs Logs) ContainingTopics(addrMap map[common.Address]struct{}, topicsMap
 		if _, requested := addrMap[v.Address]; !requested && len(addrMap) > 0 {
 			continue // not there? skip this log
 		}
-		// topicsMap len zero match any topics
+		//topicsMap len zero match any topics
 		if len(topicsMap) == 0 {
 			o = append(o, v)
 		} else {
 			for i := range v.Topics {
-				// Contain any topics that matched
+				//Contain any topics that matched
 				if _, ok := topicsMap[v.Topics[i]]; ok {
 					found = true
 				}
@@ -369,11 +369,11 @@ type rlpStorageLog struct {
 	Address common.Address
 	Topics  []common.Hash
 	Data    []byte
-	// BlockNumber uint64
-	// TxHash common.Hash
-	// TxIndex uint
-	// BlockHash   common.Hash
-	// Index uint
+	//BlockNumber uint64
+	//TxHash common.Hash
+	//TxIndex uint
+	//BlockHash   common.Hash
+	//Index uint
 }
 
 // EncodeRLP implements rlp.Encoder.

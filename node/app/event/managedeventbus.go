@@ -118,7 +118,7 @@ func removeRegistration(registrations map[uintptr][]any, objectPtr uintptr, idx 
 func findRegistrationIndex(registrations map[uintptr][]any, objectPtr uintptr, fn any) int {
 	if _, ok := registrations[objectPtr]; ok {
 		for idx, subscription := range registrations[objectPtr] {
-			// fmt.Printf("%v=%v (%v)\n", subscription, fn, reflect.ValueOf(subscription).Pointer() == reflect.ValueOf(fn).Pointer())
+			//fmt.Printf("%v=%v (%v)\n", subscription, fn, reflect.ValueOf(subscription).Pointer() == reflect.ValueOf(fn).Pointer())
 			if reflect.ValueOf(subscription) == reflect.ValueOf(fn) {
 				return idx
 			}

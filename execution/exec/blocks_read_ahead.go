@@ -448,7 +448,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 			continue
 		}
 
-		// Code domain using .bt index - means no false-positives
+		//Code domain using .bt index - means no false-positives
 		if code, _ := stateReader.ReadAccountCode(accounts.InternAddress(sender)); len(code) > 0 {
 			_, _ = code[0], code[len(code)-1]
 		}
@@ -462,7 +462,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 			if a == nil {
 				continue
 			}
-			// if account != nil && !bytes.Equal(account.CodeHash, types.EmptyCodeHash.Bytes()) {
+			//if account != nil && !bytes.Equal(account.CodeHash, types.EmptyCodeHash.Bytes()) {
 			//	reader.Code(*tx.To(), common.BytesToHash(account.CodeHash))
 			//}
 			if code, _ := stateReader.ReadAccountCode(to); len(code) > 0 {

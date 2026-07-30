@@ -130,7 +130,7 @@ func TestNull(t *testing.T) {
 
 	address := accounts.InternAddress(common.HexToAddress("0x823140710bf13990e4500136726d8b55"))
 	state.CreateAccount(address, true)
-	// value := common.FromHex("0x823140710bf13990e4500136726d8b55")
+	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
 	var value uint256.Int
 
 	state.SetState(address, accounts.ZeroKey, value)

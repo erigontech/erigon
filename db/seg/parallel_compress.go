@@ -547,9 +547,9 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		return fmt.Errorf("return to the start of intermediate file: %w", err)
 	}
 
-	// var m runtime.MemStats
-	// common.ReadMemStats(&m)
-	// logger.Info(fmt.Sprintf("[%s] Dictionary build done", logPrefix), "input", common.ByteCount(inputSize.Load()), "output", common.ByteCount(outputSize.Load()), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	//var m runtime.MemStats
+	//common.ReadMemStats(&m)
+	//logger.Info(fmt.Sprintf("[%s] Dictionary build done", logPrefix), "input", common.ByteCount(inputSize.Load()), "output", common.ByteCount(outputSize.Load()), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	posMap := make(map[uint64]uint64)
 	for _, m := range posMaps {
 		for l, c := range &m.small {
@@ -561,7 +561,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			posMap[l] += c
 		}
 	}
-	// fmt.Printf("posMap = %v\n", posMap)
+	//fmt.Printf("posMap = %v\n", posMap)
 	var patternList PatternList
 	distribution := make([]int, cfg.MaxPatternLen+1)
 	for _, p := range code2pattern {
@@ -651,7 +651,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if _, err = cw.Write(numBuf[:8]); err != nil {
 		return err
 	}
-	// fmt.Printf("patternsSize = %d\n", patternsSize)
+	//fmt.Printf("patternsSize = %d\n", patternsSize)
 	// Write all the pattens
 	slices.SortFunc(patternList, patternListCmp)
 	for _, p := range patternList {
@@ -666,7 +666,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		if _, err = cw.Write(p.word); err != nil {
 			return err
 		}
-		// fmt.Printf("[comp] depth=%d, code=[%b], codeLen=%d pattern=[%x]\n", p.depth, p.code, p.codeBits, p.word)
+		//fmt.Printf("[comp] depth=%d, code=[%b], codeLen=%d pattern=[%x]\n", p.depth, p.code, p.codeBits, p.word)
 	}
 
 	positionList, pos2code, posSize, err := buildAndWritePosDict(posMap, cw)
@@ -1007,7 +1007,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uin
 		for i := int32(0); i < int32(n); i++ {
 			inv[filtered[i]] = i
 		}
-		// logger.Info("Inverted array done")
+		//logger.Info("Inverted array done")
 		var k int
 		// Process all suffixes one by one starting from
 		// first suffix in txt[]
@@ -1043,7 +1043,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uin
 				k--
 			}
 		}
-		// log.Info("Kasai algorithm finished")
+		//log.Info("Kasai algorithm finished")
 		// Checking LCP array
 
 		if dbg.AssertEnabled {
@@ -1067,7 +1067,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uin
 				}
 			}
 		}
-		// logger.Info("LCP array checked")
+		//logger.Info("LCP array checked")
 		// Walk over LCP array and compute the scores of the strings
 		var b = inv
 		j = 0
