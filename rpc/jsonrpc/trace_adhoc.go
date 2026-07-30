@@ -1557,20 +1557,22 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		chainRules := blockCtx.Rules(chainConfig)
 		traceResult.Output = bytes.Clone(execResult.ReturnData)
 		if traceTypeStateDiff {
-			initialIbs := state.New(cloneReader)
-			if !txFinalized {
-				if err = ibs.FinalizeTx(chainRules, sd); err != nil {
-					initialIbs.Close()
-					return nil, nil, err
+			// Closure so the per-tx state is closed on every exit path.
+			if err = func() error {
+				initialIbs := state.New(cloneReader)
+				defer initialIbs.Close()
+				if !txFinalized {
+					if err := ibs.FinalizeTx(chainRules, sd); err != nil {
+						return err
+					}
 				}
-			}
-			if sd != nil {
-				if err = sd.CompareStates(initialIbs, ibs); err != nil {
-					initialIbs.Close()
-					return nil, nil, err
+				if sd != nil {
+					return sd.CompareStates(initialIbs, ibs)
 				}
+				return nil
+			}(); err != nil {
+				return nil, nil, err
 			}
-			initialIbs.Close()
 		} else if !txFinalized {
 			if err = ibs.FinalizeTx(chainRules, noop); err != nil {
 				return nil, nil, err
