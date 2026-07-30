@@ -1559,12 +1559,9 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 	return
 }
 
-// checkBlocksDrained turns a live-ctx exit that leaves scheduled blocks
-// undrained in pe.blockExecutors into an ErrInvalidBlock — such a block never
-// reached apply-loop validation. stopMoreWork and stopBadBlock stops are exempt
-// (their canceled follow-on blocks are expected leftovers, and flagging a
-// handled bad block would fire a second, wrong UnwindTo); a no-cause
-// ErrLoopExhausted is not, or a silent miss would resume forever as "more work".
+// checkBlocksDrained reports scheduled blocks that never reached apply-loop
+// validation. This is an executor failure, not proof that a block is invalid.
+// Stops that deliberately cancel follow-on blocks are exempt.
 func (pe *parallelExecutor) checkBlocksDrained(ctx, executorCtx context.Context, execErr error) error {
 	if ctx.Err() != nil {
 		return execErr
@@ -1582,8 +1579,8 @@ func (pe *parallelExecutor) checkBlocksDrained(ctx, executorCtx context.Context,
 		return execErr
 	}
 	slices.Sort(pending)
-	return fmt.Errorf("%w: parallel exec apply loop exited with %d scheduled block(s) never drained: %v",
-		rules.ErrInvalidBlock, len(pending), pending)
+	return fmt.Errorf("parallel exec apply loop exited with %d scheduled block(s) never drained: %v",
+		len(pending), pending)
 }
 
 // scheduleNextPending picks the lowest-numbered block still queued in
