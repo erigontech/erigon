@@ -238,13 +238,17 @@ test leaves the global registry untouched.
 
 ### Task 4: Verify acceptance criteria
 
-- [ ] verify all Overview requirements: collision gone (round-trip green),
+- [x] verify all Overview requirements: collision gone (round-trip green),
   duplicate/caplin-range/duplicate-name registration panics, ranges disjoint
-- [ ] `make lint` — repeat until clean (non-deterministic)
-- [ ] `make erigon integration` — both binaries build
-- [ ] run the full regression set once more: `go test ./db/snaptype/...
+  — `TestEnumRoundTrip`, `TestEnumUniqueness`, `TestEnumRangeDisjointness`,
+  and all three `TestRegisterTypePanics*` pass fresh (`-count=1`)
+- [x] `make lint` — repeat until clean (non-deterministic) — clean on two
+  consecutive runs
+- [x] `make erigon integration` — both binaries build
+- [x] run the full regression set once more: `go test ./db/snaptype/...
   ./db/snaptype2/... ./db/snapcfg/... ./db/snapshotsync/...
   ./polygon/heimdall/... ./polygon/heimdall/poshttp/... ./polygon/bridge/...`
+  — all green
 
 ### Task 5: [Final] Update documentation
 
