@@ -116,6 +116,15 @@ type Trie interface {
 	Release()
 }
 
+// StatefulTrie is the optional capability of a Trie to save its in-memory state
+// into the commitment-state record and restore it after a restart. Both calls
+// require a fully folded trie; a state blob is engine-specific and must only be
+// restored by the variant that produced it.
+type StatefulTrie interface {
+	EncodeCurrentState(buf []byte) ([]byte, error)
+	SetState(buf []byte) error
+}
+
 type CommitProgress struct {
 	KeyIndex    uint64
 	UpdateCount uint64

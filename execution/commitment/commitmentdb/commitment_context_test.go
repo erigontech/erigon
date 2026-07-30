@@ -85,15 +85,16 @@ func Test_TrieContext_BranchCopiesData(t *testing.T) {
 	require.Equal(t, []byte{9, 2, 3}, reader.branchData)
 }
 
-// Test_NewSharedDomainsCommitmentContext_RejectsBinVariant pins that a variant
-// without commitment state save/restore is refused at construction rather than
-// mid-block, where encodeCommitmentState would fail after a full Process.
-func Test_NewSharedDomainsCommitmentContext_RejectsBinVariant(t *testing.T) {
+// Test_NewSharedDomainsCommitmentContext_AcceptsBinVariant pins that the bin
+// variant constructs like any other stateful trie and carries its own variant
+// tag instead of the hex default.
+func Test_NewSharedDomainsCommitmentContext_AcceptsBinVariant(t *testing.T) {
 	t.Parallel()
 
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
-	require.Panics(t, func() {
-		NewSharedDomainsCommitmentContext(nil, commitment.ModeDirect, t.TempDir(), cfg)
-	})
+	sdc := NewSharedDomainsCommitmentContext(nil, commitment.ModeDirect, t.TempDir(), cfg)
+	defer sdc.Close()
+	require.Equal(t, commitment.VariantBinPatriciaTrie, sdc.Trie().Variant())
+	require.Equal(t, commitment.VariantBinPatriciaTrie, sdc.variant)
 }

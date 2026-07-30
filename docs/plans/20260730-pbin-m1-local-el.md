@@ -122,7 +122,7 @@ Blocking items needing a human or upstream answer. Do not proceed past the task 
 Do not treat these as established:
 
 - `pbin_branch.go` record field-bit layout beyond the leaf-kind rejection at `:156-165`. **Verify before designing Task 13's value-in-record field.**
-- The "grid arrays are restorable-as-zero" argument underpinning Task 5's ~160-byte blob (`SetState` only runs at `activeRows == 0`; `unfold` initializes each row before any read). Well-argued, not proven. Prove it or pay the ~3.3 KB full-grid blob.
+- ~~The "grid arrays are restorable-as-zero" argument underpinning Task 5's ~160-byte blob~~ — **proven in Task 5** (see the Task 5 checklist for the read/write-site audit); the root-cell blob landed.
 - Whether pbin branch records are truly opaque to the pass-through merge path (believed yes with references off, not exercised).
 - Task 8's deferral mis-attribution, inferred from comments at `commitment_context.go:150-157` and `:581-583`; no concrete failing sequence was constructed.
 
@@ -195,14 +195,14 @@ Production keeps Keccak-256. This task only makes the **test** path run the whol
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
 - Create: `execution/commitment/pbin_state_test.go`
 
-- [ ] write a failing restart round-trip test covering a path deeper than 256 bits (guards H6)
-- [ ] prove or refute that the grid arrays are restorable-as-zero (`SetState` only at `activeRows == 0`); record the outcome in this plan and pick the ~160 B root-cell blob or the ~3.3 KB full-grid blob accordingly
-- [ ] implement `pbin` `SetState`/`EncodeCurrentState` with 2-byte depths, never `byte(depth)`
-- [ ] remove the `VariantBinPatriciaTrie` panic (`:225-229`) and fix the hardcoded `variant:` in the struct literal (`:233`)
-- [ ] extend the three variant gates: `LatestCommitmentState` (`:806-808`), `encodeCommitmentState` (`:912-913`), `restorePatriciaState` (`:953-955`)
-- [ ] promote `StatefulTrie` as an **optional** interface asserted at those 3 sites; do not widen `Trie`
-- [ ] write a test asserting the 16-byte `txNum‖blockNum` header is byte-identical to hex's
-- [ ] run tests — must pass before task 6
+- [x] write a failing restart round-trip test covering a path deeper than 256 bits (guards H6) — `TestPBinRestartRoundTripDeepPath`: same-group slots 256/257 share the first 520 tree-key bits, so the root branch prefix is 527 bits; encode → restore → continue reproduces the oracle root
+- [x] prove or refute that the grid arrays are restorable-as-zero — **proven**: every row-indexed array (`rows`, `depths`, `touchMap`, `afterMap`, `branchBefore`, `prevRecord`) is written only in `unfold`/`unfoldBranchNode` before `activeRows++` exposes the row, and read only at indexes < `activeRows` (`updateCell`, `needUnfolding`, `fold` and its three arms). At `activeRows == 0` — which both state calls enforce — the live state is exactly the root cell plus the three root flags. Chose the root-cell blob: `0xB1 marker ‖ flags ‖ uint16 len ‖ pbinAppendCell(root)`. `rootPrev` is deliberately not serialized: a post-restore `storeRoot` passes nil prev and `DomainPut` fetches the stored value itself
+- [x] implement `pbin` `SetState`/`EncodeCurrentState` — the chosen blob serializes no depths at all, so no depth ever meets a one-byte encoding; the marker byte also rejects a hex blob outright (hex starts with a flags byte ≤ 0x07)
+- [x] remove the `VariantBinPatriciaTrie` panic and fix the hardcoded `variant:` in the struct literal — the stale `Test_NewSharedDomainsCommitmentContext_RejectsBinVariant` that pinned the panic became `..._AcceptsBinVariant`
+- [x] extend the three variant gates: `LatestCommitmentState`, `encodeCommitmentState`, `restorePatriciaState` — all three assert `commitment.StatefulTrie`; the trie-trace state capture in `ComputeCommitment` now uses the same seam instead of a hex/parallel type switch
+- [x] promote `StatefulTrie` as an **optional** interface asserted at those 3 sites; do not widen `Trie` — declared beside `Trie`; hex satisfies it as-is, `ParallelPatriciaHashed` delegates to its template trie, pbin implements it in `pbin_state.go`
+- [x] write a test asserting the 16-byte `txNum‖blockNum` header is byte-identical to hex's — `TestPBinCommitmentStateHeaderMatchesHex` (➕ white-box `commitmentdb/pbin_state_header_test.go`, not in the planned file list) also round-trips block/tx through `restorePatriciaState` under bin
+- [x] run tests — `go test ./execution/commitment/... ./db/state/... -count=1` green, `make lint` clean
 
 ### Task 6: The --experimental.bin-commitment flag, persistence, and root-check gating
 
