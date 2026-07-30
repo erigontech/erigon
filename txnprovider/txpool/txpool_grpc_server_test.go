@@ -80,7 +80,7 @@ func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
 
 	mockPool := &addMockTxPool{
 		knownByCall: []bool{true, false}, // first tx treated as already-known, second goes to AddLocalTxns
-		addReasons:  []txpoolcfg.DiscardReason{txpoolcfg.Success},
+		addReasons:  []txpoolcfg.DiscardReason{txpoolcfg.TipAboveFeeCap},
 	}
 
 	s := NewGrpcServer(ctx, mockPool, memdb.NewTestPoolDB(t), nil, chainID, log.New())
@@ -102,34 +102,8 @@ func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
 	if reply.Imported[0] != txpoolproto.ImportResult_ALREADY_EXISTS || reply.Errors[0] != txpoolcfg.AlreadyKnown.String() {
 		t.Fatalf("unexpected first tx result: imported=%v error=%q", reply.Imported[0], reply.Errors[0])
 	}
-	if reply.Imported[1] != txpoolproto.ImportResult_SUCCESS || reply.Errors[1] != txpoolcfg.Success.String() {
+	if reply.Imported[1] != txpoolproto.ImportResult_INVALID || reply.Errors[1] != "max priority fee per gas higher than max fee per gas" {
 		t.Fatalf("unexpected second tx result: imported=%v error=%q", reply.Imported[1], reply.Errors[1])
-	}
-}
-
-func TestGrpcServerAddTipAboveFeeCap(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	chainID := *uint256.NewInt(1)
-	mockPool := &addMockTxPool{
-		addReasons: []txpoolcfg.DiscardReason{txpoolcfg.TipAboveFeeCap},
-	}
-	s := NewGrpcServer(ctx, mockPool, memdb.NewTestPoolDB(t), nil, chainID, log.New())
-	validRlp := hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)
-
-	reply, err := s.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{validRlp}})
-	if err != nil {
-		t.Fatalf("Add returned error: %v", err)
-	}
-	if len(reply.Imported) != 1 || len(reply.Errors) != 1 {
-		t.Fatalf("unexpected reply lengths: imported=%d errors=%d", len(reply.Imported), len(reply.Errors))
-	}
-	if got := reply.Imported[0]; got != txpoolproto.ImportResult_INVALID {
-		t.Fatalf("expected INVALID, got %v", got)
-	}
-	if got := reply.Errors[0]; got != "max priority fee per gas higher than max fee per gas" {
-		t.Fatalf("unexpected error: %q", got)
 	}
 }
 
