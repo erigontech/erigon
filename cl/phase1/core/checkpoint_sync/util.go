@@ -117,7 +117,8 @@ func tryResumeFromLocalFinalizedState(dirs datadir.Dirs, beaconCfg *clparams.Bea
 	nowUnix := uint64(time.Now().Unix())
 	localSlot := localFinalized.Slot()
 	anchorEpoch := localSlot / beaconCfg.SlotsPerEpoch
-	horizonSlots := resolveResumeHorizonSlots(beaconCfg, caplinConfig.ResumeMaxStalenessEpochs, anchorEpoch)
+	needsSidecars := caplinConfig.ArchiveBlobs || caplinConfig.ImmediateBlobsBackfilling
+	horizonSlots := resolveResumeHorizonSlots(beaconCfg, caplinConfig.ResumeMaxStalenessEpochs, anchorEpoch, needsSidecars)
 	if !stateWithinResumeHorizon(localSlot, genesisTime, nowUnix, secondsPerSlot, horizonSlots) {
 		log.Info("[Checkpoint Sync] Local finalized state is too stale to resume from; using remote", "reason", "stale",
 			"slot", localSlot, "horizonSlots", horizonSlots)
@@ -151,28 +152,33 @@ func readLocalStateFile(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig
 }
 
 // resolveResumeHorizonSlots returns the maximum staleness, in slots, a locally-finalized state
-// may have and still be resumed from. The bound is data-availability feasibility, NOT
-// weak-subjectivity: we resume from our own finalized (reorg-immune) state, so the only limit is
-// that forward-syncing the anchor to head needs peers to serve sidecars within the DA retention
-// window. The binding sidecar is the anchor's own (the oldest one the catch-up needs), so the
-// default is the anchor fork's sidecar retention — blob sidecars pre-Fulu, data-column sidecars
-// Fulu+. A user override (resumeMaxStalenessEpochs) larger than that window would leave the node
-// unable to fetch the data it needs to catch up, so it is clamped down.
-func resolveResumeHorizonSlots(beaconCfg *clparams.BeaconChainConfig, resumeMaxStalenessEpochs, anchorEpoch uint64) uint64 {
-	retentionEpochs := beaconCfg.MinEpochsForBlobSidecarsRequests
-	if beaconCfg.GetCurrentStateVersion(anchorEpoch).AfterOrEqual(clparams.FuluVersion) {
-		retentionEpochs = beaconCfg.MinEpochsForDataColumnSidecarsRequests
+// may have and still be resumed from. The bound is what peers will still serve for the catch-up,
+// NOT weak-subjectivity: we resume from our own finalized (reorg-immune) state.
+//
+// Forward sync fetches sidecars only when the node archives blobs or backfills them immediately;
+// such a node is bound by the anchor fork's sidecar retention — blob sidecars pre-Fulu,
+// data-column sidecars Fulu+. Every other node fetches blocks alone, whose serve-range is
+// MIN_EPOCHS_FOR_BLOCK_REQUESTS and is far wider. A user override (resumeMaxStalenessEpochs)
+// above the applicable bound would leave the node unable to fetch what the catch-up needs, so it
+// is clamped down.
+func resolveResumeHorizonSlots(beaconCfg *clparams.BeaconChainConfig, resumeMaxStalenessEpochs, anchorEpoch uint64, needsSidecars bool) uint64 {
+	boundEpochs := beaconCfg.MinEpochsForBlockRequests()
+	if needsSidecars {
+		boundEpochs = beaconCfg.MinEpochsForBlobSidecarsRequests
+		if beaconCfg.GetCurrentStateVersion(anchorEpoch).AfterOrEqual(clparams.FuluVersion) {
+			boundEpochs = beaconCfg.MinEpochsForDataColumnSidecarsRequests
+		}
 	}
-	retentionSlots := retentionEpochs * beaconCfg.SlotsPerEpoch
+	boundSlots := boundEpochs * beaconCfg.SlotsPerEpoch
 	if resumeMaxStalenessEpochs == 0 {
-		return retentionSlots
+		return boundSlots
 	}
 	// Clamp in epochs: converting to slots first would overflow uint64 on an absurd flag value and
-	// wrap to a tiny horizon instead of the retention window.
-	if resumeMaxStalenessEpochs > retentionEpochs {
-		log.Warn("[Checkpoint Sync] caplin.resume-max-staleness-epochs exceeds the sidecar-retention window; clamping",
-			"requestedEpochs", resumeMaxStalenessEpochs, "retentionEpochs", retentionEpochs)
-		return retentionSlots
+	// wrap to a tiny horizon instead of the bound.
+	if resumeMaxStalenessEpochs > boundEpochs {
+		log.Warn("[Checkpoint Sync] caplin.resume-max-staleness-epochs exceeds what peers serve; clamping",
+			"requestedEpochs", resumeMaxStalenessEpochs, "boundEpochs", boundEpochs, "needsSidecars", needsSidecars)
+		return boundSlots
 	}
 	return resumeMaxStalenessEpochs * beaconCfg.SlotsPerEpoch
 }

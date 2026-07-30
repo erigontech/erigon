@@ -339,16 +339,57 @@ func TestResumeFromFreshFinalizedStateSkipsRemote(t *testing.T) {
 	assertSameRoot(t, finalized, got)
 }
 
+// TestStaleFinalizedStateFetchesRemote covers both horizons: a sidecar-fetching node is bound by
+// sidecar retention, any other node by the far wider block serve-range. Each must still fall
+// through to remote once its own bound is exceeded.
 func TestStaleFinalizedStateFetchesRemote(t *testing.T) {
-	dirs, finalized, db := setupResumeScaffold(t)
 	cfg := &clparams.MainnetBeaconConfig
-	staleGap := cfg.MinEpochsForBlobSidecarsRequests*cfg.SlotsPerEpoch + 10_000
+	for _, tc := range []struct {
+		name       string
+		archive    bool
+		boundSlots uint64
+	}{
+		{"blocks only", false, cfg.MinEpochsForBlockRequests() * cfg.SlotsPerEpoch},
+		{"archives blobs", true, cfg.MinEpochsForBlobSidecarsRequests * cfg.SlotsPerEpoch},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs, finalized, db := setupResumeScaffold(t)
+			staleGap := tc.boundSlots + 10_000
+			finalized.SetGenesisTime(uint64(time.Now().Unix()) - (finalized.Slot()+staleGap)*cfg.SecondsPerSlot)
+			writeFinalizedStateForTest(t, dirs, finalized)
+
+			remoteState := distinctRemoteState(t, finalized)
+			sent := false
+			mockServer := newMockHttpServer(remoteState, &sent)
+			defer mockServer.Close()
+			setCheckpointURLs(t, mockServer.URL)
+
+			caplinConfig := clparams.CaplinConfig{NetworkId: chainspec.MainnetChainID, ArchiveBlobs: tc.archive}
+			got, err := ReadOrFetchLatestBeaconState(context.Background(), dirs, cfg, caplinConfig, db)
+			require.NoError(t, err)
+			require.NotNil(t, got)
+			assert.True(t, sent, "a finalized state beyond the resume horizon must fall through to remote")
+			assertSameRoot(t, remoteState, got)
+		})
+	}
+}
+
+// TestBlocksOnlyNodeResumesBeyondSidecarRetention is the case the wider bound exists for: a node
+// off for longer than sidecar retention but still inside the block serve-range resumes locally,
+// instead of taking a remote checkpoint and the execution-history backfill behind it.
+func TestBlocksOnlyNodeResumesBeyondSidecarRetention(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	dirs, finalized, db := setupResumeScaffold(t)
+
+	sidecarBound := cfg.MinEpochsForBlobSidecarsRequests * cfg.SlotsPerEpoch
+	staleGap := sidecarBound + 10_000
+	require.Less(t, staleGap, cfg.MinEpochsForBlockRequests()*cfg.SlotsPerEpoch,
+		"precondition: past sidecar retention but still within the block serve-range")
 	finalized.SetGenesisTime(uint64(time.Now().Unix()) - (finalized.Slot()+staleGap)*cfg.SecondsPerSlot)
 	writeFinalizedStateForTest(t, dirs, finalized)
 
-	remoteState := distinctRemoteState(t, finalized)
 	sent := false
-	mockServer := newMockHttpServer(remoteState, &sent)
+	mockServer := newMockHttpServer(distinctRemoteState(t, finalized), &sent)
 	defer mockServer.Close()
 	setCheckpointURLs(t, mockServer.URL)
 
@@ -356,8 +397,8 @@ func TestStaleFinalizedStateFetchesRemote(t *testing.T) {
 	got, err := ReadOrFetchLatestBeaconState(context.Background(), dirs, cfg, caplinConfig, db)
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	assert.True(t, sent, "a finalized state beyond the resume horizon must fall through to remote")
-	assertSameRoot(t, remoteState, got)
+	assert.False(t, sent, "a blocks-only node must resume locally past sidecar retention")
+	assertSameRoot(t, finalized, got)
 }
 
 func TestForeignFinalizedStateFetchesRemote(t *testing.T) {
@@ -457,9 +498,9 @@ func TestResumeHorizonHonorsAndClampsConfig(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	retention := cfg.MinEpochsForBlobSidecarsRequests * cfg.SlotsPerEpoch
 
-	assert.Equal(t, retention, resolveResumeHorizonSlots(cfg, 0, 0), "0 resolves to the sidecar-retention window")
-	assert.Equal(t, uint64(10)*cfg.SlotsPerEpoch, resolveResumeHorizonSlots(cfg, 10, 0), "a value below the window is honored")
-	assert.Equal(t, retention, resolveResumeHorizonSlots(cfg, cfg.MinEpochsForBlobSidecarsRequests+1000, 0), "a value above the window is clamped down")
+	assert.Equal(t, retention, resolveResumeHorizonSlots(cfg, 0, 0, true), "0 resolves to the sidecar-retention window")
+	assert.Equal(t, uint64(10)*cfg.SlotsPerEpoch, resolveResumeHorizonSlots(cfg, 10, 0, true), "a value below the window is honored")
+	assert.Equal(t, retention, resolveResumeHorizonSlots(cfg, cfg.MinEpochsForBlobSidecarsRequests+1000, 0, true), "a value above the window is clamped down")
 
 	// The retention window is selected by the anchor's fork: blob sidecars pre-Fulu, data-column
 	// sidecars Fulu+. Use a config whose two retention values differ so the branch is observable
@@ -469,15 +510,49 @@ func TestResumeHorizonHonorsAndClampsConfig(t *testing.T) {
 	fuluCfg.MinEpochsForDataColumnSidecarsRequests = 8192
 	fuluEpoch := fuluCfg.FuluForkEpoch
 	assert.Equal(t, fuluCfg.MinEpochsForBlobSidecarsRequests*fuluCfg.SlotsPerEpoch,
-		resolveResumeHorizonSlots(&fuluCfg, 0, fuluEpoch-1), "pre-Fulu uses the blob-retention window")
+		resolveResumeHorizonSlots(&fuluCfg, 0, fuluEpoch-1, true), "pre-Fulu uses the blob-retention window")
 	assert.Equal(t, fuluCfg.MinEpochsForDataColumnSidecarsRequests*fuluCfg.SlotsPerEpoch,
-		resolveResumeHorizonSlots(&fuluCfg, 0, fuluEpoch), "Fulu+ uses the data-column-retention window")
+		resolveResumeHorizonSlots(&fuluCfg, 0, fuluEpoch, true), "Fulu+ uses the data-column-retention window")
 
 	// An epochs-to-slots conversion before the clamp overflows uint64 and wraps to a tiny horizon.
 	for _, epochs := range []uint64{1 << 59, math.MaxUint64} {
-		assert.Equal(t, retention, resolveResumeHorizonSlots(cfg, epochs, 0),
+		assert.Equal(t, retention, resolveResumeHorizonSlots(cfg, epochs, 0, true),
 			"an overflowing value clamps to the window, epochs=%d", epochs)
 	}
+}
+
+// TestResumeHorizonBoundBySidecarNeed pins that only a node which actually fetches sidecars
+// during forward sync is bound by sidecar retention. Every other node fetches blocks alone,
+// whose serve-range (MIN_EPOCHS_FOR_BLOCK_REQUESTS) is far wider — binding it to the ~18-day
+// sidecar window would send a node that had been off for weeks to a remote checkpoint, and
+// then through the execution-history backfill the local resume exists to avoid.
+func TestResumeHorizonBoundBySidecarNeed(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	sidecarBound := cfg.MinEpochsForBlobSidecarsRequests * cfg.SlotsPerEpoch
+	blockBound := cfg.MinEpochsForBlockRequests() * cfg.SlotsPerEpoch
+	require.Greater(t, blockBound, sidecarBound, "precondition: blocks are served over a wider range than sidecars")
+
+	assert.Equal(t, blockBound, resolveResumeHorizonSlots(cfg, 0, 0, false),
+		"a node that fetches no sidecars is bound by the block serve-range")
+	assert.Equal(t, sidecarBound, resolveResumeHorizonSlots(cfg, 0, 0, true),
+		"a sidecar-fetching node stays bound by sidecar retention")
+
+	assert.Equal(t, blockBound, resolveResumeHorizonSlots(cfg, cfg.MinEpochsForBlockRequests()+1000, 0, false),
+		"an override above the block serve-range is clamped to it")
+	assert.Equal(t, cfg.MinEpochsForBlobSidecarsRequests*cfg.SlotsPerEpoch,
+		resolveResumeHorizonSlots(cfg, cfg.MinEpochsForBlockRequests(), 0, true),
+		"an override above sidecar retention is still clamped for a sidecar-fetching node")
+
+	// The fork-selected sidecar window only applies when sidecars are needed.
+	fuluCfg := clparams.MainnetBeaconConfig
+	fuluCfg.MinEpochsForBlobSidecarsRequests = 4096
+	fuluCfg.MinEpochsForDataColumnSidecarsRequests = 8192
+	assert.Equal(t, fuluCfg.MinEpochsForDataColumnSidecarsRequests*fuluCfg.SlotsPerEpoch,
+		resolveResumeHorizonSlots(&fuluCfg, 0, fuluCfg.FuluForkEpoch, true),
+		"Fulu+ sidecar node uses the data-column window")
+	assert.Equal(t, fuluCfg.MinEpochsForBlockRequests()*fuluCfg.SlotsPerEpoch,
+		resolveResumeHorizonSlots(&fuluCfg, 0, fuluCfg.FuluForkEpoch, false),
+		"Fulu+ non-sidecar node is unaffected by the data-column window")
 }
 
 func TestLocalCheckpointSyncRejectsForeignNetworkFile(t *testing.T) {
