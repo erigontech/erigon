@@ -45,8 +45,10 @@ import (
 /*
 TxnExecutor applies a single transaction to the current world state.
 
- 1. Validate transaction (preCheck): nonce, intrinsic gas, EIP-7825 cap,
-    sender balance, and block gas availability (regular, state, blob)
+ 1. Validate transaction (preCheck): all consensus checks — nonce, sender EOA,
+    block gas availability (regular, state, blob), fee caps, EIP-7825 cap,
+    SetCode prerequisites, sender balance, intrinsic gas, initcode size —
+    without mutating state
  2. Buy gas (buyGas): debit the sender's gas and blob fees, reserve blob gas
     from the block pool
  3. Increment sender nonce
@@ -234,8 +236,8 @@ type txnFees struct {
 }
 
 // buyGas debits the gas and blob-gas fees from the sender and reserves the
-// transaction's blob gas from the block pool. preCheck does all transaction
-// validation first; buyGas only mutates state and is called once it passes.
+// transaction's blob gas from the block pool. It performs no validation and
+// runs only after preCheck passes.
 func (st *TxnExecutor) buyGas(fees txnFees, gasBailout bool) error {
 	if st.evm.ChainRules().IsCancun {
 		if err := st.gp.SubBlobGas(st.msg.BlobGas()); err != nil {
@@ -388,7 +390,8 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	// The sender must afford the gas fee plus the topmost call's value transfer.
+	// The sender must afford the gas and blob fees plus the topmost call's
+	// value transfer.
 	if !gasBailout {
 		balanceCheck := fees.gasVal
 		if st.feeCap != nil {
@@ -400,8 +403,8 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 			if overflow {
 				return txnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
 			}
-			// A nil blob fee cap (possible for non-blob-tx Message impls in
-			// NoBaseFee call/trace contexts) contributes no blob fee.
+			// A nil blob fee cap (possible for call-style Message impls,
+			// never for a real blob txn) contributes no blob fee.
 			if maxFeePerBlobGas := st.msg.MaxFeePerBlobGas(); rules.IsCancun && st.msg.BlobGas() > 0 && maxFeePerBlobGas != nil {
 				maxBlobFee, overflow := u256.MulOverflow(*maxFeePerBlobGas, u256.U64(st.msg.BlobGas()))
 				if overflow {
@@ -475,8 +478,8 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		}
 	}
 
-	// set code tx — verifyAuthorities mutates state (SetCode/SetNonce), so it
-	// runs only after the gas checks above, leaving a rejected frame untouched.
+	// Reject malformed SetCode frames before verifyAuthorities mutates state
+	// (SetCode/SetNonce), so a rejected frame leaves state untouched.
 	if err := checkSetCodeAuthorizations(auths, contractCreation, rules.IsPrague); err != nil {
 		return nil, err
 	}
@@ -841,7 +844,8 @@ func (st *TxnExecutor) prepareTopLevelCreate(destination accounts.Address, gasRe
 	return gasRemaining, gasUsed, err
 }
 
-// verifyAuthorities mutates state after checkSetCodeAuthorizations validates the transaction.
+// verifyAuthorities applies the EIP-7702 authorization list, mutating state;
+// callers must first validate the list with checkSetCodeAuthorizations.
 func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID string, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
 	var gasUsed mdgas.MdGasUsage
 	if auths == nil {

@@ -27,13 +27,15 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
-// GasPool tracks block-level gas availability across the two EIP-8037 dimensions.
+// GasPool tracks block-level gas availability across the two EIP-8037
+// dimensions, plus the EIP-4844 blob-gas budget.
 //
-// Each field is the remaining budget for its dimension, starting at the block
-// gas limit and decremented as transactions execute. A transaction is
-// includable iff its EIP-8037 contribution fits in the remaining budget:
-// min(TX_MAX_GAS_LIMIT, tx.gas) for regular and tx.gas for state. Pre-Amsterdam
-// only the regular dimension is exercised.
+// Each field is the remaining budget for its dimension, decremented as
+// transactions execute: regular and state start at the block gas limit, blob
+// at the block blob-gas budget. A transaction is includable iff its EIP-8037
+// contribution fits in the remaining budget: min(TX_MAX_GAS_LIMIT, tx.gas) for
+// regular and tx.gas for state. Pre-Amsterdam only the regular dimension is
+// exercised.
 type GasPool struct {
 	mu         sync.RWMutex
 	regularGas uint64
@@ -51,7 +53,8 @@ func NewBlockGasPool(regularGas, stateGas, blobGas uint64) *GasPool {
 	return &GasPool{regularGas: regularGas, stateGas: stateGas, blobGas: blobGas}
 }
 
-// Reset reinitialises the pool. Both gas dimensions return to gasLimit.
+// Reset reinitialises the pool: both gas dimensions return to gasLimit and
+// the blob budget to blobGas.
 func (gp *GasPool) Reset(gasLimit, blobGas uint64) {
 	if gp == nil {
 		return
