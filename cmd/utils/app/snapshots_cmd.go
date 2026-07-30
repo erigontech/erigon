@@ -3518,7 +3518,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 		allDeletedBlocks += deletedBlocks
 	}
 
-	logger.Info("Pruning has ended", "deleted blocks", allDeletedBlocks)
+	logger.Info("Pruning has ended", "deletedBlocks", allDeletedBlocks)
 
 	temporalDb, err := temporal.New(db, agg, res.BlockSnaps)
 	if err != nil {
@@ -3749,10 +3749,22 @@ func duClassifyFile(dir, name string) string {
 	// Files directly under snapshots/ — only known segment extensions are block segments.
 	switch {
 	case strings.HasSuffix(lname, ".seg"), strings.HasSuffix(lname, ".idx"), strings.HasSuffix(lname, ".dat"):
+		if duIsCaplinSegment(lname) {
+			return duCatCaplin
+		}
 		return duCatBlocks
 	default:
 		return duCatOther
 	}
+}
+
+// duIsCaplinSegment reports whether a segment in the top-level snapshots dir holds
+// consensus-layer data. Caplin writes these alongside the execution block segments,
+// but they are retained by the --caplin.*-archive flags rather than --prune.mode.
+func duIsCaplinSegment(lname string) bool {
+	return strings.Contains(lname, "beaconblocks") ||
+		strings.Contains(lname, "blobsidecars") ||
+		strings.Contains(lname, "blocksidecars")
 }
 
 // duWalkSnapshots walks all snapshot subdirectories and collects file metadata.
@@ -3841,6 +3853,17 @@ func duIsRcacheDomainFile(f duFileInfo) bool {
 	return f.Category == duCatRcache && strings.Contains(normalized, "/domain/")
 }
 
+// duCaplinBytes sums consensus-layer files, which the per-mode estimates leave out.
+func duCaplinBytes(files []duFileInfo) int64 {
+	var total int64
+	for _, f := range files {
+		if f.Category == duCatCaplin {
+			total += f.Size
+		}
+	}
+	return total
+}
+
 // duComputeEstimates computes estimated sizes for archive/full/blocks/minimal
 // modes by summing files that survive each mode's pruning rules.
 // maxBlock is the highest block number across all block segment files.
@@ -3886,6 +3909,12 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstima
 	var archiveTotal, fullTotal, blocksTotal, minimalTotal int64
 
 	for _, f := range files {
+		// Consensus-layer data is retained by the caplin flags, not --prune.mode. It
+		// would add the same amount to every mode, so it is reported on its own line.
+		if f.Category == duCatCaplin {
+			continue
+		}
+
 		archiveTotal += f.Size
 
 		// commitHist is archive-only across non-archive modes — pre-shared
@@ -4054,6 +4083,7 @@ type duResult struct {
 	Subcategories   map[string]map[string]duCategoryStat `json:"subcategories,omitempty"` // category → subcategory → stat
 	OtherExtensions []string                             `json:"other_extensions,omitempty"`
 	Estimates       []duEstimate                         `json:"estimates"`
+	CaplinBytes     int64                                `json:"caplin_bytes"` // excluded from Estimates
 }
 
 // duAggregateCategories computes per-category byte totals and file counts.
@@ -4230,6 +4260,10 @@ func duFormatHuman(w io.Writer, result duResult, verbose bool) {
 			est.Mode, duFormatSize(est.TotalBytes), deltaStr,
 			est.BlocksDesc, est.HistoryDesc)
 	}
+	if result.CaplinBytes > 0 {
+		fmt.Fprintf(w, "\n  caplin %s is on top of every mode above: --prune.mode does not\n"+
+			"  govern it, the --caplin.*-archive flags do.\n", duFormatSize(result.CaplinBytes))
+	}
 }
 
 // duFormatJSON writes the du result as JSON to w.
@@ -4307,6 +4341,7 @@ func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 		Subcategories:   duAggregateSubcategories(files),
 		OtherExtensions: duOtherExtensions(files),
 		Estimates:       estimates,
+		CaplinBytes:     duCaplinBytes(files),
 	}
 
 	verbose := cliCtx.Bool("v")
