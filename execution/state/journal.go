@@ -493,8 +493,14 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			panic(fmt.Sprintf("can't revert log index %v, max: %v", txIndex, len(s.logs)-1))
 		}
 		txnLogs := s.logs[txIndex+1]
-		s.logs[txIndex+1] = txnLogs[:len(txnLogs)-1] // revert 1 log
-		if len(s.logs[txIndex+1]) == 0 {
+		last := len(txnLogs) - 1
+		// Reset's cap check sees only visible entries, so drop an oversized
+		// buffer here before the truncation hides it from that check.
+		if txnLogs[last] != nil && cap(txnLogs[last].Data) > maxReusableLogDataCap {
+			txnLogs[last] = nil
+		}
+		s.logs[txIndex+1] = txnLogs[:last] // revert 1 log
+		if last == 0 {
 			s.logs = s.logs[:len(s.logs)-1] // revert txn
 		}
 		s.logIndexInBlock--

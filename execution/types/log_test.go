@@ -29,7 +29,25 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/stretchr/testify/require"
 )
+
+func TestLogsCopyPreservesNilEntries(t *testing.T) {
+	logs := Logs{
+		nil,
+		{
+			Address: common.HexToAddress("0x1"),
+			Topics:  []common.Hash{common.HexToHash("0xaa")},
+			Data:    []byte{1, 2},
+		},
+		nil,
+	}
+	cp := logs.Copy()
+	require.Len(t, cp, 3)
+	require.Nil(t, cp[0])
+	require.Nil(t, cp[2])
+	require.Equal(t, logs[1], cp[1])
+}
 
 var unmarshalLogTests = map[string]struct {
 	input     string
