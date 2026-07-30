@@ -21,9 +21,9 @@
 // derivation, behind pbinHasher so the suite can be swapped.
 //
 // M0 scope: in-memory Process over the account and storage zones, ModeDirect
-// only. Code chunking, deletion and parallel mounting are out — BASIC_DATA
-// carries code_size 0, and a delete is rejected rather than applied, whether it
-// arrives on the update stream or as an absent state read over a live leaf.
+// only. Code chunking and parallel mounting are out — BASIC_DATA carries
+// code_size 0. EIP-8297 has no removal: a zeroed storage slot keeps its leaf at
+// 32 zero bytes, while an account removal is refused rather than guessed at.
 
 package commitment
 
@@ -270,13 +270,17 @@ func (pph *PBinPatriciaHashed) updateCell(plainKey []byte, probe *pbinBitpath, u
 	}
 
 	// A key with no state reads back as a delete. Landing on an empty slot means
-	// there simply is no leaf here; landing on one means the leaf has to go, which
-	// EIP-8297 does not define.
+	// there simply is no leaf here; landing on one means the leaf keeps its place
+	// at a zero value, or the removal is one EIP-8297 does not define.
 	if update.Deleted() {
-		if c.kind == pbinNodeLeaf {
-			return fmt.Errorf("%w: %x", errPBinDeleteUnsupported, plainKey)
+		if c.kind != pbinNodeLeaf {
+			return nil
 		}
-		return nil
+		zeroed, err := pbinZeroedLeafUpdate(plainKey)
+		if err != nil {
+			return err
+		}
+		update = &zeroed
 	}
 
 	if g.activeRows == 0 {
@@ -309,6 +313,19 @@ func (pph *PBinPatriciaHashed) updateCell(plainKey []byte, probe *pbinBitpath, u
 	}
 	c.setFromUpdate(update)
 	return nil
+}
+
+// pbinZeroedLeafUpdate reinterprets an absent read over a live leaf. The domain
+// encodes zero and absent the same way, while EIP-8297 has no removal and holds
+// a zero value as a present leaf, so a zeroed storage slot keeps its leaf at 32
+// zero bytes. An absent account is a removal the EIP does not describe — its
+// encoding is unverified against the reference and would silently change the
+// root — so it stays refused.
+func pbinZeroedLeafUpdate(plainKey []byte) (Update, error) {
+	if len(plainKey) != length.Addr+length.Hash {
+		return Update{}, fmt.Errorf("%w: %x", errPBinDeleteUnsupported, plainKey)
+	}
+	return Update{Flags: StorageUpdate}, nil
 }
 
 // RootHash hashes whatever the root cell holds. A one-key tree's root is the
@@ -798,10 +815,9 @@ func (pph *PBinPatriciaHashed) cellHash(c *pbinCell, path *pbinBitpath) (common.
 }
 
 // loadCellState fills a leaf cell whose plain key arrived from a record and
-// whose value therefore did not.
-// The leaf is already in the tree, so an absent read means it has to go, which
-// EIP-8297 does not define. Applying it would hash a zero-valued leaf and return
-// a root with no error.
+// whose value therefore did not. The leaf is already in the tree, so an absent
+// read is pbinZeroedLeafUpdate's case: a zero value for storage, a refusal for
+// an account.
 func (pph *PBinPatriciaHashed) loadCellState(c *pbinCell) error {
 	if c.accountAddrLen > 0 && !c.loaded.account() {
 		plainKey := c.accountAddr[:c.accountAddrLen]
@@ -822,7 +838,11 @@ func (pph *PBinPatriciaHashed) loadCellState(c *pbinCell) error {
 			return fmt.Errorf("pbin: read storage %x: %w", plainKey, err)
 		}
 		if update.Deleted() {
-			return fmt.Errorf("%w: %x", errPBinDeleteUnsupported, plainKey)
+			zeroed, err := pbinZeroedLeafUpdate(plainKey)
+			if err != nil {
+				return err
+			}
+			update = &zeroed
 		}
 		c.setFromUpdate(update)
 		c.loaded = c.loaded.addFlag(cellLoadStorage)

@@ -310,57 +310,9 @@ func TestPBinProcessMissingStateIsAbsent(t *testing.T) {
 	require.Equal(t, present.oracleRoot(t), root, "keys with no state contribute no leaf")
 }
 
-// TestPBinProcessRejectsDeletedLeaf is the case an absent state read must not be
-// confused with: the key already holds a leaf, so "no state" means the leaf has
-// to go — which EIP-8297 does not define. Skipping it would leave the stale leaf
-// in the tree and return a root with no error.
-func TestPBinProcessRejectsDeletedLeaf(t *testing.T) {
-	t.Parallel()
-
-	addr := pbinOracleAddr(23)
-	corpus := new(pbinTestCorpus).
-		storage(addr, pbinOracleSlot(256), 0x01).
-		storage(addr, pbinOracleSlot(257), 0x02)
-
-	pph, ms := pbinTestEngine(t)
-	require.NoError(t, ms.applyPlainUpdates(corpus.plainKeys, corpus.updates))
-	pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates)
-
-	gone := new(pbinTestCorpus).storage(addr, pbinOracleSlot(257), 0x02)
-	require.NoError(t, ms.applyPlainUpdates(gone.plainKeys, []Update{{Flags: DeleteUpdate}}))
-
-	pph.Reset()
-	upd := WrapKeyUpdates(t, ModeDirect, pbinKeyHasher(), gone.plainKeys, gone.updates)
-	_, err := pph.Process(context.Background(), upd, "", nil, WarmupConfig{})
-	require.ErrorIs(t, err, errPBinDeleteUnsupported)
-}
-
-// TestPBinProcessRejectsDeletedSibling is the same hazard reached through the
-// fold rather than the update stream: the vanished leaf is never touched, so it
-// is rehydrated from its branch record and hashed with whatever the state read
-// returns. Applying an absent read there would hash a zero-valued leaf and
-// return a root with no error.
-func TestPBinProcessRejectsDeletedSibling(t *testing.T) {
-	t.Parallel()
-
-	addr := pbinOracleAddr(24)
-	corpus := new(pbinTestCorpus).
-		storage(addr, pbinOracleSlot(256), 0x01).
-		storage(addr, pbinOracleSlot(257), 0x02)
-
-	pph, ms := pbinTestEngine(t)
-	require.NoError(t, ms.applyPlainUpdates(corpus.plainKeys, corpus.updates))
-	pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates)
-
-	gone := new(pbinTestCorpus).storage(addr, pbinOracleSlot(256), 0x01)
-	require.NoError(t, ms.applyPlainUpdates(gone.plainKeys, []Update{{Flags: DeleteUpdate}}))
-
-	touched := new(pbinTestCorpus).storage(addr, pbinOracleSlot(257), 0x02)
-	pph.Reset()
-	upd := WrapKeyUpdates(t, ModeDirect, pbinKeyHasher(), touched.plainKeys, touched.updates)
-	_, err := pph.Process(context.Background(), upd, "", nil, WarmupConfig{})
-	require.ErrorIs(t, err, errPBinDeleteUnsupported)
-}
+// The absent read over a live leaf — the case this one must not be confused
+// with — is pbin_zerovalue_test.go's: storage keeps the leaf at a zero value,
+// an account removal stays refused.
 
 // TestPBinProcessRepeatedKeyKeepsOneLeaf checks a stem touched twice in one run
 // still holds a single leaf, so the second visit updates rather than splits.
