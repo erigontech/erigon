@@ -473,7 +473,7 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 		typedReader.SetTx(rw.chainTx)
 	}
 	if rw.ibs != nil {
-		rw.ibs.Release(true)
+		rw.ibs.Close()
 	}
 	rw.ibs = state.New(rw.stateReader)
 

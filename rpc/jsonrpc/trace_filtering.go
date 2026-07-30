@@ -224,10 +224,11 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	if err != nil {
 		return nil, err
 	}
-	traces, wdiffs, syscall, err := api.callBlock(ctx, tx, block, []string{TraceTypeTrace}, *gasBailOut /* gasBailOut */, cfg, traceConfig)
+	traces, wdiffs, syscall, closeState, err := api.callBlock(ctx, tx, block, []string{TraceTypeTrace}, *gasBailOut /* gasBailOut */, cfg, traceConfig)
 	if err != nil {
 		return nil, err
 	}
+	defer closeState() // syscall below keeps using the state, so close only at return
 
 	out := make([]ParityTrace, 0, len(traces))
 	for txno, trace := range traces {
@@ -663,7 +664,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			// Safe to skip FinalizeTx/CommitBlock: each iteration creates a fresh
 			// stateCache, cachedReader and ibs from the next txNum, and writes go
 			// to a noop writer, so no partial state escapes this scope.
-			ibs.Release(false)
+			ibs.Close()
 			continue
 		}
 		if err != nil {
@@ -678,7 +679,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectStart()
 			rpc.HandleError(err, stream)
 			stream.WriteObjectEnd()
-			ibs.Release(false)
+			ibs.Close()
 			continue
 		}
 		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
@@ -694,7 +695,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectStart()
 			rpc.HandleError(err, stream)
 			stream.WriteObjectEnd()
-			ibs.Release(false)
+			ibs.Close()
 			continue
 		}
 		if err = ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
@@ -706,10 +707,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectStart()
 			rpc.HandleError(err, stream)
 			stream.WriteObjectEnd()
-			ibs.Release(false)
+			ibs.Close()
 			continue
 		}
-		ibs.Release(false)
+		ibs.Close()
 		isIntersectionMode := req.Mode == TraceFilterModeIntersection
 		for _, pt := range traceResult.Trace {
 			if includeAll || filterTrace(pt, fromAddresses, toAddresses, isIntersectionMode) {
@@ -782,7 +783,7 @@ func (api *TraceAPIImpl) callBlock(
 	gasBailOut bool,
 	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
-) ([]*TraceCallResult, []withdrawalBalanceDiff, protocolrules.SystemCall, error) {
+) ([]*TraceCallResult, []withdrawalBalanceDiff, protocolrules.SystemCall, func(), error) {
 	blockNumber := block.NumberU64()
 	pNo := blockNumber
 	if pNo > 0 {
@@ -794,7 +795,7 @@ func (api *TraceAPIImpl) callBlock(
 	engine := api.engine()
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
 	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	rules := blockCtx.Rules(cfg)
 	signer := types.MakeSigner(cfg, blockCtx.BlockNumber, blockCtx.Time)
@@ -809,7 +810,7 @@ func (api *TraceAPIImpl) callBlock(
 		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
 
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		if ok {
 			borStateSyncTxn = bortypes.NewBorTransaction()
@@ -828,12 +829,12 @@ func (api *TraceAPIImpl) callBlock(
 
 	err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	stateCache := shards.NewStateCache(
 		32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
@@ -846,10 +847,10 @@ func (api *TraceAPIImpl) callBlock(
 	logger := log.New("trace_filtering")
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if err = ibs.CommitBlock(rules, cachedWriter); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	msgs := make([]*types.Message, len(txs))
@@ -865,7 +866,7 @@ func (api *TraceAPIImpl) callBlock(
 			txnHash = txn.Hash()
 			msg, err = txn.AsMessage(*signer, &blockCtx.BaseFee, rules)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("convert txn into msg: %w", err)
+				return nil, nil, nil, nil, fmt.Errorf("convert txn into msg: %w", err)
 			}
 		}
 
@@ -915,7 +916,7 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	if cmErr != nil {
-		return nil, nil, nil, cmErr
+		return nil, nil, nil, nil, cmErr
 	}
 
 	// Collect balance diffs for beacon chain withdrawals; prev is read only when stateDiff is requested.
@@ -928,11 +929,11 @@ func (api *TraceAPIImpl) callBlock(
 			var err error
 			prev, err = ibs.GetBalance(addr)
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, nil, err
 			}
 			existed, err = ibs.Exist(addr)
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, nil, err
 			}
 		}
 		var amountWei uint256.Int
@@ -950,7 +951,7 @@ func (api *TraceAPIImpl) callBlock(
 		return ret, err
 	}
 
-	return traces, wdiffs, syscall, nil
+	return traces, wdiffs, syscall, ibs.Close, nil
 }
 
 type blockTraceTxJob struct {
@@ -1094,7 +1095,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 
 				traceResult.Output = bytes.Clone(execResult.ReturnData)
 				results[job.txIndex] = traceResult
-				workerIbs.Release(false)
+				workerIbs.Close()
 			}
 		})
 	}
@@ -1181,7 +1182,7 @@ func (api *TraceAPIImpl) callTransaction(
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
-	defer ibs.Release(false)
+	defer ibs.Close()
 
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, nil)
 	logger := log.New("trace_filtering")

@@ -166,7 +166,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	statedb := state.New(stateReader)
-	defer statedb.Release(false)
+	defer statedb.Close()
 
 	header := block.HeaderNoCopy()
 
@@ -326,7 +326,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 				}
 				statedb := state.New(stateReader)
 				func() {
-					defer statedb.Release(false)
+					defer statedb.Close()
 					if stateOverride != nil {
 						err = stateOverride.Override(statedb, nil, rules)
 						if err != nil {

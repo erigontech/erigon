@@ -128,7 +128,7 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 		}
 	}()
 	defer rw.LogStats()
-	defer rw.ibs.Release(true)
+	defer rw.ibs.Close()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		result := rw.RunTxTask(txTask.(*TxTask))
 		if err := rw.out.Add(rw.ctx, result); err != nil {
@@ -488,7 +488,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 				// End of block transaction in a block
 				reader := state.NewHistoryReaderV3(tx, outputTxNum)
 				ibs := state.New(reader)
-				defer ibs.Release(false)
+				defer ibs.Close()
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 					ret, err := protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{
