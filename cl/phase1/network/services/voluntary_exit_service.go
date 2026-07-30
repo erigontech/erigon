@@ -105,10 +105,10 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 
 	// [IGNORE] The voluntary exit is the first valid voluntary exit received for the validator with index signed_voluntary_exit.message.validator_index.
 	if _, ok := s.seen.Get(voluntaryExit.ValidatorIndex); ok {
-		return nil
+		return ErrIgnore
 	}
 	if s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
-		return nil
+		return ErrIgnore
 	}
 
 	var (
@@ -180,9 +180,7 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 		Pks:         [][]byte{pk[:]},
 		SendingPeer: msg.Receiver,
 		F: func() {
-			s.seen.Add(voluntaryExit.ValidatorIndex, struct{}{})
-			s.operationsPool.VoluntaryExitsPool.Insert(voluntaryExit.ValidatorIndex, msg.SignedVoluntaryExit)
-			s.emitters.Operation().SendVoluntaryExit(msg.SignedVoluntaryExit)
+			s.storeVerifiedExit(msg.SignedVoluntaryExit)
 		},
 	}
 
@@ -198,4 +196,12 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
 	// gossip ourselves or ban the peer which sent that particular invalid signature.
 	return nil
+}
+
+func (s *voluntaryExitService) storeVerifiedExit(exit *cltypes.SignedVoluntaryExit) {
+	if seen, _ := s.seen.ContainsOrAdd(exit.VoluntaryExit.ValidatorIndex, struct{}{}); seen {
+		return
+	}
+	s.operationsPool.VoluntaryExitsPool.Insert(exit.VoluntaryExit.ValidatorIndex, exit)
+	s.emitters.Operation().SendVoluntaryExit(exit)
 }

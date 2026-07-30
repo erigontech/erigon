@@ -45,8 +45,8 @@ func (f *ForkChoiceStore) queuePrune(slot uint64) {
 	f.queuedPrunes = append(f.queuedPrunes, slot)
 }
 
-func (f *ForkChoiceStore) queueOperationPrune(root common.Hash) {
-	f.queuedOperationPrunes = append(f.queuedOperationPrunes, root)
+func (f *ForkChoiceStore) queueOperationPrune(checkpoint solid.Checkpoint) {
+	f.queuedOperationPrunes = append(f.queuedOperationPrunes, checkpoint)
 }
 
 // drainQueuedWork runs queued event sends and prunes. Call after releasing f.mu.
@@ -59,7 +59,7 @@ func (f *ForkChoiceStore) drainQueuedWork() {
 	f.queuedPrunes = nil
 	f.queuedOperationPrunes = nil
 	f.mu.Unlock()
-	if len(operationPrunes) > 0 {
+	if len(operationPrunes) > 0 && f.operationsPool.HasPrunableOperations() {
 		f.scheduleOperationPrune(operationPrunes[len(operationPrunes)-1])
 	}
 	for _, emit := range emits {
@@ -72,9 +72,13 @@ func (f *ForkChoiceStore) drainQueuedWork() {
 	}
 }
 
-func (f *ForkChoiceStore) scheduleOperationPrune(root common.Hash) {
+func (f *ForkChoiceStore) scheduleOperationPrune(checkpoint solid.Checkpoint) {
 	f.operationPruneMu.Lock()
-	f.operationPruneRoot = root
+	if checkpoint.Epoch <= f.operationPruneTarget.Epoch {
+		f.operationPruneMu.Unlock()
+		return
+	}
+	f.operationPruneTarget = checkpoint
 	f.operationPrunePending = true
 	if f.operationPruneRunning {
 		f.operationPruneMu.Unlock()
@@ -93,16 +97,19 @@ func (f *ForkChoiceStore) runOperationPruner() {
 			f.operationPruneMu.Unlock()
 			return
 		}
-		root := f.operationPruneRoot
+		checkpoint := f.operationPruneTarget
 		f.operationPrunePending = false
 		f.operationPruneMu.Unlock()
 
-		finalizedState, err := f.forkGraph.GetState(root, true)
-		if err != nil || finalizedState == nil {
-			log.Warn("Failed to load finalized state for operation pruning", "root", root, "err", err)
+		if !f.operationsPool.HasPrunableOperations() {
 			continue
 		}
-		f.operationsPool.PruneFinalized(finalizedState)
+		finalizedState, err := f.forkGraph.GetState(checkpoint.Root, true)
+		if err != nil || finalizedState == nil {
+			log.Warn("Failed to load finalized state for operation pruning", "root", checkpoint.Root, "err", err)
+			continue
+		}
+		f.operationsPool.PruneFinalized(finalizedState, checkpoint.Epoch)
 	}
 }
 
@@ -112,7 +119,7 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 		f.justifiedCheckpoint.Store(justifiedCheckpoint)
 	}
 	if finalizedCheckpoint.Epoch > f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch {
-		f.queueOperationPrune(finalizedCheckpoint.Root)
+		f.queueOperationPrune(finalizedCheckpoint)
 		f.onNewFinalized(finalizedCheckpoint)
 		f.finalizedCheckpoint.Store(finalizedCheckpoint)
 

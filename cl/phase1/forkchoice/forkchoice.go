@@ -161,9 +161,9 @@ type ForkChoiceStore struct {
 	// event sends queued under f.mu, emitted after release (see queueEmit)
 	queuedEmits           []func()
 	queuedPrunes          []uint64
-	queuedOperationPrunes []common.Hash
+	queuedOperationPrunes []solid.Checkpoint
 	operationPruneMu      sync.Mutex
-	operationPruneRoot    common.Hash
+	operationPruneTarget  solid.Checkpoint
 	operationPrunePending bool
 	operationPruneRunning bool
 	synced                atomic.Bool

@@ -78,11 +78,17 @@ func NewOperationsPool(beaconCfg *clparams.BeaconChainConfig) OperationsPool {
 	}
 }
 
-func (o *OperationsPool) PruneFinalized(finalizedState abstract.BeaconState) {
+func (o *OperationsPool) HasPrunableOperations() bool {
+	return o.AttesterSlashingsPool.Len() > 0 ||
+		o.ProposerSlashingsPool.Len() > 0 ||
+		o.BLSToExecutionChangesPool.Len() > 0 ||
+		o.VoluntaryExitsPool.Len() > 0
+}
+
+func (o *OperationsPool) PruneFinalized(finalizedState abstract.BeaconState, finalizedEpoch uint64) {
 	if finalizedState == nil {
 		return
 	}
-	finalizedEpoch := finalizedState.Slot() / finalizedState.BeaconConfig().SlotsPerEpoch
 
 	for _, slashing := range o.ProposerSlashingsPool.Raw() {
 		if slashing == nil || slashing.Header1 == nil || slashing.Header1.Header == nil || slashing.Header2 == nil {

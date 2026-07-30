@@ -18,6 +18,7 @@ package pool
 
 import (
 	"encoding/binary"
+	"sync"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -184,7 +185,7 @@ func TestOperationsPoolPruneFinalized(t *testing.T) {
 		require.NoError(t, finalizedState.SetValidatorSlashed(1, true))
 		require.NoError(t, finalizedState.SetWithdrawableEpochForValidatorAtIndex(2, 3))
 
-		pools.PruneFinalized(finalizedState)
+		pools.PruneFinalized(finalizedState, 3)
 
 		require.True(t, pools.ProposerSlashingsPool.Has(ComputeKeyForProposerSlashing(keep)))
 		require.False(t, pools.ProposerSlashingsPool.Has(ComputeKeyForProposerSlashing(removeSlashed)))
@@ -199,7 +200,7 @@ func TestOperationsPoolPruneFinalized(t *testing.T) {
 		pools.AttesterSlashingsPool.Insert(ComputeKeyForAttesterSlashing(partial), partial)
 		pools.AttesterSlashingsPool.Insert(ComputeKeyForAttesterSlashing(terminal), terminal)
 
-		pools.PruneFinalized(finalizedState)
+		pools.PruneFinalized(finalizedState, 3)
 
 		require.True(t, pools.AttesterSlashingsPool.Has(ComputeKeyForAttesterSlashing(partial)))
 		require.False(t, pools.AttesterSlashingsPool.Has(ComputeKeyForAttesterSlashing(terminal)))
@@ -212,7 +213,7 @@ func TestOperationsPoolPruneFinalized(t *testing.T) {
 		pools.VoluntaryExitsPool.Insert(10, voluntaryExit(10))
 		finalizedState.SetExitEpochForValidatorAtIndex(2, 4)
 
-		pools.PruneFinalized(finalizedState)
+		pools.PruneFinalized(finalizedState, 3)
 
 		require.True(t, pools.VoluntaryExitsPool.Has(0))
 		require.False(t, pools.VoluntaryExitsPool.Has(2))
@@ -230,7 +231,7 @@ func TestOperationsPoolPruneFinalized(t *testing.T) {
 		credentials := common.Hash{byte(cfg.ETH1AddressWithdrawalPrefixByte)}
 		finalizedState.SetWithdrawalCredentialForValidatorAtIndex(2, credentials)
 
-		pools.PruneFinalized(finalizedState)
+		pools.PruneFinalized(finalizedState, 3)
 
 		require.True(t, pools.BLSToExecutionChangesPool.Has(keep.Signature))
 		require.False(t, pools.BLSToExecutionChangesPool.Has(remove.Signature))
@@ -253,7 +254,7 @@ func TestOperationsPoolPruneFinalized(t *testing.T) {
 		pools.VoluntaryExitsPool.Insert(keepIndex, voluntaryExit(keepIndex))
 		pools.VoluntaryExitsPool.Insert(removeIndex, voluntaryExit(removeIndex))
 
-		pools.PruneFinalized(gloasState)
+		pools.PruneFinalized(gloasState, 0)
 
 		require.True(t, pools.VoluntaryExitsPool.Has(keepIndex))
 		require.True(t, pools.VoluntaryExitsPool.Has(removeIndex))
@@ -264,7 +265,7 @@ func TestOperationsPoolPruneFinalized(t *testing.T) {
 		key := common.Bytes96{1}
 		pools.AttestationsPool.Insert(key, &solid.Attestation{})
 
-		pools.PruneFinalized(finalizedState)
+		pools.PruneFinalized(finalizedState, 3)
 
 		require.True(t, pools.AttestationsPool.Has(key))
 	})
@@ -288,12 +289,76 @@ func TestOperationsPoolPruneFinalizedIgnoresIncompleteEntries(t *testing.T) {
 	pools.BLSToExecutionChangesPool.Insert(common.Bytes96{3}, nil)
 
 	require.NotPanics(t, func() {
-		pools.PruneFinalized(finalizedState)
+		pools.PruneFinalized(finalizedState, 0)
 	})
 	require.Len(t, pools.ProposerSlashingsPool.Raw(), 2)
 	require.Len(t, pools.AttesterSlashingsPool.Raw(), 1)
 	require.Len(t, pools.VoluntaryExitsPool.Raw(), 1)
 	require.Len(t, pools.BLSToExecutionChangesPool.Raw(), 1)
+}
+
+func TestOperationsPoolPruneFinalizedUsesCheckpointEpoch(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	finalizedState := state.New(&cfg)
+	finalizedState.SetSlot(2 * cfg.SlotsPerEpoch)
+	validator := solid.NewValidatorFromParameters(
+		common.Bytes48{},
+		common.Hash{},
+		cfg.MaxEffectiveBalance,
+		false,
+		0,
+		0,
+		cfg.FarFutureEpoch,
+		3,
+	)
+	finalizedState.AddValidator(validator, cfg.MaxEffectiveBalance)
+	slashing := proposerSlashing(0, 1)
+
+	t.Run("before boundary", func(t *testing.T) {
+		pools := NewOperationsPool(&cfg)
+		pools.ProposerSlashingsPool.Insert(ComputeKeyForProposerSlashing(slashing), slashing)
+
+		pools.PruneFinalized(finalizedState, 2)
+
+		require.True(t, pools.ProposerSlashingsPool.Has(ComputeKeyForProposerSlashing(slashing)))
+	})
+
+	t.Run("at skipped-slot checkpoint boundary", func(t *testing.T) {
+		pools := NewOperationsPool(&cfg)
+		pools.ProposerSlashingsPool.Insert(ComputeKeyForProposerSlashing(slashing), slashing)
+
+		pools.PruneFinalized(finalizedState, 3)
+
+		require.False(t, pools.ProposerSlashingsPool.Has(ComputeKeyForProposerSlashing(slashing)))
+	})
+}
+
+func TestOperationsPoolPruneFinalizedConcurrentInsert(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	finalizedState := state.New(&cfg)
+	validator := solid.NewValidator()
+	validator.SetExitEpoch(1)
+	finalizedState.AddValidator(validator, 0)
+	pools := NewOperationsPool(&cfg)
+	pools.VoluntaryExitsPool.Insert(0, voluntaryExit(0))
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range 100 {
+			pools.PruneFinalized(finalizedState, 1)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := uint64(1); i <= 100; i++ {
+			pools.VoluntaryExitsPool.Insert(i, voluntaryExit(i))
+		}
+	}()
+	wg.Wait()
+
+	require.False(t, pools.VoluntaryExitsPool.Has(0))
 }
 
 func proposerSlashing(validatorIndex uint64, signatureByte byte) *cltypes.ProposerSlashing {

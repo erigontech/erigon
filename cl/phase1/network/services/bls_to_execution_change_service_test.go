@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -127,6 +128,7 @@ func TestBlsToExecutionChangeProcessMessage(t *testing.T) {
 			prepare: func(t *testing.T, testCtx *blsToExecutionChangeTestContext, _ *state.CachingBeaconState, msg *SignedBLSToExecutionChangeForGossip) {
 				testCtx.operationsPool.BLSToExecutionChangesPool.Insert(msg.SignedBLSToExecutionChange.Signature, msg.SignedBLSToExecutionChange)
 			},
+			wantErr:    ErrIgnore,
 			wantInPool: true,
 		},
 		{
@@ -235,8 +237,26 @@ func TestBlsToExecutionChangeIgnoresSeenValidatorAfterPoolPrune(t *testing.T) {
 	st.ValidatorSet().SetWithdrawalCredentialForValidatorAtIndex(int(validatorIndex), credentials)
 	syncHeadState(t, testCtx.syncedData, st)
 
-	require.NoError(t, testCtx.service.ProcessMessage(context.Background(), nil, msg))
+	require.ErrorIs(t, testCtx.service.ProcessMessage(context.Background(), nil, msg), ErrIgnore)
 	require.True(t, testCtx.gomockCtrl.Satisfied())
+}
+
+func TestBlsToExecutionChangeStoresOneVerifiedChangePerValidator(t *testing.T) {
+	const validatorIndex = uint64(1)
+	testCtx, _ := setupBLSToExecutionChangeTest(t)
+	service := testCtx.service.(*blsToExecutionChangeService)
+	const variants = 32
+	var wg sync.WaitGroup
+	for i := range variants {
+		change := newSignedBLSToExecutionChangeForGossip(validatorIndex).SignedBLSToExecutionChange
+		change.Signature[0] = byte(i + 1)
+		wg.Go(func() {
+			service.storeVerifiedChange(change)
+		})
+	}
+	wg.Wait()
+
+	require.Len(t, testCtx.operationsPool.BLSToExecutionChangesPool.Raw(), 1)
 }
 
 func TestBlsToExecutionChangeRejectsIncompleteMessage(t *testing.T) {

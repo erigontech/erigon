@@ -117,7 +117,8 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 				t.operationsPool.VoluntaryExitsPool.Insert(mockValidatorIndex, mockMsg.SignedVoluntaryExit)
 			},
 			msg:     mockMsg,
-			wantErr: false, // Silent ignore: returns nil when already in pool
+			wantErr: true,
+			err:     ErrIgnore,
 		},
 		{
 			name: "state is nil",
@@ -294,7 +295,7 @@ func (t *voluntaryExitTestSuite) TestSeenValidatorIsIgnoredAfterPoolPrune() {
 	st.ValidatorSet().Set(int(validatorIndex), validator)
 	t.Require().NoError(t.syncedData.OnHeadState(st))
 
-	t.Require().NoError(t.voluntaryExitService.ProcessMessage(context.Background(), nil, msg))
+	t.Require().ErrorIs(t.voluntaryExitService.ProcessMessage(context.Background(), nil, msg), ErrIgnore)
 	t.Require().True(t.gomockCtrl.Satisfied())
 }
 

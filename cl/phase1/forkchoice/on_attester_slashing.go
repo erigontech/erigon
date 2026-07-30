@@ -30,8 +30,15 @@ import (
 )
 
 func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error {
+	if attesterSlashing == nil ||
+		attesterSlashing.Attestation_1 == nil ||
+		attesterSlashing.Attestation_2 == nil ||
+		attesterSlashing.Attestation_1.AttestingIndices == nil ||
+		attesterSlashing.Attestation_2.AttestingIndices == nil {
+		return errors.New("invalid attester slashing")
+	}
 	if f.operationsPool.AttesterSlashingsPool.Has(pool.ComputeKeyForAttesterSlashing(attesterSlashing)) {
-		return nil
+		return ErrIgnore
 	}
 	f.mu.Lock()
 	defer f.drainQueuedWork()
@@ -58,6 +65,13 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	// Check if this attestation is even slashable.
 	attestation1 := attesterSlashing.Attestation_1
 	attestation2 := attesterSlashing.Attestation_2
+	intersection := solid.IntersectionOfSortedSets(attestation1.AttestingIndices, attestation2.AttestingIndices)
+	if f.allAttesterSlashingIndicesSeen(intersection) {
+		return ErrIgnore
+	}
+	if attestation1.Data == nil || attestation2.Data == nil {
+		return errors.New("invalid attester slashing data")
+	}
 	if !cltypes.IsSlashableAttestationData(attestation1.Data, attestation2.Data) {
 		return errors.New("attestation data is not slashable")
 	}
@@ -68,10 +82,6 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	attestation2PublicKeys, err := getIndexedAttestationPublicKeys(s, attestation2)
 	if err != nil {
 		return err
-	}
-	intersection := solid.IntersectionOfSortedSets(attestation1.AttestingIndices, attestation2.AttestingIndices)
-	if f.allAttesterSlashingIndicesSeen(intersection) {
-		return nil
 	}
 	domain1, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, attestation1.Data.Target.Epoch)
 	if err != nil {

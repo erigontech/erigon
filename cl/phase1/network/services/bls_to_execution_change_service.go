@@ -104,10 +104,10 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	// for the validator with index signed_bls_to_execution_change.message.validator_index.
 	change := msg.SignedBLSToExecutionChange.Message
 	if _, ok := s.seen.Get(change.ValidatorIndex); ok {
-		return nil
+		return ErrIgnore
 	}
 	if s.operationsPool.BLSToExecutionChangesPool.Has(msg.SignedBLSToExecutionChange.Signature) {
-		return nil
+		return ErrIgnore
 	}
 
 	var wc, genesisValidatorRoot common.Hash
@@ -159,9 +159,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 		Pks:         [][]byte{change.From[:]},
 		SendingPeer: msg.Receiver,
 		F: func() {
-			s.seen.Add(change.ValidatorIndex, struct{}{})
-			s.emitters.Operation().SendBlsToExecution(msg.SignedBLSToExecutionChange)
-			s.operationsPool.BLSToExecutionChangesPool.Insert(msg.SignedBLSToExecutionChange.Signature, msg.SignedBLSToExecutionChange)
+			s.storeVerifiedChange(msg.SignedBLSToExecutionChange)
 		},
 	}
 
@@ -177,4 +175,12 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
 	// gossip ourselves or ban the peer which sent that particular invalid signature.
 	return nil
+}
+
+func (s *blsToExecutionChangeService) storeVerifiedChange(change *cltypes.SignedBLSToExecutionChange) {
+	if seen, _ := s.seen.ContainsOrAdd(change.Message.ValidatorIndex, struct{}{}); seen {
+		return
+	}
+	s.emitters.Operation().SendBlsToExecution(change)
+	s.operationsPool.BLSToExecutionChangesPool.Insert(change.Signature, change)
 }

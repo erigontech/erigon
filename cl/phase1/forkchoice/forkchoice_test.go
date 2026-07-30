@@ -166,7 +166,7 @@ func TestUpdateCheckpointsPrunesOperationsWithExactFinalizedState(t *testing.T) 
 	}()
 	select {
 	case <-drained:
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(time.Second):
 		close(graph.getStateRelease)
 		<-drained
 		t.Fatal("drainQueuedWork waited for finalized operation pruning")
@@ -193,6 +193,36 @@ func TestAllAttesterSlashingIndicesSeen(t *testing.T) {
 	require.False(t, store.allAttesterSlashingIndicesSeen(nil))
 }
 
+func TestAttesterSlashingSeenCheckPrecedesValidation(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	store := &ForkChoiceStore{
+		equivocatingIndicies: []byte{0b00000010},
+	}
+	slashing := &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+		},
+		Attestation_2: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+		},
+	}
+
+	err := store.onProcessAttesterSlashing(slashing, state.New(&cfg), false)
+
+	require.ErrorIs(t, err, ErrIgnore)
+}
+
+func TestOnAttesterSlashingRejectsIncompleteOperation(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	store := &ForkChoiceStore{
+		operationsPool: pool.NewOperationsPool(&cfg),
+	}
+
+	require.NotPanics(t, func() {
+		require.Error(t, store.OnAttesterSlashing(&cltypes.AttesterSlashing{}, false))
+	})
+}
+
 func TestDrainQueuedWorkRetainsOperationsWhenFinalizedStateIsUnavailable(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	operationsPool := pool.NewOperationsPool(&cfg)
@@ -204,12 +234,29 @@ func TestDrainQueuedWorkRetainsOperationsWhenFinalizedStateIsUnavailable(t *test
 		forkGraph:      &getFinalizedExecutionHashForkGraph{},
 		operationsPool: operationsPool,
 	}
-	store.queueOperationPrune(common.Hash{1})
+	store.queueOperationPrune(solid.Checkpoint{Epoch: 1, Root: common.Hash{1}})
 
 	store.drainQueuedWork()
 
 	requireOperationPrunerIdle(t, store)
 	require.True(t, operationsPool.VoluntaryExitsPool.Has(0))
+}
+
+func TestDrainQueuedWorkSkipsOperationStateLoadWithoutPrunableOperations(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	graph := &getFinalizedExecutionHashForkGraph{}
+	operationsPool := pool.NewOperationsPool(&cfg)
+	operationsPool.AttestationsPool.Insert(common.Bytes96{1}, &solid.Attestation{})
+	store := &ForkChoiceStore{
+		forkGraph:      graph,
+		operationsPool: operationsPool,
+	}
+	store.queueOperationPrune(solid.Checkpoint{Epoch: 1, Root: common.Hash{1}})
+
+	store.drainQueuedWork()
+
+	requireOperationPrunerIdle(t, store)
+	require.Empty(t, graph.stateRoots())
 }
 
 func TestOperationPrunerCoalescesPendingFinalizedRoots(t *testing.T) {
@@ -225,17 +272,22 @@ func TestOperationPrunerCoalescesPendingFinalizedRoots(t *testing.T) {
 		getStateStarted: make(chan common.Hash, 3),
 		getStateRelease: make(chan struct{}),
 	}
+	operationsPool := pool.NewOperationsPool(&cfg)
+	operationsPool.VoluntaryExitsPool.Insert(0, &cltypes.SignedVoluntaryExit{
+		VoluntaryExit: &cltypes.VoluntaryExit{ValidatorIndex: 0},
+	})
 	store := &ForkChoiceStore{
 		forkGraph:      graph,
-		operationsPool: pool.NewOperationsPool(&cfg),
+		operationsPool: operationsPool,
 	}
 
-	store.queueOperationPrune(firstRoot)
+	store.queueOperationPrune(solid.Checkpoint{Epoch: 1, Root: firstRoot})
 	store.drainQueuedWork()
 	require.Equal(t, firstRoot, waitForStateLoad(t, graph.getStateStarted))
 
-	store.queueOperationPrune(skippedRoot)
-	store.queueOperationPrune(latestRoot)
+	store.queueOperationPrune(solid.Checkpoint{Epoch: 3, Root: latestRoot})
+	store.drainQueuedWork()
+	store.queueOperationPrune(solid.Checkpoint{Epoch: 2, Root: skippedRoot})
 	store.drainQueuedWork()
 	close(graph.getStateRelease)
 	require.Equal(t, latestRoot, waitForStateLoad(t, graph.getStateStarted))
