@@ -103,11 +103,20 @@ func (pph *PBinPatriciaHashed) Reset() {
 	pph.rootChecked, pph.rootTouched, pph.rootPresent = false, false, false
 }
 
+// setHashSuite swaps H on both seams at once — node hashing on this engine and
+// the returned key-derivation hasher — so neither can be configured without the
+// other. Production never calls it: the nil default is Keccak-256 on both.
+func (pph *PBinPatriciaHashed) setHashSuite(sum pbinHashFn) keyHasher {
+	pph.hasher.sum = sum
+	return pbinKeyHasherWith(sum)
+}
+
 // Release returns the engine to the pool. The caller must not use it afterwards.
 func (pph *PBinPatriciaHashed) Release() {
 	pph.Reset()
 	pph.ctx = nil
 	pph.traceW = nil
+	pph.hasher.sum = nil
 	pph.counters = pbinCounters{}
 	pph.branchEncoder.buf = pph.branchEncoder.buf[:0]
 	pbinPool.Put(pph)

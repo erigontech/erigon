@@ -11,12 +11,10 @@ import (
 )
 
 // Vectors exported from the EIP-8297 reference implementation in
-// ethereum/execution-specs (branch projects/binary-trie). The reference hashes
-// with BLAKE3 and this engine with Keccak-256, so every digest-bearing vector —
-// the trie roots and the tree-key bodies — cannot be compared directly. What
-// survives the hash difference is checked here: the BASIC_DATA packing, which
-// involves no hash at all, and the zone/length/sub-index routing, which is
-// positional.
+// ethereum/execution-specs (branch projects/binary-trie), which hashes with
+// BLAKE3. The BASIC_DATA packing involves no hash and is compared as-is; key
+// derivation is replayed under BLAKE3 through the injectable seam, so the
+// tree-key bodies compare in full.
 type pbinSpecVectors struct {
 	Meta      map[string]string `json:"meta"`
 	BasicData []struct {
@@ -71,36 +69,29 @@ func TestPBinSpecBasicDataVectors(t *testing.T) {
 	}
 }
 
-// TestPBinSpecKeyRouting checks the positional half of key derivation against
-// the reference: which zone a key lands in, how long it is, and which sub-index
-// it carries. The 32-byte digest bodies differ by hash and are not compared.
+// TestPBinSpecKeyRouting compares full tree keys against the reference under
+// the BLAKE3 the vectors were generated with — zone, digest bodies and
+// sub-index alike. Full equality through the production keyHasher seam is what
+// proves no derivation step hashes outside it: a hardcoded Keccak site would
+// diverge here (guards H3).
 func TestPBinSpecKeyRouting(t *testing.T) {
 	t.Parallel()
 	v := loadPBinSpecVectors(t)
 	addr := mustHex(t, v.Embedding.Address)
 	require.Len(t, addr, 20)
 
-	var c pbinDigestCache
+	hasher := pbinKeyHasherWith(pbinBlake3Hash)
+	require.Equal(t, mustHex(t, v.Embedding.BasicDataKey), hasher(addr), "BASIC_DATA key")
 
-	header := mustHex(t, v.Embedding.BasicDataKey)
-	got := c.accountKey(addr, pbinBasicDataLeafKey)
-	require.Len(t, got, len(header))
-	require.Equal(t, header[0], got[0], "account zone byte")
-	require.Equal(t, header[len(header)-1], got[len(got)-1], "BASIC_DATA sub-index")
-
-	codeHash := mustHex(t, v.Embedding.CodeHashKey)
-	got = c.accountKey(addr, pbinCodeHashLeafKey)
-	require.Equal(t, codeHash[len(codeHash)-1], got[len(got)-1], "CODE_HASH sub-index")
+	c := pbinDigestCache{sum: pbinBlake3Hash}
+	require.Equal(t, mustHex(t, v.Embedding.CodeHashKey), c.accountKey(addr, pbinCodeHashLeafKey), "CODE_HASH key")
 
 	for _, s := range v.Embedding.Slots {
 		slot, err := uint256.FromDecimal(s.Slot.String())
 		require.NoError(t, err, "slot %s", s.Slot)
-		want := mustHex(t, s.Key)
 		slotBytes := slot.Bytes32()
 
-		got := c.storageKey(addr, slotBytes[:])
-		require.Len(t, got, len(want), "slot %s key length", s.Slot)
-		require.Equal(t, want[0], got[0], "slot %s zone byte", s.Slot)
-		require.Equal(t, want[len(want)-1], got[len(got)-1], "slot %s sub-index", s.Slot)
+		plainKey := append(append(make([]byte, 0, len(addr)+len(slotBytes)), addr...), slotBytes[:]...)
+		require.Equal(t, mustHex(t, s.Key), hasher(plainKey), "slot %s key", s.Slot)
 	}
 }

@@ -92,12 +92,16 @@ func pbinTreeKeyStorage(addr, slot []byte) []byte {
 // copies the hasher value, so a captured cache would be written by two buffers
 // hashing concurrently. Every hit is validated against the address it was built
 // from, so borrowing another goroutine's cache stays correct.
-func pbinKeyHasher() keyHasher {
+func pbinKeyHasher() keyHasher { return pbinKeyHasherWith(nil) }
+
+// pbinKeyHasherWith derives keys under sum, nil meaning Keccak-256. Tests swap
+// the hash here and on node hashing together through setHashSuite.
+func pbinKeyHasherWith(sum pbinHashFn) keyHasher {
 	var pool sync.Pool
 	return func(plainKey []byte) []byte {
 		c, _ := pool.Get().(*pbinDigestCache)
 		if c == nil {
-			c = new(pbinDigestCache)
+			c = &pbinDigestCache{sum: sum}
 		}
 		key := c.treeKey(plainKey)
 		pool.Put(c)

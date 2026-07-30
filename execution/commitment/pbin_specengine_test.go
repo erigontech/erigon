@@ -111,7 +111,7 @@ func TestPBinEngineMatchesSpecTrieRoots(t *testing.T) {
 
 			ms := NewMockState(t)
 			pph := NewPBinPatriciaHashed(ms)
-			pph.hasher.sum = func(b []byte) common.Hash { return common.Hash(blake3Sum(b)) }
+			pph.setHashSuite(pbinBlake3Hash)
 
 			for i := range leaves {
 				require.NoError(t, pph.followAndUpdate(leaves[i].treeKey, leaves[i].plainKey, &leaves[i].update),
@@ -132,4 +132,20 @@ func TestPBinEngineMatchesSpecTrieRoots(t *testing.T) {
 	t.Logf("excluded (no Update field for a code-chunk leaf): %v", excluded)
 	require.Equal(t, []string{"full_header_stem"}, excluded,
 		"exclusions must stay pinned: gaining code support should widen this list, not hide it")
+}
+
+// TestPBinReleaseClearsHashSuite pins pooling hygiene: a released engine must
+// come back on the Keccak default, not carrying a previous user's BLAKE3.
+// Not parallel — it inspects a pooled object.
+func TestPBinReleaseClearsHashSuite(t *testing.T) {
+	pph := NewPBinPatriciaHashed(NewMockState(t))
+	pph.setHashSuite(pbinBlake3Hash)
+	require.NotNil(t, pph.hasher.sum)
+
+	pph.Release()
+	require.Nil(t, pph.hasher.sum, "Release must drop the hash override before pooling")
+
+	reused := NewPBinPatriciaHashed(NewMockState(t))
+	require.Nil(t, reused.hasher.sum, "a pooled engine must start on the Keccak default")
+	reused.Release()
 }

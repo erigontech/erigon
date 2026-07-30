@@ -114,7 +114,7 @@ Blocking items needing a human or upstream answer. Do not proceed past the task 
 - **Q1 (highest value) — what does the reference produce for a removed account?** EIP-161 empty-removal and EIP-6780 destruct both hand pbin a `DeleteUpdate` on a committed leaf. Task 9 would turn that into BASIC_DATA `{version 0, code_size 0, nonce 0, balance 0}` + CODE_HASH `keccak(empty)`. Consistent with eip:345-347 but **not verified against the reference**, and `testdata/eip8297_vectors.json` does not cover it. It silently changes the root.
 - **Q2 — is the tree a pure function of current state, or of history?** (H8.) eip-8297 is silent. Determines whether recompute-from-domains is a valid oracle at all, hence whether the M1a gate means anything. Possibly an upstream spec question.
 - **Q3 — does the reference create a present-zero leaf on `SSTORE 0` to a virgin slot?** Erigon drops it at `execution/state/state_object.go:245-246` before any writer sees it. If yes, that guard must be variant-gated and every zero-SSTORE becomes a state write.
-- **Q4 — confirm `github.com/zeebo/blake3`** as a **test-only** dependency (lower stakes now that production stays Keccak; the in-graph `lukechampine.com/blake3` may simply be enough). Its measured advantage was 13–18% arm64 / 58–78% amd64, not re-verified.
+- **Q4 — confirm `github.com/zeebo/blake3`** as a **test-only** dependency (lower stakes now that production stays Keccak; the in-graph `lukechampine.com/blake3` may simply be enough). Its measured advantage was 13–18% arm64 / 58–78% amd64, not re-verified. **Answered (Task 1):** `zeebo` not added — production stays Keccak so BLAKE3 speed is irrelevant, and `lukechampine.com/blake3` is already a direct dependency used by `pbin_specroots_test.go`; it now backs `pbinBlake3Hash` for all three seam tests.
 - **Q5 — forward/backward compatibility of a new `erigondb.toml` key** across erigon binaries, given the file is downloader-delivered and **wins over the CLI** (`erigondb_settings.go:74-89`).
 
 ## Thin / Unverified
@@ -143,13 +143,13 @@ Do not treat these as established:
 
 Production keeps Keccak-256. This task only makes the **test** path run the whole engine — node hashing *and* key derivation — under BLAKE3, so the reference vectors become meaningful for the key-derivation surface too.
 
-- [ ] write a failing test asserting `TestPBinSpecKeyRouting` compares **full 32-byte tree keys** against `embedding_vectors`, not just zone/length/sub-index — this is what proves no hash site bypasses the seam (guards H3)
-- [ ] write a failing test asserting a pooled engine does not inherit a previous `hasher.sum` after `Release()`
-- [ ] add `github.com/zeebo/blake3` (test use only; confirm Q4 first)
-- [ ] give the engine a way to set BLAKE3 on **both** seams together — `pbinHasher.sum` and the `pbinDigestCache` behind `pbinKeyHasher` — so a half-configured test is impossible
-- [ ] clear `hasher.sum` in `Release()` (`pbin_patricia_hashed.go:107-115`)
-- [ ] leave the production nil-defaults on Keccak, the CODE_HASH leaf value on Keccak, and the empty-tree hash at 32 zero bytes
-- [ ] run tests — the three `pbin_spec*_test.go` files must all pass under BLAKE3 before task 2
+- [x] write a failing test asserting `TestPBinSpecKeyRouting` compares **full 32-byte tree keys** against `embedding_vectors`, not just zone/length/sub-index — this is what proves no hash site bypasses the seam (guards H3) — full-key equality passes: derivation matches the reference under BLAKE3
+- [x] write a failing test asserting a pooled engine does not inherit a previous `hasher.sum` after `Release()` — `TestPBinReleaseClearsHashSuite`, red before the fix
+- [x] add `github.com/zeebo/blake3` (test use only; confirm Q4 first) — Q4 answered: not added, in-graph `lukechampine.com/blake3` suffices (see Open Questions)
+- [x] give the engine a way to set BLAKE3 on **both** seams together — `pbinHasher.sum` and the `pbinDigestCache` behind `pbinKeyHasher` — so a half-configured test is impossible — `setHashSuite(sum)` sets the node seam and returns a matching `pbinKeyHasherWith(sum)`
+- [x] clear `hasher.sum` in `Release()` (`pbin_patricia_hashed.go:107-115`)
+- [x] leave the production nil-defaults on Keccak, the CODE_HASH leaf value on Keccak, and the empty-tree hash at 32 zero bytes
+- [x] run tests — the three `pbin_spec*_test.go` files must all pass under BLAKE3 before task 2
 
 ### Task 2: Root record key sentinel
 

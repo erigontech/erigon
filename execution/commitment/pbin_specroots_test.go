@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"lukechampine.com/blake3"
+
+	"github.com/erigontech/erigon/common"
 )
 
 // Root vectors exported from the EIP-8297 reference implementation in
@@ -45,6 +47,9 @@ type pbinRootVectors struct {
 }
 
 func blake3Sum(b []byte) [32]byte { return blake3.Sum256(b) }
+
+// pbinBlake3Hash adapts blake3Sum to the engine's injectable hash seam.
+var pbinBlake3Hash pbinHashFn = func(b []byte) common.Hash { return common.Hash(blake3.Sum256(b)) }
 
 func loadPBinRootVectors(t *testing.T) pbinRootVectors {
 	t.Helper()
