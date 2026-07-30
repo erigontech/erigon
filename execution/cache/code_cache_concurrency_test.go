@@ -18,9 +18,9 @@ package cache
 
 import (
 	"encoding/binary"
+	"runtime"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
@@ -163,6 +163,10 @@ func TestCodeCache_ClearRacingPut_EpochAlias(t *testing.T) {
 }
 
 func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
+	// One P makes each Gosched establish the intended lock order without timing assumptions.
+	previousProcs := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previousProcs)
+
 	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 	cc.Unwind(300)
 
@@ -171,10 +175,22 @@ func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
 	cc.addrBindMu.Lock()
 
 	var wg sync.WaitGroup
-	wg.Go(func() { cc.Put(addr, code, 200) })
-	time.Sleep(5 * time.Millisecond)
-	wg.Go(cc.Clear)
-	time.Sleep(5 * time.Millisecond)
+	putStarted := make(chan struct{})
+	wg.Go(func() {
+		close(putStarted)
+		cc.Put(addr, code, 200)
+	})
+	<-putStarted
+	runtime.Gosched()
+
+	clearStarted := make(chan struct{})
+	wg.Go(func() {
+		close(clearStarted)
+		cc.Clear()
+	})
+	<-clearStarted
+	runtime.Gosched()
+
 	cc.addrBindMu.Unlock()
 	wg.Wait()
 
