@@ -30,16 +30,16 @@ import (
 // layout.
 func TestPBinChunkifyCodeVectors(t *testing.T) {
 	t.Parallel()
-	v := loadPBinSpecVectors(t)
+	v := pbinLoadSpecVectors(t)
 	require.NotEmpty(t, v.Chunkify)
 
 	for _, tc := range v.Chunkify {
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
-			got := pbinChunkifyCode(mustHex(t, tc.Code))
+			got := pbinChunkifyCode(pbinMustHex(t, tc.Code))
 			require.Len(t, got, len(tc.Chunks))
 			for i, want := range tc.Chunks {
-				require.Equal(t, mustHex(t, want), got[i][:], "chunk %d", i)
+				require.Equal(t, pbinMustHex(t, want), got[i][:], "chunk %d", i)
 			}
 		})
 	}

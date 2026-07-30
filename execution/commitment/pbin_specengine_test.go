@@ -87,7 +87,7 @@ func pbinLeafFromVector(key, value []byte, seq int) (pbinEngineLeaf, bool) {
 
 func TestPBinEngineMatchesSpecTrieRoots(t *testing.T) {
 	t.Parallel()
-	v := loadPBinRootVectors(t)
+	v := pbinLoadRootVectors(t)
 
 	var ran, excluded []string
 	for _, tc := range v.Trie {

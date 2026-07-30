@@ -46,12 +46,12 @@ type pbinRootVectors struct {
 	} `json:"sequence_vectors"`
 }
 
-func blake3Sum(b []byte) [32]byte { return blake3.Sum256(b) }
+func pbinBlake3Sum(b []byte) [32]byte { return blake3.Sum256(b) }
 
-// pbinBlake3Hash adapts blake3Sum to the engine's injectable hash seam.
+// pbinBlake3Hash adapts pbinBlake3Sum to the engine's injectable hash seam.
 var pbinBlake3Hash pbinHashFn = func(b []byte) common.Hash { return common.Hash(blake3.Sum256(b)) }
 
-func loadPBinRootVectors(t *testing.T) pbinRootVectors {
+func pbinLoadRootVectors(t *testing.T) pbinRootVectors {
 	t.Helper()
 	raw, err := os.ReadFile("testdata/eip8297_vectors.json")
 	require.NoError(t, err)
@@ -77,12 +77,12 @@ func pbinOracleRootOf(t *testing.T, entries map[string][]byte) [32]byte {
 	for _, k := range keys {
 		tree.insert([]byte(k), entries[k])
 	}
-	return pbinOracleMerkelizeWith(tree.root, blake3Sum)
+	return pbinOracleMerkelizeWith(tree.root, pbinBlake3Sum)
 }
 
 func TestPBinOracleMatchesSpecTrieRoots(t *testing.T) {
 	t.Parallel()
-	v := loadPBinRootVectors(t)
+	v := pbinLoadRootVectors(t)
 	require.NotEmpty(t, v.Trie)
 
 	for _, tc := range v.Trie {
@@ -106,7 +106,7 @@ func TestPBinOracleMatchesSpecTrieRoots(t *testing.T) {
 // divergence is pinned to the op that caused it.
 func TestPBinOracleMatchesSpecSequenceRoots(t *testing.T) {
 	t.Parallel()
-	v := loadPBinRootVectors(t)
+	v := pbinLoadRootVectors(t)
 	require.NotEmpty(t, v.Sequences)
 
 	checked := 0

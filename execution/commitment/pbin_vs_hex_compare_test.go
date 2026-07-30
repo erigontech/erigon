@@ -16,7 +16,7 @@ import (
 // corpus. Roots differ by construction — the trees, keys and node preimages all
 // differ — so this measures shape and footprint, not equality.
 
-type engineShape struct {
+type pbinEngineShape struct {
 	name       string
 	root       []byte
 	records    int
@@ -24,7 +24,7 @@ type engineShape struct {
 	depthBits  []int // path length to each stored branch, in key bits
 }
 
-func (s engineShape) depthStats() (maxD, p50, mean int) {
+func (s pbinEngineShape) depthStats() (maxD, p50, mean int) {
 	if len(s.depthBits) == 0 {
 		return 0, 0, 0
 	}
@@ -37,9 +37,9 @@ func (s engineShape) depthStats() (maxD, p50, mean int) {
 	return d[len(d)-1], d[len(d)/2], sum / len(d)
 }
 
-// hexPathBits converts a HexToCompact-encoded branch key to a path length in
+// pbinHexPathBits converts a HexToCompact-encoded branch key to a path length in
 // key bits so the two radices are comparable: one nibble is four bits.
-func hexPathBits(compact string) int {
+func pbinHexPathBits(compact string) int {
 	if len(compact) == 0 {
 		return 0
 	}
@@ -58,7 +58,7 @@ func pbinPathBits(key string) int {
 	return int(p.bitLen)
 }
 
-func runHex(t *testing.T, plainKeys [][]byte, updates []Update) engineShape {
+func pbinRunHex(t *testing.T, plainKeys [][]byte, updates []Update) pbinEngineShape {
 	t.Helper()
 	ms := NewMockState(t)
 	// PBin derives its zone from the plain-key length, so a comparison corpus
@@ -71,16 +71,16 @@ func runHex(t *testing.T, plainKeys [][]byte, updates []Update) engineShape {
 	root, err := hph.Process(context.Background(), upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
-	s := engineShape{name: "hex", root: root}
+	s := pbinEngineShape{name: "hex", root: root}
 	for k, v := range ms.cm {
 		s.records++
 		s.recordByte += len(v)
-		s.depthBits = append(s.depthBits, hexPathBits(k))
+		s.depthBits = append(s.depthBits, pbinHexPathBits(k))
 	}
 	return s
 }
 
-func runPBin(t *testing.T, plainKeys [][]byte, updates []Update) (engineShape, pbinCounters) {
+func pbinRunBin(t *testing.T, plainKeys [][]byte, updates []Update) (pbinEngineShape, pbinCounters) {
 	t.Helper()
 	ms := NewMockState(t)
 	pph := NewPBinPatriciaHashed(ms)
@@ -91,7 +91,7 @@ func runPBin(t *testing.T, plainKeys [][]byte, updates []Update) (engineShape, p
 	root, err := pph.Process(context.Background(), upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
-	s := engineShape{name: "bin", root: root}
+	s := pbinEngineShape{name: "bin", root: root}
 	for k, v := range ms.cm {
 		s.records++
 		s.recordByte += len(v)
@@ -100,10 +100,10 @@ func runPBin(t *testing.T, plainKeys [][]byte, updates []Update) (engineShape, p
 	return s, pph.counters
 }
 
-// clusteredCorpus gives every contract slots that share a storage group, which
-// is what EIP-8297's raw sub-index co-locates. scatteredCorpus spreads slots so
+// pbinClusteredCorpus gives every contract slots that share a storage group, which
+// is what EIP-8297's raw sub-index co-locates. pbinScatteredCorpus spreads slots so
 // no two share a group — the mapping-style access random corpora produce.
-func clusteredCorpus(contracts, slotsPer int) ([][]byte, []Update) {
+func pbinClusteredCorpus(contracts, slotsPer int) ([][]byte, []Update) {
 	ub := NewUpdateBuilder()
 	for c := range contracts {
 		addr := fmt.Sprintf("%040x", c+1)
@@ -115,7 +115,7 @@ func clusteredCorpus(contracts, slotsPer int) ([][]byte, []Update) {
 	return ub.Build()
 }
 
-func scatteredCorpus(contracts, slotsPer int) ([][]byte, []Update) {
+func pbinScatteredCorpus(contracts, slotsPer int) ([][]byte, []Update) {
 	ub := NewUpdateBuilder()
 	for c := range contracts {
 		addr := fmt.Sprintf("%040x", c+1)
@@ -135,14 +135,14 @@ func TestPBinVsHexStructure(t *testing.T) {
 		name  string
 		build func(int, int) ([][]byte, []Update)
 	}{
-		{"clustered", clusteredCorpus},
-		{"scattered", scatteredCorpus},
+		{"clustered", pbinClusteredCorpus},
+		{"scattered", pbinScatteredCorpus},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			plainKeys, updates := tc.build(16, 16)
 
-			hex := runHex(t, plainKeys, updates)
-			bin, counters := runPBin(t, plainKeys, updates)
+			hex := pbinRunHex(t, plainKeys, updates)
+			bin, counters := pbinRunBin(t, plainKeys, updates)
 
 			require.NotEqual(t, hex.root, bin.root,
 				"hex and binary trees must not agree on a root; equality means one of them is not the tree it claims to be")
@@ -198,14 +198,14 @@ func TestPBinStemCoLocation(t *testing.T) {
 	require.NotEqual(t, base[33:65], next[33:65], "a new tree_index must move the group digest")
 
 	// a co-located pair shares a long prefix; a cross-group pair does not
-	sharedBits := commonPrefixBitsOfKeys(base, c.storageKey(addr, slotOf(257)))
-	crossBits := commonPrefixBitsOfKeys(base, next)
+	sharedBits := pbinCommonPrefixBitsOfKeys(base, c.storageKey(addr, slotOf(257)))
+	crossBits := pbinCommonPrefixBitsOfKeys(base, next)
 	require.Greater(t, sharedBits, crossBits,
 		"co-located slots must share a longer key prefix than cross-group slots")
 	t.Logf("co-located slots share %d bits; cross-group share %d bits", sharedBits, crossBits)
 }
 
-func commonPrefixBitsOfKeys(a, b []byte) int {
+func pbinCommonPrefixBitsOfKeys(a, b []byte) int {
 	n := min(len(a), len(b))
 	for i := range n {
 		if a[i] != b[i] {

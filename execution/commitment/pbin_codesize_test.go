@@ -32,7 +32,7 @@ import (
 // code size has to reach the leaf value, not be forced to zero.
 func TestPBinBasicDataLeafCarriesCodeSize(t *testing.T) {
 	t.Parallel()
-	v := loadPBinSpecVectors(t)
+	v := pbinLoadSpecVectors(t)
 	require.NotEmpty(t, v.BasicData)
 
 	addr := pbinOracleAddr(1)
@@ -45,7 +45,7 @@ func TestPBinBasicDataLeafCarriesCodeSize(t *testing.T) {
 		u := Update{Flags: NonceUpdate | BalanceUpdate, Nonce: tc.Nonce, Balance: *bal, CodeSize: tc.CodeSize}
 		got, err := pbinLeafValue(key, &u)
 		require.NoError(t, err)
-		require.Equal(t, mustHex(t, tc.Value), got[:],
+		require.Equal(t, pbinMustHex(t, tc.Value), got[:],
 			"BASIC_DATA leaf mismatch for code_size=%d nonce=%d balance=%s", tc.CodeSize, tc.Nonce, tc.Balance)
 	}
 }

@@ -42,7 +42,7 @@ type pbinSpecChunkifyVector struct {
 	Chunks []string `json:"chunks"`
 }
 
-func loadPBinSpecVectors(t *testing.T) pbinSpecVectors {
+func pbinLoadSpecVectors(t *testing.T) pbinSpecVectors {
 	t.Helper()
 	raw, err := os.ReadFile("testdata/eip8297_vectors.json")
 	require.NoError(t, err)
@@ -51,7 +51,7 @@ func loadPBinSpecVectors(t *testing.T) pbinSpecVectors {
 	return v
 }
 
-func mustHex(t *testing.T, s string) []byte {
+func pbinMustHex(t *testing.T, s string) []byte {
 	t.Helper()
 	b, err := hex.DecodeString(s[2:])
 	require.NoError(t, err)
@@ -62,7 +62,7 @@ func mustHex(t *testing.T, s string) []byte {
 // different hash: BASIC_DATA packing is pure byte layout.
 func TestPBinSpecBasicDataVectors(t *testing.T) {
 	t.Parallel()
-	v := loadPBinSpecVectors(t)
+	v := pbinLoadSpecVectors(t)
 	require.NotEmpty(t, v.BasicData)
 
 	for _, tc := range v.BasicData {
@@ -71,7 +71,7 @@ func TestPBinSpecBasicDataVectors(t *testing.T) {
 
 		got, err := pbinEncodeBasicData(tc.Nonce, bal, tc.CodeSize)
 		require.NoError(t, err)
-		require.Equal(t, mustHex(t, tc.Value), got[:],
+		require.Equal(t, pbinMustHex(t, tc.Value), got[:],
 			"BASIC_DATA mismatch for code_size=%d nonce=%d balance=%s", tc.CodeSize, tc.Nonce, tc.Balance)
 	}
 }
@@ -83,15 +83,15 @@ func TestPBinSpecBasicDataVectors(t *testing.T) {
 // diverge here (guards H3).
 func TestPBinSpecKeyRouting(t *testing.T) {
 	t.Parallel()
-	v := loadPBinSpecVectors(t)
-	addr := mustHex(t, v.Embedding.Address)
+	v := pbinLoadSpecVectors(t)
+	addr := pbinMustHex(t, v.Embedding.Address)
 	require.Len(t, addr, 20)
 
 	hasher := pbinKeyHasherWith(pbinBlake3Hash)
-	require.Equal(t, mustHex(t, v.Embedding.BasicDataKey), hasher(addr), "BASIC_DATA key")
+	require.Equal(t, pbinMustHex(t, v.Embedding.BasicDataKey), hasher(addr), "BASIC_DATA key")
 
 	c := pbinDigestCache{sum: pbinBlake3Hash}
-	require.Equal(t, mustHex(t, v.Embedding.CodeHashKey), c.accountKey(addr, pbinCodeHashLeafKey), "CODE_HASH key")
+	require.Equal(t, pbinMustHex(t, v.Embedding.CodeHashKey), c.accountKey(addr, pbinCodeHashLeafKey), "CODE_HASH key")
 
 	for _, s := range v.Embedding.Slots {
 		slot, err := uint256.FromDecimal(s.Slot.String())
@@ -99,6 +99,6 @@ func TestPBinSpecKeyRouting(t *testing.T) {
 		slotBytes := slot.Bytes32()
 
 		plainKey := append(append(make([]byte, 0, len(addr)+len(slotBytes)), addr...), slotBytes[:]...)
-		require.Equal(t, mustHex(t, s.Key), hasher(plainKey), "slot %s key", s.Slot)
+		require.Equal(t, pbinMustHex(t, s.Key), hasher(plainKey), "slot %s key", s.Slot)
 	}
 }
