@@ -252,27 +252,25 @@ func (t *StateTest) checkError(subtest StateSubtest, err error) error {
 // prevent per-subtest state from polluting the long-lived branch cache.
 func (t *StateTest) Run(tb testing.TB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, error) {
 	st, root, _, err := t.RunNoVerify(tb, sd, tx, subtest, vmconfig, dirs)
+	return st, root, t.checkResult(subtest, st, root, err)
+}
 
+func (t *StateTest) checkResult(subtest StateSubtest, st *state.IntraBlockState, root common.Hash, err error) error {
 	checkedErr := t.checkError(subtest, err)
 	if checkedErr != nil {
-		return st, root, checkedErr
+		return checkedErr
 	}
 	if err != nil {
-		// Error was expected — check post-state root if specified
-		post := t.Json.Post[subtest.Fork][subtest.Index]
-		if post.Root != (common.UnprefixedHash{}) && root != common.Hash(post.Root) {
-			return st, root, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
-		}
-		return st, root, nil
+		return nil
 	}
 	post := t.Json.Post[subtest.Fork][subtest.Index]
 	if root != common.Hash(post.Root) {
-		return st, root, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
+		return fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
 	if logs := st.LogsRlpHash(); logs != common.Hash(post.Logs) {
-		return st, root, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
+		return fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
 	}
-	return st, root, nil
+	return nil
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb, post-state root

@@ -70,6 +70,7 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 	if err != nil {
 		return nil, err
 	}
+	defer ibs.Release(false)
 
 	txNum, err := txNumsReader.Max(ctx, tx, block.NumberU64())
 	if err != nil {
@@ -98,6 +99,7 @@ func (g *BorGenerator) GenerateBorLogs(ctx context.Context, msgs []*types.Messag
 	if err != nil {
 		return nil, err
 	}
+	defer ibs.Release(false)
 
 	_, _, logIdxAfterTx, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 	if err != nil {
