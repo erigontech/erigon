@@ -81,6 +81,21 @@ func signAuthorization(t *testing.T, key *ecdsa.PrivateKey, chainID *uint256.Int
 }
 
 func TestEngineApiClearsFreshTouchedEmptyAccount(t *testing.T) {
+	tests := []struct {
+		name            string
+		experimentalBAL bool
+	}{
+		{name: "serial builder"},
+		{name: "experimental BAL builder", experimentalBAL: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			testEngineApiClearsFreshTouchedEmptyAccount(t, test.experimentalBAL)
+		})
+	}
+}
+
+func testEngineApiClearsFreshTouchedEmptyAccount(t *testing.T, experimentalBAL bool) {
 	parallel := dbg.Exec3Parallel
 	dbg.Exec3Parallel = true
 	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
@@ -104,6 +119,9 @@ func TestEngineApiClearsFreshTouchedEmptyAccount(t *testing.T) {
 
 	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
 		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+		EthConfigTweaker: func(cfg *ethconfig.Config) {
+			cfg.ExperimentalBAL = experimentalBAL
+		},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, eat.Close()) })
@@ -147,7 +165,8 @@ func TestEngineApiClearsFreshTouchedEmptyAccount(t *testing.T) {
 
 		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
 		require.NoError(t, err)
-		require.Equal(t, uint64(74_603), uint64(payload.ExecutionPayload.GasUsed))
+		const gasUsedWithoutAuthorityExistenceRefund = uint64(74_603)
+		require.Equal(t, gasUsedWithoutAuthorityExistenceRefund, uint64(payload.ExecutionPayload.GasUsed))
 	})
 }
 

@@ -19,6 +19,7 @@ package state
 import (
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/chain"
@@ -53,6 +54,92 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 	exists, err := next.Exist(addr)
 	require.NoError(t, err)
 	require.False(t, exists)
+}
+
+func TestFinalizedWritesLeavesVersionMapForApplyLoop(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xe1})
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
+	t.Cleanup(func() { ibs.Release(false) })
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(1, 0)
+
+	require.NoError(t, ibs.TouchAccount(addr))
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), false, "")
+
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	require.NoError(t, err)
+	_, hasAddress := writes.GetAddress(addr)
+	require.False(t, hasAddress)
+
+	_, result, ok := vm.ReadAddress(addr, 1)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDependency, result.Status())
+	require.Equal(t, 0, result.DepIdx())
+}
+
+func TestCreatedEmptyRequiresNoOtherWrites(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xe1})
+	newWrites := func() *WriteSet {
+		account := accounts.NewAccount()
+		writes := &WriteSet{}
+		writes.SetAddress(addr, &VersionedWrite[*accounts.Account]{Val: &account})
+		return writes
+	}
+	tests := []struct {
+		name string
+		add  func(*WriteSet)
+	}{
+		{
+			name: "balance",
+			add: func(writes *WriteSet) {
+				writes.SetBalance(addr, &VersionedWrite[uint256.Int]{Val: *uint256.NewInt(1)})
+			},
+		},
+		{
+			name: "code",
+			add: func(writes *WriteSet) {
+				writes.SetCode(addr, &VersionedWrite[accounts.Code]{})
+			},
+		},
+		{
+			name: "code size",
+			add: func(writes *WriteSet) {
+				writes.SetCodeSize(addr, &VersionedWrite[int]{})
+			},
+		},
+		{
+			name: "storage",
+			add: func(writes *WriteSet) {
+				writes.SetStorage(addr, accounts.InternKey([32]byte{1}), &VersionedWrite[uint256.Int]{})
+			},
+		},
+		{
+			name: "self-destruct",
+			add: func(writes *WriteSet) {
+				writes.SetSelfDestruct(addr, &VersionedWrite[bool]{})
+			},
+		},
+		{
+			name: "contract creation",
+			add: func(writes *WriteSet) {
+				writes.SetCreateContract(addr, &VersionedWrite[bool]{})
+			},
+		},
+		{
+			name: "incarnation",
+			add: func(writes *WriteSet) {
+				writes.SetIncarnation(addr, &VersionedWrite[uint64]{})
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			writes := newWrites()
+			test.add(writes)
+			require.False(t, writes.createdEmpty(addr))
+		})
+	}
 }
 
 func TestFinalizedWritesKeepCreatedEmptyBeforeEIP161(t *testing.T) {

@@ -2914,7 +2914,9 @@ func (s *WriteSet) createdEmpty(addr accounts.Address) bool {
 		return false
 	}
 	_, hasCode := s.code[addr]
+	_, hasIncarnation := s.incarnation[addr]
 	_, destroyed := s.selfDestruct[addr]
 	_, createdContract := s.createContract[addr]
-	return !hasCode && !destroyed && !createdContract && len(s.storage[addr]) == 0
+	_, hasCodeSize := s.codeSize[addr]
+	return !hasCode && !hasIncarnation && !destroyed && !createdContract && !hasCodeSize && len(s.storage[addr]) == 0
 }

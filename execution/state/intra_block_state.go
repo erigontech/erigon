@@ -2610,14 +2610,14 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	return nil
 }
 
-// FinalizedWrites returns the parallel path's committable write set. Before
-// snapshotting recorded IO, it applies EIP-161 empty-account cleanup and the
-// EIP-6780 storage wipe. deferredFeeAddrs are credited after execution.
+// FinalizedWrites returns versioned writes after end-of-transaction filtering.
 func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules, deferredFeeAddrs ...accounts.Address) (*WriteSet, error) {
-	if err := sdb.clearEmptyAccounts(chainRules, deferredFeeAddrs); err != nil {
+	writes := sdb.versionedWrites.Finalize()
+	if err := sdb.clearEmptyAccounts(chainRules, deferredFeeAddrs, writes); err != nil {
+		writes.ReleaseAndReset()
 		return nil, err
 	}
-	return sdb.versionedWrites.Finalize(), nil
+	return writes, nil
 }
 
 // clearEmptyAccounts mirrors the serial path's EIP-161 cleanup before a
@@ -2630,7 +2630,7 @@ func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules, deferredFee
 // execution: emptiness cannot be settled here, so fee finalization decides its
 // removal. Withholding a created record stays safe — fee finalization
 // re-publishes the account it credits.
-func (sdb *IntraBlockState) clearEmptyAccounts(chainRules *chain.Rules, deferredFeeAddrs []accounts.Address) error {
+func (sdb *IntraBlockState) clearEmptyAccounts(chainRules *chain.Rules, deferredFeeAddrs []accounts.Address, writes *WriteSet) error {
 	if sdb.blockNum == 0 || chainRules == nil {
 		return nil
 	}
@@ -2653,10 +2653,19 @@ func (sdb *IntraBlockState) clearEmptyAccounts(chainRules *chain.Rules, deferred
 		if !publishDelete && !sdb.versionedWrites.createdEmpty(addr) {
 			continue
 		}
-		sdb.versionMap.DeleteAll(addr, sdb.txIndex)
-		sdb.versionedWrites.deleteAddr(addr)
+		writes.deleteAddr(addr)
 		if publishDelete {
-			sdb.recordWriteSelfDestruct(addr, true)
+			sdb.MarkAddressAccess(addr, true)
+			deleteWrite := &VersionedWrite[bool]{
+				WriteHeader: WriteHeader{
+					Address: addr,
+					Path:    SelfDestructPath,
+					Version: sdb.Version(),
+				},
+				Val: true,
+			}
+			writes.SetSelfDestruct(addr, deleteWrite)
+			traceWrite(sdb, deleteWrite)
 		}
 	}
 	return nil
