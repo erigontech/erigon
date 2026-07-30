@@ -115,84 +115,9 @@ func newTestSetCodeTxnSlot(nonce uint64, senderID uint64, tip, feeCap uint64, ga
 	}
 }
 
-func TestAddLocalTxnsRejectsTipAboveFeeCap(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+func newTestPoolWithFundedSender(t *testing.T) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
+	t.Helper()
 
-	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	pool, err := New(
-		ctx,
-		make(chan Announcements, 1),
-		memdb.NewTestPoolDB(t),
-		coreDB,
-		txpoolcfg.DefaultConfig,
-		kvcache.New(kvcache.DefaultCoherentConfig),
-		chain.AllProtocolChanges,
-		nil,
-		nil,
-		func() {},
-		nil,
-		nil,
-		log.New(),
-		WithFeeCalculator(nil),
-	)
-	require.NoError(t, err)
-
-	sender := common.Address{1}
-	account := accounts3.Account{
-		Balance:  *uint256.NewInt(common.Ether),
-		CodeHash: accounts.EmptyCodeHash,
-	}
-	change := &remoteproto.StateChangeBatch{
-		PendingBlockBaseFee: 1,
-		BlockGasLimit:       1_000_000,
-		ChangeBatch: []*remoteproto.StateChange{{
-			BlockHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-			Changes: []*remoteproto.AccountChange{{
-				Action:  remoteproto.Action_UPSERT,
-				Address: gointerfaces.ConvertAddressToH160(sender),
-				Data:    accounts3.SerialiseV3(&account),
-			}},
-		}},
-	}
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
-
-	tests := []struct {
-		name string
-		txn  *TxnSlot
-	}{
-		{
-			name: "dynamic fee",
-			txn:  newTestTxnSlot(0, 0, 2, 1, 21_000),
-		},
-		{
-			name: "blob",
-			txn:  newTestBlobTxnSlot(0, 0, 2, 1, 21_000),
-		},
-		{
-			name: "set code",
-			txn:  newTestSetCodeTxnSlot(0, 0, 2, 1, 21_000),
-		},
-	}
-
-	for i, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			txn := test.txn
-			txn.IDHash[0] = byte(i + 1)
-			var txns TxnSlots
-			txns.Append(txn, sender[:], true)
-
-			reasons, err := pool.AddLocalTxns(ctx, txns)
-			require.NoError(t, err)
-			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.TipAboveFeeCap}, reasons)
-
-			pending, baseFee, queued := pool.CountContent()
-			require.Zero(t, pending+baseFee+queued)
-		})
-	}
-}
-
-func TestFromDBSkipsInvalidTransactions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -234,6 +159,50 @@ func TestFromDBSkipsInvalidTransactions(t *testing.T) {
 		}},
 	}
 	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	return ctx, pool, poolDB, coreDB, sender
+}
+
+func TestAddLocalTxnsRejectsTipAboveFeeCap(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t)
+
+	tests := []struct {
+		name string
+		txn  *TxnSlot
+	}{
+		{
+			name: "dynamic fee",
+			txn:  newTestTxnSlot(0, 0, 2, 1, 21_000),
+		},
+		{
+			name: "blob",
+			txn:  newTestBlobTxnSlot(0, 0, 2, 1, 21_000),
+		},
+		{
+			name: "set code",
+			txn:  newTestSetCodeTxnSlot(0, 0, 2, 1, 21_000),
+		},
+	}
+
+	for i, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			txn := test.txn
+			txn.IDHash[0] = byte(i + 1)
+			var txns TxnSlots
+			txns.Append(txn, sender[:], true)
+
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.TipAboveFeeCap}, reasons)
+
+			pending, baseFee, queued := pool.CountContent()
+			require.Zero(t, pending+baseFee+queued)
+		})
+	}
+}
+
+func TestFromDBSkipsInvalidTransactions(t *testing.T) {
+	ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t)
 
 	invalidTxn := newTestTxnSlot(0, 0, 2, 1, 21_000)
 	validTxn := newTestTxnSlot(0, 0, 1, 2, 21_000)
