@@ -1015,7 +1015,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 
 	switch txn.TxType() {
 	case DynamicFeeTxnType, BlobTxnType, SetCodeTxnType:
-		if txn.GetTipCap().Gt(txn.GetFeeCap()) {
+		if txn.GetFeeCap().Lt(txn.GetTipCap()) {
 			return txpoolcfg.TipAboveFeeCap, nil
 		}
 	}
