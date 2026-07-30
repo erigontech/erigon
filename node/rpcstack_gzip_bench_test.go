@@ -262,7 +262,7 @@ func fetchPayload(t testing.TB, blockTag string) []byte {
 	return data
 }
 
-// --- Test: handler-level compression (libdeflate vs stdlib, payload from node) ---
+// --- Test: handler-level compression (klauspost vs stdlib, payload from node) ---
 
 func TestGzipHandlerLatency(t *testing.T) {
 	for _, blk := range historicalBlocks {
@@ -271,11 +271,11 @@ func TestGzipHandlerLatency(t *testing.T) {
 			if payload == nil {
 				return
 			}
-			lib := measureHandlerLatency(t, payload, newGzipHandler)
+			kp := measureHandlerLatency(t, payload, newGzipHandler)
 			std := measureHandlerLatency(t, payload, newStdlibGzipHandler)
-			t.Logf("libdeflate  %s", lib)
-			t.Logf("stdlib      %s", std)
-			t.Logf("speedup p50=%.2fx  p99=%.2fx", float64(std.p50)/float64(lib.p50), float64(std.p99)/float64(lib.p99))
+			t.Logf("klauspost  %s", kp)
+			t.Logf("stdlib     %s", std)
+			t.Logf("speedup p50=%.2fx  p99=%.2fx", float64(std.p50)/float64(kp.p50), float64(std.p99)/float64(kp.p99))
 		})
 	}
 }
@@ -365,7 +365,7 @@ func getBenchPayload(b *testing.B) []byte {
 	return benchPayload
 }
 
-func BenchmarkLibdeflateGzip(b *testing.B) {
+func BenchmarkKlauspostGzip(b *testing.B) {
 	benchmarkGzipHandler(b, getBenchPayload(b), newGzipHandler)
 }
 
