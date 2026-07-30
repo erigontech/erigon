@@ -605,112 +605,102 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue
 		}
 
-		stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
-		cachedReader := state.NewCachedReader(state.NewHistoryReaderV3(dbtx, txNum), stateCache)
-		cachedWriter := state.NewCachedWriter(noop, stateCache)
+		// One traced transaction. Extracted so its state is closed on every exit
+		// path; a nil result means the error was already written to the stream.
+		traceResult, err := func() (*TraceCallResult, error) {
+			writeErr := func(err error) {
+				if first {
+					first = false
+				} else {
+					stream.WriteMore()
+				}
+				stream.WriteObjectStart()
+				rpc.HandleError(err, stream)
+				stream.WriteObjectEnd()
+			}
 
-		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
-		var ot OeTracer
-		ot.config, err = parseOeTracerConfig(traceConfig)
+			stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
+			cachedReader := state.NewCachedReader(state.NewHistoryReaderV3(dbtx, txNum), stateCache)
+			cachedWriter := state.NewCachedWriter(noop, stateCache)
+
+			traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
+			var ot OeTracer
+			oeConfig, err := parseOeTracerConfig(traceConfig)
+			if err != nil {
+				return nil, err
+			}
+			ot.config = oeConfig
+			ot.compat = api.compatibility
+			ot.r = traceResult
+			ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
+			ot.traceAddr = []int{}
+			vmConfig.Tracer = ot.Tracer().Hooks
+
+			blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
+			if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+				return nil, err
+			}
+			ibs := state.New(cachedReader)
+			defer ibs.Close()
+
+			evmTxCtx := protocol.NewEVMTxContext(msg)
+			evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
+
+			gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+			ibs.SetTxContext(blockNum, txIndex)
+			ibs.SetHooks(ot.Tracer().Hooks)
+
+			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxStart != nil {
+				ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
+			}
+
+			var timer *time.Timer
+			if api.evmCallTimeout > 0 {
+				timer = time.AfterFunc(api.evmCallTimeout, evm.Cancel)
+			}
+			execResult, execErr := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
+			if timer != nil {
+				timer.Stop()
+			}
+
+			if timer != nil && evm.Cancelled() {
+				timeoutErr := fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
+				if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
+					ot.Tracer().OnTxEnd(nil, timeoutErr)
+				}
+				// Safe to skip FinalizeTx/CommitBlock: each iteration creates a fresh
+				// stateCache, cachedReader and ibs from the next txNum, and writes go
+				// to a noop writer, so no partial state escapes this scope.
+				writeErr(timeoutErr)
+				return nil, nil
+			}
+			if execErr != nil {
+				if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
+					ot.Tracer().OnTxEnd(nil, execErr)
+				}
+				writeErr(execErr)
+				return nil, nil
+			}
+			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
+				ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
+			}
+			traceResult.Output = bytes.Clone(execResult.ReturnData)
+			if err := ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
+				writeErr(err)
+				return nil, nil
+			}
+			if err := ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
+				writeErr(err)
+				return nil, nil
+			}
+			return traceResult, nil
+		}()
 		if err != nil {
 			return err
 		}
-		ot.compat = api.compatibility
-		ot.r = traceResult
-		ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
-		ot.traceAddr = []int{}
-		vmConfig.Tracer = ot.Tracer().Hooks
-
-		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
-		if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
-			return err
-		}
-		ibs := state.New(cachedReader)
-		evmTxCtx := protocol.NewEVMTxContext(msg)
-		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
-
-		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-		ibs.SetTxContext(blockNum, txIndex)
-		ibs.SetHooks(ot.Tracer().Hooks)
-
-		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxStart != nil {
-			ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
-		}
-
-		var timer *time.Timer
-		if api.evmCallTimeout > 0 {
-			timer = time.AfterFunc(api.evmCallTimeout, evm.Cancel)
-		}
-		var execResult *evmtypes.ExecutionResult
-		execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
-		if timer != nil {
-			timer.Stop()
-		}
-		timedOut := timer != nil && evm.Cancelled()
-
-		if timedOut {
-			timeoutErr := fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
-			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-				ot.Tracer().OnTxEnd(nil, timeoutErr)
-			}
-			if first {
-				first = false
-			} else {
-				stream.WriteMore()
-			}
-			stream.WriteObjectStart()
-			rpc.HandleError(timeoutErr, stream)
-			stream.WriteObjectEnd()
-			// Safe to skip FinalizeTx/CommitBlock: each iteration creates a fresh
-			// stateCache, cachedReader and ibs from the next txNum, and writes go
-			// to a noop writer, so no partial state escapes this scope.
-			ibs.Close()
+		if traceResult == nil {
 			continue
 		}
-		if err != nil {
-			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-				ot.Tracer().OnTxEnd(nil, err)
-			}
-			if first {
-				first = false
-			} else {
-				stream.WriteMore()
-			}
-			stream.WriteObjectStart()
-			rpc.HandleError(err, stream)
-			stream.WriteObjectEnd()
-			ibs.Close()
-			continue
-		}
-		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-			ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
-		}
-		traceResult.Output = bytes.Clone(execResult.ReturnData)
-		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
-			if first {
-				first = false
-			} else {
-				stream.WriteMore()
-			}
-			stream.WriteObjectStart()
-			rpc.HandleError(err, stream)
-			stream.WriteObjectEnd()
-			ibs.Close()
-			continue
-		}
-		if err = ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
-			if first {
-				first = false
-			} else {
-				stream.WriteMore()
-			}
-			stream.WriteObjectStart()
-			rpc.HandleError(err, stream)
-			stream.WriteObjectEnd()
-			ibs.Close()
-			continue
-		}
-		ibs.Close()
 		isIntersectionMode := req.Mode == TraceFilterModeIntersection
 		for _, pt := range traceResult.Trace {
 			if includeAll || filterTrace(pt, fromAddresses, toAddresses, isIntersectionMode) {
