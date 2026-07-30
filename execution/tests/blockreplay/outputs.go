@@ -30,7 +30,7 @@ func (w *recordingWriter) UpdateAccountData(address accounts.Address, original, 
 }
 
 func (w *recordingWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
-	w.out.Code[address.Value()] = common.Copy(code)
+	w.out.Code[address.Value()] = bytes.Clone(code)
 	return nil
 }
 
@@ -103,7 +103,7 @@ func CollectOutputs(r state.StateReader, want *Outputs) (*Outputs, error) {
 		if err != nil {
 			return nil, err
 		}
-		got.Code[a] = common.Copy(code)
+		got.Code[a] = bytes.Clone(code)
 	}
 	return got, nil
 }
