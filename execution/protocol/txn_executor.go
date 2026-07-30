@@ -278,8 +278,6 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	rules := st.evm.ChainRules()
 	from := st.msg.From()
 
-	var overflow bool
-
 	// Reject more blob hashes than the per-transaction limit (Osaka+).
 	if rules.IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
 		return txnFees{}, fmt.Errorf("%w: address %v, blobs: %d", ErrTooManyBlobs, from, len(st.msg.BlobHashes()))
@@ -376,7 +374,10 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		return txnFees{}, err
 	}
 
-	var fees txnFees
+	var (
+		fees     txnFees
+		overflow bool
+	)
 	fees.gasVal, overflow = u256.MulOverflow(u256.U64(st.msg.Gas()), *st.gasPrice)
 	if overflow {
 		return txnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
