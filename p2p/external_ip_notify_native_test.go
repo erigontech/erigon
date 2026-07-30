@@ -89,17 +89,30 @@ func closeWithin(t *testing.T, n netChangeNotifier, timeout time.Duration) time.
 
 func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.After(timeout)
+	deadline := time.Now().Add(timeout)
 	for {
 		if cond() {
 			return
 		}
-		select {
-		case <-deadline:
+		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for %s", what)
-		case <-time.After(5 * time.Millisecond):
 		}
+		time.Sleep(5 * time.Millisecond)
 	}
+}
+
+// closeOnCleanup registers a bounded best-effort Close so an early t.Fatal never
+// leaks the notifier goroutine and descriptor into later tests, while a hung
+// Close still cannot stall cleanup.
+func closeOnCleanup(t *testing.T, n netChangeNotifier) {
+	t.Cleanup(func() {
+		done := make(chan struct{})
+		go func() { _ = n.Close(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+		}
+	})
 }
 
 // TestFdNotifierParksAndCloses drives the notifier from a raw, initially
@@ -122,6 +135,7 @@ func TestFdNotifierParksAndCloses(t *testing.T) {
 		_ = unix.Close(readFD)
 		t.Fatalf("newNetChangeNotifierFromFD: %v", err)
 	}
+	closeOnCleanup(t, n)
 
 	select {
 	case <-n.Events():
@@ -132,8 +146,9 @@ func TestFdNotifierParksAndCloses(t *testing.T) {
 		t.Fatalf("read exited early instead of parking in the poller: %v", h.snapshot())
 	}
 
-	// Large enough to clear the netlink loop's NLMSG_HDRLEN (16-byte) minimum,
-	// which would otherwise discard the message without firing an event.
+	// Large enough for both loops to accept: the netlink loop discards reads
+	// below NLMSG_HDRLEN (16 bytes), while the route loop fires on any non-empty
+	// read.
 	if _, err := unix.Write(writeFD, make([]byte, 128)); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -166,6 +181,7 @@ func TestFdNotifierClosesDescriptorOnReadError(t *testing.T) {
 		_ = unix.Close(writeFD)
 		t.Fatalf("newNetChangeNotifierFromFD: %v", err)
 	}
+	closeOnCleanup(t, n)
 
 	if err := unix.Close(writeFD); err != nil {
 		t.Fatalf("close write end: %v", err)
