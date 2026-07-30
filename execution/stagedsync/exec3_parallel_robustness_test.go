@@ -967,10 +967,10 @@ func TestReconcileExecAndWaitErr(t *testing.T) {
 	waitFail := errors.New("snapshot step misalignment: snapshot files need rebuilding")
 
 	// surfacesLoudly mirrors execImpl's gate: an error that is neither
-	// context.Canceled nor ErrLoopExhausted reaches the failure Warn and is
+	// cancellation-only nor ErrLoopExhausted reaches the failure Warn and is
 	// returned to the stage loop as a hard error rather than "more work".
 	surfacesLoudly := func(err error) bool {
-		return err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{}))
+		return err != nil && !(common.IsOnlyCanceled(err) || errors.Is(err, &ErrLoopExhausted{}))
 	}
 
 	t.Run("both nil", func(t *testing.T) {
@@ -1033,6 +1033,21 @@ func TestReconcileExecAndWaitErr(t *testing.T) {
 	t.Run("wait error supersedes a wrapped canceled apply exit", func(t *testing.T) {
 		got := reconcileExecAndWaitErr(fmt.Errorf("apply loop: open roTx: %w", context.Canceled), waitFail)
 		require.Same(t, waitFail, got)
+		require.True(t, surfacesLoudly(got))
+	})
+
+	t.Run("mixed canceled apply error keeps its real branch", func(t *testing.T) {
+		applyFail := errors.New("apply loop: boom")
+		got := reconcileExecAndWaitErr(errors.Join(context.Canceled, applyFail), waitFail)
+		require.ErrorIs(t, got, applyFail)
+		require.ErrorIs(t, got, waitFail)
+		require.True(t, surfacesLoudly(got))
+	})
+
+	t.Run("mixed canceled wait error surfaces", func(t *testing.T) {
+		got := reconcileExecAndWaitErr(nil, errors.Join(context.Canceled, waitFail))
+		require.ErrorIs(t, got, waitFail)
+		require.False(t, common.IsOnlyCanceled(got))
 		require.True(t, surfacesLoudly(got))
 	})
 }

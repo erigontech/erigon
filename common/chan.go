@@ -25,19 +25,21 @@ import (
 var ErrStopped = errors.New("stopped")
 var ErrUnwind = errors.New("unwound")
 
-// NilIfCanceled converts context cancellation (bare or wrapped) into nil, for
-// paths where routine cancellation is not an error — e.g. errgroup members,
-// where a Canceled return would occupy the group's first-error slot ahead of
-// a concurrent real failure. A joined error counts as cancellation only if
-// every branch does; any real branch preserves the original error.
+// NilIfCanceled returns nil when err is nil or contains only context
+// cancellation. Mixed errors are preserved.
 func NilIfCanceled(err error) error {
-	if err == nil || isAllCanceled(err) {
+	if err == nil || IsOnlyCanceled(err) {
 		return nil
 	}
 	return err
 }
 
-func isAllCanceled(err error) bool {
+// IsOnlyCanceled reports whether err is non-nil and every leaf in its unwrap
+// tree is context.Canceled.
+func IsOnlyCanceled(err error) bool {
+	if err == nil {
+		return false
+	}
 	switch x := err.(type) {
 	case interface{ Unwrap() []error }:
 		errs := x.Unwrap()
@@ -45,13 +47,13 @@ func isAllCanceled(err error) bool {
 			return false
 		}
 		for _, e := range errs {
-			if !isAllCanceled(e) {
+			if !IsOnlyCanceled(e) {
 				return false
 			}
 		}
 		return true
 	case interface{ Unwrap() error }:
-		return isAllCanceled(x.Unwrap())
+		return IsOnlyCanceled(x.Unwrap())
 	default:
 		return errors.Is(err, context.Canceled)
 	}

@@ -842,7 +842,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	}
 
 	if execErr != nil {
-		if !(errors.Is(execErr, context.Canceled) || errors.Is(execErr, &ErrLoopExhausted{})) {
+		if !(common.IsOnlyCanceled(execErr) || errors.Is(execErr, &ErrLoopExhausted{})) {
 			if lastHeader != nil {
 				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr, "block", lastHeader.Number.Uint64(), "hash", lastHeader.Hash())
 			} else {
@@ -892,7 +892,7 @@ func (pe *parallelExecutor) runApplyLoop(logPrefix string, applyResults <-chan a
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("apply loop panic: %v", rec)
 			pe.logger.Warn("["+logPrefix+"] rw panic", "rec", rec, "stack", dbg.Stack())
-		} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
+		} else if err != nil && !(common.IsOnlyCanceled(err) || errors.Is(err, &ErrLoopExhausted{})) {
 			pe.logger.Warn("["+logPrefix+"] rw exit", "err", err, "stack", dbg.Stack())
 		} else {
 			pe.logger.Debug("[" + logPrefix + "] rw exit")
@@ -1017,7 +1017,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		if rec := recover(); rec != nil {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop panic", "rec", rec, "stack", dbg.Stack())
 			err = fmt.Errorf("exec loop panic: %v", rec)
-		} else if err != nil && !errors.Is(err, context.Canceled) {
+		} else if err != nil && !common.IsOnlyCanceled(err) {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop error", "err", err)
 		} else {
 			pe.logger.Debug("[" + pe.logPrefix + "] exec loop exit")
@@ -1770,7 +1770,7 @@ func reconcileExecAndWaitErr(execErr, waitErr error) error {
 	if waitErr = common.NilIfCanceled(waitErr); waitErr == nil {
 		return execErr
 	}
-	if execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}) || errors.Is(execErr, context.Canceled) {
+	if execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}) || common.IsOnlyCanceled(execErr) {
 		return waitErr
 	}
 	return errors.Join(execErr, waitErr)

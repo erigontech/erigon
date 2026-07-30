@@ -683,7 +683,7 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 
 func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
-		if !errors.Is(err, context.Canceled) {
+		if !common.IsOnlyCanceled(err) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
 		return
@@ -691,7 +691,7 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	defer e.semaphore.Release(1)
 
 	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart); err != nil {
-		if !errors.Is(err, context.Canceled) {
+		if !common.IsOnlyCanceled(err) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
 		// During parallel execution, an invalid block in initial sync (ProcessFrozenBlocks)
@@ -716,7 +716,7 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 		}
 		e.forkValidator.NotifyCurrentHeight(progress)
 		return nil
-	}); err != nil && !errors.Is(err, context.Canceled) {
+	}); err != nil && !common.IsOnlyCanceled(err) {
 		e.logger.Warn("Could not notify fork validator of current height", "err", err)
 	}
 }

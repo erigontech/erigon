@@ -44,3 +44,16 @@ func TestNilIfCanceled(t *testing.T) {
 	require.ErrorIs(t, NilIfCanceled(wrapped), boom,
 		"a wrapped join with a real branch must survive the filter")
 }
+
+func TestIsOnlyCanceled(t *testing.T) {
+	require.False(t, IsOnlyCanceled(nil))
+	require.True(t, IsOnlyCanceled(context.Canceled))
+	require.True(t, IsOnlyCanceled(fmt.Errorf("drain: %w", context.Canceled)))
+	require.True(t, IsOnlyCanceled(errors.Join(context.Canceled, fmt.Errorf("drain: %w", context.Canceled))))
+
+	boom := errors.New("boom")
+	require.False(t, IsOnlyCanceled(boom))
+	require.False(t, IsOnlyCanceled(context.DeadlineExceeded))
+	require.False(t, IsOnlyCanceled(errors.Join(context.Canceled, boom)))
+	require.False(t, IsOnlyCanceled(fmt.Errorf("teardown: %w", errors.Join(context.Canceled, boom))))
+}
