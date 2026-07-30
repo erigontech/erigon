@@ -95,8 +95,8 @@ type EVM struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
-	storageKeys   *storageKeyCache
-	storageKeyOps uint32
+	internCache *storageKeyCache
+	internOps   uint32
 }
 
 // storageKeyCacheSize must comfortably exceed a contract's live slot count,
@@ -138,24 +138,21 @@ func (c *storageKeyCache) fill(i uint64, word *uint256.Int) accounts.StorageKey 
 // for words seen before. Short-lived EVMs intern uncached: the table only earns
 // back its allocation over a few hundred storage ops.
 func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
-	c := evm.storageKeys
+	c := evm.internCache
 	if c == nil {
-		return evm.internUncachedStorageKey(word)
+		if evm.internOps < storageKeyCacheMinOps {
+			evm.internOps++
+			return accounts.InternKey(word.Bytes32())
+		}
+		c = new(storageKeyCache)
+		evm.internCache = c
+		return c.fill(slotIndex(word), word)
 	}
 	i := slotIndex(word)
 	if h := c.handles[i]; h != accounts.NilKey && c.words[i] == *word {
 		return h
 	}
 	return c.fill(i, word)
-}
-
-func (evm *EVM) internUncachedStorageKey(word *uint256.Int) accounts.StorageKey {
-	if evm.storageKeyOps < storageKeyCacheMinOps {
-		evm.storageKeyOps++
-		return accounts.InternKey(word.Bytes32())
-	}
-	evm.storageKeys = new(storageKeyCache)
-	return evm.storageKeys.fill(slotIndex(word), word)
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
