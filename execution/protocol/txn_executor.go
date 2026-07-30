@@ -227,9 +227,7 @@ func (st *TxnExecutor) to() accounts.Address {
 	return st.msg.To()
 }
 
-// txnFees are the gas and blob fees computed and affordability-checked by
-// preCheck; buyGas takes them as input so the debit cannot run without a
-// passing validation.
+// txnFees holds the gas and blob fees computed by preCheck for buyGas.
 type txnFees struct {
 	gasVal     uint256.Int
 	blobGasVal uint256.Int
