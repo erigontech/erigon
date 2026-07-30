@@ -33,6 +33,13 @@ type pbinSpecVectors struct {
 			Key  string      `json:"key"`
 		} `json:"slots"`
 	} `json:"embedding_vectors"`
+	Chunkify []pbinSpecChunkifyVector `json:"chunkify_vectors"`
+}
+
+type pbinSpecChunkifyVector struct {
+	Name   string   `json:"name"`
+	Code   string   `json:"code"`
+	Chunks []string `json:"chunks"`
 }
 
 func loadPBinSpecVectors(t *testing.T) pbinSpecVectors {

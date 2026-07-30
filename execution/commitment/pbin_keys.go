@@ -31,13 +31,32 @@ const (
 	pbinCodeHashLeafKey     = 1
 	pbinHeaderStorageOffset = 64
 	pbinCodeOffset          = 128
+	pbinStemSubtreeWidth    = 256
 
 	pbinAccountZone = 0x00
+	pbinCodeZone    = 0x01
 	pbinStorageZone = 0xFF
 
 	pbinAccountKeyLength = 34
+	pbinCodeKeyLength    = 34
 	pbinStorageKeyLength = 66
 )
+
+// pbinZoneKeyLength is the one key length a zone admits, which is what keeps its
+// keys prefix-free (eip:284-288). An unknown zone has no length: the embedding
+// allocates 0x02..0xFE to nothing yet.
+func pbinZoneKeyLength(zone byte) (int, bool) {
+	switch zone {
+	case pbinAccountZone:
+		return pbinAccountKeyLength, true
+	case pbinCodeZone:
+		return pbinCodeKeyLength, true
+	case pbinStorageZone:
+		return pbinStorageKeyLength, true
+	default:
+		return 0, false
+	}
+}
 
 // pbinAddr32 widens a legacy address to the spec's Address32 by left-padding
 // with zero bytes (eip:291-296).
@@ -59,9 +78,9 @@ func pbinTreeKey(zone byte, treePosition []byte, subIndex byte) []byte {
 	key = append(key, treePosition...)
 	key = append(key, subIndex)
 
-	want := pbinAccountKeyLength
-	if zone == pbinStorageZone {
-		want = pbinStorageKeyLength
+	want, known := pbinZoneKeyLength(zone)
+	if !known {
+		panic(fmt.Sprintf("pbin: zone %#x names no key space", zone))
 	}
 	if len(key) != want {
 		panic(fmt.Sprintf("pbin: zone %#x key of %d bytes, want %d", zone, len(key), want))
@@ -81,6 +100,14 @@ func pbinTreeKeyAccount(addr []byte, subIndex byte) []byte {
 func pbinTreeKeyStorage(addr, slot []byte) []byte {
 	var c pbinDigestCache
 	return c.storageKey(addr, slot)
+}
+
+// pbinTreeKeyCodeChunk returns the key for code chunk chunkID of addr
+// (eip:355-367). Chunks the account header holds share the account's own stem;
+// higher chunks are content-addressed by code hash in the code zone.
+func pbinTreeKeyCodeChunk(addr []byte, chunkID int) []byte {
+	var c pbinDigestCache
+	return c.codeChunkKey(addr, chunkID)
 }
 
 // pbinKeyHasher returns a keyHasher deriving the primary leaf's tree key:
@@ -165,6 +192,13 @@ func (c *pbinDigestCache) groupDigest(addr32, slot32 *[32]byte) *[32]byte {
 func (c *pbinDigestCache) accountKey(addr []byte, subIndex byte) []byte {
 	addr32 := pbinAddr32(addr)
 	return pbinTreeKey(pbinAccountZone, c.stemDigest(&addr32)[:], subIndex)
+}
+
+func (c *pbinDigestCache) codeChunkKey(addr []byte, chunkID int) []byte {
+	if chunkID < 0 || chunkID >= pbinHeaderCodeChunks {
+		panic(fmt.Sprintf("pbin: code chunk %d lives outside the account header", chunkID))
+	}
+	return c.accountKey(addr, byte(pbinCodeOffset+chunkID))
 }
 
 func (c *pbinDigestCache) storageKey(addr, slot []byte) []byte {

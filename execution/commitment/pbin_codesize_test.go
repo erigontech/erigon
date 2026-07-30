@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -56,14 +57,28 @@ func TestPBinEngineRootCarriesCodeSize(t *testing.T) {
 	t.Parallel()
 
 	addr := pbinOracleAddr(9)
-	codeHash := common.Hash{0xC0, 0xDE}
-	withCode := new(pbinTestCorpus).accountWithCode(addr, 4, 500, codeHash, 6358)
+	code := pbinTestCode(1000)
+	withCode := new(pbinTestCorpus).accountWithCodeBytes(addr, 4, 500, code)
 
 	_, root := withCode.process(t)
 	require.Equal(t, withCode.oracleRoot(t), root)
 
-	sizeless := new(pbinTestCorpus).accountWithCode(addr, 4, 500, codeHash, 0)
-	require.NotEqual(t, sizeless.oracleRoot(t), root, "code_size must reach the root")
+	// The same leaf set with BASIC_DATA packed at code_size 0 isolates the size:
+	// every other leaf, the chunks included, stays where it was.
+	sizeless, err := pbinEncodeBasicData(4, uint256.NewInt(500), 0)
+	require.NoError(t, err)
+	entries := withCode.entries(t)
+	basicDataKey := pbinTreeKeyAccount(addr, pbinBasicDataLeafKey)
+	patched := 0
+	for i := range entries {
+		if bytes.Equal(entries[i].key, basicDataKey) {
+			entries[i].value, patched = sizeless[:], patched+1
+		}
+	}
+	require.Equal(t, 1, patched)
+
+	want := pbinOracleRoot(entries)
+	require.NotEqual(t, want[:], root, "code_size must reach the root")
 }
 
 // TestPBinUpdateCodeSizeSurvivesCopyAndReset pins the two Update lifecycle

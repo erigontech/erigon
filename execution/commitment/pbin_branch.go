@@ -36,9 +36,15 @@ const (
 	pbinFieldAccountAddr pbinCellFields = 4
 	pbinFieldStorageAddr pbinCellFields = 8
 	pbinFieldHash        pbinCellFields = 16
+	// pbinFieldLeafValue carries the leaf's own 32 bytes. A code chunk is the one
+	// value no state domain holds — chunking is a property of the tree, not of the
+	// account — so the record is where it lives.
+	pbinFieldLeafValue pbinCellFields = 32
 
-	pbinFieldsAll = pbinFieldLeaf | pbinFieldBranch | pbinFieldAccountAddr | pbinFieldStorageAddr | pbinFieldHash
-	pbinFieldKind = pbinFieldLeaf | pbinFieldBranch
+	pbinFieldsAll = pbinFieldLeaf | pbinFieldBranch | pbinFieldAccountAddr | pbinFieldStorageAddr |
+		pbinFieldHash | pbinFieldLeafValue
+	pbinFieldKind  = pbinFieldLeaf | pbinFieldBranch
+	pbinFieldValue = pbinFieldAccountAddr | pbinFieldStorageAddr | pbinFieldLeafValue
 )
 
 var (
@@ -92,6 +98,9 @@ func pbinAppendCell(dst []byte, c *pbinCell) ([]byte, error) {
 	if c.storageAddrLen > 0 {
 		fields |= pbinFieldStorageAddr
 	}
+	if c.kind == pbinNodeLeaf && fields&pbinFieldValue == 0 {
+		fields |= pbinFieldLeafValue
+	}
 	if c.hashLen > 0 {
 		fields |= pbinFieldHash
 	}
@@ -105,6 +114,13 @@ func pbinAppendCell(dst []byte, c *pbinCell) ([]byte, error) {
 	}
 	if fields&pbinFieldStorageAddr != 0 {
 		dst = pbinAppendLenAndVal(dst, c.storageAddr[:c.storageAddrLen])
+	}
+	if fields&pbinFieldLeafValue != 0 {
+		value, err := pbinCodeChunkValue(&c.Update)
+		if err != nil {
+			return nil, err
+		}
+		dst = pbinAppendLenAndVal(dst, value[:])
 	}
 	if fields&pbinFieldHash != 0 {
 		dst = pbinAppendLenAndVal(dst, c.hash[:c.hashLen])
@@ -156,15 +172,18 @@ func pbinDecodeCell(data []byte, pos int, c *pbinCell) (int, error) {
 	switch fields & pbinFieldKind {
 	case pbinFieldLeaf:
 		c.kind = pbinNodeLeaf
-		// A leaf without a plain key hashes a zero-valued state instead of failing,
-		// so the shape is rejected here rather than reaching the hasher.
-		switch fields & (pbinFieldAccountAddr | pbinFieldStorageAddr) {
-		case pbinFieldAccountAddr, pbinFieldStorageAddr:
+		// A leaf whose value has no source hashes a zero-valued state instead of
+		// failing, so the shape is rejected here rather than reaching the hasher.
+		switch fields & pbinFieldValue {
+		case pbinFieldAccountAddr, pbinFieldStorageAddr, pbinFieldLeafValue:
 		default:
-			return 0, fmt.Errorf("%w: leaf cell fields %08b name no single plain key", errPBinMalformedBranch, fields)
+			return 0, fmt.Errorf("%w: leaf cell fields %08b name no single value source", errPBinMalformedBranch, fields)
 		}
 	case pbinFieldBranch:
 		c.kind = pbinNodeBranch
+		if fields&pbinFieldLeafValue != 0 {
+			return 0, fmt.Errorf("%w: branch cell carries a leaf value", errPBinMalformedBranch)
+		}
 	default:
 		return 0, fmt.Errorf("%w: cell fields %08b name no single node kind", errPBinMalformedBranch, fields)
 	}
@@ -184,6 +203,12 @@ func pbinDecodeCell(data []byte, pos int, c *pbinCell) (int, error) {
 			return 0, err
 		}
 		c.storageAddrLen = length.Addr + length.Hash
+	}
+	if fields&pbinFieldLeafValue != 0 {
+		if pos, err = pbinDecodeFixedVal(data, pos, c.Storage[:], pbinValueLength); err != nil {
+			return 0, err
+		}
+		c.Flags, c.StorageLen = StorageUpdate, pbinValueLength
 	}
 	if fields&pbinFieldHash != 0 {
 		if pos, err = pbinDecodeFixedVal(data, pos, c.hash[:], length.Hash); err != nil {

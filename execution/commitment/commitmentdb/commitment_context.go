@@ -1089,6 +1089,16 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 	return u, nil
 }
 
+// Code serves the bytecode the binary trie chunks into leaves. Only that trie
+// asks for it; the hex trie hashes an account's code hash and never its bytes.
+func (sdc *TrieContext) Code(plainKey []byte) ([]byte, error) {
+	code, _, err := sdc.readDomain(kv.CodeDomain, plainKey)
+	if err != nil {
+		return nil, err
+	}
+	return code, nil
+}
+
 func (sdc *TrieContext) Storage(plainKey []byte) (u *commitment.Update, err error) {
 	enc, _, err := sdc.readDomain(kv.StorageDomain, plainKey)
 	if err != nil {

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -36,6 +37,7 @@ import (
 type pbinTestCorpus struct {
 	plainKeys [][]byte
 	updates   []Update
+	codes     map[string][]byte
 }
 
 func (c *pbinTestCorpus) account(addr []byte, nonce, balance uint64, codeHash common.Hash) *pbinTestCorpus {
@@ -47,6 +49,17 @@ func (c *pbinTestCorpus) accountWithCode(addr []byte, nonce, balance uint64, cod
 	u.Balance.SetUint64(balance)
 	c.plainKeys = append(c.plainKeys, bytes.Clone(addr))
 	c.updates = append(c.updates, u)
+	return c
+}
+
+// accountWithCodeBytes is the code-bearing account with its code behind it: the
+// hash and size come from the code, and the tree gains one leaf per chunk.
+func (c *pbinTestCorpus) accountWithCodeBytes(addr []byte, nonce, balance uint64, code []byte) *pbinTestCorpus {
+	c.accountWithCode(addr, nonce, balance, keccak.Sum256(code), uint64(len(code)))
+	if c.codes == nil {
+		c.codes = make(map[string][]byte)
+	}
+	c.codes[string(addr)] = bytes.Clone(code)
 	return c
 }
 
@@ -73,6 +86,12 @@ func (c *pbinTestCorpus) entries(t *testing.T) []pbinOracleEntry {
 			entries = append(entries,
 				pbinOracleEntry{key: pbinTreeKeyAccount(plainKey, pbinBasicDataLeafKey), value: basic[:]},
 				pbinOracleEntry{key: pbinTreeKeyAccount(plainKey, pbinCodeHashLeafKey), value: code[:]})
+			for j, chunk := range pbinChunkifyCode(c.codes[string(plainKey)]) {
+				entries = append(entries, pbinOracleEntry{
+					key:   pbinTreeKeyCodeChunk(plainKey, j),
+					value: chunk[:],
+				})
+			}
 		case length.Addr + length.Hash:
 			value := pbinEncodeStorageValue(u.Storage[:u.StorageLen])
 			entries = append(entries, pbinOracleEntry{
@@ -98,8 +117,19 @@ func (c *pbinTestCorpus) oracleRoot(t *testing.T) []byte {
 func (c *pbinTestCorpus) process(t *testing.T) (*PBinPatriciaHashed, []byte) {
 	t.Helper()
 	pph, ms := pbinTestEngine(t)
-	require.NoError(t, ms.applyPlainUpdates(c.plainKeys, c.updates))
+	c.applyTo(t, ms)
 	return pph, pbinTestProcess(t, pph, c.plainKeys, c.updates)
+}
+
+// applyTo writes the corpus into state, code included: the engine reads code
+// through the context, so a code-bearing account with no code behind it is a
+// state the corpus must not produce.
+func (c *pbinTestCorpus) applyTo(t *testing.T, ms *MockState) {
+	t.Helper()
+	require.NoError(t, ms.applyPlainUpdates(c.plainKeys, c.updates))
+	for addr, code := range c.codes {
+		ms.setCode([]byte(addr), code)
+	}
 }
 
 func pbinTestProcess(t *testing.T, pph *PBinPatriciaHashed, plainKeys [][]byte, updates []Update) []byte {

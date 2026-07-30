@@ -114,12 +114,18 @@ func (h *pbinHasher) leafCellHash(c *pbinCell, path *pbinBitpath) (common.Hash, 
 		return common.Hash{}, fmt.Errorf("%w: leaf key of %d+%d bits overflows", errPBinCellHash, full.bitLen, c.prefix.bitLen)
 	}
 	full.append(&c.prefix)
-	if full.bitLen != pbinAccountKeyLength*8 && full.bitLen != pbinStorageKeyLength*8 {
-		return common.Hash{}, fmt.Errorf("%w: leaf key of %d bits is neither zone length", errPBinCellHash, full.bitLen)
+	if full.bitLen%8 != 0 {
+		return common.Hash{}, fmt.Errorf("%w: leaf key of %d bits is not whole bytes", errPBinCellHash, full.bitLen)
 	}
 
 	buf := full.appendPackedBits(append(h.buf[:0], pbinLeafTag))
-	value, err := pbinLeafValue(buf[1:], &c.Update)
+	key := buf[1:]
+	// The length is fixed per zone, which is what keeps keys prefix-free: a key of
+	// another zone's length is not a key at all (eip:284-288).
+	if want, known := pbinZoneKeyLength(key[0]); !known || len(key) != want {
+		return common.Hash{}, fmt.Errorf("%w: leaf key %x is no key of zone %#x", errPBinCellHash, key, key[0])
+	}
+	value, err := pbinLeafValue(key, &c.Update)
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -127,11 +133,18 @@ func (h *pbinHasher) leafCellHash(c *pbinCell, path *pbinBitpath) (common.Hash, 
 }
 
 // pbinLeafValue picks the encoding the key's own position names: the zone byte
-// separates storage from the account header, and within the header the
-// sub-index selects between BASIC_DATA, CODE_HASH and a header-resident slot.
+// separates storage and code from the account header, and within the header the
+// sub-index selects between BASIC_DATA, CODE_HASH, a header-resident slot and a
+// header-resident code chunk.
 func pbinLeafValue(key []byte, u *Update) ([pbinValueLength]byte, error) {
-	if key[0] == pbinStorageZone {
+	switch key[0] {
+	case pbinStorageZone:
 		return pbinEncodeStorageValue(u.Storage[:u.StorageLen]), nil
+	case pbinCodeZone:
+		return pbinCodeChunkValue(u)
+	case pbinAccountZone:
+	default:
+		return [pbinValueLength]byte{}, fmt.Errorf("%w: zone %#x names no leaf", errPBinCellHash, key[0])
 	}
 	switch subIndex := key[len(key)-1]; {
 	case subIndex == pbinBasicDataLeafKey:
@@ -140,6 +153,8 @@ func pbinLeafValue(key []byte, u *Update) ([pbinValueLength]byte, error) {
 		return pbinCodeHashValue(u.CodeHash), nil
 	case subIndex >= pbinHeaderStorageOffset && subIndex < pbinCodeOffset:
 		return pbinEncodeStorageValue(u.Storage[:u.StorageLen]), nil
+	case subIndex >= pbinCodeOffset:
+		return pbinCodeChunkValue(u)
 	default:
 		return [pbinValueLength]byte{}, fmt.Errorf("%w: account-zone sub-index %d names no leaf", errPBinCellHash, subIndex)
 	}

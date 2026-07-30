@@ -34,7 +34,7 @@ func pbinTestBatches(t *testing.T, batches ...*pbinTestCorpus) (*PBinPatriciaHas
 	pph, ms := pbinTestEngine(t)
 	var root []byte
 	for _, b := range batches {
-		require.NoError(t, ms.applyPlainUpdates(b.plainKeys, b.updates))
+		b.applyTo(t, ms)
 		root = bytes.Clone(pbinTestProcess(t, pph, b.plainKeys, b.updates))
 	}
 	return pph, ms, root
@@ -48,6 +48,12 @@ func pbinTestUnion(batches ...*pbinTestCorpus) *pbinTestCorpus {
 	for _, b := range batches {
 		u.plainKeys = append(u.plainKeys, b.plainKeys...)
 		u.updates = append(u.updates, b.updates...)
+		for addr, code := range b.codes {
+			if u.codes == nil {
+				u.codes = make(map[string][]byte)
+			}
+			u.codes[addr] = code
+		}
 	}
 	return u
 }
