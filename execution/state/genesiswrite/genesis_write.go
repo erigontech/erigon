@@ -247,6 +247,7 @@ func WriteGenesisState(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (
 	if err != nil {
 		return nil, err
 	}
+	defer statedb.Close()
 
 	stateWriter := state.NewNoopWriter()
 
