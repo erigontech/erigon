@@ -372,6 +372,87 @@ func TestCreate2OntoExistingAccountSkipsNewAccountCharge(t *testing.T) {
 	require.Equal(t, availableCreateGas-availableCreateGas/64, enteredCreateGas)
 }
 
+func TestCreate2OntoStorageOnlyAccountChargesBeforeCollision(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name       string
+		pool       mdgas.MdGas
+		wantErr    error
+		wantFrames int
+	}{
+		{
+			name:    "charge out of gas",
+			pool:    mdgas.MdGas{Regular: 100_000},
+			wantErr: vm.ErrOutOfGas,
+		},
+		{
+			name:       "collision refills charge",
+			pool:       mdgas.MdGas{Regular: 500_000, State: 200_000},
+			wantFrames: 1,
+		},
+	} {
+		t.Run(
+			tt.name,
+			func(t *testing.T) {
+				t.Parallel()
+				tx, sd := testTemporalTxSD(t)
+				txNum, _, err := sd.SeekCommitment(t.Context(), tx)
+				require.NoError(t, err)
+				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+				s := state.New(r)
+				defer s.Release(false)
+				initCode := []byte{byte(vm.STOP)}
+				salt := uint256.NewInt(0)
+				factoryAddress := common.HexToAddress("0xfac0")
+				factory := accounts.InternAddress(factoryAddress)
+				target := accounts.InternAddress(types.CreateAddress2(factoryAddress, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initCode))))
+				factoryCode := program.New().Create2(initCode, salt).Push(0).Op(vm.MSTORE).Return(0, 32).Bytes()
+				s.CreateAccount(factory, true)
+				s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+				vmctx := evmtypes.BlockContext{
+					CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
+					Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+						return nil
+					},
+				}
+				_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
+				s.CreateAccount(target, true)
+				require.NoError(t, s.SetState(target, accounts.ZeroKey, *uint256.NewInt(1)))
+				empty, err := s.Empty(target)
+				require.NoError(t, err)
+				require.True(t, empty)
+				hasStorage, err := s.HasStorage(target)
+				require.NoError(t, err)
+				require.True(t, hasStorage)
+				createFrames := 0
+				hooks := &tracing.Hooks{
+					OnEnter: func(_ int, typ byte, _, _ accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
+						if vm.OpCode(typ) == vm.CREATE2 {
+							createFrames++
+						}
+					},
+				}
+				vmenv := vm.NewEVM(
+					vmctx,
+					evmtypes.TxContext{},
+					s,
+					chain.AllProtocolChanges,
+					vm.Config{Tracer: hooks},
+				)
+				ret, gas, _, err := vmenv.Call(accounts.ZeroAddress, factory, nil, tt.pool, uint256.Int{}, false)
+				if tt.wantErr != nil {
+					require.ErrorIs(t, err, tt.wantErr)
+				} else {
+					require.NoError(t, err)
+					require.Equal(t, common.Address{}, common.BytesToAddress(ret))
+					require.Equal(t, tt.pool.State, gas.State)
+				}
+				require.Equal(t, tt.wantFrames, createFrames)
+			},
+		)
+	}
+}
+
 func TestCreateTraceOnEarlyFailure(t *testing.T) {
 	for _, tt := range []struct {
 		name      string
@@ -440,6 +521,79 @@ func TestCreateTraceOnEarlyFailure(t *testing.T) {
 				require.Equal(t, 1, exitedCreateCount)
 				require.Equal(t, availableCreateGas-availableCreateGas/64, enteredCreateGas)
 				require.Zero(t, exitedCreateGasUsed)
+			},
+		)
+	}
+}
+
+func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		config *chain.Config
+	}{
+		{name: "Amsterdam", config: chain.AllProtocolChanges},
+		{name: "pre-Amsterdam", config: chain.TestChainOsakaConfig},
+	} {
+		t.Run(
+			tt.name,
+			func(t *testing.T) {
+				tx, sd := testTemporalTxSD(t)
+				txNum, _, err := sd.SeekCommitment(t.Context(), tx)
+				require.NoError(t, err)
+				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+				s := state.New(r)
+				defer s.Release(false)
+				initCode := program.New().Push(0xaa).Push(0).Op(vm.MSTORE8).Return(0, 1).Bytes()
+				replacementCreationCode := []byte{byte(vm.STOP)}
+				salt := uint256.NewInt(0)
+				factoryAddress := common.HexToAddress("0xfac0")
+				factory := accounts.InternAddress(factoryAddress)
+				target := accounts.InternAddress(types.CreateAddress2(factoryAddress, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initCode))))
+				factoryCode := program.New().Create2(initCode, salt).Push(0).Op(vm.MSTORE).Return(0, 32).Bytes()
+				s.CreateAccount(factory, true)
+				s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+				vmctx := evmtypes.BlockContext{
+					CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
+					Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+						return nil
+					},
+				}
+				_ = s.CommitBlock(vmctx.Rules(tt.config), w)
+				var evmRef *vm.EVM
+				var overlayErr error
+				capturing := false
+				hooks := &tracing.Hooks{
+					OnEnter: func(_ int, typ byte, from, to accounts.Address, _ bool, _ []byte, _ uint64, value uint256.Int, _ []byte) {
+						if capturing || vm.OpCode(typ) != vm.CREATE2 || to != target {
+							return
+						}
+						capturing = true
+						_, _, _, _, overlayErr = evmRef.OverlayCreate(
+							from,
+							vm.NewCodeAndHash(replacementCreationCode),
+							mdgas.MdGas{Regular: 400_000},
+							value,
+							to,
+							vm.CREATE2,
+							true,
+						)
+					},
+				}
+				evmRef = vm.NewEVM(
+					vmctx,
+					evmtypes.TxContext{},
+					s,
+					tt.config,
+					vm.Config{Tracer: hooks},
+				)
+				ret, _, _, err := evmRef.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Regular: 1_000_000}, uint256.Int{}, false)
+				require.NoError(t, err)
+				require.NoError(t, overlayErr)
+				require.True(t, capturing)
+				require.Equal(t, common.Address{}, common.BytesToAddress(ret))
+				code, err := evmRef.IntraBlockState().GetCode(target)
+				require.NoError(t, err)
+				require.Empty(t, code)
 			},
 		)
 	}
