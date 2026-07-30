@@ -36,7 +36,7 @@ func ThrowRandomConsensusError(IsInitialCycle bool, txIndex int, badBlockHalt bo
 	return nil
 }
 
-// armedError is a test-armed fault: throw returns nil unless a test armed it.
+// armedError stores a process-local fault until its disarm function runs.
 type armedError struct {
 	mu  sync.Mutex
 	err error
@@ -66,54 +66,44 @@ var (
 	applyLoopFault armedError
 )
 
-// ArmPreExecutionError makes ThrowPreExecutionError return err (while chaos is
-// enabled) until the returned disarm func runs. Test-only; production never arms it.
+// ArmPreExecutionError makes ThrowPreExecutionError return err until disarm runs.
 func ArmPreExecutionError(err error) (disarm func()) {
 	return preExecErr.arm(err)
 }
 
-// ThrowPreExecutionError reproduces a failure that hits executeBlocks before it
-// dispatches any block (snapshot step misalignment, a missing block, a BAL decode
-// error). Returns nil unless a test armed it via ArmPreExecutionError.
+// ThrowPreExecutionError returns the armed pre-dispatch failure, if any.
 func ThrowPreExecutionError() error {
 	return preExecErr.throw()
 }
 
-// ArmWorkerError makes ThrowWorkerError return err until the returned disarm
-// func runs. Test-only; production never arms it.
+// ArmWorkerError makes ThrowWorkerError return err until disarm runs.
 func ArmWorkerError(err error) (disarm func()) {
 	return workerErr.arm(err)
 }
 
-// ThrowWorkerError reproduces an OCC worker goroutine dying outside a tx task
-// (a panic in the worker loop). Returns nil unless a test armed it via
-// ArmWorkerError.
+// ThrowWorkerError returns the armed worker failure, if any.
 func ThrowWorkerError() error {
 	return workerErr.throw()
 }
 
-// ArmExecLoopPanic makes ExecLoopPanic panic with err until the returned
-// disarm func runs. Test-only; production never arms it.
+// ArmExecLoopPanic makes ExecLoopPanic panic with err until disarm runs.
 func ArmExecLoopPanic(err error) (disarm func()) {
 	return execLoopFault.arm(err)
 }
 
-// ExecLoopPanic reproduces a bug-class panic in the exec loop. No-op unless a
-// test armed it via ArmExecLoopPanic.
+// ExecLoopPanic panics with the armed fault, if any.
 func ExecLoopPanic() {
 	if err := execLoopFault.throw(); err != nil {
 		panic(err)
 	}
 }
 
-// ArmApplyLoopPanic makes ApplyLoopPanic panic with err until the returned
-// disarm func runs. Test-only; production never arms it.
+// ArmApplyLoopPanic makes ApplyLoopPanic panic with err until disarm runs.
 func ArmApplyLoopPanic(err error) (disarm func()) {
 	return applyLoopFault.arm(err)
 }
 
-// ApplyLoopPanic reproduces a bug-class panic in the apply loop. No-op unless
-// a test armed it via ArmApplyLoopPanic.
+// ApplyLoopPanic panics with the armed fault, if any.
 func ApplyLoopPanic() {
 	if err := applyLoopFault.throw(); err != nil {
 		panic(err)

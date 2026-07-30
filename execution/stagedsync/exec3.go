@@ -558,8 +558,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			defer close(blockRequests)
 		}
 
-		// Test-only chaos injection (gated by the ChaosMonkey flag): reproduce
-		// executeBlocks failing before it dispatches any block.
 		if te.cfg.syncCfg.ChaosMonkey && te.enableChaosMonkey {
 			if chaosErr := chaos_monkey.ThrowPreExecutionError(); chaosErr != nil {
 				return chaosErr

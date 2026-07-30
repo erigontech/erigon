@@ -376,7 +376,7 @@ func (rw *Worker) Run() (err error) {
 		}
 	}()
 
-	// Test-only chaos injection: reproduce a worker dying outside a tx task.
+	// Test-only fault injection; it returns nil unless explicitly armed.
 	if chaosErr := chaos_monkey.ThrowWorkerError(); chaosErr != nil {
 		return chaosErr
 	}

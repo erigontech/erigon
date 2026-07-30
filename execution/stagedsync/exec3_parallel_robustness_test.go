@@ -357,9 +357,7 @@ func TestApplyLoopDoesNotHangAfterRootResultsClose(t *testing.T) {
 	}
 }
 
-// TestCheckBlocksDrainedConcurrentReads verifies checkBlocksDrained is
-// safe to call concurrently with map mutations under the lock — guards
-// against future regression if someone removes the RLock.
+// Keep the pending-block snapshot safe while the executor map is being updated.
 func TestCheckBlocksDrainedConcurrentReads(t *testing.T) {
 	pe := &parallelExecutor{}
 	pe.blockExecutors = map[uint64]*blockExecutor{}
@@ -378,7 +376,6 @@ func TestCheckBlocksDrainedConcurrentReads(t *testing.T) {
 		}
 	})
 
-	// Reader: continually call checkBlocksDrained.
 	wg.Go(func() {
 		for !stop.Load() {
 			_ = pe.checkBlocksDrained(context.Background(), context.Background(), nil)
@@ -954,21 +951,12 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 			"OCC must still see it as a dependency")
 }
 
-// Pins reconcileExecAndWaitErr: a real (non-canceled) error from pe.wait must
-// supersede the apply loop's ErrLoopExhausted. Merely joining keeps
-// errors.Is(_, &ErrLoopExhausted{}) true, so execImpl skips the failure Warn
-// and advances the stage to the unchanged commit height — turning a fatal
-// executeBlocks error into a silent zero-progress retry loop.
-// A canceled wait must never override execErr: execImpl cancels the executor
-// group on every exit, so a canceled wait is the normal end of a batch, not
-// new information.
+// Real wait errors take precedence over resumable or canceled apply results.
+// Cancellation-only wait results never override the apply-loop result.
 func TestReconcileExecAndWaitErr(t *testing.T) {
 	exhausted := &ErrLoopExhausted{From: 100, To: 0, Reason: "block batch is full"}
 	waitFail := errors.New("snapshot step misalignment: snapshot files need rebuilding")
 
-	// surfacesLoudly mirrors execImpl's gate: an error that is neither
-	// cancellation-only nor ErrLoopExhausted reaches the failure Warn and is
-	// returned to the stage loop as a hard error rather than "more work".
 	surfacesLoudly := func(err error) bool {
 		return err != nil && !(common.IsOnlyCanceled(err) || errors.Is(err, &ErrLoopExhausted{}))
 	}
@@ -1183,10 +1171,7 @@ func TestRunApplyLoopErrorDrainsChannels(t *testing.T) {
 	require.Same(t, boom, context.Cause(executorCtx))
 }
 
-// Pins pe.wait's contract: it reports only real errors — a canceled group is
-// routine teardown, since execImpl cancels the executor on every exit — and it
-// returns only after every group member (exec loop, dispatch, worker join) has
-// finished: execImpl reads shared state right after it.
+// wait suppresses cancellation-only results and joins every group member.
 func TestParallelExecWait(t *testing.T) {
 	newPE := func(group func() error) *parallelExecutor {
 		pe := &parallelExecutor{}
@@ -1234,10 +1219,7 @@ func TestParallelExecWait(t *testing.T) {
 	})
 }
 
-// Pins joinWorkers, the errgroup adapter for the worker pool: a real worker
-// failure surfaces (and, as a group member, cancels the executor so the exec
-// loop cannot starve waiting for results from dead workers), while routine
-// cancellation and a clean pool exit do not.
+// Worker cancellation is routine; real worker failures must reach the executor.
 func TestJoinWorkers(t *testing.T) {
 	require.NoError(t, joinWorkers(func() error { return nil }))
 	require.NoError(t, joinWorkers(func() error { return context.Canceled }))
@@ -1249,11 +1231,7 @@ func TestJoinWorkers(t *testing.T) {
 	require.NotErrorIs(t, got, context.Canceled)
 }
 
-// Pins the errgroup property the member filters guard against: the group
-// retains its FIRST non-nil return, so a member surfacing routine cancellation
-// (an independent teardown, not caused by the failure) would occupy the slot
-// ahead of a concurrent real error. Production members therefore filter
-// cancellation before returning (common.NilIfCanceled / joinWorkers).
+// errgroup keeps its first non-nil error, so members must filter cancellation.
 func TestCanceledMemberCannotMaskRealError(t *testing.T) {
 	boom := errors.New("exec.Worker panic: boom")
 
@@ -1336,9 +1314,7 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 	})
 }
 
-// Pins checkBlocksDrained: undrained work is an executor failure, not proof that
-// a block is invalid. Bad-block handling would otherwise blame the last block
-// that completed validation rather than the block that never reached it.
+// Undrained work is an executor failure, not proof that a block is invalid.
 func TestCheckBlocksDrained(t *testing.T) {
 	withPending := func() *parallelExecutor {
 		pe := &parallelExecutor{}
@@ -1379,10 +1355,8 @@ func TestCheckBlocksDrained(t *testing.T) {
 	})
 
 	t.Run("bad-block stop leaves undrained follow-on blocks alone", func(t *testing.T) {
-		// The handled (!initialCycle) wrong-root path schedules an unwind and
-		// returns a nil execErr; blocks canceled behind the bad block never
-		// drain. Flagging them here would fire a second UnwindTo that
-		// overrides the correct one with a valid block's hash.
+		// A handled bad block cancels queued work; reporting that work would
+		// trigger a second unwind.
 		ectx, cancel := context.WithCancelCause(context.Background())
 		cancel(&stopCause{block: 5, kind: stopBadBlock, err: errors.New("wrong root")})
 		require.NoError(t, withPending().checkBlocksDrained(context.Background(), ectx, nil))
@@ -1397,9 +1371,7 @@ func TestCheckBlocksDrained(t *testing.T) {
 	})
 
 	t.Run("routine boundary executorCancel does not exempt", func(t *testing.T) {
-		// execImpl always cancels the executor context (nil cause →
-		// context.Canceled) before the check runs; only a bad-block stop may
-		// exempt, or the check never fires at all.
+		// A nil cancel cause becomes context.Canceled, not a deliberate stop.
 		ectx, cancel := context.WithCancelCause(context.Background())
 		cancel(nil)
 		err := withPending().checkBlocksDrained(context.Background(), ectx, nil)
@@ -1417,10 +1389,7 @@ func TestCheckBlocksDrained(t *testing.T) {
 	})
 
 	t.Run("no-cause exhaustion with an undrained block still flags", func(t *testing.T) {
-		// The close fallback manufactures ErrLoopExhausted when the channels
-		// close without a stop cause; exempting it would turn a silent miss into
-		// a zero-progress retry loop, so the flag must supersede (not wrap) the
-		// exhaustion — runStage classifies by errors.As first.
+		// Replacing exhaustion prevents a retry after work was silently lost.
 		ectx, cancel := context.WithCancelCause(context.Background())
 		cancel(nil)
 		exhausted := &ErrLoopExhausted{From: 1, To: 0, Reason: "block batch is full"}
@@ -1431,10 +1400,7 @@ func TestCheckBlocksDrained(t *testing.T) {
 	})
 
 	t.Run("more-work stop leaves undrained follow-on blocks alone", func(t *testing.T) {
-		// A wrong-root handled at a batch-full boundary resolves into a scheduled
-		// unwind with a nil execErr while the earlier stopMoreWork cause sticks;
-		// the blocks queued beyond the coalesce point are expected leftovers, and
-		// flagging them would fire a second, wrong UnwindTo.
+		// A batch boundary deliberately cancels queued follow-on blocks.
 		ectx, cancel := context.WithCancelCause(context.Background())
 		cancel(&stopCause{block: 5, kind: stopMoreWork})
 		require.NoError(t, withPending().checkBlocksDrained(context.Background(), ectx, nil))

@@ -35,34 +35,15 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 )
 
-// TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop pins the
-// error-surfacing invariant at the parallel exec/apply boundary: a failure that
-// hits executeBlocks before it dispatches any block must reach the stage as a
-// hard error, never be masked as ErrLoopExhausted.
-//
-// When executeBlocks fails pre-dispatch (a snapshot step-misalignment guard, a
-// missing/nil block, or a BAL decode error — here injected by the chaos monkey),
-// no block is dispatched: the apply loop returns ErrLoopExhausted{To:0} while
-// pe.wait() returns the real error. If those are merged so that
-// errors.Is(_, &ErrLoopExhausted{}) stays true, sync.go:runStage classifies the
-// result as "more work" (moreWork=true) and PipelineExecutor.RunLoop's
-// `for hasMore` re-runs Execution forever with zero progress and nothing logged.
-//
-// The test drives the real parallel executor (ExecV3, parallel=true) through the
-// injected failure and asserts the surfaced error is the real one and is not
-// classified as ErrLoopExhausted — the exact property that keeps runStage from
-// looping.
+// A pre-dispatch failure must surface as a hard error. Classifying it as
+// ErrLoopExhausted would make the stage retry without progress.
 func TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop(t *testing.T) {
 	ctx := context.Background()
 
-	// A real 1-block chain gives a fully consistent committed tip (block 1) with
-	// real txNums for blocks 0 and 1 — chaos stays disarmed for this insert.
 	m := execmoduletester.New(t)
 	require.NoError(t, m.InsertChain(makeBlockChain(m.Genesis, 1, m, canonicalSeed)))
 
-	// Give ExecV3 a block to execute past the committed tip. The pre-dispatch
-	// fault fires before block 2 is read, so only its txNum is needed — no
-	// header or body.
+	// Only tx-number metadata is needed because the fault precedes the block read.
 	const maxBlockNum = uint64(2)
 	setupTx, err := m.DB.BeginTemporalRw(ctx)
 	require.NoError(t, err)
@@ -78,9 +59,6 @@ func TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop(t *testin
 
 	err = runParallelExecV3(t, m, maxBlockNum)
 
-	// The fix must surface the injected error. Classified as ErrLoopExhausted
-	// instead, sync.go:runStage returns moreWork=true and PipelineExecutor.RunLoop
-	// re-runs Execution forever with zero progress.
 	require.ErrorIs(t, err, chaosErr,
 		"the pre-dispatch failure must surface as a hard error, wrapping the original")
 	var exhausted *stagedsync.ErrLoopExhausted
@@ -88,10 +66,8 @@ func TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop(t *testin
 		"pre-dispatch failure classified as ErrLoopExhausted → runStage loops forever with zero progress")
 }
 
-// tipWithUnexecutedBlock2 commits block 1 through the insert pipeline, then
-// stores block 2 raw (header, body, canonical hash, txNums) WITHOUT executing
-// it: ExecV3 gets a real block to dispatch past the committed tip, and the
-// dispatch itself cannot fail and mask the fault under test.
+// tipWithUnexecutedBlock2 creates a committed block-1 tip and stores block 2
+// without executing it, giving fault-injection tests real work to dispatch.
 func tipWithUnexecutedBlock2(t *testing.T) (*execmoduletester.ExecModuleTester, *types.Block) {
 	t.Helper()
 	ctx := context.Background()
@@ -114,8 +90,7 @@ func tipWithUnexecutedBlock2(t *testing.T) (*execmoduletester.ExecModuleTester, 
 	return m, b2
 }
 
-// runParallelExecV3 drives the real parallel executor from the committed tip
-// (block 1) to maxBlockNum, with the flag half of the chaos gate enabled.
+// runParallelExecV3 runs one parallel execution batch with chaos hooks enabled.
 func runParallelExecV3(t *testing.T, m *execmoduletester.ExecModuleTester, maxBlockNum uint64) error {
 	t.Helper()
 	ctx := context.Background()
@@ -144,16 +119,9 @@ func runParallelExecV3(t *testing.T, m *execmoduletester.ExecModuleTester, maxBl
 	return stagedsync.ExecV3(ctx, s, nil /*Unwinder*/, execCfg, doms, rwTx, true /*parallel*/, maxBlockNum, m.Log)
 }
 
-// TestParallelExec_WorkerPoolDeath_SurfacesInsteadOfHanging pins the worker-pool
-// half of the error-surfacing invariant: when the OCC workers die (a worker
-// panic — here injected by the chaos monkey at worker start), the batch must
-// terminate with the worker's error, not starve. Without the worker pool joined
-// into the executor errgroup, dead workers cancel only their own pool context:
-// dispatched tasks are never consumed, the exec loop waits forever for results,
-// and ExecV3 hangs — on a regression this test fails via the suite timeout with
-// a goroutine dump showing the starved exec loop.
+// A worker-pool failure must cancel the executor and surface instead of leaving
+// the exec loop waiting for results.
 func TestParallelExec_WorkerPoolDeath_SurfacesInsteadOfHanging(t *testing.T) {
-	// The armed fault kills each worker at Run entry, before it consumes a task.
 	m, b2 := tipWithUnexecutedBlock2(t)
 
 	chaosErr := errors.New("chaos monkey: simulated worker panic")
@@ -169,12 +137,8 @@ func TestParallelExec_WorkerPoolDeath_SurfacesInsteadOfHanging(t *testing.T) {
 		"worker-pool death classified as ErrLoopExhausted → runStage retries forever with zero progress")
 }
 
-// TestParallelExec_ApplyLoopPanic_SurfacesInsteadOfCommitting pins the apply
-// side of the panic-surfacing invariant: a recovered apply-loop panic must fail
-// the batch. The apply loop owns post-execution validation while the exec loop
-// and calculator complete state and commitment on their own, so a swallowed
-// apply panic looks like a clean batch — checkBlocksDrained sees a fully
-// drained map — and unvalidated blocks advance the stage as success.
+// A recovered apply-loop panic must fail the batch because the apply loop owns
+// post-execution validation.
 func TestParallelExec_ApplyLoopPanic_SurfacesInsteadOfCommitting(t *testing.T) {
 	m, b2 := tipWithUnexecutedBlock2(t)
 
@@ -188,11 +152,8 @@ func TestParallelExec_ApplyLoopPanic_SurfacesInsteadOfCommitting(t *testing.T) {
 		"a recovered apply-loop panic must fail the batch, not commit unvalidated blocks")
 }
 
-// TestParallelExec_ExecLoopPanic_SurfacesInsteadOfRetrying pins the exec side:
-// a recovered exec-loop panic must fail the batch. A panic before any block is
-// scheduled leaves pe.blockExecutors empty, so checkBlocksDrained cannot catch
-// it; the apply loop's close fallback then manufactures a no-cause
-// ErrLoopExhausted and runStage retries forever with zero progress.
+// A recovered exec-loop panic must surface instead of looking like a resumable
+// empty batch.
 func TestParallelExec_ExecLoopPanic_SurfacesInsteadOfRetrying(t *testing.T) {
 	m, b2 := tipWithUnexecutedBlock2(t)
 

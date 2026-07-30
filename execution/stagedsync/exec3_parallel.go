@@ -368,8 +368,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	var lastProgress commitment.CommitProgress
 
 	execErr := pe.runApplyLoop(execStage.LogPrefix(), applyResults, rootResults, func() (err error) {
-		// Test-only chaos injection (gated by the ChaosMonkey flag): reproduce
-		// a panic in the apply loop.
 		if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
 			chaos_monkey.ApplyLoopPanic()
 		}
@@ -1024,8 +1022,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		}
 	}()
 
-	// Test-only chaos injection (gated by the ChaosMonkey flag): reproduce
-	// a panic in the exec loop.
 	if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
 		chaos_monkey.ExecLoopPanic()
 	}
@@ -1714,9 +1710,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		return execLoopCtx, execLoopCtxCancel, err
 	}
 
-	// The worker pool joins the executor group: a real worker failure cancels
-	// execLoopCtx (unblocking the exec loop's result wait) and surfaces through
-	// pe.wait, instead of starving the batch with its error discarded.
+	// Join worker failures into the executor group so they cancel stalled consumers.
 	pe.execLoopGroup.Go(func() error {
 		return joinWorkers(pe.waitWorkers)
 	})
@@ -1739,9 +1733,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	}, nil
 }
 
-// joinWorkers turns the worker pool's join into an executor-group member: a
-// real worker failure (a panic surfaced as an error) cancels the group and
-// surfaces through pe.wait, while routine cancellation is not an error.
+// joinWorkers reports real worker failures and suppresses cancellation-only exits.
 func joinWorkers(waitWorkers func() error) error {
 	if err := common.NilIfCanceled(waitWorkers()); err != nil {
 		return fmt.Errorf("worker pool: %w", err)
@@ -1749,11 +1741,9 @@ func joinWorkers(waitWorkers func() error) error {
 	return nil
 }
 
-// wait joins the executor group — exec loop, block dispatch, worker pool — and
-// classifies the outcome: a canceled group is routine teardown (execImpl cancels
-// the executor on every exit), a real error surfaces even during shutdown.
-// Teardown is deterministic — every producer honours cancellation and the apply
-// loop drains to channel close — so the join needs no deadline.
+// wait joins every executor goroutine. Cancellation-only results are routine
+// teardown; all other errors surface. Result consumers drain to channel close,
+// allowing mandatory terminal sends to finish without a deadline.
 func (pe *parallelExecutor) wait() error {
 	if pe.execLoopGroup == nil {
 		return nil
@@ -1761,11 +1751,8 @@ func (pe *parallelExecutor) wait() error {
 	return common.NilIfCanceled(pe.execLoopGroup.Wait())
 }
 
-// reconcileExecAndWaitErr merges the apply-loop verdict with pe.wait's. A real
-// wait error supersedes ErrLoopExhausted and apply-side cancellations — joining
-// would leave the aggregate classified as resumable/canceled and a fatal exec
-// error silently dropped; a canceled wait is routine teardown (execImpl cancels
-// the executor group on every exit) and never overrides execErr.
+// reconcileExecAndWaitErr makes real wait errors authoritative over resumable
+// or cancellation-only apply results. Independent real errors are preserved.
 func reconcileExecAndWaitErr(execErr, waitErr error) error {
 	if waitErr = common.NilIfCanceled(waitErr); waitErr == nil {
 		return execErr
@@ -2384,14 +2371,11 @@ type blockExecutor struct {
 	blockStateCache *state.BlockStateCache
 }
 
-// sendResult fans out an applyResult to both the apply loop and
-// the commitment calculator. Blocks if either channel is full.
-// Channels may be closed by executeBlocks — recover from panic.
+// sendResult fans out an applyResult to the apply loop and commitment
+// calculator. The exec loop owns both channel closures.
 func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeliver bool) (err error) {
 	defer func() {
-		// "send on closed channel" panics here are benign — executeBlocks
-		// finished and closed applyResults/commitResults during batch
-		// shutdown. Re-raise anything else so real bugs still surface.
+		// Treat a closed result channel as cancellation and re-raise other panics.
 		if rec := recover(); rec != nil {
 			if e, ok := rec.(runtime.Error); ok && strings.Contains(e.Error(), "send on closed channel") {
 				err = context.Canceled
