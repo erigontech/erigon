@@ -224,11 +224,16 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	if err != nil {
 		return nil, err
 	}
-	traces, wdiffs, syscall, closeState, err := api.callBlock(ctx, tx, block, []string{TraceTypeTrace}, *gasBailOut /* gasBailOut */, cfg, traceConfig)
+	var rewards []protocolrules.Reward
+	traces, wdiffs, err := api.callBlock(ctx, tx, block, []string{TraceTypeTrace}, *gasBailOut /* gasBailOut */, cfg, traceConfig,
+		func(syscall protocolrules.SystemCall) error {
+			var err error
+			rewards, err = api.engine().CalculateRewards(cfg, block.Header(), block.Uncles(), syscall)
+			return err
+		})
 	if err != nil {
 		return nil, err
 	}
-	defer closeState() // syscall below keeps using the state, so close only at return
 
 	out := make([]ParityTrace, 0, len(traces))
 	for txno, trace := range traces {
@@ -240,11 +245,6 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 			pt.TransactionPosition = &txpos
 			out = append(out, *pt)
 		}
-	}
-
-	rewards, err := api.engine().CalculateRewards(cfg, block.Header(), block.Uncles(), syscall)
-	if err != nil {
-		return nil, err
 	}
 
 	blockHash := block.Hash()
@@ -773,7 +773,11 @@ func (api *TraceAPIImpl) callBlock(
 	gasBailOut bool,
 	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
-) ([]*TraceCallResult, []withdrawalBalanceDiff, protocolrules.SystemCall, func(), error) {
+	// withSyscall, when non-nil, runs against the block's state before it is
+	// closed. Callers needing a SystemCall must use it: the state does not
+	// outlive this call.
+	withSyscall func(protocolrules.SystemCall) error,
+) ([]*TraceCallResult, []withdrawalBalanceDiff, error) {
 	blockNumber := block.NumberU64()
 	pNo := blockNumber
 	if pNo > 0 {
@@ -785,7 +789,7 @@ func (api *TraceAPIImpl) callBlock(
 	engine := api.engine()
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
 	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, err
 	}
 	rules := blockCtx.Rules(cfg)
 	signer := types.MakeSigner(cfg, blockCtx.BlockNumber, blockCtx.Time)
@@ -800,7 +804,7 @@ func (api *TraceAPIImpl) callBlock(
 		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
 
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, err
 		}
 		if ok {
 			borStateSyncTxn = bortypes.NewBorTransaction()
@@ -819,12 +823,12 @@ func (api *TraceAPIImpl) callBlock(
 
 	err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, err
 	}
 	stateCache := shards.NewStateCache(
 		32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
@@ -832,22 +836,16 @@ func (api *TraceAPIImpl) callBlock(
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
-	// The successful return hands ownership to the caller via closeState.
-	stateHandedOff := false
-	defer func() {
-		if !stateHandedOff {
-			ibs.Close()
-		}
-	}()
+	defer ibs.Close()
 
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, nil)
 	logger := log.New("trace_filtering")
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, err
 	}
 	if err = ibs.CommitBlock(rules, cachedWriter); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	msgs := make([]*types.Message, len(txs))
@@ -863,7 +861,7 @@ func (api *TraceAPIImpl) callBlock(
 			txnHash = txn.Hash()
 			msg, err = txn.AsMessage(*signer, &blockCtx.BaseFee, rules)
 			if err != nil {
-				return nil, nil, nil, nil, fmt.Errorf("convert txn into msg: %w", err)
+				return nil, nil, fmt.Errorf("convert txn into msg: %w", err)
 			}
 		}
 
@@ -913,7 +911,7 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	if cmErr != nil {
-		return nil, nil, nil, nil, cmErr
+		return nil, nil, cmErr
 	}
 
 	// Collect balance diffs for beacon chain withdrawals; prev is read only when stateDiff is requested.
@@ -926,11 +924,11 @@ func (api *TraceAPIImpl) callBlock(
 			var err error
 			prev, err = ibs.GetBalance(addr)
 			if err != nil {
-				return nil, nil, nil, nil, err
+				return nil, nil, err
 			}
 			existed, err = ibs.Exist(addr)
 			if err != nil {
-				return nil, nil, nil, nil, err
+				return nil, nil, err
 			}
 		}
 		var amountWei uint256.Int
@@ -948,8 +946,12 @@ func (api *TraceAPIImpl) callBlock(
 		return ret, err
 	}
 
-	stateHandedOff = true
-	return traces, wdiffs, syscall, ibs.Close, nil
+	if withSyscall != nil {
+		if err := withSyscall(syscall); err != nil {
+			return nil, nil, err
+		}
+	}
+	return traces, wdiffs, nil
 }
 
 type blockTraceTxJob struct {
@@ -1044,58 +1046,62 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 					return
 				}
 
-				// Copy is needed since each worker has its own independent state.
-				// workerReader reads state up to but not including the current transaction.
-				workerReader := state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(job.txIndex))
-				workerIbs := state.New(workerReader)
+				// One traced transaction, extracted so its state is closed on every
+				// exit path. A non-nil error aborts this worker.
+				if err := func() error {
+					// Copy is needed since each worker has its own independent state.
+					// workerReader reads state up to but not including the current transaction.
+					workerReader := state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(job.txIndex))
+					workerIbs := state.New(workerReader)
+					defer workerIbs.Close()
 
-				traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: job.callParam.txHash}
+					traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: job.callParam.txHash}
 
-				var ot OeTracer
-				ot.config = oeConfig
-				ot.compat = api.compatibility
-				ot.r = traceResult
-				ot.idx = []string{fmt.Sprintf("%d-", job.txIndex)}
-				// TraceTypeTrace is always active here; initialise traceAddr unconditionally.
-				ot.traceAddr = []int{}
+					var ot OeTracer
+					ot.config = oeConfig
+					ot.compat = api.compatibility
+					ot.r = traceResult
+					ot.idx = []string{fmt.Sprintf("%d-", job.txIndex)}
+					// TraceTypeTrace is always active here; initialise traceAddr unconditionally.
+					ot.traceAddr = []int{}
 
-				tracer := ot.Tracer()
-				vmConfig := vm.Config{Tracer: tracer.Hooks}
+					tracer := ot.Tracer()
+					vmConfig := vm.Config{Tracer: tracer.Hooks}
 
-				workerIbs.SetTxContext(blockCtx.BlockNumber, job.txIndex)
-				workerIbs.SetHooks(tracer.Hooks)
+					workerIbs.SetTxContext(blockCtx.BlockNumber, job.txIndex)
+					workerIbs.SetHooks(tracer.Hooks)
 
-				txCtx := protocol.NewEVMTxContext(job.msg)
-				evm := vm.NewEVM(blockCtx, txCtx, workerIbs, chainConfig, vmConfig)
-				gp := new(protocol.GasPool).AddGas(job.msg.Gas()).AddBlobGas(job.msg.BlobGas())
+					txCtx := protocol.NewEVMTxContext(job.msg)
+					evm := vm.NewEVM(blockCtx, txCtx, workerIbs, chainConfig, vmConfig)
+					gp := new(protocol.GasPool).AddGas(job.msg.Gas()).AddBlobGas(job.msg.BlobGas())
 
-				if tracer.Hooks.OnTxStart != nil {
-					tracer.Hooks.OnTxStart(evm.GetVMContext(), job.txn, job.msg.From())
-				}
-
-				execResult, execErr := protocol.ApplyMessage(evm, job.msg, gp, true /* refunds */, gasBailout, engine)
-				if execErr != nil {
-					if tracer.Hooks.OnTxEnd != nil {
-						tracer.Hooks.OnTxEnd(nil, execErr)
+					if tracer.Hooks.OnTxStart != nil {
+						tracer.Hooks.OnTxStart(evm.GetVMContext(), job.txn, job.msg.From())
 					}
-					workerIbs.Close()
-					errOnce.Do(func() { firstErr = fmt.Errorf("txIndex %d: %w", job.txIndex, execErr); cancel() })
-					return
-				}
 
-				if tracer.Hooks.OnTxEnd != nil {
-					tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
-				}
+					execResult, execErr := protocol.ApplyMessage(evm, job.msg, gp, true /* refunds */, gasBailout, engine)
+					if execErr != nil {
+						if tracer.Hooks.OnTxEnd != nil {
+							tracer.Hooks.OnTxEnd(nil, execErr)
+						}
+						return fmt.Errorf("txIndex %d: %w", job.txIndex, execErr)
+					}
 
-				if err := workerIbs.FinalizeTx(chainRules, noop); err != nil {
-					workerIbs.Close()
+					if tracer.Hooks.OnTxEnd != nil {
+						tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
+					}
+
+					if err := workerIbs.FinalizeTx(chainRules, noop); err != nil {
+						return err
+					}
+
+					traceResult.Output = bytes.Clone(execResult.ReturnData)
+					results[job.txIndex] = traceResult
+					return nil
+				}(); err != nil {
 					errOnce.Do(func() { firstErr = err; cancel() })
 					return
 				}
-
-				traceResult.Output = bytes.Clone(execResult.ReturnData)
-				results[job.txIndex] = traceResult
-				workerIbs.Close()
 			}
 		})
 	}
