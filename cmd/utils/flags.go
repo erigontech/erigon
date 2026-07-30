@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -2017,6 +2018,10 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 
 	if ctx.Bool(ExperimentalBinCommitmentFlag.Name) {
 		cfg.ExperimentalBinCommitment = true
+		// The variant has to be process-wide before any genesis is computed here:
+		// dev mode derives the beacon Eth1Data from the EL genesis hash while still
+		// setting up the config, long before the backend applies the flag.
+		statecfg.ExperimentalBinCommitment = true
 	}
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)

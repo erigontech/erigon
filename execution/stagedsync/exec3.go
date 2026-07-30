@@ -113,6 +113,16 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, curr
 // Deferring cuts re-org validation overhead; the parallel apply path also needs
 // Flush() to carry the pending update across sync cycles. The bin trie has no
 // deferred-update path and refuses the request, so it stays on the inline path.
+// executeInParallel picks the executor. The parallel executor's normalized write
+// set produces a different bin-trie root than the serial one for the same block,
+// so the bin variant stays on the serial executor until that is resolved.
+func executeInParallel(variant commitment.TrieVariant, exec3Parallel, experimentalBAL bool) bool {
+	if variant == commitment.VariantBinPatriciaTrie {
+		return false
+	}
+	return exec3Parallel || experimentalBAL
+}
+
 func deferCommitmentUpdates(variant commitment.TrieVariant, isForkValidation, parallel, isApplyingBlocks bool) bool {
 	if variant == commitment.VariantBinPatriciaTrie {
 		return false

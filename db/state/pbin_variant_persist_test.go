@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -167,7 +168,7 @@ func TestPBinVariantUnknownVariantRefused(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestPBinVariantFreshWithDownloaderCarriesBinWithoutWrite(t *testing.T) {
+func TestPBinVariantFreshWithDownloaderPersistsBin(t *testing.T) {
 	withVariantFlags(t, true, false, false)
 	dirs := datadir.New(t.TempDir())
 
@@ -175,11 +176,39 @@ func TestPBinVariantFreshWithDownloaderCarriesBinWithoutWrite(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, TrieVariantBin, settings.TrieVariantName())
 
-	_, err = os.Stat(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE))
-	require.True(t, os.IsNotExist(err), "fresh+downloader must leave erigondb.toml for the downloader")
+	written, err := readErigonDBSettings(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE))
+	require.NoError(t, err, "a bin datadir must persist its variant at first start, downloader or not")
+	require.Equal(t, TrieVariantBin, written.TrieVariantName())
+	require.Equal(t, uint64(config3.DefaultStepSize), written.StepSize)
+}
 
-	// A later downloader-delivered hex toml must be refused under the bin
-	// process, not silently adopted.
+// A chain with no published snapshot hashes gets an empty preverified.toml
+// committed by the snapshots stage. Without a persisted variant that reads as a
+// legacy datadir at the next resolve, and the bin run is refused on its own
+// fresh datadir.
+func TestPBinVariantSurvivesEmptyPreverifiedFromSnapshotsStage(t *testing.T) {
+	withVariantFlags(t, true, false, false)
+	dirs := datadir.New(t.TempDir())
+
+	_, err := ResolveErigonDBSettings(dirs, log.New(), false)
+	require.NoError(t, err)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), []byte(""), 0644))
+
+	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
+	require.NoError(t, err)
+	require.Equal(t, TrieVariantBin, settings.TrieVariantName())
+}
+
+func TestPBinVariantFreshWithDownloaderRefusesDeliveredHexToml(t *testing.T) {
+	withVariantFlags(t, true, false, false)
+	dirs := datadir.New(t.TempDir())
+
+	_, err := ResolveErigonDBSettings(dirs, log.New(), false)
+	require.NoError(t, err)
+
+	// A downloader-delivered hex toml overwrites the persisted bin one; the next
+	// resolve must refuse rather than silently adopt hex.
 	writeToml(t, dirs, "step_size = 100\nsteps_in_frozen_file = 8\n")
 	_, err = ResolveErigonDBSettings(dirs, log.New(), false)
 	require.Error(t, err)

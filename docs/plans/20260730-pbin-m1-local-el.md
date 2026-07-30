@@ -351,13 +351,21 @@ Production keeps Keccak-256. This task only makes the **test** path run the whol
 
 **Files:**
 - Create: `docs/pbin-m1b-smoke.md`
+- Modify: `db/state/erigondb_settings.go` (➕ persist the variant at first start even with a downloader)
+- Modify: `db/state/pbin_variant_persist_test.go` (➕)
+- Modify: `cmd/utils/flags.go` (➕ the variant must reach statecfg before dev computes genesis)
+- Modify: `execution/stagedsync/exec3.go`, `execution/stagedsync/stage_execute.go` (➕ `executeInParallel`)
+- Create: `execution/stagedsync/pbin_parallel_exec_test.go` (➕)
 
-- [ ] verify genesis block 0 computes a binary root and the dev beacon accepts it
-- [ ] run a local `--chain=dev` node to a few blocks, deploying and calling a contract
-- [ ] verify a restart resumes at the same root
-- [ ] record the observed genesis root and block roots in `docs/pbin-m1b-smoke.md` with the exact command line
-- [ ] verify `integration commitment rebuild` on the resulting datadir reproduces the same roots
-- [ ] run the package suite — must pass before task 15
+- [x] verify genesis block 0 computes a binary root and the dev beacon accepts it — bin genesis root `a314dd2e…` / block hash `a6d15d43…` vs hex `eed1da97…` / `3aa9a433…`; the beacon takes `Eth1Data` from the EL genesis hash and produced from slot 1. Block 0 already carries the deposit contract's 206 code chunks (128 header + 78 overflow), so Task 13 is exercised at genesis
+- [x] run a local `--chain=dev` node to a few blocks, deploying and calling a contract — reached head 241; deployed a storage setter (call → slot 0 = `0x2a`) and a 4983-byte contract (161 chunks, 33 in CODE_ZONE overflow at runtime), both verified through RPC. Zero `Wrong trie root` with the header check at its default ON
+- [x] verify a restart resumes at the same root — flagless restart re-adopts the persisted `trie_variant = 'bin'`; roots identical across the restart, including over a datadir with collated **and merged** commitment files. ⚠️ block *production* does not always resume: Caplin's forward sync stalls after a restart — reproduced identically on hex, so it is a dev-mode CL limitation, not a trie one
+- [x] record the observed genesis root and block roots in `docs/pbin-m1b-smoke.md` with the exact command line
+- [x] verify `integration commitment rebuild` on the resulting datadir reproduces the same roots — ⚠️ **it cannot be verified on a dev datadir, on either variant.** The rebuild itself runs to completion under bin (adopts the persisted variant, rebuilds all 3 shards from the pbin state files), but the per-shard roots it prints are partial, and its documented follow-up `integration stage_exec --reset` panics on `--chain=dev` (`readGenesis`: unknown chain spec). Without it, the first post-rebuild block reports a wrong root **on hex exactly as on bin**, so the check is not variant-discriminating. The forward-vs-rebuild oracle for pbin stays the M1a gate
+- [x] ➕ **bug found and fixed: a fresh bin datadir was refused on its own second resolve.** The snapshots stage commits an empty `preverified.toml` for a chain with no published hashes, which `ResolveErigonDBSettings` reads as a legacy datadir; with the variant not yet persisted (first start + downloader deferred the write) the bin run was refused on the datadir it had just created. A bin datadir now persists its variant at first start whatever the downloader does — nothing publishes a bin `erigondb.toml` for it to pre-empt. `TestPBinVariantFreshWithDownloaderPersistsBin`, `TestPBinVariantSurvivesEmptyPreverifiedFromSnapshotsStage`; `…RefusesDeliveredHexToml` keeps the delivered-hex refusal
+- [x] ➕ **bug found and fixed: the dev beacon pinned the hex genesis.** Dev mode computes the EL genesis hash for `Eth1Data` while still assembling the config, long before the backend copies the flag into `statecfg`, so the CL asked for a genesis hash the EL never wrote. The flag now reaches `statecfg` where the CLI is read
+- [x] ➕ ⚠️ **parallel execution gated off under bin.** The parallel executor's normalized write set roots differently than the same block executed serially — block 0 gave `e557bca8…` against the genesis root `a314dd2e…`, while hex agrees on both executors, so the difference is something only the bin trie hashes (code chunks / `code_size` are the candidates; not root-caused). `executeInParallel` keeps bin on the serial executor rather than leaving a wrong-root path reachable, matching Task 8's refuse-don't-degrade rule. `TestPBinExecuteInParallelExcludesBin`. **Open for M2**
+- [x] run the package suite — must pass before task 15
 
 ### Task 15: Verify acceptance criteria
 

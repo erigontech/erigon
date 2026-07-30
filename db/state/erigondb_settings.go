@@ -183,7 +183,11 @@ func ResolveErigonDBSettingsWithRefsDefault(dirs datadir.Dirs, logger log.Logger
 	if err := reconcileTrieVariant(settings, logger); err != nil {
 		return nil, err
 	}
-	if noDownloader {
+	// A bin datadir persists its variant right away even with a downloader running:
+	// no published snapshot set carries a bin erigondb.toml, and leaving the variant
+	// unpersisted lets the empty preverified.toml that the snapshots stage commits for
+	// a chain without published hashes read as a legacy datadir at the next resolve.
+	if noDownloader || trieVariant != nil {
 		// No downloader to provide the real file — write defaults to disk now.
 		logger.Info("Initializing erigondb.toml with DEFAULT settings (nodownloader)",
 			"step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile,
