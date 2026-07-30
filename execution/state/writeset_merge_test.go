@@ -186,4 +186,41 @@ func BenchmarkWriteSetMergeInto(b *testing.B) {
 	}
 }
 
+// The apply-loop fee-merge pipeline around the merge itself: record the tx
+// write set into VersionedIO, merge the calcFees output, re-record, flush the
+// merged set into the VersionMap. Build cost of the inputs is identical in
+// both variants and included in the measured loop, since MergeInto consumes
+// next.
+func benchVersionedFeeMerge(b *testing.B, addrs, slots int, merge func(prev, next *WriteSet) *WriteSet) {
+	io := NewVersionedIO(1)
+	vm := NewVersionMap(nil)
+	version := Version{TxIndex: 0, Incarnation: 1}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		txOut, tip := buildMergeBenchSets(addrs, slots)
+		io.RecordWrites(version, txOut)
+		merged := merge(txOut, tip)
+		io.RecordWrites(version, merged)
+		vm.FlushVersionedWrites(merged, true, "")
+		sinkWS = merged
+	}
+}
+
+func BenchmarkVersionedFeeMergeClone(b *testing.B) {
+	for _, size := range []struct{ addrs, slots int }{{4, 2}, {16, 8}} {
+		b.Run(fmt.Sprintf("addrs=%d/slots=%d", size.addrs, size.slots), func(b *testing.B) {
+			benchVersionedFeeMerge(b, size.addrs, size.slots, (*WriteSet).Merge)
+		})
+	}
+}
+
+func BenchmarkVersionedFeeMergeInto(b *testing.B) {
+	for _, size := range []struct{ addrs, slots int }{{4, 2}, {16, 8}} {
+		b.Run(fmt.Sprintf("addrs=%d/slots=%d", size.addrs, size.slots), func(b *testing.B) {
+			benchVersionedFeeMerge(b, size.addrs, size.slots, (*WriteSet).MergeInto)
+		})
+	}
+}
+
 var sinkWS *WriteSet
