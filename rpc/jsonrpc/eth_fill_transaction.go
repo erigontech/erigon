@@ -41,6 +41,11 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	if args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil) {
 		return nil, errors.New("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")
 	}
+	// A set-code transaction has no gasPrice field, so honouring both would mean
+	// silently reinterpreting gasPrice as maxFeePerGas and maxPriorityFeePerGas.
+	if args.GasPrice != nil && args.AuthorizationList != nil {
+		return nil, errors.New("both gasPrice and authorizationList specified")
+	}
 	if args.MaxFeePerBlobGas != nil && args.MaxFeePerBlobGas.ToInt().Sign() == 0 {
 		return nil, errors.New("maxFeePerBlobGas, if specified, must be non-zero")
 	}
@@ -91,6 +96,10 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		} else if n > params.MaxBlobsPerTxn {
 			return nil, fmt.Errorf("too many blobs in transaction (have=%d, max=%d)", n, params.MaxBlobsPerTxn)
 		}
+	}
+
+	if args.AuthorizationList != nil && len(args.AuthorizationList) == 0 {
+		return nil, errors.New("need at least one authorization for a set-code transaction")
 	}
 
 	if args.To == nil {
