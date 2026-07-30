@@ -1347,6 +1347,30 @@ func (s *WriteSet) ReleaseAndReset() {
 	*s = WriteSet{}
 }
 
+// ReleaseMaps returns the map containers to their pools without releasing the
+// VersionedWrite values, which stay owned by GC — they may be shared with other
+// sets after MergeInto. Use ReleaseAndReset only for sets whose VWs came from
+// the vwPools and are exclusively owned.
+func (s *WriteSet) ReleaseMaps() {
+	if s == nil {
+		return
+	}
+	wsMapPoolAddress.put(s.address)
+	wsMapPoolBalance.put(s.balance)
+	wsMapPoolNonce.put(s.nonce)
+	wsMapPoolIncarnation.put(s.incarnation)
+	wsMapPoolSelfDestruct.put(s.selfDestruct)
+	wsMapPoolCreateContract.put(s.createContract)
+	wsMapPoolCode.put(s.code)
+	wsMapPoolCodeHash.put(s.codeHash)
+	wsMapPoolCodeSize.put(s.codeSize)
+	for _, inner := range s.storage {
+		wsPutStorageInner(inner)
+	}
+	wsPutStorageOuter(s.storage)
+	*s = WriteSet{}
+}
+
 // Per-path typed delete methods.  Direct map access, no internal switch
 // (mirrors the Set/Get/update* shape).  Each Del* releases the displaced
 // *VersionedWrite[T] back to its pool — keeps the pool cycle closed so
@@ -2224,6 +2248,15 @@ func (io *VersionedIO) WriteCount() (count int64) {
 	}
 
 	return count
+}
+
+// ReleaseOutputMaps returns every recorded write set's map containers to their
+// pools and empties the slots. Only for a VersionedIO whose last reader is
+// done; the shared VersionedWrite values are left to GC.
+func (io *VersionedIO) ReleaseOutputMaps() {
+	for _, output := range io.outputs {
+		output.ReleaseMaps()
+	}
 }
 
 func (io *VersionedIO) ReadCount() (count int64) {

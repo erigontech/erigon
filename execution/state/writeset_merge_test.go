@@ -186,6 +186,52 @@ func BenchmarkWriteSetMergeInto(b *testing.B) {
 	}
 }
 
+// ReleaseMaps returns the map containers to their pools without touching the
+// VersionedWrite values, which may be shared with other sets after MergeInto.
+func TestWriteSetReleaseMaps(t *testing.T) {
+	a := mergeAddr(0xa1)
+	k1 := mergeKey(0x01)
+
+	prev, next := mergeIntoFixture()
+	merged := prev.MergeInto(next)
+
+	prev.ReleaseMaps()
+	assert.True(t, prev.IsEmpty(), "released set must be empty")
+
+	// Shared VWs must survive the release of the other set's maps.
+	bw, ok := merged.balance[a]
+	require.True(t, ok)
+	assert.Equal(t, *uint256.NewInt(100), bw.Val)
+	sw, ok := merged.storage[a][k1]
+	require.True(t, ok)
+	assert.Equal(t, *uint256.NewInt(111), sw.Val)
+
+	// A released set must be reusable.
+	prev.SetBalance(a, balanceWrite(a, 7, 2))
+	bw, ok = prev.balance[a]
+	require.True(t, ok)
+	assert.Equal(t, *uint256.NewInt(7), bw.Val)
+
+	// Double release and nil-map release must not panic.
+	prev.ReleaseMaps()
+	prev.ReleaseMaps()
+}
+
+func TestVersionedIOReleaseOutputMaps(t *testing.T) {
+	io := NewVersionedIO(2)
+	ws, _ := mergeIntoFixture()
+	io.RecordWrites(Version{TxIndex: 0}, ws)
+
+	require.NotZero(t, io.WriteCount())
+	io.ReleaseOutputMaps()
+	assert.Zero(t, io.WriteCount(), "slots must be empty after release")
+	assert.True(t, io.WriteSet(0).IsEmpty())
+
+	// Empty and already-released IO must not panic.
+	io.ReleaseOutputMaps()
+	NewVersionedIO(1).ReleaseOutputMaps()
+}
+
 // The apply-loop fee-merge pipeline around the merge itself: record the tx
 // write set into VersionedIO, merge the calcFees output, re-record, flush the
 // merged set into the VersionMap. Build cost of the inputs is identical in
