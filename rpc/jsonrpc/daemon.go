@@ -101,6 +101,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(base, db, eth, NewDebugApiConfig(cfg))
+	debugImpl.witnessCache = witnessCache
 	traceImpl := NewTraceAPI(base, db, NewTraceApiConfig(cfg))
 	web3Impl := NewWeb3APIImpl(eth)
 	adminImpl := NewAdminAPI(eth)
