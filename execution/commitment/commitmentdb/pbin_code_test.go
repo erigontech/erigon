@@ -84,11 +84,10 @@ func TestPBinSharedDomainsCommitsCodeBearingAccount(t *testing.T) {
 	require.NotEqual(t, withShortCode, withCode)
 }
 
-// TestPBinSharedDomainsRefusesCodeBeyondHeader pins the M1 boundary at the
-// domain layer: chunks past the account header belong in the code zone, and
-// until that lands a contract needing them is refused rather than committed
-// short.
-func TestPBinSharedDomainsRefusesCodeBeyondHeader(t *testing.T) {
+// TestPBinSharedDomainsCommitsCodeBeyondHeader is the domain-layer half of the
+// code zone: a contract whose code outgrows the account header commits, and the
+// chunks past the header are part of what it commits.
+func TestPBinSharedDomainsCommitsCodeBeyondHeader(t *testing.T) {
 	t.Parallel()
 
 	cfg := commitment.DefaultTrieConfig()
@@ -99,6 +98,15 @@ func TestPBinSharedDomainsRefusesCodeBeyondHeader(t *testing.T) {
 	sd, tx := pbinCodeSizeSharedDomains(t,
 		[]execctx.SharedDomainOption{execctx.WithTrieConfig(cfg)}, addr, pbinCodeSizeAccount(crypto.Keccak256Hash(code)), code)
 
-	_, err := sd.ComputeCommitment(t.Context(), tx, false, 0, 0, "pbin-code-overflow", nil)
-	require.ErrorIs(t, err, commitment.ErrPBinUnsupported)
+	overflowing, err := sd.ComputeCommitment(t.Context(), tx, false, 0, 0, "pbin-code-overflow", nil)
+	require.NoError(t, err)
+
+	// Dropping the one byte that spills into the code zone must change the root:
+	// the overflow chunk is committed, not silently left out.
+	header := code[:len(code)-1]
+	headerSd, headerTx := pbinCodeSizeSharedDomains(t,
+		[]execctx.SharedDomainOption{execctx.WithTrieConfig(cfg)}, addr, pbinCodeSizeAccount(crypto.Keccak256Hash(header)), header)
+	withinHeader, err := headerSd.ComputeCommitment(t.Context(), headerTx, false, 0, 0, "pbin-code-header", nil)
+	require.NoError(t, err)
+	require.NotEqual(t, withinHeader, overflowing)
 }

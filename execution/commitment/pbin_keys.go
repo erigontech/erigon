@@ -17,11 +17,13 @@
 package commitment
 
 import (
+	"encoding/binary"
 	"fmt"
 	"sync"
 
 	keccak "github.com/erigontech/fastkeccak"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -102,12 +104,21 @@ func pbinTreeKeyStorage(addr, slot []byte) []byte {
 	return c.storageKey(addr, slot)
 }
 
-// pbinTreeKeyCodeChunk returns the key for code chunk chunkID of addr
-// (eip:355-367). Chunks the account header holds share the account's own stem;
-// higher chunks are content-addressed by code hash in the code zone.
+// pbinTreeKeyCodeChunk returns the key for a code chunk the account header holds
+// (eip:355-367). Those chunks share the account's own stem; higher ones go
+// through pbinTreeKeyCodeOverflow.
 func pbinTreeKeyCodeChunk(addr []byte, chunkID int) []byte {
 	var c pbinDigestCache
 	return c.codeChunkKey(addr, chunkID)
+}
+
+// pbinTreeKeyCodeOverflow returns the code-zone key for a chunk past the account
+// header (eip:355-367). Those chunks are content-addressed by code hash, so
+// accounts running the same bytecode name the same leaves and the key cannot be
+// derived from an address at all.
+func pbinTreeKeyCodeOverflow(codeHash common.Hash, chunkID int) []byte {
+	var c pbinDigestCache
+	return c.codeOverflowKey(codeHash, chunkID)
 }
 
 // pbinKeyHasher returns a keyHasher deriving the primary leaf's tree key:
@@ -199,6 +210,23 @@ func (c *pbinDigestCache) codeChunkKey(addr []byte, chunkID int) []byte {
 		panic(fmt.Sprintf("pbin: code chunk %d lives outside the account header", chunkID))
 	}
 	return c.accountKey(addr, byte(pbinCodeOffset+chunkID))
+}
+
+// codeOverflowKey splits the chunk's overflow index into a tree index and a
+// sub-index, hashing code_hash ‖ tree_index into the code-zone stem the chunk
+// sits under. The digest is not memoized: one contract spans at most a handful
+// of tree indexes, and the cache's entries are bound to an address these keys do
+// not have.
+func (c *pbinDigestCache) codeOverflowKey(codeHash common.Hash, chunkID int) []byte {
+	if chunkID < pbinHeaderCodeChunks {
+		panic(fmt.Sprintf("pbin: code chunk %d is a header chunk, not a code-zone one", chunkID))
+	}
+	overflow := chunkID - pbinHeaderCodeChunks
+	var preimage [2 * length.Hash]byte
+	copy(preimage[:], codeHash[:])
+	binary.BigEndian.PutUint64(preimage[2*length.Hash-8:], uint64(overflow/pbinStemSubtreeWidth))
+	position := c.hash(preimage[:])
+	return pbinTreeKey(pbinCodeZone, position[:], byte(overflow%pbinStemSubtreeWidth))
 }
 
 func (c *pbinDigestCache) storageKey(addr, slot []byte) []byte {

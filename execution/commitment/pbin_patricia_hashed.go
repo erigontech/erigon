@@ -20,9 +20,9 @@
 // this engine uses Keccak-256 both for node hashing and for tree-key
 // derivation, behind pbinHasher so the suite can be swapped.
 //
-// Scope: Process over the account and storage zones, ModeDirect only. Code is
-// chunked into the account header's own chunk leaves; a contract needing more
-// than the header holds is refused until the code zone lands. Parallel mounting
+// Scope: Process over all three zones, ModeDirect only. Code is chunked into the
+// account header's chunk leaves, overflowing into the code zone where chunks are
+// content-addressed by code hash and shared between accounts. Parallel mounting
 // is out. EIP-8297 has no removal: a zeroed storage slot keeps its leaf at 32
 // zero bytes, an account removal is refused rather than guessed at, and code
 // chunks above a shortened redeploy's length stay in the tree — the tree is a
@@ -37,6 +37,7 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
+	"slices"
 	"sync"
 
 	"github.com/erigontech/erigon/common"
@@ -57,6 +58,12 @@ type PBinPatriciaHashed struct {
 
 	siblingKey  [pbinAccountKeyLength]byte // scratch for the CODE_HASH key of the account being visited
 	pendingCode pbinPendingCode
+	// overflowCode holds the run's code-zone chunks. They are content-addressed
+	// rather than keyed by address, so they neither follow the stream's order nor
+	// belong to the account that produced them, and are emitted as one sorted
+	// block once the stream leaves the code zone.
+	overflowCode []pbinOverflowChunk
+	keyDigest    pbinDigestCache
 
 	lastKey    [pbinStorageKeyLength]byte // the deepest key visited so far, which the next one must exceed
 	lastKeyLen int16
@@ -111,6 +118,7 @@ func (pph *PBinPatriciaHashed) Reset() {
 	pph.rootChecked, pph.rootTouched, pph.rootPresent = false, false, false
 	pph.rootPrev = nil
 	pph.pendingCode = pbinPendingCode{}
+	pph.overflowCode = pph.overflowCode[:0]
 	pph.lastKeyLen = 0
 }
 
@@ -119,6 +127,7 @@ func (pph *PBinPatriciaHashed) Reset() {
 // other. Production never calls it: the nil default is Keccak-256 on both.
 func (pph *PBinPatriciaHashed) setHashSuite(sum pbinHashFn) keyHasher {
 	pph.hasher.sum = sum
+	pph.keyDigest = pbinDigestCache{sum: sum}
 	return pbinKeyHasherWith(sum)
 }
 
@@ -128,6 +137,7 @@ func (pph *PBinPatriciaHashed) Release() {
 	pph.ctx = nil
 	pph.traceW = nil
 	pph.hasher.sum = nil
+	pph.keyDigest = pbinDigestCache{}
 	pph.counters = pbinCounters{}
 	pph.branchEncoder.buf = pph.branchEncoder.buf[:0]
 	pbinPool.Put(pph)
@@ -182,6 +192,9 @@ func (pph *PBinPatriciaHashed) Process(ctx context.Context, updates *Updates, lo
 	if err = pph.flushPendingCode(); err != nil {
 		return nil, fmt.Errorf("pbin: process %s: %w", logPrefix, err)
 	}
+	if err = pph.flushOverflowCode(); err != nil {
+		return nil, fmt.Errorf("pbin: process %s: %w", logPrefix, err)
+	}
 	for pph.grid.activeRows > 0 {
 		if err = pph.fold(); err != nil {
 			return nil, fmt.Errorf("pbin: final fold: %w", err)
@@ -210,6 +223,9 @@ func (pph *PBinPatriciaHashed) processKey(treeKey, plainKey []byte, stateUpdate 
 		return fmt.Errorf("%w: update for %x", errPBinDeleteUnsupported, plainKey)
 	}
 	if err := pph.flushPendingCodeBefore(treeKey); err != nil {
+		return err
+	}
+	if err := pph.flushOverflowCodeBefore(treeKey); err != nil {
 		return err
 	}
 	update := stateUpdate
@@ -267,12 +283,61 @@ func (pph *PBinPatriciaHashed) queueCode(basicDataKey, plainKey []byte, update *
 	}
 	chunks := pbinChunkifyCode(code)
 	if len(chunks) > pbinHeaderCodeChunks {
-		return fmt.Errorf("%w: %x needs %d code chunks, the account header holds %d",
-			ErrPBinUnsupported, plainKey, len(chunks), pbinHeaderCodeChunks)
+		for i := pbinHeaderCodeChunks; i < len(chunks); i++ {
+			var oc pbinOverflowChunk
+			copy(oc.key[:], pph.keyDigest.codeOverflowKey(update.CodeHash, i))
+			oc.value = chunks[i]
+			pph.overflowCode = append(pph.overflowCode, oc)
+		}
+		chunks = chunks[:pbinHeaderCodeChunks]
 	}
 	pph.pendingCode.chunks = chunks
 	copy(pph.pendingCode.stem[:], basicDataKey)
 	copy(pph.pendingCode.plainKey[:], plainKey)
+	return nil
+}
+
+// pbinOverflowChunk is one code-zone chunk waiting for its block to be emitted.
+type pbinOverflowChunk struct {
+	key   [pbinCodeKeyLength]byte
+	value [pbinValueLength]byte
+}
+
+// flushOverflowCodeBefore emits the code-zone block once the stream reaches a
+// zone above it. Nothing the stream carries is a code-zone key — the zone is
+// content-addressed and no plain key derives into it — so the block is written
+// whole, between the last account-header key and the first storage one.
+func (pph *PBinPatriciaHashed) flushOverflowCodeBefore(treeKey []byte) error {
+	if len(pph.overflowCode) == 0 || treeKey[0] <= pbinCodeZone {
+		return nil
+	}
+	return pph.flushOverflowCode()
+}
+
+func (pph *PBinPatriciaHashed) flushOverflowCode() error {
+	if len(pph.overflowCode) == 0 {
+		return nil
+	}
+	slices.SortFunc(pph.overflowCode, func(a, b pbinOverflowChunk) int { return bytes.Compare(a.key[:], b.key[:]) })
+
+	var prev *pbinOverflowChunk
+	for i := range pph.overflowCode {
+		oc := &pph.overflowCode[i]
+		// Accounts running the same bytecode share leaves (eip:352-354), so the same
+		// key twice is one chunk two accounts asked for, not a conflict.
+		if prev != nil && oc.key == prev.key {
+			if oc.value != prev.value {
+				return fmt.Errorf("pbin: code chunk %x carries two values", oc.key[:])
+			}
+			continue
+		}
+		update := Update{Flags: StorageUpdate, StorageLen: pbinValueLength, Storage: oc.value}
+		if err := pph.followAndUpdate(oc.key[:], nil, &update); err != nil {
+			return err
+		}
+		prev = oc
+	}
+	pph.overflowCode = pph.overflowCode[:0]
 	return nil
 }
 
@@ -422,7 +487,7 @@ func (pph *PBinPatriciaHashed) updateCell(plainKey []byte, probe *pbinBitpath, u
 	case 0:
 		// A code chunk has no plain key: no state domain holds one, so the leaf
 		// carries its own value and the branch record persists it.
-		if _, err := pbinCodeChunkValue(update); err != nil {
+		if _, err := pbinRecordLeafValue(update); err != nil {
 			return err
 		}
 	case length.Addr:

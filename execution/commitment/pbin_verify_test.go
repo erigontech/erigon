@@ -190,7 +190,9 @@ func (v *pbinVerifier) plainState(c *pbinCell) (*Update, error) {
 	case c.storageAddrLen > 0:
 		return v.ms.Storage(c.storageAddr[:c.storageAddrLen])
 	default:
-		return nil, errors.New("pbin verify: leaf carries no plain key")
+		// A code chunk has no plain key and no state behind it: the record is the
+		// only place its value exists, so the check is that it round-tripped.
+		return &c.Update, nil
 	}
 }
 
@@ -289,7 +291,17 @@ func pbinVerifyDerivedKey(c *pbinCell, key []byte) ([]byte, error) {
 		addr, slot := c.storageAddr[:length.Addr], c.storageAddr[length.Addr:c.storageAddrLen]
 		return pbinTreeKeyStorage(addr, slot), nil
 	default:
-		return nil, errors.New("pbin verify: leaf carries no plain key")
+		// A record-resident leaf holds no plain key to re-derive from, so what is
+		// checked is where it may sit: only a code chunk carries its own value, and
+		// a chunk is either at the top of an account stem or in the code zone —
+		// never in the storage zone (guards H7).
+		switch {
+		case len(key) == pbinCodeKeyLength && key[0] == pbinCodeZone:
+		case len(key) == pbinAccountKeyLength && key[0] == pbinAccountZone && key[pbinAccountKeyLength-1] >= pbinCodeOffset:
+		default:
+			return nil, fmt.Errorf("%w: value-carrying leaf at %x is no code chunk", errPBinVerifyPosition, key)
+		}
+		return key, nil
 	}
 }
 

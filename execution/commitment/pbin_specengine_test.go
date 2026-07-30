@@ -18,9 +18,9 @@ import (
 // engine rebuilds a leaf's value from an Update according to where the key sits,
 // so each value has to be mapped back onto the field the engine will read.
 //
-// Not every leaf can be expressed that way: a code-chunk sub-index has no Update
-// field at all. Those vectors are excluded by name below with an asserted count,
-// so gaining code support breaks this test rather than silently widening it.
+// Every position the embedding defines is expressible, so the exclusion list is
+// asserted empty: a vector the mapping cannot express fails this test rather
+// than being skipped.
 
 type pbinEngineLeaf struct {
 	treeKey  []byte
@@ -47,9 +47,20 @@ func pbinLeafFromVector(key, value []byte, seq int) (pbinEngineLeaf, bool) {
 		l.update.Flags = StorageUpdate
 		l.update.StorageLen = int8(copy(l.update.Storage[:], value))
 	}
+	// A leaf carrying its own 32 bytes has no plain key: a code chunk, or a
+	// sub-index the embedding has reserved and defined no packing for.
+	recordLeaf := func() {
+		l.plainKey = nil
+		l.update.Flags = StorageUpdate
+		l.update.StorageLen = int8(copy(l.update.Storage[:], value))
+	}
 
 	if key[0] == pbinStorageZone {
 		storageLeaf()
+		return l, true
+	}
+	if key[0] == pbinCodeZone {
+		recordLeaf()
 		return l, true
 	}
 	switch sub := key[len(key)-1]; {
@@ -69,7 +80,8 @@ func pbinLeafFromVector(key, value []byte, seq int) (pbinEngineLeaf, bool) {
 		storageLeaf()
 		return l, true
 	default:
-		return l, false // code chunk: no Update field carries it
+		recordLeaf()
+		return l, true
 	}
 }
 
@@ -125,9 +137,8 @@ func TestPBinEngineMatchesSpecTrieRoots(t *testing.T) {
 	}
 
 	t.Logf("engine ran %d/%d reference root vectors: %v", len(ran), len(v.Trie), ran)
-	t.Logf("excluded (no Update field for a code-chunk leaf): %v", excluded)
-	require.Equal(t, []string{"full_header_stem"}, excluded,
-		"exclusions must stay pinned: gaining code support should widen this list, not hide it")
+	require.Empty(t, excluded, "every reference root vector must reproduce through the engine")
+	require.Len(t, ran, len(v.Trie))
 }
 
 // TestPBinReleaseClearsHashSuite pins pooling hygiene: a released engine must

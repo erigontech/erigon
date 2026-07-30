@@ -88,7 +88,7 @@ func (c *pbinTestCorpus) entries(t *testing.T) []pbinOracleEntry {
 				pbinOracleEntry{key: pbinTreeKeyAccount(plainKey, pbinCodeHashLeafKey), value: code[:]})
 			for j, chunk := range pbinChunkifyCode(c.codes[string(plainKey)]) {
 				entries = append(entries, pbinOracleEntry{
-					key:   pbinTreeKeyCodeChunk(plainKey, j),
+					key:   pbinTestChunkKey(plainKey, u.CodeHash, j),
 					value: chunk[:],
 				})
 			}
@@ -103,6 +103,15 @@ func (c *pbinTestCorpus) entries(t *testing.T) []pbinOracleEntry {
 		}
 	}
 	return entries
+}
+
+// pbinTestChunkKey is where chunk chunkID of addr's code lives: the account's
+// own stem while the header holds it, the content-addressed code zone after.
+func pbinTestChunkKey(addr []byte, codeHash common.Hash, chunkID int) []byte {
+	if chunkID < pbinHeaderCodeChunks {
+		return pbinTreeKeyCodeChunk(addr, chunkID)
+	}
+	return pbinTreeKeyCodeOverflow(codeHash, chunkID)
 }
 
 func (c *pbinTestCorpus) oracleRoot(t *testing.T) []byte {

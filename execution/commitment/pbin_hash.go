@@ -134,14 +134,14 @@ func (h *pbinHasher) leafCellHash(c *pbinCell, path *pbinBitpath) (common.Hash, 
 
 // pbinLeafValue picks the encoding the key's own position names: the zone byte
 // separates storage and code from the account header, and within the header the
-// sub-index selects between BASIC_DATA, CODE_HASH, a header-resident slot and a
-// header-resident code chunk.
+// sub-index selects between BASIC_DATA, CODE_HASH and a header-resident slot.
+// Every other position holds a value the record already carries whole.
 func pbinLeafValue(key []byte, u *Update) ([pbinValueLength]byte, error) {
 	switch key[0] {
 	case pbinStorageZone:
 		return pbinEncodeStorageValue(u.Storage[:u.StorageLen]), nil
 	case pbinCodeZone:
-		return pbinCodeChunkValue(u)
+		return pbinRecordLeafValue(u)
 	case pbinAccountZone:
 	default:
 		return [pbinValueLength]byte{}, fmt.Errorf("%w: zone %#x names no leaf", errPBinCellHash, key[0])
@@ -153,9 +153,10 @@ func pbinLeafValue(key []byte, u *Update) ([pbinValueLength]byte, error) {
 		return pbinCodeHashValue(u.CodeHash), nil
 	case subIndex >= pbinHeaderStorageOffset && subIndex < pbinCodeOffset:
 		return pbinEncodeStorageValue(u.Storage[:u.StorageLen]), nil
-	case subIndex >= pbinCodeOffset:
-		return pbinCodeChunkValue(u)
 	default:
-		return [pbinValueLength]byte{}, fmt.Errorf("%w: account-zone sub-index %d names no leaf", errPBinCellHash, subIndex)
+		// Code chunks from CODE_OFFSET on, and the sub-indices below
+		// HEADER_STORAGE_OFFSET the embedding reserves (eip:255-257): neither is
+		// packed from state, so the value has to be a full 32 bytes already.
+		return pbinRecordLeafValue(u)
 	}
 }

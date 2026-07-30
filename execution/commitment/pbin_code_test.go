@@ -229,23 +229,6 @@ func TestPBinShorteningRedeployKeepsStaleChunks(t *testing.T) {
 	}
 }
 
-// TestPBinCodeBeyondHeaderRefused pins the M1 boundary: chunks past the header
-// belong in the code zone, which overflow support brings, and until then a
-// contract that needs them is refused rather than committed short.
-func TestPBinCodeBeyondHeaderRefused(t *testing.T) {
-	t.Parallel()
-
-	addr := pbinOracleAddr(16)
-	code := pbinTestCode(pbinHeaderCodeChunks*pbinChunkDataLen + 1)
-	corpus := new(pbinTestCorpus).accountWithCodeBytes(addr, 1, 10, code)
-
-	pph, ms := pbinTestEngine(t)
-	corpus.applyTo(t, ms)
-	upd := WrapKeyUpdates(t, ModeDirect, pbinKeyHasher(), corpus.plainKeys, corpus.updates)
-	_, err := pph.Process(context.Background(), upd, "", nil, WarmupConfig{})
-	require.ErrorIs(t, err, ErrPBinUnsupported)
-}
-
 // TestPBinCodelessContextRefusesCodeBearingAccount pins that the code read is
 // not optional: a context that cannot serve code cannot commit an account whose
 // chunks the tree needs.

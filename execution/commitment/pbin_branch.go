@@ -116,7 +116,7 @@ func pbinAppendCell(dst []byte, c *pbinCell) ([]byte, error) {
 		dst = pbinAppendLenAndVal(dst, c.storageAddr[:c.storageAddrLen])
 	}
 	if fields&pbinFieldLeafValue != 0 {
-		value, err := pbinCodeChunkValue(&c.Update)
+		value, err := pbinRecordLeafValue(&c.Update)
 		if err != nil {
 			return nil, err
 		}

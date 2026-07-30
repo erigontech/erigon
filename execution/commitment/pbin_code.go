@@ -73,12 +73,14 @@ func pbinChunkifyCode(code []byte) [][pbinValueLength]byte {
 	return chunks
 }
 
-// pbinCodeChunkValue is the chunk value a code-chunk leaf hashes. Unlike a
-// storage value it is positional — byte 0 is the PUSHDATA count — so a short
-// value cannot be left-padded into place and is an error instead.
-func pbinCodeChunkValue(u *Update) ([pbinValueLength]byte, error) {
+// pbinRecordLeafValue is the value a leaf carries itself rather than deriving
+// from state — a code chunk, or a sub-index the embedding reserves and defines
+// no packing for. Unlike a storage value it is not left-padded into place: a
+// chunk is positional, byte 0 being the PUSHDATA count, so a short value is an
+// error.
+func pbinRecordLeafValue(u *Update) ([pbinValueLength]byte, error) {
 	if u.StorageLen != pbinValueLength {
-		return [pbinValueLength]byte{}, fmt.Errorf("%w: code chunk leaf holds %d value bytes, want %d",
+		return [pbinValueLength]byte{}, fmt.Errorf("%w: record-resident leaf holds %d value bytes, want %d",
 			errPBinCellHash, u.StorageLen, pbinValueLength)
 	}
 	return u.Storage, nil
