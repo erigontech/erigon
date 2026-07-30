@@ -405,8 +405,6 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) (err e
 			if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
 					d.logger.Debug("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
-				} else {
-					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				invalidFileItems = append(invalidFileItems, item)
 				// don't interrupt on error. other files may be good. but skip indices open.
@@ -419,13 +417,13 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) (err e
 			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
 			if err != nil {
 				fName := filepath.Base(fPath)
-				d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+				d.logger.Debug("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 			}
 			if ok {
 				fName := filepath.Base(fPath)
 				d.FileVersion.AccessorKVI.MustSupport(fileVer, fName)
 				if item.index, err = d.openHashMapAccessor(fPath); err != nil {
-					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+					d.logger.Debug("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
 			}
@@ -435,13 +433,13 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) (err e
 			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
 			if err != nil {
 				fName := filepath.Base(fPath)
-				d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+				d.logger.Debug("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 			}
 			if ok {
 				fName := filepath.Base(fPath)
 				d.FileVersion.AccessorBT.MustSupport(fileVer, fName)
 				if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, btindex.DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
-					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+					d.logger.Debug("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
 			}
@@ -451,13 +449,13 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) (err e
 			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
 			if err != nil {
 				fName := filepath.Base(fPath)
-				d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+				d.logger.Debug("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 			}
 			if ok {
 				fName := filepath.Base(fPath)
 				d.FileVersion.AccessorKVEI.MustSupport(fileVer, fName)
 				if item.existence, err = d.openExistenceFilter(fPath); err != nil {
-					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+					d.logger.Debug("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
 			}
