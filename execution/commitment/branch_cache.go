@@ -19,7 +19,6 @@ package commitment
 import (
 	"bytes"
 	"fmt"
-	"math/bits"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -320,7 +319,7 @@ func (c *BranchCache) putStripe(prefix []byte) *sync.Mutex {
 	if len(prefix) > 1 {
 		stripe ^= prefix[0]
 	}
-	return &c.putStripes[bits.RotateLeft8(stripe, 3)]
+	return &c.putStripes[stripe]
 }
 
 func (c *BranchCache) lockAllPutStripes() {
