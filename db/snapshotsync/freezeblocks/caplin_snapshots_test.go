@@ -21,11 +21,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // TestDumpBeaconBlocksNoPanic is a higher-level regression test: the production
@@ -42,4 +44,28 @@ func TestDumpBeaconBlocksNoPanic(t *testing.T) {
 	require.NotPanics(t, func() {
 		_ = DumpBeaconBlocks(t.Context(), db, 0, snaptype.CaplinMergeLimit, 0, dirs, 1, log.LvlDebug, log.New())
 	})
+}
+
+// FrozenBlobs must take visibleLock: recalcVisibleFiles (via OpenFolder)
+// reassigns s.visible under the write lock. Meaningful under -race.
+func TestFrozenBlobsVisibleLockRace(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 100 {
+			sn.FrozenBlobs()
+		}
+	}()
+	var err error
+	for range 100 {
+		if err = sn.OpenFolder(); err != nil {
+			break
+		}
+	}
+	<-done
+	require.NoError(t, err)
 }

@@ -215,14 +215,14 @@ glob to a recursive `filepath.WalkDir` collecting `*.torrent`.
 - Modify: `db/snapshotsync/freezeblocks/caplin_snapshots.go`
 - Modify: `db/snapshotsync/freezeblocks/caplin_snapshots_test.go`
 
-- [ ] write red `-race` test per Technical Details Fix 4:
+- [x] write red `-race` test per Technical Details Fix 4:
   `NewCaplinSnapshots` with `&clparams.MainnetBeaconConfig` (Deneb set),
   concurrent `FrozenBlobs()` vs `OpenFolder()` on an empty `t.TempDir()`;
   confirm the race detector fires on unfixed code
-- [ ] guard the `s.visible` iteration in `FrozenBlobs()`
+- [x] guard the `s.visible` iteration in `FrozenBlobs()`
   (`caplin_snapshots.go:693-703`) with `visibleLock.RLock()/RUnlock()`
-- [ ] run `go test -race ./db/snapshotsync/freezeblocks/...` — green
-- [ ] commit: `db/snapshotsync: take visibleLock in FrozenBlobs`
+- [x] run `go test -race ./db/snapshotsync/freezeblocks/...` — green
+- [x] commit: `db/snapshotsync: take visibleLock in FrozenBlobs`
 
 ### Task 5: recursive torrent discovery in VerifyTorrentFiles
 

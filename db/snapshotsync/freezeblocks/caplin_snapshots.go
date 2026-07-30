@@ -690,6 +690,8 @@ func (s *CaplinSnapshots) FrozenBlobs() uint64 {
 	if s.beaconCfg.DenebForkEpoch == math.MaxUint64 {
 		return 0
 	}
+	s.visibleLock.RLock()
+	defer s.visibleLock.RUnlock()
 	ret := uint64(0)
 	for _, seg := range s.visible[snaptype.BlobSidecars.Enum()] {
 		ret = max(ret, seg.To())
