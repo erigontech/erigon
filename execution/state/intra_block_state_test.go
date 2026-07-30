@@ -427,9 +427,10 @@ func TestTransientStorage(t *testing.T) {
 	}
 }
 
-func TestReleaseResetsRevisions(t *testing.T) {
+func TestCloseResetsRevisions(t *testing.T) {
 	t.Parallel()
 	state := New(nil)
+	t.Cleanup(state.Close)
 
 	state.PushSnapshot()
 	require.NotEmpty(t, state.revisions.valid)
@@ -437,6 +438,15 @@ func TestReleaseResetsRevisions(t *testing.T) {
 	state.Close()
 	require.Empty(t, state.revisions.valid)
 	require.Zero(t, state.revisions.nextId)
+}
+
+func TestCloseIsIdempotent(t *testing.T) {
+	t.Parallel()
+	state := New(nil)
+
+	state.PushSnapshot()
+	state.Close()
+	require.NotPanics(t, state.Close)
 }
 
 func TestVersionMapReadWriteDelete(t *testing.T) {

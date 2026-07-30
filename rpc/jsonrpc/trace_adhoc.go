@@ -1016,10 +1016,11 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, wdiffs, _, err := api.callBlock(ctx, tx, block, traceTypes, *gasBailOut, chainConfig, traceConfig)
+	traces, wdiffs, _, closeState, err := api.callBlock(ctx, tx, block, traceTypes, *gasBailOut, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
+	defer closeState() // the syscall is discarded here, so nothing else uses the state
 
 	result := make([]*TraceCallResult, len(traces))
 	for i, trace := range traces {

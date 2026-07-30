@@ -187,15 +187,21 @@ type ReusableCaller struct {
 	rules          *chain.Rules
 	callTimeout    time.Duration
 	message        *types.Message
+	closed         bool
 }
 
+// Close returns the state built by the last DoCallWithNewGas to its pools.
+// Idempotent. The guard must not be `r.evm = nil`: the timeout watcher
+// goroutine reads r.evm and is only signalled by close(done), never awaited,
+// so clearing it races with EVM.Cancel.
 func (r *ReusableCaller) Close() {
-	if r.evm == nil {
+	if r.closed {
 		return
 	}
-	evm := r.evm
-	r.evm = nil
-	evm.IntraBlockState().Close()
+	r.closed = true
+	if ibs := r.evm.IntraBlockState(); ibs != nil {
+		ibs.Close()
+	}
 }
 
 func (r *ReusableCaller) DoCallWithNewGas(
@@ -226,7 +232,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 		r.evm.SetPrecompiles(precompiles)
 	}
 	if prev := r.evm.IntraBlockState(); prev != nil {
-		prev.Release(false)
+		prev.Close()
 	}
 	r.evm.Reset(txCtx, ibs)
 
