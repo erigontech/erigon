@@ -104,14 +104,39 @@ func RecomputeAtTxNumWithoutSD(
 	// is the baseline and history covers the gap.
 	var baselineBytes []byte
 	var baselineFound bool
-	filesVal, _, filesHas, err := tx.Debug().GetLatestFromFilesUpToStep(kv.CommitmentDomain, KeyCommitmentState, maxStep)
+	var baselineFileEndStep kv.Step
+	filesVal, fileEndStep, filesHas, err := tx.Debug().GetLatestFromFilesUpToStep(kv.CommitmentDomain, KeyCommitmentState, maxStep)
 	if err != nil {
 		return nil, nil, 0, nil, fmt.Errorf("GetLatestFromFilesUpToStep(commitment, maxStep=%d): %w", maxStep, err)
 	}
 	if filesHas {
 		baselineBytes = filesVal
 		baselineFound = true
+		baselineFileEndStep = fileEndStep
 	}
+
+	// Bug#6 diagnostic: capture the visible-file set the compute will read
+	// from. Same-block same-input-files runs of this function under a
+	// live erigon vs a standalone recompute-at tool have historically
+	// produced different roots (2026-07-08 investigation). Logging the
+	// visible-set names here at INFO makes the next divergence
+	// attributable without needing to re-run months of investigation —
+	// a live vs tool diff on these names names the aggregator-state gap.
+	logger := log.New()
+	summariseFiles := func(dom kv.Domain) string {
+		return tx.Debug().DomainFiles(dom).String()
+	}
+	logger.Info("[commitment-recompute-sdless] compute entry",
+		"toTxNum", toTxNum,
+		"maxStep", maxStep,
+		"stepSize", stepSize,
+		"baselineFound", baselineFound,
+		"baselineFileEndStep", baselineFileEndStep,
+		"commitmentFiles", summariseFiles(kv.CommitmentDomain),
+		"accountsFiles", summariseFiles(kv.AccountsDomain),
+		"storageFiles", summariseFiles(kv.StorageDomain),
+		"codeFiles", summariseFiles(kv.CodeDomain),
+	)
 
 	// State reader composition.
 	//
@@ -171,6 +196,7 @@ func RecomputeAtTxNumWithoutSD(
 	if baselineTxNum > 0 {
 		touchFromTxNum = baselineTxNum + 1
 	}
+	touchesByDomain := make(map[kv.Domain]uint64, 3)
 	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 		it, ierr := tx.Debug().HistoryKeyTxNumRange(d, int(touchFromTxNum), int(toTxNum+1), order.Asc, -1)
 		if ierr != nil {
@@ -190,6 +216,7 @@ func RecomputeAtTxNumWithoutSD(
 				return nil, nil, 0, nil, fmt.Errorf("HistoryKeyTxNumRange next(%s): %w", d, terr)
 			}
 			updates.TouchPlainKey(string(k), nil, touchFn)
+			touchesByDomain[d]++
 		}
 		it.Close()
 	}
@@ -203,5 +230,13 @@ func RecomputeAtTxNumWithoutSD(
 	if err != nil {
 		return nil, nil, baselineTxNum, nil, fmt.Errorf("EncodeCurrentState: %w", err)
 	}
+	logger.Info("[commitment-recompute-sdless] compute exit",
+		"toTxNum", toTxNum,
+		"baselineTxNum", baselineTxNum,
+		"root", fmt.Sprintf("%x", root),
+		"touchesAccounts", touchesByDomain[kv.AccountsDomain],
+		"touchesStorage", touchesByDomain[kv.StorageDomain],
+		"touchesCode", touchesByDomain[kv.CodeDomain],
+	)
 	return root, encodedTrieState, baselineTxNum, branches, nil
 }
