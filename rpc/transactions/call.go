@@ -189,6 +189,15 @@ type ReusableCaller struct {
 	message        *types.Message
 }
 
+func (r *ReusableCaller) Close() {
+	if r.evm == nil {
+		return
+	}
+	evm := r.evm
+	r.evm = nil
+	evm.IntraBlockState().Close()
+}
+
 func (r *ReusableCaller) DoCallWithNewGas(
 	ctx context.Context,
 	newGas uint64,
