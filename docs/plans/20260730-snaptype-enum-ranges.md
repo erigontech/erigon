@@ -197,16 +197,17 @@ test leaves the global registry untouched.
 **Files:**
 - Modify: `db/snaptype/type.go`
 
-- [ ] `MinCaplinEnum` 9→10, `MinBorEnum` 11→12, `MaxEnum` 15→16
+- [x] `MinCaplinEnum` 9→10, `MinBorEnum` 11→12, `MaxEnum` 15→16
   (`type.go:389-393`); `MinCoreEnum` unchanged
-- [ ] grep for hardcoded absolute enum literals that could bypass the
+- [x] grep for hardcoded absolute enum literals that could bypass the
   constants (`Enum(9)`, `Enum(10)`, … across `db/`, `polygon/`, `cl/`,
   `cmd/`) — none expected (verified during plan review); fix any found
-- [ ] run `go test ./db/snaptype/...` — Task 1 test now green
-- [ ] run package regression tests: `go test ./db/snaptype2/...
+  — repo-wide grep found none
+- [x] run `go test ./db/snaptype/...` — Task 1 test now green
+- [x] run package regression tests: `go test ./db/snaptype2/...
   ./db/snapcfg/... ./db/snapshotsync/... ./polygon/heimdall/...
-  ./polygon/bridge/...` — must pass before task 3
-- [ ] commit: `db/snaptype: separate core/caplin/bor enum ranges`
+  ./polygon/bridge/...` — must pass before task 3 — all green
+- [x] commit: `db/snaptype: separate core/caplin/bor enum ranges`
 
 ### Task 3: RegisterType duplicate/collision panic
 
