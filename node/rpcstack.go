@@ -184,10 +184,9 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // smaller than this are sent as-is: gzip framing overhead would exceed savings.
 const minGzipBodySize = 1024
 
-// Streaming responses compress at BestSpeed: bytes leave as they are produced,
-// so per-flush latency matters more than ratio. Fully buffered responses can
-// afford a higher level since nothing waits on incremental flushes.
-const bufferedGzipLevel = 6
+// Both paths compress at BestSpeed: RPC responses are latency-sensitive and
+// the ratio gain from higher levels does not pay for the extra CPU.
+const bufferedGzipLevel = gzip.BestSpeed
 
 var gzStreamPool = sync.Pool{
 	New: func() any { w, _ := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed); return w },
