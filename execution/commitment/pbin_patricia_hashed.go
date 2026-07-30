@@ -127,12 +127,13 @@ var (
 	errPBinDeleteUnsupported = errors.New("pbin: EIP-8297 defines no deletion")
 )
 
-// pbinRootKey names the record holding the root cell. It is the empty key, which
-// pbinAppendBitPath never produces — every encoded path carries at least the
-// trailing bit-count byte — so it cannot collide with a node record. The root is
-// the one node no descent can name: every other node is found by the path that
-// reaches it, while the root's own prefix is stored nowhere else.
-var pbinRootKey = []byte{}
+// pbinRootKey names the record holding the root cell — the one node no descent
+// can name: every other node is found by the path that reaches it, while the
+// root's own prefix is stored nowhere else. The sentinel cannot collide with a
+// node record: every pbinAppendBitPath key ends in a trailing bit-count byte
+// ≤ 7. The empty key would not do — domain iteration reads a zero-length key as
+// end-of-stream, and the empty key sorts first, truncating the whole table.
+var pbinRootKey = []byte{0x08}
 
 // Process folds the update stream into the tree and returns the new root.
 // HashSort hands keys over in tree-key order, which is descent order, so the

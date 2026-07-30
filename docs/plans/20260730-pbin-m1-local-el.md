@@ -157,11 +157,11 @@ Production keeps Keccak-256. This task only makes the **test** path run the whol
 - Modify: `execution/commitment/pbin_patricia_hashed.go`
 - Create: `execution/commitment/pbin_rootkey_test.go`
 
-- [ ] write a failing test that stores a root record and reads it back through a real `TblCommitmentVals` iteration, asserting the iteration does not truncate (guards H2)
-- [ ] replace `pbinRootKey = []byte{}` with a single-byte sentinel ≥ `0x08`
-- [ ] assert the sentinel cannot be produced by `pbinEncodeBitPath` for any bit length 0..528
-- [ ] write a test asserting `loadRoot` distinguishes "no record" from "empty tree"
-- [ ] run tests — must pass before task 3
+- [x] write a failing test that stores a root record and reads it back through a real `TblCommitmentVals` iteration, asserting the iteration does not truncate (guards H2) — `TestPBinRootRecordRealTableIteration`, red before the fix: MDBX accepts the empty-key Put but hands the key back zero-length mid-iteration, which `domain_stream.go:343,577` reads as end-of-stream
+- [x] replace `pbinRootKey = []byte{}` with a single-byte sentinel ≥ `0x08` — `0x08`
+- [x] assert the sentinel cannot be produced by `pbinEncodeBitPath` for any bit length 0..528 — `TestPBinRootKeySentinelNotABitPath`, plus `pbinDecodeBitPath` rejecting the sentinel outright
+- [x] write a test asserting `loadRoot` distinguishes "no record" from "empty tree" — `TestPBinLoadRootNoRecordVersusStoredTree`: no record reads as the empty tree with `rootPresent == false`; a stored record reproduces the stored root
+- [x] run tests — must pass before task 3
 
 ### Task 3: No nil values into the domain
 
