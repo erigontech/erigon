@@ -328,8 +328,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 				func() {
 					defer statedb.Close()
 					if stateOverride != nil {
-						err = stateOverride.Override(statedb, nil, rules)
-						if err != nil {
+						if err := stateOverride.Override(statedb, nil, rules); err != nil {
 							results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
 							return
 						}
