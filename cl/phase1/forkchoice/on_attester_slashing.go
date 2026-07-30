@@ -65,6 +65,10 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	// Check if this attestation is even slashable.
 	attestation1 := attesterSlashing.Attestation_1
 	attestation2 := attesterSlashing.Attestation_2
+	if attestation1.AttestingIndices.Length() > attestation1.AttestingIndices.Cap() ||
+		attestation2.AttestingIndices.Length() > attestation2.AttestingIndices.Cap() {
+		return errors.New("attesting indices exceed limit")
+	}
 	intersection := intersectAttestingIndices(attestation1.AttestingIndices, attestation2.AttestingIndices)
 	if f.allAttesterSlashingIndicesSeen(intersection) {
 		return ErrIgnore
@@ -143,6 +147,9 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 }
 
 func intersectAttestingIndices(left, right solid.IterableSSZ[uint64]) []uint64 {
+	if left.Length() > right.Length() {
+		left, right = right, left
+	}
 	leftIndices := make(map[uint64]struct{}, left.Length())
 	for i := 0; i < left.Length(); i++ {
 		leftIndices[left.Get(i)] = struct{}{}
