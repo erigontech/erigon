@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
@@ -159,4 +160,24 @@ func TestCodeCache_ClearRacingPut_EpochAlias(t *testing.T) {
 
 	_, ok := cc.Get(addr)
 	require.False(t, ok, "pre-Clear epoch must not alias the live epoch after a later unwind")
+}
+
+func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
+	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
+	cc.Unwind(300)
+
+	addr := []byte{0xef}
+	code := []byte("dead-fork-code")
+	cc.addrBindMu.Lock()
+
+	var wg sync.WaitGroup
+	wg.Go(func() { cc.Put(addr, code, 200) })
+	time.Sleep(5 * time.Millisecond)
+	wg.Go(cc.Clear)
+	time.Sleep(5 * time.Millisecond)
+	cc.addrBindMu.Unlock()
+	wg.Wait()
+
+	_, ok := cc.Get(addr)
+	require.False(t, ok, "Clear must remove a write that started in the retiring generation")
 }
