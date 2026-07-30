@@ -80,6 +80,7 @@ type pbinGrid struct {
 	rows         [pbinGridRows][2]pbinCell
 	depths       [pbinGridRows]int16
 	branchBefore [pbinGridRows]bool
+	prevRecord   [pbinGridRows][]byte
 	touchMap     [pbinGridRows]uint16
 	afterMap     [pbinGridRows]uint16
 	activeRows   int
@@ -95,8 +96,19 @@ func (g *pbinGrid) resetForReuse() {
 		g.rows[row][1].reset()
 		g.depths[row] = 0
 		g.branchBefore[row] = false
+		g.prevRecord[row] = nil
 		g.touchMap[row] = 0
 		g.afterMap[row] = 0
 	}
 	g.activeRows = 0
+}
+
+// prevRecordFor is what the store holds at a row's record key: the bytes the
+// row unfolded from, or zero-length when it had no record. Never nil, so the
+// write layer takes it as the known previous value instead of reading its own.
+func (g *pbinGrid) prevRecordFor(row int) []byte {
+	if g.prevRecord[row] == nil {
+		return []byte{}
+	}
+	return g.prevRecord[row]
 }

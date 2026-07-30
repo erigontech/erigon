@@ -169,11 +169,11 @@ Production keeps Keccak-256. This task only makes the **test** path run the whol
 - Modify: `execution/commitment/pbin_patricia_hashed.go`
 - Create: `execution/commitment/pbin_domainwrite_test.go`
 
-- [ ] write a failing test asserting neither `storeRoot` nor `foldDelete` ever hands a nil value to `PutBranch`
-- [ ] route the empty-root `storeRoot` path (`:328-337`) and `foldDelete` (`:725-727`) through `DomainDel` or a non-nil zero-length slice
-- [ ] pass real `prevData` at both `PutBranch` sites to avoid the extra `GetLatest` per branch write
-- [ ] write a test asserting a zero-length branch value round-trips as a deletion
-- [ ] run tests — must pass before task 4
+- [x] write a failing test asserting neither `storeRoot` nor `foldDelete` ever hands a nil value to `PutBranch` — `TestPBinStoreRootEmptiedTreeWritesNonNil` + `TestPBinFoldDeleteWritesNonNilWithRealPrev` over `pbinStrictWriteContext`, which refuses nil the way `SharedDomains.DomainPut` does; both red before the fix
+- [x] route the empty-root `storeRoot` path (`:328-337`) and `foldDelete` (`:725-727`) through `DomainDel` or a non-nil zero-length slice — non-nil zero-length: `PatriciaContext` has no `DomainDel`, and `TemporalMemBatch.putHistory` routes any `len(v) == 0` write to `DeleteWithPrev`, so `[]byte{}` IS the deletion encoding at the domain boundary
+- [x] pass real `prevData` at both `PutBranch` sites to avoid the extra `GetLatest` per branch write — the grid retains each row's record bytes at unfold (`pbinGrid.prevRecord`), the engine retains the root record across load/store (`rootPrev`); all three write sites (`foldBranch`, `foldDelete`, `storeRoot`) now pass it. `TestPBinProcessPutBranchCarriesRealPrev` checks every write's prev equals the record it replaces, red before
+- [x] write a test asserting a zero-length branch value round-trips as a deletion — `TestPBinZeroLengthBranchRoundTripsAsDeletion`: the engine empties a stored tree, the zero-length records stay in the store, a fresh engine reads them back as no tree
+- [x] run tests — `go test ./execution/commitment/... -count=1` green, `make lint` clean
 
 ### Task 4: Disable the shared BranchCache for the bin variant
 

@@ -59,6 +59,7 @@ type PBinPatriciaHashed struct {
 	rootChecked bool // whether the root record is known to be absent
 	rootTouched bool
 	rootPresent bool
+	rootPrev    []byte // root record as last read or written; nil = never read
 }
 
 // pbinCounters measures what keeping a single hash per branch cell costs. A
@@ -101,6 +102,7 @@ func (pph *PBinPatriciaHashed) Reset() {
 	pph.grid.resetForReuse()
 	pph.currentKey = pbinBitpath{}
 	pph.rootChecked, pph.rootTouched, pph.rootPresent = false, false, false
+	pph.rootPrev = nil
 }
 
 // setHashSuite swaps H on both seams at once — node hashing on this engine and
@@ -335,16 +337,19 @@ func (pph *PBinPatriciaHashed) storeRoot() error {
 	if !pph.rootTouched {
 		return nil
 	}
-	var record []byte
+	// An emptied tree deletes the record: zero-length is the deletion encoding,
+	// and the domain refuses a nil value outright.
+	record := []byte{}
 	if pph.grid.root.kind != pbinNodeEmpty {
 		var err error
 		if record, err = pbinAppendCell(nil, &pph.grid.root); err != nil {
 			return err
 		}
 	}
-	if err := pph.ctx.PutBranch(pbinRootKey, record, nil); err != nil {
+	if err := pph.ctx.PutBranch(pbinRootKey, record, pph.rootPrev); err != nil {
 		return fmt.Errorf("pbin: write root cell: %w", err)
 	}
+	pph.rootPrev = record
 	return nil
 }
 
@@ -357,8 +362,10 @@ func (pph *PBinPatriciaHashed) loadRoot() error {
 		return fmt.Errorf("pbin: read root cell: %w", err)
 	}
 	if len(data) == 0 {
+		pph.rootPrev = []byte{}
 		return nil
 	}
+	pph.rootPrev = data
 	pph.grid.root.reset()
 	pos, err := pbinDecodeCell(data, 0, &pph.grid.root)
 	if err != nil {
@@ -477,6 +484,7 @@ func (pph *PBinPatriciaHashed) unfold(probe *pbinBitpath, u pbinUnfolding) error
 	g.rows[row][0].reset()
 	g.rows[row][1].reset()
 	g.touchMap[row], g.afterMap[row], g.branchBefore[row] = 0, 0, false
+	g.prevRecord[row] = nil
 
 	if u.action == pbinUnfoldRecord {
 		return pph.unfoldBranchNode(row, upDepth+1, touched && !present)
@@ -544,6 +552,7 @@ func (pph *PBinPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bo
 	if err != nil {
 		return fmt.Errorf("pbin: decode branch at %x: %w", key, err)
 	}
+	g.prevRecord[row] = data
 	// The record's own touch map is write-time bookkeeping; nothing in this run
 	// has touched the row yet. A parent cell that is touched but gone takes the
 	// whole subtree with it.
@@ -681,7 +690,7 @@ func (pph *PBinPatriciaHashed) foldBranch(row int, bit uint64, upDepth, depth in
 	if err != nil {
 		return err
 	}
-	if err = pph.ctx.PutBranch(key, bytes.Clone(record), nil); err != nil {
+	if err = pph.ctx.PutBranch(key, bytes.Clone(record), g.prevRecordFor(row)); err != nil {
 		return fmt.Errorf("pbin: write branch at %x: %w", key, err)
 	}
 
@@ -733,7 +742,7 @@ func (pph *PBinPatriciaHashed) foldDelete(row int, bit uint64, upCell *pbinCell)
 		return nil
 	}
 	key := pbinEncodeBitPath(&pph.currentKey)
-	if err := pph.ctx.PutBranch(key, nil, nil); err != nil {
+	if err := pph.ctx.PutBranch(key, []byte{}, g.prevRecordFor(row)); err != nil {
 		return fmt.Errorf("pbin: delete branch at %x: %w", key, err)
 	}
 	return nil
