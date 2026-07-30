@@ -431,7 +431,7 @@ func (sdb *IntraBlockState) Reset() {
 // Close returns pooled resources (like journal, stateObjects) back to their pools.
 // Call this when the IntraBlockState is no longer needed. Idempotent.
 func (sdb *IntraBlockState) Close() {
-	if sdb.stateObjects == nil {
+	if sdb == nil || sdb.stateObjects == nil {
 		return
 	}
 
