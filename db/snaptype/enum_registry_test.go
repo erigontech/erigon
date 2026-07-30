@@ -17,7 +17,9 @@
 package snaptype_test
 
 import (
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/erigontech/erigon/db/snaptype"
@@ -73,39 +75,47 @@ func TestEnumUniqueness(t *testing.T) {
 	}
 }
 
-func expectRegisterPanic(t *testing.T, enum snaptype.Enum, name string) {
+// wantMsg pins which guard fired: the name-guard tests must probe with enum
+// MaxEnum (the only slot free of the other guards), where the out-of-range
+// guard would also panic and mask a regressed name guard.
+func expectRegisterPanic(t *testing.T, enum snaptype.Enum, name, wantMsg string) {
 	t.Helper()
 	defer func() {
-		if recover() == nil {
+		r := recover()
+		if r == nil {
 			t.Errorf("RegisterType(%d, %q) did not panic", enum, name)
+			return
+		}
+		if msg := fmt.Sprint(r); !strings.Contains(msg, wantMsg) {
+			t.Errorf("RegisterType(%d, %q) panicked with %q, want substring %q", enum, name, msg, wantMsg)
 		}
 	}()
 	snaptype.RegisterType(enum, name, snaptype.Versions{}, nil, nil, nil)
 }
 
 func TestRegisterTypePanicsOnDuplicateEnum(t *testing.T) {
-	expectRegisterPanic(t, snaptype2.Enums.Headers, "duplicateenum")
+	expectRegisterPanic(t, snaptype2.Enums.Headers, "duplicateenum", "already registered as")
 }
 
 func TestRegisterTypePanicsOnCaplinRangeEnum(t *testing.T) {
-	expectRegisterPanic(t, snaptype.CaplinEnums.BeaconBlocks, "caplinrange")
+	expectRegisterPanic(t, snaptype.CaplinEnums.BeaconBlocks, "caplinrange", "is in the caplin range")
 }
 
 func TestRegisterTypePanicsOnDuplicateName(t *testing.T) {
-	expectRegisterPanic(t, snaptype.Enum(snaptype.MaxEnum), "headers")
+	expectRegisterPanic(t, snaptype.Enum(snaptype.MaxEnum), "headers", "already registered at enum")
 }
 
 // Caplin names resolve via ParseEnum's switch, not namedTypes, so the name
 // guard must reject them even though they never pass through RegisterType.
 func TestRegisterTypePanicsOnCaplinName(t *testing.T) {
-	expectRegisterPanic(t, snaptype.Enum(snaptype.MaxEnum), "beaconblocks")
+	expectRegisterPanic(t, snaptype.Enum(snaptype.MaxEnum), "beaconblocks", "already registered at enum")
 }
 
 // An enum outside [MinCoreEnum, MaxEnum) would index past the MaxEnum-sized
 // file slices at runtime, so registration must fail at init instead.
 func TestRegisterTypePanicsOnOutOfRangeEnum(t *testing.T) {
-	expectRegisterPanic(t, snaptype.Unknown, "belowrange")
-	expectRegisterPanic(t, snaptype.Enum(snaptype.MaxEnum), "aboverange")
+	expectRegisterPanic(t, snaptype.Unknown, "belowrange", "outside [")
+	expectRegisterPanic(t, snaptype.Enum(snaptype.MaxEnum), "aboverange", "outside [")
 }
 
 func TestEnumRangeDisjointness(t *testing.T) {
