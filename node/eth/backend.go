@@ -2690,6 +2690,24 @@ func (s *Ethereum) Start() error {
 // Stop implements node.Service, terminating all internal goroutines used by the
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
+	// Drain in-flight aggregator build+merge BEFORE anything else in the
+	// shutdown sequence starts closing subsystems. A merge interrupted
+	// mid-Compress()/accessor-build leaves a partial .kv whose seg header
+	// claims more bytes than exist on disk; the next boot's runtime read
+	// paths (getLatestFromFile → nextPos) panic on it. See
+	// memory/bug3-commitment-kv-corruption-2026-07-30.md. Bounded to 5 min
+	// to match modeBBuildQuiescenceTimeout — if merges genuinely can't
+	// drain, we log and proceed (better than blocking indefinitely).
+	if dbWithAgg, ok := s.chainDB.(interface{ Agg() any }); ok {
+		if agg, ok := dbWithAgg.Agg().(interface {
+			WaitForBuildAndMergeQuiescence(timeout time.Duration) error
+		}); ok {
+			if err := agg.WaitForBuildAndMergeQuiescence(5 * time.Minute); err != nil {
+				s.logger.Warn("aggregator did not quiesce before shutdown; partial .kv may result", "err", err)
+			}
+		}
+	}
+
 	// Drain Caplin first so its in-flight goroutines release the CL DB
 	// before sentry teardown closes the underlying handles.
 	if s.caplinService != nil {

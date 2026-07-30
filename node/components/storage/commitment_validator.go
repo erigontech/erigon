@@ -20,7 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -472,7 +475,7 @@ func blockSegAdvertisableForBlock(inv *snapshot.Inventory, blockNum uint64) bool
 // OnValidation pass — the redundancy is intentional, so the operator
 // gets one consolidated bootstrap-time log AND the per-file failure
 // is also tracked for quarantine.
-func extractBootstrapCommitmentAnchors(ctx context.Context, inv *snapshot.Inventory, db kv.TemporalRoDB, br services.FullBlockReader, logger log.Logger) {
+func extractBootstrapCommitmentAnchors(ctx context.Context, inv *snapshot.Inventory, db kv.TemporalRoDB, br services.FullBlockReader, snapDir string, logger log.Logger) {
 	if inv == nil || db == nil {
 		return
 	}
@@ -516,6 +519,21 @@ func extractBootstrapCommitmentAnchors(ctx context.Context, inv *snapshot.Invent
 					"step", fmt.Sprintf("[%d, %d)", entry.FromStep, entry.ToStep),
 					"err", err)
 			}
+			// A safeExtract error surfaces either a genuine record-parse
+			// failure or a recovered panic reading the raw segment
+			// (integrity.ErrCommitmentRecordInvalid — see the wrapper's
+			// comment "truncated output from an interrupted merge"). In
+			// both cases the on-disk file is unsafe for the runtime read
+			// paths (getLatestFromFile → nextPos etc.) which have no
+			// equivalent recover and would crash the RPC handler on the
+			// next mode-B compute. Quarantine now so retire regenerates a
+			// fresh version on the next boundary and the runtime never
+			// touches the bad bytes. Drops the Inventory entry so
+			// chain.toml stops advertising it.
+			if errors.Is(err, integrity.ErrCommitmentRecordInvalid) && snapDir != "" {
+				quarantineCorruptStateFileFamily(snapDir, entry.Name, "extract-panic-or-parse-fail", logger)
+				inv.RemoveFile(entry.Name)
+			}
 			continue
 		}
 		inv.RegisterStepBlockBoundary(entry.ToStep, info.BlockNum)
@@ -550,6 +568,53 @@ func safeExtractCommitmentRecord(ctx context.Context, tx kv.TemporalTx, startTxN
 		}
 	}()
 	return integrity.ExtractCommitmentRecord(ctx, tx, startTxNum, endTxNum)
+}
+
+// quarantineCorruptStateFileFamily renames every file in snapDir/domain/
+// whose basename shares the primary-name stem (e.g. for
+// v2.1-commitment.300-301.kv it also catches .bt, .kvei, .kvi, and each
+// .torrent sidecar) to <original>.corrupt. Retire regenerates on the
+// next boundary; the .corrupt files stay on disk for post-mortem.
+// Best-effort — os errors are logged but do not fail the caller: the
+// point is to survive corruption at boot, not to make bootstrap fail on
+// a rename hiccup.
+func quarantineCorruptStateFileFamily(snapDir, primaryName, reason string, logger log.Logger) {
+	primaryPath := snapshot.PathForName(snapDir, primaryName)
+	dir := filepath.Dir(primaryPath)
+	stem := strings.TrimSuffix(primaryName, ".kv")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("[storage] quarantine: read dir failed", "dir", dir, "err", err)
+		}
+		return
+	}
+	renamed := make([]string, 0, 8)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, stem) {
+			continue
+		}
+		if strings.HasSuffix(name, ".corrupt") {
+			continue
+		}
+		src := filepath.Join(dir, name)
+		dst := src + ".corrupt"
+		if err := os.Rename(src, dst); err != nil && !os.IsNotExist(err) {
+			if logger != nil {
+				logger.Warn("[storage] quarantine: rename failed", "src", src, "err", err)
+			}
+			continue
+		}
+		renamed = append(renamed, name)
+	}
+	if len(renamed) > 0 && logger != nil {
+		logger.Warn("[storage] quarantined corrupt commitment file family",
+			"primary", primaryName, "reason", reason, "renamed", renamed)
+	}
 }
 
 // seedLatestCommitmentBinding finds the highest commitment-domain

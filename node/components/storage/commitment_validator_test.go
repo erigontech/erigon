@@ -18,10 +18,13 @@ package storage
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
@@ -263,4 +266,81 @@ func TestCommitmentDomainValidator_RegisterBindingNilInventory(t *testing.T) {
 	t.Parallel()
 	v := CommitmentDomainValidator{}
 	v.registerBinding("v2.0-commitment.0-256.kv", 256, integrity.CommitmentRootInfo{BlockNum: 1})
+}
+
+// TestQuarantineCorruptStateFileFamily pins the boot-time quarantine
+// contract for Bug #3: when safeExtractCommitmentRecord catches a panic
+// (integrity.ErrCommitmentRecordInvalid), the whole on-disk file family
+// sharing the .kv stem — the .kv itself, its accessors (.bt, .kvei,
+// .kvi), and each of those + .torrent sidecars — must be renamed to
+// <name>.corrupt so the next retire produces a fresh version and no
+// runtime read touches the bad bytes. Sibling files (different stem)
+// must NOT be touched.
+func TestQuarantineCorruptStateFileFamily(t *testing.T) {
+	t.Parallel()
+	snapDir := t.TempDir()
+	domainDir := filepath.Join(snapDir, "domain")
+	require.NoError(t, os.MkdirAll(domainDir, 0o755))
+
+	targetStem := "v2.1-commitment.300-301"
+	targetFamily := []string{
+		targetStem + ".kv",
+		targetStem + ".kv.torrent",
+		targetStem + ".bt",
+		targetStem + ".bt.torrent",
+		targetStem + ".kvei",
+		targetStem + ".kvei.torrent",
+	}
+	// Sibling: a healthy commitment file whose stem overlaps in prefix
+	// digits (300-301 vs 301-302) — quarantine must not touch it. Exact
+	// stem match is required.
+	sibling := "v2.1-commitment.301-302.kv"
+	sidecarSibling := "v2.1-commitment.301-302.kv.torrent"
+	// Also a wholly unrelated file that shouldn't move.
+	unrelated := "v2.1-accounts.300-301.kv"
+
+	for _, f := range append(append([]string{}, targetFamily...), sibling, sidecarSibling, unrelated) {
+		require.NoError(t, os.WriteFile(filepath.Join(domainDir, f), []byte("test"), 0o644))
+	}
+
+	quarantineCorruptStateFileFamily(snapDir, targetFamily[0], "test", log.New())
+
+	// Every file in the target family is now <name>.corrupt.
+	for _, f := range targetFamily {
+		orig := filepath.Join(domainDir, f)
+		_, statErr := os.Stat(orig)
+		require.True(t, os.IsNotExist(statErr), "expected %s to be renamed away; got stat err=%v", f, statErr)
+
+		corrupt := orig + ".corrupt"
+		_, statErr = os.Stat(corrupt)
+		require.NoError(t, statErr, "expected quarantined %s to exist", corrupt)
+	}
+
+	// Sibling + unrelated files untouched.
+	for _, f := range []string{sibling, sidecarSibling, unrelated} {
+		_, statErr := os.Stat(filepath.Join(domainDir, f))
+		require.NoError(t, statErr, "quarantine must not touch %s", f)
+		_, statErr = os.Stat(filepath.Join(domainDir, f+".corrupt"))
+		require.True(t, os.IsNotExist(statErr), "quarantine must not create .corrupt for %s", f)
+	}
+}
+
+// TestQuarantineCorruptStateFileFamily_Idempotent guards against a
+// double-quarantine on repeat boots: a file already carrying the
+// .corrupt suffix must not be re-renamed to .corrupt.corrupt.
+func TestQuarantineCorruptStateFileFamily_Idempotent(t *testing.T) {
+	t.Parallel()
+	snapDir := t.TempDir()
+	domainDir := filepath.Join(snapDir, "domain")
+	require.NoError(t, os.MkdirAll(domainDir, 0o755))
+
+	stem := "v2.1-commitment.300-301"
+	require.NoError(t, os.WriteFile(filepath.Join(domainDir, stem+".kv.corrupt"), []byte("test"), 0o644))
+
+	quarantineCorruptStateFileFamily(snapDir, stem+".kv", "test", log.New())
+
+	_, statErr := os.Stat(filepath.Join(domainDir, stem+".kv.corrupt"))
+	require.NoError(t, statErr, "existing .corrupt file must be left alone")
+	_, statErr = os.Stat(filepath.Join(domainDir, stem+".kv.corrupt.corrupt"))
+	require.True(t, os.IsNotExist(statErr), "must not double-quarantine to .corrupt.corrupt")
 }

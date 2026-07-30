@@ -902,7 +902,7 @@ func (p *Provider) Initialize(deps Deps) error {
 			// snapshot tip, anchor extraction works on every preverified
 			// commitment file independently — they don't contend.
 			extractBootstrapCommitmentAnchors(ctx, deps.Inventory,
-				p.ChainDB, p.BlockReader, logger)
+				p.ChainDB, p.BlockReader, p.snapDir, logger)
 		}
 	}
 

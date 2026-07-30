@@ -63,7 +63,7 @@ func TestPruneModeExpectsBodyAbsent_GuardClauses(t *testing.T) {
 func TestExtractBootstrapCommitmentAnchors_NilSafe(t *testing.T) {
 	t.Parallel()
 	require.NotPanics(t, func() {
-		extractBootstrapCommitmentAnchors(context.Background(), nil, nil, nil, nil)
+		extractBootstrapCommitmentAnchors(context.Background(), nil, nil, nil, "", nil)
 	}, "nil inventory + nil DB must short-circuit, not panic")
 }
 
@@ -74,6 +74,6 @@ func TestExtractBootstrapCommitmentAnchors_EmptyInventoryIsNoOp(t *testing.T) {
 	t.Parallel()
 	inv := snapshot.NewInventory()
 	require.NotPanics(t, func() {
-		extractBootstrapCommitmentAnchors(context.Background(), inv, nil, nil, nil)
+		extractBootstrapCommitmentAnchors(context.Background(), inv, nil, nil, "", nil)
 	}, "empty inventory must short-circuit before attempting to open a tx")
 }
