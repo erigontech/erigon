@@ -501,21 +501,6 @@ func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntri
 			if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
 					h.logger.Debug("[agg] History.openDirtyFiles", "err", err, "f", fName)
-					// TODO we do not restore those files so we could just remove them along with indices. Same for domains/indices.
-					//      Those files will keep space on disk and closed automatically as corrupted. So better to remove them, and maybe remove downloading prohibiter to allow downloading them again?
-					//
-					// itemPaths := []string{
-					// 	fPath,
-					// 	h.vAccessorFilePath(fromStep, toStep),
-					// }
-					// for _, fp := range itemPaths {
-					// 	err = dir.Remove(fp)
-					// 	if err != nil {
-					// 		h.logger.Warn("[agg] History.openDirtyFiles cannot remove corrupted file", "err", err, "f", fp)
-					// 	}
-					// }
-				} else {
-					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 				}
 				invalidFileItems = append(invalidFileItems, item)
 				// don't interrupt on error. other files may be good. but skip indices open.
@@ -528,13 +513,13 @@ func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntri
 			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, accessorEntries, h.dirs.SnapAccessors)
 			if err != nil {
 				fName := filepath.Base(fPath)
-				h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
+				h.logger.Debug("[agg] History.openDirtyFiles", "err", err, "f", fName)
 			}
 			if ok {
 				fName := filepath.Base(fPath)
 				h.FileVersion.AccessorVI.MustSupport(fileVer, fName)
 				if item.index, err = h.openHashMapAccessor(fPath); err != nil {
-					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
+					h.logger.Debug("[agg] History.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
 			}
@@ -582,8 +567,6 @@ func (ii *InvertedIndex) openDirtyFiles(ctx context.Context, dataEntries, access
 			if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
 					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
-				} else {
-					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 				}
 				invalidFileItems = append(invalidFileItems, item)
 				// don't interrupt on error. other files may be good. but skip indices open.
@@ -596,14 +579,14 @@ func (ii *InvertedIndex) openDirtyFiles(ctx context.Context, dataEntries, access
 			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, accessorEntries, ii.dirs.SnapAccessors)
 			if err != nil {
 				fName := filepath.Base(fPath)
-				ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+				ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 				// don't interrupt on error. other files may be good
 			}
 			if ok {
 				fName := filepath.Base(fPath)
 				ii.FileVersion.AccessorEFI.MustSupport(fileVer, fName)
 				if item.index, err = ii.openHashMapAccessor(fPath); err != nil {
-					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
 			}
