@@ -1199,22 +1199,29 @@ func TestCanceledMemberCannotMaskRealError(t *testing.T) {
 	boom := errors.New("exec.Worker panic: boom")
 
 	t.Run("raw cancellation occupies the first-error slot", func(t *testing.T) {
-		g := &errgroup.Group{}
+		g, groupCtx := errgroup.WithContext(context.Background())
 		g.Go(func() error { return context.Canceled })
 		g.Go(func() error {
-			time.Sleep(20 * time.Millisecond)
+			<-groupCtx.Done()
 			return boom
 		})
-		require.NotErrorIs(t, g.Wait(), boom,
+		got := g.Wait()
+		require.ErrorIs(t, got, context.Canceled)
+		require.NotErrorIs(t, got, boom,
 			"errgroup keeps the first non-nil return — the raw Canceled masks the real error")
 	})
 
 	t.Run("filtered members surface a late real worker error", func(t *testing.T) {
+		cancellationFiltered := make(chan struct{})
 		pe := &parallelExecutor{}
 		pe.execLoopGroup = &errgroup.Group{}
-		pe.execLoopGroup.Go(func() error { return common.NilIfCanceled(context.Canceled) })
 		pe.execLoopGroup.Go(func() error {
-			time.Sleep(20 * time.Millisecond)
+			err := common.NilIfCanceled(context.Canceled)
+			close(cancellationFiltered)
+			return err
+		})
+		pe.execLoopGroup.Go(func() error {
+			<-cancellationFiltered
 			return joinWorkers(func() error { return boom })
 		})
 		require.ErrorIs(t, pe.wait(), boom,
