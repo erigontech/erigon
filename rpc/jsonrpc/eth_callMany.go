@@ -158,7 +158,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	}
 
 	st := state.New(stateReader)
-	defer st.Release(false)
+	defer st.Close()
 
 	header := block.HeaderNoCopy()
 

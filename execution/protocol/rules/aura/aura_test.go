@@ -189,7 +189,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	reader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(tx)))
 	writer := state.NewVersionedWriteCollector(rs)
 	ibs := state.New(reader)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	err = protocol.InitializeBlockExecution(engine, chainRdr, header, config, ibs, writer, logger, nil)
 	require.NoError(err)
 	account, err := reader.ReadAccountData(params.SystemAddress)
