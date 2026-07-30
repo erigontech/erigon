@@ -20,6 +20,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -65,6 +66,18 @@ func TestDetermineGloasFullRoots_EmptyBatch(t *testing.T) {
 	assert.Empty(t, roots)
 }
 
+func TestDetermineGloasFullRoots_IncompleteBlocks(t *testing.T) {
+	incomplete := &cltypes.SignedBeaconBlock{}
+
+	assert.NotPanics(t, func() {
+		roots := determineGloasFullRoots(
+			[]*cltypes.SignedBeaconBlock{nil, incomplete},
+			nil,
+		)
+		assert.Empty(t, roots)
+	})
+}
+
 // TestDetermineGloasFullRoots_AllPreGloas verifies that pre-GLOAS blocks are ignored.
 func TestDetermineGloasFullRoots_AllPreGloas(t *testing.T) {
 	responses := []*cltypes.SignedBeaconBlock{
@@ -76,18 +89,12 @@ func TestDetermineGloasFullRoots_AllPreGloas(t *testing.T) {
 	assert.Empty(t, roots)
 }
 
-// TestDetermineGloasFullRoots_SingleBlock_NilLookahead verifies that a single GLOAS block
-// with no prevBatchTopBlock (first batch ever) is treated optimistically as FULL.
-func TestDetermineGloasFullRoots_SingleBlock_NilLookahead(t *testing.T) {
+func TestDetermineGloasFullRoots_SingleBlock_NilLookaheadDoesNotGuess(t *testing.T) {
 	blk := makeGloasBlock(100, hash(0xAA), hash(0x00))
 	responses := []*cltypes.SignedBeaconBlock{blk}
 
 	roots := determineGloasFullRoots(responses, nil)
-	require.Len(t, roots, 1)
-
-	expected, err := blk.Block.HashSSZ()
-	require.NoError(t, err)
-	assert.Equal(t, expected, roots[0])
+	assert.Empty(t, roots)
 }
 
 // TestDetermineGloasFullRoots_InBatch_Full verifies that a GLOAS block is identified as FULL
@@ -99,15 +106,11 @@ func TestDetermineGloasFullRoots_InBatch_Full(t *testing.T) {
 	responses := []*cltypes.SignedBeaconBlock{blk0, blk1}
 
 	roots := determineGloasFullRoots(responses, nil)
-	// blk0 is FULL, blk1 is highest with nil prevBatchTopBlock → optimistic
-	require.Len(t, roots, 2)
+	require.Len(t, roots, 1)
 
 	root0, err := blk0.Block.HashSSZ()
 	require.NoError(t, err)
-	root1, err := blk1.Block.HashSSZ()
-	require.NoError(t, err)
 	assert.Contains(t, roots, root0)
-	assert.Contains(t, roots, root1)
 }
 
 // TestDetermineGloasFullRoots_InBatch_Empty verifies that a GLOAS block is identified as EMPTY
@@ -119,12 +122,7 @@ func TestDetermineGloasFullRoots_InBatch_Empty(t *testing.T) {
 	responses := []*cltypes.SignedBeaconBlock{blk0, blk1}
 
 	roots := determineGloasFullRoots(responses, nil)
-	// blk0 is EMPTY, blk1 is highest with nil prevBatchTopBlock → optimistic
-	require.Len(t, roots, 1)
-
-	root1, err := blk1.Block.HashSSZ()
-	require.NoError(t, err)
-	assert.Equal(t, root1, roots[0])
+	assert.Empty(t, roots)
 }
 
 // TestDetermineGloasFullRoots_CrossBatch_Full verifies the cross-batch lookahead:
@@ -169,7 +167,7 @@ func TestDetermineGloasFullRoots_Mixed(t *testing.T) {
 	responses := []*cltypes.SignedBeaconBlock{blk0, blk1, blk2, blk3}
 
 	roots := determineGloasFullRoots(responses, nil)
-	require.Len(t, roots, 3) // blk0, blk2, blk3(optimistic)
+	require.Len(t, roots, 2)
 
 	root0, _ := blk0.Block.HashSSZ()
 	root1, _ := blk1.Block.HashSSZ()
@@ -178,7 +176,7 @@ func TestDetermineGloasFullRoots_Mixed(t *testing.T) {
 	assert.Contains(t, roots, root0)
 	assert.NotContains(t, roots, root1)
 	assert.Contains(t, roots, root2)
-	assert.Contains(t, roots, root3)
+	assert.NotContains(t, roots, root3)
 }
 
 // TestDetermineGloasFullRoots_MixedVersions verifies that pre-GLOAS blocks in a mixed
@@ -191,13 +189,191 @@ func TestDetermineGloasFullRoots_MixedVersions(t *testing.T) {
 	responses := []*cltypes.SignedBeaconBlock{deneb, gloasFull, lookahead}
 
 	roots := determineGloasFullRoots(responses, nil)
-	// gloasFull FULL, lookahead optimistic (highest with nil prevBatchTopBlock)
-	require.Len(t, roots, 2)
+	require.Len(t, roots, 1)
 
 	rootFull, _ := gloasFull.Block.HashSSZ()
-	rootLookahead, _ := lookahead.Block.HashSSZ()
 	assert.Contains(t, roots, rootFull)
-	assert.Contains(t, roots, rootLookahead)
+}
+
+func TestBackwardBeaconDownloaderFirstBatchUsesLookaheadAfterMissedSlot(t *testing.T) {
+	anchor := makeGloasBlock(100, hash(0xAA), hash(0x10))
+	anchorRoot, err := anchor.Block.HashSSZ()
+	require.NoError(t, err)
+
+	lookahead := makeGloasBlock(102, hash(0xBB), hash(0x10))
+	lookahead.Block.ParentRoot = anchorRoot
+	encodedLookahead, err := lookahead.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	var lookaheadRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/eth/v2/beacon/blocks/102" {
+			lookaheadRequests.Add(1)
+			w.Header().Set("Eth-Consensus-Version", "gloas")
+			_, _ = w.Write(encodedLookahead)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	var processed atomic.Bool
+	downloader := &BackwardBeaconDownloader{
+		expectedRoot:    anchorRoot,
+		httpFallbackURL: server.URL,
+		beaconCfg:       &clparams.MainnetBeaconConfig,
+		onNewBlock: func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+			processed.Store(true)
+			assert.Nil(t, envelope)
+			return true, nil
+		},
+	}
+
+	require.NoError(t, downloader.processResponses(context.Background(), []*cltypes.SignedBeaconBlock{anchor}))
+	assert.True(t, processed.Load())
+	assert.Equal(t, int32(1), lookaheadRequests.Load())
+}
+
+func TestBackwardBeaconDownloaderFirstBatchFullBlockWaitsForEnvelope(t *testing.T) {
+	anchor := makeGloasBlock(100, hash(0xAA), hash(0x10))
+	anchorRoot, err := anchor.Block.HashSSZ()
+	require.NoError(t, err)
+
+	lookahead := makeGloasBlock(102, hash(0xBB), hash(0xAA))
+	lookahead.Block.ParentRoot = anchorRoot
+	encodedLookahead, err := lookahead.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/eth/v2/beacon/blocks/102" {
+			w.Header().Set("Eth-Consensus-Version", "gloas")
+			_, _ = w.Write(encodedLookahead)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	var processed atomic.Bool
+	downloader := &BackwardBeaconDownloader{
+		expectedRoot:    anchorRoot,
+		httpFallbackURL: server.URL,
+		beaconCfg:       &clparams.MainnetBeaconConfig,
+		onNewBlock: func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+			processed.Store(true)
+			return true, nil
+		},
+	}
+	downloader.httpPreferred.Store(true)
+
+	require.NoError(t, downloader.processResponses(context.Background(), []*cltypes.SignedBeaconBlock{anchor}))
+	assert.False(t, processed.Load())
+	assert.Equal(t, 1, downloader.consecutiveEnvelopeFailures)
+}
+
+func TestBackwardBeaconDownloaderHTTPPreferredMissingEnvelopeTracksFailure(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	block := makeGloasBlock(100, hash(0xAA), hash(0x10))
+	lookahead := makeGloasBlock(102, hash(0xBB), hash(0xAA))
+	downloader := &BackwardBeaconDownloader{
+		httpFallbackURL: server.URL,
+		beaconCfg:       &clparams.MainnetBeaconConfig,
+	}
+	downloader.httpPreferred.Store(true)
+
+	envelopes, fullRoots := downloader.fetchGloasEnvelopes(
+		context.Background(),
+		[]*cltypes.SignedBeaconBlock{block, lookahead},
+	)
+
+	assert.Empty(t, envelopes)
+	require.Len(t, fullRoots, 1)
+	assert.Equal(t, 1, downloader.consecutiveEnvelopeFailures)
+}
+
+func TestSelectGloasLookaheadRejectsUnlinkedAndIncompleteBlocks(t *testing.T) {
+	anchor := makeGloasBlock(100, hash(0xAA), hash(0x10))
+	anchorRoot, err := anchor.Block.HashSSZ()
+	require.NoError(t, err)
+
+	unlinked := makeGloasBlock(101, hash(0xBB), hash(0xAA))
+	unlinked.Block.ParentRoot = hash(0xFF)
+	linked := makeGloasBlock(102, hash(0xCC), hash(0xAA))
+	linked.Block.ParentRoot = anchorRoot
+	laterLinked := makeGloasBlock(103, hash(0xDD), hash(0xCC))
+	laterLinked.Block.ParentRoot = anchorRoot
+
+	selected := selectGloasLookahead(
+		anchor,
+		anchorRoot,
+		[]*cltypes.SignedBeaconBlock{nil, unlinked, laterLinked, linked},
+	)
+	assert.Same(t, linked, selected)
+}
+
+func TestFetchEnvelopesFromBeaconAPIIncompleteBlock(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	block := makeGloasBlock(100, hash(0xAA), hash(0x10))
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	received := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+
+	assert.NotPanics(t, func() {
+		fetched := fetchEnvelopesFromBeaconAPI(
+			context.Background(),
+			server.URL,
+			[]*cltypes.SignedBeaconBlock{nil, block},
+			[][32]byte{blockRoot},
+			received,
+			&clparams.MainnetBeaconConfig,
+		)
+		assert.Zero(t, fetched)
+	})
+}
+
+func TestBackwardBeaconDownloaderPreGloasFirstBatchNeedsNoLookahead(t *testing.T) {
+	block := makeDenebBlock(100)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	var processed atomic.Bool
+	downloader := &BackwardBeaconDownloader{
+		expectedRoot: blockRoot,
+		beaconCfg:    &clparams.MainnetBeaconConfig,
+		onNewBlock: func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+			processed.Store(true)
+			assert.Nil(t, envelope)
+			return true, nil
+		},
+	}
+
+	require.NoError(t, downloader.processResponses(context.Background(), []*cltypes.SignedBeaconBlock{block}))
+	assert.True(t, processed.Load())
+}
+
+func TestBackwardBeaconDownloaderSkipsIncompleteResponse(t *testing.T) {
+	block := makeDenebBlock(100)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	downloader := &BackwardBeaconDownloader{
+		expectedRoot: blockRoot,
+		beaconCfg:    &clparams.MainnetBeaconConfig,
+		onNewBlock: func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+			return false, nil
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		require.NoError(t, downloader.processResponses(
+			context.Background(),
+			[]*cltypes.SignedBeaconBlock{nil, block},
+		))
+	})
 }
 
 func TestBackwardBeaconDownloaderHTTPPreferredEmptyResponseFallsBack(t *testing.T) {
