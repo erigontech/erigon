@@ -1093,29 +1093,6 @@ func TestPreCheck_NilMaxFeePerBlobGas(t *testing.T) {
 	require.ErrorIs(t, err, ErrMaxFeePerBlobGas)
 }
 
-// TestApplyFrame_IntrinsicGasBeforeAuthorities pins that ApplyFrame validates
-// intrinsic gas before the SetCode prerequisite check and verifyAuthorities'
-// state mutation. On a pre-Prague config checkSetCodeAuthorizations rejects a
-// non-nil authorization list with a distinct error, so reaching
-// ErrIntrinsicGas proves the gas check runs first.
-func TestApplyFrame_IntrinsicGasBeforeAuthorities(t *testing.T) {
-	t.Parallel()
-
-	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
-	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
-	cfg := chain.TestChainBerlinConfig // pre-Prague
-
-	ibs := state.New(state.NewNoopReader())
-	evm := newTestEVM(ibs, cfg, 30_000_000)
-	msg := newSimpleTransferMsg(sender, recipient, 1000 /* below intrinsic */, true)
-	msg.SetAuthorizations([]types.Authorization{{}})
-
-	gp := new(GasPool).AddGas(30_000_000)
-	_, err := NewTxnExecutor(evm, msg, gp).ApplyFrame()
-
-	require.ErrorIs(t, err, ErrIntrinsicGas)
-}
-
 // TestType4Prereq_NoStateMutationOnReject pins that a SetCode (EIP-7702)
 // transaction rejected for a deterministic prerequisite — here, a type-4 tx
 // before Prague — takes precedence over affordability and intrinsic-gas checks
