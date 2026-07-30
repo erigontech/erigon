@@ -1037,7 +1037,7 @@ func TestReconcileExecAndWaitErr(t *testing.T) {
 	})
 }
 
-func TestHandleApplyLoopPanicDrainsChannels(t *testing.T) {
+func TestRunApplyLoopPanicDrainsChannels(t *testing.T) {
 	applyResults := make(chan applyResult, 1)
 	commitResults := make(chan applyResult, 1)
 	rootResults := make(chan commitmentResult, 1)
@@ -1098,7 +1098,9 @@ func TestHandleApplyLoopPanicDrainsChannels(t *testing.T) {
 	panicErr := errors.New("boom")
 	handlerDone := make(chan error, 1)
 	go func() {
-		handlerDone <- pe.handleApplyLoopPanic("test", panicErr, applyResults, rootResults)
+		handlerDone <- pe.runApplyLoop("test", applyResults, rootResults, func() error {
+			panic(panicErr)
+		})
 	}()
 
 	var recoveredErr error
@@ -1121,7 +1123,49 @@ func TestHandleApplyLoopPanicDrainsChannels(t *testing.T) {
 	}
 
 	<-calculatorDone
+	require.ErrorContains(t, recoveredErr, panicErr.Error())
 	require.Same(t, recoveredErr, context.Cause(executorCtx))
+}
+
+func TestRunApplyLoopErrorDrainsChannels(t *testing.T) {
+	applyResults := make(chan applyResult, 1)
+	rootResults := make(chan commitmentResult)
+	applyResults <- &txResult{}
+	close(rootResults)
+
+	executorCtx, cancelExecLoop := context.WithCancelCause(context.Background())
+	pe := &parallelExecutor{
+		txExecutor:     txExecutor{logger: log.New()},
+		cancelExecLoop: cancelExecLoop,
+	}
+
+	sendStarted := make(chan struct{})
+	sendDone := make(chan struct{})
+	go func() {
+		defer close(sendDone)
+		close(sendStarted)
+		applyResults <- &blockResult{}
+		close(applyResults)
+	}()
+	<-sendStarted
+
+	boom := errors.New("apply loop: open roTx: boom")
+	got := pe.runApplyLoop("test", applyResults, rootResults, func() error {
+		return boom
+	})
+
+	select {
+	case <-sendDone:
+	default:
+		<-applyResults
+		<-sendDone
+		for range applyResults {
+		}
+		t.Fatal("ordinary apply-loop error returned before the terminal send completed")
+	}
+
+	require.Same(t, boom, got)
+	require.Same(t, boom, context.Cause(executorCtx))
 }
 
 // Pins pe.wait's contract: it reports only real errors — a canceled group is

@@ -367,17 +367,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 
 	var lastProgress commitment.CommitProgress
 
-	execErr := func() (err error) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				err = pe.handleApplyLoopPanic(execStage.LogPrefix(), rec, applyResults, rootResults)
-			} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
-				pe.logger.Warn("["+execStage.LogPrefix()+"] rw exit", "err", err, "stack", dbg.Stack())
-			} else {
-				pe.logger.Debug("[" + execStage.LogPrefix() + "] rw exit")
-			}
-		}()
-
+	execErr := pe.runApplyLoop(execStage.LogPrefix(), applyResults, rootResults, func() (err error) {
 		// Test-only chaos injection (gated by the ChaosMonkey flag): reproduce
 		// a panic in the apply loop.
 		if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
@@ -832,7 +822,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 				}
 			}
 		}
-	}()
+	})
 
 	executorCancel(nil)
 
@@ -897,11 +887,26 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	return lastHeader, rwTx, execErr
 }
 
-func (pe *parallelExecutor) handleApplyLoopPanic(logPrefix string, rec any, applyResults <-chan applyResult, rootResults <-chan commitmentResult) error {
-	panicErr := fmt.Errorf("apply loop panic: %v", rec)
-	pe.logger.Warn("["+logPrefix+"] rw panic", "rec", rec, "stack", dbg.Stack())
-	pe.cancelExecLoop(panicErr)
+func (pe *parallelExecutor) runApplyLoop(logPrefix string, applyResults <-chan applyResult, rootResults <-chan commitmentResult, apply func() error) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("apply loop panic: %v", rec)
+			pe.logger.Warn("["+logPrefix+"] rw panic", "rec", rec, "stack", dbg.Stack())
+		} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
+			pe.logger.Warn("["+logPrefix+"] rw exit", "err", err, "stack", dbg.Stack())
+		} else {
+			pe.logger.Debug("[" + logPrefix + "] rw exit")
+		}
+		if err != nil {
+			pe.cancelAndDrainApplyLoop(err, applyResults, rootResults)
+		}
+	}()
+	return apply()
+}
 
+// Draining both streams lets blocked producers finish and close before the executor group is joined.
+func (pe *parallelExecutor) cancelAndDrainApplyLoop(cause error, applyResults <-chan applyResult, rootResults <-chan commitmentResult) {
+	pe.cancelExecLoop(cause)
 	for applyResults != nil || rootResults != nil {
 		select {
 		case _, ok := <-applyResults:
@@ -914,7 +919,6 @@ func (pe *parallelExecutor) handleApplyLoopPanic(logPrefix string, rec any, appl
 			}
 		}
 	}
-	return panicErr
 }
 
 func (pe *parallelExecutor) LogExecution() {
