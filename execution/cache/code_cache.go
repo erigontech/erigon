@@ -162,12 +162,12 @@ type CodeCache struct {
 	// check+bind is atomic w.r.t. a concurrent authoritative rebind.
 	addrBindMu sync.Mutex
 
-	// putStripes serializes putContentLocked's membership-check + size-account +
-	// insert per key hash: freelru has no LoadOrStore, so without this two
+	// putStripes serializes putContentLocked's membership check, accounting, and
+	// insertion per key hash: freelru has no LoadOrStore, so without this two
 	// concurrent Puts of the same cold code both miss the check and both add to
 	// the byte counter while only one entry survives, drifting the stat upward.
-	// Clear locks every stripe so epoch sampling and publication cannot straddle
-	// a generation reset. Distinct keys still put in parallel.
+	// Every epoch-stamped writer also uses a stripe, so Clear can fence all
+	// publications while distinct keys still write in parallel.
 	putStripes [256]sync.Mutex
 
 	// Stats counters (atomic for concurrent access)
@@ -379,11 +379,10 @@ func (c *CodeCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return e.hash, true
 }
 
-// PutAddrCodeHash records the addr → codeHash mapping. Called from the
-// account-decode populate path inside SD.codeHashForAddr; also called by
-// readAhead's BAL prefetch when it learns the codeHash from the decoded
-// account record. A live mapping is kept; an unwind-stale mapping is replaced.
-// txNum stamps the mapping for unwind invalidation.
+// PutAddrCodeHash records a committed-state addr → codeHash mapping. An
+// existing live mapping remains authoritative until DeleteAddrCodeHash
+// invalidates it; an unwind-stale mapping can be replaced. txNum stamps the
+// mapping for unwind invalidation.
 func (c *CodeCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	a := common.BytesToAddress(addr)
 	stripe := &c.putStripes[a[len(a)-1]]
@@ -396,9 +395,7 @@ func (c *CodeCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	c.addrToCodeHash.Add(a, addrCodeHashEntry{hash: h, txNum: txNum, epoch: c.coh.Epoch()})
 }
 
-// DeleteAddrCodeHash drops the addr → codeHash mapping. Called on
-// SELFDESTRUCT / CREATE2-replace / unwind where the account's codeHash
-// has been mutated.
+// DeleteAddrCodeHash removes the mapping when its account record is invalidated.
 func (c *CodeCache) DeleteAddrCodeHash(addr []byte) {
 	c.addrToCodeHash.Remove(common.BytesToAddress(addr))
 }
@@ -569,8 +566,9 @@ func (c *CodeCache) Delete(addr []byte) {
 }
 
 // Clear removes every layer, resets accounting, and starts a new coherence
-// generation. Coherence is reset only after every purge, so snapshot-before-
-// read paths cannot pair a retired entry with the lifted unwind floor.
+// generation. It holds every writer stripe through the purges and reset, so a
+// publication cannot cross generations. Reset follows every purge, so a reader
+// cannot pair a retired entry with the lifted unwind floor.
 func (c *CodeCache) Clear() {
 	c.lockAllPutStripes()
 	defer c.unlockAllPutStripes()

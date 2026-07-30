@@ -32,24 +32,24 @@ type gen struct {
 	floor uint64
 }
 
-// gen values are immutable, so zero-value readers can share pristine.
+// gen values are immutable, so all zero-value Gen reads can share pristine.
 var pristine = &gen{floor: math.MaxUint64}
 
 // Gen tracks unwind coherence for a cache: every entry is stamped (txNum, epoch),
 // and is stale iff it was written in a superseded epoch AND its txNum is at or
 // above the unwind floor (the first rolled-back txNum). Unwind bumps the epoch
 // and lowers the floor — O(1), scan-free; stale entries drop lazily on their
-// next read. The floor only ever decreases, so a shallower later unwind can't
-// resurrect entries a deeper one invalidated.
+// next read. Within one cache generation, the floor only decreases, so a
+// shallower later unwind can't resurrect entries a deeper one invalidated.
 //
 // The zero value is ready to use.
 type Gen struct {
 	state atomic.Pointer[gen]
 }
 
-// Reset starts an empty cache generation without reusing an epoch. It advances
-// the epoch and lifts the unwind floor in one CAS, so concurrent Reset and
-// Unwind calls cannot lose a generation change.
+// Reset starts a new generation for an empty cache without reusing an epoch.
+// It advances the epoch and lifts the unwind floor in one CAS, so concurrent
+// Reset and Unwind calls are ordered without losing either update.
 func (g *Gen) Reset() {
 	for {
 		cur := g.state.Load()
@@ -82,10 +82,8 @@ func (g *Gen) IsStale(txNum uint64, epoch uint32) bool {
 }
 
 // Snapshot is an immutable (epoch, floor) pair for judging entries against
-// the coherence state captured at a chosen point — e.g. before loading a
-// cache generation, so a concurrent Clear's reset (new epoch, lifted
-// floor) cannot revalidate a dead entry captured from the retiring
-// generation.
+// coherence captured at a chosen point. Taking it before loading cache storage
+// prevents a concurrent Clear from pairing a retired entry with a reset floor.
 type Snapshot struct {
 	epoch uint32
 	floor uint64

@@ -49,8 +49,8 @@ func isCommitmentStateKey(prefix []byte) bool {
 // BranchCache stores commitment-trie branch data: a bounded LRU tail plus a
 // never-evicted root slot, aggregator-scope and passive (the trie drives all
 // reads/writes). Concurrent Get/Put/Invalidate are mechanically safe, but the
-// writer stripes only coordinate writes with Clear — callers must still ensure
-// a single mutation per prefix at the orchestrator.
+// writer stripes only make stamped publications atomic with Clear; callers must
+// still ensure one logical mutation per prefix at the orchestrator.
 type BranchCache struct {
 	// Root tier — single slot for the root branch (always hottest, always
 	// present). Atomic-pointer access so no lock is needed for the hot
@@ -118,7 +118,7 @@ type BranchCache struct {
 	lastPublishedPinnedHits   atomic.Uint64
 	lastPublishedPinnedMisses atomic.Uint64
 
-	// putStripes keep epoch sampling and publication on one side of Clear while
+	// putStripes make epoch sampling and publication atomic with Clear while
 	// preserving parallel writes to unrelated prefixes.
 	putStripes [256]sync.Mutex
 
@@ -747,16 +747,17 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 // txN the chain is rewound to. O(1) and scan-free: bump the epoch (so entries
 // written in the new, live epoch stay valid) and lower the unwind floor to
 // unwindToTxN (so old-epoch entries at or above it are dropped lazily on their
-// next Get). The floor only ever decreases, so a shallow unwind cannot
-// resurrect entries a deeper one invalidated. Mirrors GenericCache.Unwind so
-// branch and state caches honor one (txN, epoch) model.
+// next Get). Within the current cache generation, the floor only decreases, so
+// a shallow unwind cannot resurrect entries a deeper one invalidated. Mirrors
+// GenericCache.Unwind so branch and state caches honor one (txN, epoch) model.
 func (c *BranchCache) Unwind(unwindToTxN uint64) {
 	c.coh.Unwind(unwindToTxN)
 }
 
 // Clear empties the root, trunk, pinned, and tail tiers, resets their stats, and
-// starts a new coherence generation. Coherence is reset only after every tier's
-// clear operation completes, so snapshot-before-lookup readers cannot pair a
+// starts a new coherence generation. It holds every writer stripe until all
+// tiers are empty and coherence is reset, so a publication cannot cross
+// generations. Reset follows every tier clear, so a reader cannot pair a
 // retired entry with the lifted unwind floor.
 func (c *BranchCache) Clear() {
 	c.lockAllPutStripes()
