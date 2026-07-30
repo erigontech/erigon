@@ -147,6 +147,7 @@ func TestCreatedEmptyRequiresNoOtherWrites(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			writes := newWrites()
+			require.True(t, writes.createdEmpty(addr))
 			test.add(writes)
 			require.False(t, writes.createdEmpty(addr))
 		})
