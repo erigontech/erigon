@@ -3,9 +3,53 @@ package snapcfg
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
 )
+
+func typedNames(t *testing.T, items PreverifiedItems) []string {
+	t.Helper()
+	typed := Preverified{Items: items}.Typed(snaptype.CaplinSnapshotTypes)
+	names := make([]string, 0, len(typed.Items))
+	for _, item := range typed.Items {
+		names = append(names, item.Name)
+	}
+	return names
+}
+
+func TestTypedCaplinVersionWindow(t *testing.T) {
+	names := typedNames(t, PreverifiedItems{
+		{Name: "caplin/v0.5-000000-000100-BlockRoot.seg", Hash: "below-min"},
+		{Name: "caplin/v1.1-000000-000100-BlockRoot.seg", Hash: "in-window"},
+		{Name: "caplin/v9.9-000000-000100-BlockRoot.seg", Hash: "above-preferred"},
+	})
+	require.Equal(t, []string{"caplin/v1.1-000000-000100-BlockRoot.seg"}, names)
+}
+
+func TestTypedCaplinKeepsNewestPerName(t *testing.T) {
+	names := typedNames(t, PreverifiedItems{
+		{Name: "caplin/v1.0-000000-000100-BlockRoot.seg", Hash: "old"},
+		{Name: "caplin/v1.0-000100-000200-BlockRoot.seg", Hash: "other-range"},
+		{Name: "caplin/v1.1-000000-000100-BlockRoot.seg", Hash: "new"},
+	})
+	require.Equal(t, []string{
+		"caplin/v1.0-000100-000200-BlockRoot.seg",
+		"caplin/v1.1-000000-000100-BlockRoot.seg",
+	}, names)
+}
+
+func TestTypedKeepsCaplinTypedEntries(t *testing.T) {
+	items := PreverifiedItems{
+		{Name: "v1.1-000000-000100-beaconblocks.idx", Hash: "a"},
+		{Name: "v1.1-000000-000100-beaconblocks.seg", Hash: "b"},
+		{Name: "v1.1-000000-000100-blobsidecars.idx", Hash: "c"},
+		{Name: "v1.1-000000-000100-blobsidecars.seg", Hash: "d"},
+	}
+	typed := Preverified{Items: items}.Typed(snaptype.CaplinSnapshotTypes)
+	require.Equal(t, items, typed.Items)
+}
 
 func TestNameToParts(t *testing.T) {
 	type args struct {

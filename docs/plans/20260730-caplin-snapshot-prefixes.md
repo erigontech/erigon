@@ -246,18 +246,18 @@ glob to a recursive `filepath.WalkDir` collecting `*.torrent`.
 - Modify: `db/snapcfg/util.go`
 - Modify: `db/snapcfg/util_test.go` (or create if absent)
 
-- [ ] write red test on `Preverified.Typed`: caplin state entries
+- [x] write red test on `Preverified.Typed`: caplin state entries
   `caplin/v9.9-…-BlockRoot.seg` + `caplin/v1.1-…-BlockRoot.seg` → only v1.1
   survives; today the bypass keeps both
-- [ ] write test: two in-window versions of the same caplin name
+- [x] write test: two in-window versions of the same caplin name
   (`caplin/v1.0-…` + `caplin/v1.1-…`) → newest kept — this pins the dedup
   key spec (version-stripped remainder, NOT the full name)
-- [ ] implement per Technical Details Fix 6 (prefix strip → version parse →
+- [x] implement per Technical Details Fix 6 (prefix strip → version parse →
   BeaconBlocks window → `"caplin/"+remainder` dedup key → emit original item)
-- [ ] write test: beaconblocks/blobsidecars `.seg`/`.idx` entries are
+- [x] write test: beaconblocks/blobsidecars `.seg`/`.idx` entries are
   untouched by this change
-- [ ] run `go test ./db/snapcfg/...` — green
-- [ ] commit: `db/snapcfg: apply the version window to caplin preverified
+- [x] run `go test ./db/snapcfg/...` — green
+- [x] commit: `db/snapcfg: apply the version window to caplin preverified
   entries`
 
 ### Task 7: Verify acceptance criteria

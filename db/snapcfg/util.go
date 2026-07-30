@@ -140,7 +140,24 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		}
 
 		if strings.HasPrefix(p.Name, "caplin") {
-			bestVersions.Set(p.Name, p)
+			caplinVersion, err := ver.ParseVersion(strings.TrimPrefix(v, "caplin/"))
+			if err != nil {
+				continue
+			}
+			versions := snaptype.BeaconBlocks.Versions()
+			if caplinVersion.Less(versions.MinSupported) || versions.Current.Less(caplinVersion) {
+				continue
+			}
+			key := "caplin/" + name
+			if current, ok := bestVersions.Get(key); ok {
+				cv, _, _ := strings.Cut(current.Name, "-")
+				currentVersion, _ := ver.ParseVersion(strings.TrimPrefix(cv, "caplin/"))
+				if currentVersion.Less(caplinVersion) {
+					bestVersions.Set(key, p)
+				}
+			} else {
+				bestVersions.Set(key, p)
+			}
 			continue
 		}
 
