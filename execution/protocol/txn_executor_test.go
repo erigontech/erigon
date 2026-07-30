@@ -227,6 +227,7 @@ func TestIntrinsicGasReject_NoStateMutation(t *testing.T) {
 
 	_, err := NewTxnExecutor(evm, msg, gp).Execute(true, false)
 	require.ErrorIs(t, err, ErrIntrinsicGas, "tx below the EIP-7623 floor must be rejected")
+	require.ErrorContains(t, err, "have 21404, want 22000")
 
 	nonce, err := ibs.GetNonce(sender)
 	require.NoError(t, err)
