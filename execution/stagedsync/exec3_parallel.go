@@ -3060,19 +3060,20 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.blockNum, err)), nil
 				}
 
-				// syscallIBS == ibs unconditionally now; no separate write
-				// propagation needed — syscall writes flow through
-				// FinalizedWrites + Normalize into finalizeWrites below.
-
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
 
-				ivw := ibs.FinalizedWrites(lastResult.Rules())
-				if !ivw.IsEmpty() {
-					be.blockIO.RecordWrites(finalVersion, ivw)
-					be.versionMap.FlushVersionedWrites(ivw, true, "")
+				// Finalize first so both views include end-of-transaction normalization.
+				// EIP-161 filtering applies only to state; EIP-7928 keeps empty-account accesses.
+				stateWrites := ibs.FinalizedWrites(lastResult.Rules())
+				balWrites := ibs.VersionedWrites()
+				if !balWrites.IsEmpty() {
+					be.blockIO.RecordWrites(finalVersion, balWrites)
+				}
+				if !stateWrites.IsEmpty() {
+					be.versionMap.FlushVersionedWrites(stateWrites, true, "")
 				}
 
-				// Commit finalize writes from the versionMap write-set (ivw), the
+				// Commit finalize writes from the versionMap write-set, the
 				// same Normalize path regular txs use, rather than from
 				// so.data via MakeWriteSet. This keeps the parallel commit sourced
 				// solely from versionedWrites so the write-path stateObject is
@@ -3095,7 +3096,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 				emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
 				var normErr error
-				finalizeWrites, normErr = ivw.Normalize(be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
+				finalizeWrites, normErr = stateWrites.Normalize(be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
 				if domainKeysErr != nil {
 					return nil, fmt.Errorf("[parallel] finalize iterate storage prefix for block write normalization: %w", domainKeysErr)
 				}
