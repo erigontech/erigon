@@ -154,6 +154,36 @@ func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
 	require.Equal(t, mdgas.MdGas{Regular: gasLimit}, gasRemaining)
 }
 
+func TestCreateInsufficientBalancePreservesPreAmsterdamTrace(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Release(false)
+	var entered []byte
+	exited := 0
+	hooks := &tracing.Hooks{
+		OnEnter: func(_ int, typ byte, _, _ accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
+			entered = append(entered, typ)
+		},
+		OnExit: func(_ int, _ []byte, _ uint64, _ error, _ bool) {
+			exited++
+		},
+	}
+	_, _, _, err := Create(
+		[]byte{byte(vm.STOP)},
+		&Config{
+			ChainConfig: chain.TestChainOsakaConfig,
+			EVMConfig:   vm.Config{Tracer: hooks},
+			GasLimit:    500_000,
+			Value:       *uint256.NewInt(1),
+			State:       statedb,
+		},
+		0,
+	)
+	require.ErrorIs(t, err, vm.ErrInsufficientBalance)
+	require.Equal(t, []byte{byte(vm.CREATE)}, entered)
+	require.Equal(t, 1, exited)
+}
+
 func TestCreateRuntimeOutOfGasEmitsCallGasChanges(t *testing.T) {
 	t.Parallel()
 	statedb := state.New(state.NewNoopReader())

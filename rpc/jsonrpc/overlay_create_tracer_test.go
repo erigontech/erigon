@@ -37,10 +37,12 @@ func TestOverlayCreateTracerCapturesResultCode(t *testing.T) {
 	t.Parallel()
 	caller := accounts.InternAddress(common.Address{0x01})
 	target := accounts.InternAddress(common.Address{0x02})
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Release(false)
 	evm := vm.NewEVM(
 		evmtypes.BlockContext{CanTransfer: protocol.CanTransfer, Transfer: misc.Transfer},
 		evmtypes.TxContext{},
-		state.New(state.NewNoopReader()),
+		statedb,
 		chain.AllProtocolChanges,
 		vm.Config{},
 	)
