@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -494,64 +493,26 @@ func TestRemoteFailureWithNoLocalStateErrors(t *testing.T) {
 	require.Nil(t, got)
 }
 
-func TestResumeHorizonHonorsAndClampsConfig(t *testing.T) {
-	cfg := &clparams.MainnetBeaconConfig
-	retention := cfg.MinEpochsForBlobSidecarsRequests * cfg.SlotsPerEpoch
-
-	assert.Equal(t, retention, resolveResumeHorizonSlots(cfg, 0, 0, true), "0 resolves to the sidecar-retention window")
-	assert.Equal(t, uint64(10)*cfg.SlotsPerEpoch, resolveResumeHorizonSlots(cfg, 10, 0, true), "a value below the window is honored")
-	assert.Equal(t, retention, resolveResumeHorizonSlots(cfg, cfg.MinEpochsForBlobSidecarsRequests+1000, 0, true), "a value above the window is clamped down")
-
-	// The retention window is selected by the anchor's fork: blob sidecars pre-Fulu, data-column
-	// sidecars Fulu+. Use a config whose two retention values differ so the branch is observable
-	// (they are equal on mainnet).
-	fuluCfg := clparams.MainnetBeaconConfig
-	fuluCfg.MinEpochsForBlobSidecarsRequests = 4096
-	fuluCfg.MinEpochsForDataColumnSidecarsRequests = 8192
-	fuluEpoch := fuluCfg.FuluForkEpoch
-	assert.Equal(t, fuluCfg.MinEpochsForBlobSidecarsRequests*fuluCfg.SlotsPerEpoch,
-		resolveResumeHorizonSlots(&fuluCfg, 0, fuluEpoch-1, true), "pre-Fulu uses the blob-retention window")
-	assert.Equal(t, fuluCfg.MinEpochsForDataColumnSidecarsRequests*fuluCfg.SlotsPerEpoch,
-		resolveResumeHorizonSlots(&fuluCfg, 0, fuluEpoch, true), "Fulu+ uses the data-column-retention window")
-
-	// An epochs-to-slots conversion before the clamp overflows uint64 and wraps to a tiny horizon.
-	for _, epochs := range []uint64{1 << 59, math.MaxUint64} {
-		assert.Equal(t, retention, resolveResumeHorizonSlots(cfg, epochs, 0, true),
-			"an overflowing value clamps to the window, epochs=%d", epochs)
-	}
-}
-
-// TestResumeHorizonBoundBySidecarNeed pins that only a node which actually fetches sidecars
-// during forward sync is bound by sidecar retention. Every other node fetches blocks alone,
-// whose serve-range (MIN_EPOCHS_FOR_BLOCK_REQUESTS) is far wider — binding it to the ~18-day
-// sidecar window would send a node that had been off for weeks to a remote checkpoint, and
-// then through the execution-history backfill the local resume exists to avoid.
 func TestResumeHorizonBoundBySidecarNeed(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	sidecarBound := cfg.MinEpochsForBlobSidecarsRequests * cfg.SlotsPerEpoch
 	blockBound := cfg.MinEpochsForBlockRequests() * cfg.SlotsPerEpoch
 	require.Greater(t, blockBound, sidecarBound, "precondition: blocks are served over a wider range than sidecars")
 
-	assert.Equal(t, blockBound, resolveResumeHorizonSlots(cfg, 0, 0, false),
+	assert.Equal(t, blockBound, resolveResumeHorizonSlots(cfg, 0, false),
 		"a node that fetches no sidecars is bound by the block serve-range")
-	assert.Equal(t, sidecarBound, resolveResumeHorizonSlots(cfg, 0, 0, true),
+	assert.Equal(t, sidecarBound, resolveResumeHorizonSlots(cfg, 0, true),
 		"a sidecar-fetching node stays bound by sidecar retention")
-
-	assert.Equal(t, blockBound, resolveResumeHorizonSlots(cfg, cfg.MinEpochsForBlockRequests()+1000, 0, false),
-		"an override above the block serve-range is clamped to it")
-	assert.Equal(t, cfg.MinEpochsForBlobSidecarsRequests*cfg.SlotsPerEpoch,
-		resolveResumeHorizonSlots(cfg, cfg.MinEpochsForBlockRequests(), 0, true),
-		"an override above sidecar retention is still clamped for a sidecar-fetching node")
 
 	// The fork-selected sidecar window only applies when sidecars are needed.
 	fuluCfg := clparams.MainnetBeaconConfig
 	fuluCfg.MinEpochsForBlobSidecarsRequests = 4096
 	fuluCfg.MinEpochsForDataColumnSidecarsRequests = 8192
 	assert.Equal(t, fuluCfg.MinEpochsForDataColumnSidecarsRequests*fuluCfg.SlotsPerEpoch,
-		resolveResumeHorizonSlots(&fuluCfg, 0, fuluCfg.FuluForkEpoch, true),
+		resolveResumeHorizonSlots(&fuluCfg, fuluCfg.FuluForkEpoch, true),
 		"Fulu+ sidecar node uses the data-column window")
 	assert.Equal(t, fuluCfg.MinEpochsForBlockRequests()*fuluCfg.SlotsPerEpoch,
-		resolveResumeHorizonSlots(&fuluCfg, 0, fuluCfg.FuluForkEpoch, false),
+		resolveResumeHorizonSlots(&fuluCfg, fuluCfg.FuluForkEpoch, false),
 		"Fulu+ non-sidecar node is unaffected by the data-column window")
 }
 

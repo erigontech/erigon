@@ -60,10 +60,6 @@ type CaplinConfig struct {
 	NetworkId NetworkType
 	// DisableCheckpointSync is optional and is used to disable checkpoint sync used by default in the node
 	DisabledCheckpointSync bool
-	// ResumeMaxStalenessEpochs bounds how stale a locally-finalized state may be to resume from it
-	// on restart instead of remote checkpoint syncing. 0 = computed default; values above what peers
-	// still serve for the catch-up are clamped down (see resolveResumeHorizonSlots).
-	ResumeMaxStalenessEpochs uint64
 	// CaplinMeVRelayUrl is optional and is used to connect to the external builder service.
 	// If it's set, the node will start in builder mode
 	MevRelayUrl string

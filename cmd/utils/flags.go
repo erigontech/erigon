@@ -1033,12 +1033,6 @@ var (
 		Usage: "disable checkpoint sync in caplin",
 		Value: false,
 	}
-	CaplinResumeMaxStalenessEpochsFlag = cli.Uint64Flag{
-		Name:  "caplin.resume-max-staleness-epochs",
-		Usage: "max epochs a locally-finalized state may be stale to resume from it on restart instead of remote checkpoint syncing (0 = default: what peers still serve for the catch-up — the anchor fork's sidecar-retention window when this node fetches sidecars, otherwise the far wider block serve-range). Larger values are clamped to that bound",
-		Value: 0,
-	}
-
 	CaplinEnableSnapshotGeneration = cli.BoolFlag{
 		Name:  "caplin.snapgen",
 		Usage: "enables snapshot generation in caplin",
@@ -1854,7 +1848,6 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
 	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
-	cfg.CaplinConfig.ResumeMaxStalenessEpochs = ctx.Uint64(CaplinResumeMaxStalenessEpochsFlag.Name)
 	cfg.CaplinConfig.ColumnKeepSlots = ctx.Uint64(CaplinColumnKeepSlotsFlag.Name)
 	// bunch of extra stuff
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)

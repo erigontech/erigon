@@ -118,7 +118,7 @@ func tryResumeFromLocalFinalizedState(dirs datadir.Dirs, beaconCfg *clparams.Bea
 	localSlot := localFinalized.Slot()
 	anchorEpoch := localSlot / beaconCfg.SlotsPerEpoch
 	needsSidecars := caplinConfig.ArchiveBlobs || caplinConfig.ImmediateBlobsBackfilling
-	horizonSlots := resolveResumeHorizonSlots(beaconCfg, caplinConfig.ResumeMaxStalenessEpochs, anchorEpoch, needsSidecars)
+	horizonSlots := resolveResumeHorizonSlots(beaconCfg, anchorEpoch, needsSidecars)
 	if !stateWithinResumeHorizon(localSlot, genesisTime, nowUnix, secondsPerSlot, horizonSlots) {
 		log.Info("[Checkpoint Sync] Local finalized state is too stale to resume from; using remote", "reason", "stale",
 			"slot", localSlot, "horizonSlots", horizonSlots)
@@ -158,10 +158,8 @@ func readLocalStateFile(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig
 // Forward sync fetches sidecars only when the node archives blobs or backfills them immediately;
 // such a node is bound by the anchor fork's sidecar retention — blob sidecars pre-Fulu,
 // data-column sidecars Fulu+. Every other node fetches blocks alone, whose serve-range is
-// MIN_EPOCHS_FOR_BLOCK_REQUESTS and is far wider. A user override (resumeMaxStalenessEpochs)
-// above the applicable bound would leave the node unable to fetch what the catch-up needs, so it
-// is clamped down.
-func resolveResumeHorizonSlots(beaconCfg *clparams.BeaconChainConfig, resumeMaxStalenessEpochs, anchorEpoch uint64, needsSidecars bool) uint64 {
+// MIN_EPOCHS_FOR_BLOCK_REQUESTS and is far wider.
+func resolveResumeHorizonSlots(beaconCfg *clparams.BeaconChainConfig, anchorEpoch uint64, needsSidecars bool) uint64 {
 	boundEpochs := beaconCfg.MinEpochsForBlockRequests()
 	if needsSidecars {
 		boundEpochs = beaconCfg.MinEpochsForBlobSidecarsRequests
@@ -169,18 +167,7 @@ func resolveResumeHorizonSlots(beaconCfg *clparams.BeaconChainConfig, resumeMaxS
 			boundEpochs = beaconCfg.MinEpochsForDataColumnSidecarsRequests
 		}
 	}
-	boundSlots := boundEpochs * beaconCfg.SlotsPerEpoch
-	if resumeMaxStalenessEpochs == 0 {
-		return boundSlots
-	}
-	// Clamp in epochs: converting to slots first would overflow uint64 on an absurd flag value and
-	// wrap to a tiny horizon instead of the bound.
-	if resumeMaxStalenessEpochs > boundEpochs {
-		log.Warn("[Checkpoint Sync] caplin.resume-max-staleness-epochs exceeds what peers serve; clamping",
-			"requestedEpochs", resumeMaxStalenessEpochs, "boundEpochs", boundEpochs, "needsSidecars", needsSidecars)
-		return boundSlots
-	}
-	return resumeMaxStalenessEpochs * beaconCfg.SlotsPerEpoch
+	return boundEpochs * beaconCfg.SlotsPerEpoch
 }
 
 // stateWithinResumeHorizon reports whether a locally-finalized state at localSlot is recent
