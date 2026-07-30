@@ -32,7 +32,7 @@ you have the answer:
 gh run download <run-id> --repo erigontech/erigon -D /tmp/qa   # all artifacts
 # or list first, artifact names vary per workflow:
 gh api repos/erigontech/erigon/actions/runs/<run-id>/artifacts --jq '.artifacts[].name'
-jq '{outcome, reason, measures: (.measures | keys)}' /tmp/qa/test-results*/result-*.json
+jq '{outcome, reason, measures: (if (.measures|type)=="object" then (.measures|keys) else .measures end)}' /tmp/qa/test-results*/result-*.json
 ```
 
 ```json
