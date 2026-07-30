@@ -1013,11 +1013,12 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 	}
 	close(jobs)
 
-	g, gctx := errgroup.WithContext(ctx)
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(numWorkers)
 
 	for range numWorkers {
 		g.Go(func() error {
-			workerTx, err := api.kv.BeginTemporalRo(gctx)
+			workerTx, err := api.kv.BeginTemporalRo(ctx)
 			if err != nil {
 				return err
 			}
@@ -1092,7 +1093,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 			}
 
 			for job := range jobs {
-				if err := common.Stopped(gctx.Done()); err != nil {
+				if err := common.Stopped(ctx.Done()); err != nil {
 					return err
 				}
 				if err := traceTxnJob(job); err != nil {
