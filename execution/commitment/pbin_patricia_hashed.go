@@ -17,16 +17,25 @@
 // PBinPatriciaHashed — commitment over EIP-8297's partitioned binary tree.
 //
 // The EIP leaves its hash function open and names Keccak-256 as a candidate;
-// this engine uses Keccak-256 both for node hashing and for tree-key
-// derivation, behind pbinHasher so the suite can be swapped.
+// this engine uses Keccak-256 both for node hashing and for tree-key derivation.
+// BLAKE3 is a test-only override, set on both seams at once by setHashSuite so
+// the reference vectors can be replayed. It buys comparability with the
+// reference implementation, never agreement with another client — no client
+// would agree with a Keccak-keyed binary tree.
 //
 // Scope: Process over all three zones, ModeDirect only. Code is chunked into the
 // account header's chunk leaves, overflowing into the code zone where chunks are
-// content-addressed by code hash and shared between accounts. Parallel mounting
-// is out. EIP-8297 has no removal: a zeroed storage slot keeps its leaf at 32
-// zero bytes, an account removal is refused rather than guessed at, and code
-// chunks above a shortened redeploy's length stay in the tree — the tree is a
-// function of history there, not of current state.
+// content-addressed by code hash and shared between accounts. Parallel and
+// streaming mounting are structurally out — their prefix trie is nibble-shaped
+// and the binary key space has no nibbles. The paths that reinterpret commitment
+// records outside block execution — witness, eth_getProof, eth_simulateV1,
+// receipt regeneration — refuse this variant rather than read bit-path records
+// as hex ones.
+//
+// EIP-8297 has no removal: a zeroed storage slot keeps its leaf at 32 zero
+// bytes, an account removal is refused rather than guessed at, and code chunks
+// above a shortened redeploy's length stay in the tree — the tree is a function
+// of history there, not of current state.
 
 package commitment
 

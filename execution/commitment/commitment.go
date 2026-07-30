@@ -151,8 +151,9 @@ const (
 	VariantHexPatriciaTrie      TrieVariant = "hex-patricia-hashed"
 	VariantParallelHexPatricia  TrieVariant = "hex-parallel-patricia-hashed"
 	VariantStreamingHexPatricia TrieVariant = "hex-streaming-patricia-hashed"
-	// VariantBinPatriciaTrie is EIP-8297's binary tree. It is not wired to the
-	// domain layer: commitment state save/restore has no binary implementation.
+	// VariantBinPatriciaTrie is EIP-8297's binary tree. Experimental: a
+	// whole-datadir property resolved at first start, sequential only, and
+	// unsupported on the paths listed in PBinPatriciaHashed's doc.
 	VariantBinPatriciaTrie TrieVariant = "bin-patricia-hashed"
 )
 

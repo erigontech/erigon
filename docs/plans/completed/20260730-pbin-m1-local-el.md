@@ -396,10 +396,10 @@ Production keeps Keccak-256. This task only makes the **test** path run the whol
 
 ### Task 16: [Final] Update documentation
 
-- [ ] update the package doc comment on `pbin_patricia_hashed.go` to state BLAKE3, the M1 scope, and the stated limitations (no witness, no getProof, no parallel)
-- [ ] ➕ fix the stale comment on `VariantBinPatriciaTrie` (`commitment.go:154-155`), which still says the variant is not wired to the domain layer and has no state save/restore — both untrue since Task 5 (found in the Task 15 audit)
-- [ ] update `CLAUDE.md` if new patterns were discovered
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update the package doc comment on `pbin_patricia_hashed.go` to state BLAKE3, the M1 scope, and the stated limitations (no witness, no getProof, no parallel) — ⚠️ wording correction against the checklist item: the doc states BLAKE3 as the **test-only** override set through `setHashSuite`, since production is Keccak (Solution Overview point 1); writing "the engine uses BLAKE3" would have made the doc claim the cross-client compatibility the plan forbids. Limitations named: sequential `ModeDirect` only, parallel/streaming structurally out, and the four record-reinterpreting paths (witness, `eth_getProof`, `eth_simulateV1`, receipt regeneration) refusing rather than reading bit-path records as hex
+- [x] ➕ fix the stale comment on `VariantBinPatriciaTrie` (`commitment.go:154-155`), which still says the variant is not wired to the domain layer and has no state save/restore — both untrue since Task 5 (found in the Task 15 audit) — now names what is actually true of the variant (experimental, whole-datadir, sequential) and points at the engine doc for the unsupported paths instead of restating them
+- [x] update `CLAUDE.md` if new patterns were discovered — one addition, the `pbin` prefix rule under Conventions. It is the only M1 convention that outlives this plan: `package commitment` carries two engines in one namespace and the hex one owns the generic names, so the rule binds every future binary-trie change, not just M1. Everything else discovered here is either recorded in the code or specific to this milestone. (`CLAUDE.md` is a symlink to `AGENTS.md`; the edit lands in the target)
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
