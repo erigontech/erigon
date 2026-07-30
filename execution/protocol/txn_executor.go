@@ -628,6 +628,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	if vmerr == nil {
 		if contractCreation {
 			createNonce, vmerr = st.state.GetNonce(sender)
+			if vmerr != nil {
+				vmerr = fmt.Errorf("%w: %w", ErrTxnExecutionFailed, vmerr)
+			}
 			if vmerr == nil && createNonce+1 >= createNonce {
 				createAddress = accounts.InternAddress(types.CreateAddress(sender.Value(), createNonce))
 				st.gasRemaining, gasUsed.topLevel, vmerr = st.prepareTopLevelCreate(createAddress, st.gasRemaining)

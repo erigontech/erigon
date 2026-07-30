@@ -526,6 +526,30 @@ func TestCreateTraceOnEarlyFailure(t *testing.T) {
 	}
 }
 
+func TestCreatePropagatesAmsterdamPreparationError(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Release(false)
+	backendErr := errors.New("can transfer failed")
+	factory := accounts.InternAddress(common.HexToAddress("0xfac0"))
+	initCode := []byte{byte(vm.STOP)}
+	factoryCode := program.New().Create2(initCode, uint256.NewInt(0)).Bytes()
+	statedb.CreateAccount(factory, true)
+	statedb.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+	vmctx := evmtypes.BlockContext{
+		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) {
+			return false, backendErr
+		},
+		Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+			return nil
+		},
+	}
+	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, statedb, chain.AllProtocolChanges, vm.Config{})
+	_, gasRemaining, _, err := vmenv.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Regular: 500_000}, uint256.Int{}, false)
+	require.ErrorIs(t, err, backendErr)
+	require.Zero(t, gasRemaining.Regular)
+}
+
 func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
