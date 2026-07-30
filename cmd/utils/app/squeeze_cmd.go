@@ -62,8 +62,8 @@ func doSqueeze(ctx context.Context, cliCtx *cli.Command) error {
 	t := Sqeeze(cliCtx.String("type"))
 
 	start := time.Now()
-	log.Info("[sqeeze] start", "t", t)
-	defer func() { logger.Info("[sqeeze] done", "t", t, "took", time.Since(start)) }()
+	log.Info("[squeeze] start", "t", t)
+	defer func() { logger.Info("[squeeze] done", "t", t, "took", time.Since(start)) }()
 
 	switch {
 	case t == SqeezeCommitment:
@@ -178,9 +178,9 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	agg.Close()
 	aggOld.Close()
 
-	log.Info("[sqeeze] removing", "dir", dirsOld.SnapDomain)
+	log.Info("[squeeze] removing", "dir", dirsOld.SnapDomain)
 	_ = dir.RemoveAll(dirsOld.SnapDomain)
-	log.Info("[sqeeze] success", "please_remove", dirs.SnapDomain+"_backup")
+	log.Info("[squeeze] success", "please_remove", dirs.SnapDomain+"_backup")
 	return nil
 }
 func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
@@ -194,7 +194,7 @@ func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) erro
 	defer agg.Close()
 	agg.PresetOfflineMerge()
 
-	log.Info("[sqeeze] start")
+	log.Info("[squeeze] start")
 	if err := agg.Sqeeze(ctx, kv.CodeDomain); err != nil {
 		return err
 	}
