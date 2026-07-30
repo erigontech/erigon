@@ -114,10 +114,9 @@ func NewBlockAssembler(cfg AssemblerCfg, block *AssembledBlock) *BlockAssembler 
 	if cfg.ChainConfig.IsAmsterdam(block.Header.Time) || cfg.ExperimentalBAL {
 		balIO = &state.VersionedIO{}
 	}
-	blockContext := evmtypes.BlockContext{
-		BlockNumber: block.Header.Number.Uint64(),
-		Time:        block.Header.Time,
-	}
+	blockContext := protocol.NewEVMBlockContext(
+		block.Header, protocol.GetHashFn(block.Header, nil), cfg.Engine, accounts.NilAddress, cfg.ChainConfig,
+	)
 	return &BlockAssembler{
 		AssembledBlock: block,
 		cfg:            cfg,
