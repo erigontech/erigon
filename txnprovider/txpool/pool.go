@@ -1013,11 +1013,9 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 	}
 
-	switch txn.TxType() {
-	case DynamicFeeTxnType, BlobTxnType, SetCodeTxnType:
-		if txn.GetFeeCap().Lt(txn.GetTipCap()) {
-			return txpoolcfg.TipAboveFeeCap, nil
-		}
+	// A no-op for legacy and access-list transactions: GetFeeCap and GetTipCap both return the gas price there
+	if txn.GetFeeCap().Lt(txn.GetTipCap()) {
+		return txpoolcfg.TipAboveFeeCap, nil
 	}
 
 	// Drop non-local transactions under our own minimal accepted gas price or tip
