@@ -175,15 +175,15 @@ glob to a recursive `filepath.WalkDir` collecting `*.torrent`.
 - Modify: `cl/antiquary/antiquary.go`
 - Modify: `cl/antiquary/antiquary_test.go`
 
-- [ ] write red test per Technical Details Fix 1: internal-package test,
+- [x] write red test per Technical Details Fix 1: internal-package test,
   cancelled ctx, `blocks: true`, `cfg: &clparams.MainnetBeaconConfig`,
   non-nil downloader stub, `backfilled` false; assert `Loop()` returns nil
   within timeout via done-channel select; confirm it hangs on unfixed code
   (red for the right reason — the `:146-155` wait loop)
-- [ ] add `return nil` to the `ctx.Done` cases at `antiquary.go:152-153` and
+- [x] add `return nil` to the `ctx.Done` cases at `antiquary.go:152-153` and
   `:249-250`; leave `:193-198` alone (non-blocking poll with `default:`)
-- [ ] run `go test ./cl/antiquary/...` — green
-- [ ] commit: `cl/antiquary: return from Loop on context cancellation`
+- [x] run `go test ./cl/antiquary/...` — green
+- [x] commit: `cl/antiquary: return from Loop on context cancellation`
 
 ### Task 2: log dropped RemoveBlobSidecars error
 

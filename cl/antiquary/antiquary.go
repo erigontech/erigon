@@ -150,6 +150,7 @@ func (a *Antiquary) Loop() error {
 				// completed when added.
 				progress = time.Now() // reset the progress if we are not completed
 			case <-a.ctx.Done():
+				return nil
 			}
 		}
 	}
@@ -247,6 +248,7 @@ func (a *Antiquary) Loop() error {
 				log.Error("[Antiquary] Failed to antiquate blobs", "err", err)
 			}
 		case <-a.ctx.Done():
+			return nil
 		}
 	}
 }

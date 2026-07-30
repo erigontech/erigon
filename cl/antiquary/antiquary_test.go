@@ -22,7 +22,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
@@ -34,11 +36,13 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 func newTestCollector(t *testing.T) *etl.Collector {
@@ -735,5 +739,38 @@ func TestBeaconStatesCollector_CollectEffectiveBalancesDump(t *testing.T) {
 	for i := range numValidators {
 		eb := binary.LittleEndian.Uint64(decompressed[i*8:])
 		require.Equal(t, uint64((i+1)*32_000_000_000), eb)
+	}
+}
+
+type noopDownloaderClient struct {
+	dbservices.NoopSeederClient
+}
+
+func (noopDownloaderClient) Download(context.Context, *downloaderproto.DownloadRequest) error {
+	return nil
+}
+
+func TestLoopReturnsOnContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	a := &Antiquary{
+		ctx:        ctx,
+		blocks:     true,
+		cfg:        &clparams.MainnetBeaconConfig,
+		downloader: noopDownloaderClient{},
+		backfilled: &atomic.Bool{},
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- a.Loop()
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Loop did not return after context cancellation")
 	}
 }
