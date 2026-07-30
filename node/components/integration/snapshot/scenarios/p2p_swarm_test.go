@@ -121,7 +121,6 @@ func fileContent(name string) []byte {
 	return multiPieceFixtureBytes("swarm:"+name, 8<<10)
 }
 
-
 // TestP2P_Swarm_CompleteArchive is the end-to-end proof that a complete
 // minimal archive partitioned across N cooperating seeders can be
 // assembled by a fresh leecher joining the swarm. No single seeder has

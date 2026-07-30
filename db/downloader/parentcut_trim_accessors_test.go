@@ -56,15 +56,15 @@ func TestTrimPostCutSiblings_RemovesPostCutAndStraddlers(t *testing.T) {
 		// domain/ hosts primary .kv (untouched — regen owns those)
 		// alongside accessor siblings (.bt, .kvei, .kvi) that this
 		// helper trims by step-range rule.
-		"domain/v3.0-receipt.288-296.kv":       true,  // pre-cut primary → keep
-		"domain/v3.0-receipt.299-300.kv":       true,  // straddling primary → keep (regen truncates)
-		"domain/v3.0-receipt.300-304.kv":       true,  // post-cut primary → keep (regen's job)
-		"domain/v1.1-accounts.288-296.bt":      true,  // pre-cut accessor → keep
-		"domain/v1.1-accounts.299-300.bt":      false, // straddling accessor → trim
-		"domain/v1.1-accounts.300-304.bt":      false, // post-cut accessor → trim
-		"domain/v1.1-accounts.288-296.kvei":    true,
-		"domain/v1.1-accounts.299-300.kvei":    false, // straddler .kvei → trim
-		"domain/v1.1-accounts.300-304.kvei":    false, // post-cut .kvei → trim
+		"domain/v3.0-receipt.288-296.kv":    true,  // pre-cut primary → keep
+		"domain/v3.0-receipt.299-300.kv":    true,  // straddling primary → keep (regen truncates)
+		"domain/v3.0-receipt.300-304.kv":    true,  // post-cut primary → keep (regen's job)
+		"domain/v1.1-accounts.288-296.bt":   true,  // pre-cut accessor → keep
+		"domain/v1.1-accounts.299-300.bt":   false, // straddling accessor → trim
+		"domain/v1.1-accounts.300-304.bt":   false, // post-cut accessor → trim
+		"domain/v1.1-accounts.288-296.kvei": true,
+		"domain/v1.1-accounts.299-300.kvei": false, // straddler .kvei → trim
+		"domain/v1.1-accounts.300-304.kvei": false, // post-cut .kvei → trim
 	}
 	for path := range files {
 		full := filepath.Join(dir, path)

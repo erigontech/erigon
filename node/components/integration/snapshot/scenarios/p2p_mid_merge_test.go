@@ -193,13 +193,13 @@ func buildMidMergeFixture(t *testing.T, baseDir string) string {
 // form" is the storage validation phase's job. When that lands, the
 // merge-equivalence validator will:
 //
-//   1. Recognise that constituents at [0, 32)+[32, 64) and merged at
-//      [0, 64) cover the same logical state for the same domain.
-//   2. Apply the configured canonical-form policy (default: prefer
-//      merged) to mark one form as canonical, the other for
-//      retirement.
-//   3. Drive the orchestrator to fetch the canonical form if the
-//      peer doesn't already hold it.
+//  1. Recognise that constituents at [0, 32)+[32, 64) and merged at
+//     [0, 64) cover the same logical state for the same domain.
+//  2. Apply the configured canonical-form policy (default: prefer
+//     merged) to mark one form as canonical, the other for
+//     retirement.
+//  3. Drive the orchestrator to fetch the canonical form if the
+//     peer doesn't already hold it.
 //
 // This test then becomes the regression check for that path.
 func TestP2P_Swarm_MidMergeJoiner(t *testing.T) {
@@ -512,10 +512,11 @@ func (r midMergeRole) String() string {
 // initial seeders we expect ~50/50 if the orchestrator is unbiased.
 //
 // Knobs:
-//   SNAPSHOT_PEERS               default 10
-//   SNAPSHOT_MIDMERGE_CONSTITS   default 2
-//   SNAPSHOT_MIDMERGE_MERGED     default 2
-//   SNAPSHOT_STAGGER_INTERVAL    default 5s (local high-speed network)
+//
+//	SNAPSHOT_PEERS               default 10
+//	SNAPSHOT_MIDMERGE_CONSTITS   default 2
+//	SNAPSHOT_MIDMERGE_MERGED     default 2
+//	SNAPSHOT_STAGGER_INTERVAL    default 5s (local high-speed network)
 //
 // What's surfaced (not asserted today, useful for future preferring-
 // merged validator regression checks):

@@ -583,9 +583,17 @@ func (a *Aggregator) OpenFolder() error {
 	// Propagate the visible file set so Inventory reflects on-disk
 	// reality: files that arrived via the downloader are visible in the
 	// aggregator but invisible to Inventory without this notification.
-	files := a.Files()
-	if len(files) > 0 && a.onFilesChange != nil {
-		a.onFilesChange(files)
+	// Convert to snap-relative form (mirrors sf.FilePaths(a.dirs.Snap)
+	// used by retire/merge) — consumers assume that shape.
+	if a.onFilesChange != nil {
+		files := a.Files()
+		relFiles := make([]string, 0, len(files))
+		for _, f := range files {
+			relFiles = append(relFiles, relPath(f, a.dirs.Snap))
+		}
+		if len(relFiles) > 0 {
+			a.onFilesChange(relFiles)
+		}
 	}
 	return nil
 }

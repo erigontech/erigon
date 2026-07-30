@@ -25,8 +25,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/components/snapshotauth"
+	"github.com/erigontech/erigon/node/debug"
 )
 
 var (

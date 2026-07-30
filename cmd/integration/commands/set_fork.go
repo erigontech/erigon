@@ -34,11 +34,11 @@ import (
 )
 
 var (
-	setForkRpcURL         string
-	setForkTarget         string
-	setForkTimeoutSec     int
-	setForkAuthorityUCAN  string
-	setForkAuthorityFile  string
+	setForkRpcURL        string
+	setForkTarget        string
+	setForkTimeoutSec    int
+	setForkAuthorityUCAN string
+	setForkAuthorityFile string
 )
 
 func init() {

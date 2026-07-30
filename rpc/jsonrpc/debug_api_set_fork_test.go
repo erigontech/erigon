@@ -31,10 +31,10 @@ import (
 // the type-assert-and-delegate path with a stub.
 type forkControllerBackend struct {
 	rpchelper.ApiBackend
-	got         string
-	gotUCAN     string
-	returns     *rpchelper.SetForkResult
-	err         error
+	got     string
+	gotUCAN string
+	returns *rpchelper.SetForkResult
+	err     error
 }
 
 func (b *forkControllerBackend) SetFork(_ context.Context, chainName, authorityUCAN string) (*rpchelper.SetForkResult, error) {

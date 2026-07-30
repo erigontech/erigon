@@ -466,4 +466,3 @@ func TestP2P_Swarm_StaggeredEntry(t *testing.T) {
 	}
 	t.Logf("V2 cross-peer agreement + preverified concordance OK")
 }
-

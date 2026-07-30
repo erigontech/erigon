@@ -704,6 +704,41 @@ func TestAggregator_OpenFolder_NotifiesForFilesLandedByDownloader(t *testing.T) 
 	require.True(t, sawCommitmentKV, "OpenFolder notification missing commitment .kv; got batches=%v", got)
 }
 
+// TestAggregator_OpenFolder_NotifiesSnapRelativePaths pins the
+// notification-format contract: OpenFolder's OnFilesChange fire must
+// carry snap-relative paths ("domain/foo.kv"), same as retire/merge
+// callers. If it delivers absolute paths, downstream RelPathForName
+// re-prepends "domain/" and produces "domain/<absolute-path>", which
+// the seeder then tries to lstat as "<snapDir>/domain/<absolute>" — a
+// non-existent path — and every post-advance Seed logs a WARN. Seen
+// live in the 2026-07-{27,28,29} continuous-soak logs.
+func TestAggregator_OpenFolder_NotifiesSnapRelativePaths(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+	_, agg := testDbAndAggregatorv3(t, stepSize)
+
+	dirs := agg.Dirs()
+	generateAccountsFile(t, dirs, []testFileRange{{0, 1}})
+	generateStorageFile(t, dirs, []testFileRange{{0, 1}})
+	generateCodeFile(t, dirs, []testFileRange{{0, 1}})
+	generateCommitmentFile(t, dirs, []testFileRange{{0, 1}})
+
+	var got []string
+	agg.OnFilesChange(func(names []string) {
+		got = append(got, names...)
+	}, nil)
+
+	require.NoError(t, agg.OpenFolder())
+
+	require.NotEmpty(t, got, "expected at least one file in the OnFilesChange batch")
+	for _, name := range got {
+		require.False(t, filepath.IsAbs(name),
+			"OpenFolder notification carries absolute path %q; retire/merge callers pass snap-relative paths, so consumers assume the same", name)
+		require.False(t, strings.Contains(name, dirs.Snap),
+			"OpenFolder notification %q contains snap-dir prefix %q; expected snap-relative form like \"domain/foo.kv\"", name, dirs.Snap)
+	}
+}
+
 // TestAggregator_Files_ReflectsOnDiskAfterOpenFolder pins the other
 // half of the bootstrap contract: after OpenFolder rescans disk, the
 // aggregator's visible-file set (Files()) must include every domain

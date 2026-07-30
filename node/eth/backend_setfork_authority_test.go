@@ -155,4 +155,3 @@ func TestVerifyForkTransition_EmptyTargetChainRejected(t *testing.T) {
 	err := verifyForkTransition("", ucan, operatorRoots(t, root), now)
 	require.ErrorContains(t, err, "target chain name is required")
 }
-
