@@ -786,8 +786,8 @@ func TestMemoryMutationConcurrentReadWrite(t *testing.T) {
 	// Concurrent writer — simulate InsertBlocks writing to the overlay.
 	wg.Go(func() {
 		for i := range iterations {
-			key := []byte(fmt.Sprintf("write-key-%04d", i))
-			val := []byte(fmt.Sprintf("write-val-%04d", i))
+			key := fmt.Appendf(nil, "write-key-%04d", i)
+			val := fmt.Appendf(nil, "write-val-%04d", i)
 			if err := batch.Put(kv.HeaderNumber, key, val); err != nil {
 				t.Errorf("writer: Put: %v", err)
 				return
@@ -810,7 +810,7 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 
 	// Pre-populate DB.
 	for i := range 100 {
-		key := []byte(fmt.Sprintf("key-%03d", i))
+		key := fmt.Appendf(nil, "key-%03d", i)
 		require.NoError(t, rwTx.Put(kv.HeaderNumber, key, []byte("db-val")))
 	}
 	require.NoError(t, rwTx.Commit())
@@ -835,7 +835,7 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 		defer readerTx.Rollback()
 		view := batch.NewReadView(readerTx)
 		for i := range 100 {
-			key := []byte(fmt.Sprintf("key-%03d", i))
+			key := fmt.Appendf(nil, "key-%03d", i)
 			_, _ = view.GetOne(kv.HeaderNumber, key)
 			_, _ = view.Has(kv.HeaderNumber, key)
 		}
@@ -844,7 +844,7 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 	// Deleter goroutine.
 	wg.Go(func() {
 		for i := range 100 {
-			key := []byte(fmt.Sprintf("key-%03d", i))
+			key := fmt.Appendf(nil, "key-%03d", i)
 			_ = batch.Delete(kv.HeaderNumber, key)
 		}
 	})

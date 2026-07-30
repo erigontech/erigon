@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/devgenesis"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
@@ -403,8 +404,8 @@ var (
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
-		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot rather than error. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. Low values are fine for low read-concurrency nodes (e.g. validators); raise it for nodes serving heavy parallel RPC",
-		Value: min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
+		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. A value below the parallel-exec worker count is raised to it (each worker holds a long-lived read tx, so a lower ceiling would deadlock); to actually reduce read concurrency, lower --exec.workers instead",
+		Value: httpcfg.DefaultDBReadConcurrency(),
 	}
 	RpcMaxConcurrentRequestsFlag = cli.IntFlag{
 		Name:  "rpc.max.concurrency",
@@ -448,6 +449,11 @@ var (
 	RpcGethCompatFlag = cli.BoolFlag{
 		Name:  "rpc.gethcompat",
 		Usage: "Enables Geth-compatible storage iteration order for debug_storageRangeAt (sorted by keccak256 hash). Disabled by default for performance.",
+	}
+	WitnessCacheBlocksFlag = cli.UintFlag{
+		Name:  "witness.cache.blocks",
+		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory, keyed by block hash in an LRU (embedded RPC only; requires --prune.experimental.include-commitment-history). 0 disables the cache; capped at 96. Each witness is stored as serialized JSON so a hit is served verbatim; memory use is roughly this count times the per-block witness size.",
+		Value: 0,
 	}
 	RpcTxSyncDefaultTimeoutFlag = cli.DurationFlag{
 		Name:  "rpc.txsync.defaulttimeout",
@@ -2030,6 +2036,12 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	if ctx.IsSet(ExecSerialFlag.Name) && ctx.Bool(ExecSerialFlag.Name) {
 		dbg.SetExec3Workers(1)
 		cfg.ExecWorkerCount = 1
+	}
+	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
+		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount); int64(c) < limit {
+			logger.Warn("db.read.concurrency below the exec read-tx floor; raising to avoid a parallel-exec deadlock",
+				"configured", c, "using", limit, "execWorkers", cfg.ExecWorkerCount)
+		}
 	}
 	if ctx.IsSet(ExecNoMergeFlag.Name) {
 		dbg.SetNoMerge(ctx.Bool(ExecNoMergeFlag.Name))

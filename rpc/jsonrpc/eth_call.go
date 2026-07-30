@@ -850,7 +850,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		logger.Warn("state root mismatch after stateless execution", "actual", newStateRoot, "expected", block.Root())
 	}
 
-	return common.Copy(witnessBuffer.Bytes()), nil
+	return bytes.Clone(witnessBuffer.Bytes()), nil
 }
 
 // emptyWitnessBytes serializes an empty op-stream witness, used for genesis and
@@ -991,7 +991,8 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		var data bytes.Buffer
 		var buf [32]byte
 		rules := blockCtx.Rules(chainConfig)
-		for _, jsonAuth := range args.AuthorizationList {
+		for i := range args.AuthorizationList {
+			jsonAuth := &args.AuthorizationList[i]
 			auth, err := jsonAuth.ToAuthorization()
 			if err != nil {
 				continue

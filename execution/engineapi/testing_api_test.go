@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -52,6 +54,7 @@ import (
 
 type stubExecutionModule struct {
 	getHeaderFunc         func(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error)
+	headerNumberFunc      func(ctx context.Context, hash common.Hash) (*uint64, error)
 	assembleBlockFunc     func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error)
 	getAssembledBlockFunc func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
 	getForkChoiceFunc     func(ctx context.Context) (execmodule.ForkChoiceState, error)
@@ -137,7 +140,10 @@ func (s *stubExecutionModule) GetPayloadBodiesByRange(_ context.Context, _, _ ui
 func (s *stubExecutionModule) IsCanonicalHash(_ context.Context, _ common.Hash) (bool, error) {
 	return false, nil
 }
-func (s *stubExecutionModule) GetHeaderHashNumber(_ context.Context, _ common.Hash) (*uint64, error) {
+func (s *stubExecutionModule) GetHeaderHashNumber(ctx context.Context, hash common.Hash) (*uint64, error) {
+	if s.headerNumberFunc != nil {
+		return s.headerNumberFunc(ctx, hash)
+	}
 	return nil, nil
 }
 func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
@@ -861,6 +867,30 @@ func TestStaticTxnProvider(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, txns)
 	})
+
+	t.Run("concurrent callers: exactly one consumes the transactions", func(t *testing.T) {
+		t.Parallel()
+		p := &staticTxnProvider{txns: []types.Transaction{stubTx}}
+		const goroutines = 32
+		var nonEmpty atomic.Int32
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		wg.Add(goroutines)
+		for range goroutines {
+			go func() {
+				defer wg.Done()
+				<-start
+				txns, err := p.ProvideTxns(context.Background())
+				assert.NoError(t, err)
+				if len(txns) > 0 {
+					nonEmpty.Add(1)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		assert.Equal(t, int32(1), nonEmpty.Load(), "exactly one concurrent caller must consume the transactions")
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -957,6 +987,44 @@ func TestBuildBlockV1AssembleParamsVersion(t *testing.T) {
 		assert.Nil(t, captured.ParentBeaconBlockRoot, "ParentBeaconBlockRoot must NOT be set pre-Cancun")
 		require.NotNil(t, captured.Withdrawals, "Withdrawals must be set for Shanghai/Capella")
 		assert.Equal(t, withdrawals, captured.Withdrawals)
+	})
+
+	t.Run("Glamsterdam: SlotNumber and TargetGasLimit propagated", func(t *testing.T) {
+		t.Parallel()
+		attrs := validPayloadAttrs(parentTimestamp)
+		*attrs.SlotNumber = 7
+		*attrs.TargetGasLimit = 45_000_000
+		var captured *builder.Parameters
+		stub := &stubExecutionModule{
+			getHeaderFunc:         getHeaderReturning(parentHash, parentHdr),
+			assembleBlockFunc:     captureAssembleParams(&captured),
+			getAssembledBlockFunc: nilGetAssembledBlock,
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		_, _ = api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
+		require.NotNil(t, captured)
+		require.NotNil(t, captured.SlotNumber, "SlotNumber must be forwarded for Glamsterdam+")
+		assert.Equal(t, uint64(7), *captured.SlotNumber)
+		require.NotNil(t, captured.TargetGasLimit, "TargetGasLimit must be forwarded for Glamsterdam+")
+		assert.Equal(t, uint64(45_000_000), *captured.TargetGasLimit)
+	})
+
+	t.Run("pre-Glamsterdam: SlotNumber and TargetGasLimit not set", func(t *testing.T) {
+		t.Parallel()
+		attrs := validPayloadAttrs(parentTimestamp)
+		attrs.SlotNumber = nil
+		attrs.TargetGasLimit = nil
+		var captured *builder.Parameters
+		stub := &stubExecutionModule{
+			getHeaderFunc:         getHeaderReturning(parentHash, parentHdr),
+			assembleBlockFunc:     captureAssembleParams(&captured),
+			getAssembledBlockFunc: nilGetAssembledBlock,
+		}
+		api := newTestingAPI(preAmsterdamChainConfig(), stub)
+		_, _ = api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
+		require.NotNil(t, captured)
+		assert.Nil(t, captured.SlotNumber, "SlotNumber must NOT be set pre-Glamsterdam")
+		assert.Nil(t, captured.TargetGasLimit, "TargetGasLimit must NOT be set pre-Glamsterdam")
 	})
 }
 
@@ -1348,6 +1416,49 @@ func TestValidatePayloadAttributesPostFCU_AmsterdamGate(t *testing.T) {
 		err := srv.validatePayloadAttributesPostFCU(clparams.FuluVersion, attrs)
 		require.NoError(t, err)
 	})
+}
+
+func TestForkchoiceUpdatedReturnsSyncingForIncompleteExecution(t *testing.T) {
+	t.Parallel()
+
+	headHash := common.Hash{0x1}
+	headNumber := uint64(1)
+	header := &types.Header{}
+	header.Number.SetUint64(headNumber)
+
+	for _, executionStatus := range []execmodule.ExecutionStatus{
+		execmodule.ExecutionStatusMissingSegment,
+		execmodule.ExecutionStatusTooFarAway,
+	} {
+		t.Run(executionStatus.String(), func(t *testing.T) {
+			t.Parallel()
+
+			stub := &stubExecutionModule{
+				getHeaderFunc: getHeaderReturning(headHash, header),
+				headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
+					return &headNumber, nil
+				},
+				updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+					return execmodule.ForkChoiceResult{
+						Status:          executionStatus,
+						LatestValidHash: common.Hash{0x2},
+						ValidationError: "not validated",
+					}, nil
+				},
+			}
+			cfg := preCancunChainConfig()
+			ctx := context.Background()
+			downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+
+			resp, err := srv.ForkchoiceUpdatedV1(ctx, &engine_types.ForkChoiceState{HeadHash: headHash}, nil)
+			require.NoError(t, err)
+			require.Equal(t, engine_types.SyncingStatus, resp.PayloadStatus.Status)
+			require.Nil(t, resp.PayloadStatus.LatestValidHash)
+			require.Nil(t, resp.PayloadStatus.ValidationError)
+			require.Nil(t, resp.PayloadId)
+		})
+	}
 }
 
 func ptrUint64(v uint64) *uint64 {

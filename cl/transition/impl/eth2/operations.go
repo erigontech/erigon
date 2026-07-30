@@ -962,11 +962,9 @@ func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, body cltypes.Gene
 		if body.GetBlobKzgCommitments().Len() > int(blobParameters.MaxBlobsPerBlock) {
 			return errors.New("ProcessExecutionPayload: too many blob commitments")
 		}
-	} else {
+	} else if body.GetBlobKzgCommitments().Len() > int(s.BeaconConfig().MaxBlobsPerBlockByVersion(s.Version())) {
 		// assert len(body.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
-		if body.GetBlobKzgCommitments().Len() > int(s.BeaconConfig().MaxBlobsPerBlockByVersion(s.Version())) {
-			return errors.New("ProcessExecutionPayload: too many blob commitments")
-		}
+		return errors.New("ProcessExecutionPayload: too many blob commitments")
 	}
 
 	s.SetLatestExecutionPayloadHeader(payloadHeader)
@@ -1090,29 +1088,29 @@ func (I *impl) ProcessBlsToExecutionChange(
 		return errors.New("ProcessBlsToExecutionChange: withdrawal credentials mismatch")
 	}
 
-	// Fork-agnostic domain since address changes are valid across forks
-	domain, err := fork.ComputeDomain(
-		s.BeaconConfig().DomainBLSToExecutionChange[:],
-		utils.Uint32ToBytes4(uint32(s.BeaconConfig().GenesisForkVersion)),
-		s.GenesisValidatorsRoot(),
-	)
-	if err != nil {
-		return err
-	}
-	signingRoot, err := fork.ComputeSigningRoot(change, domain)
-	if err != nil {
-		return err
-	}
-	// Verify the signature
-	ok, err := bls.Verify(signedChange.Signature[:], signingRoot[:], change.From[:])
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return errors.New("ProcessBlsToExecutionChange: invalid signature")
+	if I.FullValidation {
+		// Fork-agnostic domain since address changes are valid across forks
+		domain, err := fork.ComputeDomain(
+			s.BeaconConfig().DomainBLSToExecutionChange[:],
+			utils.Uint32ToBytes4(uint32(s.BeaconConfig().GenesisForkVersion)),
+			s.GenesisValidatorsRoot(),
+		)
+		if err != nil {
+			return err
+		}
+		signingRoot, err := fork.ComputeSigningRoot(change, domain)
+		if err != nil {
+			return err
+		}
+		ok, err := bls.Verify(signedChange.Signature[:], signingRoot[:], change.From[:])
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("ProcessBlsToExecutionChange: invalid signature")
+		}
 	}
 
-	// Perform full validation if requested.
 	// Reset the validator's withdrawal credentials.
 	credentials[0] = byte(beaconConfig.ETH1AddressWithdrawalPrefixByte)
 	copy(credentials[1:], make([]byte, 11))

@@ -122,7 +122,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 	ethApi := newEthApiForTest(baseApi, m.DB, nil, nil)
-	api := NewPrivateDebugAPI(baseApi, m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{})
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -173,7 +173,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 func TestTraceBlockByHash(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ethApi := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := newDebugApiForTest(m)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -262,7 +262,7 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 	tracer := "prestateTracer"
 	var buf bytes.Buffer
 	stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := newDebugApiForTest(m)
 	require.NoError(t, api.TraceBlockByHash(m.Ctx, generated.TopBlock.Hash(), &tracersConfig.TraceConfig{Tracer: &tracer}, stream))
 	require.NoError(t, stream.Flush())
 	var traces []struct {
@@ -290,7 +290,7 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 
 func TestTraceTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := newDebugApiForTest(m)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -319,7 +319,7 @@ func TestTraceTransaction(t *testing.T) {
 
 func TestTraceTransactionNotFound(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := newDebugApiForTest(m)
 
 	var buf bytes.Buffer
 	s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -332,7 +332,7 @@ func TestTraceTransactionNotFound(t *testing.T) {
 // the "result" field when the stream is untouched, producing {error:...} without result:null.
 func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := newDebugApiForTest(m)
 
 	newStream := func() (*bytes.Buffer, jsonstream.Stream) {
 		var buf bytes.Buffer
@@ -416,7 +416,7 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 }
 
 func (c *baseFeeTestChain) debugAPI() *DebugAPIImpl {
-	return NewPrivateDebugAPI(newBaseApiForTest(c.m), c.m.DB, nil, 0, false)
+	return newDebugApiForTest(c.m)
 }
 
 // callDebugTraceCall invokes debug_traceCall with the given args and
@@ -516,7 +516,7 @@ func TestTxResultFieldStreamLazy(t *testing.T) {
 // before any write (inner.Written stays false): each tx object has "error" but no "result" field.
 func TestTraceBlockErrorBeforeWrite(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := newDebugApiForTest(m)
 	ethApi := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
 	tx, err := ethApi.GetTransactionByHash(m.Ctx, common.HexToHash(debugTraceTransactionTests[0].txHash))
@@ -591,7 +591,7 @@ func TestTraceBlockErrorAfterWrite(t *testing.T) {
 
 func TestTraceTransactionNoRefund(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := newDebugApiForTest(m)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -621,7 +621,7 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 
 func TestStorageRangeAt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := newDebugApiForTest(m)
 	t.Run("invalid addr", func(t *testing.T) {
 		var block4 *types.Block
 		var err error
@@ -715,7 +715,7 @@ func TestStorageRangeAt(t *testing.T) {
 
 func TestStorageRangeAtGethCompat(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, true) // gethCompatibility=true
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{GethCompatibility: true})
 	t.Run("block latest, addr 1", func(t *testing.T) {
 		var latestBlock *types.Block
 		err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
@@ -781,7 +781,7 @@ func TestStorageRangeAtGethCompat(t *testing.T) {
 
 func TestAccountRange(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := newDebugApiForTest(m)
 
 	t.Run("valid account", func(t *testing.T) {
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
@@ -880,7 +880,7 @@ func TestAccountRange(t *testing.T) {
 
 func TestGetModifiedAccountsByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := newDebugApiForTest(m)
 
 	t.Run("correct input", func(t *testing.T) {
 		n, n2 := rpc.BlockNumber(1), rpc.BlockNumber(2)
@@ -995,7 +995,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 
 func TestAccountAt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := newDebugApiForTest(m)
 
 	var blockHash0, blockHash1, blockHash3, blockHash10, blockHashNonExistent common.Hash
 	_ = m.DB.View(m.Ctx, func(tx kv.Tx) error {
@@ -1058,7 +1058,7 @@ func TestAccountAt(t *testing.T) {
 
 func TestGetBadBlocks(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 5000000, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{GasCap: 5000000})
 	ctx := context.Background()
 
 	require := require.New(t)
@@ -1131,7 +1131,7 @@ func TestGetBadBlocks(t *testing.T) {
 
 func TestGetRawTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 5000000, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{GasCap: 5000000})
 	ctx := context.Background()
 
 	require := require.New(t)
@@ -1172,7 +1172,7 @@ func TestGetRawTransaction(t *testing.T) {
 
 func TestGetRawReceipts(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 5000000, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{GasCap: 5000000})
 	ctx := context.Background()
 
 	require := require.New(t)
@@ -1213,7 +1213,7 @@ func TestExecutionWitness(t *testing.T) {
 	})
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := newDebugApiForTest(m)
 	ctx := context.Background()
 
 	// Write the DB flag so that debug_executionWitness accepts the request.
@@ -1297,11 +1297,110 @@ func TestExecutionWitness(t *testing.T) {
 		require.NotNil(t, result.State, "State should not be nil")
 	})
 
+	// Guards the buildWitnessResult seam: the append-vs-sort tail must produce a stable,
+	// fully sorted State so a byte-identical witness comes out on every build.
+	t.Run("result bytes stable and sorted", func(t *testing.T) {
+		for blockNum := uint64(1); blockNum <= latestBlockNum; blockNum++ {
+			bn := rpc.BlockNumber(blockNum)
+			first, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+			require.NoError(t, err, "block %d", blockNum)
+			for i := 1; i < len(first.State); i++ {
+				require.LessOrEqual(t, bytes.Compare(first.State[i-1], first.State[i]), 0,
+					"block %d State must be sorted ascending", blockNum)
+			}
+			firstBytes, err := json.Marshal(first)
+			require.NoError(t, err)
+
+			second, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+			require.NoError(t, err, "block %d", blockNum)
+			secondBytes, err := json.Marshal(second)
+			require.NoError(t, err)
+
+			require.Equal(t, firstBytes, secondBytes, "block %d witness bytes must be deterministic", blockNum)
+		}
+	})
+
 	t.Run("non-existent block", func(t *testing.T) {
 		// Very high block number that doesn't exist
 		blockNum := rpc.BlockNumber(999999999)
 		_, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil)
 		require.Error(t, err, "should error for non-existent block")
+	})
+}
+
+// TestExecutionWitnessCacheServe pins the Task 2 serve hook: a legacy request for a
+// cached (num, hash) returns the stored pointer, while canonical requests, empty-cache
+// misses, and the nil-cache path all fall through to the unchanged on-demand build.
+func TestExecutionWitnessCacheServe(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+	})
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	ctx := context.Background()
+
+	err := m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	})
+	require.NoError(t, err)
+
+	var block1Hash common.Hash
+	err = m.DB.View(ctx, func(tx kv.Tx) error {
+		block1Hash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 1)
+		return err
+	})
+	require.NoError(t, err)
+
+	bn := rpc.BlockNumber(1)
+	sentinel := &ExecutionWitnessResult{State: []hexutil.Bytes{{0xde, 0xad, 0xbe, 0xef}}}
+
+	t.Run("legacy hit returns cached pointer", func(t *testing.T) {
+		cache := newWitnessResultCache(96)
+		cache.Add(block1Hash, sentinel)
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		hitBefore := witnessCacheHitCounter.GetValueUint64()
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.Same(t, sentinel, result, "legacy request must serve the cached pointer")
+		require.Equal(t, uint64(1), witnessCacheHitCounter.GetValueUint64()-hitBefore, "a hit increments the hit counter once")
+	})
+
+	t.Run("canonical request bypasses the cache", func(t *testing.T) {
+		cache := newWitnessResultCache(96)
+		cache.Add(block1Hash, sentinel)
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		canonical := "canonical"
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, &canonical)
+		require.NoError(t, err)
+		require.NotSame(t, sentinel, result, "canonical request must never serve the legacy cache")
+		require.NotNil(t, result.State, "canonical request must build a real witness on demand")
+	})
+
+	t.Run("empty-cache miss falls through to on-demand", func(t *testing.T) {
+		api.witnessCache = newWitnessResultCache(96)
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		missBefore := witnessCacheMissCounter.GetValueUint64()
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.NotSame(t, sentinel, result)
+		require.NotNil(t, result.State, "miss must build a real witness on demand")
+		require.Equal(t, uint64(1), witnessCacheMissCounter.GetValueUint64()-missBefore, "a miss increments the miss counter once")
+	})
+
+	t.Run("nil cache path unaffected", func(t *testing.T) {
+		api.witnessCache = nil
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.NotSame(t, sentinel, result)
+		require.NotNil(t, result.State)
 	})
 }
 
@@ -1376,7 +1475,7 @@ func TestSetHead(t *testing.T) {
 		backendServer := privateapi.NewEthBackendServer(ctx, mock, m.DB, m.Notifications, m.BlockReader, nil, logger, builder.NewLatestBlockBuiltStore(), nil)
 		backendClient := direct.NewEthBackendClientDirect(backendServer)
 		backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
-		return NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, backend, 0, false)
+		return NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, backend, &rpccfg.DebugApiConfig{})
 	}
 
 	// Rewinding one block below the current head is the simplest valid rewind.

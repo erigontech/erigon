@@ -177,7 +177,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 						bytes16[i*2] = b / 16
 						bytes16[i*2+1] = b % 16
 					}
-					it.hex = append(hex, bytes16[:]...)
+					it.hex = append(hex, bytes16[:]...) //nolint:gocritic
 					it.nodeStack[l] = v.Storage
 					it.iStack[l] = 0
 					it.goDeepStack[l] = true
@@ -403,7 +403,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					bytes16[i*2] = b / 16
 					bytes16[i*2+1] = b % 16
 				}
-				it.hex = append(hex, bytes16[:]...)
+				it.hex = append(hex, bytes16[:]...) //nolint:gocritic
 				it.nodeStack[l] = n.Storage
 				it.iStack[l] = 0
 				it.goDeepStack[l] = true
