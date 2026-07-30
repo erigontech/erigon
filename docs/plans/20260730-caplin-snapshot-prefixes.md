@@ -230,14 +230,14 @@ glob to a recursive `filepath.WalkDir` collecting `*.torrent`.
 - Modify: `db/integrity/torrent_verify.go`
 - Create: `db/integrity/torrent_verify_test.go` (if absent; else extend)
 
-- [ ] write red test: temp dir with `caplin/` subdir containing a torrent
+- [x] write red test: temp dir with `caplin/` subdir containing a torrent
   fixture — unfixed code never visits it
-- [ ] replace `filepath.Glob(dir/*.torrent)` (`torrent_verify.go:41`) with a
+- [x] replace `filepath.Glob(dir/*.torrent)` (`torrent_verify.go:41`) with a
   recursive `filepath.WalkDir` collecting `*.torrent`; walk errors are
   logged and skipped; failFast branch (`:96-108`) unchanged
-- [ ] write test for the flat case (top-level torrents still found)
-- [ ] run `go test ./db/integrity/...` — green
-- [ ] commit: `db/integrity: verify torrents recursively (caplin/ and state
+- [x] write test for the flat case (top-level torrents still found)
+- [x] run `go test ./db/integrity/...` — green
+- [x] commit: `db/integrity: verify torrents recursively (caplin/ and state
   subdirs)` with the scope-expansion note in the body
 
 ### Task 6: version-window filtering for caplin preverified entries

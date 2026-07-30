@@ -22,6 +22,7 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -35,10 +36,21 @@ import (
 )
 
 // VerifyTorrentFiles verifies that data files match their .torrent piece hashes.
-// It scans the given directory for .torrent files and verifies each corresponding data file.
-// If failFast is true, stops on first error. Otherwise logs warnings and continues.
+// It scans the given directory recursively for .torrent files and verifies each
+// corresponding data file. If failFast is true, stops on first error. Otherwise
+// logs warnings and continues.
 func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger log.Logger) error {
-	torrentFiles, err := filepath.Glob(filepath.Join(dir, "*.torrent"))
+	var torrentFiles []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			logger.Warn("[verify] skipping unreadable path", "path", path, "err", walkErr)
+			return nil
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".torrent") {
+			torrentFiles = append(torrentFiles, path)
+		}
+		return nil
+	})
 	if err != nil {
 		return fmt.Errorf("listing torrent files: %w", err)
 	}
