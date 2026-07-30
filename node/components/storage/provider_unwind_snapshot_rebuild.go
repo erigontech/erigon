@@ -178,8 +178,9 @@ func (p *Provider) headersStraddleFile(toBlock uint64) (*snaptype.FileInfo, erro
 // blocks [newToBlock, toBlock] are seeded into the writable DB by
 // seedLeftoverBlocks (reads the OLD straddle files still on disk
 // pre-FinalizeUnwind, writes headers / bodies / tx + senders for
-// each leftover block). Requires headers + bodies + transactions
-// straddles to be present as a matching triple.
+// each leftover block). Headers + bodies straddles must be a matching
+// pair (same range); the transactions straddle may cover a strict
+// sub-range as long as it fully spans the leftover block window.
 func (p *Provider) rebuildBlockStraddles(ctx context.Context, tx kv.RwTx, toBlock, newToBlock uint64) (rebuildPaths []string, toRemoveStraddles []*storageSnapshotFileRef, err error) {
 	// Rebuild order: Headers → Bodies → Transactions. Transactions'
 	// IndexBuilderFunc reads the bodies file at the same range, so
@@ -411,8 +412,25 @@ func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHead
 	if oldBodiesFI.From != oldHeadersFI.From || oldBodiesFI.To != oldHeadersFI.To {
 		return fmt.Errorf("seedLeftoverBlocks: bodies range [%d, %d) does not match headers [%d, %d)", oldBodiesFI.From, oldBodiesFI.To, oldHeadersFI.From, oldHeadersFI.To)
 	}
-	if oldTxFI != nil && (oldTxFI.From != oldHeadersFI.From || oldTxFI.To != oldHeadersFI.To) {
-		return fmt.Errorf("seedLeftoverBlocks: tx range [%d, %d) does not match headers [%d, %d)", oldTxFI.From, oldTxFI.To, oldHeadersFI.From, oldHeadersFI.To)
+	if oldTxFI != nil {
+		// The tx file must cover the WRITE range [fromBlock, toBlockInclusive+1)
+		// at minimum — that's the only part we actually write tx entries for.
+		// Header/body walk starts at oldHeadersFI.From to accumulate TD; the
+		// tx walk starts later, when n reaches oldTxFI.From.
+		//
+		// Retire cadence produces headers/bodies/tx on different chunk widths
+		// (e.g. headers merged into 10k, tx still at 1k) — the strict-equality
+		// check that used to live here would reject the perfectly-valid
+		// asymmetric case (headers=[3150000,3160000), tx=[3157000,3158000))
+		// where the tx sub-range fully covers the write range.
+		if oldTxFI.From > fromBlock || oldTxFI.To <= toBlockInclusive {
+			return fmt.Errorf("seedLeftoverBlocks: tx range [%d, %d) does not cover write range [%d, %d]; multi-tx-file walk not supported",
+				oldTxFI.From, oldTxFI.To, fromBlock, toBlockInclusive)
+		}
+		if oldTxFI.From < oldHeadersFI.From {
+			return fmt.Errorf("seedLeftoverBlocks: tx range [%d, %d) starts before headers [%d, %d)",
+				oldTxFI.From, oldTxFI.To, oldHeadersFI.From, oldHeadersFI.To)
+		}
 	}
 
 	// TD anchor + walk-forward accumulator. The rule (from FillDBFromSnapshots)
@@ -567,6 +585,16 @@ func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHead
 		// RPC access to historical transactions isn't expected under
 		// that mode anyway.
 		if tg == nil {
+			continue
+		}
+		// Under asymmetric-cadence merges (headers merged into wider
+		// chunks than tx), the tx file may cover only a sub-range of
+		// the headers range. Skip tx-getter advance for blocks outside
+		// the tx file — canonical/header/body/TD were still written
+		// above for writeThisBlock. Guarded by the pre-walk coverage
+		// check: oldTxFI is non-nil here and covers [fromBlock,
+		// toBlockInclusive+1) at minimum.
+		if n < oldTxFI.From || n >= oldTxFI.To {
 			continue
 		}
 		txCount := uint64(body.TxCount)

@@ -729,3 +729,104 @@ func TestStraddleBlockFileForType_FiltersByType(t *testing.T) {
 		"only the headers file should be returned for a Headers query")
 	require.Equal(t, "v1.1-002910-002920-headers.seg", got.Name())
 }
+
+// TestSeedLeftoverBlocks_AsymmetricTxSubRange pins F4: the seed
+// path must accept a transactions file whose range is a strict
+// SUB-range of the headers file (headers merged into a wider 10k
+// chunk while transactions still sit at 1k). The old strict-equality
+// check rejected the perfectly valid case where the narrower tx file
+// fully covers the seed write range.
+//
+// Observed live 2026-07-29 (continuous soak cycle 1, iter 9 mode_b):
+//
+//	tx range [3157000, 3158000) does not match headers [3150000, 3160000)
+//
+// Fixture: headers+bodies span [2_000_000, 2_000_010); tx spans only
+// [2_000_005, 2_000_010). Seed writes [2_000_005, 2_000_007]. The
+// prefix walk (blocks 2_000_000..2_000_004) accumulates TD without
+// touching tx; from 2_000_005 onwards the walk reads tx entries and
+// writes to DB.
+func TestSeedLeftoverBlocks_AsymmetricTxSubRange(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	snapDir := t.TempDir()
+	tmpDir := t.TempDir()
+
+	// Realistic F4 shape: block-snapshot filenames use blockNum/1000 for
+	// the range indicators, so ranges must be 1000-aligned to distinguish
+	// files by name. Headers 10k chunk (post-merge cadence), tx 1k chunk
+	// (still per-retire), seed the tail of the tx chunk.
+	const (
+		hFromBlock = uint64(3_150_000)
+		hToBlock   = uint64(3_160_000) // headers 10k
+		tFromBlock = uint64(3_157_000)
+		tToBlock   = uint64(3_158_000) // tx 1k, sub-range of headers
+		baseTxn    = uint64(1_000)
+		txPer      = uint32(4)
+	)
+	hFI, bFI, _ := makeBlockSnapshotTriple(t, ctx, snapDir, tmpDir, hFromBlock, hToBlock, baseTxn, txPer)
+	require.NoError(t, dir.RemoveFile(filepath.Join(snapDir, snaptype.SegmentFileName(snaptype2.Transactions.Versions().Current, hFromBlock, hToBlock, snaptype2.Transactions.Enum()))))
+	// Narrow tx file: baseTxnID at tFromBlock = baseTxn + (7000 blocks × 4 tx).
+	_, _, tFI := makeBlockSnapshotTriple(t, ctx, snapDir, tmpDir, tFromBlock, tToBlock, baseTxn+(tFromBlock-hFromBlock)*uint64(txPer), txPer)
+
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	const (
+		seedFrom = uint64(3_157_000)
+		seedTo   = uint64(3_157_002)
+	)
+	// The bug: old code returned "tx range [3157000, 3158000) does not
+	// match headers [3150000, 3160000)" — the strict-equality check
+	// rejected the valid asymmetric case.
+	require.NoError(t, seedLeftoverBlocks(ctx, rwTx, snapDir, hFI, bFI, &tFI, seedFrom, seedTo, nil))
+
+	// Each seeded block has 4 tx slots [sys, user, user, sys]. baseTxn
+	// at seedFrom = 1000 + (seedFrom-hFromBlock)*txPer.
+	for _, userTxnID := range []uint64{29001, 29002, 29005, 29006, 29009, 29010} {
+		var keyBytes [8]byte
+		binary.BigEndian.PutUint64(keyBytes[:], userTxnID)
+		got, gerr := rwTx.GetOne(kv.EthTx, keyBytes[:])
+		require.NoError(t, gerr)
+		require.NotEmpty(t, got, "user tx txnID %d in seeded block must be present", userTxnID)
+	}
+}
+
+// TestSeedLeftoverBlocks_TxRangeDoesNotCoverWriteRange pins the guard
+// on the coverage relaxation: if the tx sub-range doesn't fully cover
+// the write range, we must reject with a specific error rather than
+// silently produce a torn seed (some blocks with tx entries, some
+// without, chosen by which side the truncation lands on).
+func TestSeedLeftoverBlocks_TxRangeDoesNotCoverWriteRange(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	snapDir := t.TempDir()
+	tmpDir := t.TempDir()
+
+	const (
+		hFromBlock = uint64(2_000_000)
+		hToBlock   = uint64(2_000_010)
+		tFromBlock = uint64(2_000_005)
+		tToBlock   = uint64(2_000_006) // covers only ONE block; write range needs three
+		baseTxn    = uint64(1_000)
+		txPer      = uint32(4)
+	)
+	hFI, bFI, _ := makeBlockSnapshotTriple(t, ctx, snapDir, tmpDir, hFromBlock, hToBlock, baseTxn, txPer)
+	require.NoError(t, dir.RemoveFile(filepath.Join(snapDir, snaptype.SegmentFileName(snaptype2.Transactions.Versions().Current, hFromBlock, hToBlock, snaptype2.Transactions.Enum()))))
+	_, _, tFI := makeBlockSnapshotTriple(t, ctx, snapDir, tmpDir, tFromBlock, tToBlock, baseTxn+(tFromBlock-hFromBlock)*uint64(txPer), txPer)
+
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	const (
+		seedFrom = uint64(2_000_005)
+		seedTo   = uint64(2_000_007) // extends past tx file's [2005, 2006)
+	)
+	err = seedLeftoverBlocks(ctx, rwTx, snapDir, hFI, bFI, &tFI, seedFrom, seedTo, nil)
+	require.Error(t, err, "tx sub-range that misses the write-range tail must be rejected")
+	require.Contains(t, err.Error(), "does not cover write range")
+}
