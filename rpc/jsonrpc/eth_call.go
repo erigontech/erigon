@@ -1018,10 +1018,8 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		prevTracer = logger.NewAccessListTracer(*args.AccessList, excl, nil)
 	}
 
-	// One convergence iteration. Extracted so the iteration's state is returned to
-	// its pools on every exit path, including the one that produces the result.
-	// A non-nil result means the access list converged; otherwise the returned
-	// tracer seeds the next iteration.
+	// One convergence iteration: a non-nil result means the access list converged,
+	// otherwise the returned tracer seeds the next iteration.
 	step := func(prevTracer *logger.AccessListTracer) (*accessListResult, *logger.AccessListTracer, error) {
 		ibs := state.New(stateReader)
 		defer ibs.Close()
@@ -1053,7 +1051,6 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, excl, ibs)
-		defer tracer.Close()
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
 		txCtx := protocol.NewEVMTxContext(msg)
 

@@ -277,6 +277,14 @@ func (rw *Worker) ResetTx(chainTx kv.TemporalTx) error {
 	return rw.resetTx(chainTx)
 }
 
+// Close returns the worker's IntraBlockState to its pools. Idempotent. Callers
+// must ensure the worker's Run goroutine has exited first.
+func (rw *Worker) Close() {
+	rw.lock.Lock()
+	defer rw.lock.Unlock()
+	rw.ibs.Close()
+}
+
 func (rw *Worker) resetTxNum(txNum uint64) {
 	type resettable interface {
 		SetTxNum(txNum uint64)
@@ -606,12 +614,13 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 		}
 		clearDone = true
 		g.Wait()
+		applyWorker.Close()
 		for _, w := range reconWorkers {
+			w.Close()
 			if err = w.ResetTx(nil); err != nil {
 				return
 			}
 		}
-		//applyWorker.ResetTx(nil)
 	}
 	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
 

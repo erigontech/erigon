@@ -187,18 +187,11 @@ type ReusableCaller struct {
 	rules          *chain.Rules
 	callTimeout    time.Duration
 	message        *types.Message
-	closed         bool
 }
 
 // Close returns the state built by the last DoCallWithNewGas to its pools.
-// Idempotent. The guard must not be `r.evm = nil`: the timeout watcher
-// goroutine reads r.evm and is only signalled by close(done), never awaited,
-// so clearing it races with EVM.Cancel.
+// r.evm is never cleared: the timeout watcher goroutine reads it and is never awaited.
 func (r *ReusableCaller) Close() {
-	if r.closed {
-		return
-	}
-	r.closed = true
 	if ibs := r.evm.IntraBlockState(); ibs != nil {
 		ibs.Close()
 	}
@@ -227,6 +220,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	if r.stateOverrides != nil {
 		precompiles := vm.ActivePrecompiledContracts(r.rules)
 		if err := r.stateOverrides.Override(ibs, precompiles, r.rules); err != nil {
+			ibs.Close()
 			return nil, err
 		}
 		r.evm.SetPrecompiles(precompiles)
@@ -281,8 +275,6 @@ func NewReusableCaller(
 	callTimeout time.Duration,
 ) (*ReusableCaller, error) {
 
-	ibs := state.New(stateReader)
-
 	baseFee := header.BaseFee
 
 	msg, err := initialArgs.ToMessage(gasCap, baseFee)
@@ -299,7 +291,7 @@ func NewReusableCaller(
 	}
 	txCtx := protocol.NewEVMTxContext(msg)
 
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
+	evm := vm.NewEVM(blockCtx, txCtx, state.New(stateReader), chainConfig, vm.Config{NoBaseFee: true})
 
 	return &ReusableCaller{
 		evm:            evm,
