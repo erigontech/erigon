@@ -2593,7 +2593,8 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	return nil
 }
 
-// FinalizedWrites returns versioned writes after end-of-transaction filtering.
+// FinalizedWrites applies EIP-6780 normalization and EIP-161 filtering, then
+// returns a detached committable snapshot.
 func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) *WriteSet {
 	writes := sdb.versionedWrites.Finalize()
 	sdb.withholdCreatedEmptyAccounts(chainRules, writes)
@@ -2771,7 +2772,7 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 	}
 }
 
-// StartAccessRecording enables versioned access tracking outside transaction preparation.
+// StartAccessRecording enables versioned access tracking until ResetVersionedIO.
 func (sdb *IntraBlockState) StartAccessRecording() {
 	sdb.recordAccess = true
 }

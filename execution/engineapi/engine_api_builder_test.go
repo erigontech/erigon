@@ -139,6 +139,7 @@ func testEngineApiClearsFreshTouchedEmptyAccount(t *testing.T, experimentalBAL b
 			require.NoError(t, err)
 		}
 
+		// Deploy runtime code that pushes emptyAddr and executes SELFDESTRUCT.
 		initCode := append([]byte{0x75, 0x73}, emptyAddr[:]...)
 		initCode = append(initCode, 0xff, 0x60, 0x00, 0x52, 0x60, 0x16, 0x60, 0x0a, 0xf3)
 		send(&types.DynamicFeeTransaction{
