@@ -204,3 +204,50 @@ func TestBlsToExecutionChangeProcessMessage(t *testing.T) {
 		})
 	}
 }
+
+func TestBlsToExecutionChangeIgnoresSeenValidatorAfterPoolPrune(t *testing.T) {
+	const validatorIndex = uint64(1)
+	testCtx, st := setupBLSToExecutionChangeTest(t)
+	msg := newSignedBLSToExecutionChangeForGossip(validatorIndex)
+	st.ValidatorSet().SetWithdrawalCredentialForValidatorAtIndex(
+		int(validatorIndex),
+		matchingWithdrawalCredentials(testCtx.beaconCfg, msg.SignedBLSToExecutionChange.Message.From),
+	)
+	syncHeadState(t, testCtx.syncedData, st)
+	testCtx.gomockCtrl.RecordCall(
+		testCtx.mockFuncs,
+		"ComputeSigningRoot",
+		msg.SignedBLSToExecutionChange.Message,
+		gomock.Any(),
+	).Return([32]byte{}, nil).Times(1)
+	testCtx.gomockCtrl.RecordCall(
+		testCtx.mockFuncs,
+		"BlsVerifyMultipleSignatures",
+		gomock.Any(),
+		gomock.Any(),
+		gomock.Any(),
+	).Return(true, nil).Times(1)
+
+	require.NoError(t, testCtx.service.ProcessMessage(context.Background(), nil, msg))
+	require.True(t, testCtx.operationsPool.BLSToExecutionChangesPool.DeleteIfExist(msg.SignedBLSToExecutionChange.Signature))
+	credentials := matchingWithdrawalCredentials(testCtx.beaconCfg, msg.SignedBLSToExecutionChange.Message.From)
+	credentials[0] = byte(testCtx.beaconCfg.ETH1AddressWithdrawalPrefixByte)
+	st.ValidatorSet().SetWithdrawalCredentialForValidatorAtIndex(int(validatorIndex), credentials)
+	syncHeadState(t, testCtx.syncedData, st)
+
+	require.NoError(t, testCtx.service.ProcessMessage(context.Background(), nil, msg))
+	require.True(t, testCtx.gomockCtrl.Satisfied())
+}
+
+func TestBlsToExecutionChangeRejectsIncompleteMessage(t *testing.T) {
+	testCtx, _ := setupBLSToExecutionChangeTest(t)
+	for _, msg := range []*SignedBLSToExecutionChangeForGossip{
+		nil,
+		{},
+		{SignedBLSToExecutionChange: &cltypes.SignedBLSToExecutionChange{}},
+	} {
+		require.NotPanics(t, func() {
+			require.Error(t, testCtx.service.ProcessMessage(context.Background(), nil, msg))
+		})
+	}
+}

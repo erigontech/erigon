@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -247,6 +248,65 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 		} else {
 			t.Require().NoError(err)
 		}
+	}
+}
+
+func (t *voluntaryExitTestSuite) TestSeenValidatorIsIgnoredAfterPoolPrune() {
+	const (
+		currentEpoch   = uint64(100)
+		validatorIndex = uint64(10)
+	)
+	msg := &SignedVoluntaryExitForGossip{
+		SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{
+			VoluntaryExit: &cltypes.VoluntaryExit{
+				Epoch:          1,
+				ValidatorIndex: validatorIndex,
+			},
+		},
+		ImmediateVerification: true,
+	}
+	_, st, _ := tests.GetBellatrixRandom()
+	validator := solid.NewValidatorFromParameters(
+		common.Bytes48{},
+		common.Hash{},
+		0,
+		false,
+		0,
+		0,
+		currentEpoch+1,
+		0,
+	)
+	st.ValidatorSet().Set(int(validatorIndex), validator)
+	t.Require().NoError(t.syncedData.OnHeadState(st))
+	t.ethClock.EXPECT().GetCurrentEpoch().Return(currentEpoch).Times(1)
+	t.beaconCfg.FarFutureEpoch = validator.ExitEpoch()
+	t.gomockCtrl.RecordCall(
+		t.mockFuncs,
+		"BlsVerifyMultipleSignatures",
+		gomock.Any(),
+		gomock.Any(),
+		gomock.Any(),
+	).Return(true, nil).Times(1)
+
+	t.Require().NoError(t.voluntaryExitService.ProcessMessage(context.Background(), nil, msg))
+	t.Require().True(t.operationsPool.VoluntaryExitsPool.DeleteIfExist(validatorIndex))
+	validator.SetExitEpoch(0)
+	st.ValidatorSet().Set(int(validatorIndex), validator)
+	t.Require().NoError(t.syncedData.OnHeadState(st))
+
+	t.Require().NoError(t.voluntaryExitService.ProcessMessage(context.Background(), nil, msg))
+	t.Require().True(t.gomockCtrl.Satisfied())
+}
+
+func (t *voluntaryExitTestSuite) TestIncompleteMessageReturnsError() {
+	for _, msg := range []*SignedVoluntaryExitForGossip{
+		nil,
+		{},
+		{SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{}},
+	} {
+		t.Require().NotPanics(func() {
+			t.Require().Error(t.voluntaryExitService.ProcessMessage(context.Background(), nil, msg))
+		})
 	}
 }
 

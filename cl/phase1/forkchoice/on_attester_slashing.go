@@ -69,6 +69,10 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	if err != nil {
 		return err
 	}
+	intersection := solid.IntersectionOfSortedSets(attestation1.AttestingIndices, attestation2.AttestingIndices)
+	if f.allAttesterSlashingIndicesSeen(intersection) {
+		return nil
+	}
 	domain1, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, attestation1.Data.Target.Epoch)
 	if err != nil {
 		return fmt.Errorf("unable to get the domain: %v", err)
@@ -108,7 +112,7 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	}
 
 	var anySlashed bool
-	for _, index := range solid.IntersectionOfSortedSets(attestation1.AttestingIndices, attestation2.AttestingIndices) {
+	for _, index := range intersection {
 		f.setUnequivocating(index)
 		if !anySlashed {
 			v, err := s.ValidatorForValidatorIndex(int(index))
@@ -125,6 +129,18 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 		f.queueEmit(func() { f.emitters.Operation().SendAttesterSlashing(attesterSlashing) })
 	}
 	return nil
+}
+
+func (f *ForkChoiceStore) allAttesterSlashingIndicesSeen(indices []uint64) bool {
+	if len(indices) == 0 {
+		return false
+	}
+	for _, index := range indices {
+		if !f.isUnequivocating(index) {
+			return false
+		}
+	}
+	return true
 }
 
 func getIndexedAttestationPublicKeys(b *state.CachingBeaconState, att *cltypes.IndexedAttestation) ([][]byte, error) {

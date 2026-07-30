@@ -45,14 +45,28 @@ func (f *ForkChoiceStore) queuePrune(slot uint64) {
 	f.queuedPrunes = append(f.queuedPrunes, slot)
 }
 
+func (f *ForkChoiceStore) queueOperationPrune(root common.Hash) {
+	f.queuedOperationPrunes = append(f.queuedOperationPrunes, root)
+}
+
 // drainQueuedWork runs queued event sends and prunes. Call after releasing f.mu.
 func (f *ForkChoiceStore) drainQueuedWork() {
 	f.mu.Lock()
 	emits := f.queuedEmits
 	prunes := f.queuedPrunes
+	operationPrunes := f.queuedOperationPrunes
 	f.queuedEmits = nil
 	f.queuedPrunes = nil
+	f.queuedOperationPrunes = nil
 	f.mu.Unlock()
+	for _, root := range operationPrunes {
+		finalizedState, err := f.forkGraph.GetState(root, true)
+		if err != nil || finalizedState == nil {
+			log.Warn("Failed to load finalized state for operation pruning", "root", root, "err", err)
+			continue
+		}
+		f.operationsPool.PruneFinalized(finalizedState)
+	}
 	for _, emit := range emits {
 		emit()
 	}
@@ -69,6 +83,7 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 		f.justifiedCheckpoint.Store(justifiedCheckpoint)
 	}
 	if finalizedCheckpoint.Epoch > f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch {
+		f.queueOperationPrune(finalizedCheckpoint.Root)
 		f.onNewFinalized(finalizedCheckpoint)
 		f.finalizedCheckpoint.Store(finalizedCheckpoint)
 

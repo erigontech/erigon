@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
@@ -151,6 +152,187 @@ func TestOperationsPool(t *testing.T) {
 	require.Len(t, pools.BLSToExecutionChangesPool.Raw(), 1)
 
 	require.Len(t, pools.ProposerSlashingsPool.Raw(), 1)
+}
+
+func TestOperationsPoolPruneFinalized(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	finalizedState := state.New(&cfg)
+	finalizedState.SetSlot(3 * cfg.SlotsPerEpoch)
+	for i := range 3 {
+		finalizedState.AddValidator(solid.NewValidatorFromParameters(
+			common.Bytes48{byte(i)},
+			common.Hash{},
+			cfg.MaxEffectiveBalance,
+			false,
+			0,
+			0,
+			cfg.FarFutureEpoch,
+			cfg.FarFutureEpoch,
+		), cfg.MaxEffectiveBalance)
+	}
+
+	t.Run("proposer slashings", func(t *testing.T) {
+		pools := NewOperationsPool(&cfg)
+		keep := proposerSlashing(0, 1)
+		removeSlashed := proposerSlashing(1, 3)
+		removeWithdrawable := proposerSlashing(2, 5)
+		missing := proposerSlashing(10, 7)
+		pools.ProposerSlashingsPool.Insert(ComputeKeyForProposerSlashing(keep), keep)
+		pools.ProposerSlashingsPool.Insert(ComputeKeyForProposerSlashing(removeSlashed), removeSlashed)
+		pools.ProposerSlashingsPool.Insert(ComputeKeyForProposerSlashing(removeWithdrawable), removeWithdrawable)
+		pools.ProposerSlashingsPool.Insert(ComputeKeyForProposerSlashing(missing), missing)
+		require.NoError(t, finalizedState.SetValidatorSlashed(1, true))
+		require.NoError(t, finalizedState.SetWithdrawableEpochForValidatorAtIndex(2, 3))
+
+		pools.PruneFinalized(finalizedState)
+
+		require.True(t, pools.ProposerSlashingsPool.Has(ComputeKeyForProposerSlashing(keep)))
+		require.False(t, pools.ProposerSlashingsPool.Has(ComputeKeyForProposerSlashing(removeSlashed)))
+		require.False(t, pools.ProposerSlashingsPool.Has(ComputeKeyForProposerSlashing(removeWithdrawable)))
+		require.True(t, pools.ProposerSlashingsPool.Has(ComputeKeyForProposerSlashing(missing)))
+	})
+
+	t.Run("attester slashings retain a slashable intersection member", func(t *testing.T) {
+		pools := NewOperationsPool(&cfg)
+		partial := attesterSlashing([]uint64{0, 1}, []uint64{0, 1}, 4)
+		terminal := attesterSlashing([]uint64{1}, []uint64{1}, 5)
+		pools.AttesterSlashingsPool.Insert(ComputeKeyForAttesterSlashing(partial), partial)
+		pools.AttesterSlashingsPool.Insert(ComputeKeyForAttesterSlashing(terminal), terminal)
+
+		pools.PruneFinalized(finalizedState)
+
+		require.True(t, pools.AttesterSlashingsPool.Has(ComputeKeyForAttesterSlashing(partial)))
+		require.False(t, pools.AttesterSlashingsPool.Has(ComputeKeyForAttesterSlashing(terminal)))
+	})
+
+	t.Run("voluntary exits", func(t *testing.T) {
+		pools := NewOperationsPool(&cfg)
+		pools.VoluntaryExitsPool.Insert(0, voluntaryExit(0))
+		pools.VoluntaryExitsPool.Insert(2, voluntaryExit(2))
+		pools.VoluntaryExitsPool.Insert(10, voluntaryExit(10))
+		finalizedState.SetExitEpochForValidatorAtIndex(2, 4)
+
+		pools.PruneFinalized(finalizedState)
+
+		require.True(t, pools.VoluntaryExitsPool.Has(0))
+		require.False(t, pools.VoluntaryExitsPool.Has(2))
+		require.True(t, pools.VoluntaryExitsPool.Has(10))
+	})
+
+	t.Run("bls to execution changes", func(t *testing.T) {
+		pools := NewOperationsPool(&cfg)
+		keep := blsChange(0, 6)
+		remove := blsChange(2, 7)
+		missing := blsChange(10, 8)
+		pools.BLSToExecutionChangesPool.Insert(keep.Signature, keep)
+		pools.BLSToExecutionChangesPool.Insert(remove.Signature, remove)
+		pools.BLSToExecutionChangesPool.Insert(missing.Signature, missing)
+		credentials := common.Hash{byte(cfg.ETH1AddressWithdrawalPrefixByte)}
+		finalizedState.SetWithdrawalCredentialForValidatorAtIndex(2, credentials)
+
+		pools.PruneFinalized(finalizedState)
+
+		require.True(t, pools.BLSToExecutionChangesPool.Has(keep.Signature))
+		require.False(t, pools.BLSToExecutionChangesPool.Has(remove.Signature))
+		require.True(t, pools.BLSToExecutionChangesPool.Has(missing.Signature))
+	})
+
+	t.Run("gloas builder exits are retained across reusable indices", func(t *testing.T) {
+		gloasState := state.New(&cfg)
+		gloasState.SetVersion(clparams.GloasVersion)
+		builders := solid.NewStaticListSSZ[*cltypes.Builder](
+			int(cfg.BuilderRegistryLimit),
+			new(cltypes.Builder).EncodingSizeSSZ(),
+		)
+		builders.Append(&cltypes.Builder{WithdrawableEpoch: cfg.FarFutureEpoch})
+		builders.Append(&cltypes.Builder{WithdrawableEpoch: 4})
+		gloasState.SetBuilders(builders)
+		keepIndex := state.ConvertBuilderIndexToValidatorIndex(0)
+		removeIndex := state.ConvertBuilderIndexToValidatorIndex(1)
+		pools := NewOperationsPool(&cfg)
+		pools.VoluntaryExitsPool.Insert(keepIndex, voluntaryExit(keepIndex))
+		pools.VoluntaryExitsPool.Insert(removeIndex, voluntaryExit(removeIndex))
+
+		pools.PruneFinalized(gloasState)
+
+		require.True(t, pools.VoluntaryExitsPool.Has(keepIndex))
+		require.True(t, pools.VoluntaryExitsPool.Has(removeIndex))
+	})
+
+	t.Run("attestations are not finalized-state pruned", func(t *testing.T) {
+		pools := NewOperationsPool(&cfg)
+		key := common.Bytes96{1}
+		pools.AttestationsPool.Insert(key, &solid.Attestation{})
+
+		pools.PruneFinalized(finalizedState)
+
+		require.True(t, pools.AttestationsPool.Has(key))
+	})
+}
+
+func TestOperationsPoolPruneFinalizedIgnoresIncompleteEntries(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	finalizedState := state.New(&cfg)
+	validator := solid.NewValidator()
+	validator.SetSlashed(true)
+	finalizedState.AddValidator(validator, 0)
+	pools := NewOperationsPool(&cfg)
+	pools.ProposerSlashingsPool.Insert(common.Bytes96{1}, nil)
+	pools.ProposerSlashingsPool.Insert(common.Bytes96{4}, &cltypes.ProposerSlashing{
+		Header1: &cltypes.SignedBeaconBlockHeader{
+			Header: &cltypes.BeaconBlockHeader{ProposerIndex: 0},
+		},
+	})
+	pools.AttesterSlashingsPool.Insert(common.Bytes96{2}, nil)
+	pools.VoluntaryExitsPool.Insert(0, nil)
+	pools.BLSToExecutionChangesPool.Insert(common.Bytes96{3}, nil)
+
+	require.NotPanics(t, func() {
+		pools.PruneFinalized(finalizedState)
+	})
+	require.Len(t, pools.ProposerSlashingsPool.Raw(), 2)
+	require.Len(t, pools.AttesterSlashingsPool.Raw(), 1)
+	require.Len(t, pools.VoluntaryExitsPool.Raw(), 1)
+	require.Len(t, pools.BLSToExecutionChangesPool.Raw(), 1)
+}
+
+func proposerSlashing(validatorIndex uint64, signatureByte byte) *cltypes.ProposerSlashing {
+	return &cltypes.ProposerSlashing{
+		Header1: &cltypes.SignedBeaconBlockHeader{
+			Header:    &cltypes.BeaconBlockHeader{ProposerIndex: validatorIndex},
+			Signature: common.Bytes96{signatureByte},
+		},
+		Header2: &cltypes.SignedBeaconBlockHeader{
+			Header:    &cltypes.BeaconBlockHeader{ProposerIndex: validatorIndex},
+			Signature: common.Bytes96{signatureByte + 1},
+		},
+	}
+}
+
+func attesterSlashing(one, two []uint64, signatureByte byte) *cltypes.AttesterSlashing {
+	return &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, one),
+			Signature:        common.Bytes96{signatureByte},
+		},
+		Attestation_2: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, two),
+			Signature:        common.Bytes96{signatureByte + 1},
+		},
+	}
+}
+
+func voluntaryExit(validatorIndex uint64) *cltypes.SignedVoluntaryExit {
+	return &cltypes.SignedVoluntaryExit{
+		VoluntaryExit: &cltypes.VoluntaryExit{ValidatorIndex: validatorIndex},
+	}
+}
+
+func blsChange(validatorIndex uint64, signatureByte byte) *cltypes.SignedBLSToExecutionChange {
+	return &cltypes.SignedBLSToExecutionChange{
+		Message:   &cltypes.BLSToExecutionChange{ValidatorIndex: validatorIndex},
+		Signature: common.Bytes96{signatureByte},
+	}
 }
 
 func TestEpbsPoolGetPreferenceExactLookup(t *testing.T) {

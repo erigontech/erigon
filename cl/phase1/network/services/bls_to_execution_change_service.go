@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
@@ -51,6 +52,7 @@ type blsToExecutionChangeService struct {
 	syncedDataManager      synced_data.SyncedData
 	beaconCfg              *clparams.BeaconChainConfig
 	batchSignatureVerifier *BatchSignatureVerifier
+	seen                   *lru.Cache[uint64, struct{}]
 }
 
 func NewBLSToExecutionChangeService(
@@ -60,12 +62,17 @@ func NewBLSToExecutionChangeService(
 	beaconCfg *clparams.BeaconChainConfig,
 	batchSignatureVerifier *BatchSignatureVerifier,
 ) BLSToExecutionChangeService {
+	seen, err := lru.New[uint64, struct{}]("bls_to_execution_change_seen", operationSeenCacheSize)
+	if err != nil {
+		panic(err)
+	}
 	return &blsToExecutionChangeService{
 		operationsPool:         operationsPool,
 		emitters:               emitters,
 		syncedDataManager:      syncedDataManager,
 		beaconCfg:              beaconCfg,
 		batchSignatureVerifier: batchSignatureVerifier,
+		seen:                   seen,
 	}
 }
 
@@ -89,13 +96,19 @@ func (s *blsToExecutionChangeService) DecodeGossipMessage(pid peer.ID, data []by
 }
 
 func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet *uint64, msg *SignedBLSToExecutionChangeForGossip) error {
+	if msg == nil || msg.SignedBLSToExecutionChange == nil || msg.SignedBLSToExecutionChange.Message == nil {
+		return errors.New("invalid BLS to execution change")
+	}
 	// https://github.com/ethereum/consensus-specs/blob/dev/specs/capella/p2p-interface.md#bls_to_execution_change
 	// [IGNORE] The signed_bls_to_execution_change is the first valid signed bls to execution change received
 	// for the validator with index signed_bls_to_execution_change.message.validator_index.
+	change := msg.SignedBLSToExecutionChange.Message
+	if _, ok := s.seen.Get(change.ValidatorIndex); ok {
+		return nil
+	}
 	if s.operationsPool.BLSToExecutionChangesPool.Has(msg.SignedBLSToExecutionChange.Signature) {
 		return nil
 	}
-	change := msg.SignedBLSToExecutionChange.Message
 
 	var wc, genesisValidatorRoot common.Hash
 	if err := s.syncedDataManager.ViewHeadState(func(stateReader *state.CachingBeaconState) error {
@@ -146,6 +159,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 		Pks:         [][]byte{change.From[:]},
 		SendingPeer: msg.Receiver,
 		F: func() {
+			s.seen.Add(change.ValidatorIndex, struct{}{})
 			s.emitters.Operation().SendBlsToExecution(msg.SignedBLSToExecutionChange)
 			s.operationsPool.BLSToExecutionChangesPool.Insert(msg.SignedBLSToExecutionChange.Signature, msg.SignedBLSToExecutionChange)
 		},
