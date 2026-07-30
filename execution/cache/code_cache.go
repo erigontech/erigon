@@ -58,24 +58,6 @@ const (
 	codeSizeEntryBytes = 64
 )
 
-// CodeCache is a multi-level concurrent cache for contract code, keyed by the
-// cheap maphash rather than Keccak256 so many shared-code addresses cost little:
-//   - L1  addr → maphash(code)
-//   - L2  maphash(code) → code
-//   - L2b codeHash(code) → code — lets a caller that already knows the Ethereum
-//     codeHash (EXTCODESIZE/EXTCODEHASH/CALL after an account read) skip L1.
-//
-// Configured byte budgets are translated into LRU entry caps; full layers
-// evict their coldest entries.
-//
-// Every cached layer carries (txNum, epoch) so an unwind invalidates code the
-// same way as the account/storage/branch caches: a contract's code
-// value never changes for a given hash, but its EXISTENCE does — code deployed
-// on a fork that is later unwound must no longer be discoverable, even by
-// codeHash. So the content-addressed layers are NOT treated as immutable; they
-// honor the same (txNum, epoch) lazy-drop as the addr layers. This can re-fetch
-// code shared across deployments when one is unwound (a multiplicity cost), but
-// keeps stale code out of the cache.
 type versionedAddressID struct {
 	addrID uint64
 	// codeHash is the addr's keccak codeHash, used to reject a hashToCode
@@ -120,6 +102,24 @@ type codeSizeEntry struct {
 	epoch   uint32
 }
 
+// CodeCache is a multi-level concurrent cache for contract code, keyed by the
+// cheap maphash rather than Keccak256 so many shared-code addresses cost little:
+//   - L1  addr → maphash(code)
+//   - L2  maphash(code) → code
+//   - L2b codeHash(code) → code — lets a caller that already knows the Ethereum
+//     codeHash (EXTCODESIZE/EXTCODEHASH/CALL after an account read) skip L1.
+//
+// Configured byte budgets are translated into LRU entry caps; full layers
+// evict their coldest entries.
+//
+// Every cached layer carries (txNum, epoch) so an unwind invalidates code the
+// same way as the account/storage/branch caches: a contract's code
+// value never changes for a given hash, but its EXISTENCE does — code deployed
+// on a fork that is later unwound must no longer be discoverable, even by
+// codeHash. So the content-addressed layers are NOT treated as immutable; they
+// honor the same (txNum, epoch) lazy-drop as the addr layers. This can re-fetch
+// code shared across deployments when one is unwound (a multiplicity cost), but
+// keeps stale code out of the cache.
 type CodeCache struct {
 	// addrToHash maps a 20-byte Ethereum address to the maphash-derived
 	// codeID for the code at that address. An LRU so fresh-address workloads
