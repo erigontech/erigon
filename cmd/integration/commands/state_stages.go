@@ -399,7 +399,7 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 		if _, err = sync.Run(sd, tx, initialCycle, false); err != nil {
 			return err
 		}
-		logger.Info("[Integration] ", "loop time", time.Since(t))
+		logger.Info("[Integration] ", "loopTime", time.Since(t))
 		sd.Close()
 		tx.Rollback()
 		tx, err = db.BeginTemporalRw(ctx)

@@ -428,10 +428,13 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.dep = UnknownDep
 }
 
-// Release returns pooled resources (like journal, stateObjects) back to their pools.
-// Call this when the IntraBlockState is no longer needed.
-// If parallel is true, cleanup happens in a goroutine for faster return.
-func (sdb *IntraBlockState) Release(parallel bool) {
+// Close returns pooled resources (like journal, stateObjects) back to their pools.
+// Call this when the IntraBlockState is no longer needed. Idempotent.
+func (sdb *IntraBlockState) Close() {
+	if sdb.stateObjects == nil {
+		return
+	}
+
 	stateObjects := sdb.stateObjects
 	journal := sdb.journal
 	sdb.stateObjects = nil
@@ -439,11 +442,7 @@ func (sdb *IntraBlockState) Release(parallel bool) {
 	sdb.logs = nil
 	sdb.revisions.reset()
 
-	if parallel {
-		go releaseResources(stateObjects, journal)
-	} else {
-		releaseResources(stateObjects, journal)
-	}
+	releaseResources(stateObjects, journal)
 }
 
 func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *journal) {

@@ -64,7 +64,7 @@ func DoCall(
 	*/
 
 	state := state.New(stateReader)
-	defer state.Release(false)
+	defer state.Close()
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -189,6 +189,15 @@ type ReusableCaller struct {
 	message        *types.Message
 }
 
+func (r *ReusableCaller) Close() {
+	if r.evm == nil {
+		return
+	}
+	evm := r.evm
+	r.evm = nil
+	evm.IntraBlockState().Close()
+}
+
 func (r *ReusableCaller) DoCallWithNewGas(
 	ctx context.Context,
 	newGas uint64,
@@ -217,7 +226,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 		r.evm.SetPrecompiles(precompiles)
 	}
 	if prev := r.evm.IntraBlockState(); prev != nil {
-		prev.Release(false)
+		prev.Close()
 	}
 	r.evm.Reset(txCtx, ibs)
 

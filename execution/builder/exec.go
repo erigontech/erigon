@@ -137,7 +137,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	filterReader := state.NewReaderV3(filterSd.AsGetter(filterMb))
 
 	ibs := state.New(stateReader)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(current.Header.Number.Uint64(), -1)
 
 	current.PayloadId = cfg.payloadId
@@ -528,7 +528,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		filtered = append(filtered, transaction)
 		transactions = transactions[1:]
 	}
-	logger.Debug("Filtration", "initial", initialCnt, "no sender", noSenderCnt, "no account", noAccountCnt, "nonce too low", nonceTooLowCnt, "nonceTooHigh", missedTxs, "sender not EOA", notEOACnt, "fee too low", feeTooLowCnt, "overflow", overflowCnt, "balance too low", balanceTooLowCnt, "bad chain id", badChainId, "filtered", len(filtered))
+	logger.Debug("Filtration", "initial", initialCnt, "noSender", noSenderCnt, "noAccount", noAccountCnt, "nonceTooLow", nonceTooLowCnt, "nonceTooHigh", missedTxs, "senderNotEOA", notEOACnt, "feeTooLow", feeTooLowCnt, "overflow", overflowCnt, "balanceTooLow", balanceTooLowCnt, "badChainID", badChainId, "filtered", len(filtered))
 	if stats != nil {
 		stats.filtered += len(filtered)
 		stats.badChainID += badChainId

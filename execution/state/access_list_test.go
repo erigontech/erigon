@@ -94,7 +94,7 @@ func TestAccessList(t *testing.T) {
 	require.NoError(t, err)
 
 	state := New(NewReaderV3(domains.AsGetter(tx)))
-	defer state.Release(false)
+	defer state.Close()
 
 	state.accessList.Reset()
 

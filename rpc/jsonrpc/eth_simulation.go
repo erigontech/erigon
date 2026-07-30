@@ -540,7 +540,7 @@ func (s *simulator) simulateBlock(
 		return nil, nil, err
 	}
 	intraBlockState := state.New(stateReader)
-	defer intraBlockState.Release(false)
+	defer intraBlockState.Close()
 
 	// Create a custom block context and apply any custom block overrides
 	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.newSimulatedCanonicalReader(ancestors), s.chainConfig,
