@@ -61,6 +61,28 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Track the erigon PID launched in Phase 2 so we kill it on any exit
+# path (success, failure, or interrupt). Without this, a failed cycle
+# leaves the erigon nohup'd and it keeps mutating the datadir we
+# meant to preserve for post-mortem. Datadir mutating for hours after
+# rc=1 is exactly what happened twice on 2026-07-30 before this trap.
+ELPID=""
+cleanup_erigon() {
+    if [[ -n "$ELPID" ]] && kill -0 "$ELPID" 2>/dev/null; then
+        echo "  cleanup: killing erigon pid=$ELPID"
+        kill "$ELPID" 2>/dev/null || true
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+            kill -0 "$ELPID" 2>/dev/null || break
+            sleep 1
+        done
+        if kill -0 "$ELPID" 2>/dev/null; then
+            echo "  cleanup: SIGKILL erigon pid=$ELPID"
+            kill -9 "$ELPID" 2>/dev/null || true
+        fi
+    fi
+}
+trap cleanup_erigon EXIT INT TERM
+
 eth_block_number() {
     curl -s --max-time 10 -X POST -H "Content-Type: application/json" \
         --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
@@ -130,7 +152,8 @@ echo "  wiped + recreated"
 stage "Phase 2: launch erigon ($LAUNCH_CMD)"
 # shellcheck disable=SC2086
 DATADIR="$DATADIR" LOG="$LOG" nohup $LAUNCH_CMD </dev/null >/dev/null 2>&1 &
-echo "  launched pid=$!"
+ELPID=$!
+echo "  launched pid=$ELPID"
 
 # Phase 3: wait for sync to live tip. Strategy:
 #   a. wait for RPC alive (head > 0).
