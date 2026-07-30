@@ -553,6 +553,9 @@ func fetchEnvelopesFromBeaconAPI(
 	// Build root-to-slot mapping from blocks
 	rootToSlot := make(map[common.Hash]uint64, len(blocks))
 	for _, blk := range blocks {
+		if blk == nil || blk.Block == nil || blk.Block.Body == nil {
+			continue
+		}
 		root, err := blk.Block.HashSSZ()
 		if err == nil {
 			rootToSlot[root] = blk.Block.Slot
