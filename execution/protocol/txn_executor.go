@@ -347,8 +347,8 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 		skipBlobCheck := st.evm.Config().NoBaseFee && maxFeePerBlobGas.IsZero()
 		if !skipBlobCheck && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
-			return txnFees{}, fmt.Errorf("%w: address %v, maxFeePerBlobGas: %v < blobGasPrice: %v",
-				ErrMaxFeePerBlobGas, from, maxFeePerBlobGas, blobGasPrice)
+			return txnFees{}, fmt.Errorf("%w: address %v, maxFeePerBlobGas: %s < blobGasPrice: %s",
+				ErrMaxFeePerBlobGas, from, maxFeePerBlobGas.String(), blobGasPrice.String())
 		}
 	}
 
@@ -385,7 +385,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	if rules.IsCancun {
 		fees.blobGasVal, overflow = u256.MulOverflow(st.evm.Context.BlobBaseFee, u256.U64(st.msg.BlobGas()))
 		if overflow {
-			return txnFees{}, fmt.Errorf("%w: overflow converting blob gas: %v", ErrInsufficientFunds, &fees.blobGasVal)
+			return txnFees{}, fmt.Errorf("%w: overflow converting blob gas: %s", ErrInsufficientFunds, fees.blobGasVal.String())
 		}
 	}
 
@@ -419,8 +419,8 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		if err != nil {
 			return txnFees{}, err
 		}
-		if have, want := balance, balanceCheck; have.Cmp(&want) < 0 {
-			return txnFees{}, fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, from, &have, &want)
+		if balance.Cmp(&balanceCheck) < 0 {
+			return txnFees{}, fmt.Errorf("%w: address %v have %s want %s", ErrInsufficientFunds, from, balance.String(), balanceCheck.String())
 		}
 	}
 
