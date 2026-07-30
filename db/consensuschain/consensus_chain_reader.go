@@ -37,7 +37,12 @@ type Reader struct {
 	logger      log.Logger
 }
 
+// logger is used only on read-error paths, so a nil one stays invisible until
+// something fails. log.Logger is an interface, and calling it then panics.
 func NewReader(config *chain.Config, tx kv.Tx, blockReader dbservices.FullBlockReader, logger log.Logger) *Reader {
+	if logger == nil {
+		logger = log.Root()
+	}
 	return &Reader{config, tx, blockReader, logger}
 }
 
