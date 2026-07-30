@@ -212,6 +212,25 @@ func TestAttesterSlashingSeenCheckPrecedesValidation(t *testing.T) {
 	require.ErrorIs(t, err, ErrIgnore)
 }
 
+func TestAttesterSlashingSeenCheckHandlesUnsortedIndices(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	store := &ForkChoiceStore{
+		equivocatingIndicies: []byte{0b00000010},
+	}
+	slashing := &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{2, 1}),
+		},
+		Attestation_2: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+		},
+	}
+
+	err := store.onProcessAttesterSlashing(slashing, state.New(&cfg), false)
+
+	require.ErrorIs(t, err, ErrIgnore)
+}
+
 func TestOnAttesterSlashingRejectsIncompleteOperation(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	store := &ForkChoiceStore{

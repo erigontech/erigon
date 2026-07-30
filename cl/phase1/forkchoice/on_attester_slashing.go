@@ -65,7 +65,7 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	// Check if this attestation is even slashable.
 	attestation1 := attesterSlashing.Attestation_1
 	attestation2 := attesterSlashing.Attestation_2
-	intersection := solid.IntersectionOfSortedSets(attestation1.AttestingIndices, attestation2.AttestingIndices)
+	intersection := intersectAttestingIndices(attestation1.AttestingIndices, attestation2.AttestingIndices)
 	if f.allAttesterSlashingIndicesSeen(intersection) {
 		return ErrIgnore
 	}
@@ -83,6 +83,7 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	if err != nil {
 		return err
 	}
+	intersection = solid.IntersectionOfSortedSets(attestation1.AttestingIndices, attestation2.AttestingIndices)
 	domain1, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, attestation1.Data.Target.Epoch)
 	if err != nil {
 		return fmt.Errorf("unable to get the domain: %v", err)
@@ -139,6 +140,22 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 		f.queueEmit(func() { f.emitters.Operation().SendAttesterSlashing(attesterSlashing) })
 	}
 	return nil
+}
+
+func intersectAttestingIndices(left, right solid.IterableSSZ[uint64]) []uint64 {
+	leftIndices := make(map[uint64]struct{}, left.Length())
+	for i := 0; i < left.Length(); i++ {
+		leftIndices[left.Get(i)] = struct{}{}
+	}
+	intersection := make([]uint64, 0, min(left.Length(), right.Length()))
+	for i := 0; i < right.Length(); i++ {
+		index := right.Get(i)
+		if _, ok := leftIndices[index]; ok {
+			intersection = append(intersection, index)
+			delete(leftIndices, index)
+		}
+	}
+	return intersection
 }
 
 func (f *ForkChoiceStore) allAttesterSlashingIndicesSeen(indices []uint64) bool {
