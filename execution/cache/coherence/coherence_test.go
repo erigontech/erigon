@@ -24,9 +24,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestGen_CannotReinitializeAfterUnwind(t *testing.T) {
+	var g Gen
+	entryEpoch := g.Epoch()
+	g.Unwind(50)
+
+	if initializer, ok := any(&g).(interface{ Init() }); ok {
+		initializer.Init()
+	}
+
+	require.Equal(t, uint32(1), g.Epoch())
+	require.True(t, g.IsStale(60, entryEpoch))
+}
+
 func TestGen_FloorAndEpoch(t *testing.T) {
 	var g Gen
-	g.Init()
 	require.Equal(t, uint32(0), g.Epoch())
 
 	// Before any unwind nothing is stale.
@@ -52,7 +64,6 @@ func TestGen_FloorAndEpoch(t *testing.T) {
 // the number of Unwinds.
 func TestGen_ConcurrentUnwindNoTear(t *testing.T) {
 	var g Gen
-	g.Init()
 
 	const unwinds = 200
 	var wg sync.WaitGroup
@@ -76,7 +87,6 @@ func TestGen_ConcurrentUnwindNoTear(t *testing.T) {
 
 func TestGen_ResetAdvancesEpochAndLiftsFloor(t *testing.T) {
 	var g Gen
-	g.Init()
 	g.Unwind(50)
 
 	g.Reset()
@@ -88,7 +98,6 @@ func TestGen_ResetAdvancesEpochAndLiftsFloor(t *testing.T) {
 
 func TestGen_SnapshotKeepsDeadEntryStaleAcrossReset(t *testing.T) {
 	var g Gen
-	g.Init()
 	entryEpoch := g.Epoch()
 	g.Unwind(50)
 	read := g.Snapshot()
@@ -101,7 +110,6 @@ func TestGen_SnapshotKeepsDeadEntryStaleAcrossReset(t *testing.T) {
 
 func TestGen_ConcurrentResetAndUnwindPreserveEveryEpochBump(t *testing.T) {
 	var g Gen
-	g.Init()
 
 	const operations = 200
 	var wg sync.WaitGroup

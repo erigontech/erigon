@@ -183,9 +183,6 @@ func newGenericCacheEntries[T any](capacityBytes datasize.ByteSize, capacityEntr
 	c.curCap.Store(capacityEntries)
 	c.shardCeil = uint32(math.NextPowerOfTwo(uint64(runtime.GOMAXPROCS(0) * 16)))
 	c.shardCount = initialShardCount(capacityEntries, c.shardCeil)
-	// Before any unwind every entry predates the (nonexistent) floor, so all
-	// reads are valid; the floor only drops once an unwind happens.
-	c.coh.Init()
 	c.data.Store(c.newShards(capacityEntries, c.shardCount))
 	return c
 }

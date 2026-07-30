@@ -254,9 +254,6 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	cc.codeSizeByCodeHash = newGrowLRU[codeSizeEntry](
 		datasize.ByteSize(DefaultCodeSizeCacheEntries*codeSizeEntryBytes), codeSizeEntryBytes,
 		func(_ uint64, _ codeSizeEntry) { cc.codeSizeEntries.Add(-1) })
-	// Before any unwind every entry's txNum is below the floor, so the epoch
-	// check never strands a valid entry.
-	cc.coh.Init()
 	return cc
 }
 

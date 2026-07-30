@@ -348,9 +348,6 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 		accountTrunk:  newAccountTrunk(maxDepth),
 		trunkDisabled: os.Getenv("BRANCH_CACHE_TRUNK_DISABLE") != "",
 	}
-	// Before any unwind every entry's txN is at/below the floor, so the epoch
-	// check never strands a valid entry.
-	bc.coh.Init()
 	log.Debug("[branch-cache] init", "trunkEnabled", !bc.trunkDisabled, "tailCap", tailCapacity, "trunkDepth", maxDepth)
 	return bc
 }

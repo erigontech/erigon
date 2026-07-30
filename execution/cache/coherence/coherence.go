@@ -32,6 +32,9 @@ type gen struct {
 	floor uint64
 }
 
+// gen values are immutable, so zero-value readers can share pristine.
+var pristine = &gen{floor: math.MaxUint64}
+
 // Gen tracks unwind coherence for a cache: every entry is stamped (txNum, epoch),
 // and is stale iff it was written in a superseded epoch AND its txNum is at or
 // above the unwind floor (the first rolled-back txNum). Unwind bumps the epoch
@@ -39,15 +42,9 @@ type gen struct {
 // next read. The floor only ever decreases, so a shallower later unwind can't
 // resurrect entries a deeper one invalidated.
 //
-// Constructors must call Init.
+// The zero value is ready to use.
 type Gen struct {
 	state atomic.Pointer[gen]
-}
-
-// Init sets the pre-unwind state: epoch 0, floor = MaxUint64 (every entry
-// predates the nonexistent floor, so all reads are valid until the first unwind).
-func (g *Gen) Init() {
-	g.state.Store(&gen{epoch: 0, floor: math.MaxUint64})
 }
 
 // Reset starts an empty cache generation without reusing an epoch. It advances
@@ -75,8 +72,7 @@ func (g *Gen) load() *gen {
 	if s := g.state.Load(); s != nil {
 		return s
 	}
-	// Defensive: an un-Init'd Gen reads as pre-unwind rather than panicking.
-	return &gen{epoch: 0, floor: math.MaxUint64}
+	return pristine
 }
 
 // IsStale reports whether an entry stamped (txNum, epoch) reflects dead-fork
