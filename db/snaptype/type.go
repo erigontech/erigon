@@ -238,6 +238,16 @@ var registeredTypes = map[Enum]Type{}
 var namedTypes = map[string]Type{}
 
 func RegisterType(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
+	if prev, taken := registeredTypes[enum]; taken {
+		panic(fmt.Sprintf("snaptype: enum %d already registered as %q, cannot register %q", enum, prev.Name(), name))
+	}
+	if IsCaplinType(enum) {
+		panic(fmt.Sprintf("snaptype: enum %d is in the caplin range, cannot register %q", enum, name))
+	}
+	if prev, taken := namedTypes[strings.ToLower(name)]; taken {
+		panic(fmt.Sprintf("snaptype: name %q already registered at enum %d", name, prev.Enum()))
+	}
+
 	t := SnapType{
 		enum: enum, name: name, versions: versions, indexes: indexes, rangeExtractor: rangeExtractor, indexBuilder: indexBuilder,
 	}

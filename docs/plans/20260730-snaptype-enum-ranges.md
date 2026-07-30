@@ -215,22 +215,25 @@ test leaves the global registry untouched.
 - Modify: `db/snaptype/type.go`
 - Modify: `db/snaptype/enum_registry_test.go`
 
-- [ ] in `RegisterType` (`type.go:240-255`), before any map insert, panic on:
+- [x] in `RegisterType` (`type.go:240-255`), before any map insert, panic on:
   (a) `registeredTypes[enum]` already present, (b) `IsCaplinType(enum)`
   (`caplin_types.go:37`), (c) `namedTypes[strings.ToLower(name)]` already
   present. No same-name idempotency exemption (no call site re-registers —
   verified; strict panic is simpler and stronger)
-- [ ] write test: duplicate enum panics — register a new name at
+- [x] write test: duplicate enum panics — register a new name at
   `snaptype2.Enums.Headers` (recover-based; panic precedes insert so the
   registry is unchanged after recover)
-- [ ] write test: caplin-range enum panics — register at
+- [x] write test: caplin-range enum panics — register at
   `snaptype.CaplinEnums.BeaconBlocks`
-- [ ] write test: duplicate name panics — register name `"headers"` at
+- [x] write test: duplicate name panics — register name `"headers"` at
   `snaptype.Enum(snaptype.MaxEnum)`
-- [ ] run `go test ./db/snaptype/...` and the init-heavy importers
+  — all three written red-first: each failed with "did not panic" before the
+  guard landed, green after
+- [x] run `go test ./db/snaptype/...` and the init-heavy importers
   (`./db/snaptype2/... ./polygon/heimdall/...`) — no spurious init panic
   (all 13 RegisterType call sites are distinct; verified during plan review)
-- [ ] commit: `db/snaptype: panic on duplicate or caplin-range type
+  — all green, `make lint` clean
+- [x] commit: `db/snaptype: panic on duplicate or caplin-range type
   registration`
 
 ### Task 4: Verify acceptance criteria

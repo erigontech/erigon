@@ -67,6 +67,28 @@ func TestEnumUniqueness(t *testing.T) {
 	}
 }
 
+func expectRegisterPanic(t *testing.T, enum snaptype.Enum, name string) {
+	t.Helper()
+	defer func() {
+		if recover() == nil {
+			t.Errorf("RegisterType(%d, %q) did not panic", enum, name)
+		}
+	}()
+	snaptype.RegisterType(enum, name, snaptype.Versions{}, nil, nil, nil)
+}
+
+func TestRegisterTypePanicsOnDuplicateEnum(t *testing.T) {
+	expectRegisterPanic(t, snaptype2.Enums.Headers, "duplicateenum")
+}
+
+func TestRegisterTypePanicsOnCaplinRangeEnum(t *testing.T) {
+	expectRegisterPanic(t, snaptype.CaplinEnums.BeaconBlocks, "caplinrange")
+}
+
+func TestRegisterTypePanicsOnDuplicateName(t *testing.T) {
+	expectRegisterPanic(t, snaptype.Enum(snaptype.MaxEnum), "headers")
+}
+
 func TestEnumRangeDisjointness(t *testing.T) {
 	for _, typ := range slices.Concat(snaptype2.BlockSnapshotTypes, snaptype2.E3StateTypes) {
 		if e := typ.Enum(); e < snaptype.MinCoreEnum || e >= snaptype.MinCaplinEnum {
