@@ -3278,6 +3278,8 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	}
 }
 
+// MergeVersionedWrites folds a recorded write set with a fresh apply-loop
+// addition (calcFees/finalize output). next is consumed — see WriteSet.MergeInto.
 func MergeVersionedWrites(prev, next *state.WriteSet) *state.WriteSet {
-	return prev.Merge(next)
+	return prev.MergeInto(next)
 }

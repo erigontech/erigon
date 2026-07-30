@@ -2038,6 +2038,74 @@ func (prev *WriteSet) Merge(next *WriteSet) *WriteSet {
 	return out
 }
 
+// MergeInto folds prev's entries into next in place and returns next; next wins
+// on (addr, path, key). Unlike Merge it shares *VersionedWrite pointers instead
+// of cloning, so next must be exclusively owned by the caller and neither side
+// may mutate a shared VersionedWrite in place afterwards; prev's maps are never
+// touched, so map-level deletes on prev stay safe.
+func (prev *WriteSet) MergeInto(next *WriteSet) *WriteSet {
+	if prev.IsEmpty() {
+		return next
+	}
+	if next.IsEmpty() {
+		return prev
+	}
+	for a, vw := range prev.address {
+		if _, ok := next.address[a]; !ok {
+			next.SetAddress(a, vw)
+		}
+	}
+	for a, vw := range prev.balance {
+		if _, ok := next.balance[a]; !ok {
+			next.SetBalance(a, vw)
+		}
+	}
+	for a, vw := range prev.nonce {
+		if _, ok := next.nonce[a]; !ok {
+			next.SetNonce(a, vw)
+		}
+	}
+	for a, vw := range prev.incarnation {
+		if _, ok := next.incarnation[a]; !ok {
+			next.SetIncarnation(a, vw)
+		}
+	}
+	for a, vw := range prev.selfDestruct {
+		if _, ok := next.selfDestruct[a]; !ok {
+			next.SetSelfDestruct(a, vw)
+		}
+	}
+	for a, vw := range prev.createContract {
+		if _, ok := next.createContract[a]; !ok {
+			next.SetCreateContract(a, vw)
+		}
+	}
+	for a, vw := range prev.code {
+		if _, ok := next.code[a]; !ok {
+			next.SetCode(a, vw)
+		}
+	}
+	for a, vw := range prev.codeHash {
+		if _, ok := next.codeHash[a]; !ok {
+			next.SetCodeHash(a, vw)
+		}
+	}
+	for a, vw := range prev.codeSize {
+		if _, ok := next.codeSize[a]; !ok {
+			next.SetCodeSize(a, vw)
+		}
+	}
+	for a, inner := range prev.storage {
+		nextInner := next.storage[a]
+		for k, vw := range inner {
+			if _, ok := nextInner[k]; !ok {
+				next.SetStorage(a, k, vw)
+			}
+		}
+	}
+	return next
+}
+
 // hasNewWrite: returns true if the current set has a new write compared to the input
 func (writes *WriteSet) HasNewWrite(cmpSet *WriteSet) bool {
 	if writes.IsEmpty() {
