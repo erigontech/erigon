@@ -16,6 +16,12 @@
 
 package storage
 
+import (
+	"fmt"
+
+	"github.com/erigontech/erigon/db/kv"
+)
+
 // stateFileAction is the verdict the mode-B planner assigns to a
 // single state-domain .kv file given a new stepBoundary.
 type stateFileAction int
@@ -100,6 +106,46 @@ type classifiedFiles struct {
 	regen   []stateFileRange // mixed: in-place + truncate; FinalizeUnwind needs to know which is which
 	remove  []stateFileRange
 	inPlace []bool // parallel to regen: true if regenInPlace, false if regenTruncate
+}
+
+// overrideActionForIXHorizon adjusts a per-file action when the
+// domain's history/IX has been pruned past the unwind target's txN
+// (i.e. the regen's per-key AsOf lookup at ts=lastTxNum+1 cannot
+// answer). ixCoversTarget=true is the normal case — pass-through.
+//
+// When ixCoversTarget=false:
+//
+//   - Receipt: regen actions become actionRemove. Receipt keys are
+//     re-written on every txN, so forward-exec restores every value
+//     naturally; retire produces a fresh .kv from re-executed MDBX.
+//   - Commitment: regen actions pass through — commitment regen uses
+//     an encoded anchor (not per-key AsOf) so IX horizon doesn't
+//     apply.
+//   - Other history-tracked domains (accounts/storage/code): regen
+//     actions error. Silent removal would lose state for keys last
+//     written pre-target and never touched since — forward-exec
+//     cannot resurrect that state.
+//   - actionKeep / actionRemove: no AsOf lookup performed, always
+//     pass through.
+func overrideActionForIXHorizon(action stateFileAction, domain kv.Domain, ixCoversTarget bool) (stateFileAction, error) {
+	if ixCoversTarget {
+		return action, nil
+	}
+	switch action {
+	case actionKeep, actionRemove:
+		return action, nil
+	case actionRegenInPlace, actionRegenTruncate:
+		switch domain {
+		case kv.ReceiptDomain:
+			return actionRemove, nil
+		case kv.CommitmentDomain:
+			return action, nil
+		default:
+			return 0, fmt.Errorf("domain %s history pruned past unwind target: regen requires history the pruning contract has removed", domain)
+		}
+	default:
+		return 0, fmt.Errorf("overrideActionForIXHorizon: unknown stateFileAction %d", action)
+	}
 }
 
 // planStateFileActions iterates the input files and returns the

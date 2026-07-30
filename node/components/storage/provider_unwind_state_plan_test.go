@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // classifyStateFileForUnwind: per-file rule tests. Each case is one
@@ -240,4 +242,76 @@ func TestPlan_EmptyInput(t *testing.T) {
 	require.Empty(t, got.keep)
 	require.Empty(t, got.regen)
 	require.Empty(t, got.remove)
+}
+
+// overrideActionForIXHorizon: per-file, per-domain override rule that
+// applies AFTER classifyStateFileForUnwind. When the domain's history
+// index (IX) has been pruned past the unwind target's txN, regen's
+// per-key AsOf lookup cannot answer — the operator asked to unwind
+// past the retained-history horizon under --prune.mode=minimal.
+//
+// Receipt domain: safe to resolve by remove-and-rebuild. Receipt keys
+// (cumGas, cumBlobGas, logIdx) are re-written on every txN, so
+// forward-exec from target restores every value. The pre-unwind
+// boundary .kv is stale (its latest values reflect a txN past the
+// target); removing it lets retire produce a fresh .kv from the
+// re-executed MDBX rows once forward-exec has progressed.
+//
+// Accounts / storage / code: return an error. Silent removal would
+// lose state for keys last written pre-target and never touched
+// since — forward-exec from target cannot resurrect that state.
+//
+// Commitment: passes through unchanged. Commitment regen uses an
+// encoded anchor (not per-key AsOf) so IX horizon doesn't apply.
+//
+// actionKeep / actionRemove: no AsOf lookup performed, always pass
+// through regardless of IX coverage.
+func TestOverrideActionForIXHorizon(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name           string
+		action         stateFileAction
+		domain         kv.Domain
+		ixCoversTarget bool
+		wantAction     stateFileAction
+		wantErr        bool
+	}{
+		// IX covers target: pass-through regardless of action/domain.
+		{"covered: receipt regen-in-place", actionRegenInPlace, kv.ReceiptDomain, true, actionRegenInPlace, false},
+		{"covered: accounts regen-truncate", actionRegenTruncate, kv.AccountsDomain, true, actionRegenTruncate, false},
+		{"covered: receipt keep", actionKeep, kv.ReceiptDomain, true, actionKeep, false},
+		{"covered: storage remove", actionRemove, kv.StorageDomain, true, actionRemove, false},
+
+		// IX doesn't cover: receipt regen actions become remove.
+		{"pruned: receipt regen-in-place → remove", actionRegenInPlace, kv.ReceiptDomain, false, actionRemove, false},
+		{"pruned: receipt regen-truncate → remove", actionRegenTruncate, kv.ReceiptDomain, false, actionRemove, false},
+
+		// IX doesn't cover: receipt keep/remove pass through (no AsOf needed).
+		{"pruned: receipt keep unchanged", actionKeep, kv.ReceiptDomain, false, actionKeep, false},
+		{"pruned: receipt remove unchanged", actionRemove, kv.ReceiptDomain, false, actionRemove, false},
+
+		// IX doesn't cover: non-receipt regen actions error.
+		{"pruned: accounts regen-in-place errors", actionRegenInPlace, kv.AccountsDomain, false, 0, true},
+		{"pruned: storage regen-truncate errors", actionRegenTruncate, kv.StorageDomain, false, 0, true},
+		{"pruned: code regen-in-place errors", actionRegenInPlace, kv.CodeDomain, false, 0, true},
+
+		// IX doesn't cover: non-receipt keep/remove pass through (no AsOf needed).
+		{"pruned: accounts keep unchanged", actionKeep, kv.AccountsDomain, false, actionKeep, false},
+		{"pruned: storage remove unchanged", actionRemove, kv.StorageDomain, false, actionRemove, false},
+
+		// Commitment: regen uses encoded anchor, not per-key AsOf.
+		{"pruned: commitment regen-in-place unchanged", actionRegenInPlace, kv.CommitmentDomain, false, actionRegenInPlace, false},
+		{"pruned: commitment regen-truncate unchanged", actionRegenTruncate, kv.CommitmentDomain, false, actionRegenTruncate, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := overrideActionForIXHorizon(tc.action, tc.domain, tc.ixCoversTarget)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.wantAction, got)
+		})
+	}
 }

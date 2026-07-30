@@ -166,9 +166,28 @@ func (p *Provider) regenerateBoundaryStepFiles(
 			anchor = commitmentAnchor
 		}
 
+		// Probe once per domain: does this domain's IX cover the AsOf
+		// lookup ts (lastTxNum+1)? Under --prune.mode=minimal the IX
+		// only covers the last ~100k blocks; a deep unwind can target
+		// a txN below that horizon. Regen's per-key AsOf would then
+		// raise "data before txNum=<horizon> not available".
+		// overrideActionForIXHorizon resolves this per-domain: receipt
+		// becomes actionRemove (forward-exec restores), non-receipt
+		// history-tracked domains error out.
+		ixStart := tx.Debug().HistoryStartFrom(kvDomain)
+		ixCoversTarget := ixStart <= lastTxNum+1
+		if !ixCoversTarget {
+			p.logger.Warn("mode-B unwind: domain IX pruned past target",
+				"domain", sd, "ixStart", ixStart, "target", lastTxNum+1)
+		}
+
 		// Walk every file; map each to an action via classifyStateFileForUnwind.
 		for i, fileEntry := range domainFiles {
 			action := classifyStateFileForUnwind(ranges[i], stepBoundary)
+			action, err = overrideActionForIXHorizon(action, kvDomain, ixCoversTarget)
+			if err != nil {
+				return nil, fmt.Errorf("classify %s file %s: %w", sd, fileEntry.Name, err)
+			}
 			switch action {
 			case actionKeep:
 				// content valid post-unwind; nothing to do.
