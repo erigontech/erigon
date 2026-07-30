@@ -28,6 +28,24 @@ without recurrence.
 
 ## OPEN
 
+### 4. Commitment straddler regen preserves stale branches — forward-exec fails with `empty branch data during unfold`
+
+- **Signature:** `[4/6 Execution] commitment: commitmentCalculator: compute failed: hash sort failed: followAndUpdate: unfold: empty branch data read during unfold, compact prefix <hex>`
+- **First seen:** 2026-07-30T20:19:14 UTC
+  - Cycle log: `/tmp/continuous-soak/soak.cycle0001-20260730T183503.log`
+  - Erigon log: `/tmp/continuous-soak/erigon.cycle0001-20260730T183503.log`
+  - Binary commit: `7cab2f95bc` (G1 fix — receipt regen skipped when below IX horizon)
+  - Iter 2 mode_b: pre_head=3319425, target=3151933, depth=167492
+  - Unwind completed with 5.17M commitment branches applied at target
+  - Forward-exec catchup failed at block 3152836 (target+903), same key deterministic across 4 retries: `000159225106a8b9f12347788ae1209c24c3c624800...`
+- **Reproduction:** deterministic on deep mode-B unwind past the pre-unwind head's commitment `.kv` boundary. Surfaced by the G1 fix — deep unwinds past receipt IX horizon now succeed and expose this pre-existing commitment straddler bug.
+- **Root cause:** commitment has `HistoryDisabled`, so its regen falls through `DomainRoTx.GetAsOf` to `AggregatorRoTx.GetLatest`. `getLatestFromDb`'s file-endTxN filter at `db/state/domain.go:1749` (`lastTxNumOfStep(step) >= files.EndTxN()`) shadows the compute's MDBX writes at step-of-lastTxN by the OLD boundary file's EndTxN. Regen copies OLD file content wholesale into the `.regen` boundary file, preserving:
+  - case (a): overwritten walked branches that had post-lastTxN over-writes in the OLD file
+  - case (c): ~170K post-lastTxN-only branches that don't exist in the trie at lastTxN
+  Forward-exec surfaces either as `Wrong trie root` (case a matching an untouched-since-unwind key) or `empty branch data during unfold` (case c phantom branch whose underlying account gets touched later). Fully documented in memory `mode-b-commitment-regen-preserves-stale-branches-2026-07-09`.
+- **Fix:** landed 2026-07-30 (uncommitted at time of writing). `overrideActionForDomain` in `provider_unwind_state_plan.go` extends the G1 override with `(CommitmentDomain, actionRegenTruncate) → actionRemove` unconditionally. `FinalizeUnwind` unlinks the file; `files.EndTxN(commitment)` drops back to the previous file's boundary; the filter no longer shadows MDBX at step-of-lastTxN; compute's 5M+ branches serve reads. Next retire materialises fresh files. `actionRegenInPlace` stays as regen (only KeyCommitmentState anchor replacement).
+- **Diagnostic hook:** the error message names the compact-prefix key. Deterministic across retries within a cycle — a stuck loop retrying the same block/txN is the identifier.
+
 ### 3. Receipt boundary-step regen aborts when target < receipt inverted-index earliest txN
 
 - **Signature:** `regen receipt boundary-step file domain/v3.0-receipt.<from>-<to>.kv: AsOfLookup(receipt, key, <txN>): seekInFiles(invIndex=receipt,txNum=<txN+1>) but data before txNum=<horizon> not available`

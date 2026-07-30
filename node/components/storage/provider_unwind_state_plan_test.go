@@ -244,29 +244,27 @@ func TestPlan_EmptyInput(t *testing.T) {
 	require.Empty(t, got.remove)
 }
 
-// overrideActionForIXHorizon: per-file, per-domain override rule that
-// applies AFTER classifyStateFileForUnwind. When the domain's history
-// index (IX) has been pruned past the unwind target's txN, regen's
-// per-key AsOf lookup cannot answer — the operator asked to unwind
-// past the retained-history horizon under --prune.mode=minimal.
+// overrideActionForDomain: per-file, per-domain override rule that
+// applies AFTER classifyStateFileForUnwind. Two orthogonal overrides
+// layer here:
 //
-// Receipt domain: safe to resolve by remove-and-rebuild. Receipt keys
-// (cumGas, cumBlobGas, logIdx) are re-written on every txN, so
-// forward-exec from target restores every value. The pre-unwind
-// boundary .kv is stale (its latest values reflect a txN past the
-// target); removing it lets retire produce a fresh .kv from the
-// re-executed MDBX rows once forward-exec has progressed.
+// (1) Commitment straddler regen is unsafe regardless of IX horizon.
+// Commitment's HistoryDisabled means regen falls through GetAsOf to
+// GetLatest; getLatestFromDb's file-endTxN filter then shadows the
+// compute's MDBX writes at step-of-lastTxN by the OLD file's EndTxN.
+// The regen copies OLD file content wholesale, preserving stale
+// post-lastTxN over-writes and phantom post-lastTxN-only branches.
+// Map actionRegenTruncate → actionRemove; MDBX becomes authoritative
+// until next retire.
 //
-// Accounts / storage / code: return an error. Silent removal would
-// lose state for keys last written pre-target and never touched
-// since — forward-exec from target cannot resurrect that state.
-//
-// Commitment: passes through unchanged. Commitment regen uses an
-// encoded anchor (not per-key AsOf) so IX horizon doesn't apply.
-//
-// actionKeep / actionRemove: no AsOf lookup performed, always pass
-// through regardless of IX coverage.
-func TestOverrideActionForIXHorizon(t *testing.T) {
+// (2) Domain IX pruned past target's txN (conditional):
+//   - Receipt: regen → actionRemove (forward-exec restores; keys re-
+//     written every txN).
+//   - Commitment: pass through (regen uses encoded anchor, not AsOf
+//     — override 1 above already handled the truncate case).
+//   - Accounts/storage/code: error (silent removal would lose state).
+//   - actionKeep / actionRemove: no AsOf, pass through.
+func TestOverrideActionForDomain(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name           string
@@ -276,7 +274,19 @@ func TestOverrideActionForIXHorizon(t *testing.T) {
 		wantAction     stateFileAction
 		wantErr        bool
 	}{
-		// IX covers target: pass-through regardless of action/domain.
+		// Commitment straddler regen override (fires regardless of IX horizon).
+		{"commitment truncate → remove (ix covered)", actionRegenTruncate, kv.CommitmentDomain, true, actionRemove, false},
+		{"commitment truncate → remove (ix pruned)", actionRegenTruncate, kv.CommitmentDomain, false, actionRemove, false},
+
+		// Commitment aligned in-place stays as regen (anchor replacement).
+		{"commitment regen-in-place unchanged (ix covered)", actionRegenInPlace, kv.CommitmentDomain, true, actionRegenInPlace, false},
+		{"commitment regen-in-place unchanged (ix pruned)", actionRegenInPlace, kv.CommitmentDomain, false, actionRegenInPlace, false},
+
+		// Commitment keep/remove pass through.
+		{"commitment keep unchanged", actionKeep, kv.CommitmentDomain, true, actionKeep, false},
+		{"commitment remove unchanged", actionRemove, kv.CommitmentDomain, false, actionRemove, false},
+
+		// IX covers target: non-commitment pass-through.
 		{"covered: receipt regen-in-place", actionRegenInPlace, kv.ReceiptDomain, true, actionRegenInPlace, false},
 		{"covered: accounts regen-truncate", actionRegenTruncate, kv.AccountsDomain, true, actionRegenTruncate, false},
 		{"covered: receipt keep", actionKeep, kv.ReceiptDomain, true, actionKeep, false},
@@ -290,7 +300,7 @@ func TestOverrideActionForIXHorizon(t *testing.T) {
 		{"pruned: receipt keep unchanged", actionKeep, kv.ReceiptDomain, false, actionKeep, false},
 		{"pruned: receipt remove unchanged", actionRemove, kv.ReceiptDomain, false, actionRemove, false},
 
-		// IX doesn't cover: non-receipt regen actions error.
+		// IX doesn't cover: non-receipt/non-commitment regen actions error.
 		{"pruned: accounts regen-in-place errors", actionRegenInPlace, kv.AccountsDomain, false, 0, true},
 		{"pruned: storage regen-truncate errors", actionRegenTruncate, kv.StorageDomain, false, 0, true},
 		{"pruned: code regen-in-place errors", actionRegenInPlace, kv.CodeDomain, false, 0, true},
@@ -298,14 +308,10 @@ func TestOverrideActionForIXHorizon(t *testing.T) {
 		// IX doesn't cover: non-receipt keep/remove pass through (no AsOf needed).
 		{"pruned: accounts keep unchanged", actionKeep, kv.AccountsDomain, false, actionKeep, false},
 		{"pruned: storage remove unchanged", actionRemove, kv.StorageDomain, false, actionRemove, false},
-
-		// Commitment: regen uses encoded anchor, not per-key AsOf.
-		{"pruned: commitment regen-in-place unchanged", actionRegenInPlace, kv.CommitmentDomain, false, actionRegenInPlace, false},
-		{"pruned: commitment regen-truncate unchanged", actionRegenTruncate, kv.CommitmentDomain, false, actionRegenTruncate, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := overrideActionForIXHorizon(tc.action, tc.domain, tc.ixCoversTarget)
+			got, err := overrideActionForDomain(tc.action, tc.domain, tc.ixCoversTarget)
 			if tc.wantErr {
 				require.Error(t, err)
 				return
