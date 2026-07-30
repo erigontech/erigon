@@ -18,6 +18,7 @@ package downloader
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"reflect"
@@ -312,6 +313,43 @@ type ParentSection struct {
 	// snapshot of the parent's schedule — a mismatch rejects the
 	// manifest.
 	ParentForks []ForkActivation `toml:"parent_forks,omitempty"`
+
+	// CLConfig carries the fork's beacon-chain config bytes verbatim.
+	// Absent → fork-follower falls back to reading cl-config.<fork>.yaml
+	// from the datadir. Present → the follower writes the yaml bytes to
+	// that path (the projection) before Caplin boot.
+	CLConfig *ParentCLConfig `toml:"cl_config,omitempty"`
+
+	// ParentCut carries the fork's parent-cut record bytes verbatim.
+	// Same envelope semantics as CLConfig: absent → fall back to
+	// parent-cut.<fork>.json on disk; present → written as projection.
+	ParentCut *ParentCutSection `toml:"parent_cut,omitempty"`
+}
+
+// ParentCLConfig is the envelope carrying the fork's CL beacon-chain
+// config as opaque yaml bytes plus a sha256 digest of those bytes.
+// Envelope semantics: chain.toml does not parse the yaml — it just
+// distributes it. Config changes across chain.toml versions are
+// whole-blob deltas, not field-level diffs.
+type ParentCLConfig struct {
+	// YAML is the raw beacon-config yaml the fork's Caplin will read.
+	// TOML multi-line-literal-friendly (embedded newlines are fine).
+	YAML string `toml:"yaml"`
+	// SHA256 is hex(sha256(YAML bytes)) — the digest a UCAN attestation
+	// binds to. Recomputed at parse time; a mismatch rejects.
+	SHA256 string `toml:"sha256"`
+}
+
+// ParentCutSection is the envelope carrying the fork's parent-cut
+// record as opaque json bytes plus a sha256 digest. Same envelope
+// semantics as ParentCLConfig.
+type ParentCutSection struct {
+	// JSON is the raw parent-cut json (ParentCut struct's canonical
+	// marshal) the fork-follower reads at boot.
+	JSON string `toml:"json"`
+	// SHA256 is hex(sha256(JSON bytes)) — UCAN attestation anchor.
+	// Recomputed at parse time; mismatch rejects.
+	SHA256 string `toml:"sha256"`
 }
 
 // ParentTrustRootEntry is a single entry in ParentSection's
@@ -640,7 +678,73 @@ func ParseV2(data []byte) (*ChainTomlV2, error) {
 			}
 		}
 	}
+	if err := verifyParentEnvelopeDigests(manifest.Parent); err != nil {
+		return nil, err
+	}
 	return manifest, nil
+}
+
+// verifyParentEnvelopeDigests recomputes sha256 over each envelope's
+// bytes and rejects if the manifest's declared SHA256 disagrees. An
+// attacker who tampered with the yaml/json body without updating the
+// digest would silently propagate a bad config to fork-followers
+// otherwise — the digest is what UCAN attestations bind to, and it
+// has to match the bytes it claims to cover.
+func verifyParentEnvelopeDigests(p *ParentSection) error {
+	if p == nil {
+		return nil
+	}
+	if p.CLConfig != nil {
+		if err := verifyEnvelopeDigest("[parent.cl_config]", p.CLConfig.YAML, p.CLConfig.SHA256); err != nil {
+			return err
+		}
+	}
+	if p.ParentCut != nil {
+		if err := verifyEnvelopeDigest("[parent.parent_cut]", p.ParentCut.JSON, p.ParentCut.SHA256); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func verifyEnvelopeDigest(section, body, declared string) error {
+	if body == "" && declared == "" {
+		return nil
+	}
+	if body == "" {
+		return fmt.Errorf("%s: sha256 declared but body empty", section)
+	}
+	if declared == "" {
+		return fmt.Errorf("%s: body present but sha256 empty", section)
+	}
+	computed := envelopeDigest(body)
+	if !strings.EqualFold(computed, declared) {
+		return fmt.Errorf("%s: sha256 mismatch (declared=%s computed=%s)", section, declared, computed)
+	}
+	return nil
+}
+
+// envelopeDigest is hex(sha256(body)) — the canonical form both writer
+// and parser use. Lowercase without 0x prefix, matching the rest of
+// the manifest's hex conventions.
+func envelopeDigest(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])
+}
+
+// NewParentCLConfig wraps the given yaml bytes as an envelope with
+// its sha256 digest. Emitter-side helper — parse-side round-trip is
+// verified by verifyParentEnvelopeDigests.
+func NewParentCLConfig(yamlBytes []byte) *ParentCLConfig {
+	body := string(yamlBytes)
+	return &ParentCLConfig{YAML: body, SHA256: envelopeDigest(body)}
+}
+
+// NewParentCutSection wraps the given json bytes as an envelope with
+// its sha256 digest.
+func NewParentCutSection(jsonBytes []byte) *ParentCutSection {
+	body := string(jsonBytes)
+	return &ParentCutSection{JSON: body, SHA256: envelopeDigest(body)}
 }
 
 // normalizeBlocks converts the raw `blocks` field (as parsed by
