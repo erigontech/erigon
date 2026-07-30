@@ -2593,66 +2593,45 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	return nil
 }
 
-// FinalizedWrites returns the parallel path's committable write set. Before
-// snapshotting recorded IO, it withholds fresh empty accounts under EIP-161 and
-// applies the EIP-6780 storage wipe. Reset clears journal state for the next tx.
+// FinalizedWrites returns versioned writes after end-of-transaction filtering.
 func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) *WriteSet {
-	sdb.withholdCreatedEmptyAccounts(chainRules)
-	return sdb.versionedWrites.Finalize()
+	writes := sdb.versionedWrites.Finalize()
+	sdb.withholdCreatedEmptyAccounts(chainRules, writes)
+	return writes
 }
 
-func (sdb *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules) {
-	if sdb.blockNum == 0 || chainRules == nil || !chainRules.IsEIP161Enabled() {
+func (sdb *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules, writes *WriteSet) {
+	if sdb.blockNum == 0 || chainRules == nil {
 		return
 	}
-	for addr := range sdb.versionedWrites.address {
-		if !EIP161EmptyRemoval(true, chainRules.IsAura, addr) {
+	eip161 := chainRules.IsEIP161Enabled()
+	if !eip161 {
+		return
+	}
+	for addr := range writes.address {
+		if !EIP161EmptyRemoval(eip161, chainRules.IsAura, addr) {
 			continue
 		}
 		read, ok := sdb.versionedReads.GetAddress(addr)
-		if !ok || (read.Val != nil && !read.Val.IsNil()) || !sdb.versionedWrites.createdEmpty(addr) {
+		if !ok || (read.Val != nil && !read.Val.IsNil()) || !writes.createdEmpty(addr) {
 			continue
 		}
-		sdb.versionMap.DeleteAll(addr, sdb.txIndex)
-		sdb.versionedWrites.deleteAddr(addr)
+		writes.deleteAddr(addr)
 	}
 }
 
-// MergeTxIOInto folds the current transaction's recorded reads, writes and
-// accesses into io at the current tx index, without building an intermediate
-// VersionedIO.
-func (sdb *IntraBlockState) MergeTxIOInto(io *VersionedIO) {
+// MergeTxIOInto folds the current transaction's reads and supplied writes into io.
+func (sdb *IntraBlockState) MergeTxIOInto(io *VersionedIO, writes *WriteSet) {
 	version := Version{BlockNum: sdb.blockNum, TxIndex: sdb.txIndex, Incarnation: sdb.version}
-	io.mergeTx(version, sdb.versionedReads, sdb.VersionedWrites())
+	io.mergeTx(version, sdb.versionedReads, writes)
 }
 
-// FlushWritesToVersionMap publishes the current tx's writes into this IBS's own
-// versionMap, positioned by each write's (txIndex, incarnation). The single-IBS
-// block assembler resets the per-tx versionedWrites between txs (for per-tx BAL
-// recording), so without this a later tx would not observe an earlier tx's state
-// — the versionMap is the cross-tx carrier, matching how the parallel executor
-// persists each committed tx before the next reads it.
-// FlushWritesToVersionMap publishes this tx's writes to the version map on the
-// block-builder path. It flushes the RAW versionedWrites, not the SD-filtered
-// FinalizedWrites() the parallel worker flushes — so a builder map may carry a
-// same-index AddressPath + SelfDestruct=true pair the executor never produces.
-// Safe under the strict-`>` gate in versionedReadCore and the committed
-// fallback; a consumer leaning on the AccountLifecycle `>=` arm must account for
-// it (or this should be unified onto FinalizedWrites()).
-func (sdb *IntraBlockState) FlushWritesToVersionMap() {
+// FlushWritesToVersionMap publishes the supplied writes to this state's version map.
+func (sdb *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 	if sdb.versionMap == nil {
 		return
 	}
-	sdb.versionMap.FlushVersionedWrites(&sdb.versionedWrites, true, "")
-}
-
-// ApplyEIP6780StorageWipe zeroes the current tx's storage writes for any account
-// it both created and self-destructed (EIP-6780/EIP-7928), so the BAL records the
-// slots as reads (net-zero) rather than changes. On the noMaterialize builder path
-// this replaces the stateObject-driven wipe MakeWriteSet performs; it is derived
-// purely from the CreateContract/SelfDestruct write cells.
-func (sdb *IntraBlockState) ApplyEIP6780StorageWipe() {
-	sdb.versionedWrites.zeroSameTxCreateDestructStorage()
+	sdb.versionMap.FlushVersionedWrites(writes, true, "")
 }
 
 func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {

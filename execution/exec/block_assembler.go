@@ -101,6 +101,7 @@ type BlockAssembler struct {
 	*AssembledBlock
 	cfg         AssemblerCfg
 	balIO       *state.VersionedIO
+	blockRules  *chain.Rules
 	stateWriter state.StateWriter // optional: if set, domain writes go here instead of NoopWriter
 	gasUsed     protocol.GasUsed  // EIP-8037: cumulative per-dimension gas across AddTransactions calls
 }
@@ -113,10 +114,15 @@ func NewBlockAssembler(cfg AssemblerCfg, block *AssembledBlock) *BlockAssembler 
 	if cfg.ChainConfig.IsAmsterdam(block.Header.Time) || cfg.ExperimentalBAL {
 		balIO = &state.VersionedIO{}
 	}
+	blockContext := evmtypes.BlockContext{
+		BlockNumber: block.Header.Number.Uint64(),
+		Time:        block.Header.Time,
+	}
 	return &BlockAssembler{
 		AssembledBlock: block,
 		cfg:            cfg,
 		balIO:          balIO,
+		blockRules:     blockContext.Rules(cfg.ChainConfig),
 	}
 }
 
@@ -155,10 +161,11 @@ func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalT
 		return err
 	}
 	if ba.HasBAL() {
-		ibs.MergeTxIOInto(ba.balIO)
+		writes := ibs.FinalizedWrites(ba.blockRules)
+		ibs.MergeTxIOInto(ba.balIO, writes)
 		// Publish block-init writes (EIP-4788, etc.) to the versionMap so the
 		// first tx observes them across the ResetVersionedIO below.
-		ibs.FlushWritesToVersionMap()
+		ibs.FlushWritesToVersionMap(writes)
 		ibs.ResetVersionedIO()
 	}
 	return nil
@@ -208,16 +215,13 @@ func (ba *BlockAssembler) AddTransactions(
 	// CommitBlock in AssembleBlock writes all final state correctly.
 	writer := state.NewNoopWriter()
 	recordTxIO := func() {
-		// EIP-6780: zero storage of an account created+destructed in this tx so
-		// the BAL records net-zero reads (the stateObject-based wipe no longer
-		// runs on the cache-free builder path).
-		ibs.ApplyEIP6780StorageWipe()
 		if ba.HasBAL() {
-			ibs.MergeTxIOInto(ba.balIO)
+			writes := ibs.FinalizedWrites(ba.blockRules)
+			ibs.MergeTxIOInto(ba.balIO, writes)
+			// Publish this tx's writes to the versionMap so the next tx observes them;
+			// ResetVersionedIO below clears the per-tx write set used for BAL recording.
+			ibs.FlushWritesToVersionMap(writes)
 		}
-		// Publish this tx's writes to the versionMap so the next tx observes them;
-		// ResetVersionedIO below clears the per-tx write set used for BAL recording.
-		ibs.FlushWritesToVersionMap()
 		ibs.ResetVersionedIO()
 	}
 	clearTxIO := func() {
@@ -406,14 +410,15 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 	// so we must modify the block's header directly, not ba.Header.
 	header := block.HeaderNoCopy()
 	if ba.HasBAL() {
+		writes := ibs.FinalizedWrites(ba.blockRules)
 		// Record finalize system call I/O (EIP-7002, EIP-7251, etc.)
-		ibs.MergeTxIOInto(ba.balIO)
+		ibs.MergeTxIOInto(ba.balIO, writes)
 		// Publish finalize-phase writes to the versionMap, mirroring the init and
 		// per-tx phases: the versioned commit loop normalizes each phase against the
 		// map and prefers the map value, so a finalize update to an address already
 		// written earlier in the block (fee recipient, withdrawal target) must be
 		// visible there or the commit reuses the stale pre-finalize value.
-		ibs.FlushWritesToVersionMap()
+		ibs.FlushWritesToVersionMap(writes)
 		ibs.ResetVersionedIO()
 		ba.BlockAccessList = ba.balIO.AsBlockAccessList()
 		// Only embed the BAL hash in the header for Amsterdam+ chains.
