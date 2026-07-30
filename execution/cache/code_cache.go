@@ -382,13 +382,17 @@ func (c *CodeCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 // PutAddrCodeHash records the addr → codeHash mapping. Called from the
 // account-decode populate path inside SD.codeHashForAddr; also called by
 // readAhead's BAL prefetch when it learns the codeHash from the decoded
-// account record. txNum stamps the mapping for unwind invalidation.
+// account record. A live mapping is kept; an unwind-stale mapping is replaced.
+// txNum stamps the mapping for unwind invalidation.
 func (c *CodeCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	a := common.BytesToAddress(addr)
 	stripe := &c.putStripes[a[len(a)-1]]
 	stripe.Lock()
 	defer stripe.Unlock()
 
+	if e, ok := c.addrToCodeHash.Get(a); ok && !c.coh.IsStale(e.txNum, e.epoch) {
+		return
+	}
 	c.addrToCodeHash.Add(a, addrCodeHashEntry{hash: h, txNum: txNum, epoch: c.coh.Epoch()})
 }
 

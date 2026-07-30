@@ -204,7 +204,8 @@ func (c *StateCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 
 // PutAddrCodeHash records the addr → codeHash mapping in the addr-keyed
 // LRU above SD. Callers that have just decoded an account record should
-// call this so subsequent lookups skip the account-domain read.
+// call this so subsequent lookups skip the account-domain read. A live
+// mapping is kept; an unwind-stale mapping is replaced.
 func (c *StateCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
