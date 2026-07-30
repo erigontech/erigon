@@ -2604,12 +2604,8 @@ func (sdb *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules
 	if sdb.blockNum == 0 || chainRules == nil {
 		return
 	}
-	eip161 := chainRules.IsEIP161Enabled()
-	if !eip161 {
-		return
-	}
 	for addr := range writes.address {
-		if !EIP161EmptyRemoval(eip161, chainRules.IsAura, addr) {
+		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
 			continue
 		}
 		read, ok := sdb.versionedReads.GetAddress(addr)
