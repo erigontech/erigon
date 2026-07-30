@@ -19,17 +19,20 @@ package event
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 )
 
 // Notifier notifies waiters about an event.
 // It supports a single "producer" and multiple waiters.
 // A producer can set the event state to "signaled" or "non-signaled".
 // Waiters can wait for the "signaled" event state.
+//
+// Every access to hasEvent and every Broadcast happens under mutex. A waiter
+// evaluates the loop condition and registers on the cond as one atomic step,
+// so a broadcast can never land in between and be lost.
 type Notifier struct {
 	mutex    sync.Mutex
 	cond     *sync.Cond
-	hasEvent atomic.Bool
+	hasEvent bool
 }
 
 func NewNotifier() *Notifier {
@@ -40,12 +43,18 @@ func NewNotifier() *Notifier {
 
 // Reset to the "non-signaled" state.
 func (en *Notifier) Reset() {
-	en.hasEvent.Store(false)
+	en.mutex.Lock()
+	defer en.mutex.Unlock()
+
+	en.hasEvent = false
 }
 
 // SetAndBroadcast sets the "signaled" state and notifies all waiters.
 func (en *Notifier) SetAndBroadcast() {
-	en.hasEvent.Store(true)
+	en.mutex.Lock()
+	defer en.mutex.Unlock()
+
+	en.hasEvent = true
 	en.cond.Broadcast()
 }
 
@@ -60,7 +69,7 @@ func (en *Notifier) Wait(ctx context.Context) error {
 		en.mutex.Lock()
 		defer en.mutex.Unlock()
 
-		for !en.hasEvent.Load() && (waitCtx.Err() == nil) {
+		for !en.hasEvent && (waitCtx.Err() == nil) {
 			en.cond.Wait()
 		}
 		waitCancel()
@@ -72,7 +81,9 @@ func (en *Notifier) Wait(ctx context.Context) error {
 	// if the parent context is done, force the waiting goroutine to exit
 	// this might lead to spurious wake-ups for other waiters,
 	// but it is ok due to the waiting loop conditions
+	en.mutex.Lock()
 	en.cond.Broadcast()
+	en.mutex.Unlock()
 
 	wg.Wait()
 	return ctx.Err()
