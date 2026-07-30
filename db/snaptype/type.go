@@ -249,6 +249,11 @@ func RegisterType(enum Enum, name string, versions Versions, rangeExtractor Rang
 	if prevEnum, taken := ParseEnum(name); taken {
 		panic(fmt.Sprintf("snaptype: name %q already registered at enum %d", name, prevEnum))
 	}
+	// Runtime file slices are sized by MaxEnum and indexed by enum, so an
+	// out-of-range registration must fail here, not on first slice access.
+	if enum < MinCoreEnum || enum >= MaxEnum {
+		panic(fmt.Sprintf("snaptype: enum %d for %q outside [%d, %d)", enum, name, MinCoreEnum, MaxEnum))
+	}
 
 	t := SnapType{
 		enum: enum, name: name, versions: versions, indexes: indexes, rangeExtractor: rangeExtractor, indexBuilder: indexBuilder,

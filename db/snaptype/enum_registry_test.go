@@ -101,6 +101,13 @@ func TestRegisterTypePanicsOnCaplinName(t *testing.T) {
 	expectRegisterPanic(t, snaptype.Enum(snaptype.MaxEnum), "beaconblocks")
 }
 
+// An enum outside [MinCoreEnum, MaxEnum) would index past the MaxEnum-sized
+// file slices at runtime, so registration must fail at init instead.
+func TestRegisterTypePanicsOnOutOfRangeEnum(t *testing.T) {
+	expectRegisterPanic(t, snaptype.Unknown, "belowrange")
+	expectRegisterPanic(t, snaptype.Enum(snaptype.MaxEnum), "aboverange")
+}
+
 func TestEnumRangeDisjointness(t *testing.T) {
 	for _, typ := range coreSnapshotTypes {
 		if e := typ.Enum(); e < snaptype.MinCoreEnum || e >= snaptype.MinCaplinEnum {
