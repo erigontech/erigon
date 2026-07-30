@@ -29,10 +29,16 @@ import (
 // configuration, so the bor list is spelled out to cover the full enum range.
 var borSnapshotTypes = []snaptype.Type{heimdall.Events, heimdall.Spans, heimdall.Checkpoints, heimdall.Milestones}
 
+// Salt belongs to neither exported snaptype2 slice, so it is listed explicitly.
+var coreSnapshotTypes = slices.Concat(
+	[]snaptype.Type{snaptype2.Salt},
+	snaptype2.BlockSnapshotTypes,
+	snaptype2.E3StateTypes,
+)
+
 func allSnapshotTypes() []snaptype.Type {
 	return slices.Concat(
-		snaptype2.BlockSnapshotTypes,
-		snaptype2.E3StateTypes,
+		coreSnapshotTypes,
 		borSnapshotTypes,
 		snaptype.CaplinSnapshotTypes,
 	)
@@ -89,8 +95,14 @@ func TestRegisterTypePanicsOnDuplicateName(t *testing.T) {
 	expectRegisterPanic(t, snaptype.Enum(snaptype.MaxEnum), "headers")
 }
 
+// Caplin names resolve via ParseEnum's switch, not namedTypes, so the name
+// guard must reject them even though they never pass through RegisterType.
+func TestRegisterTypePanicsOnCaplinName(t *testing.T) {
+	expectRegisterPanic(t, snaptype.Enum(snaptype.MaxEnum), "beaconblocks")
+}
+
 func TestEnumRangeDisjointness(t *testing.T) {
-	for _, typ := range slices.Concat(snaptype2.BlockSnapshotTypes, snaptype2.E3StateTypes) {
+	for _, typ := range coreSnapshotTypes {
 		if e := typ.Enum(); e < snaptype.MinCoreEnum || e >= snaptype.MinCaplinEnum {
 			t.Errorf("core type %q enum %d outside [%d, %d)", typ.Name(), e, snaptype.MinCoreEnum, snaptype.MinCaplinEnum)
 		}

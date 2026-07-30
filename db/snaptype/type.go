@@ -241,11 +241,13 @@ func RegisterType(enum Enum, name string, versions Versions, rangeExtractor Rang
 	if prev, taken := registeredTypes[enum]; taken {
 		panic(fmt.Sprintf("snaptype: enum %d already registered as %q, cannot register %q", enum, prev.Name(), name))
 	}
-	if IsCaplinType(enum) {
+	if enum >= MinCaplinEnum && enum < MinBorEnum {
 		panic(fmt.Sprintf("snaptype: enum %d is in the caplin range, cannot register %q", enum, name))
 	}
-	if prev, taken := namedTypes[strings.ToLower(name)]; taken {
-		panic(fmt.Sprintf("snaptype: name %q already registered at enum %d", name, prev.Enum()))
+	// ParseEnum rather than namedTypes: caplin names resolve through its
+	// switch and never appear in the map.
+	if prevEnum, taken := ParseEnum(name); taken {
+		panic(fmt.Sprintf("snaptype: name %q already registered at enum %d", name, prevEnum))
 	}
 
 	t := SnapType{
