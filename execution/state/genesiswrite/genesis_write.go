@@ -172,10 +172,11 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, _, err1 := GenesisToBlock(nil, genesis, dirs, logger)
+		block, ibs, err1 := GenesisToBlock(nil, genesis, dirs, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
+		ibs.Close()
 		hash := block.Hash()
 		if hash != storedHash {
 			return genesis.Config, block, &GenesisMismatchError{Stored: storedHash, New: hash}
