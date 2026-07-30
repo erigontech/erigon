@@ -135,7 +135,17 @@ func (sdc *SharedDomainsCommitmentContext) EnableTrieWarmup(trieWarmup bool) {
 // instead of being applied inline. Used during fork validation where the update is
 // flushed later via FlushPendingUpdate.
 func (sdc *SharedDomainsCommitmentContext) SetDeferCommitmentUpdates(defer_ bool) {
+	if defer_ && sdc.variant == commitment.VariantBinPatriciaTrie {
+		panic(pbinUnsupported("deferred commitment updates"))
+	}
 	sdc.deferCommitmentUpdates = defer_
+}
+
+// pbinUnsupported names a code path only the hex trie implements — deferred
+// updates, collapse tracing, hex-prefixed branch reads, trie-trace replay — so
+// asking for one under the bin variant fails instead of yielding a zero value.
+func pbinUnsupported(what string) error {
+	return fmt.Errorf("%w: %s", commitment.ErrPBinUnsupported, what)
 }
 
 // TakePendingUpdate returns the pending update and clears the field.
@@ -421,6 +431,9 @@ func (sdc *SharedDomainsCommitmentContext) WitnessLean(ctx context.Context, code
 // during commitment calculation. This is used by witness generation to capture paths
 // to HashNodes that need resolution when a FullNode is reduced to a single child.
 func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.CollapseTracer) {
+	if tracer != nil && sdc.variant == commitment.VariantBinPatriciaTrie {
+		panic(pbinUnsupported("collapse tracing"))
+	}
 	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
 	if ok {
 		hexPatriciaHashed.SetCollapseTracer(tracer)
@@ -430,12 +443,29 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 // BranchChildCount returns the child count of the branch at nibblePrefix, read
 // from the in-memory commitment domain (post-compute state).
 func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, nibblePrefix []byte) (int, error) {
+	if sdc.variant == commitment.VariantBinPatriciaTrie {
+		return 0, pbinUnsupported("branch child count by hex nibble prefix")
+	}
 	key := nibbles.HexToCompact(nibblePrefix)
 	enc, _, err := sdc.sharedDomains.AsGetter(tx).GetLatest(kv.CommitmentDomain, key)
 	if err != nil {
 		return 0, err
 	}
 	return commitment.BranchData(enc).ChildCount(), nil
+}
+
+// trieTraceFile returns where blockNum's trie trace goes, or "" when tracing is
+// off or aimed at another block. TRIE_TRACE_BLOCK alone picks a default path.
+func trieTraceFile(blockNum uint64) string {
+	if dbg.TrieTraceBlock != 0 {
+		if blockNum != dbg.TrieTraceBlock {
+			return ""
+		}
+		if dbg.TrieTraceFile == "" {
+			return fmt.Sprintf("/tmp/trie-trace-block-%d.toml", blockNum)
+		}
+	}
+	return dbg.TrieTraceFile
 }
 
 // ComputeCommitment Evaluates commitment for gathered updates.
@@ -446,6 +476,15 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, ni
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) (rootHash []byte, err error) {
 	if sdc.pendingUpdate != nil {
 		panic("sdCtx.ComputeCommitment called directly with non-nil pendingUpdate; use SharedDomains.ComputeCommitment wrapper instead")
+	}
+	traceFile := trieTraceFile(blockNum)
+	if sdc.variant == commitment.VariantBinPatriciaTrie {
+		switch {
+		case sdc.deferCommitmentUpdates:
+			return nil, pbinUnsupported("deferred commitment updates")
+		case traceFile != "":
+			return nil, pbinUnsupported("trie trace capture")
+		}
 	}
 	if dbg.KVReadLevelledMetrics {
 		mxCommitmentRunning.Inc()
@@ -484,16 +523,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	trieContext := sdc.trieContext(tx, blockNum, txNum, readCtx)
 
-	// If trie trace is configured, wrap the context with a recorder.
-	// Block-targeted: when TrieTraceBlock is set, only record that specific block.
 	var recorder *commitment.RecordingContext
-	traceFile := dbg.TrieTraceFile
-	if traceFile == "" && dbg.TrieTraceBlock != 0 && blockNum == dbg.TrieTraceBlock {
-		// Auto-generate filename when only TRIE_TRACE_BLOCK is set without TRIE_TRACE_FILE.
-		traceFile = fmt.Sprintf("/tmp/trie-trace-block-%d.toml", blockNum)
-	} else if dbg.TrieTraceBlock != 0 && blockNum != dbg.TrieTraceBlock {
-		traceFile = "" // skip recording — not the target block
-	}
 	if traceFile != "" {
 		recorder = commitment.NewRecordingContext(trieContext)
 		sdc.patriciaTrie.ResetContext(recorder)

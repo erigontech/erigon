@@ -365,6 +365,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
+	// After the resolve: a flagless restart of a bin datadir adopts the variant there.
+	if statecfg.ExperimentalBinCommitment {
+		logger.Warn("EXPERIMENTAL BINARY COMMITMENT TRIE IS ENABLED: roots follow EIP-8297 over Keccak-256 and agree with no other client; witness, eth_getProof, eth_simulateV1, receipt regeneration, deferred commitment updates, collapse tracing and trie traces are unsupported and refuse rather than degrade")
+	}
+
 	var chainConfig *chain.Config
 	var genesis *types.Block
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {

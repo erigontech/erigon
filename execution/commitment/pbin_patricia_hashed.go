@@ -129,6 +129,10 @@ var (
 	errPBinDeleteUnsupported = errors.New("pbin: EIP-8297 defines no deletion")
 )
 
+// ErrPBinUnsupported marks a code path only the hex trie implements. Callers
+// wrap it with the path name so the bin variant refuses instead of no-opping.
+var ErrPBinUnsupported = errors.New("pbin: unsupported under the bin commitment variant")
+
 // pbinRootKey names the record holding the root cell — the one node no descent
 // can name: every other node is found by the path that reaches it, while the
 // root's own prefix is stored nowhere else. The sentinel cannot collide with a

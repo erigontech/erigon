@@ -124,7 +124,7 @@ Do not treat these as established:
 - `pbin_branch.go` record field-bit layout beyond the leaf-kind rejection at `:156-165`. **Verify before designing Task 13's value-in-record field.**
 - ~~The "grid arrays are restorable-as-zero" argument underpinning Task 5's ~160-byte blob~~ — **proven in Task 5** (see the Task 5 checklist for the read/write-site audit); the root-cell blob landed.
 - Whether pbin branch records are truly opaque to the pass-through merge path (believed yes with references off, not exercised).
-- Task 8's deferral mis-attribution, inferred from comments at `commitment_context.go:150-157` and `:581-583`; no concrete failing sequence was constructed.
+- ~~Task 8's deferral mis-attribution~~ — **Task 8**: still no concrete failing sequence, and the exposure is bounded: deferral is only ever requested by `ExecV3` (fork validation / parallel apply), and the fork-validation writes it would mis-route land in a validation overlay that is never flushed. The guards are structural — bin cannot reach the deferred path at all now.
 
 ## What Goes Where
 
@@ -249,14 +249,18 @@ Production keeps Keccak-256. This task only makes the **test** path run the whol
 
 **Files:**
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
+- Modify: `execution/commitment/pbin_patricia_hashed.go` (➕ `ErrPBinUnsupported`, the sentinel both packages wrap)
 - Modify: `execution/stagedsync/exec3.go`
+- Modify: `node/eth/backend.go` (➕ startup limitation log)
 - Create: `execution/commitment/commitmentdb/pbin_unsupported_test.go`
+- Create: `execution/stagedsync/pbin_defer_test.go` (➕)
 
-- [ ] write a failing test asserting `SetLeaveDeferredForCaller` and the deferred-update take reject the bin variant instead of silently no-opping
-- [ ] reject the bin variant explicitly where `exec3.go:206-210` enables deferral for fork validation and the parallel apply path
-- [ ] make `SetCollapseTracer` (`:415-420`), `BranchChildCount` (`:424-431`) and trace-state capture (`:501-506`) error under bin rather than degrade
-- [ ] write tests asserting each of the four paths errors under bin
-- [ ] run tests — must pass before task 9
+- [x] write a failing test asserting `SetLeaveDeferredForCaller` and the deferred-update take reject the bin variant instead of silently no-opping — `TestPBinRefusesDeferredCommitmentUpdates` (enabling side) + `TestPBinComputeCommitmentRefusesDeferredTake` (taking side), both red before: the flag was accepted and the post-`Process` type switch matched no bin trie
+- [x] reject the bin variant explicitly where `exec3.go:206-210` enables deferral for fork validation and the parallel apply path — `deferCommitmentUpdates(variant, isForkValidation, parallel, isApplyingBlocks)` excludes bin, so `ExecV3` never makes a request the context panics on. **Not an ExecV3 error**: `ValidateChain` runs fork validation on every `engine_newPayload` (`exec_module.go:589`), so erroring there would make the M1b dev-chain gate unreachable; deferral is a re-org-overhead optimisation and the inline path it falls back to is the default one, over a validation overlay that is never flushed (`exec_module.go:600-602`)
+- [x] make `SetCollapseTracer` (`:415-420`), `BranchChildCount` (`:424-431`) and trace-state capture (`:501-506`) error under bin rather than degrade — `BranchChildCount` and the trace capture (in `ComputeCommitment`) return `commitment.ErrPBinUnsupported`; the two void setters (`SetDeferCommitmentUpdates`, `SetCollapseTracer`) panic with the same wrapped error, matching this file's existing misuse convention (`EnableParaTrieDB`, the Task 4 ctor assert) instead of taking a fourth API break for an error return. Both are unreachable under bin in production — their only callers reach a hex-only SharedDomains (Task 7)
+- [x] write tests asserting each of the four paths errors under bin — `commitmentdb/pbin_unsupported_test.go`: deferral enable, deferral take, trie-trace capture, collapse tracer, branch child count; each also pins that hex still accepts. ➕ `stagedsync/pbin_defer_test.go` (not in the planned file list) table-tests the exec3 decision
+- [x] ➕ log the bin variant's unsupported paths once at startup, after the erigondb resolve so a flagless bin restart says it too (`node/eth/backend.go`)
+- [x] run tests — `./execution/commitment/... ./db/state/... ./execution/stagedsync/... ./rpc/jsonrpc/...` green, `make lint` clean twice
 
 ### Task 9: Zero-vs-absent in the engine
 

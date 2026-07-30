@@ -108,6 +108,18 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, curr
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
 }
 
+// deferCommitmentUpdates reports whether Process() may leave branch updates as a
+// pending update flushed at the block boundary instead of applying them inline.
+// Deferring cuts re-org validation overhead; the parallel apply path also needs
+// Flush() to carry the pending update across sync cycles. The bin trie has no
+// deferred-update path and refuses the request, so it stays on the inline path.
+func deferCommitmentUpdates(variant commitment.TrieVariant, isForkValidation, parallel, isApplyingBlocks bool) bool {
+	if variant == commitment.VariantBinPatriciaTrie {
+		return false
+	}
+	return isForkValidation || (parallel && isApplyingBlocks)
+}
+
 func ExecV3(ctx context.Context,
 	execStage *StageState, u Unwinder, cfg ExecuteBlockCfg,
 	doms *execctx.SharedDomains, rwTx kv.TemporalRwTx,
@@ -199,12 +211,7 @@ func ExecV3(ctx context.Context,
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
 	doms.SetDeferCommitmentUpdates(false)
-	// Enable deferred commitment updates for fork validation and parallel initial sync.
-	// Deferred updates batch commitment calculations to block boundaries rather than
-	// per-transaction, significantly reducing re-org validation overhead.
-	// For the parallel path during initial sync, Flush() now includes pending updates,
-	// so they are no longer silently discarded between StageLoopIteration cycles.
-	if isForkValidation || (parallel && isApplyingBlocks) {
+	if deferCommitmentUpdates(doms.GetCommitmentCtx().Trie().Variant(), isForkValidation, parallel, isApplyingBlocks) {
 		doms.SetDeferCommitmentUpdates(true)
 	}
 	defer doms.SetDeferCommitmentUpdates(false)
