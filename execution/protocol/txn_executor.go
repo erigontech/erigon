@@ -45,12 +45,12 @@ import (
 /*
 TxnExecutor applies a single transaction to the current world state.
 
- 1. Validate transaction (preCheck): all consensus checks — nonce, sender EOA,
-    block gas availability (regular, state, blob), fee caps, EIP-7825 cap,
-    SetCode prerequisites, sender balance, intrinsic gas, initcode size —
-    without mutating state
- 2. Buy gas (buyGas): debit the sender's gas and blob fees, reserve blob gas
-    from the block pool
+ 1. Compute intrinsic gas and run pre-execution validation (preCheck): nonce,
+    sender eligibility, block gas availability, fee caps, transaction gas caps,
+    SetCode prerequisites, affordability, intrinsic gas, and initcode size.
+    This phase does not mutate state or reserve block gas.
+ 2. Reserve blob gas and, unless gas bailout is enabled, debit the precomputed
+    gas and blob fees (buyGas)
  3. Increment sender nonce
  4. Execute: if contract creation, run initcode and store result as code;
     otherwise, call the recipient
@@ -233,9 +233,9 @@ type txnFees struct {
 	blobGasVal uint256.Int
 }
 
-// buyGas debits the gas and blob-gas fees from the sender and reserves the
-// transaction's blob gas from the block pool. It performs no validation and
-// runs only after preCheck passes.
+// buyGas reserves blob gas and, unless gas bailout is enabled, debits the
+// precomputed gas and blob fees. It assumes preCheck has validated the
+// transaction.
 func (st *TxnExecutor) buyGas(fees txnFees, gasBailout bool) error {
 	if st.evm.ChainRules().IsCancun {
 		if err := st.gp.SubBlobGas(st.msg.BlobGas()); err != nil {
@@ -384,7 +384,6 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		return txnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
 	}
 
-	// compute blob fee for eip-4844 data blobs if any
 	if hasBlobGas {
 		fees.blobGasVal, overflow = u256.MulOverflow(st.evm.Context.BlobBaseFee, u256.U64(blobGas))
 		if overflow {
@@ -429,8 +428,8 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		return txnFees{}, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, gas, requiredIntrinsicGas)
 	}
 
-	// EIP-3860: reject oversized contract-creation initcode before
-	// buying gas, so a rejected tx leaves sender state untouched.
+	// Check EIP-3860 initcode size before buyGas so rejection leaves sender
+	// state and gas pools unchanged.
 	if st.msg.To().IsNil() {
 		vmConfig := st.evm.Config()
 		if err := vm.CheckMaxInitCodeSize(uint64(len(st.data)), vmConfig.HasEip3860(rules), rules.IsAmsterdam); err != nil {
@@ -594,9 +593,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		return nil, ErrGasUintOverflow
 	}
 
-	// Validate consensus rules (incl. intrinsic gas) before any state mutation,
-	// so a rejected tx leaves sender state untouched. Only once it passes do we
-	// buy gas (debit the fee, reserve blob gas) and apply the message.
+	// Complete pre-execution validation before buyGas or nonce mutation so a
+	// rejected transaction leaves sender state and gas pools unchanged.
 	fees, err := st.preCheck(gasBailout, intrinsicGasResult)
 	if err != nil {
 		return nil, err

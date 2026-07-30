@@ -110,13 +110,9 @@ func (r *accountErrorReader) ReadAccountData(accounts.Address) (*accounts.Accoun
 	return nil, r.err
 }
 
-// TestEIP7825_GasPoolPreservedOnReject verifies that when a transaction is
-// rejected by the EIP-7825 gas limit cap, the block gas pool is NOT depleted.
-//
-// Regression test for the bug where buyGas() debited the pool before the cap
-// check, and on rejection the debit was never reversed — exhausting the pool
-// mid-block and causing subsequent valid transactions to fail with "gas limit
-// reached".
+// TestEIP7825_GasPoolPreservedOnReject verifies that rejecting a transaction
+// above the gas-limit cap does not consume block gas needed by later
+// transactions.
 func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 	t.Parallel()
 
@@ -158,13 +154,10 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 	})
 
 	t.Run("consecutive txs after rejection", func(t *testing.T) {
-		// Simulate the original bug scenario: a rejected tx should not prevent
-		// a subsequent valid tx from succeeding due to pool exhaustion.
 		ibs := state.New(state.NewNoopReader())
 		defer ibs.Release(false)
 		gp := new(GasPool).AddGas(blockGasLimit)
 
-		// First: a tx that exceeds the cap — must be rejected without touching pool.
 		evm1 := newTestEVM(ibs, cfg, blockGasLimit)
 		msg1 := newSimpleTransferMsg(sender, recipient, params.MaxTxnGasLimit+1, true)
 		st1 := NewTxnExecutor(evm1, msg1, gp)
@@ -175,7 +168,6 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 		require.Equal(t, uint64(blockGasLimit), poolAfterReject,
 			"gas pool must be unchanged after rejected tx")
 
-		// Second: a valid tx that fits within the cap and remaining pool.
 		evm2 := newTestEVM(ibs, cfg, blockGasLimit)
 		msg2 := newSimpleTransferMsg(sender, recipient, 100_000, true)
 		st2 := NewTxnExecutor(evm2, msg2, gp)
@@ -188,10 +180,8 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 	})
 }
 
-// TestIntrinsicGasReject_NoStateMutation pins that a transaction rejected for
-// insufficient intrinsic gas — exercised here via the EIP-7623 calldata floor —
-// leaves the sender nonce and balance untouched, matching the execution-spec
-// ordering that validates intrinsic gas before any state mutation.
+// TestIntrinsicGasReject_NoStateMutation verifies that EIP-7623 calldata-floor
+// rejection reports the effective requirement without changing sender state.
 func TestIntrinsicGasReject_NoStateMutation(t *testing.T) {
 	t.Parallel()
 
@@ -238,12 +228,9 @@ func TestIntrinsicGasReject_NoStateMutation(t *testing.T) {
 	require.Equal(t, *initialBalance, balance, "sender balance must not be debited when the tx is rejected for intrinsic gas")
 }
 
-// TestPreCheck_InsufficientFundsBeforeIntrinsicGas pins that a transaction
-// failing both the affordability check and the intrinsic-gas check reports
-// insufficient funds first, matching geth — so eth_call/eth_callMany error
-// messages stay geth-compatible. Mirrors rpc-tests eth_callMany/test_04: a
-// contract creation (nil recipient) with gas 21000 < 53000 intrinsic, whose
-// sender also can't afford gas*price + value.
+// TestPreCheck_InsufficientFundsBeforeIntrinsicGas verifies geth-compatible
+// error precedence when a transaction is both unaffordable and below intrinsic
+// gas.
 func TestPreCheck_InsufficientFundsBeforeIntrinsicGas(t *testing.T) {
 	t.Parallel()
 
@@ -274,14 +261,9 @@ func TestPreCheck_InsufficientFundsBeforeIntrinsicGas(t *testing.T) {
 	require.NotErrorIs(t, err, ErrIntrinsicGas)
 }
 
-// TestEIP8037_GasPoolTracksRegularAndStateIndependently verifies that the
-// EIP-8037 two-dimensional gas pool decrements regular and state budgets
-// independently — neither is conflated with max(regular, state).
-//
-// Regression test for the bug where per-tx deduction used
-// max(blockRegularGasUsed, blockStateGasUsed) against a single-dimension
-// pool, giving Σ max(r_i, s_i) ≥ max(Σ r_i, Σ s_i) and rejecting valid
-// blocks whose per-dimension sums fit (bal-devnet-3, block 193).
+// TestEIP8037_GasPoolTracksRegularAndStateIndependently verifies that each gas
+// dimension accumulates independently. Summing max(regular, state) per
+// transaction can exceed max(total regular, total state).
 func TestEIP8037_GasPoolTracksRegularAndStateIndependently(t *testing.T) {
 	t.Parallel()
 
@@ -1010,9 +992,8 @@ func TestPreCheckErrorOrdering_GasBeforeFeeCap(t *testing.T) {
 	})
 }
 
-// TestBlobGasPreservedOnReject verifies that a transaction rejected before it is
-// applied does not deplete the block blob-gas pool: blob gas is reserved in
-// buyGas, which runs only after preCheck's validation passes.
+// TestBlobGasPreservedOnReject verifies that blob gas is reserved only after
+// preCheck succeeds, while a valid blob transaction still consumes the pool.
 func TestBlobGasPreservedOnReject(t *testing.T) {
 	t.Parallel()
 
@@ -1039,8 +1020,6 @@ func TestBlobGasPreservedOnReject(t *testing.T) {
 	}
 
 	t.Run("rejected tx preserves blob pool", func(t *testing.T) {
-		// Sender has no balance, so the blob fee makes the tx unaffordable and it
-		// is rejected before blob gas is reserved.
 		ibs := state.New(state.NewNoopReader())
 		evm := newTestEVM(ibs, cfg, blockGasLimit)
 		gp := new(GasPool).AddGas(blockGasLimit).AddBlobGas(blockBlobGas)
@@ -1094,10 +1073,9 @@ func TestPreCheck_NilMaxFeePerBlobGas(t *testing.T) {
 	require.ErrorIs(t, err, ErrMaxFeePerBlobGas)
 }
 
-// TestType4Prereq_NoStateMutationOnReject pins that a SetCode (EIP-7702)
-// transaction rejected for a deterministic prerequisite — here, a type-4 tx
-// before Prague — takes precedence over affordability and intrinsic-gas checks
-// and leaves the sender's nonce and balance untouched.
+// TestType4Prereq_NoStateMutationOnReject verifies that SetCode prerequisites
+// take precedence over affordability and intrinsic gas, leaving sender state
+// unchanged on rejection.
 func TestType4Prereq_NoStateMutationOnReject(t *testing.T) {
 	t.Parallel()
 
@@ -1132,10 +1110,8 @@ func TestType4Prereq_NoStateMutationOnReject(t *testing.T) {
 	require.Equal(t, *initialBalance, bal, "balance must be untouched on a type-4 prerequisite rejection")
 }
 
-// TestMaxInitCodeSizeReject_NoStateMutation pins that a contract-creation
-// transaction rejected for oversized initcode (EIP-3860) — with enough gas to
-// clear the intrinsic check — leaves the sender's nonce and balance untouched,
-// because preCheck validates the initcode size before buying gas.
+// TestMaxInitCodeSizeReject_NoStateMutation verifies that EIP-3860 initcode-size
+// rejection occurs before fees are debited or the sender nonce is incremented.
 func TestMaxInitCodeSizeReject_NoStateMutation(t *testing.T) {
 	t.Parallel()
 
