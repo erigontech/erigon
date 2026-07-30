@@ -82,10 +82,8 @@ type commitmentCalculator struct {
 	// execLoop or apply loop. Only this goroutine reads/writes it.
 	updates *commitment.Updates
 
-	// balUpdates is a reusable buffer for the per-block BAL fold. Each fold
-	// fully consumes it (FlushToUpdates → root) on this single goroutine, so
-	// it is Reset and reused across blocks instead of freshly allocated —
-	// avoiding a new prefix-trie arena (a 16k-node slab) per block.
+	// balUpdates is the per-block BAL fold buffer, Reset and reused across blocks
+	// instead of reallocated — avoids a fresh prefix-trie arena (16k-node slab) each block.
 	balUpdates *commitment.Updates
 
 	// state accumulates account/storage values across TX writes.
@@ -266,8 +264,7 @@ func (cc *commitmentCalculator) Start(ctx context.Context) {
 func (cc *commitmentCalculator) Stop() {
 	close(cc.done)
 	cc.wg.Wait()
-	// Not closed here: the shared commitment context may still reference it
-	// (post-exec ComputeCommitment); GC reclaims it when the calculator drops.
+	// balUpdates isn't closed here: the shared commitment context may still reference it post-exec.
 	if cc.roTx != nil {
 		cc.roTx.Rollback()
 	}
@@ -615,14 +612,9 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	if err := balState.LazyLoadErr(); err != nil {
 		return nil, fmt.Errorf("lazy-load: %w", err)
 	}
-	// Reuse the fold buffer across blocks: Reset clears its contents while
-	// retaining the prefix-trie arena's first slab, so we skip a fresh
-	// NewEmpty (and its ~16k-node slab allocation) every block.
 	if cc.balUpdates == nil {
 		cc.balUpdates = cc.updates.NewEmpty()
-		// Match the calculator's constructor: only ModeDirect needs upgrading to
-		// ModeUpdate to carry compute-ahead's BAL-sourced values; ModeParallel already
-		// carries them (and ParallelPatriciaHashed rejects any other mode).
+		// ModeDirect must upgrade to ModeUpdate to carry compute-ahead's BAL values.
 		if cc.balUpdates.Mode() != commitment.ModeParallel {
 			cc.balUpdates.SetMode(commitment.ModeUpdate)
 		}
