@@ -203,6 +203,36 @@ inventory_drift() {
     echo "$missing_on_disk $on_disk_not_in_toml"
 }
 
+# inventory_drift_names: prints the actual filenames of extras + missing
+# to stderr. Used at every measurement point so we can attribute deltas
+# to specific files rather than just count them. Enable with
+# INVENTORY_DRIFT_NAMES=1 (default off — noisy but the only way to
+# tell WHICH files caused the drift).
+inventory_drift_names() {
+    if [[ "${INVENTORY_DRIFT_NAMES:-0}" != "1" ]]; then
+        return
+    fi
+    if [[ -z "$SNAP_DIR" || ! -r "$SNAP_DIR/chain.toml" ]]; then
+        return
+    fi
+    local tag="$1"
+    local toml_files disk_files
+    toml_files=$(grep -oE '^"[^"]+\.seg"' "$SNAP_DIR/chain.toml" 2>/dev/null \
+        | tr -d '"' | sort -u || true)
+    disk_files=$(ls "$SNAP_DIR" 2>/dev/null | grep -E '\.seg$' | sort -u || true)
+    local extras missing
+    extras=$(comm -13 <(echo "$toml_files") <(echo "$disk_files"))
+    missing=$(comm -23 <(echo "$toml_files") <(echo "$disk_files"))
+    if [[ -n "$extras" ]]; then
+        echo "  [inv-drift $tag] EXTRAS (on disk, not in chain.toml):" >&2
+        echo "$extras" | sed 's/^/    /' >&2
+    fi
+    if [[ -n "$missing" ]]; then
+        echo "  [inv-drift $tag] MISSING (in chain.toml, not on disk):" >&2
+        echo "$missing" | sed 's/^/    /' >&2
+    fi
+}
+
 # scenario_test: run one setHead test and write a CSV row. Args:
 #   $1 phase label (mode_a / mode_a2 / mode_b)
 #   $2 iter number
@@ -222,7 +252,23 @@ scenario_test() {
     pre_head_hex=$(eth_block_number)
     if [[ "$pre_head_hex" == "null" || -z "$pre_head_hex" ]]; then
         echo "iter $iter $phase: ABORT — eth_blockNumber returned null"
-        echo "$iter,$phase,,,,0,0,abort:no-head" >> "$OUT"
+        # Snapshot erigon state so post-mortem doesn't need to race the
+        # next fresh-sync overwrite of the shared log. F3-class (2026-07-28
+        # cycle-1 iter 41): 40 clean iters then a null head — likely
+        # correlated with a background panic. Capture what we can while
+        # the process may still be up.
+        local diag="$OUT.abort-no-head.iter${iter}-${phase}.diag"
+        {
+            echo "=== abort:no-head at $(date -Iseconds) iter=$iter phase=$phase ==="
+            echo "--- pgrep erigon ---"
+            pgrep -af "build/bin/erigon" 2>&1 || true
+            echo "--- last 200 lines of erigon log ($LOG) ---"
+            tail -n 200 "$LOG" 2>&1 || true
+            echo "--- panic markers in full log ---"
+            grep -nE "panic:|fatal error:|Killed|OOM" "$LOG" 2>&1 | tail -n 40 || true
+        } > "$diag" 2>&1
+        echo "  captured post-mortem: $diag"
+        echo "$iter,$phase,,,,0,0,abort:no-head+diag=$(basename "$diag")" >> "$OUT"
         PHASE_RC=1
         OVERALL_RC=1
         return
@@ -243,6 +289,7 @@ scenario_test() {
     # tells us whether the unwind introduced new chain.toml/disk drift.
     local pre_missing pre_extras
     read -r pre_missing pre_extras <<< "$(inventory_drift)"
+    inventory_drift_names "iter=$iter $phase pre"
     echo "iter $iter $phase: $(date +%T) pre_head=$pre_head depth=$depth target=$target ($target_hex)"
     resp=$(curl -s --max-time "$sethead_timeout" -X POST -H "Content-Type: application/json" \
         --data "{\"jsonrpc\":\"2.0\",\"method\":\"debug_setHead\",\"params\":[\"$target_hex\"],\"id\":1}" \
@@ -362,6 +409,7 @@ scenario_test() {
         || true)
     local post_missing post_extras
     read -r post_missing post_extras <<< "$(inventory_drift)"
+    inventory_drift_names "iter=$iter $phase post"
     local d_missing=$((post_missing - pre_missing))
     local d_extras=$((post_extras - pre_extras))
     note="ok"
