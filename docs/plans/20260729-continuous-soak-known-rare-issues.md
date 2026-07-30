@@ -28,6 +28,27 @@ without recurrence.
 
 ## OPEN
 
+### 3. Receipt boundary-step regen aborts when target < receipt inverted-index earliest txN
+
+- **Signature:** `regen receipt boundary-step file domain/v3.0-receipt.<from>-<to>.kv: AsOfLookup(receipt, key, <txN>): seekInFiles(invIndex=receipt,txNum=<txN+1>) but data before txNum=<horizon> not available`
+- **First seen:** 2026-07-30T15:59:30 UTC
+  - Cycle log: `/tmp/continuous-soak/soak.cycle0001-20260730T140449.log`
+  - Erigon log: `/tmp/continuous-soak/erigon.cycle0001-20260730T140449.log` (per-cycle log — F3 diag change from this batch)
+  - Datadir: `/erigon/tmp/erigon-hoodi-continuous-soak.cycle0001-20260730T140449`
+  - Binary commit: `228accbd71` (full fix-batch: doubled-path Seed + RoSnapshots.delete both parts + Bug #3 + F4 + F3 diag + Bug #6 diag + Bug #4)
+  - Iter 4 mode_b, depth 169350, target 3149167 (txN 111871647)
+  - Receipt IX earliest available txN: 112500000 (step 288 boundary)
+  - Gap: 628k txs, spans step 286 → 288
+  - Iters 1–3 all clean (F4 asymmetric-tx didn't trip; no seedLeftoverBlocks; iter-1 mode_b had a transient `inv_extras=2` on a 2300s deep unwind but recovered)
+- **Reproduction:** in-soak only, but likely deterministic on any deep mode-B target that lands below the receipt IX earliest txN. Preserved datadir may reproduce via `debug_setHead` with target = 3149167 on the same binary.
+- **Root cause (candidate, not yet code-traced):** Provider.Unwind's boundary-step regen for the receipt domain calls AsOfLookup on the receipt inverted-index at a txN below the IX's earliest available data. Under `--prune.mode=minimal` the receipt IX is pruned to the last ~100k blocks; if the target's txN falls below that horizon, AsOfLookup returns "not available" and regen aborts. Regen expects the IX to cover the whole step range being regenerated, which is incompatible with the pruning contract.
+- **Fix:** not yet implemented. Two directions:
+  - (a) Skip receipt regen when target's txN < receipt IX earliest — the receipt domain's compute state at the target can be reconstructed via forward re-execution instead. Similar to how the compute side handles missing history under prune-minimal.
+  - (b) Widen receipt IX retention to always cover any block the operator might unwind to — defeats the pruning storage savings.
+- **Diagnostic hook:** the error message names the IX name + requested txN + horizon — enough to identify the pattern on next occurrence.
+
+### 2. `seedLeftoverBlocks` header/tx range mismatch on mode-B unwind
+
 ### 2. `seedLeftoverBlocks` header/tx range mismatch on mode-B unwind
 
 - **Signature:** `storage.Provider.Unwind: snapshot-trim: seedLeftoverBlocks([X, Y]): seedLeftoverBlocks: tx range [X, Z) does not match headers [A, B)`
@@ -59,8 +80,12 @@ without recurrence.
     - seedLeftoverBlocks needs to handle asymmetric ranges (pick
       the narrowest containing tx chunk and iterate headers'
       corresponding sub-range).
-- **Fix:** none landed. This is the SECOND rare issue surfaced by
-  the soak this week; needs its own investigation session.
+- **Fix:** `3e8e06feb8` (2026-07-30) — seedLeftoverBlocks relaxed
+  from strict tx-range equality to coverage-based: tx file must span
+  the write range [fromBlock, toBlockInclusive+1) at minimum. Walk
+  skips tx-getter advance for blocks outside the tx file's range.
+  Two RED→GREEN tests pin the asymmetric case + guard the coverage
+  gate. Awaiting ≥3 soak cycles clean before moving to CLOSED.
 - **Diagnostic hook:** the error message names all three ranges —
   enough state to identify which files disagreed. Additional context
   (merge history, retire cadence) needs a log-side capture that
