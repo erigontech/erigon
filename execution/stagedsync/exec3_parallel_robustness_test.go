@@ -25,6 +25,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -1034,6 +1035,93 @@ func TestReconcileExecAndWaitErr(t *testing.T) {
 		require.Same(t, waitFail, got)
 		require.True(t, surfacesLoudly(got))
 	})
+}
+
+func TestHandleApplyLoopPanicDrainsChannels(t *testing.T) {
+	applyResults := make(chan applyResult, 1)
+	commitResults := make(chan applyResult, 1)
+	rootResults := make(chan commitmentResult, 1)
+	applyResults <- &txResult{}
+	rootResults <- commitmentResult{}
+
+	executorCtx, cancelExecLoop := context.WithCancelCause(context.Background())
+	pe := &parallelExecutor{
+		txExecutor:     txExecutor{logger: log.New()},
+		cancelExecLoop: cancelExecLoop,
+	}
+	blockExecutor := &blockExecutor{
+		applyResults:  applyResults,
+		commitResults: commitResults,
+	}
+
+	sendDone := make(chan error, 1)
+	go func() {
+		sendDone <- blockExecutor.sendResult(executorCtx, &blockResult{}, true)
+		close(commitResults)
+		close(applyResults)
+	}()
+
+	calculatorDone := make(chan struct{})
+	go func() {
+		defer close(calculatorDone)
+		for range commitResults {
+			rootResults <- commitmentResult{}
+		}
+		close(rootResults)
+	}()
+
+	emergencyDrain := func() {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			applyCh, rootCh := applyResults, rootResults
+			for applyCh != nil || rootCh != nil {
+				select {
+				case _, ok := <-applyCh:
+					if !ok {
+						applyCh = nil
+					}
+				case _, ok := <-rootCh:
+					if !ok {
+						rootCh = nil
+					}
+				}
+			}
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("emergency channel drain hung")
+		}
+	}
+
+	panicErr := errors.New("boom")
+	handlerDone := make(chan error, 1)
+	go func() {
+		handlerDone <- pe.handleApplyLoopPanic("test", panicErr, applyResults, rootResults)
+	}()
+
+	var recoveredErr error
+	select {
+	case recoveredErr = <-handlerDone:
+	case <-time.After(5 * time.Second):
+		emergencyDrain()
+		<-handlerDone
+		t.Fatal("panic handler hung")
+	}
+
+	select {
+	case err := <-sendDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		emergencyDrain()
+		require.NoError(t, <-sendDone)
+		<-calculatorDone
+		t.Fatal("panic handler returned before the terminal send completed")
+	}
+
+	<-calculatorDone
+	require.Same(t, recoveredErr, context.Cause(executorCtx))
 }
 
 // Pins pe.wait's contract: it reports only real errors — a canceled group is

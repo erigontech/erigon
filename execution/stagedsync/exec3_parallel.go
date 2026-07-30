@@ -370,8 +370,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	execErr := func() (err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				pe.logger.Warn("["+execStage.LogPrefix()+"] rw panic", "rec", rec, "stack", dbg.Stack())
-				err = fmt.Errorf("apply loop panic: %v", rec)
+				err = pe.handleApplyLoopPanic(execStage.LogPrefix(), rec, applyResults, rootResults)
 			} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
 				pe.logger.Warn("["+execStage.LogPrefix()+"] rw exit", "err", err, "stack", dbg.Stack())
 			} else {
@@ -896,6 +895,26 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	}
 
 	return lastHeader, rwTx, execErr
+}
+
+func (pe *parallelExecutor) handleApplyLoopPanic(logPrefix string, rec any, applyResults <-chan applyResult, rootResults <-chan commitmentResult) error {
+	panicErr := fmt.Errorf("apply loop panic: %v", rec)
+	pe.logger.Warn("["+logPrefix+"] rw panic", "rec", rec, "stack", dbg.Stack())
+	pe.cancelExecLoop(panicErr)
+
+	for applyResults != nil || rootResults != nil {
+		select {
+		case _, ok := <-applyResults:
+			if !ok {
+				applyResults = nil
+			}
+		case _, ok := <-rootResults:
+			if !ok {
+				rootResults = nil
+			}
+		}
+	}
+	return panicErr
 }
 
 func (pe *parallelExecutor) LogExecution() {
