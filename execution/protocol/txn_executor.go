@@ -106,16 +106,16 @@ type TxnExecutor struct {
 }
 
 type runtimeGasAccounting struct {
-	auth         mdgas.MdGasUsage
-	topLevelCall mdgas.MdGasUsage
-	frame        mdgas.MdGasUsage
+	auth     mdgas.MdGasUsage
+	topLevel mdgas.MdGasUsage
+	frame    mdgas.MdGasUsage
 }
 
 func (g runtimeGasAccounting) total() mdgas.MdGasUsage {
 	return mdgas.MdGasUsage{
-		Regular:    g.auth.Regular + g.topLevelCall.Regular + g.frame.Regular,
-		State:      g.auth.State + g.topLevelCall.State + g.frame.State,
-		StateSpill: g.auth.StateSpill + g.topLevelCall.StateSpill + g.frame.StateSpill,
+		Regular:    g.auth.Regular + g.topLevel.Regular + g.frame.Regular,
+		State:      g.auth.State + g.topLevel.State + g.frame.State,
+		StateSpill: g.auth.StateSpill + g.topLevel.StateSpill + g.frame.StateSpill,
 	}
 }
 
@@ -123,8 +123,16 @@ func (g *runtimeGasAccounting) consumeAllRegularGas(regular uint64) {
 	*g = runtimeGasAccounting{frame: mdgas.MdGasUsage{Regular: regular}}
 }
 
-func (g *runtimeGasAccounting) refillTopLevelCallState(gasRemaining *mdgas.MdGas, restoreState bool, vmerr error) {
-	RefillTopLevelCallGas(gasRemaining, &g.topLevelCall, restoreState, vmerr)
+func (g *runtimeGasAccounting) refillTopLevelState(gasRemaining *mdgas.MdGas, restoreState bool, vmerr error) {
+	RefillTopLevelGas(gasRemaining, &g.topLevel, restoreState, vmerr)
+}
+
+func (g *runtimeGasAccounting) finishFrame(gas, gasRemaining mdgas.MdGas, vmerr error) {
+	if vmerr == nil {
+		return
+	}
+	g.frame.State = 0
+	g.frame.Regular = gas.Total() - gasRemaining.Total()
 }
 
 // Message represents a message sent to a contract.
@@ -441,7 +449,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 	st.gasRemaining, _, err = st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), st.gasRemaining)
 	if err == nil && !contractCreation {
-		st.gasRemaining, gasUsed.topLevelCall, err = st.prepareTopLevelCall(st.gasRemaining)
+		st.gasRemaining, gasUsed.topLevel, err = st.prepareTopLevelCall(st.gasRemaining)
 	}
 	if err != nil {
 		if !rules.IsAmsterdam {
@@ -450,7 +458,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		st.state.RevertToSnapshot(runtimeSnapshot, err)
 		if errors.Is(err, vm.ErrRuntimeOutOfGas) {
 			st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
-			st.traceRuntimeFailure(runtimeGas, err)
+			st.traceRuntimeFailure(vm.CALL, st.to(), runtimeGas, st.gasRemaining, err)
 			return &evmtypes.ExecutionResult{Err: err}, nil
 		}
 		return nil, err
@@ -462,7 +470,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 
 	ret, st.gasRemaining, _, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
 	if !contractCreation {
-		gasUsed.refillTopLevelCallState(&st.gasRemaining, vmConfig.RestoreState, vmerr)
+		gasUsed.refillTopLevelState(&st.gasRemaining, vmConfig.RestoreState, vmerr)
 	}
 
 	result := &evmtypes.ExecutionResult{
@@ -607,6 +615,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		gasUsed         runtimeGasAccounting
 		runtimeGas      mdgas.MdGas
 		runtimeSnapshot = -1
+		createAddress   accounts.Address
+		createNonce     uint64
 	)
 	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
 	if rules.IsAmsterdam {
@@ -615,8 +625,19 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		defer st.state.PopSnapshot(runtimeSnapshot)
 	}
 	st.gasRemaining, gasUsed.auth, vmerr = st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), st.gasRemaining)
-	if vmerr == nil && !contractCreation {
-		st.gasRemaining, gasUsed.topLevelCall, vmerr = st.prepareTopLevelCall(st.gasRemaining)
+	if vmerr == nil {
+		if contractCreation {
+			createNonce, vmerr = st.state.GetNonce(sender)
+			if vmerr != nil {
+				vmerr = fmt.Errorf("%w: %w", ErrTxnExecutionFailed, vmerr)
+			}
+			if vmerr == nil && createNonce+1 >= createNonce {
+				createAddress = accounts.InternAddress(types.CreateAddress(sender.Value(), createNonce))
+				st.gasRemaining, gasUsed.topLevel, vmerr = st.prepareTopLevelCreate(createAddress, st.gasRemaining)
+			}
+		} else {
+			st.gasRemaining, gasUsed.topLevel, vmerr = st.prepareTopLevelCall(st.gasRemaining)
+		}
 	}
 	if vmerr != nil {
 		if !rules.IsAmsterdam {
@@ -626,22 +647,25 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		if !errors.Is(vmerr, vm.ErrRuntimeOutOfGas) {
 			return nil, vmerr
 		}
+		if contractCreation {
+			st.state.SetNonce(sender, createNonce+1, tracing.NonceChangeContractCreator)
+		}
 		st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
 		gasUsed.consumeAllRegularGas(runtimeGas.Regular)
-		st.traceRuntimeFailure(runtimeGas, vmerr)
-	} else {
+		typ, destination := vm.CALL, st.to()
 		if contractCreation {
-			ret, _, st.gasRemaining, gasUsed.frame, _, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
+			typ, destination = vm.CREATE, createAddress
+		}
+		st.traceRuntimeFailure(typ, destination, runtimeGas, st.gasRemaining, vmerr)
+	} else {
+		frameGas := st.gasRemaining
+		if contractCreation {
+			ret, _, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
 		} else {
 			ret, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
-			gasUsed.refillTopLevelCallState(&st.gasRemaining, vmConfig.RestoreState, vmerr)
 		}
-		if rules.IsAmsterdam {
-			if contractCreation && errors.Is(vmerr, vm.ErrRuntimeOutOfGas) {
-				st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
-				gasUsed.consumeAllRegularGas(runtimeGas.Regular)
-			}
-		}
+		gasUsed.finishFrame(frameGas, st.gasRemaining, vmerr)
+		gasUsed.refillTopLevelState(&st.gasRemaining, vmConfig.RestoreState, vmerr)
 	}
 
 	totalGasUsed := gasUsed.total()
@@ -756,12 +780,20 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	return result, nil
 }
 
-func (st *TxnExecutor) traceRuntimeFailure(gas mdgas.MdGas, err error) {
-	TraceTopLevelCallFailure(st.evm, st.msg.From(), st.to(), st.data, gas, st.value, err)
+func (st *TxnExecutor) traceRuntimeFailure(typ vm.OpCode, destination accounts.Address, startGas, gasRemaining mdgas.MdGas, err error) {
+	TraceTopLevelFailure(st.evm, typ, st.msg.From(), destination, st.data, startGas, gasRemaining, st.value, err)
 }
 
 func (st *TxnExecutor) prepareTopLevelCall(gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
 	gasRemaining, gasUsed, err := PrepareTopLevelCall(st.evm, st.to(), st.value, gasRemaining)
+	if err != nil && !errors.Is(err, vm.ErrRuntimeOutOfGas) {
+		err = fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+	}
+	return gasRemaining, gasUsed, err
+}
+
+func (st *TxnExecutor) prepareTopLevelCreate(destination accounts.Address, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
+	gasRemaining, gasUsed, err := PrepareTopLevelCreate(st.evm, destination, gasRemaining)
 	if err != nil && !errors.Is(err, vm.ErrRuntimeOutOfGas) {
 		err = fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 	}
