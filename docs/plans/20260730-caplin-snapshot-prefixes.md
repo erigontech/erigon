@@ -262,11 +262,11 @@ glob to a recursive `filepath.WalkDir` collecting `*.torrent`.
 
 ### Task 7: Verify acceptance criteria
 
-- [ ] all six Overview items implemented, one commit each, package-prefixed
+- [x] all six Overview items implemented, one commit each, package-prefixed
   messages
-- [ ] `make lint` — repeat until clean (non-deterministic)
-- [ ] `make erigon integration` — both binaries build
-- [ ] full affected-package suite: `go test -race ./cl/antiquary/...
+- [x] `make lint` — repeat until clean (non-deterministic)
+- [x] `make erigon integration` — both binaries build
+- [x] full affected-package suite: `go test -race ./cl/antiquary/...
   ./db/snapshotsync/... ./db/integrity/... ./db/snapcfg/...`
 
 ### Task 8: [Final] Update documentation
