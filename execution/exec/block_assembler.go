@@ -109,20 +109,15 @@ type BlockAssembler struct {
 func (ba *BlockAssembler) CumulativeGasUsed() protocol.GasUsed { return ba.gasUsed }
 
 func NewBlockAssembler(cfg AssemblerCfg, block *AssembledBlock) *BlockAssembler {
-	var balIO *state.VersionedIO
-
+	ba := &BlockAssembler{AssembledBlock: block, cfg: cfg}
 	if cfg.ChainConfig.IsAmsterdam(block.Header.Time) || cfg.ExperimentalBAL {
-		balIO = &state.VersionedIO{}
+		ba.balIO = &state.VersionedIO{}
+		blockContext := protocol.NewEVMBlockContext(
+			block.Header, protocol.GetHashFn(block.Header, nil), cfg.Engine, accounts.NilAddress, cfg.ChainConfig,
+		)
+		ba.blockRules = blockContext.Rules(cfg.ChainConfig)
 	}
-	blockContext := protocol.NewEVMBlockContext(
-		block.Header, protocol.GetHashFn(block.Header, nil), cfg.Engine, accounts.NilAddress, cfg.ChainConfig,
-	)
-	return &BlockAssembler{
-		AssembledBlock: block,
-		cfg:            cfg,
-		balIO:          balIO,
-		blockRules:     blockContext.Rules(cfg.ChainConfig),
-	}
+	return ba
 }
 
 func (ba *BlockAssembler) HasBAL() bool {
