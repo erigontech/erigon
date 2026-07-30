@@ -170,6 +170,30 @@ func testEngineApiClearsFreshTouchedEmptyAccount(t *testing.T, experimentalBAL b
 	})
 }
 
+func TestEngineApiClearsFreshZeroAmountWithdrawal(t *testing.T) {
+	parallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
+
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		fresh := common.Address{0xbe, 0xef}
+		withdrawals := []*types.Withdrawal{{Index: 1, Validator: 1, Address: fresh, Amount: 0}}
+		_, err := eat.MockCl.BuildCanonicalBlock(ctx, engineapitester.WithWithdrawals(withdrawals))
+		require.NoError(t, err)
+	})
+}
+
 func TestEngineApiBuiltBlockStateMatchesValidation(t *testing.T) {
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)

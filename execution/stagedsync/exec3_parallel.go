@@ -3062,11 +3062,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				// syscallIBS == ibs unconditionally now; no separate write
 				// propagation needed — syscall writes flow through
-				// ibs.VersionedWrites() + Normalize into finalizeWrites below.
+				// FinalizedWrites + Normalize into finalizeWrites below.
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
 
-				ivw := ibs.VersionedWrites()
+				ivw := ibs.FinalizedWrites(lastResult.Rules())
 				if !ivw.IsEmpty() {
 					be.blockIO.RecordWrites(finalVersion, ivw)
 					be.versionMap.FlushVersionedWrites(ivw, true, "")
