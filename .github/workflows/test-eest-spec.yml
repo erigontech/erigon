@@ -91,7 +91,7 @@ jobs:
       # readable from every PR. A miss here self-heals (tools/test-fixtures.sh
       # re-downloads), and the warmer repopulates main.
       - name: Restore EEST tarballs
-        if: '!inputs.cache-warming-only'
+        if: ${{ !inputs.cache-warming-only && !contains(matrix.shard, 'legacy') }}
         uses: actions/cache/restore@v6
         with:
           # Only the .tar.gz files are cached; each shard re-extracts just the
@@ -106,6 +106,17 @@ jobs:
           key: test-fixtures-eest-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
           restore-keys: |
             test-fixtures-eest-${{ runner.os }}-
+
+      - name: Restore legacy fixture tarballs
+        if: ${{ !inputs.cache-warming-only && contains(matrix.shard, 'legacy') }}
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            test-fixtures-cache/legacy_tests.tar.gz
+            test-fixtures-cache/legacy_cancun.tar.gz
+          key: test-fixtures-legacy-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          restore-keys: |
+            test-fixtures-legacy-${{ runner.os }}-
 
       - name: Run eest-spec-${{ matrix.shard }}
         if: '!inputs.cache-warming-only'

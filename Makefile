@@ -269,6 +269,11 @@ test-fixtures-eest:
 test-fixtures-zkevm:
 	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_zkevm
 
+## test-fixtures-legacy:                download & extract the pinned legacy execution-test tarballs
+.PHONY: test-fixtures-legacy
+test-fixtures-legacy:
+	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache legacy_tests legacy_cancun
+
 # EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest, zkevmtest)
 # against EEST fixtures. The shard list, workers, and failure budgets live in
 # tools/eest-spec-shards.yml (single source of truth shared with
