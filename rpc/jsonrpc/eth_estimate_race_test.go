@@ -27,14 +27,9 @@ import (
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
-// TestEstimateGasDeterminism verifies eth_estimateGas returns the same value
-// for identical serial requests at a fixed head. A stale watcher goroutine in
-// ReusableCaller.DoCallWithNewGas could cancel the shared EVM during the next
-// probe of the binary search; the aborted frame reports err == nil, so the
-// probe was misclassified as a success and the estimate intermittently
-// converged below the true minimum gas limit. store(0) clears 17 non-zero
-// slots, so the refund makes the (gasUsed, trueMinimum) window wide enough to
-// observe the misconvergence.
+// TestEstimateGasDeterminism asserts eth_estimateGas returns the same value for
+// identical serial requests at a fixed head. store(0) clears 17 slots for a
+// large refund, widening the window that exposed the stale-cancel bug.
 func TestEstimateGasDeterminism(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")

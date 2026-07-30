@@ -224,11 +224,20 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	// deferred stop() runs before cancel() (LIFO), so on normal return the
 	// callback can never fire and cancel the shared EVM during a later call.
 	var timedOut atomic.Bool
+	cancelled := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() {
+		defer close(cancelled)
 		timedOut.Store(true)
 		r.evm.Cancel()
 	})
-	defer stop()
+	// stop() does not wait for a callback that already started, so join it: a
+	// Cancel() landing after the next probe's Reset() aborts that probe, and an
+	// aborted frame reports err == nil.
+	defer func() {
+		if !stop() {
+			<-cancelled
+		}
+	}()
 
 	gp := new(protocol.GasPool).AddGas(r.message.Gas()).AddBlobGas(r.message.BlobGas())
 
