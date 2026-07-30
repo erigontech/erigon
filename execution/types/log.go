@@ -252,12 +252,16 @@ func (l *RPCLog) UnmarshalJSON(input []byte) error {
 type RPCLogs []*RPCLog
 
 // Copy deep-copies the logs into freshly allocated shared backing arrays.
+// Nil entries stay nil.
 func (logs Logs) Copy() Logs {
 	if logs == nil {
 		return nil
 	}
 	var totalTopics, totalData int
 	for _, l := range logs {
+		if l == nil {
+			continue
+		}
 		totalTopics += len(l.Topics)
 		totalData += len(l.Data)
 	}
@@ -266,6 +270,9 @@ func (logs Logs) Copy() Logs {
 	backing := make([]Log, len(logs))
 	out := make(Logs, len(logs))
 	for i, l := range logs {
+		if l == nil {
+			continue
+		}
 		dst := &backing[i]
 		nt, nd := len(l.Topics), len(l.Data)
 		// Capped so a later append to one copied log cannot bleed into the next.

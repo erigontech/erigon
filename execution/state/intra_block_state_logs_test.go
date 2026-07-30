@@ -54,6 +54,43 @@ func TestLogsRlpHash(t *testing.T) {
 	})
 }
 
+func TestRevertDropsOversizedLogBuffer(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+
+	snap := ibs.PushSnapshot()
+	ibs.AddLog(&types.Log{
+		Address: common.HexToAddress("0x1"),
+		Data:    make([]byte, maxReusableLogDataCap+1),
+	})
+	ibs.RevertToSnapshot(snap, nil)
+
+	ibs.Reset()
+	ibs.SetTxContext(2, 0)
+	lp := ibs.AllocLog(0, 1)
+	require.LessOrEqual(t, cap(lp.Data), maxReusableLogDataCap)
+}
+
+func TestRevertKeepsNormalLogBufferForReuse(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+
+	snap := ibs.PushSnapshot()
+	ibs.AddLog(&types.Log{
+		Address: common.HexToAddress("0x1"),
+		Data:    []byte{1, 2, 3},
+	})
+	first := ibs.logs[1][0]
+	ibs.RevertToSnapshot(snap, nil)
+
+	lp := ibs.AllocLog(0, 2)
+	require.Same(t, first, lp)
+}
+
 func BenchmarkLogsRlpHash(b *testing.B) {
 	ibs := New(nil)
 	for txIndex := range 200 {
