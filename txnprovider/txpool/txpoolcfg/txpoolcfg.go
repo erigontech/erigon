@@ -140,7 +140,7 @@ const (
 	NonceTooDistant      DiscardReason = 37 // Nonce gap between tx and on-chain nonce exceeds MaxNonceGap; tx can never become pending
 	QueuedDormant        DiscardReason = 38 // Sender had no on-chain state change for longer than QueuedDormancyDuration
 	ErrGetSenderInfo     DiscardReason = 39 // Error getting sender nonce/balance from state during validation
-	TipAboveFeeCap       DiscardReason = 40
+	TipAboveFeeCap       DiscardReason = 40 // EIP-1559: max priority fee per gas cannot exceed max fee per gas
 )
 
 func (r DiscardReason) String() string {
