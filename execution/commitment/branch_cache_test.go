@@ -185,6 +185,8 @@ func TestBranchCache_ClearRacingPut_EpochAlias(t *testing.T) {
 }
 
 func clearDuringBlockedBranchCacheWrite(c *BranchCache, block *sync.Mutex, write func()) {
+	// Limit Go execution to one logical processor. Each runtime.Gosched call
+	// yields to the queued goroutine, which runs until it reaches the blocked lock.
 	previousProcs := runtime.GOMAXPROCS(1)
 	defer runtime.GOMAXPROCS(previousProcs)
 

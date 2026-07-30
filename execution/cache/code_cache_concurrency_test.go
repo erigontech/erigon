@@ -30,13 +30,8 @@ import (
 	"github.com/erigontech/erigon/common/maphash"
 )
 
-// TestCodeCache_ConcurrentPutSameCode_NoSizeDrift guards against the size
-// accounting drift that the pre-LoadOrStore code had: parallel workers Putting
-// the same cold code all missed the membership check, all passed the cap gate,
-// and all added to the byte counter, leaving a permanent positive surplus that
-// eventually wedged the cap. With the atomic LoadOrStore insert, only the
-// goroutine that actually inserts accounts the size, so the counters must equal
-// exactly one entry regardless of how many concurrent Puts raced.
+// Concurrent puts of the same cold code must account each content layer once.
+// The per-key stripe keeps the membership check, accounting, and insertion atomic.
 func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
 	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 
@@ -163,7 +158,8 @@ func TestCodeCache_ClearRacingPut_EpochAlias(t *testing.T) {
 }
 
 func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
-	// One P makes each Gosched establish the intended lock order without timing assumptions.
+	// Limit Go execution to one logical processor. Each runtime.Gosched call
+	// yields to the queued goroutine, which runs until it reaches the blocked lock.
 	previousProcs := runtime.GOMAXPROCS(1)
 	defer runtime.GOMAXPROCS(previousProcs)
 

@@ -63,11 +63,11 @@ const (
 //   - L1  addr → maphash(code)
 //   - L2  maphash(code) → code
 //   - L2b codeHash(code) → code — lets a caller that already knows the Ethereum
-//         codeHash (EXTCODESIZE/EXTCODEHASH/CALL after an account read) skip L1.
+//     codeHash (EXTCODESIZE/EXTCODEHASH/CALL after an account read) skip L1.
 //
-// Capacity is byte-based; once full new puts are dropped, but updates to
-// existing entries and deletions still apply.
-
+// Configured byte budgets are translated into LRU entry caps; full layers
+// evict their coldest entries.
+//
 // Every cached layer carries (txNum, epoch) so an unwind invalidates code the
 // same way as the account/storage/branch caches: a contract's code
 // value never changes for a given hash, but its EXISTENCE does — code deployed
@@ -327,9 +327,7 @@ func (c *CodeCache) PutIfAbsent(addr []byte, code []byte, txNum uint64) {
 
 // putCode populates the addr→codeID and codeID→code layers. keyHash is the
 // code's keccak codeHash when known (zero otherwise), stored so Get can reject
-// a 64-bit maphash collision. Size is accounted only on the goroutine that
-// actually inserts (LoadOrStore is atomic), so concurrent Puts of the same
-// cold code can't both Add and permanently inflate codeSize.
+// a 64-bit maphash collision.
 func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum uint64, overwriteAddr bool) {
 	if len(code) == 0 {
 		return
@@ -538,8 +536,7 @@ func (c *CodeCache) GetCodeSizeByCodeHash(codeHash []byte) (int, bool) {
 }
 
 // PutCodeSizeByCodeHash stores the size of code keyed by its Ethereum
-// codeHash. No-op when the entry cap is reached. txNum stamps the entry for
-// unwind invalidation.
+// codeHash. txNum stamps the entry for unwind invalidation.
 func (c *CodeCache) PutCodeSizeByCodeHash(codeHash []byte, size int, txNum uint64) {
 	if len(codeHash) == 0 || size < 0 {
 		return
@@ -567,8 +564,8 @@ func (c *CodeCache) Delete(addr []byte) {
 
 // Clear removes every layer, resets accounting, and starts a new coherence
 // generation. It holds every writer stripe through the purges and reset, so a
-// publication cannot cross generations. Reset follows every purge, so a reader
-// cannot pair a retired entry with the lifted unwind floor.
+// publication cannot cross generations. Reset runs after all purges, so a
+// reader cannot pair a retired entry with the lifted unwind floor.
 func (c *CodeCache) Clear() {
 	c.lockAllPutStripes()
 	defer c.unlockAllPutStripes()

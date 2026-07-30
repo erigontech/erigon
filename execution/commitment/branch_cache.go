@@ -756,7 +756,7 @@ func (c *BranchCache) Unwind(unwindToTxN uint64) {
 // Clear empties the root, trunk, pinned, and tail tiers, resets their stats, and
 // starts a new coherence generation. It holds every writer stripe until all
 // tiers are empty and coherence is reset, so a publication cannot cross
-// generations. Reset follows every tier clear, so a reader cannot pair a
+// generations. Reset runs after every tier is cleared, so a reader cannot pair a
 // retired entry with the lifted unwind floor.
 func (c *BranchCache) Clear() {
 	c.lockAllPutStripes()
