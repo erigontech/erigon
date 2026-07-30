@@ -252,9 +252,11 @@ test leaves the global registry untouched.
 
 ### Task 5: [Final] Update documentation
 
-- [ ] no README/CLAUDE.md changes expected (registry behavior is
+- [x] no README/CLAUDE.md changes expected (registry behavior is
   self-documenting via the panic + test); confirm and skip if so
-- [ ] move this plan to `docs/plans/completed/`
+  — confirmed: no enum-range references in README/CLAUDE.md/docs outside
+  this plan
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
