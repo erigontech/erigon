@@ -201,11 +201,11 @@ glob to a recursive `filepath.WalkDir` collecting `*.torrent`.
 **Files:**
 - Modify: `db/snapshotsync/freezeblocks/caplin_snapshots.go`
 
-- [ ] delete the `time.Sleep(15 * time.Second)` + "Ugly hack" comment at
+- [x] delete the `time.Sleep(15 * time.Second)` + "Ugly hack" comment at
   `caplin_snapshots.go:403-404`
-- [ ] remove the now-unused `time` import
-- [ ] run `go test ./db/snapshotsync/... ./cl/antiquary/...` — green
-- [ ] commit: `db/snapshotsync: drop the beacon dump fsync sleep` with body
+- [x] remove the now-unused `time` import
+- [x] run `go test ./db/snapshotsync/... ./cl/antiquary/...` — green
+- [x] commit: `db/snapshotsync: drop the beacon dump fsync sleep` with body
   citing `db/seg/compress.go:373-381` (fsync→close→rename inside Compress)
   and the EL compress→index precedent (`block_snapshots.go:673,679`)
 

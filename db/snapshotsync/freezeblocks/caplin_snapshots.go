@@ -26,7 +26,6 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/tidwall/btree"
@@ -399,9 +398,6 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 	}
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
-
-	// Ugly hack to wait for fsync
-	time.Sleep(15 * time.Second)
 
 	return snapshotsync.BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
 }
