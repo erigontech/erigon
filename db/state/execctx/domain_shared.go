@@ -199,9 +199,12 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	for _, opt := range opts {
 		opt(&o)
 	}
-	// Bit-path branch keys collide in the cache's hex-shaped trunk slots; the
-	// commitment-context ctor refuses a bin SD that shares the cache.
 	if o.trieCfg.Variant == commitment.VariantBinPatriciaTrie {
+		if o.hexCommitmentOnly {
+			return nil, ErrBinCommitmentUnsupported
+		}
+		// Bit-path branch keys collide in the cache's hex-shaped trunk slots; the
+		// commitment-context ctor refuses a bin SD that shares the cache.
 		WithoutSharedBranchCache()(&o)
 	}
 	trieCfg := o.trieCfg

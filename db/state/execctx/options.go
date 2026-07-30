@@ -16,11 +16,20 @@
 
 package execctx
 
-import "github.com/erigontech/erigon/execution/commitment"
+import (
+	"errors"
+
+	"github.com/erigontech/erigon/execution/commitment"
+)
+
+// ErrBinCommitmentUnsupported is returned by NewSharedDomains for a caller that
+// declared itself hex-only (WithHexCommitmentOnly) over a bin-variant datadir.
+var ErrBinCommitmentUnsupported = errors.New("this code path supports the hex commitment trie only, and the datadir uses the bin trie")
 
 type sharedDomainOptions struct {
 	trieCfg              commitment.TrieConfig
 	useSharedBranchCache bool
+	hexCommitmentOnly    bool
 }
 
 // SharedDomainOption configures NewSharedDomains.
@@ -41,9 +50,26 @@ func WithoutSharedBranchCache() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.useSharedBranchCache = false }
 }
 
-// WithSequentialCommitment forces the sequential HexPatriciaHashed trie regardless
-// of the experimental parallel/concurrent flags — for one-shot / empty-DB paths
-// (e.g. genesis) that wire no trie-context factory for the parallel trie.
-func WithSequentialCommitment() SharedDomainOption {
-	return func(o *sharedDomainOptions) { o.trieCfg.Variant = commitment.VariantHexPatriciaTrie }
+// WithoutParallelCommitment demotes the experimental parallel/streaming tries to the
+// sequential HexPatriciaHashed — for one-shot / empty-DB paths (e.g. genesis) that
+// wire no trie-context factory for the parallel trie. The bin variant is a persisted
+// whole-datadir property and stays bin: demoting it would compute a hex root over a
+// datadir the executor reads as bin.
+func WithoutParallelCommitment() SharedDomainOption {
+	return func(o *sharedDomainOptions) {
+		if o.trieCfg.Variant != commitment.VariantBinPatriciaTrie {
+			o.trieCfg.Variant = commitment.VariantHexPatriciaTrie
+		}
+	}
+}
+
+// WithHexCommitmentOnly is WithoutParallelCommitment for callers that can only read
+// hex branch records — witness, eth_getProof, eth_simulateV1, receipt regeneration,
+// commitment integrity. Under the bin variant NewSharedDomains returns
+// ErrBinCommitmentUnsupported instead of reading bit-path records as hex ones.
+func WithHexCommitmentOnly() SharedDomainOption {
+	return func(o *sharedDomainOptions) {
+		o.hexCommitmentOnly = true
+		WithoutParallelCommitment()(o)
+	}
 }

@@ -238,12 +238,12 @@ Production keeps Keccak-256. This task only makes the **test** path run the whol
 - Modify: `rpc/rpchelper/commitment.go`
 - Create: `db/state/execctx/pbin_options_test.go`
 
-- [ ] write a failing test asserting genesis under the bin variant computes a **binary** root, not a hex one
-- [ ] add `WithoutParallelCommitment()` that demotes streaming/parallel to hex and leaves bin as bin; keep `WithSequentialCommitment()` as a deprecated alias or migrate all 11 call sites
-- [ ] switch `genesis_write.go:381` to the new option
-- [ ] make the 10 RPC/integrity sites return an explicit unsupported-variant error rather than silently forcing hex over pbin records
-- [ ] write a test asserting each of those paths errors under bin instead of returning a hex root
-- [ ] run tests — must pass before task 8
+- [x] write a failing test asserting genesis under the bin variant computes a **binary** root, not a hex one — `TestPBinGenesisComputesBinaryRoot` (➕ `execution/state/genesiswrite/pbin_genesis_test.go`, not in the planned file list), red before: `GenesisToBlock` returned the hex root under bin. Asserts both `bin != hex` and `bin == ` the root of a SharedDomains explicitly running the bin trie over the same alloc. Code-free alloc — code chunking is Task 12/13
+- [x] add `WithoutParallelCommitment()` that demotes streaming/parallel to hex and leaves bin as bin; keep `WithSequentialCommitment()` as a deprecated alias or migrate all 11 call sites — migrated all 11 and removed `WithSequentialCommitment`; no alias, so a new call site has to pick a variant policy deliberately
+- [x] switch `genesis_write.go:381` to the new option
+- [x] make the 10 RPC/integrity sites return an explicit unsupported-variant error rather than silently forcing hex over pbin records — `WithHexCommitmentOnly()` + `ErrBinCommitmentUnsupported`, refused in `NewSharedDomains` before any domain work. ➕ an 11th site (`commitment_integrity.go:1194`, the per-block SD inside `CheckCommitmentHistAtBlkRange`) carried no variant option at all and got the same gate
+- [x] write a test asserting each of those paths errors under bin instead of returning a hex root — functional per-caller tests: `CheckCommitmentHistAtBlk` + `CheckCommitmentHistAtBlkRange` (`db/integrity/pbin_hex_only_test.go`), `ComputeCustomCommitmentFromStateHistory` (`rpc/rpchelper/pbin_commitment_test.go`), `eth_getProof` + `eth_simulateV1` (`rpc/jsonrpc/pbin_hex_only_test.go`). The remaining sites (`getWitness`, `buildWitnessResult`, both receipt-regeneration sites, `checkCommitmentRootViaSd`) reach their SharedDomains only after full block re-execution or over snapshot files, so they are covered by the shared refusal itself, tested directly in `TestPBinHexOnlyCommitmentRefusesBin`
+- [x] run tests — `./db/state/... ./execution/commitment/... ./execution/state/genesiswrite ./db/integrity ./rpc/rpchelper ./rpc/jsonrpc/...` green, `make lint` clean twice
 
 ### Task 8: Make the silent degradations loud
 
