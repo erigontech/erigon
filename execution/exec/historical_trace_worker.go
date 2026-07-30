@@ -128,6 +128,7 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 		}
 	}()
 	defer rw.LogStats()
+	defer rw.ibs.Release(true)
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		result := rw.RunTxTask(txTask.(*TxTask))
 		if err := rw.out.Add(rw.ctx, result); err != nil {

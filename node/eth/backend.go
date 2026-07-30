@@ -166,7 +166,7 @@ type Ethereum struct {
 	rpcDaemonStateCache kvcache.Cache
 	mcpRPC              *mcp.ErigonMCPServer
 
-	miningSealingQuit   chan struct{}
+	sealCancel          chan struct{}
 	pendingBlocks       chan *types.Block
 	minedBlocks         chan *types.Block
 	minedBlockObservers *event.Observers[*types.Block]
@@ -338,7 +338,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		networkID:                 config.NetworkID,
 		etherbase:                 config.Builder.Etherbase,
 		blockBuilderNotifyNewTxns: make(chan struct{}, 1),
-		miningSealingQuit:         make(chan struct{}),
+		sealCancel:                make(chan struct{}),
 		minedBlocks:               make(chan *types.Block, 1),
 		minedBlockObservers:       event.NewObservers[*types.Block](),
 		logger:                    logger,
@@ -836,7 +836,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		&vm.Config{},
 		tmpdir,
 		txnProvider,
-		backend.miningSealingQuit,
+		backend.sealCancel,
 		latestBlockBuiltStore,
 		backend.notifications.Events.LatestSD,
 		logger,
@@ -1276,7 +1276,7 @@ func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
 func (s *Ethereum) NetPeerCount() (uint64, error) {
 	var sentryPc uint64 = 0
 
-	s.logger.Trace("sentry", "peer count", sentryPc)
+	s.logger.Trace("sentry", "peerCount", sentryPc)
 	for _, sc := range s.sentryProvider.Client.Sentries() {
 		ctx := context.Background()
 		reply, err := sc.PeerCount(ctx, &sentryproto.PeerCountRequest{})
