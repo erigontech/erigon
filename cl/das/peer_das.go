@@ -706,7 +706,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []c
 		for _, block := range blocks {
 			slots = append(slots, block.GetSlot())
 		}
-		log.Debug("DownloadColumnsAndRecoverBlobs", "elapsed time", time.Since(begin), "slots", slots)
+		log.Debug("DownloadColumnsAndRecoverBlobs", "elapsed", time.Since(begin), "slots", slots)
 	}()
 
 	// initialize the download request
@@ -829,28 +829,13 @@ mainloop:
 			var wg sync.WaitGroup
 			for _, sidecar := range result.sidecars {
 				wg.Go(func() {
-					// [Modified in Gloas:EIP7732] Get slot first, then use epoch-based version detection
-					var slot uint64
-					if sidecar.SignedBlockHeader != nil && sidecar.SignedBlockHeader.Header != nil {
-						slot = sidecar.SignedBlockHeader.Header.Slot
-					} else {
-						slot = sidecar.Slot
+					slot, blockRoot, ok := d.resolveColumnSidecarSlotAndRoot(sidecar)
+					if !ok {
+						log.Debug("rejecting malformed or schema-inconsistent column sidecar", "pid", result.pid)
+						d.rpc.BanPeer(result.pid)
+						return
 					}
-					epoch := slot / d.beaconConfig.SlotsPerEpoch
-					isGloasSidecar := d.beaconConfig.GetCurrentStateVersion(epoch) >= clparams.GloasVersion
-
-					var blockRoot common.Hash
-					if isGloasSidecar {
-						blockRoot = sidecar.BeaconBlockRoot
-					} else {
-						var err error
-						blockRoot, err = sidecar.SignedBlockHeader.Header.HashSSZ()
-						if err != nil {
-							log.Debug("failed to get block root", "err", err)
-							d.rpc.BanPeer(result.pid)
-							return
-						}
-					}
+					isGloasSidecar := sidecar.Version() >= clparams.GloasVersion
 					defer func() {
 						// check if need to schedule recover whenever we download a column sidecar
 						if needToRecoverBlobs &&
@@ -933,6 +918,31 @@ mainloop:
 	}
 
 	return nil
+}
+
+// resolveColumnSidecarSlotAndRoot reads a received column sidecar's slot and
+// block root from the fields populated by the schema it was decoded with. ok is
+// false for a malformed sidecar, or one whose slot disagrees with that schema —
+// see BeaconChainConfig.ForkSchemaMatchesSlot.
+func (d *peerdas) resolveColumnSidecarSlotAndRoot(sidecar *cltypes.DataColumnSidecar) (slot uint64, blockRoot common.Hash, ok bool) {
+	if sidecar.Version() >= clparams.GloasVersion {
+		if !d.beaconConfig.ForkSchemaMatchesSlot(sidecar.Slot, sidecar.Version()) {
+			return 0, common.Hash{}, false
+		}
+		return sidecar.Slot, sidecar.BeaconBlockRoot, true
+	}
+	header := sidecar.SignedBlockHeader
+	if header == nil || header.Header == nil {
+		return 0, common.Hash{}, false
+	}
+	if !d.beaconConfig.ForkSchemaMatchesSlot(header.Header.Slot, sidecar.Version()) {
+		return 0, common.Hash{}, false
+	}
+	root, err := header.Header.HashSSZ()
+	if err != nil {
+		return 0, common.Hash{}, false
+	}
+	return header.Header.Slot, root, true
 }
 
 func isExpectedColumnDownloadMiss(err error) bool {

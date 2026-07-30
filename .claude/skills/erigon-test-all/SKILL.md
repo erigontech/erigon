@@ -36,9 +36,9 @@ make eest-spec-blocktests-legacy-constantinople-sequential
                                              # ...-race-other-forks
 make eest-spec-blocktests-legacy-cancun-sequential
                                              # Hive legacy-cancun selection;
-                                             # -parallel plus two race partitions:
-                                             # ...-race-berlin-shanghai-cancun and
-                                             # ...-race-other-forks
+                                             # -parallel plus six race partitions:
+                                             # ...-race-{berlin,shanghai,cancun,
+                                             # london,paris,other-forks}
 make eest-spec-enginextests-benchmark-1m-sequential
                                              # engine-x benchmark fixtures @ 1M gas target
                                              # (with per-test --time stats);
