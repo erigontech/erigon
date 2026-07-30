@@ -190,8 +190,17 @@ func TestEngineApiClearsFreshZeroAmountWithdrawal(t *testing.T) {
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		fresh := common.Address{0xbe, 0xef}
 		withdrawals := []*types.Withdrawal{{Index: 1, Validator: 1, Address: fresh, Amount: 0}}
-		_, err := eat.MockCl.BuildCanonicalBlock(ctx, engineapitester.WithWithdrawals(withdrawals))
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx, engineapitester.WithWithdrawals(withdrawals))
 		require.NoError(t, err)
+
+		bal := decodeAndValidateBAL(t, payload)
+		changes := findAccountChanges(bal, accounts.InternAddress(fresh))
+		require.NotNilf(t, changes, "zero-amount withdrawal recipient must remain an access-only BAL entry\n%s", bal.DebugString())
+		require.Empty(t, changes.StorageChanges)
+		require.Empty(t, changes.StorageReads)
+		require.Empty(t, changes.BalanceChanges)
+		require.Empty(t, changes.NonceChanges)
+		require.Empty(t, changes.CodeChanges)
 	})
 }
 
