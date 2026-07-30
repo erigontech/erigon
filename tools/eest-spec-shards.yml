@@ -40,8 +40,7 @@
   max-allowed-failures: 0
 - shard: statetests-devnet
   workers: 12
-  # TODO: reduce to 0 as tests-glamsterdam-devnet@v7.2.0 support lands.
-  max-allowed-failures: 34
+  max-allowed-failures: 0
 - shard: statetests-legacy
   workers: 12
   max-allowed-failures: 0
@@ -56,7 +55,7 @@
 - shard: blocktests-devnet
   workers: 12
   # TODO: reduce to 0 as tests-glamsterdam-devnet@v7.2.0 support lands.
-  max-allowed-failures: 152
+  max-allowed-failures: 2
   exec3-parallel: true
 - shard: blocktests-legacy-consensus-sequential
   workers: 12
@@ -135,24 +134,57 @@
   exec3-parallel: true
   exclude:
     - '/\.meta/'
-- shard: blocktests-legacy-cancun-race-berlin-shanghai-cancun
+- shard: blocktests-legacy-cancun-race-berlin
   workers: 12
   # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
   max-allowed-failures: 7
-  expected-tests: 56564
+  expected-tests: 14026
   exec3-parallel: true
-  run: '(_(Berlin|Shanghai|Cancun)$|fork_(Berlin|Shanghai|Cancun)-)'
+  run: '(_Berlin$|fork_Berlin-)'
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-cancun-race-shanghai
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 20689
+  exec3-parallel: true
+  run: '(_Shanghai$|fork_Shanghai-)'
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-cancun-race-cancun
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 21849
+  exec3-parallel: true
+  run: '(_Cancun$|fork_Cancun-)'
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-cancun-race-london
+  workers: 12
+  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
+  max-allowed-failures: 7
+  expected-tests: 20337
+  exec3-parallel: true
+  run: '(_London$|fork_London-)'
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-cancun-race-paris
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 20369
+  exec3-parallel: true
+  run: '(_Paris$|fork_Paris-)'
   exclude:
     - '/\.meta/'
 - shard: blocktests-legacy-cancun-race-other-forks
   workers: 12
   # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
-  max-allowed-failures: 19
-  expected-tests: 55419
+  max-allowed-failures: 12
+  expected-tests: 14713
   exec3-parallel: true
   exclude:
     - '/\.meta/'
-    - '::.*(_(Berlin|Shanghai|Cancun)$|fork_(Berlin|Shanghai|Cancun)-)'
+    - '::.*(_(Berlin|Shanghai|Cancun|London|Paris)$|fork_(Berlin|Shanghai|Cancun|London|Paris)-)'
 - shard: enginextests-stable-sequential
   workers: 8
   max-allowed-failures: 0
@@ -226,7 +258,7 @@
 - shard: zkevm-witness
   workers: 8
   # TODO: reduce to 0 as tests-zkevm@v0.6.2 support lands.
-  max-allowed-failures: 152
+  max-allowed-failures: 2
 - shard: blocktests-stable-race-pre-cancun-sequential
   workers: 12
   max-allowed-failures: 0
@@ -266,10 +298,10 @@
 - shard: blocktests-devnet-race-amsterdam
   workers: 12
   # TODO: reduce to 0 as tests-glamsterdam-devnet@v7.2.0 support lands.
-  max-allowed-failures: 152
+  max-allowed-failures: 2
   exec3-parallel: true
   run: 'fork_Amsterdam'
 - shard: zkevm-witness-race
   workers: 8
   # TODO: reduce to 0 as tests-zkevm@v0.6.2 support lands.
-  max-allowed-failures: 152
+  max-allowed-failures: 2
