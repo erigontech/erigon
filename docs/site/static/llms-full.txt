@@ -1357,7 +1357,7 @@ This command will display a list of convenience commands available in the Makefi
 ```text
  go-version:                        print and verify go version
  validate_docker_build_args:        ensure docker build args are valid
- docker:                            validate, update submodules and build with docker
+ docker:                            validate and build with docker
  setup_xdg_data_home:               TODO
  docker-compose:                    validate build args, setup xdg data home, and run docker-compose up
  dbg                                debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
@@ -1381,7 +1381,6 @@ This command will display a list of convenience commands available in the Makefi
  bindings:                          generate test contracts and core contracts
  prometheus:                        run prometheus and grafana with docker-compose
  escape:                            run escape path={path} to check for memory leaks e.g. run escape path=cmd/erigon
- git-submodules:                    update git submodules
  install:                           copies binaries and libraries to DIST
  user_linux:                        create "erigon" user (Linux)
  user_macos:                        create "erigon" user (MacOS)

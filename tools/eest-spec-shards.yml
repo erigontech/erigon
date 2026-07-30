@@ -46,6 +46,21 @@
   workers: 12
   max-allowed-failures: 0
   expected-tests: 108593
+- shard: rlptests-legacy-race
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 55
+  no-ramdisk: true
+- shard: transactiontests-legacy-race
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 212
+  no-ramdisk: true
+- shard: difficultytests-legacy-race
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 23600
+  no-ramdisk: true
 - shard: blocktests-stable-sequential
   workers: 12
   max-allowed-failures: 0
