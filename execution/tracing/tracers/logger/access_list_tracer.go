@@ -245,9 +245,8 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 	}
 }
 
-// Close returns the tracer's IntraBlockState to its pools. The state is only read
-// while execution drives OnOpcode, so it can be closed as soon as execution
-// returns; the accessors below read tracer-owned maps. Idempotent.
+// Close returns the state borrowed for CREATE nonce lookups to its pools.
+// Idempotent.
 func (a *AccessListTracer) Close() {
 	if a.state == nil {
 		return

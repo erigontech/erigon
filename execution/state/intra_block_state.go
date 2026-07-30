@@ -435,11 +435,8 @@ func (sdb *IntraBlockState) Close() {
 		return
 	}
 
-	stateObjects := sdb.stateObjects
-	journal := sdb.journal
-	sdb.stateObjects = nil
-	sdb.journal = nil
-	sdb.logs = nil
+	stateObjects, journal := sdb.stateObjects, sdb.journal
+	sdb.stateObjects, sdb.journal = nil, nil
 	sdb.revisions.reset()
 
 	releaseResources(stateObjects, journal)

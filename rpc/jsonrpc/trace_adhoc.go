@@ -1020,7 +1020,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	if err != nil {
 		return nil, err
 	}
-	defer closeState() // the syscall is discarded here, so nothing else uses the state
+	defer closeState()
 
 	result := make([]*TraceCallResult, len(traces))
 	for i, trace := range traces {
@@ -1560,11 +1560,13 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			initialIbs := state.New(cloneReader)
 			if !txFinalized {
 				if err = ibs.FinalizeTx(chainRules, sd); err != nil {
+					initialIbs.Close()
 					return nil, nil, err
 				}
 			}
 			if sd != nil {
 				if err = sd.CompareStates(initialIbs, ibs); err != nil {
+					initialIbs.Close()
 					return nil, nil, err
 				}
 			}

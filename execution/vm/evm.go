@@ -95,12 +95,18 @@ type EVM struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
-	storageKeys *storageKeyCache
+	storageKeys   *storageKeyCache
+	storageKeyOps uint32
 }
 
 // storageKeyCacheSize must comfortably exceed a contract's live slot count,
 // or conflict misses dominate.
 const storageKeyCacheSize = 1024
+
+// storageKeyCacheMinOps delays the table until interning has cost more than
+// zeroing 40KB: a hit saves ~16ns, so an EVM resolving fewer keys than this
+// cannot win the allocation back however well the keys repeat.
+const storageKeyCacheMinOps = 128
 
 // slotIndex masks rather than divides, so the size has to be a power of two.
 var _ [0]struct{} = [storageKeyCacheSize & (storageKeyCacheSize - 1)]struct{}{}
@@ -129,12 +135,12 @@ func (c *storageKeyCache) fill(i uint64, word *uint256.Int) accounts.StorageKey 
 }
 
 // internStorageKey returns word interned as a StorageKey, skipping unique.Make
-// for words seen before. The 40KB table is allocated lazily so EVMs that never
-// touch storage don't pay for it.
+// for words seen before. Short-lived EVMs intern uncached: the table only earns
+// back its allocation over a few hundred storage ops.
 func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
 	c := evm.storageKeys
 	if c == nil {
-		return evm.internFirstStorageKey(word)
+		return evm.internUncachedStorageKey(word)
 	}
 	i := slotIndex(word)
 	if h := c.handles[i]; h != accounts.NilKey && c.words[i] == *word {
@@ -143,7 +149,11 @@ func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
 	return c.fill(i, word)
 }
 
-func (evm *EVM) internFirstStorageKey(word *uint256.Int) accounts.StorageKey {
+func (evm *EVM) internUncachedStorageKey(word *uint256.Int) accounts.StorageKey {
+	if evm.storageKeyOps < storageKeyCacheMinOps {
+		evm.storageKeyOps++
+		return accounts.InternKey(word.Bytes32())
+	}
 	evm.storageKeys = new(storageKeyCache)
 	return evm.storageKeys.fill(slotIndex(word), word)
 }

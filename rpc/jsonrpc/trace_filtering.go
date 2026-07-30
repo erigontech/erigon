@@ -620,12 +620,12 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
 		ot.traceAddr = []int{}
 		vmConfig.Tracer = ot.Tracer().Hooks
-		ibs := state.New(cachedReader)
 
 		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
 		if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 			return err
 		}
+		ibs := state.New(cachedReader)
 		evmTxCtx := protocol.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
 
@@ -842,6 +842,13 @@ func (api *TraceAPIImpl) callBlock(
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
+	// The successful return hands ownership to the caller via closeState.
+	stateHandedOff := false
+	defer func() {
+		if !stateHandedOff {
+			ibs.Close()
+		}
+	}()
 
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, nil)
 	logger := log.New("trace_filtering")
@@ -951,6 +958,7 @@ func (api *TraceAPIImpl) callBlock(
 		return ret, err
 	}
 
+	stateHandedOff = true
 	return traces, wdiffs, syscall, ibs.Close, nil
 }
 
@@ -1080,6 +1088,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 					if tracer.Hooks.OnTxEnd != nil {
 						tracer.Hooks.OnTxEnd(nil, execErr)
 					}
+					workerIbs.Close()
 					errOnce.Do(func() { firstErr = fmt.Errorf("txIndex %d: %w", job.txIndex, execErr); cancel() })
 					return
 				}
@@ -1089,6 +1098,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				}
 
 				if err := workerIbs.FinalizeTx(chainRules, noop); err != nil {
+					workerIbs.Close()
 					errOnce.Do(func() { firstErr = err; cancel() })
 					return
 				}
