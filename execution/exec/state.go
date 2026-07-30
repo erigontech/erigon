@@ -277,6 +277,17 @@ func (rw *Worker) ResetTx(chainTx kv.TemporalTx) error {
 	return rw.resetTx(chainTx)
 }
 
+// Close releases the worker's state, tx, reader and writer. Idempotent. Only
+// call it once the worker's Run goroutine has exited.
+func (rw *Worker) Close() {
+	rw.lock.Lock()
+	defer rw.lock.Unlock()
+	rw.ibs.Close()
+	if err := rw.resetTx(nil); err != nil {
+		panic(fmt.Errorf("exec.Worker.Close: %w", err)) // unreachable: only a non-nil tx can fail
+	}
+}
+
 func (rw *Worker) resetTxNum(txNum uint64) {
 	type resettable interface {
 		SetTxNum(txNum uint64)
@@ -606,12 +617,10 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 		}
 		clearDone = true
 		g.Wait()
+		applyWorker.Close()
 		for _, w := range reconWorkers {
-			if err = w.ResetTx(nil); err != nil {
-				return
-			}
+			w.Close()
 		}
-		//applyWorker.ResetTx(nil)
 	}
 	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
 
