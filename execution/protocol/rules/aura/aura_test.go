@@ -56,8 +56,9 @@ import (
 func TestEmptyBlock(t *testing.T) {
 	require := require.New(t)
 	genesis := chainspec.GnosisGenesisBlock()
-	genesisBlock, _, err := genesiswrite.GenesisToBlock(t, genesis, datadir.New(t.TempDir()), log.Root())
+	genesisBlock, ibs, err := genesiswrite.GenesisToBlock(t, genesis, datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
+	defer ibs.Close()
 
 	genesis.Config.TerminalTotalDifficultyPassed = false
 
@@ -159,6 +160,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	// then MakeWriteSet writes it into the real shared domains.
 	genesisBlock, genesisIbs, err := genesiswrite.GenesisToBlock(t, genesis, dirs, logger)
 	require.NoError(err)
+	defer genesisIbs.Close()
 	domainWriter := state.NewWriter(domains.AsPutDel(tx), nil, 1)
 	err = genesisIbs.MakeWriteSet(&chain.Rules{}, domainWriter)
 	require.NoError(err)
