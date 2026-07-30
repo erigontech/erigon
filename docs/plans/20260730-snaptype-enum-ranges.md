@@ -169,22 +169,27 @@ test leaves the global registry untouched.
 **Files:**
 - Create: `db/snaptype/enum_registry_test.go` (package `snaptype_test`)
 
-- [ ] build the explicit type list: `snaptype2.BlockSnapshotTypes`,
+- [x] build the explicit type list: `snaptype2.BlockSnapshotTypes`,
   `snaptype2.E3StateTypes`, `heimdall.Events`, `heimdall.Spans`,
   `heimdall.Checkpoints`, `heimdall.Milestones`
   (`polygon/heimdall/types.go:164,260,321,386` — NOT `SnapshotTypes()`),
   `snaptype.CaplinSnapshotTypes`
-- [ ] write round-trip test: for every type `t` in the list,
+- [x] write round-trip test: for every type `t` in the list,
   `t.Enum().String() == t.Name()`, `ParseEnum(t.Name())` returns
   `(t.Enum(), true)`, and `t.Enum().Type().Name() == t.Name()`
-- [ ] write pairwise enum-uniqueness test over the same list
-- [ ] write range-disjointness test: every core enum `< MinCaplinEnum`, every
+- [x] write pairwise enum-uniqueness test over the same list
+- [x] write range-disjointness test: every core enum `< MinCaplinEnum`, every
   caplin enum `< MinBorEnum`, every bor enum `< MaxEnum`
-- [ ] run `go test ./db/snaptype/...` — **expected RED, fails until Task 2;
+- [x] run `go test ./db/snaptype/...` — **expected RED, fails until Task 2;
   do NOT weaken the assertions to get green.** Must fail exactly on the
   Txt/BeaconBlocks assertions in Technical Details; confirm the failure
   messages name enum 9 / "txt" / "beaconblocks" (red for the right reason)
-- [ ] commit: `db/snaptype: add registry round-trip and range-disjointness
+  — confirmed: `TestEnumRoundTrip` fails with `type "txt":
+  Enum().String() = "beaconblocks" (enum 9)` and `Enum().Type().Name() =
+  "beaconblocks"`, `TestEnumUniqueness` with `enum 9 shared by "txt" and
+  "beaconblocks"`, `TestEnumRangeDisjointness` with `core type "txt" enum 9
+  outside [1, 9)`; ParseEnum("txt") passes as predicted
+- [x] commit: `db/snaptype: add registry round-trip and range-disjointness
   test (red: Txt shadowed by BeaconBlocks at enum 9)`
 
 ### Task 2: renumber the ranges (green)
