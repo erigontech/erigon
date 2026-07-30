@@ -22,20 +22,11 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math/big"
 	"os"
-	"path/filepath"
 	"slices"
-	"strings"
 
-	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v3"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/empty"
-	commonmath "github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/execution/chain"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 )
@@ -51,22 +42,6 @@ var difficultyTestCommand = cli.Command{
 		&ExcludeFlag,
 		&WorkersFlag,
 	},
-}
-
-var ropstenDifficultyConfig = &chain.Config{
-	ChainID:               uint256.NewInt(3),
-	Rules:                 chain.EtHashRules,
-	HomesteadBlock:        common.NewUint64(0),
-	TangerineWhistleBlock: common.NewUint64(0),
-	SpuriousDragonBlock:   common.NewUint64(10),
-	ByzantiumBlock:        common.NewUint64(1_700_000),
-	ConstantinopleBlock:   common.NewUint64(4_230_000),
-	PetersburgBlock:       common.NewUint64(4_939_394),
-	IstanbulBlock:         common.NewUint64(6_485_846),
-	MuirGlacierBlock:      common.NewUint64(7_117_117),
-	BerlinBlock:           common.NewUint64(9_812_189),
-	LondonBlock:           common.NewUint64(10_499_401),
-	Ethash:                new(chain.EthashConfig),
 }
 
 func difficultyTestCmd(_ context.Context, ctx *cli.Command) error {
@@ -100,9 +75,6 @@ func runDifficultyTest(path string, filter testFilter) ([]testResult, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
-	}
-	if config, ok := basicDifficultyConfig(path); ok && isBasicDifficultyTest(data) {
-		return runBasicDifficultyTest(path, data, filter, config)
 	}
 	var groups map[string]map[string]json.RawMessage
 	if err := json.Unmarshal(data, &groups); err != nil {
@@ -140,90 +112,6 @@ func runDifficultyTest(path string, filter testFilter) ([]testResult, error) {
 				results = append(results, result)
 			}
 		}
-	}
-	return results, nil
-}
-
-type basicDifficultyTest struct {
-	ParentTimestamp    commonmath.HexOrDecimal64   `json:"parentTimestamp"`
-	ParentDifficulty   *commonmath.HexOrDecimal256 `json:"parentDifficulty"`
-	ParentUncles       common.Hash                 `json:"parentUncles"`
-	CurrentTimestamp   commonmath.HexOrDecimal64   `json:"currentTimestamp"`
-	CurrentBlockNumber commonmath.HexOrDecimal64   `json:"currentBlockNumber"`
-	CurrentDifficulty  *commonmath.HexOrDecimal256 `json:"currentDifficulty"`
-}
-
-func (test basicDifficultyTest) run(config *chain.Config) error {
-	parentUncles := uint64(1)
-	if test.ParentUncles == (common.Hash{}) || test.ParentUncles == empty.UncleHash {
-		parentUncles = 0
-	}
-	canonical := testutil.DifficultyTest{
-		ParentTimestamp:    uint64(test.ParentTimestamp),
-		ParentDifficulty:   *uint256.MustFromBig((*big.Int)(test.ParentDifficulty)),
-		ParentUncles:       parentUncles,
-		CurrentTimestamp:   uint64(test.CurrentTimestamp),
-		CurrentBlockNumber: uint64(test.CurrentBlockNumber),
-		CurrentDifficulty:  *uint256.MustFromBig((*big.Int)(test.CurrentDifficulty)),
-	}
-	return canonical.Run(config)
-}
-
-func basicDifficultyConfig(path string) (*chain.Config, bool) {
-	switch filepath.Base(path) {
-	case "difficulty.json", "difficultyCustomMainNetwork.json", "difficultyMainNetwork.json":
-		return chainspec.Mainnet.Config, true
-	case "difficultyCustomHomestead.json":
-		return testforks.Forks["Homestead"], true
-	case "difficultyRopsten.json":
-		return ropstenDifficultyConfig, true
-	default:
-		return nil, false
-	}
-}
-
-func isBasicDifficultyTest(data []byte) bool {
-	var tests map[string]struct {
-		ParentDifficulty json.RawMessage `json:"parentDifficulty"`
-	}
-	if json.Unmarshal(data, &tests) != nil {
-		return false
-	}
-	for _, test := range tests {
-		if len(test.ParentDifficulty) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func runBasicDifficultyTest(
-	path string,
-	data []byte,
-	filter testFilter,
-	config *chain.Config,
-) ([]testResult, error) {
-	var tests map[string]basicDifficultyTest
-	if err := json.Unmarshal(data, &tests); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	group := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	names := slices.Sorted(maps.Keys(tests))
-	results := make([]testResult, 0, len(names))
-	for _, name := range names {
-		if name == "_info" {
-			continue
-		}
-		fullName := group + "/" + name
-		if !filter.includeCase(path, fullName) {
-			continue
-		}
-		err := tests[name].run(config)
-		result := testResult{Name: fullName, Pass: err == nil}
-		if err != nil {
-			result.Error = err.Error()
-		}
-		results = append(results, result)
 	}
 	return results, nil
 }

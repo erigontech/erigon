@@ -28,28 +28,29 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 )
 
-func TestCalcDifficultyAppliesMinimumAfterBomb(t *testing.T) {
+func TestCalcDifficultyAddsBombAfterMinimum(t *testing.T) {
 	zero := uint64(0)
 	for _, test := range []struct {
 		name         string
 		config       *chain.Config
 		currentBlock uint64
 	}{
-		{"Frontier", &chain.Config{}, 900_000},
-		{"Homestead", &chain.Config{HomesteadBlock: &zero}, 900_000},
-		{"Byzantium", &chain.Config{HomesteadBlock: &zero, ByzantiumBlock: &zero}, 4_370_000},
+		{"Frontier", &chain.Config{}, 200_000},
+		{"Homestead", &chain.Config{HomesteadBlock: &zero}, 200_000},
+		{"Byzantium", &chain.Config{HomesteadBlock: &zero, ByzantiumBlock: &zero}, 3_200_000},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			difficulty := CalcDifficulty(
 				test.config,
-				1,
-				1,
-				*uint256.NewInt(1_000),
+				1_000,
+				0,
+				*uint256.NewInt(minimumDifficulty),
 				test.currentBlock-1,
 				empty.UncleHash,
 			)
-			if !difficulty.Eq(uint256.NewInt(minimumDifficulty)) {
-				t.Fatalf("got %s, want %d", &difficulty, minimumDifficulty)
+			expected := uint256.NewInt(minimumDifficulty + 1)
+			if !difficulty.Eq(expected) {
+				t.Fatalf("got %s, want %s", &difficulty, expected)
 			}
 		})
 	}

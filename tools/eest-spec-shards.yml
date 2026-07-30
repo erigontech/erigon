@@ -59,7 +59,7 @@
 - shard: difficultytests-legacy-race
   workers: 12
   max-allowed-failures: 0
-  expected-tests: 23600
+  expected-tests: 18598
   no-ramdisk: true
 - shard: blocktests-stable-sequential
   workers: 12

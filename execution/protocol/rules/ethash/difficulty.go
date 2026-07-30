@@ -64,6 +64,9 @@ func calcDifficultyFrontier(time, parentTime uint64, parentDifficulty uint256.In
 	} else {
 		pDiff.Sub(pDiff, adjust)
 	}
+	if pDiff.LtUint64(minimumDifficulty) {
+		pDiff.SetUint64(minimumDifficulty)
+	}
 	// 'pdiff' now contains:
 	// pdiff + pdiff / 2048 * (1 if time - ptime < 13 else -1)
 
@@ -72,9 +75,6 @@ func calcDifficultyFrontier(time, parentTime uint64, parentDifficulty uint256.In
 		expDiff := adjust.SetOne()
 		expDiff.Lsh(expDiff, uint(periodCount-2)) // expdiff: 2 ^ (periodCount -2)
 		pDiff.Add(pDiff, expDiff)
-	}
-	if pDiff.LtUint64(minimumDifficulty) {
-		pDiff.SetUint64(minimumDifficulty)
 	}
 	return *pDiff
 }
@@ -119,14 +119,14 @@ func calcDifficultyHomestead(time, parentTime uint64, parentDifficulty uint256.I
 	} else {
 		pDiff.Add(pDiff, adjust) // pdiff + pdiff / 2048 * max((time - ptime) / 10 - 1, 99)
 	}
+	if pDiff.LtUint64(minimumDifficulty) {
+		pDiff.SetUint64(minimumDifficulty)
+	}
 	// for the exponential factor, a.k.a "the bomb"
 	// diff = diff + 2^(periodCount - 2)
 	if periodCount := (1 + parentNumber) / expDiffPeriod; periodCount > 1 {
 		expFactor := adjust.Lsh(adjust.SetOne(), uint(periodCount-2))
 		pDiff.Add(pDiff, expFactor)
-	}
-	if pDiff.LtUint64(minimumDifficulty) {
-		pDiff.SetUint64(minimumDifficulty)
 	}
 	return *pDiff
 }
@@ -173,6 +173,10 @@ func makeDifficultyCalculator(bombDelay uint64) func(time, parentTime uint64, pa
 		} else {
 			y.Add(&pDiff, z) // y: parent_diff + parent_diff/2048 * adjustment_factor
 		}
+		// minimum difficulty can ever be (before exponential factor)
+		if y.LtUint64(minimumDifficulty) {
+			y.SetUint64(minimumDifficulty)
+		}
 		// calculate a fake block number for the ice-age delay
 		// Specification: https://eips.ethereum.org/EIPS/eip-1234
 		if pNum >= bombDelayFromParent {
@@ -181,9 +185,6 @@ func makeDifficultyCalculator(bombDelay uint64) func(time, parentTime uint64, pa
 				z.Lsh(z, uint(fakeBlockNumber/expDiffPeriod-2))
 				y.Add(z, y)
 			}
-		}
-		if y.LtUint64(minimumDifficulty) {
-			y.SetUint64(minimumDifficulty)
 		}
 		return *y
 	}

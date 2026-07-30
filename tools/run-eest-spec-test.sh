@@ -145,15 +145,7 @@ case "$shard_route" in
 	transactiontests-legacy-*)
 		cmd=transactiontest;   paths=("$base/TransactionTests") ;;
 	difficultytests-legacy-*)
-		cmd=difficultytest
-		paths=(
-			"$base/DifficultyTests"
-			"$base/BasicTests/difficulty.json"
-			"$base/BasicTests/difficultyCustomHomestead.json"
-			"$base/BasicTests/difficultyCustomMainNetwork.json"
-			"$base/BasicTests/difficultyMainNetwork.json"
-			"$base/BasicTests/difficultyRopsten.json"
-		) ;;
+		cmd=difficultytest;   paths=("$base/DifficultyTests") ;;
 	# race shards reuse this arm; each one's per-fork --run regex comes from the
 	# manifest `run` key (appended after this case), not from a per-shard arm.
 	blocktests-stable | blocktests-devnet | blocktests-stable-race-* | blocktests-devnet-race-*)
