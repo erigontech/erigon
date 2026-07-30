@@ -39,7 +39,11 @@ type pbinTestCorpus struct {
 }
 
 func (c *pbinTestCorpus) account(addr []byte, nonce, balance uint64, codeHash common.Hash) *pbinTestCorpus {
-	u := Update{Flags: NonceUpdate | BalanceUpdate | CodeUpdate, Nonce: nonce, CodeHash: codeHash}
+	return c.accountWithCode(addr, nonce, balance, codeHash, 0)
+}
+
+func (c *pbinTestCorpus) accountWithCode(addr []byte, nonce, balance uint64, codeHash common.Hash, codeSize uint64) *pbinTestCorpus {
+	u := Update{Flags: NonceUpdate | BalanceUpdate | CodeUpdate, Nonce: nonce, CodeHash: codeHash, CodeSize: codeSize}
 	u.Balance.SetUint64(balance)
 	c.plainKeys = append(c.plainKeys, bytes.Clone(addr))
 	c.updates = append(c.updates, u)
@@ -63,7 +67,7 @@ func (c *pbinTestCorpus) entries(t *testing.T) []pbinOracleEntry {
 		u := &c.updates[i]
 		switch len(plainKey) {
 		case length.Addr:
-			basic, err := pbinEncodeBasicData(u.Nonce, &u.Balance, 0)
+			basic, err := pbinEncodeBasicData(u.Nonce, &u.Balance, u.CodeSize)
 			require.NoError(t, err)
 			code := pbinCodeHashValue(u.CodeHash)
 			entries = append(entries,

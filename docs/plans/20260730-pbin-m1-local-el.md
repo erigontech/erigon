@@ -297,14 +297,15 @@ Production keeps Keccak-256. This task only makes the **test** path run the whol
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
 - Modify: `execution/commitment/pbin_hash.go`
 - Create: `execution/commitment/pbin_codesize_test.go`
+- Create: `execution/commitment/commitmentdb/pbin_codesize_test.go` (➕ the read side)
 
-- [ ] write a failing test asserting BASIC_DATA for a code-bearing account carries the real `code_size`, checked against `basic_data_vectors`
-- [ ] add the `code_size` field to `Update` plus handling in `Reset`/`Copy`/`Merge`/`Encode`/`Decode`/`String`
-- [ ] populate it at `TrieContext.Account` (`:1026-1070`) by reading `kv.CodeDomain` unconditionally
-- [ ] delete the wrong comment at `pbin_hash.go:138-139` and pass the real size instead of `0`
-- [ ] decide and test the cleared-7702-residue case explicitly — the existing benign-residue license no longer holds (guards H9)
-- [ ] write a test asserting the push side is inert for pbin, so nobody patches `calc_state.go` expecting code to arrive
-- [ ] run tests — must pass before task 12
+- [x] write a failing test asserting BASIC_DATA for a code-bearing account carries the real `code_size`, checked against `basic_data_vectors` — `TestPBinBasicDataLeafCarriesCodeSize` drives `pbinLeafValue` over every vector; `TestPBinEngineRootCarriesCodeSize` then takes the size through the whole engine (context read → cell merge → leaf hash) and asserts a size-less variant of the same account roots differently. Both red before
+- [x] add the `code_size` field to `Update` plus handling in `Reset`/`Copy`/`Merge`/`Encode`/`Decode`/`String` — `CodeSize uint64`, carried under the existing `CodeUpdate` flag at every hook (a size and a hash describe the same code, so a merge can never take one from the old account and the other from the new). Encode appends a varint inside the `CodeUpdate` block; ➕ `TestUpdate_EncodeDecode`/`TestUpdate_Merge` in `hex_patricia_hashed_test.go` gained the field, not in the planned file list
+- [x] populate it at `TrieContext.Account` (`:1026-1070`) by reading `kv.CodeDomain` unconditionally — "unconditionally" in the sense that matters: the read no longer hides behind `dbg.AssertEnabled`. It is gated on `TrieContext.readCodeSize`, set from the variant at the one construction site the bin trie can reach (`trieContext`), so hex takes no extra domain read per code-bearing account. The warmup/concurrent factories are deliberately left alone: they need `paraTrieDB` and only ever serve page-cache warmup or a `*ParallelPatriciaHashed` fold, neither of which bin can reach
+- [x] delete the wrong comment at `pbin_hash.go:138-139` and pass the real size instead of `0`
+- [x] decide and test the cleared-7702-residue case explicitly — the existing benign-residue license no longer holds (guards H9) — **decision: code_size follows the account's own code hash, never CodeDomain presence.** A code-less account keeps code_size 0 whatever residue a cleared delegation left behind, so the tolerated inconsistency stays out of the root (`TestPBinTrieContextIgnoresClearedDelegationResidue`). The mirror case cannot be tolerated: a code-bearing account with no code behind it would hash as code_size 0 and produce a silently wrong root, so it errors (`TestPBinTrieContextRefusesCodeBearingAccountWithoutCode`). That is only reachable under bin — the overlay callers it would otherwise break (`eth_simulateV1`) are already refused by Task 7
+- [x] write a test asserting the push side is inert for pbin, so nobody patches `calc_state.go` expecting code to arrive — `TestPBinPushSideNeverDeliversCode`: the bin variant overrides the requested mode to `ModeDirect`, and a `TouchCode` touch reaches `HashSort` as a nil update. Pinning test — it passes against current behaviour by design and fails if the push side ever starts carrying values
+- [x] run tests — `./execution/commitment/... ./db/state/... ./execution/state/genesiswrite ./db/integrity` and `./execution/stagedsync/... -short` green, `go build ./...` clean, `make lint` clean twice. ➕ the tests for the read side live in `commitmentdb/pbin_codesize_test.go` (the trie context is in that package), not in the planned `execution/commitment/pbin_codesize_test.go`; the wiring test `TestPBinSharedDomainsReadsCodeSizeUnderBin` pins variant → read and is non-vacuous by mutation
 
 ### Task 12: chunkify_code and header code chunks
 

@@ -2206,6 +2206,9 @@ type Update struct {
 	Flags      UpdateFlags
 	Balance    uint256.Int
 	Nonce      uint64
+	// CodeSize travels with CodeHash and is read only by the binary trie, whose
+	// BASIC_DATA leaf packs it (eip-8297).
+	CodeSize uint64
 }
 
 func (u *Update) Reset() {
@@ -2214,6 +2217,7 @@ func (u *Update) Reset() {
 	u.Nonce = 0
 	u.StorageLen = 0
 	u.CodeHash = empty.CodeHash
+	u.CodeSize = 0
 }
 
 // Copy creates a deep copy of the Update.
@@ -2227,6 +2231,7 @@ func (u *Update) Copy() *Update {
 		StorageLen: u.StorageLen,
 		Flags:      u.Flags,
 		Nonce:      u.Nonce,
+		CodeSize:   u.CodeSize,
 	}
 	c.Balance.Set(&u.Balance)
 	return c
@@ -2251,6 +2256,7 @@ func (u *Update) Merge(b *Update) {
 	if b.Flags&CodeUpdate != 0 {
 		u.Flags |= CodeUpdate
 		copy(u.CodeHash[:], b.CodeHash[:])
+		u.CodeSize = b.CodeSize
 	}
 	if b.Flags&StorageUpdate != 0 {
 		u.Flags |= StorageUpdate
@@ -2271,6 +2277,8 @@ func (u *Update) Encode(buf []byte, numBuf []byte) []byte {
 	}
 	if u.Flags&CodeUpdate != 0 {
 		buf = append(buf, u.CodeHash[:]...)
+		n := binary.PutUvarint(numBuf, u.CodeSize)
+		buf = append(buf, numBuf[:n]...)
 	}
 	if u.Flags&StorageUpdate != 0 {
 		n := binary.PutUvarint(numBuf, uint64(u.StorageLen))
@@ -2323,6 +2331,15 @@ func (u *Update) Decode(buf []byte, pos int) (int, error) {
 		}
 		copy(u.CodeHash[:], buf[pos:pos+32])
 		pos += length.Hash
+		var n int
+		u.CodeSize, n = binary.Uvarint(buf[pos:])
+		if n == 0 {
+			return 0, errors.New("decode Update: buffer too small for codeSize")
+		}
+		if n < 0 {
+			return 0, errors.New("decode Update: codeSize overflow")
+		}
+		pos += n
 	}
 	if u.Flags&StorageUpdate != 0 {
 		l, n := binary.Uvarint(buf[pos:])
@@ -2356,7 +2373,7 @@ func (u *Update) String() string {
 		sb.WriteString(fmt.Sprintf(", Nonce: [%d]", u.Nonce))
 	}
 	if u.Flags&CodeUpdate != 0 {
-		sb.WriteString(fmt.Sprintf(", CodeHash: [%x]", u.CodeHash))
+		sb.WriteString(fmt.Sprintf(", CodeHash: [%x], CodeSize: [%d]", u.CodeHash, u.CodeSize))
 	}
 	if u.Flags&StorageUpdate != 0 {
 		sb.WriteString(fmt.Sprintf(", Storage: [%x]", u.Storage[:u.StorageLen]))

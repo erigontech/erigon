@@ -274,12 +274,13 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 // exclusively. Warmup/concurrent-mount readers get their own via the factories.
 func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64, readCtx context.Context) *TrieContext {
 	mainTtx := &TrieContext{
-		getter:   sdc.sharedDomains.AsGetter(tx),
-		putter:   sdc.sharedDomains.AsPutDel(tx),
-		stepSize: sdc.sharedDomains.StepSize(),
-		txNum:    txNum,
-		blockNum: blockNum,
-		traceW:   sdc.traceW,
+		getter:       sdc.sharedDomains.AsGetter(tx),
+		putter:       sdc.sharedDomains.AsPutDel(tx),
+		stepSize:     sdc.sharedDomains.StepSize(),
+		txNum:        txNum,
+		blockNum:     blockNum,
+		traceW:       sdc.traceW,
+		readCodeSize: sdc.variant == commitment.VariantBinPatriciaTrie,
 	}
 	if sdc.stateReader != nil {
 		mainTtx.stateReader = sdc.stateReader.CloneForWorker(readCtx, tx)
@@ -985,7 +986,12 @@ type TrieContext struct {
 	traceW         io.Writer // nil = disabled; traces branch reads/writes (see [SDC] lines)
 	stateReader    StateReader
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
+	// readCodeSize makes Account resolve the account's code length. Only the
+	// binary trie hashes code_size, and the extra CodeDomain read is not free.
+	readCodeSize bool
 }
+
+func (sdc *TrieContext) SetReadCodeSize(v bool) { sdc.readCodeSize = v }
 
 // NewTrieContextRo creates a read-only TrieContext suitable for TrieReader lookups.
 // Only Branch() is functional; PutBranch/Account/Storage will return errors or nil.
@@ -1058,11 +1064,13 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 		u.CodeHash = acc.CodeHash.Value()
 	}
 
-	// Verify only code-bearing accounts whose code is actually in the domain,
-	// and never fold the read into u. A cleared EIP-7702 delegation leaves a
-	// benign CodeDomain residue on a code-less account, and eth_simulateV1
-	// overrides put code in an overlay the domain read doesn't see.
-	if dbg.AssertEnabled && !acc.IsEmptyCodeHash() {
+	// The read is keyed on the account's own code hash, never on what the
+	// CodeDomain happens to hold: a cleared EIP-7702 delegation leaves a residue
+	// there that no longer belongs to the account, so a code-less account keeps
+	// code_size 0. A code-bearing account with no code behind it would hash as
+	// code_size 0 instead — an eth_simulateV1 overlay the domain read doesn't
+	// see, or a truncated datadir — so it is an error rather than a wrong root.
+	if (sdc.readCodeSize || dbg.AssertEnabled) && !acc.IsEmptyCodeHash() {
 		code, _, err := sdc.readDomain(kv.CodeDomain, plainKey)
 		if err != nil {
 			return nil, err
@@ -1071,6 +1079,11 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 			if codeHash := crypto.Keccak256Hash(code); acc.CodeHash.Value() != codeHash {
 				return nil, fmt.Errorf("code hash mismatch: account '%x' != codeHash '%x'", acc.CodeHash, codeHash[:])
 			}
+		} else if sdc.readCodeSize {
+			return nil, fmt.Errorf("code missing for account '%x' with codeHash '%x'", plainKey, acc.CodeHash.Value())
+		}
+		if sdc.readCodeSize {
+			u.CodeSize = uint64(len(code))
 		}
 	}
 	return u, nil

@@ -135,9 +135,7 @@ func pbinLeafValue(key []byte, u *Update) ([pbinValueLength]byte, error) {
 	}
 	switch subIndex := key[len(key)-1]; {
 	case subIndex == pbinBasicDataLeafKey:
-		// code_size stays zero while code chunking is out of scope: the shared
-		// Update carries no code size and adding one is an external API change.
-		return pbinEncodeBasicData(u.Nonce, &u.Balance, 0)
+		return pbinEncodeBasicData(u.Nonce, &u.Balance, u.CodeSize)
 	case subIndex == pbinCodeHashLeafKey:
 		return pbinCodeHashValue(u.CodeHash), nil
 	case subIndex >= pbinHeaderStorageOffset && subIndex < pbinCodeOffset:

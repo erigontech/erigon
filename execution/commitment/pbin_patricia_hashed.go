@@ -21,9 +21,11 @@
 // derivation, behind pbinHasher so the suite can be swapped.
 //
 // M0 scope: in-memory Process over the account and storage zones, ModeDirect
-// only. Code chunking and parallel mounting are out — BASIC_DATA carries
-// code_size 0. EIP-8297 has no removal: a zeroed storage slot keeps its leaf at
-// 32 zero bytes, while an account removal is refused rather than guessed at.
+// only. BASIC_DATA carries the account's real code_size, but the CODE_ZONE
+// chunks it describes are not in the tree yet, so a code-bearing account hashes
+// incompletely. Parallel mounting is out. EIP-8297 has no removal: a zeroed
+// storage slot keeps its leaf at 32 zero bytes, while an account removal is
+// refused rather than guessed at.
 
 package commitment
 

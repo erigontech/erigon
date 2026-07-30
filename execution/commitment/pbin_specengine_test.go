@@ -54,13 +54,9 @@ func pbinLeafFromVector(key, value []byte, seq int) (pbinEngineLeaf, bool) {
 	}
 	switch sub := key[len(key)-1]; {
 	case sub == pbinBasicDataLeafKey:
-		// BASIC_DATA is rebuilt from nonce and balance with code_size forced to
-		// zero, so a value carrying a code size cannot be reproduced.
-		if binary.BigEndian.Uint32(value[pbinBasicDataCodeSizeOffset:]) != 0 {
-			return l, false
-		}
 		l.plainKey = account
 		l.update.Flags = BalanceUpdate | NonceUpdate
+		l.update.CodeSize = uint64(binary.BigEndian.Uint32(value[pbinBasicDataCodeSizeOffset:]))
 		l.update.Nonce = binary.BigEndian.Uint64(value[pbinBasicDataNonceOffset:])
 		l.update.Balance = *new(uint256.Int).SetBytes(value[pbinBasicDataBalanceOffset:])
 		return l, true
