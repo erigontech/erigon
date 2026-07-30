@@ -19,6 +19,7 @@ package commitment
 import (
 	"bytes"
 	"fmt"
+	"math/bits"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -48,8 +49,8 @@ func isCommitmentStateKey(prefix []byte) bool {
 // BranchCache stores commitment-trie branch data: a bounded LRU tail plus a
 // never-evicted root slot, aggregator-scope and passive (the trie drives all
 // reads/writes). Concurrent Get/Put/Invalidate are mechanically safe, but the
-// cache does not coordinate writers — callers must ensure a single writer per
-// prefix, coordinated at the orchestrator, not by locking the cache.
+// writer stripes only coordinate writes with Clear — callers must still ensure
+// a single mutation per prefix at the orchestrator.
 type BranchCache struct {
 	// Root tier — single slot for the root branch (always hottest, always
 	// present). Atomic-pointer access so no lock is needed for the hot
@@ -117,12 +118,13 @@ type BranchCache struct {
 	lastPublishedPinnedHits   atomic.Uint64
 	lastPublishedPinnedMisses atomic.Uint64
 
+	// putStripes keep epoch sampling and publication on one side of Clear while
+	// preserving parallel writes to unrelated prefixes.
+	putStripes [256]sync.Mutex
+
 	// coh is the (epoch, floor) unwind-coherence primitive shared with the state
 	// and code caches: an entry is valid iff written in the current epoch OR its
-	// txN is below the unwind floor. Serving reads snapshot coherence before
-	// lookup, while Clear completes every tier's clear operation before Reset;
-	// together those orderings keep the lifted floor from revalidating a retired
-	// entry.
+	// txN is below the unwind floor.
 	coh coherence.Gen
 }
 
@@ -309,6 +311,29 @@ type AdaptivePinControllerProvider interface {
 // branchCacheTailShards splits the LRU tail into independently-locked shards so
 // concurrent commitment mounts / warmup workers don't serialize on one mutex.
 const branchCacheTailShards = 256
+
+func (c *BranchCache) putStripe(prefix []byte) *sync.Mutex {
+	if len(prefix) == 0 {
+		return &c.putStripes[0]
+	}
+	stripe := prefix[len(prefix)-1]
+	if len(prefix) > 1 {
+		stripe ^= prefix[0]
+	}
+	return &c.putStripes[bits.RotateLeft8(stripe, 3)]
+}
+
+func (c *BranchCache) lockAllPutStripes() {
+	for i := range c.putStripes {
+		c.putStripes[i].Lock()
+	}
+}
+
+func (c *BranchCache) unlockAllPutStripes() {
+	for i := len(c.putStripes) - 1; i >= 0; i-- {
+		c.putStripes[i].Unlock()
+	}
+}
 
 // NewBranchCache constructs a BranchCache with the given LRU tail capacity.
 // Capacity <= 0 panics — pass a positive value or DefaultBranchCacheTailCapacity.
@@ -614,6 +639,11 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 	}
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
+
+	stripe := c.putStripe(prefix)
+	stripe.Lock()
+	defer stripe.Unlock()
+
 	entry := &branchCacheEntry{data: dataCopy, step: step, txN: txN, epoch: c.coh.Epoch()}
 	st, _, stor, ok := c.storageRoute(prefix, true)
 	if !ok {
@@ -675,6 +705,11 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 	}
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
+
+	stripe := c.putStripe(prefix)
+	stripe.Lock()
+	defer stripe.Unlock()
+
 	c.store(prefix, &branchCacheEntry{
 		data:  dataCopy,
 		step:  step,
@@ -727,6 +762,9 @@ func (c *BranchCache) Unwind(unwindToTxN uint64) {
 // clear operation completes, so snapshot-before-lookup readers cannot pair a
 // retired entry with the lifted unwind floor.
 func (c *BranchCache) Clear() {
+	c.lockAllPutStripes()
+	defer c.unlockAllPutStripes()
+
 	c.root.Store(nil)
 	c.clearTrunk()
 	c.pinned.Store(nil)
