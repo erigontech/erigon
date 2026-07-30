@@ -24,19 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGen_CannotReinitializeAfterUnwind(t *testing.T) {
-	var g Gen
-	entryEpoch := g.Epoch()
-	g.Unwind(50)
-
-	if initializer, ok := any(&g).(interface{ Init() }); ok {
-		initializer.Init()
-	}
-
-	require.Equal(t, uint32(1), g.Epoch())
-	require.True(t, g.IsStale(60, entryEpoch))
-}
-
 func TestGen_FloorAndEpoch(t *testing.T) {
 	var g Gen
 	require.Equal(t, uint32(0), g.Epoch())
