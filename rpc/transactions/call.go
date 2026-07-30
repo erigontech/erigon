@@ -226,7 +226,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 		r.evm.SetPrecompiles(precompiles)
 	}
 	if prev := r.evm.IntraBlockState(); prev != nil {
-		prev.Release(false)
+		prev.Close()
 	}
 	r.evm.Reset(txCtx, ibs)
 

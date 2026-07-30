@@ -424,15 +424,13 @@ func (sdb *IntraBlockState) Reset() {
 }
 
 // Close returns pooled resources (like journal, stateObjects) back to their pools.
-// Call this when the IntraBlockState is no longer needed.
-// If parallel is true, cleanup happens in a goroutine for faster return.
+// Call this when the IntraBlockState is no longer needed. Idempotent.
 func (sdb *IntraBlockState) Close() {
 	if sdb.stateObjects == nil {
 		return
 	}
 
 	stateObjects := sdb.stateObjects
-	sdb.stateObjects = nil
 	journal := sdb.journal
 	sdb.stateObjects = nil
 	sdb.journal = nil
