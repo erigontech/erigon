@@ -123,7 +123,7 @@ Do not treat these as established:
 
 - `pbin_branch.go` record field-bit layout beyond the leaf-kind rejection at `:156-165`. **Verify before designing Task 13's value-in-record field.**
 - ~~The "grid arrays are restorable-as-zero" argument underpinning Task 5's ~160-byte blob~~ — **proven in Task 5** (see the Task 5 checklist for the read/write-site audit); the root-cell blob landed.
-- Whether pbin branch records are truly opaque to the pass-through merge path (believed yes with references off, not exercised).
+- ~~Whether pbin branch records are truly opaque to the pass-through merge path~~ — **exercised in Task 10** with references off: collation, prune and merge round-trip the records byte-for-byte, checked against a db snapshot with a positive count of records provably served from files.
 - ~~Task 8's deferral mis-attribution~~ — **Task 8**: still no concrete failing sequence, and the exposure is bounded: deferral is only ever requested by `ExecV3` (fork validation / parallel apply), and the fork-validation writes it would mis-route land in a validation overlay that is never flushed. The guards are structural — bin cannot reach the deferred path at all now.
 
 ## What Goes Where
@@ -281,13 +281,14 @@ Production keeps Keccak-256. This task only makes the **test** path run the whol
 
 **Files:**
 - Create: `execution/commitment/backtester/pbin_m1a_test.go`
+- Modify: `db/state/squeeze.go` (➕ phantom empty-key touch in `rebuildCommitmentShard`)
 
-- [ ] write a test driving pbin over a real MDBX datadir via `RebuildCommitmentFiles` or the backtester, with no consensus
-- [ ] assert the forward-run root equals the rebuild-from-domains root over the same input
-- [ ] assert a restart mid-run resumes to the same root (exercises Task 5)
-- [ ] assert collation and merge preserve branch records byte-for-byte
-- [ ] record in this plan that M1a has **no header-root oracle** and is not acceptance
-- [ ] run tests — must pass before task 11
+- [x] write a test driving pbin over a real MDBX datadir via `RebuildCommitmentFiles` or the backtester, with no consensus — `backtester_test` builds its own datadir (real MDBX under a temp dir + real `.kv` domain files) and drives it through `execctx.SharedDomains` with `statecfg.ExperimentalBinCommitment` on; every SD open asserts the trie really is `*PBinPatriciaHashed`, so a hex fallback cannot make the suite vacuous. The `Backtester` type itself is unusable here — it needs a synced datadir with canonical headers
+- [x] assert the forward-run root equals the rebuild-from-domains root over the same input — `TestPBinM1AForwardRunMatchesRebuildFromDomains`. Two arms: a full-touch recompute over the same datadir, and `RebuildCommitmentFiles` after wiping every commitment record and file. ➕ **found a bug in shared code**: `rebuildCommitmentShard` touches the key from `next()` before testing `ok`, so at stream exhaustion it touches a 0-length plain key. Hex hashes it into a spurious absent update; pbin panics (a plain key is neither 20 nor 52 bytes). Fixed by skipping the touch for an empty key — `next()` signals exhaustion as `(false, nil)` but a shard boundary as `(false, key)`, so the key has to be checked separately from `ok`. ➕ the comparison point is the **last collated** step boundary, not the last forward root: collation always leaves the newest step in the db, so a files-only rebuild reproduces the root as of `TxNumsInFiles`
+- [x] assert a restart mid-run resumes to the same root (exercises Task 5) — `TestPBinM1ARestartResumesToSameRoot`: two halves of one input across an aggregator reopen, second half touching only its own keys, must reach the uninterrupted root; plus a fresh SD restoring the saved root before folding anything. ⚠️ **correction**: this does not exercise Task 5's state blob. `RootHash()` calls `loadRoot()` whenever `rootChecked` is false, so a gutted `SetState` still returns the right root — for pbin the restart carrier is Task 3's root record in the commitment domain, and the blob is a cache. Verified by mutation: gutting `SetState` leaves this test and `TestPBinRestartRoundTripDeepPath` green, and only the blob's own unit tests (`TestPBinStateBlobRoundTripsFlags`, `TestPBinSetStateRejectsForeignBlob`) go red
+- [x] assert collation and merge preserve branch records byte-for-byte — `TestPBinM1ABranchRecordsSurviveCollationAndMerge`: latest records snapshotted from the db before collation must read back identically after `BuildFiles` + prune + `MergeLoop`, and again after a folder reopen. Non-vacuity is asserted, not assumed: every record is db-resident before collation, and a positive number (12 of 36) are gone from `TblCommitmentVals` afterwards, so their latest read can only come from the files
+- [x] record in this plan that M1a has **no header-root oracle** and is not acceptance — stated in the file's package doc and here: nothing outside the engine validates these roots. Both rebuild arms and the restart arm are self-consistency checks over the same engine, so a green M1a means deterministic, not correct. H8 (stale high code chunks) is also out of reach until Task 12 puts code in the tree, which is where the forward-vs-rebuild comparison first gets a chance to fail for a real reason
+- [x] run tests — `go test ./execution/commitment/... ./db/state/... -count=1` and `./execution/stagedsync/... -short` green, `go build ./...` clean, `make lint` clean twice
 
 ### Task 11: code_size on Update
 

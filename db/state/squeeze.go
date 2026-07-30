@@ -1166,9 +1166,13 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 
 	sf := time.Now()
 	var processed uint64
+	// next() signals "no more keys" as (false, nil) but a shard boundary as
+	// (false, key), so the key has to be checked separately from ok.
 	for ok, key := next(); ; ok, key = next() {
-		sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
-		processed++
+		if len(key) > 0 {
+			sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
+			processed++
+		}
 		if !ok {
 			break
 		}
