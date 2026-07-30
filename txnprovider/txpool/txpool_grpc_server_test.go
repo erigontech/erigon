@@ -107,6 +107,14 @@ func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
 	}
 }
 
+func TestMapDiscardReasonToProtoTipAboveFeeCap(t *testing.T) {
+	t.Parallel()
+
+	if got := mapDiscardReasonToProto(txpoolcfg.TipAboveFeeCap); got != txpoolproto.ImportResult_INVALID {
+		t.Fatalf("expected INVALID, got %v", got)
+	}
+}
+
 // TestQueryAllWithoutPanicUnknown tries to reproduce https://github.com/erigontech/erigon/issues/18076 relying on
 // the TOCTOU between the deprecatedForEach locking window and the conversion of currentSubPool in GrpcServer.All().
 // It runs 3 concurrent loops: one repeatedly calling GrpcServer.All(), the others repeatedly triggering public
