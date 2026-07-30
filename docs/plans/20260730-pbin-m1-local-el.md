@@ -115,7 +115,7 @@ Blocking items needing a human or upstream answer. Do not proceed past the task 
 - **Q2 — is the tree a pure function of current state, or of history?** (H8.) eip-8297 is silent. Determines whether recompute-from-domains is a valid oracle at all, hence whether the M1a gate means anything. Possibly an upstream spec question.
 - **Q3 — does the reference create a present-zero leaf on `SSTORE 0` to a virgin slot?** Erigon drops it at `execution/state/state_object.go:245-246` before any writer sees it. If yes, that guard must be variant-gated and every zero-SSTORE becomes a state write.
 - **Q4 — confirm `github.com/zeebo/blake3`** as a **test-only** dependency (lower stakes now that production stays Keccak; the in-graph `lukechampine.com/blake3` may simply be enough). Its measured advantage was 13–18% arm64 / 58–78% amd64, not re-verified. **Answered (Task 1):** `zeebo` not added — production stays Keccak so BLAKE3 speed is irrelevant, and `lukechampine.com/blake3` is already a direct dependency used by `pbin_specroots_test.go`; it now backs `pbinBlake3Hash` for all three seam tests.
-- **Q5 — forward/backward compatibility of a new `erigondb.toml` key** across erigon binaries, given the file is downloader-delivered and **wins over the CLI** (`erigondb_settings.go:74-89`).
+- **Q5 — forward/backward compatibility of a new `erigondb.toml` key** across erigon binaries, given the file is downloader-delivered and **wins over the CLI** (`erigondb_settings.go:74-89`). **Answered (Task 6):** `readErigonDBSettings` uses `go-toml/v2` `Unmarshal`, which ignores unknown keys — older binaries parse a `trie_variant` toml fine. The key is written only when bin, so published/downloader tomls stay byte-identical, and a downloader-delivered hex toml under a bin process is refused at resolve. Residual risk: a binary **predating the key** opens a bin datadir as hex with no guard — inherent to any new key; acceptable while bin is experimental and fresh-datadir-only.
 
 ## Thin / Unverified
 
@@ -217,18 +217,18 @@ Production keeps Keccak-256. This task only makes the **test** path run the whol
 - Modify: `cmd/integration/commands/flags.go`
 - Create: `db/state/pbin_variant_persist_test.go`
 
-- [ ] write a failing test asserting a datadir created with the bin variant is **refused** when opened with a conflicting config (guards H4)
-- [ ] write a failing test asserting `references_in_commitment_branches = true` is refused under the bin variant (guards H10)
-- [ ] add a `statecfg` global for the variant
-- [ ] add the `--experimental.bin-commitment` flag across the 7-site experimental-commitment template
-- [ ] replace the duplicated inline switch at `squeeze.go:1023-1029` with `PickTrieVariant()`
-- [ ] add `trie_variant` to `ErigonDBSettings`, resolved first-start exactly as `ReferencesInCommitmentBranches` is, and note in a comment that `erigondb.toml` wins over the CLI
-- [ ] write a failing test asserting the header state-root comparison is enforced by default and skipped only when the new toggle is set — under **both** variants, since the toggle is variant-independent
-- [ ] add the third case to `PickTrieVariant()` reachable via `--experimental.bin-commitment`
-- [ ] add a root-check toggle to `common/dbg/experiments.go` following the `DiscardCommitment` `EnvBool` pattern, **defaulting to check-enabled**, and honour it at all five sites: `exec3.go:810`, `exec3.go:730`, `exec3_serial.go:205`, `committer.go:557`, `:659`, `:764`
-- [ ] log loudly once at startup when the check is disabled, so a running node says so out loud (guards H13)
-- [ ] write a test asserting a flagless restart of a bin datadir stays bin
-- [ ] run tests — must pass before task 7
+- [x] write a failing test asserting a datadir created with the bin variant is **refused** when opened with a conflicting config (guards H4) — `db/state/pbin_variant_persist_test.go`: bin datadir + streaming/parallel flags refused; hex datadir (absent or explicit `trie_variant`) + bin flag refused; a downloader-delivered hex toml under an in-memory-bin process refused; legacy datadir (preverified.toml) + bin flag refused
+- [x] write a failing test asserting `references_in_commitment_branches = true` is refused under the bin variant (guards H10) — `TestPBinVariantRefusesReferences`: both the persisted refs=true+bin toml and the first-start refs-override+bin combination error
+- [x] add a `statecfg` global for the variant — `statecfg.ExperimentalBinCommitment` (`COMMITMENT_BIN` env, mirroring `COMMITMENT_PARALLEL`)
+- [x] add the `--experimental.bin-commitment` flag across the 7-site experimental-commitment template — flag def + ctx→cfg (`cmd/utils/flags.go`), `node/cli/default_flags.go`, `ethconfig.Config` field, cfg→statecfg (`node/eth/backend.go`), `cmd/integration/commands/flags.go`, statecfg global
+- [x] replace the duplicated inline switch at `squeeze.go:1023-1029` with `PickTrieVariant()` — the `EnableParaTrieDB` gate below it now derives from the returned variant instead of the raw flags
+- [x] add `trie_variant` to `ErigonDBSettings`, resolved first-start exactly as `ReferencesInCommitmentBranches` is, and note in a comment that `erigondb.toml` wins over the CLI — `*string` ("hex"/"bin", absent = hex), written only when bin so published tomls stay unchanged; `reconcileTrieVariant` runs at every resolve: a persisted bin adopts bin process-wide (sets the statecfg global), all conflicts refuse rather than degrade
+- [x] write a failing test asserting the header state-root comparison is enforced by default and skipped only when the new toggle is set — under **both** variants, since the toggle is variant-independent — `TestHeaderRootCheckDefaultOnAndTogglable` drives `headerRootMismatch` under both settings of the bin global
+- [x] add the third case to `PickTrieVariant()` reachable via `--experimental.bin-commitment` — bin wins over streaming/parallel (the resolver refuses the combination anyway); `TestPickTrieVariant_BinFlag`
+- [x] add a root-check toggle to `common/dbg/experiments.go` following the `DiscardCommitment` `EnvBool` pattern, **defaulting to check-enabled**, and honour it at all five sites: `exec3.go:810`, `exec3.go:730`, `exec3_serial.go:205`, `committer.go:557`, `:659`, `:764` — `dbg.CheckHeaderStateRoot` (`CHECK_HEADER_STATE_ROOT`, default true), applied via a shared `headerRootMismatch` helper at all five comparisons; `handleIncorrectRootHashError` (the `:730` arm) is only reachable from gated comparisons
+- [x] log loudly once at startup when the check is disabled, so a running node says so out loud (guards H13) — `backend.go` Warn at node construction
+- [x] write a test asserting a flagless restart of a bin datadir stays bin — `TestPBinVariantFlaglessRestartStaysBin`: persisted bin re-adopts with the global off, `PickTrieVariant()` returns bin
+- [x] run tests — `go test ./execution/commitment/... ./db/state/... -count=1` and `./execution/stagedsync/... -short` green, `make lint` clean twice
 
 ### Task 7: Un-pin the genesis variant
 

@@ -67,6 +67,12 @@ var (
 	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
 	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 
+	// CheckHeaderStateRoot gates the post-execution comparison of the computed
+	// state root against the block header's. On by default; switch off only for
+	// a chain whose headers this node cannot reproduce — with it off nothing
+	// cross-checks execution results.
+	CheckHeaderStateRoot = EnvBool("CHECK_HEADER_STATE_ROOT", true)
+
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
 

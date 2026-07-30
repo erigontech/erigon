@@ -268,6 +268,7 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.ExperimentalParallelCommitmentFlag,
 	&utils.ExperimentalStreamingCommitmentFlag,
+	&utils.ExperimentalBinCommitmentFlag,
 
 	&utils.MCPDisableFlag,
 	&utils.MCPAddrFlag,

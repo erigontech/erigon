@@ -313,6 +313,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if config.ExperimentalStreamingCommitment {
 			statecfg.ExperimentalStreamingCommitment = true
 		}
+		if config.ExperimentalBinCommitment {
+			statecfg.ExperimentalBinCommitment = true
+		}
 
 		if err = stages.UpdateMetrics(tx); err != nil {
 			return err
@@ -326,6 +329,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil
 	}); err != nil {
 		return nil, err
+	}
+
+	if !dbg.CheckHeaderStateRoot {
+		logger.Warn("HEADER STATE-ROOT CHECK IS DISABLED (CHECK_HEADER_STATE_ROOT=false): nothing cross-checks execution results against headers; a wrong chain will look healthy")
 	}
 
 	ctx, ctxCancel := context.WithCancel(context.Background())

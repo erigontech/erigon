@@ -725,6 +725,14 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 	return nil
 }
 
+// headerRootMismatch reports whether a computed state root fails the header
+// state-root check. Variant-independent and on by default;
+// dbg.CheckHeaderStateRoot switches the check off for a chain whose headers
+// this node cannot reproduce.
+func headerRootMismatch(computed, expected []byte) bool {
+	return dbg.CheckHeaderStateRoot && !bytes.Equal(computed, expected)
+}
+
 func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, s *StageState, logger log.Logger, u Unwinder) error {
 	if cfg.badBlockHalt {
 		return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNumber)
@@ -807,7 +815,7 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return false, times, fmt.Errorf("compute commitment: %w", err)
 	}
 
-	if !bytes.Equal(computedRootHash, header.Root[:]) {
+	if headerRootMismatch(computedRootHash, header.Root[:]) {
 		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root[:], header.Hash()))
 		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), applyTx, cfg, e, logger, u)
 		return false, times, err

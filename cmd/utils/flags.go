@@ -1114,6 +1114,14 @@ var (
 		Usage: "EXPERIMENTAL: enables streaming trie for commitment (StreamingCommitter, overlaps folding with execution). Takes precedence over --experimental.parallel-commitment if set.",
 		Value: false,
 	}
+	// ExperimentalBinCommitmentFlag selects the EIP-8297 binary commitment trie.
+	// A whole-datadir property: honoured on a fresh datadir, persisted to
+	// erigondb.toml there, and adopted from it on later starts.
+	ExperimentalBinCommitmentFlag = cli.BoolFlag{
+		Name:  "experimental.bin-commitment",
+		Usage: "EXPERIMENTAL: enables the EIP-8297 binary commitment trie. Takes effect on a fresh datadir only and is persisted there.",
+		Value: false,
+	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
 		Usage: "restart erigon under gdb for debug purposes",
@@ -2005,6 +2013,10 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 
 	if ctx.Bool(ExperimentalStreamingCommitmentFlag.Name) {
 		cfg.ExperimentalStreamingCommitment = true
+	}
+
+	if ctx.Bool(ExperimentalBinCommitmentFlag.Name) {
+		cfg.ExperimentalBinCommitment = true
 	}
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)

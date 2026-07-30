@@ -176,8 +176,12 @@ type SharedDomains struct {
 func PickTrieVariant() commitment.TrieVariant {
 	switch {
 	// Selecting more than one experimental-commitment flag is a misconfiguration;
-	// they are alternative paths. Streaming overlaps folding with execution, so it
+	// they are alternative paths. Bin is a persisted whole-datadir property, so
+	// it wins over the runtime experiments (the settings resolver refuses the
+	// combination outright); streaming overlaps folding with execution, so it
 	// wins over parallel.
+	case statecfg.ExperimentalBinCommitment:
+		return commitment.VariantBinPatriciaTrie
 	case statecfg.ExperimentalStreamingCommitment:
 		return commitment.VariantStreamingHexPatricia
 	case statecfg.ExperimentalParallelCommitment:
