@@ -161,40 +161,6 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	return ColumnSidecars, pid, nil
 }
 
-func (b *BeaconRpcP2P) SendColumnSidecarsByRangeReqV1(
-	ctx context.Context,
-	start, count uint64,
-	columns []uint64,
-) ([]*cltypes.DataColumnSidecar, string, error) {
-	req := &cltypes.ColumnSidecarsByRangeRequest{
-		StartSlot: start,
-		Count:     count,
-		Columns:   solid.NewUint64ListSSZ(int(b.beaconConfig.NumberOfColumns)),
-	}
-	for _, column := range columns {
-		req.Columns.Append(column)
-	}
-	var buffer buffer.Buffer
-	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
-		return nil, "", err
-	}
-
-	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRangeProtocolV1, buffer.Bytes(), communication.MaxWireResponseBytes(b.columnSidecarRawBytes(), count*uint64(len(columns))))
-	if err != nil {
-		return nil, pid, err
-	}
-
-	ColumnSidecars := []*cltypes.DataColumnSidecar{}
-	for _, data := range responsePacket {
-		columnSidecar := &cltypes.DataColumnSidecar{}
-		if err := columnSidecar.DecodeSSZ(data.raw, int(data.version)); err != nil {
-			return nil, pid, err
-		}
-		ColumnSidecars = append(ColumnSidecars, columnSidecar)
-	}
-	return ColumnSidecars, pid, nil
-}
-
 // SendExecutionPayloadEnvelopesByRangeReq retrieves execution payload envelopes by slot range.
 // [New in Gloas:EIP7732]
 func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Context, start, count uint64) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error) {

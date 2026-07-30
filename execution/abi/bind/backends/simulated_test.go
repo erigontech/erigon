@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math/big"
 	"reflect"
 	"strings"
@@ -1075,7 +1076,7 @@ func TestSimulatedBackend_PendingAndCallContractAmsterdamDefaultGas(t *testing.T
 	const sstoresPerCall = 448
 
 	runtime := program.New()
-	for i := 0; i < sstoresPerCall; i++ {
+	for i := range sstoresPerCall {
 		runtime.Sstore(i, 1)
 	}
 	runtime.Op(vm.STOP)
@@ -1112,6 +1113,31 @@ func TestSimulatedBackend_PendingAndCallContractAmsterdamDefaultGas(t *testing.T
 	res, err = sim.CallContract(bgCtx, call, nil)
 	require.NoError(t, err)
 	require.Empty(t, res)
+}
+
+func TestSimulatedBackendEstimateGasClassifiesRuntimeOutOfGas(t *testing.T) {
+	sender := crypto.PubkeyToAddress(testKey.PublicKey)
+	recipient := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	sim := NewSimulatedBackendWithConfig(
+		t,
+		types.GenesisAlloc{sender: {Balance: big.NewInt(common.Ether)}},
+		chain.AllProtocolChanges,
+		1_000_000,
+	)
+	gasCap := params.TxBaseEIP2780 +
+		params.ColdAccountAccessEIP2780 +
+		params.TransferLogCostEIP2780 +
+		params.TxValueCostEIP2780 +
+		params.StateGasNewAccount - 1
+
+	_, err := sim.EstimateGas(context.Background(), bind.CallMsg{
+		From:     sender,
+		To:       &recipient,
+		Gas:      gasCap,
+		GasPrice: &u256.Num0,
+		Value:    &u256.Num1,
+	})
+	require.EqualError(t, err, fmt.Sprintf("gas required exceeds allowance (%d)", gasCap))
 }
 
 // This test is based on the following contract:
@@ -1201,11 +1227,9 @@ func TestSimulatedBackend_CallContractRevert(t *testing.T) {
 				if rerr.Error() != "execution reverted: "+val.(string) {
 					t.Errorf("error was malformed: got %v want %v", rerr.Error(), val)
 				}
-			} else {
+			} else if err.Error() != "execution reverted" {
 				// revert(0x0,0x0)
-				if err.Error() != "execution reverted" {
-					t.Errorf("error was malformed: got %v want %v", err, "execution reverted")
-				}
+				t.Errorf("error was malformed: got %v want %v", err, "execution reverted")
 			}
 		}
 		input, err := parsed.Pack("noRevert")

@@ -1,11 +1,12 @@
 package app
 
 import (
+	"cmp"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
@@ -66,8 +67,11 @@ func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (
 		return 0, false, err
 	}
 
-	sort.Slice(dataFiles, func(i, j int) bool {
-		return (dataFiles[i].From < dataFiles[j].From) || (dataFiles[i].From == dataFiles[j].From && dataFiles[i].To < dataFiles[j].To)
+	slices.SortFunc(dataFiles, func(a, b state.SnapInfo) int {
+		if a.From != b.From {
+			return cmp.Compare(a.From, b.From)
+		}
+		return cmp.Compare(a.To, b.To)
 	})
 
 	if len(dataFiles) == 0 {

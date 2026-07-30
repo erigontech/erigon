@@ -22,7 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
@@ -172,7 +173,9 @@ func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64,
 	binary.LittleEndian.PutUint64(slotByteArray, slot)
 
 	// Add slot to the end of the input.
-	inputWithSlot := append(input[:], slotByteArray...)
+	inputWithSlot := make([]byte, 0, len(input)+len(slotByteArray))
+	inputWithSlot = append(inputWithSlot, input[:]...)
+	inputWithSlot = append(inputWithSlot, slotByteArray...)
 
 	// Calculate the hash.
 	hash.Write(inputWithSlot)
@@ -236,7 +239,6 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 	inclusionDelay uint64,
 	skipAssert bool,
 ) ([]uint8, error) {
-
 	var justifiedCheckpoint solid.Checkpoint
 	// get checkpoint from epoch
 	if data.Target.Epoch == Epoch(b) {
@@ -359,9 +361,8 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 
 	// pre-gloas computation
 	beaconConfig := b.BeaconConfig()
-	optimizedHashFunc := utils.OptimizedSha256NotThreadSafe()
 	epoch := Epoch(b) + 1
-	//math.MaxUint8
+	// math.MaxUint8
 	activeValidatorIndicies := b.GetActiveValidatorsIndices(epoch)
 	activeValidatorCount := uint64(len(activeValidatorIndicies))
 	if activeValidatorCount == 0 {
@@ -394,7 +395,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 			activeValidatorCount,
 			seed,
 			preInputs,
-			optimizedHashFunc,
+			crypto.Sha256,
 		)
 		if err != nil {
 			return nil, err
@@ -408,7 +409,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 		// random_bytes = hash(seed + uint_to_bytes(i // groupSize)); one hash covers a whole group.
 		if group := i / groupSize; group != cachedGroup {
 			binary.LittleEndian.PutUint64(buf[32:], group)
-			cachedHash = optimizedHashFunc(buf[:])
+			cachedHash = crypto.Sha256(buf[:])
 			cachedGroup = group
 		}
 		if isElectra {
@@ -605,13 +606,15 @@ func (b *CachingBeaconState) ComputePTC(slot uint64) ([]uint64, error) {
 	// seed = hash(get_seed(state, epoch, DOMAIN_PTC_ATTESTER) + uint_to_bytes(slot))
 	slotBytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotBytes, slot)
-	seedInput := append(baseSeed[:], slotBytes...)
-	seed := utils.Sha256(seedInput)
+	seedInput := make([]byte, 0, len(baseSeed)+len(slotBytes))
+	seedInput = append(seedInput, baseSeed[:]...)
+	seedInput = append(seedInput, slotBytes...)
+	seed := crypto.Sha256(seedInput)
 
 	// Concatenate all committees for this slot in order
 	indices := []uint64{}
 	committeesPerSlot := b.CommitteeCount(epoch)
-	for i := uint64(0); i < committeesPerSlot; i++ {
+	for i := range committeesPerSlot {
 		committee, err := b.GetBeaconCommitee(slot, i)
 		if err != nil {
 			return nil, err
@@ -651,7 +654,7 @@ func (b *CachingBeaconState) InitializePtcWindow() error {
 	for epochOffset := uint64(0); epochOffset < 1+cfg.MinSeedLookahead; epochOffset++ {
 		epoch := currentEpoch + epochOffset
 		epochStartSlot := epoch * slotsPerEpoch
-		for i := uint64(0); i < slotsPerEpoch; i++ {
+		for i := range slotsPerEpoch {
 			slot := epochStartSlot + i
 			ptc, err := b.ComputePTC(slot)
 			if err != nil {
@@ -684,9 +687,7 @@ func (b *CachingBeaconState) GetIndexedPayloadAttestation(payloadAttestation *cl
 			indices = append(indices, index)
 		}
 	}
-	sort.SliceStable(indices, func(i, j int) bool {
-		return indices[i] < indices[j]
-	})
+	slices.Sort(indices)
 
 	return &cltypes.IndexedPayloadAttestation{
 		AttestingIndices: solid.NewRawUint64List(len(indices), indices),

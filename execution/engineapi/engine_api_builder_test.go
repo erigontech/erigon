@@ -96,7 +96,7 @@ func TestEngineApiMultiBlockSequence(t *testing.T) {
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		receiver := common.HexToAddress("0x42")
 
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			txn, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(1000))
 			require.NoError(t, err)
 
@@ -685,6 +685,251 @@ func TestEngineApiBALGlamsterdamCreate2OntoFundedAddress(t *testing.T) {
 		for _, proxy := range proxies {
 			requireProxyCreditPreserved(t, eat, bal, proxy)
 		}
+	})
+}
+
+// TestEngineApiEIP8246PreservedBalanceSurvivesCreate2Recreate builds one block
+// with two calls to SelfDestructFactory using the same salt: each CREATE2-
+// deploys SelfDestructInConstructor, whose constructor self-destructs to
+// itself, so under EIP-8246 the first call leaves a balance-only account and
+// the second re-creates over it with more value. The assembler runs both txs
+// on one shared IntraBlockState, so a stale selfdestructed marker from tx1
+// would drop the preserved balance in tx2's CREATE2 and produce an invalid
+// block: newPayload validation (fresh state per tx) computes the preserved sum
+// and rejects the assembled root.
+func TestEngineApiEIP8246PreservedBalanceSurvivesCreate2Recreate(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(senderKey.PublicKey)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.Alloc[senderAddr] = types.GenesisAccount{
+		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil), // 100 ETH
+	}
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
+		DataDir:     t.TempDir(),
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	valueTx1 := big.NewInt(1_000_000)
+	valueTx2 := big.NewInt(500_000)
+	salt := [32]byte{0x82, 0x46}
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		factoryAuth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, chainID)
+		require.NoError(t, err)
+		factoryAuth.GasLimit = params.MaxTxnGasLimit
+		factoryAddr, _, factory, err := contracts.DeploySelfDestructFactory(factoryAuth, eat.ContractBackend)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		deployAuth, err := bind.NewKeyedTransactorWithChainID(senderKey, chainID)
+		require.NoError(t, err)
+		deployAuth.GasLimit = 1_000_000
+		deployAuth.Value = valueTx1
+		txn1, err := factory.Deploy(deployAuth, salt)
+		require.NoError(t, err)
+		deployAuth.Value = valueTx2
+		txn2, err := factory.Deploy(deployAuth, salt)
+		require.NoError(t, err)
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err, "assembled block must validate: a dropped preserved balance surfaces as an INVALID payload")
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, txn1.Hash(), txn2.Hash())
+		require.NoError(t, err)
+		createdAddr := create2Addr(factoryAddr, salt, common.FromHex(contracts.SelfDestructInConstructorBin))
+		balance, err := eat.RpcApiClient.GetBalance(createdAddr, rpc.LatestBlock)
+		require.NoError(t, err)
+		expected := new(big.Int).Add(valueTx1, valueTx2)
+		require.Equal(t, expected, balance,
+			"EIP-8246: tx1's preserved balance must survive tx2's CREATE2 at the same address")
+		code, err := eat.RpcApiClient.GetCode(createdAddr, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Empty(t, code, "the self-destructed account is balance-only")
+	})
+}
+
+func TestEngineApiAccountLifecycleFinalizationConsistency(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.Config.AmsterdamTime = nil
+
+	salt := [32]byte{}
+	factoryAddr := types.CreateAddress(crypto.PubkeyToAddress(coinbaseKey.PublicKey), 0)
+	coinbase := create2Addr(factoryAddr, salt, common.FromHex(contracts.SelfDestructInConstructorBin))
+	genesis.Coinbase = coinbase
+
+	senderKeys := make([]*ecdsa.PrivateKey, 3)
+	funds := new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)
+	for i := range senderKeys {
+		senderKeys[i], err = crypto.GenerateKey()
+		require.NoError(t, err)
+		genesis.Alloc[crypto.PubkeyToAddress(senderKeys[i].PublicKey)] = types.GenesisAccount{Balance: funds}
+	}
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		deployAuth, err := bind.NewKeyedTransactorWithChainID(coinbaseKey, chainID)
+		require.NoError(t, err)
+		deployAuth.GasLimit = params.MaxTxnGasLimit
+		deployedFactoryAddr, _, factory, err := contracts.DeploySelfDestructFactory(deployAuth, eat.ContractBackend)
+		require.NoError(t, err)
+		require.Equal(t, factoryAddr, deployedFactoryAddr)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		disperseAuth, err := bind.NewKeyedTransactorWithChainID(coinbaseKey, chainID)
+		require.NoError(t, err)
+		disperseAuth.GasLimit = params.MaxTxnGasLimit
+		_, _, disperse, err := contracts.DeployDisperse(disperseAuth, eat.ContractBackend)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		destroyAuth, err := bind.NewKeyedTransactorWithChainID(senderKeys[0], chainID)
+		require.NoError(t, err)
+		destroyAuth.GasLimit = 1_000_000
+		destroyAuth.GasPrice = big.NewInt(5_000_000_000)
+		destroyTx, err := factory.Deploy(destroyAuth, salt)
+		require.NoError(t, err)
+
+		fundAuth, err := bind.NewKeyedTransactorWithChainID(senderKeys[1], chainID)
+		require.NoError(t, err)
+		fundAuth.GasLimit = 1_000_000
+		fundAuth.GasPrice = big.NewInt(4_000_000_000)
+		fundAuth.Value = big.NewInt(7)
+		fundTx, err := disperse.DisperseEther(fundAuth, []common.Address{coinbase}, []*big.Int{big.NewInt(7)})
+		require.NoError(t, err)
+
+		recreateAuth, err := bind.NewKeyedTransactorWithChainID(senderKeys[2], chainID)
+		require.NoError(t, err)
+		recreateAuth.GasLimit = 1_000_000
+		recreateAuth.GasPrice = big.NewInt(3_000_000_000)
+		recreateTx, err := factory.Deploy(recreateAuth, salt)
+		require.NoError(t, err)
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		gotHashes := make([]common.Hash, len(payload.ExecutionPayload.Transactions))
+		for i, encoded := range payload.ExecutionPayload.Transactions {
+			txn, err := types.DecodeTransaction(encoded)
+			require.NoError(t, err)
+			gotHashes[i] = txn.Hash()
+		}
+		require.Equal(t, []common.Hash{destroyTx.Hash(), fundTx.Hash(), recreateTx.Hash()}, gotHashes)
+	})
+}
+
+// TestEngineApiAccountLifecycleFinalizationConsistencyEIP8246 is the Amsterdam
+// counterpart of TestEngineApiAccountLifecycleFinalizationConsistency. Under
+// EIP-8246 a self-destructed account that still holds a balance is preserved
+// (balance-only) rather than deleted, so the tip credited to a same-block
+// created+self-destructed coinbase must survive — the builder and the parallel
+// validator must still agree on the assembled block.
+func TestEngineApiAccountLifecycleFinalizationConsistencyEIP8246(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	require.NotNil(t, genesis.Config.AmsterdamTime, "genesis must keep Amsterdam enabled to exercise the EIP-8246 path")
+
+	salt := [32]byte{}
+	factoryAddr := types.CreateAddress(crypto.PubkeyToAddress(coinbaseKey.PublicKey), 0)
+	coinbase := create2Addr(factoryAddr, salt, common.FromHex(contracts.SelfDestructInConstructorBin))
+	genesis.Coinbase = coinbase
+
+	senderKeys := make([]*ecdsa.PrivateKey, 3)
+	funds := new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)
+	for i := range senderKeys {
+		senderKeys[i], err = crypto.GenerateKey()
+		require.NoError(t, err)
+		genesis.Alloc[crypto.PubkeyToAddress(senderKeys[i].PublicKey)] = types.GenesisAccount{Balance: funds}
+	}
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		deployAuth, err := bind.NewKeyedTransactorWithChainID(coinbaseKey, chainID)
+		require.NoError(t, err)
+		deployAuth.GasLimit = params.MaxTxnGasLimit
+		deployedFactoryAddr, _, factory, err := contracts.DeploySelfDestructFactory(deployAuth, eat.ContractBackend)
+		require.NoError(t, err)
+		require.Equal(t, factoryAddr, deployedFactoryAddr)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		disperseAuth, err := bind.NewKeyedTransactorWithChainID(coinbaseKey, chainID)
+		require.NoError(t, err)
+		disperseAuth.GasLimit = params.MaxTxnGasLimit
+		_, _, disperse, err := contracts.DeployDisperse(disperseAuth, eat.ContractBackend)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		destroyAuth, err := bind.NewKeyedTransactorWithChainID(senderKeys[0], chainID)
+		require.NoError(t, err)
+		destroyAuth.GasLimit = 1_000_000
+		destroyAuth.GasPrice = big.NewInt(5_000_000_000)
+		destroyTx, err := factory.Deploy(destroyAuth, salt)
+		require.NoError(t, err)
+
+		fundAuth, err := bind.NewKeyedTransactorWithChainID(senderKeys[1], chainID)
+		require.NoError(t, err)
+		fundAuth.GasLimit = 1_000_000
+		fundAuth.GasPrice = big.NewInt(4_000_000_000)
+		fundAuth.Value = big.NewInt(7)
+		fundTx, err := disperse.DisperseEther(fundAuth, []common.Address{coinbase}, []*big.Int{big.NewInt(7)})
+		require.NoError(t, err)
+
+		recreateAuth, err := bind.NewKeyedTransactorWithChainID(senderKeys[2], chainID)
+		require.NoError(t, err)
+		recreateAuth.GasLimit = 1_000_000
+		recreateAuth.GasPrice = big.NewInt(3_000_000_000)
+		recreateTx, err := factory.Deploy(recreateAuth, salt)
+		require.NoError(t, err)
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		gotHashes := make([]common.Hash, len(payload.ExecutionPayload.Transactions))
+		for i, encoded := range payload.ExecutionPayload.Transactions {
+			txn, err := types.DecodeTransaction(encoded)
+			require.NoError(t, err)
+			gotHashes[i] = txn.Hash()
+		}
+		require.Equal(t, []common.Hash{destroyTx.Hash(), fundTx.Hash(), recreateTx.Hash()}, gotHashes)
+
+		// EIP-8246: the created+self-destructed+recreated coinbase is preserved as
+		// a balance-only account (empty code, non-zero accrued tips + funding), so
+		// the delayed tip is credited rather than burned.
+		code, err := eat.RpcApiClient.GetCode(coinbase, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Empty(t, code, "EIP-8246: self-destructed coinbase is balance-only")
+		balance, err := eat.RpcApiClient.GetBalance(coinbase, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Positive(t, balance.Sign(), "EIP-8246: coinbase tip must be preserved, not burned")
 	})
 }
 

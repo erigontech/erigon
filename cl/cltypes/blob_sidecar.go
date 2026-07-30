@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -155,21 +156,21 @@ func VerifyCommitmentInclusionProof(commitment common.Bytes48, commitmentInclusi
 	}
 	var curr common.Hash
 	// Start by constructing the commitments subtree
-	for i := uint64(0); i < commitmentsDepth; i++ {
+	for i := range commitmentsDepth {
 		curr = commitmentInclusionProof.Get(int(i))
 		if (commitmentIndex / utils.PowerOf2(i) % 2) == 1 {
-			value = utils.Sha256(curr[:], value[:])
+			value = crypto.Sha256(curr[:], value[:])
 		} else {
-			value = utils.Sha256(value[:], curr[:])
+			value = crypto.Sha256(value[:], curr[:])
 		}
 	}
 	// Construct up the block giga tree
 	for i := uint64(0); i < uint64(bodyDepth); i++ {
 		curr = commitmentInclusionProof.Get(int(i + commitmentsDepth))
 		if (bIndex / utils.PowerOf2(i) % 2) == 1 {
-			value = utils.Sha256(curr[:], value[:])
+			value = crypto.Sha256(curr[:], value[:])
 		} else {
-			value = utils.Sha256(value[:], curr[:])
+			value = crypto.Sha256(value[:], curr[:])
 		}
 	}
 	return value == bodyRoot

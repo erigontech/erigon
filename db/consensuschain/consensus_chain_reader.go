@@ -23,9 +23,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -33,11 +33,16 @@ import (
 type Reader struct {
 	config      *chain.Config
 	tx          kv.Tx
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 	logger      log.Logger
 }
 
-func NewReader(config *chain.Config, tx kv.Tx, blockReader services.FullBlockReader, logger log.Logger) *Reader {
+// logger is used only on read-error paths, so a nil one stays invisible until
+// something fails. log.Logger is an interface, and calling it then panics.
+func NewReader(config *chain.Config, tx kv.Tx, blockReader dbservices.FullBlockReader, logger log.Logger) *Reader {
+	if logger == nil {
+		logger = log.Root()
+	}
 	return &Reader{config, tx, blockReader, logger}
 }
 

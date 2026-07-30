@@ -64,9 +64,30 @@ func (g *Gen) load() *gen {
 }
 
 // IsStale reports whether an entry stamped (txNum, epoch) reflects dead-fork
-// state after an unwind.
+// state after an unwind, judged by the live coherence state.
 func (g *Gen) IsStale(txNum uint64, epoch uint32) bool {
+	return g.Snapshot().IsStale(txNum, epoch)
+}
+
+// Snapshot is an immutable (epoch, floor) pair for judging entries against
+// the coherence state captured at a chosen point — e.g. before loading a
+// cache generation, so a concurrent Clear's re-init (fresh epoch, lifted
+// floor) cannot revalidate a dead entry captured from the retiring
+// generation.
+type Snapshot struct {
+	epoch uint32
+	floor uint64
+}
+
+// Snapshot returns the current (epoch, floor) pair.
+func (g *Gen) Snapshot() Snapshot {
 	s := g.load()
+	return Snapshot{epoch: s.epoch, floor: s.floor}
+}
+
+// IsStale reports whether an entry stamped (txNum, epoch) reflects dead-fork
+// state under this snapshot.
+func (s Snapshot) IsStale(txNum uint64, epoch uint32) bool {
 	return epoch != s.epoch && txNum >= s.floor
 }
 

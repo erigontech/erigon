@@ -197,7 +197,7 @@ type prefixWriter struct {
 func (pw *prefixWriter) Write(p []byte) (int, error) {
 	buf := make([]byte, 0, len(p)+len(pw.prefix)*2)
 	buf = append(buf, pw.prefix...)
-	for i := 0; i < len(p); i++ {
+	for i := range p {
 		buf = append(buf, p[i])
 		if p[i] == '\n' && i != len(p)-1 { // re-tag interior lines, not a trailing newline
 			buf = append(buf, pw.prefix...)
@@ -265,6 +265,9 @@ func (p *ParallelPatriciaHashed) RootHash() ([]byte, error) {
 
 // processStreaming delegates Process to the attached StreamingCommitter and republishes the root.
 func (p *ParallelPatriciaHashed) processStreaming(ctx context.Context) ([]byte, error) {
+	// The template root is the restore target of SetState, so it seeds the committer's base;
+	// PromoteRootInto below keeps the two in sync after every fold.
+	p.streaming.SeedRootFrom(p.template)
 	rh, err := p.streaming.Process(ctx)
 	if err != nil {
 		return nil, err
@@ -335,7 +338,7 @@ func (p *ParallelPatriciaHashed) Process(
 		p.deferredForCaller = pu.deferredCombined
 		pu.deferredCombined = nil
 		pu.deferredMu.Unlock()
-	} else if aErr := p.applyDeferredUpdates(pu); aErr != nil {
+	} else if aErr := p.applyDeferredUpdates(ctx, pu); aErr != nil {
 		return nil, aErr
 	}
 
@@ -378,7 +381,7 @@ func dfsSubtree(node *prefixNode, path []byte, fn func(hashedKey, plainKey []byt
 }
 
 // applyDeferredUpdates applies the merged deferred branch updates, returning every entry to the pool on success or failure.
-func (p *ParallelPatriciaHashed) applyDeferredUpdates(pu *parallelUpdate) error {
+func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *parallelUpdate) error {
 	pu.deferredMu.Lock()
 	deferred := pu.deferredCombined
 	pu.deferredCombined = nil
@@ -393,7 +396,7 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(pu *parallelUpdate) error 
 		}
 	}()
 
-	applyCtx, cleanup := p.trieCtxFactory()
+	applyCtx, cleanup := p.trieCtxFactory(ctx)
 	if cleanup != nil {
 		defer cleanup()
 	}

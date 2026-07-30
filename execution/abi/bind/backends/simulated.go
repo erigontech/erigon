@@ -36,9 +36,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/chain"
@@ -129,15 +129,22 @@ func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64
 	return b
 }
 
-func (b *SimulatedBackend) DB() kv.TemporalRwDB                   { return b.m.DB }
-func (b *SimulatedBackend) HistoryV3() bool                       { return b.m.HistoryV3 }
-func (b *SimulatedBackend) Engine() rules.Engine                  { return b.m.Engine }
-func (b *SimulatedBackend) BlockReader() services.FullBlockReader { return b.m.BlockReader }
+func (b *SimulatedBackend) DB() kv.TemporalRwDB                     { return b.m.DB }
+func (b *SimulatedBackend) HistoryV3() bool                         { return b.m.HistoryV3 }
+func (b *SimulatedBackend) Engine() rules.Engine                    { return b.m.Engine }
+func (b *SimulatedBackend) BlockReader() dbservices.FullBlockReader { return b.m.BlockReader }
 
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
+		b.pendingReaderTx = nil
+	}
+	if b.pendingState != nil {
+		b.pendingState.Release(false)
+		b.pendingState = nil
 	}
 	b.m.Close()
 }
@@ -181,6 +188,9 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingGasUsed = new(protocol.GasUsed)
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
+	}
+	if b.pendingState != nil {
+		b.pendingState.Release(false)
 	}
 	tx, err := b.m.DB.BeginTemporalRo(context.Background()) //nolint:gocritic
 	if err != nil {
@@ -712,7 +722,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call bind.CallMsg) (
 			return 0, err
 		}
 		if failed {
-			if result != nil && result.Err != vm.ErrOutOfGas {
+			if result != nil && !errors.Is(result.Err, vm.ErrOutOfGas) {
 				if len(result.Revert()) > 0 {
 					return 0, newRevertError(result)
 				}

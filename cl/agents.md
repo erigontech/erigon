@@ -15,6 +15,7 @@ Caplin is Erigon's embedded Beacon Chain client implementing Ethereum's proof-of
 | `sentinel/` | libp2p P2P networking |
 | `pool/` | Operations pools (attestations, slashings) |
 | `validator/` | Attestation producer |
+| `antiquary/` | Freezes history to snapshots; prunes frozen state rows from the indexing DB |
 
 ## Key Components
 
@@ -39,6 +40,11 @@ Bridge to execution layer:
 - libp2p-based P2P networking
 - GossipSub for block/attestation propagation
 - Peer scoring and discovery
+
+### Antiquary (`antiquary/`)
+- Freezes historical blocks/states into `.seg` snapshots and prunes the frozen rows from the indexing DB
+- State-prune invariant: a state table's rows may be deleted only below that table's contiguous-from-genesis snapshot coverage (`CaplinStateSnapshots.ContiguousCoverageEnd`); the state reader resolves per-table, segment-first, so covered DB rows are unreachable
+- Progress markers in `kv.StatesPruneProgress`; kill-switch `CAPLIN_STATE_PRUNE_DISABLE`
 
 ## Beacon API (`beacon/handler/`)
 

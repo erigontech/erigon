@@ -92,7 +92,7 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 	compression := a.d[domain].Compression
 	compressCfg := a.d[domain].CompressCfg
 
-	a.logger.Info("[sqeeze] file", "f", to, "cfg", compressCfg, "c", compression)
+	a.logger.Info("[squeeze] file", "f", to, "cfg", compressCfg, "c", compression)
 	decompressor, err := seg.NewDecompressor(from)
 	if err != nil {
 		return err
@@ -100,7 +100,7 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 	defer decompressor.Close()
 	defer decompressor.MadvSequential().DisableReadAhead()
 
-	c, err := seg.NewCompressor(ctx, "sqeeze", to, a.dirs.Tmp, compressCfg, log.LvlInfo, a.logger)
+	c, err := seg.NewCompressor(ctx, "squeeze", to, a.dirs.Tmp, compressCfg, log.LvlInfo, a.logger)
 	if err != nil {
 		return err
 	}
@@ -150,7 +150,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 			},
 		},
 	}
-	sf, err := at.FilesInRange(rng)
+	sf, err := at.filesInRange(rng)
 	if err != nil {
 		return err
 	}
@@ -299,7 +299,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 			}
 			temporalFiles = append(temporalFiles, squeezedPath)
 
-			logger.Info("[sqeeze_migration] file done", "original", filepath.Base(originalPath),
+			logger.Info("[squeeze_migration] file done", "original", filepath.Base(originalPath),
 				"sizeDelta", fmt.Sprintf("%s (%.1f%%)", delta.HR(), deltaP))
 
 			processedFiles++
@@ -854,7 +854,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 	if err = SqueezeCommitmentFiles(ctx, actx, logger); err != nil {
 		logger.Warn("[rebuild_commitment_history] squeeze failed", "err", err)
-		logger.Info("[rebuild_commitment_history] rebuilt commitment files still available. Run 'erigon snapshots sqeeze' to finish squeezing")
+		logger.Info("[rebuild_commitment_history] rebuilt commitment files still available. Run 'erigon snapshots squeeze' to finish squeezing")
 		return nil, err
 	}
 	actx.Close()
@@ -907,7 +907,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			},
 		},
 	}
-	sf, err := acRo.FilesInRange(rng)
+	sf, err := acRo.filesInRange(rng)
 	if err != nil {
 		return nil, err
 	}
@@ -1145,12 +1145,12 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	if err = SqueezeCommitmentFiles(ctx, actx, logger); err != nil {
 		logger.Warn("[squeeze] failed", "err", err)
-		logger.Info("[squeeze] rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots sqeeze' to finish squeezing")
+		logger.Info("[squeeze] rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots squeeze' to finish squeezing")
 		return nil, err
 	}
 	actx.Close()
 	if err = a.ReloadFiles(); err != nil {
-		logger.Warn("[squeeze] failed to reload folder after sqeeze", "err", err)
+		logger.Warn("[squeeze] failed to reload folder after squeeze", "err", err)
 	}
 
 	if err = a.BuildMissedAccessors(ctx, 4); err != nil {

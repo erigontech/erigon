@@ -17,13 +17,14 @@
 package network
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -82,9 +83,9 @@ func (f *ForwardBeaconDownloader) SetHTTPFallbackURL(checkpointSyncURL string) {
 	if checkpointSyncURL == "" {
 		return
 	}
-	idx := strings.Index(checkpointSyncURL, "/eth/")
-	if idx >= 0 {
-		f.httpFallbackURL = checkpointSyncURL[:idx]
+	before, _, found := strings.Cut(checkpointSyncURL, "/eth/")
+	if found {
+		f.httpFallbackURL = before
 	} else {
 		// Accept bare base URL (no /eth/ path).
 		f.httpFallbackURL = strings.TrimRight(checkpointSyncURL, "/")
@@ -260,8 +261,8 @@ Process:
 	processBlocks := resp.blocks
 	pid := resp.peerId
 
-	sort.Slice(processBlocks, func(i, j int) bool {
-		return processBlocks[i].Block.Slot < processBlocks[j].Block.Slot
+	slices.SortFunc(processBlocks, func(a, b *cltypes.SignedBeaconBlock) int {
+		return cmp.Compare(a.Block.Slot, b.Block.Slot)
 	})
 
 	// For GLOAS blocks, fetch envelopes only for FULL blocks (whose payload was delivered).
@@ -417,7 +418,7 @@ func (f *ForwardBeaconDownloader) capAtForkBoundary(reqSlot, reqCount uint64) (u
 		}
 		boundaries = append(boundaries, epoch*slotsPerEpoch)
 	}
-	sort.Slice(boundaries, func(i, j int) bool { return boundaries[i] < boundaries[j] })
+	slices.Sort(boundaries)
 
 	endSlot := reqSlot + reqCount
 	for _, boundarySlot := range boundaries {
@@ -457,12 +458,10 @@ func fetchBlocksFromBeaconAPI(ctx context.Context, baseURL string, startSlot, co
 	sem := make(chan struct{}, 8) // limit concurrent requests
 	var wg sync.WaitGroup
 
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		slot := startSlot + i
 		idx := i
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
@@ -501,7 +500,7 @@ func fetchBlocksFromBeaconAPI(ctx context.Context, baseURL string, startSlot, co
 				return
 			}
 			results[idx].block = block
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -598,9 +597,7 @@ func fetchEnvelopesFromBeaconAPI(
 		idx := i
 		slot := item.slot
 		root := item.root
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
@@ -629,7 +626,7 @@ func fetchEnvelopesFromBeaconAPI(
 				return
 			}
 			results[idx] = envResult{hash: common.Hash(root), envelope: envelope}
-		}()
+		})
 	}
 	wg.Wait()
 

@@ -53,15 +53,13 @@ func TestSyncWriter_ConcurrentLinesStayAttributed(t *testing.T) {
 	shared := NewSyncWriter(&buf)
 
 	var wg sync.WaitGroup
-	for g := 0; g < 8; g++ {
+	for g := range 8 {
 		w := tracePrefix(shared, fmt.Sprintf("[%x] ", g))
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < 250; i++ {
+		wg.Go(func() {
+			for i := range 250 {
 				fmt.Fprintf(w, "step %d\n", i)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

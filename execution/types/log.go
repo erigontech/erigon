@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -377,7 +378,34 @@ type rlpStorageLog struct {
 
 // EncodeRLP implements rlp.Encoder.
 func (l *Log) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, rlpLog{Address: l.Address, Topics: l.Topics, Data: l.Data})
+	return rlp.Encode(w, &rlpLog{Address: l.Address, Topics: l.Topics, Data: l.Data})
+}
+
+func (l *Log) payloadSize() int {
+	topicsLen := (1 + length.Hash) * len(l.Topics)
+	return rlp.StringLen(l.Address[:]) + rlp.ListPrefixLen(topicsLen) + topicsLen + rlp.StringLen(l.Data)
+}
+
+func (l *Log) encodingSize() int {
+	return rlp.ListLen(l.payloadSize())
+}
+
+func (l *Log) encodeRLP(w io.Writer, b []byte) error {
+	if err := rlp.EncodeListPrefix(l.payloadSize(), w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeString(l.Address[:], w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeListPrefix((1+length.Hash)*len(l.Topics), w, b); err != nil {
+		return err
+	}
+	for i := range l.Topics {
+		if err := rlp.EncodeString(l.Topics[i][:], w, b); err != nil {
+			return err
+		}
+	}
+	return rlp.EncodeString(l.Data, w, b)
 }
 
 // DecodeRLP implements rlp.Decoder.
@@ -388,6 +416,30 @@ func (l *Log) DecodeRLP(s *rlp.Stream) error {
 		l.Address, l.Topics, l.Data = dec.Address, dec.Topics, dec.Data
 	}
 	return err
+}
+
+// RlpHashLogs hashes the concatenation of the given log groups as one RLP list,
+// without flattening them into a single slice first.
+func RlpHashLogs(groups []Logs) common.Hash {
+	return rlpPayloadHash(func(w io.Writer, b []byte) error {
+		payloadSize := 0
+		for _, logs := range groups {
+			for _, l := range logs {
+				payloadSize += l.encodingSize()
+			}
+		}
+		if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
+			return err
+		}
+		for _, logs := range groups {
+			for _, l := range logs {
+				if err := l.encodeRLP(w, b); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 // Copy creates a deep copy of the Log.
@@ -414,14 +466,14 @@ type LogForStorage Log
 
 // EncodeRLP implements rlp.Encoder.
 func (l *LogForStorage) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, rlpStorageLog{
+	return rlp.Encode(w, &rlpStorageLog{
 		Address: l.Address,
 		Topics:  l.Topics,
 		Data:    l.Data,
 	})
 }
 
-func decodeTopics2(s *rlp.Stream) (list []common.Hash, err error) {
+func decodeHashList(s *rlp.Stream) (list []common.Hash, err error) {
 	l, err := s.List()
 	if err != nil {
 		return nil, err
@@ -429,18 +481,17 @@ func decodeTopics2(s *rlp.Stream) (list []common.Hash, err error) {
 	if l == 0 {
 		return []common.Hash{}, s.ListEnd()
 	}
-	listLen := int(l / (1 + 32))  // rlpLenPrefix+32bytes
-	preAlloc := min(128, listLen) // attacker may craft rlp prefix - which will trigger hube pre-alloc. so, add hard-limit
+	listLen := l / (1 + 32)            // rlpLenPrefix+32bytes
+	preAlloc := int(min(128, listLen)) // attacker may craft rlp prefix - which will trigger huge pre-alloc. so, add hard-limit
 	list = make([]common.Hash, 0, preAlloc)
-	var i int
-	var b common.Hash
-	for ; s.MoreDataInList(); i++ {
-		if err = s.ReadBytes(b[:]); err != nil {
+	for s.MoreDataInList() {
+		h, err := s.ReadHash()
+		if err != nil {
 			return nil, err
 		}
-		list = append(list, b)
+		list = append(list, h)
 	}
-	return list[:i], s.ListEnd()
+	return list, s.ListEnd()
 }
 
 // DecodeRLP implements rlp.Decoder.
@@ -451,11 +502,10 @@ func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	err = s.ReadBytes(l.Address[:])
-	if err != nil {
+	if l.Address, err = s.Addr(); err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
-	l.Topics, err = decodeTopics2(s)
+	l.Topics, err = decodeHashList(s)
 	if err != nil {
 		return err
 	}

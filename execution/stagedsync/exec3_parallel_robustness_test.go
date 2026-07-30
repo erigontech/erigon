@@ -202,7 +202,7 @@ func TestBlockValidatorWaitMultipleTimes(t *testing.T) {
 	bv := &blockValidator{done: make(chan error, 1)}
 	bv.done <- nil // simulate goroutine completion
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		done := make(chan error, 1)
 		go func() {
 			done <- bv.Wait()
@@ -366,10 +366,7 @@ func TestCheckBlocksDrainedConcurrentReads(t *testing.T) {
 	var stop atomic.Bool
 	var wg sync.WaitGroup
 
-	// Mutator: add and remove blocks under pe's lock.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for !stop.Load() {
 			pe.Lock()
 			pe.blockExecutors[42] = &blockExecutor{}
@@ -378,16 +375,14 @@ func TestCheckBlocksDrainedConcurrentReads(t *testing.T) {
 			delete(pe.blockExecutors, 42)
 			pe.Unlock()
 		}
-	}()
+	})
 
 	// Reader: continually call checkBlocksDrained.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for !stop.Load() {
 			_ = pe.checkBlocksDrained(context.Background(), context.Background(), nil)
 		}
-	}()
+	})
 
 	time.Sleep(50 * time.Millisecond)
 	stop.Store(true)

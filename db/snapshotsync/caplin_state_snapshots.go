@@ -17,6 +17,8 @@
 package snapshotsync
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -25,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -85,7 +88,7 @@ func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 		if err := db.View(context.TODO(), func(tx kv.Tx) error {
 			key = base_encoding.Encode64ToBytes4(numId)
 			value, err = tx.GetOne(tableName, key)
-			value = common.Copy(value)
+			value = bytes.Clone(value)
 			return err
 		}); err != nil {
 			return nil, nil, err
@@ -217,7 +220,7 @@ func (s *CaplinStateSnapshots) SegmentsMax() uint64 { return s.segmentsMax.Load(
 
 func (s *CaplinStateSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
-		"blocks", common.PrettyCounter(s.SegmentsMax()+1), "indices", common.PrettyCounter(s.IndicesMax()+1))
+		"blocks", common.PrettyExact(s.SegmentsMax()+1), "indices", common.PrettyExact(s.IndicesMax()+1))
 }
 
 func (s *CaplinStateSnapshots) LS() {
@@ -265,6 +268,15 @@ func (s *CaplinStateSnapshots) BlocksAvailable() uint64 {
 	return min(s.segmentsMax.Load(), s.idxMax.Load())
 }
 
+func (s *CaplinStateSnapshots) TypeNames() []string {
+	names := make([]string, 0, len(s.snapshotTypes.KeyValueGetters))
+	for name := range s.snapshotTypes.KeyValueGetters {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 func (s *CaplinStateSnapshots) coveredRangesForType(name string) []Range {
 	s.visibleLock.RLock()
 	defer s.visibleLock.RUnlock()
@@ -282,6 +294,23 @@ func (s *CaplinStateSnapshots) coveredRangesForType(name string) []Range {
 		ranges = append(ranges, seg.Range)
 	}
 	return ranges
+}
+
+// ContiguousCoverageEnd returns the end of the unbroken visible-segment run that
+// starts at slot 0 for the given type, or 0 when coverage is not rooted at genesis.
+func (s *CaplinStateSnapshots) ContiguousCoverageEnd(typeName string) uint64 {
+	ranges := s.coveredRangesForType(typeName)
+	slices.SortFunc(ranges, func(a, b Range) int { return cmp.Compare(a.from, b.from) })
+	var end uint64
+	for _, r := range ranges {
+		if r.from > end {
+			break
+		}
+		if r.to > end {
+			end = r.to
+		}
+	}
+	return end
 }
 
 func (s *CaplinStateSnapshots) Close() {
