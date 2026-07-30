@@ -59,13 +59,8 @@ func (f *ForkChoiceStore) drainQueuedWork() {
 	f.queuedPrunes = nil
 	f.queuedOperationPrunes = nil
 	f.mu.Unlock()
-	for _, root := range operationPrunes {
-		finalizedState, err := f.forkGraph.GetState(root, true)
-		if err != nil || finalizedState == nil {
-			log.Warn("Failed to load finalized state for operation pruning", "root", root, "err", err)
-			continue
-		}
-		f.operationsPool.PruneFinalized(finalizedState)
+	if len(operationPrunes) > 0 {
+		f.scheduleOperationPrune(operationPrunes[len(operationPrunes)-1])
 	}
 	for _, emit := range emits {
 		emit()
@@ -74,6 +69,40 @@ func (f *ForkChoiceStore) drainQueuedWork() {
 		if err := f.forkGraph.Prune(pruneSlot); err != nil {
 			log.Warn("Failed to prune fork graph", "pruneSlot", pruneSlot, "err", err)
 		}
+	}
+}
+
+func (f *ForkChoiceStore) scheduleOperationPrune(root common.Hash) {
+	f.operationPruneMu.Lock()
+	f.operationPruneRoot = root
+	f.operationPrunePending = true
+	if f.operationPruneRunning {
+		f.operationPruneMu.Unlock()
+		return
+	}
+	f.operationPruneRunning = true
+	f.operationPruneMu.Unlock()
+	go f.runOperationPruner()
+}
+
+func (f *ForkChoiceStore) runOperationPruner() {
+	for {
+		f.operationPruneMu.Lock()
+		if !f.operationPrunePending {
+			f.operationPruneRunning = false
+			f.operationPruneMu.Unlock()
+			return
+		}
+		root := f.operationPruneRoot
+		f.operationPrunePending = false
+		f.operationPruneMu.Unlock()
+
+		finalizedState, err := f.forkGraph.GetState(root, true)
+		if err != nil || finalizedState == nil {
+			log.Warn("Failed to load finalized state for operation pruning", "root", root, "err", err)
+			continue
+		}
+		f.operationsPool.PruneFinalized(finalizedState)
 	}
 }
 

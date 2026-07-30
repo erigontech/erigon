@@ -162,6 +162,10 @@ type ForkChoiceStore struct {
 	queuedEmits           []func()
 	queuedPrunes          []uint64
 	queuedOperationPrunes []common.Hash
+	operationPruneMu      sync.Mutex
+	operationPruneRoot    common.Hash
+	operationPrunePending bool
+	operationPruneRunning bool
 	synced                atomic.Bool
 
 	ethClock                eth_clock.EthereumClock

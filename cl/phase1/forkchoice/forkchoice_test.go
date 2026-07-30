@@ -18,7 +18,10 @@ package forkchoice
 
 import (
 	"errors"
+	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
@@ -138,6 +141,8 @@ func TestUpdateCheckpointsPrunesOperationsWithExactFinalizedState(t *testing.T) 
 		states: map[common.Hash]*state.CachingBeaconState{
 			finalizedRoot: finalizedState,
 		},
+		getStateStarted: make(chan common.Hash, 1),
+		getStateRelease: make(chan struct{}),
 	}
 	store := &ForkChoiceStore{
 		forkGraph:      graph,
@@ -152,13 +157,30 @@ func TestUpdateCheckpointsPrunesOperationsWithExactFinalizedState(t *testing.T) 
 		solid.Checkpoint{},
 		solid.Checkpoint{Epoch: 2, Root: finalizedRoot},
 	)
-	require.Empty(t, graph.getStateRoots)
+	require.Empty(t, graph.stateRoots())
 
-	store.drainQueuedWork()
+	drained := make(chan struct{})
+	go func() {
+		store.drainQueuedWork()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+	case <-time.After(100 * time.Millisecond):
+		close(graph.getStateRelease)
+		<-drained
+		t.Fatal("drainQueuedWork waited for finalized operation pruning")
+	}
 
-	require.Equal(t, []common.Hash{finalizedRoot}, graph.getStateRoots)
-	require.Equal(t, []bool{true}, graph.getStateAlwaysCopy)
-	require.False(t, operationsPool.VoluntaryExitsPool.Has(0))
+	require.Equal(t, finalizedRoot, waitForStateLoad(t, graph.getStateStarted))
+	require.True(t, operationsPool.VoluntaryExitsPool.Has(0))
+	close(graph.getStateRelease)
+	require.Eventually(t, func() bool {
+		return !operationsPool.VoluntaryExitsPool.Has(0)
+	}, time.Second, time.Millisecond)
+	require.Equal(t, []common.Hash{finalizedRoot}, graph.stateRoots())
+	require.Equal(t, []bool{true}, graph.stateCopyModes())
+	requireOperationPrunerIdle(t, store)
 }
 
 func TestAllAttesterSlashingIndicesSeen(t *testing.T) {
@@ -186,15 +208,73 @@ func TestDrainQueuedWorkRetainsOperationsWhenFinalizedStateIsUnavailable(t *test
 
 	store.drainQueuedWork()
 
+	requireOperationPrunerIdle(t, store)
 	require.True(t, operationsPool.VoluntaryExitsPool.Has(0))
+}
+
+func TestOperationPrunerCoalescesPendingFinalizedRoots(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	firstRoot := common.Hash{1}
+	skippedRoot := common.Hash{2}
+	latestRoot := common.Hash{3}
+	graph := &getFinalizedExecutionHashForkGraph{
+		states: map[common.Hash]*state.CachingBeaconState{
+			firstRoot:  state.New(&cfg),
+			latestRoot: state.New(&cfg),
+		},
+		getStateStarted: make(chan common.Hash, 3),
+		getStateRelease: make(chan struct{}),
+	}
+	store := &ForkChoiceStore{
+		forkGraph:      graph,
+		operationsPool: pool.NewOperationsPool(&cfg),
+	}
+
+	store.queueOperationPrune(firstRoot)
+	store.drainQueuedWork()
+	require.Equal(t, firstRoot, waitForStateLoad(t, graph.getStateStarted))
+
+	store.queueOperationPrune(skippedRoot)
+	store.queueOperationPrune(latestRoot)
+	store.drainQueuedWork()
+	close(graph.getStateRelease)
+	require.Equal(t, latestRoot, waitForStateLoad(t, graph.getStateStarted))
+	require.Eventually(t, func() bool {
+		return len(graph.stateRoots()) == 2
+	}, time.Second, time.Millisecond)
+	require.Equal(t, []common.Hash{firstRoot, latestRoot}, graph.stateRoots())
+	requireOperationPrunerIdle(t, store)
+}
+
+func requireOperationPrunerIdle(t *testing.T, store *ForkChoiceStore) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		store.operationPruneMu.Lock()
+		defer store.operationPruneMu.Unlock()
+		return !store.operationPruneRunning && !store.operationPrunePending
+	}, time.Second, time.Millisecond)
+}
+
+func waitForStateLoad(t *testing.T, started <-chan common.Hash) common.Hash {
+	t.Helper()
+	select {
+	case root := <-started:
+		return root
+	case <-time.After(time.Second):
+		t.Fatal("finalized state load did not start")
+		return common.Hash{}
+	}
 }
 
 type getFinalizedExecutionHashForkGraph struct {
 	blocks                map[common.Hash]*cltypes.SignedBeaconBlock
 	headers               map[common.Hash]*cltypes.BeaconBlockHeader
 	states                map[common.Hash]*state.CachingBeaconState
+	getStateMu            sync.Mutex
 	getStateRoots         []common.Hash
 	getStateAlwaysCopy    []bool
+	getStateStarted       chan common.Hash
+	getStateRelease       chan struct{}
 	beforeUpdate          *cltypes.LightClientUpdate
 	afterUpdate           *cltypes.LightClientUpdate
 	addChainSegmentStatus fork_graph.ChainSegmentInsertionResult
@@ -218,10 +298,30 @@ func (g *getFinalizedExecutionHashForkGraph) GetBlock(blockRoot common.Hash) (*c
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+	g.getStateMu.Lock()
 	g.getStateRoots = append(g.getStateRoots, blockRoot)
 	g.getStateAlwaysCopy = append(g.getStateAlwaysCopy, alwaysCopy)
+	g.getStateMu.Unlock()
+	if g.getStateStarted != nil {
+		g.getStateStarted <- blockRoot
+	}
+	if g.getStateRelease != nil {
+		<-g.getStateRelease
+	}
 	state := g.states[blockRoot]
 	return state, nil
+}
+
+func (g *getFinalizedExecutionHashForkGraph) stateRoots() []common.Hash {
+	g.getStateMu.Lock()
+	defer g.getStateMu.Unlock()
+	return slices.Clone(g.getStateRoots)
+}
+
+func (g *getFinalizedExecutionHashForkGraph) stateCopyModes() []bool {
+	g.getStateMu.Lock()
+	defer g.getStateMu.Unlock()
+	return slices.Clone(g.getStateAlwaysCopy)
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetCurrentJustifiedCheckpoint(common.Hash) (solid.Checkpoint, bool) {
