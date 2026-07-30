@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -31,7 +32,13 @@ import (
 // finishes flushing; short enough that a wedged pipeline surfaces
 // rather than hanging forever. See
 // docs/plans/20260525-admin-sethead-unwind-design.md.
-const modeBQuiescenceTimeout = 120 * time.Second
+//
+// Sized to match modeBBuildQuiescenceTimeout: mode-B's two
+// quiescence waits run back-to-back on the same operation, so
+// mismatched budgets give the operator two different failure modes to
+// diagnose. Configurable via ERIGON_MODE_B_QUIESCENCE_TIMEOUT for
+// tuning under heavier ingest loads.
+var modeBQuiescenceTimeout = dbg.EnvDuration("ERIGON_MODE_B_QUIESCENCE_TIMEOUT", 5*time.Minute)
 
 // modeBQuiescencePoll is the polling interval for the quiescence
 // wait. Small enough that the wait usually terminates almost as soon
