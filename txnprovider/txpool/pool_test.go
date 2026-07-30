@@ -71,6 +71,26 @@ func newTestTxnSlot(nonce uint64, senderID uint64, tip, feeCap uint64, gas uint6
 	}
 }
 
+func newTestBlobTxnSlot(nonce uint64, senderID uint64, tip, feeCap uint64, gas uint64) *TxnSlot {
+	to := common.Address{1}
+	txn := &types.BlobTx{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{
+				Nonce:    nonce,
+				GasLimit: gas,
+				To:       &to,
+			},
+			TipCap: *uint256.NewInt(tip),
+			FeeCap: *uint256.NewInt(feeCap),
+		},
+	}
+	return &TxnSlot{
+		Txn:      txn,
+		Nonce:    nonce,
+		SenderID: senderID,
+	}
+}
+
 func newTestSetCodeTxnSlot(nonce uint64, senderID uint64, tip, feeCap uint64, gas uint64) *TxnSlot {
 	to := common.Address{1} // non-nil To means not a contract creation
 	txn := &types.SetCodeTransaction{
@@ -137,17 +157,39 @@ func TestAddLocalTxnsRejectsTipAboveFeeCap(t *testing.T) {
 	}
 	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
-	txn := newTestTxnSlot(0, 0, 2, 1, 21_000)
-	txn.IDHash[0] = 1
-	var txns TxnSlots
-	txns.Append(txn, sender[:], true)
+	tests := []struct {
+		name string
+		txn  *TxnSlot
+	}{
+		{
+			name: "dynamic fee",
+			txn:  newTestTxnSlot(0, 0, 2, 1, 21_000),
+		},
+		{
+			name: "blob",
+			txn:  newTestBlobTxnSlot(0, 0, 2, 1, 21_000),
+		},
+		{
+			name: "set code",
+			txn:  newTestSetCodeTxnSlot(0, 0, 2, 1, 21_000),
+		},
+	}
 
-	reasons, err := pool.AddLocalTxns(ctx, txns)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.TipAboveFeeCap}, reasons)
+	for i, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			txn := test.txn
+			txn.IDHash[0] = byte(i + 1)
+			var txns TxnSlots
+			txns.Append(txn, sender[:], true)
 
-	pending, baseFee, queued := pool.CountContent()
-	require.Zero(t, pending+baseFee+queued)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.TipAboveFeeCap}, reasons)
+
+			pending, baseFee, queued := pool.CountContent()
+			require.Zero(t, pending+baseFee+queued)
+		})
+	}
 }
 
 func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {

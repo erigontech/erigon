@@ -107,11 +107,29 @@ func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
 	}
 }
 
-func TestMapDiscardReasonToProtoTipAboveFeeCap(t *testing.T) {
+func TestGrpcServerAddTipAboveFeeCap(t *testing.T) {
 	t.Parallel()
 
-	if got := mapDiscardReasonToProto(txpoolcfg.TipAboveFeeCap); got != txpoolproto.ImportResult_INVALID {
+	ctx := context.Background()
+	chainID := *uint256.NewInt(1)
+	mockPool := &addMockTxPool{
+		addReasons: []txpoolcfg.DiscardReason{txpoolcfg.TipAboveFeeCap},
+	}
+	s := NewGrpcServer(ctx, mockPool, memdb.NewTestPoolDB(t), nil, chainID, log.New())
+	validRlp := hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)
+
+	reply, err := s.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{validRlp}})
+	if err != nil {
+		t.Fatalf("Add returned error: %v", err)
+	}
+	if len(reply.Imported) != 1 || len(reply.Errors) != 1 {
+		t.Fatalf("unexpected reply lengths: imported=%d errors=%d", len(reply.Imported), len(reply.Errors))
+	}
+	if got := reply.Imported[0]; got != txpoolproto.ImportResult_INVALID {
 		t.Fatalf("expected INVALID, got %v", got)
+	}
+	if got := reply.Errors[0]; got != "max priority fee per gas higher than max fee per gas" {
+		t.Fatalf("unexpected error: %q", got)
 	}
 }
 
