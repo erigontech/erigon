@@ -20,6 +20,7 @@ package p2p
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -86,6 +87,21 @@ func closeWithin(t *testing.T, n netChangeNotifier, timeout time.Duration) time.
 	return time.Since(start)
 }
 
+func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		if cond() {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for %s", what)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
 // TestFdNotifierParksAndCloses drives the notifier from a raw, initially
 // blocking pipe descriptor so it exercises the SetNonblock + os.NewFile
 // transition the fix relies on, hermetically (no privileged socket, never
@@ -101,10 +117,10 @@ func TestFdNotifierParksAndCloses(t *testing.T) {
 	defer unix.Close(writeFD)
 
 	logger, h := captureLogger()
-	n, err := notifierFromFD(readFD, logger)
+	n, err := newNetChangeNotifierFromFD(readFD, logger)
 	if err != nil {
 		_ = unix.Close(readFD)
-		t.Fatalf("notifierFromFD: %v", err)
+		t.Fatalf("newNetChangeNotifierFromFD: %v", err)
 	}
 
 	select {
@@ -129,5 +145,41 @@ func TestFdNotifierParksAndCloses(t *testing.T) {
 
 	if d := closeWithin(t, n, 2*time.Second); d > 500*time.Millisecond {
 		t.Fatalf("Close took %v; read did not park in the poller", d)
+	}
+}
+
+// TestFdNotifierClosesDescriptorOnReadError asserts the loop releases the
+// descriptor as soon as it exits on a terminal read error, rather than leaving
+// it open until the tracker's deferred Close at shutdown. Closing the pipe's
+// write end makes the read return io.EOF, which exits the loop.
+func TestFdNotifierClosesDescriptorOnReadError(t *testing.T) {
+	var fds [2]int
+	if err := unix.Pipe(fds[:]); err != nil {
+		t.Fatalf("unix.Pipe: %v", err)
+	}
+	readFD, writeFD := fds[0], fds[1]
+
+	logger, h := captureLogger()
+	n, err := newNetChangeNotifierFromFD(readFD, logger)
+	if err != nil {
+		_ = unix.Close(readFD)
+		_ = unix.Close(writeFD)
+		t.Fatalf("newNetChangeNotifierFromFD: %v", err)
+	}
+
+	if err := unix.Close(writeFD); err != nil {
+		t.Fatalf("close write end: %v", err)
+	}
+
+	waitFor(t, 2*time.Second, "read-failure log", func() bool {
+		return h.contains(notifierReadFailedMsg)
+	})
+	waitFor(t, 2*time.Second, "descriptor release", func() bool {
+		_, err := unix.FcntlInt(uintptr(readFD), unix.F_GETFD, 0)
+		return errors.Is(err, unix.EBADF)
+	})
+
+	if err := n.Close(); err != nil {
+		t.Fatalf("Close after loop exit: %v", err)
 	}
 }

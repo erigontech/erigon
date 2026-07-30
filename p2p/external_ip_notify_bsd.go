@@ -47,7 +47,7 @@ func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
 	}
 	unix.CloseOnExec(fd)
 
-	n, err := newRouteNotifierFromFD(fd, "pf_route", logger)
+	n, err := newNetChangeNotifierFromFD(fd, logger)
 	if err != nil {
 		_ = unix.Close(fd)
 		logger.Debug(notifierUnavailableMsg, "err", err)
@@ -56,9 +56,9 @@ func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
 	return n
 }
 
-// newRouteNotifierFromFD takes ownership of fd. On error fd is left open for the
-// caller to close; on success the returned notifier owns it via Close.
-func newRouteNotifierFromFD(fd int, name string, logger log.Logger) (*routeNotifier, error) {
+// newNetChangeNotifierFromFD takes ownership of fd. On error fd is left open for
+// the caller to close; on success the returned notifier owns it via Close.
+func newNetChangeNotifierFromFD(fd int, logger log.Logger) (netChangeNotifier, error) {
 	// Nonblocking so os.NewFile registers the socket with the runtime netpoller:
 	// the read parks until a message arrives and Close unblocks it at once,
 	// instead of a receive-timeout loop that wakes on a timer to observe Close.
@@ -66,7 +66,7 @@ func newRouteNotifierFromFD(fd int, name string, logger log.Logger) (*routeNotif
 		return nil, err
 	}
 	n := &routeNotifier{
-		file:    os.NewFile(uintptr(fd), name),
+		file:    os.NewFile(uintptr(fd), "pf_route"),
 		events:  make(chan struct{}, 1),
 		stopped: make(chan struct{}),
 	}
@@ -77,16 +77,19 @@ func newRouteNotifierFromFD(fd int, name string, logger log.Logger) (*routeNotif
 func (n *routeNotifier) Events() <-chan struct{} { return n.events }
 
 func (n *routeNotifier) Close() error {
-	n.closeOnce.Do(func() {
-		n.closeErr = n.file.Close()
-		<-n.stopped
-	})
+	n.closeOnce.Do(n.closeFile)
+	<-n.stopped
 	return n.closeErr
 }
+
+func (n *routeNotifier) closeFile() { n.closeErr = n.file.Close() }
 
 func (n *routeNotifier) loop(logger log.Logger) {
 	defer dbg.LogPanic()
 	defer close(n.stopped)
+	// Close the descriptor on any loop exit (including a terminal read error)
+	// so it is released at once, not held until the tracker's deferred Close.
+	defer func() { n.closeOnce.Do(n.closeFile) }()
 
 	buf := make([]byte, 4096)
 	for {
