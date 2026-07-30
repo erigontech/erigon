@@ -27,7 +27,7 @@ In order to connect diagnostics run
 
 This sub command can be used for manipulating snapshot files
 
-## Danger zone: `seg sqeeze`
+## Danger zone: `seg squeeze`
 
 To perform foreign-key-awared re-compression of files
 
