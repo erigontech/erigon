@@ -323,8 +323,10 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	}
 
 	// The block must have enough regular, state, and blob gas left for the tx.
-	regularContribution, stateContribution := InclusionContributions(st.msg.Gas(), rules.IsAmsterdam)
-	if err := CheckBlockGasInclusion(st.gp, regularContribution, stateContribution, st.msg.BlobGas()); err != nil {
+	gas := st.msg.Gas()
+	blobGas := st.msg.BlobGas()
+	regularContribution, stateContribution := InclusionContributions(gas, rules.IsAmsterdam)
+	if err := CheckBlockGasInclusion(st.gp, regularContribution, stateContribution, blobGas); err != nil {
 		return txnFees{}, err
 	}
 
@@ -339,30 +341,31 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 	// EIP-4844: the max fee per blob gas must cover the blob gas price.
-	if st.msg.BlobGas() > 0 && rules.IsCancun {
+	var maxFeePerBlobGas uint256.Int
+	hasBlobGas := rules.IsCancun && blobGas > 0
+	if hasBlobGas {
 		blobGasPrice := st.evm.Context.BlobBaseFee
-		maxFeePerBlobGas := st.msg.MaxFeePerBlobGas()
-		if maxFeePerBlobGas == nil {
-			maxFeePerBlobGas = new(uint256.Int)
+		if feeCap := st.msg.MaxFeePerBlobGas(); feeCap != nil {
+			maxFeePerBlobGas.Set(feeCap)
 		}
 		skipBlobCheck := st.evm.Config().NoBaseFee && maxFeePerBlobGas.IsZero()
-		if !skipBlobCheck && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
+		if !skipBlobCheck && blobGasPrice.Cmp(&maxFeePerBlobGas) > 0 {
 			return txnFees{}, fmt.Errorf("%w: address %v, maxFeePerBlobGas: %s < blobGasPrice: %s",
 				ErrMaxFeePerBlobGas, from, maxFeePerBlobGas.String(), blobGasPrice.String())
 		}
 	}
 
 	// EIP-7825: Transaction Gas Limit Cap.
+	requiredIntrinsicGas := max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost)
 	if st.msg.CheckGas() && rules.IsOsaka {
 		if rules.IsAmsterdam {
 			// EIP-8037: TX_MAX_GAS_LIMIT applies to the regular gas dimension only.
-			gasToCap := max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost)
-			if gasToCap > params.MaxTxnGasLimit {
+			if requiredIntrinsicGas > params.MaxTxnGasLimit {
 				return txnFees{}, fmt.Errorf("%w: regular gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
-					ErrIntrinsicGas, gasToCap, params.MaxTxnGasLimit)
+					ErrIntrinsicGas, requiredIntrinsicGas, params.MaxTxnGasLimit)
 			}
-		} else if st.msg.Gas() > params.MaxTxnGasLimit {
-			return txnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, st.msg.Gas())
+		} else if gas > params.MaxTxnGasLimit {
+			return txnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, gas)
 		}
 	}
 
@@ -376,14 +379,14 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		fees     txnFees
 		overflow bool
 	)
-	fees.gasVal, overflow = u256.MulOverflow(u256.U64(st.msg.Gas()), *st.gasPrice)
+	fees.gasVal, overflow = u256.MulOverflow(u256.U64(gas), *st.gasPrice)
 	if overflow {
 		return txnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
 	}
 
 	// compute blob fee for eip-4844 data blobs if any
-	if rules.IsCancun {
-		fees.blobGasVal, overflow = u256.MulOverflow(st.evm.Context.BlobBaseFee, u256.U64(st.msg.BlobGas()))
+	if hasBlobGas {
+		fees.blobGasVal, overflow = u256.MulOverflow(st.evm.Context.BlobBaseFee, u256.U64(blobGas))
 		if overflow {
 			return txnFees{}, fmt.Errorf("%w: overflow converting blob gas: %s", ErrInsufficientFunds, fees.blobGasVal.String())
 		}
@@ -394,7 +397,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	if !gasBailout {
 		balanceCheck := fees.gasVal
 		if st.feeCap != nil {
-			balanceCheck, overflow = u256.MulOverflow(u256.U64(st.msg.Gas()), *st.feeCap)
+			balanceCheck, overflow = u256.MulOverflow(u256.U64(gas), *st.feeCap)
 			if overflow {
 				return txnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
 			}
@@ -402,10 +405,8 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 			if overflow {
 				return txnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
 			}
-			// A nil blob fee cap (possible for call-style Message impls,
-			// never for a real blob txn) contributes no blob fee.
-			if maxFeePerBlobGas := st.msg.MaxFeePerBlobGas(); rules.IsCancun && st.msg.BlobGas() > 0 && maxFeePerBlobGas != nil {
-				maxBlobFee, overflow := u256.MulOverflow(*maxFeePerBlobGas, u256.U64(st.msg.BlobGas()))
+			if hasBlobGas {
+				maxBlobFee, overflow := u256.MulOverflow(maxFeePerBlobGas, u256.U64(blobGas))
 				if overflow {
 					return txnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
 				}
@@ -424,9 +425,8 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	intrinsicGas := intrinsicGasResult.RegularGas
-	if st.msg.Gas() < intrinsicGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
-		return txnFees{}, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGas, intrinsicGasResult.FloorGasCost))
+	if gas < requiredIntrinsicGas {
+		return txnFees{}, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, gas, requiredIntrinsicGas)
 	}
 
 	// EIP-3860: reject oversized contract-creation initcode before

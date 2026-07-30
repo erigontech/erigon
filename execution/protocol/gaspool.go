@@ -180,13 +180,15 @@ func CheckBlockGasInclusion(gp *GasPool, regularGas, stateGas, blobGas uint64) e
 	if gp == nil {
 		return nil
 	}
-	if regularGas > gp.RegularGasAvailable() {
+	gp.mu.RLock()
+	defer gp.mu.RUnlock()
+	if regularGas > gp.regularGas {
 		return ErrGasLimitReached
 	}
-	if stateGas > gp.StateGasAvailable() {
+	if stateGas > gp.stateGas {
 		return ErrGasLimitReached
 	}
-	if blobGas > gp.BlobGas() {
+	if blobGas > gp.blobGas {
 		return ErrBlobGasLimitReached
 	}
 	return nil
