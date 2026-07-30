@@ -277,17 +277,14 @@ func (rw *Worker) ResetTx(chainTx kv.TemporalTx) error {
 	return rw.resetTx(chainTx)
 }
 
-// Close returns the worker's IntraBlockState to its pools and drops its
-// transaction, reader and writer. Idempotent, and safe to defer. Callers must
-// ensure the worker's Run goroutine has exited first.
+// Close releases the worker's state, tx, reader and writer. Idempotent. Only
+// call it once the worker's Run goroutine has exited.
 func (rw *Worker) Close() {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.ibs.Close()
-	// resetTx only reports errors while installing a non-nil tx, so a nil tx
-	// cannot fail. Assert it rather than return it: Close is meant to be deferred.
 	if err := rw.resetTx(nil); err != nil {
-		panic(fmt.Errorf("exec.Worker.Close: %w", err))
+		panic(fmt.Errorf("exec.Worker.Close: %w", err)) // unreachable: only a non-nil tx can fail
 	}
 }
 
