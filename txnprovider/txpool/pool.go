@@ -2699,7 +2699,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 			return err
 		}
 		if reason != txpoolcfg.NotSet && reason != txpoolcfg.Success {
-			return nil // TODO: Clarify - if one of the txns has the wrong reason, no pooled txns!
+			continue
 		}
 		txns.Resize(uint(i + 1))
 		txns.Txns[i] = txn

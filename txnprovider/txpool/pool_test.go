@@ -192,6 +192,80 @@ func TestAddLocalTxnsRejectsTipAboveFeeCap(t *testing.T) {
 	}
 }
 
+func TestFromDBSkipsInvalidTransactions(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	poolDB := memdb.NewTestPoolDB(t)
+	pool, err := New(
+		ctx,
+		make(chan Announcements, 1),
+		poolDB,
+		coreDB,
+		txpoolcfg.DefaultConfig,
+		kvcache.New(kvcache.DefaultCoherentConfig),
+		chain.AllProtocolChanges,
+		nil,
+		nil,
+		func() {},
+		nil,
+		nil,
+		log.New(),
+		WithFeeCalculator(nil),
+	)
+	require.NoError(t, err)
+
+	sender := common.Address{1}
+	account := accounts3.Account{
+		Balance:  *uint256.NewInt(common.Ether),
+		CodeHash: accounts.EmptyCodeHash,
+	}
+	change := &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: 1,
+		BlockGasLimit:       1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+			Changes: []*remoteproto.AccountChange{{
+				Action:  remoteproto.Action_UPSERT,
+				Address: gointerfaces.ConvertAddressToH160(sender),
+				Data:    accounts3.SerialiseV3(&account),
+			}},
+		}},
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	invalidTxn := newTestTxnSlot(0, 0, 2, 1, 21_000)
+	validTxn := newTestTxnSlot(0, 0, 1, 2, 21_000)
+	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+		for _, txn := range []*TxnSlot{invalidTxn, validTxn} {
+			var encoded bytes.Buffer
+			if err := txn.Txn.MarshalBinary(&encoded); err != nil {
+				return err
+			}
+			value := make([]byte, len(sender)+encoded.Len())
+			copy(value, sender[:])
+			copy(value[len(sender):], encoded.Bytes())
+			hash := txn.Txn.Hash()
+			if err := tx.Put(kv.PoolTransaction, hash[:], value); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
+		return coreDB.ViewTemporal(ctx, func(coreTx kv.TemporalTx) error {
+			return pool.fromDB(ctx, poolTx, coreTx)
+		})
+	}))
+
+	validHash := validTxn.Txn.Hash()
+	invalidHash := invalidTxn.Txn.Hash()
+	require.Contains(t, pool.byHash, string(validHash[:]))
+	require.NotContains(t, pool.byHash, string(invalidHash[:]))
+}
+
 func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
