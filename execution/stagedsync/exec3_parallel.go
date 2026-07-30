@@ -840,7 +840,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	}
 
 	if execErr != nil {
-		if !(common.IsOnlyCanceled(execErr) || errors.Is(execErr, &ErrLoopExhausted{})) {
+		if !isQuietExit(execErr) {
 			if lastHeader != nil {
 				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr, "block", lastHeader.Number.Uint64(), "hash", lastHeader.Hash())
 			} else {
@@ -885,12 +885,18 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	return lastHeader, rwTx, execErr
 }
 
+// isQuietExit reports whether err is routine teardown (cancellation-only) or a
+// resumable batch boundary rather than a failure.
+func isQuietExit(err error) bool {
+	return common.IsOnlyCanceled(err) || errors.Is(err, &ErrLoopExhausted{})
+}
+
 func (pe *parallelExecutor) runApplyLoop(logPrefix string, applyResults <-chan applyResult, rootResults <-chan commitmentResult, apply func() error) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("apply loop panic: %v", rec)
 			pe.logger.Warn("["+logPrefix+"] rw panic", "rec", rec, "stack", dbg.Stack())
-		} else if err != nil && !(common.IsOnlyCanceled(err) || errors.Is(err, &ErrLoopExhausted{})) {
+		} else if err != nil && !isQuietExit(err) {
 			pe.logger.Warn("["+logPrefix+"] rw exit", "err", err, "stack", dbg.Stack())
 		} else {
 			pe.logger.Debug("[" + logPrefix + "] rw exit")
@@ -1598,7 +1604,7 @@ func (pe *parallelExecutor) checkBlocksDrained(ctx, executorCtx context.Context,
 		return execErr
 	}
 	slices.Sort(pending)
-	return fmt.Errorf("parallel exec apply loop exited with %d scheduled block(s) never drained: %v",
+	return fmt.Errorf("parallel exec finished with %d scheduled block(s) that never reached apply-loop validation: %v",
 		len(pending), pending)
 }
 

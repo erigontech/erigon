@@ -958,7 +958,7 @@ func TestReconcileExecAndWaitErr(t *testing.T) {
 	waitFail := errors.New("snapshot step misalignment: snapshot files need rebuilding")
 
 	surfacesLoudly := func(err error) bool {
-		return err != nil && !(common.IsOnlyCanceled(err) || errors.Is(err, &ErrLoopExhausted{}))
+		return err != nil && !isQuietExit(err)
 	}
 
 	t.Run("both nil", func(t *testing.T) {
@@ -1159,7 +1159,7 @@ func TestRunApplyLoopErrorDrainsChannels(t *testing.T) {
 
 	select {
 	case <-sendDone:
-	default:
+	case <-time.After(5 * time.Second):
 		<-applyResults
 		<-sendDone
 		for range applyResults {
