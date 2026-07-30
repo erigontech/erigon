@@ -195,6 +195,11 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	for _, opt := range opts {
 		opt(&o)
 	}
+	// Bit-path branch keys collide in the cache's hex-shaped trunk slots; the
+	// commitment-context ctor refuses a bin SD that shares the cache.
+	if o.trieCfg.Variant == commitment.VariantBinPatriciaTrie {
+		WithoutSharedBranchCache()(&o)
+	}
 	trieCfg := o.trieCfg
 
 	sd := &SharedDomains{
@@ -777,6 +782,10 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64
 }
 
 func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
+
+// HasSharedBranchCache reports whether commitment-branch reads go through the
+// aggregator-scope BranchCache shared across SharedDomains instances.
+func (sd *SharedDomains) HasSharedBranchCache() bool { return sd.branchCache != nil }
 
 // IsUnfrozenStepEdge reports whether txNum is the last tx of a step whose
 // commitment is not yet frozen into files — where a step-boundary checkpoint

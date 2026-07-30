@@ -51,6 +51,10 @@ type sd interface {
 	// per domain (Storage value loads vs Commitment branch reads
 	// vs Account loads).
 	Metrics() *kvmetrics.DomainMetrics
+
+	// HasSharedBranchCache reports whether commitment-branch reads go through
+	// the aggregator-scope BranchCache shared across SharedDomains instances.
+	HasSharedBranchCache() bool
 }
 
 type SharedDomainsCommitmentContext struct {
@@ -223,6 +227,12 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 		variant = commitment.VariantHexPatriciaTrie
 	}
 	if variant == commitment.VariantBinPatriciaTrie {
+		// The shared BranchCache indexes trunk slots by hex compact prefixes;
+		// distinct bin bit-path keys collapse onto one slot, so a shared cache
+		// would serve another node's record as a well-formed hit.
+		if sd != nil && sd.HasSharedBranchCache() {
+			panic("commitment variant " + string(variant) + " cannot use the shared branch cache: bit-path keys collide in its trunk slots")
+		}
 		// encodeCommitmentState/restorePatriciaState are hex-only, so this variant
 		// would fail after a full Process instead of at configuration time.
 		panic("commitment variant " + string(variant) + " has no state save/restore and cannot back a domain commitment context")

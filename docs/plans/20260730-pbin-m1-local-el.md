@@ -181,11 +181,11 @@ Production keeps Keccak-256. This task only makes the **test** path run the whol
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
 - Create: `execution/commitment/commitmentdb/pbin_nocache_test.go`
 
-- [ ] write a failing test asserting a bin-variant `SharedDomains` has no shared branch cache
-- [ ] write a failing test demonstrating the `trunkSlot` collision for two distinct ≤8-bit bit-path keys, so the reason is pinned in the suite (guards H1)
-- [ ] construct the bin-variant `SharedDomains` with `execctx.WithoutSharedBranchCache()`
-- [ ] add a structural assert in the commitment-context ctor that the bin variant never has a shared branch cache — enforce, do not document
-- [ ] run tests — must pass before task 5
+- [x] write a failing test asserting a bin-variant `SharedDomains` has no shared branch cache — `TestPBinSharedDomainsHasNoSharedBranchCache`, red while the ctor assert saw the shared cache; written to survive Task 5 (tolerates the save/restore panic, asserts directly on the SD once construction succeeds)
+- [x] write a failing test demonstrating the `trunkSlot` collision for two distinct ≤8-bit bit-path keys, so the reason is pinned in the suite (guards H1) — `TestPBinBranchCacheTrunkSlotCollision`: 3-bit paths 000 (`00 03`) and 001 (`20 03`) both index `d2[0x03]`; `Get` serves the other path's record as a well-formed hit. Pinning test — it passes against current `trunkSlot` by design and fails if the collision ever disappears
+- [x] construct the bin-variant `SharedDomains` with `execctx.WithoutSharedBranchCache()` — `NewSharedDomains` applies it whenever `trieCfg.Variant` is bin; the co-located `AdaptivePinController` is gated on the same option and stays off too
+- [x] add a structural assert in the commitment-context ctor that the bin variant never has a shared branch cache — enforce, do not document — the commitmentdb `sd` interface gained `HasSharedBranchCache()` (implemented by `execctx.SharedDomains`); `NewSharedDomainsCommitmentContext` panics on bin+shared-cache ahead of the save/restore panic Task 5 removes
+- [x] run tests — `go test ./execution/commitment/... -count=1` and `./db/state/... -short` green, `make lint` clean twice
 
 ### Task 5: SetState / EncodeCurrentState for pbin, and remove the panic
 
