@@ -17,6 +17,7 @@
 package pool
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -25,6 +26,71 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
+
+func bytes96(i int) common.Bytes96 {
+	var k common.Bytes96
+	binary.LittleEndian.PutUint64(k[:], uint64(i))
+	return k
+}
+
+// Capacity is a retention window, not a per-block bound: filling a pool past its
+// capacity must evict, and the surviving count is what a proposer gets to pack from.
+func TestOperationsPoolCapacity(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	pools := NewOperationsPool(&cfg)
+
+	t.Run("attestations hold the retention window", func(t *testing.T) {
+		want := attestationRetentionSlots * int(cfg.MaxCommitteesPerSlot*cfg.TargetAggregatorsPerCommittee)
+		for i := 0; i <= want; i++ {
+			pools.AttestationsPool.Insert(bytes96(i), &solid.Attestation{})
+		}
+		require.Equal(t, want, len(pools.AttestationsPool.Raw()))
+	})
+
+	t.Run("attester slashings", func(t *testing.T) {
+		for i := 0; i <= attesterSlashingsCapacity; i++ {
+			pools.AttesterSlashingsPool.Insert(bytes96(i), &cltypes.AttesterSlashing{})
+		}
+		require.Equal(t, attesterSlashingsCapacity, len(pools.AttesterSlashingsPool.Raw()))
+	})
+
+	t.Run("proposer slashings", func(t *testing.T) {
+		for i := 0; i <= proposerSlashingsCapacity; i++ {
+			pools.ProposerSlashingsPool.Insert(bytes96(i), &cltypes.ProposerSlashing{})
+		}
+		require.Equal(t, proposerSlashingsCapacity, len(pools.ProposerSlashingsPool.Raw()))
+	})
+
+	t.Run("bls to execution changes", func(t *testing.T) {
+		for i := 0; i <= blsToExecutionChangesCapacity; i++ {
+			pools.BLSToExecutionChangesPool.Insert(bytes96(i), &cltypes.SignedBLSToExecutionChange{})
+		}
+		require.Equal(t, blsToExecutionChangesCapacity, len(pools.BLSToExecutionChangesPool.Raw()))
+	})
+
+	t.Run("voluntary exits", func(t *testing.T) {
+		for i := 0; i <= voluntaryExitsCapacity; i++ {
+			pools.VoluntaryExitsPool.Insert(uint64(i), &cltypes.SignedVoluntaryExit{})
+		}
+		require.Equal(t, voluntaryExitsCapacity, len(pools.VoluntaryExitsPool.Raw()))
+	})
+}
+
+// The attestation pool tracks the committee layout of the network it runs on, so a
+// smaller preset must not reserve the mainnet window.
+func TestAttestationsPoolCapacityFollowsPreset(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	pools := NewOperationsPool(&cfg)
+
+	want := attestationRetentionSlots * int(cfg.MaxCommitteesPerSlot*cfg.TargetAggregatorsPerCommittee)
+	require.Less(t, want, attestationsCapacity(&clparams.MainnetBeaconConfig))
+
+	for i := 0; i <= want; i++ {
+		pools.AttestationsPool.Insert(bytes96(i), &solid.Attestation{})
+	}
+	require.Equal(t, want, len(pools.AttestationsPool.Raw()))
+}
 
 func TestOperationsPool(t *testing.T) {
 	pools := NewOperationsPool(&clparams.MainnetBeaconConfig)
