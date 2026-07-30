@@ -1546,11 +1546,36 @@ func (s *RoSnapshots) delete(fileName string) error {
 		}
 	}
 	if delSeg == nil || dirtySegments == nil {
-		// Deletion is intentionally idempotent because a snapshot may already
-		// have been removed from the in-memory set by another pruning path.
+		// Not tracked in the dirty set. Fall through to a direct disk
+		// unlink so a caller like pruneBlockSnapshots (stage_snapshots.go)
+		// gets the same net effect as for tracked segments — otherwise
+		// prune leaves the .seg on disk after Downloader.Delete has
+		// removed its .torrent, and every subsequent retire round
+		// re-fires the same no-op Delete cycle. Deletion stays idempotent
+		// via removeOldFiles' os.ErrNotExist handling.
+		toRemove := []string{filepath.Join(s.dir, fName)}
+		if fi, _, ok := snaptype.ParseFileName(s.dir, fName); ok && fi.Type != nil {
+			for _, idxName := range fi.Type.IdxFileNames(fi.From, fi.To) {
+				toRemove = append(toRemove, filepath.Join(s.dir, idxName))
+			}
+		}
+		removeOldFiles(toRemove)
 		return nil
 	}
 	dirtySegments.Delete(delSeg)
+	// For tracked segments the deferred disk cleanup is
+	//   RoTx.Close: refcount.Add(-1) → if refcount==0 && canDelete → closeAndRemoveFiles
+	// That only fires when a visible-set RoTx that referenced this
+	// segment actually closes. For below-prune-horizon block-snapshot
+	// files under --prune.mode=minimal no visible view ever includes
+	// them, so refcount stays 0 from the start and the deferred cleanup
+	// never runs. Trigger the close+unlink synchronously when refcount
+	// is already 0 (i.e. nobody's reading). If refcount > 0 there's an
+	// in-flight reader; canDelete is set, and their RoTx.Close will
+	// clean up as before.
+	if delSeg.refcount.Load() == 0 {
+		delSeg.closeAndRemoveFiles()
+	}
 	return nil
 }
 

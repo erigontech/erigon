@@ -401,6 +401,82 @@ func TestDeleteSnapshotsIsIdempotent(t *testing.T) {
 	})
 }
 
+// TestDeleteSnapshots_TrackedButUnreferenced pins the OTHER half of
+// pruneBlockSnapshots's contract: even when the segment IS in the dirty
+// btree (Decompressor opened, healthy file) but no visible-view RoTx
+// currently references it (refcount == 0), Delete must remove the .seg
+// synchronously — not defer to the RoTx.Close cleanup path. That
+// deferred path only fires when a RoTx that pinned this segment
+// actually closes; for below-prune-horizon block files no visible view
+// ever includes them, so refcount stays 0 from the start and the
+// deferred cleanup never runs. Seen live 2026-07-30 in the fix-verify
+// run — pruneBlockSnapshots called Delete 8× per retire round, the
+// per-call .torrent was removed each time, but the .seg persisted on
+// disk because the tracked-segment path stopped at "mark canDelete +
+// remove from btree" and the deferred RoTx.Close cleanup never fired.
+func TestDeleteSnapshots_TrackedButUnreferenced(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, version.V1_0, logger)
+	}
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	// OpenFolder → dirty btree populated with Decompressor non-nil.
+	// No View() opened → refcount stays 0.
+	require.NoError(s.OpenFolder())
+
+	fileName := "v1.0-000000-000010-bodies.seg"
+	segPath := filepath.Join(dir, fileName)
+	_, statErr := os.Stat(segPath)
+	require.NoError(statErr, "test precondition: .seg exists on disk before Delete")
+
+	require.NoError(s.Delete(fileName))
+
+	_, statErr = os.Stat(segPath)
+	require.True(errors.Is(statErr, os.ErrNotExist),
+		"Delete must remove the .seg from disk even for tracked-but-unreferenced segments (refcount==0 no-visible-view case); got stat err=%v", statErr)
+}
+
+// TestDeleteSnapshots_UntrackedOnDisk pins the pruner's contract: when
+// pruneBlockSnapshots (stage_snapshots.go) asks RoSnapshots.Delete to prune
+// a file whose Decompressor was never opened (under --prune.mode=minimal,
+// block files below the prune horizon skip Decompressor open — the
+// walk-and-skip at snapshots.go:1530 then leaves them untracked in the
+// dirty btree), the file must still be removed from disk. Otherwise the
+// pruner's Downloader.Delete strips the .torrent, chain.toml can no
+// longer advertise the file (its disk walk enumerates .torrent siblings),
+// the .seg is orphaned, and every subsequent retire round re-fires the
+// same fruitless Delete cycle. Seen live in the 2026-07-30 continuous
+// soak instrumented run.
+func TestDeleteSnapshots_UntrackedOnDisk(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	// Drop a .seg (+ .idx) on disk without OpenFolder, so it exists on
+	// disk but is not registered in the dirty btree.
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, version.V1_0, logger)
+	}
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	// Deliberately no s.OpenFolder() — mirrors the below-horizon-file case
+	// where the segment is never opened.
+
+	fileName := "v1.0-000000-000010-bodies.seg"
+	segPath := filepath.Join(dir, fileName)
+	_, statErr := os.Stat(segPath)
+	require.NoError(statErr, "test precondition: .seg exists on disk before Delete")
+
+	require.NoError(s.Delete(fileName))
+
+	_, statErr = os.Stat(segPath)
+	require.True(errors.Is(statErr, os.ErrNotExist),
+		"RoSnapshots.Delete must remove the .seg from disk even when the segment was never opened (Decompressor==nil / not in dirty set); got stat err=%v", statErr)
+}
+
 func TestRemoveOverlaps(t *testing.T) {
 	mustSeeFile := func(files []string, fileNameWithoutVersion string) bool { //file-version agnostic
 		for _, f := range files {
