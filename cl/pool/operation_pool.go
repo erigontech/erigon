@@ -25,16 +25,14 @@ import (
 
 const lifeSpan = 30 * time.Minute
 
-var operationsMultiplier = 20 // Cap the amount of cached element to max_operations_per_block * operations_multiplier
-
 type OperationPool[K comparable, T any] struct {
 	pool         *lru.Cache[K, T] // Map the Signature to the underlying object
 	recentlySeen sync.Map         // map from K to time.Time
 	lastPruned   time.Time
 }
 
-func NewOperationPool[K comparable, T any](maxOperationsPerBlock int, matricName string) *OperationPool[K, T] {
-	pool, err := lru.New[K, T](matricName, maxOperationsPerBlock*operationsMultiplier)
+func NewOperationPool[K comparable, T any](capacity int, matricName string) *OperationPool[K, T] {
+	pool, err := lru.New[K, T](matricName, capacity)
 	if err != nil {
 		panic(err)
 	}
