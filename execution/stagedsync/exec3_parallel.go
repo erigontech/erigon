@@ -758,6 +758,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						}
 					}
 
+					// The BAL was the last reader of the recorded write sets;
+					// return their map containers to the pools.
+					applyResult.TxIO.ReleaseOutputMaps()
+
 					// Mark this block as fully applied. The exit-completeness
 					// check at channel-close compares this set against the
 					// expected [startBlockNum, maxBlockNum] range to detect
@@ -1242,7 +1246,7 @@ func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
 	pe.abortCount.Add(int64(be.cntAbort))
 	pe.invalidCount.Add(int64(be.cntValidationFail))
 	pe.readCount.Add(be.blockIO.ReadCount())
-	pe.writeCount.Add(be.blockIO.WriteCount())
+	pe.writeCount.Add(be.ioWriteCount)
 	if !be.execStarted.IsZero() {
 		pe.blockExecMetrics.Duration.Add(time.Since(be.execStarted))
 		pe.blockExecMetrics.BlockCount.Add(1)
@@ -2261,6 +2265,11 @@ type blockExecutor struct {
 	tasks   []*execTask
 	results []*execResult
 
+	// ioWriteCount snapshots blockIO.WriteCount at blockResult build: the apply
+	// loop releases the write-set maps after the BAL is processed, so metrics
+	// must not iterate them later.
+	ioWriteCount int64
+
 	// settledInput[tx]==true marks a task that was dispatched when every
 	// preceding task had already validated — so it executed against fully
 	// settled MVCC state, with no lower-indexed worker still in flight.
@@ -2790,6 +2799,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 					merged := MergeVersionedWrites(existingWrites, addWrites)
 					be.blockIO.RecordWrites(txVersion, merged)
+					if existingWrites != txResult.TxOut {
+						// The replaced slot was the fee-merge temporary; TxOut
+						// stays live for finalize and must keep its maps.
+						existingWrites.ReleaseMaps()
+					}
 
 					// Flush the merged writes (including fee calc changes)
 					// to the version map so that subsequent per-tx
@@ -3137,6 +3151,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			return nil, err
 		}
 
+		be.ioWriteCount = be.blockIO.WriteCount()
 		be.result = &blockResult{
 			BlockNum:         be.blockNum,
 			BlockTime:        txTask.BlockTime(),
