@@ -271,8 +271,10 @@ glob to a recursive `filepath.WalkDir` collecting `*.torrent`.
 
 ### Task 8: [Final] Update documentation
 
-- [ ] no README/CLAUDE.md changes expected; confirm and skip if so
-- [ ] move this plan to `docs/plans/completed/`
+- [x] no README/CLAUDE.md changes expected; confirm and skip if so
+  (confirmed: all six fixes are internal code paths — no flags, commands,
+  or build steps changed)
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
