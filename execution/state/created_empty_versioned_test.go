@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -92,6 +93,18 @@ func TestCreatedEmptyRequiresNoOtherWrites(t *testing.T) {
 			name: "balance",
 			add: func(writes *WriteSet) {
 				writes.SetBalance(addr, &VersionedWrite[uint256.Int]{Val: *uint256.NewInt(1)})
+			},
+		},
+		{
+			name: "nonce",
+			add: func(writes *WriteSet) {
+				writes.SetNonce(addr, &VersionedWrite[uint64]{Val: 1})
+			},
+		},
+		{
+			name: "code hash",
+			add: func(writes *WriteSet) {
+				writes.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{Val: accounts.InternCodeHash(common.Hash{1})})
 			},
 		},
 		{
