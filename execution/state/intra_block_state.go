@@ -2601,6 +2601,11 @@ func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) *WriteSet {
 	return writes
 }
 
+// withholdCreatedEmptyAccounts drops writes for accounts the tx observed as
+// absent and left empty (EIP-161): such an account is absent both before and
+// after the tx, so omitting its writes is exact and no deletion marker is
+// needed. An account that existed before is kept even when it ends empty —
+// clearing it needs an explicit delete, which commit-time normalization emits.
 func (sdb *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules, writes *WriteSet) {
 	if sdb.blockNum == 0 || chainRules == nil {
 		return
@@ -2773,6 +2778,10 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 }
 
 // StartAccessRecording enables versioned access tracking until ResetVersionedIO.
+// Block finalization re-enables it (Prepare only runs for user txs) so that an
+// address touched but left absent — e.g. a zero-amount withdrawal recipient —
+// still reaches the BAL as an access-only entry: its reads are validation-only
+// and FinalizedWrites withholds its created-empty writes.
 func (sdb *IntraBlockState) StartAccessRecording() {
 	sdb.recordAccess = true
 }
