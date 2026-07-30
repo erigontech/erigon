@@ -278,13 +278,17 @@ func (rw *Worker) ResetTx(chainTx kv.TemporalTx) error {
 }
 
 // Close returns the worker's IntraBlockState to its pools and drops its
-// transaction, reader and writer. Idempotent. Callers must ensure the worker's
-// Run goroutine has exited first.
-func (rw *Worker) Close() error {
+// transaction, reader and writer. Idempotent, and safe to defer. Callers must
+// ensure the worker's Run goroutine has exited first.
+func (rw *Worker) Close() {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.ibs.Close()
-	return rw.resetTx(nil)
+	// resetTx only reports errors while installing a non-nil tx, so a nil tx
+	// cannot fail. Assert it rather than return it: Close is meant to be deferred.
+	if err := rw.resetTx(nil); err != nil {
+		panic(fmt.Errorf("exec.Worker.Close: %w", err))
+	}
 }
 
 func (rw *Worker) resetTxNum(txNum uint64) {
@@ -616,13 +620,9 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 		}
 		clearDone = true
 		g.Wait()
-		if err = applyWorker.Close(); err != nil {
-			return
-		}
+		applyWorker.Close()
 		for _, w := range reconWorkers {
-			if err = w.Close(); err != nil {
-				return
-			}
+			w.Close()
 		}
 	}
 	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
