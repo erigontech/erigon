@@ -190,11 +190,11 @@ glob to a recursive `filepath.WalkDir` collecting `*.torrent`.
 **Files:**
 - Modify: `cl/antiquary/antiquary.go`
 
-- [ ] log the `RemoveBlobSidecars` error at `:518` (`Warn`, slot + err),
+- [x] log the `RemoveBlobSidecars` error at `:518` (`Warn`, slot + err),
   keep the loop going; no new test (logging only, pragmatism clause —
   declare in PR body)
-- [ ] run `go test ./cl/antiquary/...` — green
-- [ ] commit: `cl/antiquary: log blob sidecar removal failures during prune`
+- [x] run `go test ./cl/antiquary/...` — green
+- [x] commit: `cl/antiquary: log blob sidecar removal failures during prune`
 
 ### Task 3: drop the 15s dump sleep
 

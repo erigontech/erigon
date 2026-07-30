@@ -517,7 +517,9 @@ func (a *Antiquary) antiquateBlobs() error {
 		if err != nil {
 			return err
 		}
-		a.blobStorage.RemoveBlobSidecars(a.ctx, i, blockRoot)
+		if err := a.blobStorage.RemoveBlobSidecars(a.ctx, i, blockRoot); err != nil {
+			a.logger.Warn("[Antiquary] Failed to remove blob sidecars", "slot", i, "err", err)
+		}
 	}
 	return nil
 }
