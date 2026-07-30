@@ -1088,7 +1088,7 @@ func (imp *impl) ProcessBlsToExecutionChange(
 		return errors.New("ProcessBlsToExecutionChange: withdrawal credentials mismatch")
 	}
 
-	if I.FullValidation {
+	if imp.FullValidation {
 		// Fork-agnostic domain since address changes are valid across forks
 		domain, err := fork.ComputeDomain(
 			s.BeaconConfig().DomainBLSToExecutionChange[:],
