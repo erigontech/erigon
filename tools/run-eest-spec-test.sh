@@ -10,18 +10,21 @@
 #   statetests-legacy                          complete legacy Cancun state tests
 #   blocktests-stable-sequential               blockchain tests vs. eest_stable
 #   blocktests-devnet                          blockchain tests vs. eest_devnet
-#   blocktests-legacy-consensus-{sequential,parallel,race}
+#   blocktests-legacy-consensus-{sequential,parallel}
+#                                              Hive consensus suite
+#   blocktests-legacy-consensus-race-{sequential,parallel}
+#                                              race-detector variants of the
 #                                              Hive consensus suite
 #   blocktests-legacy-constantinople-{sequential,parallel}
 #                                              Hive legacy suite
-#   blocktests-legacy-constantinople-race-{constantinople,constantinople-fix,other-forks}
-#                                              race-detector partition of the
-#                                              Hive legacy suite
+#   blocktests-legacy-constantinople-race-*
+#                                              three fork partitions, each with
+#                                              sequential/parallel commitment
 #   blocktests-legacy-cancun-{sequential,parallel}
 #                                              Hive legacy-cancun suite
-#   blocktests-legacy-cancun-race-{berlin,shanghai,cancun,london,paris,other-forks}
-#                                              race-detector partition of the
-#                                              Hive legacy-cancun suite
+#   blocktests-legacy-cancun-race-*
+#                                              six fork partitions, each with
+#                                              sequential/parallel commitment
 #   enginextests-stable-sequential             engine-x tests vs. eest_stable
 #   enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}-sequential
 #                                              engine-x benchmark fixtures per

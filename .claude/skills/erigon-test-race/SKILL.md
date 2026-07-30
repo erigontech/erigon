@@ -16,12 +16,12 @@ Use the dedicated EEST blocktest race shards:
 ```bash
 make eest-spec-blocktests-stable-race-{pre-cancun,cancun,prague,osaka}-{sequential,parallel}
 make eest-spec-blocktests-devnet-race-amsterdam
-make eest-spec-blocktests-legacy-consensus-race
-make eest-spec-blocktests-legacy-constantinople-race-{constantinople,constantinople-fix,other-forks}
-make eest-spec-blocktests-legacy-cancun-race-{berlin,shanghai,cancun,london,paris,other-forks}
+make eest-spec-blocktests-legacy-consensus-race-{sequential,parallel}
+make eest-spec-blocktests-legacy-constantinople-race-{constantinople,constantinople-fix,other-forks}-{sequential,parallel}
+make eest-spec-blocktests-legacy-cancun-race-{berlin,shanghai,cancun,london,paris,other-forks}-{sequential,parallel}
 ```
 
-These targets build a race-instrumented `evm.race` binary automatically (see `EEST_SPEC_RACE_SHARDS` in the root `Makefile`). The stable `-sequential` / `-parallel` pairs pin both execution modes; the devnet and legacy race shards pin parallel execution to match their fixture topology. For the consensus spec suite or other Go packages, pass `GOFLAGS='-race'` or invoke `go test -race` against the relevant package directly.
+These targets build a race-instrumented `evm.race` binary automatically (see `EEST_SPEC_RACE_SHARDS` in the root `Makefile`). The stable and legacy `-sequential` / `-parallel` pairs pin both commitment modes; execution remains parallel in every pair. The unsuffixed devnet race shard uses serial commitment. For the consensus spec suite or other Go packages, pass `GOFLAGS='-race'` or invoke `go test -race` against the relevant package directly.
 
 **Pitfall: stale `evm.race` binary.** `make eest-spec-<race-shard>` lists `evm.race` as a prereq and `go build` is cache-aware, so a stale binary gets rebuilt. Calling `bash tools/run-eest-spec-test.sh <shard>` directly with `EVM_BIN=build/bin/evm.race` **bypasses** the rebuild and silently runs an old race-instrumented binary against current fixtures — race reports against code that no longer exists, missed races against code that does. After pulling or switching branches: `rm -f build/bin/evm.race && make evm.race` before re-running.
 
