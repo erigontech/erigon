@@ -18,6 +18,7 @@ package types
 
 import (
 	"bytes"
+	"errors"
 	"math"
 	"testing"
 
@@ -26,8 +27,9 @@ import (
 	"github.com/holiman/uint256"
 )
 
-// The fixed vector verifies the signing preimage independently of
-// SignAuthorization, so a shared encoding mistake cannot make a round trip pass.
+// The fixed vector pins the signing preimage independently of SignAuthorization:
+// a bug in the shared encoding keeps the round-trip test passing but changes
+// the address recovered from this externally signed vector.
 func TestRecoverSigner(t *testing.T) {
 	t.Parallel()
 
@@ -100,8 +102,8 @@ func TestSignAuthorizationRejectsMaxNonce(t *testing.T) {
 	}
 
 	_, err = SignAuthorization(privateKey, uint256.Int{}, common.Address{}, math.MaxUint64)
-	if err == nil {
-		t.Fatal("expected maximum nonce to be rejected")
+	if !errors.Is(err, errAuthNonceOverflow) {
+		t.Fatalf("expected maximum nonce to be rejected, got %v", err)
 	}
 }
 
