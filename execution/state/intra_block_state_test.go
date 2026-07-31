@@ -640,7 +640,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	assert.NoError(t, err)
 
 	var io2 VersionedIO
-	states[2].MergeTxIOInto(&io2)
+	states[2].MergeTxIOInto(&io2, states[2].VersionedWrites())
 	valid := mvhm.ValidateVersion(2, &io2, func(rv, wv Version) VersionValidity {
 		if rv == wv {
 			return VersionValid

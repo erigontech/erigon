@@ -158,9 +158,11 @@ func (tm *TestMatcher) CheckFailureForName(name string, err error) error {
 func (tm *TestMatcher) Walk(t *testing.T, dir string, runTest any) {
 	// Walk the directory.
 	dirinfo, err := os.Stat(dir)
-	if os.IsNotExist(err) || !dirinfo.IsDir() {
-		fmt.Fprintf(os.Stderr, "can't find test files in %s, did you clone the tests submodule?\n", dir)
-		t.Skip("missing test files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dirinfo.IsDir() {
+		t.Fatalf("test path is not a directory: %s", dir)
 	}
 	err = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
