@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -295,6 +294,20 @@ func AssertReceipts(ctx context.Context, cfg *exec.ExecArgs, db kv.TemporalRoDB,
 	return integrity.ReceiptsNoDupsRange(ctx, fromBlock, toBlock, db, cfg.BlockReader, true)
 }
 
+func writeCustomTraceReceipts(writer *rawtemporaldb.ReceiptWriter, putter kv.TemporalPutDel, produce Produce, logIndexAfterTx uint32, cumGasUsed, cumulativeBlobGasUsed uint64, receipt *types.Receipt, txNum uint64) error {
+	if produce.ReceiptDomain {
+		if err := writer.AppendMetadata(putter, logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsed, txNum); err != nil {
+			return err
+		}
+	}
+	if produce.RCacheDomain {
+		if err := writer.Append(putter, receipt, txNum); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, tx kv.TemporalRwTx, doms *execctx.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	const logPeriod = 5 * time.Second
 	logEvery := time.NewTicker(logPeriod)
@@ -307,6 +320,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 	prevTxNumLog := fromTxNum
 
 	var m runtime.MemStats
+	var receipts rawtemporaldb.ReceiptWriter
 	if err := exec.CustomTraceMapReduce(ctx, fromBlock, toBlock, exec.TraceConsumerFunc(
 		func(blockResult *exec.BlockResult, result *exec.TxResult, tx kv.TemporalTx) error {
 			if result.Err != nil {
@@ -319,12 +333,10 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 			}
 
 			putter := doms.AsPutDel(tx)
-			var receipts rawtemporaldb.ReceiptWriter
+			var logIndexAfterTx uint32
+			var cumGasUsed uint64
 
 			if produce.ReceiptDomain {
-				var logIndexAfterTx uint32
-				var cumGasUsed uint64
-
 				if txTask.IsBlockEnd() { // block changed
 					if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
 						// get last receipt and store the last log index + 1
@@ -347,18 +359,10 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 						}
 					}
 				}
-
-				if err := receipts.AppendMetadata(putter, logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
-					return err
-				}
-
-				if txTask.IsBlockEnd() { // block changed
-					cumulativeBlobGasUsedInBlock = 0
-				}
 			}
 
+			var receipt *types.Receipt
 			if produce.RCacheDomain {
-				var receipt *types.Receipt
 				if !txTask.IsBlockEnd() {
 					receipt = result.Receipt
 				} else if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
@@ -368,9 +372,13 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 						return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
 					}
 				}
-				if err := rawdb.WriteReceiptCacheV2(putter, receipt, txTask.TxNum); err != nil {
-					return err
-				}
+			}
+
+			if err := writeCustomTraceReceipts(&receipts, putter, produce, logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, receipt, txTask.TxNum); err != nil {
+				return err
+			}
+			if produce.ReceiptDomain && txTask.IsBlockEnd() { // block changed
+				cumulativeBlobGasUsedInBlock = 0
 			}
 
 			if produce.LogAddr {
