@@ -1294,57 +1294,42 @@ func (s *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 // ReleaseAndReset returns every *VersionedWrite[T] held by the set to its
 // typed sync.Pool, then returns the per-path maps to their map-pools.
 // Called at tx-finalize so both the VW values and the map buckets cycle
-// through pools rather than getting GC'd.
-//
-// Per-path sequence: walk the map releasing each value first; then the
-// map-pool's put() does clear() + Put, preserving the bucket array for
-// the next tx's checkout.  Pool-resident containers want clear() — the
-// usual "clear doesn't free memory" critique becomes a feature here.
+// through pools rather than getting GC'd. The values must go back before
+// ReleaseMaps clears the maps that hold them.
 func (s *WriteSet) ReleaseAndReset() {
 	for _, vw := range s.address {
 		releaseVWAddress(vw)
 	}
-	wsMapPoolAddress.put(s.address)
 	for _, vw := range s.balance {
 		releaseVWBalance(vw)
 	}
-	wsMapPoolBalance.put(s.balance)
 	for _, vw := range s.nonce {
 		releaseVWNonce(vw)
 	}
-	wsMapPoolNonce.put(s.nonce)
 	for _, vw := range s.incarnation {
 		releaseVWIncarnation(vw)
 	}
-	wsMapPoolIncarnation.put(s.incarnation)
 	for _, vw := range s.selfDestruct {
 		releaseVWSelfDestruct(vw)
 	}
-	wsMapPoolSelfDestruct.put(s.selfDestruct)
 	for _, vw := range s.createContract {
 		releaseVWCreateContract(vw)
 	}
-	wsMapPoolCreateContract.put(s.createContract)
 	for _, vw := range s.code {
 		releaseVWCode(vw)
 	}
-	wsMapPoolCode.put(s.code)
 	for _, vw := range s.codeHash {
 		releaseVWCodeHash(vw)
 	}
-	wsMapPoolCodeHash.put(s.codeHash)
 	for _, vw := range s.codeSize {
 		releaseVWCodeSize(vw)
 	}
-	wsMapPoolCodeSize.put(s.codeSize)
 	for _, inner := range s.storage {
 		for _, vw := range inner {
 			releaseVWStorage(vw)
 		}
-		wsPutStorageInner(inner)
 	}
-	wsPutStorageOuter(s.storage)
-	*s = WriteSet{}
+	s.ReleaseMaps()
 }
 
 // ReleaseMaps returns the map containers to their pools without releasing the
@@ -2048,6 +2033,68 @@ func (s *WriteSet) copyFrom(src *WriteSet) {
 	}
 }
 
+// copyMissingFrom adds the entries s does not already hold, sharing src's
+// *VersionedWrite pointers rather than cloning them — see MergeInto for what
+// the sharing costs the caller.
+func (s *WriteSet) copyMissingFrom(src *WriteSet) {
+	if src == nil {
+		return
+	}
+	for a, vw := range src.address {
+		if _, ok := s.address[a]; !ok {
+			s.SetAddress(a, vw)
+		}
+	}
+	for a, vw := range src.balance {
+		if _, ok := s.balance[a]; !ok {
+			s.SetBalance(a, vw)
+		}
+	}
+	for a, vw := range src.nonce {
+		if _, ok := s.nonce[a]; !ok {
+			s.SetNonce(a, vw)
+		}
+	}
+	for a, vw := range src.incarnation {
+		if _, ok := s.incarnation[a]; !ok {
+			s.SetIncarnation(a, vw)
+		}
+	}
+	for a, vw := range src.selfDestruct {
+		if _, ok := s.selfDestruct[a]; !ok {
+			s.SetSelfDestruct(a, vw)
+		}
+	}
+	for a, vw := range src.createContract {
+		if _, ok := s.createContract[a]; !ok {
+			s.SetCreateContract(a, vw)
+		}
+	}
+	for a, vw := range src.code {
+		if _, ok := s.code[a]; !ok {
+			s.SetCode(a, vw)
+		}
+	}
+	for a, vw := range src.codeHash {
+		if _, ok := s.codeHash[a]; !ok {
+			s.SetCodeHash(a, vw)
+		}
+	}
+	for a, vw := range src.codeSize {
+		if _, ok := s.codeSize[a]; !ok {
+			s.SetCodeSize(a, vw)
+		}
+	}
+	for a, inner := range src.storage {
+		own := s.storage[a]
+		for key, vw := range inner {
+			if _, ok := own[key]; !ok {
+				s.SetStorage(a, key, vw)
+			}
+		}
+	}
+}
+
 // Merge returns the union of prev and next, with next winning on (addr,path,key).
 func (prev *WriteSet) Merge(next *WriteSet) *WriteSet {
 	if prev.IsEmpty() {
@@ -2074,59 +2121,7 @@ func (prev *WriteSet) MergeInto(next *WriteSet) *WriteSet {
 	if next.IsEmpty() {
 		return prev
 	}
-	for a, vw := range prev.address {
-		if _, ok := next.address[a]; !ok {
-			next.SetAddress(a, vw)
-		}
-	}
-	for a, vw := range prev.balance {
-		if _, ok := next.balance[a]; !ok {
-			next.SetBalance(a, vw)
-		}
-	}
-	for a, vw := range prev.nonce {
-		if _, ok := next.nonce[a]; !ok {
-			next.SetNonce(a, vw)
-		}
-	}
-	for a, vw := range prev.incarnation {
-		if _, ok := next.incarnation[a]; !ok {
-			next.SetIncarnation(a, vw)
-		}
-	}
-	for a, vw := range prev.selfDestruct {
-		if _, ok := next.selfDestruct[a]; !ok {
-			next.SetSelfDestruct(a, vw)
-		}
-	}
-	for a, vw := range prev.createContract {
-		if _, ok := next.createContract[a]; !ok {
-			next.SetCreateContract(a, vw)
-		}
-	}
-	for a, vw := range prev.code {
-		if _, ok := next.code[a]; !ok {
-			next.SetCode(a, vw)
-		}
-	}
-	for a, vw := range prev.codeHash {
-		if _, ok := next.codeHash[a]; !ok {
-			next.SetCodeHash(a, vw)
-		}
-	}
-	for a, vw := range prev.codeSize {
-		if _, ok := next.codeSize[a]; !ok {
-			next.SetCodeSize(a, vw)
-		}
-	}
-	for a, inner := range prev.storage {
-		nextInner := next.storage[a]
-		for k, vw := range inner {
-			if _, ok := nextInner[k]; !ok {
-				next.SetStorage(a, k, vw)
-			}
-		}
-	}
+	next.copyMissingFrom(prev)
 	return next
 }
 

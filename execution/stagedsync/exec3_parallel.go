@@ -2680,8 +2680,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 			if !tipWrites.IsEmpty() {
 				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-				merged := MergeVersionedWrites(existingWrites, tipWrites)
-				be.blockIO.RecordWrites(txVersion, merged)
+				be.blockIO.RecordWrites(txVersion, existingWrites.MergeInto(tipWrites))
 			}
 		}
 
@@ -2797,9 +2796,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if !addWrites.IsEmpty() {
 					// Merge finalization writes with existing execution writes.
 					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-					merged := MergeVersionedWrites(existingWrites, addWrites)
+					merged := existingWrites.MergeInto(addWrites)
 					be.blockIO.RecordWrites(txVersion, merged)
-					if existingWrites != txResult.TxOut {
+					if merged != existingWrites && existingWrites != txResult.TxOut {
 						// The replaced slot was the fee-merge temporary; TxOut
 						// stays live for finalize and must keep its maps.
 						existingWrites.ReleaseMaps()
@@ -3291,10 +3290,4 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		be.execTasks.drainDeferred()
 		dispatch()
 	}
-}
-
-// MergeVersionedWrites folds a recorded write set with a fresh apply-loop
-// addition (calcFees/finalize output). next is consumed — see WriteSet.MergeInto.
-func MergeVersionedWrites(prev, next *state.WriteSet) *state.WriteSet {
-	return prev.MergeInto(next)
 }
