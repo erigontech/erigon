@@ -37,16 +37,9 @@ import (
 )
 
 func TestPoolAttesterSlashings(t *testing.T) {
-	attesterSlashing := &cltypes.AttesterSlashing{
-		Attestation_1: &cltypes.IndexedAttestation{
-			AttestingIndices: solid.NewRawUint64List(2048, []uint64{2, 3, 4, 5, 6}),
-			Data:             &solid.AttestationData{},
-		},
-		Attestation_2: &cltypes.IndexedAttestation{
-			AttestingIndices: solid.NewRawUint64List(2048, []uint64{2, 3, 4, 1, 6}),
-			Data:             &solid.AttestationData{},
-		},
-	}
+	attesterSlashing := cltypes.NewAttesterSlashing(clparams.DenebVersion)
+	attesterSlashing.Attestation_1.AttestingIndices = solid.NewRawUint64List(2048, []uint64{2, 3, 4, 5, 6})
+	attesterSlashing.Attestation_2.AttestingIndices = solid.NewRawUint64List(2048, []uint64{2, 3, 4, 1, 6})
 	// find server
 	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}

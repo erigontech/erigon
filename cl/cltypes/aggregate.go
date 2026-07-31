@@ -17,6 +17,7 @@
 package cltypes
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 
@@ -44,6 +45,39 @@ func (a *AggregateAndProof) SetVersion(version clparams.StateVersion) {
 	if a.Aggregate != nil {
 		a.Aggregate.SetVersion(version)
 	}
+}
+
+func (a *AggregateAndProof) UnmarshalJSON(data []byte) error {
+	decoded := struct {
+		AggregatorIndex uint64         `json:"aggregator_index,string"`
+		SelectionProof  common.Bytes96 `json:"selection_proof"`
+	}{AggregatorIndex: a.AggregatorIndex, SelectionProof: a.SelectionProof}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	fields := make(map[string]json.RawMessage)
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	aggregate := a.Aggregate
+	if raw, ok := fields["aggregate"]; ok {
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			aggregate = nil
+		} else {
+			aggregate = &solid.Attestation{}
+			aggregate.SetVersion(a.version)
+			if err := json.Unmarshal(raw, aggregate); err != nil {
+				return err
+			}
+		}
+	}
+	a.AggregatorIndex = decoded.AggregatorIndex
+	a.Aggregate = aggregate
+	a.SelectionProof = decoded.SelectionProof
+	if a.Aggregate != nil {
+		a.Aggregate.SetVersion(a.version)
+	}
+	return nil
 }
 
 func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -79,6 +113,37 @@ func (a *SignedAggregateAndProof) SetVersion(version clparams.StateVersion) {
 	if a.Message != nil {
 		a.Message.SetVersion(version)
 	}
+}
+
+func (a *SignedAggregateAndProof) UnmarshalJSON(data []byte) error {
+	decoded := struct {
+		Signature common.Bytes96 `json:"signature"`
+	}{Signature: a.Signature}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	fields := make(map[string]json.RawMessage)
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	message := a.Message
+	if raw, ok := fields["message"]; ok {
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			message = nil
+		} else {
+			message = &AggregateAndProof{}
+			message.SetVersion(a.version)
+			if err := json.Unmarshal(raw, message); err != nil {
+				return err
+			}
+		}
+	}
+	a.Message = message
+	a.Signature = decoded.Signature
+	if a.Message != nil {
+		a.Message.SetVersion(a.version)
+	}
+	return nil
 }
 
 func (a *SignedAggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
