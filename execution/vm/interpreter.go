@@ -86,15 +86,19 @@ type CallContext struct {
 
 // peekStorageKey returns the top-of-stack value as an interned StorageKey.
 // The result is cached for the lifetime of one opcode dispatch (gas phase +
-// execute phase share the same cacheGen), so unique.Make is called at most
+// execute phase share the same cacheGen), so the key is resolved at most
 // once per opcode. Callers must invoke this before any stack mutation
 // (pop/push/swap) within the same dispatch — the cache is keyed by generation
 // only and will not detect a changed stack top within the same opcode.
-func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
+func (ctx *CallContext) peekStorageKey(evm *EVM) accounts.StorageKey {
 	if ctx.cachedKeyGen == ctx.cacheGen {
 		return ctx.cachedKey
 	}
-	ctx.cachedKey = accounts.InternKey(ctx.Stack.peek().Bytes32())
+	return ctx.memoStorageKey(evm)
+}
+
+func (ctx *CallContext) memoStorageKey(evm *EVM) accounts.StorageKey {
+	ctx.cachedKey = evm.internStorageKey(ctx.Stack.peek())
 	ctx.cachedKeyGen = ctx.cacheGen
 	return ctx.cachedKey
 }

@@ -438,7 +438,7 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) (err e
 			if ok {
 				fName := filepath.Base(fPath)
 				d.FileVersion.AccessorBT.MustSupport(fileVer, fName)
-				if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, btindex.DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
+				if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, d.dataReader(item.decompressor)); err != nil {
 					d.logger.Debug("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}

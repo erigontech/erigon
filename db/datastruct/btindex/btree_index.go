@@ -44,7 +44,9 @@ const BtreeLogPrefix = "btree"
 
 // DefaultBtreeM - amount of keys on leaf of BTree
 // It will do log2(M) co-located-reads from data file - for binary-search inside leaf
-var DefaultBtreeM = uint64(dbg.EnvInt("BT_M", 256))
+var DefaultBtreeM = uint64(dbg.EnvInt("BT_M", 64))
+
+const DefaultBtreeMLegacy = uint64(256) // for legacy format (determined first byte), we created the files with m=256
 
 const DefaultBtreeStartSkip = uint64(4) // defines smallest shard available for scan instead of binsearch
 
@@ -375,18 +377,18 @@ type BtIndex struct {
 	pool     sync.Pool
 }
 
-// Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
-func CreateBtreeIndexWithDecompressor(indexPath string, existenceFilterPath string, m uint64, decompressor *seg.Reader, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors statecfg.Accessors) (*BtIndex, error) {
+// CreateBtreeIndexWithDecompressor Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
+func CreateBtreeIndexWithDecompressor(indexPath string, existenceFilterPath string, decompressor *seg.Reader, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors statecfg.Accessors) (*BtIndex, error) {
 	err := BuildBtreeIndexWithDecompressor(indexPath, existenceFilterPath, decompressor, ps, tmpdir, seed, logger, noFsync, accessors)
 	if err != nil {
 		return nil, err
 	}
-	return OpenBtreeIndexWithDecompressor(indexPath, m, decompressor)
+	return OpenBtreeIndexWithDecompressor(indexPath, decompressor)
 }
 
 // OpenBtreeIndexAndDataFile opens btree index file and data file and returns it along with BtIndex instance
 // Mostly useful for testing
-func OpenBtreeIndexAndDataFile(indexPath, dataPath string, m uint64, compressed seg.FileCompression, trace bool) (_ *seg.Decompressor, _ *BtIndex, err error) {
+func OpenBtreeIndexAndDataFile(indexPath, dataPath string, compressed seg.FileCompression, trace bool) (_ *seg.Decompressor, _ *BtIndex, err error) {
 	d, err := seg.NewDecompressor(dataPath)
 	if err != nil {
 		return nil, nil, err
@@ -397,7 +399,7 @@ func OpenBtreeIndexAndDataFile(indexPath, dataPath string, m uint64, compressed 
 		}
 	}()
 	kv := seg.NewReader(d.MakeGetter(), compressed)
-	bt, err := OpenBtreeIndexWithDecompressor(indexPath, m, kv)
+	bt, err := OpenBtreeIndexWithDecompressor(indexPath, kv)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -470,10 +472,9 @@ func BuildBtreeIndexWithDecompressor(indexPath string, existenceFilterPath strin
 	return nil
 }
 
-func OpenBtreeIndexWithDecompressor(indexPath string, m uint64, kvGetter *seg.Reader) (bt *BtIndex, err error) {
+func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt *BtIndex, err error) {
 	idx := &BtIndex{
 		filePath: indexPath,
-		indexM:   m,
 	}
 
 	var validationPassed bool
@@ -513,6 +514,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, m uint64, kvGetter *seg.Re
 	var nodeOfftEF *eliasfano32.EliasFano
 	var keysBlob []byte
 	var nodeStride uint64
+	m := DefaultBtreeMLegacy // newer format ("use footer") carry m in the file itself
 	switch idx.data[0] {
 	case btFirstByteLegacy: // legacy [EF][nodesCount][di-nodes]
 		var pos int
