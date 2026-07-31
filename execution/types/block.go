@@ -606,9 +606,14 @@ func (h *Header) Size() common.StorageSize {
 	return s
 }
 
-// HasBAL reports whether the header commits to a non-empty EIP-7928 block access list.
+// HasBAL reports whether the header contains an EIP-7928 block access list commitment.
 func (h *Header) HasBAL() bool {
-	return h.BlockAccessListHash != nil && *h.BlockAccessListHash != empty.BlockAccessListHash
+	return h.BlockAccessListHash != nil
+}
+
+// HasNonEmptyBAL reports whether the commitment is for a non-empty block access list.
+func (h *Header) HasNonEmptyBAL() bool {
+	return h.HasBAL() && *h.BlockAccessListHash != empty.BlockAccessListHash
 }
 
 // SanityCheck checks a few basic things -- these checks are way beyond what

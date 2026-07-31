@@ -1154,19 +1154,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.Nil(entry)
 }
 
-type blockAccessListReadCounter struct {
-	kv.Getter
-	reads int
-}
-
-func (g *blockAccessListReadCounter) GetOne(table string, key []byte) ([]byte, error) {
-	if table == kv.BlockAccessList {
-		g.reads++
-	}
-	return g.Getter.GetOne(table, key)
-}
-
-func TestReadBlockSkipsEmptyBlockAccessListLookup(t *testing.T) {
+func TestReadBlockLoadsEmptyBlockAccessList(t *testing.T) {
 	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 	defer tx.Rollback()
@@ -1191,10 +1179,13 @@ func TestReadBlockSkipsEmptyBlockAccessListLookup(t *testing.T) {
 		BlockAccessListHash:   &emptyBALHash,
 	})
 	require.NoError(t, rawdb.WriteBlock(tx, block))
+	emptyBALBytes, err := types.EncodeBlockAccessListBytes(nil)
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), emptyBALBytes))
 
-	getter := &blockAccessListReadCounter{Getter: tx}
-	require.NotNil(t, rawdb.ReadBlock(getter, block.Hash(), block.NumberU64()))
-	require.Zero(t, getter.reads)
+	readBlock := rawdb.ReadBlock(tx, block.Hash(), block.NumberU64())
+	require.NotNil(t, readBlock)
+	require.Equal(t, emptyBALBytes, readBlock.BlockAccessList())
 }
 
 func TestBlockAccessListStorage(t *testing.T) {

@@ -530,7 +530,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 
 func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64) ([]byte, error) {
 	data := block.BlockAccessList()
-	if len(data) == 0 && block.HeaderNoCopy().HasBAL() {
+	if len(data) == 0 && block.HeaderNoCopy().HasNonEmptyBAL() {
 		return rawdb.ReadBlockAccessListBytes(blockTx, block.Hash(), blockNum)
 	}
 	return data, nil
