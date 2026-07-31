@@ -83,6 +83,9 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 //     original.Incarnation > account.Incarnation (followed by account fields)
 func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache, trace bool) error {
 	if writes != nil && !writes.IsEmpty() {
+		if dbg.AssertEnabled {
+			writes.assertSelfDestructNormalized()
+		}
 		// Field presence is tracked with has-flags rather than pointers: the
 		// pointer form heap-escapes one allocation per field per address.
 		type addrState struct {

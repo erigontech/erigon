@@ -195,3 +195,63 @@ func TestNormalize_SelfDestructDropsAccountFieldAndStorageWrites(t *testing.T) {
 	_, storageOK := out.GetStorage(addr, kRaw)
 	require.False(t, storageOK, "raw storage write of a self-destructed address must be dropped")
 }
+
+// The account-field writes of a self-destructed address are what make Apply
+// compute pureDelete=false and take the cleanup-before-recreate branch, leaving
+// a phantom account. Normalize drops them; this asserts the guarantee at the
+// consumer so a filter regression surfaces on the block that triggers it rather
+// than as a wrong trie root later.
+func TestAssertSelfDestructNormalized(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xA55E27"))
+	ver := Version{TxIndex: 1}
+	sd := func(ws *WriteSet) *WriteSet {
+		ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
+			WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ver},
+			Val:         true,
+		})
+		return ws
+	}
+
+	require.Panics(t, func() {
+		ws := sd(&WriteSet{})
+		ws.SetNonce(addr, &VersionedWrite[uint64]{
+			WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver},
+			Val:         1,
+		})
+		ws.assertSelfDestructNormalized()
+	}, "a nonce write on a self-destructed address must trip the assert")
+
+	require.Panics(t, func() {
+		ws := sd(&WriteSet{})
+		ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{
+			WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: ver},
+			Val:         accounts.NewCode([]byte{0x00}).Hash,
+		})
+		ws.assertSelfDestructNormalized()
+	}, "a codeHash write on a self-destructed address must trip the assert")
+
+	require.Panics(t, func() {
+		ws := sd(&WriteSet{})
+		ws.SetIncarnation(addr, &VersionedWrite[uint64]{
+			WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: ver},
+			Val:         2,
+		})
+		ws.assertSelfDestructNormalized()
+	}, "an incarnation write on a self-destructed address must trip the assert")
+
+	// Balance (kept under EIP-8246) and the storage-delete cascade are the two
+	// things a normalized self-destruct legitimately carries.
+	require.NotPanics(t, func() {
+		ws := sd(&WriteSet{})
+		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{
+			WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver},
+			Val:         *uint256.NewInt(9),
+		})
+		k := accounts.InternKey(common.HexToHash("0x01"))
+		ws.SetStorage(addr, k, &VersionedWrite[uint256.Int]{
+			WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: k, Version: ver},
+		})
+		ws.assertSelfDestructNormalized()
+	}, "balance and storage deletes are legal on a self-destructed address")
+}

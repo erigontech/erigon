@@ -25,6 +25,14 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+// codePathRecoveryHashMismatch counts BAL codePath recoveries skipped because
+// the recovered bytes didn't hash to the emitted codeHash; surfaced so the skip
+// isn't silent.
+var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
+
+// The account fields Normalize fills in when a dirty address lacks them.
+var normalizeAccountPaths = [4]AccountPath{BalancePath, NoncePath, IncarnationPath, CodeHashPath}
+
 // Normalize produces a clean write set from the versionMap's WriteSet
 // for a given TX. It matches the serial IBS MakeWriteSet behaviour:
 //
@@ -52,14 +60,6 @@ import (
 // from the trie (wrong root in TestDeleteRecreateAccount / TestSelfDestructReceive
 // / TestEIP161AccountRemoval, all of which SD a contract whose storage predates
 // the block). Pass nil in unit tests that don't exercise pre-block storage.
-// codePathRecoveryHashMismatch counts BAL codePath recoveries skipped because
-// the recovered bytes didn't hash to the emitted codeHash; surfaced so the skip
-// isn't silent.
-var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
-
-// The account fields Normalize fills in when a dirty address lacks them.
-var normalizeAccountPaths = [4]AccountPath{BalancePath, NoncePath, IncarnationPath, CodeHashPath}
-
 func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool, eip8246 bool) (*WriteSet, error) {
 	filtered := &WriteSet{}
 	if writes == nil {
