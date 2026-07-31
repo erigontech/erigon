@@ -57,11 +57,12 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 // CallContext contains the things that are per-call, such as stack and memory,
 // but not transients like pc and gas
 type CallContext struct {
-	gas           uint64
-	stateGas      uint64
-	stateGasSpill uint64
-	input         []byte
-	Memory        Memory
+	gas               uint64
+	stateGas          uint64
+	stateGasSpill     uint64
+	newAccountCharged bool
+	input             []byte
+	Memory            Memory
 
 	// Opcode-scoped key/address intern cache. cacheGen is incremented once per
 	// opcode dispatch in the interpreter loop; cachedKeyGen/cachedAddrGen hold
@@ -124,6 +125,7 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 	ctx.gas = gas.Regular
 	ctx.stateGas = gas.State
 	ctx.stateGasSpill = 0
+	ctx.newAccountCharged = false
 	ctx.input = input
 	ctx.Contract = contract
 	return ctx
@@ -134,6 +136,7 @@ func (c *CallContext) put() {
 	c.Stack.Reset()
 	c.cacheGen = 0
 	c.stateGasSpill = 0
+	c.newAccountCharged = false
 	// Use sentinel values so that a peek call before the first cacheGen++ is
 	// always a miss rather than returning a stale handle from a prior use.
 	c.cachedKeyGen = ^uint64(0)

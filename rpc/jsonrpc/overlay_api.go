@@ -221,11 +221,12 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	txCtx = protocol.NewEVMTxContext(msg)
 	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), code: *code, gasCap: api.GasCap}
 	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Tracer: ct.Tracer().Hooks})
+	ct.evm = evm
 
 	// Execute the transaction message
 	_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
 	if ct.err != nil {
-		return nil, err
+		return nil, ct.err
 	}
 
 	resultCode := &CreationCode{}
