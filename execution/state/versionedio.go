@@ -2109,11 +2109,14 @@ func (prev *WriteSet) Merge(next *WriteSet) *WriteSet {
 	return out
 }
 
-// MergeInto folds prev's entries into next in place and returns next; next wins
-// on (addr, path, key). Unlike Merge it shares *VersionedWrite pointers instead
-// of cloning, so next must be exclusively owned by the caller and neither side
-// may mutate a shared VersionedWrite in place afterwards; prev's maps are never
-// touched, so map-level deletes on prev stay safe.
+// MergeInto folds prev's entries into next in place and returns the surviving
+// set, next winning on (addr, path, key). That is next, except that an empty
+// side short-circuits to the other one — so the result can be prev, and a
+// caller that releases or mutates it must compare identity first. Unlike Merge
+// it shares *VersionedWrite pointers instead of cloning, so next must be
+// exclusively owned by the caller and neither side may mutate a shared
+// VersionedWrite in place afterwards; prev's maps are never touched, so
+// map-level deletes on prev stay safe.
 func (prev *WriteSet) MergeInto(next *WriteSet) *WriteSet {
 	if prev.IsEmpty() {
 		return next

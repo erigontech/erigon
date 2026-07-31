@@ -42,9 +42,9 @@ func balanceWrite(addr accounts.Address, val uint64, incarnation int) *Versioned
 	}
 }
 
-func nonceWrite(addr accounts.Address, val uint64) *VersionedWrite[uint64] {
+func nonceWrite(addr accounts.Address, val uint64, incarnation int) *VersionedWrite[uint64] {
 	return &VersionedWrite[uint64]{
-		WriteHeader: WriteHeader{Address: addr, Path: NoncePath},
+		WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0, Incarnation: incarnation}},
 		Val:         val,
 	}
 }
@@ -61,13 +61,14 @@ func mergeIntoFixture() (prev, next *WriteSet) {
 	k1, k2 := mergeKey(0x01), mergeKey(0x02)
 	prev = newWriteSet(
 		balanceWrite(a, 1, 0),
-		nonceWrite(a, 5),
+		nonceWrite(a, 5, 0),
 		storageWrite(a, k1, 10),
 		storageWrite(a, k2, 20),
 		balanceWrite(b, 2, 0),
 	)
 	next = newWriteSet(
 		balanceWrite(a, 100, 1),
+		nonceWrite(a, 50, 1),
 		storageWrite(a, k1, 111),
 		balanceWrite(c, 3, 1),
 	)
@@ -85,6 +86,12 @@ func assertSameWrites(t *testing.T, want, got *WriteSet) {
 		require.True(t, ok)
 		assert.Equal(t, vw.Val, gotVW.Val, "balance mismatch at %v", addr)
 		assert.Equal(t, vw.Version, gotVW.Version, "balance version mismatch at %v", addr)
+	}
+	for addr, vw := range want.nonce {
+		gotVW, ok := got.nonce[addr]
+		require.True(t, ok)
+		assert.Equal(t, vw.Val, gotVW.Val, "nonce mismatch at %v", addr)
+		assert.Equal(t, vw.Version, gotVW.Version, "nonce version mismatch at %v", addr)
 	}
 	for addr, inner := range want.storage {
 		for key, vw := range inner {
@@ -148,7 +155,7 @@ func buildMergeBenchSets(addrs, slots int) (*WriteSet, *WriteSet) {
 	for i := range addrs {
 		addr := mergeAddr(byte(i + 1))
 		prev.SetBalance(addr, balanceWrite(addr, uint64(i+1), 0))
-		prev.SetNonce(addr, nonceWrite(addr, uint64(i)))
+		prev.SetNonce(addr, nonceWrite(addr, uint64(i), 0))
 		for s := range slots {
 			key := mergeKey(byte(s + 1))
 			prev.SetStorage(addr, key, storageWrite(addr, key, uint64(s)))
