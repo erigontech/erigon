@@ -100,16 +100,13 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 		// If-absent writes only: this runs in a fire-and-forget goroutine over a
 		// committed snapshot, so an unconditional Put racing an FCU flush's
 		// cache-apply could replace the flushed value with the pre-flush one.
-		if name == kv.CodeDomain {
-			// A live binding makes the conditional put a no-op — skip before
-			// paying the keccak+copy below. Code negatives end here too: they
-			// are not cacheable (CodeCache drops zero-length puts).
-			if len(v) > 0 && !cpg.sc.HasLiveCode(k) {
-				// Key the content cache by keccak(v), the code's own hash — never
-				// a separately read account codeHash, which parallel exec can skew
-				// (see the code-domain read-fill in SharedDomains.getLatestMetered).
-				cpg.sc.PutCodeWithHashIfAbsent(k, v, crypto.Keccak256(v), (uint64(step)+1)*cpg.stepSize-1)
-			}
+		if name == kv.CodeDomain && len(v) > 0 {
+			// Key the content cache by the code's OWN hash, never a separately
+			// read account codeHash: under parallel/speculative exec that hash
+			// can be skewed or cross-account, and a (hash, code) pair that
+			// doesn't satisfy keccak(code)==hash poisons every account sharing
+			// the hash. keccak(v) makes each entry self-consistent.
+			cpg.sc.PutCodeWithHashIfAbsent(k, v, crypto.Keccak256(v), (uint64(step)+1)*cpg.stepSize-1)
 		} else {
 			// Cache including nil/empty results: a probe returning no
 			// bytes is a valid negative answer (missing account, empty
@@ -124,9 +121,6 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 			// does).
 			readTxNum := (uint64(step)+1)*cpg.stepSize - 1
 			if len(v) == 0 && name != kv.CodeDomain && cpg.sc.GetCache(name) != nil {
-				if cpg.progress == nil {
-					return v, step, err
-				}
 				readTxNum = cpg.progress(name)
 			}
 			cpg.sc.PutIfAbsent(name, k, v, readTxNum)

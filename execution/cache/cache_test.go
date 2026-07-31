@@ -891,26 +891,6 @@ func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 	}
 }
 
-func TestCodeCache_ContainsLive(t *testing.T) {
-	cc := NewCodeCache(1*datasize.MB, 1*datasize.MB)
-	addr := makeAddr(1)
-	code := []byte{0xaa, 1, 2, 3}
-	require.False(t, cc.ContainsLive(addr), "absent addr")
-
-	cc.PutWithCodeHash(addr, code, crypto.Keccak256(code), 10)
-	require.True(t, cc.ContainsLive(addr))
-
-	cc.Unwind(5)
-	require.False(t, cc.ContainsLive(addr), "stale binding must not read as live")
-
-	// A bound addr whose content entry was evicted is not live: the binding
-	// alone cannot serve the bytes.
-	cc2 := NewCodeCache(1*datasize.MB, 1*datasize.MB)
-	cc2.PutWithCodeHash(addr, code, crypto.Keccak256(code), 10)
-	cc2.hashToCode.Purge()
-	require.False(t, cc2.ContainsLive(addr), "binding without content bytes is not servable")
-}
-
 // The drain-before-unwind convention (drainReadAhead ordered before every
 // epoch bump) is enforced here: a cache-populating warmup still in flight at
 // Unwind time can stamp a dead-fork value with the post-unwind epoch.

@@ -177,13 +177,6 @@ func (c *StateCache) putCodeWithHash(addr, code, codeHash []byte, txNum uint64, 
 	}
 }
 
-// HasLiveCode reports whether addr resolves to live code bytes; see
-// CodeCache.ContainsLive.
-func (c *StateCache) HasLiveCode(addr []byte) bool {
-	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
-	return ok && cc.ContainsLive(addr)
-}
-
 // GetCodeSizeByHash returns the size of code by its Ethereum codeHash
 // without loading the bytes. Returns (0, false) when the size-only layer
 // is not populated for this hash.
