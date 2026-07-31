@@ -253,9 +253,6 @@ runs:
         echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
         echo "modcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
         workflow="${CACHE_NAMESPACE:-$(basename "${GITHUB_WORKFLOW_REF%%@*}" .yml)}"
-        if [ "$RUNNER_OS" = "Windows" ]; then
-          workflow="${workflow}-windows-d-drive-v1"
-        fi
         echo "workflow=$workflow" >> "$GITHUB_OUTPUT"
         echo "ERIGON_CI_GOCACHE_PATH=$(go env GOCACHE)" >> "$GITHUB_ENV"
         echo "ERIGON_CI_MODCACHE=$(go env GOMODCACHE)" >> "$GITHUB_ENV"
