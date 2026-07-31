@@ -49,26 +49,26 @@ func (p *countingPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum 
 
 // A reused ReceiptWriter must keep its varint scratch off the heap: this runs
 // once per transaction applied.
-func TestReceiptWriterAppendIsAllocationFree(t *testing.T) {
+func TestReceiptWriterAppendMetadataIsAllocationFree(t *testing.T) {
 	var w rawtemporaldb.ReceiptWriter
 	putter := &countingPutDel{}
 
 	allocs := testing.AllocsPerRun(100, func() {
-		if err := w.Append(putter, 7, 21000, 131072, 42); err != nil {
+		if err := w.AppendMetadata(putter, 7, 21000, 131072, 42); err != nil {
 			t.Fatal(err)
 		}
 	})
-	require.Zero(t, allocs, "ReceiptWriter.Append must not allocate")
+	require.Zero(t, allocs, "ReceiptWriter.AppendMetadata must not allocate")
 }
 
 // Reusing one scratch across the three puts is only safe because each value is
 // copied on the way in; pin that the three values reach the putter distinct.
-func TestReceiptWriterAppendValuesAreDistinct(t *testing.T) {
+func TestReceiptWriterAppendMetadataValuesAreDistinct(t *testing.T) {
 	t.Parallel()
 	var w rawtemporaldb.ReceiptWriter
 	putter := &countingPutDel{copy: true}
 
-	require.NoError(t, w.Append(putter, 7, 21000, 131072, 42))
+	require.NoError(t, w.AppendMetadata(putter, 7, 21000, 131072, 42))
 	require.Len(t, putter.puts, 3)
 	require.Equal(t, rawtemporaldb.ReceiptValueForTest(21000), putter.puts[0])
 	require.Equal(t, rawtemporaldb.ReceiptValueForTest(131072), putter.puts[1])
