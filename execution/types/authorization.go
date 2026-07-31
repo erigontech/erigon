@@ -17,6 +17,8 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
+var errAuthNonceOverflow = errors.New("failed assertion: auth.nonce < 2**64 - 1")
+
 type Authorization struct {
 	ChainID uint256.Int
 	Address common.Address
@@ -59,7 +61,7 @@ func encodeSigningPayload(chainID uint256.Int, address common.Address, nonce uin
 
 func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common.Address, error) {
 	if ath.Nonce == math.MaxUint64 {
-		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
+		return nil, errAuthNonceOverflow
 	}
 
 	if err := encodeSigningPayload(ath.ChainID, ath.Address, ath.Nonce, data, buf); err != nil {
@@ -75,7 +77,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common
 // during authorization processing.
 func SignAuthorization(key *ecdsa.PrivateKey, chainID uint256.Int, address common.Address, nonce uint64) (Authorization, error) {
 	if nonce == math.MaxUint64 {
-		return Authorization{}, errors.New("failed assertion: auth.nonce < 2**64 - 1")
+		return Authorization{}, errAuthNonceOverflow
 	}
 	if key == nil {
 		return Authorization{}, errors.New("private key is nil")
