@@ -1333,6 +1333,14 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 				if err != nil {
 					return nil, StorageRead, UnknownVersion, err
 				}
+				if preserved == nil {
+					sdb.finalizeProvisionalAddressRead(addr)
+					return nil, StorageRead, UnknownVersion, nil
+				}
+				// The EVM consumes this conclusion: reconcile the provisional
+				// nil probe with the preserved account so a later flush
+				// conflicts with it instead of being silently adopted.
+				sdb.accountRead(addr, preserved, MapRead, Version{TxIndex: destructTxIndex})
 				return preserved, MapRead, Version{TxIndex: destructTxIndex}, nil
 			}
 		}
@@ -1388,6 +1396,7 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		// only overwrites fields a versionMap cell exists for), so Empty()
 		// returns false and the EVM misses CallNewAccountGas.
 		if destroyed, _, revived := sdb.versionMap.AccountLifecycle(addr, sdb.txIndex); destroyed && !revived {
+			sdb.finalizeProvisionalAddressRead(addr)
 			return nil, StorageRead, UnknownVersion, nil
 		}
 		// readAccount above recorded a nil map-read marker; the DB resolved

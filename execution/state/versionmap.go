@@ -649,7 +649,29 @@ func (vm *VersionMap) destroyedAndUnrevived(addr accounts.Address, txIndex int) 
 			return false
 		}
 	}
-	return !vm.accountLiveAt(addr, txIndex)
+	return !vm.accountLiveSince(addr, destructTxIndex, txIndex)
+}
+
+// accountLiveSince reports whether any sub-field cell written at or after
+// fromIdx (and below txIdx) shows the account EIP-161-non-empty — e.g. a
+// self-destruct that preserves a non-zero balance writes it at the destruct
+// index itself. Cells older than fromIdx are pre-destruct state and say
+// nothing about life afterwards. Estimate cells cannot prove death and count
+// as live (fail-safe: the reader re-executes).
+func (vm *VersionMap) accountLiveSince(addr accounts.Address, fromIdx int, txIdx int) bool {
+	if bal, rr, ok := vm.ReadBalance(addr, txIdx); ok && (rr.Status() != MVReadResultDone || (rr.DepIdx() >= fromIdx && !bal.IsZero())) {
+		return true
+	}
+	if nonce, rr, ok := vm.ReadNonce(addr, txIdx); ok && (rr.Status() != MVReadResultDone || (rr.DepIdx() >= fromIdx && nonce != 0)) {
+		return true
+	}
+	if ch, rr, ok := vm.ReadCodeHash(addr, txIdx); ok && (rr.Status() != MVReadResultDone || (rr.DepIdx() >= fromIdx && !(ch.IsEmpty() || ch.IsZero()))) {
+		return true
+	}
+	if c, rr, ok := vm.ReadCode(addr, txIdx); ok && (rr.Status() != MVReadResultDone || (rr.DepIdx() >= fromIdx && len(c.Bytes) > 0)) {
+		return true
+	}
+	return false
 }
 
 // FindDoneSelfDestructInRange returns the version of the highest Done
@@ -981,6 +1003,24 @@ func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, pat
 	// compares against the value that came with rr.
 	live, rr, ok := readLive(vm, addr, key, txIndex)
 	matchesLive := func() bool { return ok && eq(readVal, live) }
+	// A recorded zero/absent value means the read concluded absence; the
+	// destroyed-account relaxations are only sound for those. Typed check —
+	// the eq helpers carry dead-equivalence semantics, not zero-ness.
+	absent := false
+	switch v := any(readVal).(type) {
+	case *accounts.Account:
+		absent = v == nil
+	case []byte:
+		absent = len(v) == 0
+	case uint256.Int:
+		absent = v.IsZero()
+	case uint64:
+		absent = v == 0
+	case int:
+		absent = v == 0
+	case accounts.CodeHash:
+		absent = v.IsEmpty() || v.IsZero()
+	}
 	// A read folded onto the account record tiebreaks against the live record's
 	// field: record churn that keeps the field unchanged is not a conflict. A
 	// non-Done or absent record cannot prove equality (fail-safe: re-execute).
@@ -994,7 +1034,7 @@ func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, pat
 			return eq(readVal, recordField(acc))
 		}
 	}
-	valid := vm.validateReadImpl(txIndex, addr, path, key, source, version, rr, matchesLive, matchesRecord, checkVersion, traceInvalid, tracePrefix, false)
+	valid := vm.validateReadImpl(txIndex, addr, path, key, source, version, rr, matchesLive, matchesRecord, absent, checkVersion, traceInvalid, tracePrefix, false)
 	if dbg.TraceReexec && valid == VersionInvalid {
 		fmt.Printf(
 			"VINV tx=%d %x %s src=%s rv=(%d.%d) cell=(%d.%d,st=%d) readVal=%v live=%v liveOK=%v\n",
@@ -1107,6 +1147,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	rr ReadResult,
 	matchesLive func() bool,
 	matchesRecord func() bool,
+	absent bool,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string, recursive bool) VersionValidity {
 
@@ -1143,7 +1184,17 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		}
 		// A later tx self-destructed the account (no revival), so a read predating
 		// the destruct is stale; checkVersion alone misses it because the SD doesn't
-		// write the read's own path.
+		// write the read's own path. AddressPath and CodePath use the shared
+		// lifecycle probe (>= arm for same-tx re-creation, post-destruct liveness
+		// for EIP-8246 preserved balances); the destroyer writes no cells for
+		// either path, so any Done cell here predates the destruct.
+		if valid == VersionValid && (path == AddressPath || path == CodePath) {
+			if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sdRR.Status() == MVReadResultDone && destructed &&
+				sdRR.DepIdx() > rr.Version().TxIndex && vm.destroyedAndUnrevived(addr, txIndex) {
+				valid = VersionInvalid
+				invReason = "sd-stale"
+			}
+		}
 		if valid == VersionValid && path != SelfDestructPath && path != AddressPath &&
 			path != IncarnationPath && path != CreateContractPath && path != CodePath {
 			if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sdRR.Status() == MVReadResultDone && destructed {
@@ -1174,7 +1225,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			// AddressPath (its source/version), so validate it against AddressPath
 			// at that version — with the record-field value as the tiebreaker.
 			valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
-				version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), matchesRecord, nil, checkVersion, traceInvalid, tracePrefix, true)
+				version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), matchesRecord, nil, absent, checkVersion, traceInvalid, tracePrefix, true)
 			if valid == VersionInvalid {
 				invReason = "fold-addr"
 			}
@@ -1189,34 +1240,45 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				// any property (code, storage slots, balance, nonce, etc.).
 				if path != AddressPath && path != SelfDestructPath {
 					if valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
-						version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), nil, nil, checkVersion, traceInvalid, tracePrefix, true); valid == VersionValid {
+						version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), nil, nil, absent, checkVersion, traceInvalid, tracePrefix, true); valid == VersionValid {
 						valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, nil, checkVersion, traceInvalid, tracePrefix, true)
+							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, nil, absent, checkVersion, traceInvalid, tracePrefix, true)
 						if valid == VersionInvalid {
 							invReason = "xval-sd"
 						}
 					} else {
 						invReason = "xval-addr"
 						vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, nil, checkVersion, traceInvalid, tracePrefix, true)
+							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, nil, absent, checkVersion, traceInvalid, tracePrefix, true)
 					}
 				} else if path == AddressPath {
 					valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-						version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, nil, checkVersion, traceInvalid, tracePrefix, true)
+						version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, nil, absent, checkVersion, traceInvalid, tracePrefix, true)
 					if valid == VersionInvalid {
 						invReason = "addr-xval-sd"
 					}
 
-					// A prior tx re-creating this account makes a nil AddressPath
-					// storage read stale; IncarnationPath is the specific signal
-					// (written only by CreateAccount and SelfDestruct), unlike
-					// BalancePath which overfires for every gas payer. A
-					// destroyed-and-unrevived account is the exception: its
-					// Incarnation cell belongs to a dead account, so the nil
-					// read is correct.
+					// A prior tx creating, destroying or re-creating this account
+					// can make an AddressPath storage read stale; IncarnationPath
+					// is the specific signal (written only by CreateAccount and
+					// SelfDestruct), unlike BalancePath which overfires for every
+					// gas payer. Non-recursive means the record IS the AddressPath
+					// read and absent is recorded non-existence: it must match
+					// cell-evidenced deadness — a nil read is valid only for a
+					// destroyed-and-unrevived account, an alive read only for a
+					// live one (e.g. EIP-8246 preserved balance). Recursive means
+					// a sub-field storage read cross-validating its account and
+					// absent is field emptiness: an empty read stays correct (an
+					// in-block non-empty write would have left a cell the floor
+					// probe finds), while a non-empty committed value is stale
+					// under any lifecycle churn, which clears fields.
 					if valid == VersionValid {
 						if _, incRR, ok := vm.ReadIncarnation(addr, txIndex); ok && incRR.Status() == MVReadResultDone {
-							if !vm.destroyedAndUnrevived(addr, txIndex) {
+							stale := !absent
+							if !recursive {
+								stale = absent != vm.destroyedAndUnrevived(addr, txIndex)
+							}
+							if stale {
 								valid = VersionInvalid
 								invReason = "addr-inc-created"
 							}
@@ -1283,7 +1345,7 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	// check is authoritative. One ReadStatus, no value comparison.
 	noValueRead := func(addr accounts.Address, path AccountPath, key accounts.StorageKey, hdr ReadHeader) VersionValidity {
 		return vm.validateReadImpl(txIdx, addr, path, key, hdr.Source, hdr.Version,
-			vm.ReadStatus(addr, path, key, txIdx), nil, nil, checkVersion, traceInvalid, tracePrefix, false)
+			vm.ReadStatus(addr, path, key, txIdx), nil, nil, false, checkVersion, traceInvalid, tracePrefix, false)
 	}
 
 	// Value paths go through the generic validateRead so the recorded value stays
