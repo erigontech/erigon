@@ -622,25 +622,6 @@ func TestMultipleAuthorizations(t *testing.T) {
 	}
 }
 
-// The round trip verifies that SignAuthorization produces a tuple accepted by
-// the recovery path used for authorization validation.
-func TestRecoverSignerFromRLP_ValidData(t *testing.T) {
-	privateKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	pubKey := crypto.PubkeyToAddress(privateKey.PublicKey)
-	chainID := uint64(7078815900)
-
-	auth, err := types.SignAuthorization(privateKey, *uint256.NewInt(chainID), pubKey, 0)
-	require.NoError(t, err)
-
-	var b [33]byte
-	recoveredAddress, err := auth.RecoverSigner(bytes.NewBuffer(nil), b[:])
-	require.NoError(t, err)
-	assert.NotNil(t, recoveredAddress)
-
-	assert.Equal(t, pubKey, *recoveredAddress)
-}
-
 func TestReplaceWithHigherFee(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)

@@ -52,6 +52,45 @@ func TestRecoverSigner(t *testing.T) {
 
 }
 
+func TestSignAuthorizationRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	privateKey, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := crypto.PubkeyToAddress(privateKey.PublicKey)
+	// Keep the delegation target distinct from the authority so the test checks
+	// both roles independently.
+	delegationTarget := authority
+	delegationTarget[0] ^= 0xff
+	chainID := *uint256.NewInt(7078815900)
+	const nonce = uint64(7)
+
+	auth, err := SignAuthorization(privateKey, chainID, delegationTarget, nonce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auth.ChainID != chainID {
+		t.Fatalf("unexpected chain ID: got %s, want %s", auth.ChainID.String(), chainID.String())
+	}
+	if auth.Address != delegationTarget {
+		t.Fatalf("unexpected delegation target: got %s, want %s", auth.Address, delegationTarget)
+	}
+	if auth.Nonce != nonce {
+		t.Fatalf("unexpected nonce: got %d, want %d", auth.Nonce, nonce)
+	}
+
+	var buf [32]byte
+	recovered, err := auth.RecoverSigner(bytes.NewBuffer(nil), buf[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *recovered != authority {
+		t.Fatalf("unexpected authority: got %s, want %s", *recovered, authority)
+	}
+}
+
 func TestSignAuthorizationRejectsMaxNonce(t *testing.T) {
 	privateKey, err := crypto.GenerateKey()
 	if err != nil {
