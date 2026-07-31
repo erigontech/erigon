@@ -571,16 +571,15 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			blockTx = execRoTx
 		}
 
-		// Use the max of all state domain steps (not just commitment) to
-		// determine which txNums need history reads.
 		cmtStep := execRoTx.StepsInFiles(kv.CommitmentDomain)
-		acctStep := execRoTx.StepsInFiles(kv.AccountsDomain)
-		storStep := execRoTx.StepsInFiles(kv.StorageDomain)
-		codeStep := execRoTx.StepsInFiles(kv.CodeDomain)
-		maxStateStep := max(acctStep, storStep, codeStep)
-		if maxStateStep > cmtStep {
-			return fmt.Errorf("snapshot step misalignment: state domains (accounts=%d, storage=%d, code=%d) ahead of commitment=%d — snapshot files need rebuilding",
-				acctStep, storStep, codeStep, cmtStep)
+		if dbg.AssertEnabled {
+			acctStep := execRoTx.StepsInFiles(kv.AccountsDomain)
+			storStep := execRoTx.StepsInFiles(kv.StorageDomain)
+			codeStep := execRoTx.StepsInFiles(kv.CodeDomain)
+			if max(acctStep, storStep, codeStep) > cmtStep {
+				return fmt.Errorf("snapshot step misalignment: state domains (accounts=%d, storage=%d, code=%d) ahead of commitment=%d — snapshot files need rebuilding",
+					acctStep, storStep, codeStep, cmtStep)
+			}
 		}
 		lastFrozenStep := cmtStep
 
