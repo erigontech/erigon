@@ -28,6 +28,22 @@ without recurrence.
 
 ## OPEN
 
+### 5. `blockReader.frozenBlocks=0` after snapshot trim — later deep mode-B unwind hits `no header for block <N>`
+
+- **Signature:** `storage.Provider.Unwind: commitment-anchor compute: ensureCommitmentAtBlockCompute: no header for block <N>`; earlier in the same log, `blockReader.frozenBlocks=0` persists from a transition triggered by an earlier iteration's snapshot trim; the specific failing target's header file physically exists on disk but is invisible to the reader.
+- **First seen:** 2026-07-31T10:35:20 UTC
+  - Cycle log: `/tmp/continuous-soak/soak.cycle0001-20260730T203246.log`
+  - Erigon log: `/tmp/continuous-soak/erigon.cycle0001-20260730T203246.log`
+  - Binary commit: `f71a9a56cd` (G1 + G2 landed, plus fork-stream fixes)
+  - Iter 24 mode_b: pre_head=3323686, target=3155281, depth=168405
+  - `frozenBlocks` transitioned from `3275999 → 0` at 2026-07-30T23:12:23 UTC during iter 8 mode_b's forward-exec recovery (which followed a `Provider.Unwind: snapshot files trimmed past toBlock=3157205 files=137`). Never recovered — every `blockReader.frozenBlocks=` entry after that is `0`.
+  - Iters 9-23 mode_b all succeeded despite `frozenBlocks=0` — their targets fell in the MDBX retention window (blocks BlockCollector had inserted or that hadn't been pruned yet). Iter 24 target 3155281 fell outside MDBX retention and needed snapshots → no data.
+- **Reproduction:** in-cycle only. Any cycle chain of enough iterations that include (a) at least one deep mode-B trim to a low toBlock, followed by (b) enough further churn to prune the affected MDBX range, followed by (c) a mode-B target back in the affected range, should reproduce.
+- **Physical state on preserved datadir** (confirmed 2026-07-31): `v1.1-003100-003157-headers.seg` (trimmed from `003100-003200` at iter 8's toBlock=3157205 trim) exists with its accessor `v2.0-003100-003157-headers.idx`. Block 3155281 falls in that file's [3100000, 3157000) range. Files are present + healthy. This is a VISIBILITY bug in the block reader / `RoSnapshots.OpenFolder`, NOT a physical missing-file bug.
+- **Suspected root cause (not yet code-traced):** `RoSnapshots.OpenFolder` post-trim produces an empty visible set. Possibly the visible-set computation rejects trimmed files (non-100k-block-boundary chunks like `003100-003157`) via a filter that expects standard chunk widths, and returns empty rather than partial. Once emptied, the state persists — subsequent scans don't re-include the trimmed files.
+- **Fix direction:** trace `RoSnapshots.OpenFolder` / visible-set filter path when a directory contains trimmed files with non-standard chunk boundaries. Confirm whether trimmed files are systematically excluded. If yes, either (a) update the filter to accept them, or (b) ensure trim regenerates chunk-aligned files instead of leaving non-standard names.
+- **Diagnostic hook:** the presence of `frozenBlocks=0` in an `[execution] entry state view` log line after the process has past initial sync is the signal. Add a periodic assertion or warn if frozenBlocks unexpectedly drops mid-run.
+
 ### 4. Commitment straddler regen preserves stale branches — forward-exec fails with `empty branch data during unfold`
 
 - **Signature:** `[4/6 Execution] commitment: commitmentCalculator: compute failed: hash sort failed: followAndUpdate: unfold: empty branch data read during unfold, compact prefix <hex>`
