@@ -44,7 +44,7 @@ type IntrinsicGasCalcArgs struct {
 }
 
 type IntrinsicGasCalcResult struct {
-	RegularGas   uint64
+	ExecutionGas uint64
 	FloorGasCost uint64
 }
 
@@ -74,24 +74,24 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	// Set the starting gas for the raw transaction
 	switch {
 	case args.IsAATxn:
-		result.RegularGas = params.TxAAGas
+		result.ExecutionGas = params.TxAAGas
 	case args.IsEIP2780:
-		result.RegularGas = params.TxBaseEIP2780
+		result.ExecutionGas = params.TxBaseEIP2780
 		if args.IsContractCreation {
-			result.RegularGas += params.CreateAccessEIP2780
+			result.ExecutionGas += params.CreateAccessEIP2780
 		} else if !args.IsSelfTransfer {
-			result.RegularGas += params.ColdAccountAccessEIP2780
+			result.ExecutionGas += params.ColdAccountAccessEIP2780
 			if args.HasValue {
-				result.RegularGas += params.TxValueCostEIP2780
+				result.ExecutionGas += params.TxValueCostEIP2780
 			}
 		}
 	case args.IsContractCreation && args.IsEIP2:
-		result.RegularGas = params.TxGasContractCreation
+		result.ExecutionGas = params.TxGasContractCreation
 	default:
-		result.RegularGas = params.TxGas
+		result.ExecutionGas = params.TxGas
 	}
 	if args.IsEIP2780 {
-		result.FloorGasCost = result.RegularGas
+		result.FloorGasCost = result.ExecutionGas
 	} else {
 		result.FloorGasCost = params.TxGas
 	}
@@ -109,7 +109,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
+		result.ExecutionGas, overflow = math.SafeAdd(result.ExecutionGas, product)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
@@ -120,7 +120,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
+		result.ExecutionGas, overflow = math.SafeAdd(result.ExecutionGas, product)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
@@ -131,7 +131,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 			if overflow {
 				return IntrinsicGasCalcResult{}, true
 			}
-			result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
+			result.ExecutionGas, overflow = math.SafeAdd(result.ExecutionGas, product)
 			if overflow {
 				return IntrinsicGasCalcResult{}, true
 			}
@@ -150,7 +150,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
+		result.ExecutionGas, overflow = math.SafeAdd(result.ExecutionGas, product)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
@@ -159,7 +159,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
+		result.ExecutionGas, overflow = math.SafeAdd(result.ExecutionGas, product)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
@@ -177,7 +177,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	//   - EIP-7981 (Glamsterdam): extends floor coverage to access-list data
 	//     (addresses + storage keys) on top of the calldata floor, using the
 	//     same 4 tokens-per-byte / 16 gas-per-token rate. Also charges the
-	//     access-list data cost at floor rate in the regular intrinsic gas path
+	//     access-list data cost at floor rate in the execution intrinsic gas path
 	//     so access lists cannot be used to bypass calldata floor pricing.
 	//
 	// Compute calldata floor tokens (EIP-7623 or EIP-7976) independently from
@@ -191,7 +191,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	// EIP-7976 and EIP-7981 share the same per-token rate (16 gas/token), and
 	// EIP-7981 spec requires EIP-7976 as a precondition. Selecting the rate on
 	// either flag keeps the access-list floor surcharge (charged at floor rate
-	// in RegularGas) consistent with the FloorGasCost rate.
+	// in ExecutionGas) consistent with the FloorGasCost rate.
 	if args.IsEIP7976 || args.IsEIP7981 {
 		costPerToken = params.TxTotalCostFloorPerTokenEIP7976
 	} else {
@@ -241,7 +241,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 			if overflow {
 				return IntrinsicGasCalcResult{}, true
 			}
-			result.RegularGas, overflow = math.SafeAdd(result.RegularGas, accessListDataGas)
+			result.ExecutionGas, overflow = math.SafeAdd(result.ExecutionGas, accessListDataGas)
 			if overflow {
 				return IntrinsicGasCalcResult{}, true
 			}
@@ -266,9 +266,9 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	var perAuthCost uint64
 	if args.IsEIP2780 {
 		if args.IsAATxn {
-			perAuthCost = params.PerAuthRegularCostEIP8038
+			perAuthCost = params.PerAuthExecutionCostEIP8038
 		} else {
-			perAuthCost = params.RegularPerAuthBaseCostEIP8038
+			perAuthCost = params.ExecutionPerAuthBaseCostEIP8038
 		}
 	} else {
 		perAuthCost = params.PerEmptyAccountCost
@@ -277,7 +277,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	if overflow {
 		return IntrinsicGasCalcResult{}, true
 	}
-	result.RegularGas, overflow = math.SafeAdd(result.RegularGas, authCost)
+	result.ExecutionGas, overflow = math.SafeAdd(result.ExecutionGas, authCost)
 	if overflow {
 		return IntrinsicGasCalcResult{}, true
 	}
