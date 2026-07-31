@@ -45,6 +45,21 @@
   workers: 12
   max-allowed-failures: 0
   expected-tests: 108593
+- shard: rlptests-legacy-race
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 55
+  no-ramdisk: true
+- shard: transactiontests-legacy-race
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 212
+  no-ramdisk: true
+- shard: difficultytests-legacy-race
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 18598
+  no-ramdisk: true
 - shard: blocktests-stable-sequential
   workers: 12
   max-allowed-failures: 0
@@ -54,8 +69,7 @@
   exec3-parallel: true
 - shard: blocktests-devnet
   workers: 12
-  # TODO: reduce to 0 as tests-glamsterdam-devnet@v7.2.0 support lands.
-  max-allowed-failures: 2
+  max-allowed-failures: 0
   exec3-parallel: true
 - shard: blocktests-legacy-consensus-sequential
   workers: 12
@@ -110,15 +124,24 @@
   run: '_ConstantinopleFix$'
   exclude:
     - '/\.meta/'
+- shard: blocktests-legacy-constantinople-race-byzantium
+  workers: 8
+  max-allowed-failures: 0
+  expected-tests: 5000
+  exec3-parallel: true
+  run: '_Byzantium$'
+  exclude:
+    - '/\.meta/'
 - shard: blocktests-legacy-constantinople-race-other-forks
   workers: 12
   # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
   max-allowed-failures: 14
-  expected-tests: 11006
+  expected-tests: 6006
   exec3-parallel: true
   exclude:
     - '/\.meta/'
     - '::.*_Constantinople(Fix)?$'
+    - '::.*_Byzantium$'
 - shard: blocktests-legacy-cancun-sequential
   workers: 12
   # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
@@ -257,8 +280,7 @@
   no-ramdisk: true
 - shard: zkevm-witness
   workers: 8
-  # TODO: reduce to 0 as tests-zkevm@v0.6.2 support lands.
-  max-allowed-failures: 2
+  max-allowed-failures: 0
 - shard: blocktests-stable-race-pre-cancun-sequential
   workers: 12
   max-allowed-failures: 0
@@ -297,11 +319,9 @@
   run: 'fork_(Osaka|BPO)'
 - shard: blocktests-devnet-race-amsterdam
   workers: 12
-  # TODO: reduce to 0 as tests-glamsterdam-devnet@v7.2.0 support lands.
-  max-allowed-failures: 2
+  max-allowed-failures: 0
   exec3-parallel: true
   run: 'fork_Amsterdam'
 - shard: zkevm-witness-race
   workers: 8
-  # TODO: reduce to 0 as tests-zkevm@v0.6.2 support lands.
-  max-allowed-failures: 2
+  max-allowed-failures: 0
