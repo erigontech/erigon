@@ -318,7 +318,7 @@ func getNextTransactions(
 		// EIP-8037: runtime state gas is enforced by post-execution rollback
 		// in the block assembler.
 		txnprovider.WithGasTarget(mdgas.NewFullMdGas(
-			header.GasLimit-gasUsed.BlockRegular,
+			header.GasLimit-gasUsed.BlockExecution,
 			header.GasLimit-gasUsed.BlockState,
 			remainingBlobGas,
 		)),
