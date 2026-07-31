@@ -123,6 +123,30 @@ func TestBitListCap(t *testing.T) {
 	require.Equal(10, capacity, "BitList Cap did not return the expected value")
 }
 
+func TestBitListDecodeSSZRejectsNonCanonicalEncoding(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{"empty", nil},
+		{"missing delimiter", []byte{0}},
+		{"trailing zero", []byte{1, 0}},
+		{"over limit", []byte{0, 2}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			bitlist := solid.NewBitList(0, 8)
+			require.Error(t, bitlist.DecodeSSZ(test.data, 0))
+		})
+	}
+}
+
+func TestBitListDecodeSSZAcceptsLimit(t *testing.T) {
+	bitlist := solid.NewBitList(0, 8)
+	require.NoError(t, bitlist.DecodeSSZ([]byte{0, 1}, 0))
+	require.Equal(t, 8, bitlist.Bits())
+}
+
 // Add more tests as needed for other functions in the BitList struct.
 
 func TestBitlistMerge(t *testing.T) {

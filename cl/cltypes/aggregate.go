@@ -65,9 +65,6 @@ func (a *AggregateAndProof) EncodingSizeSSZ() int {
 }
 
 func (a *AggregateAndProof) HashSSZ() ([32]byte, error) {
-	if a.Aggregate != nil {
-		a.Aggregate.SetVersion(a.version)
-	}
 	return merkle_tree.HashTreeRoot(a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
 }
 
@@ -99,9 +96,6 @@ func (a *SignedAggregateAndProof) EncodingSizeSSZ() int {
 }
 
 func (a *SignedAggregateAndProof) HashSSZ() ([32]byte, error) {
-	if a.Message != nil {
-		a.Message.SetVersion(a.version)
-	}
 	return merkle_tree.HashTreeRoot(a.Message, a.Signature[:])
 }
 

@@ -19,6 +19,7 @@ package solid
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/bits"
 	"slices"
 
@@ -207,6 +208,13 @@ func (u *BitList) EncodeSSZ(dst []byte) ([]byte, error) {
 // DecodeSSZ replaces the underlying byte slice of the BitList with a copy of the input byte slice.
 // It then updates the length of the BitList to match the length of the new byte slice.
 func (u *BitList) DecodeSSZ(dst []byte, _ int) error {
+	if len(dst) == 0 || dst[len(dst)-1] == 0 {
+		return errors.New("invalid bitlist: missing length bit")
+	}
+	bitLength := 8*(len(dst)-1) + bits.Len8(dst[len(dst)-1]) - 1
+	if bitLength > u.c {
+		return fmt.Errorf("invalid bitlist length: %d > %d", bitLength, u.c)
+	}
 	u.u = make([]byte, len(dst))
 	copy(u.u, dst)
 	u.l = len(dst)

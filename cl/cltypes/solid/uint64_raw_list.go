@@ -19,6 +19,7 @@ package solid
 import (
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -102,6 +103,12 @@ func (arr *RawUint64List) EncodeSSZ(buf []byte) (dst []byte, err error) {
 }
 
 func (arr *RawUint64List) DecodeSSZ(buf []byte, _ int) error {
+	if len(buf)%8 != 0 {
+		return fmt.Errorf("invalid uint64 list byte length: %d", len(buf))
+	}
+	if len(buf)/8 > arr.c {
+		return fmt.Errorf("uint64 list length exceeds limit: %d > %d", len(buf)/8, arr.c)
+	}
 	arr.cachedHash = common.Hash{}
 	arr.u = make([]uint64, len(buf)/8)
 	for i := range arr.u {

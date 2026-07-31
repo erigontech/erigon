@@ -129,8 +129,8 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 
 func getIndexedAttestationPublicKeys(b *state.CachingBeaconState, att *cltypes.IndexedAttestation) ([][]byte, error) {
 	inds := att.AttestingIndices
-	if inds.Length() == 0 || !solid.IsUint64SortedSet(inds) {
-		return nil, errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
+	if err := state.ValidateIndexedAttestationIndices(b.BeaconConfig(), b.Version(), inds); err != nil {
+		return nil, err
 	}
 	pks := make([][]byte, 0, inds.Length())
 	if err := solid.RangeErr[uint64](inds, func(_ int, v uint64, _ int) error {

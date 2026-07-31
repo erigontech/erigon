@@ -497,10 +497,11 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 	// DecodeDynamicList calls DecodeSSZ on each element with hardcoded mainnet limits.
 	// We must override those limits for minimal preset compatibility.
 	if b.beaconCfg != nil && b.Version.AfterOrEqual(clparams.ElectraVersion) {
-		b.Attestations.Range(func(_ int, att *solid.Attestation, _ int) bool {
-			att.SetBeaconConfig(b.beaconCfg)
-			return true
-		})
+		if err := solid.RangeErr(b.Attestations, func(_ int, att *solid.Attestation, _ int) error {
+			return att.ValidateForConfig(b.beaconCfg, b.Version)
+		}); err != nil {
+			return err
+		}
 		b.AttesterSlashings.Range(func(_ int, as *AttesterSlashing, _ int) bool {
 			as.SetVersionWithConfig(b.Version, b.beaconCfg)
 			return true
@@ -766,10 +767,11 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 		return true
 	})
 	if b.beaconCfg != nil && b.Version.AfterOrEqual(clparams.ElectraVersion) {
-		tmp.Attestations.Range(func(_ int, att *solid.Attestation, _ int) bool {
-			att.SetBeaconConfig(b.beaconCfg)
-			return true
-		})
+		if err := solid.RangeErr(tmp.Attestations, func(_ int, att *solid.Attestation, _ int) error {
+			return att.ValidateForConfig(b.beaconCfg, b.Version)
+		}); err != nil {
+			return err
+		}
 	}
 
 	b.RandaoReveal = tmp.RandaoReveal

@@ -1552,6 +1552,11 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	if err := validateBlindedBlockRequest(signedBlindedBlock, version); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+	if err := solid.RangeErr(signedBlindedBlock.Block.Body.Attestations, func(_ int, attestation *solid.Attestation, _ int) error {
+		return attestation.ValidateForConfig(a.beaconChainCfg, version)
+	}); err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
 	if isJSON {
 		signedBlindedBlock.Block.SetVersion(version)
 	}

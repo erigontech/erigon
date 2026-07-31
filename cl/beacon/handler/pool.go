@@ -384,6 +384,21 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 
 	failures := []poolingFailure{}
 	for _, v := range req {
+		if v == nil || v.Message == nil || v.Message.Aggregate == nil || v.Message.Aggregate.Data == nil || v.Message.Aggregate.AggregationBits == nil {
+			failures = append(failures, poolingFailure{Index: len(failures), Message: "invalid aggregate and proof"})
+			continue
+		}
+		epoch := v.Message.Aggregate.Data.Slot / a.beaconChainCfg.SlotsPerEpoch
+		version := a.beaconChainCfg.GetCurrentStateVersion(epoch)
+		if version >= clparams.ElectraVersion && v.Message.Aggregate.CommitteeBits == nil {
+			failures = append(failures, poolingFailure{Index: len(failures), Message: "invalid aggregate and proof: missing committee bits"})
+			continue
+		}
+		v.SetVersion(version)
+		if err := v.Message.Aggregate.ValidateForConfig(a.beaconChainCfg, version); err != nil {
+			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
+			continue
+		}
 		encodedSSZ, err := v.EncodeSSZ(nil)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
