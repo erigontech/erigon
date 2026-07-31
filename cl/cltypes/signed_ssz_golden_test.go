@@ -28,9 +28,9 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// These goldens pin the wire encoding, reported size, and hash-tree root of
-// every signed container that uses the shared helpers. Round-trip checks ensure
-// decoding and re-encoding preserve the same bytes.
+// These goldens pin the wire encoding, reported size, and hash-tree root of the
+// signed containers covered below. Round-trip checks ensure that decoding and
+// re-encoding preserve the same bytes.
 type signedContainerSSZ interface {
 	EncodeSSZ([]byte) ([]byte, error)
 	DecodeSSZ([]byte, int) error
