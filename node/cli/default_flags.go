@@ -237,6 +237,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinDisableBlobPruningFlag,
 	&utils.CaplinColumnKeepSlotsFlag,
 	&utils.CaplinDisableCheckpointSyncFlag,
+	&utils.CaplinResumeMaxStalenessEpochsFlag,
 	&utils.CaplinEnableSnapshotGeneration,
 	&utils.CaplinMevRelayUrl,
 	&utils.CaplinValidatorMonitorFlag,
