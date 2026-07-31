@@ -109,15 +109,24 @@
   run: '_ConstantinopleFix$'
   exclude:
     - '/\.meta/'
+- shard: blocktests-legacy-constantinople-race-byzantium
+  workers: 8
+  max-allowed-failures: 0
+  expected-tests: 5000
+  exec3-parallel: true
+  run: '_Byzantium$'
+  exclude:
+    - '/\.meta/'
 - shard: blocktests-legacy-constantinople-race-other-forks
   workers: 12
   # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
   max-allowed-failures: 14
-  expected-tests: 11006
+  expected-tests: 6006
   exec3-parallel: true
   exclude:
     - '/\.meta/'
     - '::.*_Constantinople(Fix)?$'
+    - '::.*_Byzantium$'
 - shard: blocktests-legacy-cancun-sequential
   workers: 12
   # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
