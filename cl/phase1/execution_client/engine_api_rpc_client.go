@@ -120,9 +120,9 @@ func (c *EngineAPIRPCClient) ForkchoiceUpdatedV3(ctx context.Context, forkChoice
 	return result, nil
 }
 
-func (c *EngineAPIRPCClient) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, custodyColumns *engine_types.CustodyColumns) (*engine_types.ForkChoiceUpdatedResponse, error) {
+func (c *EngineAPIRPCClient) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	result := &engine_types.ForkChoiceUpdatedResponse{}
-	if err := c.client.CallContext(ctx, result, rpc_helper.ForkChoiceUpdatedV4, forkChoiceState, payloadAttributes, custodyColumns); err != nil {
+	if err := c.client.CallContext(ctx, result, rpc_helper.ForkChoiceUpdatedV4, forkChoiceState, payloadAttributes); err != nil {
 		return nil, err
 	}
 	return result, nil

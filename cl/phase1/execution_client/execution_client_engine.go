@@ -241,7 +241,7 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		// V3 is valid for Cancun (Deneb) and Prague (Electra/Fulu)
 		resp, err = cc.engine.ForkchoiceUpdatedV3(ctx, forkChoiceState, attributes)
 	default: // Gloas+ (Amsterdam)
-		resp, err = cc.engine.ForkchoiceUpdatedV4(ctx, forkChoiceState, attributes, nil)
+		resp, err = cc.engine.ForkchoiceUpdatedV4(ctx, forkChoiceState, attributes)
 	}
 	if err != nil {
 		if err.Error() == errContextExceeded {

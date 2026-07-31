@@ -467,7 +467,7 @@ func TestEngineApiForkchoiceToGenesisRewindsHead(t *testing.T) {
 		}
 		var r *enginetypes.ForkChoiceUpdatedResponse
 		if eat.ChainConfig.AmsterdamTime != nil {
-			r, err = eat.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcu, nil, nil)
+			r, err = eat.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcu, nil)
 		} else {
 			r, err = eat.EngineApiClient.ForkchoiceUpdatedV3(ctx, &fcu, nil)
 		}
