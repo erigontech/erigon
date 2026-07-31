@@ -70,7 +70,7 @@ func TestPBinInitializeTrieAppliesHashSuite(t *testing.T) {
 			defer pph.Release()
 
 			require.Equal(t, tc.wantSame, pph.hasher.sum != nil, "node hashing seam")
-			require.Equal(t, tc.wantSame, pph.keyDigest.sum != nil, "key derivation seam")
+			require.Equal(t, tc.wantSame, pph.updateStream.keyDigest.sum != nil, "key derivation seam")
 
 			// The buffer's hasher has to derive the same key the engine will look for.
 			addr := make([]byte, 20)

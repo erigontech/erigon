@@ -46,7 +46,6 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
-	"slices"
 	"sync"
 
 	"github.com/erigontech/erigon/common"
@@ -64,15 +63,7 @@ type PBinPatriciaHashed struct {
 	hasher        pbinHasher
 	branchEncoder pbinBranchEncoder
 	counters      pbinCounters
-
-	siblingKey  [pbinAccountKeyLength]byte // scratch for the CODE_HASH key of the account being visited
-	pendingCode pbinPendingCode
-	// overflowCode holds the run's code-zone chunks. They are content-addressed
-	// rather than keyed by address, so they neither follow the stream's order nor
-	// belong to the account that produced them, and are emitted as one sorted
-	// block once the stream leaves the code zone.
-	overflowCode []pbinOverflowChunk
-	keyDigest    pbinDigestCache
+	updateStream  pbinUpdateStream
 
 	lastKey    [pbinStorageKeyLength]byte // the deepest key visited so far, which the next one must exceed
 	lastKeyLen int16
@@ -126,8 +117,7 @@ func (pph *PBinPatriciaHashed) Reset() {
 	pph.currentKey = pbinBitpath{}
 	pph.rootChecked, pph.rootTouched, pph.rootPresent = false, false, false
 	pph.rootPrev = nil
-	pph.pendingCode = pbinPendingCode{}
-	pph.overflowCode = pph.overflowCode[:0]
+	pph.updateStream.reset()
 	pph.lastKeyLen = 0
 }
 
@@ -136,7 +126,7 @@ func (pph *PBinPatriciaHashed) Reset() {
 // other. nil is Keccak-256 on both.
 func (pph *PBinPatriciaHashed) setHashSuite(sum pbinHashFn) keyHasher {
 	pph.hasher.sum = sum
-	pph.keyDigest = pbinDigestCache{sum: sum}
+	pph.updateStream.keyDigest = pbinDigestCache{sum: sum}
 	return pbinKeyHasherWith(sum)
 }
 
@@ -146,7 +136,7 @@ func (pph *PBinPatriciaHashed) Release() {
 	pph.ctx = nil
 	pph.traceW = nil
 	pph.hasher.sum = nil
-	pph.keyDigest = pbinDigestCache{}
+	pph.updateStream.release()
 	pph.counters = pbinCounters{}
 	pph.branchEncoder.buf = pph.branchEncoder.buf[:0]
 	pbinPool.Put(pph)
@@ -157,13 +147,6 @@ var (
 	errPBinDeleteUnsupported = errors.New("pbin: EIP-8297 defines no deletion")
 	errPBinVisitOrder        = errors.New("pbin: visit order is not ascending")
 )
-
-// pbinCodeContext is the read code chunking needs. PatriciaContext hands out
-// account state, not the bytecode the chunk leaves hold, so a context that
-// cannot serve code cannot commit a code-bearing account.
-type pbinCodeContext interface {
-	Code(plainKey []byte) ([]byte, error)
-}
 
 // ErrPBinUnsupported marks a code path only the hex trie implements. Callers
 // wrap it with the path name so the bin variant refuses instead of no-opping.
@@ -183,28 +166,9 @@ var pbinRootKey = []byte{0x08}
 //
 // warmup is ignored: the engine has no parallel read path to pre-warm for.
 func (pph *PBinPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) ([]byte, error) {
-	var processed uint64
-	// Each run is its own ascending stream: the grid is back at the root, so the
-	// key the previous run ended on bounds nothing. The code buffers are cleared
-	// for the same reason — a run that failed mid-stream leaves chunks queued,
-	// and the next run must not emit them against its own keys.
 	pph.lastKeyLen = 0
-	pph.pendingCode = pbinPendingCode{}
-	pph.overflowCode = pph.overflowCode[:0]
-	err := updates.HashSort(ctx, nil, func(treeKey, plainKey []byte, stateUpdate *Update) error {
-		if err := pph.processKey(treeKey, plainKey, stateUpdate); err != nil {
-			return err
-		}
-		processed++
-		return nil
-	})
+	processed, err := pph.updateStream.process(ctx, updates, pph.ctx, pph.followAndUpdate)
 	if err != nil {
-		return nil, fmt.Errorf("pbin: process %s: %w", logPrefix, err)
-	}
-	if err = pph.flushPendingCode(); err != nil {
-		return nil, fmt.Errorf("pbin: process %s: %w", logPrefix, err)
-	}
-	if err = pph.flushOverflowCode(); err != nil {
 		return nil, fmt.Errorf("pbin: process %s: %w", logPrefix, err)
 	}
 	for pph.grid.activeRows > 0 {
@@ -223,199 +187,6 @@ func (pph *PBinPatriciaHashed) Process(ctx context.Context, updates *Updates, lo
 			processed, pph.counters.splitsInsidePrefix, pph.counters.materializeReads)
 	}
 	return pph.RootHash()
-}
-
-// processKey routes one update into the tree. An account fans out to two leaves
-// visited back to back — BASIC_DATA and the CODE_HASH sibling at the next
-// sub-index — which is what lets the shared keyHasher stay a one-key function.
-// Its code chunks sit at the top of the same stem and are held back until the
-// stream leaves it.
-func (pph *PBinPatriciaHashed) processKey(treeKey, plainKey []byte, stateUpdate *Update) error {
-	if stateUpdate != nil && stateUpdate.Deleted() {
-		return fmt.Errorf("%w: update for %x", errPBinDeleteUnsupported, plainKey)
-	}
-	if err := pph.flushPendingCodeBefore(treeKey); err != nil {
-		return err
-	}
-	if err := pph.flushOverflowCodeBefore(treeKey); err != nil {
-		return err
-	}
-	update := stateUpdate
-	if update == nil {
-		var err error
-		if update, err = pph.stateOf(plainKey); err != nil {
-			return err
-		}
-	}
-	if err := pph.followAndUpdate(treeKey, plainKey, update); err != nil {
-		return err
-	}
-	if len(plainKey) != length.Addr {
-		return nil
-	}
-	codeKey, err := pph.codeHashKey(treeKey)
-	if err != nil {
-		return err
-	}
-	if err = pph.followAndUpdate(codeKey, plainKey, update); err != nil {
-		return err
-	}
-	return pph.queueCode(treeKey, plainKey, update)
-}
-
-// pbinPendingCode is one account's code fan-out, waiting for the stream to leave
-// its stem. Chunks occupy the header's top sub-indices, so emitting them at the
-// account's own visit would descend past a header storage slot the stream has not
-// delivered yet, and coming back for it would rewrite a record the fold had
-// already written.
-type pbinPendingCode struct {
-	stem     [pbinAccountKeyLength - 1]byte
-	plainKey [length.Addr]byte
-	chunks   [][pbinValueLength]byte
-}
-
-// queueCode reads the account's code and holds its chunks until the stem is done.
-// The size the BASIC_DATA leaf hashes and the code the chunks come from are two
-// reads, so they are checked against each other rather than trusted apart.
-func (pph *PBinPatriciaHashed) queueCode(basicDataKey, plainKey []byte, update *Update) error {
-	if update.CodeSize == 0 {
-		return nil
-	}
-	if len(pph.pendingCode.chunks) != 0 {
-		return fmt.Errorf("pbin: code for %x queued while %x is still pending: the stem exit was missed",
-			plainKey, pph.pendingCode.plainKey[:])
-	}
-	code, err := pph.codeOf(plainKey)
-	if err != nil {
-		return err
-	}
-	if uint64(len(code)) != update.CodeSize {
-		return fmt.Errorf("pbin: account %x says %d code bytes, the code domain holds %d",
-			plainKey, update.CodeSize, len(code))
-	}
-	chunks := pbinChunkifyCode(code)
-	if len(chunks) > pbinHeaderCodeChunks {
-		for i := pbinHeaderCodeChunks; i < len(chunks); i++ {
-			var oc pbinOverflowChunk
-			copy(oc.key[:], pph.keyDigest.codeOverflowKey(update.CodeHash, i))
-			oc.value = chunks[i]
-			pph.overflowCode = append(pph.overflowCode, oc)
-		}
-		chunks = chunks[:pbinHeaderCodeChunks]
-	}
-	pph.pendingCode.chunks = chunks
-	copy(pph.pendingCode.stem[:], basicDataKey)
-	copy(pph.pendingCode.plainKey[:], plainKey)
-	return nil
-}
-
-// pbinOverflowChunk is one code-zone chunk waiting for its block to be emitted.
-type pbinOverflowChunk struct {
-	key   [pbinCodeKeyLength]byte
-	value [pbinValueLength]byte
-}
-
-// flushOverflowCodeBefore emits the code-zone block once the stream reaches a
-// zone above it. Nothing the stream carries is a code-zone key — the zone is
-// content-addressed and no plain key derives into it — so the block is written
-// whole, between the last account-header key and the first storage one.
-func (pph *PBinPatriciaHashed) flushOverflowCodeBefore(treeKey []byte) error {
-	if len(pph.overflowCode) == 0 || treeKey[0] <= pbinCodeZone {
-		return nil
-	}
-	return pph.flushOverflowCode()
-}
-
-func (pph *PBinPatriciaHashed) flushOverflowCode() error {
-	if len(pph.overflowCode) == 0 {
-		return nil
-	}
-	slices.SortFunc(pph.overflowCode, func(a, b pbinOverflowChunk) int { return bytes.Compare(a.key[:], b.key[:]) })
-
-	var prev *pbinOverflowChunk
-	for i := range pph.overflowCode {
-		oc := &pph.overflowCode[i]
-		// Accounts running the same bytecode share leaves (eip:352-354), so the same
-		// key twice is one chunk two accounts asked for, not a conflict.
-		if prev != nil && oc.key == prev.key {
-			if oc.value != prev.value {
-				return fmt.Errorf("pbin: code chunk %x carries two values", oc.key[:])
-			}
-			continue
-		}
-		update := Update{Flags: StorageUpdate, StorageLen: pbinValueLength, Storage: oc.value}
-		if err := pph.followAndUpdate(oc.key[:], nil, &update); err != nil {
-			return err
-		}
-		prev = oc
-	}
-	pph.overflowCode = pph.overflowCode[:0]
-	return nil
-}
-
-func (pph *PBinPatriciaHashed) codeOf(plainKey []byte) ([]byte, error) {
-	ctx, ok := pph.ctx.(pbinCodeContext)
-	if !ok {
-		return nil, fmt.Errorf("%w: %T serves no code, needed to chunk account %x",
-			ErrPBinUnsupported, pph.ctx, plainKey)
-	}
-	code, err := ctx.Code(plainKey)
-	if err != nil {
-		return nil, fmt.Errorf("pbin: read code %x: %w", plainKey, err)
-	}
-	return code, nil
-}
-
-// flushPendingCodeBefore emits the held-back chunks when treeKey leaves their
-// stem. Chunk sub-indices are the highest in a stem, so a stem the stream has
-// left is a stem no key can return to.
-func (pph *PBinPatriciaHashed) flushPendingCodeBefore(treeKey []byte) error {
-	if len(pph.pendingCode.chunks) == 0 || bytes.HasPrefix(treeKey, pph.pendingCode.stem[:]) {
-		return nil
-	}
-	return pph.flushPendingCode()
-}
-
-func (pph *PBinPatriciaHashed) flushPendingCode() error {
-	p := &pph.pendingCode
-	var key [pbinAccountKeyLength]byte
-	copy(key[:], p.stem[:])
-	for i := range p.chunks {
-		key[pbinAccountKeyLength-1] = byte(pbinCodeOffset + i)
-		update := Update{Flags: StorageUpdate, StorageLen: pbinValueLength, Storage: p.chunks[i]}
-		if err := pph.followAndUpdate(key[:], nil, &update); err != nil {
-			return err
-		}
-	}
-	p.chunks = nil
-	return nil
-}
-
-func (pph *PBinPatriciaHashed) stateOf(plainKey []byte) (*Update, error) {
-	if len(plainKey) == length.Addr {
-		update, err := pph.ctx.Account(plainKey)
-		if err != nil {
-			return nil, fmt.Errorf("pbin: read account %x: %w", plainKey, err)
-		}
-		return update, nil
-	}
-	update, err := pph.ctx.Storage(plainKey)
-	if err != nil {
-		return nil, fmt.Errorf("pbin: read storage %x: %w", plainKey, err)
-	}
-	return update, nil
-}
-
-// codeHashKey is the CODE_HASH leaf beside a BASIC_DATA key: same stem, next
-// sub-index (eip:311-320). The two sit adjacent in key order, so visiting them
-// together never walks the descent backwards.
-func (pph *PBinPatriciaHashed) codeHashKey(basicDataKey []byte) ([]byte, error) {
-	if len(basicDataKey) != pbinAccountKeyLength || basicDataKey[pbinAccountKeyLength-1] != pbinBasicDataLeafKey {
-		return nil, fmt.Errorf("pbin: %x is not a BASIC_DATA key", basicDataKey)
-	}
-	copy(pph.siblingKey[:], basicDataKey)
-	pph.siblingKey[pbinAccountKeyLength-1] = pbinCodeHashLeafKey
-	return pph.siblingKey[:], nil
 }
 
 // followAndUpdate moves the grid onto treeKey and writes the update into the
