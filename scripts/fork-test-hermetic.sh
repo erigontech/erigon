@@ -100,6 +100,39 @@ eth_block_number() {
         --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
         "$PARENT_RPC" | jq -r '.result // "null"'
 }
+
+# progress_block reports the parent's real sync progress in decimal.
+# During OtterSync's initial-sync phase, eth_blockNumber stays at 0
+# because Caplin hasn't cut its first forkchoice yet — the exec stage
+# is executing frozen blocks but the "head" hasn't been declared.
+# eth_syncing.currentBlock reflects the actual exec progress and
+# tracks all the way up to live tip. Once at tip, eth_syncing returns
+# {result: false} and we fall back to eth_blockNumber.
+# Returns "null" only if the RPC is unreachable.
+progress_block() {
+    local resp cur h_hex
+    resp=$(curl -s --max-time 10 -X POST -H "Content-Type: application/json" \
+        --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' \
+        "$PARENT_RPC" 2>/dev/null)
+    if [[ -z "$resp" ]]; then
+        echo "null"
+        return
+    fi
+    # eth_syncing returns either false (at tip) or an object with currentBlock.
+    cur=$(echo "$resp" | jq -r '.result.currentBlock // empty')
+    if [[ -n "$cur" ]]; then
+        printf '%d\n' "$cur"
+        return
+    fi
+    # At tip — fall back to eth_blockNumber.
+    h_hex=$(eth_block_number)
+    if [[ "$h_hex" == "null" || -z "$h_hex" ]]; then
+        echo "null"
+        return
+    fi
+    printf '%d\n' "$h_hex"
+}
+
 hex_to_dec() { printf '%d\n' "$1"; }
 
 stage "Phase 0: kill any running erigon on parent ports + datadir"
@@ -182,12 +215,11 @@ stagnation_polls=0
 prev_head_for_progress=0
 
 while [[ $(date +%s) -lt $sync_end ]]; do
-    h_hex=$(eth_block_number)
-    if [[ "$h_hex" == "null" || -z "$h_hex" ]]; then
+    head=$(progress_block)
+    if [[ "$head" == "null" || -z "$head" ]]; then
         sleep 5
         continue
     fi
-    head=$(hex_to_dec "$h_hex")
 
     if [[ $bootstrap_floor -eq 0 && $head -gt 0 ]]; then
         bootstrap_floor=$head

@@ -292,16 +292,30 @@ before Phase 1 lock; **2** = surfaces in Phase 2 matrix.
   specific — this is a general erigon initial-sync bug that also affects
   unwind soak's cycle-start behaviour, though the unwind soak has
   succeeded so far.
-- **Decision:** **workaround now, deep fix as separate follow-up**.
-  Workaround landed 2026-07-31: `erigon-launch-hoodi-fork-parent.sh`
-  exports `ERIGON_EXEC3_PARALLEL=false`. Fork tests use the parent as
-  a stable substrate; they exercise fork transitions, not parallel
-  exec. Serial exec is slower but not racy. The race itself is a
-  general erigon bug outside fork scope — needs its own workstream to
-  root-cause the missing blockResult signal at
-  `execution/stagedsync/exec3_parallel.go:464`. Reproduces on fresh
-  hoodi sync intermittently under parallel exec + large
+- **Decision:** **must fix — real bug in the default operating model**.
+  Parallel exec is the default (not an opt-in), so any "disable
+  parallel" mitigation is not a defensible workaround: it runs the node
+  against a code path that isn't representative of production. The
+  race in the ProcessFrozenBlocks completeness check at
+  `execution/stagedsync/exec3_parallel.go:464` needs root-cause + fix
+  in its own workstream (general erigon bug outside fork scope).
+  Reproduces intermittently on fresh hoodi sync under large
   ProcessFrozenBlocks batches.
+- **Fork test infrastructure impact:** hermetic fork tests need a
+  healthy parent from a **fresh** sync (project rule: never copy
+  existing datadirs — their state is not knowable from the outside).
+  L10 makes fresh sync unreliable, which blocks hermetic Phase 1 fork
+  tests. Until L10 is resolved, Phase 1 fork test iteration cannot
+  proceed cleanly against fresh parents.
+- **Candidate route to resolution:** the branch is 440 commits behind
+  main as of 2026-07-31. Main has multiple refactors landed in the
+  exact code path L10 fires from (`execution/stagedsync/exec3_parallel.go`
+  and `execution/execmodule/`): `507925fa3c` extract blockExecutor
+  .deliver from sendResult, `992009503e` split parallel execLoop into
+  helpers, `f93ab5ae69` withhold created-empty versioned writes,
+  `050ac8a1a7` exec/RPC robustness fixes. Merging main may make L10
+  fall out for free. If not, targeted root-cause work remains
+  necessary but starts from a more current baseline.
 
 ### L9 — Multi-node convergence requires coordinated chain switch (Phase 2)
 
