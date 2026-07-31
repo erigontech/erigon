@@ -156,7 +156,7 @@ datadir
     nodes         # p2p peers. safe to remove.
     temp          # used to sort data bigger than RAM. can grow to ~100gb. cleaned at startup.
    
-# There is 6 domains: account, storage, code, commitment, receipt, rcache. Last one only with `--prune.include-receipts`.
+# There are 6 domains: account, storage, code, commitment, receipt, rcache. Last one only with `--prune.include-receipts`.
 ```
 
 See the [lib](db/downloader/README.md) and [cmd](cmd/downloader/README.md) READMEs for more information.
@@ -185,14 +185,15 @@ datadir
 
 ### Erigon3 datadir size
 
-Measured on Erigon 3.6 `--prune.mode=archive` nodes, July 2026. `snapshots` counts only the block files
-(headers, bodies, transactions) that sit in the directory itself, not its sub-folders. Each column is one node, so
-totals can differ a few percent from the table above, which is measured on freshly synced nodes.
+Measured on Erigon 3.6 `--prune.mode=archive` nodes, July 2026. The `snapshots/*.seg` row is only the block files —
+headers, bodies and transactions — that sit directly in `snapshots/`; the rows below it are its sub-folders. Each
+column is one node, so totals can differ a few percent from the table above, which is measured on freshly synced
+nodes.
 
 | Path                 | eth-mainnet | gnosis    | sepolia   | hoodi     | chiado   |
 |----------------------|-------------|-----------|-----------|-----------|----------|
 | `chaindata`          | 22.75 GB    | 9.63 GB   | 12.87 GB  | 6.78 GB   | 2.40 GB  |
-| `snapshots`          | 996.40 GB   | 284.82 GB | 614.90 GB | 33.38 GB  | 12.91 GB |
+| `snapshots/*.seg`    | 996.40 GB   | 284.82 GB | 614.90 GB | 33.38 GB  | 12.91 GB |
 | `snapshots/domain`   | 417.66 GB   | 227.03 GB | 237.26 GB | 52.39 GB  | 7.17 GB  |
 | `snapshots/idx`      | 332.72 GB   | 136.67 GB | 115.95 GB | 25.47 GB  | 3.44 GB  |
 | `snapshots/history`  | 255.60 GB   | 39.28 GB  | 68.93 GB  | 8.00 GB   | 2.33 GB  |
@@ -208,7 +209,8 @@ Data that is off by default, measured on the same nodes:
 | `--caplin.blocks-archive`, `--caplin.blobs-archive`, `--caplin.states-archive` | +2.48 TB | +501.00 GB | +1.40 TB | +135.28 GB | - |
 
 Caplin numbers are the backfilled beacon blocks, blob sidecars and beacon state snapshots. They exclude the beacon
-chain db every node with the embedded Consensus Layer keeps anyway. Blob sidecars dominate: 2.17 TB of the mainnet 2.48 TB.
+chain db that every node with the embedded Consensus Layer keeps anyway. Blob sidecars dominate: on mainnet they are
+2.17 TB of the 2.48 TB total.
 
 ### Erigon3 changes from Erigon2
 
@@ -221,7 +223,7 @@ chain db every node with the embedded Consensus Layer keeps anyway. Blob sidecar
 - **Validator mode**: added. `--internalcl` is enabled by default. to disable use `--externalcl`.
 - **Store most of data in immutable files (segments/snapshots):**
     - can symlink/mount latest state to fast drive and history to cheap drive
-  - `chaindata` is tens of gb (22gb on an archive mainnet node). It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
+    - `chaindata` is tens of gb (22gb on an archive mainnet node). It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
 - **`--prune` flags changed**: see `--prune.mode` (default: `full`, archive: `archive`, EIP-4444: `minimal`)
 - **Other changes:**
     - ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
