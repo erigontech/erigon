@@ -166,9 +166,9 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, h
 // WaitForWarmup blocks until any in-flight warmBody goroutine finishes or the
 // context is cancelled, reporting whether the warmup fully drained. False
 // means a warmup may still be running — callers about to bump the cache epoch
-// or Clear must treat it as a failed precondition. Call before closing the
-// database to avoid waitTxsAllDoneOnClose hangs (that caller may ignore the
-// result: it only needs a bounded wait).
+// must treat it as a failed precondition. Call before closing the database to
+// avoid waitTxsAllDoneOnClose hangs (that caller may ignore the result: it only
+// needs a bounded wait).
 func (bra *BlockReadAheader) WaitForWarmup(ctx context.Context) bool {
 	done := make(chan struct{})
 	go func() {

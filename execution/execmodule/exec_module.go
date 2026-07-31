@@ -694,19 +694,6 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	}
 	defer e.semaphore.Release(1)
 
-	// Engine servers are live before Start, so an early payload validation may
-	// already have warmed the state cache with pre-catchup state. Frozen-block
-	// processing advances state without touching the cache (its SDs are not
-	// wired to it), so such entries would be served stale afterwards — drain
-	// any in-flight warmup and clear before it runs. An interrupted drain
-	// means shutdown: return rather than Clear under a live warmup.
-	if !e.drainReadAhead() {
-		return
-	}
-	if e.stateCache != nil {
-		e.stateCache.Clear()
-	}
-
 	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
