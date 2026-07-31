@@ -1035,21 +1035,23 @@ func BenchmarkDataDependentConflicts(b *testing.B) {
 	for _, numTx := range totalTxs {
 		for _, cfg := range configs {
 			b.Run(fmt.Sprintf("txs=%d/%s", numTx, cfg.name), func(b *testing.B) {
-				tasks, _ := taskFactory(numTx, uniqueSender, 5, 5, 10, hotSlotPathGenerator, readTime, writeTime, nonIOTime)
+				var execs, txs int64
+				for b.Loop() {
+					b.StopTimer()
+					tasks, _ := taskFactory(numTx, uniqueSender, 5, 5, 10, hotSlotPathGenerator, readTime, writeTime, nonIOTime)
+					b.StartTimer()
 
-				b.ResetTimer()
-				runParallelWorkers(b, tasks, defaultChecks, false, logger, cfg.workers)
-				b.StopTimer()
+					runParallelWorkers(b, tasks, defaultChecks, false, logger, cfg.workers)
 
-				var execs, aborts int64
-				for _, task := range tasks {
-					execs += task.(*testExecTask).execCount.Load()
-					aborts += task.(*testExecTask).abortCount.Load()
+					b.StopTimer()
+					for _, task := range tasks {
+						execs += task.(*testExecTask).execCount.Load()
+					}
+					txs += int64(numTx)
+					b.StartTimer()
 				}
-				b.ReportMetric(float64(aborts), "aborts")
 				if execs > 0 {
-					b.ReportMetric(100*float64(execs-int64(numTx))/float64(execs), "repeat%")
-					b.ReportMetric(float64(execs)/float64(numTx), "execs/tx")
+					b.ReportMetric(100*float64(execs-txs)/float64(execs), "repeat%")
 				}
 			})
 		}
