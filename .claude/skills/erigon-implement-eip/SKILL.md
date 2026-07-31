@@ -115,15 +115,13 @@ Run local tests using the `/erigon-test-all` skill. Analyse and fix any failures
 
 The most important tests when implementing a new EIP for the EL are the EEST spec test shards, exercised by the `cmd/evm` runners (`statetest`, `blocktest`, `enginextest`) via the Makefile targets:
 
-- `make eest-spec-statetests-stable` / `…-devnet` — state-tests against the stable/devnet EEST fixtures
-- `make eest-spec-blocktests-stable-sequential` / `…-devnet` — blockchain-tests against the stable/devnet EEST fixtures. The devnet shard always runs under `ERIGON_EXEC3_PARALLEL=true` (the in-development hardfork requires it); the `…-sequential` shard pins `ERIGON_EXEC3_PARALLEL=false`.
-- `make eest-spec-blocktests-stable-parallel` — same fixtures as `…-stable-sequential` but with `ERIGON_EXEC3_PARALLEL=true`; useful for catching parallel-only regressions on stable fixtures.
-- `make eest-spec-enginextests-stable-sequential` — engine-x tests against the stable EEST fixtures with `ERIGON_EXEC3_PARALLEL=false`. No devnet variant: the devnet tarball doesn't yet ship `blockchain_tests_engine_x/`.
-- `make eest-spec-enginextests-stable-parallel` — same fixtures as `…-stable-sequential` but with `ERIGON_EXEC3_PARALLEL=true`; useful for catching parallel-only regressions on engine-x stable fixtures.
-- `make eest-spec-enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}-{sequential,parallel}` — engine-x tests against the per-gas-target benchmark fixtures, with `--time` per-test stats. Each gas target has a `-sequential` (`ERIGON_EXEC3_PARALLEL=false`) and `-parallel` (`ERIGON_EXEC3_PARALLEL=true`) variant.
-- `make eest-spec-blocktests-stable-race-{pre-cancun,cancun,prague,osaka}-{sequential,parallel}` and `make eest-spec-blocktests-devnet-race-amsterdam` — race-detector variants split by fork. Each stable-race sub-shard has a `-sequential` / `-parallel` pair; the `-parallel` siblings exercise parallel exec3 under the race detector. The `blocktests-devnet-race-amsterdam` shard is always parallel (matches the non-race devnet behaviour).
+- `make eest-spec-statetests-{stable,devnet}-{sequential,parallel}` — state tests against the stable/devnet EEST fixtures in both commitment modes.
+- `make eest-spec-blocktests-{stable,devnet}-{sequential,parallel}` — blockchain tests against the stable/devnet EEST fixtures in both commitment modes.
+- `make eest-spec-enginextests-stable-{sequential,parallel}` — engine-x tests against the stable EEST fixtures in both commitment modes. No devnet variant exists because the devnet tarball does not yet ship `blockchain_tests_engine_x/`.
+- `make eest-spec-enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}-{sequential,parallel}` — engine-x tests against the per-gas-target benchmark fixtures, with `--time` per-test stats and both commitment modes.
+- `make eest-spec-blocktests-stable-race-{pre-cancun,cancun,prague,osaka}-{sequential,parallel}` and `make eest-spec-blocktests-devnet-race-amsterdam-{sequential,parallel}` — race-detector variants split by fork and commitment mode.
 
-The shard list / failure budgets / `exec3-parallel` flags are defined in `tools/eest-spec-shards.yml` (single source of truth shared with the CI workflow and the local runner script). See `EEST_SPEC_SHARDS` / `EEST_SPEC_RACE_SHARDS` in the root `Makefile` for the partition into non-race vs race targets.
+The shard list, failure budgets, and `commitment-parallel` flags are defined in `tools/eest-spec-shards.yml` (single source of truth shared with the CI workflow and the local runner script). Execution remains parallel in every paired shard. See `EEST_SPEC_SHARDS` / `EEST_SPEC_RACE_SHARDS` in the root `Makefile` for the partition into non-race vs race targets.
 
 **Pitfall: stale `evm` / `evm.race` binary.** When iterating on an EIP implementation, always invoke shards via `make eest-spec-<shard>` rather than `bash tools/run-eest-spec-test.sh <shard>` — the make target lists `evm` (or `evm.race`) as a prereq and `go build` is cache-aware, so a fresh binary is built before each run. The script invoked directly **bypasses** that rebuild, so the runners exercise whatever `build/bin/evm{,.race}` happens to be on disk against current fixtures — silently inflating failures (e.g. devnet shards "regressing" by thousands of tests) or hiding regressions when comparing budgets before/after a change.
 

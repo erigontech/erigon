@@ -14,14 +14,18 @@ Runs the complete test suite with 60-minute timeout and coverage output. Takes ~
 To exercise the EEST suites locally, see `erigon-eest-spec` (or run a specific shard directly):
 
 ```bash
-make eest-spec-statetests-stable             # state tests vs eest_stable fixtures
+make eest-spec-statetests-stable-{sequential,parallel}
+                                             # state tests vs eest_stable fixtures
 make eest-spec-blocktests-stable-sequential  # blockchain tests vs eest_stable fixtures (serial commitment)
 make eest-spec-blocktests-stable-parallel    # same, but with parallel commitment
 make eest-spec-enginextests-stable-sequential # engine-x tests vs eest_stable (serial commitment)
 make eest-spec-enginextests-stable-parallel  # same, but with parallel commitment
-make eest-spec-statetests-devnet             # …vs eest_devnet fixtures
-make eest-spec-blocktests-devnet             # devnet blocktests (serial commitment)
-make eest-spec-statetests-legacy             # pinned legacy Cancun state-test archive
+make eest-spec-statetests-devnet-{sequential,parallel}
+                                             # state tests vs eest_devnet fixtures
+make eest-spec-blocktests-devnet-{sequential,parallel}
+                                             # devnet blocktests in both commitment modes
+make eest-spec-statetests-legacy-{sequential,parallel}
+                                             # pinned legacy Cancun state-test archive
 make eest-spec-rlptests-legacy-race          # complete pinned legacy RLP suite
 make eest-spec-transactiontests-legacy-race  # complete pinned legacy transaction suite
 make eest-spec-difficultytests-legacy-race   # complete pinned legacy difficulty suite
@@ -50,8 +54,9 @@ make eest-spec-enginextests-benchmark-1m-sequential
 make eest-spec-blocktests-stable-race-cancun-sequential
                                              # race-detector variant, sharded per fork:
                                              # -pre-cancun/-cancun/-prague/-osaka, plus
-                                             # eest-spec-blocktests-devnet-race-amsterdam.
-                                             # Each stable-race sub-shard has a
+                                             # eest-spec-blocktests-devnet-race-amsterdam-
+                                             # {sequential,parallel}. Each stable-race
+                                             # and devnet-race sub-shard has a
                                              # "-sequential" / "-parallel" pair
                                              # (e.g. ...-race-cancun-{sequential,parallel})
 ```
