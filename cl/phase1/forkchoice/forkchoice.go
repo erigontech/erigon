@@ -195,8 +195,10 @@ type ForkChoiceStore struct {
 	// whose EL newPayload failed (e.g. because EL hasn't caught up after forward sync).
 	// The stages layer drains these into blockCollector before each Flush() so EL
 	// eventually receives the blocks.
-	pendingELPayloadsMu sync.Mutex
-	pendingELPayloads   []PendingELPayload
+	pendingELPayloadsMu    sync.Mutex
+	pendingELPayloads      []PendingELPayload
+	payloadValidations     map[common.Hash]*payloadValidationCall
+	payloadValidationSlots chan struct{}
 
 	// db is used to persist execution payload indices (block number/hash) when an envelope
 	// is accepted in OnExecutionPayload. May be nil (e.g. in tests), in which case the
@@ -208,6 +210,12 @@ type ForkChoiceStore struct {
 type PendingELPayload struct {
 	Block    *cltypes.SignedBeaconBlock
 	Envelope *cltypes.SignedExecutionPayloadEnvelope
+}
+
+type payloadValidationCall struct {
+	done   chan struct{}
+	status execution_client.PayloadStatus
+	err    error
 }
 
 type childrens struct {
