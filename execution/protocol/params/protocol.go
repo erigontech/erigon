@@ -243,9 +243,9 @@ const (
 	CallValueTransferGasEIP8038       = AccountWriteCostEIP8038 + CallStipend                  // CALL_VALUE = 10300
 	CreateAccessEIP8038               = AccountWriteCostEIP8038 + ColdStorageAccessCostEIP8038 // CREATE_ACCESS = 11000
 	SstoreClearsScheduleRefundEIP8038 = uint64(12480)                                          // REFUND_STORAGE_CLEAR = (STORAGE_WRITE+COLD_STORAGE_ACCESS)*4800/5000
-	TxAccessListAddressGasEIP8038     = ColdAccountAccessCostEIP8038                           // ACCESS_LIST_ADDRESS_COST
-	TxAccessListStorageKeyGasEIP8038  = ColdStorageAccessCostEIP8038                           // ACCESS_LIST_STORAGE_KEY_COST
-	ExtCodeWarmAccessGasEIP8038       = 2 * WarmStorageReadCostEIP2929                         // EXTCODESIZE/EXTCODECOPY: account access + second read for the code
+	TxAccessListAddressGasEIP8038     = ColdAccountAccessCostEIP8038 - WarmStorageReadCostEIP2929
+	TxAccessListStorageKeyGasEIP8038  = ColdStorageAccessCostEIP8038 - WarmStorageReadCostEIP2929
+	ExtCodeWarmAccessGasEIP8038       = 2 * WarmStorageReadCostEIP2929 // EXTCODESIZE/EXTCODECOPY: account access + second read for the code
 	// REGULAR_PER_AUTH_BASE_COST = 101 auth-tuple bytes * 16 + ECRECOVER + COLD_ACCOUNT_ACCESS + 2*WARM_ACCESS = 7816
 	RegularPerAuthBaseCostEIP8038 = 101*TxDataNonZeroGasEIP2028 + EcrecoverGas + ColdAccountAccessCostEIP8038 + 2*WarmStorageReadCostEIP2929
 	// PER_AUTH regular intrinsic = ACCOUNT_WRITE + REGULAR_PER_AUTH_BASE_COST = 15816
