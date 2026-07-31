@@ -358,7 +358,7 @@ func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
 			return false
 		}
 		if item.decompressor != nil {
-			log.Debug("[snapshots] closing", "file", item.decompressor.FileName(), "reason", fmt.Sprintf("step %d not complete", lowerBound))
+			log.Warn("[snapshots] closing", "file", item.decompressor.FileName(), "reason", fmt.Sprintf("step %d not complete", lowerBound))
 		}
 		return true
 	}

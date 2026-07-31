@@ -1748,13 +1748,16 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 	)
 	// TODO(awskii) have two different functions including commitment/without it
 	//  Usually its skipped because commitment either have MaxUint64 due to no history or equal to other domains
-
-	//log.Warn("dirtyFilesEndTxNumMinimax", "min", m,
-	//	"acc", a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
-	//	"sto", a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
-	//	"cod", a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
-	//	"com", a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
-	//)
+	if cd := a.d[kv.CommitmentDomain]; cd != nil {
+		if cm := cd.dirtyFilesEndTxNumMinimax(); cm < m {
+			a.logger.Warn("[agg] commitment dirty files behind state domains",
+				"commitment", cm,
+				"acc", a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
+				"sto", a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
+				"cod", a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
+			)
+		}
+	}
 	return m
 }
 
