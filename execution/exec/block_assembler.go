@@ -212,22 +212,30 @@ func (ba *BlockAssembler) AddTransactions(
 	// CommitBlock in AssembleBlock writes all final state correctly.
 	writer := state.NewNoopWriter()
 	recordTxIO := func() error {
-		if !ba.HasBAL() {
+		if !ba.HasBAL() && !ibs.IsVersioned() {
 			return nil
+		}
+		if ba.blockRules == nil {
+			blockContext := protocol.NewEVMBlockContext(
+				ba.Header, protocol.GetHashFn(ba.Header, nil), ba.cfg.Engine, accounts.NilAddress, ba.cfg.ChainConfig,
+			)
+			ba.blockRules = blockContext.Rules(ba.cfg.ChainConfig)
 		}
 		writes, err := ibs.FinalizedWrites(ba.blockRules)
 		if err != nil {
 			return err
 		}
-		ibs.MergeTxIOInto(ba.balIO, writes)
+		if ba.HasBAL() {
+			ibs.MergeTxIOInto(ba.balIO, writes)
+		}
 		// Publish this tx's writes to the versionMap so the next tx observes them;
-		// ResetVersionedIO below clears the per-tx write set used for BAL recording.
+		// ResetVersionedIO below clears the per-tx write set.
 		ibs.FlushWritesToVersionMap(writes)
 		ibs.ResetVersionedIO()
 		return nil
 	}
 	clearTxIO := func() {
-		if !ba.HasBAL() {
+		if !ba.HasBAL() && !ibs.IsVersioned() {
 			return
 		}
 		ibs.ResetVersionedIO()
