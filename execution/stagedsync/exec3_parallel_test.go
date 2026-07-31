@@ -64,10 +64,8 @@ type testExecTask struct {
 	nonce        int
 	dependencies []int
 	// execCount counts how often the executor ran this task; anything above one
-	// is a re-execution. abortCount counts the runs that ended in a dependency
-	// abort, i.e. the optimistic read lost to a lower-indexed write.
-	execCount  atomic.Int64
-	abortCount atomic.Int64
+	// is a re-execution.
+	execCount atomic.Int64
 }
 
 type PathGenerator func(i int, j int, total int) opkey
@@ -182,7 +180,6 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	}
 
 	if dep != -1 {
-		t.abortCount.Add(1)
 		return &exec.TxResult{Err: protocol.ErrExecAbortError{DependencyTxIndex: dep, OriginError: fmt.Errorf("Dependency error")}}
 	}
 
@@ -275,6 +272,24 @@ var hotSlotPathGenerator = func(i int, j int, total int) opkey {
 // slot is the only thing ordering them — nonces do not also serialise the block.
 func uniqueSender(i int) accounts.Address {
 	return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i))))
+}
+
+// hotRecipientShare: 7 in 8 transactions touch the shared slot, matching the
+// mainnet ERC-20 block this generator is modelled on.
+const hotRecipientShare = 8
+
+// realBlockPathGenerator models a block of ERC-20 transfers into one hot
+// exchange wallet: every transaction touches its own sender balance, and most
+// also touch the single recipient balance every transfer credits. That mix of
+// private and shared slots is what a token-heavy block actually looks like,
+// unlike hotSlotPathGenerator where nothing is private.
+var realBlockPathGenerator = func(i int, j int, total int) opkey {
+	token := accounts.InternAddress(common.BigToAddress(big.NewInt(1)))
+	senderSlot := accounts.InternKey(common.BigToHash(big.NewInt(int64(i) + 2)))
+	if i%hotRecipientShare == 0 || j%2 == 0 {
+		return opkey{token, senderSlot, state.StoragePath}
+	}
+	return opkey{token, accounts.InternKey(common.BigToHash(big.NewInt(1))), state.StoragePath}
 }
 
 var readTime = randTimeGenerator(4*time.Microsecond, 12*time.Microsecond)
@@ -1002,16 +1017,18 @@ func BenchmarkMoreConflicts(b *testing.B) {
 	}
 }
 
-// BenchmarkDataDependentConflicts is the worst case for optimistic parallel
-// execution: every transaction in the block reads and writes one storage slot,
-// so each speculative run reads a value a lower-indexed transaction then
-// overwrites, is invalidated, and runs again. It executes the same block at the
-// production worker count and at a single worker, reporting how many times each
-// transaction had to run.
+// BenchmarkDataDependentConflicts measures the re-execution caused by data
+// conflicts: a speculative run reads a value a lower-indexed transaction then
+// overwrites, is invalidated, and runs again. shared-slot is the worst case
+// (every transaction reads and writes one storage slot); erc20-hot-wallet mixes
+// private and shared slots. Both run at the production worker count and at one
+// worker.
 //
 // repeat% is the share of executions that were re-executions, so 0 means every
-// transaction ran once. The single-worker configuration is the floor: with no
-// speculation there is nothing to invalidate.
+// transaction ran once. One worker is not a zero-repeat floor: the apply loop
+// publishes a transaction's writes to the version map only after validating
+// them, so even a serial worker can start tx N before tx N-1's writes are
+// visible.
 //
 // Run with: go test -run='^$' -bench=BenchmarkDataDependentConflicts -benchtime=1x
 func BenchmarkDataDependentConflicts(b *testing.B) {
@@ -1024,6 +1041,13 @@ func BenchmarkDataDependentConflicts(b *testing.B) {
 	if testing.Short() {
 		totalTxs = totalTxs[:1]
 	}
+	scenarios := []struct {
+		name string
+		path PathGenerator
+	}{
+		{"shared-slot", hotSlotPathGenerator},
+		{"erc20-hot-wallet", realBlockPathGenerator},
+	}
 	configs := []struct {
 		name    string
 		workers int
@@ -1032,28 +1056,30 @@ func BenchmarkDataDependentConflicts(b *testing.B) {
 		{"workers=1", 1},
 	}
 
-	for _, numTx := range totalTxs {
-		for _, cfg := range configs {
-			b.Run(fmt.Sprintf("txs=%d/%s", numTx, cfg.name), func(b *testing.B) {
-				var execs, txs int64
-				for b.Loop() {
-					b.StopTimer()
-					tasks, _ := taskFactory(numTx, uniqueSender, 5, 5, 10, hotSlotPathGenerator, readTime, writeTime, nonIOTime)
-					b.StartTimer()
+	for _, sc := range scenarios {
+		for _, numTx := range totalTxs {
+			for _, cfg := range configs {
+				b.Run(fmt.Sprintf("%s/txs=%d/%s", sc.name, numTx, cfg.name), func(b *testing.B) {
+					var execs, txs int64
+					for b.Loop() {
+						b.StopTimer()
+						tasks, _ := taskFactory(numTx, uniqueSender, 5, 5, 10, sc.path, readTime, writeTime, nonIOTime)
+						b.StartTimer()
 
-					runParallelWorkers(b, tasks, defaultChecks, false, logger, cfg.workers)
+						runParallelWorkers(b, tasks, defaultChecks, false, logger, cfg.workers)
 
-					b.StopTimer()
-					for _, task := range tasks {
-						execs += task.(*testExecTask).execCount.Load()
+						b.StopTimer()
+						for _, task := range tasks {
+							execs += task.(*testExecTask).execCount.Load()
+						}
+						txs += int64(numTx)
+						b.StartTimer()
 					}
-					txs += int64(numTx)
-					b.StartTimer()
-				}
-				if execs > 0 {
-					b.ReportMetric(100*float64(execs-txs)/float64(execs), "repeat%")
-				}
-			})
+					if execs > 0 {
+						b.ReportMetric(100*float64(execs-txs)/float64(execs), "repeat%")
+					}
+				})
+			}
 		}
 	}
 }

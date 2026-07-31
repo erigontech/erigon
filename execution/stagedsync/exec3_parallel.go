@@ -1245,30 +1245,31 @@ func (pe *parallelExecutor) completeBlock(ctx context.Context, blockResult *bloc
 var repeatReportThreshold = dbg.EnvInt("EXEC_REPEAT_REPORT", 0)
 
 func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
-	pe.reportBlockRepeats(be)
+	execTimed := !be.execStarted.IsZero()
+	var execDur time.Duration
+	if execTimed {
+		execDur = time.Since(be.execStarted)
+	}
+	pe.reportBlockRepeats(be, execDur)
 	pe.execCount.Add(int64(be.cntExec))
 	pe.abortCount.Add(int64(be.cntAbort))
 	pe.invalidCount.Add(int64(be.cntValidationFail))
 	pe.readCount.Add(be.blockIO.ReadCount())
 	pe.writeCount.Add(be.blockIO.WriteCount())
-	if !be.execStarted.IsZero() {
-		pe.blockExecMetrics.Duration.Add(time.Since(be.execStarted))
+	if execTimed {
+		pe.blockExecMetrics.Duration.Add(execDur)
 		pe.blockExecMetrics.BlockCount.Add(1)
 	}
 }
 
-func (pe *parallelExecutor) reportBlockRepeats(be *blockExecutor) {
-	if repeatReportThreshold <= 0 || be.cntExec <= len(be.tasks) || len(be.tasks) == 0 {
+func (pe *parallelExecutor) reportBlockRepeats(be *blockExecutor, execDur time.Duration) {
+	if repeatReportThreshold <= 0 || be.cntExec <= len(be.tasks) {
 		return
 	}
 	repeats := be.cntExec - len(be.tasks)
 	repeatPct := 100 * float64(repeats) / float64(be.cntExec)
 	if repeatPct < float64(repeatReportThreshold) {
 		return
-	}
-	var execDur time.Duration
-	if !be.execStarted.IsZero() {
-		execDur = time.Since(be.execStarted)
 	}
 	pe.logger.Info("[exec] high-repeat block",
 		"blockNum", be.blockNum,
@@ -1364,10 +1365,19 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 		switch {
 		case len(t.Dependencies()) > 0:
+			// addDependency rejects a blocker that isn't strictly lower than the
+			// dependent. Clearing pending without a registered blocker leaves the
+			// task in no queue at all, so it is never scheduled and the block
+			// never completes.
+			blocked := false
 			for _, depTxIndex := range t.Dependencies() {
-				executor.execTasks.addDependency(depTxIndex+1, i)
+				if executor.execTasks.addDependency(depTxIndex+1, i) {
+					blocked = true
+				}
 			}
-			executor.execTasks.clearPending(i)
+			if blocked {
+				executor.execTasks.clearPending(i)
+			}
 		case len(execRequest.accessList) != 0:
 			// if we have an access list we can assume that all
 			// writes are already in the shared memory map so
