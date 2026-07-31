@@ -31,6 +31,17 @@ echo "[launcher] trust-root pubkey: $TRUST_ROOT_PUB (key: $TRUST_ROOT_KEY)" >&2
 export USE_STATE_CACHE=false
 export ERIGON_MERGE_MIN_AGE_STEPS="${ERIGON_MERGE_MIN_AGE_STEPS:-6}"
 
+# ERIGON_EXEC3_PARALLEL=false disables parallel execution. Fork tests
+# use this parent as a stable substrate — they exercise fork transitions,
+# not the parallel-exec path. Parallel exec has a race in the initial-
+# sync ProcessFrozenBlocks completeness check that intermittently halts
+# fresh hoodi sync (see leak L10 in
+# docs/plans/20260731-fork-test-scope-and-leaks.md). Serial exec is
+# slower but not racy; the fork test infrastructure prefers reliability
+# over throughput. Override via env if you need to test the parallel
+# path against a fork parent.
+export ERIGON_EXEC3_PARALLEL="${ERIGON_EXEC3_PARALLEL:-false}"
+
 exec "$BIN" \
   --datadir="$DATADIR" \
   --chain="$CHAIN" --prune.mode=minimal \

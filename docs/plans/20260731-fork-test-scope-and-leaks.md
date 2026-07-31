@@ -292,9 +292,16 @@ before Phase 1 lock; **2** = surfaces in Phase 2 matrix.
   specific — this is a general erigon initial-sync bug that also affects
   unwind soak's cycle-start behaviour, though the unwind soak has
   succeeded so far.
-- **Decision:** **fix (Phase 1)** — parallel-exec race in
-  ProcessFrozenBlocks needs to be closed. Blocker for Phase 1 fork
-  test hermetic infrastructure.
+- **Decision:** **workaround now, deep fix as separate follow-up**.
+  Workaround landed 2026-07-31: `erigon-launch-hoodi-fork-parent.sh`
+  exports `ERIGON_EXEC3_PARALLEL=false`. Fork tests use the parent as
+  a stable substrate; they exercise fork transitions, not parallel
+  exec. Serial exec is slower but not racy. The race itself is a
+  general erigon bug outside fork scope — needs its own workstream to
+  root-cause the missing blockResult signal at
+  `execution/stagedsync/exec3_parallel.go:464`. Reproduces on fresh
+  hoodi sync intermittently under parallel exec + large
+  ProcessFrozenBlocks batches.
 
 ### L9 — Multi-node convergence requires coordinated chain switch (Phase 2)
 
