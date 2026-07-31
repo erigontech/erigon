@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"sync"
 
 	"github.com/holiman/uint256"
 
@@ -116,7 +117,7 @@ type storedReceiptRLP struct {
 	CumulativeGasUsed uint64
 	FirstLogIndex     uint32 // Logs have their own incremental Index within block. To allow calc it without re-executing whole block - can store it in Receipt
 
-	Logs []*LogForStorage
+	Logs []rlpStorageLog
 
 	TransactionIndex uint
 	ContractAddress  common.Address
@@ -377,21 +378,43 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 		r.FirstLogIndexWithinBlock = uint32(r.Logs[0].Index)
 	}
 
-	logsForStorage := make([]*LogForStorage, len(r.Logs))
-	for i, l := range r.Logs {
-		logsForStorage[i] = (*LogForStorage)(l)
+	s := storedReceiptScratchPool.Get().(*storedReceiptScratch)
+	defer s.release()
+
+	s.logs = slices.Grow(s.logs[:0], len(r.Logs))
+	for _, l := range r.Logs {
+		s.logs = append(s.logs, rlpStorageLog{Address: l.Address, Topics: l.Topics, Data: l.Data})
 	}
-	return rlp.Encode(w, &storedReceiptRLP{
+	s.rec = storedReceiptRLP{
 		Type:              r.Type,
 		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
 		CumulativeGasUsed: r.CumulativeGasUsed,
 		FirstLogIndex:     r.FirstLogIndexWithinBlock,
 
-		Logs:             logsForStorage,
+		Logs:             s.logs,
 		GasUsed:          r.GasUsed,
 		ContractAddress:  r.ContractAddress,
 		TransactionIndex: r.TransactionIndex,
-	})
+	}
+	return rlp.Encode(w, &s.rec)
+}
+
+// storedReceiptScratch keeps the reflection encoder's input off the heap: the
+// encoder needs an addressable struct and a log slice, and a receipt is encoded
+// once per transaction executed.
+type storedReceiptScratch struct {
+	rec  storedReceiptRLP
+	logs []rlpStorageLog
+}
+
+var storedReceiptScratchPool = sync.Pool{New: func() any { return new(storedReceiptScratch) }}
+
+// release drops the borrowed topic and data slices so a pooled scratch never
+// keeps a receipt's logs alive.
+func (s *storedReceiptScratch) release() {
+	clear(s.logs)
+	s.rec = storedReceiptRLP{}
+	storedReceiptScratchPool.Put(s)
 }
 
 func decodeLogsForStorage(s *rlp.Stream) (Logs, error) {
