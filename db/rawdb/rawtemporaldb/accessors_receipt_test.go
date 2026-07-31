@@ -14,7 +14,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 )
 
-func TestAppendReceipt(t *testing.T) {
+func TestAppendReceiptMetadata(t *testing.T) {
 	dirs, require := datadir.New(t.TempDir()), require.New(t)
 	db := temporaltest.NewTestDB(t, dirs)
 	tx, err := db.BeginTemporalRw(t.Context())
@@ -26,16 +26,16 @@ func TestAppendReceipt(t *testing.T) {
 	require.NoError(err)
 	defer doms.Close()
 
-	err = rawtemporaldb.AppendReceipt(doms.AsPutDel(ttx), 1, 10, 0, 0) // 1 log
+	err = rawtemporaldb.AppendReceiptMetadata(doms.AsPutDel(ttx), 1, 10, 0, 0) // 1 log
 	require.NoError(err)
 
-	err = rawtemporaldb.AppendReceipt(doms.AsPutDel(ttx), 1, 11, 0, 1) // 0 log
+	err = rawtemporaldb.AppendReceiptMetadata(doms.AsPutDel(ttx), 1, 11, 0, 1) // 0 log
 	require.NoError(err)
 
-	err = rawtemporaldb.AppendReceipt(doms.AsPutDel(ttx), 4, 12, 0, 3) // 3 logs
+	err = rawtemporaldb.AppendReceiptMetadata(doms.AsPutDel(ttx), 4, 12, 0, 3) // 3 logs
 	require.NoError(err)
 
-	err = rawtemporaldb.AppendReceipt(doms.AsPutDel(ttx), 4, 14, 0, 4) // 0 log
+	err = rawtemporaldb.AppendReceiptMetadata(doms.AsPutDel(ttx), 4, 14, 0, 4) // 0 log
 	require.NoError(err)
 
 	err = doms.Flush(t.Context(), tx)

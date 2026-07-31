@@ -64,7 +64,9 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 // ReceiptCacheKey is the single RCacheDomain key; the value is the encoded receipt.
 var ReceiptCacheKey = []byte{0x0}
 
-// ReceiptWriter reuse-safe, thread-unsafe
+// ReceiptWriter is a reusable, single-goroutine encoder for the receipt domains.
+// It hands its own scratch to DomainPut, so the value bytes are only valid until
+// the next call: a kv.TemporalPutDel must copy what it keeps.
 type ReceiptWriter struct {
 	buf          [binary.MaxVarintLen64]byte
 	rlpEncodeBuf bytes.Buffer
@@ -126,7 +128,7 @@ func (w *ReceiptWriter) AppendMetadata(tx kv.TemporalPutDel, logIndexAfterTx uin
 	return nil
 }
 
-func AppendReceipt(tx kv.TemporalPutDel, logIndexAfterTx uint32, cumGasUsedInBlock, cumBlobGasUsed uint64, txNum uint64) error {
+func AppendReceiptMetadata(tx kv.TemporalPutDel, logIndexAfterTx uint32, cumGasUsedInBlock, cumBlobGasUsed uint64, txNum uint64) error {
 	var w ReceiptWriter
 	return w.AppendMetadata(tx, logIndexAfterTx, cumGasUsedInBlock, cumBlobGasUsed, txNum)
 }

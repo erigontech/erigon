@@ -1263,7 +1263,7 @@ type RCacheV2Query struct {
 
 // doesn't do DeriveFieldsV4ForCachedReceipt
 func ReceiptCacheV2Stream(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (stream.Duo[uint64, *types.Receipt], error) {
-	it, err := tx.Debug().TraceKey(kv.RCacheDomain, receiptCacheKey, fromTxNum, toTxNum)
+	it, err := tx.Debug().TraceKey(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, fromTxNum, toTxNum)
 	if err != nil {
 		return nil, err
 	}
@@ -1286,7 +1286,7 @@ func ReceiptCacheV2Stream(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (stream.D
 }
 
 func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, bool, error) {
-	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, query.TxNum+1 /*history storing value BEFORE-change*/)
+	v, ok, err := tx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, query.TxNum+1 /*history storing value BEFORE-change*/)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1323,7 +1323,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 
 	receiptIdx := 0
 	for txNum := minTxNum; txNum < maxTxNum+1; txNum++ {
-		v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1)
+		v, ok, err := tx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, txNum+1)
 		if err != nil {
 			return nil, err
 		}
