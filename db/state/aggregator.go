@@ -1673,24 +1673,34 @@ func (a *Aggregator) FirstTxNumOfStep(step kv.Step) uint64 { // could have some 
 }
 
 func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
-	if a.d[kv.AccountsDomain] == nil || a.d[kv.StorageDomain] == nil || a.d[kv.CodeDomain] == nil {
+	m := uint64(math.MaxUint64)
+	// An entity with no files yet reports 0; folding that in would drag the
+	// ceiling down and hide every other entity's files.
+	for id, d := range a.d {
+		if d == nil || d.Disable {
+			continue
+		}
+		// A decoupled domain is mid-regeneration from the others (commitment,
+		// under rebuild tooling); clamping to its partial progress would hide
+		// the very files it reads.
+		if a.checker != nil && a.checker.IsDecoupled(FromDomain(kv.Domain(id))) {
+			continue
+		}
+		if end := d.dirtyFilesEndTxNumMinimax(); end > 0 {
+			m = min(m, end)
+		}
+	}
+	for _, ii := range a.standaloneIIs() {
+		if ii == nil || ii.Disable {
+			continue
+		}
+		if end := ii.dirtyFilesEndTxNumMinimax(); end > 0 {
+			m = min(m, end)
+		}
+	}
+	if m == math.MaxUint64 {
 		return 0
 	}
-	m := min(
-		a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
-		a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
-		a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
-		// a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
-	)
-	// TODO(awskii) have two different functions including commitment/without it
-	//  Usually its skipped because commitment either have MaxUint64 due to no history or equal to other domains
-
-	//log.Warn("dirtyFilesEndTxNumMinimax", "min", m,
-	//	"acc", a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
-	//	"sto", a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
-	//	"cod", a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
-	//	"com", a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
-	//)
 	return m
 }
 

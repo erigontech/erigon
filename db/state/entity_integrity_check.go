@@ -121,6 +121,38 @@ func (d *DependencyIntegrityChecker) EnableInterDomain() {
 	d.disableInterDomain = false
 }
 
+// IsDependent reports whether e is registered as derived from some other entity
+// — commitment, from accounts and storage. A structural fact: it does not change
+// when enforcement is switched off.
+func (d *DependencyIntegrityChecker) IsDependent(e UniversalEntity) bool {
+	for _, dependents := range d.dependencyMap {
+		for _, dependent := range dependents {
+			if dependent.entity == e {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// IsDecoupled reports whether e, as a dependent, may currently lag what it is
+// derived from. It mirrors the predicate CheckDependentPresent enforces with, so
+// whichever switch stops enforcing a dependency also frees the dependent to
+// trail it.
+func (d *DependencyIntegrityChecker) IsDecoupled(e UniversalEntity) bool {
+	for dependency, dependents := range d.dependencyMap {
+		if !d.disable && !(d.disableInterDomain && dependency.category() == domainCategory) {
+			continue
+		}
+		for _, dependent := range dependents {
+			if dependent.entity == e {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // CheckDependentPresent checks if the dependent domain file is present. All/Any are the two quantifiers provided here
 // All: all dependent files are present
 // Any: there exists a dependent file, which is present
