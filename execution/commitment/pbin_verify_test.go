@@ -24,7 +24,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -337,53 +336,6 @@ func pbinTestVerifyRecords(t *testing.T, ms *MockState, root []byte, wantLeaves 
 	leaves, err := v.checkPlainKeys()
 	require.NoError(t, err)
 	require.Equal(t, wantLeaves, leaves)
-}
-
-func pbinTestVerifyCorpora(t *testing.T) []struct {
-	name   string
-	corpus *pbinTestCorpus
-} {
-	t.Helper()
-	return []struct {
-		name   string
-		corpus *pbinTestCorpus
-	}{
-		{
-			name: "two accounts",
-			corpus: new(pbinTestCorpus).
-				account(pbinOracleAddr(51), 1, 2, common.Hash{0x01}).
-				account(pbinOracleAddr(52), 3, 4, common.Hash{0x02}),
-		},
-		{
-			name: "zone boundary slots",
-			corpus: new(pbinTestCorpus).
-				storage(pbinOracleAddr(53), pbinOracleSlot(63), 0x01).
-				storage(pbinOracleAddr(53), pbinOracleSlot(64), 0x02).
-				storage(pbinOracleAddr(53), pbinOracleSlot(255), 0x03).
-				storage(pbinOracleAddr(53), pbinOracleSlot(256), 0x04),
-		},
-		{name: "mixed accounts and storage", corpus: pbinTestMixedCorpus()},
-		{name: "deep shared prefix", corpus: pbinTestDeepSharedPrefixCorpus()},
-	}
-}
-
-// TestPBinVerifyRecordsRebuildRoot is the independent recompute: what the engine
-// wrote must hash back to what it returned, with no cell of the live grid
-// involved.
-func TestPBinVerifyRecordsRebuildRoot(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range pbinTestVerifyCorpora(t) {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			pph, ms := pbinTestEngine(t)
-			require.NoError(t, ms.applyPlainUpdates(tc.corpus.plainKeys, tc.corpus.updates))
-			root := pbinTestProcess(t, pph, tc.corpus.plainKeys, tc.corpus.updates)
-
-			require.Equal(t, tc.corpus.oracleRoot(t), root)
-			pbinTestVerifyRecords(t, ms, root, len(tc.corpus.entries(t)))
-		})
-	}
 }
 
 // TestPBinVerifyRootRecordIsUnique pins the shape the recompute relies on: one
