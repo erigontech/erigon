@@ -941,7 +941,6 @@ func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 
 func (emt *ExecModuleTester) insertChainPoW(chain *blockgen.ChainPack) error {
 	tip := chain.TopBlock
-
 	currentHeader, err := emt.ExecModule.CurrentHeader(emt.Ctx)
 	if err != nil {
 		return err
@@ -955,7 +954,6 @@ func (emt *ExecModuleTester) insertChainPoW(chain *blockgen.ChainPack) error {
 	if currentTd == nil {
 		return fmt.Errorf("total difficulty not found for current head %d %x", currentNumber, currentHash)
 	}
-
 	firstBlock := chain.Blocks[0]
 	firstNumber := firstBlock.NumberU64()
 	if firstNumber == 0 {
@@ -970,7 +968,6 @@ func (emt *ExecModuleTester) insertChainPoW(chain *blockgen.ChainPack) error {
 	if parentTd == nil {
 		return fmt.Errorf("total difficulty not found for parent %d %x", parentNumber, parentHash)
 	}
-
 	candidateTd := new(uint256.Int).Set(parentTd)
 	for _, block := range chain.Blocks {
 		difficulty := block.Difficulty()

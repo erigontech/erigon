@@ -366,7 +366,6 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 		}
 		// RLP decoding worked, try to insert into chain:
 		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb, BlockAccessLists: [][]byte{balBytes}}
-
 		var previousHead *types.Header
 		if b.BlockHeader == nil {
 			previousHead, err = m.ExecModule.CurrentHeader(m.Ctx)
@@ -382,13 +381,14 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 				return nil, fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), err1)
 			}
 		}
-
 		if b.BlockHeader == nil {
 			isCanonical, err := bt.isCanonical(m, cb)
 			if err != nil {
 				return nil, err
 			}
 			if isCanonical && !m.ChainConfig.IsByzantium(cb.NumberU64()) {
+				// Staged execution does not retain the per-transaction post-state roots needed
+				// for legacy receipt tries, so use the slower receipt generator to reconstruct them.
 				validReceipts, err := bt.validatePreByzantiumReceipts(m, cb)
 				if err != nil {
 					return nil, err
@@ -420,7 +420,6 @@ func (bt *BlockTest) validatePreByzantiumReceipts(m *execmoduletester.ExecModule
 		return false, err
 	}
 	defer tx.Rollback()
-
 	receipts, err := m.ReceiptsReader.GetReceipts(m.Ctx, m.ChainConfig, tx, block, eth.ReceiptsOpts{})
 	if err != nil {
 		return false, err
