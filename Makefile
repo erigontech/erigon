@@ -304,7 +304,7 @@ $(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)): eest-spec-%: evm.race
 	@EVM_BIN=$(GOBIN)/evm.race bash tools/run-eest-spec-test.sh "$*"
 endif
 
-## check-eest-shards:                  verify EEST shard coverage (stable fork partition + devnet EIP-filter liveness/completeness)
+## check-eest-shards:                  verify stable/devnet EEST fork partitions
 .PHONY: check-eest-shards
 check-eest-shards:
 	@bash tools/test-fixtures.sh --download-only test-fixtures.json test-fixtures-cache eest_stable eest_devnet

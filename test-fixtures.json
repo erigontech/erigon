@@ -5,9 +5,9 @@
     "size": 1025048557
   },
   "eest_devnet": {
-    "url": "https://github.com/ethereum/execution-specs/releases/download/tests-glamsterdam-devnet%40v7.2.0/fixtures_glamsterdam-devnet.tar.gz",
-    "sha256": "29ba214eaf37c880c845179994cb62e82a0fb63e58f83e6c640d85f3e7d7a796",
-    "size": 677943112,
+    "url": "https://github.com/ethereum/execution-specs/releases/download/tests-glamsterdam-devnet%40v7.2.1/fixtures_glamsterdam-devnet.tar.gz",
+    "sha256": "02e3eca2ede5b424f4dbf2461caf592e6b43b56d55bbd64213dd01f63af9a583",
+    "size": 883926577,
     "branch": "devnets/glamsterdam/7"
   },
   "eest_stable": {
