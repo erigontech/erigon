@@ -147,7 +147,7 @@ func (cl *MockCl) StartBuilding(ctx context.Context, opts ...BlockBuildingOption
 			var r *enginetypes.ForkChoiceUpdatedResponse
 			var err error
 			if cl.chainConfig.AmsterdamTime != nil {
-				r, err = cl.engineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoiceState, &payloadAttributes)
+				r, err = cl.engineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoiceState, &payloadAttributes, nil)
 			} else {
 				r, err = cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, &payloadAttributes)
 			}
@@ -243,7 +243,7 @@ func (cl *MockCl) UpdateForkChoice(ctx context.Context, p *MockClPayload) error 
 			var r *enginetypes.ForkChoiceUpdatedResponse
 			var err error
 			if cl.chainConfig.AmsterdamTime != nil {
-				r, err = cl.engineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoiceState, nil)
+				r, err = cl.engineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoiceState, nil, nil)
 			} else {
 				r, err = cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, nil)
 			}
