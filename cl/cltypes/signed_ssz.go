@@ -16,33 +16,15 @@
 
 package cltypes
 
-import (
-	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
-	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/common/ssz"
-)
+import "github.com/erigontech/erigon/common/length"
 
-// Signed containers share a two-field SSZ layout: a message followed by a
-// 96-byte BLS signature. A dynamic message occupies a 4-byte offset in the
-// fixed section, with its encoded bytes stored in the variable section.
-func encodeSigned(buf []byte, msg ssz2.SizedObjectSSZ, sig []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, msg, sig)
+// A signed container adds a 96-byte BLS signature to its message.
+func signedStaticSize(messageSize int) int {
+	return length.Bytes96 + messageSize
 }
 
-func decodeSigned(buf []byte, version int, msg ssz2.SizedObjectSSZ, sig []byte) error {
-	return ssz2.UnmarshalSSZ(buf, version, msg, sig)
-}
-
-func sizeSigned(msg ssz2.SizedObjectSSZ) int {
+// A dynamic message also occupies a 4-byte offset in the fixed section.
+func signedDynamicSize(messageSize int) int {
 	const dynamicOffsetSize = 4
-	size := length.Bytes96 + msg.EncodingSizeSSZ()
-	if !msg.Static() {
-		size += dynamicOffsetSize
-	}
-	return size
-}
-
-func hashSigned(msg ssz.HashableSSZ, sig []byte) ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(msg, sig)
+	return signedStaticSize(messageSize) + dynamicOffsetSize
 }

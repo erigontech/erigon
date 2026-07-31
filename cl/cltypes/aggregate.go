@@ -64,20 +64,20 @@ type SignedAggregateAndProof struct {
 }
 
 func (a *SignedAggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
-	return encodeSigned(dst, a.Message, a.Signature[:])
+	return ssz2.MarshalSSZ(dst, a.Message, a.Signature[:])
 }
 
 func (a *SignedAggregateAndProof) DecodeSSZ(buf []byte, version int) error {
 	a.Message = new(AggregateAndProof)
-	return decodeSigned(buf, version, a.Message, a.Signature[:])
+	return ssz2.UnmarshalSSZ(buf, version, a.Message, a.Signature[:])
 }
 
 func (a *SignedAggregateAndProof) EncodingSizeSSZ() int {
-	return sizeSigned(a.Message)
+	return signedDynamicSize(a.Message.EncodingSizeSSZ())
 }
 
 func (a *SignedAggregateAndProof) HashSSZ() ([32]byte, error) {
-	return hashSigned(a.Message, a.Signature[:])
+	return merkle_tree.HashTreeRoot(a.Message, a.Signature[:])
 }
 
 // Default mainnet sync committee bits size in bytes (512 / 8).

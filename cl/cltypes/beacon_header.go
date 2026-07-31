@@ -73,18 +73,18 @@ func (b *SignedBeaconBlockHeader) Static() bool {
 }
 
 func (b *SignedBeaconBlockHeader) EncodeSSZ(dst []byte) ([]byte, error) {
-	return encodeSigned(dst, b.Header, b.Signature[:])
+	return ssz2.MarshalSSZ(dst, b.Header, b.Signature[:])
 }
 
 func (b *SignedBeaconBlockHeader) DecodeSSZ(buf []byte, version int) error {
 	b.Header = new(BeaconBlockHeader)
-	return decodeSigned(buf, version, b.Header, b.Signature[:])
+	return ssz2.UnmarshalSSZ(buf, version, b.Header, b.Signature[:])
 }
 
 func (b *SignedBeaconBlockHeader) HashSSZ() ([32]byte, error) {
-	return hashSigned(b.Header, b.Signature[:])
+	return merkle_tree.HashTreeRoot(b.Header, b.Signature[:])
 }
 
 func (b *SignedBeaconBlockHeader) EncodingSizeSSZ() int {
-	return sizeSigned(b.Header)
+	return signedStaticSize(b.Header.EncodingSizeSSZ())
 }
