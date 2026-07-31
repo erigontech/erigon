@@ -35,9 +35,10 @@ func decodeSigned(buf []byte, version int, msg ssz2.SizedObjectSSZ, sig []byte) 
 }
 
 func sizeSigned(msg ssz2.SizedObjectSSZ) int {
+	const dynamicOffsetSize = 4
 	size := length.Bytes96 + msg.EncodingSizeSSZ()
 	if !msg.Static() {
-		size += 4
+		size += dynamicOffsetSize
 	}
 	return size
 }

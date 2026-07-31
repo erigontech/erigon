@@ -66,12 +66,12 @@ func call[T any](ctx context.Context, client *rpc.Client, method string, args ..
 }
 
 func callValue[T any](ctx context.Context, client *rpc.Client, method string, args ...any) (T, error) {
-	result, err := call[T](ctx, client, method, args...)
-	if err != nil {
+	var result T
+	if err := client.CallContext(ctx, &result, method, args...); err != nil {
 		var zero T
 		return zero, err
 	}
-	return *result, nil
+	return result, nil
 }
 
 func (c *EngineAPIRPCClient) NewPayloadV1(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {

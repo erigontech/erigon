@@ -294,9 +294,11 @@ func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
 func (e *ExecutionPayloadBid) EncodingSizeSSZ() int {
 	// The fixed section contains five hashes, one address, five uint64 values,
 	// and the offset for BlobKzgCommitments.
-	return length.Hash*4 + length.Addr + 8*5 +
-		4 +
-		length.Hash +
+	const dynamicOffsetSize = 4
+	return length.Hash*5 +
+		length.Addr +
+		length.BlockNum*5 +
+		dynamicOffsetSize +
 		e.BlobKzgCommitments.EncodingSizeSSZ()
 }
 
@@ -464,9 +466,12 @@ func (e *ExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
 
 func (e *ExecutionPayloadEnvelope) EncodingSizeSSZ() int {
 	// Payload and ExecutionRequests are dynamic, so each contributes a 4-byte offset.
-	return 4 + e.Payload.EncodingSizeSSZ() +
-		4 + e.ExecutionRequests.EncodingSizeSSZ() +
-		8 + length.Hash + length.Hash
+	const dynamicOffsetSize = 4
+	return 2*dynamicOffsetSize +
+		e.Payload.EncodingSizeSSZ() +
+		e.ExecutionRequests.EncodingSizeSSZ() +
+		length.BlockNum +
+		2*length.Hash
 }
 
 func (e *ExecutionPayloadEnvelope) Clone() clonable.Clonable {

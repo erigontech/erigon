@@ -17,12 +17,12 @@
 package execution_client
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -126,52 +126,7 @@ func (cc *ExecutionClientEngine) Close() {
 // buildExecutionPayload maps Caplin's SSZ payload representation to the Engine
 // API representation.
 func buildExecutionPayload(payload *cltypes.Eth1Block) *engine_types.ExecutionPayload {
-	reversedBaseFeePerGas := bytes.Clone(payload.BaseFeePerGas[:])
-	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
-		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
-	}
-	baseFee := new(uint256.Int).SetBytes(reversedBaseFeePerGas)
-
-	request := &engine_types.ExecutionPayload{
-		ParentHash:   payload.ParentHash,
-		FeeRecipient: payload.FeeRecipient,
-		StateRoot:    payload.StateRoot,
-		ReceiptsRoot: payload.ReceiptsRoot,
-		LogsBloom:    payload.LogsBloom[:],
-		PrevRandao:   payload.PrevRandao,
-		BlockNumber:  hexutil.Uint64(payload.BlockNumber),
-		GasLimit:     hexutil.Uint64(payload.GasLimit),
-		GasUsed:      hexutil.Uint64(payload.GasUsed),
-		Timestamp:    hexutil.Uint64(payload.Time),
-		ExtraData:    payload.Extra.Bytes(),
-		BlockHash:    payload.BlockHash,
-	}
-	request.BaseFeePerGas = (*hexutil.Big)(baseFee.ToBig())
-
-	payloadBody := payload.Body()
-	request.Withdrawals = payloadBody.Withdrawals
-	for _, bytesTransaction := range payloadBody.Transactions {
-		request.Transactions = append(request.Transactions, bytesTransaction)
-	}
-
-	if payload.Version() >= clparams.DenebVersion {
-		request.BlobGasUsed = new(hexutil.Uint64)
-		request.ExcessBlobGas = new(hexutil.Uint64)
-		*request.BlobGasUsed = hexutil.Uint64(payload.BlobGasUsed)
-		*request.ExcessBlobGas = hexutil.Uint64(payload.ExcessBlobGas)
-	}
-
-	if payload.Version() >= clparams.GloasVersion {
-		bal := hexutil.Bytes{}
-		if payload.BlockAccessList != nil {
-			bal = payload.BlockAccessList.Bytes()
-		}
-		request.BlockAccessList = &bal
-		slotNumber := hexutil.Uint64(payload.SlotNumber)
-		request.SlotNumber = &slotNumber
-	}
-
-	return request
+	return engine_types.ExecutionPayloadFromSSZBlock(payload, payload.Version())
 }
 
 func (cc *ExecutionClientEngine) NewPayload(
@@ -497,9 +452,7 @@ func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clpa
 		baseFee := uint256.MustFromBig(ep.BaseFeePerGas.ToInt())
 		baseFeeBytes := baseFee.Bytes32()
 		// Eth1Block stores BaseFeePerGas in little-endian byte order.
-		for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
-			baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
-		}
+		slices.Reverse(baseFeeBytes[:])
 		copy(block.BaseFeePerGas[:], baseFeeBytes[:])
 	}
 
