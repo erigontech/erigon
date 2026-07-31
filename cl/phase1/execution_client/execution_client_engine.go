@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"slices"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -443,10 +442,7 @@ func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clpa
 
 	if ep.BaseFeePerGas != nil {
 		baseFee := uint256.MustFromBig(ep.BaseFeePerGas.ToInt())
-		baseFeeBytes := baseFee.Bytes32()
-		// Eth1Block stores BaseFeePerGas in little-endian byte order.
-		slices.Reverse(baseFeeBytes[:])
-		copy(block.BaseFeePerGas[:], baseFeeBytes[:])
+		_, _ = baseFee.MarshalSSZAppend(block.BaseFeePerGas[:0])
 	}
 
 	if ep.BlobGasUsed != nil {

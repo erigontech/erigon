@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -97,9 +96,7 @@ func (p *ExecutionPayload) ToSSZBlock(version clparams.StateVersion) (*cltypes.E
 	block.Extra.SetBytes(p.ExtraData)
 	if p.BaseFeePerGas != nil {
 		baseFee := uint256.MustFromBig(p.BaseFeePerGas.ToInt())
-		baseFeeBytes := baseFee.Bytes32()
-		slices.Reverse(baseFeeBytes[:])
-		copy(block.BaseFeePerGas[:], baseFeeBytes[:])
+		_, _ = baseFee.MarshalSSZAppend(block.BaseFeePerGas[:0])
 	}
 	block.BlockHash = p.BlockHash
 	txs := make([][]byte, len(p.Transactions))
@@ -134,9 +131,8 @@ func (p *ExecutionPayload) ToSSZBlock(version clparams.StateVersion) (*cltypes.E
 }
 
 func ExecutionPayloadFromSSZBlock(block *cltypes.Eth1Block, version clparams.StateVersion) *ExecutionPayload {
-	baseFeeBytes := bytes.Clone(block.BaseFeePerGas[:])
-	slices.Reverse(baseFeeBytes)
-	baseFee := new(uint256.Int).SetBytes(baseFeeBytes)
+	baseFee := new(uint256.Int)
+	_ = baseFee.UnmarshalSSZ(block.BaseFeePerGas[:])
 	body := block.Body()
 	p := &ExecutionPayload{
 		ParentHash:    block.ParentHash,
