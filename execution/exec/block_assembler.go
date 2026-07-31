@@ -185,17 +185,17 @@ func (ba *BlockAssembler) AddTransactions(
 	// based on position in the block's transaction list).
 	txnIdx := len(ba.Txns)
 	header := ba.AssembledBlock.Header
-	// EIP-8037: regular and state gas pools deplete independently. The
+	// EIP-8037: execution and state gas pools deplete independently. The
 	// builder calls AddTransactions repeatedly with batches from the txpool,
 	// so each call must initialise both dimensions from their own cumulative
-	// usage. Seeding both from BlockRegular only would over-inflate the
-	// state pool whenever state gas has run ahead of regular gas.
+	// usage. Seeding both from BlockExecution only would over-inflate the
+	// state pool whenever state gas has run ahead of execution gas.
 	blobBudget := uint64(0)
 	if header.BlobGasUsed != nil {
 		blobBudget = ba.cfg.ChainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed
 	}
 	gasPool := protocol.NewBlockGasPool(
-		header.GasLimit-ba.gasUsed.BlockRegular,
+		header.GasLimit-ba.gasUsed.BlockExecution,
 		header.GasLimit-ba.gasUsed.BlockState,
 		blobBudget,
 	)
@@ -231,12 +231,12 @@ func (ba *BlockAssembler) AddTransactions(
 
 	var commitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *AssembledBlock) ([]*types.Log, error) {
 		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
-		// EIP-8037: regular and state gas pool dimensions can deplete
+		// EIP-8037: execution and state gas pool dimensions can deplete
 		// independently — execution-time state-gas (e.g. CREATE code deposit)
 		// is not visible to the txpool's intrinsic-state-gas filter and may
-		// drain the state pool faster than the regular pool. Snapshot both
+		// drain the state pool faster than the execution pool. Snapshot both
 		// dimensions so a failed-inclusion restore puts each one back.
-		regularGasSnap := gasPool.RegularGasAvailable()
+		executionGasSnap := gasPool.ExecutionGasAvailable()
 		stateGasSnap := gasPool.StateGasAvailable()
 		blobGasSnap := gasPool.BlobGas()
 		snap := ibs.PushSnapshot()
@@ -249,21 +249,21 @@ func (ba *BlockAssembler) AddTransactions(
 			paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, header, evm, chainConfig)
 			if err != nil {
 				ibs.RevertToSnapshot(snap, err)
-				gasPool = protocol.NewBlockGasPool(regularGasSnap, stateGasSnap, blobGasSnap)
+				gasPool = protocol.NewBlockGasPool(executionGasSnap, stateGasSnap, blobGasSnap)
 				return nil, err
 			}
 
 			status, aaGasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gasPool, evm, header, ibs)
 			if err != nil {
 				ibs.RevertToSnapshot(snap, err)
-				gasPool = protocol.NewBlockGasPool(regularGasSnap, stateGasSnap, blobGasSnap)
+				gasPool = protocol.NewBlockGasPool(executionGasSnap, stateGasSnap, blobGasSnap)
 				return nil, err
 			}
 
 			// EIP-8037: AA txns don't go through protocol.ApplyTransaction, so
 			// update cumulative gas manually. We attribute aaGasUsed entirely to
-			// regular gas (AA has no state-gas dimension yet).
-			gasUsed.BlockRegular += aaGasUsed
+			// execution gas (AA has no state-gas dimension yet).
+			gasUsed.BlockExecution += aaGasUsed
 			gasUsed.Blob += txn.GetBlobGas()
 			protocol.SetGasUsed(header, gasUsed)
 			logs := ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
@@ -283,7 +283,7 @@ func (ba *BlockAssembler) AddTransactions(
 			// Restore cumulative gas to pre-tx values.
 			*gasUsed = gasSnapshot
 			ibs.RevertToSnapshot(snap, err)
-			gasPool = protocol.NewBlockGasPool(regularGasSnap, stateGasSnap, blobGasSnap)
+			gasPool = protocol.NewBlockGasPool(executionGasSnap, stateGasSnap, blobGasSnap)
 			return nil, err
 		}
 		protocol.SetGasUsed(header, gasUsed)

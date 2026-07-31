@@ -773,7 +773,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 
 	for ; count < n && i < len(best.ms); i++ {
 		// if we wouldn't have enough gas for a standard transaction then quit out early
-		if availableGas.Regular < params.TxGas {
+		if availableGas.Execution < params.TxGas {
 			break
 		}
 		if availableRlpSpace <= 0 {
@@ -844,18 +844,18 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			IsEIP2780:          isAmsterdam,
 			IsAATxn:            isAATxn,
 		})
-		intrinsicGas := intrinsicGasResult.RegularGas
+		intrinsicGas := intrinsicGasResult.ExecutionGas
 		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicGas {
 			intrinsicGas = intrinsicGasResult.FloorGasCost
 		}
-		if intrinsicGas > availableGas.Regular {
+		if intrinsicGas > availableGas.Execution {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
 			continue
 		}
 		if isAmsterdam && mt.TxnSlot.GetGas() > availableGas.State {
 			continue
 		}
-		availableGas.Regular -= intrinsicGas
+		availableGas.Execution -= intrinsicGas
 		availableGas.Blob -= blobCount * params.GasPerBlob
 		availableRlpSpace -= len(rlpTxn)
 		txns.Txns[count] = rlpTxn
@@ -1042,7 +1042,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		IsEIP2780:          isAmsterdam,
 		IsAATxn:            isAATxn,
 	})
-	gas := intrinsicGasResult.RegularGas
+	gas := intrinsicGasResult.ExecutionGas
 	if isPrague && intrinsicGasResult.FloorGasCost > gas {
 		gas = intrinsicGasResult.FloorGasCost
 	}
@@ -1069,11 +1069,11 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		return txpoolcfg.GasLimitTooHigh, nil
 	}
 	// EIP-7825: Transaction Gas Limit Cap.
-	// EIP-8037 (Amsterdam): TX_MAX_GAS_LIMIT applies to the regular gas dimension only.
+	// EIP-8037 (Amsterdam): TX_MAX_GAS_LIMIT applies to the execution gas dimension only.
 	// Pre-Amsterdam: cap = full tx gas limit.
 	var gasToCap uint64
 	if isAmsterdam {
-		gasToCap = max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost)
+		gasToCap = max(intrinsicGasResult.ExecutionGas, intrinsicGasResult.FloorGasCost)
 	} else {
 		gasToCap = txn.GetGas()
 	}

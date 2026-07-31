@@ -691,7 +691,7 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	}
 
 	result.ExecutionResult.ReceiptGasUsed = gasUsed
-	result.ExecutionResult.BlockRegularGasUsed = gasUsed
+	result.ExecutionResult.BlockExecutionGasUsed = gasUsed
 	// The versionMap path produces its write-set from the recorded IO after
 	// the switch; only the serial path clears pending changes here.
 	if !ibs.IsVersioned() {
