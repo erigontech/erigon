@@ -16,7 +16,7 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 | Component | Recommendation | Notes |
 | --- | --- | --- |
 | Disk Type | Use high-end NVMe SSDs. | Avoid HDDs. SSD performance may degrade when nearing full capacity. |
-| Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive; RAID 0 is not needed and doubles the chance of losing the datadir. See [Filesystem](#filesystem). |
+| Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive, so RAID 0 striping is not needed. For failure protection use a mirrored array, not RAID 0. See [Filesystem](#filesystem). |
 | Filesystem | ext4 or XFS | See [Filesystem](#filesystem) below. |
 | RAM | Adequate memory is crucial | Reduces bottlenecks during sync and improves performance under load. |
 | CPU | 4–8 cores for Full nodes8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. |
@@ -37,8 +37,9 @@ Filesystems other than these two are not part of what we measure, so treat their
 
 A few points that follow from Erigon's storage model — see [Database](../fundamentals/database) for the layout:
 
-* **One device is enough.** An archive node fits on a single 4 TB drive, so striping across disks buys nothing and doubles the probability of losing the datadir. Use RAID 0 only if you already have several smaller drives and no single one is large enough.
-* **Most of the datadir is re-downloadable.** Snapshot files are content-addressed and fetched from peers, so redundancy matters far less here than for a database-backed service. Only `chaindata/` is worth backing up.
+* **One device is enough.** An archive node fits on a single 4 TB drive, so RAID 0 gains you no capacity you need while doubling the chance of losing the datadir. Stripe only if no single drive you have is large enough.
+* **For failure protection, use redundancy — not RAID 0.** A mirrored array and ECC memory guard against a failing disk or bad RAM, which is what [Best Practices](/help-center/best-practices) recommends. RAID 0 does the opposite.
+* **Most of the datadir is re-downloadable.** Snapshot files are content-addressed and refetched from peers, so `chaindata/` is the part worth backing up.
 * **Erigon memory-maps its database.** Leave RAM for the page cache and avoid layers that keep a second cache of their own.
 * **Network and cloud block storage are slow for block execution.** See [known issues](/help-center/known-issues#cloud-network-drives).
 
@@ -75,7 +76,7 @@ _Current Disk Usage measured as of {/* ds-date:gnosis */}2026-07-21{/* ds:end */
 | Full (Default) | -                      |
 | Minimal        | -                      |
 
-_Current Disk Usage measured as of {/* ds-date:sepolia */}2026-07-29{/* ds:end */}; usage grows over time as the chain grows. Execution layer only. Full and minimal are not measured on this network: only the QA full-node and minimal-node sync runs upload disk-usage figures, and both run on Ethereum mainnet and Gnosis Chain._
+_Current Disk Usage measured as of {/* ds-date:sepolia */}2026-07-29{/* ds:end */}; usage grows over time as the chain grows. Execution layer only. Archive is the only mode measured on this network._
 </TabItem>
 <TabItem value="hoodi" label="Hoodi">
 | **Pruning Mode**  | **Current Disk Usage** |
@@ -84,7 +85,7 @@ _Current Disk Usage measured as of {/* ds-date:sepolia */}2026-07-29{/* ds:end *
 | Full (Default) | -                      |
 | Minimal        | -                      |
 
-_Current Disk Usage measured as of {/* ds-date:hoodi */}2026-07-29{/* ds:end */}; usage grows over time as the chain grows. Execution layer only. Full and minimal are not measured on this network: only the QA full-node and minimal-node sync runs upload disk-usage figures, and both run on Ethereum mainnet and Gnosis Chain._
+_Current Disk Usage measured as of {/* ds-date:hoodi */}2026-07-29{/* ds:end */}; usage grows over time as the chain grows. Execution layer only. Archive is the only mode measured on this network._
 </TabItem>
 <TabItem value="chiado" label="Chiado">
 | **Pruning Mode**  | **Current Disk Usage** |
@@ -93,7 +94,7 @@ _Current Disk Usage measured as of {/* ds-date:hoodi */}2026-07-29{/* ds:end */}
 | Full (Default) | -                      |
 | Minimal        | -                      |
 
-_Current Disk Usage measured as of {/* ds-date:chiado */}2026-07-29{/* ds:end */}; usage grows over time as the chain grows. Execution layer only. Full and minimal are not measured on this network: only the QA full-node and minimal-node sync runs upload disk-usage figures, and both run on Ethereum mainnet and Gnosis Chain._
+_Current Disk Usage measured as of {/* ds-date:chiado */}2026-07-29{/* ds:end */}; usage grows over time as the chain grows. Execution layer only. Archive is the only mode measured on this network._
 </TabItem>
 </Tabs>
 

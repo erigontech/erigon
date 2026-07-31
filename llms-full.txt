@@ -57,11 +57,34 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 
 | Component | Recommendation | Notes |
 | --- | --- | --- |
-| Disk Type | Use high-end NVMe SSDs. | Avoid HDDs.SSD performance may degrade when nearing full capacity. |
-| Disk Configuration | RAID 0 for multiple disks (Speed) | High-Speed Option: RAID 0 provides maximum speed but no redundancy (data loss risk).ZFS filesystems may be considered for Archive nodes for their data integrity features, but complex RAID-Z setups are generally not recommended. |
+| Disk Type | Use high-end NVMe SSDs. | Avoid HDDs. SSD performance may degrade when nearing full capacity. |
+| Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive, so RAID 0 striping is not needed. For failure protection use a mirrored array, not RAID 0. See [Filesystem](#filesystem). |
+| Filesystem | ext4 or XFS | See [Filesystem](#filesystem) below. |
 | RAM | Adequate memory is crucial | Reduces bottlenecks during sync and improves performance under load. |
 | CPU | 4–8 cores for Full nodes8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. |
 | Linux | Kernel version > v4 | A modern Linux distribution is required. |
+
+## Filesystem
+
+Use **ext4** or **XFS** on a single NVMe device. Either is a good choice: both are in use by operators running Erigon, and the disk figures below are measured on ext4.
+
+Mount with `noatime` so reads do not generate metadata writes:
+
+```
+/dev/nvme0n1p2  /data  ext4  rw,noatime  0 1
+```
+
+Filesystems other than these two are not part of what we measure, so treat their performance as unverified rather than assumed.
+
+A few points that follow from Erigon's storage model — see [Database](../fundamentals/database) for the layout:
+
+* **One device is enough.** An archive node fits on a single 4 TB drive, so RAID 0 gains you no capacity you need while doubling the chance of losing the datadir. Stripe only if no single drive you have is large enough.
+* **For failure protection, use redundancy — not RAID 0.** A mirrored array and ECC memory guard against a failing disk or bad RAM, which is what [Best Practices](/help-center/best-practices) recommends. RAID 0 does the opposite.
+* **Most of the datadir is re-downloadable.** Snapshot files are content-addressed and refetched from peers, so `chaindata/` is the part worth backing up.
+* **Erigon memory-maps its database.** Leave RAM for the page cache and avoid layers that keep a second cache of their own.
+* **Network and cloud block storage are slow for block execution.** See [known issues](/help-center/known-issues#cloud-network-drives).
+
+If you must split the datadir across a fast and a slow device, see [Optimizing Storage](../fundamentals/optimizing-storage).
 
 ## Disk Size and RAM Requirements
 
@@ -83,15 +106,29 @@ _Current Disk Usage measured as of 2026-07-19; usage grows over time as the chai
 
 _Current Disk Usage measured as of 2026-07-21; usage grows over time as the chain grows._
 
-:::warning
-The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases). Disk usage figures below are from September 2025 and are no longer automatically updated.
-:::
+| **Pruning Mode**  | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | 1.10 TB |
+| Full (Default) | -                      |
+| Minimal        | -                      |
 
-| **Pruning Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
-| -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
-| Archive        | 4.85 TB                | 8 TB                        | 64 GB              | 128 GB                |
-| Full (Default) | 3.3 TB                 | 4 TB                        | 32 GB              | 64 GB                 |
-| Minimal        | 1.2 TB                 | 2 TB                        | 32 GB              | 64 GB                 |
+_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only. Archive is the only mode measured on this network._
+
+| **Pruning Mode**  | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | 133.73 GB |
+| Full (Default) | -                      |
+| Minimal        | -                      |
+
+_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only. Archive is the only mode measured on this network._
+
+| **Pruning Mode**  | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | 29.64 GB |
+| Full (Default) | -                      |
+| Minimal        | -                      |
+
+_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only. Archive is the only mode measured on this network._
 
 :::tip
 See also how you can [optimize storage](../fundamentals/optimizing-storage).
@@ -2814,7 +2851,7 @@ Set **both** `--nat` and `--caplin.nat` to the same external IP, otherwise your 
 URL: https://docs.erigon.tech/fundamentals/optimizing-storage
 
 
-For optimal performance, it's recommended to store the datadir on a fast NVMe-RAID disk. However, if this is not feasible, you can store the history on a cheaper disk and still achieve good performance.
+For optimal performance, store the datadir on a single fast NVMe device formatted with ext4 — see [Filesystem](../get-started/hardware-requirements#filesystem). If that is not feasible, you can keep the history on a cheaper disk and still achieve good performance.
 
 ### Step 1
 
