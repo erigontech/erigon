@@ -2414,6 +2414,8 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `131072` (~18 days)
 * `--caplin.checkpoint-sync.disable`: Disables checkpoint sync.
   * Default: `false`
+* `--caplin.resume-max-staleness-epochs value`: Max epochs a locally-finalized state may be stale for Caplin to resume from it on restart instead of remote checkpoint syncing. Data-availability bound; larger values are clamped to the anchor fork's sidecar-retention window.
+  * Default: `0` (resolves to the anchor fork's sidecar-retention window)
 * `--caplin.snapgen`: Enables snapshot generation.
   * Default: `false`
 * `--caplin.mev-relay-url value`: The MEV relay endpoint.
