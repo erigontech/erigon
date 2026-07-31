@@ -116,7 +116,6 @@ func (cc *ExecutionClientEngine) SetBeaconChainConfig(beaconCfg *clparams.Beacon
 	}
 }
 
-// Close closes the remote RPC client, if present.
 func (cc *ExecutionClientEngine) Close() {
 	if cc.rpcClient != nil {
 		cc.rpcClient.Close()
@@ -195,7 +194,7 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 	case clparams.CapellaVersion:
 		resp, err = cc.engine.ForkchoiceUpdatedV2(ctx, forkChoiceState, attributes)
 	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
-		// ForkchoiceUpdatedV3 covers Deneb, Electra, and Fulu.
+		// V3 is valid for Cancun (Deneb), Prague (Electra), and Osaka (Fulu).
 		resp, err = cc.engine.ForkchoiceUpdatedV3(ctx, forkChoiceState, attributes)
 	default: // Gloas+ (Amsterdam)
 		resp, err = cc.engine.ForkchoiceUpdatedV4(ctx, forkChoiceState, attributes, nil)
