@@ -1009,6 +1009,11 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 	}
 
+	// A no-op for legacy and access-list transactions: GetFeeCap and GetTipCap both return the gas price there
+	if txn.GetFeeCap().Lt(txn.GetTipCap()) {
+		return txpoolcfg.TipAboveFeeCap, nil
+	}
+
 	// Drop non-local transactions under our own minimal accepted gas price or tip
 	if !isLocal && uint256.NewInt(p.cfg.MinFeeCap).Cmp(txn.GetFeeCap()) == 1 {
 		if txn.Traced {
@@ -2694,7 +2699,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 			return err
 		}
 		if reason != txpoolcfg.NotSet && reason != txpoolcfg.Success {
-			return nil // TODO: Clarify - if one of the txns has the wrong reason, no pooled txns!
+			continue
 		}
 		txns.Resize(uint(i + 1))
 		txns.Txns[i] = txn
