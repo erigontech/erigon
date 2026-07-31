@@ -115,7 +115,6 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	//      already uses last-write-wins for d.selfDestruct, so this keeps the two
 	//      in agreement. (EIP-6780 narrows this pattern post-Cancun but doesn't
 	//      eliminate it; mainnet-rare, but cheap to get right.)
-	// A nil sdSet reads as all-false; allocated only when the tx self-destructed.
 	var sdSet map[accounts.Address]bool
 	for addr, vw := range writes.selfDestruct {
 		if vw.Version.Incarnation == incarnation && vw.Val {
@@ -126,10 +125,11 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		}
 	}
 
-	// The filter walks the typed maps directly rather than AllHeaders(): every
-	// range-over-func pass allocates its iterator closures, and the header walk
-	// would need a second per-value map probe anyway. Per-entry decisions are
-	// order-independent, so per-path loops are equivalent.
+	// Per-entry decisions are order-independent, so the per-path loops below are
+	// equivalent to one pass over the merged header stream. There is no loop for
+	// AddressPath (record-level) or CodeSizePath (derived from the code bytes,
+	// not a domain field): neither is carried into the calc/apply write set, as
+	// on serial.
 	//
 	// SD'd addresses drop their account-field/storage writes so
 	// applyVersionedWrites takes the pure-delete branch instead of
@@ -269,11 +269,6 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			})
 		}
 	}
-	// AddressPath is record-level and CodeSizePath is derived from the code
-	// bytes — neither is carried into the calc/apply write set (as on serial).
-	// Cross-tx ReadCodeSize is served from the versionMap, which the worker
-	// populates directly — independent of this pass.
-
 	// For addresses that appear in the raw WriteSet but don't have account-level
 	// writes in the output, emit account field entries. Serial's MakeWriteSet
 	// always calls UpdateAccountData for every dirty object — the commitment
@@ -281,9 +276,6 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	// - Addresses with only storage writes (no balance/nonce changes)
 	// - Addresses whose storage writes were all filtered as no-ops
 	//   (the object was still dirty in the IBS)
-	//
-	// Collect all addresses from the raw input (before filtering). AddressPath
-	// entries are record-level and intentionally excluded.
 	allAddresses := make(map[accounts.Address]bool)
 	writes.forEachFieldAddr(func(addr accounts.Address) { allAddresses[addr] = true })
 

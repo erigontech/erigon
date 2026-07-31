@@ -138,3 +138,60 @@ func TestNormalize_SelfDestructBalanceRetention_EIP8246(t *testing.T) {
 	_, postBal := post.GetBalance(addr)
 	require.True(t, postBal, "EIP-8246 SD retains the balance write")
 }
+
+// A self-destructed address must keep none of its account-field or raw storage
+// writes: any survivor makes Apply see a non-empty account and take the
+// cleanup-before-recreate branch instead of the pure delete, leaving a phantom
+// account whose incarnation breaks a later CREATE2 at the same address. Only
+// SelfDestructPath (and, under EIP-8246, the balance) may remain.
+func TestNormalize_SelfDestructDropsAccountFieldAndStorageWrites(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x5DEAD"))
+	kRaw := accounts.InternKey(common.HexToHash("0x03"))
+	code := accounts.NewCode([]byte{0x60, 0x00})
+	ver := Version{TxIndex: 1}
+
+	ws := &WriteSet{}
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
+		WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ver},
+		Val:         true,
+	})
+	ws.SetNonce(addr, &VersionedWrite[uint64]{
+		WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver},
+		Val:         7,
+	})
+	ws.SetIncarnation(addr, &VersionedWrite[uint64]{
+		WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: ver},
+		Val:         3,
+	})
+	ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{
+		WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: ver},
+		Val:         code.Hash,
+	})
+	ws.SetCode(addr, &VersionedWrite[accounts.Code]{
+		WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: ver},
+		Val:         code,
+	})
+	// Not present in the versionMap or the domain, so the SD storage cascade
+	// cannot re-emit it — if it shows up, the raw write survived the SD filter.
+	ws.SetStorage(addr, kRaw, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: kRaw, Version: ver},
+		Val:         *uint256.NewInt(42),
+	})
+
+	out, err := ws.Normalize(NewVersionMap(nil), 1, 0, &minimalStateReader{}, nil, false /*emptyRemoval*/, false /*isAura*/, false /*eip8246*/)
+	require.NoError(t, err)
+
+	_, sdOK := out.GetSelfDestruct(addr)
+	require.True(t, sdOK, "the self-destruct itself must survive")
+	_, nonceOK := out.GetNonce(addr)
+	require.False(t, nonceOK, "nonce write of a self-destructed address must be dropped")
+	_, incOK := out.GetIncarnation(addr)
+	require.False(t, incOK, "incarnation write of a self-destructed address must be dropped")
+	_, codeHashOK := out.GetCodeHash(addr)
+	require.False(t, codeHashOK, "codeHash write of a self-destructed address must be dropped")
+	_, codeOK := out.GetCode(addr)
+	require.False(t, codeOK, "code write of a self-destructed address must be dropped")
+	_, storageOK := out.GetStorage(addr, kRaw)
+	require.False(t, storageOK, "raw storage write of a self-destructed address must be dropped")
+}
