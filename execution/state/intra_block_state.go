@@ -423,8 +423,9 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.dep = UnknownDep
 }
 
-// Close returns pooled resources (like journal, stateObjects) back to their pools.
-// Call this when the IntraBlockState is no longer needed. Idempotent.
+// Close returns pooled resources (like journal, stateObjects, versioned writes)
+// back to their pools. Call this when the IntraBlockState is no longer needed.
+// Idempotent, but not safe for concurrent callers.
 func (sdb *IntraBlockState) Close() {
 	if sdb == nil || sdb.stateObjects == nil {
 		return
@@ -433,6 +434,9 @@ func (sdb *IntraBlockState) Close() {
 	stateObjects, journal := sdb.stateObjects, sdb.journal
 	sdb.stateObjects, sdb.journal = nil, nil
 	sdb.revisions.reset()
+	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
+	// set is unexported, so nothing outside holds a raw VersionedWrite.
+	sdb.versionedWrites.ReleaseAndReset()
 
 	releaseResources(stateObjects, journal)
 }

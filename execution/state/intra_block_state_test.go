@@ -440,6 +440,23 @@ func TestCloseResetsRevisions(t *testing.T) {
 	require.Zero(t, state.revisions.nextId)
 }
 
+func TestCloseReleasesVersionedWrites(t *testing.T) {
+	t.Parallel()
+	state := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
+	t.Cleanup(state.Close)
+	state.SetNoMaterialize(true)
+	state.SetTxContext(1, 0)
+
+	require.NoError(t, state.TouchAccount(accounts.InternAddress([20]byte{0xe1})))
+	require.NotZero(t, state.versionedWrites.Count())
+
+	handedOut := state.VersionedWrites()
+	state.Close()
+
+	require.Zero(t, state.versionedWrites.Count())
+	require.NotZero(t, handedOut.Count(), "the clone handed to callers must survive Close")
+}
+
 func TestCloseIsIdempotent(t *testing.T) {
 	t.Parallel()
 	state := New(nil)

@@ -1014,7 +1014,6 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 	close(jobs)
 
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(numWorkers)
 
 	for range numWorkers {
 		g.Go(func() error {
