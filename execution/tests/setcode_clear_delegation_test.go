@@ -18,12 +18,12 @@ package executiontests
 
 import (
 	"bytes"
-	"context"
 	"crypto/ecdsa"
 	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -62,13 +62,12 @@ func signAuthorization(t *testing.T, key *ecdsa.PrivateKey, chainID uint256.Int,
 	return auth
 }
 
-// TestSetCodeClearDelegationPurgesCodeDomain pins the account↔code domain
-// invariant across the EIP-7702 delegation lifecycle: setting a delegation
-// stores the designator in CodeDomain; clearing it (authorization to the zero
-// address) must delete that CodeDomain entry rather than leave the stale
-// designator alongside an account whose code hash says "no code".
+// TestSetCodeClearDelegationPurgesCodeDomain verifies the account/code invariant
+// across the EIP-7702 delegation lifecycle: setting a delegation stores its
+// designator in CodeDomain, while clearing it deletes the entry and restores
+// the authority's empty code hash.
 func TestSetCodeClearDelegationPurgesCodeDomain(t *testing.T) {
-	// mutates dbg.Exec3Parallel per sub-test; not safe for t.Parallel
+	// This test changes dbg.Exec3Parallel and cannot run in parallel.
 	for _, mode := range []struct {
 		name     string
 		parallel bool
@@ -89,44 +88,24 @@ func TestSetCodeClearDelegationPurgesCodeDomain(t *testing.T) {
 			authority := crypto.PubkeyToAddress(authorityKey.PublicKey)
 			delegate := common.HexToAddress("0x000000000000000000000000000000000000cafe")
 
-			cfg := &chain.Config{
-				ChainID:                       uint256.NewInt(1337),
-				Rules:                         chain.EtHashRules,
-				HomesteadBlock:                common.NewUint64(0),
-				TangerineWhistleBlock:         common.NewUint64(0),
-				SpuriousDragonBlock:           common.NewUint64(0),
-				ByzantiumBlock:                common.NewUint64(0),
-				ConstantinopleBlock:           common.NewUint64(0),
-				PetersburgBlock:               common.NewUint64(0),
-				IstanbulBlock:                 common.NewUint64(0),
-				MuirGlacierBlock:              common.NewUint64(0),
-				BerlinBlock:                   common.NewUint64(0),
-				LondonBlock:                   common.NewUint64(0),
-				ArrowGlacierBlock:             common.NewUint64(0),
-				GrayGlacierBlock:              common.NewUint64(0),
-				TerminalTotalDifficulty:       uint256.NewInt(0),
-				TerminalTotalDifficultyPassed: true,
-				ShanghaiTime:                  common.NewUint64(0),
-				CancunTime:                    common.NewUint64(0),
-				PragueTime:                    common.NewUint64(0),
-				DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
-				Ethash:                        new(chain.EthashConfig),
-			}
+			pragueConfig := new(chain.Config)
+			require.NoError(t, copier.CopyWithOption(pragueConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
+			pragueConfig.OsakaTime = nil
 			gspec := &types.Genesis{
-				Config: cfg,
+				Config: pragueConfig,
 				Alloc: types.GenesisAlloc{
 					sender: {Balance: big.NewInt(1_000_000_000_000_000_000)},
 				},
 			}
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(senderKey))
 
-			signer := types.LatestSignerForChainID(cfg.ChainID)
+			signer := types.LatestSignerForChainID(pragueConfig.ChainID)
 			mkSetCodeTx := func(nonce uint64, auth types.Authorization) types.Transaction {
 				to := common.HexToAddress("0x000000000000000000000000000000000000beef")
 				txn := &types.SetCodeTransaction{
 					DynamicFeeTransaction: types.DynamicFeeTransaction{
 						CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 500_000, To: &to},
-						ChainID:  *cfg.ChainID,
+						ChainID:  *pragueConfig.ChainID,
 						TipCap:   *uint256.NewInt(1_000_000_000),
 						FeeCap:   *uint256.NewInt(10_000_000_000),
 					},
@@ -141,9 +120,9 @@ func TestSetCodeClearDelegationPurgesCodeDomain(t *testing.T) {
 				b.SetCoinbase(common.Address{1})
 				switch i {
 				case 0:
-					b.AddTx(mkSetCodeTx(b.TxNonce(sender), signAuthorization(t, authorityKey, *cfg.ChainID, delegate, 0)))
+					b.AddTx(mkSetCodeTx(b.TxNonce(sender), signAuthorization(t, authorityKey, *pragueConfig.ChainID, delegate, 0)))
 				case 1:
-					b.AddTx(mkSetCodeTx(b.TxNonce(sender), signAuthorization(t, authorityKey, *cfg.ChainID, common.Address{}, 1)))
+					b.AddTx(mkSetCodeTx(b.TxNonce(sender), signAuthorization(t, authorityKey, *pragueConfig.ChainID, common.Address{}, 1)))
 				}
 			})
 			require.NoError(t, err)
@@ -151,7 +130,7 @@ func TestSetCodeClearDelegationPurgesCodeDomain(t *testing.T) {
 			readAuthority := func() (accounts.Account, []byte) {
 				var acc accounts.Account
 				var code []byte
-				require.NoError(t, m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+				require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 					accEnc, _, err := tx.GetLatest(kv.AccountsDomain, authority[:])
 					if err != nil {
 						return err
@@ -169,13 +148,13 @@ func TestSetCodeClearDelegationPurgesCodeDomain(t *testing.T) {
 
 			require.NoError(t, m.InsertChain(chainPack.Slice(0, 1)))
 			acc, code := readAuthority()
-			require.EqualValues(t, 1, acc.Nonce, "set authorization must have been applied")
+			require.Equal(t, uint64(1), acc.Nonce, "set authorization must have been applied")
 			require.Equal(t, types.AddressToDelegation(accounts.InternAddress(delegate)), code)
 			require.False(t, acc.IsEmptyCodeHash())
 
 			require.NoError(t, m.InsertChain(chainPack.Slice(1, 2)))
 			acc, code = readAuthority()
-			require.EqualValues(t, 2, acc.Nonce, "clear authorization must have been applied")
+			require.Equal(t, uint64(2), acc.Nonce, "clear authorization must have been applied")
 			require.True(t, acc.IsEmptyCodeHash(), "account code hash must be empty after delegation clear")
 			require.Empty(t, code, "CodeDomain must not retain the delegation designator after clear")
 		})
