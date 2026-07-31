@@ -2,8 +2,6 @@ package commitment
 
 import (
 	"encoding/hex"
-	"encoding/json"
-	"os"
 	"sort"
 	"testing"
 
@@ -24,42 +22,10 @@ import (
 // The engine itself is tied to this oracle by the differential tests, so the
 // chain reaches the engine even though the engine hashes with Keccak-256.
 
-type pbinRootVectors struct {
-	Meta      map[string]string `json:"meta"`
-	EmptyRoot string            `json:"empty_root"`
-	Trie      []struct {
-		Name    string `json:"name"`
-		Entries []struct {
-			Key   string `json:"key"`
-			Value string `json:"value"`
-		} `json:"entries"`
-		Root string `json:"root"`
-	} `json:"trie_vectors"`
-	Sequences []struct {
-		Seed int `json:"seed"`
-		Ops  []struct {
-			Op    string `json:"op"`
-			Key   string `json:"key"`
-			Value string `json:"value"`
-		} `json:"ops"`
-		RootsAfter []string `json:"roots_after"`
-	} `json:"sequence_vectors"`
-}
-
 func pbinBlake3Sum(b []byte) [32]byte { return blake3.Sum256(b) }
 
 // pbinBlake3Hash adapts pbinBlake3Sum to the engine's injectable hash seam.
 var pbinBlake3Hash pbinHashFn = func(b []byte) common.Hash { return common.Hash(blake3.Sum256(b)) }
-
-func pbinLoadRootVectors(t *testing.T) pbinRootVectors {
-	t.Helper()
-	raw, err := os.ReadFile("testdata/eip8297_vectors.json")
-	require.NoError(t, err)
-	var v pbinRootVectors
-	require.NoError(t, json.Unmarshal(raw, &v))
-	require.Equal(t, "blake3", v.Meta["hasher"], "vectors are only replayable under the hash they were generated with")
-	return v
-}
 
 // pbinOracleRootOf builds the oracle trie from a whole key set and merkelizes it
 // under BLAKE3. Building from the surviving set is also how a delete is applied:
@@ -82,7 +48,7 @@ func pbinOracleRootOf(t *testing.T, entries map[string][]byte) [32]byte {
 
 func TestPBinOracleMatchesSpecTrieRoots(t *testing.T) {
 	t.Parallel()
-	v := pbinLoadRootVectors(t)
+	v := pbinLoadSpecVectors(t)
 	require.NotEmpty(t, v.Trie)
 
 	for _, tc := range v.Trie {
@@ -106,7 +72,7 @@ func TestPBinOracleMatchesSpecTrieRoots(t *testing.T) {
 // divergence is pinned to the op that caused it.
 func TestPBinOracleMatchesSpecSequenceRoots(t *testing.T) {
 	t.Parallel()
-	v := pbinLoadRootVectors(t)
+	v := pbinLoadSpecVectors(t)
 	require.NotEmpty(t, v.Sequences)
 
 	checked := 0

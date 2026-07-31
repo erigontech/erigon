@@ -17,8 +17,6 @@
 package commitment
 
 import (
-	"encoding/hex"
-	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -86,52 +84,28 @@ func TestPBinInitializeTrieAppliesHashSuite(t *testing.T) {
 // selection is not reaching the engine and the test proves nothing.
 func TestPBinBlake3SuiteMatchesSpecRoots(t *testing.T) {
 	pbinRestoreHashSuite(t)
-	v := pbinLoadRootVectors(t)
+	v := pbinLoadSpecVectors(t)
 	require.NotEmpty(t, v.Trie)
 
-	rootOf := func(t *testing.T, tc int) string {
+	rootOf := func(t *testing.T, tc pbinSpecTrieVector) string {
 		t.Helper()
-		leaves := make([]pbinEngineLeaf, 0, len(v.Trie[tc].Entries))
-		for i, e := range v.Trie[tc].Entries {
-			key, err := hex.DecodeString(e.Key[2:])
-			require.NoError(t, err)
-			val, err := hex.DecodeString(e.Value[2:])
-			require.NoError(t, err)
-			l, ok := pbinLeafFromVector(key, val, i+1)
-			require.True(t, ok)
-			leaves = append(leaves, l)
-		}
-		sort.Slice(leaves, func(i, j int) bool {
-			return string(leaves[i].treeKey) < string(leaves[j].treeKey)
-		})
-
 		trie, _ := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), TrieConfig{Variant: VariantBinPatriciaTrie})
 		pph := trie.(*PBinPatriciaHashed)
 		defer pph.Release()
 		pph.ResetContext(NewMockState(t))
-
-		for i := range leaves {
-			require.NoError(t, pph.followAndUpdate(leaves[i].treeKey, leaves[i].plainKey, &leaves[i].update))
-		}
-		for pph.grid.activeRows > 0 {
-			require.NoError(t, pph.fold())
-		}
-		require.NoError(t, pph.storeRoot())
-		got, err := pph.RootHash()
-		require.NoError(t, err)
-		return hex.EncodeToString(got)
+		return pbinSpecEngineRoot(t, pph, tc)
 	}
 
-	for i, tc := range v.Trie {
+	for _, tc := range v.Trie {
 		t.Run(tc.Name, func(t *testing.T) {
 			require.NoError(t, SetPBinHashSuite(PBinHashBlake3))
-			require.Equal(t, tc.Root[2:], rootOf(t, i))
+			require.Equal(t, tc.Root[2:], rootOf(t, tc))
 
 			if len(tc.Entries) == 0 {
 				return // the empty tree is 32 zero bytes under any hash (eip:208)
 			}
 			require.NoError(t, SetPBinHashSuite(PBinHashKeccak))
-			require.NotEqual(t, tc.Root[2:], rootOf(t, i), "keccak must not reproduce a blake3 reference root")
+			require.NotEqual(t, tc.Root[2:], rootOf(t, tc), "keccak must not reproduce a blake3 reference root")
 		})
 	}
 }
