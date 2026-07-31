@@ -1348,6 +1348,8 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	return res, nil
 }
 
+var receiptCacheBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+
 func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
 	var toWrite []byte
 
@@ -1356,12 +1358,19 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uin
 			panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64()))
 		}
 
-		var err error
 		storageReceipt := (*types.ReceiptForStorage)(receipt)
-		toWrite, err = rlp.EncodeToBytes(storageReceipt)
-		if err != nil {
+		buf := receiptCacheBufPool.Get().(*bytes.Buffer)
+		defer func() {
+			buf.Reset()
+			receiptCacheBufPool.Put(buf)
+		}()
+		// Safe to hand DomainPut a pooled buffer: the mem batch clones the
+		// value (TemporalMemBatch.putLatest) and RCacheDomain is not touched
+		// by the commitment context.
+		if err := rlp.Encode(buf, storageReceipt); err != nil {
 			return fmt.Errorf("WriteReceiptCache: %w", err)
 		}
+		toWrite = buf.Bytes()
 		if dbg.AssertEnabled {
 			storageReceipt2 := &types.ReceiptForStorage{}
 			if err := rlp.DecodeBytes(toWrite, storageReceipt2); err != nil {
