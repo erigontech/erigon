@@ -383,11 +383,13 @@ test-hive:
 # Lazy `=` so unrelated targets don't shell out to jq at make-parse time.
 EEST_DEVNET_URL = $(shell jq -r '."eest_devnet".url' test-fixtures.json)
 EEST_DEVNET_BRANCH = $(shell jq -r '."eest_devnet".branch' test-fixtures.json)
-EEST_GLAMSTERDAM_ERIGON_FLAGS = --fcu.background.prune=false --fcu.timeout=0 --experimental.bal
+EEST_STABLE_ERIGON_FLAGS = --fcu.background.prune=false --fcu.timeout=0
+EEST_GLAMSTERDAM_ERIGON_FLAGS = $(EEST_STABLE_ERIGON_FLAGS) --experimental.bal
 EEST_HIVE_REF = $(shell jq -r '.hive_ref' .github/workflows/hive-versions.json)
 HIVE_SIM_PARALLELISM ?= 8
 
 eest-devnet: HIVE_SIM_PARALLELISM = 4
+eest-hive: HIVE_SIM_PARALLELISM = 4
 eest-devnet:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" .
@@ -458,7 +460,9 @@ eest-hive:
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && git checkout --detach "$(EEST_HIVE_REF)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
 		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
-		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
+		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile && \
+		sed -i'' -e '/^echo "Running erigon/i\FLAGS="$$FLAGS $(EEST_STABLE_ERIGON_FLAGS)"' clients/erigon/erigon.sh && \
+		grep -qF -- '$(EEST_STABLE_ERIGON_FLAGS)' clients/erigon/erigon.sh
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-enginex,"",--sim.buildarg fixtures=$(EEST_STABLE_URL))
