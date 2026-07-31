@@ -178,10 +178,15 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNumber() == 0 {
 			// Genesis block
-			_, ibs, err = genesiswrite.GenesisToBlock(nil, rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
+			var genesisIbs *state.IntraBlockState
+			_, genesisIbs, err = genesiswrite.GenesisToBlock(nil, rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
 			if err != nil {
 				panic(fmt.Errorf("GenesisToBlock: %w", err))
 			}
+			// This state replaces rw.ibs for the genesis task only, so it needs its
+			// own close; rw.ibs stays owned by the worker.
+			defer genesisIbs.Close()
+			ibs = genesisIbs
 			// For Genesis, rules should be empty, so that empty accounts can be included
 			rules = &chain.Rules{} //nolint
 			break
