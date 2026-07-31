@@ -39,7 +39,7 @@ func TestExecutionRequestsEncodingSizeSSZ(t *testing.T) {
 			requests := cltypes.NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, test.version)
 			encoded, err := requests.EncodeSSZ(nil)
 			require.NoError(t, err)
-			require.Equal(t, len(encoded), requests.EncodingSizeSSZ())
+			require.Len(t, encoded, requests.EncodingSizeSSZ())
 		})
 	}
 }

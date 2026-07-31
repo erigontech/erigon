@@ -57,7 +57,7 @@ func TestSignedContainerEncodingSizeSSZ(t *testing.T) {
 			name: "aggregate and proof",
 			container: &cltypes.SignedAggregateAndProof{Message: &cltypes.AggregateAndProof{
 				Aggregate: &solid.Attestation{
-					AggregationBits: solid.BitlistFromBytes([]byte{1}, 2048),
+					AggregationBits: solid.BitlistFromBytes([]byte{1}, int(cfg.MaxValidatorsPerCommittee)),
 					Data:            &solid.AttestationData{},
 				},
 			}},
