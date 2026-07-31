@@ -2375,43 +2375,34 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 			panic(rec)
 		}
 	}()
-	// mustDeliver (the terminal stop): the coordination ctx is already cancelled
-	// by the stopCause published just before this send, but blockResult(M) MUST
-	// still reach the apply loop (validation + progress) and the calculator — a
-	// dropped M surfaces as a spurious ErrInvalidBlock. Both consumers are alive
-	// and draining, so block unconditionally rather than honour ctx.Done; a
-	// closed channel (batch shutdown) is caught by the recover above.
-	if mustDeliver {
-		be.applyResults <- r
-		if be.commitResults != nil {
-			be.commitResults <- r
-		}
+	if err := be.deliver(ctx, be.applyResults, r, mustDeliver); err != nil {
+		return err
+	}
+	return be.deliver(ctx, be.commitResults, r, mustDeliver)
+}
+
+// deliver sends r to ch using a two-phase select: first try a non-blocking send
+// (even if ctx is cancelled), then if the buffer is full wait for room or ctx.Done.
+// If mustDeliver is true, ctx is ignored and the send blocks until it succeeds.
+func (be *blockExecutor) deliver(ctx context.Context, ch chan<- applyResult, r applyResult, mustDeliver bool) error {
+	if ch == nil {
 		return nil
 	}
-	// Data-arm-first on both channels: deliver while the buffer has room; only
-	// honour ctx.Done if the buffer is full (avoids a deadlock when the consumer
-	// is truly gone).
-	select {
-	case be.applyResults <- r:
+	if mustDeliver {
+		ch <- r
+		return nil
+	}
+	select { // data-arm-first: take a free send even under cancellation
+	case ch <- r:
+		return nil
 	default:
-		select {
-		case be.applyResults <- r:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
 	}
-	if be.commitResults != nil {
-		select {
-		case be.commitResults <- r:
-		default:
-			select {
-			case be.commitResults <- r:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
+	select { // buffer full: wait for room, or bail if the consumer is gone
+	case ch <- r:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	return nil
 }
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, commitResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
