@@ -385,9 +385,11 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			// Return if the context is done
 			return ctx.Err()
 		case <-logTicker.C:
-			// Log progress at regular intervals
+			// Log progress at regular intervals. Read the tip live rather than reusing
+			// the loop's captured chainTipSlot: near the head the loop can run for
+			// minutes, so a frozen tip would pin the reported distance to a stale gap.
 			cur := currentSlot.Load()
-			slotsRemaining, ratePerSec := forwardSyncProgress(chainTipSlot, cur, prevProgress, secsPerLog)
+			slotsRemaining, ratePerSec := forwardSyncProgress(cfg.ethClock.GetCurrentSlot(), cur, prevProgress, secsPerLog)
 			prevProgress = cur
 			// distance-from-chain-tip is the ETA at the chain's own production rate
 			// (one slot per SecondsPerSlot), which also saturates instead of overflowing.
