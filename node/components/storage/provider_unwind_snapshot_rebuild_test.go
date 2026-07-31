@@ -63,7 +63,7 @@ func makeFakeSegFile(t *testing.T, ctx context.Context, path, tmpDir string, cou
 	c, err := seg.NewCompressor(ctx, "test-fake-seg", path, tmpDir, cfg, log.LvlError, log.New())
 	require.NoError(t, err)
 	defer c.Close()
-	for i := 0; i < count; i++ {
+	for i := range count {
 		// Word content: ASCII "block-NNNNN". Differentiates positions
 		// for sequential read verification.
 		word := fmt.Appendf(nil, "block-%05d", i)
@@ -209,7 +209,7 @@ func makeBlockSnapshotTriple(t *testing.T, ctx context.Context, snapDir, tmpDir 
 	tc, err := seg.NewCompressor(ctx, "fixture-txs", tFI.Path, tmpDir, seg.DefaultCfg, log.LvlError, log.New())
 	require.NoError(t, err)
 	totalTx := (toBlock - fromBlock) * uint64(txCount)
-	for i := uint64(0); i < totalTx; i++ {
+	for i := range totalTx {
 		positionInBlock := i % uint64(txCount)
 		isSystemSlot := positionInBlock == 0 || positionInBlock == uint64(txCount)-1
 		if isSystemSlot {

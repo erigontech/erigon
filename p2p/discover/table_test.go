@@ -135,7 +135,7 @@ func waitForRevalidationPing(t *testing.T, transport *pingRecorder, tab *Table, 
 
 	simclock := tab.cfg.Clock.(*mclock.Simulated)
 	maxAttempts := tab.len() * 8
-	for i := 0; i < maxAttempts; i++ {
+	for range maxAttempts {
 		simclock.Run(tab.cfg.PingInterval * slowRevalidationFactor)
 		p := transport.waitPing(2 * time.Second)
 		if p == nil {
@@ -157,7 +157,7 @@ func TestTable_IPLimit(t *testing.T) {
 	defer db.Close()
 	defer tab.close()
 
-	for i := 0; i < tableIPLimit+1; i++ {
+	for i := range tableIPLimit + 1 {
 		n := nodeAtDistance(tab.self().ID(), i, net.IP{172, 0, 1, byte(i)})
 		tab.addFoundNode(n, false)
 	}
@@ -176,13 +176,11 @@ func TestTable_BucketIPLimit(t *testing.T) {
 
 	// d=17 ensures idAtDistance randomises 2 trailing bytes so each call
 	// produces a unique ID; lower distances (e.g. d=3) flip a single bit
-	// with no tail randomness, collapsing to one ID. All these still land
-	// in buckets[0] (d <= bucketMinDistance).
+	// with no tail randomness, collapsing to one ID.
 	const d = 17
 	// Pre-fill the bucket from diverse /24s so it crosses bucketSize/2 and
-	// enters the enforce regime. The diverse adds themselves go through in
-	// permissive mode and are not counted against the cap.
-	for i := 0; i < bucketSize/2; i++ {
+	// enters the enforce regime.
+	for i := range bucketSize / 2 {
 		n := nodeAtDistance(tab.self().ID(), d, net.IP{byte(10 + i), 0, 0, 1})
 		tab.addFoundNode(n, false)
 	}
@@ -192,7 +190,7 @@ func TestTable_BucketIPLimit(t *testing.T) {
 	}
 
 	// Now stress with a same-/24 cluster. Cap should hold.
-	for i := 0; i < bucketIPLimit+1; i++ {
+	for i := range bucketIPLimit + 1 {
 		n := nodeAtDistance(tab.self().ID(), d, net.IP{172, 0, 1, byte(i)})
 		tab.addFoundNode(n, false)
 	}
@@ -214,7 +212,7 @@ func TestTable_BucketIPLimit_PermissiveWhenSparse(t *testing.T) {
 	const d = 17
 	// Add bucketIPLimit+1 same-/24 nodes to an empty bucket. All should land
 	// because the bucket is below the fill threshold.
-	for i := 0; i < bucketIPLimit+1; i++ {
+	for i := range bucketIPLimit + 1 {
 		n := nodeAtDistance(tab.self().ID(), d, net.IP{172, 0, 1, byte(i)})
 		tab.addFoundNode(n, false)
 	}
@@ -234,7 +232,7 @@ func TestTable_BucketIPLimit_PermissiveOnCloseBucket(t *testing.T) {
 
 	// Distance 250 → bucket index 250 - bucketMinDistance - 1 = 250 - 239 - 1 = 10.
 	const d = 250
-	for i := 0; i < bucketSize; i++ {
+	for i := range bucketSize {
 		n := nodeAtDistance(tab.self().ID(), d, net.IP{172, 0, 1, byte(i)})
 		tab.addFoundNode(n, false)
 	}
@@ -522,7 +520,7 @@ func nodeIDEqual[N nodeType](n1, n2 N) bool {
 
 // gen wraps quick.Value so it's easier to use.
 // it generates a random value of the given value's type.
-func gen(typ interface{}, rand *rand.Rand) interface{} {
+func gen(typ any, rand *rand.Rand) any {
 	v, ok := quick.Value(reflect.TypeOf(typ), rand)
 	if !ok {
 		panic(fmt.Sprintf("couldn't generate random value of type %T", typ))

@@ -20,8 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
@@ -32,7 +32,7 @@ import (
 // across each retired headers.seg.
 type HeaderChainValidator struct {
 	DB          kv.RoDB
-	BlockReader services.FullBlockReader
+	BlockReader dbservices.FullBlockReader
 }
 
 // Name implements validation.StepValidator.
@@ -84,7 +84,7 @@ func (v HeaderChainValidator) ValidateStep(ctx context.Context, files []*snapsho
 // verifyHeaderChain walks blocks [from, to) and checks
 // header[N].ParentHash == hash(header[N-1]). Block 0 (genesis) has
 // no parent so a segment starting at 0 begins comparison at block 1.
-func verifyHeaderChain(ctx context.Context, tx kv.Getter, br services.FullBlockReader, from, to uint64) error {
+func verifyHeaderChain(ctx context.Context, tx kv.Getter, br dbservices.FullBlockReader, from, to uint64) error {
 	if to <= from {
 		return fmt.Errorf("invalid range [%d, %d)", from, to)
 	}

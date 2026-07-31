@@ -44,7 +44,7 @@ func TestBreadth_EmptyPeerManifest(t *testing.T) {
 	peer.AnnounceTo(leecher)
 	leecher.Bus.WaitAsync()
 
-	requestType := reflect.TypeOf(flow.DownloadRequested{})
+	requestType := reflect.TypeFor[flow.DownloadRequested]()
 	require.Equal(t, 0, leecher.Bus.CountOfType(requestType),
 		"empty manifest should produce no requests")
 	require.Equal(t, 0, leecher.Orch.PendingCount())
@@ -79,7 +79,7 @@ func TestBreadth_PartialDomainPeer(t *testing.T) {
 	require.Empty(t, leecher.Inventory.LocalFiles(snapshot.DomainCommitment))
 
 	// No failures, no orphan pending.
-	require.Equal(t, 0, leecher.Bus.CountOfType(reflect.TypeOf(flow.DownloadFailed{})))
+	require.Equal(t, 0, leecher.Bus.CountOfType(reflect.TypeFor[flow.DownloadFailed]()))
 	require.Equal(t, 0, leecher.Orch.PendingCount())
 }
 
@@ -123,7 +123,7 @@ func TestBreadth_ComplementaryPeers(t *testing.T) {
 		require.NotEmpty(t, leecher.Inventory.LocalFiles(d),
 			"domain %s should be covered after complementary peers", d)
 	}
-	require.Equal(t, 0, leecher.Bus.CountOfType(reflect.TypeOf(flow.DownloadFailed{})))
+	require.Equal(t, 0, leecher.Bus.CountOfType(reflect.TypeFor[flow.DownloadFailed]()))
 	require.Equal(t, 0, leecher.Orch.PendingCount())
 }
 

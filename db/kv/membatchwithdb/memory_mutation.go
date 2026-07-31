@@ -26,16 +26,21 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 )
 
 var _ kv.TemporalRwTx = &MemoryMutation{}
+
+type DomainReader interface {
+	GetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error)
+	HistorySeek(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error)
+}
 
 type MemoryMutation struct {
 	// mu protects concurrent access to the mutation's maps and backing tx.
@@ -52,6 +57,7 @@ type MemoryMutation struct {
 	clearedTables    map[string]struct{}
 	db               kv.TemporalTx
 	statelessCursors map[string]kv.RwCursor
+	DomainReader     DomainReader
 }
 
 // NewMemoryBatch creates a pure Go in-memory batch with no OS-thread affinity.
@@ -113,6 +119,19 @@ func NewMemoryBatchMDBX(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm 
 
 func (m *MemoryMutation) UnderlyingTx() kv.TemporalTx {
 	return m.db
+}
+
+// Pin forwards the files-pin capability to the underlying tx: domain reads fall
+// through the overlay to it, so pinning the underlying tx keeps overlay-view
+// reads on the same file generation. Returns nil when the underlying tx can't
+// pin files, letting the caller fall back to an independent snapshot.
+func (m *MemoryMutation) Pin() kv.TemporalFilesPin {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if p, ok := m.db.(interface{ Pin() kv.TemporalFilesPin }); ok {
+		return p.Pin()
+	}
+	return nil
 }
 
 func (m *MemoryMutation) UpdateTxn(tx kv.TemporalTx) {
@@ -576,6 +595,25 @@ func (m *MemoryMutation) BucketSize(bucket string) (uint64, error) {
 	return m.memTx.BucketSize(bucket)
 }
 
+type HasBlockFilesRoTx interface {
+	BlockFilesRoTx() *blocksnapshots.View
+}
+
+func (m *MemoryMutation) BlockFilesRoTx() *blocksnapshots.View {
+	if p, ok := m.db.(HasBlockFilesRoTx); ok {
+		return p.BlockFilesRoTx()
+	}
+	return nil
+}
+
+func (m *MemoryMutation) ForceReopenUnderlyingFilesTx() {
+	p, ok := m.db.(kv.CanReopenUnderlyingFilesTx)
+	if !ok {
+		panic(fmt.Sprintf("snapshots stage requires a tx that can ForceReopenUnderlyingFilesTx, got %T", m.db))
+	}
+	p.ForceReopenUnderlyingFilesTx()
+}
+
 func (m *MemoryMutation) Count(bucket string) (uint64, error) {
 	panic("not implemented")
 }
@@ -796,8 +834,8 @@ func (m *MemoryMutation) Diff() (*MemoryDiff, error) {
 					return nil, err
 				}
 				memDiff.diff[t] = append(memDiff.diff[t], entry{
-					k: common.Copy(k),
-					v: common.Copy(v),
+					k: bytes.Clone(k),
+					v: bytes.Clone(v),
 				})
 			}
 		} else {
@@ -815,8 +853,8 @@ func (m *MemoryMutation) Diff() (*MemoryDiff, error) {
 					return nil, err
 				}
 				memDiff.diff[t] = append(memDiff.diff[t], entry{
-					k: common.Copy(k),
-					v: common.Copy(v),
+					k: bytes.Clone(k),
+					v: bytes.Clone(v),
 				})
 			}
 		}
@@ -913,6 +951,15 @@ func (m *MemoryMutation) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.
 }
 
 func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	if m.DomainReader != nil {
+		val, ok, err := m.DomainReader.GetAsOf(name, k, ts)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			return val, true, nil
+		}
+	}
 	if m.db == nil {
 		return nil, false, fmt.Errorf("MemoryMutation: domain read requires backing tx (detached overlay)")
 	}
@@ -941,6 +988,15 @@ func (m *MemoryMutation) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uin
 }
 
 func (m *MemoryMutation) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	if m.DomainReader != nil {
+		val, ok, err := m.DomainReader.HistorySeek(name, k, ts)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			return val, true, nil
+		}
+	}
 	if m.db == nil {
 		return nil, false, fmt.Errorf("MemoryMutation: history read requires backing tx (detached overlay)")
 	}
@@ -977,20 +1033,6 @@ func (m *MemoryMutation) Debug() kv.TemporalDebugTx {
 	return m.db.Debug()
 }
 
-func (m *MemoryMutation) AggForkablesTx(id kv.ForkableId) any {
-	if m.db == nil {
-		return nil
-	}
-	return m.db.AggForkablesTx(id)
-}
-
-func (m *MemoryMutation) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
-	if m.db == nil {
-		return nil
-	}
-	return m.db.Unmarked(id)
-}
-
 func (m *MemoryMutation) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
 	panic("implement me pls. or use SharedDomains")
 }
@@ -1001,16 +1043,6 @@ func (m *MemoryMutation) DomainDel(domain kv.Domain, k []byte, txNum uint64, pre
 
 func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
 	panic("implement me pls. or use SharedDomains")
-}
-
-func (m *MemoryMutation) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
-	if m.db == nil {
-		return nil
-	}
-	if rwTx, ok := m.db.(kv.TemporalRwTx); ok {
-		return rwTx.UnmarkedRw(id)
-	}
-	return nil // overlay backed by RO tx
 }
 
 func (m *MemoryMutation) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
@@ -1061,6 +1093,7 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 		deletedDups:    m.deletedDups,
 		clearedTables:  m.clearedTables,
 		db:             dbTx,
+		DomainReader:   m.DomainReader,
 	}
 }
 
@@ -1113,39 +1146,65 @@ func (v *OverlayTemporalReadView) Apply(_ context.Context, f func(tx kv.Tx) erro
 func (v *OverlayTemporalReadView) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	return v.temporalTx.GetLatest(name, k)
 }
+
 func (v *OverlayTemporalReadView) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
 	return v.temporalTx.HasPrefix(name, prefix)
 }
+
 func (v *OverlayTemporalReadView) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return v.temporalTx.StepsInFiles(entitySet...)
 }
+
 func (v *OverlayTemporalReadView) GetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
+	// Check DomainReader independently — this method shadows MemoryMutation.GetAsOf
+	// and falls through to v.temporalTx (not m.db), so the embedded check never fires.
+	if v.MemoryMutation != nil && v.MemoryMutation.DomainReader != nil {
+		val, ok, err := v.MemoryMutation.DomainReader.GetAsOf(name, k, ts)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			return val, true, nil
+		}
+	}
 	return v.temporalTx.GetAsOf(name, k, ts)
 }
+
 func (v *OverlayTemporalReadView) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (stream.KV, error) {
 	return v.temporalTx.RangeAsOf(name, fromKey, toKey, ts, asc, limit)
 }
+
 func (v *OverlayTemporalReadView) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (stream.U64, error) {
 	return v.temporalTx.IndexRange(name, k, fromTs, toTs, asc, limit)
 }
+
 func (v *OverlayTemporalReadView) HistorySeek(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
+	// Check DomainReader independently — this method shadows MemoryMutation.HistorySeek
+	// and falls through to v.temporalTx (not m.db), so the embedded check never fires.
+	if v.MemoryMutation != nil && v.MemoryMutation.DomainReader != nil {
+		val, ok, err := v.MemoryMutation.DomainReader.HistorySeek(name, k, ts)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			return val, true, nil
+		}
+	}
 	return v.temporalTx.HistorySeek(name, k, ts)
 }
+
 func (v *OverlayTemporalReadView) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
 	return v.temporalTx.HistoryRange(name, fromTs, toTs, asc, limit)
 }
+
 func (v *OverlayTemporalReadView) Debug() kv.TemporalDebugTx {
 	return v.temporalTx.Debug()
 }
+
 func (v *OverlayTemporalReadView) AggTx() any {
 	return v.temporalTx.AggTx()
 }
-func (v *OverlayTemporalReadView) AggForkablesTx(id kv.ForkableId) any {
-	return v.temporalTx.AggForkablesTx(id)
-}
-func (v *OverlayTemporalReadView) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
-	return v.temporalTx.Unmarked(id)
-}
+
 func (v *OverlayTemporalReadView) FreezeInfo() kv.FreezeInfo {
 	return v.temporalTx.FreezeInfo()
 }

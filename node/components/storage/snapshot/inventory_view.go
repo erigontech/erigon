@@ -295,13 +295,7 @@ func (v *InventoryView) LocalBlockTip() uint64 {
 	bTip := contiguousTip(bodies)
 	tTip := contiguousTip(txs)
 
-	minTip := hTip
-	if bTip < minTip {
-		minTip = bTip
-	}
-	if tTip < minTip {
-		minTip = tTip
-	}
+	minTip := min(tTip, min(bTip, hTip))
 	if minTip == 0 {
 		return 0
 	}

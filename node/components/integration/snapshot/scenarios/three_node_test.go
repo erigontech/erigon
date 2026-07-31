@@ -68,14 +68,14 @@ func TestThreeNode_MergeDivergence(t *testing.T) {
 
 	// Leecher should have downloaded each of A's files exactly once and
 	// zero of B's redundant files.
-	requestCount := leecher.Bus.CountOfType(reflect.TypeOf(flow.DownloadRequested{}))
+	requestCount := leecher.Bus.CountOfType(reflect.TypeFor[flow.DownloadRequested]())
 	require.Equal(t, mergedFiles, requestCount,
 		"leecher should request only the merged peer's files; unmerged slices are already covered")
 
-	completeCount := leecher.Bus.CountOfType(reflect.TypeOf(flow.DownloadComplete{}))
+	completeCount := leecher.Bus.CountOfType(reflect.TypeFor[flow.DownloadComplete]())
 	require.Equal(t, mergedFiles, completeCount, "every request should complete")
 
-	failedCount := leecher.Bus.CountOfType(reflect.TypeOf(flow.DownloadFailed{}))
+	failedCount := leecher.Bus.CountOfType(reflect.TypeFor[flow.DownloadFailed]())
 	require.Equal(t, 0, failedCount, "no downloads should fail")
 
 	// Accounts coverage is the full [0, 500) as a single range — proving C

@@ -230,7 +230,7 @@ func TestTier2_SequenceRobustness_MultipleTransitions(t *testing.T) {
 	rt := newTier2Runtime(t, forkName, cutBlock, initialHead)
 	ctrl := forkcomp.New(rt)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, err := ctrl.Transition(t.Context(), forkName)
 		require.NoError(t, err, "iter %d: to fork", i)
 		require.Equal(t, forkName, rt.current.ChainName)

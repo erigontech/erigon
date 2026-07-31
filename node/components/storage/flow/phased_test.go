@@ -206,7 +206,7 @@ func TestPhasedScheduling_StateReadyFiresOnce(t *testing.T) {
 	// ready. Caplin-only manifests have nothing in phase-1, so
 	// statePending == 0 holds throughout; only the first one's fire
 	// should publish.
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		bus.Publish(PeerManifestReceived{
 			PeerID: "peer",
 			Caplin: []*snapshot.FileEntry{

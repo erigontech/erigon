@@ -22,7 +22,7 @@ import (
 	"os"
 	"path/filepath"
 
-	dl "github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	downloaderproto "github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
@@ -92,4 +92,4 @@ func (c *InprocClient) Seed(_ context.Context, _ []string) error { return nil }
 // Delete is a no-op; tests don't exercise the deletion path.
 func (c *InprocClient) Delete(_ context.Context, _ []string) error { return nil }
 
-var _ dl.Client = (*InprocClient)(nil)
+var _ dbservices.DownloaderClient = (*InprocClient)(nil)

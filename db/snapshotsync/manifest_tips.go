@@ -132,13 +132,7 @@ func DeriveManifestTips(items snapcfg.PreverifiedItems) ManifestTips {
 		// files exist. ParseFileName already converted from filename-
 		// K-units to block numbers; subtract 1 to convert exclusive
 		// upper bound to inclusive tip.
-		minOfMax := maxHeaders
-		if maxBodies < minOfMax {
-			minOfMax = maxBodies
-		}
-		if maxTxs < minOfMax {
-			minOfMax = maxTxs
-		}
+		minOfMax := min(maxTxs, min(maxBodies, maxHeaders))
 		blockTip = minOfMax - 1
 	}
 

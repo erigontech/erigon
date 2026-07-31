@@ -59,7 +59,8 @@ func createSentinel(
 	peerDasStateReader peerdasstate.PeerDasStateReader,
 	p2p p2p.P2PManager,
 	initialStatus *cltypes.Status,
-	logger log.Logger) (*sentinel.Sentinel, *enode.LocalNode, error) {
+	logger log.Logger,
+) (*sentinel.Sentinel, *enode.LocalNode, error) {
 	sent, err := sentinel.New(
 		ctx,
 		cfg,
@@ -105,9 +106,10 @@ func StartSentinelService(
 	ethClock eth_clock.EthereumClock,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	dataColumnStorage blob_storage.DataColumnStorage,
-	PeerDasStateReader peerdasstate.PeerDasStateReader,
+	peerDasStateReader peerdasstate.PeerDasStateReader,
 	p2p p2p.P2PManager,
-	logger log.Logger) (sentinelproto.SentinelClient, *enode.LocalNode, error) {
+	logger log.Logger,
+) (sentinelproto.SentinelClient, *enode.LocalNode, error) {
 	sent, localNode, err := createSentinel(
 		ctx,
 		cfg,
@@ -117,7 +119,7 @@ func StartSentinelService(
 		forkChoiceReader,
 		ethClock,
 		dataColumnStorage,
-		PeerDasStateReader,
+		peerDasStateReader,
 		p2p,
 		srvCfg.InitialStatus,
 		logger,

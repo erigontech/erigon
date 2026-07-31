@@ -40,7 +40,7 @@ type CapturedBus struct {
 // consumed the capture.
 type Captured struct {
 	Ordinal int
-	Args    []interface{}
+	Args    []any
 }
 
 // NewCapturedBus wraps inner and begins capturing its publications.
@@ -50,20 +50,20 @@ func NewCapturedBus(inner event.EventBus) *CapturedBus {
 
 // Publish records the event and delegates to the underlying bus. The return
 // value is the count from the inner bus (number of handlers invoked).
-func (c *CapturedBus) Publish(args ...interface{}) int {
+func (c *CapturedBus) Publish(args ...any) int {
 	c.mu.Lock()
 	c.events = append(c.events, Captured{Ordinal: len(c.events), Args: args})
 	c.mu.Unlock()
 	return c.inner.Publish(args...)
 }
 
-func (c *CapturedBus) Subscribe(fn interface{}) error      { return c.inner.Subscribe(fn) }
-func (c *CapturedBus) SubscribeAsync(fn interface{}) error { return c.inner.SubscribeAsync(fn) }
-func (c *CapturedBus) SubscribeOnce(fn interface{}) error  { return c.inner.SubscribeOnce(fn) }
-func (c *CapturedBus) SubscribeOnceAsync(fn interface{}) error {
+func (c *CapturedBus) Subscribe(fn any) error      { return c.inner.Subscribe(fn) }
+func (c *CapturedBus) SubscribeAsync(fn any) error { return c.inner.SubscribeAsync(fn) }
+func (c *CapturedBus) SubscribeOnce(fn any) error  { return c.inner.SubscribeOnce(fn) }
+func (c *CapturedBus) SubscribeOnceAsync(fn any) error {
 	return c.inner.SubscribeOnceAsync(fn)
 }
-func (c *CapturedBus) Unsubscribe(fn interface{}) error { return c.inner.Unsubscribe(fn) }
+func (c *CapturedBus) Unsubscribe(fn any) error { return c.inner.Unsubscribe(fn) }
 
 func (c *CapturedBus) HasCallback(types ...reflect.Type) bool { return c.inner.HasCallback(types...) }
 func (c *CapturedBus) WaitAsync()                             { c.inner.WaitAsync() }

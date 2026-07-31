@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -60,12 +61,8 @@ func flattenV2Manifest(m *ChainTomlV2) map[string]string {
 	for _, b := range m.Blocks {
 		out[b.Name] = b.Hash
 	}
-	for k, v := range m.Meta {
-		out[k] = v
-	}
-	for k, v := range m.Salt {
-		out[k] = v
-	}
+	maps.Copy(out, m.Meta)
+	maps.Copy(out, m.Salt)
 	for _, dm := range m.Domains {
 		for _, f := range dm.Files {
 			out[f.Name] = f.Hash
@@ -97,9 +94,7 @@ func BuildTomlFromMap(m map[string]string) []byte {
 // conflict (same key). Returns the merged map and the count of genuinely new entries.
 func MergeChainToml(existing, discovered map[string]string) (merged map[string]string, newCount int) {
 	merged = make(map[string]string, len(existing)+len(discovered))
-	for k, v := range existing {
-		merged[k] = v
-	}
+	maps.Copy(merged, existing)
 	for k, v := range discovered {
 		if _, exists := merged[k]; !exists {
 			merged[k] = v
@@ -391,13 +386,7 @@ func deriveBlockTipFromMap(m map[string]string) uint64 {
 	if maxHeaders == 0 || maxBodies == 0 || maxTxs == 0 {
 		return 0
 	}
-	minOfMax := maxHeaders
-	if maxBodies < minOfMax {
-		minOfMax = maxBodies
-	}
-	if maxTxs < minOfMax {
-		minOfMax = maxTxs
-	}
+	minOfMax := min(maxTxs, min(maxBodies, maxHeaders))
 	return minOfMax - 1
 }
 

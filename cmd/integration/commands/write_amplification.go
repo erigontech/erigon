@@ -67,11 +67,9 @@ Flags:
 go run ./cmd/integration write_amplification --datadir=/path/to/db --chain=mainnet --domains=storage,commitment
 go run ./cmd/integration write_amplification --datadir=/path/to/db --chain=mainnet --domains=accounts`,
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
-
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return

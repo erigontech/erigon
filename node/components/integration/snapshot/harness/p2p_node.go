@@ -34,9 +34,9 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	dl "github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -561,7 +561,7 @@ func newP2PNodeAt(t *testing.T, baseDir string, logger log.Logger, mode storageM
 	dlProvider.Configure(cfg, ethconfig.BlocksFreezing{}, dirs, logger, nil)
 
 	// --- Chain stack ------------------------------------------------------
-	chainDB := temporal.NewTestDB(t, dbcfg.ChainDB)
+	chainDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	spec, err := chainspec.ChainSpecByName(networkname.Test)
 	require.NoError(t, err)
 
@@ -569,7 +569,7 @@ func newP2PNodeAt(t *testing.T, baseDir string, logger log.Logger, mode storageM
 	require.NoError(t, err)
 
 	// Empty snapshots registry — genesis-only state, no frozen files.
-	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, logger)
+	allSnapshots := blocksnapshots.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, logger)
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil)
 
 	// --- Event bus and storage / orchestrator -----------------------------

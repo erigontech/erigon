@@ -551,10 +551,8 @@ func GenerateV2(inv *snapshotinv.Inventory) *ChainTomlV2 {
 		}
 
 		// Sort files deterministically: by range, then kind, then name.
-		// Mixing kinds with overlapping ranges (kv + history + idx + the
-		// accessors all on [0, 128)) needs a tiebreak so the output is
-		// byte-stable; name breaks the final tie between same-range
-		// same-kind entries (a primary's several accessors).
+		// Mixing kinds with overlapping ranges needs a tiebreak so the
+		// output is byte-stable.
 		sort.Slice(dm.Files, func(i, j int) bool {
 			a, b := dm.Files[i], dm.Files[j]
 			if a.Range[0] != b.Range[0] {

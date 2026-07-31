@@ -20,6 +20,7 @@ import (
 	"errors"
 	"net/http"
 	"sync"
+	"sync/atomic"
 
 	"github.com/go-chi/chi/v5"
 
@@ -51,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
@@ -108,6 +110,8 @@ type ApiHandler struct {
 	validatorParams                    *validator_params.ValidatorParams
 	blobBundles                        *lru.Cache[common.Bytes48, BlobBundle] // Keep recent bundled blobs from the execution layer.
 	engine                             execution_client.ExecutionEngine
+	elClientVersion                    atomic.Pointer[engine_types.ClientVersionV1] // Cached execution client version for default graffiti.
+	elClientVersionFetching            atomic.Bool                                  // Guards a single in-flight background elClientVersion fetch.
 	syncMessagePool                    sync_contribution_pool.SyncContributionPool
 	committeeSub                       *committee_subscription.CommitteeSubscribeMgmt
 	attestationProducer                attestation_producer.AttestationDataProducer
@@ -263,6 +267,7 @@ func (a *ApiHandler) Init() {
 		a.init()
 	})
 }
+
 func (a *ApiHandler) init() {
 	r := chi.NewRouter()
 	a.mux = r
@@ -412,7 +417,6 @@ func (a *ApiHandler) init() {
 					}
 				})
 			}
-
 		})
 		r.Route("/v2", func(r chi.Router) {
 			if a.routerCfg.Debug {

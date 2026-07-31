@@ -69,8 +69,8 @@ func TestProviderCloseIdempotent(t *testing.T) {
 	p.Close()
 }
 
-// TestActivateOnNilProvider pins the nil-safety guard so a misconfigured
-// caller gets a clear error rather than a nil-deref panic.
+// Nil-safety guard so a misconfigured caller gets a clear error rather than
+// a nil-deref panic.
 func TestActivateOnNilProvider(t *testing.T) {
 	var p *Provider
 	err := p.Activate(t.Context())
@@ -78,9 +78,8 @@ func TestActivateOnNilProvider(t *testing.T) {
 	require.Contains(t, err.Error(), "nil provider")
 }
 
-// TestActivateNoDownloader pins that the activate phase is a clean no-op
-// (returns nil, marks activated) when the Provider has no underlying
-// Downloader (NoDownloader build, external mode, or no chain config).
+// Activate is a clean no-op (returns nil, marks activated) when the Provider
+// has no underlying Downloader (NoDownloader build, external mode).
 func TestActivateNoDownloader(t *testing.T) {
 	p := &Provider{}
 	p.Configure(
@@ -95,7 +94,24 @@ func TestActivateNoDownloader(t *testing.T) {
 
 	require.NoError(t, p.Activate(t.Context()))
 	require.True(t, p.activated, "Activate must record the lifecycle edge even on no-op path")
-
-	// Idempotent: second Activate is a no-op + still returns nil.
 	require.NoError(t, p.Activate(t.Context()))
+}
+
+// Shutdown race: afterSnapshotDownload callback fires after Close() has
+// nil'd p.Downloader — must be a no-op, not a nil pointer dereference.
+func TestProviderAddTorrentsFromDiskAfterClose(t *testing.T) {
+	p := &Provider{}
+	p.Configure(
+		nil,
+		ethconfig.BlocksFreezing{NoDownloader: true},
+		datadir.New(t.TempDir()),
+		log.Root(),
+		nil,
+	)
+	require.NoError(t, p.Initialize(t.Context()))
+	p.Close()
+
+	incomplete, err := p.AddTorrentsFromDisk(t.Context())
+	require.NoError(t, err)
+	require.Zero(t, incomplete)
 }

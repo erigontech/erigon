@@ -429,12 +429,12 @@ func (p *Provider) sweepBlockOrphansPastBlock(toBlock uint64) []string {
 // offsets.
 func (p *Provider) renameAccessorsToOld(finalPath string) []string {
 	finalBase := filepath.Base(finalPath)
-	dashIdx := strings.IndexByte(finalBase, '-')
-	if dashIdx == -1 {
+	_, after, ok := strings.Cut(finalBase, "-")
+	if !ok {
 		return nil
 	}
-	suffix := strings.TrimSuffix(finalBase[dashIdx+1:], ".kv")
-	if suffix == finalBase[dashIdx+1:] {
+	suffix := strings.TrimSuffix(after, ".kv")
+	if suffix == after {
 		return nil
 	}
 	finalDir := filepath.Dir(finalPath)

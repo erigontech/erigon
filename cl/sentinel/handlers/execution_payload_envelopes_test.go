@@ -118,7 +118,7 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 		envelope := &cltypes.SignedExecutionPayloadEnvelope{
 			Message: &cltypes.ExecutionPayloadEnvelope{
 				Payload:           payload,
-				ExecutionRequests: cltypes.NewExecutionRequests(beaconCfg),
+				ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(beaconCfg, clparams.GloasVersion),
 			},
 		}
 		envelope.Message.BeaconBlockRoot = blockRoot
@@ -273,7 +273,7 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 		envelope := &cltypes.SignedExecutionPayloadEnvelope{
 			Message: &cltypes.ExecutionPayloadEnvelope{
 				Payload:           payload,
-				ExecutionRequests: cltypes.NewExecutionRequests(beaconCfg),
+				ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(beaconCfg, clparams.GloasVersion),
 			},
 		}
 		envelope.Message.BeaconBlockRoot = blockRoot
@@ -299,7 +299,7 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 	c.Start()
 
 	// Encode the request: List[Root, MAX_REQUEST_PAYLOADS]
-	reqRoots := solid.NewHashList(int(beaconCfg.MaxRequestBlocksDeneb))
+	reqRoots := solid.NewHashList(int(beaconCfg.MaxRequestPayloads))
 	for _, root := range blockRoots {
 		reqRoots.Append(root)
 	}
@@ -396,7 +396,7 @@ func TestExecutionPayloadEnvelopesByRootHandler_PreGloas(t *testing.T) {
 	)
 	c.Start()
 
-	reqRoots := solid.NewHashList(int(beaconCfg.MaxRequestBlocksDeneb))
+	reqRoots := solid.NewHashList(int(beaconCfg.MaxRequestPayloads))
 	reqRoots.Append(common.Hash{1, 2, 3})
 	var reqBuf bytes.Buffer
 	err = ssz_snappy.EncodeAndWrite(&reqBuf, reqRoots)
@@ -410,6 +410,61 @@ func TestExecutionPayloadEnvelopesByRootHandler_PreGloas(t *testing.T) {
 
 	_, err = stream.Read(make([]byte, 1))
 	require.ErrorIs(t, err, io.EOF, "should get EOF for pre-GLOAS request")
+}
+
+func TestExecutionPayloadEnvelopesByRootHandlerRejectsOverLimit(t *testing.T) {
+	ctx := context.Background()
+
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
+
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
+
+	err = host.Connect(ctx, peer.AddrInfo{
+		ID:    host1.ID(),
+		Addrs: host1.Addrs(),
+	})
+	require.NoError(t, err)
+
+	peersPool := peers.NewPool(host)
+	_, indiciesDB := setupStore(t)
+	store := tests.NewMockBlockReader()
+	ethClock, beaconCfg := getGloasEthClockAndConfig(t)
+	beaconCfg.MaxRequestPayloads = 1
+	fcMock := mock_services.NewForkChoiceStorageMock(t)
+
+	c := NewConsensusHandlers(
+		ctx,
+		store,
+		indiciesDB,
+		host,
+		peersPool,
+		&clparams.NetworkConfig{},
+		nil,
+		beaconCfg,
+		ethClock,
+		nil, fcMock, nil, nil, nil, true,
+	)
+	c.Start()
+
+	reqRoots := solid.NewHashList(int(beaconCfg.MaxRequestPayloads))
+	reqRoots.Append(common.Hash{1})
+	reqRoots.Append(common.Hash{2})
+	var reqBuf bytes.Buffer
+	err = ssz_snappy.EncodeAndWrite(&reqBuf, reqRoots)
+	require.NoError(t, err)
+
+	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.ExecutionPayloadEnvelopesByRootProtocolV1))
+	require.NoError(t, err)
+
+	_, err = stream.Write(reqBuf.Bytes())
+	require.NoError(t, err)
+
+	_, err = stream.Read(make([]byte, 1))
+	require.Error(t, err)
 }
 
 func TestExecutionPayloadEnvelopesByRangeHandler_PreGloas(t *testing.T) {

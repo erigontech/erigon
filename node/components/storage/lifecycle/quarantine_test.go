@@ -46,7 +46,7 @@ func TestQuarantine_StopsRetryingAfterThreshold(t *testing.T) {
 
 	// 5 sweeps. Threshold=3, so after the third sweep the file is
 	// quarantined and the handler should not be called again.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		d.Sweep(context.Background(), nil)
 	}
 
@@ -125,7 +125,7 @@ func TestQuarantine_SuccessfulDispatchClearsCounter(t *testing.T) {
 		return errors.New("failing again")
 	}
 	d.OnIndexing = failOnceErr
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		d.Sweep(context.Background(), nil)
 	}
 	require.Equal(t, int32(6), calls.Load(),

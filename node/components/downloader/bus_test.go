@@ -29,7 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	dl "github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/app/util"
 	"github.com/erigontech/erigon/node/app/workerpool"
@@ -90,7 +90,7 @@ func (c *fakeClient) callCount() int {
 	return len(c.downloadArgs)
 }
 
-var _ dl.Client = (*fakeClient)(nil)
+var _ dbservices.DownloaderClient = (*fakeClient)(nil)
 
 type busTestEnv struct {
 	bus     event.EventBus

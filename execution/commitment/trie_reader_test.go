@@ -18,7 +18,6 @@ package commitment
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"testing"
 
@@ -64,7 +63,7 @@ func (tc *trieReaderTestCtx) TxNum() uint64                                 { re
 func (tc *trieReaderTestCtx) putBranch(nibblePrefix []byte, cells [16]*cell) {
 	var afterMap uint16
 	var encData [16]cellEncodeData
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		if cells[i] != nil {
 			afterMap |= uint16(1) << i
 			encData[i] = cellEncodeDataFromCell(cells[i])
@@ -245,7 +244,7 @@ func TestTrieReader_MultiLevelDescent(t *testing.T) {
 	depth := 12
 
 	// Create branch-hash cells following the actual hashed key path.
-	for d := 0; d < depth; d++ {
+	for d := range depth {
 		var cells [16]*cell
 		cells[hashedKey[d]] = makeBranchCell(dummyHash())
 		ctx.putBranch(hashedKey[:d], cells)
@@ -283,7 +282,7 @@ func TestTrieReader_StorageLookup(t *testing.T) {
 	// To reach depth 64, we need branch-hash cells along the account path.
 	// For simplicity, create a single branch at root pointing to depth 64
 	// via chain of hash cells at key depths.
-	for d := 0; d < 64; d++ {
+	for d := range 64 {
 		var cells [16]*cell
 		cells[hashedKey[d]] = makeBranchCell(dummyHash())
 		ctx.putBranch(hashedKey[:d], cells)
@@ -381,12 +380,11 @@ func TestTrieReader_EmptyKey(t *testing.T) {
 func TestTrieReader_RoundTripWithHPH(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
 	ms := NewMockState(t)
 
 	// Use real 20-byte account addresses (accountKeyLen = length.Addr).
 	hph := NewHexPatriciaHashed(int16(length.Addr), ms, DefaultTrieConfig())
-	hph.SetTrace(false)
+	hph.SetTraceWriter(nil)
 
 	// Build updates: several accounts with balance/nonce, plus storage.
 	plainKeys, updates := NewUpdateBuilder().
@@ -406,14 +404,7 @@ func TestTrieReader_RoundTripWithHPH(t *testing.T) {
 			"0000000000000000000000000000000000000000000000000000000000000003", "ff").
 		Build()
 
-	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-	defer upds.Close()
-
-	err := ms.applyPlainUpdates(plainKeys, updates)
-	require.NoError(t, err)
-
-	rootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
-	require.NoError(t, err)
+	rootHash := processBatch(t, ms, hph, plainKeys, updates)
 	require.NotEmpty(t, rootHash)
 
 	t.Logf("rootHash: %x, branches stored: %d", rootHash, len(ms.cm))
@@ -463,29 +454,21 @@ func TestTrieReader_RoundTripWithHPH(t *testing.T) {
 func TestTrieReader_RoundTripWithHPH_ManyAccounts(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
 	ms := NewMockState(t)
 
 	hph := NewHexPatriciaHashed(int16(length.Addr), ms, DefaultTrieConfig())
-	hph.SetTrace(false)
+	hph.SetTraceWriter(nil)
 
 	// Generate 100 accounts with distinct addresses.
 	ub := NewUpdateBuilder()
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		addr := fmt.Sprintf("%040x", i+1) // 20-byte hex addresses
 		ub.Balance(addr, uint64(1000+i))
 		ub.Nonce(addr, uint64(i))
 	}
 
 	plainKeys, updates := ub.Build()
-	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-	defer upds.Close()
-
-	err := ms.applyPlainUpdates(plainKeys, updates)
-	require.NoError(t, err)
-
-	rootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
-	require.NoError(t, err)
+	rootHash := processBatch(t, ms, hph, plainKeys, updates)
 	require.NotEmpty(t, rootHash)
 
 	t.Logf("rootHash: %x, branches: %d, accounts: %d", rootHash, len(ms.cm), len(plainKeys))

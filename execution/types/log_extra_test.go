@@ -136,7 +136,6 @@ func TestLogForStorage_RLPRoundTrip(t *testing.T) {
 		"with topics": {common.HexToHash("0xaa"), common.HexToHash("0xbb")},
 		"no topics":   {},
 	} {
-		topics := topics
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			orig := LogForStorage{

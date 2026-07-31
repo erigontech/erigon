@@ -20,9 +20,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/services"
 	storagecomp "github.com/erigontech/erigon/node/components/storage"
 )
 
@@ -34,12 +34,14 @@ type mockAggregator struct{}
 
 var _ storagecomp.StateAggregator = mockAggregator{}
 
-func (mockAggregator) Files() []string                                 { return nil }
-func (mockAggregator) OpenFolder() error                               { return nil }
-func (mockAggregator) BuildMissedAccessors(context.Context, int) error { return nil }
-func (mockAggregator) LockCollation()                                  {}
-func (mockAggregator) UnlockCollation()                                {}
-func (mockAggregator) StepSize() uint64                                { return 0 }
+func (mockAggregator) Files() []string   { return nil }
+func (mockAggregator) OpenFolder() error { return nil }
+func (mockAggregator) BuildMissedAccessors(context.Context, int, ...kv.BuildAccessorsOption) error {
+	return nil
+}
+func (mockAggregator) LockCollation()   {}
+func (mockAggregator) UnlockCollation() {}
+func (mockAggregator) StepSize() uint64 { return 0 }
 func (mockAggregator) WipeWritableShadowPast(context.Context, kv.TemporalRwTx, uint64) error {
 	return nil
 }
@@ -55,6 +57,6 @@ func (mockAggregator) WaitForBuildAndMergeQuiescence(time.Duration) error {
 // no consumer for.
 type noopDBEventNotifier struct{}
 
-var _ services.DBEventNotifier = noopDBEventNotifier{}
+var _ dbservices.DBEventNotifier = noopDBEventNotifier{}
 
 func (noopDBEventNotifier) OnNewSnapshot() {}

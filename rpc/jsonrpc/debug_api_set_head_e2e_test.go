@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/privateapi"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -99,7 +100,7 @@ func newSetHeadE2EAPI(t *testing.T, m *execmoduletester.ExecModuleTester) *Debug
 	)
 	backendClient := direct.NewEthBackendClientDirect(backendServer)
 	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
-	return NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, backend, 0, false)
+	return NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, backend, &rpccfg.DebugApiConfig{})
 }
 
 // assertNoBlockDataPastTarget pins the cold-start invariant that
@@ -1123,7 +1124,7 @@ type captureBus struct {
 	events []flow.UnwindCompleted
 }
 
-func (b *captureBus) Publish(payload ...interface{}) int {
+func (b *captureBus) Publish(payload ...any) int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, p := range payload {

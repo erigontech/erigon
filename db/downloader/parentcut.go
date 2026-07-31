@@ -410,8 +410,8 @@ func stripURLCredentials(raw string) string {
 	if i := strings.Index(raw, "://"); i >= 0 {
 		scheme := raw[:i+3]
 		rest := raw[i+3:]
-		if at := strings.Index(rest, "@"); at >= 0 {
-			return scheme + rest[at+1:]
+		if _, after, ok := strings.Cut(rest, "@"); ok {
+			return scheme + after
 		}
 	}
 	return raw

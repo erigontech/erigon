@@ -17,10 +17,8 @@
 package btindex
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -28,7 +26,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon/common/background"
@@ -36,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/murmur3"
+	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
@@ -46,7 +44,9 @@ const BtreeLogPrefix = "btree"
 
 // DefaultBtreeM - amount of keys on leaf of BTree
 // It will do log2(M) co-located-reads from data file - for binary-search inside leaf
-var DefaultBtreeM = uint64(dbg.EnvInt("BT_M", 256))
+var DefaultBtreeM = uint64(dbg.EnvInt("BT_M", 64))
+
+const DefaultBtreeMLegacy = uint64(256) // for legacy format (determined first byte), we created the files with m=256
 
 const DefaultBtreeStartSkip = uint64(4) // defines smallest shard available for scan instead of binsearch
 
@@ -226,7 +226,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (_ *BtIndexWrit
 	if btw.indexF, err = dir.CreateTemp(args.IndexFile); err != nil {
 		return nil, fmt.Errorf("create temp index file for %s: %w", args.IndexFile, err)
 	}
-	btw.writer = &countingWriter{w: getBufioWriter(btw.indexF)}
+	btw.writer = &countingWriter{w: bufiopool.Writer(btw.indexF)}
 
 	if args.KeyCount > 0 {
 		if args.M == 0 {
@@ -352,7 +352,7 @@ func (btw *BtIndexWriter) closeTemps() {
 
 func (btw *BtIndexWriter) Close() {
 	if btw.writer != nil {
-		putBufioWriter(btw.writer.w)
+		bufiopool.PutWriter(btw.writer.w)
 		btw.writer = nil
 	}
 	if btw.indexF != nil { // non-nil means Build didn't rename it: drop the partial .tmp
@@ -377,18 +377,18 @@ type BtIndex struct {
 	pool     sync.Pool
 }
 
-// Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
-func CreateBtreeIndexWithDecompressor(indexPath string, existenceFilterPath string, M uint64, decompressor *seg.Reader, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors statecfg.Accessors) (*BtIndex, error) {
+// CreateBtreeIndexWithDecompressor Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
+func CreateBtreeIndexWithDecompressor(indexPath string, existenceFilterPath string, decompressor *seg.Reader, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors statecfg.Accessors) (*BtIndex, error) {
 	err := BuildBtreeIndexWithDecompressor(indexPath, existenceFilterPath, decompressor, ps, tmpdir, seed, logger, noFsync, accessors)
 	if err != nil {
 		return nil, err
 	}
-	return OpenBtreeIndexWithDecompressor(indexPath, M, decompressor)
+	return OpenBtreeIndexWithDecompressor(indexPath, decompressor)
 }
 
 // OpenBtreeIndexAndDataFile opens btree index file and data file and returns it along with BtIndex instance
 // Mostly useful for testing
-func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed seg.FileCompression, trace bool) (_ *seg.Decompressor, _ *BtIndex, err error) {
+func OpenBtreeIndexAndDataFile(indexPath, dataPath string, compressed seg.FileCompression, trace bool) (_ *seg.Decompressor, _ *BtIndex, err error) {
 	d, err := seg.NewDecompressor(dataPath)
 	if err != nil {
 		return nil, nil, err
@@ -399,7 +399,7 @@ func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed 
 		}
 	}()
 	kv := seg.NewReader(d.MakeGetter(), compressed)
-	bt, err := OpenBtreeIndexWithDecompressor(indexPath, M, kv)
+	bt, err := OpenBtreeIndexWithDecompressor(indexPath, kv)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -472,10 +472,9 @@ func BuildBtreeIndexWithDecompressor(indexPath string, existenceFilterPath strin
 	return nil
 }
 
-func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Reader) (bt *BtIndex, err error) {
+func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt *BtIndex, err error) {
 	idx := &BtIndex{
 		filePath: indexPath,
-		indexM:   M,
 	}
 
 	var validationPassed bool
@@ -515,6 +514,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 	var nodeOfftEF *eliasfano32.EliasFano
 	var keysBlob []byte
 	var nodeStride uint64
+	m := DefaultBtreeMLegacy // newer format ("use footer") carry m in the file itself
 	switch idx.data[0] {
 	case btFirstByteLegacy: // legacy [EF][nodesCount][di-nodes]
 		var pos int
@@ -525,7 +525,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 				return nil, err
 			}
 			if nodeStride == 0 { // <2 nodes: only di=0 exists, stride is irrelevant
-				nodeStride = M
+				nodeStride = m
 			}
 		}
 	case btFirstByteUseFooter: // footer-based layout: [leadingByte][nodes][EF][footer][anchor]
@@ -540,17 +540,17 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 		if footer.FormatVersion != btVersion {
 			return nil, fmt.Errorf("btindex: %s: unsupported format version %d (want %d): upgrade Erigon", indexPath, footer.FormatVersion, btVersion)
 		}
-		M = footer.Meta.M
-		if M == 0 || footer.Meta.EfOffset >= uint64(footerStart) {
-			return nil, fmt.Errorf("btindex: corrupt footer in %s (M=%d ef_offset=%d body=%d)", indexPath, M, footer.Meta.EfOffset, footerStart)
+		m = footer.Meta.M
+		if m == 0 || footer.Meta.EfOffset >= uint64(footerStart) {
+			return nil, fmt.Errorf("btindex: corrupt footer in %s (M=%d ef_offset=%d body=%d)", indexPath, m, footer.Meta.EfOffset, footerStart)
 		}
 		// ceil(K/M) overflow-safe: (K+M-1)/M overflows when K≈MaxUint64; use (K-1)/M+1 for K>0.
 		var nodesCount uint64
 		if footer.Meta.KeysCount > 0 {
-			nodesCount = (footer.Meta.KeysCount-1)/M + 1
+			nodesCount = (footer.Meta.KeysCount-1)/m + 1
 		}
 		keysBlob = idx.data[1:]
-		nodeStride = M
+		nodeStride = m
 		var nodesEnd int
 		if nodeOfftEF, nodesEnd, err = decodeNodes(keysBlob, nodesCount); err != nil {
 			return nil, err
@@ -566,7 +566,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 		return nil, fmt.Errorf("btindex: %s: unknown format byte %#x", indexPath, idx.data[0])
 	}
 
-	idx.indexM = M
+	idx.indexM = m
 	idx.pool.New = func() any {
 		return &Cursor{ef: idx.ef, returnInto: &idx.pool}
 	}
@@ -574,9 +574,9 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 	defer kvGetter.MadvNormal().DisableReadAhead()
 
 	if nodeOfftEF == nil {
-		idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup)
+		idx.bplus = NewBpsTree(kvGetter, idx.ef, m, idx.dataLookup)
 	} else {
-		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, keysBlob, nodeOfftEF, nodeStride)
+		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, m, idx.dataLookup, keysBlob, nodeOfftEF, nodeStride)
 	}
 	idx.bplus.cursorGetter = idx.newCursor
 
@@ -724,19 +724,3 @@ func (b *BtIndex) OrdinalLookup(getter *seg.Reader, i uint64) *Cursor {
 
 func (b *BtIndex) Offsets() *eliasfano32.EliasFano { return b.bplus.Offsets() }
 func (b *BtIndex) Distances() (map[int]int, error) { return b.bplus.Distances() }
-
-// Erigon doesn't create tons of bufio readers/writers, but it has tons of
-// parallel small unit-tests which each create many small files and bufio
-// readers/writers — pooling avoids the allocation pressure in that scenario.
-var bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
-
-func getBufioWriter(w io.Writer) *bufio.Writer {
-	bw := bufioWriterPool.Get().(*bufio.Writer)
-	bw.Reset(w)
-	return bw
-}
-
-// Reset(nil) before Put is required: without it the pool entry retains a
-// reference to the underlying io.Writer/io.Reader, keeping it alive until the
-// next GC cycle or until the entry is reused — whichever comes first.
-func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }

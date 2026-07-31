@@ -1,9 +1,10 @@
 package app
 
 import (
+	"context"
 	"fmt"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -11,15 +12,12 @@ import (
 	storagesnapshot "github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
-// adoptCliAction promotes snapshot batches that a running node staged
-// and validated under --snapshot.adoption-policy=stage|warn but did
-// not cut over. Each <datadir>/temp/adoption-* directory holds
-// canonical files already validated before the node stopped; this
-// renames them over the live snapshots. Run it against a stopped node,
-// then restart — the node rescans the snapshot directory on startup.
-func adoptCliAction(cliCtx *cli.Context) error {
+// adoptCliAction promotes snapshot batches staged under
+// --snapshot.adoption-policy=stage|warn but not cut over. Run it against
+// a stopped node, then restart.
+func adoptCliAction(_ context.Context, cliCtx *cli.Command) error {
 	logger := log.Root()
-	dryRun := dryRunFlag.Get(cliCtx)
+	dryRun := cliCtx.Bool(dryRunFlag.Name)
 	dirs := datadir.Open(cliCtx.String(utils.DataDirFlag.Name))
 
 	recovered, err := storagesnapshot.RecoverStagedAdoptions(dirs.Snap, dirs.Tmp, dryRun, logger)

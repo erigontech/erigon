@@ -81,11 +81,11 @@ func TestStorageChange_DecodeRLP_Errors(t *testing.T) {
 	t.Parallel()
 
 	var overIndex bytes.Buffer
-	require.NoError(t, rlp.Encode(&overIndex, []interface{}{uint64(1) << 32, []byte{5}}))
+	require.NoError(t, rlp.Encode(&overIndex, []any{uint64(1) << 32, []byte{5}}))
 	require.ErrorContains(t, (&StorageChange{}).DecodeRLP(rlp.NewStream(&overIndex, 0)), "exceeds uint32")
 
 	var bigVal bytes.Buffer
-	require.NoError(t, rlp.Encode(&bigVal, []interface{}{uint64(0), make([]byte, 33)}))
+	require.NoError(t, rlp.Encode(&bigVal, []any{uint64(0), make([]byte, 33)}))
 	require.ErrorContains(t, (&StorageChange{}).DecodeRLP(rlp.NewStream(&bigVal, 0)), "too large")
 }
 
@@ -93,11 +93,11 @@ func TestBalanceChange_DecodeRLP_Errors(t *testing.T) {
 	t.Parallel()
 
 	var overIndex bytes.Buffer
-	require.NoError(t, rlp.Encode(&overIndex, []interface{}{uint64(1) << 32, []byte{5}}))
+	require.NoError(t, rlp.Encode(&overIndex, []any{uint64(1) << 32, []byte{5}}))
 	require.ErrorContains(t, (&BalanceChange{}).DecodeRLP(rlp.NewStream(&overIndex, 0)), "exceeds uint32")
 
 	var bigVal bytes.Buffer
-	require.NoError(t, rlp.Encode(&bigVal, []interface{}{uint64(0), make([]byte, 33)}))
+	require.NoError(t, rlp.Encode(&bigVal, []any{uint64(0), make([]byte, 33)}))
 	require.ErrorContains(t, (&BalanceChange{}).DecodeRLP(rlp.NewStream(&bigVal, 0)), "too large")
 }
 
@@ -105,11 +105,11 @@ func TestNonceAndCodeChange_DecodeRLP_OverIndex(t *testing.T) {
 	t.Parallel()
 
 	var nc bytes.Buffer
-	require.NoError(t, rlp.Encode(&nc, []interface{}{uint64(1) << 32, uint64(1)}))
+	require.NoError(t, rlp.Encode(&nc, []any{uint64(1) << 32, uint64(1)}))
 	require.ErrorContains(t, (&NonceChange{}).DecodeRLP(rlp.NewStream(&nc, 0)), "exceeds uint32")
 
 	var cc bytes.Buffer
-	require.NoError(t, rlp.Encode(&cc, []interface{}{uint64(1) << 32, []byte{1}}))
+	require.NoError(t, rlp.Encode(&cc, []any{uint64(1) << 32, []byte{1}}))
 	require.ErrorContains(t, (&CodeChange{}).DecodeRLP(rlp.NewStream(&cc, 0)), "exceeds uint32")
 }
 

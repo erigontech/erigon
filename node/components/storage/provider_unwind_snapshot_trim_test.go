@@ -35,12 +35,14 @@ import (
 // are inert.
 type stubAggregator struct{}
 
-func (stubAggregator) Files() []string                                     { return nil }
-func (stubAggregator) OpenFolder() error                                   { return nil }
-func (stubAggregator) BuildMissedAccessors(_ context.Context, _ int) error { return nil }
-func (stubAggregator) LockCollation()                                      {}
-func (stubAggregator) UnlockCollation()                                    {}
-func (stubAggregator) StepSize() uint64                                    { return 390625 }
+func (stubAggregator) Files() []string   { return nil }
+func (stubAggregator) OpenFolder() error { return nil }
+func (stubAggregator) BuildMissedAccessors(_ context.Context, _ int, _ ...kv.BuildAccessorsOption) error {
+	return nil
+}
+func (stubAggregator) LockCollation()   {}
+func (stubAggregator) UnlockCollation() {}
+func (stubAggregator) StepSize() uint64 { return 390625 }
 func (stubAggregator) WipeWritableShadowPast(_ context.Context, _ kv.TemporalRwTx, _ uint64) error {
 	return nil
 }

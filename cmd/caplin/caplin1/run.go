@@ -72,7 +72,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -201,26 +201,14 @@ func upgradeGenesisState(s *state.CachingBeaconState, from, to clparams.StateVer
 // the Inventory.
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
-	snDownloader downloader.Client, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted,
+	snDownloader dbservices.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted,
 	blockHeadersReady <-chan struct{}, localBlockTipFn func() uint64) error {
 
-	// Block until the storage component signals that the tip
-	// *-headers.seg file is readable and OpenSegments(Headers) has
-	// been called on the EL's BlockReader. Without this wait,
-	// stage_history_download.go reads engine.FrozenBlocks() at
-	// stage-init time and sees zero — destinationSlotForEL falls
-	// back to Bellatrix-fork-epoch and Caplin walks ~25M blocks via
-	// DevP2P at ~25 blk/sec (273h ETA). With the wait, by the time
-	// Caplin reads FrozenBlocks() the EL's snapshot view is opened
-	// and the call returns the real tip.
-	//
-	// The channel is supplied by the storage component (see
-	// node/components/storage/provider.go:watchTipHeaderForOpenSegments).
-	// Caplin remains downloader-independent — its only dependency
-	// is on storage's bus event.
-	//
-	// Nil channel = no wait (test/standalone invocations,
-	// non-storage-driven configurations).
+	// Block until storage signals tip *-headers.seg is readable. Without
+	// this wait, stage_history_download reads engine.FrozenBlocks() at
+	// stage-init time and sees zero — Caplin falls back to Bellatrix-fork
+	// epoch and walks ~25M blocks via DevP2P (273h ETA). With the wait,
+	// FrozenBlocks() returns the real tip.
 	if blockHeadersReady != nil {
 		log.Info("[Caplin] waiting for storage to signal tip-header readable", "channel", "BlockHeadersReady")
 		select {
@@ -411,7 +399,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	pksRegistry := public_keys_registry.NewHeadViewPublicKeysRegistry(syncedDataManager)
 	validatorParameters := validator_params.NewValidatorParams()
 	forkChoice, err := forkchoice.NewForkChoiceStore(
-		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter, emitters),
+		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter),
 		emitters, syncedDataManager, blobStorage, pksRegistry, validatorParameters, doLMDSampling, indexDB)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)

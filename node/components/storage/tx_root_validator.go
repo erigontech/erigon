@@ -20,8 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/types"
@@ -33,7 +33,7 @@ import (
 // for each block in each retired transactions.seg.
 type TxRootValidator struct {
 	DB          kv.RoDB
-	BlockReader services.FullBlockReader
+	BlockReader dbservices.FullBlockReader
 }
 
 // Name implements validation.StepValidator.

@@ -52,7 +52,7 @@ with silent regime-coverage loss.`,
 		ctx := cmd.Context()
 
 		dirs := datadir.New(datadirCli)
-		db, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("open DB", "err", err)
 			os.Exit(2)
@@ -231,7 +231,7 @@ with silent regime-coverage loss.`,
 			for shift := uint64(0); shift < 100 && *t > shift; shift++ {
 				candTx, terr := rawdbv3.TxNums.Max(ctx, tx, *t-shift)
 				if terr == nil && candTx <= headTxN {
-					*t = *t - shift
+					*t -= shift
 					break
 				}
 			}

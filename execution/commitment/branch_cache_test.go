@@ -19,10 +19,67 @@ package commitment
 import (
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+// TestBranchCache_AccountTrunkRouting verifies account-trie branches at nibble
+// depths 1-4 land in the resident fixed-array trunk (counted as trunk hits),
+// survive LRU tail-eviction pressure, and are invalidated lazily by an unwind
+// (the trunk honors the same (txN, epoch) model as the tail).
+func TestBranchCache_AccountTrunkRouting(t *testing.T) {
+	c := NewBranchCache(10) // small tail
+
+	trunkKey := []byte{0xa0, 0xb0} // 2 nibbles (even flag) → accountTrunk.d2
+	c.Put(trunkKey, []byte("trunk-data"), 0, 100)
+
+	got, _, ok := c.Get(trunkKey)
+	require.True(t, ok)
+	require.Equal(t, []byte("trunk-data"), got)
+	require.Equal(t, uint64(1), c.trunkHits.Load())
+	require.Equal(t, uint64(0), c.tailHits.Load(), "depth-2 account branch must not land in the tail")
+
+	// Flood the tail well past capacity with deep (5-nibble) keys; the resident
+	// trunk entry must not be evicted.
+	for i := range 100 {
+		c.Put([]byte{0x10, byte(i), byte(i)}, []byte{byte(i)}, 0, 100) // odd flag, 5 nibbles → tail
+	}
+	got, _, ok = c.Get(trunkKey)
+	require.True(t, ok, "resident trunk entry must survive tail eviction pressure")
+	require.Equal(t, []byte("trunk-data"), got)
+
+	// An unwind below the entry's txN invalidates it lazily on next Get.
+	c.Unwind(60)
+	_, _, ok = c.Get(trunkKey)
+	require.False(t, ok, "trunk entry with txN=100 must drop at unwind floor 60")
+}
+
+// TestBranchCache_StorageTrunkPin verifies PinEntry routes a storage-trunk
+// prefix (>= 64 nibbles) into its per-contract storage trunk, is served from
+// the pinned tier, counts toward PinnedCount, and honors the unwind model.
+func TestBranchCache_StorageTrunkPin(t *testing.T) {
+	c := NewBranchCache(100)
+
+	// 33-byte compact prefix: even flag (0x00) + 32-byte account hash = 64
+	// nibbles exactly → the storage trunk's depth-0 slot for that contract.
+	prefix := make([]byte, 33)
+	for i := 1; i < 33; i++ {
+		prefix[i] = byte(i)
+	}
+	c.PinEntry(prefix, []byte("storage-root"), 0, 100)
+	require.Equal(t, 1, c.PinnedCount())
+
+	got, _, ok := c.Get(prefix)
+	require.True(t, ok)
+	require.Equal(t, []byte("storage-root"), got)
+	require.Equal(t, uint64(1), c.pinnedHits.Load())
+
+	c.Unwind(60)
+	_, _, ok = c.Get(prefix)
+	require.False(t, ok, "pinned storage-trunk entry with txN=100 must drop at unwind floor 60")
+}
 
 // TestBranchCache_RootPinning verifies the root branch lands in the pinned
 // slot (counted as root-hit) and tail entries land in the LRU tier
@@ -59,7 +116,7 @@ func TestBranchCache_RootSurvivesEvictionPressure(t *testing.T) {
 	c.Put(rootKey, []byte("ROOT-PERSISTS"), 0, 0)
 
 	// Stuff the tail well past capacity
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		c.Put([]byte{byte(i), byte(i)}, []byte{byte(i)}, 0, 0)
 	}
 
@@ -69,7 +126,7 @@ func TestBranchCache_RootSurvivesEvictionPressure(t *testing.T) {
 	require.Equal(t, []byte("ROOT-PERSISTS"), got)
 
 	// Tail at capacity (10), not 100
-	require.LessOrEqual(t, c.tail.Len(), 10, "tail should respect LRU capacity")
+	require.LessOrEqual(t, c.tailLen(), 10, "tail should respect LRU capacity")
 }
 
 // TestBranchCache_Invalidate removes entries from both tiers.
@@ -92,10 +149,11 @@ func TestBranchCache_Invalidate(t *testing.T) {
 // TestBranchCache_Clear empties everything and resets stats.
 func TestBranchCache_Clear(t *testing.T) {
 	c := NewBranchCache(100)
+	deepKey := []byte{0x12, 0x34, 0x56} // 5 nibbles → LRU tail
 	c.Put([]byte{0x00}, []byte("r"), 0, 0)
-	c.Put([]byte{0x12}, []byte("d"), 0, 0)
+	c.Put(deepKey, []byte("d"), 0, 0)
 	_, _, _ = c.Get([]byte{0x00})
-	_, _, _ = c.Get([]byte{0x12})
+	_, _, _ = c.Get(deepKey)
 
 	require.Equal(t, uint64(1), c.rootHits.Load())
 	require.Equal(t, uint64(1), c.tailHits.Load())
@@ -105,38 +163,98 @@ func TestBranchCache_Clear(t *testing.T) {
 	require.Equal(t, uint64(0), c.tailHits.Load())
 	_, _, ok := c.Get([]byte{0x00})
 	require.False(t, ok)
-	_, _, ok = c.Get([]byte{0x12})
+	_, _, ok = c.Get(deepKey)
 	require.False(t, ok)
 }
 
-// TestBranchCache_StateKeyNeverCached pins the invariant that the commitment
-// state checkpoint key bypasses every tier: Put is a no-op, Get always misses,
-// and Invalidate neither panics nor disturbs real entries.
-func TestBranchCache_StateKeyNeverCached(t *testing.T) {
+func TestBranchCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	c := NewBranchCache(100)
+	defer c.Close()
+	c.Unwind(300)
 
-	c.Put(KeyCommitmentState, []byte("checkpoint"), 1, 1)
-	_, _, ok := c.Get(KeyCommitmentState)
-	require.False(t, ok, "state key must never be served from the cache")
-	require.Equal(t, 0, c.tail.Len(), "state key must not occupy a tail slot")
+	key := []byte{0x00}
+	preClearEpoch := c.coh.Epoch()
+	c.Clear()
+	// Model a writer that sampled the epoch before Clear and published after
+	// its target tier was emptied.
+	c.store(key, &branchCacheEntry{data: []byte("dead-fork-branch"), txN: 200, epoch: preClearEpoch})
+	c.Unwind(150)
 
-	deepKey := []byte{0x12, 0x34}
-	c.Put(deepKey, []byte("d"), 0, 0)
-	c.Invalidate(KeyCommitmentState)
-	got, _, ok := c.Get(deepKey)
-	require.True(t, ok, "invalidating the state key must not evict real entries")
-	require.Equal(t, []byte("d"), got)
+	_, _, ok := c.Get(key)
+	require.False(t, ok, "pre-Clear epoch must not alias the live epoch after a later unwind")
+}
+
+func clearDuringBlockedBranchCacheWrite(c *BranchCache, block *sync.Mutex, write func()) {
+	// Limit Go execution to one logical processor. Each runtime.Gosched call
+	// yields to the queued goroutine, which runs until it reaches the blocked lock.
+	previousProcs := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previousProcs)
+
+	block.Lock()
+	writerStarted := make(chan struct{})
+	writerDone := make(chan struct{})
+	go func() {
+		close(writerStarted)
+		write()
+		close(writerDone)
+	}()
+	<-writerStarted
+	runtime.Gosched()
+
+	clearDone := make(chan struct{})
+	go func() {
+		c.Clear()
+		close(clearDone)
+	}()
+	runtime.Gosched()
+
+	block.Unlock()
+	<-writerDone
+	<-clearDone
+}
+
+func TestBranchCache_ClearFencesStartedPut(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+	c.Unwind(300)
+
+	key := []byte{0x12, 0x34, 0x56}
+	clearDuringBlockedBranchCacheWrite(c, &c.tailMu, func() {
+		c.Put(key, []byte("dead-fork-branch"), 0, 200)
+	})
+
+	_, _, ok := c.Get(key)
+	require.False(t, ok, "Clear must remove a Put that started in the retiring generation")
+}
+
+func TestBranchCache_ClearFencesStartedPinEntry(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+	c.Unwind(300)
+
+	key := make([]byte, 33)
+	key[32] = 1
+	clearDuringBlockedBranchCacheWrite(c, &c.pinnedMu, func() {
+		c.PinEntry(key, []byte("dead-fork-branch"), 0, 200)
+	})
+
+	_, _, ok := c.Get(key)
+	require.False(t, ok, "Clear must remove a PinEntry that started in the retiring generation")
 }
 
 // TestBranchCache_Stats verifies the format of the stats string is
 // deterministic and contains the expected per-tier counts.
 func TestBranchCache_Stats(t *testing.T) {
 	c := NewBranchCache(100)
+	// 3-byte odd-flag prefixes are 5 nibbles deep → LRU tail (the account
+	// trunk only holds depths 1-4).
+	tailHit := []byte{0x12, 0x34, 0x56}
+	tailMiss := []byte{0x12, 0x34, 0x57}
 	c.Put([]byte{0x00}, []byte("rrr"), 0, 0)
-	c.Put([]byte{0x12, 0x34}, []byte("ddd"), 0, 0)
+	c.Put(tailHit, []byte("ddd"), 0, 0)
 	_, _, _ = c.Get([]byte{0x00})
-	_, _, _ = c.Get([]byte{0x12, 0x34})
-	_, _, _ = c.Get([]byte{0xff}) // tail miss
+	_, _, _ = c.Get(tailHit)
+	_, _, _ = c.Get(tailMiss) // tail miss
 
 	s := c.Stats()
 	for _, want := range []string{
@@ -145,19 +263,27 @@ func TestBranchCache_Stats(t *testing.T) {
 	} {
 		require.Contains(t, s, want, "Stats output: %s", s)
 	}
+	// New format carries the trunk and pin tiers.
+	require.Contains(t, s, "trunk hit=", "Stats output: %s", s)
+	require.Contains(t, s, "pin hit=", "Stats output: %s", s)
 	// Sanity: format doesn't blow up if we read it
 	require.True(t, strings.HasPrefix(s, "branch-cache "))
 }
+
+// twoTailKeyCapacity guarantees per-shard capacity >= 2 across the 256 tail
+// shards, so two tail entries can never evict each other regardless of the
+// per-process maphash seed.
+const twoTailKeyCapacity = 2 * branchCacheTailShards
 
 // TestBranchCache_Unwind_DropsStaleAboveFloorLazily verifies Unwind drops
 // (lazily, on the next Get) every superseded-epoch entry whose txN is at or
 // above the unwind floor, while entries below the floor survive untouched.
 func TestBranchCache_Unwind_DropsStaleAboveFloorLazily(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(twoTailKeyCapacity)
 
 	rootKey := []byte{0x00}
-	tailKeyKeep := []byte{0xa0, 0xb0}
-	tailKeyDrop := []byte{0xa0, 0xb1}
+	tailKeyKeep := []byte{0x1a, 0xb0, 0x00} // odd flag, 5 nibbles → LRU tail
+	tailKeyDrop := []byte{0x1a, 0xb0, 0x01}
 
 	// txN=50 entries — below an unwind floor of 60, so they survive.
 	c.Put(rootKey, []byte("root-keep"), 0, 50)
@@ -173,35 +299,42 @@ func TestBranchCache_Unwind_DropsStaleAboveFloorLazily(t *testing.T) {
 	require.True(t, ok, "tail entry with txN=50 must survive floor=60")
 	_, _, ok = c.Get(tailKeyDrop)
 	require.False(t, ok, "tail entry with txN=100 must drop at floor=60")
+	require.Equal(t, uint64(2), c.tailHits.Load(), "both keys must exercise the LRU tail")
 }
 
-// TestBranchCache_Unwind_AcrossAllTiers verifies lazy invalidation reaches the
-// root slot, not just the LRU tail.
+// TestBranchCache_Unwind_AcrossAllTiers verifies lazy invalidation reaches
+// every tier: the root slot, the resident account trunk, and the LRU tail.
 func TestBranchCache_Unwind_AcrossAllTiers(t *testing.T) {
 	c := NewBranchCache(100)
 
 	rootKey := []byte{0x00}
-	tailKey := []byte{0xa0, 0xb0}
+	trunkKey := []byte{0xa0, 0xb0}      // 2 nibbles (even flag) → account trunk
+	tailKey := []byte{0x1a, 0xb0, 0x00} // odd flag, 5 nibbles → LRU tail
 
 	c.Put(rootKey, []byte("root"), 0, 100)
+	c.Put(trunkKey, []byte("trunk"), 0, 100)
 	c.Put(tailKey, []byte("tail"), 0, 100)
 
 	c.Unwind(50)
 
 	_, _, ok := c.Get(rootKey)
 	require.False(t, ok, "root entry at txN>=floor must drop")
+	_, _, ok = c.Get(trunkKey)
+	require.False(t, ok, "trunk entry at txN>=floor must drop")
 	_, _, ok = c.Get(tailKey)
 	require.False(t, ok, "tail entry at txN>=floor must drop")
+	require.Equal(t, uint64(1), c.trunkHits.Load(), "trunk key must route to the account trunk")
+	require.Equal(t, uint64(1), c.tailHits.Load(), "tail key must route to the LRU tail")
 }
 
 // TestBranchCache_Unwind_FloorBoundary verifies the >= rule at the floor: an
 // entry stamped exactly at the unwind floor belongs to a rolled-back block and
 // drops; an entry one txN below the floor survives.
 func TestBranchCache_Unwind_FloorBoundary(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(twoTailKeyCapacity)
 
-	belowKey := []byte{0xa0, 0xb0}
-	atKey := []byte{0xa0, 0xb1}
+	belowKey := []byte{0x1a, 0xb0, 0x00} // odd flag, 5 nibbles → LRU tail
+	atKey := []byte{0x1a, 0xb0, 0x01}
 	c.Put(belowKey, []byte("below"), 0, 99)
 	c.Put(atKey, []byte("at"), 0, 100)
 
@@ -211,6 +344,7 @@ func TestBranchCache_Unwind_FloorBoundary(t *testing.T) {
 	require.True(t, ok, "entry at txN=floor-1 must survive")
 	_, _, ok = c.Get(atKey)
 	require.False(t, ok, "entry at txN==floor must drop (rolled-back block)")
+	require.Equal(t, uint64(2), c.tailHits.Load(), "both keys must exercise the LRU tail")
 }
 
 // TestBranchCache_Unwind_CurrentEpochSurvives verifies the epoch disambiguates a
@@ -241,26 +375,45 @@ func TestBranchCache_Unwind_FrozenSurvives(t *testing.T) {
 	require.True(t, ok, "frozen txN=0 entry must survive any positive-txN unwind")
 }
 
-// TestBranchCache_ShardedTailUnwindAcrossShards drives a lazy Unwind over many
-// tail entries spread across the sharded tail, pinning that invalidation by txN
-// floor works at scale: every stale entry (txN >= floor) drops on its next Get
-// and every fresh one survives, regardless of which shard it landed in.
+// TestBranchCache_StateKeyNeverCached pins that the commitment checkpoint key is
+// never served or stored (serving a stale checkpoint corrupts the trie root),
+// and that invalidating it doesn't evict real entries.
+func TestBranchCache_StateKeyNeverCached(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	c.Put(KeyCommitmentState, []byte("checkpoint"), 1, 1)
+	_, _, ok := c.Get(KeyCommitmentState)
+	require.False(t, ok, "state key must never be served from the cache")
+	require.Equal(t, 0, c.tailLen(), "state key must not occupy a tail slot")
+
+	deepKey := []byte{0x12, 0x34}
+	c.Put(deepKey, []byte("d"), 0, 0)
+	c.Invalidate(KeyCommitmentState)
+	got, _, ok := c.Get(deepKey)
+	require.True(t, ok, "invalidating the state key must not evict real entries")
+	require.Equal(t, []byte("d"), got)
+}
+
+// TestBranchCache_ShardedTailUnwindAcrossShards verifies the lazy (epoch+floor)
+// unwind drops exactly the entries at/above the floor across all tail shards.
 func TestBranchCache_ShardedTailUnwindAcrossShards(t *testing.T) {
 	c := NewBranchCache(DefaultBranchCacheTailCapacity)
+	defer c.Close()
 
-	const n = 2000
-	const watermark = 1000
-	for i := 0; i < n; i++ {
+	// Stay within the tail's start capacity so the entries can't LRU-evict: the
+	// tail only jump-grows when the shared cachebudget has room, which a full
+	// test run may have consumed — this test asserts the unwind floor, not growth.
+	const n = 64
+	const watermark = 32
+	for i := range n {
 		prefix := []byte{0x01, byte(i), byte(i >> 8)}
 		c.Put(prefix, []byte{byte(i)}, 0, uint64(i))
 	}
 
-	// Lazy unwind: bump the epoch and lower the floor to watermark (the first
-	// unwound txN). Stale entries (old epoch, txN >= floor) are dropped on their
-	// next Get, across all tail shards — no eager scan.
 	c.Unwind(watermark)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		prefix := []byte{0x01, byte(i), byte(i >> 8)}
 		_, _, ok := c.Get(prefix)
 		if uint64(i) >= watermark {
@@ -271,27 +424,28 @@ func TestBranchCache_ShardedTailUnwindAcrossShards(t *testing.T) {
 	}
 }
 
-// TestBranchCache_BaselineFootprint pins that a freshly constructed cache is
-// cheap. One is allocated per aggregator and may linger after Close, so an
-// empty cache must not carry a multi-megabyte fixed backing for its LRU tail.
-func TestBranchCache_BaselineFootprint(t *testing.T) {
+// TestBranchCache_ConcurrentTailGrow drives concurrent tail Puts well past the
+// 512-entry start capacity so maybeGrow runs under contention. It regresses the
+// data race where Add read tailLRU.curCap unsynchronized while maybeGrow/reset
+// wrote it under resizeMu. Must be run under -race to be meaningful.
+func TestBranchCache_ConcurrentTailGrow(t *testing.T) {
+	c := NewBranchCache(4096) // max >> 512 start, so the tail actually grows
+	defer c.Close()
+
 	const (
-		n                = 128
-		maxBytesPerCache = 256 * 1024
+		workers   = 8
+		perWorker = 2000 // 16k distinct deep keys >> 512 → forces maybeGrow
 	)
-	caches := make([]*BranchCache, n)
-
-	var before, after runtime.MemStats
-	runtime.GC()
-	runtime.ReadMemStats(&before)
-	for i := range caches {
-		caches[i] = NewBranchCache(DefaultBranchCacheTailCapacity)
+	var wg sync.WaitGroup
+	for w := range workers {
+		wg.Go(func() {
+			for i := range perWorker {
+				// odd flag (0x10) + 3 bytes → 7 nibbles → tail; unique per (w,i).
+				key := []byte{0x10, byte(w), byte(i), byte(i >> 8)}
+				c.Put(key, []byte{byte(i)}, 0, 100)
+				c.Get(key)
+			}
+		})
 	}
-	runtime.GC()
-	runtime.ReadMemStats(&after)
-	runtime.KeepAlive(caches)
-
-	perCache := (after.HeapAlloc - before.HeapAlloc) / n
-	require.Less(t, perCache, uint64(maxBytesPerCache),
-		"fresh BranchCache baseline is %d KiB/cache, want < %d KiB", perCache/1024, maxBytesPerCache/1024)
+	wg.Wait()
 }

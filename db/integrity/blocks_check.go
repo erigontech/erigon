@@ -19,8 +19,8 @@ package integrity
 import (
 	"context"
 
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 )
 
 // BlocksCheck wraps SnapBlocksRead as a self-contained type that
@@ -34,7 +34,7 @@ import (
 // No enum, no central registry, no bridge.
 type BlocksCheck struct {
 	DB          kv.TemporalRoDB
-	BlockReader services.FullBlockReader
+	BlockReader dbservices.FullBlockReader
 	From, To    uint64
 	FailFast    bool
 }

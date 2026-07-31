@@ -44,15 +44,13 @@ func NewSchedule() *Schedule {
 // elapsed (e.g. start was several ms ago), fn fires immediately on its
 // own goroutine.
 func (s *Schedule) At(offset time.Duration, fn func()) {
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		d := time.Until(s.start.Add(offset))
 		if d > 0 {
 			time.Sleep(d)
 		}
 		fn()
-	}()
+	})
 }
 
 // Wait blocks until every action scheduled via At has run.

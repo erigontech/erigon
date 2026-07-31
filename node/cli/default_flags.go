@@ -17,7 +17,7 @@
 package cli
 
 import (
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/utils"
 )
@@ -44,6 +44,7 @@ var DefaultFlags = []cli.Flag{
 	&PruneBlocksDistanceFlag,
 	&PruneModeFlag,
 	&utils.KeepExecutionProofsFlag,
+	&utils.CommitmentHistoryDistanceFlag,
 	&utils.FcuTimeoutFlag,
 	&utils.FcuBackgroundPruneFlag,
 	&utils.FcuBackgroundCommitFlag,
@@ -102,9 +103,13 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcAccessListFlag,
 	&utils.RpcTraceCompatFlag,
 	&utils.RpcGethCompatFlag,
+	&utils.WitnessCacheBlocksFlag,
+	&utils.WitnessCacheHeadCaptureFlag,
+	&utils.WitnessCacheMaxMBFlag,
 	&utils.RpcGasCapFlag,
 	&utils.RpcBlockRangeLimit,
 	&utils.RpcGetLogsMaxResults,
+	&utils.RpcLogQueryLimit,
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
 	&utils.AllowUnprotectedTxs,
@@ -128,6 +133,7 @@ var DefaultFlags = []cli.Flag{
 	&RpcSubscriptionFiltersMaxTxsFlag,
 	&RpcSubscriptionFiltersMaxAddressesFlag,
 	&RpcSubscriptionFiltersMaxTopicsFlag,
+	&RpcSubscriptionFiltersTimeoutFlag,
 
 	&utils.SnapKeepBlocksFlag,
 	&utils.SnapStopFlag,
@@ -174,6 +180,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.VMEnableDebugFlag,
 	&utils.NetworkIdFlag,
 	&utils.PersistReceiptsV2Flag,
+	&utils.PersistReceiptsDistanceFlag,
 	&utils.FakePoWFlag,
 	&utils.GpoBlocksFlag,
 	&utils.GpoPercentileFlag,
@@ -241,6 +248,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinDisableBlobPruningFlag,
 	&utils.CaplinColumnKeepSlotsFlag,
 	&utils.CaplinDisableCheckpointSyncFlag,
+	&utils.CaplinResumeMaxStalenessEpochsFlag,
 	&utils.CaplinEnableSnapshotGeneration,
 	&utils.CaplinMevRelayUrl,
 	&utils.CaplinValidatorMonitorFlag,
@@ -278,4 +286,5 @@ var DefaultFlags = []cli.Flag{
 	&utils.MCPPortFlag,
 
 	&utils.ErigondbDomainStepsInFrozenFileFlag,
+	&utils.CommitmentPlainValuesFlag,
 }

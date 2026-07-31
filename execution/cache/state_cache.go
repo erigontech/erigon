@@ -22,7 +22,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -85,22 +84,13 @@ func stateCacheModeFromEnv() Mode {
 	}
 }
 
-// newDomainCacheBytes constructs a DomainCache where the entry-count cap
-// is derived from the byte budget using the supplied per-domain avg.
+// newDomainCacheBytes constructs a DomainCache whose growth ceiling is derived
+// from the byte budget using the supplied per-domain avg. It jump-grows from a
+// small start into the shared envelope on demand, so a domain with a small
+// working set (a test fixture) never pre-commits the full budget.
 func newDomainCacheBytes(capacityBytes datasize.ByteSize, avgBytes uint32, mode Mode) *DomainCache {
-	capacityEntries := uint32(uint64(capacityBytes) / uint64(avgBytes))
-	if capacityEntries < 1024 {
-		capacityEntries = 1024
-	}
-	// Clamp the slot count, same as NewGenericCache: freelru.NewSharded eagerly
-	// allocates the whole slot array up front, so an unclamped Account budget
-	// (1 GB / ~96 B ≈ 11M entries) would allocate gigabytes before caching
-	// anything. The byte budget still bounds residency below this cap.
-	if capacityEntries > 1<<22 {
-		capacityEntries = 1 << 22
-	}
 	return &DomainCache{
-		GenericCache: newGenericCacheEntries(capacityBytes, capacityEntries, func(v []byte) int { return len(v) }, mode),
+		GenericCache: NewGenericCacheWithAvg(capacityBytes, avgBytes, func(v []byte) int { return len(v) }, mode),
 	}
 }
 
@@ -158,11 +148,25 @@ func (c *StateCache) GetCodeByHash(codeHash []byte) ([]byte, bool) {
 // codeHash-keyed codeHashToCode layer. Callers should prefer this over Put when they
 // have the codeHash from the account record — avoids a redundant keccak.
 func (c *StateCache) PutCodeWithHash(addr, code, codeHash []byte, txNum uint64) {
+	c.putCodeWithHash(addr, code, codeHash, txNum, true)
+}
+
+// PutCodeWithHashIfAbsent is PutCodeWithHash with if-absent binding semantics
+// (see Cache.PutIfAbsent).
+func (c *StateCache) PutCodeWithHashIfAbsent(addr, code, codeHash []byte, txNum uint64) {
+	c.putCodeWithHash(addr, code, codeHash, txNum, false)
+}
+
+func (c *StateCache) putCodeWithHash(addr, code, codeHash []byte, txNum uint64, overwrite bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
 	}
-	cc.PutWithCodeHash(addr, common.Copy(code), codeHash, txNum)
+	if overwrite {
+		cc.PutWithCodeHash(addr, bytes.Clone(code), codeHash, txNum)
+	} else {
+		cc.PutWithCodeHashIfAbsent(addr, bytes.Clone(code), codeHash, txNum)
+	}
 }
 
 // GetCodeSizeByHash returns the size of code by its Ethereum codeHash
@@ -188,8 +192,7 @@ func (c *StateCache) PutCodeSizeByHash(codeHash []byte, size int, txNum uint64) 
 }
 
 // GetAddrCodeHash returns the Ethereum codeHash for addr without an
-// account-domain round-trip. (0xff..ff/false, no entry on miss; (h, true)
-// on hit.)
+// account-domain round-trip. The hash is zero when ok is false.
 func (c *StateCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
@@ -198,9 +201,9 @@ func (c *StateCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return cc.GetAddrCodeHash(addr)
 }
 
-// PutAddrCodeHash records the addr → codeHash mapping in the addr-keyed
-// LRU above SD. Callers that have just decoded an account record should
-// call this so subsequent lookups skip the account-domain read.
+// PutAddrCodeHash records a committed-state addr → codeHash mapping in the
+// addr-keyed LRU. An existing live mapping remains authoritative until
+// DeleteAddrCodeHash invalidates it; an unwind-stale mapping can be replaced.
 func (c *StateCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
@@ -209,9 +212,7 @@ func (c *StateCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	cc.PutAddrCodeHash(addr, h, txNum)
 }
 
-// DeleteAddrCodeHash drops the addr → codeHash mapping. Used by
-// invalidation paths (SELFDESTRUCT / CREATE2-replace / unwind diffsets)
-// where the account's codeHash has been mutated.
+// DeleteAddrCodeHash removes the mapping when its account record is invalidated.
 func (c *StateCache) DeleteAddrCodeHash(addr []byte) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
@@ -223,6 +224,15 @@ func (c *StateCache) DeleteAddrCodeHash(addr []byte) {
 // Put stores data for the given domain and key, stamped with the txNum the
 // value reflects (for txNum/epoch unwind invalidation).
 func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, txNum uint64) {
+	c.put(domain, key, value, txNum, true)
+}
+
+// PutIfAbsent is Put with if-absent semantics (see Cache.PutIfAbsent).
+func (c *StateCache) PutIfAbsent(domain kv.Domain, key []byte, value []byte, txNum uint64) {
+	c.put(domain, key, value, txNum, false)
+}
+
+func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint64, overwrite bool) {
 	cache := c.caches[domain]
 	if cache == nil {
 		return
@@ -230,7 +240,11 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, txNum uint6
 	if domain == kv.CommitmentDomain && bytes.Equal(key, commitmentdb.KeyCommitmentState) {
 		return
 	}
-	cache.Put(key, common.Copy(value), txNum)
+	if overwrite {
+		cache.Put(key, bytes.Clone(value), txNum)
+	} else {
+		cache.PutIfAbsent(key, bytes.Clone(value), txNum)
+	}
 }
 
 // Delete removes the data for the given domain and key.
@@ -247,6 +261,16 @@ func (c *StateCache) Clear() {
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Clear()
+		}
+	}
+}
+
+// Close releases every sub-cache's slot in the shared memory envelope so later
+// caches size against real concurrency. Idempotent.
+func (c *StateCache) Close() {
+	for _, cache := range c.caches {
+		if cache != nil {
+			cache.Close()
 		}
 	}
 }

@@ -162,8 +162,8 @@ func parseSiblingFileName(basename string) (parsedStepRange, bool, error) {
 		return parsedStepRange{}, false, nil
 	}
 	rangePart := name[i+1:]
-	dash := strings.Index(rangePart, "-")
-	if dash < 0 {
+	found := strings.Contains(rangePart, "-")
+	if !found {
 		return parsedStepRange{}, false, nil
 	}
 	var from, to uint64

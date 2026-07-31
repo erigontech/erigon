@@ -17,7 +17,8 @@
 package integrity
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 )
 
 type Check string
@@ -125,12 +126,18 @@ const (
 	// DeriveSha, and compares it with block.header.ReceiptHash. Similar to StateRootVerifyByHistory
 	// but for receipt roots instead of state roots.
 	ReceiptRootIntegrity Check = "ReceiptRootIntegrity"
+
+	// CaplinStateRoots verifies frozen caplin block_roots/state_roots snapshots hold a
+	// 32-byte root for every slot. process_slot writes these every slot, so an empty word is
+	// a range frozen before it was reconstructed; such a blank segment shadows the DB and
+	// breaks historical-state reads. Cheap: iterates the .seg words, no DB or re-derivation.
+	CaplinStateRoots Check = "CaplinStateRoots"
 )
 
 // FastChecks is ordered cheapest → heaviest so time-budgeted runs give unused
 // budget to the heavier checks at the tail.
 var FastChecks = []Check{
-	Publishable, HeaderNoGaps, BlocksTxnID, Blocks,
+	Publishable, HeaderNoGaps, BlocksTxnID, Blocks, CaplinStateRoots,
 	ReceiptsNoDups, RCacheNoDups, ReceiptRootIntegrity, InvertedIndex, CommitmentRoot, CommitmentKvi,
 	HistoryNoSystemTxs, CommitmentHistVal, StateRootVerifyByHistory,
 }
@@ -151,18 +158,18 @@ func SortChecksByCost(checks []Check) []Check {
 		rank[c] = i
 	}
 	out := append([]Check{}, checks...)
-	sort.SliceStable(out, func(i, j int) bool {
-		ri, oki := rank[out[i]]
-		rj, okj := rank[out[j]]
+	slices.SortStableFunc(out, func(a, b Check) int {
+		ri, oki := rank[a]
+		rj, okj := rank[b]
 		switch {
 		case oki && okj:
-			return ri < rj
+			return cmp.Compare(ri, rj)
 		case oki:
-			return true
+			return -1
 		case okj:
-			return false
+			return 1
 		default:
-			return false
+			return 0
 		}
 	})
 	return out

@@ -26,11 +26,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	downloaderproto "github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
-// recordingDownloaderClient is the test stub for downloader.Client.
+// recordingDownloaderClient is the test stub for dbservices.DownloaderClient.
 // It records every Delete call so a test can assert that the regen
 // path notified the downloader to drop the regenerated file from its
 // torrent set.
@@ -39,7 +39,7 @@ type recordingDownloaderClient struct {
 	deletes [][]string
 }
 
-var _ downloader.Client = (*recordingDownloaderClient)(nil)
+var _ dbservices.DownloaderClient = (*recordingDownloaderClient)(nil)
 
 func (c *recordingDownloaderClient) Seed(_ context.Context, _ []string) error { return nil }
 

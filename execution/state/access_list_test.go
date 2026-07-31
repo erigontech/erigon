@@ -17,6 +17,8 @@
 package state
 
 import (
+	"fmt"
+	"math/big"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -92,6 +94,7 @@ func TestAccessList(t *testing.T) {
 	require.NoError(t, err)
 
 	state := New(NewReaderV3(domains.AsGetter(tx)))
+	defer state.Release(false)
 
 	state.accessList.Reset()
 
@@ -238,4 +241,184 @@ func BenchmarkAccessListReset(b *testing.B) {
 			populate(al)
 		}
 	})
+}
+
+// BenchmarkAccessListSlots measures the per-opcode access-list traffic: every
+// SLOAD and SSTORE calls AddSlot, and a re-read of an already-warm slot is the
+// dominant case in storage-heavy contracts.
+//
+// runLen is how many consecutive storage ops target the same address before
+// execution moves to another one. A call frame only ever touches its own
+// storage, so runLen models frame length: 1 is a proxy chain doing one SLOAD
+// per frame, 64 is a loop inside a single contract.
+func BenchmarkAccessListSlots(b *testing.B) {
+	const nAddrs, nSlots = 4, 64
+	addrs := make([]accounts.Address, nAddrs)
+	for i := range addrs {
+		addrs[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+	}
+	keys := make([]accounts.StorageKey, nSlots)
+	for i := range keys {
+		keys[i] = accounts.InternKey(common.BigToHash(big.NewInt(int64(i + 1))))
+	}
+	populated := func() *accessList {
+		al := newAccessList()
+		for _, a := range addrs {
+			for _, k := range keys {
+				al.AddSlot(a, k)
+			}
+		}
+		return al
+	}
+
+	for _, runLen := range []int{1, 4, 16, 64} {
+		name := fmt.Sprintf("run%d", runLen)
+
+		b.Run("warm-hit/"+name, func(b *testing.B) {
+			al := populated()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				al.AddSlot(addrs[(i/runLen)%nAddrs], keys[i%nSlots])
+			}
+		})
+
+		// Same slot re-read for the whole run: a loop hammering one storage
+		// slot, the pattern SLOAD hot loops produce.
+		b.Run("warm-hit-hot/"+name, func(b *testing.B) {
+			al := populated()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				al.AddSlot(addrs[(i/runLen)%nAddrs], keys[(i/runLen)%nSlots])
+			}
+		})
+
+		b.Run("cold-insert/"+name, func(b *testing.B) {
+			al := newAccessList()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				// Walk all nAddrs*nSlots pairs exactly once per Reset window,
+				// keeping runs of runLen ops on one address. Deriving the slot
+				// from i alone would repeat 64 pairs four times instead.
+				w := i % (nAddrs * nSlots)
+				if w == 0 {
+					al.Reset()
+				}
+				al.AddSlot(addrs[(w/runLen)%nAddrs], keys[(w/(runLen*nAddrs))*runLen+w%runLen])
+			}
+		})
+
+		b.Run("contains/"+name, func(b *testing.B) {
+			al := populated()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				al.Contains(addrs[(i/runLen)%nAddrs], keys[i%nSlots])
+			}
+		})
+	}
+}
+
+// TestAccessListMemoDroppedOnSlotMapReuse pins the memo invalidation in
+// DeleteSlot. Emptying a slot map truncates it out of al.slots and marks the
+// address slotless, so a surviving memo would send the next AddSlot into a
+// detached map — and hand that map, carrying the stray slot, to whichever
+// address claims the freed slot next. Reads go through the memo too, so the
+// damage only shows once another address has displaced it.
+func TestAccessListMemoDroppedOnSlotMapReuse(t *testing.T) {
+	t.Parallel()
+	addrA := accounts.InternAddress(common.HexToAddress("0xaa"))
+	addrB := accounts.InternAddress(common.HexToAddress("0xbb"))
+	slot1 := accounts.InternKey(common.HexToHash("0x01"))
+	slot2 := accounts.InternKey(common.HexToHash("0x02"))
+	slot3 := accounts.InternKey(common.HexToHash("0x03"))
+
+	al := newAccessList()
+	al.AddSlot(addrA, slot1) // populates the memo for A
+	al.DeleteSlot(addrA, slot1)
+	al.AddSlot(addrA, slot2) // must re-establish A's slot map, not reuse the detached one
+	al.AddSlot(addrB, slot3) // displaces the memo, so the reads below take the slow path
+
+	addrPresent, slotPresent := al.Contains(addrA, slot2)
+	require.True(t, addrPresent)
+	require.True(t, slotPresent, "addrA's slot was written into a detached slot map")
+
+	_, leaked := al.Contains(addrB, slot2)
+	require.False(t, leaked, "addrA's slot leaked into addrB's reused slot map")
+}
+
+// TestAccessListWarmSlotMemoDroppedOnDelete pins lastWarmSlot invalidation for
+// a DeleteSlot that leaves the slot map non-empty (no truncation): the reverted
+// slot must not keep reading as warm through the memo.
+func TestAccessListWarmSlotMemoDroppedOnDelete(t *testing.T) {
+	t.Parallel()
+	addrA := accounts.InternAddress(common.HexToAddress("0xaa"))
+	slot1 := accounts.InternKey(common.HexToHash("0x01"))
+	slot2 := accounts.InternKey(common.HexToHash("0x02"))
+
+	al := newAccessList()
+	al.AddSlot(addrA, slot1)
+	al.AddSlot(addrA, slot2) // memoizes slot2 as the last warm slot
+	al.DeleteSlot(addrA, slot2)
+
+	_, slotPresent := al.Contains(addrA, slot2)
+	require.False(t, slotPresent, "reverted slot still warm via stale lastWarmSlot memo")
+
+	_, slotChange := al.AddSlot(addrA, slot2)
+	require.True(t, slotChange, "re-adding a reverted slot must report a change for the journal")
+}
+
+// TestAccessListMemoOnEmptyList pins the empty and reset states: NilAddress is
+// the zero value of the memo's address field, so matching on the address alone
+// would let a list with no memo answer as if it had one.
+func TestAccessListMemoOnEmptyList(t *testing.T) {
+	t.Parallel()
+	addrA := accounts.InternAddress(common.HexToAddress("0xaa"))
+	slot1 := accounts.InternKey(common.HexToHash("0x01"))
+
+	for _, tc := range []struct {
+		name string
+		al   func() *accessList
+	}{
+		{"fresh", newAccessList},
+		{"reset", func() *accessList {
+			al := newAccessList()
+			al.AddSlot(addrA, slot1)
+			al.Reset()
+			return al
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			al := tc.al()
+
+			addrPresent, slotPresent := al.Contains(accounts.NilAddress, accounts.ZeroKey)
+			require.False(t, addrPresent)
+			require.False(t, slotPresent)
+
+			addrPresent, slotPresent = al.Contains(accounts.NilAddress, accounts.NilKey)
+			require.False(t, addrPresent)
+			require.False(t, slotPresent)
+
+			addrChange, slotChange := al.AddSlot(accounts.NilAddress, accounts.ZeroKey)
+			require.True(t, addrChange)
+			require.True(t, slotChange)
+		})
+	}
+}
+
+// TestSlotKnownWarmOnEmptyAccessList pins the same invariant at the gas-charge
+// entry point: nothing is warm before anything is added.
+func TestSlotKnownWarmOnEmptyAccessList(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 1))
+
+	state := New(NewReaderV3(domains.AsGetter(tx)))
+	defer state.Release(false)
+
+	require.False(t, state.SlotKnownWarm(accounts.NilAddress, accounts.NilKey))
+	require.False(t, state.SlotKnownWarm(accounts.NilAddress, accounts.ZeroKey))
 }

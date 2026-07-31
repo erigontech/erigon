@@ -67,7 +67,7 @@ func TestSingleNodeFlow_LoadAndQuery(t *testing.T) {
 		"accounts at TrustVerified should match full coverage")
 
 	// No peer manifests → no DownloadRequested events.
-	reqType := reflect.TypeOf(flow.DownloadRequested{})
+	reqType := reflect.TypeFor[flow.DownloadRequested]()
 	require.Equal(t, 0, node.Bus.CountOfType(reqType),
 		"no DownloadRequested should fire without peers")
 }

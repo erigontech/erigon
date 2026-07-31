@@ -61,7 +61,6 @@ func TestValidateDepositLog_Errors(t *testing.T) {
 		"wrong size":   wrongSize,
 	}
 	for name, data := range tests {
-		data := data
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			require.ErrorIs(t, validateDepositLog(data), InvalidDepositLogErr)

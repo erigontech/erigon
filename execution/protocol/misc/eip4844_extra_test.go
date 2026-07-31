@@ -43,7 +43,6 @@ func TestVerifyPresenceOfCancunHeaderFields(t *testing.T) {
 		"missing parentBeaconBlockRoot": func(h *types.Header) { h.ParentBeaconBlockRoot = nil },
 	}
 	for name, drop := range tests {
-		drop := drop
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			h := &types.Header{
@@ -67,7 +66,6 @@ func TestVerifyAbsenceOfCancunHeaderFields(t *testing.T) {
 		"has parentBeaconBlockRoot": func(h *types.Header) { h.ParentBeaconBlockRoot = &common.Hash{} },
 	}
 	for name, set := range tests {
-		set := set
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			h := &types.Header{}

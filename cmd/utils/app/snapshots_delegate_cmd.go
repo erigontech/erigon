@@ -17,12 +17,13 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/node/components/snapshotauth"
@@ -78,13 +79,13 @@ var (
 //  4. Build + sign a Delegation per the flags.
 //  5. Write canonical CBOR to --output.
 //  6. If --print-json is set, render the JSON view to stdout.
-func doSnapshotDelegate(cliCtx *cli.Context) error {
-	signerKey, err := crypto.LoadECDSA(delegateSignerKeyFlag.Get(cliCtx))
+func doSnapshotDelegate(_ context.Context, cliCtx *cli.Command) error {
+	signerKey, err := crypto.LoadECDSA(cliCtx.String(delegateSignerKeyFlag.Name))
 	if err != nil {
-		return fmt.Errorf("loading signer key from %q: %w", delegateSignerKeyFlag.Get(cliCtx), err)
+		return fmt.Errorf("loading signer key from %q: %w", cliCtx.String(delegateSignerKeyFlag.Name), err)
 	}
 
-	targetEnr, err := readENR(delegateTargetENRFlag.Get(cliCtx))
+	targetEnr, err := readENR(cliCtx.String(delegateTargetENRFlag.Name))
 	if err != nil {
 		return fmt.Errorf("reading target ENR: %w", err)
 	}
@@ -97,13 +98,13 @@ func doSnapshotDelegate(cliCtx *cli.Context) error {
 		return fmt.Errorf("target ENR has no secp256k1 public key")
 	}
 
-	caps, err := snapshotauth.ParseCapabilities(delegateCapabilitiesFlag.Get(cliCtx))
+	caps, err := snapshotauth.ParseCapabilities(cliCtx.String(delegateCapabilitiesFlag.Name))
 	if err != nil {
 		return err
 	}
 
 	var notBefore, expires time.Time
-	expiresFlag := strings.TrimSpace(delegateExpiresFlag.Get(cliCtx))
+	expiresFlag := strings.TrimSpace(cliCtx.String(delegateExpiresFlag.Name))
 	if !strings.EqualFold(expiresFlag, "never") {
 		expires, err = time.Parse(time.RFC3339, expiresFlag)
 		if err != nil {
@@ -112,7 +113,7 @@ func doSnapshotDelegate(cliCtx *cli.Context) error {
 	}
 
 	var parentBytes []byte
-	if path := delegateParentFlag.Get(cliCtx); path != "" {
+	if path := cliCtx.String(delegateParentFlag.Name); path != "" {
 		parentBytes, err = os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("reading parent delegation: %w", err)
@@ -145,19 +146,19 @@ func doSnapshotDelegate(cliCtx *cli.Context) error {
 	if err != nil {
 		return fmt.Errorf("encoding delegation: %w", err)
 	}
-	if err := os.WriteFile(delegateOutputFlag.Get(cliCtx), encoded, 0o600); err != nil {
-		return fmt.Errorf("writing delegation to %q: %w", delegateOutputFlag.Get(cliCtx), err)
+	if err := os.WriteFile(cliCtx.String(delegateOutputFlag.Name), encoded, 0o600); err != nil {
+		return fmt.Errorf("writing delegation to %q: %w", cliCtx.String(delegateOutputFlag.Name), err)
 	}
 
-	fmt.Fprintf(cliCtx.App.Writer, "wrote delegation (%d bytes) to %s\n",
-		len(encoded), delegateOutputFlag.Get(cliCtx))
+	fmt.Fprintf(os.Stdout, "wrote delegation (%d bytes) to %s\n",
+		len(encoded), cliCtx.String(delegateOutputFlag.Name))
 
 	if cliCtx.Bool(delegateJSONFlag.Name) {
 		js, err := d.MarshalJSON()
 		if err != nil {
 			return fmt.Errorf("rendering JSON view: %w", err)
 		}
-		fmt.Fprintln(cliCtx.App.Writer, string(js))
+		fmt.Fprintln(os.Stdout, string(js))
 	}
 	return nil
 }
@@ -176,7 +177,7 @@ func readENR(input string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue

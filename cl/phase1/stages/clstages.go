@@ -263,7 +263,6 @@ digraph {
 func ConsensusClStages(ctx context.Context,
 	cfg *Cfg,
 ) *clstages.StageGraph[*Cfg, Args] {
-
 	// clstages run in a single thread - so we don't need to worry about any synchronization.
 	return &clstages.StageGraph[*Cfg, Args]{
 		// the ArgsFunc is run after every stage. It is passed into the transition function, and the same args are passed into the next stage.
@@ -296,7 +295,7 @@ func ConsensusClStages(ctx context.Context,
 					return ChainTipSync
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-					if err := saveHeadStateOnDiskIfNeeded(cfg, cfg.state); err != nil {
+					if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, cfg.state.Slot()); err != nil {
 						return err
 					}
 					// We only download historical blocks once
@@ -326,7 +325,8 @@ func ConsensusClStages(ctx context.Context,
 					}
 
 					startingSlot := cfg.state.LatestBlockHeader().Slot
-					logger.Debug("Backward sync starting",
+					logger.Debug(
+						"Backward sync starting",
 						"slot", startingSlot,
 						"stateVersion", cfg.state.Version(),
 						"stateRoot", common.Hash(stateRoot),

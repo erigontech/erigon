@@ -97,7 +97,7 @@ func TestTwoNode_GapFillMergedOnly(t *testing.T) {
 	}
 
 	// No DownloadFailed events.
-	failedType := reflect.TypeOf(flow.DownloadFailed{})
+	failedType := reflect.TypeFor[flow.DownloadFailed]()
 	require.Equal(t, 0, leecher.Bus.CountOfType(failedType))
 }
 
@@ -123,7 +123,7 @@ func TestTwoNode_NoGapNoDownload(t *testing.T) {
 
 	leecher.Bus.WaitAsync()
 
-	requestType := reflect.TypeOf(flow.DownloadRequested{})
+	requestType := reflect.TypeFor[flow.DownloadRequested]()
 	require.Equal(t, 0, leecher.Bus.CountOfType(requestType),
 		"no DownloadRequested should fire when the leecher already has the coverage")
 }

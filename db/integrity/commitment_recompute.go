@@ -22,8 +22,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -73,7 +73,7 @@ import (
 func RecomputeCommitmentAtBlock(
 	ctx context.Context,
 	tx kv.TemporalTx,
-	br services.FullBlockReader,
+	br dbservices.FullBlockReader,
 	blockNum uint64,
 	logger log.Logger,
 ) (encodedTrieState []byte, root common.Hash, err error) {

@@ -118,7 +118,6 @@ func TestReceipt_MarshalBinaryRoundTrip(t *testing.T) {
 		"legacy":     LegacyTxType,
 		"dynamicfee": DynamicFeeTxType,
 	} {
-		typ := typ
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			r := sampleReceipt()

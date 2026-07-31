@@ -25,8 +25,8 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -44,7 +44,7 @@ import (
 type PipelineExecutor struct {
 	sync                    *stagedsync.Sync
 	db                      kv.TemporalRwDB
-	blockReader             services.FullBlockReader
+	blockReader             dbservices.FullBlockReader
 	chainConfig             *chain.Config
 	engine                  rules.Engine
 	validationSync          *stagedsync.Sync
@@ -107,7 +107,7 @@ func (pe *PipelineExecutor) takeSnapshotReconcileSignal() bool {
 func NewPipelineExecutor(
 	sync *stagedsync.Sync,
 	db kv.TemporalRwDB,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	validationSync *stagedsync.Sync,
@@ -318,6 +318,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 				return nil, nil, err
 			}
 			newSD.SetInMemHistoryReads(inMemHistoryReads)
+			hook.NotifySyncState(newTx)
 			return newTx, newSD, nil
 		},
 		ShouldBreak: func(curTx kv.TemporalRwTx) (bool, error) {
@@ -342,13 +343,14 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			if err != nil {
 				return err
 			}
+			// Before UpdateHead, which publishes the sync state computed from it.
+			hook.LastNewBlockSeen(headersProgress)
 			if err = hook.SendNotifications(tx, finishStageBeforeSync); err != nil {
 				return err
 			}
 			if err = hook.UpdateHead(tx, finishStageBeforeSync, false); err != nil {
 				return err
 			}
-			hook.LastNewBlockSeen(headersProgress)
 			return nil
 		}); err != nil {
 			return err

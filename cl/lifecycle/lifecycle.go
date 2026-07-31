@@ -23,6 +23,7 @@ package lifecycle
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -60,11 +61,9 @@ func (b *Bundle) Ctx() context.Context {
 // Go spawns fn as a tracked background goroutine. fn receives the
 // bundle's ctx and MUST return when that ctx is cancelled.
 func (b *Bundle) Go(fn func(ctx context.Context)) {
-	b.wg.Add(1)
-	go func() {
-		defer b.wg.Done()
+	b.wg.Go(func() {
 		fn(b.ctx)
-	}()
+	})
 }
 
 // Stop cancels the bundle's ctx and blocks until every goroutine
@@ -130,8 +129,8 @@ func (g *Group) Stop() {
 	entries := append([]entry(nil), g.entries...)
 	g.entries = nil
 	g.mu.Unlock()
-	for i := len(entries) - 1; i >= 0; i-- {
-		e := entries[i]
+	for _, e := range slices.Backward(entries) {
+
 		start := time.Now()
 		e.stop()
 		if g.logger != nil {

@@ -25,6 +25,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	"github.com/rs/cors"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/rpc"
@@ -182,8 +184,8 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "invalid host specified", http.StatusForbidden)
 }
 
-// gzPoolBufCap is the maximum buffer capacity retained in pools to bound RSS growth.
-const gzPoolBufCap = 1 << 20
+// gzPoolBufCap is the maximum dst capacity retained in the pool to bound RSS growth.
+const gzPoolBufCap = 1024 * 1024
 
 // minGzipBodySize is the minimum response body size to compress. Responses
 // smaller than this are sent as-is: gzip framing overhead would exceed savings.
@@ -193,42 +195,92 @@ var gzPool = sync.Pool{
 	New: func() any { w, _ := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed); return w },
 }
 
+func putGzip(gz *gzip.Writer) {
+	gz.Reset(io.Discard)
+	gzPool.Put(gz)
+}
+
 var libdeflateWarnOnce sync.Once
 var libdeflateCompressWarnOnce sync.Once
 var libdeflateDisabled atomic.Bool
 
-var gzCompressorPool = sync.Pool{
-	New: func() any {
-		c, err := libdeflate.NewCompressor(libdeflate.DefaultCompression)
-		if err != nil {
-			libdeflateDisabled.Store(true)
-			libdeflateWarnOnce.Do(func() {
-				log.Warn("libdeflate unavailable, falling back to stdlib gzip", "err", err)
-			})
-			return nil
-		}
+var (
+	libdeflatePoolHit      = metrics.GetOrCreateCounter(`libdeflate_pool_hit_total`)
+	libdeflatePoolMiss     = metrics.GetOrCreateCounter(`libdeflate_pool_miss_total`)
+	libdeflatePoolOverflow = metrics.GetOrCreateCounter(`libdeflate_pool_overflow_total`)
+)
+
+// libdeflateCompressorsPool pools libdeflate compressors. sync.Pool is unsafe for these: a
+// libdeflate.Compressor owns a C context freed only by Close(), and sync.Pool
+// drops entries on GC with no hook to Close them, so every evicted compressor
+// leaks its C memory. A buffered channel with Close-on-overflow instead frees the
+// C context deterministically and bounds the pooled working set.
+//
+// Each pooled compressor is a single ~653 KiB libdeflate C allocation (level 6),
+// so pool peak RAM = cap × 653 KiB. The cap floors at 64 and is capped at 512, so
+// peak stays ~41 MiB (64) .. ~326 MiB (512) regardless of GOMAXPROCS.
+var libdeflateCompressorsPool = make(chan *libdeflate.Compressor, min(512, max(64, runtime.GOMAXPROCS(0)*8)))
+
+func getLibdeflateCompressor() *libdeflate.Compressor {
+	if libdeflateDisabled.Load() {
+		return nil
+	}
+	select {
+	case c := <-libdeflateCompressorsPool:
+		libdeflatePoolHit.Inc()
 		return c
-	},
+	default:
+	}
+	libdeflatePoolMiss.Inc()
+	c, err := libdeflate.NewCompressor(libdeflate.DefaultCompression)
+	if err != nil {
+		libdeflateDisabled.Store(true)
+		libdeflateWarnOnce.Do(func() {
+			log.Warn("libdeflate unavailable, falling back to stdlib gzip", "err", err)
+		})
+		closePooledLibdeflateCompressors()
+		return nil
+	}
+	return c
 }
 
-var gzBufPool = sync.Pool{
-	New: func() any { return new(bytes.Buffer) },
+// putLibdeflateCompressor returns c for reuse, or frees its C context via Close when
+// the pool is full or libdeflate has been disabled — never dropping it uncollected
+// the way sync.Pool eviction would.
+func putLibdeflateCompressor(c *libdeflate.Compressor) {
+	if libdeflateDisabled.Load() {
+		c.Close()
+		return
+	}
+	select {
+	case libdeflateCompressorsPool <- c:
+		// If disable raced with this send, drain: once disabled, get returns nil early,
+		// so a compressor left in the pool would never be handed out again.
+		if libdeflateDisabled.Load() {
+			closePooledLibdeflateCompressors()
+		}
+	default:
+		libdeflatePoolOverflow.Inc()
+		c.Close()
+	}
+}
+
+// closePooledLibdeflateCompressors frees every compressor currently in the pool.
+// Called once libdeflate is disabled, so the pool can't retain C contexts that
+// getLibdeflateCompressor would never hand out again.
+func closePooledLibdeflateCompressors() {
+	for {
+		select {
+		case c := <-libdeflateCompressorsPool:
+			c.Close()
+		default:
+			return
+		}
+	}
 }
 
 var gzDstPool = sync.Pool{
 	New: func() any { return make([]byte, 0, 64*1024) },
-}
-
-func getBuf() *bytes.Buffer {
-	buf := gzBufPool.Get().(*bytes.Buffer)
-	buf.Reset()
-	return buf
-}
-
-func putBuf(buf *bytes.Buffer) {
-	if buf.Cap() <= gzPoolBufCap {
-		gzBufPool.Put(buf)
-	}
 }
 
 func putDst(dst []byte) {
@@ -282,7 +334,7 @@ func (w *gzipResponseWriter) Flush() {
 
 func writeStdlibGzip(w http.ResponseWriter, src []byte, status int) {
 	gz := gzPool.Get().(*gzip.Writer)
-	defer gzPool.Put(gz)
+	defer putGzip(gz)
 	gz.Reset(w)
 	w.Header().Set("Content-Encoding", "gzip")
 	w.Header().Del("Content-Length")
@@ -297,20 +349,16 @@ func writeStdlibGzip(w http.ResponseWriter, src []byte, status int) {
 // Returns false if libdeflate is unavailable or compression fails; the caller
 // should then fall back to writeStdlibGzip.
 func compressLibdeflate(w http.ResponseWriter, src []byte, status int) bool {
-	if libdeflateDisabled.Load() {
+	c := getLibdeflateCompressor()
+	if c == nil {
 		return false
 	}
-	raw := gzCompressorPool.Get()
-	if raw == nil {
-		return false
-	}
-	c := raw.(*libdeflate.Compressor)
-	defer gzCompressorPool.Put(c)
+	defer putLibdeflateCompressor(c)
 
 	dst := gzDstPool.Get().([]byte)
 	gzBound := c.GzipCompressBound(len(src))
 	dst = slices.Grow(dst[:0], gzBound)[:gzBound]
-	defer putDst(dst)
+	defer putDst(dst) // return the grown buffer for reuse (putDst drops it if over gzPoolBufCap)
 
 	n, err := c.CompressGzip(dst, src)
 	if err != nil {
@@ -330,11 +378,11 @@ func compressLibdeflate(w http.ResponseWriter, src []byte, status int) bool {
 }
 
 func sendGzipResponse(w http.ResponseWriter, grw *gzipResponseWriter) {
-	defer putBuf(grw.buf)
+	defer pool.PutBuffer(grw.buf)
 
 	if grw.gzw != nil {
-		defer gzPool.Put(grw.gzw)
-		defer grw.gzw.Close() //nolint:errcheck
+		defer putGzip(grw.gzw)
+		grw.gzw.Close() //nolint:errcheck
 		return
 	}
 
@@ -360,7 +408,7 @@ func newGzipHandler(next http.Handler) http.Handler {
 			return
 		}
 
-		grw := &gzipResponseWriter{buf: getBuf(), ResponseWriter: w}
+		grw := &gzipResponseWriter{buf: pool.GetBuffer(), ResponseWriter: w}
 		// The hook activates streaming mode before the first write; absent when gzip
 		// is off so it cannot prematurely commit HTTP headers (e.g. 200 before 503).
 		r = r.WithContext(rpc.WithGzipStreamingHook(r.Context(), grw.Flush))

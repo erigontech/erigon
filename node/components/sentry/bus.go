@@ -248,7 +248,7 @@ func (p *Provider) publishPeerConnectedWithRetry(ctx context.Context, peerID [64
 		maxAttempts = 20 // 20 × 100ms = 2s total
 		retryDelay  = 100 * time.Millisecond
 	)
-	for i := 0; i < maxAttempts; i++ {
+	for range maxAttempts {
 		if node := p.peerNodeByID(peerID); node != nil {
 			p.PublishPeerConnected(node)
 			return

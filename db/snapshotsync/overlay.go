@@ -40,8 +40,8 @@ import (
 //
 // Each override path must be a block segment (.seg) file whose index
 // (.idx) sits alongside it in the same directory.
-func OpenRoSnapshotsWithOverrides(cfg ethconfig.BlocksFreezing, liveDir string, overridePaths []string, types []snaptype.Type, alignMin bool, logger log.Logger) (*RoSnapshots, error) {
-	s := NewRoSnapshots(cfg, liveDir, types, alignMin, logger)
+func OpenRoSnapshotsWithOverrides(cfg ethconfig.BlocksFreezing, liveDir string, overridePaths []string, types []snaptype.Type, baseSegType snaptype.Type, alignMin bool, logger log.Logger) (*BaseRoSnapshots, error) {
+	s := NewBaseRoSnapshots(cfg, liveDir, types, baseSegType, alignMin, logger)
 	if err := ApplyBlockOverrides(s, overridePaths); err != nil {
 		s.Close()
 		return nil, err
@@ -55,7 +55,7 @@ func OpenRoSnapshotsWithOverrides(cfg ethconfig.BlocksFreezing, liveDir string, 
 // package can apply overrides to a *freezeblocks.RoSnapshots — the type
 // freezeblocks.NewBlockReader requires — without copying the embedded
 // snapshotsync.RoSnapshots value.
-func ApplyBlockOverrides(s *RoSnapshots, overridePaths []string) error {
+func ApplyBlockOverrides(s *BaseRoSnapshots, overridePaths []string) error {
 	if err := s.OpenFolder(); err != nil {
 		return err
 	}
@@ -64,14 +64,14 @@ func ApplyBlockOverrides(s *RoSnapshots, overridePaths []string) error {
 			return fmt.Errorf("override %s: %w", filepath.Base(p), err)
 		}
 	}
-	s.recalcVisibleFiles(s.alignMin)
+	s.recalcVisibleFiles(s.alignMin, nil)
 	return nil
 }
 
 // applyBlockOverride opens the segment at path and swaps it into the
 // dirty tree in place of the same-range live segment. The caller invokes
 // recalcVisibleFiles once all overrides are applied.
-func (s *RoSnapshots) applyBlockOverride(path string) error {
+func (s *BaseRoSnapshots) applyBlockOverride(path string) error {
 	dir, name := filepath.Split(path)
 	dir = filepath.Clean(dir)
 	f, isState, ok := snaptype.ParseFileName(dir, name)

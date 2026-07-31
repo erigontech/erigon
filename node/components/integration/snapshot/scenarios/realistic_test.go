@@ -71,7 +71,7 @@ func TestRealistic_SingleNode_InventoryLoaded(t *testing.T) {
 	require.Equal(t, snapshot.StepRanges{{From: 0, To: 256}}, accounts,
 		"accounts coverage should match fixture range")
 
-	reqType := reflect.TypeOf(flow.DownloadRequested{})
+	reqType := reflect.TypeFor[flow.DownloadRequested]()
 	require.Equal(t, 0, node.Bus.CountOfType(reqType),
 		"no DownloadRequested should fire without peers")
 }
@@ -116,7 +116,7 @@ func TestRealistic_TwoNode_GapFill(t *testing.T) {
 		require.Equal(t, peerCov, leecherCov, "coverage mismatch for domain %s", d)
 	}
 
-	require.Equal(t, 0, leecher.Bus.CountOfType(reflect.TypeOf(flow.DownloadFailed{})),
+	require.Equal(t, 0, leecher.Bus.CountOfType(reflect.TypeFor[flow.DownloadFailed]()),
 		"no DownloadFailed expected")
 	require.Equal(t, int(expectedFiles), len(leecher.Storage.Recorded()),
 		"MockStorage.RecordFile should have been invoked once per completed download")
@@ -143,14 +143,14 @@ func TestRealistic_ThreeNode_MergeDivergence(t *testing.T) {
 
 	mergedFiles := harness.HoodiMerged500().FileCount()
 	waitForRealistic(t, func() bool {
-		return leecher.Bus.CountOfType(reflect.TypeOf(flow.DownloadComplete{})) == mergedFiles
+		return leecher.Bus.CountOfType(reflect.TypeFor[flow.DownloadComplete]()) == mergedFiles
 	}, 3*time.Second, "merged peer's downloads to complete")
 
-	requestCount := leecher.Bus.CountOfType(reflect.TypeOf(flow.DownloadRequested{}))
+	requestCount := leecher.Bus.CountOfType(reflect.TypeFor[flow.DownloadRequested]())
 	require.Equal(t, mergedFiles, requestCount,
 		"leecher should request only the merged peer's files")
 
-	require.Equal(t, 0, leecher.Bus.CountOfType(reflect.TypeOf(flow.DownloadFailed{})),
+	require.Equal(t, 0, leecher.Bus.CountOfType(reflect.TypeFor[flow.DownloadFailed]()),
 		"no downloads should fail")
 
 	accountsCov := leecher.Inventory.CoverageAtTrust(snapshot.DomainAccounts, snapshot.TrustVerified)
@@ -176,9 +176,9 @@ func TestRealistic_Breadth_EmptyAndPartialManifests(t *testing.T) {
 
 	// After processing an empty manifest, no gap-fill should have fired.
 	leecher.Bus.WaitAsync()
-	require.Equal(t, 0, leecher.Bus.CountOfType(reflect.TypeOf(flow.DownloadRequested{})),
+	require.Equal(t, 0, leecher.Bus.CountOfType(reflect.TypeFor[flow.DownloadRequested]()),
 		"empty manifest should not trigger any downloads")
-	require.Equal(t, 0, leecher.Bus.CountOfType(reflect.TypeOf(flow.DownloadFailed{})))
+	require.Equal(t, 0, leecher.Bus.CountOfType(reflect.TypeFor[flow.DownloadFailed]()))
 }
 
 // TestRealistic_SoakLite_Churn is a downsized soak scenario: announce,
@@ -198,7 +198,7 @@ func TestRealistic_SoakLite_Churn(t *testing.T) {
 	var completeCount atomic.Int32
 	require.NoError(t, leecher.Bus.Subscribe(func(flow.DownloadComplete) { completeCount.Add(1) }))
 
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		peer := harness.NewInprocPeer("peer-soak", coord)
 		peer.Seed(fixture)
 		peer.AnnounceTo(leecher.Sentry)

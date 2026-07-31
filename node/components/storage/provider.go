@@ -42,14 +42,15 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/preverified"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	snaptypelib "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
@@ -75,7 +76,7 @@ type Provider struct {
 	ChainDB              kv.TemporalRwDB
 	BlockReader          *freezeblocks.BlockReader
 	BlockWriter          *blockio.BlockWriter
-	AllSnapshots         *freezeblocks.RoSnapshots
+	AllSnapshots         *blocksnapshots.RoSnapshots
 	AllBorSnapshots      *heimdall.RoSnapshots // nil if not Bor
 	BridgeStore          bridge.Store          // nil if not Bor
 	HeimdallStore        heimdall.Store        // nil if not Bor
@@ -84,7 +85,7 @@ type Provider struct {
 	GenesisHash          common.Hash
 	CurrentBlockNumber   uint64
 	SegmentsBuildLimiter *semaphore.Weighted
-	BlockRetire          services.BlockRetire
+	BlockRetire          dbservices.BlockRetire
 
 	// Aggregator is the state Aggregator. Stored from Deps.Aggregator so
 	// the staged-adoption cutover (adoption.go) can take its commit
@@ -197,7 +198,7 @@ type Provider struct {
 	// Delete to stop seeding files being removed. May be nil for
 	// tools / tests / nodes started with --no-downloader; trim
 	// still removes inventory + disk in that case.
-	downloaderClient downloader.Client
+	downloaderClient dbservices.DownloaderClient
 
 	// republishChainToml is the publisher's manifest republish hook.
 	// Stored from Deps.RepublishChainToml so Provider.Unwind's
@@ -256,7 +257,7 @@ type Provider struct {
 // Config and would otherwise be lost after Initialize returns.
 type storageRestartDeps struct {
 	config          *ethconfig.Config
-	dbEventNotifier services.DBEventNotifier
+	dbEventNotifier dbservices.DBEventNotifier
 }
 
 // pendingTrimState is the deferred set of FS / inventory / network
@@ -291,7 +292,7 @@ type Deps struct {
 	ChainDB         kv.TemporalRwDB
 	BlockReader     *freezeblocks.BlockReader
 	BlockWriter     *blockio.BlockWriter
-	AllSnapshots    *freezeblocks.RoSnapshots
+	AllSnapshots    *blocksnapshots.RoSnapshots
 	AllBorSnapshots *heimdall.RoSnapshots // nil if not Bor
 	BridgeStore     bridge.Store          // nil if not Bor
 	HeimdallStore   heimdall.Store        // nil if not Bor
@@ -306,10 +307,10 @@ type Deps struct {
 	// DBEventNotifier — NOT owned by storage. Passed in so BlockRetire and
 	// file-change callbacks can forward snapshot events. Currently backed by
 	// shards.Events; will migrate to the framework event bus.
-	DBEventNotifier services.DBEventNotifier
+	DBEventNotifier dbservices.DBEventNotifier
 
 	// Downloader client for file-change callbacks (may be nil).
-	DownloaderClient downloader.Client
+	DownloaderClient dbservices.DownloaderClient
 
 	// RepublishChainToml is called after retire/merge produces new
 	// snapshot files (via OnFilesChange) so the publisher's
@@ -443,7 +444,7 @@ func (p *Provider) Initialize(deps Deps) error {
 		dbEventNotifier: deps.DBEventNotifier,
 	}
 	// BlockRetire — heimdallStore and bridgeStore may be nil for non-Bor chains.
-	p.BlockRetire = freezeblocks.NewBlockRetire(1, config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB, p.HeimdallStore, p.BridgeStore, p.ChainConfig, config, deps.DBEventNotifier, p.SegmentsBuildLimiter, logger)
+	p.BlockRetire = freezeblocks.NewBlockRetire(ctx, 1, config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB, p.HeimdallStore, p.BridgeStore, p.ChainConfig, config, deps.DBEventNotifier, p.SegmentsBuildLimiter, logger)
 
 	// Serialize retirement's chain-DB reads against Aggregator commit+prune.
 	// Without this, retirement's db.View RO txs can overlap a commit and pin
@@ -1770,10 +1771,13 @@ func (p *Provider) Restart(ctx context.Context, opts RestartOpts) error {
 }
 
 // Close releases the storage component's runtime resources for node
-// exit: the lifecycle driver, the flow orchestrator, and the internal
-// event pool all need explicit shutdown. Multi-call safe. Use Stop
-// (not Close) for a mid-process pause the Provider can later resume.
+// exit: BlockRetire drain, lifecycle driver, flow orchestrator, and
+// the internal event pool all need explicit shutdown. Multi-call safe.
+// Use Stop (not Close) for a mid-process pause.
 func (p *Provider) Close() {
+	if p.BlockRetire != nil {
+		p.BlockRetire.Close()
+	}
 	if p.LifecycleDriver != nil {
 		p.LifecycleDriver.Stop()
 	}
@@ -1820,7 +1824,7 @@ func (p *Provider) SetChainConfig(cfg *chain.Config) {
 	}
 	rd := p.restartDeps
 	p.BlockRetire = freezeblocks.NewBlockRetire(
-		1, rd.config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB,
+		context.Background(), 1, rd.config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB,
 		p.HeimdallStore, p.BridgeStore, p.ChainConfig, rd.config,
 		rd.dbEventNotifier, p.SegmentsBuildLimiter, p.logger,
 	)

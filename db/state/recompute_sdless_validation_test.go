@@ -146,17 +146,17 @@ func TestRecomputeAtTxNumWithoutSD_MidBlockCS(t *testing.T) {
 	ctx := t.Context()
 
 	accountKeys := make([][]byte, numAccounts)
-	for i := 0; i < numAccounts; i++ {
+	for i := range numAccounts {
 		accountKeys[i] = makeTestAccountAddr(uint64(i))
 	}
 	storageKeys := make([][]byte, numStorage)
-	for i := 0; i < numStorage; i++ {
+	for i := range numStorage {
 		storageKeys[i] = makeTestStorageKey(uint64(i), 1)
 	}
 
 	writeAt := func(domains *execctx.SharedDomains, rwTx kv.TemporalRwTx, txNum uint64) {
 		t.Helper()
-		for i := 0; i < numAccounts; i++ {
+		for i := range numAccounts {
 			acc := accounts.Account{
 				Nonce:    txNum,
 				Balance:  *uint256.NewInt(txNum * 1000),
@@ -164,7 +164,7 @@ func TestRecomputeAtTxNumWithoutSD_MidBlockCS(t *testing.T) {
 			}
 			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, accountKeys[i], accounts.SerialiseV3(&acc), txNum, nil))
 		}
-		for i := 0; i < numStorage; i++ {
+		for i := range numStorage {
 			var val [32]byte
 			val[31] = byte(txNum + 1)
 			require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, storageKeys[i], val[:], txNum, nil))
@@ -177,7 +177,7 @@ func TestRecomputeAtTxNumWithoutSD_MidBlockCS(t *testing.T) {
 	build := func(t *testing.T, midStepCC bool) ([]byte, *kvAggHandles) {
 		t.Helper()
 		db, agg := testDbAndAggregatorv3(t, stepSize)
-		agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+		agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 
 		var blockEndRoot []byte
 		{
@@ -423,7 +423,7 @@ func TestRecomputeAtTxNumWithoutSD_MidBlockCS_HoodiPatterns(t *testing.T) {
 		t.Helper()
 		db, agg := testDbAndAggregatorv3(t, stepSize)
 		// Hoodi has ReplaceKeysInValues=true. Match production.
-		agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+		agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 
 		var blockEndRoot []byte
 		{
@@ -578,21 +578,21 @@ func TestRecomputeAtTxNumWithoutSD_AgainstSDComputeCommit_ShadowAheadOfTarget(t 
 	)
 
 	db, agg := testDbAndAggregatorv3(t, stepSize)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	ctx := t.Context()
 
 	accountKeys := make([][]byte, numAccounts)
-	for i := 0; i < numAccounts; i++ {
+	for i := range numAccounts {
 		accountKeys[i] = makeTestAccountAddr(uint64(i))
 	}
 	storageKeys := make([][]byte, numStorage)
-	for i := 0; i < numStorage; i++ {
+	for i := range numStorage {
 		storageKeys[i] = makeTestStorageKey(uint64(i), 1)
 	}
 
 	writeAccountsAndStorage := func(domains *execctx.SharedDomains, rwTx kv.TemporalRwTx, txNum uint64) {
 		t.Helper()
-		for i := 0; i < numAccounts; i++ {
+		for i := range numAccounts {
 			acc := accounts.Account{
 				Nonce:    txNum,
 				Balance:  *uint256.NewInt(txNum * 1000),
@@ -601,7 +601,7 @@ func TestRecomputeAtTxNumWithoutSD_AgainstSDComputeCommit_ShadowAheadOfTarget(t 
 			buf := accounts.SerialiseV3(&acc)
 			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, accountKeys[i], buf, txNum, nil))
 		}
-		for i := 0; i < numStorage; i++ {
+		for i := range numStorage {
 			var val [32]byte
 			val[31] = byte(txNum + 1)
 			require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, storageKeys[i], val[:], txNum, nil))
@@ -616,7 +616,7 @@ func TestRecomputeAtTxNumWithoutSD_AgainstSDComputeCommit_ShadowAheadOfTarget(t 
 		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
-		for txNum := uint64(0); txNum < ph1TxNums; txNum++ {
+		for txNum := range ph1TxNums {
 			writeAccountsAndStorage(domains, rwTx, txNum)
 			if (txNum+1)%stepSize == 0 {
 				_, err := domains.ComputeCommitment(ctx, rwTx, true, txNum/stepSize, txNum, "", nil)
@@ -736,21 +736,21 @@ func runRecomputeVsSDCheck(t *testing.T, tc recomputeCheckCase) {
 	const numStorage = 10
 
 	db, agg := testDbAndAggregatorv3(t, tc.StepSize)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	ctx := t.Context()
 
 	accountKeys := make([][]byte, numAccounts)
-	for i := 0; i < numAccounts; i++ {
+	for i := range numAccounts {
 		accountKeys[i] = makeTestAccountAddr(uint64(i))
 	}
 	storageKeys := make([][]byte, numStorage)
-	for i := 0; i < numStorage; i++ {
+	for i := range numStorage {
 		storageKeys[i] = makeTestStorageKey(uint64(i), 1)
 	}
 
 	writeAccountsAndStorage := func(domains *execctx.SharedDomains, rwTx kv.TemporalRwTx, txNum uint64) {
 		t.Helper()
-		for i := 0; i < numAccounts; i++ {
+		for i := range numAccounts {
 			acc := accounts.Account{
 				Nonce:    txNum,
 				Balance:  *uint256.NewInt(txNum * 1000),
@@ -759,7 +759,7 @@ func runRecomputeVsSDCheck(t *testing.T, tc recomputeCheckCase) {
 			buf := accounts.SerialiseV3(&acc)
 			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, accountKeys[i], buf, txNum, nil))
 		}
-		for i := 0; i < numStorage; i++ {
+		for i := range numStorage {
 			var val [32]byte
 			val[31] = byte(txNum + 1)
 			require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, storageKeys[i], val[:], txNum, nil))

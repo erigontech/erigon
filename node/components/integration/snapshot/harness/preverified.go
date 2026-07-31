@@ -257,11 +257,11 @@ func classifyEntry(e *PreverifiedEntry) {
 // splitRel separates "<dir>/<base>" into (dir, base). Returns ("", base)
 // when there is no separator.
 func splitRel(relPath string) (string, string) {
-	idx := strings.IndexByte(relPath, '/')
-	if idx < 0 {
+	before, after, ok := strings.Cut(relPath, "/")
+	if !ok {
 		return "", relPath
 	}
-	return relPath[:idx], relPath[idx+1:]
+	return before, after
 }
 
 // decodeHash20 parses a 40-char hex string into a fixed-size info-hash.

@@ -60,11 +60,8 @@ func (e *AdvertisementSelfCheckError) Error() string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "advertisement self-check: %d entries diverge from canonical (retire bug; halt and investigate):",
 		len(e.Mismatches))
-	limit := len(e.Mismatches)
-	if limit > 8 {
-		limit = 8
-	}
-	for i := 0; i < limit; i++ {
+	limit := min(len(e.Mismatches), 8)
+	for i := range limit {
 		m := e.Mismatches[i]
 		fmt.Fprintf(&sb, "\n  %s: own=%s canonical=%s", m.Name, m.OwnHash, m.CanonicalHash)
 	}

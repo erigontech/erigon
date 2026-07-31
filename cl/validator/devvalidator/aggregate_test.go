@@ -52,7 +52,7 @@ func TestSignedAggregateAndProof_RoundTrip(t *testing.T) {
 		Signature: common.Bytes96{0x04},
 	}
 
-	raw, err := json.Marshal([]interface{}{signed})
+	raw, err := json.Marshal([]any{signed})
 	require.NoError(t, err)
 
 	var decoded []*cltypes.SignedAggregateAndProof

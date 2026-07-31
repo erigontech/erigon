@@ -59,9 +59,9 @@ func TestWatchInitialValidation(t *testing.T) {
 		logger:          log.Root(),
 	}
 
-	var done int32
+	var done atomic.Int32
 	require.NoError(t, bus.Subscribe(func(flow.InitialValidationComplete) {
-		atomic.AddInt32(&done, 1)
+		done.Add(1)
 	}))
 
 	downloadsComplete := make(chan struct{})
@@ -69,17 +69,17 @@ func TestWatchInitialValidation(t *testing.T) {
 
 	// Not fired before the download set completes.
 	time.Sleep(40 * time.Millisecond)
-	require.Zero(t, atomic.LoadInt32(&done))
+	require.Zero(t, done.Load())
 
 	close(downloadsComplete)
 
 	// Still not fired: `settling` has not reached Advertisable.
 	time.Sleep(60 * time.Millisecond)
-	require.Zero(t, atomic.LoadInt32(&done), "must not fire while a file is still settling")
+	require.Zero(t, done.Load(), "must not fire while a file is still settling")
 
 	// Settle the last file → the watcher fires InitialValidationComplete.
 	inv.AdvanceTo(settling, snapshot.LifecycleAdvertisable)
-	require.Eventually(t, func() bool { return atomic.LoadInt32(&done) == 1 },
+	require.Eventually(t, func() bool { return done.Load() == 1 },
 		2*time.Second, 10*time.Millisecond, "InitialValidationComplete after all files settle")
 }
 
@@ -113,9 +113,9 @@ func TestWatchInitialValidation_TipFileOutsideInitialSet(t *testing.T) {
 		logger:          log.Root(),
 	}
 
-	var done int32
+	var done atomic.Int32
 	require.NoError(t, bus.Subscribe(func(flow.InitialValidationComplete) {
-		atomic.AddInt32(&done, 1)
+		done.Add(1)
 	}))
 
 	downloadsComplete := make(chan struct{})
@@ -125,7 +125,7 @@ func TestWatchInitialValidation_TipFileOutsideInitialSet(t *testing.T) {
 
 	// Fires even though tipFile never reaches Advertisable — it is
 	// outside the initial set.
-	require.Eventually(t, func() bool { return atomic.LoadInt32(&done) == 1 },
+	require.Eventually(t, func() bool { return done.Load() == 1 },
 		2*time.Second, 10*time.Millisecond,
 		"InitialValidationComplete must not wait on a tip file outside the initial set")
 	tipState, ok := inv.LifecycleState(tipFile)

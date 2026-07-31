@@ -30,6 +30,11 @@ type Cache interface {
 	// reflects (used for txNum/epoch unwind invalidation).
 	Put(key []byte, value []byte, txNum uint64)
 
+	// PutIfAbsent is Put except that a live entry for key is left untouched
+	// (a stale one is replaced) — for prefetch writers, whose snapshot may
+	// already be superseded by an authoritative Put.
+	PutIfAbsent(key []byte, value []byte, txNum uint64)
+
 	// Delete removes the data for the given key.
 	Delete(key []byte)
 
@@ -41,6 +46,9 @@ type Cache interface {
 	// bump an epoch and lower a floor, so stale entries (including code and
 	// size) are evicted on the next read rather than walked eagerly.
 	Unwind(unwindToTxNum uint64)
+
+	// Close drops the cache's slot in the shared memory envelope. Idempotent.
+	Close()
 
 	// Len returns the number of entries in the cache.
 	Len() int

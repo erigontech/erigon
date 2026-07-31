@@ -20,6 +20,7 @@
 package types
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 
@@ -183,7 +184,7 @@ func (tx *LegacyTx) copy() *LegacyTx {
 			TransactionMisc: TransactionMisc{},
 			Nonce:           tx.Nonce,
 			To:              tx.To, // TODO: copy pointed-to address
-			Data:            common.Copy(tx.Data),
+			Data:            bytes.Clone(tx.Data),
 			GasLimit:        tx.GasLimit,
 			Value:           tx.Value,
 			V:               tx.V,
@@ -404,7 +405,11 @@ func (tx *LegacyTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.I
 }
 
 func (tx *LegacyTx) GetChainID() *uint256.Int {
-	return DeriveChainId(&tx.V)
+	chainID, err := DeriveChainId(&tx.V)
+	if err != nil {
+		return new(uint256.Int)
+	}
+	return chainID
 }
 
 func (tx *LegacyTx) cachedSender() (sender accounts.Address, ok bool) {

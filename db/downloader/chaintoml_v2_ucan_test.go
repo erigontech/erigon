@@ -130,7 +130,7 @@ func TestRollingV2Publisher_RotatingDelegation(t *testing.T) {
 		return []byte(fmt.Sprintf("ucan-gen-%d", calls)), nil
 	})
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, err := pub.Publish(context.Background(), rollingTestInventory(t, 0x10), 0, nil)
 		require.NoError(t, err, "publish %d", i)
 	}
@@ -139,7 +139,7 @@ func TestRollingV2Publisher_RotatingDelegation(t *testing.T) {
 	// Three distinct delegations → three Authority UCAN files, each at
 	// the <rev> derived from its own content.
 	require.Len(t, listAuthorityUCANRevs(t, snapDir), 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		content := []byte(fmt.Sprintf("ucan-gen-%d", i+1))
 		got, err := os.ReadFile(filepath.Join(snapDir, ChainAuthorityUCANFileName(testENRFP, genIDFromContent(content))))
 		require.NoError(t, err, "read rotation %d UCAN", i)

@@ -27,12 +27,7 @@ import (
 // keeps the canonical decoder consistent with the canonical encoder.
 func TestDecodeBranchInto_RoundTrip(t *testing.T) {
 	t.Parallel()
-	row, bm := generateCellRow(t, 16)
-
-	be := NewBranchEncoder(1024)
-	cellData := generateCellEncodeDataRow(t, row, bm)
-	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
-	require.NoError(t, err)
+	row, bm, enc := encodeCellRow(t, 16)
 	require.NotEmpty(t, enc)
 
 	// EncodeBranch produces bytes WITH the 2-byte touch-map prefix; the
@@ -54,15 +49,7 @@ func TestDecodeBranchInto_RoundTrip(t *testing.T) {
 	// hashedExtension etc. are set by deriveHashedKeys (separate step) and
 	// are not part of the decoder's responsibility.
 	for i, orig := range row {
-		decoded := &cells[i]
-		require.Equal(t, orig.extLen, decoded.extLen, "cell %d extLen", i)
-		require.Equal(t, orig.extension[:orig.extLen], decoded.extension[:decoded.extLen], "cell %d extension", i)
-		require.Equal(t, orig.accountAddrLen, decoded.accountAddrLen, "cell %d accountAddrLen", i)
-		require.Equal(t, orig.accountAddr[:orig.accountAddrLen], decoded.accountAddr[:decoded.accountAddrLen], "cell %d accountAddr", i)
-		require.Equal(t, orig.storageAddrLen, decoded.storageAddrLen, "cell %d storageAddrLen", i)
-		require.Equal(t, orig.storageAddr[:orig.storageAddrLen], decoded.storageAddr[:decoded.storageAddrLen], "cell %d storageAddr", i)
-		require.Equal(t, orig.hashLen, decoded.hashLen, "cell %d hashLen", i)
-		require.Equal(t, orig.hash[:orig.hashLen], decoded.hash[:decoded.hashLen], "cell %d hash", i)
+		requireDecodedCellEq(t, i, orig, &cells[i])
 	}
 }
 
@@ -70,12 +57,7 @@ func TestDecodeBranchInto_RoundTrip(t *testing.T) {
 // flips correctly with the deleted parameter.
 func TestDecodeBranchInto_DeletedFlag(t *testing.T) {
 	t.Parallel()
-	row, bm := generateCellRow(t, 16)
-
-	be := NewBranchEncoder(1024)
-	cellData := generateCellEncodeDataRow(t, row, bm)
-	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
-	require.NoError(t, err)
+	_, bm, enc := encodeCellRow(t, 16)
 	branchData := []byte(enc)[2:]
 
 	var cells [16]cell

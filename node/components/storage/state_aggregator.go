@@ -33,7 +33,7 @@ import (
 type StateAggregator interface {
 	Files() []string
 	OpenFolder() error
-	BuildMissedAccessors(ctx context.Context, workers int) error
+	BuildMissedAccessors(ctx context.Context, workers int, opts ...kv.BuildAccessorsOption) error
 	LockCollation()
 	UnlockCollation()
 

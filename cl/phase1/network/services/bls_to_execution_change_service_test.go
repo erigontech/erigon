@@ -20,6 +20,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -27,10 +30,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/pool"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 type blsToExecutionChangeTestContext struct {
@@ -105,7 +106,7 @@ func syncHeadState(t *testing.T, syncedData *synced_data.SyncedDataManager, st *
 }
 
 func matchingWithdrawalCredentials(cfg *clparams.BeaconChainConfig, from common.Bytes48) common.Hash {
-	hashedFrom := utils.Sha256(from[:])
+	hashedFrom := crypto.Sha256(from[:])
 	wc := common.Hash{byte(cfg.BLSWithdrawalPrefixByte)}
 	copy(wc[1:], hashedFrom[1:])
 	return wc

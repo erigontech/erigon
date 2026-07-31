@@ -19,6 +19,7 @@ package flow
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -377,7 +378,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		o.mu.Unlock()
 		return fmt.Errorf("flow orchestrator already started")
 	}
-	subs := []interface{}{
+	subs := []any{
 		o.hBlocksFlushed,
 		o.hPeerManifestReceived,
 		o.hDownloadComplete,
@@ -387,7 +388,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	for i, sub := range subs {
 		if err := o.bus.Subscribe(sub); err != nil {
 			// Roll back the subscriptions that did succeed.
-			for j := 0; j < i; j++ {
+			for j := range i {
 				_ = o.bus.Unsubscribe(subs[j])
 			}
 			o.mu.Unlock()
@@ -464,7 +465,7 @@ func (o *Orchestrator) Close() error {
 	// Drain async handlers before unsubscribing so handlers can't be racing
 	// with our teardown.
 	o.bus.WaitAsync()
-	for _, sub := range []interface{}{
+	for _, sub := range []any{
 		o.hBlocksFlushed,
 		o.hPeerManifestReceived,
 		o.hDownloadComplete,
@@ -850,7 +851,7 @@ func (o *Orchestrator) fireInitialStateReady() {
 	for d := range o.stateDomainsSeen {
 		domains = append(domains, d)
 	}
-	sort.Slice(domains, func(i, j int) bool { return domains[i] < domains[j] })
+	slices.Sort(domains)
 	queue := o.blocksQueued
 	o.blocksQueued = nil
 	o.peerMu.Unlock()

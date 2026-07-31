@@ -69,7 +69,6 @@ func getAggregateAndProofAndState(t *testing.T) (*SignedAggregateAndProofForGoss
 
 	a.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = s.Slot() / 32
 	return a, s
-
 }
 
 func setupAggregateAndProofTest(t *testing.T) (AggregateAndProofService, *synced_data.SyncedDataManager, *mock_services.ForkChoiceStorageMock) {
@@ -175,6 +174,73 @@ func TestAggregateAndProofInvalidCommittee(t *testing.T) {
 	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
 	agg.SignedAggregateAndProof.Message.AggregatorIndex = 12453224
 	require.Error(t, aggService.ProcessMessage(context.Background(), nil, agg))
+}
+
+func TestAggregateAndProofAllowsNextEpochWhenForkchoiceHasSeenIt(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	agg, s := getAggregateAndProofAndState(t)
+	nextEpochSlot := s.Slot() + clparams.MainnetBeaconConfig.SlotsPerEpoch
+	nextEpoch := nextEpochSlot / clparams.MainnetBeaconConfig.SlotsPerEpoch
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = nextEpochSlot
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Source.Epoch = nextEpoch - 1
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = nextEpoch
+
+	aggService, sd, fcu := setupAggregateAndProofTest(t)
+	sd.OnHeadState(s)
+	fcu.HighestSeenVal = nextEpochSlot
+	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*clparams.MainnetBeaconConfig.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+	fcu.Ancestors[nextEpochSlot] = forkchoice.ForkChoiceNode{Root: agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root}
+	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+	committee, err := s.GetBeaconCommitee(nextEpochSlot, agg.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex)
+	require.NoError(t, err)
+	require.NotEmpty(t, committee)
+	agg.SignedAggregateAndProof.Message.AggregatorIndex = committee[0]
+
+	err = aggService.ProcessMessage(context.Background(), nil, agg)
+	require.NoError(t, err)
+}
+
+func TestAggregateAndProofRejectsNextEpochBeforeForkchoiceHasSeenIt(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	agg, s := getAggregateAndProofAndState(t)
+	nextEpochSlot := s.Slot() + clparams.MainnetBeaconConfig.SlotsPerEpoch
+	nextEpoch := nextEpochSlot / clparams.MainnetBeaconConfig.SlotsPerEpoch
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = nextEpochSlot
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Source.Epoch = nextEpoch - 1
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = nextEpoch
+
+	aggService, sd, fcu := setupAggregateAndProofTest(t)
+	sd.OnHeadState(s)
+	fcu.HighestSeenVal = s.Slot()
+
+	err := aggService.ProcessMessage(context.Background(), nil, agg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "epoch outside validation range")
+}
+
+func TestAggregateAndProofRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	agg, s := getAggregateAndProofAndState(t)
+	beyondNextEpochSlot := s.Slot() + 2*clparams.MainnetBeaconConfig.SlotsPerEpoch
+	beyondNextEpoch := beyondNextEpochSlot / clparams.MainnetBeaconConfig.SlotsPerEpoch
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = beyondNextEpochSlot
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Source.Epoch = beyondNextEpoch - 1
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = beyondNextEpoch
+
+	aggService, sd, fcu := setupAggregateAndProofTest(t)
+	sd.OnHeadState(s)
+	fcu.HighestSeenVal = beyondNextEpochSlot
+
+	err := aggService.ProcessMessage(context.Background(), nil, agg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "epoch outside validation range")
 }
 
 func TestAggregateAndProofAncestorMissing(t *testing.T) {

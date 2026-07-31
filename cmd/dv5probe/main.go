@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -68,12 +69,16 @@ func main() {
 	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "listen udp:", err)
-		os.Exit(1)
+		db.Close()
+		os.Exit(1) //nolint:gocritic // explicit db.Close above; defer above this branch is a no-op
 	}
 	defer conn.Close()
 	fmt.Printf("probe: listening on %v, self.id=%s\n", conn.LocalAddr(), ln.ID().TerminalString())
 
-	dv5, err := discover.ListenV5(conn, ln, discover.Config{
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dv5, err := discover.ListenV5(ctx, conn, ln, discover.Config{
 		PrivateKey: key,
 		Log:        stdlog.Root(),
 	})

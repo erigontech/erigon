@@ -17,10 +17,11 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/datadir"
@@ -37,14 +38,14 @@ var genesisLocationFlag = cli.StringFlag{
 // `erigon init` for chain state — recording <snapDir>/canonical.v0.toml
 // so the node anchors its canonical view on a fixed v0 that no runtime
 // flag can change (docs/plans/20260520-chaintoml-ucan-flow-spec.md).
-func doSnapshotGenesis(cliCtx *cli.Context) error {
+func doSnapshotGenesis(_ context.Context, cliCtx *cli.Command) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 
 	var (
 		items snapcfg.PreverifiedItems
 		src   string
 	)
-	if loc := genesisLocationFlag.Get(cliCtx); loc != "" {
+	if loc := cliCtx.String(genesisLocationFlag.Name); loc != "" {
 		data, err := os.ReadFile(loc)
 		if err != nil {
 			return fmt.Errorf("reading genesis source %q: %w", loc, err)
@@ -70,7 +71,7 @@ func doSnapshotGenesis(cliCtx *cli.Context) error {
 	if err := snapcfg.WritePinnedGenesis(dirs.Snap, items); err != nil {
 		return err
 	}
-	fmt.Fprintf(cliCtx.App.Writer, "pinned canonical genesis v0 (%d entries from %s) to %s\n",
+	fmt.Fprintf(os.Stdout, "pinned canonical genesis v0 (%d entries from %s) to %s\n",
 		len(items), src, dirs.Snap)
 	return nil
 }

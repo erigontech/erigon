@@ -50,7 +50,7 @@ func TestOpenRoSnapshotsWithOverrides(t *testing.T) {
 
 	stagedSeg := filepath.Join(stagingDir, snaptype.SegmentFileName(version.V1_0, 10_000, 20_000, headers.Enum()))
 
-	s, err := OpenRoSnapshotsWithOverrides(cfg, liveDir, []string{stagedSeg}, []snaptype.Type{headers}, true, logger)
+	s, err := OpenRoSnapshotsWithOverrides(cfg, liveDir, []string{stagedSeg}, []snaptype.Type{headers}, headers, true, logger)
 	require.NoError(t, err)
 	defer s.Close()
 
@@ -77,6 +77,6 @@ func TestOpenRoSnapshotsWithOverrides_NoCoveringRange(t *testing.T) {
 
 	stagedSeg := filepath.Join(stagingDir, snaptype.SegmentFileName(version.V1_0, 20_000, 30_000, headers.Enum()))
 
-	_, err := OpenRoSnapshotsWithOverrides(cfg, liveDir, []string{stagedSeg}, []snaptype.Type{headers}, true, logger)
+	_, err := OpenRoSnapshotsWithOverrides(cfg, liveDir, []string{stagedSeg}, []snaptype.Type{headers}, headers, true, logger)
 	require.ErrorContains(t, err, "no live")
 }

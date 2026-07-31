@@ -56,7 +56,7 @@ import (
 type fakeBridge struct {
 	mu             sync.Mutex
 	seedCalls      [][]string
-	republishCalls int32
+	republishCalls atomic.Int32
 }
 
 func (f *fakeBridge) seed(names []string) {
@@ -67,7 +67,7 @@ func (f *fakeBridge) seed(names []string) {
 }
 
 func (f *fakeBridge) republish() error {
-	atomic.AddInt32(&f.republishCalls, 1)
+	f.republishCalls.Add(1)
 	return nil
 }
 
@@ -95,7 +95,7 @@ func (f *fakeBridge) seedNames() []string {
 type fakeBindingValidator struct {
 	inv     *snapshot.Inventory
 	binding func(toStep uint64) (block uint64, ok bool)
-	fired   int32
+	fired   atomic.Int32
 	fireMu  sync.Mutex
 	fireLog []uint64
 }
@@ -112,7 +112,7 @@ func (v *fakeBindingValidator) ValidateStep(_ context.Context, files []*snapshot
 		return nil
 	}
 	v.inv.RegisterStepBlockBoundary(toStep, block)
-	atomic.AddInt32(&v.fired, 1)
+	v.fired.Add(1)
 	v.fireMu.Lock()
 	v.fireLog = append(v.fireLog, toStep)
 	v.fireMu.Unlock()
@@ -204,8 +204,7 @@ func buildPublisherStackWithChain(t *testing.T, ctx context.Context, snapDir str
 // reaching Indexed, because no binding existed.
 func TestPublisher_BlockFlow_AdvancesToAdvertisable(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	snapDir := t.TempDir()
 	_, inv, bridge := buildPublisherStack(t, ctx, snapDir)
@@ -248,7 +247,7 @@ func TestPublisher_BlockFlow_AdvancesToAdvertisable(t *testing.T) {
 
 	// Bridge subscriber fired Seed + RepublishChainToml for the
 	// advanced files.
-	require.GreaterOrEqual(t, atomic.LoadInt32(&bridge.republishCalls), int32(1),
+	require.GreaterOrEqual(t, bridge.republishCalls.Load(), int32(1),
 		"RepublishChainToml should have fired at least once")
 	seeded := bridge.seedNames()
 	for _, n := range wantNames {
@@ -262,8 +261,7 @@ func TestPublisher_BlockFlow_AdvancesToAdvertisable(t *testing.T) {
 // This is the "wait for binding" gate working as designed.
 func TestPublisher_BlockFlow_BlockedWithoutBinding(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	snapDir := t.TempDir()
 	_, inv, bridge := buildPublisherStack(t, ctx, snapDir)
@@ -298,7 +296,7 @@ func TestPublisher_BlockFlow_BlockedWithoutBinding(t *testing.T) {
 		require.Equal(t, snapshot.LifecycleIndexed, state,
 			"%q must stay at Indexed without a binding", n)
 	}
-	require.Equal(t, int32(0), atomic.LoadInt32(&bridge.republishCalls),
+	require.Equal(t, int32(0), bridge.republishCalls.Load(),
 		"bridge should NOT fire when files stay at Indexed")
 }
 
@@ -312,8 +310,7 @@ func TestPublisher_BlockFlow_BlockedWithoutBinding(t *testing.T) {
 // blocks ALL block files on a fresh publisher.
 func TestPublisher_StateFiles_DiscoveredFromSubdirs(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	snapDir := t.TempDir()
 	// Erigon places state files in subdirectories of snap-dir.
@@ -356,8 +353,7 @@ func TestPublisher_StateFiles_DiscoveredFromSubdirs(t *testing.T) {
 // → no binding → block-step wait gate stays closed forever.
 func TestPublisher_StateFile_RegistersBinding_UnblocksBlockFiles(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	snapDir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(snapDir, "domain"), 0o755))
@@ -400,7 +396,7 @@ func TestPublisher_StateFile_RegistersBinding_UnblocksBlockFiles(t *testing.T) {
 	// discovered → lifecycle ran the binding validator on it →
 	// binding registered).
 	require.Eventually(t, func() bool {
-		return atomic.LoadInt32(&binding.fired) > 0
+		return binding.fired.Load() > 0
 	}, 5*time.Second, 50*time.Millisecond,
 		"binding validator should fire on the discovered commitment file")
 	_, hasBinding := inv.BlockToStep(25_030_000)
@@ -429,7 +425,7 @@ func TestPublisher_StateFile_RegistersBinding_UnblocksBlockFiles(t *testing.T) {
 			}())
 
 	// Bridge subscriber fires for the advanced files.
-	require.GreaterOrEqual(t, atomic.LoadInt32(&bridge.republishCalls), int32(1),
+	require.GreaterOrEqual(t, bridge.republishCalls.Load(), int32(1),
 		"RepublishChainToml should fire for advanced files")
 	seeded := bridge.seedNames()
 	for _, n := range wantBlockFiles {

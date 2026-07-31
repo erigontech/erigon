@@ -47,18 +47,6 @@ func TestEthTransferLog(t *testing.T) {
 	require.Equal(t, want[:], []byte(l.Data))
 }
 
-func TestEthBurnLog(t *testing.T) {
-	t.Parallel()
-	from := common.HexToAddress("0x01")
-	amount := *uint256.NewInt(1234)
-
-	l := EthBurnLog(from, amount)
-	require.Equal(t, params.SystemAddress.Value(), l.Address)
-	require.Equal(t, []common.Hash{EthBurnLogEvent, from.Hash()}, l.Topics)
-	want := amount.Bytes32()
-	require.Equal(t, want[:], []byte(l.Data))
-}
-
 func TestVerifyDAOHeaderExtraData(t *testing.T) {
 	t.Parallel()
 

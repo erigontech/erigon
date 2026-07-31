@@ -25,10 +25,10 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dlcomp "github.com/erigontech/erigon/node/components/downloader"
@@ -305,7 +305,7 @@ func (p *Provider) validateStagedBatchStage2(ctx context.Context, batch *dlcomp.
 // validation.ErrPause — aborts: a fully-staged batch validated against
 // a synchronously-opened overlay has nothing legitimately pending, so a
 // pause signals a real problem.
-func (p *Provider) runStage2Validators(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, entries []*snapshot.FileEntry, pruneMode prune.Mode) error {
+func (p *Provider) runStage2Validators(ctx context.Context, db kv.TemporalRoDB, br dbservices.FullBlockReader, entries []*snapshot.FileEntry, pruneMode prune.Mode) error {
 	hasBlock := false
 	for _, fe := range entries {
 		if fe.Domain == "" && (strings.HasSuffix(fe.Name, ".seg") || strings.HasSuffix(fe.Name, ".idx")) {

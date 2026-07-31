@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -45,8 +46,9 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-// BenchmarkEngineGetBlobsV3WorstCasePayload gives e2e measurements for engine_getBlobsV3.
-func BenchmarkEngineGetBlobsV3WorstCasePayload(b *testing.B) {
+// BenchmarkEngineGetBlobsV3 gives e2e measurements for engine_getBlobsV3 at the mainnet-typical
+// (6 blobs) and protocol worst-case (128 blobs) request sizes.
+func BenchmarkEngineGetBlobsV3(b *testing.B) {
 	if os.Getenv("ERIGON_RUN_GETBLOBS_BENCH") == "" {
 		b.Skip("set ERIGON_RUN_GETBLOBS_BENCH=1 to run this full-node benchmark")
 	}
@@ -84,52 +86,64 @@ func BenchmarkEngineGetBlobsV3WorstCasePayload(b *testing.B) {
 	// issue a raw JWT-authenticated POST and drain the body to io.Discard. The client never
 	// hex-decodes the multi-MB payload into structs — in production that cost is the consensus
 	// layer's, not erigon's — so the timing reflects what the node is actually charged for.
-	reqBody, err := json.Marshal(map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "engine_getBlobsV3",
-		"params":  []any{hashes},
-	})
-	require.NoError(b, err)
-
+	// The default transport advertises Accept-Encoding: gzip, as stock CL http clients do.
 	httpClient := &http.Client{Transport: jwt.NewHttpRoundTripper(http.DefaultTransport, eat.JwtSecret)}
-	getBlobsRaw := func() (int64, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, eat.EngineApiUrl, bytes.NewReader(reqBody))
-		if err != nil {
-			return 0, err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		httpResp, err := httpClient.Do(req)
-		if err != nil {
-			return 0, err
-		}
-		n, err := io.Copy(io.Discard, httpResp.Body)
-		_ = httpResp.Body.Close()
-		if err != nil {
-			return 0, err
-		}
-		if httpResp.StatusCode != http.StatusOK {
-			return 0, fmt.Errorf("unexpected status %d", httpResp.StatusCode)
-		}
-		return n, nil
-	}
+	for _, tc := range []struct {
+		name   string
+		hashes []common.Hash
+	}{
+		{"blobs=6", hashes[:6]},
+		{fmt.Sprintf("blobs=%d", maxBlobs), hashes},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			reqBody, err := json.Marshal(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      1,
+				"method":  "engine_getBlobsV3",
+				"params":  []any{tc.hashes},
+			})
+			require.NoError(b, err)
 
-	respBytes, err := getBlobsRaw()
-	require.NoError(b, err)
-	require.Greater(b, respBytes, int64(1<<20), "response must carry the blobs")
-	b.Logf("worst-case getBlobsV3 over JSON-RPC: %d blobs, %d cell proofs/blob, ~%d KiB response (client decode excluded)", maxBlobs, params.CellsPerExtBlob, respBytes/1024)
+			getBlobsRaw := func() (int64, error) {
+				req, err := http.NewRequestWithContext(ctx, http.MethodPost, eat.EngineApiUrl, bytes.NewReader(reqBody))
+				if err != nil {
+					return 0, err
+				}
+				req.Header.Set("Content-Type", "application/json")
+				httpResp, err := httpClient.Do(req)
+				if err != nil {
+					return 0, err
+				}
+				n, err := io.Copy(io.Discard, httpResp.Body)
+				_ = httpResp.Body.Close()
+				if err != nil {
+					return 0, err
+				}
+				if httpResp.StatusCode != http.StatusOK {
+					return 0, fmt.Errorf("unexpected status %d", httpResp.StatusCode)
+				}
+				return n, nil
+			}
 
-	b.SetBytes(respBytes)
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		n, err := getBlobsRaw()
-		if err != nil {
-			b.Fatal(err)
-		}
-		if n < 1<<20 {
-			b.Fatalf("short response: %d bytes", n)
-		}
+			minRespBytes := int64(len(tc.hashes)) * params.BlobSize * 2
+			respBytes, err := getBlobsRaw()
+			require.NoError(b, err)
+			require.Greater(b, respBytes, minRespBytes, "response must carry the blobs")
+			b.Logf("getBlobsV3 over JSON-RPC: %d blobs, %d cell proofs/blob, ~%d KiB response (client decode excluded)", len(tc.hashes), params.CellsPerExtBlob, respBytes/1024)
+
+			b.SetBytes(respBytes)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				n, err := getBlobsRaw()
+				if err != nil {
+					b.Fatal(err)
+				}
+				if n < minRespBytes {
+					b.Fatalf("short response: %d bytes", n)
+				}
+			}
+		})
 	}
 }
 
@@ -144,15 +158,9 @@ func submitBlobTxns(ctx context.Context, b *testing.B, eat engineapitester.Engin
 	nonce := nonceBig.Uint64()
 
 	hashes := make([]common.Hash, 0, maxBlobs)
-	tag := byte(0)
 	for remaining := maxBlobs; remaining > 0; {
 		count := min(remaining, params.MaxBlobsPerTxn)
-		tags := make([]byte, count)
-		for i := range tags {
-			tag++
-			tags[i] = tag
-		}
-		wrapper := buildWrappedBlobTxn(b, eat.ChainId(), eat.CoinbaseKey, nonce, tags)
+		wrapper := buildWrappedBlobTxn(b, eat.ChainId(), eat.CoinbaseKey, nonce, count)
 		var buf bytes.Buffer
 		require.NoError(b, wrapper.MarshalBinaryWrapped(&buf))
 		var txnHash common.Hash
@@ -165,10 +173,10 @@ func submitBlobTxns(ctx context.Context, b *testing.B, eat engineapitester.Engin
 	return hashes
 }
 
-// buildWrappedBlobTxn builds a Fulu-era (cell-proof) wrapped blob txn carrying one distinct blob per
-// tag, signed by key. Each blob is zero apart from one low-order byte set to its tag, which keeps
-// every field element a valid BLS scalar while giving every blob a distinct commitment.
-func buildWrappedBlobTxn(b *testing.B, chainID *uint256.Int, key *ecdsa.PrivateKey, nonce uint64, tags []byte) *types.BlobTxWrapper {
+// buildWrappedBlobTxn builds a Fulu-era (cell-proof) wrapped blob txn carrying count distinct blobs,
+// signed by key. Blob field elements are random below the BLS modulus (top byte zero): zero-filled
+// blobs would make content-dependent costs (compression, transfer) vanish from the measurement.
+func buildWrappedBlobTxn(b *testing.B, chainID *uint256.Int, key *ecdsa.PrivateKey, nonce uint64, count int) *types.BlobTxWrapper {
 	b.Helper()
 	to := common.Address{0x10}
 	wrapper := &types.BlobTxWrapper{WrapperVersion: 1}
@@ -180,14 +188,18 @@ func buildWrappedBlobTxn(b *testing.B, chainID *uint256.Int, key *ecdsa.PrivateK
 	wrapper.Tx.FeeCap = *uint256.NewInt(1_000_000_000_000)
 	wrapper.Tx.MaxFeePerBlobGas = *uint256.NewInt(1_000_000_000)
 
-	wrapper.Blobs = make(types.Blobs, len(tags))
-	wrapper.Commitments = make(types.BlobKzgs, len(tags))
-	wrapper.Proofs = make(types.KZGProofs, 0, len(tags)*int(params.CellsPerExtBlob))
-	wrapper.Tx.BlobVersionedHashes = make([]common.Hash, len(tags))
+	wrapper.Blobs = make(types.Blobs, count)
+	wrapper.Commitments = make(types.BlobKzgs, count)
+	wrapper.Proofs = make(types.KZGProofs, 0, count*int(params.CellsPerExtBlob))
+	wrapper.Tx.BlobVersionedHashes = make([]common.Hash, count)
 
 	kzgCtx := kzg.Ctx()
-	for i, tag := range tags {
-		wrapper.Blobs[i][len(wrapper.Blobs[i])-1] = tag
+	for i := range count {
+		_, err := rand.Read(wrapper.Blobs[i][:])
+		require.NoError(b, err)
+		for fe := 0; fe < len(wrapper.Blobs[i]); fe += 32 {
+			wrapper.Blobs[i][fe] = 0
+		}
 		commitment, err := kzgCtx.BlobToKZGCommitment((*goethkzg.Blob)(&wrapper.Blobs[i]), 0)
 		require.NoError(b, err)
 		copy(wrapper.Commitments[i][:], commitment[:])

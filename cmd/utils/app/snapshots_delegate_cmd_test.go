@@ -17,22 +17,43 @@
 package app
 
 import (
-	"bytes"
+	"context"
 	"crypto/elliptic"
 	"encoding/hex"
-	"flag"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/node/components/snapshotauth"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 )
+
+// runDelegate builds a v3 cli.Command wired to doSnapshotDelegate with
+// the given argv and runs it — the closest analogue to what the actual
+// CLI does end-to-end.
+func runDelegate(t *testing.T, args []string) error {
+	t.Helper()
+	cmd := &cli.Command{
+		Name: "delegate",
+		Flags: []cli.Flag{
+			&delegateTargetENRFlag,
+			&delegateSignerKeyFlag,
+			&delegateCapabilitiesFlag,
+			&delegateExpiresFlag,
+			&delegateDepthFlag,
+			&delegateOutputFlag,
+			&delegateParentFlag,
+			&delegateJSONFlag,
+		},
+		Action: doSnapshotDelegate,
+	}
+	return cmd.Run(context.Background(), append([]string{"delegate"}, args...))
+}
 
 func TestDoSnapshotDelegate_RootSignAndDecode(t *testing.T) {
 	dir := t.TempDir()
@@ -54,16 +75,14 @@ func TestDoSnapshotDelegate_RootSignAndDecode(t *testing.T) {
 
 	outPath := filepath.Join(dir, "delegation.cbor")
 
-	c := newDelegateCLI(t, []string{
+	require.NoError(t, runDelegate(t, []string{
 		"--target-enr", enrStr,
 		"--signer-key", signerPath,
 		"--capabilities", "snapshot:advertise,snapshot:serve",
 		"--expires", "never",
 		"--depth", "1",
 		"--output", outPath,
-	})
-
-	require.NoError(t, doSnapshotDelegate(c))
+	}))
 
 	raw, err := os.ReadFile(outPath)
 	require.NoError(t, err)
@@ -108,13 +127,13 @@ func TestDoSnapshotDelegate_ChainsFromParent(t *testing.T) {
 	midEnr := midNode.URLv4()
 
 	rootOut := filepath.Join(dir, "root.cbor")
-	require.NoError(t, doSnapshotDelegate(newDelegateCLI(t, []string{
+	require.NoError(t, runDelegate(t, []string{
 		"--target-enr", midEnr,
 		"--signer-key", rootPath,
 		"--capabilities", "snapshot:advertise,snapshot:delegate",
 		"--depth", "2",
 		"--output", rootOut,
-	})))
+	}))
 
 	// Leaf ENR.
 	leafKey, err := crypto.GenerateKey()
@@ -127,14 +146,14 @@ func TestDoSnapshotDelegate_ChainsFromParent(t *testing.T) {
 
 	// Mid signs a chained delegation to leaf.
 	leafOut := filepath.Join(dir, "leaf.cbor")
-	require.NoError(t, doSnapshotDelegate(newDelegateCLI(t, []string{
+	require.NoError(t, runDelegate(t, []string{
 		"--target-enr", leafEnr,
 		"--signer-key", midPath,
 		"--capabilities", "snapshot:advertise",
 		"--depth", "1",
 		"--output", leafOut,
 		"--parent", rootOut,
-	})))
+	}))
 
 	raw, err := os.ReadFile(leafOut)
 	require.NoError(t, err)
@@ -171,13 +190,12 @@ func TestDoSnapshotDelegate_RejectsBadCapability(t *testing.T) {
 	targetNode, err := enode.New(enode.ValidSchemes, &rec)
 	require.NoError(t, err)
 
-	c := newDelegateCLI(t, []string{
+	err = runDelegate(t, []string{
 		"--target-enr", targetNode.URLv4(),
 		"--signer-key", signerPath,
 		"--capabilities", "snapshot:typo",
 		"--output", filepath.Join(dir, "out.cbor"),
 	})
-	err = doSnapshotDelegate(c)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unknown capability")
 }
@@ -197,32 +215,6 @@ func TestReadENR_FromFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, targetNode.URLv4(), got,
 		"first non-empty non-comment line is the ENR")
-}
-
-// newDelegateCLI builds a *cli.Context with the given flags pre-set so
-// the action body runs as if invoked from the command line.
-func newDelegateCLI(t *testing.T, args []string) *cli.Context {
-	t.Helper()
-	app := &cli.App{
-		Writer:    &bytes.Buffer{},
-		ErrWriter: &bytes.Buffer{},
-	}
-	set := flag.NewFlagSet("delegate", flag.ContinueOnError)
-	flags := []cli.Flag{
-		&delegateTargetENRFlag,
-		&delegateSignerKeyFlag,
-		&delegateCapabilitiesFlag,
-		&delegateExpiresFlag,
-		&delegateDepthFlag,
-		&delegateOutputFlag,
-		&delegateParentFlag,
-		&delegateJSONFlag,
-	}
-	for _, f := range flags {
-		require.NoError(t, f.Apply(set))
-	}
-	require.NoError(t, set.Parse(args))
-	return cli.NewContext(app, set, nil)
 }
 
 // silence unused-import warning for hex in case future tests need it.

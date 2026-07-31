@@ -17,6 +17,7 @@
 package snapshotauth
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -101,12 +102,7 @@ func TestMintForkAuthorityUCAN_EmbedsForkedFromCapability(t *testing.T) {
 
 	// Standard publish capabilities are present.
 	hasCap := func(want string) bool {
-		for _, c := range d.Capabilities {
-			if c == want {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(d.Capabilities, want)
 	}
 	require.True(t, hasCap(string(CapAdvertise)))
 	require.True(t, hasCap(string(CapServe)))

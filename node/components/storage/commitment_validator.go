@@ -22,15 +22,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/node/components/storage/validation"
 )
@@ -69,7 +70,7 @@ import (
 // commitment.kv to read, and the validator has nothing to check.
 type CommitmentDomainValidator struct {
 	DB          kv.TemporalRoDB
-	BlockReader services.FullBlockReader
+	BlockReader dbservices.FullBlockReader
 	Inventory   *snapshot.Inventory
 
 	// Logger may be nil. When set, ValidateStep emits a positive
@@ -435,8 +436,8 @@ func blockSegAdvertisableForBlock(inv *snapshot.Inventory, blockNum uint64) bool
 		return false
 	}
 	files := inv.BlockFiles()
-	for i := len(files) - 1; i >= 0; i-- {
-		f := files[i]
+	for _, f := range slices.Backward(files) {
+
 		if !f.Advertisable || f.ToBlock <= f.FromBlock {
 			continue
 		}
@@ -475,7 +476,7 @@ func blockSegAdvertisableForBlock(inv *snapshot.Inventory, blockNum uint64) bool
 // OnValidation pass — the redundancy is intentional, so the operator
 // gets one consolidated bootstrap-time log AND the per-file failure
 // is also tracked for quarantine.
-func extractBootstrapCommitmentAnchors(ctx context.Context, inv *snapshot.Inventory, db kv.TemporalRoDB, br services.FullBlockReader, snapDir string, logger log.Logger) {
+func extractBootstrapCommitmentAnchors(ctx context.Context, inv *snapshot.Inventory, db kv.TemporalRoDB, br dbservices.FullBlockReader, snapDir string, logger log.Logger) {
 	if inv == nil || db == nil {
 		return
 	}

@@ -29,7 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
 	snaptype2 "github.com/erigontech/erigon/db/snaptype2"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -107,7 +107,7 @@ func TestCutoverStagedBatch_SwapsLiveFile(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, liveBefore, stagedSegBytes, "fixture: staged content must differ from live")
 
-	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, logger)
+	snaps := blocksnapshots.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, logger)
 	require.NoError(t, snaps.OpenFolder())
 	defer snaps.Close()
 

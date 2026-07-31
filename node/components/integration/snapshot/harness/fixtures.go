@@ -183,10 +183,7 @@ func mergedFixture(name string, from, to uint64) *Fixture {
 func unmergedSlices(d snapshot.Domain, from, to, step uint64) []*snapshot.FileEntry {
 	entries := make([]*snapshot.FileEntry, 0, 2*((to-from)/step))
 	for lo := from; lo < to; lo += step {
-		hi := lo + step
-		if hi > to {
-			hi = to
-		}
+		hi := min(lo+step, to)
 		for _, ext := range []string{"kv", "kvi"} {
 			entries = append(entries, &snapshot.FileEntry{
 				Domain:   d,

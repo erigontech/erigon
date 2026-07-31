@@ -21,10 +21,10 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/node/components/storage/validation"
@@ -58,7 +58,7 @@ import (
 // keep the old contract.
 type ReceiptRootValidator struct {
 	DB          kv.TemporalRoDB
-	BlockReader services.FullBlockReader
+	BlockReader dbservices.FullBlockReader
 	ChainConfig *chain.Config
 	Logger      log.Logger
 	PruneMode   prune.Mode

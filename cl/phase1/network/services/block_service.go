@@ -44,9 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-var (
-	ErrInvalidSignature = errors.New("invalid signature")
-)
+var ErrInvalidSignature = errors.New("invalid signature")
 
 type proposerIndexAndSlot struct {
 	proposerIndex uint64
@@ -131,7 +129,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	currentSlot := b.syncedData.HeadSlot()
 
 	// [IGNORE] The block is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that
-	//signed_beacon_block.message.slot <= current_slot (a client MAY queue future blocks for processing at the appropriate slot).
+	// signed_beacon_block.message.slot <= current_slot (a client MAY queue future blocks for processing at the appropriate slot).
 	if currentSlot < msg.Block.Slot && !b.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Block.Slot) {
 		return fmt.Errorf("%w: block is not from a future slot: %d > %d", ErrIgnore, currentSlot, msg.Block.Slot)
 	}
@@ -217,12 +215,10 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		if status == execution_client.PayloadStatusInvalidated {
 			return errors.New("parent execution payload is invalid")
 		}
-	} else {
+	} else if msg.Block.Body.BlobKzgCommitments != nil && msg.Block.Body.BlobKzgCommitments.Len() > int(maxBlobsPerBlock) {
 		// Pre-GLOAS: [REJECT] The length of KZG commitments is less than or equal to the limitation defined in Consensus Layer
 		// i.e. validate that len(body.signed_beacon_block.message.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
-		if msg.Block.Body.BlobKzgCommitments != nil && msg.Block.Body.BlobKzgCommitments.Len() > int(maxBlobsPerBlock) {
-			return ErrInvalidCommitmentsCount
-		}
+		return ErrInvalidCommitmentsCount
 	}
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store

@@ -122,15 +122,8 @@ func lineageCompatible(localChain, peerChain [][4]byte) bool {
 	}
 	localFinal := localChain[len(localChain)-1]
 	peerFinal := peerChain[len(peerChain)-1]
-	for _, h := range localChain {
-		if h == peerFinal {
-			return true
-		}
+	if slices.Contains(localChain, peerFinal) {
+		return true
 	}
-	for _, h := range peerChain {
-		if h == localFinal {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(peerChain, localFinal)
 }

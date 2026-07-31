@@ -23,10 +23,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon/rpc/rpccfg"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/rpc"
@@ -37,7 +36,7 @@ var latestBlock = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	baseApi := NewBaseApi(nil, nil, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	baseApi := NewBaseApi(nil, nil, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 	api := NewParityAPIImpl(baseApi, m.DB)
 	answers := []string{
 		"0000000000000000000000000000000000000000000000000000000000000000",

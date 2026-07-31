@@ -174,7 +174,7 @@ func TestRollingV2Publisher_KeepsSubsetValidGenerations(t *testing.T) {
 
 	// Seven generations with distinct content but the same file-name
 	// set — every prior generation stays a subset of the latest.
-	for i := 0; i < 7; i++ {
+	for i := range 7 {
 		_, err := pub.Publish(context.Background(), rollingTestInventory(t, 0x20+byte(i)), 0, nil)
 		require.NoError(t, err, "publish %d", i)
 	}
@@ -196,7 +196,7 @@ func TestRollingV2Publisher_EvictsWhenReferencesRetired(t *testing.T) {
 
 	// gen 0,1: distinct content, both listing {accounts.0-1024,
 	// storage.0-1024}.
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		_, err := pub.Publish(context.Background(), rollingTestInventory(t, 0x21+byte(i)), 0, nil)
 		require.NoError(t, err)
 	}
@@ -243,7 +243,7 @@ func TestRollingV2Publisher_RestartResumesGenerations(t *testing.T) {
 	first, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 	first.SetENRFingerprint(testENRFP)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, err := first.Publish(context.Background(), rollingTestInventory(t, 0x30+byte(i)), 0, nil)
 		require.NoError(t, err)
 	}
@@ -272,7 +272,7 @@ func TestRollingV2Publisher_RestartRecoversNameSets(t *testing.T) {
 	first, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 	first.SetENRFingerprint(testENRFP)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, err := first.Publish(context.Background(), rollingTestInventory(t, 0x40+byte(i)), 0, nil)
 		require.NoError(t, err)
 	}

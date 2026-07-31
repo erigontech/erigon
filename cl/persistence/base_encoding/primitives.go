@@ -54,7 +54,7 @@ func EncodeCompactUint64(x uint64) (out []byte) {
 
 // DecodeCompactUint64 decodes a number encoded with EncodeCompactUint64
 func DecodeCompactUint64(buf []byte) (x uint64) {
-	for i := 0; i < len(buf); i++ {
+	for i := range buf {
 		x |= uint64(buf[i]&0x7f) << (7 * uint(i))
 		if buf[i]&0x80 == 0 {
 			return

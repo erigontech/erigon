@@ -228,7 +228,7 @@ func TestOrchestratorBlockFilesDispatchInPhase1(t *testing.T) {
 	bus.Publish(DownloadComplete{FileName: stateEntry.Name, InfoHash: [20]byte{0xaa}, Size: 1024})
 	bus.Publish(DownloadComplete{FileName: headerEntry.Name, InfoHash: [20]byte{0xbb}, Size: 2048})
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		mu.Lock()
 		fired := stateReadyFired
 		mu.Unlock()
@@ -342,7 +342,7 @@ func TestOrchestratorSaltMetaDispatchInPhase1(t *testing.T) {
 	bus.Publish(DownloadComplete{FileName: stateEntry.Name, InfoHash: [20]byte{0xaa}, Size: 1024})
 	bus.Publish(DownloadComplete{FileName: metaEntry.Name, InfoHash: [20]byte{0xbb}, Size: 100})
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		mu.Lock()
 		fired := stateReadyFired
 		mu.Unlock()

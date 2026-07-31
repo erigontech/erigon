@@ -36,6 +36,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -827,12 +828,7 @@ func (p *Provider) gateOnUCAN(
 
 // containsCapability reports whether caps includes want.
 func containsCapability(caps []string, want string) bool {
-	for _, c := range caps {
-		if c == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(caps, want)
 }
 
 // delegationTimeValid reports whether now is within d's

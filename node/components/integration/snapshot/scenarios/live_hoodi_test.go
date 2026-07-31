@@ -90,12 +90,12 @@ func TestLiveHoodi_TipFixtures(t *testing.T) {
 	//   - per-domain coverage at TrustVerified equals the live peer's full
 	//     coverage (the leecher ends up with the same data, possibly at
 	//     different file granularity)
-	requestCount := leecher.Bus.CountOfType(reflect.TypeOf(flow.DownloadRequested{}))
+	requestCount := leecher.Bus.CountOfType(reflect.TypeFor[flow.DownloadRequested]())
 	require.Greater(t, requestCount, 0, "leecher should request at least one file")
-	completeCount := leecher.Bus.CountOfType(reflect.TypeOf(flow.DownloadComplete{}))
+	completeCount := leecher.Bus.CountOfType(reflect.TypeFor[flow.DownloadComplete]())
 	require.Equal(t, requestCount, completeCount,
 		"every request should complete against the live coordinator")
-	failedCount := leecher.Bus.CountOfType(reflect.TypeOf(flow.DownloadFailed{}))
+	failedCount := leecher.Bus.CountOfType(reflect.TypeFor[flow.DownloadFailed]())
 	require.Equal(t, 0, failedCount, "no downloads should fail")
 
 	for _, d := range peer.Inventory.Domains() {

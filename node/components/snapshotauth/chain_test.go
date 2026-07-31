@@ -445,7 +445,7 @@ func TestVerify_ChainDepthExceeded(t *testing.T) {
 	parents := []([]byte){}
 	// Root's DepthCap covers the whole chain; each link decrements by 1.
 	rootCap := uint16(numLinks + 2)
-	for i := 0; i < numLinks; i++ {
+	for i := range numLinks {
 		dc := rootCap - uint16(i)
 		d := mustSignedDelegation(t, keysPath[i], keysPath[i+1],
 			[]string{string(CapAdvertise), string(CapDelegate)},

@@ -11,11 +11,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	proto_sentry "github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -176,7 +176,7 @@ func (m *mockSentryClient) PenalizePeer(ctx context.Context, req *proto_sentry.P
 }
 
 type mockBlockReader struct {
-	services.FullBlockReader
+	dbservices.FullBlockReader
 }
 
 // TestBlockRange69_InvalidPacketKicksPeer verifies that an invalid
@@ -244,7 +244,7 @@ func (m *mockStatusDataProvider) GetStatusData(ctx context.Context) (*proto_sent
 }
 
 type mockFullBlockReader struct {
-	services.FullBlockReader
+	dbservices.FullBlockReader
 	readyFunc func(ctx context.Context) <-chan error
 }
 
@@ -252,13 +252,13 @@ func (m *mockFullBlockReader) Ready(ctx context.Context) <-chan error {
 	return m.readyFunc(ctx)
 }
 
-// balHeaderNumberReader is a minimal services.FullBlockReader stub that resolves
+// balHeaderNumberReader is a minimal dbservices.FullBlockReader stub that resolves
 // hash → block-number via an explicit map. AnswerGetBlockAccessListsQuery only
 // reads HeaderNumber; every other method falls through to the embedded nil
 // interface and would panic if called, which is the correct behaviour — it
 // flags accidental coupling.
 type balHeaderNumberReader struct {
-	services.FullBlockReader
+	dbservices.FullBlockReader
 	byHash map[common.Hash]uint64
 }
 
@@ -279,7 +279,7 @@ func (m *balHeaderNumberReader) HeaderNumber(_ context.Context, _ kv.Getter, has
 func TestGetBlockAccessLists71_AnswersAndSends(t *testing.T) {
 	ctx := context.Background()
 
-	db := temporal.NewTestDB(t, dbcfg.ChainDB)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	rwTx, err := db.BeginRw(ctx)
 	if err != nil {
 		t.Fatalf("begin rw: %v", err)

@@ -26,17 +26,23 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/generics"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -46,14 +52,103 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
-	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/txnprovider"
+	txnpool "github.com/erigontech/erigon/txnprovider/txpool"
 )
+
+type blockingTxnProvider struct {
+	ready     chan struct{}
+	release   chan struct{}
+	exhausted chan struct{}
+	txns      []types.Transaction
+	readyOnce sync.Once
+	emptyOnce sync.Once
+}
+
+func (p *blockingTxnProvider) ProvideTxns(ctx context.Context, _ ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	first := false
+	p.readyOnce.Do(func() {
+		first = true
+		close(p.ready)
+	})
+	if first {
+		select {
+		case <-p.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return p.txns, nil
+	}
+	p.emptyOnce.Do(func() { close(p.exhausted) })
+	return nil, nil
+}
+
+type rewindingTxnProvider struct {
+	pool  *txnpool.TxPool
+	head  *remoteproto.StateChangeBatch
+	ready chan struct{}
+	once  sync.Once
+	err   error
+}
+
+func (p *rewindingTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	p.once.Do(func() {
+		p.err = p.pool.OnNewBlock(ctx, p.head, txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{})
+		close(p.ready)
+	})
+	if p.err != nil {
+		return nil, p.err
+	}
+	return p.pool.ProvideTxns(ctx, opts...)
+}
+
+type observingTxnProvider struct {
+	txnprovider.TxnProvider
+	txnCounts chan int
+}
+
+func (p *observingTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	txns, err := p.TxnProvider.ProvideTxns(ctx, opts...)
+	if err == nil {
+		p.txnCounts <- len(txns)
+	}
+	return txns, err
+}
+
+func waitForProvidedTxnCount(t *testing.T, txnCounts <-chan int, want int) {
+	t.Helper()
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case got := <-txnCounts:
+			if got == want {
+				return
+			}
+		case <-timer.C:
+			t.Fatalf("transaction provider did not return %d transactions", want)
+		}
+	}
+}
+
+func txPoolHead(block *types.Block) *remoteproto.StateChangeBatch {
+	return &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: block.BaseFee().Uint64(),
+		BlockGasLimit:       block.GasLimit(),
+		ChangeBatch: []*remoteproto.StateChange{
+			{BlockHeight: block.NumberU64()},
+		},
+	}
+}
 
 func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	// See https://github.com/erigontech/erigon/issues/18823
@@ -449,6 +544,7 @@ func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
 		t.Run(mode.name, func(t *testing.T) {
 			ctx := t.Context()
 			m := execmoduletester.New(t, opts...)
+			m.ExecModule.WaitIdle(ctx)
 
 			const chainLen = 9
 			const reorgBackTo = 5
@@ -548,7 +644,7 @@ func TestAssembleBlock(t *testing.T) {
 	require.NoError(t, err)
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -562,6 +658,147 @@ func TestAssembleBlock(t *testing.T) {
 
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
+}
+
+func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	parentChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, gen *blockgen.BlockGen) {
+		tx, txErr := types.SignTx(
+			types.NewTransaction(0, common.Address{1}, uint256.NewInt(10_000), 50_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+			m.Key,
+		)
+		require.NoError(t, txErr)
+		gen.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(parentChain))
+	parent := parentChain.TopBlock
+	builderTx, err := types.SignTx(
+		types.NewTransaction(1, common.Address{2}, uint256.NewInt(20_000), 50_000, uint256.NewInt(parent.BaseFee().Uint64()), nil),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+		m.Key,
+	)
+	require.NoError(t, err)
+	builderTx.SetSender(accounts.InternAddress(m.Address))
+	siblingTx, err := types.SignTx(
+		types.NewTransaction(1, common.Address{3}, uint256.NewInt(30_000), 50_000, uint256.NewInt(parent.BaseFee().Uint64()), nil),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+		m.Key,
+	)
+	require.NoError(t, err)
+	siblingChain, err := blockgen.GenerateChain(m.ChainConfig, parent, m.Engine, m.DB, 1, func(_ int, gen *blockgen.BlockGen) {
+		gen.AddTx(siblingTx)
+	})
+	require.NoError(t, err)
+	provider := &blockingTxnProvider{
+		ready:     make(chan struct{}),
+		release:   make(chan struct{}, 1),
+		exhausted: make(chan struct{}),
+		txns:      []types.Transaction{builderTx},
+	}
+	parentBeaconBlockRoot := randomHash()
+	payloadID, err := assembleBlock(ctx, m.ExecModule, &builder.Parameters{
+		ParentHash:            parent.Hash(),
+		Timestamp:             parent.Time() + 1,
+		PrevRandao:            parent.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{4},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		CustomTxnProvider:     provider,
+	})
+	require.NoError(t, err)
+	defer func() {
+		select {
+		case provider.release <- struct{}{}:
+		default:
+		}
+		_, _ = getAssembledBlock(context.Background(), m.ExecModule, payloadID)
+	}()
+	select {
+	case <-provider.ready:
+	case <-time.After(10 * time.Second):
+		t.Fatal("builder did not reach transaction selection")
+	}
+	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, siblingChain.Blocks))
+	provider.release <- struct{}{}
+	select {
+	case <-provider.exhausted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("builder did not finish transaction selection")
+	}
+	built, err := getAssembledBlock(ctx, m.ExecModule, payloadID)
+	require.NoError(t, err)
+	require.Equal(t, parent.Hash(), built.ParentHash())
+	require.Len(t, built.Transactions(), 1)
+	require.Equal(t, builderTx.Hash(), built.Transactions()[0].Hash())
+	status, err := insertBlocks(ctx, m.ExecModule, []*types.Block{built})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	validation, err := validateChain(ctx, m.ExecModule, built.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+}
+
+func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+
+	parent := chainPack.TopBlock
+	provider := &rewindingTxnProvider{
+		pool:  m.TxPool,
+		head:  txPoolHead(chainPack.Blocks[len(chainPack.Blocks)-2]),
+		ready: make(chan struct{}),
+	}
+	parentBeaconBlockRoot := randomHash()
+	payloadID, err := assembleBlock(ctx, m.ExecModule, &builder.Parameters{
+		ParentHash:            parent.Hash(),
+		Timestamp:             parent.Time() + 1,
+		PrevRandao:            parent.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		CustomTxnProvider:     provider,
+	})
+	require.NoError(t, err)
+
+	select {
+	case <-provider.ready:
+	case <-time.After(10 * time.Second):
+		t.Fatal("builder did not reach transaction selection")
+	}
+
+	requestCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := m.ExecModule.GetAssembledBlock(requestCtx, payloadID)
+		resultCh <- err
+	}()
+
+	var requestErr error
+	blocked := false
+	select {
+	case requestErr = <-resultCh:
+	case <-time.After(time.Second):
+		blocked = true
+	}
+
+	require.NoError(t, m.TxPool.OnNewBlock(ctx, txPoolHead(parent), txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{}))
+	if blocked {
+		select {
+		case <-resultCh:
+		case <-time.After(10 * time.Second):
+			t.Fatal("GetAssembledBlock did not return after restoring the txpool head")
+		}
+		t.Fatal("GetAssembledBlock remained blocked after context cancellation while the txpool was behind the builder parent")
+	}
+	require.ErrorIs(t, requestErr, context.Canceled)
 }
 
 func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
@@ -584,25 +821,31 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	require.NoError(t, err)
 	baseFee := chainPack.TopBlock.BaseFee().Uint64()
 	addTwoTxnsToPool(ctx, 1, t, m, txpool, baseFee)
+	provider := &observingTxnProvider{
+		TxnProvider: m.TxPool,
+		txnCounts:   make(chan int, 16),
+	}
 
 	var parentBeaconBlockRoot common.Hash
 	_, err = rand.Read(parentBeaconBlockRoot[:])
 	require.NoError(t, err)
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		CustomTxnProvider:     provider,
 	})
 	require.NoError(t, err)
 
-	// Add new transactions with a delay
-	time.Sleep(300 * time.Millisecond)
+	waitForProvidedTxnCount(t, provider.txnCounts, 2)
+	waitForProvidedTxnCount(t, provider.txnCounts, 0)
 	addTwoTxnsToPool(ctx, 3, t, m, txpool, baseFee)
+	waitForProvidedTxnCount(t, provider.txnCounts, 2)
+	waitForProvidedTxnCount(t, provider.txnCounts, 0)
 
-	// The block should have all four transactions
 	block, err := getAssembledBlock(ctx, exec, payloadId)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), block.NumberU64())
@@ -613,9 +856,20 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 }
 
 func insertBlocks(ctx context.Context, exec *execmodule.ExecModule, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
+	return insertBlocksWithBAL(ctx, exec, blocks, nil)
+}
+
+// insertBlocksWithBAL inserts blocks, attaching the parallel per-block BAL bytes
+// (as blockgen's ChainPack.BlockAccessLists carries them) onto each RawBlock so
+// the BAL reaches the DB — GenerateChain sets the header's BlockAccessListHash
+// but not the block's BlockAccessList field. bals may be nil.
+func insertBlocksWithBAL(ctx context.Context, exec *execmodule.ExecModule, blocks []*types.Block, bals [][]byte) (execmodule.ExecutionStatus, error) {
 	rawBlocks := make([]*types.RawBlock, len(blocks))
 	for i, b := range blocks {
 		rawBlocks[i] = &types.RawBlock{Header: b.HeaderNoCopy(), Body: b.RawBody()}
+		if i < len(bals) {
+			rawBlocks[i].BlockAccessList = bals[i]
+		}
 	}
 	return retryBusy(ctx, func() (execmodule.ExecutionStatus, bool, error) {
 		status, err := exec.InsertBlocks(ctx, rawBlocks)
@@ -752,7 +1006,7 @@ func TestAssembleEmptyBlock(t *testing.T) {
 	// Don't add any txns to pool — assemble empty block.
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -792,7 +1046,7 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -815,7 +1069,7 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 	addTwoTxnsToPool(ctx, 3, t, m, txpool, baseFee)
 	payloadId2, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            block.Hash(),
-		Timestamp:             block.Header().Time + 1,
+		Timestamp:             block.Time() + 1,
 		PrevRandao:            block.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -871,7 +1125,7 @@ func TestAssembleBlockWithContractCreation(t *testing.T) {
 	// Assemble block.
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -942,7 +1196,7 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 	// Assemble block 2 — should be gas-limited.
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1036,7 +1290,7 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	// Assemble block.
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1128,7 +1382,7 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 	beaconRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1228,7 +1482,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 	// Build 3 pre-Amsterdam blocks via the builder (timestamps 1, 2, 3).
 	topBlock := m.Genesis
 	baseFee := topBlock.BaseFee().Uint64()
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		nonce := uint64(i)
 		tx, txErr := types.SignTx(
 			types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil),
@@ -1241,7 +1495,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		require.NoError(t, addErr)
 		require.Equal(t, "success", r.Errors[0])
 
-		ts := topBlock.Header().Time + 1
+		ts := topBlock.Time() + 1
 		require.Less(t, ts, amsterdamTime) // still pre-Amsterdam
 		var prevRandao, beaconRoot common.Hash
 		_, _ = rand.Read(prevRandao[:])
@@ -1266,7 +1520,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		baseFee = block.BaseFee().Uint64()
 	}
 
-	require.Less(t, topBlock.Header().Time, amsterdamTime, "pre-Amsterdam blocks should have timestamp < amsterdamTime")
+	require.Less(t, topBlock.Time(), amsterdamTime, "pre-Amsterdam blocks should have timestamp < amsterdamTime")
 
 	// Add a contract deployment tx to the pool — exercises state gas (EIP-8037)
 	// more than simple EOA transfers.
@@ -1313,12 +1567,215 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 	block, err := getAssembledBlock(ctx, exec, payloadId)
 	require.NoError(t, err)
 	require.NotNil(t, block, "first Amsterdam block should be built successfully")
-	require.True(t, cfg.IsAmsterdam(block.Header().Time), "block should be an Amsterdam block")
+	require.True(t, cfg.IsAmsterdam(block.Time()), "block should be an Amsterdam block")
 	require.GreaterOrEqual(t, len(block.Transactions()), 1, "block should contain txpool txns")
 
 	// Insert, validate, and update fork choice.
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
+}
+
+// TestGetPayloadBodiesRegenerateBlockAccessLists verifies the payload-bodies
+// getters serve stored BALs as-is and, once the stored rows are pruned (kept
+// only for the reorg window), regenerate them by re-execution —
+// engine_getPayloadBodiesBy*V2 must serve BALs for the weak subjectivity period.
+func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(10_000), 50_000, baseFee, nil), *signer, privKey)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	err = m.InsertChain(chainPack)
+	require.NoError(t, err)
+	hashes := []common.Hash{chainPack.Blocks[0].Hash(), chainPack.Blocks[1].Hash()}
+	stored, err := m.ExecModule.GetPayloadBodiesByHash(ctx, hashes)
+	require.NoError(t, err)
+	require.Len(t, stored, 2)
+	for i, pb := range stored {
+		require.NotNil(t, pb)
+		require.Equal(t, chainPack.BlockAccessLists[i], pb.BlockAccessList, "stored block %d", i+1)
+	}
+	err = m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.ForEach(kv.BlockAccessList, nil, func(k, _ []byte) error {
+			return tx.Delete(kv.BlockAccessList, k)
+		})
+	})
+	require.NoError(t, err)
+	err = m.DB.View(ctx, func(tx kv.Tx) error {
+		count, err := tx.Count(kv.BlockAccessList)
+		require.NoError(t, err)
+		require.Zero(t, count, "stored BALs should be fully pruned")
+		return nil
+	})
+	require.NoError(t, err)
+	byHash, err := m.ExecModule.GetPayloadBodiesByHash(ctx, hashes)
+	require.NoError(t, err)
+	require.Len(t, byHash, 2)
+	for i, pb := range byHash {
+		require.NotNil(t, pb)
+		require.Equal(t, chainPack.BlockAccessLists[i], pb.BlockAccessList, "byHash block %d", i+1)
+	}
+	byRange, err := m.ExecModule.GetPayloadBodiesByRange(ctx, 1, 2)
+	require.NoError(t, err)
+	require.Len(t, byRange, 2)
+	for i, pb := range byRange {
+		require.NotNil(t, pb)
+		require.Equal(t, chainPack.BlockAccessLists[i], pb.BlockAccessList, "byRange block %d", i+1)
+	}
+}
+
+func TestGetPayloadBodiesEmptyBlockAccessList(t *testing.T) {
+	t.Parallel()
+	m, chainPack := newPayloadBodiesBALTestChain(t, chain.AllProtocolChanges)
+	block := chainPack.Blocks[0]
+	require.NotNil(t, block.Header().BlockAccessListHash)
+	err := m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		return rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), []byte{0xc0})
+	})
+	require.NoError(t, err)
+	requirePayloadBodiesBlockAccessList(t, m, block, []byte{0xc0})
+}
+
+func TestGetPayloadBodiesPreAmsterdamBlockAccessList(t *testing.T) {
+	t.Parallel()
+	var config chain.Config
+	require.NoError(t, copier.CopyWithOption(&config, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	config.AmsterdamTime = nil
+	m, chainPack := newPayloadBodiesBALTestChain(t, &config)
+	block := chainPack.Blocks[0]
+	require.Nil(t, block.Header().BlockAccessListHash)
+	requirePayloadBodiesBlockAccessList(t, m, block, nil)
+}
+
+func TestGetPayloadBodiesPrunedHistoryBlockAccessList(t *testing.T) {
+	t.Parallel()
+	m, chainPack := newPayloadBodiesBALTestChain(t, chain.AllProtocolChanges)
+	block := chainPack.Blocks[0]
+	require.NotNil(t, block.Header().BlockAccessListHash)
+	prunePayloadBodiesBALHistory(t, m, block)
+	requirePayloadBodiesBlockAccessList(t, m, block, nil)
+}
+
+func newPayloadBodiesBALTestChain(t *testing.T, config *chain.Config) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+	t.Helper()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(config))
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	return m, chainPack
+}
+
+func requirePayloadBodiesBlockAccessList(t *testing.T, m *execmoduletester.ExecModuleTester, block *types.Block, want []byte) {
+	t.Helper()
+	byHash, err := m.ExecModule.GetPayloadBodiesByHash(t.Context(), []common.Hash{block.Hash()})
+	require.NoError(t, err)
+	require.Len(t, byHash, 1)
+	require.NotNil(t, byHash[0])
+	require.Equal(t, want, byHash[0].BlockAccessList)
+	byRange, err := m.ExecModule.GetPayloadBodiesByRange(t.Context(), block.NumberU64(), 1)
+	require.NoError(t, err)
+	require.Len(t, byRange, 1)
+	require.NotNil(t, byRange[0])
+	require.Equal(t, want, byRange[0].BlockAccessList)
+}
+
+func prunePayloadBodiesBALHistory(t *testing.T, m *execmoduletester.ExecModuleTester, block *types.Block) {
+	t.Helper()
+	err := m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := tx.Delete(kv.BlockAccessList, dbutils.BlockBodyKey(block.NumberU64(), block.Hash())); err != nil {
+			return err
+		}
+		var historyStart [8]byte
+		binary.BigEndian.PutUint64(historyStart[:], ^uint64(0))
+		for _, table := range []struct {
+			name     string
+			valueLen int
+		}{{name: kv.TblAccountHistoryKeys, valueLen: length.Addr}, {name: kv.TblStorageHistoryKeys, valueLen: length.Addr + length.Hash}, {name: kv.TblCodeHistoryKeys, valueLen: length.Addr}} {
+			for {
+				key, err := kv.FirstKey(tx, table.name)
+				if err != nil {
+					return err
+				}
+				if key == nil {
+					break
+				}
+				if err := tx.Delete(table.name, key); err != nil {
+					return err
+				}
+			}
+			if err := tx.Put(table.name, historyStart[:], make([]byte, table.valueLen)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// TestGetPayloadBodiesNonCanonicalBlockAccessList verifies that payload-bodies
+// requests for non-canonical blocks degrade the blockAccessList to null instead
+// of failing the batch: BALs can only be re-derived from canonical state.
+func TestGetPayloadBodiesNonCanonicalBlockAccessList(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	privKeyA, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	privKeyB, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	addrA := crypto.PubkeyToAddress(privKeyA.PublicKey)
+	addrB := crypto.PubkeyToAddress(privKeyB.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			addrA: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+			addrB: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKeyA))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
+	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(10_000), 50_000, baseFee, nil), *signer, privKeyA)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	fork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(uint64(i), common.Address{2}, uint256.NewInt(20_000), 50_000, baseFee, nil), *signer, privKeyB)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, canonical.Blocks[0].Hash(), fork.Blocks[0].Hash())
+	err = m.InsertChain(canonical)
+	require.NoError(t, err)
+	// Insert the fork blocks without a fork choice update so they stay
+	// non-canonical, with no stored BAL sidecar.
+	insertRes, err := insertBlocks(ctx, m.ExecModule, fork.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	byHash, err := m.ExecModule.GetPayloadBodiesByHash(ctx, []common.Hash{fork.Blocks[0].Hash(), fork.Blocks[1].Hash()})
+	require.NoError(t, err)
+	require.Len(t, byHash, 2)
+	for i, pb := range byHash {
+		require.NotNil(t, pb)
+		require.Nil(t, pb.BlockAccessList, "fork block %d", i+1)
+	}
 }
 
 // TestNotificationDispatchForegroundCommit verifies that after FCU returns
@@ -1437,12 +1894,12 @@ func drainHeaders(t *testing.T, ch <-chan [][]byte, timeout time.Duration) {
 }
 
 // TestAssembleBlockStateGasLimit verifies that the builder respects the EIP-8037
-// block validity invariant: gas_used = max(regular, state) <= gas_limit.
+// block validity invariant: gas_used = max(execution, state) <= gas_limit.
 //
-// Contract creations have high intrinsic state gas (~184K per create at
-// CostPerStateByte=1530, STATE_BYTES_PER_NEW_ACCOUNT=120) but low regular gas
+// Contract creations have high runtime state gas (~184K per create at
+// CostPerStateByte=1530, STATE_BYTES_PER_NEW_ACCOUNT=120) but low execution gas
 // (~30K). With a 500K gas limit, about 3 creates would push state gas past
-// the limit even though regular gas has room. Without the fix the builder
+// the limit even though execution gas has room. Without the fix the builder
 // would produce an invalid block.
 func TestAssembleBlockStateGasLimit(t *testing.T) {
 	t.Parallel()
@@ -1476,7 +1933,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Submit 10 contract creation txns to the pool.
-	// Each has ~131K intrinsic state gas but only ~30K regular gas.
+	// Each has ~184K runtime state gas but only ~30K execution gas.
 	baseFee := chainPack.TopBlock.BaseFee().Uint64()
 	deployCode := []byte{0x60, 0x00} // PUSH1 0x00 — minimal contract
 	rlpTxs := make([][]byte, 10)
@@ -1501,7 +1958,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 	parentBeaconBlockRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1519,7 +1976,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 
 	// EIP-8037 invariant: gas_used <= gas_limit.
 	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
-		"gas_used (max of regular, state) must not exceed gas_limit")
+		"gas_used (max of execution, state) must not exceed gas_limit")
 
 	// Block must pass full validation (insert + validate + FCU).
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
@@ -1527,14 +1984,12 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 }
 
 // TestAssembleBlockStateGasLimitSSTORE verifies the EIP-8037 block validity
-// invariant for execution-time state gas (SSTOREs), as opposed to intrinsic
-// state gas (contract creations tested above).
+// invariant for SSTORE state gas, as opposed to top-level runtime state gas
+// for contract creations tested above.
 //
-// A deployed contract writes 4 new storage slots per call (~150K execution
-// state gas, ~41K regular gas, 0 intrinsic state gas). The txpool cannot
-// filter these by state gas — only the check inside applyTransaction
-// (between ApplyMessage and FinalizeTx) prevents the block from exceeding
-// gas_limit.
+// A deployed contract writes 4 new storage slots per call (~150K state gas
+// and ~41K execution gas). The txpool cannot filter these by state gas; the
+// check inside applyTransaction prevents the block from exceeding gas_limit.
 func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -1583,10 +2038,9 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	require.NoError(t, err)
 
 	// Submit 10 call txns. Each writes 4 new slots (~150K state gas, ~41K
-	// regular gas). With a 500K gas limit, 3 calls fit (~451K state gas)
-	// but the 4th would push to ~601K. Intrinsic state gas is 0 for all
-	// calls, so the txpool's regular-gas filter lets them all through —
-	// the applyTransaction check is the only defense.
+	// execution gas). With a 500K gas limit, 3 calls fit (~451K state gas)
+	// but the 4th would push to ~601K. The txpool's execution-gas filter lets
+	// them all through, so the applyTransaction check is the only defense.
 	baseFee = chainPack.TopBlock.BaseFee().Uint64()
 	rlpTxs := make([][]byte, 10)
 	for i := range rlpTxs {
@@ -1612,7 +2066,7 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	parentBeaconBlockRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1629,7 +2083,7 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 
 	// EIP-8037 invariant: gas_used <= gas_limit.
 	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
-		"gas_used (max of regular, state) must not exceed gas_limit")
+		"gas_used (max of execution, state) must not exceed gas_limit")
 
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
@@ -1637,18 +2091,15 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 
 // TestAssembleBlockGasPoolSnapshotRestoreBug exercises the per-tx gas pool
 // snapshot/restore in the block assembler's commitTx path. Under EIP-8037 the
-// pool tracks regular and state gas as separate dimensions, so a restore that
-// only captures the regular dimension and seeds both on restore wrongly
+// pool tracks execution and state gas as separate dimensions, so a restore that
+// only captures the execution dimension and seeds both on restore wrongly
 // inflates the state pool, letting a follow-up tx exceed the block's
 // state-gas limit.
 //
-// The scenario relies on a tx whose intrinsic state gas (the part the txpool
-// can see when filtering) fits in the remaining pool but whose total state
-// gas (intrinsic + on-success code-deposit) does not: such a tx passes the
-// txpool's filter, reaches the assembler, and fails ConsumeState inside
-// ApplyTransaction. The bug then surfaces if a successor tx in the same
-// batch consumes the inflated state pool that the restore wrongly handed
-// back.
+// The scenario relies on a tx whose runtime state gas exceeds the remaining
+// pool. It reaches the assembler and fails ConsumeState inside
+// ApplyTransaction. The bug then surfaces if a successor tx in the same batch
+// consumes the inflated state pool that the restore wrongly handed back.
 //
 // Fresh senders (each at nonce 0) are required so a failed tx doesn't
 // nonce-block its successors within the batch.
@@ -1657,8 +2108,8 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 	ctx := t.Context()
 
 	// Initcode that deploys a 100-byte runtime (100 zero bytes) via CODECOPY.
-	// Per byte deployed: 1530 state gas (CPSB) + 200 regular gas. So each
-	// CREATE consumes ~153K state gas on top of the 183.6K intrinsic
+	// Per byte deployed: 1530 state gas (CPSB) + 200 execution gas. So each
+	// CREATE consumes ~153K code-deposit state gas on top of the 183.6K runtime
 	// NEW_ACCOUNT charge — a total of ~337K state per tx.
 	const runtimeLen = 100
 	initHeader := []byte{
@@ -1670,13 +2121,14 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 		0x60, 0x00, //             PUSH1 0 (memory offset)
 		0xf3, //                   RETURN
 	}
-	deployCode := append(initHeader, make([]byte, runtimeLen)...)
+	deployCode := make([]byte, 0, len(initHeader)+runtimeLen)
+	deployCode = append(deployCode, initHeader...)
+	deployCode = append(deployCode, make([]byte, runtimeLen)...)
 
 	// With a 1_000_000 block gas limit, two txs (~337K state each) leave
-	// the pool at ~326K; a third has 184K intrinsic state (fits in pool by
-	// txpool's filter) but needs 337K total (fails ConsumeState during
-	// execution). A fourth tx then succeeds against the wrongly inflated
-	// pool, pushing the block's total state gas past gas_limit.
+	// the pool at ~326K; a third needs 337K total and fails ConsumeState
+	// during execution. A fourth tx then succeeds against the wrongly
+	// inflated pool, pushing the block's total state gas past gas_limit.
 	const numSenders = 4
 	keys := make([]*ecdsa.PrivateKey, numSenders)
 	addrs := make([]common.Address, numSenders)
@@ -1734,7 +2186,7 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 	parentBeaconBlockRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1747,7 +2199,7 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 
 	require.Greater(t, len(block.Transactions()), 0, "block should contain at least one tx")
 	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
-		"gas_used (max of regular, state) must not exceed gas_limit")
+		"gas_used (max of execution, state) must not exceed gas_limit")
 
 	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, []*types.Block{block}))
 }
@@ -1756,17 +2208,16 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 // per-batch gas-pool initialisation. The block builder calls AddTransactions
 // repeatedly with batches of up to 50 txs from the txpool. Each call must
 // build the pool with the *per-dimension* remaining budget; seeding both
-// dimensions from the regular-only cumulative gas wrongly inflates the state
-// pool when state gas has run ahead of regular gas after the previous batch,
+// dimensions from the execution-only cumulative gas wrongly inflates the state
+// pool when state gas has run ahead of execution gas after the previous batch,
 // letting a tx in the next batch consume state past gas_limit.
 //
 // The scenario: 50 contract creations in batch 1 push cumulative state gas
-// near the block gas limit while keeping cumulative regular gas low (CREATE
-// has ~184K intrinsic state vs ~30K intrinsic regular per tx). The 51st tx
-// has small intrinsic state (so the txpool's state-aware filter admits it
-// into batch 2) but a large code-deposit state on execution. With the pool
-// init seeded from regular gas only, batch 2 starts with a state pool that
-// matches the regular dimension — i.e. far more than the real remaining
+// near the block gas limit while keeping cumulative execution gas low (CREATE
+// has ~184K runtime state vs ~30K intrinsic execution per tx). The 51st tx has
+// a large code-deposit state charge. With the pool
+// init seeded from execution gas only, batch 2 starts with a state pool that
+// matches the execution dimension — i.e. far more than the real remaining
 // state budget — and the 51st tx is wrongly accepted.
 func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 	t.Parallel()
@@ -1790,7 +2241,7 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 	for _, a := range addrs {
 		alloc[a] = types.GenesisAccount{Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)}
 	}
-	// 10M block limit fits ~54 CREATEs by intrinsic state (184K each ≈ 9.2M
+	// 10M block limit fits ~54 CREATEs by runtime state (184K each ≈ 9.2M
 	// for 50). Leaves ~800K of state headroom for batch 2, which the trigger
 	// tx's ~1.2M total state exceeds.
 	genesis := &types.Genesis{
@@ -1818,12 +2269,12 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 	lowPrice := uint256.NewInt(baseFee)      // baseFee only → batch 2
 
 	// Batch 1 initcode: PUSH1 0, PUSH1 0, RETURN → zero-byte runtime, no
-	// code-deposit state. Per-tx state is just the 184K intrinsic.
+	// code-deposit state. Per-tx state is just the 184K runtime charge.
 	batch1Init := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
 
 	// Batch 2 initcode deploys a ~660-byte runtime via CODECOPY. Per-byte
-	// deposit cost: 1530 state + 200 regular. ~660 bytes → ~1M state on top
-	// of the 184K intrinsic.
+	// deposit cost: 1530 state + 200 execution. ~660 bytes → ~1M state on top
+	// of the 184K runtime charge.
 	const triggerRuntimeLen = 660
 	triggerInit := []byte{
 		0x61, byte(triggerRuntimeLen >> 8), byte(triggerRuntimeLen & 0xff), // PUSH2 length
@@ -1866,7 +2317,7 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 	parentBeaconBlockRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1879,19 +2330,20 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 
 	require.Greater(t, len(block.Transactions()), 0, "block should contain at least one tx")
 	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
-		"gas_used (max of regular, state) must not exceed gas_limit")
+		"gas_used (max of execution, state) must not exceed gas_limit")
 
 	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, []*types.Block{block}))
 }
 
-func TestEIP7708BurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
-	// Regression test for https://github.com/erigontech/erigon/issues/19951
+func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
+	// Regression test for https://github.com/erigontech/erigon/issues/19951.
 	//
-	// When the coinbase is a contract that self-destructs during execution,
-	// EIP-7708 requires a Burn log for the residual balance (priority fee)
-	// credited after the SELFDESTRUCT. Post-EIP-6780 SELFDESTRUCT only
-	// deletes contracts created in the same transaction, so we CREATE a
-	// contract at the pre-computed coinbase address whose init code
+	// A contract self-destructs at the coinbase address and is then credited the
+	// priority fee at finalization. EIP-8246 removes the SELFDESTRUCT burn, so the
+	// coinbase is preserved holding that residual balance and no EIP-7708 Burn log
+	// is emitted (pre-8246 the residual was burned and logged). Post-EIP-6780
+	// SELFDESTRUCT only deletes contracts created in the same transaction, so we
+	// CREATE a contract at the pre-computed coinbase address whose init code
 	// immediately SELFDESTRUCTs to the caller.
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
@@ -1936,44 +2388,34 @@ func TestEIP7708BurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Verify the receipt contains an EIP-7708 Burn log.
 	require.Len(t, chainPack.Receipts[0], 1)
 	receipt := chainPack.Receipts[0][0]
 	require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
 	require.Greater(t, receipt.GasUsed, uint64(0))
 
-	var burnLog *types.Log
-	var burnCount, transferCount int
-	for _, log := range receipt.Logs {
-		if log.Address != params.SystemAddress.Value() || len(log.Topics) < 2 {
-			continue
-		}
-		switch log.Topics[0] {
-		case misc.EthBurnLogEvent:
-			burnLog = log
-			burnCount++
-		case misc.EthTransferLogEvent:
-			transferCount++
-		}
-	}
-	require.Equal(t, 1, burnCount, "expected exactly one EIP-7708 Burn log")
-	require.Equal(t, 0, transferCount, "no Transfer log expected for zero-value CREATE")
-	require.Equal(t, coinbaseAddr.Hash(), burnLog.Topics[1],
-		"burn log should reference the coinbase address")
-
-	// Burnt amount = priority fee = gasUsed × effectiveTip.
-	// Use the actual block baseFee (EIP-1559 adjusts it from genesis).
-	blockBaseFee := chainPack.Headers[0].BaseFee.Uint64()
-	expectedBurn := new(uint256.Int).Mul(
-		uint256.NewInt(receipt.GasUsed),
-		uint256.NewInt(gasPrice-blockBaseFee),
-	)
-	burnBytes := expectedBurn.Bytes32()
-	require.Equal(t, burnBytes[:], []byte(burnLog.Data),
-		"burn amount should equal the priority fee credited to coinbase")
-
 	// Insert + validate + FCU proves the state root is computed correctly.
 	err = insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks)
+	require.NoError(t, err)
+
+	// EIP-8246 preserves the self-destructed coinbase: the priority fee
+	// credited at finalization is retained (pre-8246 the account was deleted
+	// and the fee burned), and the record is balance-only — nonce, code hash
+	// and storage cleared.
+	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, coinbaseAddr[:])
+		if err != nil {
+			return err
+		}
+		require.NotEmpty(t, enc, "the self-destructed coinbase must be preserved, not deleted")
+		var acc accounts.Account
+		require.NoError(t, accounts.DeserialiseV3(&acc, enc))
+		require.False(t, acc.Balance.IsZero(), "the credited priority fee must not be burned")
+		expected := accounts.NewAccount()
+		expected.Balance = acc.Balance
+		require.Equal(t, accounts.SerialiseV3(&expected), enc,
+			"the preserved coinbase must be a balance-only record")
+		return nil
+	})
 	require.NoError(t, err)
 }
 
@@ -2310,4 +2752,204 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 		require.Equal(t, fork.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 		return nil
 	}))
+}
+
+// TestBALDrivenComputeAheadChangesetIntegrity guards against compute-ahead
+// misrouting a block's commitment branch deltas into the wrong block's changeset.
+// BAL-driven compute-ahead computes a pre-window block ahead of its blockResult;
+// if it recorded its deferred branch writes into a later window block's changeset
+// (instead of isolated), that window block's saved diffset would gain entries it
+// must not have, and a later unwind would restore a wrong trie root.
+//
+// The batch uses a mid-batch changeset window (MaxReorgDepth places windowStart
+// inside the batch) so early blocks compute ahead (pre-window, isolated) while the
+// later window blocks keep per-block changesets. The check is differential and
+// per-key: the window blocks' CommitmentDomain diffsets must be byte-identical
+// whether the earlier blocks were computed ahead (compute-ahead-on) or computed
+// incrementally (compute-ahead-off). A leak would show up as extra/changed entries
+// under compute-ahead-on — the vacuous NotEmpty check the previous version used
+// could not see that. It also asserts the compute-ahead path actually engaged (a
+// real count) so a silent degrade-to-incremental can't make the differential pass
+// trivially.
+//
+// (An end-to-end divergent-fork reorg would be a stronger check, but blockgen
+// randomises ParentBeaconBlockRoot per block, so under Amsterdam — required for
+// BALs — two chains can't share a prefix and a mid-chain parent has no state.)
+func TestBALDrivenComputeAheadChangesetIntegrity(t *testing.T) {
+	off := runBALComputeAheadChangeset(t, false, false)
+	on := runBALComputeAheadChangeset(t, true, false)
+
+	require.Zero(t, off.computedAhead, "compute-ahead-off must not compute any block ahead")
+	require.Positive(t, on.computedAhead, "compute-ahead-on must actually compute the pre-window blocks ahead (else the differential is vacuous)")
+	// Compare the SET OF KEYS each window block's commitment changeset touched,
+	// not the raw diff bytes: per-block compute-ahead and a merged batch transition
+	// legitimately encode the same branches differently (step references), so
+	// byte-equality is too strict. But the set of branches a window block's own
+	// compute touches is fixed by the post-pre-window trie shape — misrouting
+	// a pre-window block's deltas into a window block's changeset would add
+	// keys that block never touched, so the key sets must match.
+	require.Equal(t, off.windowCommitmentKeys, on.windowCommitmentKeys,
+		"a window block's commitment-changeset key set differs between incremental and "+
+			"compute-ahead — a pre-window block's branch deltas were misrouted into a "+
+			"window block's changeset")
+}
+
+// TestBALShadowCompute_MatchesIncremental exercises BAL_SHADOW_COMPUTE's success
+// path end-to-end: with compute-ahead AND shadow cross-check on, every block
+// computed ahead is recomputed incrementally and the two roots must agree.
+// runBALComputeAheadChangeset asserts the batch validates cleanly, so a shadow
+// mismatch would fail the block with ErrWrongTrieRoot; a clean run with
+// computedAhead>0 proves the match path ran.
+func TestBALShadowCompute_MatchesIncremental(t *testing.T) {
+	res := runBALComputeAheadChangeset(t, true, true)
+	require.Positive(t, res.computedAhead, "compute-ahead must have run so shadow cross-check exercised the match path")
+}
+
+type balComputeAheadResult struct {
+	// windowCommitmentKeys maps each window block number to the sorted set of
+	// CommitmentDomain changeset keys (branch prefixes) it touched — compared
+	// across modes to catch compute-ahead misrouting deltas into the wrong block.
+	windowCommitmentKeys map[uint64][]string
+	computedAhead        int64
+}
+
+func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balComputeAheadResult {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	defer func(prev bool) { dbg.BALShadowCompute = prev }(dbg.BALShadowCompute)
+	dbg.BALDrivenCommitment = computeAhead
+	dbg.IgnoreBAL = false
+	dbg.BALShadowCompute = shadow
+	stagedsync.ResetComputedAheadForTest()
+
+	const chainLen = 12
+	// maxReorgDepth places the changeset window at maxBlock-depth = 12-4 = 8, so
+	// blocks 1..7 are pre-window (compute-ahead candidates) and 8..12 own changesets.
+	const maxReorgDepth = 4
+	const windowStart = chainLen - maxReorgDepth
+
+	ctx := t.Context()
+	// Deterministic key: compute-ahead-off and compute-ahead-on must execute the identical chain
+	// (same sender → same trie branches) so the only difference between the two
+	// runs is compute-ahead vs incremental. A random key would give each run a
+	// different address and thus different branch keys, making the cross-mode
+	// changeset comparison meaningless (and flaky).
+	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	m := execmoduletester.New(t,
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.AllProtocolChanges, // Amsterdam-at-0 → every block carries a BAL
+			Alloc:  types.GenesisAlloc{senderAddr: {Balance: big.NewInt(1 * common.Ether)}},
+		}),
+		execmoduletester.WithExperimentalBAL(),
+		execmoduletester.WithAlwaysGenerateChangesets(false),
+		execmoduletester.WithMaxReorgDepth(maxReorgDepth),
+	)
+
+	// AllProtocolChanges is post-London, so txs need a fee cap above the base fee
+	// (transferGen's 1-wei price is only valid on the pre-London default).
+	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
+		func(i int, b *blockgen.BlockGen) {
+			tx, txErr := types.SignTx(
+				types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(10_000_000_000), nil),
+				*types.LatestSignerForChainID(nil), privKey,
+			)
+			require.NoError(t, txErr)
+			b.AddTx(tx)
+		})
+	require.NoError(t, err)
+
+	insRes, err := insertBlocksWithBAL(ctx, m.ExecModule, canonical.Blocks, canonical.BlockAccessLists)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	fcuRes, err := updateForkChoice(ctx, m.ExecModule, canonical.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status,
+		"batch with compute-ahead=%v must execute cleanly; validationError=%q", computeAhead, fcuRes.ValidationError)
+
+	m.ExecModule.WaitIdle(ctx)
+
+	res := balComputeAheadResult{
+		windowCommitmentKeys: map[uint64][]string{},
+		computedAhead:        stagedsync.ComputedAheadCountForTest(),
+	}
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		// Confirm blocks carry BALs (checked on the tip, which is inside the
+		// window and so not pruned — pre-window BAL sidecars are pruned beyond
+		// MaxReorgDepth, but compute-ahead reads them in-memory during execution,
+		// and on.computedAhead asserts the compute-ahead path actually engaged).
+		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, canonical.TopBlock.Hash(), canonical.TopBlock.NumberU64())
+		require.NoError(t, err)
+		require.NotEmpty(t, balBytes, "blocks must carry a BAL so BAL-driven compute-ahead actually engages")
+
+		// Window blocks own per-block changesets; capture their CommitmentDomain
+		// deltas for the cross-mode differential.
+		for _, blk := range canonical.Blocks {
+			if blk.NumberU64() < windowStart {
+				continue
+			}
+			diffs, ok, err := changeset.ReadDiffSet(tx, blk.NumberU64(), blk.Hash())
+			require.NoError(t, err)
+			require.Truef(t, ok, "window block %d must have a saved diffset", blk.NumberU64())
+			require.NotEmptyf(t, diffs[kv.CommitmentDomain],
+				"window block %d changeset is missing CommitmentDomain deltas (compute-ahead=%v)",
+				blk.NumberU64(), computeAhead)
+			keys := make([]string, 0, len(diffs[kv.CommitmentDomain]))
+			for _, d := range diffs[kv.CommitmentDomain] {
+				keys = append(keys, d.Key)
+			}
+			sort.Strings(keys)
+			res.windowCommitmentKeys[blk.NumberU64()] = keys
+		}
+		return nil
+	}))
+
+	// End-to-end: FCU back into the window unwinds using those changesets, then
+	// FCU forward re-executes. If the compute-ahead-built state were wrong, the
+	// unwind restores a bad root and the forward re-exec fails.
+	const reorgBackTo = chainLen - 2 // within the window (>= windowStart)
+	back, err := updateForkChoice(ctx, m.ExecModule, canonical.Blocks[reorgBackTo-1].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, back.Status, "reorg back must succeed")
+	m.ExecModule.WaitIdle(ctx)
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		execProg, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, uint64(reorgBackTo), execProg, "FCU back must unwind execution (consuming the window changesets)")
+		return nil
+	}))
+
+	fwd, err := updateForkChoice(ctx, m.ExecModule, canonical.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fwd.Status,
+		"forward re-exec after unwind must reach the correct root (compute-ahead=%v); validationError=%q",
+		computeAhead, fwd.ValidationError)
+	m.ExecModule.WaitIdle(ctx)
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		execProg, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, uint64(chainLen), execProg)
+		require.Equal(t, canonical.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
+		return nil
+	}))
+	return res
+}
+
+// A forkchoice head at height 0 that is not the genesis (e.g. a block carrying a
+// corrupted number) must be rejected, not treated as a genesis reset.
+func TestUpdateForkChoiceToNonGenesisBlockAtHeightZero(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges}))
+	fakeHeader := m.Genesis.Header()
+	fakeHeader.Extra = []byte("not the genesis")
+	fakeBlock := types.NewBlockWithHeader(fakeHeader)
+	require.NotEqual(t, m.Genesis.Hash(), fakeBlock.Hash())
+	insRes, err := insertBlocks(ctx, m.ExecModule, []*types.Block{fakeBlock})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	fcu, err := updateForkChoice(ctx, m.ExecModule, fakeBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
 }

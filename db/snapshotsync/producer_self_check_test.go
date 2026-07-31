@@ -256,7 +256,7 @@ func TestAdvertisementSelfCheckError_Truncates(t *testing.T) {
 
 	genesis := snapcfg.PreverifiedItems{}
 	adv := snapcfg.PreverifiedItems{}
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		name := fmt.Sprintf("v1.1-%06d-%06d-headers.seg", i*1000, (i+1)*1000)
 		genesis = append(genesis, preverified.Item{Name: name, Hash: "good"})
 		adv = append(adv, preverified.Item{Name: name, Hash: "bad"})

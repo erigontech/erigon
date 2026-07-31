@@ -224,7 +224,7 @@ func TestDriver_PauseDoesNotQuarantine(t *testing.T) {
 
 	// Sweep many more times than the threshold. A non-pause error
 	// would quarantine after 3 calls; pauses must not.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		d.Sweep(context.Background(), nil)
 	}
 
@@ -252,7 +252,7 @@ func TestDriver_NonPauseErrorStillQuarantines(t *testing.T) {
 		QuarantineThreshold: 3,
 	}
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		d.Sweep(context.Background(), nil)
 	}
 

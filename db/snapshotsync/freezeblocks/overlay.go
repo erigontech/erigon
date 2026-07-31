@@ -19,23 +19,18 @@ package freezeblocks
 import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-// OpenRoSnapshotsWithOverrides builds an independent block-snapshots
-// view over liveDir with the staged block segments in overridePaths
-// substituted in. Unlike snapshotsync.OpenRoSnapshotsWithOverrides it
-// returns a *freezeblocks.RoSnapshots — the concrete type
-// NewBlockReader type-asserts for — so the result can back a
-// BlockReader used to validate a staged block .seg file against the
-// otherwise-live chain. See
-// docs/plans/20260520-phase7-staged-adoption-design.md §7b-3.
-//
-// The returned view is a throwaway: the caller must Close() it. The
-// live snapshot directory is never written.
-func OpenRoSnapshotsWithOverrides(cfg ethconfig.BlocksFreezing, liveDir string, overridePaths []string, logger log.Logger) (*RoSnapshots, error) {
-	s := NewRoSnapshots(cfg, liveDir, logger)
-	if err := snapshotsync.ApplyBlockOverrides(&s.RoSnapshots, overridePaths); err != nil {
+// OpenRoSnapshotsWithOverrides builds an independent block-snapshots view
+// over liveDir with the staged block segments in overridePaths substituted
+// in. Returns the concrete *blocksnapshots.RoSnapshots so the result can
+// back a BlockReader used to validate a staged .seg file against the
+// otherwise-live chain. Throwaway view — caller must Close().
+func OpenRoSnapshotsWithOverrides(cfg ethconfig.BlocksFreezing, liveDir string, overridePaths []string, logger log.Logger) (*blocksnapshots.RoSnapshots, error) {
+	s := blocksnapshots.NewRoSnapshots(cfg, liveDir, logger)
+	if err := snapshotsync.ApplyBlockOverrides(&s.BaseRoSnapshots, overridePaths); err != nil {
 		s.Close()
 		return nil, err
 	}

@@ -171,7 +171,7 @@ func (d *Domain) openDomainFileItemAt(snapDir string, fromStep, toStep kv.Step) 
 			return nil, fmt.Errorf("no .bt accessor for %s steps %d-%d: %w", d.FilenameBase, fromStep, toStep, err)
 		}
 		d.FileVersion.AccessorBT.MustSupport(ver, filepath.Base(p))
-		if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(p, btindex.DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
+		if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(p, d.dataReader(item.decompressor)); err != nil {
 			item.closeFiles()
 			return nil, fmt.Errorf("open .bt accessor: %w", err)
 		}

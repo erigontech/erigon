@@ -72,7 +72,6 @@ func TestNewAccount(t *testing.T) {
 func TestEncodeDecodeForStorage_RoundTrip(t *testing.T) {
 	t.Parallel()
 	for name, a := range accountVariants() {
-		a := a
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			buf := make([]byte, a.EncodingLengthForStorage())
@@ -111,7 +110,6 @@ func TestDecodeForStorage_Malformed(t *testing.T) {
 		"truncated codehash":    {[]byte{0x08, 0x20}, "Account.CodeHash"},
 	}
 	for name, tc := range tests {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			var a Account
@@ -125,7 +123,6 @@ func TestDecodeForStorage_Malformed(t *testing.T) {
 func TestEncodeDecodeForHashing_RoundTrip(t *testing.T) {
 	t.Parallel()
 	for name, a := range accountVariants() {
-		a := a
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			enc := a.RLP()
@@ -200,7 +197,6 @@ func TestDecodeForHashing_Errors(t *testing.T) {
 		"codehash wrong size": {codeHashWrongSize, "CodeHash should have size 32"},
 	}
 	for name, tc := range tests {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			var a Account
@@ -288,7 +284,6 @@ func TestIsEmptyRootAndIncarnationAccessors(t *testing.T) {
 func TestDecodeIncarnationFromStorage(t *testing.T) {
 	t.Parallel()
 	for name, a := range accountVariants() {
-		a := a
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			buf := make([]byte, a.EncodingLengthForStorage())
@@ -312,7 +307,6 @@ func TestDecodeIncarnationFromStorage_Errors(t *testing.T) {
 		"truncated incarnation": {0x04, 0x05},
 	}
 	for name, enc := range tests {
-		enc := enc
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			_, err := DecodeIncarnationFromStorage(enc)
@@ -324,7 +318,6 @@ func TestDecodeIncarnationFromStorage_Errors(t *testing.T) {
 func TestSerialiseDeserialiseV3_RoundTrip(t *testing.T) {
 	t.Parallel()
 	for name, a := range accountVariants() {
-		a := a
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			enc := SerialiseV3(&a)

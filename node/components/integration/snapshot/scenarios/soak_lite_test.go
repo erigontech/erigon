@@ -54,7 +54,7 @@ func TestSoakLite_GapFillLoop(t *testing.T) {
 	runtime.GC()
 	beforeGoroutines := runtime.NumGoroutine()
 
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		runGapFillIteration(t, i)
 	}
 
@@ -116,7 +116,7 @@ func TestSoakLite_PeerChurn(t *testing.T) {
 	require.NoError(t, node.AttachSimulatedTransport(coord))
 	require.NoError(t, node.Start(context.Background()))
 
-	for i := 0; i < peerCount; i++ {
+	for i := range peerCount {
 		peer := harness.NewFakePeer(fmt.Sprintf("peer-%d", i), coord)
 		peer.Seed(harness.HoodiBaseline())
 		peer.AnnounceTo(node)
@@ -165,7 +165,7 @@ func TestSoakLite_RandomFailures(t *testing.T) {
 	peer.AnnounceTo(leecher)
 	leecher.Bus.WaitAsync()
 
-	failedType := reflect.TypeOf(flow.DownloadFailed{})
+	failedType := reflect.TypeFor[flow.DownloadFailed]()
 	failed := leecher.Bus.CountOfType(failedType)
 	require.Greater(t, failed, 0, "expected some failures under fault injection")
 
@@ -179,7 +179,7 @@ func TestSoakLite_RandomFailures(t *testing.T) {
 	leecher.Bus.WaitAsync()
 
 	baseline := harness.HoodiBaseline().FileCount()
-	completeType := reflect.TypeOf(flow.DownloadComplete{})
+	completeType := reflect.TypeFor[flow.DownloadComplete]()
 	complete := leecher.Bus.CountOfType(completeType)
 	require.GreaterOrEqual(t, complete, baseline,
 		"after re-announce without failures, every file should eventually complete")

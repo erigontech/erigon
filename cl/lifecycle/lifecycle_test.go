@@ -30,7 +30,7 @@ func TestBundle_StopDrainsGoroutines(t *testing.T) {
 	b.Start(context.Background())
 
 	var running atomic.Int32
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		b.Go(func(ctx context.Context) {
 			running.Add(1)
 			defer running.Add(-1)
@@ -80,8 +80,7 @@ func TestGroup_StopInReverseOrder(t *testing.T) {
 func TestGroup_StopWaitsForEachDrain(t *testing.T) {
 	g := NewGroup(nil)
 	drained := make([]atomic.Bool, 3)
-	for i := 0; i < 3; i++ {
-		i := i
+	for i := range 3 {
 		b := NewBundle()
 		b.Start(context.Background())
 		b.Go(func(ctx context.Context) {
@@ -92,7 +91,7 @@ func TestGroup_StopWaitsForEachDrain(t *testing.T) {
 		g.OnStop("comp", b.Stop)
 	}
 	g.Stop()
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		require.True(t, drained[i].Load(), "component %d not drained", i)
 	}
 }

@@ -603,7 +603,7 @@ func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHead
 			sendersBuf = make([]byte, 0, (txCount-2)*20)
 		}
 		txnID := body.BaseTxnID.U64()
-		for i := uint64(0); i < txCount; i++ {
+		for i := range txCount {
 			if !tg.HasNext() {
 				return fmt.Errorf("seedLeftoverBlocks: tx source ran out at block %d tx %d/%d", n, i, txCount)
 			}
@@ -697,7 +697,7 @@ func sliceStraddleSeg(ctx context.Context, oldFI snaptype.FileInfo, newToBlock u
 	keep := newFI.To - newFI.From
 	var buf []byte
 	var written uint64
-	for i := uint64(0); i < keep; i++ {
+	for i := range keep {
 		if !g.HasNext() {
 			return snaptype.FileInfo{}, 0, fmt.Errorf("rebuild %s: source ran out at entry %d (wanted %d)", oldFI.Name(), i, keep)
 		}
@@ -886,7 +886,7 @@ func rebuildTransactionsStraddleFile(ctx context.Context, oldFI snaptype.FileInf
 	noCompress := (newFI.To - newFI.From) < (snaptype.Erigon2MergeLimit - 1)
 	g := dec.MakeGetter()
 	var buf []byte
-	for i := 0; i < expectedCount; i++ {
+	for i := range expectedCount {
 		if !g.HasNext() {
 			return snaptype.FileInfo{}, fmt.Errorf("tx rebuild %s: source ran out at entry %d (wanted %d)", oldFI.Name(), i, expectedCount)
 		}

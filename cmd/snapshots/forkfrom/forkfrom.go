@@ -27,13 +27,14 @@
 package forkfrom
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cl/clparams/forkexport"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -163,7 +164,7 @@ past the cut block until paired with the CL setup (Phase 2c-CL).
 	Action: action,
 }
 
-func action(ctx *cli.Context) error {
+func action(cmdCtx context.Context, ctx *cli.Command) error {
 	logger := log.New("cmd", "fork-from")
 
 	rpcURL := ctx.String(ParentRPCFlag.Name)
@@ -182,7 +183,7 @@ func action(ctx *cli.Context) error {
 		}
 		cutBlock := ctx.Uint64(CutBlockFlag.Name)
 		cut, err = dl.CaptureParentCut(
-			ctx.Context, rpcURL, parentChain, cutBlock,
+			cmdCtx, rpcURL, parentChain, cutBlock,
 			ctx.String(ParentManifestNameFlag.Name),
 			ctx.String(ParentManifestHashFlag.Name),
 			logger,

@@ -50,7 +50,8 @@ func main() {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "begin ro: %v\n", err)
-		os.Exit(1)
+		db.Close()
+		os.Exit(1) //nolint:gocritic // explicit db.Close above; defer above this branch is a no-op
 	}
 	defer tx.Rollback()
 

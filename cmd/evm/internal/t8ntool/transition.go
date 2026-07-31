@@ -31,7 +31,7 @@ import (
 	"path/filepath"
 
 	"github.com/holiman/uint256"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -99,7 +99,7 @@ type input struct {
 	Txs   []*txWithKey       `json:"txs,omitempty"`
 }
 
-func Main(ctx *cli.Context) error {
+func Main(_ context.Context, ctx *cli.Command) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	var (
 		err     error
@@ -412,51 +412,16 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 }
 
 func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
-	gasPrice, value := uint256.NewInt(0), uint256.NewInt(0)
-	var overflow bool
-	var chainId uint256.Int
-
-	if txJson.Value != nil {
-		value, overflow = uint256.FromBig(txJson.Value.ToInt())
-		if overflow {
-			return nil, errors.New("value field caused an overflow (uint256)")
+	deref := func(b *hexutil.U256) uint256.Int {
+		if b == nil {
+			return uint256.Int{}
 		}
+		return uint256.Int(*b)
 	}
-
-	if txJson.GasPrice != nil {
-		gasPrice, overflow = uint256.FromBig(txJson.GasPrice.ToInt())
-		if overflow {
-			return nil, errors.New("gasPrice field caused an overflow (uint256)")
-		}
-	}
-
-	if txJson.ChainID != nil {
-		cid, overflow := uint256.FromBig(txJson.ChainID.ToInt())
-		if overflow {
-			return nil, errors.New("chainId field caused an overflow (uint256)")
-		}
-		chainId = *cid
-	}
-
-	sig := func(name string, b *hexutil.Big) (uint256.Int, error) {
-		var out uint256.Int
-		if b != nil && out.SetFromBig(b.ToInt()) {
-			return out, fmt.Errorf("%s field caused an overflow (uint256)", name)
-		}
-		return out, nil
-	}
-	v, err := sig("v", txJson.V)
-	if err != nil {
-		return nil, err
-	}
-	r, err := sig("r", txJson.R)
-	if err != nil {
-		return nil, err
-	}
-	s, err := sig("s", txJson.S)
-	if err != nil {
-		return nil, err
-	}
+	value := deref(txJson.Value)
+	gasPrice := deref(txJson.GasPrice)
+	chainId := deref(txJson.ChainID)
+	v, r, s := deref(txJson.V), deref(txJson.R), deref(txJson.S)
 
 	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
 		if txJson.Type == types.LegacyTxType {
@@ -464,14 +429,14 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    *value,
+					Value:    value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
 					V:        v,
 					R:        r,
 					S:        s,
 				},
-				GasPrice: *gasPrice,
+				GasPrice: gasPrice,
 			}, nil
 		}
 
@@ -480,42 +445,28 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    *value,
+					Value:    value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
 					V:        v,
 					R:        r,
 					S:        s,
 				},
-				GasPrice: *gasPrice,
+				GasPrice: gasPrice,
 			},
 			ChainID:    chainId,
 			AccessList: *txJson.Accesses,
 		}, nil
 	} else if txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType {
-		var tipCap, feeCap uint256.Int
-		if txJson.MaxPriorityFeePerGas != nil {
-			tc, overflow := uint256.FromBig(txJson.MaxPriorityFeePerGas.ToInt())
-			if overflow {
-				return nil, errors.New("maxPriorityFeePerGas field caused an overflow (uint256)")
-			}
-			tipCap = *tc
-		}
-
-		if txJson.MaxFeePerGas != nil {
-			fc, overflow := uint256.FromBig(txJson.MaxFeePerGas.ToInt())
-			if overflow {
-				return nil, errors.New("maxFeePerGas field caused an overflow (uint256)")
-			}
-			feeCap = *fc
-		}
+		tipCap := deref(txJson.MaxPriorityFeePerGas)
+		feeCap := deref(txJson.MaxFeePerGas)
 
 		if txJson.Type == types.DynamicFeeTxType {
 			return &types.DynamicFeeTransaction{
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    *value,
+					Value:    value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
 					V:        v,
@@ -529,9 +480,10 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			}, nil
 		}
 
-		auths := make([]types.Authorization, 0)
-		for _, auth := range *txJson.Authorizations {
-			a, err := auth.ToAuthorization()
+		jsonAuths := *txJson.Authorizations
+		auths := make([]types.Authorization, 0, len(jsonAuths))
+		for i := range jsonAuths {
+			a, err := jsonAuths[i].ToAuthorization()
 			if err != nil {
 				return nil, err
 			}
@@ -544,7 +496,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    *value,
+					Value:    value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
 					V:        v,
@@ -634,7 +586,7 @@ func saveFile(baseDir, filename string, data any) error {
 
 // dispatchOutput writes the output data to either stderr or stdout, or to the specified
 // files
-func dispatchOutput(ctx *cli.Context, baseDir string, result *protocol.EphemeralExecResult, alloc Alloc, body hexutil.Bytes) error {
+func dispatchOutput(ctx *cli.Command, baseDir string, result *protocol.EphemeralExecResult, alloc Alloc, body hexutil.Bytes) error {
 	stdOutObject := make(map[string]any)
 	stdErrObject := make(map[string]any)
 	dispatch := func(baseDir, fName, name string, obj any) error {

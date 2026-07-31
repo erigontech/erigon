@@ -164,7 +164,7 @@ func TestWalkForkAncestry_DepthCapEnforced(t *testing.T) {
 	keys := make([]*ecdsa.PrivateKey, totalLevels)
 	pubs := make([][]byte, totalLevels)
 	ucans := make([][]byte, totalLevels)
-	for i := 0; i < totalLevels; i++ {
+	for i := range totalLevels {
 		keys[i] = newKey(t)
 		pubs[i] = compressed(t, keys[i])
 	}

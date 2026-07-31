@@ -25,10 +25,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"regexp"
 	"sync"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
@@ -53,6 +52,7 @@ var stateTestCommand = cli.Command{
 		&JSONOutputFlag,
 		&MachineFlag,
 		&RunFlag,
+		&ExcludeFlag,
 		&WorkersFlag,
 		&DisableMemoryFlag,
 		&DisableStackFlag,
@@ -61,7 +61,7 @@ var stateTestCommand = cli.Command{
 	},
 }
 
-func stateTestCmd(ctx *cli.Context) error {
+func stateTestCmd(_ context.Context, ctx *cli.Command) error {
 	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
 	if machineFriendlyOutput {
 		log.Root().SetHandler(log.DiscardHandler())
@@ -87,11 +87,15 @@ func stateTestCmd(ctx *cli.Context) error {
 	if workers == 0 {
 		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
 	}
+	filter, err := compileTestFilter(ctx.String(RunFlag.Name), ctx.StringSlice(ExcludeFlag.Name))
+	if err != nil {
+		return err
+	}
 
 	path := ctx.Args().First()
 	if len(path) != 0 {
-		collected := collectFiles(path)
-		results, err := runStateTestsParallel(ctx, cfg, collected, workers)
+		collected := filter.filterFiles(collectFiles(path))
+		results, err := runStateTestsParallel(ctx, cfg, collected, workers, filter)
 		if err != nil {
 			return err
 		}
@@ -105,7 +109,7 @@ func stateTestCmd(ctx *cli.Context) error {
 		if len(fname) == 0 {
 			return nil
 		}
-		results, err := runStateTest(ctx, cfg, fname)
+		results, err := runStateTest(ctx, cfg, fname, filter)
 		if err != nil {
 			return err
 		}
@@ -114,11 +118,11 @@ func stateTestCmd(ctx *cli.Context) error {
 	return nil
 }
 
-func runStateTestsParallel(ctx *cli.Context, cfg vm.Config, files []string, workers uint64) ([]testResult, error) {
+func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, files []string, workers uint64, filter testFilter) ([]testResult, error) {
 	if workers == 1 {
 		results := make([]testResult, 0, len(files)*4) // pre-allocate
 		for _, fname := range files {
-			r, err := runStateTest(ctx, cfg, fname)
+			r, err := runStateTest(ctx, cfg, fname, filter)
 			if err != nil {
 				return nil, err
 			}
@@ -142,15 +146,13 @@ func runStateTestsParallel(ctx *cli.Context, cfg vm.Config, files []string, work
 	}
 	close(fileCh)
 
-	for w := uint64(0); w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			for item := range fileCh {
-				r, err := runStateTest(ctx, cfg, item.fname)
+				r, err := runStateTest(ctx, cfg, item.fname, filter)
 				resultCh <- fileResult{index: item.index, results: r, err: err}
 			}
-		}()
+		})
 	}
 	go func() {
 		wg.Wait()
@@ -177,7 +179,7 @@ func runStateTestsParallel(ctx *cli.Context, cfg vm.Config, files []string, work
 }
 
 // runStateTest loads the state-test given by fname, and executes the test.
-func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, error) {
+func runStateTest(ctx *cli.Command, cfg vm.Config, fname string, filter testFilter) ([]testResult, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
 		return nil, err
@@ -185,11 +187,6 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 	var stateTests map[string]testutil.StateTest
 	if err = json.Unmarshal(src, &stateTests); err != nil {
 		return nil, err
-	}
-
-	re, err := regexp.Compile(ctx.String(RunFlag.Name))
-	if err != nil {
-		return nil, fmt.Errorf("invalid regex -%s: %v", RunFlag.Name, err)
 	}
 
 	bench := ctx.Bool(BenchFlag.Name)
@@ -210,10 +207,11 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 	db := temporaltest.NewTestDB(nil, dirs)
 	defer db.Close()
 
-	for key, test := range stateTests {
-		if !re.MatchString(key) {
+	for key := range stateTests {
+		if !filter.includeCase(fname, key) {
 			continue
 		}
+		test := stateTests[key]
 		for _, st := range test.Subtests() {
 			result := &testResult{Name: key, Fork: st.Fork, Pass: true}
 

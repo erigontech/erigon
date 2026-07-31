@@ -25,9 +25,8 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -141,17 +140,13 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 		p.discardDownloadedHistory(ctx, downloadedPaths, downloadedNames)
 		return noop, fmt.Errorf("OpenFolder after history download: %w", err)
 	}
-	if trw, ok := any(opts.Tx).(*temporal.RwTx); ok {
-		trw.ForceReopenAggCtx()
-	}
+	// TODO: post-merge — aggregator's pin/reclaim model may already refresh
+	// visibility on OpenFolder; verify no explicit tx re-pin is needed.
 
 	return func() {
 		p.discardDownloadedHistory(ctx, downloadedPaths, downloadedNames)
 		if err := p.Aggregator.OpenFolder(); err != nil && p.logger != nil {
 			p.logger.Warn("[storage] Provider.Unwind: OpenFolder after temp-history cleanup failed", "err", err)
-		}
-		if trw, ok := any(opts.Tx).(*temporal.RwTx); ok {
-			trw.ForceReopenAggCtx()
 		}
 	}, nil
 }
@@ -272,8 +267,8 @@ func neededPreverifiedHistoryForWalk(items snapcfg.PreverifiedItems, baselineSte
 // internal state; without the Delete step the next mode-B ensure call
 // sees the torrent as "have complete" from the prior download and
 // returns immediately even though the actual files were unlinked).
-func filterMissingOnDisk(needed []snapcfg.PreverifiedItem, snapDir string) ([]services.DownloadRequest, []string, []string) {
-	missing := make([]services.DownloadRequest, 0, len(needed))
+func filterMissingOnDisk(needed []snapcfg.PreverifiedItem, snapDir string) ([]dbservices.DownloadRequest, []string, []string) {
+	missing := make([]dbservices.DownloadRequest, 0, len(needed))
 	paths := make([]string, 0, len(needed))
 	names := make([]string, 0, len(needed))
 	for _, item := range needed {
@@ -281,7 +276,7 @@ func filterMissingOnDisk(needed []snapcfg.PreverifiedItem, snapDir string) ([]se
 		if _, err := os.Stat(absPath); err == nil {
 			continue
 		}
-		missing = append(missing, services.DownloadRequest{Path: item.Name, TorrentHash: item.Hash})
+		missing = append(missing, dbservices.DownloadRequest{Path: item.Name, TorrentHash: item.Hash})
 		paths = append(paths, absPath)
 		names = append(names, item.Name)
 	}
@@ -299,11 +294,11 @@ func isHistoryOrIdxOrAccessor(name string) bool {
 // "<subdir>/vX.Y-<domain>.<from>-<to>.<ext>".
 func isWalkDomain(name string) bool {
 	base := filepath.Base(name)
-	dash := strings.IndexByte(base, '-')
-	if dash < 0 {
+	_, after, ok0 := strings.Cut(base, "-")
+	if !ok0 {
 		return false
 	}
-	afterVersion := base[dash+1:]
+	afterVersion := after
 	dot := strings.IndexByte(afterVersion, '.')
 	if dot <= 0 {
 		return false

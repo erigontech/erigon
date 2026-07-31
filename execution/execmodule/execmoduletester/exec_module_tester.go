@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -50,7 +51,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
-	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -60,6 +61,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -127,18 +129,16 @@ type ExecModuleTester struct {
 	ForkValidator  *execmodule.ForkValidator
 	ExecModule     *execmodule.ExecModule
 	StateCache     *execmodule.Cache
+	domainCache    *cache.StateCache
 
 	// adminUnwindInventory is the *snapshot.Inventory pointer the
-	// admin-unwind Provider observes. Populated lazily — empty at
-	// construction time, repopulated by RescanAdminUnwindInventory()
-	// after blocks execute and the aggregator writes files.
+	// admin-unwind Provider observes. Populated lazily via
+	// RescanAdminUnwindInventory() after blocks execute.
 	adminUnwindInventory *snapshotpkg.Inventory
 	adminUnwindSnapDir   string
 
 	// AdminUnwindProvider is the storage.Provider wired as the
-	// admin-unwind Unwinder when WithAdminUnwindWired() is set. nil
-	// otherwise — the default tester has no Provider and SetHead
-	// rejects past-diffset targets with the legacy error.
+	// admin-unwind Unwinder when WithAdminUnwindWired() is set.
 	AdminUnwindProvider *storage.Provider
 	retirementStart     chan bool
 	retirementDone      chan struct{}
@@ -153,8 +153,10 @@ type ExecModuleTester struct {
 
 	HistoryV3      bool
 	cfg            ethconfig.Config
-	BlockSnapshots *freezeblocks.RoSnapshots
-	BlockReader    services.FullBlockReader
+	BlockSnapshots *blocksnapshots.RoSnapshots
+	borSnapshots   *heimdall.RoSnapshots
+	blockRetire    dbservices.BlockRetire
+	BlockReader    dbservices.FullBlockReader
 	ReceiptsReader *receipts.Generator
 	posStagedSync  *stagedsync.Sync
 	bgComponentsEg errgroup.Group
@@ -165,14 +167,23 @@ func (emt *ExecModuleTester) Close() {
 	if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
 		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
 	}
+	if emt.blockRetire != nil {
+		emt.blockRetire.Close()
+	}
 	if emt.Engine != nil {
 		emt.Engine.Close()
 	}
 	if emt.BlockSnapshots != nil {
 		emt.BlockSnapshots.Close()
 	}
+	if emt.borSnapshots != nil {
+		emt.borSnapshots.Close()
+	}
 	if emt.DB != nil {
 		emt.DB.Close()
+	}
+	if emt.domainCache != nil {
+		emt.domainCache.Close()
 	}
 	if emt.tb == nil && emt.Dirs.DataDir != "" {
 		dir.RemoveAll(emt.Dirs.DataDir)
@@ -345,6 +356,12 @@ func WithChainConfig(cfg *chain.Config) Option {
 	}
 }
 
+func WithoutAmsterdamBuilderContracts() Option {
+	return func(opts *options) {
+		opts.skipAmsterdamBuilderContracts = true
+	}
+}
+
 func WithFcuBackgroundCommit() Option {
 	return func(opts *options) {
 		opts.fcuBackgroundCommit = true
@@ -358,6 +375,15 @@ func WithFcuBackgroundCommit() Option {
 func WithAlwaysGenerateChangesets(v bool) Option {
 	return func(opts *options) {
 		opts.alwaysGenerateChangesets = &v
+	}
+}
+
+// WithMaxReorgDepth pins syncCfg.MaxReorgDepth so the changeset window
+// (maxBlockNum-MaxReorgDepth) can be placed mid-batch — leaving earlier blocks
+// pre-window (BAL-fold candidates) and later blocks window (per-block changeset).
+func WithMaxReorgDepth(d uint64) Option {
+	return func(opts *options) {
+		opts.maxReorgDepth = &d
 	}
 }
 
@@ -390,20 +416,22 @@ func WithSentryProtocol(protocol uint) Option {
 }
 
 type options struct {
-	stepSize                 *uint64
-	experimentalBAL          bool
-	genesis                  *types.Genesis
-	chainConfig              *chain.Config
-	key                      *ecdsa.PrivateKey
-	engine                   rules.Engine
-	pruneMode                *prune.Mode
-	withTxPool               bool
-	enableDomains            []kv.Domain
-	fcuBackgroundCommit      bool
-	fcuBackgroundPrune       bool
-	adminUnwindWired         bool
-	alwaysGenerateChangesets *bool
-	sentryProtocol           uint
+	stepSize                      *uint64
+	experimentalBAL               bool
+	genesis                       *types.Genesis
+	chainConfig                   *chain.Config
+	key                           *ecdsa.PrivateKey
+	engine                        rules.Engine
+	pruneMode                     *prune.Mode
+	withTxPool                    bool
+	enableDomains                 []kv.Domain
+	fcuBackgroundCommit           bool
+	fcuBackgroundPrune            bool
+	adminUnwindWired              bool
+	alwaysGenerateChangesets      *bool
+	maxReorgDepth                 *uint64
+	sentryProtocol                uint
+	skipAmsterdamBuilderContracts bool
 }
 
 func applyOptions(opts []Option) options {
@@ -429,6 +457,9 @@ func applyOptions(opts []Option) options {
 			},
 		}
 	}
+	if !opt.skipAmsterdamBuilderContracts {
+		addAmsterdamBuilderContracts(opt.genesis)
+	}
 	// engine depends on genesis
 	if opt.engine == nil {
 		switch {
@@ -441,6 +472,28 @@ func applyOptions(opts []Option) options {
 		}
 	}
 	return opt
+}
+
+func addAmsterdamBuilderContracts(genesis *types.Genesis) {
+	if genesis.Config.AmsterdamTime == nil {
+		return
+	}
+	if genesis.Alloc == nil {
+		genesis.Alloc = types.GenesisAlloc{}
+	}
+	genesis.Alloc[genesis.Config.GetBuilderDepositContract().Value()] = types.GenesisAccount{
+		Balance: new(big.Int),
+		Code:    misc.BuilderDepositRequestCode,
+		Nonce:   1,
+	}
+	slot := common.Hash{}
+	sentinel := common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+	genesis.Alloc[genesis.Config.GetBuilderExitContract().Value()] = types.GenesisAccount{
+		Balance: new(big.Int),
+		Code:    misc.BuilderExitRequestCode,
+		Nonce:   1,
+		Storage: map[common.Hash]common.Hash{slot: sentinel},
+	}
 }
 
 // New creates an ExecModuleTester. When called with no options, it uses
@@ -476,6 +529,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Dirs = dirs
 	if opt.alwaysGenerateChangesets != nil {
 		cfg.AlwaysGenerateChangesets = *opt.alwaysGenerateChangesets
+	}
+	if opt.maxReorgDepth != nil {
+		cfg.Sync.MaxReorgDepth = *opt.maxReorgDepth
 	}
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
@@ -519,7 +575,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
-	allSnapshots := freezeblocks.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
+	allSnapshots := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
 	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
 
 	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
@@ -536,6 +592,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		stateChangesClient: direct.NewStateDiffClientDirect(erigonGrpcServer),
 		PeerId:             gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots:     allSnapshots,
+		borSnapshots:       allBorSnapshots,
 		BlockReader:        br,
 		ReceiptsReader:     receipts.NewGenerator(dirs, br, engine, nil, 5*time.Second),
 		HistoryV3:          true,
@@ -590,7 +647,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			ctx,
 			poolCfg,
 			mock.DB,
-			kvcache.NewSimple(),
+			kvcache.NewLatestBatchCache(),
 			sentries,
 			stateChangesClient,
 			func() {}, /* builderNotifyNewTxns */
@@ -646,11 +703,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	snapDownloader := mockDownloader(ctrl, mock.Dirs.Snap)
 
-	miningCancel := make(chan struct{})
-	go func() {
-		<-mock.Ctx.Done()
-		close(miningCancel)
-	}()
+	// Never closed: finishBlock sends to it concurrently to abort an in-flight seal.
+	sealCancel := make(chan struct{})
 
 	readAheader := exec.NewBlockReadAheader()
 	blkBuilder := builder.NewBuilder(
@@ -681,13 +735,14 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		&vm.Config{},
 		dirs.Tmp,
 		mock.TxPool,
-		miningCancel,
+		sealCancel,
 		latestBlockBuiltStore,
 		nil, /*sdProvider*/
 		logger,
 	)
 
-	blockRetire := freezeblocks.NewBlockRetire(1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
+	blockRetire := freezeblocks.NewBlockRetire(mock.Ctx, 1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
+	mock.blockRetire = blockRetire
 	mock.Sync = stagedsync.New(
 		cfg.Sync,
 		stagedsync.DefaultStages(
@@ -742,7 +797,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, dispatcher, logger)
 
-	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil)
+	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil, mock.BlockReader)
 
 	mock.StateCache = &execmodule.Cache{}
 	onlySnapDownloadOnStart := cfg.Genesis.Config.Bor != nil
@@ -752,21 +807,17 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		RecentReceipts: mock.Notifications.RecentReceipts,
 	}
 
+	// Per-instance domain cache, held on the tester so Close releases its
+	// envelope reservation.
+	mock.domainCache = cache.NewDefaultStateCache()
+
 	// AdminUnwind wiring (default disabled). When WithAdminUnwindWired()
-	// is set, construct a minimal storage.Provider via
-	// NewProviderForUnwindTest and an inline adapter satisfying
-	// execmodule.Unwinder. Mirrors node/eth's providerUnwinderAdapter
-	// — kept inline so the tester doesn't pull in node/eth (heavy + would
-	// be wrong-direction layering).
+	// is set, construct a minimal storage.Provider and an inline adapter
+	// satisfying execmodule.Unwinder — kept inline so the tester doesn't
+	// pull in node/eth.
 	var unwinder execmodule.Unwinder
 	if opt.adminUnwindWired {
 		agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-		// Snapshot files the test aggregator builds during execution
-		// are real on-disk artefacts, but the Inventory is empty at
-		// tester-construction time (blocks haven't executed yet).
-		// RescanAdminUnwindInventory() (called by the test after
-		// InsertChain) populates the shared *snapshotpkg.Inventory by
-		// scanning the snap dir; the Provider observes the same pointer.
 		mock.adminUnwindInventory = snapshotpkg.NewInventory()
 		mock.adminUnwindSnapDir = dirs.Snap
 		mock.AdminUnwindProvider = storage.NewProviderForUnwindTest(storage.UnwindTestDeps{
@@ -793,9 +844,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		hook,
 		accum,
 		mock.StateCache,
-		// Small per-instance domain cache: the harness builds one ExecModule per
-		// fixture, so production-size caches would allocate hundreds of MB each.
-		cache.NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB),
+		mock.domainCache,
 		logger,
 		engine,
 		cfg.Sync,
@@ -840,7 +889,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	return mock
 }
 
-func mockDownloader(ctrl *gomock.Controller, snapRoot string) downloader.Client {
+func mockDownloader(ctrl *gomock.Controller, snapRoot string) dbservices.DownloaderClient {
 	snapDownloader := downloaderproto.NewMockDownloaderClient(ctrl)
 
 	snapDownloader.EXPECT().
@@ -963,7 +1012,7 @@ func (emt *ExecModuleTester) NewStateReader(tx kv.TemporalGetter) state.StateRea
 	return state.NewReaderV3(tx)
 }
 
-func (emt *ExecModuleTester) BlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
+func (emt *ExecModuleTester) BlocksIO() (dbservices.FullBlockReader, *blockio.BlockWriter) {
 	return emt.BlockReader, blockio.NewBlockWriter()
 }
 

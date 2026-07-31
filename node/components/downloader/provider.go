@@ -22,7 +22,7 @@
 //   - Local: in-process torrent client (default)
 //   - Remote: connects to external downloader via gRPC
 //
-// Consumers access it through the downloader.Client interface, which abstracts
+// Consumers access it through the dbservices.DownloaderClient interface, which abstracts
 // both modes behind Download/Seed/Delete operations.
 package downloader
 
@@ -34,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	dl "github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
@@ -41,7 +42,7 @@ import (
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/node/ethconfig"
-	downloaderproto "github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 // Provider holds the Downloader's runtime state. It implements the component
@@ -50,8 +51,8 @@ import (
 // After Initialize, the Client field is ready for consumers to use.
 type Provider struct {
 	// Public fields — accessible by consumers via the component dependency graph.
-	Downloader *dl.Downloader // nil when using external downloader
-	Client     dl.Client      // always set after Initialize (local or remote)
+	Downloader *dl.Downloader              // nil when using external downloader
+	Client     dbservices.DownloaderClient // always set after Initialize (local or remote)
 
 	// Configuration
 	cfg         *downloadercfg.Cfg
@@ -179,30 +180,11 @@ func (p *Provider) initDownloader(ctx context.Context) (downloaderproto.Download
 	return dl.DirectGrpcServerClient(bittorrentServer), nil
 }
 
-// Activate starts the downloader's background goroutines. This is the
-// fourth phase of the component lifecycle (Configure → Initialize →
-// Activate → Close), called after Initialize has constructed the
-// underlying Downloader AND callers have wired the per-deployment
-// setters (SetInventory, SetChainIdentity, SetForkCutBlock,
-// SetDelegationSource, SetContentUCANMinter, SetManifestSelfCheck,
-// SetNodeSource, etc.).
-//
-// On a non-NoDownloader build:
-//   - StartTorrentPeerManager runs the DevP2P↔torrent peer sync loop;
-//     requires the caller to have installed a node source (nodeSourceFn).
-//   - If snapshotCfg.P2PManifest is set, EnableP2PManifest opens the
-//     manifestReady channel and StartChainTomlDiscovery launches the
-//     discovery loop.
-//
-// Idempotent: a second call returns nil without re-launching any
-// goroutine. Tests / NoDownloader builds short-circuit on a nil
-// Downloader.
-//
-// ManifestReady() returns the channel callers (e.g. backend.go) plumb
-// into ethconfig.BlocksFreezing.ManifestReady for stage_snapshots's
-// gate. The component's BindBus handler also publishes
-// flow.ManifestDiscoveryComplete the first time that channel closes
-// (see bus.go) so bus subscribers see the signal as a typed event.
+// Activate starts the downloader's background goroutines. Fourth phase of the
+// component lifecycle (Configure → Initialize → Activate → Close), called after
+// Initialize AND the per-deployment setters (SetInventory, SetChainIdentity,
+// SetForkCutBlock, SetDelegationSource, etc.). Idempotent; NoDownloader builds
+// short-circuit.
 func (p *Provider) Activate(ctx context.Context) error {
 	if p == nil {
 		return fmt.Errorf("downloader.Activate: nil provider")
@@ -211,7 +193,6 @@ func (p *Provider) Activate(ctx context.Context) error {
 		return nil
 	}
 	if p.Downloader == nil {
-		// External downloader or NoDownloader build — nothing to start.
 		p.activated = true
 		return nil
 	}
@@ -224,6 +205,17 @@ func (p *Provider) Activate(ctx context.Context) error {
 
 	p.activated = true
 	return nil
+}
+
+// AddTorrentsFromDisk adds completed on-disk torrents via the local downloader.
+// No-op returning (0, nil) when no local downloader is present (remote/disabled
+// downloader, or already-closed during shutdown).
+func (p *Provider) AddTorrentsFromDisk(ctx context.Context) (incompleteTorrents int, err error) {
+	d := p.Downloader
+	if d == nil {
+		return 0, nil
+	}
+	return d.AddTorrentsFromDisk(ctx)
 }
 
 // Close shuts down the downloader. Safe to call multiple times.

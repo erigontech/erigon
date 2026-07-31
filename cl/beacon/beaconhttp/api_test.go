@@ -25,7 +25,7 @@ func TestHandleEndpoint_SetsEthConsensusVersionHeaderFromBodyVersion(t *testing.
 		return NewBeaconResponse(map[string]any{"ok": true}).WithVersion(clparams.DenebVersion), nil
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequest("GET", "/test", http.NoBody)
 	rr := httptest.NewRecorder()
 	h(rr, req)
 
@@ -47,7 +47,7 @@ func TestHandleEndpoint_UsesSSZForPreferredWeightedAccept(t *testing.T) {
 		return NewBeaconResponse(testSSZResponse{}), nil
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequest("GET", "/test", http.NoBody)
 	req.Header.Set("Accept", "application/octet-stream;q=1,application/json;q=0.9")
 	rr := httptest.NewRecorder()
 	h(rr, req)
@@ -65,7 +65,7 @@ func TestHandleEndpoint_UsesJSONForPreferredSSZAcceptWhenResponseDoesNotSupportS
 		return NewBeaconResponse(map[string]any{"ok": true}), nil
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequest("GET", "/test", http.NoBody)
 	req.Header.Set("Accept", "application/octet-stream;q=1,application/json;q=0.9")
 	rr := httptest.NewRecorder()
 	h(rr, req)
@@ -91,7 +91,7 @@ func TestHandleEndpoint_RejectsSSZOnlyAcceptWhenResponseDoesNotSupportSSZ(t *tes
 		return NewBeaconResponse(map[string]any{"ok": true}), nil
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequest("GET", "/test", http.NoBody)
 	req.Header.Set("Accept", "application/octet-stream")
 	rr := httptest.NewRecorder()
 	h(rr, req)
@@ -114,7 +114,7 @@ func TestHandleEndpoint_UsesSSZWhenExactTypeBeatsWildcard(t *testing.T) {
 		return NewBeaconResponse(testSSZResponse{}), nil
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequest("GET", "/test", http.NoBody)
 	req.Header.Set("Accept", "application/octet-stream, */*")
 	rr := httptest.NewRecorder()
 	h(rr, req)
@@ -164,7 +164,7 @@ func TestHandleEndpoint_DoesNotOverrideEthConsensusVersionHeader(t *testing.T) {
 			WithVersion(clparams.DenebVersion), nil
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequest("GET", "/test", http.NoBody)
 	rr := httptest.NewRecorder()
 	h(rr, req)
 

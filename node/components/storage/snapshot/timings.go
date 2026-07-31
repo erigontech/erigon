@@ -152,7 +152,8 @@ func (inv *Inventory) StepTimings(key StepKey) StepTimings {
 	// timestamp (the "not yet complete" semantics).
 	minTs := func(includeMinimumOnly bool, pick func(FileTimings) time.Time) time.Time {
 		var out time.Time
-		for _, fs := range snap {
+		for _, fs := range snap { //nolint:gocritic // small map, per-iter copy is fine
+
 			if includeMinimumOnly && !fs.isMinimum {
 				continue
 			}
@@ -171,7 +172,8 @@ func (inv *Inventory) StepTimings(key StepKey) StepTimings {
 	}
 	maxTs := func(includeMinimumOnly bool, pick func(FileTimings) time.Time) time.Time {
 		var out time.Time
-		for _, fs := range snap {
+		for _, fs := range snap { //nolint:gocritic // small map, per-iter copy is fine
+
 			if includeMinimumOnly && !fs.isMinimum {
 				continue
 			}

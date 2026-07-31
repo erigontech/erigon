@@ -50,7 +50,7 @@ var didKeySecp256k1Prefix = []byte{0xe7, 0x01}
 // spec yields a nil slice and no error.
 func ParseTrustRoots(spec string) ([]TrustRoot, error) {
 	var roots []TrustRoot
-	for _, raw := range strings.Split(spec, ",") {
+	for raw := range strings.SplitSeq(spec, ",") {
 		elem := strings.TrimSpace(raw)
 		if elem == "" {
 			continue
