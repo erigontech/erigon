@@ -1559,7 +1559,7 @@ func (b *Block) Copy() *Block {
 		uncles:          uncles,
 		transactions:    CopyTxs(b.transactions),
 		withdrawals:     withdrawals,
-		blockAccessList: common.Copy(b.blockAccessList),
+		blockAccessList: bytes.Clone(b.blockAccessList),
 	}
 	szCopy := b.size.Load()
 	newB.size.Store(szCopy)
