@@ -1894,12 +1894,12 @@ func drainHeaders(t *testing.T, ch <-chan [][]byte, timeout time.Duration) {
 }
 
 // TestAssembleBlockStateGasLimit verifies that the builder respects the EIP-8037
-// block validity invariant: gas_used = max(regular, state) <= gas_limit.
+// block validity invariant: gas_used = max(execution, state) <= gas_limit.
 //
 // Contract creations have high runtime state gas (~184K per create at
-// CostPerStateByte=1530, STATE_BYTES_PER_NEW_ACCOUNT=120) but low regular gas
+// CostPerStateByte=1530, STATE_BYTES_PER_NEW_ACCOUNT=120) but low execution gas
 // (~30K). With a 500K gas limit, about 3 creates would push state gas past
-// the limit even though regular gas has room. Without the fix the builder
+// the limit even though execution gas has room. Without the fix the builder
 // would produce an invalid block.
 func TestAssembleBlockStateGasLimit(t *testing.T) {
 	t.Parallel()
@@ -1933,7 +1933,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Submit 10 contract creation txns to the pool.
-	// Each has ~184K runtime state gas but only ~30K regular gas.
+	// Each has ~184K runtime state gas but only ~30K execution gas.
 	baseFee := chainPack.TopBlock.BaseFee().Uint64()
 	deployCode := []byte{0x60, 0x00} // PUSH1 0x00 — minimal contract
 	rlpTxs := make([][]byte, 10)
@@ -1976,7 +1976,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 
 	// EIP-8037 invariant: gas_used <= gas_limit.
 	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
-		"gas_used (max of regular, state) must not exceed gas_limit")
+		"gas_used (max of execution, state) must not exceed gas_limit")
 
 	// Block must pass full validation (insert + validate + FCU).
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
@@ -1988,7 +1988,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 // for contract creations tested above.
 //
 // A deployed contract writes 4 new storage slots per call (~150K state gas
-// and ~41K regular gas). The txpool cannot filter these by state gas; the
+// and ~41K execution gas). The txpool cannot filter these by state gas; the
 // check inside applyTransaction prevents the block from exceeding gas_limit.
 func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	t.Parallel()
@@ -2038,8 +2038,8 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	require.NoError(t, err)
 
 	// Submit 10 call txns. Each writes 4 new slots (~150K state gas, ~41K
-	// regular gas). With a 500K gas limit, 3 calls fit (~451K state gas)
-	// but the 4th would push to ~601K. The txpool's regular-gas filter lets
+	// execution gas). With a 500K gas limit, 3 calls fit (~451K state gas)
+	// but the 4th would push to ~601K. The txpool's execution-gas filter lets
 	// them all through, so the applyTransaction check is the only defense.
 	baseFee = chainPack.TopBlock.BaseFee().Uint64()
 	rlpTxs := make([][]byte, 10)
@@ -2083,7 +2083,7 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 
 	// EIP-8037 invariant: gas_used <= gas_limit.
 	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
-		"gas_used (max of regular, state) must not exceed gas_limit")
+		"gas_used (max of execution, state) must not exceed gas_limit")
 
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
@@ -2091,8 +2091,8 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 
 // TestAssembleBlockGasPoolSnapshotRestoreBug exercises the per-tx gas pool
 // snapshot/restore in the block assembler's commitTx path. Under EIP-8037 the
-// pool tracks regular and state gas as separate dimensions, so a restore that
-// only captures the regular dimension and seeds both on restore wrongly
+// pool tracks execution and state gas as separate dimensions, so a restore that
+// only captures the execution dimension and seeds both on restore wrongly
 // inflates the state pool, letting a follow-up tx exceed the block's
 // state-gas limit.
 //
@@ -2108,7 +2108,7 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 	ctx := t.Context()
 
 	// Initcode that deploys a 100-byte runtime (100 zero bytes) via CODECOPY.
-	// Per byte deployed: 1530 state gas (CPSB) + 200 regular gas. So each
+	// Per byte deployed: 1530 state gas (CPSB) + 200 execution gas. So each
 	// CREATE consumes ~153K code-deposit state gas on top of the 183.6K runtime
 	// NEW_ACCOUNT charge — a total of ~337K state per tx.
 	const runtimeLen = 100
@@ -2199,7 +2199,7 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 
 	require.Greater(t, len(block.Transactions()), 0, "block should contain at least one tx")
 	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
-		"gas_used (max of regular, state) must not exceed gas_limit")
+		"gas_used (max of execution, state) must not exceed gas_limit")
 
 	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, []*types.Block{block}))
 }
@@ -2208,16 +2208,16 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 // per-batch gas-pool initialisation. The block builder calls AddTransactions
 // repeatedly with batches of up to 50 txs from the txpool. Each call must
 // build the pool with the *per-dimension* remaining budget; seeding both
-// dimensions from the regular-only cumulative gas wrongly inflates the state
-// pool when state gas has run ahead of regular gas after the previous batch,
+// dimensions from the execution-only cumulative gas wrongly inflates the state
+// pool when state gas has run ahead of execution gas after the previous batch,
 // letting a tx in the next batch consume state past gas_limit.
 //
 // The scenario: 50 contract creations in batch 1 push cumulative state gas
-// near the block gas limit while keeping cumulative regular gas low (CREATE
-// has ~184K runtime state vs ~30K intrinsic regular per tx). The 51st tx has
+// near the block gas limit while keeping cumulative execution gas low (CREATE
+// has ~184K runtime state vs ~30K intrinsic execution per tx). The 51st tx has
 // a large code-deposit state charge. With the pool
-// init seeded from regular gas only, batch 2 starts with a state pool that
-// matches the regular dimension — i.e. far more than the real remaining
+// init seeded from execution gas only, batch 2 starts with a state pool that
+// matches the execution dimension — i.e. far more than the real remaining
 // state budget — and the 51st tx is wrongly accepted.
 func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 	t.Parallel()
@@ -2273,7 +2273,7 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 	batch1Init := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
 
 	// Batch 2 initcode deploys a ~660-byte runtime via CODECOPY. Per-byte
-	// deposit cost: 1530 state + 200 regular. ~660 bytes → ~1M state on top
+	// deposit cost: 1530 state + 200 execution. ~660 bytes → ~1M state on top
 	// of the 184K runtime charge.
 	const triggerRuntimeLen = 660
 	triggerInit := []byte{
@@ -2330,7 +2330,7 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 
 	require.Greater(t, len(block.Transactions()), 0, "block should contain at least one tx")
 	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
-		"gas_used (max of regular, state) must not exceed gas_limit")
+		"gas_used (max of execution, state) must not exceed gas_limit")
 
 	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, []*types.Block{block}))
 }
