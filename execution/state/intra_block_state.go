@@ -2709,11 +2709,7 @@ func (sdb *IntraBlockState) MergeTxIOInto(io *VersionedIO, writes *WriteSet) {
 	io.mergeTx(version, sdb.versionedReads, writes)
 }
 
-// FlushWritesToVersionMap publishes the supplied write set into this IBS's
-// version map at each cell's recorded transaction index and incarnation.
-// Block assembly clears per-transaction IO after BAL recording, so finalized
-// writes must be flushed before ResetVersionedIO to remain visible to later
-// transactions and system-call phases.
+// FlushWritesToVersionMap publishes the supplied writes to this state's version map.
 func (sdb *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 	if sdb.versionMap == nil {
 		return
@@ -2862,9 +2858,11 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 	}
 }
 
-// StartAccessRecording enables MarkAddressAccess outside Prepare. Block phases
-// with no transaction context (engine.Finalize: withdrawals, block-end system
-// calls) use it so their accesses reach the EIP-7928 block access list.
+// StartAccessRecording enables versioned access tracking until ResetVersionedIO.
+// Block finalization re-enables it (Prepare only runs for user txs) so that an
+// address touched but left absent — e.g. a zero-amount withdrawal recipient —
+// still reaches the BAL as an access-only entry: its reads are validation-only
+// and FinalizedWrites withholds its created-empty writes.
 func (sdb *IntraBlockState) StartAccessRecording() {
 	sdb.recordAccess = true
 }

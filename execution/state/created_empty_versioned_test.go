@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -97,6 +98,18 @@ func TestCreatedEmptyRequiresNoOtherWrites(t *testing.T) {
 			},
 		},
 		{
+			name: "nonce",
+			add: func(writes *WriteSet) {
+				writes.SetNonce(addr, &VersionedWrite[uint64]{Val: 1})
+			},
+		},
+		{
+			name: "code hash",
+			add: func(writes *WriteSet) {
+				writes.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{Val: accounts.InternCodeHash(common.Hash{1})})
+			},
+		},
+		{
 			name: "code",
 			add: func(writes *WriteSet) {
 				writes.SetCode(addr, &VersionedWrite[accounts.Code]{})
@@ -136,6 +149,7 @@ func TestCreatedEmptyRequiresNoOtherWrites(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			writes := newWrites()
+			require.True(t, writes.createdEmpty(addr))
 			test.add(writes)
 			require.False(t, writes.createdEmpty(addr))
 		})

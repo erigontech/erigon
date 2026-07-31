@@ -128,8 +128,8 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 	if evm.readOnly {
 		return mdgas.MdGas{}, ErrWriteProtection
 	}
-	value, x := callContext.Stack.back2(1, 0)
-	key := accounts.InternKey(x.Bytes32())
+	value := callContext.Stack.back(1)
+	key := callContext.peekStorageKey(evm)
 	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
 	// The legacy gas metering only takes into consideration the current state
 	// Legacy rules should be applied if we are in Petersburg (removal of EIP-1283)
@@ -217,8 +217,8 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 		return mdgas.MdGas{}, errors.New("not enough gas for reentrancy sentry")
 	}
 	// Gas sentry honoured, do the actual gas calculation based on the stored value
-	value, x := callContext.Stack.back2(1, 0)
-	key := accounts.InternKey(x.Bytes32())
+	value := callContext.Stack.back(1)
+	key := callContext.peekStorageKey(evm)
 	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
 
 	if current.Eq(value) { // noop (1)
@@ -370,9 +370,6 @@ func gasCreateEip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	if overflow {
 		return mdgas.MdGas{}, ErrGasUintOverflow
 	}
-	if evm.ChainRules().IsAmsterdam {
-		gas.State = params.StateGasNewAccount
-	}
 	return gas, nil
 }
 
@@ -397,9 +394,6 @@ func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.Md
 	gas.Regular, overflow = math.SafeAdd(gas.Regular, wordGas)
 	if overflow {
 		return mdgas.MdGas{}, ErrGasUintOverflow
-	}
-	if evm.ChainRules().IsAmsterdam {
-		gas.State = params.StateGasNewAccount
 	}
 	return gas, nil
 }
@@ -497,7 +491,7 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availa
 	var accountGas, stateGas uint64
 	var address = accounts.InternAddress(callContext.Stack.back(1).Bytes20())
 	rules := evm.ChainRules()
-	evm.callNewAccountCharged = false
+	callContext.newAccountCharged = false
 	if rules.IsEIP161Enabled() {
 		empty, err := evm.IntraBlockState().Empty(address)
 		if err != nil {
@@ -510,7 +504,7 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availa
 		if transfersValue && empty {
 			if rules.IsAmsterdam {
 				stateGas = params.StateGasNewAccount
-				evm.callNewAccountCharged = true
+				callContext.newAccountCharged = true
 			} else {
 				accountGas = params.CallNewAccountGas
 			}

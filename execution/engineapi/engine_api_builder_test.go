@@ -139,6 +139,7 @@ func testEngineApiClearsFreshTouchedEmptyAccount(t *testing.T, experimentalBAL b
 			require.NoError(t, err)
 		}
 
+		// Deploy runtime code that pushes emptyAddr and executes SELFDESTRUCT.
 		initCode := append([]byte{0x75, 0x73}, emptyAddr[:]...)
 		initCode = append(initCode, 0xff, 0x60, 0x00, 0x52, 0x60, 0x16, 0x60, 0x0a, 0xf3)
 		send(&types.DynamicFeeTransaction{
@@ -167,6 +168,39 @@ func testEngineApiClearsFreshTouchedEmptyAccount(t *testing.T, experimentalBAL b
 		require.NoError(t, err)
 		const gasUsedWithoutAuthorityExistenceRefund = uint64(74_603)
 		require.Equal(t, gasUsedWithoutAuthorityExistenceRefund, uint64(payload.ExecutionPayload.GasUsed))
+	})
+}
+
+func TestEngineApiClearsFreshZeroAmountWithdrawal(t *testing.T) {
+	parallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
+
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		fresh := common.Address{0xbe, 0xef}
+		withdrawals := []*types.Withdrawal{{Index: 1, Validator: 1, Address: fresh, Amount: 0}}
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx, engineapitester.WithWithdrawals(withdrawals))
+		require.NoError(t, err)
+
+		bal := decodeAndValidateBAL(t, payload)
+		changes := findAccountChanges(bal, accounts.InternAddress(fresh))
+		require.NotNilf(t, changes, "zero-amount withdrawal recipient must remain an access-only BAL entry\n%s", bal.DebugString())
+		require.Empty(t, changes.StorageChanges)
+		require.Empty(t, changes.StorageReads)
+		require.Empty(t, changes.BalanceChanges)
+		require.Empty(t, changes.NonceChanges)
+		require.Empty(t, changes.CodeChanges)
 	})
 }
 

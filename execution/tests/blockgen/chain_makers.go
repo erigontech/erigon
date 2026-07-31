@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // BlockGen creates blocks for testing.
@@ -166,10 +165,9 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 }
 
 func (b *BlockGen) blockRules() *chain.Rules {
-	blockContext := evmtypes.BlockContext{
-		BlockNumber: b.header.Number.Uint64(),
-		Time:        b.header.Time,
-	}
+	blockContext := protocol.NewEVMBlockContext(
+		b.header, protocol.GetHashFn(b.header, nil), b.engine, accounts.NilAddress, b.config,
+	)
 	return blockContext.Rules(b.config)
 }
 
