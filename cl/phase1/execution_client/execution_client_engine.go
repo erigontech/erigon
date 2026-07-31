@@ -122,12 +122,6 @@ func (cc *ExecutionClientEngine) Close() {
 	}
 }
 
-// buildExecutionPayload maps Caplin's SSZ payload representation to the Engine
-// API representation.
-func buildExecutionPayload(payload *cltypes.Eth1Block) *engine_types.ExecutionPayload {
-	return engine_types.ExecutionPayloadFromSSZBlock(payload, payload.Version())
-}
-
 func (cc *ExecutionClientEngine) NewPayload(
 	ctx context.Context,
 	payload *cltypes.Eth1Block,
@@ -139,7 +133,7 @@ func (cc *ExecutionClientEngine) NewPayload(
 		return PayloadStatusValidated, nil
 	}
 
-	request := buildExecutionPayload(payload)
+	request := engine_types.ExecutionPayloadFromSSZBlock(payload, payload.Version())
 
 	var (
 		payloadStatus *engine_types.PayloadStatus
