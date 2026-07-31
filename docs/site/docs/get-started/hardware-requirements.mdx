@@ -15,12 +15,34 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 
 | Component | Recommendation | Notes |
 | --- | --- | --- |
-| Disk Type | Use high-end NVMe SSDs. | Avoid HDDs.SSD performance may degrade when nearing full capacity. |
-| Disk Configuration | RAID 0 for multiple disks (Speed) | High-Speed Option: RAID 0 provides maximum speed but no redundancy (data loss risk).ZFS filesystems may be considered for Archive nodes for their data integrity features, but complex RAID-Z setups are generally not recommended. |
+| Disk Type | Use high-end NVMe SSDs. | Avoid HDDs. SSD performance may degrade when nearing full capacity. |
+| Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive; RAID 0 is not needed and doubles the chance of losing the datadir. See [Filesystem](#filesystem). |
+| Filesystem | ext4 | See [Filesystem](#filesystem) below. |
 | RAM | Adequate memory is crucial | Reduces bottlenecks during sync and improves performance under load. |
 | CPU | 4–8 cores for Full nodes8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. |
 | Linux | Kernel version > v4 | A modern Linux distribution is required. |
 
+
+## Filesystem
+
+Use **ext4** on a single NVMe device. This is what Erigon is developed and measured on, and the disk figures below are obtained on it.
+
+Mount with `noatime` so reads do not generate metadata writes:
+
+```
+/dev/nvme0n1p2  /data  ext4  rw,noatime  0 1
+```
+
+**XFS** is a reasonable alternative and is used by several operators. Filesystems other than these two are not part of what we measure, so treat their performance as unverified rather than assumed.
+
+A few points that follow from Erigon's storage model — see [Database](../fundamentals/database) for the layout:
+
+* **One device is enough.** An archive node fits on a single 4 TB drive, so striping across disks buys nothing and doubles the probability of losing the datadir. Use RAID 0 only if you already have several smaller drives and no single one is large enough.
+* **Most of the datadir is re-downloadable.** Snapshot files are content-addressed and fetched from peers, so redundancy matters far less here than for a database-backed service. Only `chaindata/` is worth backing up.
+* **Erigon memory-maps its database.** Leave RAM for the page cache and avoid layers that keep a second cache of their own.
+* **Network and cloud block storage are slow for block execution.** See [known issues](/help-center/known-issues#cloud-network-drives).
+
+If you must split the datadir across a fast and a slow device, see [Optimizing Storage](../fundamentals/optimizing-storage).
 
 ## Disk Size and RAM Requirements
 
@@ -46,16 +68,32 @@ _Current Disk Usage measured as of {/* ds-date:mainnet */}2026-07-19{/* ds:end *
 
 _Current Disk Usage measured as of {/* ds-date:gnosis */}2026-07-21{/* ds:end */}; usage grows over time as the chain grows._
 </TabItem>
-<TabItem value="polygon" label="Polygon">
-:::warning
-The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases). Disk usage figures below are from September 2025 and are no longer automatically updated.
-:::
+<TabItem value="sepolia" label="Sepolia">
+| **Pruning Mode**  | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | {/* ds:sepolia:archive */}1.10 TB{/* ds:end */} |
+| Full (Default) | -                      |
+| Minimal        | -                      |
 
-| **Pruning Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
-| -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
-| Archive        | 4.85 TB                | 8 TB                        | 64 GB              | 128 GB                |
-| Full (Default) | 3.3 TB                 | 4 TB                        | 32 GB              | 64 GB                 |
-| Minimal        | 1.2 TB                 | 2 TB                        | 32 GB              | 64 GB                 |
+_Current Disk Usage measured as of {/* ds-date:sepolia */}2026-07-29{/* ds:end */}; usage grows over time as the chain grows. Execution layer only. Full and minimal are not measured on this network: only the QA full-node and minimal-node sync runs upload disk-usage figures, and both run on Ethereum mainnet and Gnosis Chain._
+</TabItem>
+<TabItem value="hoodi" label="Hoodi">
+| **Pruning Mode**  | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | {/* ds:hoodi:archive */}133.73 GB{/* ds:end */} |
+| Full (Default) | -                      |
+| Minimal        | -                      |
+
+_Current Disk Usage measured as of {/* ds-date:hoodi */}2026-07-29{/* ds:end */}; usage grows over time as the chain grows. Execution layer only. Full and minimal are not measured on this network: only the QA full-node and minimal-node sync runs upload disk-usage figures, and both run on Ethereum mainnet and Gnosis Chain._
+</TabItem>
+<TabItem value="chiado" label="Chiado">
+| **Pruning Mode**  | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | {/* ds:chiado:archive */}29.64 GB{/* ds:end */} |
+| Full (Default) | -                      |
+| Minimal        | -                      |
+
+_Current Disk Usage measured as of {/* ds-date:chiado */}2026-07-29{/* ds:end */}; usage grows over time as the chain grows. Execution layer only. Full and minimal are not measured on this network: only the QA full-node and minimal-node sync runs upload disk-usage figures, and both run on Ethereum mainnet and Gnosis Chain._
 </TabItem>
 </Tabs>
 
