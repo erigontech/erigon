@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -62,6 +63,11 @@ type testExecTask struct {
 	sender       accounts.Address
 	nonce        int
 	dependencies []int
+	// execCount counts how often the executor ran this task; anything above one
+	// is a re-execution. abortCount counts the runs that ended in a dependency
+	// abort, i.e. the optimistic read lost to a lower-indexed write.
+	execCount  atomic.Int64
+	abortCount atomic.Int64
 }
 
 type PathGenerator func(i int, j int, total int) opkey
@@ -113,6 +119,8 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
 	calcFees bool) *exec.TxResult {
+	t.execCount.Add(1)
+
 	// Sleep for 50 microsecond to simulate setup time
 	sleepWithContext(t.ctx, time.Microsecond*50) //nolint:errcheck
 
@@ -174,10 +182,13 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	}
 
 	if dep != -1 {
+		t.abortCount.Add(1)
 		return &exec.TxResult{Err: protocol.ErrExecAbortError{DependencyTxIndex: dep, OriginError: fmt.Errorf("Dependency error")}}
 	}
 
-	return &exec.TxResult{}
+	// Hand the read and write sets back to the executor. Without them validation
+	// has nothing to check, so no task is ever found stale and none is re-run.
+	return &exec.TxResult{TxIn: t.readMap, TxOut: t.writeMap}
 }
 
 func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) *state.WriteSet {
@@ -250,6 +261,20 @@ var dexPathGenerator = func(i int, j int, total int) opkey {
 		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(j))))
 		return opkey{addr: addr, path: state.BalancePath}
 	}
+}
+
+// hotSlotPathGenerator points every op at one storage slot, so every
+// transaction in the block reads and writes the same key.
+var hotSlotPathGenerator = func(i int, j int, total int) opkey {
+	addr := accounts.InternAddress(common.BigToAddress(big.NewInt(0)))
+	key := accounts.InternKey(common.BigToHash(big.NewInt(0)))
+	return opkey{addr, key, state.StoragePath}
+}
+
+// uniqueSender gives each transaction its own sender, so the shared storage
+// slot is the only thing ordering them — nonces do not also serialise the block.
+func uniqueSender(i int) accounts.Address {
+	return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i))))
 }
 
 var readTime = randTimeGenerator(4*time.Microsecond, 12*time.Microsecond)
@@ -483,6 +508,11 @@ func checkNoDroppedTx(pe *parallelExecutor) error {
 
 func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, metadata bool, logger log.Logger) time.Duration {
 	tb.Helper()
+	return runParallelWorkers(tb, tasks, validation, metadata, logger, runtime.NumCPU()-1)
+}
+
+func runParallelWorkers(tb testing.TB, tasks []exec.Task, validation propertyCheck, metadata bool, logger log.Logger, workerCount int) time.Duration {
+	tb.Helper()
 	ctx := tb.Context()
 
 	dirs := datadir.New(tb.TempDir())
@@ -510,7 +540,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
 			logger: logger,
 		},
-		workerCount: runtime.NumCPU() - 1,
+		workerCount: workerCount,
 	}
 
 	executorContext, executorCancel, err := pe.run(ctx)
@@ -968,6 +998,63 @@ func BenchmarkMoreConflicts(b *testing.B) {
 					})
 				}
 			}
+		}
+	}
+}
+
+// BenchmarkDataDependentConflicts is the worst case for optimistic parallel
+// execution: every transaction in the block reads and writes one storage slot,
+// so each speculative run reads a value a lower-indexed transaction then
+// overwrites, is invalidated, and runs again. It executes the same block at the
+// production worker count and at a single worker, reporting how many times each
+// transaction had to run.
+//
+// repeat% is the share of executions that were re-executions, so 0 means every
+// transaction ran once. The single-worker configuration is the floor: with no
+// speculation there is nothing to invalidate.
+//
+// Run with: go test -run='^$' -bench=BenchmarkDataDependentConflicts -benchtime=1x
+func BenchmarkDataDependentConflicts(b *testing.B) {
+	if runtime.GOOS == "windows" {
+		b.Skip()
+	}
+	logger := logger(discardLogging)
+
+	totalTxs := []int{50, 200}
+	if testing.Short() {
+		totalTxs = totalTxs[:1]
+	}
+	configs := []struct {
+		name    string
+		workers int
+	}{
+		{"workers=production", max(1, runtime.NumCPU()-1)},
+		{"workers=1", 1},
+	}
+
+	for _, numTx := range totalTxs {
+		for _, cfg := range configs {
+			b.Run(fmt.Sprintf("txs=%d/%s", numTx, cfg.name), func(b *testing.B) {
+				tasks, serialDuration := taskFactory(numTx, uniqueSender, 5, 5, 10, hotSlotPathGenerator, readTime, writeTime, nonIOTime)
+
+				b.ResetTimer()
+				parallelDuration := runParallelWorkers(b, tasks, defaultChecks, false, logger, cfg.workers)
+				b.StopTimer()
+
+				var execs, aborts int64
+				for _, task := range tasks {
+					execs += task.(*testExecTask).execCount.Load()
+					aborts += task.(*testExecTask).abortCount.Load()
+				}
+				b.ReportMetric(float64(aborts), "aborts")
+				if execs > 0 {
+					b.ReportMetric(100*float64(execs-int64(numTx))/float64(execs), "repeat%")
+					b.ReportMetric(float64(execs)/float64(numTx), "execs/tx")
+				}
+				if parallelDuration > 0 {
+					b.ReportMetric(float64(serialDuration)/float64(parallelDuration), "speedup")
+				}
+			})
 		}
 	}
 }

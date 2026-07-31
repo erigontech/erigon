@@ -1237,7 +1237,13 @@ func (pe *parallelExecutor) completeBlock(ctx context.Context, blockResult *bloc
 	return false, nil
 }
 
+// repeatReportThreshold logs any block whose share of repeated executions
+// reaches this percentage, so high-conflict blocks can be found by block number
+// instead of being averaged away in the per-interval aggregate. 0 disables.
+var repeatReportThreshold = dbg.EnvInt("EXEC_REPEAT_REPORT", 0)
+
 func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
+	pe.reportBlockRepeats(be)
 	pe.execCount.Add(int64(be.cntExec))
 	pe.abortCount.Add(int64(be.cntAbort))
 	pe.invalidCount.Add(int64(be.cntValidationFail))
@@ -1247,6 +1253,29 @@ func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
 		pe.blockExecMetrics.Duration.Add(time.Since(be.execStarted))
 		pe.blockExecMetrics.BlockCount.Add(1)
 	}
+}
+
+func (pe *parallelExecutor) reportBlockRepeats(be *blockExecutor) {
+	if repeatReportThreshold <= 0 || be.cntExec <= len(be.tasks) || len(be.tasks) == 0 {
+		return
+	}
+	repeats := be.cntExec - len(be.tasks)
+	repeatPct := 100 * float64(repeats) / float64(be.cntExec)
+	if repeatPct < float64(repeatReportThreshold) {
+		return
+	}
+	var execDur time.Duration
+	if !be.execStarted.IsZero() {
+		execDur = time.Since(be.execStarted)
+	}
+	pe.logger.Info("[exec] high-repeat block",
+		"blockNum", be.blockNum,
+		"txs", len(be.tasks),
+		"execs", be.cntExec,
+		"repeat%", fmt.Sprintf("%.1f", repeatPct),
+		"abort", be.cntAbort,
+		"invalid", be.cntValidationFail,
+		"took", execDur)
 }
 
 // decideStop evaluates the per-blockResult exit conditions and, on a terminal
