@@ -353,10 +353,10 @@ func WriteBeaconBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeac
 	if err != nil {
 		return err
 	}
-	if err := encoder.Flush(); err != nil {
+	if err := encoder.Close(); err != nil {
 		return err
 	}
-	if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot), common.Copy(buf.Bytes())); err != nil {
+	if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot), bytes.Clone(buf.Bytes())); err != nil {
 		return err
 	}
 	return nil
@@ -509,6 +509,6 @@ func AddBlockRootToParentRootsIndex(tx kv.RwTx, parentRoot, blockRoot common.Has
 		}
 	}
 
-	roots = append(common.Copy(roots), blockRoot[:]...)
+	roots = append(bytes.Clone(roots), blockRoot[:]...)
 	return tx.Put(kv.ParentRootToBlockRoots, parentRoot[:], roots)
 }

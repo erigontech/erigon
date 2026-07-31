@@ -17,17 +17,17 @@
 package stagedsync
 
 import (
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
-	"github.com/erigontech/erigon/db/services"
 )
 
 type BodiesCfg struct {
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 	blockWriter *blockio.BlockWriter
 }
 
-func StageBodiesCfg(blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter) BodiesCfg {
+func StageBodiesCfg(blockReader dbservices.FullBlockReader, blockWriter *blockio.BlockWriter) BodiesCfg {
 	return BodiesCfg{blockReader: blockReader, blockWriter: blockWriter}
 }
 

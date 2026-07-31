@@ -83,10 +83,6 @@ Usage:
 
 Flags:
       --datadir string                     Data directory for the databases (default "/home/user/.local/share/erigon")
-      --diagnostics.disabled               Disable diagnostics
-      --diagnostics.endpoint.addr string   Diagnostics HTTP server listening interface (default "127.0.0.1")
-      --diagnostics.endpoint.port uint     Diagnostics HTTP server listening port (default 6062)
-      --diagnostics.speedtest              Enable speed test
       --discovery.dns strings              Sets DNS discovery entry points (use "" to disable DNS)
       --healthcheck                        Enabling grpc health check
   -h, --help                               help for sentry
@@ -99,7 +95,7 @@ Flags:
       --log.dir.prefix string              The file name prefix for logs stored to disk
       --log.dir.verbosity string           Set the log verbosity for logs stored to disk (default "info")
       --log.json                           Format console logs with JSON
-      --maxpeers int                       Maximum number of network peers (network disabled if set to 0) (default 32)
+      --maxpeers int                       Maximum number of network peers (network disabled if set to 0) (default 64)
       --maxpendpeers int                   Maximum number of TCP connections pending to become connected peers (default 1000)
       --metrics                            Enable metrics collection and reporting
       --metrics.addr string                Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
@@ -116,8 +112,7 @@ Flags:
                                            
       --netrestrict string                 Restricts network communication to the given IP networks (CIDR masks)
       --nodiscover                         Disables the peer discovery mechanism (manual peer addition)
-      --p2p.allowed-ports uints            Allowed ports to pick for different eth p2p protocol versions as follows <porta>,<portb>,..,<porti> (default [30303,30304,30305,30306,30307])
-      --p2p.protocol uint                  Version of eth p2p protocol (default 68)
+      --p2p.protocol uint                  Version of eth p2p protocol (default 69)
       --port int                           Network listening port (default 30303)
       --pprof                              Enable the pprof HTTP server
       --pprof.addr string                  pprof HTTP server listening interface (default "127.0.0.1")

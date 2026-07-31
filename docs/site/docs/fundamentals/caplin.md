@@ -26,6 +26,8 @@ In addition, Caplin can backfill recent blobs for an op-node or other uses with 
 
 * `--caplin.blobs-immediate-backfill`: Backfills the last 18 days' worth of blobs to quickly populate historical blob data for operational needs or analytics.
 
+With state archival enabled, Caplin's indexing database (`<datadir>/caplin/indexing`) is pruned automatically: state rows already frozen into snapshots are deleted on the antiquary cadence, so the database holds only the un-frozen tail. The `mdbx.dat` file does not shrink when rows are pruned — freed pages are reused, bounding future growth. Set `CAPLIN_STATE_PRUNE_DISABLE=true` to turn pruning off.
+
 ### PeerDAS Data Column Retention
 
 For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sidecars for a configurable window:
@@ -46,6 +48,6 @@ When Caplin is running, it exposes a Beacon API that external tools can query. T
 | `--beacon.api.cors.allow-methods` | `GET, POST, PUT, DELETE, OPTIONS` | CORS allowed methods |
 | `--beacon.api.cors.allow-credentials` | `false` | Allow credentials in CORS requests |
 | `--beacon.api.protocol` | `tcp` | Network protocol (`tcp` or `tcp4` or `tcp6`) |
-| `--beacon.api.read.timeout` | `5s` | HTTP server read timeout |
-| `--beacon.api.write.timeout` | `31536000s` (~1 year) | HTTP server write timeout |
-| `--beacon.api.ide.timeout` | `25s` | HTTP server idle timeout (note: flag name is `ide` not `idle` — typo in source) |
+| `--beacon.api.read.timeout` | `5` | HTTP server read timeout, in seconds |
+| `--beacon.api.write.timeout` | `31536000` | HTTP server write timeout, in seconds (~1 year) |
+| `--beacon.api.idle.timeout` | `25` | HTTP server idle timeout, in seconds |

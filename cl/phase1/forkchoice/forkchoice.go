@@ -17,8 +17,8 @@
 package forkchoice
 
 import (
+	"cmp"
 	"slices"
-	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -734,8 +734,8 @@ func (f *ForkChoiceStore) ForkNodes() []ForkNode {
 			ExecutionBlock: blockHash,
 		})
 	}
-	sort.Slice(forkNodes, func(i, j int) bool {
-		return forkNodes[i].Slot < forkNodes[j].Slot
+	slices.SortFunc(forkNodes, func(a, b ForkNode) int {
+		return cmp.Compare(a.Slot, b.Slot)
 	})
 	return forkNodes
 }

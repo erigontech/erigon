@@ -15,6 +15,9 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   stage-exec-test:
     name: stage-exec-test (${{ matrix.mode_name }}, ${{ matrix.exec_mode }})
@@ -63,6 +66,8 @@ jobs:
     steps:
     - name: Check out repository
       uses: actions/checkout@v7
+      with:
+        persist-credentials: false
 
     - name: Set reference data dir based on branch
       run: |

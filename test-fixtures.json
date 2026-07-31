@@ -5,24 +5,36 @@
     "size": 1025048557
   },
   "eest_devnet": {
-    "url": "https://github.com/ethereum/execution-specs/releases/download/tests-glamsterdam-devnet%40v6.1.1/fixtures_glamsterdam-devnet.tar.gz",
-    "sha256": "45c1e1489c31aac055f8ccd38bd0f1466aab87d9d61178e9979e79164e4ee02b",
-    "size": 674284009,
-    "branch": "devnets/glamsterdam/6"
+    "url": "https://github.com/ethereum/execution-specs/releases/download/tests-glamsterdam-devnet%40v7.2.0/fixtures_glamsterdam-devnet.tar.gz",
+    "sha256": "29ba214eaf37c880c845179994cb62e82a0fb63e58f83e6c640d85f3e7d7a796",
+    "size": 677943112,
+    "branch": "devnets/glamsterdam/7"
   },
   "eest_stable": {
-    "url": "https://github.com/ethereum/execution-specs/releases/download/tests%40v20.0.0/fixtures.tar.gz",
-    "sha256": "b183702a5b447b465873865357ced9eb342315922e52e31b714e2de115dd0bb4",
-    "size": 399656884
+    "url": "https://github.com/ethereum/execution-specs/releases/download/tests%40v20.0.1/fixtures.tar.gz",
+    "sha256": "3586193db06d4d5745d5e90b3c3008c2255a4e19ccd8f11a3ce887aec8c0b17c",
+    "size": 423237039
   },
   "eest_zkevm": {
-    "url": "https://github.com/ethereum/execution-specs/releases/download/tests-zkevm%40v0.5.0/fixtures_zkevm.tar.gz",
-    "sha256": "6b5fd6dea77cc5ea51dfdc35b03bdca41875926e17ad26f3ebebf9841038a366",
-    "size": 486272611
+    "url": "https://github.com/ethereum/execution-specs/releases/download/tests-zkevm%40v0.6.2/fixtures_zkevm.tar.gz",
+    "sha256": "cf9395b2cb1a87c195fd827ea03dce65a37c6036bb182441da28e7b0f6d45f40",
+    "size": 497764775
   },
   "cl_mainnet": {
     "url": "https://github.com/ethereum/consensus-specs/releases/download/v1.7.0-alpha.11/mainnet.tar.gz",
     "sha256": "956cc05f9bb2e745ecd04b60fb2bb91679c80ede82e81b489b5d47a9d65eb66b",
     "size": 851476438
+  },
+  "legacy_cancun": {
+    "url": "https://github.com/ethereum/legacytests/archive/1f581b8ccdc4c63acf5f2c5c1b155c690c32a8eb.tar.gz",
+    "sha256": "ed16742e585db5ac4196bdf552ee126a68b777128e3e811bab179b36206dee35",
+    "size": 126768895,
+    "root": "legacytests-1f581b8ccdc4c63acf5f2c5c1b155c690c32a8eb"
+  },
+  "legacy_tests": {
+    "url": "https://github.com/ethereum/tests/archive/c67e485ff8b5be9abc8ad15345ec21aa22e290d9.tar.gz",
+    "sha256": "c87bdba75ef00e0de9d7206200d36552d0a88d74f4a7bd441d5ced854e3e02bf",
+    "size": 105688266,
+    "root": "tests-c67e485ff8b5be9abc8ad15345ec21aa22e290d9"
   }
 }
