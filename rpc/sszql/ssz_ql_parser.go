@@ -3,13 +3,14 @@ package sszql
 import "strconv"
 
 func parseQuery(request SSZQLRequest, version int, block_id string) SSZQLResponse {
-
-	var response SSZQLResponse
-
+	response := SSZQLResponse{
+		Paths:    make([]Path, 0),
+		Gindices: make([]Gindex, 0),
+		Leaves:   make([]Leaf, 0),
+		Results:  make([]Result, 0),
+	}
 	parseQueries(request, &response)
-
 	parseAliases(request.Aliases, &response)
-
 	if request.IncludeProofs {
 		generateProof(&response)
 	}

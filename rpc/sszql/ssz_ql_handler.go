@@ -69,11 +69,13 @@ func isValidBlockAndVersion(block_id string, version int) bool {
 }
 
 func writeQueryResponse(w http.ResponseWriter, res SSZQLResponse) {
-	w.Header().Set("Content-Type", sszQLContentType)
-	w.WriteHeader(200)
-
-	enc := json.NewEncoder(w)
-	if err := enc.Encode(res); err != nil {
+	b, err := json.Marshal(res)
+	if err != nil {
 		http.Error(w, "invalid response: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
+
+	w.Header().Set("Content-Type", sszQLContentType)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(append(b, '\n'))
 }
