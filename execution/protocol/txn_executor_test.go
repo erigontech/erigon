@@ -516,7 +516,6 @@ func TestEIP2780RecipientRuntimeOutOfGasPrecedesTransfer(t *testing.T) {
 	value := uint256.NewInt(1)
 	intrinsic := params.TxBaseEIP2780 +
 		params.ColdAccountAccessEIP2780 +
-		params.TransferLogCostEIP2780 +
 		params.TxValueCostEIP2780
 	gasLimit := intrinsic + params.StateGasNewAccount - 1
 
