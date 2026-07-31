@@ -780,14 +780,14 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		logger.Info("RPC admission control enabled", "max_concurrent_requests", rpcConcurrencyLimit, "db.read.concurrency", cfg.DBReadConcurrency)
 	}
 	sszqlHandler := sszql.SSZQueryHandler()
-rpcAndSSZQL := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	p := strings.TrimSuffix(r.URL.Path, "/")
-	if strings.HasPrefix(p, "/eth/") && strings.HasSuffix(p, "/query") {
-		sszqlHandler.ServeHTTP(w, r)
-		return
-	}
-	srv.ServeHTTP(w, r)
-})
+	rpcAndSSZQL := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.TrimSuffix(r.URL.Path, "/")
+		if strings.HasPrefix(p, "/eth/") && strings.HasSuffix(p, "/query") {
+			sszqlHandler.ServeHTTP(w, r)
+			return
+		}
+		srv.ServeHTTP(w, r)
+	})
 	httpHandler := node.NewHTTPHandlerStack(rpcAndSSZQL, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, rpcConcurrencyLimit, true)
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
