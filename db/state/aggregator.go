@@ -1744,7 +1744,7 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 		a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
 		a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
 		a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
-		// a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
+		a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
 	)
 	// TODO(awskii) have two different functions including commitment/without it
 	//  Usually its skipped because commitment either have MaxUint64 due to no history or equal to other domains
