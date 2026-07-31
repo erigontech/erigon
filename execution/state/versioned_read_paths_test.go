@@ -545,7 +545,7 @@ func TestVersionedRead_E2_StaleMapReadCaughtAtCommit(t *testing.T) {
 	assert.Equal(t, *uint256.NewInt(99), got, "read-once returns the recorded value")
 
 	var io VersionedIO
-	ibs.MergeTxIOInto(&io)
+	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
 	valid := mvhm.ValidateVersion(10, &io, func(rv, wv Version) VersionValidity {
 		if rv == wv {
 			return VersionValid

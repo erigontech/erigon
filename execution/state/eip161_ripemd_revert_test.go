@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -63,7 +64,7 @@ func normalizeTouchThenRevert(t *testing.T, addr accounts.Address) bool {
 	require.NoError(t, ibs.AddBalance(addr, uint256.Int{}, 0))
 	ibs.RevertToSnapshot(snap, nil)
 
-	writes := ibs.FinalizedWrites()
+	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
 	if writes == nil {
 		return false
 	}
