@@ -39,18 +39,31 @@
 #                                      -sequential/-parallel variants of a fork
 #                                      carry the same regex.
 
-- shard: statetests-stable
+- shard: statetests-stable-sequential
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
-- shard: statetests-devnet
+- shard: statetests-stable-parallel
+  workers: 12
+  max-allowed-failures: 0
+  commitment-parallel: true
+- shard: statetests-devnet-sequential
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
-- shard: statetests-legacy
+- shard: statetests-devnet-parallel
+  workers: 12
+  max-allowed-failures: 0
+  commitment-parallel: true
+- shard: statetests-legacy-sequential
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
+  expected-tests: 108593
+- shard: statetests-legacy-parallel
+  workers: 12
+  max-allowed-failures: 0
+  commitment-parallel: true
   expected-tests: 108593
 - shard: rlptests-legacy-race
   workers: 12

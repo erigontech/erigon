@@ -5,9 +5,9 @@
 #
 # Where <shard> is one of:
 #
-#   statetests-stable                          state tests vs. eest_stable
-#   statetests-devnet                          state tests vs. eest_devnet
-#   statetests-legacy                          complete legacy Cancun state tests
+#   statetests-stable-{sequential,parallel}    state tests vs. eest_stable
+#   statetests-devnet-{sequential,parallel}    state tests vs. eest_devnet
+#   statetests-legacy-{sequential,parallel}    complete legacy Cancun state tests
 #   rlptests-legacy-race                      complete legacy RLP tests
 #   transactiontests-legacy-race              complete legacy transaction tests
 #   difficultytests-legacy-race               complete legacy difficulty tests
@@ -95,7 +95,7 @@ case "$shard" in
 	*-stable*)                     fixture_sets=(eest_stable) ;;
 	*-devnet*)                     fixture_sets=(eest_devnet) ;;
 	*-benchmark*)                  fixture_sets=(eest_benchmark) ;;
-	statetests-legacy)                       fixture_sets=(legacy_cancun) ;;
+	statetests-legacy-*)                     fixture_sets=(legacy_cancun) ;;
 	rlptests-legacy-* | \
 		transactiontests-legacy-* | \
 		difficultytests-legacy-*)           fixture_sets=(legacy_tests) ;;
