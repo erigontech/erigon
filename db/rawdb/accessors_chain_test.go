@@ -1154,6 +1154,49 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.Nil(entry)
 }
 
+type blockAccessListReadCounter struct {
+	kv.Getter
+	reads int
+}
+
+func (g *blockAccessListReadCounter) GetOne(table string, key []byte) ([]byte, error) {
+	if table == kv.BlockAccessList {
+		g.reads++
+	}
+	return g.Getter.GetOne(table, key)
+}
+
+func TestReadBlockSkipsEmptyBlockAccessListLookup(t *testing.T) {
+	t.Parallel()
+	_, tx := memdb.NewTestTx(t)
+	defer tx.Rollback()
+
+	emptyBALHash := empty.BlockAccessListHash
+	withdrawalsHash := empty.RootHash
+	blobGas := uint64(0)
+	parentBeaconBlockRoot := common.Hash{}
+	requestsHash := common.Hash{}
+	block := types.NewBlockWithHeader(&types.Header{
+		Number:                *uint256.NewInt(1),
+		Extra:                 []byte("test block"),
+		UncleHash:             empty.UncleHash,
+		TxHash:                empty.RootHash,
+		ReceiptHash:           empty.RootHash,
+		BaseFee:               uint256.NewInt(1),
+		WithdrawalsHash:       &withdrawalsHash,
+		BlobGasUsed:           &blobGas,
+		ExcessBlobGas:         &blobGas,
+		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		RequestsHash:          &requestsHash,
+		BlockAccessListHash:   &emptyBALHash,
+	})
+	require.NoError(t, rawdb.WriteBlock(tx, block))
+
+	getter := &blockAccessListReadCounter{Getter: tx}
+	require.NotNil(t, rawdb.ReadBlock(getter, block.Hash(), block.NumberU64()))
+	require.Zero(t, getter.reads)
+}
+
 func TestBlockAccessListStorage(t *testing.T) {
 	t.Parallel()
 	_, tx := memdb.NewTestTx(t)

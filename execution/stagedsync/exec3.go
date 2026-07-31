@@ -528,6 +528,14 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
+func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64) ([]byte, error) {
+	data := block.BlockAccessList()
+	if len(data) == 0 && block.HeaderNoCopy().HasBAL() {
+		return rawdb.ReadBlockAccessListBytes(blockTx, block.Hash(), blockNum)
+	}
+	return data, nil
+}
+
 func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults chan applyResult) error {
 	if te.execLoopGroup == nil {
 		return errors.New("no exec group")
@@ -619,12 +627,9 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			// db.View() as it can deadlock with the stageloop's RW transaction when
 			// BlockOverlay is active. ProcessBAL still computes+validates the BAL
 			// from the write-set as the ultimate fallback.
-			data := b.BlockAccessList()
-			if len(data) == 0 {
-				data, err = rawdb.ReadBlockAccessListBytes(blockTx, b.Hash(), blockNum)
-				if err != nil {
-					return err
-				}
+			data, err := blockAccessListBytes(blockTx, b, blockNum)
+			if err != nil {
+				return err
 			}
 			if len(data) > 0 && !dbg.IgnoreBAL {
 				dbBAL, err = types.DecodeBlockAccessListBytes(data)
