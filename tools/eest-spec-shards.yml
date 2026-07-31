@@ -16,6 +16,8 @@
 #   workers               (required) — parallel worker count.
 #   max-allowed-failures  (required) — failure budget; bump only with a comment
 #                                      explaining why and a tracking issue.
+#   expected-tests        (optional) — exact result count. Used by legacy shards
+#                                      to guard the coverage moved out of Go tests.
 #   exec3-parallel        (optional, default false) — pins ERIGON_EXEC3_PARALLEL.
 #   no-ramdisk            (optional, default false) — true keeps the shard's
 #                                      datadirs on disk instead of a RAM-backed
@@ -39,6 +41,10 @@
 - shard: statetests-devnet
   workers: 12
   max-allowed-failures: 0
+- shard: statetests-legacy
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 108593
 - shard: blocktests-stable-sequential
   workers: 12
   max-allowed-failures: 0
@@ -50,6 +56,134 @@
   workers: 12
   max-allowed-failures: 0
   exec3-parallel: true
+- shard: blocktests-legacy-consensus-sequential
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 1142
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-consensus-parallel
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 1142
+  exec3-parallel: true
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-consensus-race
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 1142
+  exec3-parallel: true
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-constantinople-sequential
+  workers: 12
+  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
+  max-allowed-failures: 24
+  expected-tests: 32615
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-constantinople-parallel
+  workers: 12
+  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
+  max-allowed-failures: 24
+  expected-tests: 32615
+  exec3-parallel: true
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-constantinople-race-constantinople
+  workers: 12
+  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
+  max-allowed-failures: 5
+  expected-tests: 10807
+  exec3-parallel: true
+  run: '_Constantinople$'
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-constantinople-race-constantinople-fix
+  workers: 12
+  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
+  max-allowed-failures: 5
+  expected-tests: 10802
+  exec3-parallel: true
+  run: '_ConstantinopleFix$'
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-constantinople-race-other-forks
+  workers: 12
+  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
+  max-allowed-failures: 14
+  expected-tests: 11006
+  exec3-parallel: true
+  exclude:
+    - '/\.meta/'
+    - '::.*_Constantinople(Fix)?$'
+- shard: blocktests-legacy-cancun-sequential
+  workers: 12
+  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
+  max-allowed-failures: 26
+  expected-tests: 111983
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-cancun-parallel
+  workers: 12
+  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
+  max-allowed-failures: 26
+  expected-tests: 111983
+  exec3-parallel: true
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-cancun-race-berlin
+  workers: 12
+  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
+  max-allowed-failures: 7
+  expected-tests: 14026
+  exec3-parallel: true
+  run: '(_Berlin$|fork_Berlin-)'
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-cancun-race-shanghai
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 20689
+  exec3-parallel: true
+  run: '(_Shanghai$|fork_Shanghai-)'
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-cancun-race-cancun
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 21849
+  exec3-parallel: true
+  run: '(_Cancun$|fork_Cancun-)'
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-cancun-race-london
+  workers: 12
+  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
+  max-allowed-failures: 7
+  expected-tests: 20337
+  exec3-parallel: true
+  run: '(_London$|fork_London-)'
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-cancun-race-paris
+  workers: 12
+  max-allowed-failures: 0
+  expected-tests: 20369
+  exec3-parallel: true
+  run: '(_Paris$|fork_Paris-)'
+  exclude:
+    - '/\.meta/'
+- shard: blocktests-legacy-cancun-race-other-forks
+  workers: 12
+  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
+  max-allowed-failures: 12
+  expected-tests: 14713
+  exec3-parallel: true
+  exclude:
+    - '/\.meta/'
+    - '::.*(_(Berlin|Shanghai|Cancun|London|Paris)$|fork_(Berlin|Shanghai|Cancun|London|Paris)-)'
 - shard: enginextests-stable-sequential
   workers: 8
   max-allowed-failures: 0

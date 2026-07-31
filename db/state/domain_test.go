@@ -625,7 +625,7 @@ func checkDomainFileSortedKeyOrder(t *testing.T, dt *DomainRoTx) {
 					"file %d [%d-%d) pair %d: key %x not > prevKey %x",
 					i, f.startTxNum, f.endTxNum, pairIdx, key, prevKey)
 			}
-			prevKey = common.Copy(key)
+			prevKey = bytes.Clone(key)
 			if r.HasNext() {
 				r.Skip() // skip value
 			}
@@ -1117,7 +1117,7 @@ func TestNewSegStreamReader(t *testing.T) {
 		if prevK != nil {
 			require.Negative(t, bytes.Compare(prevK, k))
 		}
-		prevK = common.Copy(k)
+		prevK = bytes.Clone(k)
 
 		require.NoError(t, err)
 		require.NotEmpty(t, v)
@@ -2028,7 +2028,7 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 		p := []byte{}
 		for i := range updates {
 			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
-			p = common.Copy(updates[i].value)
+			p = bytes.Clone(updates[i].value)
 		}
 	}
 
@@ -2129,7 +2129,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 		p := []byte{}
 		for i := range updates {
 			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
-			p = common.Copy(updates[i].value)
+			p = bytes.Clone(updates[i].value)
 		}
 	}
 
@@ -2915,7 +2915,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		p := []byte{}
 		for i := range updates {
 			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
-			p = common.Copy(updates[i].value)
+			p = bytes.Clone(updates[i].value)
 		}
 	}
 
@@ -3128,8 +3128,8 @@ func TestCommitmentDomain_DebugRangeLatest(t *testing.T) {
 				binary.BigEndian.PutUint64(k[:], keyNum)
 				binary.BigEndian.PutUint64(v[:], valNum)
 				err = writer.PutWithPrev(k[:], v[:], txNum, prev[keyNum])
-				prev[keyNum] = common.Copy(v[:])
-				keysLatest[string(k[:])] = common.Copy(v[:])
+				prev[keyNum] = bytes.Clone(v[:])
+				keysLatest[string(k[:])] = bytes.Clone(v[:])
 				require.NoError(t, err)
 			}
 		}
@@ -3238,7 +3238,7 @@ func TestDomain_DebugRangeLatestFromFiles(t *testing.T) {
 				binary.BigEndian.PutUint64(k[:], keyNum)
 				binary.BigEndian.PutUint64(v[:], txNum)
 				err = writer.PutWithPrev(k[:], v[:], txNum, prev[keyNum])
-				prev[keyNum] = common.Copy(v[:])
+				prev[keyNum] = bytes.Clone(v[:])
 				fileKeyNums[keyNum] = true
 				require.NoError(t, err)
 			}

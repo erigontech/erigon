@@ -29,7 +29,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -1535,7 +1534,7 @@ func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc or
 			fromTxNum = uint64(startTxNum)
 		}
 		binary.BigEndian.PutUint64(from[len(key):], fromTxNum)
-		to := common.Copy(from)
+		to := bytes.Clone(from)
 		toTxNum := uint64(math.MaxUint64)
 		if endTxNum >= 0 {
 			toTxNum = uint64(endTxNum)

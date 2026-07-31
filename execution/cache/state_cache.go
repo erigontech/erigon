@@ -22,7 +22,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -164,9 +163,9 @@ func (c *StateCache) putCodeWithHash(addr, code, codeHash []byte, txNum uint64, 
 		return
 	}
 	if overwrite {
-		cc.PutWithCodeHash(addr, common.Copy(code), codeHash, txNum)
+		cc.PutWithCodeHash(addr, bytes.Clone(code), codeHash, txNum)
 	} else {
-		cc.PutWithCodeHashIfAbsent(addr, common.Copy(code), codeHash, txNum)
+		cc.PutWithCodeHashIfAbsent(addr, bytes.Clone(code), codeHash, txNum)
 	}
 }
 
@@ -193,8 +192,7 @@ func (c *StateCache) PutCodeSizeByHash(codeHash []byte, size int, txNum uint64) 
 }
 
 // GetAddrCodeHash returns the Ethereum codeHash for addr without an
-// account-domain round-trip. (0xff..ff/false, no entry on miss; (h, true)
-// on hit.)
+// account-domain round-trip. The hash is zero when ok is false.
 func (c *StateCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
@@ -203,9 +201,9 @@ func (c *StateCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return cc.GetAddrCodeHash(addr)
 }
 
-// PutAddrCodeHash records the addr → codeHash mapping in the addr-keyed
-// LRU above SD. Callers that have just decoded an account record should
-// call this so subsequent lookups skip the account-domain read.
+// PutAddrCodeHash records a committed-state addr → codeHash mapping in the
+// addr-keyed LRU. An existing live mapping remains authoritative until
+// DeleteAddrCodeHash invalidates it; an unwind-stale mapping can be replaced.
 func (c *StateCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
@@ -214,9 +212,7 @@ func (c *StateCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	cc.PutAddrCodeHash(addr, h, txNum)
 }
 
-// DeleteAddrCodeHash drops the addr → codeHash mapping. Used by
-// invalidation paths (SELFDESTRUCT / CREATE2-replace / unwind diffsets)
-// where the account's codeHash has been mutated.
+// DeleteAddrCodeHash removes the mapping when its account record is invalidated.
 func (c *StateCache) DeleteAddrCodeHash(addr []byte) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
@@ -245,9 +241,9 @@ func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint6
 		return
 	}
 	if overwrite {
-		cache.Put(key, common.Copy(value), txNum)
+		cache.Put(key, bytes.Clone(value), txNum)
 	} else {
-		cache.PutIfAbsent(key, common.Copy(value), txNum)
+		cache.PutIfAbsent(key, bytes.Clone(value), txNum)
 	}
 }
 

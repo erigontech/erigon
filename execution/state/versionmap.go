@@ -271,14 +271,14 @@ func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 					len(codeChange.Bytecode),
 				)
 			}
+			// Seed the whole code trio so pre-population matches what tx execution
+			// flushes together; a CodePath cell without its CodeHashPath/CodeSizePath
+			// siblings lets a concurrent reader see code but no code hash.
 			code := accounts.NewCode(codeChange.Bytecode)
-			version := Version{TxIndex: int(codeChange.Index) - 1}
-			vm.WriteCode(accountChanges.Address, version, code, true)
-			// The code determines its size and hash: write the derived cells so
-			// EXTCODESIZE/EXTCODEHASH readers resolve here instead of falling
-			// through to the DB and racing the creator's flush.
-			vm.WriteCodeSize(accountChanges.Address, version, code.Len(), true)
-			vm.WriteCodeHash(accountChanges.Address, version, code.Hash, true)
+			v := Version{TxIndex: int(codeChange.Index) - 1}
+			vm.WriteCode(accountChanges.Address, v, code, true)
+			vm.WriteCodeHash(accountChanges.Address, v, code.Hash, true)
+			vm.WriteCodeSize(accountChanges.Address, v, code.Len(), true)
 		}
 	}
 }
@@ -631,7 +631,9 @@ func (vm *VersionMap) AnyDoneSelfDestructEquals(addr accounts.Address, txIdxLimi
 // destroyedAndUnrevived reports whether the latest SelfDestruct cell below
 // txIndex marks the account destroyed with no later cell showing life again.
 // Same-tx re-creation writes SelfDestructPath and AddressPath at the SAME
-// TxIdx, so AddressPath uses >= (not strict >).
+// TxIdx, so AddressPath uses >= (not strict >). Destroyed does not imply dead:
+// a self-destruct that preserves a non-zero balance leaves the account alive,
+// so deadness additionally requires no live sub-field floor.
 func (vm *VersionMap) destroyedAndUnrevived(addr accounts.Address, txIndex int) bool {
 	destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex)
 	if !ok || sdRR.Status() != MVReadResultDone || !destructed {
@@ -647,7 +649,7 @@ func (vm *VersionMap) destroyedAndUnrevived(addr accounts.Address, txIndex int) 
 			return false
 		}
 	}
-	return true
+	return !vm.accountLiveAt(addr, txIndex)
 }
 
 // FindDoneSelfDestructInRange returns the version of the highest Done
@@ -1247,7 +1249,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	}
 	if vm.trace || (traceInvalid && valid == VersionInvalid) {
 		if len(tracePrefix) > 0 {
-			tracePrefix = tracePrefix + "  RD"
+			tracePrefix += "  RD"
 		} else {
 			tracePrefix = "RD"
 		}

@@ -1000,6 +1000,44 @@ func TestBALFedReaderDoesNotRaceCreatorFlush(t *testing.T) {
 	}
 }
 
+// Destroyed-and-unrevived is not non-existent under EIP-8246: a self-destruct
+// that preserves a non-zero balance leaves the account alive, so a nil record
+// read racing the destroyer's flush must invalidate and re-execute. Only a
+// cell-evidenced dead account (no live sub-field floors) relaxes the
+// created-account incarnation check.
+func TestValidateRead_NilReadOfPreservedBalanceDestructInvalid(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x82, 0x46})
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+	newIO := func() *VersionedIO {
+		io := NewVersionedIO(2)
+		rs := ReadSet{}
+		rs.SetAddress(addr, VersionedRead[AccountView]{
+			ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+		})
+		io.RecordReads(Version{TxIndex: 1}, rs)
+		return io
+	}
+	t.Run("preserved non-zero balance keeps the account alive", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
+		vm.WriteBalance(addr, Version{TxIndex: 0}, *uint256.NewInt(3), true)
+		vm.WriteIncarnation(addr, Version{TxIndex: 0}, 1, true)
+		require.Equal(t, VersionInvalid, vm.ValidateVersion(1, newIO(), checkVersionEqual, true, false, ""))
+	})
+	t.Run("zero-balance destroyed account stays relaxed", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
+		vm.WriteBalance(addr, Version{TxIndex: 0}, uint256.Int{}, true)
+		vm.WriteIncarnation(addr, Version{TxIndex: 0}, 1, true)
+		require.Equal(t, VersionValid, vm.ValidateVersion(1, newIO(), checkVersionEqual, true, false, ""))
+	})
+}
+
 // A sub-field read with no dedicated cell folds onto the account record for
 // validation. A later record write that keeps the field's value unchanged
 // (fee-merge churn re-stamps the coinbase record every tx) must not invalidate

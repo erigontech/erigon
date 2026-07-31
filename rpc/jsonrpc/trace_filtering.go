@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -145,9 +146,9 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 
 	// 'trace_get' index starts at one (oddly)
 	firstIndex := int(indicies[0]) + 1
-	for i, trace := range traces {
+	for i := range traces {
 		if i == firstIndex {
-			return &trace, nil
+			return &traces[i], nil
 		}
 	}
 	return nil, err
@@ -574,7 +575,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		}
 		txIndexU64 := uint64(txIndex)
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNum, txIndex)
+		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNum, txIndex)
 		if err != nil {
 			if first {
 				first = false
@@ -586,7 +587,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectEnd()
 			continue
 		}
-		if txn == nil {
+		if !ok {
 			continue //guess block doesn't have transactions
 		}
 		txHash := txn.Hash()
@@ -681,7 +682,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
 			ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
 		}
-		traceResult.Output = common.Copy(execResult.ReturnData)
+		traceResult.Output = bytes.Clone(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
 			if first {
 				first = false
@@ -836,8 +837,8 @@ func (api *TraceAPIImpl) callBlock(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
-	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, nil)
 	logger := log.New("trace_filtering")
+	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	if err != nil {
 		return nil, nil, nil, err
@@ -1086,7 +1087,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 					return
 				}
 
-				traceResult.Output = common.Copy(execResult.ReturnData)
+				traceResult.Output = bytes.Clone(execResult.ReturnData)
 				results[job.txIndex] = traceResult
 			}
 		})
@@ -1141,12 +1142,13 @@ func (api *TraceAPIImpl) callTransaction(
 		}
 		txn = bortypes.NewBorTransaction()
 	} else {
+		var ok bool
 		var err error
-		txn, err = api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNumber, txIndex)
+		txn, ok, err = api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNumber, txIndex)
 		if err != nil {
 			return nil, err
 		}
-		if txn == nil {
+		if !ok {
 			return nil, fmt.Errorf("transaction not found at block %d, index %d", blockNumber, txIndex)
 		}
 	}
@@ -1174,8 +1176,8 @@ func (api *TraceAPIImpl) callTransaction(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
-	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, nil)
 	logger := log.New("trace_filtering")
+	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
 	if err != nil {
 		return nil, err

@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -58,11 +59,12 @@ func IdxFileMask(from, to uint64, fType string) string {
 }
 
 func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
-	for _, f := range in {
+	for i := range in {
+		f := &in[i]
 		if f.Ext != expectExt { // filter out only compressed files
 			continue
 		}
-		out = append(out, f)
+		out = append(out, *f)
 	}
 
 	slices.SortFunc(out, func(a, b FileInfo) int {
@@ -473,11 +475,19 @@ func ParseDir(name string) (res []FileInfo, err error) {
 		}
 		return nil, err
 	}
+	return parseDirEntries(name, files)
+}
 
+func parseDirEntries(name string, files []os.DirEntry) (res []FileInfo, err error) {
 	for _, f := range files {
 		fileInfo, err := f.Info()
 		if err != nil {
-			return nil, err
+			// Deleted between ReadDir and this stat: merged-over segments are unlinked
+			// concurrently with directory scans.
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("ParseDir: %s: %w", name, err)
 		}
 		if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 {
 			continue

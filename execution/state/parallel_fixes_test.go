@@ -163,12 +163,12 @@ func TestAddressAccessResetInIBSReset(t *testing.T) {
 	coinbase := accounts.InternAddress([20]byte{0x02})
 	leaked := accounts.InternAddress([20]byte{0x42})
 	// Prepare enables access recording at tx start.
-	require.NoError(t, ibs.Prepare(&chain.Rules{}, sender, coinbase, accounts.NilAddress, nil, nil, nil))
+	ibs.Prepare(&chain.Rules{}, sender, coinbase, accounts.NilAddress, nil, nil)
 	ibs.MarkAddressAccess(leaked, false)
 	// Tx aborts: AccessedAddresses is never harvested. The worker resets
 	// the shared IBS before the next task.
 	ibs.Reset()
-	assert.Empty(t, ibs.AccessedAddresses(), "no recorded accesses should survive Reset")
+	assert.Empty(t, ibs.versionedReads.access, "no recorded accesses should survive Reset")
 }
 
 // TestTransientStorageResetInIBSReset verifies that IBS.Reset() clears

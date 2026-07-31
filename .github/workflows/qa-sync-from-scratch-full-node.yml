@@ -17,6 +17,7 @@ permissions:
 
 jobs:
   full-node-sync-from-scratch-test:
+    name: full-node-sync-from-scratch-test-${{ matrix.chain }}
     runs-on: [self-hosted, qa, long-running]
     timeout-minutes: 1440  # 24 hours
     strategy:

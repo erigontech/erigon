@@ -1404,7 +1404,7 @@ func (hph *HexPatriciaHashed) witnessMaterializeBranch(branchPrefix []byte, chil
 		if len(cellHash) == length.Hash+1 { // strip the 0xa0 prefix
 			cellHash = cellHash[1:]
 		}
-		fullNode.Children[nibble] = trie.NewHashNode(common.Copy(cellHash))
+		fullNode.Children[nibble] = trie.NewHashNode(bytes.Clone(cellHash))
 		bitset ^= bit
 	}
 	return fullNode, nil
@@ -1584,7 +1584,7 @@ func (hph *HexPatriciaHashed) needFolding(hashedKey []byte) bool {
 }
 
 // Process-cumulative trie-compute counters feeding the KVReadLevelledMetrics
-// "skip ratio"/"reset ratio" Debug log at the end of ComputeCommitment.
+// "skipRatio"/"resetRatio" Debug log at the end of ComputeCommitment.
 var (
 	hadToLoad   atomic.Uint64
 	skippedLoad atomic.Uint64
@@ -2101,10 +2101,8 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 			if hph.traceW != nil {
 				fmt.Fprintf(hph.traceW, "deleteCell setting (%d, %x)\n", row, nibble)
 			}
-		} else {
-			if hph.traceW != nil {
-				fmt.Fprintf(hph.traceW, "deleteCell ignoring (%d, %x)\n", row, nibble)
-			}
+		} else if hph.traceW != nil {
+			fmt.Fprintf(hph.traceW, "deleteCell ignoring (%d, %x)\n", row, nibble)
 		}
 	}
 	cell.reset()
@@ -2163,7 +2161,7 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 		fmt.Fprintf(hph.traceW, "[collapse] found at parentRow=%d depth=%d: deleteNibble=%x, siblingNibble=%x, siblingPath=%s (len=%d), hashLen=%d, extLen=%d\n",
 			parentRow, depth, deleteNibble, siblingNibble, compactSibling, len(siblingPath), siblingCell.hashLen, siblingCell.hashedExtLen)
 	}
-	hph.collapseTracer(siblingPath, common.Copy(hph.currentKey[:depth]))
+	hph.collapseTracer(siblingPath, bytes.Clone(hph.currentKey[:depth]))
 }
 
 // detectCascadingCollapseAtRow detects a FullNode→ShortNode collapse caused by
@@ -2187,7 +2185,7 @@ func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
 		fmt.Fprintf(hph.traceW, "[cascade-collapse] found at row=%d depth=%d: survivingNibble=%x, siblingPath=%s (len=%d), hashLen=%d, hashedExtLen=%d\n",
 			row, depth, survivingNibble, compactSibling, len(siblingPath), survivingCell.hashLen, survivingCell.hashedExtLen)
 	}
-	hph.collapseTracer(siblingPath, common.Copy(hph.currentKey[:depth]))
+	hph.collapseTracer(siblingPath, bytes.Clone(hph.currentKey[:depth]))
 }
 
 // fetches cell by key and set touch/after maps. Requires that prefix to be already unfolded
@@ -2229,10 +2227,8 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 		if hph.traceW != nil {
 			fmt.Fprintf(hph.traceW, "set downHasheKey=[%x]\n", cell.hashedExtension[:cell.hashedExtLen])
 		}
-	} else {
-		if hph.traceW != nil {
-			fmt.Fprintf(hph.traceW, "keep downHasheKey=[%x]\n", cell.hashedExtension[:cell.hashedExtLen])
-		}
+	} else if hph.traceW != nil {
+		fmt.Fprintf(hph.traceW, "keep downHasheKey=[%x]\n", cell.hashedExtension[:cell.hashedExtLen])
 	}
 	if int16(len(plainKey)) == hph.accountKeyLen {
 		cell.accountAddrLen = int16(len(plainKey))
@@ -2423,7 +2419,7 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 
 	provedKeys = make([][]byte, 0, updates.Size())
 	err = updates.HashSort(ctx, nil, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
-		provedKeys = append(provedKeys, common.Copy(hashedKey))
+		provedKeys = append(provedKeys, bytes.Clone(hashedKey))
 		if len(plainKey) > 0 {
 			if int16(len(plainKey)) == hph.accountKeyLen {
 				if _, err := hph.accountFromCacheOrDB(plainKey); err != nil {
@@ -2633,8 +2629,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		log.Debug("commitment finished, counters updated (no reset)",
 			//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
 			//"hadToReset", common.PrettyCounter(hadToReset.Load()),
-			"skip ratio", fmt.Sprintf("%.1f%%", 100*(float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))),
-			"reset ratio", fmt.Sprintf("%.1f%%", 100*(float64(hadToReset.Load())/float64(hadToLoad.Load()))),
+			"skipRatio", fmt.Sprintf("%.1f%%", 100*(float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))),
+			"resetRatio", fmt.Sprintf("%.1f%%", 100*(float64(hadToReset.Load())/float64(hadToLoad.Load()))),
 			"keys", common.PrettyCounter(ki), "spent", time.Since(start),
 		)
 		ends := make([]uint64, 0, len(hph.hadToLoadL))
