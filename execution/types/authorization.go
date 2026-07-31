@@ -72,13 +72,23 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common
 // SignAuthorization returns an authorization tuple delegating address, signed by
 // key — the counterpart to RecoverSigner.
 func SignAuthorization(key *ecdsa.PrivateKey, chainID uint256.Int, address common.Address, nonce uint64) (Authorization, error) {
+	if nonce == math.MaxUint64 {
+		return Authorization{}, errors.New("failed assertion: auth.nonce < 2**64 - 1")
+	}
+	if key == nil {
+		return Authorization{}, errors.New("private key is nil")
+	}
+
 	var buf [33]byte
 	data := bytes.NewBuffer(nil)
 	if err := encodeSigningPayload(chainID, address, nonce, data, buf[:]); err != nil {
 		return Authorization{}, err
 	}
 
-	hash := crypto.Keccak256Hash(append([]byte{params.SetCodeMagicPrefix}, data.Bytes()...))
+	hashData := make([]byte, 0, 1+data.Len())
+	hashData = append(hashData, params.SetCodeMagicPrefix)
+	hashData = append(hashData, data.Bytes()...)
+	hash := crypto.Keccak256Hash(hashData)
 	sig, err := crypto.Sign(hash[:], key)
 	if err != nil {
 		return Authorization{}, err

@@ -18,9 +18,11 @@ package types
 
 import (
 	"bytes"
+	"math"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/holiman/uint256"
 )
 
@@ -48,4 +50,23 @@ func TestRecoverSigner(t *testing.T) {
 		t.Errorf("mismatch in recovered signer: got %v, want %v", *authorityPtr, expectedSigner)
 	}
 
+}
+
+func TestSignAuthorizationRejectsMaxNonce(t *testing.T) {
+	privateKey, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = SignAuthorization(privateKey, uint256.Int{}, common.Address{}, math.MaxUint64)
+	if err == nil {
+		t.Fatal("expected maximum nonce to be rejected")
+	}
+}
+
+func TestSignAuthorizationRejectsNilKey(t *testing.T) {
+	_, err := SignAuthorization(nil, uint256.Int{}, common.Address{}, 0)
+	if err == nil {
+		t.Fatal("expected nil private key to be rejected")
+	}
 }
