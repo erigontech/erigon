@@ -2625,9 +2625,10 @@ func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules, deferredFee
 
 // clearEmptyAccounts mirrors the serial path's EIP-161 cleanup before a
 // parallel transaction's writes are published. Newly created accounts that
-// remain empty are withheld, while pre-existing accounts that end empty emit a
-// deletion so neither can remain visible to later transactions through the
-// version map. Genesis and Aura system-account exceptions match the serial path.
+// remain empty are withheld when their prior absence was recorded, while
+// pre-existing accounts that end empty emit a deletion. An empty record without
+// an address read is kept because its prior state cannot be established.
+// Genesis and Aura system-account exceptions match the serial path.
 //
 // A deferred-fee address is exempt from the deletion, as its credit lands after
 // execution: emptiness cannot be settled here, so fee finalization decides its
@@ -2653,7 +2654,12 @@ func (sdb *IntraBlockState) clearEmptyAccounts(chainRules *chain.Rules, deferred
 			}
 			publishDelete = existingEmpty
 		}
-		if !publishDelete && !sdb.versionedWrites.createdEmpty(addr) {
+		withholdCreatedEmpty := sdb.versionedWrites.createdEmpty(addr)
+		if withholdCreatedEmpty {
+			read, ok := sdb.versionedReads.GetAddress(addr)
+			withholdCreatedEmpty = ok && (read.Val == nil || read.Val.IsNil())
+		}
+		if !publishDelete && !withholdCreatedEmpty {
 			continue
 		}
 		writes.deleteAddr(addr)

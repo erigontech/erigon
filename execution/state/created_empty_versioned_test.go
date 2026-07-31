@@ -89,6 +89,21 @@ func TestFinalizedWritesRequiresRules(t *testing.T) {
 	require.ErrorContains(t, err, "chain rules")
 }
 
+func TestFinalizedWritesKeepCreatedEmptyWithoutAddressRead(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xe1})
+	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
+	t.Cleanup(func() { ibs.Release(false) })
+	ibs.SetTxContext(1, 0)
+
+	account := accounts.NewAccount()
+	ibs.recordWriteAddress(addr, &account)
+
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	require.NoError(t, err)
+	_, ok := writes.GetAddress(addr)
+	require.True(t, ok)
+}
+
 func TestCreatedEmptyRequiresNoOtherWrites(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xe1})
 	newWrites := func() *WriteSet {
