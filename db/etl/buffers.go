@@ -79,10 +79,11 @@ func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
 
-// Pooled buffers start empty and grow with the data they actually see: a
-// pooled buffer keeps its grown capacity across reuse (Reset preserves cap),
-// so hot collectors amortize growth while collectors with tiny working sets
-// never pay a megabyte-scale prealloc.
+// etlSmallBufRAM (BufferOptimalSize/8) bounds the flush threshold so a full
+// set of domain/history/index flush collectors (~17 per batch writer) stays
+// around 512 MB when all run full. Pooled buffers start empty and grow with
+// the data they actually see; grown capacity survives reuse (Reset preserves
+// cap), so hot collectors amortize growth while never-full ones stay small.
 var etlSmallBufRAM = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
 var SmallSortableBuffers = NewAllocator(&sync.Pool{
 	New: func() any {
