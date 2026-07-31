@@ -72,14 +72,18 @@ runs:
         fi
         df -h
 
-    - name: "Use D: drive for temp files on Windows"
+    - name: "Use D: drive for caches and temp files on Windows"
       if: ${{ runner.os == 'Windows' }}
       shell: bash
       run: |
-        mkdir -p D:/tmp
-        echo "TEMP=D:/tmp" >> "$GITHUB_ENV"
-        echo "TMP=D:/tmp" >> "$GITHUB_ENV"
-        echo "TMPDIR=D:/tmp" >> "$GITHUB_ENV"
+        mkdir -p D:/tmp D:/go-build D:/go/pkg/mod
+        {
+          echo "TEMP=D:/tmp"
+          echo "TMP=D:/tmp"
+          echo "TMPDIR=D:/tmp"
+          echo "GOCACHE=D:/go-build"
+          echo "GOMODCACHE=D:/go/pkg/mod"
+        } >> "$GITHUB_ENV"
 
     - name: Enable long paths on Windows
       if: ${{ runner.os == 'Windows' }}
@@ -249,6 +253,9 @@ runs:
         echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
         echo "modcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
         workflow="${CACHE_NAMESPACE:-$(basename "${GITHUB_WORKFLOW_REF%%@*}" .yml)}"
+        if [ "$RUNNER_OS" = "Windows" ]; then
+          workflow="${workflow}-windows-d-drive-v1"
+        fi
         echo "workflow=$workflow" >> "$GITHUB_OUTPUT"
         echo "ERIGON_CI_GOCACHE_PATH=$(go env GOCACHE)" >> "$GITHUB_ENV"
         echo "ERIGON_CI_MODCACHE=$(go env GOMODCACHE)" >> "$GITHUB_ENV"
