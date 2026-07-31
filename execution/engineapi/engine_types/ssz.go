@@ -96,7 +96,11 @@ func (p *ExecutionPayload) ToSSZBlock(version clparams.StateVersion) (*cltypes.E
 	block.Extra.SetBytes(p.ExtraData)
 	if p.BaseFeePerGas != nil {
 		baseFee := uint256.MustFromBig(p.BaseFeePerGas.ToInt())
-		_, _ = baseFee.MarshalSSZAppend(block.BaseFeePerGas[:0])
+		baseFeeBytes := baseFee.Bytes32()
+		for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
+			baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
+		}
+		copy(block.BaseFeePerGas[:], baseFeeBytes[:])
 	}
 	block.BlockHash = p.BlockHash
 	txs := make([][]byte, len(p.Transactions))
@@ -131,8 +135,11 @@ func (p *ExecutionPayload) ToSSZBlock(version clparams.StateVersion) (*cltypes.E
 }
 
 func ExecutionPayloadFromSSZBlock(block *cltypes.Eth1Block, version clparams.StateVersion) *ExecutionPayload {
-	baseFee := new(uint256.Int)
-	_ = baseFee.UnmarshalSSZ(block.BaseFeePerGas[:])
+	baseFeeBytes := bytes.Clone(block.BaseFeePerGas[:])
+	for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
+		baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
+	}
+	baseFee := new(uint256.Int).SetBytes(baseFeeBytes)
 	body := block.Body()
 	p := &ExecutionPayload{
 		ParentHash:    block.ParentHash,
