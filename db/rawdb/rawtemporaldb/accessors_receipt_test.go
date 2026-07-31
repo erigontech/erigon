@@ -133,8 +133,8 @@ func TestReceiptWriterReuseAgainstDomains(t *testing.T) {
 	var w rawtemporaldb.ReceiptWriter
 	putter := doms.AsPutDel(tx)
 
-	const txs = 4
-	for i := uint64(0); i < txs; i++ {
+	const txs uint64 = 4
+	for i := range txs {
 		receipt := &types.Receipt{
 			Type:                     types.DynamicFeeTxType,
 			Status:                   types.ReceiptStatusSuccessful,
@@ -150,7 +150,7 @@ func TestReceiptWriterReuseAgainstDomains(t *testing.T) {
 	}
 	require.NoError(doms.Flush(t.Context(), tx))
 
-	for i := uint64(0); i < txs; i++ {
+	for i := range txs {
 		cumGasUsed, cumBlobGasUsed, logIdxAfterTx, err := rawtemporaldb.ReceiptAsOf(tx, i+1)
 		require.NoError(err)
 		require.Equal(10+i, cumGasUsed)
