@@ -1799,6 +1799,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 		next.iis[id] = ii.calcVisibleFiles(toTxNum)
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
+	a.assertVisibleAlignment(next)
 
 	old := a.visible.Load()
 	old.retired = retired
@@ -1808,6 +1809,36 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
 	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
 	reclaimFiles(a.reclaimRetiredLocked())
+}
+
+// assertVisibleAlignment checks that no state domain's visible files end ahead
+// of commitment's: commitment references accounts/storage files by position, so
+// a bundle where they diverge serves reads execution will later reject. The
+// DependencyIntegrityChecker is what normally hides dependent domains' files
+// when commitment lags; its type/nil-ness is printed because a missing checker
+// is the usual way a misaligned bundle gets published.
+func (a *Aggregator) assertVisibleAlignment(next *aggregatorVisible) {
+	cv := next.d[kv.CommitmentDomain]
+	if cv == nil {
+		return
+	}
+	cmtEnd := visibleFiles(cv.files).EndTxNum()
+	for _, id := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		dv := next.d[id]
+		if dv == nil {
+			continue
+		}
+		end := visibleFiles(dv.files).EndTxNum()
+		if end <= cmtEnd {
+			continue
+		}
+		msg := fmt.Sprintf("visible files misalignment: %s endTxNum=%d ahead of commitment=%d (checker=%T checkerIsNil=%v)",
+			id, end, cmtEnd, a.d[id].checker, a.d[id].checker == nil)
+		if dbg.AssertEnabled {
+			panic(msg)
+		}
+		a.logger.Warn("[agg] " + msg)
+	}
 }
 
 // stateMinimaxTxNum returns min(EndTxNum) across kv.StateDomains. Mirrors
