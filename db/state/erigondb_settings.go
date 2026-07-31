@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 const ERIGONDB_SETTINGS_FILE = "erigondb.toml"
@@ -29,6 +30,9 @@ type ErigonDBSettings struct {
 	// TrieVariant is the commitment trie the datadir was created with ("hex" or
 	// "bin"); absent means hex. Like every erigondb.toml key it wins over the CLI.
 	TrieVariant *string `toml:"trie_variant,omitempty"`
+	// TrieHash is H for a "bin" datadir ("keccak" or "blake3"); absent means
+	// keccak. Meaningless under "hex", which has no choice of hash.
+	TrieHash *string `toml:"trie_hash,omitempty"`
 }
 
 // RefsInCommitmentBranches resolves the commitment "references in branches" regime,
@@ -49,6 +53,14 @@ func (s *ErigonDBSettings) TrieVariantName() string {
 	return *s.TrieVariant
 }
 
+// TrieHashName resolves H for a bin datadir, treating an absent field as Keccak.
+func (s *ErigonDBSettings) TrieHashName() string {
+	if s.TrieHash == nil || *s.TrieHash == "" {
+		return commitment.PBinHashKeccak
+	}
+	return *s.TrieHash
+}
+
 // reconcileTrieVariant applies the datadir's trie variant to the process: a bin
 // datadir turns the bin flag on process-wide, and a combination the bin engine
 // cannot honour is refused rather than degraded to a wrong-root run.
@@ -65,7 +77,23 @@ func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
 			logger.Info("datadir uses the bin commitment trie; enabling it for this process")
 			statecfg.ExperimentalBinCommitment = true
 		}
+		// The stored hash wins over the flag: every root on disk was built with it,
+		// so honouring a differing flag would silently produce a second tree.
+		stored := s.TrieHashName()
+		if statecfg.BinCommitmentHash != "" && statecfg.BinCommitmentHash != stored {
+			return fmt.Errorf("--experimental.bin-commitment.hash=%s: datadir was built with %q; the bin trie needs a fresh datadir to change hash",
+				statecfg.BinCommitmentHash, stored)
+		}
+		if err := commitment.SetPBinHashSuite(stored); err != nil {
+			return fmt.Errorf("erigondb.toml: %w", err)
+		}
 	case TrieVariantHex:
+		if s.TrieHash != nil {
+			return errors.New("erigondb.toml: trie_hash is meaningless under trie_variant \"hex\"")
+		}
+		if statecfg.BinCommitmentHash != "" {
+			return errors.New("--experimental.bin-commitment.hash needs --experimental.bin-commitment")
+		}
 		if statecfg.ExperimentalBinCommitment {
 			return errors.New("--experimental.bin-commitment: datadir was created with the hex commitment trie; the bin trie needs a fresh datadir")
 		}
@@ -134,7 +162,7 @@ func ResolveErigonDBSettingsWithRefsDefault(dirs datadir.Dirs, logger log.Logger
 		// snapshot metadata and must not be rewritten.
 		logger.Info("erigondb settings", "step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile,
 			"references_in_commitment_branches", settings.RefsInCommitmentBranches(),
-			"trie_variant", settings.TrieVariantName())
+			"trie_variant", settings.TrieVariantName(), "trie_hash", settings.TrieHashName())
 		return settings, nil
 	}
 
@@ -143,10 +171,15 @@ func ResolveErigonDBSettingsWithRefsDefault(dirs datadir.Dirs, logger log.Logger
 		refs = *refsFirstStart
 	}
 
-	var trieVariant *string
+	var trieVariant, trieHash *string
 	if statecfg.ExperimentalBinCommitment {
 		v := TrieVariantBin
 		trieVariant = &v
+		h := statecfg.BinCommitmentHash
+		if h == "" {
+			h = commitment.PBinHashKeccak
+		}
+		trieHash = &h
 	}
 
 	preverifiedExists, err := dir.FileExist(filepath.Join(dirs.Snap, datadir.PreverifiedFileName))
@@ -179,6 +212,7 @@ func ResolveErigonDBSettingsWithRefsDefault(dirs datadir.Dirs, logger log.Logger
 		StepsInFrozenFile:              config3.DefaultStepsInFrozenFile,
 		ReferencesInCommitmentBranches: &refs,
 		TrieVariant:                    trieVariant,
+		TrieHash:                       trieHash,
 	}
 	if err := reconcileTrieVariant(settings, logger); err != nil {
 		return nil, err

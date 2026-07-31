@@ -76,6 +76,7 @@ import (
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/exec"
@@ -315,6 +316,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		if config.ExperimentalBinCommitment {
 			statecfg.ExperimentalBinCommitment = true
+		}
+		if config.BinCommitmentHash != "" {
+			if err = commitment.SetPBinHashSuite(config.BinCommitmentHash); err != nil {
+				return err
+			}
+			statecfg.BinCommitmentHash = config.BinCommitmentHash
 		}
 
 		if err = stages.UpdateMetrics(tx); err != nil {

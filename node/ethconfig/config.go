@@ -326,6 +326,7 @@ type Sync struct {
 	ExperimentalParallelCommitment  bool
 	ExperimentalStreamingCommitment bool
 	ExperimentalBinCommitment       bool
+	BinCommitmentHash               string
 	PersistReceiptsCacheV2          bool
 	SnapshotDownloadToBlock         uint64 // exclusive [0,toBlock)
 }

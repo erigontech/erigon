@@ -132,7 +132,7 @@ func pbinTreeKeyCodeOverflow(codeHash common.Hash, chunkID int) []byte {
 // from, so borrowing another goroutine's cache stays correct.
 func pbinKeyHasher() keyHasher { return pbinKeyHasherWith(nil) }
 
-// pbinKeyHasherWith derives keys under sum, nil meaning Keccak-256. Tests swap
+// pbinKeyHasherWith derives keys under sum, nil meaning Keccak-256. Callers swap
 // the hash here and on node hashing together through setHashSuite.
 func pbinKeyHasherWith(sum pbinHashFn) keyHasher {
 	var pool sync.Pool

@@ -16,12 +16,12 @@
 
 // PBinPatriciaHashed — commitment over EIP-8297's partitioned binary tree.
 //
-// The EIP leaves its hash function open and names Keccak-256 as a candidate;
-// this engine uses Keccak-256 both for node hashing and for tree-key derivation.
-// BLAKE3 is a test-only override, set on both seams at once by setHashSuite so
-// the reference vectors can be replayed. It buys comparability with the
-// reference implementation, never agreement with another client — no client
-// would agree with a Keccak-keyed binary tree.
+// The EIP leaves its hash function open and names Keccak-256 as a candidate,
+// which is this engine's default for both node hashing and tree-key derivation.
+// BLAKE3 is the alternative, selected by SetPBinHashSuite and applied to both
+// seams at once. It is what the execution-specs reference and the other clients
+// on the shared binary-trie testnets hash with, so a node that has to agree with
+// them runs on BLAKE3; a Keccak-keyed tree agrees with no other client.
 //
 // Scope: Process over all three zones, ModeDirect only. Code is chunked into the
 // account header's chunk leaves, overflowing into the code zone where chunks are
@@ -133,7 +133,7 @@ func (pph *PBinPatriciaHashed) Reset() {
 
 // setHashSuite swaps H on both seams at once — node hashing on this engine and
 // the returned key-derivation hasher — so neither can be configured without the
-// other. Production never calls it: the nil default is Keccak-256 on both.
+// other. nil is Keccak-256 on both.
 func (pph *PBinPatriciaHashed) setHashSuite(sum pbinHashFn) keyHasher {
 	pph.hasher.sum = sum
 	pph.keyDigest = pbinDigestCache{sum: sum}
@@ -181,13 +181,16 @@ var pbinRootKey = []byte{0x08}
 // HashSort hands keys over in tree-key order, which is descent order, so the
 // grid only ever walks the path between two consecutive keys.
 //
-// M0 ignores warmup: the engine runs against an in-memory context, so there is
-// no page cache to pre-warm.
+// warmup is ignored: the engine has no parallel read path to pre-warm for.
 func (pph *PBinPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) ([]byte, error) {
 	var processed uint64
 	// Each run is its own ascending stream: the grid is back at the root, so the
-	// key the previous run ended on bounds nothing.
+	// key the previous run ended on bounds nothing. The code buffers are cleared
+	// for the same reason — a run that failed mid-stream leaves chunks queued,
+	// and the next run must not emit them against its own keys.
 	pph.lastKeyLen = 0
+	pph.pendingCode = pbinPendingCode{}
+	pph.overflowCode = pph.overflowCode[:0]
 	err := updates.HashSort(ctx, nil, func(treeKey, plainKey []byte, stateUpdate *Update) error {
 		if err := pph.processKey(treeKey, plainKey, stateUpdate); err != nil {
 			return err
@@ -880,6 +883,7 @@ func (pph *PBinPatriciaHashed) fold() error {
 		return err
 	}
 	g.activeRows--
+	g.prevRecord[row] = nil
 	pph.currentKey.truncate(max(upDepth-1, 0))
 	return nil
 }

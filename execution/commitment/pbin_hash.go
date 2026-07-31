@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	keccak "github.com/erigontech/fastkeccak"
+	"lukechampine.com/blake3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
@@ -46,11 +47,46 @@ var pbinEmptyTreeHash common.Hash
 var errPBinCellHash = errors.New("pbin: cell cannot be hashed")
 
 // pbinHashFn is H. EIP-8297 leaves the hash open and names Keccak-256 among the
-// candidates (eip:511-513); the execution-specs reference hashes with BLAKE3, so
-// tests substitute it to compare roots against that reference. Key derivation
-// hashes too, so a suite is only fully swapped when pbinDigestCache is swapped
-// with it.
+// candidates (eip:511-513); the execution-specs reference hashes with BLAKE3.
+// Key derivation hashes too, so a suite is only fully swapped when
+// pbinDigestCache is swapped with it.
 type pbinHashFn func([]byte) common.Hash
+
+// Names for H, as the --experimental.bin-commitment.hash flag spells them.
+const (
+	PBinHashKeccak = "keccak"
+	PBinHashBlake3 = "blake3"
+)
+
+// pbinSelectedSum is H for every binary-trie engine this process builds; nil is
+// Keccak-256. Roots are not comparable across a change, so the datadir persists
+// the choice and refuses to reopen under a different one.
+var pbinSelectedSum pbinHashFn
+
+// SetPBinHashSuite selects H by name. Keccak-256 is the default because the EIP
+// names it first, but the clients sharing a binary-trie testnet follow the
+// execution-specs reference, which hashes BLAKE3 — interoperating means asking
+// for it. Call before the first engine is built.
+func SetPBinHashSuite(name string) error {
+	switch name {
+	case "", PBinHashKeccak:
+		pbinSelectedSum = nil
+	case PBinHashBlake3:
+		pbinSelectedSum = func(b []byte) common.Hash { return common.Hash(blake3.Sum256(b)) }
+	default:
+		return fmt.Errorf("unknown bin commitment hash %q, want %q or %q", name, PBinHashKeccak, PBinHashBlake3)
+	}
+	return nil
+}
+
+// PBinHashSuiteName reports the selected suite, for logging and for the value
+// the datadir persists.
+func PBinHashSuiteName() string {
+	if pbinSelectedSum == nil {
+		return PBinHashKeccak
+	}
+	return PBinHashBlake3
+}
 
 // pbinHasher applies H to node preimages. Every preimage fits its single scratch
 // buffer, so each node costs one hash call and no allocation. Its zero value is

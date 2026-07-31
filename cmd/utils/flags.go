@@ -60,6 +60,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -1123,6 +1124,15 @@ var (
 		Usage: "EXPERIMENTAL: enables the EIP-8297 binary commitment trie. Takes effect on a fresh datadir only and is persisted there.",
 		Value: false,
 	}
+	// ExperimentalBinCommitmentHashFlag picks H for the binary trie. Persisted and
+	// adopted like the variant itself: roots do not survive a change.
+	ExperimentalBinCommitmentHashFlag = cli.StringFlag{
+		Name:  "experimental.bin-commitment.hash",
+		Usage: "EXPERIMENTAL: hash for the EIP-8297 binary commitment trie: \"keccak\" (default) or \"blake3\". blake3 matches the execution-specs reference and the other clients on the binary-trie testnets. Takes effect on a fresh datadir only and is persisted there.",
+		// Empty, not "keccak": an unset flag must stay distinguishable from an
+		// explicit one, which a hex datadir refuses.
+		Value: "",
+	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
 		Usage: "restart erigon under gdb for debug purposes",
@@ -2022,6 +2032,16 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		// dev mode derives the beacon Eth1Data from the EL genesis hash while still
 		// setting up the config, long before the backend applies the flag.
 		statecfg.ExperimentalBinCommitment = true
+	}
+
+	if h := ctx.String(ExperimentalBinCommitmentHashFlag.Name); h != "" {
+		if err := commitment.SetPBinHashSuite(h); err != nil {
+			Fatalf("%v", err)
+		}
+		// Genesis is computed here too, so the suite has to be live before the
+		// datadir reconciles it.
+		cfg.BinCommitmentHash = h
+		statecfg.BinCommitmentHash = h
 	}
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)

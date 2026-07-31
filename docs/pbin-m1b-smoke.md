@@ -4,7 +4,9 @@ Record of the M1b gate: a local dev chain booted from genesis on the EIP-8297 bi
 trie, produced blocks, deployed and called contracts, and resumed after a restart.
 
 Binary: `awskii/pbin-patricia`, erigon `v3.7.0-dev`, darwin/arm64.
-Hash: Keccak-256 (BLAKE3 is test-only). Roots below agree with no other client.
+Hash: Keccak-256, the default. Roots below agree with no other client; reproducing
+them elsewhere needs the same flags. `--experimental.bin-commitment.hash=blake3`
+selects the hash the execution-specs reference and the other binary-trie clients use.
 
 ## Command line
 

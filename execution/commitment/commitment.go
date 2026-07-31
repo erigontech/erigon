@@ -176,7 +176,7 @@ func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *
 		// ModeDirect regardless of the argument: the parallel prefix trie is a
 		// hex-nibble structure and the binary key space has no nibbles.
 		trie := NewPBinPatriciaHashed(nil)
-		tree := NewUpdates(ModeDirect, tmpdir, pbinKeyHasher())
+		tree := NewUpdates(ModeDirect, tmpdir, trie.setHashSuite(pbinSelectedSum))
 		return trie, tree
 	case VariantHexPatriciaTrie:
 		fallthrough
