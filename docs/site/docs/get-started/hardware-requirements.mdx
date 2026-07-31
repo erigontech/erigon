@@ -17,7 +17,7 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 | --- | --- | --- |
 | Disk Type | Use high-end NVMe SSDs. | Avoid HDDs. SSD performance may degrade when nearing full capacity. |
 | Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive; RAID 0 is not needed and doubles the chance of losing the datadir. See [Filesystem](#filesystem). |
-| Filesystem | ext4 | See [Filesystem](#filesystem) below. |
+| Filesystem | ext4 or XFS | See [Filesystem](#filesystem) below. |
 | RAM | Adequate memory is crucial | Reduces bottlenecks during sync and improves performance under load. |
 | CPU | 4–8 cores for Full nodes8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. |
 | Linux | Kernel version > v4 | A modern Linux distribution is required. |
@@ -25,7 +25,7 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 
 ## Filesystem
 
-Use **ext4** on a single NVMe device. This is what Erigon is developed and measured on, and the disk figures below are obtained on it.
+Use **ext4** or **XFS** on a single NVMe device. Either is a good choice: both are in use by operators running Erigon, and the disk figures below are measured on ext4.
 
 Mount with `noatime` so reads do not generate metadata writes:
 
@@ -33,7 +33,7 @@ Mount with `noatime` so reads do not generate metadata writes:
 /dev/nvme0n1p2  /data  ext4  rw,noatime  0 1
 ```
 
-**XFS** is a reasonable alternative and is used by several operators. Filesystems other than these two are not part of what we measure, so treat their performance as unverified rather than assumed.
+Filesystems other than these two are not part of what we measure, so treat their performance as unverified rather than assumed.
 
 A few points that follow from Erigon's storage model — see [Database](../fundamentals/database) for the layout:
 
