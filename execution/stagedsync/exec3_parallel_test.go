@@ -1035,10 +1035,10 @@ func BenchmarkDataDependentConflicts(b *testing.B) {
 	for _, numTx := range totalTxs {
 		for _, cfg := range configs {
 			b.Run(fmt.Sprintf("txs=%d/%s", numTx, cfg.name), func(b *testing.B) {
-				tasks, serialDuration := taskFactory(numTx, uniqueSender, 5, 5, 10, hotSlotPathGenerator, readTime, writeTime, nonIOTime)
+				tasks, _ := taskFactory(numTx, uniqueSender, 5, 5, 10, hotSlotPathGenerator, readTime, writeTime, nonIOTime)
 
 				b.ResetTimer()
-				parallelDuration := runParallelWorkers(b, tasks, defaultChecks, false, logger, cfg.workers)
+				runParallelWorkers(b, tasks, defaultChecks, false, logger, cfg.workers)
 				b.StopTimer()
 
 				var execs, aborts int64
@@ -1050,9 +1050,6 @@ func BenchmarkDataDependentConflicts(b *testing.B) {
 				if execs > 0 {
 					b.ReportMetric(100*float64(execs-int64(numTx))/float64(execs), "repeat%")
 					b.ReportMetric(float64(execs)/float64(numTx), "execs/tx")
-				}
-				if parallelDuration > 0 {
-					b.ReportMetric(float64(serialDuration)/float64(parallelDuration), "speedup")
 				}
 			})
 		}
