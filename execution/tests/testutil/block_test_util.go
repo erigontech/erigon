@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
@@ -47,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/rulesconfig"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
 // A BlockTest checks handling of entire blocks.
@@ -365,6 +367,13 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 		// RLP decoding worked, try to insert into chain:
 		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb, BlockAccessLists: [][]byte{balBytes}}
 
+		var previousHead *types.Header
+		if b.BlockHeader == nil {
+			previousHead, err = m.ExecModule.CurrentHeader(m.Ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
 		err1 := m.InsertChain(chain)
 		if err1 != nil {
 			if b.BlockHeader == nil {
@@ -372,16 +381,28 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 			} else {
 				return nil, fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), err1)
 			}
-		} else if b.BlockHeader == nil {
+		}
+
+		if b.BlockHeader == nil {
 			isCanonical, err := bt.isCanonical(m, cb)
 			if err != nil {
 				return nil, err
 			}
+			if isCanonical && !m.ChainConfig.IsByzantium(cb.NumberU64()) {
+				validReceipts, err := bt.validatePreByzantiumReceipts(m, cb)
+				if err != nil {
+					return nil, err
+				}
+				if !validReceipts {
+					if err := restoreForkChoice(m, previousHead.Hash()); err != nil {
+						return nil, err
+					}
+					continue
+				}
+			}
 			if isCanonical {
 				return nil, fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
 			}
-		}
-		if b.BlockHeader == nil {
 			continue
 		}
 		// validate RLP decoding by checking all values against test file JSON
@@ -391,6 +412,33 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 		validBlocks = append(validBlocks, b)
 	}
 	return validBlocks, nil
+}
+
+func (bt *BlockTest) validatePreByzantiumReceipts(m *execmoduletester.ExecModuleTester, block *types.Block) (bool, error) {
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	receipts, err := m.ReceiptsReader.GetReceipts(m.Ctx, m.ChainConfig, tx, block, eth.ReceiptsOpts{})
+	if err != nil {
+		return false, err
+	}
+	return types.DeriveSha(receipts) == block.ReceiptHash(), nil
+}
+
+func restoreForkChoice(m *execmoduletester.ExecModuleTester, headHash common.Hash) error {
+	m.ExecModule.WaitIdle(m.Ctx)
+	result, err := m.ExecModule.UpdateForkChoice(m.Ctx, headHash, headHash, headHash)
+	if err != nil {
+		return err
+	}
+	m.ExecModule.WaitIdle(m.Ctx)
+	if result.Status != execmodule.ExecutionStatusSuccess {
+		return fmt.Errorf("restore fork choice failed, status: %s, error: %s", result.Status, result.ValidationError)
+	}
+	return nil
 }
 
 // isCanonical reports whether block is the canonical block at its height.
