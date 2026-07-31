@@ -66,7 +66,7 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 
 ## Filesystem
 
-Use **ext4** or **XFS** on a single NVMe device. Either is a good choice: both are in use by operators running Erigon, and the disk figures below are measured on ext4.
+Use **ext4** or **XFS** on a single NVMe device. The disk figures below are measured on ext4, and that is the configuration Erigon's own measurements come from. XFS is a reasonable choice on the same reasoning, but we have not measured it.
 
 Mount with `noatime` so reads do not generate metadata writes:
 
