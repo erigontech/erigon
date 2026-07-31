@@ -20,6 +20,7 @@
 package executiontests
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -27,17 +28,23 @@ import (
 )
 
 var (
-	legacyDir  = filepath.Join(".", "legacy-tests")
-	rlpTestDir = filepath.Join(legacyDir, "RLPTests")
 	cornersDir = filepath.Join(".", "test-corners")
 )
 
 func TestMatcherWhitelist(t *testing.T) {
+	dir := t.TempDir()
+	fixture := []byte(`{"case":{"in":"VALID","out":"0x80"}}`)
+	for _, name := range []string{"invalidRLPTest.json", "validRLPTest.json"} {
+		if err := os.WriteFile(filepath.Join(dir, name), fixture, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	tm := new(testutil.TestMatcher)
 	tm.Whitelist("invalid*")
-	tm.Walk(t, rlpTestDir, func(t *testing.T, name string, test *testutil.RLPTest) {
-		if name[:len("invalidRLPTest.json")] != "invalidRLPTest.json" {
-			t.Fatalf("invalid test found: %s != invalidRLPTest.json", name)
+	tm.Walk(t, dir, func(t *testing.T, name string, test *testutil.RLPTest) {
+		if name != "invalidRLPTest.json" {
+			t.Fatalf("unexpected test: %s", name)
 		}
 	})
 }
