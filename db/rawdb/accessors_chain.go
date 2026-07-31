@@ -31,7 +31,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/rawdb/utils"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -1358,55 +1358,11 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	return res, nil
 }
 
-var receiptCacheBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
-
 func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
-	var toWrite []byte
-
-	if receipt != nil {
-		if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
-			panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64()))
-		}
-
-		storageReceipt := (*types.ReceiptForStorage)(receipt)
-		buf := receiptCacheBufPool.Get().(*bytes.Buffer)
-		defer func() {
-			buf.Reset()
-			receiptCacheBufPool.Put(buf)
-		}()
-		// Safe to hand DomainPut a pooled buffer: the mem batch clones the
-		// value (TemporalMemBatch.putLatest) and RCacheDomain is not touched
-		// by the commitment context.
-		if err := rlp.Encode(buf, storageReceipt); err != nil {
-			return fmt.Errorf("WriteReceiptCache: %w", err)
-		}
-		toWrite = buf.Bytes()
-		if dbg.AssertEnabled {
-			storageReceipt2 := &types.ReceiptForStorage{}
-			if err := rlp.DecodeBytes(toWrite, storageReceipt2); err != nil {
-				panic(fmt.Sprintf("assert: receipt encode/decode round-trip: %v", err))
-			}
-			if storageReceipt.ContractAddress != storageReceipt2.ContractAddress {
-				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.ContractAddress, storageReceipt2.ContractAddress))
-			}
-			if storageReceipt.FirstLogIndexWithinBlock != storageReceipt2.FirstLogIndexWithinBlock {
-				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.FirstLogIndexWithinBlock, storageReceipt2.FirstLogIndexWithinBlock))
-			}
-			if storageReceipt.TransactionIndex != storageReceipt2.TransactionIndex {
-				panic(fmt.Sprintf("assert: TransactionIndex mismatch: %d, %d\n", storageReceipt.TransactionIndex, storageReceipt2.TransactionIndex))
-			}
-		}
-	} else {
-		toWrite = []byte{}
-	}
-
-	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, toWrite, txNum, nil); err != nil {
-		return fmt.Errorf("WriteReceiptCache: %w", err)
-	}
-
-	return nil
+	var w rawtemporaldb.ReceiptWriter
+	return w.Append(tx, receipt, txNum)
 }
 
 var (
-	receiptCacheKey = []byte{0x0}
+	receiptCacheKey = rawtemporaldb.ReceiptCacheKey
 )
