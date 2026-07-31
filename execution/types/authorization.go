@@ -40,21 +40,21 @@ func (ath *Authorization) copy() *Authorization {
 // encodeSigningPayload writes rlp([chain_id, address, nonce]), the RLP portion
 // of an EIP-7702 authorization signing preimage. Hashing adds the magic prefix;
 // buf is scratch space for the RLP encoders.
-func encodeSigningPayload(chainID uint256.Int, address common.Address, nonce uint64, data *bytes.Buffer, buf []byte) error {
+func encodeSigningPayload(chainID uint256.Int, address common.Address, nonce uint64, w io.Writer, buf []byte) error {
 	authLen := rlp.Uint256Len(chainID)
 	authLen += 1 + length.Addr
 	authLen += rlp.U64Len(nonce)
 
-	if err := rlp.EncodeListPrefix(authLen, data, buf); err != nil {
+	if err := rlp.EncodeListPrefix(authLen, w, buf); err != nil {
 		return err
 	}
-	if err := rlp.EncodeUint256(chainID, data, buf); err != nil {
+	if err := rlp.EncodeUint256(chainID, w, buf); err != nil {
 		return err
 	}
-	if err := EncodeOptionalAddress(&address, data, buf); err != nil {
+	if err := EncodeOptionalAddress(&address, w, buf); err != nil {
 		return err
 	}
-	return rlp.EncodeU64(nonce, data, buf)
+	return rlp.EncodeU64(nonce, w, buf)
 }
 
 func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common.Address, error) {
@@ -81,16 +81,9 @@ func SignAuthorization(key *ecdsa.PrivateKey, chainID uint256.Int, address commo
 		return Authorization{}, errors.New("private key is nil")
 	}
 
-	var buf [33]byte
-	data := bytes.NewBuffer(nil)
-	if err := encodeSigningPayload(chainID, address, nonce, data, buf[:]); err != nil {
-		return Authorization{}, err
-	}
-
-	hashData := make([]byte, 0, 1+data.Len())
-	hashData = append(hashData, params.SetCodeMagicPrefix)
-	hashData = append(hashData, data.Bytes()...)
-	hash := crypto.Keccak256Hash(hashData)
+	hash := prefixedPayloadHash(params.SetCodeMagicPrefix, func(w io.Writer, buf []byte) error {
+		return encodeSigningPayload(chainID, address, nonce, w, buf)
+	})
 	sig, err := crypto.Sign(hash[:], key)
 	if err != nil {
 		return Authorization{}, err
