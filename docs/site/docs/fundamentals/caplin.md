@@ -49,3 +49,9 @@ When Caplin is running, it exposes a Beacon API that external tools can query. T
 | `--beacon.api.read.timeout` | `5` | HTTP server read timeout, in seconds |
 | `--beacon.api.write.timeout` | `31536000` | HTTP server write timeout, in seconds (~1 year) |
 | `--beacon.api.idle.timeout` | `25` | HTTP server idle timeout, in seconds |
+
+The API is not served until you enable it with `--beacon.api=<namespaces>`; see [Caplin for staking](../staking/caplin) for the full namespace list.
+
+:::note
+Enabling the Beacon API increases RAM usage by roughly **6 GB**. Account for it when sizing your host — see [Hardware Requirements](../get-started/hardware-requirements).
+:::

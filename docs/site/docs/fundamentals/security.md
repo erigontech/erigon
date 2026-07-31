@@ -20,6 +20,10 @@ Based on best practices for execution clients, your local machine's firewall set
 | 8545     | TCP          | JSON-RPC (Public API)         | Block all traffic _except_ from explicitly defined trusted machines. This port should never be publicly exposed without strict controls. |
 | 9090     | TCP          | Private API Communication     | Block all traffic except for communication between your internal components (e.g., RPC Daemon and core node).                            |
 
+:::note
+Some hosting providers impose additional firewall requirements on top of these. If you run on Hetzner Cloud or a Hetzner dedicated server, see the [Hetzner firewall note](/help-center/troubleshooting#hetzner-cloud--dedicated-server-firewall-note) for the ports to open and the reserved ranges to block.
+:::
+
 #### CORS Protection
 
 When exposing public RPC endpoints (like those on port 8545), use the following practice to mitigate cross-origin attacks:

@@ -110,3 +110,16 @@ Your internet bandwidth is also an important factor, particularly for sync speed
 | -------------- | -------------------- | ----------------------- |
 | Staking/Mining | 10 Mbps              | 50 Mbps                 |
 | Non-Staking    | 5 Mbps               | 25 Mbps                 |
+
+## Sync Times
+
+Approximate times to sync from scratch to the tip of the chain.
+
+| Chain    | Archive | Full (Default) | Minimal |
+| -------- | ------- | -------------- | ------- |
+| Ethereum | ~8 h    | ~4–6 h         | ~2 h    |
+| Gnosis   | ~2 h    | ~1–2 h         | ~30 m   |
+
+:::info
+These figures are indicative and are **not measured by CI** — read them as an order of magnitude, not a target. Most of the elapsed time is snapshot download rather than block execution, so your available [bandwidth](#bandwidth-requirements) influences the result more than CPU does: expect proportionally faster syncs on a well-connected host and slower ones on a constrained link.
+:::

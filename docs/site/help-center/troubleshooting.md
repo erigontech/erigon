@@ -44,6 +44,8 @@ kill -SIGUSR1 $(pidof erigon)
 # Stack traces are printed to the erigon log / stdout
 ```
 
+If the node is wedged and you are ready to lose the running instance, `kill -6 $(pidof erigon)` (`SIGABRT`) dumps the stacks and terminates the process in one step.
+
 **Capture a CPU or heap profile via pprof** (requires `--pprof` flag at startup — default address `localhost:6060`; override with `--pprof.addr` and `--pprof.port`):
 
 ```bash
@@ -69,4 +71,27 @@ Hetzner applies a stateless firewall at the network edge. Ensure the following p
 | P2P (Caplin)   | 9000  | TCP+UDP  |
 
 Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure the firewall in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`.
+
+An Erigon node should also never attempt to peer with IPv4 ranges that are reserved for special use. Blocking them is good practice on any host and worth doing explicitly on Hetzner, whose stricter filtering is what prompted this note. The authoritative list is the [IANA IPv4 Special-Purpose Address Registry](https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml) ([RFC 6890](https://datatracker.ietf.org/doc/html/rfc6890)); the ranges below are the ones commonly blocked for an Ethereum node (`100.64.0.0/10` comes from [RFC 6598](https://datatracker.ietf.org/doc/html/rfc6598), and `192.88.99.0/24` has since been deprecated by [RFC 7526](https://datatracker.ietf.org/doc/html/rfc7526) — blocking it remains correct):
+
+```text
+0.0.0.0/8             "This" Network                                RFC 1122, Section 3.2.1.3
+10.0.0.0/8            Private-Use Networks                          RFC 1918
+100.64.0.0/10         Carrier-Grade NAT (CGN)                       RFC 6598, Section 7
+127.0.0.0/8           Loopback                                      RFC 1122, Section 3.2.1.3
+169.254.0.0/16        Link Local                                    RFC 3927
+172.16.0.0/12         Private-Use Networks                          RFC 1918
+192.0.0.0/24          IETF Protocol Assignments                     RFC 5736
+192.0.2.0/24          TEST-NET-1                                    RFC 5737
+192.88.99.0/24        6to4 Relay Anycast                            RFC 3068
+192.168.0.0/16        Private-Use Networks                          RFC 1918
+198.18.0.0/15         Network Interconnect Device Benchmark Testing RFC 2544
+198.51.100.0/24       TEST-NET-2                                    RFC 5737
+203.0.113.0/24        TEST-NET-3                                    RFC 5737
+224.0.0.0/4           Multicast                                     RFC 3171
+240.0.0.0/4           Reserved for Future Use                       RFC 1112, Section 4
+255.255.255.255/32    Limited Broadcast                             RFC 919 and RFC 922, Section 7
+```
+
+The same list expressed in [iptables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-prevent-being-blacklisted-for-running-an-ethereum-client/13068#13068).
 

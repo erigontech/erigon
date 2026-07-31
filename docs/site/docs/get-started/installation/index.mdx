@@ -357,6 +357,16 @@ make -j<n> erigon
 
 The resulting executable binary will be created in the `./build/bin/erigon` path.
 
+**2.4 Installing Outside the Build Tree (Optional)**
+
+Running Erigon as a [dedicated system user](/fundamentals/security) — for example under `systemd` — is easiest when the binaries live outside your source checkout, where that user can reach them. Pass a destination to `make install`:
+
+```sh
+make DIST=/opt/erigon install
+```
+
+`$HOME/erigon` works equally well. `make install` copies whatever is currently in `build/bin`, so build every component you intend to deploy before running it.
+
 **3. Running Erigon**
 
 After installation, you can run Erigon from your terminal:
