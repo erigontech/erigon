@@ -18,15 +18,15 @@ package mdgas
 
 import "testing"
 
-func TestRefillReversesRegularGasConsumption(t *testing.T) {
-	initial := MdGas{Regular: 100, State: 30}
+func TestRefillReversesExecutionGasConsumption(t *testing.T) {
+	initial := MdGas{Execution: 100, State: 30}
 	remaining := initial
 	var used MdGasUsage
 
-	if !Consume(&remaining, &used, 40, RegularGas) {
-		t.Fatal("regular gas consumption failed")
+	if !Consume(&remaining, &used, 40, ExecutionGas) {
+		t.Fatal("execution gas consumption failed")
 	}
-	Refill(&remaining, &used, 40, RegularGas)
+	Refill(&remaining, &used, 40, ExecutionGas)
 
 	if remaining != initial {
 		t.Fatalf("remaining gas: got %+v, want %+v", remaining, initial)
@@ -37,7 +37,7 @@ func TestRefillReversesRegularGasConsumption(t *testing.T) {
 }
 
 func TestRefillReversesStateGasConsumption(t *testing.T) {
-	initial := MdGas{Regular: 100, State: 30}
+	initial := MdGas{Execution: 100, State: 30}
 	remaining := initial
 	var used MdGasUsage
 
@@ -55,11 +55,11 @@ func TestRefillReversesStateGasConsumption(t *testing.T) {
 }
 
 func TestRefillStateGasUsesSpillFirst(t *testing.T) {
-	remaining := MdGas{Regular: 80}
+	remaining := MdGas{Execution: 80}
 	used := MdGasUsage{State: 50, StateSpill: 20}
 
 	Refill(&remaining, &used, 10, StateGas)
-	if remaining != (MdGas{Regular: 90}) {
+	if remaining != (MdGas{Execution: 90}) {
 		t.Fatalf("remaining gas after first refill: got %+v", remaining)
 	}
 	if used != (MdGasUsage{State: 40, StateSpill: 10}) {
@@ -67,7 +67,7 @@ func TestRefillStateGasUsesSpillFirst(t *testing.T) {
 	}
 
 	Refill(&remaining, &used, 20, StateGas)
-	if remaining != (MdGas{Regular: 100, State: 10}) {
+	if remaining != (MdGas{Execution: 100, State: 10}) {
 		t.Fatalf("remaining gas after second refill: got %+v", remaining)
 	}
 	if used != (MdGasUsage{State: 20}) {

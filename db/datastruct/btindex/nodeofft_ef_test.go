@@ -51,7 +51,7 @@ func Test_BtreeIndex_NodeOfftEF_V0_V2(t *testing.T) {
 
 	for _, tc := range []struct{ name, path string }{{"v0", v0Path}, {"v2", v2Path}} {
 		t.Run(tc.name, func(t *testing.T) {
-			kv, bt, err := OpenBtreeIndexAndDataFile(tc.path, dataPath, M, compressFlags, false)
+			kv, bt, err := OpenBtreeIndexAndDataFile(tc.path, dataPath, compressFlags, false)
 			require.NoError(t, err)
 			defer bt.Close()
 			defer kv.Close()

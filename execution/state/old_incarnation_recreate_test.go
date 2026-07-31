@@ -6,6 +6,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -32,7 +33,7 @@ func TestOldIncarnationStorageMaskedAfterRecreate(t *testing.T) {
 		ibs.SetVersion(0)
 		ibs.SetNoMaterialize(true)
 		f(ibs)
-		vm.FlushVersionedWrites(ibs.FinalizedWrites(), true, "")
+		vm.FlushVersionedWrites(ibs.FinalizedWrites(&chain.Rules{}), true, "")
 	}
 
 	runTx(0, func(ibs *IntraBlockState) {
