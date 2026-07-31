@@ -122,6 +122,7 @@ jobs:
         env:
           EEST_SPEC_MAX_FAILURES: ${{ matrix.max-allowed-failures }}
           EEST_SPEC_WORKERS: ${{ matrix.workers }}
+          ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment-parallel }}
           SHARD: ${{ matrix.shard }}
         run: make "eest-spec-$SHARD"
 

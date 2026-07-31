@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -171,8 +170,7 @@ func runLifecycle(b *testing.B, cfg lifecycleConfig) (*lifecycleTimings, kv.Temp
 	require.NoError(b, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(b, err)
+	domains := newSharedDomainsBench(b, db, rwTx)
 	defer domains.Close()
 
 	rnd := newRnd(42)
@@ -338,8 +336,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 		require.NoError(b, err)
 		defer rwTx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-		require.NoError(b, err)
+		domains := newSharedDomainsBench(b, db, rwTx)
 		defer domains.Close()
 
 		rnd := newRnd(42)
@@ -371,8 +368,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 		require.NoError(b, err)
 		defer rwTx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-		require.NoError(b, err)
+		domains := newSharedDomainsBench(b, db, rwTx)
 		defer domains.Close()
 
 		rnd := newRnd(42)
@@ -413,8 +409,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 		require.NoError(b, err)
 		defer rwTx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-		require.NoError(b, err)
+		domains := newSharedDomainsBench(b, db, rwTx)
 		defer domains.Close()
 
 		txNum := initAccounts(b, domains, rwTx, keyGen)
@@ -446,8 +441,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 		require.NoError(b, err)
 		defer rwTx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-		require.NoError(b, err)
+		domains := newSharedDomainsBench(b, db, rwTx)
 		defer domains.Close()
 
 		rnd := newRnd(42)

@@ -12,7 +12,7 @@
 #   transactiontests-legacy-race              complete legacy transaction tests
 #   difficultytests-legacy-race               complete legacy difficulty tests
 #   blocktests-stable-sequential               blockchain tests vs. eest_stable
-#   blocktests-devnet                          blockchain tests vs. eest_devnet
+#   blocktests-devnet-{sequential,parallel}    blockchain tests vs. eest_devnet
 #   blocktests-legacy-consensus-{sequential,parallel}
 #                                              Hive consensus suite
 #   blocktests-legacy-consensus-race-{sequential,parallel}
@@ -44,7 +44,8 @@
 #                                              export EVM_BIN to the race-built
 #                                              binary; otherwise -race
 #                                              detection doesn't fire.
-#   blocktests-devnet-race-amsterdam           race-detector variant filtered
+#   blocktests-devnet-race-amsterdam-{sequential,parallel}
+#                                              race-detector variants filtered
 #                                              to the Amsterdam fork only.
 #   zkevm-witness                              zkevm execution-witness conformance
 #                                              (eest_zkevm corpus) via the zkevmtest
@@ -117,7 +118,12 @@ base=$(fixture_base "${fixture_sets[0]}")
 # adding a shard / tweaking a budget / changing a fork filter is a one-file edit.
 # yq converts YAML→JSON so it can be queried with jq.
 manifest=tools/eest-spec-shards.yml
-shard_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")\t\(."commitment-parallel" // false)\t\(."no-ramdisk" // false)\t\(."expected-tests" // 0)\t\(.run // "")"')
+shard_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '
+	.[] | select(.shard == $s)
+	| if (."commitment-parallel" | type) != "boolean"
+		then error("shard \($s) must define boolean commitment-parallel")
+		else "\(.workers)\t\(."max-allowed-failures")\t\(."commitment-parallel")\t\(."no-ramdisk" // false)\t\(."expected-tests" // 0)\t\(.run // "")"
+	end')
 if [[ -z "$shard_row" ]]; then
 	echo "shard $shard not found in $manifest" >&2
 	exit 2
