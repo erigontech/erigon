@@ -404,6 +404,17 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			code = c.Bytes
 		}
 		if len(code) == 0 && stateReader != nil {
+			// Reject on size before materializing: only a designator can be
+			// recovered, and every storage-dirty contract in the block reaches
+			// this loop with a filled-in codeHash, so reading the bytes would
+			// decompress whole contracts just to fail ParseDelegation below.
+			size, err := stateReader.ReadAccountCodeSize(addr)
+			if err != nil {
+				return nil, err
+			}
+			if size != types.DelegateDesignationCodeSize {
+				continue
+			}
 			c, err := stateReader.ReadAccountCode(addr)
 			if err != nil {
 				return nil, err

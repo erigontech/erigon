@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"errors"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -137,4 +139,69 @@ func TestNormalize_SelfDestructBalanceRetention_EIP8246(t *testing.T) {
 	post, _ := build().Normalize(vm, 1, 0, &minimalStateReader{}, nil, false, false, true /*eip8246*/)
 	_, postBal := post.GetBalance(addr)
 	require.True(t, postBal, "EIP-8246 SD retains the balance write")
+}
+
+// codeCountingReader records how often Normalize materializes code bytes vs
+// asks only for the size.
+type codeCountingReader struct {
+	minimalStateReader
+	code      []byte
+	codeReads int
+	sizeReads int
+}
+
+func (r *codeCountingReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
+	r.codeReads++
+	return r.code, nil
+}
+
+func (r *codeCountingReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
+	r.sizeReads++
+	return len(r.code), nil
+}
+
+// codeHashWriteSet is a tx that emitted a codeHash without code bytes — the
+// shape Normalize tries to repair by recovering the code.
+func codeHashWriteSet(addr accounts.Address, hash accounts.CodeHash) *WriteSet {
+	ws := &WriteSet{}
+	ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{
+		WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: Version{TxIndex: 0}},
+		Val:         hash,
+	})
+	return ws
+}
+
+// Only an EIP-7702 designator can be recovered, so committed code of any other
+// length must be rejected on its size — reading the bytes decompresses a whole
+// contract just to throw it away, and every storage-dirty contract in a block
+// reaches this loop.
+func TestNormalize_CodeRecoveryRejectsNonDelegationBySize(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xC0DE"))
+	code := accounts.NewCode(bytes.Repeat([]byte{0x60}, 64))
+	reader := &codeCountingReader{code: code.Bytes}
+
+	out, err := codeHashWriteSet(addr, code.Hash).Normalize(NewVersionMap(nil), 0, 0, reader, nil, false, false, false)
+	require.NoError(t, err)
+
+	_, hasCode := out.GetCode(addr)
+	require.False(t, hasCode, "non-designator code must not be re-emitted")
+	require.Zero(t, reader.codeReads, "ordinary contract code must not be materialized to be rejected")
+}
+
+// The size gate must not cost the repair its reason for existing: a designator
+// still gets its CodePath back.
+func TestNormalize_CodeRecoveryKeepsDelegation(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xA0"))
+	delegate := accounts.InternAddress(common.HexToAddress("0xB0"))
+	code := accounts.NewCode(types.AddressToDelegation(delegate))
+	reader := &codeCountingReader{code: code.Bytes}
+
+	out, err := codeHashWriteSet(addr, code.Hash).Normalize(NewVersionMap(nil), 0, 0, reader, nil, false, false, false)
+	require.NoError(t, err)
+
+	got, hasCode := out.GetCode(addr)
+	require.True(t, hasCode, "a delegation designator must still be recovered")
+	require.Equal(t, code.Bytes, got.Val.Bytes)
 }
