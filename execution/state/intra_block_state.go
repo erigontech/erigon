@@ -2762,6 +2762,13 @@ func (sdb *IntraBlockState) SlotInAccessList(addr accounts.Address, slot account
 	return sdb.accessList.Contains(addr, slot)
 }
 
+// SlotKnownWarm is a conservative fast check: true means the (addr, slot) pair
+// is warm; false means unknown — callers must fall back to AddSlotToAccessList.
+// It stays cheap enough to inline at every SLOAD/SSTORE gas-charge site.
+func (sdb *IntraBlockState) SlotKnownWarm(addr accounts.Address, slot accounts.StorageKey) bool {
+	return sdb.accessList.lastSlots != nil && sdb.accessList.lastAddr == addr && slot == sdb.accessList.lastWarmSlot
+}
+
 func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable bool) {
 	if !sdb.recordAccess {
 		return
