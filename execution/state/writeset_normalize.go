@@ -125,25 +125,32 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		}
 	}
 
-	// Per-entry decisions are order-independent, so the per-path loops below are
-	// equivalent to one pass over the merged header stream. There is no loop for
-	// AddressPath (record-level) or CodeSizePath (derived from the code bytes,
-	// not a domain field): neither is carried into the calc/apply write set, as
-	// on serial.
-	//
-	// SD'd addresses drop their account-field/storage writes so
-	// applyVersionedWrites takes the pure-delete branch instead of
-	// cleanup-before-recreate; the SelfDestructPath case re-emits an explicit
-	// StoragePath=0 delete for every slot via sdStorageSlots. EIP-8246 keeps
-	// the post-SD balance so the calculator can preserve a balance-only
-	// account; pre-8246 drops it so the account is purely deleted.
-	for addr, inner := range writes.storage {
-		if sdSet[addr] {
-			continue
+	for h := range writes.AllHeaders() {
+		// Drop account-field writes for SD'd addresses so applyVersionedWrites
+		// takes the pure-delete branch instead of cleanup-before-recreate; drop
+		// raw StoragePath writes too (the SelfDestructPath case re-emits an
+		// explicit StoragePath=0 delete for every slot via sdStorageSlots).
+		if sdSet[h.Address] {
+			switch h.Path {
+			case NoncePath, IncarnationPath, CodeHashPath, CodePath, StoragePath:
+				continue
+			case BalancePath:
+				// EIP-8246 keeps the post-SD balance so the calculator can
+				// preserve a balance-only account (or delete it when zero);
+				// pre-8246 drops it so the account is purely deleted.
+				if !eip8246 {
+					continue
+				}
+			}
 		}
-		for key, sw := range inner {
+		switch h.Path {
+		case StoragePath:
 			// Only include writes from the current (validated) incarnation.
-			if sw.Version.Incarnation != incarnation {
+			if h.Version.Incarnation != incarnation {
+				continue
+			}
+			sw, ok := writes.GetStorage(h.Address, h.Key)
+			if !ok {
 				continue
 			}
 			writeVal := sw.Val
@@ -156,13 +163,13 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			// that re-writes a slot to its pre-SD value is wrongly dropped as a
 			// no-op (TestDeleteRecreateSlotsAcrossManyBlocks).
 			sdTxIdx, sdOk := -1, false
-			if v, sd, _ := vm.ReadSelfDestruct(addr, txIndex); sd.Status() == MVReadResultDone && v {
+			if v, sd, _ := vm.ReadSelfDestruct(h.Address, txIndex); sd.Status() == MVReadResultDone && v {
 				sdTxIdx, sdOk = sd.Version().TxIndex, true
 			}
 			// No-op filter: compare against origin (what this TX would have read).
 			// First check versionMap floor (prior TX's write in this block).
 			// Then fall back to stateReader (pre-block value from domain).
-			originVal, origin, originOK := vm.ReadStorage(addr, key, txIndex)
+			originVal, origin, originOK := vm.ReadStorage(h.Address, h.Key, txIndex)
 			originValid := originOK && origin.Status() == MVReadResultDone &&
 				!(sdOk && sdTxIdx > origin.Version().TxIndex)
 			if originValid {
@@ -182,12 +189,12 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 				// misses it. Narrower than an IncarnationPath probe: pure
 				// CREATE (no prior SD=true) doesn't wipe pre-existing storage,
 				// so its same-value SSTOREs still no-op against pre-block.
-				if vm.AnyDoneSelfDestructEquals(addr, txIndex-1, true) {
+				if vm.AnyDoneSelfDestructEquals(h.Address, txIndex-1, true) {
 					if writeVal.IsZero() {
 						continue
 					}
 				} else {
-					preVal, found, err := stateReader.ReadAccountStorage(addr, key)
+					preVal, found, err := stateReader.ReadAccountStorage(h.Address, h.Key)
 					if err != nil {
 						return nil, err
 					}
@@ -199,76 +206,75 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 					}
 				}
 			}
-			filtered.SetStorage(addr, key, sw)
+			filtered.SetStorage(h.Address, h.Key, sw)
+		case BalancePath, NoncePath, IncarnationPath, CodeHashPath:
+			// Account fields: prefer the versionMap's accumulated value; fall
+			// back to the raw write when the map has none.
+			if !SetAccountFieldFromMap(filtered, vm, h.Address, h.Path, h.Version, txIndex+1) {
+				switch h.Path {
+				case BalancePath:
+					if vw, ok := writes.GetBalance(h.Address); ok {
+						filtered.SetBalance(h.Address, vw)
+					}
+				case NoncePath:
+					if vw, ok := writes.GetNonce(h.Address); ok {
+						filtered.SetNonce(h.Address, vw)
+					}
+				case IncarnationPath:
+					if vw, ok := writes.GetIncarnation(h.Address); ok {
+						filtered.SetIncarnation(h.Address, vw)
+					}
+				case CodeHashPath:
+					if vw, ok := writes.GetCodeHash(h.Address); ok {
+						filtered.SetCodeHash(h.Address, vw)
+					}
+				}
+			}
+		case CodePath:
+			if h.Version.Incarnation != incarnation {
+				continue
+			}
+			if vw, ok := writes.GetCode(h.Address); ok {
+				filtered.SetCode(h.Address, vw)
+			}
+		case CreateContractPath:
+			if h.Version.Incarnation != incarnation {
+				continue
+			}
+			if vw, ok := writes.GetCreateContract(h.Address); ok {
+				filtered.SetCreateContract(h.Address, vw)
+			}
+		case SelfDestructPath:
+			if h.Version.Incarnation != incarnation {
+				continue
+			}
+			// Only emit storage DELETE entries when the account was actually
+			// self-destructed (val=true).
+			sdw, ok := writes.GetSelfDestruct(h.Address)
+			if !ok || !sdw.Val {
+				continue
+			}
+			filtered.SetSelfDestruct(h.Address, sdw)
+			for _, slot := range sdStorageSlots(h.Address) {
+				filtered.SetStorage(h.Address, slot, &VersionedWrite[uint256.Int]{
+					WriteHeader: WriteHeader{
+						Address: h.Address,
+						Path:    StoragePath,
+						Key:     slot,
+						Version: h.Version,
+					},
+				})
+			}
+		case AddressPath:
+			// AddressPath is record-level — skip for field-level consumers.
+		case CodeSizePath:
+			// Code size is derived from the code bytes and isn't a domain field,
+			// so it's intentionally not carried into the calc/apply write set (as
+			// on serial). Cross-tx ReadCodeSize is served from the versionMap,
+			// which the worker populates directly — independent of this pass.
 		}
 	}
-	// Account fields: prefer the versionMap's accumulated value; fall back to
-	// the raw write when the map has none.
-	for addr, vw := range writes.balance {
-		if sdSet[addr] && !eip8246 {
-			continue
-		}
-		if !SetAccountFieldFromMap(filtered, vm, addr, BalancePath, vw.Version, txIndex+1) {
-			filtered.SetBalance(addr, vw)
-		}
-	}
-	for addr, vw := range writes.nonce {
-		if sdSet[addr] {
-			continue
-		}
-		if !SetAccountFieldFromMap(filtered, vm, addr, NoncePath, vw.Version, txIndex+1) {
-			filtered.SetNonce(addr, vw)
-		}
-	}
-	for addr, vw := range writes.incarnation {
-		if sdSet[addr] {
-			continue
-		}
-		if !SetAccountFieldFromMap(filtered, vm, addr, IncarnationPath, vw.Version, txIndex+1) {
-			filtered.SetIncarnation(addr, vw)
-		}
-	}
-	for addr, vw := range writes.codeHash {
-		if sdSet[addr] {
-			continue
-		}
-		if !SetAccountFieldFromMap(filtered, vm, addr, CodeHashPath, vw.Version, txIndex+1) {
-			filtered.SetCodeHash(addr, vw)
-		}
-	}
-	for addr, vw := range writes.code {
-		if sdSet[addr] || vw.Version.Incarnation != incarnation {
-			continue
-		}
-		filtered.SetCode(addr, vw)
-	}
-	for addr, vw := range writes.createContract {
-		if vw.Version.Incarnation != incarnation {
-			continue
-		}
-		filtered.SetCreateContract(addr, vw)
-	}
-	for addr, sdw := range writes.selfDestruct {
-		if sdw.Version.Incarnation != incarnation {
-			continue
-		}
-		// Only emit storage DELETE entries when the account was actually
-		// self-destructed (val=true).
-		if !sdw.Val {
-			continue
-		}
-		filtered.SetSelfDestruct(addr, sdw)
-		for _, slot := range sdStorageSlots(addr) {
-			filtered.SetStorage(addr, slot, &VersionedWrite[uint256.Int]{
-				WriteHeader: WriteHeader{
-					Address: addr,
-					Path:    StoragePath,
-					Key:     slot,
-					Version: sdw.Version,
-				},
-			})
-		}
-	}
+
 	// For addresses that appear in the raw WriteSet but don't have account-level
 	// writes in the output, emit account field entries. Serial's MakeWriteSet
 	// always calls UpdateAccountData for every dirty object — the commitment
