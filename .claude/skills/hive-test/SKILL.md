@@ -159,12 +159,13 @@ Only replace these values when the user explicitly requests another release.
    Do NOT add `--p2p.protocol` flags to erigon.sh. Let erigon use its default
    protocol negotiation.
 
-6b. **Devnet client configuration:**
-   Mirror the selected row from `.github/workflows/test-hive-eest.yml`. Every
-   devnet EngineX row sets `ERIGON_EXEC3_PARALLEL=true` and adds
-   `--fcu.background.prune=false --fcu.timeout=0`; the Amsterdam row also adds
-   `--experimental.bal`. Bake the environment variable into the client image and
-   patch `clients/erigon/erigon.sh` with the row's flags before building Hive.
+6b. **EngineX client configuration:**
+   Mirror the selected row from `.github/workflows/test-hive-eest.yml`. For every
+   stable or devnet EngineX run, patch `clients/erigon/erigon.sh` with
+   `--fcu.background.prune=false --fcu.timeout=0`. Devnet runs also bake
+   `ERIGON_EXEC3_PARALLEL=true` into the client image. Add `--experimental.bal`
+   only for the Amsterdam family; use a separate client image when running it
+   alongside other EngineX families.
 
 7. **Create client config file:**
    ```bash
