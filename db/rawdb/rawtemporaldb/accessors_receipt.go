@@ -72,8 +72,8 @@ type ReceiptWriter struct {
 	rlpEncodeBuf bytes.Buffer
 }
 
-// Append stores the receipt in RCacheDomain.
-func (w *ReceiptWriter) Append(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
+// Write stores the receipt in RCacheDomain.
+func (w *ReceiptWriter) Write(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
 	var toWrite []byte
 
 	if receipt != nil {
@@ -112,7 +112,7 @@ func (w *ReceiptWriter) Append(tx kv.TemporalPutDel, receipt *types.Receipt, txN
 	return nil
 }
 
-func (w *ReceiptWriter) AppendMetadata(tx kv.TemporalPutDel, logIndexAfterTx uint32, cumGasUsedInBlock, cumBlobGasUsed uint64, txNum uint64) error {
+func (w *ReceiptWriter) WriteMetadata(tx kv.TemporalPutDel, logIndexAfterTx uint32, cumGasUsedInBlock, cumBlobGasUsed uint64, txNum uint64) error {
 	i := binary.PutUvarint(w.buf[:], cumGasUsedInBlock)
 	if err := tx.DomainPut(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, w.buf[:i], txNum, nil); err != nil {
 		return err
@@ -130,7 +130,7 @@ func (w *ReceiptWriter) AppendMetadata(tx kv.TemporalPutDel, logIndexAfterTx uin
 
 func AppendReceiptMetadata(tx kv.TemporalPutDel, logIndexAfterTx uint32, cumGasUsedInBlock, cumBlobGasUsed uint64, txNum uint64) error {
 	var w ReceiptWriter
-	return w.AppendMetadata(tx, logIndexAfterTx, cumGasUsedInBlock, cumBlobGasUsed, txNum)
+	return w.WriteMetadata(tx, logIndexAfterTx, cumGasUsedInBlock, cumBlobGasUsed, txNum)
 }
 
 func uvarint(in []byte) (res uint64) {

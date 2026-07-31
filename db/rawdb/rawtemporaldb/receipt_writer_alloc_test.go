@@ -54,7 +54,7 @@ func TestReceiptWriterAppendMetadataIsAllocationFree(t *testing.T) {
 	putter := &countingPutDel{}
 
 	allocs := testing.AllocsPerRun(100, func() {
-		if err := w.AppendMetadata(putter, 7, 21000, 131072, 42); err != nil {
+		if err := w.WriteMetadata(putter, 7, 21000, 131072, 42); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -68,7 +68,7 @@ func TestReceiptWriterAppendMetadataValuesAreDistinct(t *testing.T) {
 	var w rawtemporaldb.ReceiptWriter
 	putter := &countingPutDel{copy: true}
 
-	require.NoError(t, w.AppendMetadata(putter, 7, 21000, 131072, 42))
+	require.NoError(t, w.WriteMetadata(putter, 7, 21000, 131072, 42))
 	require.Len(t, putter.puts, 3)
 	require.Equal(t, rawtemporaldb.ReceiptValueForTest(21000), putter.puts[0])
 	require.Equal(t, rawtemporaldb.ReceiptValueForTest(131072), putter.puts[1])
