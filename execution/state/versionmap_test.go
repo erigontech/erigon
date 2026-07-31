@@ -1003,7 +1003,6 @@ func TestBALFedReaderDoesNotRaceCreatorFlush(t *testing.T) {
 // The provisional nil probe must not survive the destroyed-unrevived and
 // EIP-8246 preserved-account conclusions: once the EVM consumes either, a
 // later same-tx load must conflict with a fresh flush instead of adopting it.
-// (yperbasis review, item 3.)
 func TestVersionedAccountBase_DestroyedExitDemotesProvisional(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xd3, 0x01})
 	reader := &codeReader{addr: addr, account: &accounts.Account{Nonce: 1, Balance: *uint256.NewInt(9), CodeHash: accounts.EmptyCodeHash}}
@@ -1046,7 +1045,7 @@ func TestVersionedAccountBase_NilPreservedAccountResolvesAbsent(t *testing.T) {
 
 // A stale ALIVE read of an in-block-destroyed, unrevived account must
 // invalidate: the destroyed-and-unrevived relaxation is only sound for reads
-// that concluded ABSENCE. (yperbasis review, blocking item 1.)
+// that concluded ABSENCE.
 func TestValidateRead_StaleAliveReadOfDestroyedAccountMustInvalidate(t *testing.T) {
 	addr := getAddress(150)
 	alive := &accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash([32]byte{0xaa})}
@@ -1060,8 +1059,7 @@ func TestValidateRead_StaleAliveReadOfDestroyedAccountMustInvalidate(t *testing.
 	vm := NewVersionMap(nil)
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
 	vm.WriteIncarnation(addr, Version{TxIndex: 1}, 1, true)
-	require.Equal(t, VersionInvalid, vm.ValidateVersion(3, io, validateEqualVersion, true, false, ""),
-		"an alive-read of a destroyed, unrevived account is stale and must re-execute")
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(3, io, validateEqualVersion, true, false, ""))
 }
 
 // CodePath twin of the stale-alive case: a recorded non-empty code read of a
@@ -1083,7 +1081,7 @@ func TestValidateRead_StaleCodeReadOfDestroyedAccountMustInvalidate(t *testing.T
 
 // The MapRead value tiebreaker must not bypass a LATER self-destruct: a read
 // whose value matches a churned cell is only valid if the account was not
-// destroyed (unrevived) after that cell. (yperbasis review, blocking item 2.)
+// destroyed (unrevived) after that cell.
 func TestValidateRead_TiebreakerMustNotBypassLaterSD(t *testing.T) {
 	addr := getAddress(160)
 	alive := &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}
@@ -1117,10 +1115,12 @@ func TestValidateRead_CodeReadMustSeeLaterSD(t *testing.T) {
 	vm.WriteCode(addr, Version{TxIndex: 3}, accounts.NewCode(code), true)
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 4}, true, true)
 	vm.WriteIncarnation(addr, Version{TxIndex: 4}, 1, true)
-	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, newIO(Version{TxIndex: 0}), validateEqualVersion, true, false, ""),
-		"version-churn + value-equal must still see the later SD")
-	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, newIO(Version{TxIndex: 3}), validateEqualVersion, true, false, ""),
-		"version-match must still see the later SD (pre-existing hole on main)")
+	t.Run("version-churn value-equal read sees the later SD", func(t *testing.T) {
+		require.Equal(t, VersionInvalid, vm.ValidateVersion(5, newIO(Version{TxIndex: 0}), validateEqualVersion, true, false, ""))
+	})
+	t.Run("version-match read sees the later SD", func(t *testing.T) {
+		require.Equal(t, VersionInvalid, vm.ValidateVersion(5, newIO(Version{TxIndex: 3}), validateEqualVersion, true, false, ""))
+	})
 }
 
 // Destroyed-and-unrevived is not non-existent under EIP-8246: a self-destruct

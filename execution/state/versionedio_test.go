@@ -1495,8 +1495,6 @@ func TestVersionedIO_mergeTxEquivalentToMerge(t *testing.T) {
 		"mergeTx must keep inputs/outputs equal length")
 }
 
-// Restored per review (yperbasis item 2): consensus-guard tests dropped on this
-// branch; adapted VersionedWrites(false)->VersionedWrites().
 func TestApplyVersionedWrites_SelfDestructDominatesCreateContract(t *testing.T) {
 	t.Parallel()
 

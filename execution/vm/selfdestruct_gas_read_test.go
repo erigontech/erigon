@@ -29,7 +29,7 @@ func runSelfdestructGasFn(t *testing.T, gasFn gasFunc) *state.IntraBlockState {
 	scope.cacheGen++
 	benVal := beneficiary.Value()
 	scope.Stack.push(*new(uint256.Int).SetBytes(benVal[:]))
-	_, err := gasFn(evm, scope, mdgas.MdGas{Regular: 1_000_000}, 0)
+	_, err := gasFn(evm, scope, mdgas.MdGas{Execution: 1_000_000}, 0)
 	require.NoError(t, err)
 	return ibs
 }
