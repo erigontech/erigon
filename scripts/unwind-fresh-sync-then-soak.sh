@@ -348,8 +348,16 @@ if [[ -z "$DEPTHS" ]]; then
             _iter=$((_iter + 1))
             lo=${R_LO[$regime]}
             hi=${R_HI[$regime]}
+            if [[ "$lo" -gt "$hi" ]]; then
+                echo "FAIL: iter=$_iter regime=$regime has inverted range lo=$lo > hi=$hi (regime-depths emitter bug); refusing to pick a random target (would silently pick depth=HEAD → target near genesis → mode-B WSP-window rejection)"
+                exit 1
+            fi
             target=$(shuf -i "$lo-$hi" -n 1 \
                 --random-source=<(openssl enc -aes-256-ctr -pass "pass:$RANDOM_SEED-depth-$_iter" -nosalt < /dev/zero 2>/dev/null))
+            if [[ -z "$target" ]]; then
+                echo "FAIL: iter=$_iter regime=$regime shuf returned empty from lo=$lo hi=$hi (invalid range not caught upstream)"
+                exit 1
+            fi
             depth=$((HEAD_NOW - target))
             DEPTHS="${DEPTHS:+$DEPTHS,}$depth"
             echo "    iter=$_iter regime=$regime lo=$lo hi=$hi target=$target depth=$depth"

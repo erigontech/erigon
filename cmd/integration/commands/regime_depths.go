@@ -166,32 +166,55 @@ with silent regime-coverage loss.`,
 		}
 		r3Target := (r3Lo + r3Hi) / 2
 
-		// Regime 4: in multi-step file — widest MERGED file (fromStep>0).
+		// Regime 4: in multi-step file — widest MERGED file (fromStep>0)
+		// whose txN range maps to distinct blocks in this datadir.
 		// Unwind into the initial frozen `.0-N.kv` IS supported, but the
 		// resulting depth is huge for a soak iter; the shallower
 		// non-frozen merged files exercise the same regime with a
-		// tractable iter runtime.
-		var multiStepFile *commitmentKV
+		// tractable iter runtime. AND a multi-step file whose txN range
+		// predates the datadir's block-level index (fresh sync under
+		// --prune.mode=minimal where preverified blocks/txns cover only
+		// a subset of the historical state files) is also unusable —
+		// blockAtStepEnd collapses both fromStep and toStep to the
+		// same fallback block, and the emitted lo/hi range degenerates.
+		// Iterate by width, largest first, keeping the first file whose
+		// range maps to distinct blocks.
+		candidates := make([]int, 0, len(commitmentFiles))
 		for i := range commitmentFiles {
 			if commitmentFiles[i].width() > 1 && commitmentFiles[i].fromStep > 0 {
-				if multiStepFile == nil || commitmentFiles[i].width() > multiStepFile.width() {
-					multiStepFile = &commitmentFiles[i]
-				}
+				candidates = append(candidates, i)
 			}
 		}
+		sort.Slice(candidates, func(a, b int) bool {
+			return commitmentFiles[candidates[a]].width() > commitmentFiles[candidates[b]].width()
+		})
+		var multiStepFile *commitmentKV
+		var r4Lo, r4Hi uint64
+		for _, i := range candidates {
+			lo, err := blockAtStepEnd(commitmentFiles[i].fromStep)
+			if err != nil {
+				logger.Error("blockAtStepEnd(multi-step from)", "err", err, "file", commitmentFiles[i].name)
+				continue
+			}
+			hi, err := blockAtStepEnd(commitmentFiles[i].toStep)
+			if err != nil {
+				logger.Error("blockAtStepEnd(multi-step to)", "err", err, "file", commitmentFiles[i].name)
+				continue
+			}
+			if lo >= hi {
+				// Degenerate: fromStep and toStep both map to the same
+				// fallback block. File's txN range predates the datadir's
+				// block-level index. Try the next candidate.
+				continue
+			}
+			multiStepFile = &commitmentFiles[i]
+			r4Lo = lo
+			r4Hi = hi
+			break
+		}
 		if multiStepFile == nil {
-			logger.Error("regime 4 unreachable: no commitment .kv file with width>1")
+			logger.Error("regime 4 unreachable: no multi-step commitment .kv file (fromStep>0, width>1) whose txN range maps to distinct blocks in the datadir; every candidate collapses to a single block via blockAtStepEnd")
 			os.Exit(1)
-		}
-		r4Lo, err := blockAtStepEnd(multiStepFile.fromStep)
-		if err != nil {
-			logger.Error("blockAtStepEnd(multi-step from)", "err", err)
-			os.Exit(2)
-		}
-		r4Hi, err := blockAtStepEnd(multiStepFile.toStep)
-		if err != nil {
-			logger.Error("blockAtStepEnd(multi-step to)", "err", err)
-			os.Exit(2)
 		}
 		r4Target := (r4Lo + r4Hi) / 2
 
