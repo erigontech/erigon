@@ -37,7 +37,7 @@ type dataColumnStorageImpl struct {
 	slotsKept         uint64
 	emitters          *beaconevents.EventEmitter
 
-	//lock sync.RWMutex
+	// lock sync.RWMutex
 	rwLocks []sync.RWMutex
 }
 
@@ -87,7 +87,7 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	lock.Lock()
 	defer lock.Unlock()
 	dir, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
-	if err := s.fs.MkdirAll(dir, 0755); err != nil {
+	if err := s.fs.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	if _, err := s.fs.Stat(filepath); err == nil {

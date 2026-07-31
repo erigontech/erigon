@@ -21,14 +21,11 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"testing"
 	"time"
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
@@ -259,34 +256,12 @@ func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	db.stateFiles.OnFilesChange(onChange, onDel)
 }
 
-func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
-	tb.Helper()
-	db := memdb.NewTestDB(tb, label)
-	dirs := datadir.New(tb.TempDir())
-	agg := state.NewTest(dirs).DisableHistory().MustOpen(context.Background(), db)
-	tb.Cleanup(agg.Close)
-	tdb, _ := New(db, agg, nil)
-	return tdb
-}
-
-func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
-	tb.Helper()
-	db := NewTestDB(tb, dbcfg.ChainDB)
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tb.Cleanup(tx.Rollback)
-	return db, tx
-}
-
 type tx struct {
-	db               *DB
-	aggtx            *state.AggregatorRoTx
-	blocktx          *blocksnapshots.View
-	resourcesToClose []kv.Closer
-	ctx              context.Context
-	mu               sync.RWMutex
+	db      *DB
+	aggtx   *state.AggregatorRoTx
+	blocktx *blocksnapshots.View
+	ctx     context.Context
+	mu      sync.RWMutex
 }
 
 type Tx struct {
@@ -324,13 +299,13 @@ func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error)
 }
 
 func (tx *tx) Rollback() {
-	tx.autoClose()
+	tx.closeFilesView()
 }
 func (tx *Tx) Rollback() {
 	if tx == nil {
 		return
 	}
-	tx.autoClose()
+	tx.closeFilesView()
 	if tx.Tx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
@@ -438,7 +413,7 @@ func (tx *RwTx) Rollback() {
 	if tx == nil {
 		return
 	}
-	tx.autoClose()
+	tx.closeFilesView()
 	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
@@ -459,11 +434,10 @@ func (rwtx *RwTx) AsyncClone(asyncTx kv.RwTx) *asyncClone {
 		RwTx{
 			RwTx: asyncTx,
 			tx: tx{
-				db:               rwtx.db,
-				aggtx:            rwtx.aggtx,
-				blocktx:          rwtx.blocktx,
-				resourcesToClose: nil,
-				ctx:              rwtx.ctx,
+				db:      rwtx.db,
+				aggtx:   rwtx.aggtx,
+				blocktx: rwtx.blocktx,
+				ctx:     rwtx.ctx,
 			}}}
 }
 
@@ -477,21 +451,18 @@ func (tx *asyncClone) Commit() error {
 func (tx *asyncClone) Rollback() {
 }
 
-func (tx *tx) autoClose() {
-	for _, closer := range tx.resourcesToClose {
-		closer.Close()
-	}
+func (tx *tx) closeFilesView() {
 	tx.aggtx.Close()
-	if tx.blocktx != nil {
-		tx.blocktx.Close()
-	}
+	tx.aggtx = nil
+	tx.blocktx.Close()
+	tx.blocktx = nil
 }
 
 func (tx *RwTx) Commit() error {
 	if tx == nil {
 		return nil
 	}
-	tx.autoClose()
+	tx.closeFilesView()
 	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return nil
 	}
@@ -505,7 +476,6 @@ func (tx *tx) rangeAsOf(name kv.Domain, rtx kv.Tx, fromKey, toKey []byte, asOfTs
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
 
@@ -597,7 +567,6 @@ func (tx *tx) indexRange(name kv.InvertedIdx, dbTx kv.Tx, k []byte, fromTs, toTs
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, timestamps)
 	return timestamps, nil
 }
 
@@ -614,7 +583,6 @@ func (tx *tx) historyRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int, asc ord
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
 
@@ -631,7 +599,6 @@ func (tx *tx) historyKeyTxNumRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int,
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
 
@@ -699,8 +666,8 @@ func (db *DB) DomainTables(domain ...kv.Domain) []string {
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 	return db.stateFiles.InvertedIdxTables(domain...)
 }
-func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) (err error) {
-	return db.stateFiles.BuildMissedAccessors(ctx, workers)
+func (db *DB) BuildMissedAccessors(ctx context.Context, workers int, opts ...kv.BuildAccessorsOption) (err error) {
+	return db.stateFiles.BuildMissedAccessors(ctx, workers, opts...)
 }
 func (db *DB) EnableReadAhead() kv.TemporalDebugDB {
 	db.stateFiles.MadvNormal()

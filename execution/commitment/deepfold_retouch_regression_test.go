@@ -35,7 +35,7 @@ func TestDeepFold_SurvivorCollapseThenRetouch(t *testing.T) {
 	addr, _, _, _, wk1, wu1, groups := whaleByNibble(30_000)
 
 	surv := -1
-	for x := 0; x < 16; x++ {
+	for x := range 16 {
 		if len(groups[x]) >= 2 {
 			surv = x
 			break
@@ -51,7 +51,7 @@ func TestDeepFold_SurvivorCollapseThenRetouch(t *testing.T) {
 	wu2[0].Nonce = 7
 	var reAdd storKV
 	haveReAdd := false
-	for x := 0; x < 16; x++ {
+	for x := range 16 {
 		if x == surv {
 			continue
 		}

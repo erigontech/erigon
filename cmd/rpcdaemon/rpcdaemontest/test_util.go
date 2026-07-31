@@ -125,6 +125,23 @@ func genTestChainOnce(t *testing.T) {
 }
 
 func CreateTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, []*blockgen.ChainPack) {
+	m, testChain := CreateTestExecModuleNoInsert(t)
+
+	if err := m.InsertChain(testOrphanedChain); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.InsertChain(testChain); err != nil {
+		t.Fatal(err)
+	}
+
+	return m, testChain, []*blockgen.ChainPack{testOrphanedChain}
+}
+
+// CreateTestExecModuleNoInsert builds a fresh exec module with the same genesis as
+// CreateTestExecModule but inserts no blocks, so a caller can drive insertion
+// incrementally (e.g. to hold an RO snapshot pinned mid-chain). It returns the module
+// and the canonical testChain the caller inserts.
+func CreateTestExecModuleNoInsert(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
 	genTestChainOnce(t)
 
 	addresses := makeTestAddresses()
@@ -139,14 +156,7 @@ func CreateTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *bl
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(addresses.key))
 
-	if err := m.InsertChain(testOrphanedChain); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.InsertChain(testChain); err != nil {
-		t.Fatal(err)
-	}
-
-	return m, testChain, []*blockgen.ChainPack{testOrphanedChain}
+	return m, testChain
 }
 
 func generateChain(
@@ -299,11 +309,11 @@ func generateChain(
 			txs = append(txs, txn)
 			balanceStorageKeyPath := computeMappingStorageKey(address1, 1) // balance in slot 1
 			// The trie path for storage is keccak256(address) + keccak256(storage_slot)
-			hashedBalanceKey := crypto.Keccak256(balanceStorageKeyPath[:])
+			hashedBalanceKey := crypto.Keccak256Hash(balanceStorageKeyPath[:])
 
 			sameStoragePrefixAddresses = findAddressesWithMatchingStorageKeyPrefix(balanceStorageKeyPath, 1, 1, 1)
 			sameStorageKeyPath := computeMappingStorageKey(sameStoragePrefixAddresses[0], 1)
-			hashedSiblingKey := crypto.Keccak256(sameStorageKeyPath[:])
+			hashedSiblingKey := crypto.Keccak256Hash(sameStorageKeyPath[:])
 
 			// Assert first nibble of the hashed storage key is the same (trie path)
 			if (hashedSiblingKey[0] >> 4) != (hashedBalanceKey[0] >> 4) {
@@ -363,7 +373,7 @@ func findAddressWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint64,
 	// We need to match the first nNibbles of that hashed value.
 	targetHashedKey := crypto.Keccak256Hash(targetKey[:])
 	targetNibbles := make([]byte, nNibbles)
-	for i := 0; i < nNibbles; i++ {
+	for i := range nNibbles {
 		if i%2 == 0 {
 			targetNibbles[i] = targetHashedKey[i/2] >> 4
 		} else {
@@ -382,7 +392,7 @@ func findAddressWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint64,
 
 		// Compare nibbles of the hashed storage key (the actual trie path)
 		match := true
-		for i := 0; i < nNibbles; i++ {
+		for i := range nNibbles {
 			var nibble byte
 			if i%2 == 0 {
 				nibble = hashedStorageKey[i/2] >> 4
@@ -625,7 +635,7 @@ func CreateTestExecModuleForTracesCollision(t *testing.T) *execmoduletester.Exec
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := accounts.InternCodeHash(crypto.HashData(initCode))
+	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
 	aa := types.CreateAddress2(bb, [32]byte{}, initHash)
 	t.Logf("Destination address: %x\n", aa)
 

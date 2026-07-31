@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"reflect"
 	"testing"
@@ -158,6 +159,38 @@ func TestBlockEncoding(t *testing.T) {
 	}
 	if !bytes.Equal(ourBlockEnc, blockEnc) {
 		t.Errorf("encoded block mismatch:\ngot:  %x\nwant: %x", ourBlockEnc, blockEnc)
+	}
+}
+
+// TestBlockAccessListNotInEncoding pins the invariant that the BAL sidecar is
+// carried out-of-band: it must never enter the block's RLP encoding or hash.
+func TestBlockAccessListNotInEncoding(t *testing.T) {
+	t.Parallel()
+	blockEnc := common.FromHex("f90260f901f9a083cafc574e1f51ba9dc0568fc617a08ea2429fb384059c972f13b19fa1c8dd55a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347948888f1f195afa192cfee860698584c030f4c9db1a0ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017a05fe50b260da6308036625b850b5d6ced6d0a9f814c0688bc91ffb7b7a3a54b67a0bc37d79753ad738a6dac4921e57392f145d8887476de3f783dfa7edae9283e52b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001832fefd8825208845506eb0780a0bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff49888a13a5a8c8f2bb1c4f861f85f800a82c35094095e7baea6a6c7c4c2dfeb977efac326af552d870a801ba09bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094fa08a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b1c0")
+	var block Block
+	if err := rlp.DecodeBytes(blockEnc, &block); err != nil {
+		t.Fatal("decode error: ", err)
+	}
+
+	hashBefore := block.Hash()
+	block.SetBlockAccessList([]byte{0x01, 0x02, 0x03})
+	if got := block.Hash(); got != hashBefore {
+		t.Errorf("BAL changed block hash: got %x want %x", got, hashBefore)
+	}
+	enc, err := rlp.EncodeToBytes(&block)
+	if err != nil {
+		t.Fatal("encode error: ", err)
+	}
+	if !bytes.Equal(enc, blockEnc) {
+		t.Errorf("BAL leaked into block RLP:\ngot:  %x\nwant: %x", enc, blockEnc)
+	}
+
+	var decoded Block
+	if err := rlp.DecodeBytes(enc, &decoded); err != nil {
+		t.Fatal("decode error: ", err)
+	}
+	if decoded.BlockAccessList() != nil {
+		t.Errorf("BAL survived RLP round-trip (must be a non-encoded sidecar): %x", decoded.BlockAccessList())
 	}
 }
 
@@ -322,6 +355,95 @@ func BenchmarkEncodeBlock(b *testing.B) {
 	}
 }
 
+func encodedBenchBody(b *testing.B) []byte {
+	b.Helper()
+	var buf bytes.Buffer
+	if err := rlp.Encode(&buf, &BodyForStorage{BaseTxnID: BaseTxnID(1234567), TxCount: 250}); err != nil {
+		b.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// TestBodyOnlyTxnDecodeRLPBytes pins the contract that makes DecodeRLPBytes exist:
+// it reads the leading txn fields of a full BodyForStorage encoding and tolerates
+// the unread tail, which rlp.DecodeBytes rejects.
+func TestBodyOnlyTxnDecodeRLPBytes(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	if err := rlp.Encode(&buf, &BodyForStorage{BaseTxnID: BaseTxnID(1234567), TxCount: 250}); err != nil {
+		t.Fatal(err)
+	}
+	enc := buf.Bytes()
+
+	var b BodyOnlyTxn
+	if err := b.DecodeRLPBytes(enc); err != nil {
+		t.Fatalf("DecodeRLPBytes: %v", err)
+	}
+	if b.BaseTxnID != BaseTxnID(1234567) || b.TxCount != 250 {
+		t.Fatalf("unexpected decode result: %+v", b)
+	}
+
+	// Tolerating the unread tail - the uncles list here, and withdrawals whenever
+	// they are present - is the whole reason this entrypoint exists: swapping it for
+	// rlp.DecodeBytes would start rejecting every body.
+	if err := rlp.DecodeBytes(enc, &BodyOnlyTxn{}); !errors.Is(err, rlp.ErrMoreThanOneValue) {
+		t.Fatalf("rlp.DecodeBytes must reject the unread tail, got %v", err)
+	}
+}
+
+func TestBodyOnlyTxnDecodeRLPBytesErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input []byte
+	}{
+		{"empty", nil},
+		{"not a list", []byte{0x80}},
+		{"truncated list", []byte{0xC3, 0x82}},
+		{"non-canonical BaseTxnID", []byte{0xC3, 0x82, 0x00, 0x02}},
+		{"BaseTxnID only", []byte{0xC1, 0x01}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var b BodyOnlyTxn
+			if err := b.DecodeRLPBytes(tt.input); err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+		})
+	}
+}
+
+func BenchmarkBodyOnlyTxnDecodeRLPBytes(b *testing.B) {
+	enc := encodedBenchBody(b)
+
+	var out BodyOnlyTxn
+	b.ReportAllocs()
+	for b.Loop() {
+		if err := out.DecodeRLPBytes(enc); err != nil {
+			b.Fatal(err)
+		}
+	}
+	if out.BaseTxnID != BaseTxnID(1234567) || out.TxCount != 250 {
+		b.Fatalf("unexpected decode result: %+v", out)
+	}
+}
+
+func BenchmarkBodyForStorageDecodeBytes(b *testing.B) {
+	enc := encodedBenchBody(b)
+
+	var out BodyForStorage
+	b.ReportAllocs()
+	for b.Loop() {
+		if err := rlp.DecodeBytes(enc, &out); err != nil {
+			b.Fatal(err)
+		}
+	}
+	if out.BaseTxnID != BaseTxnID(1234567) || out.TxCount != 250 {
+		b.Fatalf("unexpected decode result: %+v", out)
+	}
+}
+
 func BenchmarkDecodeBlock(b *testing.B) {
 	block := makeBenchBlock()
 	encoded, err := rlp.EncodeToBytes(block)
@@ -423,12 +545,12 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rlpBytes := common.Copy(writer.Bytes())
+	rlpBytes := bytes.Clone(writer.Bytes())
 	writer.Reset()
 	writer.WriteString(hexutil.Encode(rlpBytes))
 
 	var rawBody RawBody
-	fromHex := common.Copy(common.FromHex(writer.String()))
+	fromHex := bytes.Clone(common.FromHex(writer.String()))
 	bodyReader := bytes.NewReader(fromHex)
 	stream := rlp.NewStream(bodyReader, 0)
 
@@ -755,7 +877,7 @@ func TestBlockRawBodyFromBinaryTxsMatchesEncoded(t *testing.T) {
 			if tr.RandTransaction(txType).MarshalBinary(&buf) != nil {
 				continue
 			}
-			binaryTxn := common.Copy(buf.Bytes())
+			binaryTxn := bytes.Clone(buf.Bytes())
 			if decoded, err := DecodeTransaction(binaryTxn); err == nil {
 				binaryTxs[i], txns[i] = binaryTxn, decoded
 			}
@@ -772,4 +894,29 @@ func TestBlockRawBodyFromBinaryTxsMatchesEncoded(t *testing.T) {
 		require.Equalf(t, want.Transactions[i], got.Transactions[i],
 			"txType=%d: cached RawBody tx bytes must equal the rlp.EncodeToBytes form", txType)
 	}
+}
+
+// TestBodyDecodeRejectsEmptyStringTx pins that an empty-string element
+// (0x80) in the transactions list is rejected, not dropped as if it were
+// the list terminator.
+func TestBodyDecodeRejectsEmptyStringTx(t *testing.T) {
+	validTx := append([]byte{0xc9}, bytes.Repeat([]byte{0x80}, 9)...) // legacy tx: list of 9 zero fields
+	raw := RawBody{Transactions: [][]byte{validTx, {0x80}}}
+
+	buf := bytes.NewBuffer(nil)
+	require.NoError(t, raw.EncodeRLP(buf))
+
+	var b Body
+	err := rlp.DecodeBytes(buf.Bytes(), &b)
+	require.Error(t, err, "must reject an empty-string element in the transactions list")
+}
+
+func TestBodyDecodeRejectsWrappedLegacyTransaction(t *testing.T) {
+	t.Parallel()
+	bodyRLP, err := hex.DecodeString("f868f865b863f86103018207d094b94f5374fce5edbc8e2a8697c15331677e6ebf0b0a8255441ca098ff921201554726367d2be8c804a7ff89ccf285ebc57dff8ae4c44b9c19ac4aa08887321be575c8095f789dd4c743dfe42c1820f9231f98a962b210e3ac2452a3c0")
+	require.NoError(t, err)
+
+	var body Body
+	err = rlp.DecodeBytes(bodyRLP, &body)
+	require.ErrorIs(t, err, ErrInvalidTxType)
 }

@@ -894,7 +894,7 @@ func benchSnapshotsHistoryLookup(ctx context.Context, tx kv.TemporalTx, historyF
 
 		// Generate random sample of txnums within this file's range
 		sampledTxNums := make([]uint64, sampleCount)
-		for i := 0; i < sampleCount; i++ {
+		for i := range sampleCount {
 			// Generate random txnum in [startTxNum, endTxNum)
 			sampledTxNums[i] = startTxNum + uint64(rng.Int63n(int64(txnumRange)))
 		}
@@ -987,7 +987,7 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 
 	// Generate random txnums in [minTxNum, maxTxNum)
 	sampledTxNums := make([]uint64, sampleCount)
-	for i := 0; i < sampleCount; i++ {
+	for i := range sampleCount {
 		sampledTxNums[i] = minTxNum + uint64(rng.Int63n(int64(txnumRange)))
 	}
 
@@ -1071,7 +1071,8 @@ func printHistoryBenchResultsTable(prefix []byte, compactKey []byte, fileStats [
 	var totalSamples int
 	var totalDuration time.Duration
 
-	for _, fs := range fileStats {
+	for i := range fileStats {
+		fs := &fileStats[i]
 		fmt.Printf("%-45s %12d %12d %8d %10v %10v %10v %10v\n",
 			fs.Name,
 			fs.StartTxNum,
@@ -1295,9 +1296,7 @@ func visualizeCommitmentFiles(files []string) {
 
 		fmt.Printf("[%d/%d] - %s..", pos+1, len(files), path.Base(fpath))
 
-		wg.Add(1)
-		go func(wg *sync.WaitGroup, mu *sync.Mutex) {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { sema <- struct{}{} }()
 
 			stat, err := processCommitmentFile(fpath)
@@ -1314,7 +1313,7 @@ func visualizeCommitmentFiles(files []string) {
 				fileContentsMapChart(fpath, stat),
 			)
 			mu.Unlock()
-		}(&wg, &mu)
+		})
 	}
 	wg.Wait()
 	fmt.Println()

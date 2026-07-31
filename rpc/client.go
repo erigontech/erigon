@@ -407,7 +407,7 @@ func (c *Client) BatchCallContext(ctx context.Context, b []BatchElem) error {
 	}
 
 	// Wait for all responses to come back.
-	for n := 0; n < len(batchResp); n++ {
+	for n := range batchResp {
 		resp := batchResp[n]
 		if resp == nil {
 			// Ignore null responses. These can happen for batches sent via HTTP.

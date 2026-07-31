@@ -12,8 +12,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   full-node-sync-from-scratch-test:
+    name: full-node-sync-from-scratch-test-${{ matrix.chain }}
     runs-on: [self-hosted, qa, long-running]
     timeout-minutes: 1440  # 24 hours
     strategy:
@@ -37,6 +41,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Clean Erigon Build & Data Directories
         run: |

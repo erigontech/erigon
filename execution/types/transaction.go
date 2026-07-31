@@ -171,13 +171,14 @@ func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Tran
 		}
 		txn = legacy
 	case rlp.String:
-		// Decode the EIP-2718 typed txn envelope.
+		// Decode the EIP-2718 typed txn envelope. Safe to view: every decoder
+		// copies out the fields it keeps.
 		var b []byte
-		if b, err = s.Bytes(); err != nil {
+		if b, err = s.ViewBytes(); err != nil {
 			return nil, err
 		}
-		if len(b) == 0 {
-			return nil, rlp.EOL
+		if len(b) > 0 && b[0] >= rlp.SingleByteThreshold {
+			return nil, ErrInvalidTxType
 		}
 		if txn, err = UnmarshalTransactionFromBinary(b, blobTxnsAreWrappedWithBlobs); err != nil {
 			return nil, err
@@ -314,7 +315,7 @@ func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		result[i] = common.Copy(buf.Bytes())
+		result[i] = bytes.Clone(buf.Bytes())
 	}
 	return result, nil
 }
@@ -365,10 +366,10 @@ func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeP
 	return nil
 }
 
-func isProtectedV(V *uint256.Int) bool {
-	if V.BitLen() <= 8 {
-		v := V.Uint64()
-		return v != 27 && v != 28 && v != 1 && v != 0
+func isProtectedV(v *uint256.Int) bool {
+	if v.BitLen() <= 8 {
+		vVal := v.Uint64()
+		return vVal != 27 && vVal != 28 && vVal != 1 && vVal != 0
 	}
 	// anything not 27 or 28 is considered protected
 	return true

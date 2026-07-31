@@ -17,6 +17,7 @@
 package execution_client
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -123,7 +124,7 @@ func (cc *ExecutionClientEngine) Close() {
 
 // buildExecutionPayload converts a CL Eth1Block into an Engine API ExecutionPayload.
 func buildExecutionPayload(payload *cltypes.Eth1Block) *engine_types.ExecutionPayload {
-	reversedBaseFeePerGas := common.Copy(payload.BaseFeePerGas[:])
+	reversedBaseFeePerGas := bytes.Clone(payload.BaseFeePerGas[:])
 	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
 		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
 	}
@@ -240,7 +241,7 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		// V3 is valid for Cancun (Deneb) and Prague (Electra/Fulu)
 		resp, err = cc.engine.ForkchoiceUpdatedV3(ctx, forkChoiceState, attributes)
 	default: // Gloas+ (Amsterdam)
-		resp, err = cc.engine.ForkchoiceUpdatedV4(ctx, forkChoiceState, attributes)
+		resp, err = cc.engine.ForkchoiceUpdatedV4(ctx, forkChoiceState, attributes, nil)
 	}
 	if err != nil {
 		if err.Error() == errContextExceeded {

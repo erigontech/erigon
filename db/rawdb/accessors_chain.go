@@ -430,27 +430,27 @@ func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawVa
 	return bodyRlp
 }
 
-func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) (types.Transaction, error) {
+func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) (types.Transaction, bool, error) {
 	b, err := ReadBodyForStorageByKey(db, dbutils.BlockBodyKey(blockNum, blockHash))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if b == nil {
-		return nil, nil
+		return nil, false, nil
 	}
 
 	v, err := db.GetOne(kv.EthTx, hexutil.EncodeTs(b.BaseTxnID.At(txIdxInBlock)))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if len(v) == 0 {
-		return nil, nil
+		return nil, false, nil
 	}
 	txn, err := types.DecodeTransaction(v)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return txn, nil
+	return txn, true, nil
 }
 
 func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.Transaction, error) {
@@ -609,7 +609,10 @@ func ReadBlockAccessListBytes(db kv.Getter, hash common.Hash, number uint64) ([]
 	return data, nil
 }
 
-// WriteBlockAccessListBytes stores the RLP-encoded block access list sidecar for a block.
+// WriteBlockAccessListBytes stores the RLP-encoded block access list sidecar for
+// a block. This is secondary storage (serving, backfill, unwind); the primary
+// carry into execution is Block.BlockAccessList(), written via the block overlay
+// in InsertBlocks and flushed at commit.
 func WriteBlockAccessListBytes(db kv.Putter, hash common.Hash, number uint64, data []byte) error {
 	if err := db.Put(kv.BlockAccessList, dbutils.BlockBodyKey(number, hash), data); err != nil {
 		return fmt.Errorf("failed to store block access list: %w", err)
@@ -627,7 +630,7 @@ func ReadSenders(db kv.Getter, hash common.Hash, number uint64) ([]common.Addres
 		return nil, fmt.Errorf("readSenders failed: %w", err)
 	}
 	senders := make([]common.Address, len(data)/length.Addr)
-	for i := 0; i < len(senders); i++ {
+	for i := range senders {
 		copy(senders[i][:], data[i*length.Addr:])
 	}
 	return senders, nil
@@ -807,6 +810,13 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 		return nil
 	}
 	block := types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals)
+	// Carry the BAL sidecar (secondary storage) so a block reconstructed from the
+	// DB carries its BAL like its header/body. Only Amsterdam+ blocks have one.
+	if header.BlockAccessListHash != nil {
+		if bal, err := ReadBlockAccessListBytes(tx, hash, number); err == nil && len(bal) > 0 {
+			block.SetBlockAccessList(bal)
+		}
+	}
 	return block
 }
 
@@ -896,7 +906,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 		}
 		// Copying k because otherwise the same memory will be reused
 		// for the next key and Delete below will end up deleting 1 more record than required
-		kCopy := common.Copy(k)
+		kCopy := bytes.Clone(k)
 		if err = tx.Delete(kv.Senders, kCopy); err != nil {
 			return deleted, err
 		}
@@ -947,7 +957,7 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 		}
 		// Copying k because otherwise the same memory will be reused
 		// for the next key and Delete below will end up deleting 1 more record than required
-		kCopy := common.Copy(k)
+		kCopy := bytes.Clone(k)
 		if err := tx.Delete(kv.Senders, kCopy); err != nil {
 			return err
 		}
@@ -1004,6 +1014,7 @@ func ReadHeaderByHash(db kv.Getter, hash common.Hash) (*types.Header, error) {
 	return ReadHeader(db, hash, *number), nil
 }
 
+// DeleteNewerEpochs drops [blockNum, ∞)
 func DeleteNewerEpochs(tx kv.RwTx, number uint64) error {
 	if err := tx.ForEach(kv.PendingEpoch, hexutil.EncodeTs(number), func(k, v []byte) error {
 		return tx.Delete(kv.PendingEpoch, k)
@@ -1363,7 +1374,9 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uin
 		}
 		if dbg.AssertEnabled {
 			storageReceipt2 := &types.ReceiptForStorage{}
-			rlp.DecodeBytes(toWrite, storageReceipt2)
+			if err := rlp.DecodeBytes(toWrite, storageReceipt2); err != nil {
+				panic(fmt.Sprintf("assert: receipt encode/decode round-trip: %v", err))
+			}
 			if storageReceipt.ContractAddress != storageReceipt2.ContractAddress {
 				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.ContractAddress, storageReceipt2.ContractAddress))
 			}

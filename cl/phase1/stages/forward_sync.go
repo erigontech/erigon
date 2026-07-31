@@ -1,10 +1,11 @@
 package stages
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -125,8 +127,8 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 // It returns the new highest block processed and an error if any.
 func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *Cfg, highestBlockProcessed uint64, shouldInsert bool, blocks []*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (newHighestBlockProcessed uint64, err error) {
 	// Pre-process the block batch to ensure that the blocks are sorted by slot in ascending order
-	sort.Slice(blocks, func(i, j int) bool {
-		return blocks[i].Block.Slot < blocks[j].Block.Slot
+	slices.SortFunc(blocks, func(a, b *cltypes.SignedBeaconBlock) int {
+		return cmp.Compare(a.Block.Slot, b.Block.Slot)
 	})
 
 	var blockRoot common.Hash
@@ -226,8 +228,8 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 						err = fmt.Errorf("failed to dump state: %w", err)
 						return
 					}
-					if err = saveHeadStateOnDiskIfNeeded(cfg, st); err != nil {
-						err = fmt.Errorf("failed to save head state: %w", err)
+					if err = saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, st.Slot()); err != nil {
+						err = fmt.Errorf("failed to save finalized state: %w", err)
 						return
 					}
 				}
@@ -244,8 +246,8 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 					err = fmt.Errorf("failed to dump state: %w", err)
 					return
 				}
-				if err = saveHeadStateOnDiskIfNeeded(cfg, st); err != nil {
-					err = fmt.Errorf("failed to save head state: %w", err)
+				if err = saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, st.Slot()); err != nil {
+					err = fmt.Errorf("failed to save finalized state: %w", err)
 					return
 				}
 			}
@@ -265,6 +267,20 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 	return
 }
 
+// forwardSyncProgress returns the slots still to sync and the observed sync rate
+// in slots/sec. currentSlot can overshoot chainTipSlot and dip below prevProgress
+// on reorgs, so both differences are clamped to keep the unsigned math from
+// underflowing.
+func forwardSyncProgress(chainTipSlot, currentSlot, prevProgress uint64, secsPerLog int) (slotsRemaining uint64, ratePerSec float64) {
+	if chainTipSlot > currentSlot {
+		slotsRemaining = chainTipSlot - currentSlot
+	}
+	if currentSlot > prevProgress && secsPerLog > 0 {
+		ratePerSec = float64(currentSlot-prevProgress) / float64(secsPerLog)
+	}
+	return
+}
+
 // forwardSync (MAIN ROUTINE FOR ForwardSync) performs the forward synchronization of beacon blocks.
 func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	var (
@@ -280,7 +296,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	if startSlot < maxReorgRange {
 		startSlot = 0
 	} else {
-		startSlot = startSlot - maxReorgRange
+		startSlot -= maxReorgRange
 	}
 
 	finalizedSlot := cfg.forkChoice.FinalizedCheckpoint().Epoch * cfg.beaconCfg.SlotsPerEpoch
@@ -370,18 +386,15 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			return ctx.Err()
 		case <-logTicker.C:
 			// Log progress at regular intervals
-			progressMade := chainTipSlot - currentSlot.Load()
-			distFromChainTip := time.Duration(progressMade*cfg.beaconCfg.SecondsPerSlot) * time.Second
-			timeProgress := currentSlot.Load() - prevProgress
-			estimatedTimeRemaining := 999 * time.Hour
-			if timeProgress > 0 {
-				estimatedTimeRemaining = time.Duration(float64(progressMade)/(float64(currentSlot.Load()-prevProgress)/float64(secsPerLog))) * time.Second
-			}
-			if distFromChainTip < 0 || estimatedTimeRemaining < 0 {
-				continue
-			}
-			prevProgress = currentSlot.Load()
-			logger.Info("[Caplin] Forward Sync", "progress", currentSlot.Load(), "distance-from-chain-tip", distFromChainTip, "estimated-time-remaining", estimatedTimeRemaining)
+			cur := currentSlot.Load()
+			slotsRemaining, ratePerSec := forwardSyncProgress(chainTipSlot, cur, prevProgress, secsPerLog)
+			prevProgress = cur
+			// distance-from-chain-tip is the ETA at the chain's own production rate
+			// (one slot per SecondsPerSlot), which also saturates instead of overflowing.
+			chainRatePerSec := 1.0 / float64(cfg.beaconCfg.SecondsPerSlot)
+			logger.Info("[Caplin] Forward Sync", "progress", cur,
+				"distance-from-chain-tip", utils.ETA(slotsRemaining, chainRatePerSec),
+				"estimated-time-remaining", utils.ETA(slotsRemaining, ratePerSec))
 		default:
 		}
 	}
@@ -406,6 +419,13 @@ func setHeadStateFromForkChoice(cfg *Cfg, logger log.Logger) {
 		return
 	}
 	logger.Info("[Caplin] Head state set from forward sync", "slot", headSlot, "root", headRoot)
+}
+
+// anchorEnvelopeMatches reports whether env is the execution payload envelope for anchorRoot.
+// The checkpoint endpoint serves the server's current finalized envelope, which may be for a
+// newer block than a local resume anchor; a non-matching envelope must not be accepted.
+func anchorEnvelopeMatches(env *cltypes.SignedExecutionPayloadEnvelope, anchorRoot common.Hash) bool {
+	return env != nil && env.Message != nil && env.Message.BeaconBlockRoot == anchorRoot
 }
 
 // ensureAnchorEnvelopeOnce proactively fetches the anchor block's execution payload
@@ -460,13 +480,17 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 		}
 	} else {
 		// Try HTTP API first (checkpoint sync endpoint), then fall back to P2P.
-		// HTTP is more reliable on devnets with few peers.
-		if httpEnv := checkpoint_sync.FetchFinalizedEnvelope(ctx, cfg.beaconCfg, cfg.caplinConfig); httpEnv != nil {
+		// HTTP is more reliable on devnets with few peers. The checkpoint endpoint
+		// serves the server's current finalized envelope, which can be a newer block
+		// than our local resume anchor; accept it only when its root matches anchorRoot,
+		// otherwise request the anchor's envelope by root over P2P.
+		httpEnv := checkpoint_sync.FetchFinalizedEnvelope(ctx, cfg.beaconCfg, cfg.caplinConfig)
+		if anchorEnvelopeMatches(httpEnv, anchorRoot) {
 			log.Info("[Caplin] Anchor envelope fetched via HTTP checkpoint sync", "anchorSlot", anchorSlot)
 			env = httpEnv
 		} else {
-			// Fall back to P2P
-			log.Info("[Caplin] HTTP envelope fetch returned nil, trying P2P...", "anchorSlot", anchorSlot)
+			// Fall back to P2P (root-specific request)
+			log.Info("[Caplin] HTTP anchor envelope unavailable or ahead of local anchor, trying P2P...", "anchorSlot", anchorSlot)
 			envMap, err := network2.RequestEnvelopesFrantically(ctx, cfg.rpc, [][32]byte{anchorRoot})
 			if err != nil {
 				return fmt.Errorf("failed to request anchor envelope: %w", err)

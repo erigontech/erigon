@@ -411,7 +411,7 @@ type StorageKeysInfo struct {
 	KeyLength int
 }
 
-// GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
+// GetProof implements eth_getProof; historical blocks are supported as far back as the commitment history allows.
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHashArg *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
 	blockNrOrHash := orLatest(blockNrOrHashArg)
 	if len(storageKeys) > maxGetProofKeys {
@@ -430,8 +430,6 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
-	} else if requestedBlockNr == 0 {
-		return nil, errors.New("block not found")
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, roTx, uint64(requestedBlockNr))
@@ -473,6 +471,9 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	header, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNrOrHash.BlockNumber.Uint64())
 	if err != nil {
 		return nil, err
+	}
+	if header == nil {
+		return nil, fmt.Errorf("header not found for block %d", blockNrOrHash.BlockNumber.Uint64())
 	}
 
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
@@ -595,8 +596,8 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 
 		// prepare key path (keccak(address) | keccak(key))
-		addrHash := crypto.HashData(address[:])
-		keyHash := crypto.HashData(storageKey.Hash[:])
+		addrHash := crypto.Keccak256Hash(address[:])
+		keyHash := crypto.Keccak256Hash(storageKey.Hash[:])
 		fullKey := make([]byte, 0, 64)
 		fullKey = append(fullKey, addrHash[:]...)
 		fullKey = append(fullKey, keyHash[:]...)
@@ -660,6 +661,13 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	// Witness for genesis block is empty
 	if blockNr == 0 {
 		return emptyWitnessBytes()
+	}
+
+	// A head-capture minimal node keeps no commitment history and cannot build this
+	// RLP/uncached witness on demand; report out-of-window for any block rather than a
+	// prune-history or hard-gate error, so the caller sees one typed signal.
+	if api.witnessCache != nil && api.witnessCache.HeadCapture() {
+		return nil, errWitnessOutOfWindow
 	}
 
 	if err = api.checkPruneHistory(ctx, tx, blockNr); err != nil {
@@ -774,7 +782,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
 
-	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
+	siblingPaths, err := detectCollapseSiblings(ctx, tx, nil, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNr, parentNum,
 		block.Root(), accessed, witnessModeLegacy)
 	if err != nil {
@@ -852,7 +860,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		logger.Warn("state root mismatch after stateless execution", "actual", newStateRoot, "expected", block.Root())
 	}
 
-	return common.Copy(witnessBuffer.Bytes()), nil
+	return bytes.Clone(witnessBuffer.Bytes()), nil
 }
 
 // emptyWitnessBytes serializes an empty op-stream witness, used for genesis and
@@ -993,7 +1001,8 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		var data bytes.Buffer
 		var buf [32]byte
 		rules := blockCtx.Rules(chainConfig)
-		for _, jsonAuth := range args.AuthorizationList {
+		for i := range args.AuthorizationList {
+			jsonAuth := &args.AuthorizationList[i]
 			auth, err := jsonAuth.ToAuthorization()
 			if err != nil {
 				continue

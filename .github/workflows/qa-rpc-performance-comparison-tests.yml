@@ -141,7 +141,7 @@ jobs:
         if: matrix.client == 'erigon'
         uses: actions/checkout@v7
         with:
-          submodules: recursive
+          persist-credentials: false
           fetch-depth: "0"
           filter: blob:none
 

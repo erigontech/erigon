@@ -149,7 +149,7 @@ const (
 	MaxCodeSize              = 24 * 1024                // Maximum bytecode to permit for a contract
 	MaxCodeSizeAhmedabad     = 32 * 1024                // Maximum bytecode to permit for a contract post Ahmedabad hard fork (bor / polygon pos) (32KB)
 	MaxInitCodeSize          = 2 * MaxCodeSize          // Maximum initcode to permit in a creation transaction and create instructions
-	MaxCodeSizeAmsterdam     = 32 * 1024                // EIP-7954: Increase Maximum Contract Size
+	MaxCodeSizeAmsterdam     = 64 * 1024                // EIP-7954: Increase Maximum Contract Size
 	MaxInitCodeSizeAmsterdam = 2 * MaxCodeSizeAmsterdam // EIP-7954: Increase Maximum Contract Size
 
 	// Precompiled contract gas prices
@@ -228,11 +228,10 @@ const (
 	CostPerStateByte        = 1530
 
 	// Pre-multiplied state-gas costs (StateBytesX * CostPerStateByte) for hot paths.
-	StateGasNewAccount        = StateBytesNewAccount * CostPerStateByte
-	StateGasPerStorageSet     = StateBytesPerStorageSet * CostPerStateByte
-	StateGasAuthBase          = StateBytesAuthBase * CostPerStateByte
-	StateGasNewAccountAndAuth = (StateBytesNewAccount + StateBytesAuthBase) * CostPerStateByte
-	StateGasSystemMaxSstores  = StateBytesPerStorageSet * CostPerStateByte * SystemMaxSstoresPerCall
+	StateGasNewAccount       = StateBytesNewAccount * CostPerStateByte
+	StateGasPerStorageSet    = StateBytesPerStorageSet * CostPerStateByte
+	StateGasAuthBase         = StateBytesAuthBase * CostPerStateByte
+	StateGasSystemMaxSstores = StateBytesPerStorageSet * CostPerStateByte * SystemMaxSstoresPerCall
 
 	// EIP-8038: State-access gas cost update. Reprices the EIP-2929 state-access
 	// costs and adds the regular-gas write components (ACCOUNT_WRITE, STORAGE_WRITE)
@@ -291,11 +290,15 @@ var (
 
 // EIP-8282 - The Builder Deposit Addresses
 // Nick's-method derived address from the builder deposit contract deployment transaction.
-var BuilderDepositAddress = accounts.InternAddress(common.HexToAddress("0x0000884d2AA32eAa155F59A2f24eFa73D9008282"))
+var BuilderDepositAddress = accounts.InternAddress(
+	common.HexToAddress("0x0000BFF46984E3725691FA540A8C7589300D8282"),
+)
 
 // EIP-8282 - The Builder Exit Addresses
 // Nick's-method derived address from the builder exit contract deployment transaction.
-var BuilderExitAddress = accounts.InternAddress(common.HexToAddress("0x000014574A74c805590AFF9499fc7A690f008282"))
+var BuilderExitAddress = accounts.InternAddress(
+	common.HexToAddress("0x000064D678505AD48F8CCB093BC65613800E8282"),
+)
 
 // See EIP-7840: Add blob schedule to EL config files
 type BlobConfig struct {

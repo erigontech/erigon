@@ -18,7 +18,7 @@ package kv
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -637,9 +637,7 @@ func TablesCfgByLabel(label Label) TableCfg {
 	}
 }
 func sortBuckets() {
-	sort.SliceStable(ChaindataTables, func(i, j int) bool {
-		return strings.Compare(ChaindataTables[i], ChaindataTables[j]) < 0
-	})
+	slices.Sort(ChaindataTables)
 }
 
 func init() {

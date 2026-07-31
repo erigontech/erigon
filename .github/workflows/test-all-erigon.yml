@@ -8,6 +8,10 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   tests-mac-linux:
     strategy:
@@ -56,7 +60,6 @@ jobs:
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:
-          submodules: true
           cleanup-space: true
           ramdisk: true
           cache-namespace: test-all-erigon

@@ -42,9 +42,10 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	math2 "github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -292,7 +293,7 @@ type Bor struct {
 	mutex       sync.Mutex
 	chainConfig *chain.Config     // Chain config
 	config      *borcfg.BorConfig // Rules engine configuration parameters for bor rules
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 
 	Signatures   *lru.ARCCache[common.Hash, accounts.Address] // Signatures of recent blocks to speed up mining
 	Dependencies *lru.ARCCache[common.Hash, [][]int]
@@ -323,7 +324,7 @@ type signer struct {
 // New creates a Matic Bor rules engine.
 func New(
 	chainConfig *chain.Config,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	spanner Spanner,
 	genesisContracts StateReceiver,
 	logger log.Logger,
@@ -376,7 +377,7 @@ func New(
 }
 
 // NewRo is used by the rpcdaemon and tests which need read only access to the provided data services
-func NewRo(chainConfig *chain.Config, blockReader services.FullBlockReader, logger log.Logger) *Bor {
+func NewRo(chainConfig *chain.Config, blockReader dbservices.FullBlockReader, logger log.Logger) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 
@@ -720,7 +721,7 @@ func (c *Bor) Prepare(chain rules.ChainHeaderReader, header *types.Header, state
 
 			blockExtraDataBytes, err := rlp.EncodeToBytes(blockExtraData)
 			if err != nil {
-				log.Error("error while encoding block extra data: %v", err)
+				log.Error("[bor] encoding block extra data", "err", err)
 				return fmt.Errorf("error while encoding block extra data: %v", err)
 			}
 
@@ -738,7 +739,7 @@ func (c *Bor) Prepare(chain rules.ChainHeaderReader, header *types.Header, state
 
 		blockExtraDataBytes, err := rlp.EncodeToBytes(blockExtraData)
 		if err != nil {
-			log.Error("error while encoding block extra data: %v", err)
+			log.Error("[bor] encoding block extra data", "err", err)
 			return fmt.Errorf("error while encoding block extra data: %v", err)
 		}
 
@@ -771,16 +772,14 @@ func (c *Bor) Prepare(chain rules.ChainHeaderReader, header *types.Header, state
 	now := time.Now()
 	if header.Time < uint64(now.Unix()) {
 		header.Time = uint64(now.Unix())
-	} else {
+	} else if c.config.IsBhilai(number) && succession == 0 {
 		// For primary validators, wait until the current block production window
 		// starts. This prevents bor from starting to build next block before time
 		// as we'd like to wait for new transactions. Although this change doesn't
 		// need a check for hard fork as it doesn't change any consensus rules, we
 		// still keep it for safety and testing.
-		if c.config.IsBhilai(number) && succession == 0 {
-			startTime := time.Unix(int64(header.Time)-int64(c.config.CalculatePeriod(number)), 0)
-			time.Sleep(time.Until(startTime))
-		}
+		startTime := time.Unix(int64(header.Time)-int64(c.config.CalculatePeriod(number)), 0)
+		time.Sleep(time.Until(startTime))
 	}
 
 	return nil
@@ -1180,19 +1179,15 @@ func (c *Bor) GetRootHash(ctx context.Context, tx kv.Tx, start, end uint64) (str
 }
 
 func ComputeHeadersRootHash(blockHeaders []*types.Header) ([]byte, error) {
-	headers := make([][32]byte, NextPowerOfTwo(uint64(len(blockHeaders))))
-	for i := 0; i < len(blockHeaders); i++ {
+	headers := make([][32]byte, math2.NextPowerOfTwo(uint64(len(blockHeaders))))
+	for i := range blockHeaders {
 		blockHeader := blockHeaders[i]
-		header := crypto.Keccak256(AppendBytes32(
+		headers[i] = crypto.Keccak256Hash(AppendBytes32(
 			blockHeader.Number.Bytes(),
 			new(big.Int).SetUint64(blockHeader.Time).Bytes(),
 			blockHeader.TxHash[:],
 			blockHeader.ReceiptHash[:],
 		))
-
-		var arr [32]byte
-		copy(arr[:], header)
-		headers[i] = arr
 	}
 	tree := merkle.NewTreeWithOpts(merkle.TreeOptions{EnableHashSorting: false, DisableHashLeaves: true})
 	if err := tree.Generate(Convert(headers), keccak.NewFastKeccak()); err != nil {

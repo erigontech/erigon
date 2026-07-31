@@ -36,7 +36,7 @@ func contractHashFromPrefixReference(prefix []byte) (hash [32]byte, ok bool) {
 	if len(nib) < 64 {
 		return hash, false
 	}
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		hash[i] = nib[2*i]<<4 | nib[2*i+1]
 	}
 	return hash, true
@@ -44,7 +44,7 @@ func contractHashFromPrefixReference(prefix []byte) (hash [32]byte, ok bool) {
 
 func TestContractHashFromPrefix_MatchesReference(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
-	for n := 0; n < 5000; n++ {
+	for range 5000 {
 		l := 30 + rng.Intn(40) // spans below and above the 33-byte minimum
 		prefix := make([]byte, l)
 		rng.Read(prefix)

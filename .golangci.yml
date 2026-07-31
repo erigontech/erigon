@@ -50,18 +50,7 @@ linters:
       enabled-checks:
         - ruleguard
       disabled-checks:
-        - unnecessaryDefer
-        - appendAssign
-        - regexpMust
-        - rangeValCopy
-        - exitAfterDefer
-        - elseif
-        - dupBranchBody
-        - assignOp
-        - singleCaseSwitch
-        - unlambda
-        - captLocal
-        - commentFormatting
+        - commentFormatting # disabled to avoid unnecessary friction on local lints and CI for minor whitespace changes without functional benefit
         - ifElseChain
         - sloppyReassign
         - sprintfQuotedString
@@ -89,22 +78,6 @@ linters:
           rules: rules.go
         underef:
           skipRecvDeref: true
-    modernize:
-      disable: # each disabled analyzer has an existing backlog; enable it once its findings are cleared
-        - omitzero
-        - rangeint
-        - reflecttypefor
-        - slicesbackward
-        - slicescontains
-        - slicessort
-        - stditerators
-        - stringsbuilder
-        - stringscut
-        - stringscutprefix
-        - testingcontext
-        - waitgroupgo
-        - waitgroup
-        - fmtappendf
     govet:
       enable:
         - nilness

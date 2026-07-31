@@ -130,7 +130,7 @@ func measureHandlerLatency(t testing.TB, payload []byte, wrap func(http.Handler)
 
 	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(payload))
 		req.Header.Set("Accept-Encoding", "gzip")
 		resp, _ := client.Do(req)
@@ -141,7 +141,7 @@ func measureHandlerLatency(t testing.TB, payload []byte, wrap func(http.Handler)
 	}
 
 	latencies := make([]time.Duration, 0, requests)
-	for i := 0; i < requests; i++ {
+	for range requests {
 		req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(payload))
 		req.Header.Set("Accept-Encoding", "gzip")
 		start := time.Now()
@@ -170,7 +170,7 @@ func measureRPCLatency(t testing.TB, endpoint, blockTag string) latencyStats {
 
 	// Warmup + fetch payload size
 	var payloadKB int
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		req, _ := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept-Encoding", "gzip")
@@ -187,7 +187,7 @@ func measureRPCLatency(t testing.TB, endpoint, blockTag string) latencyStats {
 	}
 
 	latencies := make([]time.Duration, 0, requests)
-	for i := 0; i < requests; i++ {
+	for range requests {
 		req, _ := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept-Encoding", "gzip")
@@ -322,7 +322,7 @@ func benchmarkGzipHandler(b *testing.B, payload []byte, wrap func(http.Handler) 
 
 	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(payload))
 		req.Header.Set("Accept-Encoding", "gzip")
 		resp, _ := client.Do(req)

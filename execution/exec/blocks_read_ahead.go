@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"bytes"
 	"context"
 	"sync"
 	"sync/atomic"
@@ -14,9 +15,9 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -79,20 +80,18 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 // stack cost on the EVM's first touch of any prefetched address.
 //
 // For the CodeDomain the wrapper also populates the codeHashToCode
-// (codeHash→bytes) + size-cache layers via PutCodeWithHash, keyed by the
-// code's own keccak hash so every cached pair is self-consistent.
+// (codeHash→bytes) + size-cache layers via PutCodeWithHashIfAbsent, keyed by
+// the code's own keccak hash so every cached pair is self-consistent.
 type cachePopulatingGetter struct {
 	g        kv.TemporalGetter
 	sc       *cache.StateCache
-	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
-	// progress returns the domain's max committed txNum in the read snapshot;
-	// it stamps negative results, whose miss carries no step to derive a
-	// bound from.
-	progress func(kv.Domain) uint64
+	progress func(kv.Domain) uint64 // domain progress source for stamping negative fills
+	stepSize uint64                 // for the read txNum upper bound (last txNum of the read's step)
 }
 
-func newCachePopulatingGetter(ttx kv.TemporalTx, sc *cache.StateCache) *cachePopulatingGetter {
-	return &cachePopulatingGetter{g: ttx, sc: sc, stepSize: ttx.Debug().StepSize(), progress: ttx.Debug().DomainProgress}
+func newCachePopulatingGetter(tx kv.TemporalTx, sc *cache.StateCache) *cachePopulatingGetter {
+	debug := tx.Debug()
+	return &cachePopulatingGetter{g: tx, sc: sc, progress: debug.DomainProgress, stepSize: debug.StepSize()}
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
@@ -112,23 +111,25 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 				cpg.sc.PutCodeWithHashIfAbsent(k, v, crypto.Keccak256(v), (uint64(step)+1)*cpg.stepSize-1)
 			}
 		} else {
-			// Cache including nil/empty results: a probe returning no bytes is
-			// a valid negative answer (missing account, empty storage slot) and
-			// caching it lets repeated probes skip the file accessor stack —
-			// revm's CacheAccount { account: None, status: LoadedNotExisting }
-			// pattern. Stamp with the last txNum of the value's step; a
-			// negative has no step — use the domain's progress at observation
-			// time so any unwind drops it.
-			txNum := (uint64(step)+1)*cpg.stepSize - 1
-			if len(v) == 0 {
+			// Cache including nil/empty results: a probe returning no
+			// bytes is a valid negative answer (missing account, empty
+			// storage slot; empty code lands here too but CodeCache drops
+			// zero-length puts) and caching it lets repeated probes
+			// skip the file accessor stack. Mirrors revm's CacheAccount
+			// { account: None, status: LoadedNotExisting } pattern.
+			// Stamp with an upper bound on the value's write txNum (last txNum
+			// of the step it came from) so unwind invalidation is correct. A
+			// negative carries no step — stamp it with the domain's progress
+			// at observation time so any unwind drops it (as the SD read-fill
+			// does).
+			readTxNum := (uint64(step)+1)*cpg.stepSize - 1
+			if len(v) == 0 && name != kv.CodeDomain && cpg.sc.GetCache(name) != nil {
 				if cpg.progress == nil {
-					// No progress oracle → no honest stamp; skip rather than
-					// cache an unwind-immortal negative.
 					return v, step, err
 				}
-				txNum = cpg.progress(name)
+				readTxNum = cpg.progress(name)
 			}
-			cpg.sc.PutIfAbsent(name, k, v, txNum)
+			cpg.sc.PutIfAbsent(name, k, v, readTxNum)
 		}
 	}
 	return v, step, err
@@ -151,24 +152,14 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, h
 		if !bra.warming.CompareAndSwap(false, true) {
 			return
 		}
-		// Ordering makes "WaitForWarmup drained ⟹ gauge is zero" hold on its
-		// own: WarmupStarted only after warmWg.Add, WarmupDone before
-		// warmWg.Done (defers run LIFO). StateCache.Unwind asserts on the gauge.
-		// The cache pointer is captured once so the Started/Done pair and the
-		// warmup's puts all bind to the same gauge even if SetStateCache races
-		// the launch.
-		bra.warmWg.Add(1)
 		sc := bra.stateCache
-		if sc != nil {
-			sc.WarmupStarted()
-		}
-		go func() {
-			defer bra.warmWg.Done()
+		bra.warmWg.Go(func() {
 			if sc != nil {
+				sc.WarmupStarted()
 				defer sc.WarmupDone()
 			}
 			bra.warmBody(ctx, db, sc, header, body, 8) // use 8 workers for warming
-		}()
+		})
 	}
 }
 
@@ -196,7 +187,7 @@ func (bra *BlockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
 	if _, ok := bra.bodies.Get(blockHash); !ok {
 		return
 	}
-	bra.senders.Add(blockHash, common.Copy(senders))
+	bra.senders.Add(blockHash, bytes.Clone(senders))
 }
 
 // warmBody warms state for all transactions in a body using multiple workers.
@@ -245,7 +236,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, sc *cache
 		// Pre-divide work: each worker gets a dedicated range of BAL entries
 		entriesPerWorker := (balLen + balWorkers - 1) / balWorkers
 
-		for w := 0; w < balWorkers; w++ {
+		for w := range balWorkers {
 			start := w * entriesPerWorker
 			end := min(start+entriesPerWorker, balLen)
 			if start >= balLen {
@@ -405,11 +396,11 @@ func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types
 	return types.NewBlockFromStorage(header.Hash(), header, body.Transactions, body.Uncles, body.Withdrawals), true
 }
 
-func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader services.FullBlockReader) (chan uint64, context.CancelFunc) {
+func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader) (chan uint64, context.CancelFunc) {
 	const readAheadBlocks = 500
 	readAhead := make(chan uint64, readAheadBlocks)
 	g, gCtx := errgroup.WithContext(ctx)
-	for workerNum := 0; workerNum < workers; workerNum++ {
+	for range workers {
 		g.Go(func() (err error) {
 			var bn uint64
 			var ok bool
@@ -451,7 +442,7 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 		_ = g.Wait()
 	}
 }
-func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine rules.Engine, blockReader services.FullBlockReader) error {
+func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine rules.Engine, blockReader dbservices.FullBlockReader) error {
 	block, err := blockReader.BlockByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return err

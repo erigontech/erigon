@@ -31,10 +31,9 @@ import (
 type ParallelPatriciaHashed struct {
 	template       *HexPatriciaHashed
 	trieCtxFactory TrieContextFactory
-	workerPool     sync.Pool
-	cfg            TrieConfig
 
 	accountKeyLen int16
+	cfg           TrieConfig
 	numWorkers    int
 
 	rootHash atomic.Pointer[[]byte]
@@ -51,21 +50,10 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 		template:       NewHexPatriciaHashed(accountKeyLen, nil, cfg),
 		trieCtxFactory: ctxFactory,
 		accountKeyLen:  accountKeyLen,
-		cfg:            cfg,
 		numWorkers:     runtime.NumCPU(),
+		cfg:            cfg,
 	}
-	p.resetPool()
 	return p
-}
-
-func (p *ParallelPatriciaHashed) resetPool() {
-	akl := p.accountKeyLen
-	cfg := p.cfg
-	p.workerPool = sync.Pool{
-		New: func() any {
-			return NewHexPatriciaHashed(akl, nil, cfg)
-		},
-	}
 }
 
 // SetNumWorkers overrides the worker count for the next Process call; n <= 0 falls back to runtime.NumCPU.
@@ -110,13 +98,13 @@ func (p *ParallelPatriciaHashed) RootTrie() *HexPatriciaHashed {
 	return p.template
 }
 
-// Reset clears the published root hash, drops pooled workers, and resets the template so the instance can be reused.
+// Reset clears the published root hash and resets the template so the instance
+// can be reused; pooled workers stay cached for the next Process call.
 func (p *ParallelPatriciaHashed) Reset() {
 	if p.template != nil {
 		p.template.Reset()
 	}
 	p.rootHash.Store(nil)
-	p.resetPool()
 	if p.streaming != nil {
 		p.streaming.Reset()
 	}
@@ -129,7 +117,6 @@ func (p *ParallelPatriciaHashed) Release() {
 		p.template = nil
 	}
 	p.rootHash.Store(nil)
-	p.resetPool()
 	if p.streaming != nil {
 		p.streaming.Release()
 		p.streaming = nil
@@ -197,7 +184,7 @@ type prefixWriter struct {
 func (pw *prefixWriter) Write(p []byte) (int, error) {
 	buf := make([]byte, 0, len(p)+len(pw.prefix)*2)
 	buf = append(buf, pw.prefix...)
-	for i := 0; i < len(p); i++ {
+	for i := range p {
 		buf = append(buf, p[i])
 		if p[i] == '\n' && i != len(p)-1 { // re-tag interior lines, not a trailing newline
 			buf = append(buf, pw.prefix...)
@@ -265,6 +252,9 @@ func (p *ParallelPatriciaHashed) RootHash() ([]byte, error) {
 
 // processStreaming delegates Process to the attached StreamingCommitter and republishes the root.
 func (p *ParallelPatriciaHashed) processStreaming(ctx context.Context) ([]byte, error) {
+	// The template root is the restore target of SetState, so it seeds the committer's base;
+	// PromoteRootInto below keeps the two in sync after every fold.
+	p.streaming.SeedRootFrom(p.template)
 	rh, err := p.streaming.Process(ctx)
 	if err != nil {
 		return nil, err
@@ -335,7 +325,7 @@ func (p *ParallelPatriciaHashed) Process(
 		p.deferredForCaller = pu.deferredCombined
 		pu.deferredCombined = nil
 		pu.deferredMu.Unlock()
-	} else if aErr := p.applyDeferredUpdates(pu); aErr != nil {
+	} else if aErr := p.applyDeferredUpdates(ctx, pu); aErr != nil {
 		return nil, aErr
 	}
 
@@ -378,7 +368,7 @@ func dfsSubtree(node *prefixNode, path []byte, fn func(hashedKey, plainKey []byt
 }
 
 // applyDeferredUpdates applies the merged deferred branch updates, returning every entry to the pool on success or failure.
-func (p *ParallelPatriciaHashed) applyDeferredUpdates(pu *parallelUpdate) error {
+func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *parallelUpdate) error {
 	pu.deferredMu.Lock()
 	deferred := pu.deferredCombined
 	pu.deferredCombined = nil
@@ -393,7 +383,7 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(pu *parallelUpdate) error 
 		}
 	}()
 
-	applyCtx, cleanup := p.trieCtxFactory()
+	applyCtx, cleanup := p.trieCtxFactory(ctx)
 	if cleanup != nil {
 		defer cleanup()
 	}

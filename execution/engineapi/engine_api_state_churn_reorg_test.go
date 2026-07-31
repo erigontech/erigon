@@ -253,7 +253,7 @@ func buildChurnChain(
 	payloads = append(payloads, deployBlock)
 	sums = append(sums, recordChurnSum(ctx, t, churn))
 
-	for k := 0; k < pokes; k++ {
+	for k := range pokes {
 		txn, err := churn.Poke(transactOpts, big.NewInt(seed(k)))
 		require.NoError(t, err)
 		block, err := eat.MockCl.BuildCanonicalBlock(ctx)
@@ -282,7 +282,7 @@ func churnAndAssert(
 	require.NoError(t, err)
 	transactOpts.GasLimit = params.MaxTxnGasLimit
 	coinbaseAddr := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
-	for k := 0; k < pokes; k++ {
+	for k := range pokes {
 		// Pin the nonce to the head state: the txpool's own pending-nonce view
 		// can be stale right after a reorg/restart (re-injected dead-fork txns,
 		// https://github.com/erigontech/erigon/issues/22299), and submission is

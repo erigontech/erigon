@@ -68,8 +68,8 @@ func (e *GenesisMismatchError) Error() string {
 		advice = fmt.Sprintf(" (try with flag --chain=%s)", specs[0].Name)
 	} else if len(specs) > 1 {
 		names := make([]string, len(specs))
-		for i, s := range specs {
-			names[i] = s.Name
+		for i := range specs {
+			names[i] = specs[i].Name
 		}
 		advice = fmt.Sprintf(" (try with flag --chain=<%s>)", strings.Join(names, "|"))
 	}
@@ -543,7 +543,7 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 	}
 
 	if g.Config != nil && g.Config.IsAmsterdam(g.Timestamp) {
-		if !g.Config.IsEIPDisabled(7928) {
+		if g.Config.IsEIPEnabled(7928, g.Timestamp) {
 			if g.BlockAccessListHash != nil {
 				head.BlockAccessListHash = g.BlockAccessListHash
 			} else {
@@ -555,7 +555,7 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 	}
 
-	// these fields need to be overriden for Bor running in a kurtosis devnet
+	// these fields need to be overridden for Bor running in a kurtosis devnet
 	if g.Config != nil && g.Config.Bor != nil && g.Config.ChainID.Uint64() == polygonchain.BorKurtosisDevnetChainId {
 		withdrawals = []*types.Withdrawal{}
 		head.BlobGasUsed = new(uint64)

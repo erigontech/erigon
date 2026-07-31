@@ -16,7 +16,7 @@ func TestKeyToHexNibbleHashCached_MatchesUncached(t *testing.T) {
 
 	t.Run("account_keys", func(t *testing.T) {
 		var c addrHashCache
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			addr := make([]byte, length.Addr)
 			addr[0] = byte(i)
 			addr[19] = byte(i * 7)
@@ -26,7 +26,7 @@ func TestKeyToHexNibbleHashCached_MatchesUncached(t *testing.T) {
 
 	t.Run("storage_keys", func(t *testing.T) {
 		var c addrHashCache
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			key := make([]byte, 52)
 			key[0] = byte(i % 30)
 			key[19] = byte(i)
@@ -41,7 +41,7 @@ func TestKeyToHexNibbleHashCached_MatchesUncached(t *testing.T) {
 		var c addrHashCache
 		addr := make([]byte, length.Addr)
 		addr[0], addr[1], addr[19] = 0xDE, 0xAD, 0xBE
-		for slot := 0; slot < 1000; slot++ {
+		for slot := range 1000 {
 			key := make([]byte, 52)
 			copy(key[:20], addr)
 			key[20] = byte(slot >> 8)
@@ -54,7 +54,7 @@ func TestKeyToHexNibbleHashCached_MatchesUncached(t *testing.T) {
 	// the cache must never leak a stale prefix across an address change.
 	t.Run("interleaved", func(t *testing.T) {
 		var c addrHashCache
-		for i := 0; i < 200; i++ {
+		for i := range 200 {
 			addr := make([]byte, length.Addr)
 			addr[0] = byte(i % 4) // only 4 distinct addresses, non-consecutive
 			addr[19] = byte(i % 4)
@@ -133,8 +133,8 @@ func TestHasherReusesAddrPrefix(t *testing.T) {
 
 func benchKeys(numAddr, slotsPer int) [][]byte {
 	keys := make([][]byte, 0, numAddr*slotsPer)
-	for a := 0; a < numAddr; a++ {
-		for s := 0; s < slotsPer; s++ {
+	for a := range numAddr {
+		for s := range slotsPer {
 			k := make([]byte, 52)
 			k[0] = byte(a)
 			k[1] = byte(a >> 8)
