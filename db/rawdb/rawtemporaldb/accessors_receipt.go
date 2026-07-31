@@ -65,8 +65,8 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 var ReceiptCacheKey = []byte{0x0}
 
 // ReceiptWriter is a reusable, single-goroutine encoder for the receipt domains.
-// It hands its own scratch to DomainPut, so the value bytes are only valid until
-// the next call: a kv.TemporalPutDel must copy what it keeps.
+// It hands its own scratch to DomainPut, which does not borrow it - see
+// kv.TemporalPutDel.
 type ReceiptWriter struct {
 	buf          [binary.MaxVarintLen64]byte
 	rlpEncodeBuf bytes.Buffer
@@ -84,7 +84,7 @@ func (w *ReceiptWriter) Append(tx kv.TemporalPutDel, receipt *types.Receipt, txN
 		storageReceipt := (*types.ReceiptForStorage)(receipt)
 		w.rlpEncodeBuf.Reset()
 		if err := rlp.Encode(&w.rlpEncodeBuf, storageReceipt); err != nil {
-			return fmt.Errorf("WriteReceiptCache: %w", err)
+			return fmt.Errorf("ReceiptWriter.Append: encode: %w", err)
 		}
 		toWrite = w.rlpEncodeBuf.Bytes()
 		if dbg.AssertEnabled {
@@ -107,7 +107,7 @@ func (w *ReceiptWriter) Append(tx kv.TemporalPutDel, receipt *types.Receipt, txN
 	}
 
 	if err := tx.DomainPut(kv.RCacheDomain, ReceiptCacheKey, toWrite, txNum, nil); err != nil {
-		return fmt.Errorf("WriteReceiptCache: %w", err)
+		return fmt.Errorf("ReceiptWriter.Append: %w", err)
 	}
 	return nil
 }

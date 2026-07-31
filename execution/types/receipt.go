@@ -409,10 +409,18 @@ type storedReceiptScratch struct {
 
 var storedReceiptScratchPool = sync.Pool{New: func() any { return new(storedReceiptScratch) }}
 
+// maxPooledLogs bounds what one pooled scratch keeps alive; a receipt with an
+// outlier log count is not worth pinning its backing array in the pool.
+const maxPooledLogs = 1024
+
 // release drops the borrowed topic and data slices so a pooled scratch never
 // keeps a receipt's logs alive.
 func (s *storedReceiptScratch) release() {
-	clear(s.logs)
+	if cap(s.logs) > maxPooledLogs {
+		s.logs = nil
+	} else {
+		clear(s.logs)
+	}
 	s.rec = storedReceiptRLP{}
 	storedReceiptScratchPool.Put(s)
 }
