@@ -383,25 +383,33 @@ test-hive:
 # Lazy `=` so unrelated targets don't shell out to jq at make-parse time.
 EEST_DEVNET_URL = $(shell jq -r '."eest_devnet".url' test-fixtures.json)
 EEST_DEVNET_BRANCH = $(shell jq -r '."eest_devnet".branch' test-fixtures.json)
+EEST_GLAMSTERDAM_ERIGON_FLAGS = --fcu.background.prune=false --fcu.timeout=0 --experimental.bal
+EEST_HIVE_REF = $(shell jq -r '.hive_ref' .github/workflows/hive-versions.json)
+HIVE_SIM_PARALLELISM ?= 8
 
+eest-devnet: HIVE_SIM_PARALLELISM = 4
 eest-devnet:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" .
 	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && git checkout --detach "$(EEST_HIVE_REF)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
 		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
-		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
+		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile && \
+		echo "ENV ERIGON_EXEC3_PARALLEL=true" >> clients/erigon/Dockerfile && \
+		sed -i'' -e '/^echo "Running erigon/i\FLAGS="$$FLAGS $(EEST_GLAMSTERDAM_ERIGON_FLAGS)"' clients/erigon/erigon.sh && \
+		grep -qF -- '$(EEST_GLAMSTERDAM_ERIGON_FLAGS)' clients/erigon/erigon.sh
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,".*amsterdam.*",--sim.buildarg branch=$(EEST_DEVNET_BRANCH) --sim.buildarg fixtures=$(EEST_DEVNET_URL))
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-enginex,".*/.*fork_(Amsterdam|BPO2ToAmsterdam)",--sim.buildarg branch=$(EEST_DEVNET_BRANCH) --sim.buildarg fixtures=$(EEST_DEVNET_URL),--sim.loglevel=3 --client.checktimelimit=300s)
 
 # Define the run_suite function
 define run_suite
     printf "\n\n============================================================"; \
-    echo "Running test: $1-$2"; \
+    echo "Running test: $1"; \
     printf "\n"; \
-    ./hive --sim ethereum/$1 --sim.limit=$2 --sim.parallelism=8 --docker.nocache=true --client erigon $3 2>&1 | tee output.log; \
+    ./hive --sim ethereum/$1 --sim.limit=$2 --sim.parallelism=$(HIVE_SIM_PARALLELISM) --docker.nocache=true --client erigon --sim.limit.exact=false $3 $4 2>&1 | tee output.log; \
     if [ $$? -gt 0 ]; then \
         echo "Exitcode gt 0"; \
     fi; \
@@ -414,7 +422,7 @@ define run_suite
     tests=$$(echo "$$status_line" | sed -n 's/.*tests=\([0-9]*\).*/\1/p'); \
     failed=$$(echo "$$status_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p'); \
     printf "\n"; \
-    echo "-----------   Results for $1-$2    -----------"; \
+    echo "-----------   Results for $1    -----------"; \
     echo "Tests: $$tests, Failed: $$failed"; \
     printf "\n\n============================================================\n"
 endef
@@ -447,12 +455,13 @@ eest-hive:
 	docker build -t "test/erigon:$(SHORT_COMMIT)" .
 	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && git checkout --detach "$(EEST_HIVE_REF)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
 		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
 		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,"",--sim.buildarg fixtures=$(EEST_STABLE_URL))
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-enginex,"",--sim.buildarg fixtures=$(EEST_STABLE_URL))
 
 # define kurtosis assertoor runner
 define run-kurtosis-assertoor
