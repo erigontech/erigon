@@ -1140,6 +1140,15 @@ func (s *WriteSet) forEachAddr(f func(accounts.Address)) {
 	for a := range s.address {
 		f(a)
 	}
+	s.forEachFieldAddr(f)
+}
+
+// forEachFieldAddr is forEachAddr restricted to field-level writes: it skips the
+// record-level AddressPath map, whose entries carry no field of their own.
+func (s *WriteSet) forEachFieldAddr(f func(accounts.Address)) {
+	if s == nil {
+		return
+	}
 	for a := range s.balance {
 		f(a)
 	}

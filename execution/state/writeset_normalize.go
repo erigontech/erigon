@@ -57,7 +57,7 @@ import (
 // isn't silent.
 var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
 
-// Bit i of the addrFields mask below corresponds to normalizeAccountPaths[i].
+// The account fields Normalize fills in when a dirty address lacks them.
 var normalizeAccountPaths = [4]AccountPath{BalancePath, NoncePath, IncarnationPath, CodeHashPath}
 
 func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool, eip8246 bool) (*WriteSet, error) {
@@ -285,49 +285,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	// Collect all addresses from the raw input (before filtering). AddressPath
 	// entries are record-level and intentionally excluded.
 	allAddresses := make(map[accounts.Address]bool)
-	for addr := range writes.balance {
-		allAddresses[addr] = true
-	}
-	for addr := range writes.nonce {
-		allAddresses[addr] = true
-	}
-	for addr := range writes.incarnation {
-		allAddresses[addr] = true
-	}
-	for addr := range writes.selfDestruct {
-		allAddresses[addr] = true
-	}
-	for addr := range writes.createContract {
-		allAddresses[addr] = true
-	}
-	for addr := range writes.code {
-		allAddresses[addr] = true
-	}
-	for addr := range writes.codeHash {
-		allAddresses[addr] = true
-	}
-	for addr := range writes.codeSize {
-		allAddresses[addr] = true
-	}
-	for addr := range writes.storage {
-		allAddresses[addr] = true
-	}
-
-	// Track which fields each address already has in the output, as a bitmask
-	// indexed like normalizeAccountPaths.
-	addrFields := make(map[accounts.Address]uint8)
-	for addr := range filtered.balance {
-		addrFields[addr] |= 1 << 0
-	}
-	for addr := range filtered.nonce {
-		addrFields[addr] |= 1 << 1
-	}
-	for addr := range filtered.incarnation {
-		addrFields[addr] |= 1 << 2
-	}
-	for addr := range filtered.codeHash {
-		addrFields[addr] |= 1 << 3
-	}
+	writes.forEachFieldAddr(func(addr accounts.Address) { allAddresses[addr] = true })
 
 	for addr := range allAddresses {
 		if sdSet[addr] {
@@ -340,7 +298,6 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			continue
 		}
 		ver := Version{TxIndex: txIndex, Incarnation: incarnation}
-		fields := addrFields[addr]
 
 		// If addr was self-destructed by an earlier TX in this block and this
 		// TX re-creates it (it isn't in sdSet — this TX didn't re-destruct it),
@@ -376,8 +333,8 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		fallbackLoaded := false
 
 		// For each missing field, try versionMap then stateReader.
-		for i, path := range normalizeAccountPaths {
-			if fields&(1<<i) != 0 {
+		for _, path := range normalizeAccountPaths {
+			if filtered.Has(WriteHeader{Address: addr, Path: path}) {
 				continue // already in output
 			}
 			if sdEarlier && hasCreateContract {
