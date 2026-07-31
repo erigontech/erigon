@@ -17,9 +17,52 @@
 package stages
 
 import (
+	"context"
 	"math"
 	"testing"
+	"time"
+
+	"github.com/erigontech/erigon/cl/phase1/network"
 )
+
+func TestRecoverSkippedEnvelopeBatchesDoesNotStarveLaterBatches(t *testing.T) {
+	skipped := []network.SkippedFullBlock{{Slot: 1}, {Slot: 2}, {Slot: 3}, {Slot: 4}, {Slot: 5}, {Slot: 6}, {Slot: 7}, {Slot: 8}}
+	attempted := make([]uint64, 0, len(skipped))
+	recoverBatch := func(ctx, _ context.Context, batch []network.SkippedFullBlock) []network.SkippedFullBlock {
+		attempted = append(attempted, batch[0].Slot)
+		if batch[0].Slot < 7 {
+			<-ctx.Done()
+			return batch
+		}
+		return nil
+	}
+
+	pending := recoverSkippedEnvelopeBatches(context.Background(), skipped, 2, time.Millisecond, recoverBatch)
+	if len(attempted) != 4 || attempted[3] != 7 {
+		t.Fatalf("attempted batch starts = %v, want [1 3 5 7]", attempted)
+	}
+	for _, item := range pending {
+		if item.Slot >= 7 {
+			t.Fatalf("later recoverable item %d remained pending", item.Slot)
+		}
+	}
+}
+
+func TestRecoverSkippedEnvelopeBatchesKeepsPartialSuccess(t *testing.T) {
+	skipped := []network.SkippedFullBlock{{Slot: 1}, {Slot: 2}}
+	recoverBatch := func(fetchCtx, persistCtx context.Context, batch []network.SkippedFullBlock) []network.SkippedFullBlock {
+		<-fetchCtx.Done()
+		if persistCtx.Err() != nil {
+			t.Fatalf("persist context expired with fetch context: %v", persistCtx.Err())
+		}
+		return batch[1:]
+	}
+
+	pending := recoverSkippedEnvelopeBatches(context.Background(), skipped, 2, time.Millisecond, recoverBatch)
+	if len(pending) != 1 || pending[0].Slot != 2 {
+		t.Fatalf("pending = %v, want only slot 2", pending)
+	}
+}
 
 // clampProgress must never report a total below processed nor underflow, even
 // when the floor and current counters drift past the frozen highestBlockSeen.
