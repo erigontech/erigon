@@ -57,6 +57,9 @@ import (
 // isn't silent.
 var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
 
+// Bit i of the addrFields mask below corresponds to normalizeAccountPaths[i].
+var normalizeAccountPaths = [4]AccountPath{BalancePath, NoncePath, IncarnationPath, CodeHashPath}
+
 func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool, eip8246 bool) (*WriteSet, error) {
 	filtered := &WriteSet{}
 	if writes == nil {
@@ -112,39 +115,35 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	//      already uses last-write-wins for d.selfDestruct, so this keeps the two
 	//      in agreement. (EIP-6780 narrows this pattern post-Cancun but doesn't
 	//      eliminate it; mainnet-rare, but cheap to get right.)
-	sdSet := make(map[accounts.Address]bool)
-	for addr, vw := range writes.SelfDestructs() {
+	// A nil sdSet reads as all-false; allocated only when the tx self-destructed.
+	var sdSet map[accounts.Address]bool
+	for addr, vw := range writes.selfDestruct {
 		if vw.Version.Incarnation == incarnation && vw.Val {
+			if sdSet == nil {
+				sdSet = make(map[accounts.Address]bool)
+			}
 			sdSet[addr] = true
 		}
 	}
 
-	for h := range writes.AllHeaders() {
-		// Drop account-field writes for SD'd addresses so applyVersionedWrites
-		// takes the pure-delete branch instead of cleanup-before-recreate; drop
-		// raw StoragePath writes too (the SelfDestructPath case re-emits an
-		// explicit StoragePath=0 delete for every slot via sdStorageSlots).
-		if sdSet[h.Address] {
-			switch h.Path {
-			case NoncePath, IncarnationPath, CodeHashPath, CodePath, StoragePath:
-				continue
-			case BalancePath:
-				// EIP-8246 keeps the post-SD balance so the calculator can
-				// preserve a balance-only account (or delete it when zero);
-				// pre-8246 drops it so the account is purely deleted.
-				if !eip8246 {
-					continue
-				}
-			}
+	// The filter walks the typed maps directly rather than AllHeaders(): every
+	// range-over-func pass allocates its iterator closures, and the header walk
+	// would need a second per-value map probe anyway. Per-entry decisions are
+	// order-independent, so per-path loops are equivalent.
+	//
+	// SD'd addresses drop their account-field/storage writes so
+	// applyVersionedWrites takes the pure-delete branch instead of
+	// cleanup-before-recreate; the SelfDestructPath case re-emits an explicit
+	// StoragePath=0 delete for every slot via sdStorageSlots. EIP-8246 keeps
+	// the post-SD balance so the calculator can preserve a balance-only
+	// account; pre-8246 drops it so the account is purely deleted.
+	for addr, inner := range writes.storage {
+		if sdSet[addr] {
+			continue
 		}
-		switch h.Path {
-		case StoragePath:
+		for key, sw := range inner {
 			// Only include writes from the current (validated) incarnation.
-			if h.Version.Incarnation != incarnation {
-				continue
-			}
-			sw, ok := writes.GetStorage(h.Address, h.Key)
-			if !ok {
+			if sw.Version.Incarnation != incarnation {
 				continue
 			}
 			writeVal := sw.Val
@@ -157,13 +156,13 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			// that re-writes a slot to its pre-SD value is wrongly dropped as a
 			// no-op (TestDeleteRecreateSlotsAcrossManyBlocks).
 			sdTxIdx, sdOk := -1, false
-			if v, sd, _ := vm.ReadSelfDestruct(h.Address, txIndex); sd.Status() == MVReadResultDone && v {
+			if v, sd, _ := vm.ReadSelfDestruct(addr, txIndex); sd.Status() == MVReadResultDone && v {
 				sdTxIdx, sdOk = sd.Version().TxIndex, true
 			}
 			// No-op filter: compare against origin (what this TX would have read).
 			// First check versionMap floor (prior TX's write in this block).
 			// Then fall back to stateReader (pre-block value from domain).
-			originVal, origin, originOK := vm.ReadStorage(h.Address, h.Key, txIndex)
+			originVal, origin, originOK := vm.ReadStorage(addr, key, txIndex)
 			originValid := originOK && origin.Status() == MVReadResultDone &&
 				!(sdOk && sdTxIdx > origin.Version().TxIndex)
 			if originValid {
@@ -183,12 +182,12 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 				// misses it. Narrower than an IncarnationPath probe: pure
 				// CREATE (no prior SD=true) doesn't wipe pre-existing storage,
 				// so its same-value SSTOREs still no-op against pre-block.
-				if vm.AnyDoneSelfDestructEquals(h.Address, txIndex-1, true) {
+				if vm.AnyDoneSelfDestructEquals(addr, txIndex-1, true) {
 					if writeVal.IsZero() {
 						continue
 					}
 				} else {
-					preVal, found, err := stateReader.ReadAccountStorage(h.Address, h.Key)
+					preVal, found, err := stateReader.ReadAccountStorage(addr, key)
 					if err != nil {
 						return nil, err
 					}
@@ -200,74 +199,80 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 					}
 				}
 			}
-			filtered.SetStorage(h.Address, h.Key, sw)
-		case BalancePath, NoncePath, IncarnationPath, CodeHashPath:
-			// Account fields: prefer the versionMap's accumulated value; fall
-			// back to the raw write when the map has none.
-			if !SetAccountFieldFromMap(filtered, vm, h.Address, h.Path, h.Version, txIndex+1) {
-				switch h.Path {
-				case BalancePath:
-					if vw, ok := writes.GetBalance(h.Address); ok {
-						filtered.SetBalance(h.Address, vw)
-					}
-				case NoncePath:
-					if vw, ok := writes.GetNonce(h.Address); ok {
-						filtered.SetNonce(h.Address, vw)
-					}
-				case IncarnationPath:
-					if vw, ok := writes.GetIncarnation(h.Address); ok {
-						filtered.SetIncarnation(h.Address, vw)
-					}
-				case CodeHashPath:
-					if vw, ok := writes.GetCodeHash(h.Address); ok {
-						filtered.SetCodeHash(h.Address, vw)
-					}
-				}
-			}
-		case CodePath:
-			if h.Version.Incarnation != incarnation {
-				continue
-			}
-			if vw, ok := writes.GetCode(h.Address); ok {
-				filtered.SetCode(h.Address, vw)
-			}
-		case CreateContractPath:
-			if h.Version.Incarnation != incarnation {
-				continue
-			}
-			if vw, ok := writes.GetCreateContract(h.Address); ok {
-				filtered.SetCreateContract(h.Address, vw)
-			}
-		case SelfDestructPath:
-			if h.Version.Incarnation != incarnation {
-				continue
-			}
-			// Only emit storage DELETE entries when the account was actually
-			// self-destructed (val=true).
-			sdw, ok := writes.GetSelfDestruct(h.Address)
-			if !ok || !sdw.Val {
-				continue
-			}
-			filtered.SetSelfDestruct(h.Address, sdw)
-			for _, slot := range sdStorageSlots(h.Address) {
-				filtered.SetStorage(h.Address, slot, &VersionedWrite[uint256.Int]{
-					WriteHeader: WriteHeader{
-						Address: h.Address,
-						Path:    StoragePath,
-						Key:     slot,
-						Version: h.Version,
-					},
-				})
-			}
-		case AddressPath:
-			// AddressPath is record-level — skip for field-level consumers.
-		case CodeSizePath:
-			// Code size is derived from the code bytes and isn't a domain field,
-			// so it's intentionally not carried into the calc/apply write set (as
-			// on serial). Cross-tx ReadCodeSize is served from the versionMap,
-			// which the worker populates directly — independent of this pass.
+			filtered.SetStorage(addr, key, sw)
 		}
 	}
+	// Account fields: prefer the versionMap's accumulated value; fall back to
+	// the raw write when the map has none.
+	for addr, vw := range writes.balance {
+		if sdSet[addr] && !eip8246 {
+			continue
+		}
+		if !SetAccountFieldFromMap(filtered, vm, addr, BalancePath, vw.Version, txIndex+1) {
+			filtered.SetBalance(addr, vw)
+		}
+	}
+	for addr, vw := range writes.nonce {
+		if sdSet[addr] {
+			continue
+		}
+		if !SetAccountFieldFromMap(filtered, vm, addr, NoncePath, vw.Version, txIndex+1) {
+			filtered.SetNonce(addr, vw)
+		}
+	}
+	for addr, vw := range writes.incarnation {
+		if sdSet[addr] {
+			continue
+		}
+		if !SetAccountFieldFromMap(filtered, vm, addr, IncarnationPath, vw.Version, txIndex+1) {
+			filtered.SetIncarnation(addr, vw)
+		}
+	}
+	for addr, vw := range writes.codeHash {
+		if sdSet[addr] {
+			continue
+		}
+		if !SetAccountFieldFromMap(filtered, vm, addr, CodeHashPath, vw.Version, txIndex+1) {
+			filtered.SetCodeHash(addr, vw)
+		}
+	}
+	for addr, vw := range writes.code {
+		if sdSet[addr] || vw.Version.Incarnation != incarnation {
+			continue
+		}
+		filtered.SetCode(addr, vw)
+	}
+	for addr, vw := range writes.createContract {
+		if vw.Version.Incarnation != incarnation {
+			continue
+		}
+		filtered.SetCreateContract(addr, vw)
+	}
+	for addr, sdw := range writes.selfDestruct {
+		if sdw.Version.Incarnation != incarnation {
+			continue
+		}
+		// Only emit storage DELETE entries when the account was actually
+		// self-destructed (val=true).
+		if !sdw.Val {
+			continue
+		}
+		filtered.SetSelfDestruct(addr, sdw)
+		for _, slot := range sdStorageSlots(addr) {
+			filtered.SetStorage(addr, slot, &VersionedWrite[uint256.Int]{
+				WriteHeader: WriteHeader{
+					Address: addr,
+					Path:    StoragePath,
+					Key:     slot,
+					Version: sdw.Version,
+				},
+			})
+		}
+	}
+	// AddressPath is record-level and CodeSizePath is derived from the code
+	// bytes — neither is carried into the calc/apply write set (as on serial).
+	// Cross-tx ReadCodeSize is served from the versionMap, which the worker
+	// populates directly — independent of this pass.
 
 	// For addresses that appear in the raw WriteSet but don't have account-level
 	// writes in the output, emit account field entries. Serial's MakeWriteSet
@@ -277,24 +282,51 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	// - Addresses whose storage writes were all filtered as no-ops
 	//   (the object was still dirty in the IBS)
 	//
-	// Collect all addresses from the raw input (before filtering).
+	// Collect all addresses from the raw input (before filtering). AddressPath
+	// entries are record-level and intentionally excluded.
 	allAddresses := make(map[accounts.Address]bool)
-	for h := range writes.AllHeaders() {
-		if h.Path != AddressPath {
-			allAddresses[h.Address] = true
-		}
+	for addr := range writes.balance {
+		allAddresses[addr] = true
+	}
+	for addr := range writes.nonce {
+		allAddresses[addr] = true
+	}
+	for addr := range writes.incarnation {
+		allAddresses[addr] = true
+	}
+	for addr := range writes.selfDestruct {
+		allAddresses[addr] = true
+	}
+	for addr := range writes.createContract {
+		allAddresses[addr] = true
+	}
+	for addr := range writes.code {
+		allAddresses[addr] = true
+	}
+	for addr := range writes.codeHash {
+		allAddresses[addr] = true
+	}
+	for addr := range writes.codeSize {
+		allAddresses[addr] = true
+	}
+	for addr := range writes.storage {
+		allAddresses[addr] = true
 	}
 
-	// Track which fields each address already has in the output.
-	addrFields := make(map[accounts.Address]map[AccountPath]bool)
-	for h := range filtered.AllHeaders() {
-		switch h.Path {
-		case BalancePath, NoncePath, IncarnationPath, CodeHashPath:
-			if addrFields[h.Address] == nil {
-				addrFields[h.Address] = make(map[AccountPath]bool)
-			}
-			addrFields[h.Address][h.Path] = true
-		}
+	// Track which fields each address already has in the output, as a bitmask
+	// indexed like normalizeAccountPaths.
+	addrFields := make(map[accounts.Address]uint8)
+	for addr := range filtered.balance {
+		addrFields[addr] |= 1 << 0
+	}
+	for addr := range filtered.nonce {
+		addrFields[addr] |= 1 << 1
+	}
+	for addr := range filtered.incarnation {
+		addrFields[addr] |= 1 << 2
+	}
+	for addr := range filtered.codeHash {
+		addrFields[addr] |= 1 << 3
 	}
 
 	for addr := range allAddresses {
@@ -344,8 +376,8 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		fallbackLoaded := false
 
 		// For each missing field, try versionMap then stateReader.
-		for _, path := range []AccountPath{BalancePath, NoncePath, IncarnationPath, CodeHashPath} {
-			if fields != nil && fields[path] {
+		for i, path := range normalizeAccountPaths {
+			if fields&(1<<i) != 0 {
 				continue // already in output
 			}
 			if sdEarlier && hasCreateContract {
@@ -380,16 +412,12 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	// (versionMap, else stateReader post-state) and re-emit CodePath, bounded to
 	// 7702 designators so unchanged contract code isn't re-emitted. Forward-only:
 	// it can't repair codeHash-no-code already collated into snapshots.
-	codeInOutput := make(map[accounts.Address]bool)
-	for addr := range filtered.Codes() {
-		codeInOutput[addr] = true
-	}
-	codeHashInOutput := make(map[accounts.Address]accounts.CodeHash)
-	for addr, vw := range filtered.CodeHashes() {
-		codeHashInOutput[addr] = vw.Val
-	}
-	for addr, h := range codeHashInOutput {
-		if h.IsEmpty() || codeInOutput[addr] || sdSet[addr] {
+	for addr, hvw := range filtered.codeHash {
+		h := hvw.Val
+		if h.IsEmpty() || sdSet[addr] {
+			continue
+		}
+		if _, ok := filtered.code[addr]; ok {
 			continue
 		}
 		// Recover the code whose hash this tx emitted. Prefer the versionMap
@@ -458,29 +486,24 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		hasNonce bool
 		hasCode  bool
 	}
-	acctStates := make(map[accounts.Address]*acctState)
-	ensureAcctState := func(addr accounts.Address) *acctState {
+	acctStates := make(map[accounts.Address]acctState, len(filtered.balance))
+	for addr, vw := range filtered.balance {
 		s := acctStates[addr]
-		if s == nil {
-			s = &acctState{}
-			acctStates[addr] = s
-		}
-		return s
-	}
-	for addr, vw := range filtered.Balances() {
-		s := ensureAcctState(addr)
 		s.balance = vw.Val
 		s.hasBal = true
+		acctStates[addr] = s
 	}
-	for addr, vw := range filtered.Nonces() {
-		s := ensureAcctState(addr)
+	for addr, vw := range filtered.nonce {
+		s := acctStates[addr]
 		s.nonce = vw.Val
 		s.hasNonce = true
+		acctStates[addr] = s
 	}
-	for addr, vw := range filtered.CodeHashes() {
-		s := ensureAcctState(addr)
+	for addr, vw := range filtered.codeHash {
+		s := acctStates[addr]
 		s.codeHash = vw.Val
 		s.hasCode = true
+		acctStates[addr] = s
 	}
 
 	// Check for empty accounts and replace with Delete. Only when EIP-161
@@ -488,16 +511,16 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	// merely touched (e.g. a 0-value transfer) is created and persists, so
 	// converting it to a delete here would diverge from serial's trie root
 	// (TestEIP161AccountRemoval block 1, pre-SpuriousDragon).
-	emptyAddrs := make(map[accounts.Address]bool)
+	var emptyAddrs []accounts.Address
 	for addr, s := range acctStates {
 		if EIP161EmptyRemoval(emptyRemoval, isAura, addr) &&
 			s.hasBal && s.hasNonce && s.hasCode &&
 			s.balance.IsZero() && s.nonce == 0 && s.codeHash.IsEmpty() {
-			emptyAddrs[addr] = true
+			emptyAddrs = append(emptyAddrs, addr)
 		}
 	}
 
-	for addr := range emptyAddrs {
+	for _, addr := range emptyAddrs {
 		filtered.DeleteAccountFields(addr)
 		filtered.SetSelfDestruct(addr, &VersionedWrite[bool]{
 			WriteHeader: WriteHeader{
