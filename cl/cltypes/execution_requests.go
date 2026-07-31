@@ -80,10 +80,18 @@ func (e *ExecutionRequests) ensureLists() {
 
 func (e *ExecutionRequests) EncodingSizeSSZ() int {
 	e.ensureLists()
+	const dynamicOffsetSize = 4
+	size := 3*dynamicOffsetSize +
+		e.Deposits.EncodingSizeSSZ() +
+		e.Withdrawals.EncodingSizeSSZ() +
+		e.Consolidations.EncodingSizeSSZ()
 	if e.effectiveVersion() < clparams.GloasVersion {
-		return e.Deposits.EncodingSizeSSZ() + e.Withdrawals.EncodingSizeSSZ() + e.Consolidations.EncodingSizeSSZ()
+		return size
 	}
-	return e.Deposits.EncodingSizeSSZ() + e.Withdrawals.EncodingSizeSSZ() + e.Consolidations.EncodingSizeSSZ() + e.BuilderDeposits.EncodingSizeSSZ() + e.BuilderExits.EncodingSizeSSZ()
+	return size +
+		2*dynamicOffsetSize +
+		e.BuilderDeposits.EncodingSizeSSZ() +
+		e.BuilderExits.EncodingSizeSSZ()
 }
 
 func (e *ExecutionRequests) EncodeSSZ(buf []byte) ([]byte, error) {
