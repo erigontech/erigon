@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
@@ -11,34 +12,45 @@ import (
 
 type countingBlockAccessListGetter struct {
 	kv.Getter
+	data  []byte
 	calls int
 }
 
 func (g *countingBlockAccessListGetter) GetOne(string, []byte) ([]byte, error) {
 	g.calls++
-	return nil, nil
+	return g.data, nil
 }
 
-func TestBlockAccessListBytesSkipsDBWithoutBALField(t *testing.T) {
-	getter := &countingBlockAccessListGetter{}
-	block := types.NewBlockFromStorage(common.Hash{}, &types.Header{}, nil, nil, nil)
-
-	if _, err := blockAccessListBytes(getter, block, 1); err != nil {
-		t.Fatal(err)
+func TestBlockAccessListBytes(t *testing.T) {
+	nonEmptyBALHash := common.Hash{1}
+	storedBAL := []byte{1, 2, 3}
+	tests := []struct {
+		name      string
+		hash      *common.Hash
+		storedBAL []byte
+		wantBAL   []byte
+		wantReads int
+	}{
+		{name: "missing commitment"},
+		{name: "empty commitment", hash: &empty.BlockAccessListHash},
+		{name: "non-empty commitment", hash: &nonEmptyBALHash, storedBAL: storedBAL, wantBAL: storedBAL, wantReads: 1},
 	}
-	if getter.calls != 0 {
-		t.Fatalf("unexpected DB reads: %d", getter.calls)
-	}
-}
 
-func TestBlockAccessListBytesSkipsDBForEmptyBAL(t *testing.T) {
-	getter := &countingBlockAccessListGetter{}
-	block := types.NewBlockFromStorage(common.Hash{}, &types.Header{BlockAccessListHash: &empty.BlockAccessListHash}, nil, nil, nil)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			getter := &countingBlockAccessListGetter{data: test.storedBAL}
+			block := types.NewBlockFromStorage(common.Hash{}, &types.Header{BlockAccessListHash: test.hash}, nil, nil, nil)
 
-	if _, err := blockAccessListBytes(getter, block, 1); err != nil {
-		t.Fatal(err)
-	}
-	if getter.calls != 0 {
-		t.Fatalf("unexpected DB reads: %d", getter.calls)
+			got, err := blockAccessListBytes(getter, block, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, test.wantBAL) {
+				t.Fatalf("block access list = %x, want %x", got, test.wantBAL)
+			}
+			if getter.calls != test.wantReads {
+				t.Fatalf("DB reads = %d, want %d", getter.calls, test.wantReads)
+			}
+		})
 	}
 }
