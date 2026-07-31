@@ -79,6 +79,16 @@ func TestFinalizedWritesLeavesVersionMapForApplyLoop(t *testing.T) {
 	require.Equal(t, 0, result.DepIdx())
 }
 
+func TestFinalizedWritesRequiresRules(t *testing.T) {
+	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
+	t.Cleanup(func() { ibs.Release(false) })
+	ibs.SetTxContext(1, 0)
+
+	writes, err := ibs.FinalizedWrites(nil)
+	require.Nil(t, writes)
+	require.ErrorContains(t, err, "chain rules")
+}
+
 func TestCreatedEmptyRequiresNoOtherWrites(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xe1})
 	newWrites := func() *WriteSet {

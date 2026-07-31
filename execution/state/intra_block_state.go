@@ -2612,6 +2612,9 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 
 // FinalizedWrites returns versioned writes after end-of-transaction filtering.
 func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules, deferredFeeAddrs ...accounts.Address) (*WriteSet, error) {
+	if chainRules == nil {
+		return nil, errors.New("chain rules are required to finalize versioned writes")
+	}
 	writes := sdb.versionedWrites.Finalize()
 	if err := sdb.clearEmptyAccounts(chainRules, deferredFeeAddrs, writes); err != nil {
 		writes.ReleaseAndReset()
@@ -2631,7 +2634,7 @@ func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules, deferredFee
 // removal. Withholding a created record stays safe — fee finalization
 // re-publishes the account it credits.
 func (sdb *IntraBlockState) clearEmptyAccounts(chainRules *chain.Rules, deferredFeeAddrs []accounts.Address, writes *WriteSet) error {
-	if sdb.blockNum == 0 || chainRules == nil {
+	if sdb.blockNum == 0 {
 		return nil
 	}
 	eip161 := chainRules.IsEIP161Enabled()
