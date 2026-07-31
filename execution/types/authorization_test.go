@@ -26,8 +26,8 @@ import (
 	"github.com/holiman/uint256"
 )
 
-// Tests that the correct signer is recovered from an Authorization object
-// The data here was obtained from a pectra devnet
+// The fixed vector verifies the signing preimage independently of
+// SignAuthorization, so a shared encoding mistake cannot make a round trip pass.
 func TestRecoverSigner(t *testing.T) {
 	t.Parallel()
 

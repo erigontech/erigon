@@ -37,9 +37,9 @@ func (ath *Authorization) copy() *Authorization {
 	}
 }
 
-// encodeSigningPayload writes the RLP list the authorization signature covers —
-// chainId, address, nonce — into data. buf is scratch space the caller reuses
-// across authorizations.
+// encodeSigningPayload writes rlp([chain_id, address, nonce]), the RLP portion
+// of an EIP-7702 authorization signing preimage. Hashing adds the magic prefix;
+// buf is scratch space for the RLP encoders.
 func encodeSigningPayload(chainID uint256.Int, address common.Address, nonce uint64, data *bytes.Buffer, buf []byte) error {
 	authLen := rlp.Uint256Len(chainID)
 	authLen += 1 + length.Addr
@@ -69,8 +69,10 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common
 	return RecoverSignerFromRLP(data.Bytes(), ath.YParity, ath.R, ath.S)
 }
 
-// SignAuthorization returns an authorization tuple delegating address, signed by
-// key — the counterpart to RecoverSigner.
+// SignAuthorization returns an EIP-7702 authorization that delegates the
+// signer's account to address. It signs the authorization preimage with key and
+// rejects a nil key or the maximum uint64 nonce, which cannot be incremented
+// during authorization processing.
 func SignAuthorization(key *ecdsa.PrivateKey, chainID uint256.Int, address common.Address, nonce uint64) (Authorization, error) {
 	if nonce == math.MaxUint64 {
 		return Authorization{}, errors.New("failed assertion: auth.nonce < 2**64 - 1")

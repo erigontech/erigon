@@ -622,6 +622,8 @@ func TestMultipleAuthorizations(t *testing.T) {
 	}
 }
 
+// The round trip verifies that SignAuthorization produces a tuple accepted by
+// the recovery path used for authorization validation.
 func TestRecoverSignerFromRLP_ValidData(t *testing.T) {
 	privateKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -636,7 +638,6 @@ func TestRecoverSignerFromRLP_ValidData(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, recoveredAddress)
 
-	// Verify the recovered address matches the original public key address
 	assert.Equal(t, pubKey, *recoveredAddress)
 }
 
