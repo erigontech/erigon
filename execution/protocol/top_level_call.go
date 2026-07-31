@@ -68,7 +68,7 @@ func PrepareTopLevelCall(evm *vm.EVM, destination accounts.Address, value uint25
 		if ibs.AddressInAccessList(delegatedTo) {
 			accessCost = params.WarmStorageReadCostEIP2929
 		}
-		if !mdgas.Consume(&gasRemaining, &gasUsed, accessCost, mdgas.RegularGas) {
+		if !mdgas.Consume(&gasRemaining, &gasUsed, accessCost, mdgas.ExecutionGas) {
 			return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
 		}
 	}
@@ -99,8 +99,8 @@ func RefillTopLevelGas(gasRemaining *mdgas.MdGas, gasUsed *mdgas.MdGasUsage, res
 	}
 	spill := gasUsed.StateSpill
 	mdgas.Refill(gasRemaining, gasUsed, uint64(gasUsed.State), mdgas.StateGas)
-	if !errors.Is(vmerr, vm.ErrExecutionReverted) && !mdgas.Consume(gasRemaining, gasUsed, spill, mdgas.RegularGas) {
-		panic("refilled state-gas spill exceeds regular gas")
+	if !errors.Is(vmerr, vm.ErrExecutionReverted) && !mdgas.Consume(gasRemaining, gasUsed, spill, mdgas.ExecutionGas) {
+		panic("refilled state-gas spill exceeds execution gas")
 	}
 }
 
@@ -111,13 +111,13 @@ func TraceTopLevelFailure(evm *vm.EVM, typ vm.OpCode, sender, recipient accounts
 	}
 	precompile := typ == vm.CALL && slices.Contains(vm.ActivePrecompiles(evm.ChainRules()), recipient)
 	if tracer.OnEnter != nil {
-		tracer.OnEnter(0, byte(typ), sender, recipient, precompile, input, startGas.Regular, value, nil)
+		tracer.OnEnter(0, byte(typ), sender, recipient, precompile, input, startGas.Execution, value, nil)
 	}
 	if tracer.OnGasChange != nil {
-		tracer.OnGasChange(0, startGas.Regular, tracing.GasChangeCallInitialBalance)
-		tracer.OnGasChange(startGas.Regular, gasRemaining.Regular, tracing.GasChangeCallFailedExecution)
+		tracer.OnGasChange(0, startGas.Execution, tracing.GasChangeCallInitialBalance)
+		tracer.OnGasChange(startGas.Execution, gasRemaining.Execution, tracing.GasChangeCallFailedExecution)
 	}
 	if tracer.OnExit != nil {
-		tracer.OnExit(0, nil, startGas.Regular-gasRemaining.Regular, vm.VMErrorFromErr(err), true)
+		tracer.OnExit(0, nil, startGas.Execution-gasRemaining.Execution, vm.VMErrorFromErr(err), true)
 	}
 }

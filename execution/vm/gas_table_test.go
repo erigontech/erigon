@@ -145,13 +145,13 @@ func TestEIP2200(t *testing.T) {
 			_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), w)
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, vm.Config{ExtraEips: []int{2200}})
 			mdGas := mdgas.MdGas{
-				Regular: tt.gaspool,
+				Execution: tt.gaspool,
 			}
 			_, gas, _, err := vmenv.Call(accounts.ZeroAddress, address, nil, mdGas, uint256.Int{}, false /* bailout */)
 			if !errors.Is(err, tt.failure) {
 				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 			}
-			if used := tt.gaspool - gas.Regular; used != tt.used {
+			if used := tt.gaspool - gas.Execution; used != tt.used {
 				t.Errorf("test %d: gas used mismatch: have %v, want %v", i, used, tt.used)
 			}
 			if refund := vmenv.IntraBlockState().GetRefund(); refund != tt.refund {
@@ -172,53 +172,53 @@ var eip8038SStoreTests = []struct {
 	// gas used in each dimension and the accumulated refund, computed from the
 	// EIP-8038 SSTORE matrix (cold slot 3000, STORAGE_WRITE 10000, per-slot state
 	// gas 97920, clear refund 12480, restore refund = STORAGE_WRITE).
-	usedRegular uint64
-	usedState   uint64
-	refund      uint64
+	usedExecution uint64
+	usedState     uint64
+	refund        uint64
 }{
 	{
 		// 0 -> 1: create slot. cold access + STORAGE_WRITE, plus per-slot state gas.
-		name:        "create slot",
-		original:    0,
-		input:       "0x6001600055",
-		usedRegular: 2*push1 + params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038,
-		usedState:   params.StateGasPerStorageSet,
+		name:          "create slot",
+		original:      0,
+		input:         "0x6001600055",
+		usedExecution: 2*push1 + params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038,
+		usedState:     params.StateGasPerStorageSet,
 	},
 	{
-		// 1 -> 0: delete slot. cold access + STORAGE_WRITE regular, 12480 clear refund.
-		name:        "delete slot adds clear refund",
-		original:    1,
-		input:       "0x6000600055",
-		usedRegular: 2*push1 + params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038,
-		refund:      12480, // REFUND_STORAGE_CLEAR
+		// 1 -> 0: delete slot. cold access + STORAGE_WRITE execution, 12480 clear refund.
+		name:          "delete slot adds clear refund",
+		original:      1,
+		input:         "0x6000600055",
+		usedExecution: 2*push1 + params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038,
+		refund:        12480, // REFUND_STORAGE_CLEAR
 	},
 	{
 		// 1 -> 2 -> 1: reset to original (existing) refunds the full STORAGE_WRITE.
-		name:        "reset to original refunds storage write",
-		original:    1,
-		input:       "0x60026000556001600055",
-		usedRegular: 4*push1 + params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038 + params.WarmStorageReadCostEIP2929,
-		refund:      10000, // full STORAGE_WRITE
+		name:          "reset to original refunds storage write",
+		original:      1,
+		input:         "0x60026000556001600055",
+		usedExecution: 4*push1 + params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038 + params.WarmStorageReadCostEIP2929,
+		refund:        10000, // full STORAGE_WRITE
 	},
 	{
 		// 1 -> 1: no-op still pays the cold slot access (slot warmed before the check).
-		name:        "noop pays cold access",
-		original:    1,
-		input:       "0x6001600055",
-		usedRegular: 2*push1 + params.ColdStorageAccessCostEIP8038,
+		name:          "noop pays cold access",
+		original:      1,
+		input:         "0x6001600055",
+		usedExecution: 2*push1 + params.ColdStorageAccessCostEIP8038,
 	},
 	{
 		// 0 -> 1 -> 2: dirty update after a same-tx create; second write is warm, no refund.
-		name:        "dirty update after create",
-		original:    0,
-		input:       "0x60016000556002600055",
-		usedRegular: 4*push1 + params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038 + params.WarmStorageReadCostEIP2929,
-		usedState:   params.StateGasPerStorageSet,
+		name:          "dirty update after create",
+		original:      0,
+		input:         "0x60016000556002600055",
+		usedExecution: 4*push1 + params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038 + params.WarmStorageReadCostEIP2929,
+		usedState:     params.StateGasPerStorageSet,
 	},
 }
 
 // TestEIP8038SStore pins the EIP-8038 SSTORE gas matrix (repriced cold access and
-// STORAGE_WRITE, the split regular/state dimensions on slot creation, and the 12480
+// STORAGE_WRITE, the split execution/state dimensions on slot creation, and the 12480
 // clear / full STORAGE_WRITE restore refunds) so a regression in any of those
 // constants surfaces here. Behaviour is already validated end-to-end by the devnet
 // spec shards; this locks it in cheaply at the unit level.
@@ -244,10 +244,10 @@ func TestEIP8038SStore(t *testing.T) {
 			}
 			_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{})
-			pool := mdgas.MdGas{Regular: 10_000_000, State: 10_000_000}
+			pool := mdgas.MdGas{Execution: 10_000_000, State: 10_000_000}
 			_, gas, _, err := vmenv.Call(accounts.ZeroAddress, address, nil, pool, uint256.Int{}, false /* bailout */)
 			require.NoError(t, err)
-			require.Equal(t, tt.usedRegular, pool.Regular-gas.Regular, "regular gas used")
+			require.Equal(t, tt.usedExecution, pool.Execution-gas.Execution, "execution gas used")
 			require.Equal(t, tt.usedState, pool.State-gas.State, "state gas used")
 			require.Equal(t, tt.refund, vmenv.IntraBlockState().GetRefund(), "refund")
 		})
@@ -297,7 +297,7 @@ func TestEIP7928SStoreReadRequiresAffordableAccess(t *testing.T) {
 				accounts.ZeroAddress,
 				contract,
 				nil,
-				mdgas.MdGas{Regular: 2*push1 + tt.gas},
+				mdgas.MdGas{Execution: 2*push1 + tt.gas},
 				uint256.Int{},
 				false,
 			)
@@ -325,7 +325,7 @@ func TestEIP7928SystemCallReadsAbsentTarget(t *testing.T) {
 		params.SystemAddress,
 		target,
 		nil,
-		mdgas.MdGas{Regular: math.MaxUint64 - params.StateGasSystemMaxSstores, State: params.StateGasSystemMaxSstores},
+		mdgas.MdGas{Execution: math.MaxUint64 - params.StateGasSystemMaxSstores, State: params.StateGasSystemMaxSstores},
 		uint256.Int{},
 		false,
 	)
@@ -339,7 +339,7 @@ func TestEIP7928SystemCallReadsAbsentTarget(t *testing.T) {
 }
 
 // TestCallNewAccountSpillBefore63of64 pins the EIP-8037 charge order for a value
-// CALL to a dead account: the NEW_ACCOUNT state charge (spilling into regular gas
+// CALL to a dead account: the NEW_ACCOUNT state charge (spilling into execution gas
 // when the reservoir can't cover it) is applied before the 63/64 child allowance,
 // per EELS amsterdam call(). With the reverse order a caller forwarding ~all gas
 // would OOG the whole frame on the spill.
@@ -356,27 +356,27 @@ func TestCallNewAccountSpillBefore63of64(t *testing.T) {
 	// pre-CALL opcodes 20, warm base 100, cold access 2900, CALL_VALUE 10300,
 	// tail 15; NEW_ACCOUNT 183600; empty callee returns callGas + 2300 stipend.
 	for _, tt := range []struct {
-		name            string
-		pool            mdgas.MdGas
-		leftoverRegular uint64
-		leftoverState   uint64
+		name              string
+		pool              mdgas.MdGas
+		leftoverExecution uint64
+		leftoverState     uint64
 	}{
 		{
-			// zero reservoir → full NEW_ACCOUNT spills to regular.
+			// zero reservoir → full NEW_ACCOUNT spills to execution.
 			// base = 500000-20-100-2900-10300-183600 = 303080; callGas = 303080 - 303080/64 = 298345;
 			// leftover = 4735 + 298345 + 2300 - 15 = 305365.
-			name:            "zero reservoir, full spill",
-			pool:            mdgas.MdGas{Regular: 500_000, State: 0},
-			leftoverRegular: 305_365,
-			leftoverState:   0,
+			name:              "zero reservoir, full spill",
+			pool:              mdgas.MdGas{Execution: 500_000, State: 0},
+			leftoverExecution: 305_365,
+			leftoverState:     0,
 		},
 		{
 			// funded reservoir → no spill; base = 500000-20-100-13200 = 486680;
 			// callGas = 486680 - 486680/64 = 479076; leftover = 7604 + 479076 + 2300 - 15 = 488965.
-			name:            "funded reservoir, no spill",
-			pool:            mdgas.MdGas{Regular: 500_000, State: 200_000},
-			leftoverRegular: 488_965,
-			leftoverState:   200_000 - 183_600,
+			name:              "funded reservoir, no spill",
+			pool:              mdgas.MdGas{Execution: 500_000, State: 200_000},
+			leftoverExecution: 488_965,
+			leftoverState:     200_000 - 183_600,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -402,7 +402,7 @@ func TestCallNewAccountSpillBefore63of64(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, ret, 32)
 			require.Equal(t, byte(1), ret[31])
-			require.Equal(t, tt.leftoverRegular, gas.Regular)
+			require.Equal(t, tt.leftoverExecution, gas.Execution)
 			require.Equal(t, tt.leftoverState, gas.State)
 			exists, err := vmenv.IntraBlockState().Exist(callee)
 			require.NoError(t, err)
@@ -450,7 +450,7 @@ func TestCreate2OntoExistingAccountSkipsNewAccountCharge(t *testing.T) {
 		},
 	}
 	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{Tracer: hooks})
-	ret, _, _, err := vmenv.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Regular: 500_000}, uint256.Int{}, false)
+	ret, _, _, err := vmenv.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Execution: 500_000}, uint256.Int{}, false)
 	require.NoError(t, err)
 	require.Equal(t, target.Value(), common.BytesToAddress(ret))
 	require.Equal(t, availableCreateGas-availableCreateGas/64, enteredCreateGas)
@@ -466,12 +466,12 @@ func TestCreate2OntoStorageOnlyAccountChargesBeforeCollision(t *testing.T) {
 	}{
 		{
 			name:    "charge out of gas",
-			pool:    mdgas.MdGas{Regular: 100_000},
+			pool:    mdgas.MdGas{Execution: 100_000},
 			wantErr: vm.ErrOutOfGas,
 		},
 		{
 			name:       "collision refills charge",
-			pool:       mdgas.MdGas{Regular: 500_000, State: 200_000},
+			pool:       mdgas.MdGas{Execution: 500_000, State: 200_000},
 			wantFrames: 1,
 		},
 	} {
@@ -593,7 +593,7 @@ func TestCreateTraceOnEarlyFailure(t *testing.T) {
 					},
 				}
 				vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, tt.config, vm.Config{Tracer: hooks})
-				_, _, _, err = vmenv.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Regular: 500_000}, uint256.Int{}, false)
+				_, _, _, err = vmenv.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Execution: 500_000}, uint256.Int{}, false)
 				require.NoError(t, err)
 				require.NotZero(t, availableCreateGas)
 				if !tt.forwarded {
@@ -629,9 +629,9 @@ func TestCreatePropagatesAmsterdamPreparationError(t *testing.T) {
 		},
 	}
 	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, statedb, chain.AllProtocolChanges, vm.Config{})
-	_, gasRemaining, _, err := vmenv.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Regular: 500_000}, uint256.Int{}, false)
+	_, gasRemaining, _, err := vmenv.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Execution: 500_000}, uint256.Int{}, false)
 	require.ErrorIs(t, err, backendErr)
-	require.Zero(t, gasRemaining.Regular)
+	require.Zero(t, gasRemaining.Execution)
 }
 
 func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
@@ -679,7 +679,7 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 						_, _, _, _, overlayErr = evmRef.OverlayCreate(
 							from,
 							vm.NewCodeAndHash(replacementCreationCode),
-							mdgas.MdGas{Regular: 400_000},
+							mdgas.MdGas{Execution: 400_000},
 							value,
 							to,
 							vm.CREATE2,
@@ -694,7 +694,7 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 					tt.config,
 					vm.Config{Tracer: hooks},
 				)
-				ret, _, _, err := evmRef.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Regular: 1_000_000}, uint256.Int{}, false)
+				ret, _, _, err := evmRef.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Execution: 1_000_000}, uint256.Int{}, false)
 				require.NoError(t, err)
 				require.NoError(t, overlayErr)
 				require.True(t, capturing)
@@ -760,13 +760,13 @@ func TestCreateGas(t *testing.T) {
 
 		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, config)
 		startGas := mdgas.MdGas{
-			Regular: math.MaxUint64,
+			Execution: math.MaxUint64,
 		}
 		_, gas, _, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)
 		if err != nil {
 			t.Errorf("test %d execution failed: %v", i, err)
 		}
-		if gasUsed := startGas.Regular - gas.Regular; gasUsed != tt.gasUsed {
+		if gasUsed := startGas.Execution - gas.Execution; gasUsed != tt.gasUsed {
 			t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
 		}
 		domains.Close()
@@ -807,7 +807,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), w)
 
 	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, vm.Config{})
-	_, _, _, err = vmenv.Call(params.SystemAddress, address, nil, mdgas.MdGas{Regular: math.MaxUint64}, uint256.Int{}, false /* bailout */)
+	_, _, _, err = vmenv.Call(params.SystemAddress, address, nil, mdgas.MdGas{Execution: math.MaxUint64}, uint256.Int{}, false /* bailout */)
 	require.NoError(t, err)
 	require.False(t, canTransferCalled, "CanTransfer should be skipped for zero-value system calls")
 	require.False(t, transferCalled, "Transfer should be skipped for zero-value system calls")

@@ -126,7 +126,7 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 		log.Error("Type assertion failure", "err", "cannot get CallContext from contextPool")
 	}
 
-	ctx.gas = gas.Regular
+	ctx.gas = gas.Execution
 	ctx.stateGas = gas.State
 	ctx.stateGasSpill = 0
 	ctx.newAccountCharged = false
@@ -167,7 +167,7 @@ func (c *CallContext) useGas(gas uint64, tracer *tracing.Hooks, reason tracing.G
 func (c *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
 	remaining, stateSpill, ok := useMdGas(c.Gas(), gas, t, tracer, reason)
 	if ok {
-		c.gas = remaining.Regular
+		c.gas = remaining.Execution
 		c.stateGas = remaining.State
 		c.stateGasSpill += stateSpill
 	}
@@ -178,7 +178,7 @@ func (c *CallContext) refillStateGas(amount uint64) {
 	remaining := c.Gas()
 	used := mdgas.MdGasUsage{State: int64(amount), StateSpill: c.stateGasSpill}
 	mdgas.Refill(&remaining, &used, amount, mdgas.StateGas)
-	c.gas = remaining.Regular
+	c.gas = remaining.Execution
 	c.stateGas = remaining.State
 	c.stateGasSpill = used.StateSpill
 }
@@ -202,7 +202,7 @@ func useMdGas(initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, tracer *tracin
 		return initial, 0, false
 	}
 	if tracer != nil && tracer.OnGasChange != nil && reason != tracing.GasChangeIgnored {
-		before, after := initial.Regular, remaining.Regular
+		before, after := initial.Execution, remaining.Execution
 		if t == mdgas.StateGas && used.StateSpill == 0 {
 			before, after = initial.State, remaining.State
 		}
@@ -268,8 +268,8 @@ func (ctx *CallContext) CodeHash() accounts.CodeHash {
 
 func (ctx *CallContext) Gas() mdgas.MdGas {
 	return mdgas.MdGas{
-		Regular: ctx.gas,
-		State:   ctx.stateGas,
+		Execution: ctx.gas,
+		State:     ctx.stateGas,
 	}
 }
 
@@ -281,15 +281,15 @@ func (ctx *CallContext) Gas() mdgas.MdGas {
 // balance) preserve gasRemaining.State so the reservoir is returned intact.
 func (ctx *CallContext) restoreChildGas(returnGas mdgas.MdGas, tracer *tracing.Hooks) {
 	ctx.stateGas = returnGas.State
-	ctx.refundGas(returnGas.Regular, tracer, tracing.GasChangeCallLeftOverRefunded)
+	ctx.refundGas(returnGas.Execution, tracer, tracing.GasChangeCallLeftOverRefunded)
 }
 
 // callGas builds the MdGas to pass to a child CALL frame from the
 // pre-computed callGasTemp (63/64 rule) and the current state reservoir.
 func (ctx *CallContext) callGas(evm *EVM) mdgas.MdGas {
 	return mdgas.MdGas{
-		Regular: evm.CallGasTemp(),
-		State:   ctx.stateGas,
+		Execution: evm.CallGasTemp(),
+		State:     ctx.stateGas,
 	}
 }
 
@@ -416,7 +416,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		// state-gas usage from the reservoir delta before callContext.put()
 		// clears them. A state charge lowers stateGas (or raises stateGasSpill
 		// on spill) and a refill reverses it, so the net used (signed) is
-		// (initialReservoir - stateGas) + stateGasSpill. gasUsed.Regular is
+		// (initialReservoir - stateGas) + stateGasSpill. gasUsed.Execution is
 		// derived uniformly by evm.call/evm.create's defer from the final
 		// gasRemaining (covers precompile/no-code paths and the revert burn).
 		gasUsed.StateSpill = callContext.stateGasSpill
@@ -508,24 +508,24 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
 			}
 			if anyTrace {
-				cost += dynamicCost.Regular
-				callGas = operation.constantGas + dynamicCost.Regular - evm.CallGasTemp()
-				if dbg.TraceDynamicGas && dynamicCost.Regular > 0 {
+				cost += dynamicCost.Execution
+				callGas = operation.constantGas + dynamicCost.Execution - evm.CallGasTemp()
+				if dbg.TraceDynamicGas && dynamicCost.Execution > 0 {
 					fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), traceGas(op, callGas, cost), op)
 				}
 			}
-			// EIP-8037: "Regular gas charge MUST be applied first. If the regular
+			// EIP-8037: "Execution gas charge MUST be applied first. If the execution
 			// gas charge triggers an out-of-gas error, the state gas charge is
-			// not applied." Deduct regular gas before state gas so that any
-			// state-to-regular spill operates on the already-reduced balance.
-			if callContext.gas < dynamicCost.Regular {
+			// not applied." Deduct execution gas before state gas so that any
+			// state-to-execution spill operates on the already-reduced balance.
+			if callContext.gas < dynamicCost.Execution {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
-			callContext.gas -= dynamicCost.Regular
+			callContext.gas -= dynamicCost.Execution
 			if dynamicCost.State > 0 {
 				// Note: do NOT add dynamicCost.State to `cost` here.
 				// `cost` is only used for tracing and is compared against `gasCopy`
-				// which captures only regular gas. Adding state gas would cause
+				// which captures only execution gas. Adding state gas would cause
 				// uint64 underflow in the OnGasChange(gasCopy, gasCopy-cost, ...) call below.
 				// State gas is charged separately via useMdGas.
 				ok := callContext.useMdGas(dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
