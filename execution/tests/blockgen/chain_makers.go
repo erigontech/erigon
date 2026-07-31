@@ -148,7 +148,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	}
 
 	if b.ibs.IsVersioned() {
-		writes := b.ibs.VersionedWrites()
+		writes := b.ibs.FinalizedWrites(b.blockRules())
 		if b.blockIO != nil {
 			b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
 			b.blockIO.RecordWrites(txVersion, writes)
@@ -159,6 +159,13 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 
 	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
+}
+
+func (b *BlockGen) blockRules() *chain.Rules {
+	blockContext := protocol.NewEVMBlockContext(
+		b.header, protocol.GetHashFn(b.header, nil), b.engine, accounts.NilAddress, b.config,
+	)
+	return blockContext.Rules(b.config)
 }
 
 func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number uint64) (*types.Header, error), engine rules.Engine, txn types.Transaction) {
@@ -523,7 +530,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// Record system call I/O into blockIO for BAL computation
 			if ibs.IsVersioned() && b.blockIO != nil {
 				initVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: -1}
-				writes := ibs.VersionedWrites()
+				writes := ibs.FinalizedWrites(b.blockRules())
 				b.blockIO.RecordReads(initVersion, ibs.VersionedReads())
 				b.blockIO.RecordWrites(initVersion, writes)
 				if b.versionMap != nil {
@@ -549,6 +556,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// Reset versioned I/O before finalize to capture system call I/O cleanly
 			if ibs.IsVersioned() {
 				ibs.ResetVersionedIO()
+				ibs.StartAccessRecording()
 			}
 			// Finalize and seal the block
 			syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
@@ -562,7 +570,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// Record finalize system call I/O into blockIO for BAL computation
 			if ibs.IsVersioned() && b.blockIO != nil {
 				finalizeVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
-				writes := ibs.VersionedWrites()
+				writes := ibs.FinalizedWrites(b.blockRules())
 				b.blockIO.RecordReads(finalizeVersion, ibs.VersionedReads())
 				b.blockIO.RecordWrites(finalizeVersion, writes)
 				if b.versionMap != nil {

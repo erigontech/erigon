@@ -2098,51 +2098,6 @@ func (writes *WriteSet) StripBalanceWrite(addr accounts.Address, readSet ReadSet
 	return
 }
 
-// SetAccountBalanceOrDelete replaces the BalancePath write for addr. If the
-// address has no existing writes in the set, all four account fields (balance,
-// nonce, incarnation, codeHash) are emitted so that applyVersionedWrites can
-// reconstruct a complete account. Without the full set, it would create an
-// account with nonce=0, incarnation=0, empty codeHash — wiping the real values.
-//
-// When emptyRemoval is true (EIP-161 SpuriousDragon), if the final account
-// would be empty (balance=0, nonce=0, empty code), the existing writes for
-// this address are stripped and a SelfDestructPath entry is emitted instead.
-func (writes *WriteSet) SetAccountBalanceOrDelete(addr accounts.Address, acc *accounts.Account, val uint256.Int, reason tracing.BalanceChangeReason, emptyRemoval bool) *WriteSet {
-	if writes == nil {
-		writes = &WriteSet{}
-	}
-	if acc == nil {
-		a := accounts.NewAccount()
-		acc = &a
-	}
-
-	// EIP-161: if the final account is empty, delete it.
-	if emptyRemoval && val.IsZero() && acc.Nonce == 0 && acc.IsEmptyCodeHash() {
-		writes.deleteAddr(addr)
-		writes.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath}, Val: true})
-		return writes
-	}
-
-	if bw, ok := writes.balance[addr]; ok {
-		bw.Val = val
-		bw.Reason = reason
-		return writes
-	}
-	if writes.hasAddr(addr) {
-		// The worker already wrote another field for this addr (e.g. Nonce on a
-		// miner self-send where sender == coinbase); append only Balance so the
-		// pre-block snapshot acc does not clobber those post-execution writes.
-		writes.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Reason: reason}, Val: val})
-		return writes
-	}
-	// Account not in writes — emit complete account fields.
-	writes.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Reason: reason}, Val: val})
-	writes.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: acc.Nonce})
-	writes.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath}, Val: acc.Incarnation})
-	writes.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath}, Val: acc.CodeHash})
-	return writes
-}
-
 // note that TxIndex starts at -1 (the begin system tx)
 type VersionedIO struct {
 	inputs  []versionedReadSet
@@ -2916,13 +2871,12 @@ func GetDep(deps *VersionedIO) map[int]map[int]bool {
 	return newDependencies
 }
 
-func (s *WriteSet) accountAfterWrites(addr accounts.Address, account accounts.Account) (accounts.Account, bool) {
-	if written, ok := s.address[addr]; ok {
-		if written.Val == nil {
-			return accounts.Account{}, false
-		}
-		account = *written.Val
+func (s *WriteSet) createdEmpty(addr accounts.Address) bool {
+	created, ok := s.address[addr]
+	if !ok || created.Val == nil {
+		return false
 	}
+	account := *created.Val
 	if written, ok := s.balance[addr]; ok {
 		account.Balance = written.Val
 	}
@@ -2932,28 +2886,13 @@ func (s *WriteSet) accountAfterWrites(addr accounts.Address, account accounts.Ac
 	if written, ok := s.codeHash[addr]; ok {
 		account.CodeHash = written.Val
 	}
-	return account, true
-}
-
-// createdEmpty reports whether these writes create addr and leave it empty, with
-// nothing else recorded against it. The AddressPath write carries the account as
-// created, so overlaying the field writes gives its end-of-tx value; anything
-// beyond those fields — code, storage, a creation or destruction marker — would
-// be orphaned by withholding the record, so it disqualifies addr instead.
-func (s *WriteSet) createdEmpty(addr accounts.Address) bool {
-	if s == nil {
-		return false
-	}
-	created, ok := s.address[addr]
-	if !ok || created.Val == nil {
-		return false
-	}
-	account, ok := s.accountAfterWrites(addr, *created.Val)
-	if !ok || !account.Empty() {
+	if !account.Empty() {
 		return false
 	}
 	_, hasCode := s.code[addr]
+	_, hasIncarnation := s.incarnation[addr]
 	_, destroyed := s.selfDestruct[addr]
 	_, createdContract := s.createContract[addr]
-	return !hasCode && !destroyed && !createdContract && len(s.storage[addr]) == 0
+	_, hasCodeSize := s.codeSize[addr]
+	return !hasCode && !hasIncarnation && !destroyed && !createdContract && !hasCodeSize && len(s.storage[addr]) == 0
 }

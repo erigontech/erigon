@@ -113,14 +113,6 @@ type TxResult struct {
 
 	TraceFroms map[accounts.Address]struct{}
 	TraceTos   map[accounts.Address]struct{}
-
-	// CollectorWrites holds collector-format writes (all 4 account fields per
-	// address) produced during worker execution, with fee-calc balance
-	// adjustments folded in during finalize. It is not the commit source — the
-	// parallel commit builds its write set from the versionMap — so this is
-	// vestigial and slated for removal once the last self-referential fee update
-	// is dropped.
-	CollectorWrites *state.WriteSet
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -619,10 +611,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		// write-set is not applied for it, so keep genesis on the MakeWriteSet path.
 		isGenesis := txTask.TxIndex == -1 && txTask.BlockNumber() == 0
 		if ibs.IsVersioned() && !isGenesis {
-			result.TxOut, result.Err = finalizedWrites(ibs, rules, evm.Context.Coinbase, result.ExecutionResult.BurntContractAddress)
-			if result.Err != nil {
-				return &result
-			}
+			result.TxOut = ibs.FinalizedWrites(rules)
 		} else {
 			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 				panic(err)
@@ -636,32 +625,12 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	return &result
 }
 
-// finalizedWrites turns a dependency raised while building the write-set into a
-// retryable abort. The recover in TxnExecutor.Execute covers message execution
-// only, so a stale read found here would otherwise reach the worker as a fatal
-// task panic instead of re-executing the tx against its blocker.
-func finalizedWrites(ibs *state.IntraBlockState, rules *chain.Rules, deferredFeeAddrs ...accounts.Address) (writes *state.WriteSet, err error) {
-	defer func() {
-		rec := recover()
-		if rec == nil {
-			return
-		}
-		if rec != state.ErrDependency {
-			panic(rec)
-		}
-		err = protocol.ErrExecAbortError{
-			DependencyTxIndex: ibs.DepTxIndex(),
-		}
-	}()
-	return ibs.FinalizedWrites(rules, deferredFeeAddrs...)
-}
-
 func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	evm *vm.EVM,
 	gasPool *protocol.GasPool,
 	ibs *state.IntraBlockState,
 	chainConfig *chain.Config) *TxResult {
-	result := TxResult{Coinbase: evm.Context.Coinbase}
+	var result TxResult
 
 	if !txTask.InBatch {
 		// this is the first transaction in an AA transaction batch, run all validation frames, then execute execution frames in its own txtask

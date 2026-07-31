@@ -33,9 +33,7 @@ func TestOldIncarnationStorageMaskedAfterRecreate(t *testing.T) {
 		ibs.SetVersion(0)
 		ibs.SetNoMaterialize(true)
 		f(ibs)
-		writes, err := ibs.FinalizedWrites(&chain.Rules{})
-		require.NoError(t, err)
-		vm.FlushVersionedWrites(writes, true, "")
+		vm.FlushVersionedWrites(ibs.FinalizedWrites(&chain.Rules{}), true, "")
 	}
 
 	runTx(0, func(ibs *IntraBlockState) {

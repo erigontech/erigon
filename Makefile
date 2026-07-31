@@ -141,7 +141,7 @@ validate_docker_build_args:
 	fi
 	@echo "✔️ host OS user exists: $(shell id -nu $(DOCKER_UID))"
 
-## docker:                            validate, update submodules and build with docker
+## docker:                            validate and build with docker
 docker: 
 	DOCKER_BUILDKIT=1 $(DOCKER) build -t ${DOCKER_TAG} \
 		--build-arg "BUILD_DATE=$(shell date +"%Y-%m-%dT%H:%M:%S:%z")" \
@@ -268,6 +268,11 @@ test-fixtures-eest:
 .PHONY: test-fixtures-zkevm
 test-fixtures-zkevm:
 	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_zkevm
+
+## test-fixtures-legacy:                download & extract the pinned legacy execution-test tarballs
+.PHONY: test-fixtures-legacy
+test-fixtures-legacy:
+	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache legacy_tests legacy_cancun
 
 # EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest, zkevmtest)
 # against EEST fixtures. The shard list, workers, and failure budgets live in
@@ -518,9 +523,6 @@ $(GOBINREL)/protoc-gen-go: | $(GOBINREL)
 $(GOBINREL)/protoc-gen-go-grpc: | $(GOBINREL)
 	$(GOINSTALL) google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
-$(PROTO_PATH):
-	git submodule update --init $@
-
 protoc-all: $(GOBINREL)/protoc $(PROTOC_INCLUDE) $(GOBINREL)/protoc-gen-go $(GOBINREL)/protoc-gen-go-grpc
 
 protoc-clean:
@@ -624,15 +626,6 @@ prometheus:
 ## escape:                            run escape path={path} to check for memory leaks e.g. run escape path=cmd/erigon
 escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
-
-## git-submodules:                    update git submodules
-git-submodules:
-	@[ -d ".git" ] || (echo "Not a git repository" && exit 1)
-	@echo "Updating git submodules"
-	@# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
-	@# these lines will also fail if ran as root in a non-root user's checked out repository
-	@git submodule sync --quiet --recursive || true
-	@git submodule update --quiet --init --recursive --force || true
 
 ## install:                            copies binaries and libraries to DIST
 DIST ?= $(CURDIR)/build/dist

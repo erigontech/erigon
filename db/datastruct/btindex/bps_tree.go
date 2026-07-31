@@ -51,8 +51,8 @@ type indexSeekerIterator interface {
 type dataLookupFunc func(di uint64, g *seg.Reader) ([]byte, []byte, uint64, error)
 
 // M limits amount of child for tree node.
-func NewBpsTree(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc) *BpsTree {
-	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup}
+func NewBpsTree(kv *seg.Reader, offt *eliasfano32.EliasFano, m uint64, dataLookup dataLookupFunc) *BpsTree {
+	bt := &BpsTree{M: m, offt: offt, dataLookupFunc: dataLookup}
 	if err := bt.WarmUp(kv); err != nil {
 		panic(err)
 	}
@@ -62,8 +62,8 @@ func NewBpsTree(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLooku
 // "assert key behind offset == to stored key in bt"
 var envAssertBTKeys = dbg.EnvBool("BT_ASSERT_OFFSETS", false)
 
-func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keysBlob []byte, nodeOfftEF *eliasfano32.EliasFano, nodeStride uint64) *BpsTree {
-	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup, keysBlob: keysBlob, nodeOfftEF: nodeOfftEF, nodeStride: nodeStride}
+func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, m uint64, dataLookup dataLookupFunc, keysBlob []byte, nodeOfftEF *eliasfano32.EliasFano, nodeStride uint64) *BpsTree {
+	bt := &BpsTree{M: m, offt: offt, dataLookupFunc: dataLookup, keysBlob: keysBlob, nodeOfftEF: nodeOfftEF, nodeStride: nodeStride}
 	if envAssertBTKeys {
 		for i := range bt.numNodes() {
 			if cmp := bt.compareKey(kv, bt.nodeKey(i), bt.nodeDi(i)); cmp != 0 {

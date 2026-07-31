@@ -110,16 +110,15 @@ type testFinalizeScenario struct {
 	// Pre-existing account state (what the state reader returns).
 	accts map[accounts.Address]*accounts.Account
 	// Execution reads/writes and fees.
-	txIn            state.ReadSet
-	txOut           *state.WriteSet
-	collectorWrites *state.WriteSet
-	feeTipped       uint256.Int
-	feeBurnt        uint256.Int
-	coinbase        accounts.Address
-	burntAddr       accounts.Address
-	rules           *chain.Rules
-	config          *chain.Config
-	header          *types.Header
+	txIn      state.ReadSet
+	txOut     *state.WriteSet
+	feeTipped uint256.Int
+	feeBurnt  uint256.Int
+	coinbase  accounts.Address
+	burntAddr accounts.Address
+	rules     *chain.Rules
+	config    *chain.Config
+	header    *types.Header
 	// txs is optional: when set, buildExecResult attaches it to the TxTask
 	// so finalizeTxSimple's TxMessage().From() call returns the signer's
 	// derived sender. Required for senderIsCoinbase test coverage.
@@ -354,18 +353,6 @@ func simpleTransferScenario() *testFinalizeScenario {
 	txOut.SetNonce(sender, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath}, Val: uint64(1)})
 	txOut.SetBalance(recipient, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: recipient, Path: state.BalancePath, Reason: tracing.BalanceChangeTransfer}, Val: *newRecipientBal})
 
-	// CollectorWrites: LightCollector output from MakeWriteSet.
-	// No coinbase (not touched during execution).
-	collectorWrites := &state.WriteSet{}
-	collectorWrites.SetBalance(sender, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: sender, Path: state.BalancePath}, Val: *newSenderBal})
-	collectorWrites.SetNonce(sender, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath}, Val: uint64(1)})
-	collectorWrites.SetIncarnation(sender, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: sender, Path: state.IncarnationPath}, Val: uint64(1)})
-	collectorWrites.SetCodeHash(sender, &state.VersionedWrite[accounts.CodeHash]{WriteHeader: state.WriteHeader{Address: sender, Path: state.CodeHashPath}, Val: accounts.EmptyCodeHash})
-	collectorWrites.SetBalance(recipient, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: recipient, Path: state.BalancePath}, Val: *newRecipientBal})
-	collectorWrites.SetNonce(recipient, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: recipient, Path: state.NoncePath}, Val: uint64(0)})
-	collectorWrites.SetIncarnation(recipient, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: recipient, Path: state.IncarnationPath}, Val: uint64(1)})
-	collectorWrites.SetCodeHash(recipient, &state.VersionedWrite[accounts.CodeHash]{WriteHeader: state.WriteHeader{Address: recipient, Path: state.CodeHashPath}, Val: accounts.EmptyCodeHash})
-
 	return &testFinalizeScenario{
 		name: "simple_transfer_pre_london",
 		accts: map[accounts.Address]*accounts.Account{
@@ -373,14 +360,13 @@ func simpleTransferScenario() *testFinalizeScenario {
 			recipient: fMakeAccount(recipientBal.Uint64(), 0),
 			coinbase:  fMakeAccount(0, 0),
 		},
-		txIn:            txIn,
-		txOut:           txOut,
-		collectorWrites: collectorWrites,
-		feeTipped:       *tip,
-		coinbase:        coinbase,
-		burntAddr:       accounts.NilAddress,
-		rules:           rules,
-		config:          config,
+		txIn:      txIn,
+		txOut:     txOut,
+		feeTipped: *tip,
+		coinbase:  coinbase,
+		burntAddr: accounts.NilAddress,
+		rules:     rules,
+		config:    config,
 		header: &types.Header{
 			Number:   *uint256.NewInt(1),
 			GasLimit: 30_000_000,
@@ -413,10 +399,8 @@ func londonTransferScenario() *testFinalizeScenario {
 	return s
 }
 
-// senderIsCoinbaseScenario builds a scenario where sender == coinbase (via
-// a real signed tx so finalizeTxSimple's TxMessage().From() == result.Coinbase
-// check returns true). The TxOut and CollectorWrites shapes are minimal
-// baselines — each test customizes them to exercise its specific case.
+// senderIsCoinbaseScenario builds a scenario where the transaction sender is
+// also the fee recipient. Tests add the TxOut balance shape they need.
 //
 // preBlockCoinbaseBal is the pre-block coinbase balance written into the
 // reader's accts map. tip is the FeeTipped value the worker-skipped tip
@@ -476,13 +460,6 @@ func senderIsCoinbaseScenario(t *testing.T, value uint64, preBlockCoinbaseBal ui
 	txOut := &state.WriteSet{}
 	txOut.SetNonce(coinbase, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: coinbase, Path: state.NoncePath}, Val: uint64(1)})
 
-	// Baseline CollectorWrites: matches TxOut by default. Tests customise
-	// to exercise the senderIsCoinbase discriminator.
-	collectorWrites := &state.WriteSet{}
-	collectorWrites.SetNonce(coinbase, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: coinbase, Path: state.NoncePath}, Val: uint64(1)})
-	collectorWrites.SetIncarnation(coinbase, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: coinbase, Path: state.IncarnationPath}, Val: uint64(1)})
-	collectorWrites.SetCodeHash(coinbase, &state.VersionedWrite[accounts.CodeHash]{WriteHeader: state.WriteHeader{Address: coinbase, Path: state.CodeHashPath}, Val: accounts.EmptyCodeHash})
-
 	// Baseline TxIn: sender (=coinbase) balance + nonce reads.
 	txIn := state.ReadSet{}
 	txIn.SetAddress(coinbase, state.VersionedRead[state.AccountView]{Val: state.NewAccountView(fMakeAccount(preBlockCoinbaseBal, 0))})
@@ -494,16 +471,15 @@ func senderIsCoinbaseScenario(t *testing.T, value uint64, preBlockCoinbaseBal ui
 		accts: map[accounts.Address]*accounts.Account{
 			coinbase: fMakeAccount(preBlockCoinbaseBal, 0),
 		},
-		txIn:            txIn,
-		txOut:           txOut,
-		collectorWrites: collectorWrites,
-		feeTipped:       *uint256.NewInt(tip),
-		coinbase:        coinbase,
-		burntAddr:       accounts.NilAddress,
-		rules:           rules,
-		config:          config,
-		header:          header,
-		txs:             []types.Transaction{signed},
+		txIn:      txIn,
+		txOut:     txOut,
+		feeTipped: *uint256.NewInt(tip),
+		coinbase:  coinbase,
+		burntAddr: accounts.NilAddress,
+		rules:     rules,
+		config:    config,
+		header:    header,
+		txs:       []types.Transaction{signed},
 	}
 
 	if london {
@@ -545,9 +521,6 @@ func (s *testFinalizeScenario) runFinalizeTx(t *testing.T, priorCoinbaseBalance 
 	result := s.buildExecResult()
 	result.TxIn = copyReadSet(s.txIn)
 	result.TxOut = copyWrites(s.txOut)
-	if s.collectorWrites != nil {
-		result.CollectorWrites = copyWrites(s.collectorWrites)
-	}
 
 	vm := state.NewVersionMap(nil)
 	reader := s.makeReader()
@@ -593,35 +566,9 @@ func TestFinalizeTxSimple_BasicFeeCredit(t *testing.T) {
 		"coinbase should be priorBalance + FeeTipped (no delta, no double-count)")
 }
 
-// TestFinalizeTxSimple_SenderIsCoinbase_TxOutValueWins is the regression
-// pin for bug #1 of #21017. The block-218957 manifestation:
-//
-//   - Sender == coinbase (a Frontier-style miner self-send)
-//   - Worker runs with shouldDelayFeeCalc=true so noFeeBurnAndTip=true.
-//     buyGas still debits the sender; the tip credit to coinbase is skipped
-//     (it's what finalize must add back).
-//   - The worker's IBS therefore has coinbase Balance debited by the gas
-//     amount. TxOut (raw IBS.VersionedWrites output) carries this debited
-//     value.
-//   - For Frontier miner self-sends, CollectorWrites (IBS net-change via
-//     LightCollector) suppresses the coinbase entry under specific
-//     conditions documented at exec3_parallel.go:1641-1673 — historically
-//     the load-bearing case the bug originally hit.
-//
-// Pre-fix: finalizeTxSimple scanned CollectorWrites only. The suppression
-// meant no override → newCoinbaseBalance stayed at the versionMap base
-// (pre-this-tx value) → adding FeeTipped on top over-credited the coinbase
-// by exactly one tip.
-//
-// Post-fix: when senderIsCoinbase, finalizeTxSimple scans TxOut instead,
-// finds the worker's debited value, overrides newCoinbaseBalance, then
-// adds FeeTipped. The net result equals the canonical post-tx state
-// (debit and tip cancel for a miner self-send).
-//
-// This test pins the discriminator: when sender==coinbase AND TxOut has
-// a coinbase BalancePath entry that disagrees with the versionMap base,
-// finalize MUST use the TxOut value as the base for the tip credit.
-func TestFinalizeTxSimple_SenderIsCoinbase_TxOutValueWins(t *testing.T) {
+// TestFinalizeTxSimple_SenderIsCoinbase_UsesTxOutBalance verifies that the
+// current transaction's gas debit is the base for its deferred tip credit.
+func TestFinalizeTxSimple_SenderIsCoinbase_UsesTxOutBalance(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -635,15 +582,10 @@ func TestFinalizeTxSimple_SenderIsCoinbase_TxOutValueWins(t *testing.T) {
 
 	s := senderIsCoinbaseScenario(t, 0 /* value=0: pure miner self-send */, preBlockBal, tip, false /* pre-London */)
 
-	// TxOut: worker debited coinbase by gas — emit the post-debit value.
-	// CollectorWrites: SUPPRESS the coinbase BalancePath entry (mimicking
-	// the bug-trigger condition). The two disagree; the senderIsCoinbase
-	// discriminator must pick TxOut's value.
 	s.txOut.SetBalance(s.coinbase, &state.VersionedWrite[uint256.Int]{
 		WriteHeader: state.WriteHeader{Address: s.coinbase, Path: state.BalancePath},
 		Val:         *uint256.NewInt(postDebitBal),
 	})
-	// (s.collectorWrites left as the baseline — no coinbase BalancePath entry)
 
 	writes := s.runFinalizeTx(t, nil /* no prior tx in this block */)
 
@@ -653,80 +595,12 @@ func TestFinalizeTxSimple_SenderIsCoinbase_TxOutValueWins(t *testing.T) {
 	got := coinbaseWrite.Val
 	want := uint256.NewInt(expectedFinal)
 	assert.Equal(t, *want, got,
-		"senderIsCoinbase: finalize must use TxOut value (%d) + tip (%d) = %d, NOT versionMap base (%d) + tip (%d) = %d (the bug)",
+		"finalize must use TxOut value (%d) + tip (%d) = %d, not the prior balance (%d) + tip (%d) = %d",
 		postDebitBal, tip, expectedFinal, preBlockBal, tip, preBlockBal+tip)
 }
 
-// (Removed: TestFinalizeTxSimple_SenderNotCoinbase_CollectorWritesValueWins
-// was a negative control for the prior code's senderIsCoinbase discriminator
-// — it asserted that flipping sender to non-coinbase made finalize ignore
-// TxOut and use versionMap base + tip. The new apply-loop calcFees
-// step uses vm.Read(..., txIndex+1) for the base, which reads whatever is
-// most recently in versionMap at or before this tx — including the TxOut
-// entry flushed by the test setup. The discriminator code path no longer
-// exists, and the synthetic scenario the test constructed doesn't map to
-// any real execution behavior. The SenderIsCoinbase positive tests still
-// pin the correctness of the new read semantics.)
-
-// TestFinalizeTxSimple_SenderIsCoinbase_TxOutWinsOverCollectorWrites
-// strengthens TxOutValueWins by adding a coinbase BalancePath entry to
-// CollectorWrites at a DIFFERENT value than TxOut. The discriminator must
-// firmly pick TxOut when senderIsCoinbase=true — even when CollectorWrites
-// is non-empty and would have given a different answer.
-//
-// Maps to cleanup memory case #2: sender == coinbase, value > 0, Frontier.
-// In real EVM exec, a sender==coinbase value-bearing self-send produces a
-// different CollectorWrites shape than a value=0 self-send because the
-// IBS journal records the self-transfer's SubBalance/AddBalance pair (net
-// zero on the address but tracked by LightCollector's per-call deltas). The
-// test pins that the discriminator's choice does not depend on whether
-// CollectorWrites has an entry.
-func TestFinalizeTxSimple_SenderIsCoinbase_TxOutWinsOverCollectorWrites(t *testing.T) {
-	t.Parallel()
-
-	const (
-		preBlockBal   = uint64(1_000_000)
-		postDebitBal  = uint64(979_000)   // TxOut: gas-debited value
-		collectorBal  = uint64(1_500_000) // CollectorWrites: different, wrong value
-		tip           = uint64(21_000)
-		expectedFinal = postDebitBal + tip // 1,000,000 — must use TxOut, not CollectorWrites
-	)
-
-	s := senderIsCoinbaseScenario(t, 100 /* value > 0 self-send */, preBlockBal, tip, false)
-
-	s.txOut.SetBalance(s.coinbase, &state.VersionedWrite[uint256.Int]{
-		WriteHeader: state.WriteHeader{Address: s.coinbase, Path: state.BalancePath},
-		Val:         *uint256.NewInt(postDebitBal),
-	})
-	// Add a contradictory CollectorWrites entry to prove the discriminator
-	// firmly picks TxOut. If finalize ever falls through to scanning
-	// CollectorWrites under senderIsCoinbase=true, the assertion below
-	// would fail with the collectorBal+tip value.
-	s.collectorWrites.SetBalance(s.coinbase, &state.VersionedWrite[uint256.Int]{
-		WriteHeader: state.WriteHeader{Address: s.coinbase, Path: state.BalancePath},
-		Val:         *uint256.NewInt(collectorBal),
-	})
-
-	writes := s.runFinalizeTx(t, nil)
-
-	coinbaseWrite := findBalance(writes, s.coinbase)
-	require.NotNil(t, coinbaseWrite, "finalize must produce coinbase BalancePath write")
-
-	got := coinbaseWrite.Val
-	want := uint256.NewInt(expectedFinal)
-	assert.Equal(t, *want, got,
-		"senderIsCoinbase=true: TxOut value (%d) + tip (%d) = %d MUST WIN over CollectorWrites value (%d) + tip = %d",
-		postDebitBal, tip, expectedFinal, collectorBal, collectorBal+tip)
-}
-
-// TestFinalizeTxSimple_SenderIsCoinbase_PostLondon verifies the
-// senderIsCoinbase discriminator still picks TxOut for the coinbase under
-// post-London rules (IsLondon=true, separate burnt contract address). The
-// burnt path runs in parallel for a non-sender burnt contract — its
-// FeeBurnt is added to its versionMap base via the regular (non-sender)
-// CollectorWrites scan.
-//
-// Maps to cleanup memory case #3: sender == coinbase, value > 0, post-London.
+// TestFinalizeTxSimple_SenderIsCoinbase_PostLondon verifies deferred tip and
+// burn credits when the sender is also the fee recipient.
 func TestFinalizeTxSimple_SenderIsCoinbase_PostLondon(t *testing.T) {
 	t.Parallel()
 
@@ -747,8 +621,6 @@ func TestFinalizeTxSimple_SenderIsCoinbase_PostLondon(t *testing.T) {
 		WriteHeader: state.WriteHeader{Address: s.coinbase, Path: state.BalancePath},
 		Val:         *uint256.NewInt(postDebitBal),
 	})
-	// CollectorWrites: no coinbase, no burnt — finalize reads burnt base
-	// from versionMap (= burntPreBlockBal from scenario.accts) and adds burn.
 
 	writes := s.runFinalizeTx(t, nil)
 
@@ -765,16 +637,8 @@ func TestFinalizeTxSimple_SenderIsCoinbase_PostLondon(t *testing.T) {
 		"burnt: versionMap base (%d) + burn (%d) = %d expected", burntPreBlockBal, burn, expectedBurntBal)
 }
 
-// TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs runs three
-// successive sender==coinbase txs through finalize, verifying that the tip
-// credit accumulates correctly across the txs even when the discriminator
-// uses TxOut on each call. Mirrors the existing
-// TestFinalizeTxSimple_AccumulatedFees but for sender==coinbase.
-//
-// Maps to cleanup memory case #6: multiple sender == coinbase txs in same
-// block. Pins that the per-tx TxOut-override doesn't break across-tx
-// accumulation — each tx's worker debit + finalize tip credit cancel,
-// so the coinbase balance stays at preBlockBal across all N txs.
+// TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs verifies that
+// each worker debit and deferred tip credit cancel across consecutive txs.
 func TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs(t *testing.T) {
 	t.Parallel()
 
@@ -820,7 +684,6 @@ func TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs(t *testing.T) {
 		result := s.buildExecResult()
 		result.TxIn = copyReadSet(s.txIn)
 		result.TxOut = copyWrites(s.txOut)
-		result.CollectorWrites = copyWrites(s.collectorWrites)
 
 		// Set this tx's version explicitly so versionMap reads land on
 		// the right tx-index for the floor-read semantics.
@@ -843,14 +706,8 @@ func TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs(t *testing.T) {
 	}
 }
 
-// TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation pins that
-// when the worker re-executes at incarnation > 0 and emits a different
-// TxOut value than the abandoned incarnation 0, finalize uses the
-// RE-EXECUTED value (from the latest TxOut), not the abandoned one.
-//
-// Maps to cleanup memory case #7: sender == coinbase with worker
-// re-execution. Tests that the TxOut scan in finalize is on the CURRENT
-// execResult's TxOut (not stashed from a prior incarnation).
+// TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation verifies that
+// fee calculation uses the current incarnation's TxOut balance.
 func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 	t.Parallel()
 
@@ -864,37 +721,25 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 
 	s := senderIsCoinbaseScenario(t, 0, preBlockBal, tip, false)
 
-	// Simulate the abandoned incarnation 0 write already in versionMap.
-	// finalize's vsReader uses floor(txIndex-1) so it WON'T read this
-	// value (TxIndex=0), but recording it documents the scenario.
-	// What matters for the test is that the CURRENT result.TxOut is what
-	// finalize scans.
 	s.txOut.SetBalance(s.coinbase, &state.VersionedWrite[uint256.Int]{
 		WriteHeader: state.WriteHeader{Address: s.coinbase, Path: state.BalancePath},
-		Val:         *uint256.NewInt(reExecutedPostBal), // the re-executed (correct) value
+		Val:         *uint256.NewInt(reExecutedPostBal),
 	})
 
-	// Set incarnation > 0 on the task to reflect re-execution.
 	result := s.buildExecResult()
 	result.TxIn = copyReadSet(s.txIn)
 	result.TxOut = copyWrites(s.txOut)
-	result.CollectorWrites = copyWrites(s.collectorWrites)
 
 	task := result.Task.(*taskVersion)
-	task.version.Incarnation = 1 // re-execution
+	task.version.Incarnation = 1
 
 	vm := state.NewVersionMap(nil)
 	reader := s.makeReader()
 
-	// Pre-populate versionMap with the abandoned incarnation 0 value at
-	// (txIndex=0, incarnation=0). The re-execution at incarnation=1 should
-	// produce a write that masks this; finalize must NOT use this stale
-	// abandoned value.
 	vm.WriteBalance(s.coinbase,
 		state.Version{TxIndex: 0, Incarnation: 0},
 		*uint256.NewInt(abandonedPostBal), true)
 
-	// Now flush the re-executed TxOut at incarnation 1.
 	vm.FlushVersionedWrites(result.TxOut, true, "")
 
 	writes, err := result.calcFees(task, vm, reader, s.rules)
@@ -947,20 +792,6 @@ func TestFinalizeTxSimple_LondonBurntFees(t *testing.T) {
 		"burnt contract should be existing balance + FeeBurnt")
 }
 
-func TestCalcFeesZeroBurnClearsEmptyBurntAddress(t *testing.T) {
-	t.Parallel()
-	s := londonTransferScenario()
-	empty := accounts.NewAccount()
-	s.accts[s.burntAddr] = &empty
-	s.feeBurnt = uint256.Int{}
-
-	writes := s.runFinalizeTx(t, nil)
-
-	deleted, ok := writes.GetSelfDestruct(s.burntAddr)
-	require.True(t, ok)
-	require.True(t, deleted.Val)
-}
-
 // TestFinalizeTxSimple_NoCoinbaseInVersionMap verifies that when there's no
 // prior coinbase entry in the versionMap, the finalize reads from the
 // stateReader and adds FeeTipped.
@@ -994,7 +825,6 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 		result := s.buildExecResult()
 		result.TxIn = copyReadSet(s.txIn)
 		result.TxOut = copyWrites(s.txOut)
-		result.CollectorWrites = copyWrites(s.collectorWrites)
 		result.ExecutionResult.FeeTipped = *tipPerTx
 
 		task := result.Task.(*taskVersion)

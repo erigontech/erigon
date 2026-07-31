@@ -58,23 +58,21 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			stateCreate = 0
 		}
 
-		slot := callContext.peekStorageKey()
+		slot := callContext.peekStorageKey(evm)
 		access := params.WarmStorageReadCostEIP2929
-		_, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), slot)
-		if slotMod {
+		_, slotPresent := evm.IntraBlockState().SlotInAccessList(callContext.Address(), slot)
+		if !slotPresent {
 			access = coldAccess
+		}
+		if scopeGas.Regular < access {
+			return mdgas.MdGas{}, ErrOutOfGas
+		}
+		if !slotPresent {
+			evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), slot)
 		}
 		var value uint256.Int
 		value.Set(callContext.Stack.back(1))
-		// Read the current slot value before the cold-access affordability check
-		// so an SSTORE that clears the EIP-2200 sentry but then OOGs on the access
-		// cost still records the slot read in the EIP-7928 block access list. This
-		// matches the glamsterdam-devnet-6 fixtures; EELS later reordered
-		// get_storage vs charge_gas.
 		current, _ := evm.IntraBlockState().GetState(callContext.Address(), slot)
-		if slotMod && callContext.gas < access {
-			return mdgas.MdGas{}, ErrOutOfGas
-		}
 
 		if current.Eq(&value) { // noop (1)
 			return mdgas.MdGas{Regular: access}, nil
@@ -118,7 +116,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 func gasSLoadEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
 	// If the caller cannot afford the cost, this change will be rolled back
 	// If he does afford it, we can skip checking the same thing later on, during execution
-	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), callContext.peekStorageKey()); slotMod {
+	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), callContext.peekStorageKey(evm)); slotMod {
 		return mdgas.MdGas{Regular: coldStorageAccessCost(evm.chainRules)}, nil
 	}
 	return mdgas.MdGas{Regular: params.WarmStorageReadCostEIP2929}, nil

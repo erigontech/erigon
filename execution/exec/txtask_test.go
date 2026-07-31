@@ -24,17 +24,10 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
@@ -160,52 +153,4 @@ func TestCreateReceiptTxIndex(t *testing.T) {
 	require.Equal(t, uint32(firstLogIndex), receipt.FirstLogIndexWithinBlock)
 	require.Len(t, receipt.Logs, 1)
 	require.Equal(t, hexutil.Uint(firstLogIndex), receipt.Logs[0].Index)
-}
-
-func TestExecuteCarriesCoinbaseForAccountAbstraction(t *testing.T) {
-	coinbase := accounts.InternAddress(common.HexToAddress("0xc01aba5e"))
-	config := &chain.Config{AllowAA: true}
-	blockContext := evmtypes.BlockContext{
-		BlockNumber: 1,
-		Coinbase:    coinbase,
-	}
-	ibs := state.New(state.NewNoopReader())
-	defer ibs.Release(false)
-	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, vm.Config{})
-
-	txTask := &TxTask{
-		TxIndex:         0,
-		Header:          &types.Header{Number: *uint256.NewInt(1)},
-		Txs:             types.Transactions{&types.AccountAbstractionTransaction{}},
-		Config:          config,
-		EvmBlockContext: blockContext,
-	}
-	result := txTask.Execute(evm, nil, nil, ibs, nil, config, nil, datadir.Dirs{}, false)
-
-	require.ErrorContains(t, result.Err, "account is not deployed")
-	require.Equal(t, coinbase, result.Coinbase)
-}
-
-func TestFinalizedWritesDependencyIsRetryable(t *testing.T) {
-	addr := accounts.InternAddress(common.HexToAddress("0xdead"))
-	priorVersion := state.Version{TxIndex: 0}
-	empty := accounts.NewAccount()
-	versionMap := state.NewVersionMap(nil)
-	versionMap.WriteAddress(addr, priorVersion, &empty, true)
-	versionMap.WriteBalance(addr, priorVersion, uint256.Int{}, false)
-
-	ibs := state.NewWithVersionMap(state.NewNoopReader(), versionMap)
-	defer ibs.Release(false)
-	ibs.SetNoMaterialize(true)
-	ibs.SetTxContext(1, 1)
-	ibs.SetVersion(0)
-	require.NoError(t, ibs.SetNonce(addr, 0, tracing.NonceChangeUnspecified))
-
-	_, err := finalizedWrites(ibs, &chain.Rules{IsSpuriousDragon: true})
-
-	var abort protocol.ErrExecAbortError
-	require.ErrorAs(t, err, &abort)
-	require.Equal(t, 0, abort.DependencyTxIndex)
-	require.Nil(t, abort.OriginError)
-	require.False(t, abort.IsError())
 }

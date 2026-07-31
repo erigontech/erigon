@@ -252,13 +252,13 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 	defer st.Release(false)
 	senderBalance, err := st.GetBalance(accounts.InternAddress(sender))
 	require.NoError(t, err)
-	require.Equal(t, uint256.MustFromHex("0x286a802d7b04d897"), &senderBalance)
+	require.Equal(t, uint256.MustFromHex("0x2869323611617c47"), &senderBalance)
 	senderNonce, err := st.GetNonce(accounts.InternAddress(sender))
 	require.NoError(t, err)
 	require.Equal(t, uint64(4258), senderNonce)
 	coinbaseBalance, err := st.GetBalance(accounts.InternAddress(coinbase))
 	require.NoError(t, err)
-	require.Equal(t, uint256.MustFromHex("0x14a5fadeb16dd327696"), &coinbaseBalance)
+	require.Equal(t, uint256.MustFromHex("0x14a5faf390e46c23696"), &coinbaseBalance)
 	tracer := "prestateTracer"
 	var buf bytes.Buffer
 	stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -1358,7 +1358,7 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 	sentinel := &ExecutionWitnessResult{State: []hexutil.Bytes{{0xde, 0xad, 0xbe, 0xef}}}
 
 	t.Run("legacy hit returns cached pointer", func(t *testing.T) {
-		cache := newWitnessResultCache(96)
+		cache := newWitnessResultCache(96, 0, false, false)
 		cache.Add(block1Hash, sentinel)
 		api.witnessCache = cache
 		t.Cleanup(func() { api.witnessCache = nil })
@@ -1371,7 +1371,7 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 	})
 
 	t.Run("canonical request bypasses the cache", func(t *testing.T) {
-		cache := newWitnessResultCache(96)
+		cache := newWitnessResultCache(96, 0, false, false)
 		cache.Add(block1Hash, sentinel)
 		api.witnessCache = cache
 		t.Cleanup(func() { api.witnessCache = nil })
@@ -1384,7 +1384,7 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 	})
 
 	t.Run("empty-cache miss falls through to on-demand", func(t *testing.T) {
-		api.witnessCache = newWitnessResultCache(96)
+		api.witnessCache = newWitnessResultCache(96, 0, false, false)
 		t.Cleanup(func() { api.witnessCache = nil })
 
 		missBefore := witnessCacheMissCounter.GetValueUint64()

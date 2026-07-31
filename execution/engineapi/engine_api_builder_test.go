@@ -46,6 +46,130 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
+func TestEngineApiClearsFreshTouchedEmptyAccount(t *testing.T) {
+	tests := []struct {
+		name            string
+		experimentalBAL bool
+	}{
+		{name: "serial builder"},
+		{name: "experimental BAL builder", experimentalBAL: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			testEngineApiClearsFreshTouchedEmptyAccount(t, test.experimentalBAL)
+		})
+	}
+}
+
+func testEngineApiClearsFreshTouchedEmptyAccount(t *testing.T, experimentalBAL bool) {
+	parallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
+
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.Config.AmsterdamTime = nil
+
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(senderKey.PublicKey)
+	genesis.Alloc[senderAddr] = types.GenesisAccount{
+		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil),
+	}
+
+	emptyKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	emptyAddr := crypto.PubkeyToAddress(emptyKey.PublicKey)
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+		EthConfigTweaker: func(cfg *ethconfig.Config) {
+			cfg.ExperimentalBAL = experimentalBAL
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		signer := types.LatestSignerForChainID(chainID)
+		rpcClient := eat.Transactor.RpcClient()
+		feeCap := uint256.NewInt(1_000_000_000)
+
+		send := func(txn types.Transaction) {
+			signed, err := types.SignTx(txn, *signer, senderKey)
+			require.NoError(t, err)
+			_, err = rpcClient.SendTransaction(signed)
+			require.NoError(t, err)
+		}
+
+		// Deploy runtime code that pushes emptyAddr and executes SELFDESTRUCT.
+		initCode := append([]byte{0x75, 0x73}, emptyAddr[:]...)
+		initCode = append(initCode, 0xff, 0x60, 0x00, 0x52, 0x60, 0x16, 0x60, 0x0a, 0xf3)
+		send(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 0, GasLimit: 200_000, Data: initCode},
+			ChainID:  *chainID, TipCap: *feeCap, FeeCap: *feeCap,
+		})
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		selfDestructor := types.CreateAddress(senderAddr, 0)
+		send(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 1, GasLimit: 200_000, To: &selfDestructor},
+			ChainID:  *chainID, TipCap: *feeCap, FeeCap: *feeCap,
+		})
+		auth, err := types.SignAuthorization(emptyKey, *chainID, common.Address{0xaa}, 0)
+		require.NoError(t, err)
+		send(&types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: 2, GasLimit: 500_000, To: &senderAddr},
+				ChainID:  *chainID, TipCap: *feeCap, FeeCap: *feeCap,
+			},
+			Authorizations: []types.Authorization{auth},
+		})
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		const gasUsedWithoutAuthorityExistenceRefund = uint64(74_603)
+		require.Equal(t, gasUsedWithoutAuthorityExistenceRefund, uint64(payload.ExecutionPayload.GasUsed))
+	})
+}
+
+func TestEngineApiClearsFreshZeroAmountWithdrawal(t *testing.T) {
+	parallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
+
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		fresh := common.Address{0xbe, 0xef}
+		withdrawals := []*types.Withdrawal{{Index: 1, Validator: 1, Address: fresh, Amount: 0}}
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx, engineapitester.WithWithdrawals(withdrawals))
+		require.NoError(t, err)
+
+		bal := decodeAndValidateBAL(t, payload)
+		changes := findAccountChanges(bal, accounts.InternAddress(fresh))
+		require.NotNilf(t, changes, "zero-amount withdrawal recipient must remain an access-only BAL entry\n%s", bal.DebugString())
+		require.Empty(t, changes.StorageChanges)
+		require.Empty(t, changes.StorageReads)
+		require.Empty(t, changes.BalanceChanges)
+		require.Empty(t, changes.NonceChanges)
+		require.Empty(t, changes.CodeChanges)
+	})
+}
+
 func TestEngineApiBuiltBlockStateMatchesValidation(t *testing.T) {
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
@@ -998,231 +1122,4 @@ func lastBalanceChange(ac *types.AccountChanges) *types.BalanceChange {
 		}
 	}
 	return last
-}
-
-// TestEngineApiEmptyAccountClearingConsistency pins builder/validator agreement
-// when one transaction leaves an account empty and a later EIP-7702
-// authorization reads its existence in the same block.
-func TestEngineApiEmptyAccountClearingConsistency(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		touch       bool
-		auth        bool
-		preexisting bool
-		parallel    bool
-	}{
-		{name: "touch_only", touch: true, parallel: true},
-		{name: "authorization_only", auth: true, parallel: true},
-		{name: "combined_serial", touch: true, auth: true},
-		{name: "combined_parallel", touch: true, auth: true, parallel: true},
-		{name: "preexisting_combined_serial", touch: true, auth: true, preexisting: true},
-		{name: "preexisting_combined_parallel", touch: true, auth: true, preexisting: true, parallel: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			runEmptyAccountClearingCase(t, tc.touch, tc.auth, tc.preexisting, tc.parallel)
-		})
-	}
-}
-
-func runEmptyAccountClearingCase(t *testing.T, doTouch, doAuth, preexisting, parallel bool) {
-	prev := dbg.Exec3Parallel
-	dbg.Exec3Parallel = parallel
-	t.Cleanup(func() { dbg.Exec3Parallel = prev })
-
-	ctx := t.Context()
-	logger := testlog.Logger(t, log.LvlError)
-	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
-	require.NoError(t, err)
-	// Pre-Amsterdam, so the legacy EIP-7702 regular-gas refund branch applies.
-	genesis.Config.AmsterdamTime = nil
-
-	senderKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	senderAddr := crypto.PubkeyToAddress(senderKey.PublicKey)
-	genesis.Alloc[senderAddr] = types.GenesisAccount{
-		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil),
-	}
-
-	emptyKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	emptyAddr := crypto.PubkeyToAddress(emptyKey.PublicKey)
-	if preexisting {
-		genesis.Alloc[emptyAddr] = types.GenesisAccount{Balance: new(big.Int)}
-	}
-
-	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
-		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, eat.Close()) })
-
-	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
-		chainID := eat.ChainId()
-		signer := types.LatestSignerForChainID(chainID)
-		rpcClient := eat.Transactor.RpcClient()
-		feeCap, tipCap := uint256.NewInt(1_000_000_000), uint256.NewInt(1_000_000_000)
-
-		send := func(txn types.Transaction) {
-			signed, err := types.SignTx(txn, *signer, senderKey)
-			require.NoError(t, err)
-			_, err = rpcClient.SendTransaction(signed)
-			require.NoError(t, err)
-		}
-
-		// Deploy in its own block so EIP-6780 keeps the contract alive and the
-		// SELFDESTRUCT only forwards its (zero) balance.
-		// runtime: PUSH20 <empty account> ; SELFDESTRUCT
-		// init:    PUSH22 <runtime> ; PUSH1 0 ; MSTORE ; PUSH1 0x16 ; PUSH1 0x0a ; RETURN
-		initCode := append([]byte{0x75, 0x73}, emptyAddr[:]...)
-		initCode = append(initCode, 0xff, 0x60, 0x00, 0x52, 0x60, 0x16, 0x60, 0x0a, 0xf3)
-		send(&types.DynamicFeeTransaction{
-			CommonTx: types.CommonTx{Nonce: 0, GasLimit: 200_000, Data: initCode},
-			ChainID:  *chainID, TipCap: *tipCap, FeeCap: *feeCap,
-		})
-		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
-		require.NoError(t, err)
-
-		selfDestructor := types.CreateAddress(senderAddr, 0)
-		code, err := rpcClient.GetCode(selfDestructor, rpc.LatestBlock)
-		require.NoError(t, err)
-		require.NotEmpty(t, code)
-
-		nonce := uint64(1)
-		if doTouch {
-			send(&types.DynamicFeeTransaction{
-				CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 200_000, To: &selfDestructor},
-				ChainID:  *chainID, TipCap: *tipCap, FeeCap: *feeCap,
-			})
-			nonce++
-		}
-		if doAuth {
-			auth, err := types.SignAuthorization(emptyKey, *chainID, common.Address{0xaa}, 0)
-			require.NoError(t, err)
-			send(&types.SetCodeTransaction{
-				DynamicFeeTransaction: types.DynamicFeeTransaction{
-					CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 500_000, To: &senderAddr},
-					ChainID:  *chainID, TipCap: *tipCap, FeeCap: *feeCap,
-				},
-				Authorizations: []types.Authorization{auth},
-			})
-		}
-
-		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
-		require.NoError(t, err)
-
-		var want uint64
-		if doTouch {
-			want += 28603 // 21000 + PUSH20 + SELFDESTRUCT + cold beneficiary
-		}
-		if doAuth {
-			want += 46000 // 21000 + PerEmptyAccountCost, no existing-account refund
-		}
-		require.Equal(t, want, uint64(payload.ExecutionPayload.GasUsed))
-	})
-}
-
-// TestEngineApiEmptyCoinbaseTipped pins builder/validator agreement when a
-// transaction touches an empty fee recipient. EIP-161 judges emptiness after the
-// tip lands, so the transaction's own write-set — which predates it — must not
-// settle the fee recipient's fate either way: it survives a tip and is cleared
-// without one.
-func TestEngineApiEmptyCoinbaseTipped(t *testing.T) {
-	for _, tc := range []emptyCoinbaseCase{
-		{name: "touched_serial", touchFeeRecipient: true},
-		{name: "touched_parallel", touchFeeRecipient: true, parallel: true},
-		{name: "untouched_parallel", parallel: true},
-		{name: "touched_zero_tip_serial", touchFeeRecipient: true, zeroTip: true},
-		{name: "touched_zero_tip_parallel", touchFeeRecipient: true, zeroTip: true, parallel: true},
-		{name: "touched_amsterdam_serial", touchFeeRecipient: true, amsterdam: true},
-		{name: "touched_amsterdam_parallel", touchFeeRecipient: true, amsterdam: true, parallel: true},
-		{name: "touched_zero_tip_amsterdam_parallel", touchFeeRecipient: true, zeroTip: true, amsterdam: true, parallel: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			runEmptyCoinbaseCase(t, tc)
-		})
-	}
-}
-
-type emptyCoinbaseCase struct {
-	name              string
-	touchFeeRecipient bool
-	zeroTip           bool
-	amsterdam         bool
-	parallel          bool
-}
-
-func runEmptyCoinbaseCase(t *testing.T, tc emptyCoinbaseCase) {
-	touchFeeRecipient, zeroTip, parallel := tc.touchFeeRecipient, tc.zeroTip, tc.parallel
-	prev := dbg.Exec3Parallel
-	dbg.Exec3Parallel = parallel
-	t.Cleanup(func() { dbg.Exec3Parallel = prev })
-
-	ctx := t.Context()
-	logger := testlog.Logger(t, log.LvlError)
-	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
-	require.NoError(t, err)
-	if !tc.amsterdam {
-		genesis.Config.AmsterdamTime = nil
-	}
-
-	feeRecipient := genesis.Coinbase
-	genesis.Alloc[feeRecipient] = types.GenesisAccount{Balance: new(big.Int)}
-
-	senderKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	senderAddr := crypto.PubkeyToAddress(senderKey.PublicKey)
-	genesis.Alloc[senderAddr] = types.GenesisAccount{
-		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil),
-	}
-
-	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
-		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, eat.Close()) })
-
-	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
-		chainID := eat.ChainId()
-		rpcClient := eat.Transactor.RpcClient()
-
-		to := &senderAddr
-		if touchFeeRecipient {
-			to = &feeRecipient
-		}
-		tipCap := uint256.NewInt(1_000_000_000)
-		if zeroTip {
-			tipCap = uint256.NewInt(0)
-		}
-		txn, err := types.SignTx(&types.DynamicFeeTransaction{
-			CommonTx: types.CommonTx{Nonce: 0, GasLimit: 100_000, To: to},
-			ChainID:  *chainID,
-			TipCap:   *tipCap,
-			FeeCap:   *uint256.NewInt(1_000_000_000),
-		}, *types.LatestSignerForChainID(chainID), senderKey)
-		require.NoError(t, err)
-		_, err = rpcClient.SendTransaction(txn)
-		require.NoError(t, err)
-
-		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
-		require.NoError(t, err)
-		require.Len(t, payload.ExecutionPayload.Transactions, 1)
-
-		if tc.amsterdam {
-			// EIP-7928: the assembler's and the validator's account lists must
-			// agree on the fee recipient too.
-			bal := decodeAndValidateBAL(t, payload)
-			block, err := eat.RpcApiClient.GetBlockByNumber(ctx, rpc.BlockNumber(payload.ExecutionPayload.BlockNumber), false)
-			require.NoError(t, err)
-			require.NotNil(t, block.BlockAccessListHash)
-			require.Equal(t, bal.Hash(), *block.BlockAccessListHash)
-		}
-
-		balance, err := rpcClient.GetBalance(feeRecipient, rpc.LatestBlock)
-		require.NoError(t, err)
-		if zeroTip {
-			require.Zero(t, balance.Sign(), "an untipped empty fee recipient stays cleared")
-			return
-		}
-		require.Positive(t, balance.Sign(), "fee recipient must keep the tip it was credited")
-	})
 }
