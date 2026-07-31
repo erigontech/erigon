@@ -74,7 +74,7 @@ These flags control database performance and memory usage. See [Database](/funda
   * Default: `1TB`
 * `--db.writemap`: Enables `WRITE_MAP` for fast database writes.
   * Default: `true`
-* `--db.read.concurrency value`: Maximum number of concurrent open database read transactions (the MDBX read-transaction semaphore); when it is full, extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response instead. Low values are fine for low read-concurrency nodes (for example, validators); raise it for nodes serving heavy parallel RPC.
+* `--db.read.concurrency value`: Maximum number of concurrent open database read transactions (the MDBX read-transaction semaphore); when it is full, extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response instead. Raise it for nodes serving heavy parallel RPC. Lowering it does not reduce read concurrency: each parallel-execution worker holds a long-lived read transaction, so a value below the worker count would deadlock and is silently raised to it. To genuinely reduce read concurrency, lower `--exec.workers` instead.
   * Default: scales with the host as `min(max(10, GOMAXPROCS * 64), 9000)` — kept well above the CPU count because reads are I/O-bound, and capped below Go's roughly 10,000 OS-thread limit.
 * `--database.verbosity value`: Enables internal database logs.
   * Default: `2`
@@ -165,9 +165,7 @@ These flags manage network connectivity, peer discovery, and traffic control. Se
 * `--port value`: The main network listening port.
   * Default: `30303`
 * `--p2p.protocol value`: The version of the `eth` P2P protocol.
-  * Default: `68`, `69`
-* `--p2p.allowed-ports value`: A comma-separated list of allowed ports for different P2P protocols.
-  * Default: `30303, 30304, 30305, 30306, 30307`
+  * Default: `69`, `70`, `71`
 * `--nat value`: The NAT port mapping mechanism (See [here](/fundamentals/nat) for more details).
 * `--nodiscover`: Disables peer discovery.
   * Default: `false`
@@ -298,6 +296,8 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `2m0s`
 * `--healthcheck`: Enables gRPC health checks.
   * Default: `false`
+* `--witness.cache.blocks value` *(New in v3.6)*: Number of recent blocks whose legacy `debug_executionWitness` result is eagerly cached in memory, keyed by block hash in an LRU. Each witness is held as serialized JSON and served verbatim on a hit, so memory use is roughly this count multiplied by the per-block witness size. Embedded RPC only, and requires `--prune.include-commitment-history` (runtime errors from `debug_executionWitness` and `eth_getWitness` name its `--prune.experimental.include-commitment-history` alias instead).
+  * Default: `0` (cache disabled); values above the cap of `96` are clamped
 
 ### MCP Server
 
@@ -354,13 +354,6 @@ Flags for controlling logging and performance profiling. See [Logs](/fundamental
 
 Flags related to consensus mechanisms and network forks.
 
-* `--clique.checkpoint value`: The number of blocks after which to save the vote snapshot.
-  * Default: `10`
-* `--clique.snapshots value`: The number of recent vote snapshots to keep in memory.
-  * Default: `1024`
-* `--clique.signatures value`: The number of recent block signatures to keep in memory.
-  * Default: `16384`
-* `--clique.datadir value`: The path to the clique database folder.
 * `--fakepow`: Disables proof-of-work verification.
   * Default: `false`
 * `--gpo.blocks value`: The number of recent blocks to check for gas prices.

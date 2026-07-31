@@ -145,6 +145,4 @@ var builderPendingPaymentsTest = NewEpochProcessing(func(s abstract.BeaconState)
 	return nil
 })
 
-var ptcWindowTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	return statechange.ProcessPtcWindow(s)
-})
+var ptcWindowTest = NewEpochProcessing(statechange.ProcessPtcWindow)

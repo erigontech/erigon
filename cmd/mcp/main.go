@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -48,6 +49,13 @@ import (
 var defaultRPCPorts = []uint{8545, 8546, 8547}
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	var (
 		rpcURL    string
 		port      uint
@@ -151,7 +159,7 @@ Examples:
 
 	rootCmd.Flags().StringVar(&rpcURL, "rpc.url", "http://127.0.0.1:8545", "Erigon JSON-RPC endpoint URL")
 	rootCmd.Flags().UintVar(&port, "port", 0, "Erigon JSON-RPC port (shorthand for --rpc.url=http://127.0.0.1:{port})")
-	rootCmd.Flags().StringVar(&dataDir, "datadir", "", "Erigon data directory (enables direct DB access mode)")
+	flags.DirVar(rootCmd.Flags(), &dataDir, "datadir", "", "Erigon data directory (enables direct DB access mode)")
 	rootCmd.Flags().StringVar(&privAPI, "private.api.addr", "127.0.0.1:9090", "Erigon gRPC private API address (used with --datadir)")
 	rootCmd.Flags().StringVar(&transport, "transport", "stdio", "MCP transport: 'stdio' or 'http' ('sse' is a deprecated alias of 'http')")
 	rootCmd.Flags().StringVar(&sseAddr, "sse.addr", "127.0.0.1:8553", "HTTP listen address (when transport=http)")
@@ -167,10 +175,7 @@ Examples:
 		rootCancel()
 	}()
 
-	if err := rootCmd.ExecuteContext(rootCtx); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
+	return rootCmd.ExecuteContext(rootCtx)
 }
 
 // serve starts the MCP server in the chosen transport mode.
@@ -255,7 +260,7 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 
 	// Create the JSON-RPC APIs and serve them over an in-process connection —
 	// same path as rpcdaemon.
-	apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, heimdallReader, nil)
+	apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, heimdallReader, nil, nil)
 	rpcSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
 	defer rpcSrv.Stop()
 	for _, api := range apiList {

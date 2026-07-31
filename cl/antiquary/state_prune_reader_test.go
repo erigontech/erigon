@@ -233,7 +233,7 @@ func TestPruneStateBalancesForwardAndReverseDumpPaths(t *testing.T) {
 	epochDiff := func(oldSlot, newSlot uint64) []byte {
 		var b bytes.Buffer
 		require.NoError(t, base_encoding.ComputeCompressedSerializedUint64ListDiff(&b, balancesAt(oldSlot), balancesAt(newSlot)))
-		return common.Copy(b.Bytes())
+		return bytes.Clone(b.Bytes())
 	}
 	compressor, err := zstd.NewWriter(nil)
 	require.NoError(t, err)
@@ -243,7 +243,7 @@ func TestPruneStateBalancesForwardAndReverseDumpPaths(t *testing.T) {
 		var b bytes.Buffer
 		sdata := &state_accessors.SlotData{Version: clparams.BellatrixVersion, ValidatorLength: valCount, Eth1Data: &cltypes.Eth1Data{}, Fork: &cltypes.Fork{}}
 		require.NoError(t, sdata.WriteTo(&b))
-		return common.Copy(b.Bytes())
+		return bytes.Clone(b.Bytes())
 	}
 
 	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {

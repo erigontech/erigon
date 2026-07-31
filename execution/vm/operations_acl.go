@@ -60,21 +60,19 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 
 		slot := callContext.peekStorageKey()
 		access := params.WarmStorageReadCostEIP2929
-		_, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), slot)
-		if slotMod {
+		_, slotPresent := evm.IntraBlockState().SlotInAccessList(callContext.Address(), slot)
+		if !slotPresent {
 			access = coldAccess
 		}
-		var value uint256.Int
-		value.Set(callContext.Stack.Back(1))
-		// Read the current slot value before the cold-access affordability check
-		// so an SSTORE that clears the EIP-2200 sentry but then OOGs on the access
-		// cost still records the slot read in the EIP-7928 block access list. This
-		// matches the glamsterdam-devnet-6 fixtures; EELS later reordered
-		// get_storage vs charge_gas.
-		current, _ := evm.IntraBlockState().GetState(callContext.Address(), slot)
-		if slotMod && callContext.gas < access {
+		if scopeGas.Regular < access {
 			return mdgas.MdGas{}, ErrOutOfGas
 		}
+		if !slotPresent {
+			evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), slot)
+		}
+		var value uint256.Int
+		value.Set(callContext.Stack.back(1))
+		current, _ := evm.IntraBlockState().GetState(callContext.Address(), slot)
 
 		if current.Eq(&value) { // noop (1)
 			return mdgas.MdGas{Regular: access}, nil
@@ -167,7 +165,7 @@ func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas mdgas.M
 
 func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
-		addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
+		addr := accounts.InternAddress(callContext.Stack.back(1).Bytes20())
 		// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
 		// the cost to charge for cold access, if any, is Cold - Warm
 		coldCost := params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
@@ -291,10 +289,10 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 	return func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
 		// In static mode, CALL with value must fail before EIP-7702 can warm
 		// the target or delegated address.
-		if rejectStaticValueTransfer && evm.readOnly && !callContext.Stack.Back(2).IsZero() {
+		if rejectStaticValueTransfer && evm.readOnly && !callContext.Stack.back(2).IsZero() {
 			return mdgas.MdGas{}, ErrWriteProtection
 		}
-		addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
+		addr := accounts.InternAddress(callContext.Stack.back(1).Bytes20())
 		coldAccountAccess := coldAccountAccessCost(evm.ChainRules())
 		// Check slot presence in the access list
 		var gas mdgas.MdGas

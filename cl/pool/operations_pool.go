@@ -24,7 +24,28 @@ import (
 	"github.com/erigontech/erigon/common/crypto/blake2b"
 )
 
-const operationsPerPool = 512
+// Pool capacities are gossip retention windows, not per-block bounds: the pools are drained
+// only by eviction, and a proposer packs from operations gathered over many slots.
+const (
+	// Aggregates are retained for this many slots. A deeper window offers the proposer more
+	// partial aggregates to merge, but block production is linear in pool occupancy and
+	// quadratic within one data root, with a BLS aggregation per merge, so widening it is a
+	// latency trade and needs measuring first.
+	attestationRetentionSlots = 10
+	// Has() on these pools is the only cheap gate in front of full BLS verification of a
+	// re-gossiped slashing, so keep them deep: eviction is not recoverable for lifeSpan.
+	attesterSlashingsCapacity = 10240
+	proposerSlashingsCapacity = 10240
+	// Keyed by validator index, so the pool self-dedupes. Sized for a mass-exit queue
+	// arriving faster than it drains at MaxVoluntaryExits per block.
+	voluntaryExitsCapacity = 16384
+	// Purged on every imported block, so this only ever holds one slot of arrivals.
+	blsToExecutionChangesCapacity = 10240
+)
+
+func attestationsCapacity(beaconCfg *clparams.BeaconChainConfig) int {
+	return attestationRetentionSlots * int(beaconCfg.MaxCommitteesPerSlot*beaconCfg.TargetAggregatorsPerCommittee)
+}
 
 // DoubleSignatureKey uses blake2b algorithm to merge two signatures together. blake2 is faster than sha3.
 func doubleSignatureKey(one, two common.Bytes96) (out common.Bytes96) {
@@ -52,11 +73,11 @@ type OperationsPool struct {
 
 func NewOperationsPool(beaconCfg *clparams.BeaconChainConfig) OperationsPool {
 	return OperationsPool{
-		AttestationsPool:          NewOperationPool[common.Bytes96, *solid.Attestation](operationsPerPool, "attestationsPool"),
-		AttesterSlashingsPool:     NewOperationPool[common.Bytes96, *cltypes.AttesterSlashing](operationsPerPool, "attesterSlashingsPool"),
-		ProposerSlashingsPool:     NewOperationPool[common.Bytes96, *cltypes.ProposerSlashing](operationsPerPool, "proposerSlashingsPool"),
-		BLSToExecutionChangesPool: NewOperationPool[common.Bytes96, *cltypes.SignedBLSToExecutionChange](operationsPerPool, "blsExecutionChangesPool"),
-		VoluntaryExitsPool:        NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](operationsPerPool, "voluntaryExitsPool"),
+		AttestationsPool:          NewOperationPool[common.Bytes96, *solid.Attestation](attestationsCapacity(beaconCfg), "attestationsPool"),
+		AttesterSlashingsPool:     NewOperationPool[common.Bytes96, *cltypes.AttesterSlashing](attesterSlashingsCapacity, "attesterSlashingsPool"),
+		ProposerSlashingsPool:     NewOperationPool[common.Bytes96, *cltypes.ProposerSlashing](proposerSlashingsCapacity, "proposerSlashingsPool"),
+		BLSToExecutionChangesPool: NewOperationPool[common.Bytes96, *cltypes.SignedBLSToExecutionChange](blsToExecutionChangesCapacity, "blsExecutionChangesPool"),
+		VoluntaryExitsPool:        NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](voluntaryExitsCapacity, "voluntaryExitsPool"),
 	}
 }
 

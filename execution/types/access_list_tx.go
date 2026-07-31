@@ -20,6 +20,7 @@
 package types
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -65,7 +66,7 @@ func (tx *AccessListTx) copy() *AccessListTx {
 				TransactionMisc: TransactionMisc{},
 				Nonce:           tx.Nonce,
 				To:              tx.To, // TODO: copy pointed-to address
-				Data:            common.Copy(tx.Data),
+				Data:            bytes.Clone(tx.Data),
 				GasLimit:        tx.GasLimit,
 				Value:           tx.Value,
 				V:               tx.V,

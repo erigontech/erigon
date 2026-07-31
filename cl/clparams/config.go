@@ -820,6 +820,15 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 	return stateVersion
 }
 
+// ForkSchemaMatchesSlot reports whether an object decoded with decodedVersion is
+// consistent with the fork implied by slot. A peer picks the response fork digest,
+// so the two are independent inputs; Gloas changed which fields BeaconBody and
+// DataColumnSidecar carry, so a disagreement reaches a field left unset.
+func (b *BeaconChainConfig) ForkSchemaMatchesSlot(slot uint64, decodedVersion StateVersion) bool {
+	slotIsGloas := b.GetCurrentStateVersion(slot/b.SlotsPerEpoch) >= GloasVersion
+	return slotIsGloas == (decodedVersion >= GloasVersion)
+}
+
 // AttestationDueMs returns the attestation deadline in milliseconds from slot start.
 func (b *BeaconChainConfig) AttestationDueMs(gloas bool) uint64 {
 	if b == nil || b.SecondsPerSlot == 0 {

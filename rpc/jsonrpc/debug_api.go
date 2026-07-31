@@ -85,6 +85,9 @@ type DebugAPIImpl struct {
 	ethBackend        rpchelper.ApiBackend
 	GasCap            uint64
 	gethCompatibility bool // Geth-compatible storage iteration order for debug_storageRangeAt
+	// witnessCache serves recent legacy-mode debug_executionWitness results from
+	// memory, keyed by block hash; nil disables it (only the embedded node wires one).
+	witnessCache *witnessResultCache
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
@@ -822,18 +825,17 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 		return nil, err
 	}
 
-	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
+	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
 	if err != nil {
 		return nil, err
 	}
-
-	if txn != nil {
-		var buf bytes.Buffer
-		err = txn.MarshalBinary(&buf)
-		return buf.Bytes(), err
+	if !ok {
+		return nil, nil
 	}
 
-	return nil, nil
+	var buf bytes.Buffer
+	err = txn.MarshalBinary(&buf)
+	return buf.Bytes(), err
 }
 
 // MemStats returns detailed runtime memory statistics.
