@@ -18,12 +18,14 @@ package state
 
 import (
 	"fmt"
+	"maps"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -56,49 +58,118 @@ func storageWrite(addr accounts.Address, key accounts.StorageKey, val uint64) *V
 	}
 }
 
+func addressWrite(addr accounts.Address, nonce uint64) *VersionedWrite[*accounts.Account] {
+	return &VersionedWrite[*accounts.Account]{
+		WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 0}},
+		Val:         &accounts.Account{Nonce: nonce},
+	}
+}
+
+func incarnationWrite(addr accounts.Address, val uint64) *VersionedWrite[uint64] {
+	return &VersionedWrite[uint64]{
+		WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: Version{TxIndex: 0}},
+		Val:         val,
+	}
+}
+
+func selfDestructWrite(addr accounts.Address, val bool) *VersionedWrite[bool] {
+	return &VersionedWrite[bool]{
+		WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 0}},
+		Val:         val,
+	}
+}
+
+func createContractWrite(addr accounts.Address, val bool) *VersionedWrite[bool] {
+	return &VersionedWrite[bool]{
+		WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: Version{TxIndex: 0}},
+		Val:         val,
+	}
+}
+
+func codeWrite(addr accounts.Address, code []byte) *VersionedWrite[accounts.Code] {
+	return &VersionedWrite[accounts.Code]{
+		WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 0}},
+		Val:         accounts.NewCode(code),
+	}
+}
+
+func codeHashWrite(addr accounts.Address, b byte) *VersionedWrite[accounts.CodeHash] {
+	return &VersionedWrite[accounts.CodeHash]{
+		WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: Version{TxIndex: 0}},
+		Val:         accounts.InternCodeHash(common.Hash{b}),
+	}
+}
+
+func codeSizeWrite(addr accounts.Address, val int) *VersionedWrite[int] {
+	return &VersionedWrite[int]{
+		WriteHeader: WriteHeader{Address: addr, Path: CodeSizePath, Version: Version{TxIndex: 0}},
+		Val:         val,
+	}
+}
+
+// Every path conflicts on address a — both sides write it with a different
+// value — so "next wins on a matched key" is exercised per-path instead of
+// passing vacuously. b is prev-only, c is next-only, and storage carries all
+// three shapes: k1 conflicts, k2 is prev-only, k3 is next-only.
 func mergeIntoFixture() (prev, next *WriteSet) {
 	a, b, c := mergeAddr(0xa1), mergeAddr(0xb2), mergeAddr(0xc3)
-	k1, k2 := mergeKey(0x01), mergeKey(0x02)
+	k1, k2, k3 := mergeKey(0x01), mergeKey(0x02), mergeKey(0x03)
 	prev = newWriteSet(
+		addressWrite(a, 5),
 		balanceWrite(a, 1, 0),
 		nonceWrite(a, 5, 0),
+		incarnationWrite(a, 0),
+		selfDestructWrite(a, false),
+		createContractWrite(a, false),
+		codeWrite(a, []byte{0x60, 0x00}),
+		codeHashWrite(a, 0x11),
+		codeSizeWrite(a, 2),
 		storageWrite(a, k1, 10),
 		storageWrite(a, k2, 20),
 		balanceWrite(b, 2, 0),
+		nonceWrite(b, 7, 0),
+		codeSizeWrite(b, 9),
 	)
 	next = newWriteSet(
+		addressWrite(a, 50),
 		balanceWrite(a, 100, 1),
 		nonceWrite(a, 50, 1),
+		incarnationWrite(a, 1),
+		selfDestructWrite(a, true),
+		createContractWrite(a, true),
+		codeWrite(a, []byte{0x60, 0x01, 0x02}),
+		codeHashWrite(a, 0x22),
+		codeSizeWrite(a, 3),
 		storageWrite(a, k1, 111),
+		storageWrite(a, k3, 33),
 		balanceWrite(c, 3, 1),
+		selfDestructWrite(c, true),
 	)
 	return prev, next
+}
+
+// writeKey is the identity a merge dedups on: (addr, path, key). Version is
+// excluded, so two writes to the same slot collide here.
+type writeKey struct {
+	addr accounts.Address
+	key  accounts.StorageKey
+	path AccountPath
+}
+
+func writeKeysOf(s *WriteSet) map[writeKey]bool {
+	keys := map[writeKey]bool{}
+	for h := range s.AllHeaders() {
+		keys[writeKey{addr: h.Address, key: h.Key, path: h.Path}] = true
+	}
+	return keys
 }
 
 func assertSameWrites(t *testing.T, want, got *WriteSet) {
 	t.Helper()
 	require.Equal(t, want.Count(), got.Count())
 	for h := range want.AllHeaders() {
-		assert.True(t, got.Has(h), "missing header %v", h)
-	}
-	for addr, vw := range want.balance {
-		gotVW, ok := got.balance[addr]
-		require.True(t, ok)
-		assert.Equal(t, vw.Val, gotVW.Val, "balance mismatch at %v", addr)
-		assert.Equal(t, vw.Version, gotVW.Version, "balance version mismatch at %v", addr)
-	}
-	for addr, vw := range want.nonce {
-		gotVW, ok := got.nonce[addr]
-		require.True(t, ok)
-		assert.Equal(t, vw.Val, gotVW.Val, "nonce mismatch at %v", addr)
-		assert.Equal(t, vw.Version, gotVW.Version, "nonce version mismatch at %v", addr)
-	}
-	for addr, inner := range want.storage {
-		for key, vw := range inner {
-			gotVW, ok := got.storage[addr][key]
-			require.True(t, ok)
-			assert.Equal(t, vw.Val, gotVW.Val, "storage mismatch at %v/%v", addr, key)
-		}
+		require.True(t, got.Has(h), "missing header %v", h)
+		assert.Equal(t, writeSetVal(want, h), writeSetVal(got, h), "value mismatch at %v", h)
 	}
 }
 
@@ -113,6 +184,42 @@ func TestWriteSetMergeInto_MatchesMergeOracle(t *testing.T) {
 
 	assert.Same(t, next, merged, "MergeInto must return next itself, not a copy")
 	assertSameWrites(t, oracle, merged)
+}
+
+// A key held by both sides keeps next's write and drops prev's — that is the
+// merge policy, not a lost write: the merged set still holds every (addr,
+// path, key) either side wrote.
+func TestWriteSetMergeInto_MatchedKeyKeepsNext(t *testing.T) {
+	prev, next := mergeIntoFixture()
+	prevKeys, nextKeys := writeKeysOf(prev), writeKeysOf(next)
+	nextHeaders := map[writeKey]WriteHeader{}
+	nextVals := map[writeKey]any{}
+	for h := range next.AllHeaders() {
+		k := writeKey{addr: h.Address, key: h.Key, path: h.Path}
+		nextHeaders[k] = h
+		nextVals[k] = writeSetVal(next, h)
+	}
+	require.NotZero(t, matchedKeys(prevKeys, nextKeys), "fixture must have matched keys")
+
+	merged := prev.MergeInto(next)
+
+	for k, h := range nextHeaders {
+		require.True(t, merged.Has(h), "next's write dropped at %v", h)
+		assert.Equal(t, nextVals[k], writeSetVal(merged, h), "next must win at %v", h)
+	}
+	union := prevKeys
+	maps.Copy(union, nextKeys)
+	assert.Equal(t, union, writeKeysOf(merged), "merged set must hold every key either side wrote")
+}
+
+func matchedKeys(a, b map[writeKey]bool) int {
+	n := 0
+	for k := range a {
+		if b[k] {
+			n++
+		}
+	}
+	return n
 }
 
 // prev is aliased by execResult.TxOut, which finalize later reads and mutates
