@@ -234,7 +234,7 @@ const (
 	StateGasSystemMaxSstores = StateBytesPerStorageSet * CostPerStateByte * SystemMaxSstoresPerCall
 
 	// EIP-8038: State-access gas cost update. Reprices the EIP-2929 state-access
-	// costs and adds the regular-gas write components (ACCOUNT_WRITE, STORAGE_WRITE)
+	// costs and adds the execution-gas write components (ACCOUNT_WRITE, STORAGE_WRITE)
 	// that the EIP-8037 state-gas model is charged alongside.
 	ColdAccountAccessCostEIP8038      = uint64(3000)                                           // COLD_ACCOUNT_ACCESS (EIP-2929: 2600)
 	ColdStorageAccessCostEIP8038      = uint64(3000)                                           // COLD_STORAGE_ACCESS (EIP-2929 cold SLOAD: 2100)
@@ -246,10 +246,10 @@ const (
 	TxAccessListAddressGasEIP8038     = ColdAccountAccessCostEIP8038                           // ACCESS_LIST_ADDRESS_COST
 	TxAccessListStorageKeyGasEIP8038  = ColdStorageAccessCostEIP8038                           // ACCESS_LIST_STORAGE_KEY_COST
 	ExtCodeWarmAccessGasEIP8038       = 2 * WarmStorageReadCostEIP2929                         // EXTCODESIZE/EXTCODECOPY: account access + second read for the code
-	// REGULAR_PER_AUTH_BASE_COST = 101 auth-tuple bytes * 16 + ECRECOVER + COLD_ACCOUNT_ACCESS + 2*WARM_ACCESS = 7816
-	RegularPerAuthBaseCostEIP8038 = 101*TxDataNonZeroGasEIP2028 + EcrecoverGas + ColdAccountAccessCostEIP8038 + 2*WarmStorageReadCostEIP2929
-	// PER_AUTH regular intrinsic = ACCOUNT_WRITE + REGULAR_PER_AUTH_BASE_COST = 15816
-	PerAuthRegularCostEIP8038 = AccountWriteCostEIP8038 + RegularPerAuthBaseCostEIP8038
+	// EXECUTION_PER_AUTH_BASE_COST = 101 auth-tuple bytes * 16 + ECRECOVER + COLD_ACCOUNT_ACCESS + 2*WARM_ACCESS = 7816
+	ExecutionPerAuthBaseCostEIP8038 = 101*TxDataNonZeroGasEIP2028 + EcrecoverGas + ColdAccountAccessCostEIP8038 + 2*WarmStorageReadCostEIP2929
+	// PER_AUTH execution intrinsic = ACCOUNT_WRITE + EXECUTION_PER_AUTH_BASE_COST = 15816
+	PerAuthExecutionCostEIP8038 = AccountWriteCostEIP8038 + ExecutionPerAuthBaseCostEIP8038
 
 	// EIP-2780: Reduce intrinsic transaction gas (resource-based decomposition).
 	// COLD_ACCOUNT_ACCESS and CREATE_ACCESS take their values from EIP-8038.

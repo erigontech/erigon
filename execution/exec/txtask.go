@@ -611,7 +611,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		// write-set is not applied for it, so keep genesis on the MakeWriteSet path.
 		isGenesis := txTask.TxIndex == -1 && txTask.BlockNumber() == 0
 		if ibs.IsVersioned() && !isGenesis {
-			result.TxOut = ibs.FinalizedWrites()
+			result.TxOut = ibs.FinalizedWrites(rules)
 		} else {
 			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 				panic(err)
@@ -691,7 +691,7 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	}
 
 	result.ExecutionResult.ReceiptGasUsed = gasUsed
-	result.ExecutionResult.BlockRegularGasUsed = gasUsed
+	result.ExecutionResult.BlockExecutionGasUsed = gasUsed
 	// The versionMap path produces its write-set from the recorded IO after
 	// the switch; only the serial path clears pending changes here.
 	if !ibs.IsVersioned() {

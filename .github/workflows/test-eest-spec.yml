@@ -76,7 +76,6 @@ jobs:
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:
-          submodules: false
           cleanup-space: ${{ !inputs.cache-warming-only }}
           # matrix.no-ramdisk is absent (null, falsy) for shards without the key.
           ramdisk: ${{ !inputs.cache-warming-only && !matrix.no-ramdisk }}
