@@ -77,8 +77,12 @@ type Collector struct {
 	allocator *Allocator
 }
 
+// NewCollectorWithAllocator builds a collector that draws its buffer from the
+// allocator's pool lazily, on the first Collect — a collector that never
+// receives a write never takes a buffer. Batch writers built upfront for every
+// domain rely on this to make unused writers cost nothing.
 func NewCollectorWithAllocator(logPrefix, tmpdir string, allocator *Allocator, logger log.Logger) *Collector {
-	c := NewCollector(logPrefix, tmpdir, allocator.Get(), logger)
+	c := &Collector{logPrefix: logPrefix, tmpdir: tmpdir, logLvl: log.LvlInfo, logger: logger}
 	c.Allocator(allocator)
 	return c
 }
@@ -94,6 +98,7 @@ func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
+		c.bufType = getTypeByBuffer(c.buf)
 	}
 	c.buf.Put(k, v)
 	if !c.buf.CheckFlushSize() {
@@ -117,7 +122,7 @@ func (c *Collector) Allocator(a *Allocator) *Collector {
 }
 
 func (c *Collector) flushBuffer(canStoreInRam bool) error {
-	if c.buf.Len() == 0 {
+	if c.buf == nil || c.buf.Len() == 0 {
 		return nil
 	}
 
@@ -143,7 +148,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 
 	fullBuf := c.buf // can't `.Reset()` because this `buf` will move to another goroutine
 	if c.allocator != nil {
-		c.buf = c.allocator.Get()
+		c.buf = nil // drawn again lazily on the next Collect; a flush is often the collector's last write event
 	} else {
 		prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
 		c.buf = getBufferByType(c.bufType, datasize.ByteSize(fullBuf.SizeLimit()))
@@ -170,9 +175,6 @@ func (c *Collector) Flush() error {
 }
 
 func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
-	if c.buf == nil && c.allocator != nil {
-		c.buf = c.allocator.Get()
-	}
 	args.BufferType = c.bufType
 
 	if !c.allFlushed {
@@ -253,7 +255,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	simpleLoad := func(k, v []byte) error {
 		return loadFunc(k, v, currentTable, loadNextFunc)
 	}
-	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf); err != nil {
+	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
 	//logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
@@ -285,7 +287,7 @@ func (c *Collector) Close() {
 // for the next item, which is then added back to the heap.
 // The subsequent iterations pop the heap again and load up the provider associated with it to get the next element after processing LoadFunc.
 // this continues until all providers have reached their EOF.
-func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs, buf Buffer) (err error) {
+func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs) (err error) {
 	for _, provider := range providers {
 		if err := provider.Wait(); err != nil {
 			return err
