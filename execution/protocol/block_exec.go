@@ -344,6 +344,10 @@ func FinalizeBlockExecution(
 		return ret, err
 	}
 
+	if ibs.IsVersioned() {
+		ibs.StartAccessRecording()
+	}
+
 	if isMining {
 		newBlock, retRequests, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, nil, logger)
 	} else {

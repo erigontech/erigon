@@ -2291,12 +2291,33 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	return nil
 }
 
-// MergeTxIOInto folds the current transaction's recorded reads, writes and
-// accesses into io at the current tx index, without building an intermediate
-// VersionedIO.
-func (sdb *IntraBlockState) MergeTxIOInto(io *VersionedIO) {
+// MergeTxIOInto folds the current transaction's reads, accesses, and supplied writes into io.
+func (sdb *IntraBlockState) MergeTxIOInto(io *VersionedIO, writes *WriteSet) {
 	version := Version{BlockNum: sdb.blockNum, TxIndex: sdb.txIndex, Incarnation: sdb.version}
-	io.mergeTx(version, sdb.versionedReads, sdb.VersionedWrites(false), sdb.addressAccess)
+	io.mergeTx(version, sdb.versionedReads, writes, sdb.addressAccess)
+}
+
+// FinalizedWrites returns committable versioned writes after EIP-161 filtering.
+func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules, checkDirty bool) *WriteSet {
+	writes := sdb.VersionedWrites(checkDirty)
+	sdb.withholdCreatedEmptyAccounts(chainRules, writes)
+	return writes
+}
+
+func (sdb *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules, writes *WriteSet) {
+	if sdb.blockNum == 0 || chainRules == nil {
+		return
+	}
+	for addr := range writes.address {
+		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
+			continue
+		}
+		read, ok := sdb.versionedReads.GetAddress(addr)
+		if !ok || (read.Val != nil && !read.Val.IsNil()) || !writes.createdEmpty(addr) {
+			continue
+		}
+		writes.deleteAddr(addr)
+	}
 }
 
 func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
@@ -2473,6 +2494,14 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 	} else {
 		sdb.addressAccess[addr] = &accessOptions{revertable}
 	}
+}
+
+// StartAccessRecording enables versioned access tracking until ResetVersionedIO.
+func (sdb *IntraBlockState) StartAccessRecording() {
+	if sdb.addressAccess == nil {
+		sdb.addressAccess = make(map[accounts.Address]*accessOptions)
+	}
+	sdb.recordAccess = true
 }
 
 // MarkReadsInternal marks all versioned reads for addr as internal.

@@ -615,7 +615,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 		result.AccessedAddresses = ibs.AccessedAddresses()
 		result.TxIn = txTask.VersionedReads(ibs)
-		result.TxOut = txTask.VersionedWrites(ibs)
+		result.TxOut = ibs.FinalizedWrites(rules, false)
 	}
 
 	return &result

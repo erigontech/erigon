@@ -1880,10 +1880,7 @@ func (result *execResult) finalizeSystemTx(
 	if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
 		return nil, state.ReadSet{}, nil, err
 	}
-	// Use checkDirty=false because FinalizeTx clears the journal (dirties map).
-	// With checkDirty=true, all writes would be deleted from the versionMap
-	// since no address appears dirty after the journal reset.
-	return nil, ibs.VersionedReads(), ibs.VersionedWrites(false), nil
+	return nil, ibs.VersionedReads(), ibs.FinalizedWrites(rules, false), nil
 }
 
 func (result *execResult) calcFees(
@@ -3023,6 +3020,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			localVersionMap := state.NewVersionMap(nil)
 			ibs.SetVersionMap(localVersionMap)
 			ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
+			ibs.StartAccessRecording()
 
 			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
 				// Syscalls share the main ibs so their writes (EIP-7002/7251
@@ -3057,17 +3055,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.blockNum, err)), nil
 				}
 
-				// syscallIBS == ibs unconditionally now; no separate write
-				// propagation needed — syscall writes flow through
-				// ibs.MakeWriteSet into finalizeWrites below.
-
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
 				be.blockIO.RecordAccesses(finalVersion, ibs.AccessedAddresses())
 
-				ivw := ibs.VersionedWrites(true)
-				if !ivw.IsEmpty() {
-					be.blockIO.RecordWrites(finalVersion, ivw)
-					be.versionMap.FlushVersionedWrites(ivw, true, "")
+				writes := ibs.FinalizedWrites(lastResult.Rules(), true)
+				if !writes.IsEmpty() {
+					be.blockIO.RecordWrites(finalVersion, writes)
+					be.versionMap.FlushVersionedWrites(writes, true, "")
 				}
 
 				collector := state.NewVersionedWriteCollector(pe.rs)

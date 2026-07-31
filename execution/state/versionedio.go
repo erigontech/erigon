@@ -2785,3 +2785,29 @@ func GetDep(deps *VersionedIO) map[int]map[int]bool {
 
 	return newDependencies
 }
+
+func (s *WriteSet) createdEmpty(addr accounts.Address) bool {
+	created, ok := s.address[addr]
+	if !ok || created.Val == nil {
+		return false
+	}
+	account := *created.Val
+	if written, ok := s.balance[addr]; ok {
+		account.Balance = written.Val
+	}
+	if written, ok := s.nonce[addr]; ok {
+		account.Nonce = written.Val
+	}
+	if written, ok := s.codeHash[addr]; ok {
+		account.CodeHash = written.Val
+	}
+	if !account.Empty() {
+		return false
+	}
+	_, hasCode := s.code[addr]
+	_, hasIncarnation := s.incarnation[addr]
+	_, destroyed := s.selfDestruct[addr]
+	_, createdContract := s.createContract[addr]
+	_, hasCodeSize := s.codeSize[addr]
+	return !hasCode && !hasIncarnation && !destroyed && !createdContract && !hasCodeSize && len(s.storage[addr]) == 0
+}
