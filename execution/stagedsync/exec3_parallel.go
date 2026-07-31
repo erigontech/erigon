@@ -1263,13 +1263,11 @@ func (pe *parallelExecutor) decideStop(blockResult *blockResult, sizeCutPending 
 	if blockResult.Err != nil {
 		return false, false
 	}
-	// AfterCommitment estimate (2x) in per-block mode since commitment
-	// is already computed; BeforeCommitment (4x) in batch mode.
 	var sizeEst uint64
 	if dbg.BatchCommitments {
-		sizeEst = pe.rs.SizeEstimateBeforeCommitment()
+		sizeEst = pe.rs.SizeEstimateBeforeCommitment() // 2x
 	} else {
-		sizeEst = pe.rs.SizeEstimateAfterCommitment()
+		sizeEst = pe.rs.SizeEstimateAfterCommitment() // 1x
 	}
 	switch execLoopShouldExit(blockResult, sizeEst, pe.cfg.batchSize.Bytes(), pe.maxBlockNum, dbg.StopAfterBlock) {
 	case execLoopExitMaxReached, execLoopExitExhausted, execLoopExitStopAfter:
