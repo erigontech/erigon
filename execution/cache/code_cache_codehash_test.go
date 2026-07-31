@@ -33,6 +33,35 @@ func makeCodeHash(i int) []byte {
 	return h
 }
 
+func TestCodeCache_PutAddrCodeHashKeepsLiveEntry(t *testing.T) {
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
+	addr := makeAddr(1)
+	freshHash := [32]byte{1}
+	staleHash := [32]byte{2}
+
+	c.PutAddrCodeHash(addr, freshHash, 20)
+	c.PutAddrCodeHash(addr, staleHash, 10)
+
+	got, ok := c.GetAddrCodeHash(addr)
+	require.True(t, ok)
+	require.Equal(t, freshHash, got)
+}
+
+func TestCodeCache_PutAddrCodeHashReplacesStaleEntry(t *testing.T) {
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
+	addr := makeAddr(1)
+	oldHash := [32]byte{1}
+	newHash := [32]byte{2}
+
+	c.PutAddrCodeHash(addr, oldHash, 100)
+	c.Unwind(50)
+	c.PutAddrCodeHash(addr, newHash, 100)
+
+	got, ok := c.GetAddrCodeHash(addr)
+	require.True(t, ok)
+	require.Equal(t, newHash, got)
+}
+
 func TestCodeCache_GetByCodeHash_HitAfterPut(t *testing.T) {
 	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	addr := makeAddr(1)

@@ -690,7 +690,7 @@ func (s *BaseRoSnapshots) LogStat(label string) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", label),
-		"blocks", fmt.Sprintf("%dk", (s.SegmentsMax()+1)/1_000), "indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1_000),
+		"blocks", common.PrettyExact(s.SegmentsMax()+1), "indices", common.PrettyExact(s.IndicesMax()+1),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 }
 
