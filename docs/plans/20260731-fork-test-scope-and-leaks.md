@@ -94,6 +94,44 @@ Phase 1 coverage-to-tests map:
 | Chained transitions | `scripts/fork-soak-until-stopped.sh` | 4 | rpc-model only; empirical pending |
 | Adjacent captor contract | `manifest_exchange` and adjacent test suites | 1 | **FAIL under load (F1)** |
 
+## Open methodology decision — transaction load (spammer)
+
+**Not phase-locked yet. Captured to avoid losing.**
+
+Every fork test currently runs against an **empty tx stream** — the parent
+chain progresses because Caplin delivers blocks, but nothing is
+submitting transactions. That means:
+
+- The txpool's fork transition is untested with real load. Pool state
+  (pending nonces, sender caches, replacement rules, gas pricing) may
+  fork correctly with 0 txs but fail with N txs — never observed.
+- Block production during/after fork transition is untested with real
+  content. Empty blocks succeed; blocks with transactions may hit
+  ordering, pricing, or gas-limit issues fork-specific.
+- Gas pricing coordination across the fork boundary is untested.
+
+The end-user shape of fork is fork-with-transaction-content, not
+fork-of-empty-chain. Reaching completeness requires exercising with
+load.
+
+Two ways to fit spammer into the phase model:
+
+- **As Phase 3 (separate stage after Phase 2 lock):** dedicated live-load
+  phase. Uses different discipline (statistical, not deterministic).
+  Trade-off: keeps Phase 1/2 fast + deterministic, but delays discovery
+  of load-related bugs.
+- **As an iteration dimension inside Phase 1/2:** every scenario runs
+  with/without spammer. Trade-off: earlier load exposure, but variability
+  makes deterministic assertions harder and iteration wall-clock grows.
+
+Candidates: `ethpandaops/spamoor` (rich pattern support), simple
+tx-injection scripts, or a custom harness with predictable
+tx-per-second rates.
+
+Decision deferred. Whenever the decision is made, add spammer wiring +
+per-scenario expected behaviour + assertion approach (deterministic if
+Phase 1/2, statistical if Phase 3) here.
+
 ## Phase 2 matrix (deferred)
 
 Documented here as the roadmap; not started until Phase 1 locked.
@@ -233,6 +271,30 @@ before Phase 1 lock; **2** = surfaces in Phase 2 matrix.
 - **Impact:** cosmetic today; potential for wrong-chain snapshot data if
   torrent state affects future retrieval.
 - **Decision:** **Phase 2**. Fix-vs-document TBD.
+
+### L10 — Parallel-exec race during initial-sync ProcessFrozenBlocks (Phase 1, external to fork)
+
+- **Signature:** `[4/6 Execution] rw exit err="invalid block: apply loop
+  exited (reachedMaxBlock=false lastBlockResult=<N> maxBlockNum=<M>) but
+  1 block(s) had tx-results without a blockResult: [<N+1>]"` followed
+  by `Could not start execution service err="ProcessFrozenBlocks: ..."`
+  and `Invalid block during parallel initial sync — halting process`.
+  Erigon exits voluntarily during OtterSync's ProcessFrozenBlocks phase.
+- **First seen:** 2026-07-31 fresh hoodi sync via
+  `scripts/fork-test-hermetic.sh`. Head stalled at 0 for 300s → hermetic
+  wrapper stagnation-detected + trap-killed.
+- **Root cause:** parallel-exec harness computed txResults for block
+  N+1 but the blockResult signal was lost. Internal invariant
+  violation. Likely a race in the parallel exec loop under high initial-
+  batch load (OtterSync processes large ranges at once).
+- **Impact:** Fresh hoodi sync intermittently fails during OtterSync.
+  Blocks Phase 1 fork tests (they need a fresh parent). Not fork-
+  specific — this is a general erigon initial-sync bug that also affects
+  unwind soak's cycle-start behaviour, though the unwind soak has
+  succeeded so far.
+- **Decision:** **fix (Phase 1)** — parallel-exec race in
+  ProcessFrozenBlocks needs to be closed. Blocker for Phase 1 fork
+  test hermetic infrastructure.
 
 ### L9 — Multi-node convergence requires coordinated chain switch (Phase 2)
 

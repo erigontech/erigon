@@ -502,26 +502,6 @@ func (p *Provider) onPeerConnected(e sentry.PeerConnected) {
 	peerIP := e.Peer.IP()
 
 	p.mu.Lock()
-	if p.inflight == nil {
-		p.mu.Unlock()
-		return
-	}
-	if _, exists := p.inflight[peerID]; exists {
-		p.mu.Unlock()
-		return
-	}
-	state := p.trustState
-	now := p.nowFn
-	p.mu.Unlock()
-
-	if state != nil && now != nil && state.blacklisted(peerID, now()) {
-		return
-	}
-
-	p.mu.Lock()
-	// Re-check under mu: UnbindBus may have nil'd inflight/ctx while we
-	// ran the blacklist probe unlocked, and a concurrent onPeerConnected
-	// for the same peerID may have already registered.
 	if p.inflight == nil || p.ctx == nil {
 		p.mu.Unlock()
 		return
@@ -530,7 +510,29 @@ func (p *Provider) onPeerConnected(e sentry.PeerConnected) {
 		p.mu.Unlock()
 		return
 	}
+	// Claim the inflight slot BEFORE releasing mu for the blacklist
+	// probe. Two concurrent onPeerConnected for the same peerID can
+	// otherwise both pass the exists-check, both release mu, both run
+	// the probe, and — if this call's fetchAndPublish completes + fires
+	// clearInflight before the peer arrives back at the second lock
+	// (which happens under scheduler pressure when the fetcher is fast) —
+	// the second call sees an empty slot and launches a duplicate fetch.
+	// clearInflight is a safe no-op if UnbindBus has since nil'd the map.
 	p.inflight[peerID] = struct{}{}
+	state := p.trustState
+	now := p.nowFn
+	p.mu.Unlock()
+
+	if state != nil && now != nil && state.blacklisted(peerID, now()) {
+		p.clearInflight(peerID)
+		return
+	}
+
+	p.mu.Lock()
+	if p.inflight == nil || p.ctx == nil {
+		p.mu.Unlock()
+		return
+	}
 	ctx := p.ctx
 	peerPub := e.Peer.Pubkey()
 	p.fetchWG.Add(1)

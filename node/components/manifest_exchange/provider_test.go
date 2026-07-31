@@ -42,11 +42,20 @@ import (
 // mockFetcher is a ManifestFetcher implementation for unit tests. It
 // returns bytes from a pre-registered (infohash → file) map, simulating
 // a successful peer fetch without touching a real torrent client.
+//
+// gate, if non-nil, blocks the first call to FetchPeerManifestV2 until
+// the channel is closed. Used by concurrency tests that need to
+// deterministically hold a fetch "in flight" while other events fire —
+// the naive back-to-back-publish pattern doesn't guarantee overlap
+// under CPU pressure because the first fetch can complete +
+// clearInflight fire before the second Publish's handler runs.
 type mockFetcher struct {
-	mu      sync.Mutex
-	sources map[[20]byte]string
-	err     error
-	calls   int
+	mu       sync.Mutex
+	sources  map[[20]byte]string
+	err      error
+	calls    int
+	gate     chan struct{}
+	gateOnce sync.Once
 }
 
 func newMockFetcher() *mockFetcher {
@@ -57,6 +66,19 @@ func (m *mockFetcher) register(hash [20]byte, srcPath string) {
 	m.mu.Lock()
 	m.sources[hash] = srcPath
 	m.mu.Unlock()
+}
+
+// setGate installs a blocker fired on the first FetchPeerManifestV2
+// call. The caller closes the returned channel to release the fetch.
+// Subsequent fetch calls proceed without blocking. Only meaningful
+// before any fetch call has landed.
+func (m *mockFetcher) setGate() chan struct{} {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.gate == nil {
+		m.gate = make(chan struct{})
+	}
+	return m.gate
 }
 
 func (m *mockFetcher) setError(err error) {
@@ -76,7 +98,12 @@ func (m *mockFetcher) FetchPeerManifestV2(_ context.Context, _ string, infoHash 
 	m.calls++
 	err := m.err
 	src, ok := m.sources[infoHash]
+	gate := m.gate
+	firstCall := m.calls == 1
 	m.mu.Unlock()
+	if firstCall && gate != nil {
+		<-gate
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -357,25 +384,48 @@ func TestConcurrentPeerConnectedDoesntDoubleFetch(t *testing.T) {
 	seedPath, hash := seedPeerManifest(t, seedDir, inv)
 	e.fetcher.register(hash, seedPath)
 
+	// Gate the first fetch so it stays "in flight" until we release
+	// it. Without the gate, under CPU pressure the first fetch can
+	// complete + clearInflight can fire BEFORE the second Publish's
+	// onPeerConnected handler even starts — dropping the two events
+	// out of overlap and defeating the property this test pins.
+	// Reproduced 2026-07-31 with 12-CPU load: 38/100 fail rate on
+	// the naive back-to-back publish pattern.
+	gate := e.fetcher.setGate()
+
 	peer := makePeerNode(t, &enr.ChainToml{
 		AuthoritativeBlocks: 100,
 		KnownBlocks:         100,
 		InfoHash:            hash,
 	})
 
-	// Fire two PeerConnected events for the same peer back to back.
 	e.sentry.PublishPeerConnected(peer)
+	// Wait until the first fetch has landed in the mockFetcher — i.e.
+	// onPeerConnected has claimed the inflight slot and its goroutine
+	// is blocked in FetchPeerManifestV2 waiting on the gate.
+	waitFor(t, func() bool { return e.fetcher.callCount() == 1 },
+		2*time.Second, "first fetch to land in mockFetcher (in-flight)")
+
+	// Fire the second PeerConnected while the first fetch is
+	// definitely still in flight.
 	e.sentry.PublishPeerConnected(peer)
 
-	waitFor(t, func() bool { return e.receivedCount() >= 1 },
-		2*time.Second, "at least one PeerManifestReceived")
-
-	// Allow any second fetch to complete; it should have been suppressed.
+	// Give the second Publish's async handler a chance to run through
+	// onPeerConnected. It should see inflight set and return early
+	// without incrementing the fetch counter.
 	e.bus.WaitAsync()
 	time.Sleep(50 * time.Millisecond)
 
+	// Second onPeerConnected must NOT have started a second fetch
+	// while the first is still in flight.
 	require.Equal(t, 1, e.fetcher.callCount(),
 		"second PeerConnected for same peer should not trigger a second fetch while first is in flight")
+
+	// Release the gate; the first fetch completes normally.
+	close(gate)
+
+	waitFor(t, func() bool { return e.receivedCount() >= 1 },
+		2*time.Second, "at least one PeerManifestReceived after gate release")
 }
 
 // TestCanonicalValidatorFilters pins the consumer-side canonical
