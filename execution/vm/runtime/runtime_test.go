@@ -139,7 +139,7 @@ func TestCall(t *testing.T) {
 func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
 	t.Parallel()
 	statedb := state.New(state.NewNoopReader())
-	defer statedb.Release(false)
+	defer statedb.Close()
 	const gasLimit = uint64(500_000)
 	_, _, gasRemaining, err := Create(
 		[]byte{byte(vm.STOP)},
@@ -157,7 +157,7 @@ func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
 func TestCreateInsufficientBalancePreservesPreAmsterdamTrace(t *testing.T) {
 	t.Parallel()
 	statedb := state.New(state.NewNoopReader())
-	defer statedb.Release(false)
+	defer statedb.Close()
 	var entered []byte
 	exited := 0
 	hooks := &tracing.Hooks{
@@ -187,7 +187,7 @@ func TestCreateInsufficientBalancePreservesPreAmsterdamTrace(t *testing.T) {
 func TestCreateRuntimeOutOfGasEmitsCallGasChanges(t *testing.T) {
 	t.Parallel()
 	statedb := state.New(state.NewNoopReader())
-	defer statedb.Release(false)
+	defer statedb.Close()
 	type gasChange struct {
 		old    uint64
 		new    uint64

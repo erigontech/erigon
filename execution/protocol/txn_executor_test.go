@@ -631,7 +631,7 @@ func TestEIP2780ContractCreationNonceReadErrorIsExecutionFailure(t *testing.T) {
 		&accountErrorReader{StateReader: state.NewNoopReader(), err: backendErr},
 		versionMap,
 	)
-	defer statedb.Release(false)
+	defer statedb.Close()
 	statedb.SetTxContext(1, 1)
 	evm := newTestEVM(statedb, chain.AllProtocolChanges, blockGasLimit)
 	msg := types.NewMessage(
@@ -679,7 +679,7 @@ func TestEIP2780ContractCreationFrameStartsAfterRuntimeCharge(t *testing.T) {
 	require.False(t, overflow)
 	gasLimit := intrinsic.RegularGas + params.StateGasNewAccount + frameGas
 	ibs := state.New(state.NewNoopReader())
-	defer ibs.Release(false)
+	defer ibs.Close()
 	var enteredGas uint64
 	hooks := &tracing.Hooks{
 		OnEnter: func(depth int, typ byte, _ accounts.Address, _ accounts.Address, _ bool, _ []byte, gas uint64, _ uint256.Int, _ []byte) {
@@ -766,7 +766,7 @@ func TestEIP2780ContractCreationOntoStorageOnlyAccountChargesBeforeCollision(t *
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			ibs := state.New(state.NewNoopReader())
-			defer ibs.Release(false)
+			defer ibs.Close()
 			ibs.CreateAccount(sender, false)
 			ibs.CreateAccount(target, true)
 			require.NoError(t, ibs.SetState(target, accounts.ZeroKey, *uint256.NewInt(1)))
