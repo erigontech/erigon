@@ -23,8 +23,9 @@ import (
 	"github.com/erigontech/erigon/common/ssz"
 )
 
-// SSZ quartet shared by the signed container types ({Message, Signature} pairs).
-
+// Signed containers share a two-field SSZ layout: a message followed by a
+// 96-byte BLS signature. A dynamic message occupies a 4-byte offset in the
+// fixed section, with its encoded bytes stored in the variable section.
 func encodeSigned(buf []byte, msg ssz2.SizedObjectSSZ, sig []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(buf, msg, sig)
 }

@@ -28,10 +28,9 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// Golden tests pinning the exact SSZ encoding and hash tree root of every
-// signed container type ({Message, Signature} pair). These types cross the
-// network, so any refactor of their SSZ methods must stay byte-identical.
-
+// These goldens pin the wire encoding, reported size, and hash-tree root of
+// every signed container that uses the shared helpers. Round-trip checks ensure
+// decoding and re-encoding preserve the same bytes.
 type signedContainerSSZ interface {
 	EncodeSSZ([]byte) ([]byte, error)
 	DecodeSSZ([]byte, int) error

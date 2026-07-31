@@ -59,10 +59,10 @@ func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
 	return nil
 }
 
-// ExecutionClientEngine implements ExecutionEngine using the EngineAPI interface.
-// It works in two modes:
-//   - Local: engine is an in-process *EngineServer, chainRW provides direct access
-//   - Remote: engine is an EngineAPIRPCClient over HTTP, rpcClient provides eth_* calls
+// ExecutionClientEngine implements ExecutionEngine with either an in-process or
+// remote EngineAPI. Local mode accesses chain data and the transaction pool
+// directly; remote mode uses authenticated HTTP JSON-RPC for Engine API and
+// eth_* calls.
 type ExecutionClientEngine struct {
 	engine    engineapi.EngineAPI
 	chainRW   *chainreader.ChainReaderWriterEth1 // non-nil for local mode
@@ -71,8 +71,9 @@ type ExecutionClientEngine struct {
 	beaconCfg *clparams.BeaconChainConfig
 }
 
-// NewExecutionClientEngineLocal creates an in-process engine client that calls
-// EngineServer methods directly, avoiding HTTP/JWT/JSON overhead.
+// NewExecutionClientEngineLocal creates an in-process client with direct chain
+// and transaction-pool access. The supplied EngineAPI is called without HTTP,
+// JWT, or JSON serialization.
 func NewExecutionClientEngineLocal(
 	engine engineapi.EngineAPI,
 	chainRW chainreader.ChainReaderWriterEth1,
@@ -115,14 +116,15 @@ func (cc *ExecutionClientEngine) SetBeaconChainConfig(beaconCfg *clparams.Beacon
 	}
 }
 
-// Close releases resources held by the engine client (HTTP connections, goroutines).
+// Close closes the remote RPC client, if present.
 func (cc *ExecutionClientEngine) Close() {
 	if cc.rpcClient != nil {
 		cc.rpcClient.Close()
 	}
 }
 
-// buildExecutionPayload converts a CL Eth1Block into an Engine API ExecutionPayload.
+// buildExecutionPayload maps Caplin's SSZ payload representation to the Engine
+// API representation.
 func buildExecutionPayload(payload *cltypes.Eth1Block) *engine_types.ExecutionPayload {
 	reversedBaseFeePerGas := bytes.Clone(payload.BaseFeePerGas[:])
 	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
@@ -238,7 +240,7 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 	case clparams.CapellaVersion:
 		resp, err = cc.engine.ForkchoiceUpdatedV2(ctx, forkChoiceState, attributes)
 	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
-		// V3 is valid for Cancun (Deneb) and Prague (Electra/Fulu)
+		// ForkchoiceUpdatedV3 covers Deneb, Electra, and Fulu.
 		resp, err = cc.engine.ForkchoiceUpdatedV3(ctx, forkChoiceState, attributes)
 	default: // Gloas+ (Amsterdam)
 		resp, err = cc.engine.ForkchoiceUpdatedV4(ctx, forkChoiceState, attributes, nil)
@@ -374,7 +376,7 @@ func (cc *ExecutionClientEngine) GetAssembledBlock(ctx context.Context, id []byt
 		return cc.chainRW.GetAssembledBlock(binary.LittleEndian.Uint64(id))
 	}
 
-	// Select Engine API version based on CL state version.
+	// GetPayload versions advance with the response fields introduced by each fork.
 	switch {
 	case version >= clparams.GloasVersion:
 		return cc.getAssembledBlockFromEngine(ctx, id, version, "GetPayloadV6", cc.engine.GetPayloadV6)
@@ -412,7 +414,8 @@ func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []b
 	return block, resp.BlobsBundle, nil, blockValue, nil
 }
 
-// getAssembledBlockFromResponse converts a GetPayloadResponse into the block production tuple.
+// getAssembledBlockFromResponse converts an Engine response into Caplin's
+// block-production values.
 func (cc *ExecutionClientEngine) getAssembledBlockFromResponse(resp *engine_types.GetPayloadResponse, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	if resp.ExecutionPayload == nil {
 		return nil, nil, nil, nil, errors.New("GetPayload returned nil execution payload")
@@ -477,7 +480,7 @@ func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clpa
 	if ep.BaseFeePerGas != nil {
 		baseFee := uint256.MustFromBig(ep.BaseFeePerGas.ToInt())
 		baseFeeBytes := baseFee.Bytes32()
-		// Reverse to little-endian for Eth1Block.BaseFeePerGas
+		// Eth1Block stores BaseFeePerGas in little-endian byte order.
 		for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
 			baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
 		}
@@ -491,14 +494,14 @@ func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clpa
 		block.ExcessBlobGas = uint64(*ep.ExcessBlobGas)
 	}
 
-	// Transactions
+	// Keep transactions encoded while rebuilding their SSZ container.
 	txBytes := make([][]byte, len(ep.Transactions))
 	for i, tx := range ep.Transactions {
 		txBytes[i] = tx
 	}
 	block.Transactions = solid.NewTransactionsSSZFromTransactions(txBytes)
 
-	// Withdrawals
+	// Use the chain preset's withdrawal limit when rebuilding the SSZ list.
 	if ep.Withdrawals != nil {
 		maxWithdrawals := 16
 		if beaconCfg != nil {
@@ -515,7 +518,7 @@ func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clpa
 		}
 	}
 
-	// GLOAS fields
+	// Gloas extends the payload with the slot number and block access list.
 	if ep.SlotNumber != nil {
 		block.SlotNumber = uint64(*ep.SlotNumber)
 	}
@@ -564,9 +567,8 @@ func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes [
 		return blobs, proofs, nil
 	}
 
-	// Remote mode: select GetBlobs version based on fork.
-	// V1 returns single proof per blob (Deneb/Electra).
-	// V2/V3 return cell proofs (Fulu+).
+	// Deneb and Electra expect one proof per blob. Fulu and later expect cell
+	// proofs.
 	if version >= clparams.FuluVersion {
 		result, err := cc.engine.GetBlobsV2(ctx, versionedHashes)
 		if err != nil {

@@ -19,13 +19,9 @@ var (
 	_ ssz2.SizedObjectSSZ        = (*ExecutionRequests)(nil)
 )
 
-// class ExecutionRequests(Container):
-//
-//	deposits: List[DepositRequest, MAX_DEPOSIT_REQUESTS_PER_PAYLOAD]  # [New in Electra:EIP6110]
-//	withdrawals: List[WithdrawalRequest, MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD]  # [New in Electra:EIP7002:EIP7251]
-//	consolidations: List[ConsolidationRequest, MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD]  # [New in Electra:EIP7251]
-//	builder_deposits: List[BuilderDepositRequest, MAX_BUILDER_DEPOSIT_REQUESTS_PER_PAYLOAD]  # [New in Gloas:EIP8282]
-//	builder_exits: List[BuilderExitRequest, MAX_BUILDER_EXIT_REQUESTS_PER_PAYLOAD]  # [New in Gloas:EIP8282]
+// ExecutionRequests groups execution-layer requests carried by a payload.
+// Electra defines deposits, withdrawals, and consolidations; Gloas adds builder
+// deposits and exits.
 type ExecutionRequests struct {
 	Deposits        *solid.ListSSZ[*solid.DepositRequest]        `json:"deposits"`
 	Withdrawals     *solid.ListSSZ[*solid.WithdrawalRequest]     `json:"withdrawals"`
@@ -80,6 +76,7 @@ func (e *ExecutionRequests) ensureLists() {
 
 func (e *ExecutionRequests) EncodingSizeSSZ() int {
 	e.ensureLists()
+	// Every field is a dynamic list, so each contributes a 4-byte offset.
 	const dynamicOffsetSize = 4
 	size := 3*dynamicOffsetSize +
 		e.Deposits.EncodingSizeSSZ() +

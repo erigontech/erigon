@@ -30,8 +30,9 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-// EngineAPIRPCClient implements engineapi.EngineAPI over HTTP JSON-RPC.
-// It is a thin transport layer — no version negotiation, just direct method dispatch.
+// EngineAPIRPCClient implements engineapi.EngineAPI over authenticated HTTP
+// JSON-RPC. Callers choose an explicit Engine API version; this client only
+// dispatches the requested method.
 type EngineAPIRPCClient struct {
 	client *rpc.Client
 }

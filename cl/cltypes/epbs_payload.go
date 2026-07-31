@@ -258,7 +258,7 @@ func (i *IndexedPayloadAttestation) Clone() clonable.Clonable {
 }
 
 // ExecutionPayloadBid represents a bid for an execution payload from a builder.
-// Field order matches the alpha7 spec: consensus-specs/specs/gloas/beacon-chain.md
+// Its SSZ methods must preserve the field order defined by the Gloas schema.
 type ExecutionPayloadBid struct {
 	ParentBlockHash       common.Hash                   `json:"parent_block_hash"`
 	ParentBlockRoot       common.Hash                   `json:"parent_block_root"`
@@ -292,15 +292,11 @@ func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
 }
 
 func (e *ExecutionPayloadBid) EncodingSizeSSZ() int {
-	// 4 Hash32 fields (ParentBlockHash, ParentBlockRoot, BlockHash, PrevRandao) = 32*4 = 128
-	// 1 ExecutionAddress (FeeRecipient) = 20
-	// 5 uint64 fields (GasLimit, BuilderIndex, Slot, Value, ExecutionPayment) = 8*5 = 40
-	// 1 offset for BlobKzgCommitments = 4
-	// 1 Hash32 field (ExecutionRequestsRoot) = 32
-	// Total fixed = 128 + 20 + 40 + 4 + 32 = 224
+	// The fixed section contains five hashes, one address, five uint64 values,
+	// and the offset for BlobKzgCommitments.
 	return length.Hash*4 + length.Addr + 8*5 +
-		4 + // offset for BlobKzgCommitments (variable-length field)
-		length.Hash + // ExecutionRequestsRoot
+		4 +
+		length.Hash +
 		e.BlobKzgCommitments.EncodingSizeSSZ()
 }
 
@@ -467,9 +463,10 @@ func (e *ExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (e *ExecutionPayloadEnvelope) EncodingSizeSSZ() int {
-	return 4 + e.Payload.EncodingSizeSSZ() + // offset for Payload (variable-length)
-		4 + e.ExecutionRequests.EncodingSizeSSZ() + // offset for ExecutionRequests (variable-length)
-		8 + length.Hash + length.Hash // BuilderIndex + BeaconBlockRoot + ParentBeaconBlockRoot
+	// Payload and ExecutionRequests are dynamic, so each contributes a 4-byte offset.
+	return 4 + e.Payload.EncodingSizeSSZ() +
+		4 + e.ExecutionRequests.EncodingSizeSSZ() +
+		8 + length.Hash + length.Hash
 }
 
 func (e *ExecutionPayloadEnvelope) Clone() clonable.Clonable {
