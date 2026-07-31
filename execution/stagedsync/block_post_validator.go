@@ -15,6 +15,10 @@ type blockValidator struct {
 	done chan error // buffered(1); written once, then re-stuffed on each Wait
 }
 
+func shouldValidateBlockPostExecution(blockNum uint64, receiptsComplete bool) bool {
+	return blockNum > 0 && receiptsComplete
+}
+
 func newBlockValidator(engine rules.Engine, blockGasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool, receipts types.Receipts,
 	header *types.Header, txns types.Transactions,
 	chainConfig *chain.Config, logger log.Logger) *blockValidator {
