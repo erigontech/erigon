@@ -29,8 +29,8 @@ import (
 	"github.com/erigontech/erigon/cl/utils/bls"
 )
 
-func (I *impl) VerifyTransition(s abstract.BeaconState, currentBlock *cltypes.BeaconBlock) error {
-	if !I.FullValidation {
+func (imp *impl) VerifyTransition(s abstract.BeaconState, currentBlock *cltypes.BeaconBlock) error {
+	if !imp.FullValidation {
 		return nil
 	}
 	expectedStateRoot, err := s.HashSSZ()
@@ -43,8 +43,8 @@ func (I *impl) VerifyTransition(s abstract.BeaconState, currentBlock *cltypes.Be
 	return nil
 }
 
-func (I *impl) VerifyBlockSignature(s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error {
-	if !I.FullValidation {
+func (imp *impl) VerifyBlockSignature(s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error {
+	if !imp.FullValidation {
 		return nil
 	}
 	valid, err := VerifyBlockSignature(s, block)

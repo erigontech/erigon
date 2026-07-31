@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -43,9 +44,11 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -251,6 +254,90 @@ func TestEIP8038SStore(t *testing.T) {
 	}
 }
 
+func TestEIP7928SStoreReadRequiresAffordableAccess(t *testing.T) {
+	tests := []struct {
+		name       string
+		gas        uint64
+		warm       bool
+		expectRead bool
+		expectErr  bool
+	}{
+		{name: "stipend plus one", gas: params.SstoreSentryGasEIP2200 + 1, expectErr: true},
+		{name: "cold access minus one", gas: params.ColdStorageAccessCostEIP8038 - 1, expectErr: true},
+		{name: "cold access", gas: params.ColdStorageAccessCostEIP8038, expectRead: true, expectErr: true},
+		{name: "warm access", gas: params.WarmStorageReadCostEIP2929 + params.StorageWriteCostEIP8038 + params.StateGasPerStorageSet, warm: true, expectRead: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			versionMap := state.NewVersionMap(nil)
+			reader := state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, state.NewNoopReader())
+			statedb := state.NewWithVersionMap(reader, versionMap)
+			defer statedb.Release(false)
+			statedb.SetTxContext(1, 0)
+			contract := accounts.InternAddress(common.HexToAddress("0x1000"))
+			slot := accounts.InternKey(common.HexToHash("0x01"))
+			statedb.CreateAccount(contract, true)
+			require.NoError(t, statedb.SetCode(contract, hexutil.MustDecode("0x6001600155"), tracing.CodeChangeUnspecified))
+			statedb.ResetVersionedReads()
+			blockCtx := evmtypes.BlockContext{
+				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) {
+					return true, nil
+				},
+				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+					return nil
+				},
+			}
+			vmenv := vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chain.AllProtocolChanges, vm.Config{})
+			rules := vmenv.ChainRules()
+			statedb.Prepare(rules, accounts.ZeroAddress, accounts.ZeroAddress, contract, vm.ActivePrecompiles(rules), nil)
+			if tt.warm {
+				statedb.AddSlotToAccessList(contract, slot)
+			}
+			_, _, _, err := vmenv.Call(
+				accounts.ZeroAddress,
+				contract,
+				nil,
+				mdgas.MdGas{Regular: 2*push1 + tt.gas},
+				uint256.Int{},
+				false,
+			)
+			if tt.expectErr {
+				require.ErrorIs(t, err, vm.ErrOutOfGas)
+			} else {
+				require.NoError(t, err)
+			}
+			reads := statedb.VersionedReads()
+			_, read := reads.GetStorage(contract, slot)
+			require.Equal(t, tt.expectRead, read)
+		})
+	}
+}
+
+func TestEIP7928SystemCallReadsAbsentTarget(t *testing.T) {
+	versionMap := state.NewVersionMap(nil)
+	reader := state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, state.NewNoopReader())
+	statedb := state.NewWithVersionMap(reader, versionMap)
+	defer statedb.Release(false)
+	statedb.SetTxContext(1, -1)
+	target := accounts.InternAddress(common.HexToAddress("0x1000"))
+	vmenv := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, statedb, chain.AllProtocolChanges, vm.Config{})
+	_, _, _, err := vmenv.Call(
+		params.SystemAddress,
+		target,
+		nil,
+		mdgas.MdGas{Regular: math.MaxUint64 - params.StateGasSystemMaxSstores, State: params.StateGasSystemMaxSstores},
+		uint256.Int{},
+		false,
+	)
+	require.NoError(t, err)
+	reads := statedb.VersionedReads()
+	_, read := reads.GetCode(target)
+	require.True(t, read)
+	exists, err := statedb.Exist(target)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
 // TestCallNewAccountSpillBefore63of64 pins the EIP-8037 charge order for a value
 // CALL to a dead account: the NEW_ACCOUNT state charge (spilling into regular gas
 // when the reservoir can't cover it) is applied before the 63/64 child allowance,
@@ -312,15 +399,311 @@ func TestCallNewAccountSpillBefore63of64(t *testing.T) {
 			_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{})
 			ret, gas, _, err := vmenv.Call(accounts.ZeroAddress, caller, nil, tt.pool, uint256.Int{}, false /* bailout */)
-			require.NoError(t, err, "outer frame must not OOG: NEW_ACCOUNT spill must precede the 63/64 computation")
+			require.NoError(t, err)
 			require.Len(t, ret, 32)
-			require.Equal(t, byte(1), ret[31], "inner CALL must succeed")
-			require.Equal(t, tt.leftoverRegular, gas.Regular, "leftover regular gas")
-			require.Equal(t, tt.leftoverState, gas.State, "leftover state gas")
+			require.Equal(t, byte(1), ret[31])
+			require.Equal(t, tt.leftoverRegular, gas.Regular)
+			require.Equal(t, tt.leftoverState, gas.State)
 			exists, err := vmenv.IntraBlockState().Exist(callee)
 			require.NoError(t, err)
-			require.True(t, exists, "callee account must have been created")
+			require.True(t, exists)
 		})
+	}
+}
+
+func TestCreate2OntoExistingAccountSkipsNewAccountCharge(t *testing.T) {
+	t.Parallel()
+	tx, sd := testTemporalTxSD(t)
+	txNum, _, err := sd.SeekCommitment(t.Context(), tx)
+	require.NoError(t, err)
+	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	s := state.New(r)
+	defer s.Release(false)
+	initCode := program.New().Push(0).Push(400_000).Op(vm.MSTORE).Return(0, 0).Bytes()
+	salt := uint256.NewInt(0)
+	factoryAddress := common.HexToAddress("0xfac0")
+	factory := accounts.InternAddress(factoryAddress)
+	target := accounts.InternAddress(types.CreateAddress2(factoryAddress, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initCode))))
+	factoryCode := program.New().Create2(initCode, salt).Push(0).Op(vm.MSTORE).Return(0, 32).Bytes()
+	s.CreateAccount(factory, true)
+	s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+	s.CreateAccount(target, false)
+	s.AddBalance(target, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+	vmctx := evmtypes.BlockContext{
+		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
+		Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+			return nil
+		},
+	}
+	_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
+	var enteredCreateGas, availableCreateGas uint64
+	hooks := &tracing.Hooks{
+		OnEnter: func(_ int, typ byte, _, _ accounts.Address, _ bool, _ []byte, gas uint64, _ uint256.Int, _ []byte) {
+			if vm.OpCode(typ) == vm.CREATE2 {
+				enteredCreateGas = gas
+			}
+		},
+		OnOpcode: func(_ uint64, op byte, gas, cost uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
+			if vm.OpCode(op) == vm.CREATE2 {
+				availableCreateGas = gas - cost
+			}
+		},
+	}
+	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{Tracer: hooks})
+	ret, _, _, err := vmenv.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Regular: 500_000}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Equal(t, target.Value(), common.BytesToAddress(ret))
+	require.Equal(t, availableCreateGas-availableCreateGas/64, enteredCreateGas)
+}
+
+func TestCreate2OntoStorageOnlyAccountChargesBeforeCollision(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name       string
+		pool       mdgas.MdGas
+		wantErr    error
+		wantFrames int
+	}{
+		{
+			name:    "charge out of gas",
+			pool:    mdgas.MdGas{Regular: 100_000},
+			wantErr: vm.ErrOutOfGas,
+		},
+		{
+			name:       "collision refills charge",
+			pool:       mdgas.MdGas{Regular: 500_000, State: 200_000},
+			wantFrames: 1,
+		},
+	} {
+		t.Run(
+			tt.name,
+			func(t *testing.T) {
+				t.Parallel()
+				tx, sd := testTemporalTxSD(t)
+				txNum, _, err := sd.SeekCommitment(t.Context(), tx)
+				require.NoError(t, err)
+				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+				s := state.New(r)
+				defer s.Release(false)
+				initCode := []byte{byte(vm.STOP)}
+				salt := uint256.NewInt(0)
+				factoryAddress := common.HexToAddress("0xfac0")
+				factory := accounts.InternAddress(factoryAddress)
+				target := accounts.InternAddress(types.CreateAddress2(factoryAddress, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initCode))))
+				factoryCode := program.New().Create2(initCode, salt).Push(0).Op(vm.MSTORE).Return(0, 32).Bytes()
+				s.CreateAccount(factory, true)
+				s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+				vmctx := evmtypes.BlockContext{
+					CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
+					Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+						return nil
+					},
+				}
+				_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
+				s.CreateAccount(target, true)
+				require.NoError(t, s.SetState(target, accounts.ZeroKey, *uint256.NewInt(1)))
+				empty, err := s.Empty(target)
+				require.NoError(t, err)
+				require.True(t, empty)
+				hasStorage, err := s.HasStorage(target)
+				require.NoError(t, err)
+				require.True(t, hasStorage)
+				createFrames := 0
+				hooks := &tracing.Hooks{
+					OnEnter: func(_ int, typ byte, _, _ accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
+						if vm.OpCode(typ) == vm.CREATE2 {
+							createFrames++
+						}
+					},
+				}
+				vmenv := vm.NewEVM(
+					vmctx,
+					evmtypes.TxContext{},
+					s,
+					chain.AllProtocolChanges,
+					vm.Config{Tracer: hooks},
+				)
+				ret, gas, _, err := vmenv.Call(accounts.ZeroAddress, factory, nil, tt.pool, uint256.Int{}, false)
+				if tt.wantErr != nil {
+					require.ErrorIs(t, err, tt.wantErr)
+				} else {
+					require.NoError(t, err)
+					require.Equal(t, common.Address{}, common.BytesToAddress(ret))
+					require.Equal(t, tt.pool.State, gas.State)
+				}
+				require.Equal(t, tt.wantFrames, createFrames)
+			},
+		)
+	}
+}
+
+func TestCreateTraceOnEarlyFailure(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		config    *chain.Config
+		forwarded bool
+	}{
+		{name: "Amsterdam", config: chain.AllProtocolChanges},
+		{name: "pre-Amsterdam", config: chain.TestChainOsakaConfig, forwarded: true},
+	} {
+		t.Run(
+			tt.name,
+			func(t *testing.T) {
+				t.Parallel()
+				tx, sd := testTemporalTxSD(t)
+				txNum, _, err := sd.SeekCommitment(t.Context(), tx)
+				require.NoError(t, err)
+				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+				s := state.New(r)
+				defer s.Release(false)
+				initCode := program.New().Push(0).Return(0, 0).Bytes()
+				salt := uint256.NewInt(0)
+				factory := accounts.InternAddress(common.HexToAddress("0xfac0"))
+				factoryCode := program.New().Mstore(initCode, 0).Push(salt).Push(len(initCode)).Push(0).Push(1).Op(vm.CREATE2).Bytes()
+				s.CreateAccount(factory, true)
+				s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+				vmctx := evmtypes.BlockContext{
+					CanTransfer: func(_ evmtypes.IntraBlockState, _ accounts.Address, value uint256.Int) (bool, error) {
+						return value.IsZero(), nil
+					},
+					Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+						return nil
+					},
+				}
+				_ = s.CommitBlock(vmctx.Rules(tt.config), w)
+				var enteredCreateGas, exitedCreateGasUsed, availableCreateGas uint64
+				var enteredCreateCount, exitedCreateCount int
+				hooks := &tracing.Hooks{
+					OnEnter: func(_ int, typ byte, _, _ accounts.Address, _ bool, _ []byte, gas uint64, _ uint256.Int, _ []byte) {
+						if vm.OpCode(typ) == vm.CREATE2 {
+							enteredCreateCount++
+							enteredCreateGas = gas
+						}
+					},
+					OnExit: func(depth int, _ []byte, gasUsed uint64, _ error, _ bool) {
+						if depth == 1 {
+							exitedCreateCount++
+							exitedCreateGasUsed = gasUsed
+						}
+					},
+					OnOpcode: func(_ uint64, op byte, gas, cost uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
+						if vm.OpCode(op) == vm.CREATE2 {
+							availableCreateGas = gas - cost
+						}
+					},
+				}
+				vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, tt.config, vm.Config{Tracer: hooks})
+				_, _, _, err = vmenv.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Regular: 500_000}, uint256.Int{}, false)
+				require.NoError(t, err)
+				require.NotZero(t, availableCreateGas)
+				if !tt.forwarded {
+					require.Zero(t, enteredCreateCount)
+					require.Zero(t, exitedCreateCount)
+					return
+				}
+				require.Equal(t, 1, enteredCreateCount)
+				require.Equal(t, 1, exitedCreateCount)
+				require.Equal(t, availableCreateGas-availableCreateGas/64, enteredCreateGas)
+				require.Zero(t, exitedCreateGasUsed)
+			},
+		)
+	}
+}
+
+func TestCreatePropagatesAmsterdamPreparationError(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Release(false)
+	backendErr := errors.New("can transfer failed")
+	factory := accounts.InternAddress(common.HexToAddress("0xfac0"))
+	initCode := []byte{byte(vm.STOP)}
+	factoryCode := program.New().Create2(initCode, uint256.NewInt(0)).Bytes()
+	statedb.CreateAccount(factory, true)
+	statedb.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+	vmctx := evmtypes.BlockContext{
+		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) {
+			return false, backendErr
+		},
+		Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+			return nil
+		},
+	}
+	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, statedb, chain.AllProtocolChanges, vm.Config{})
+	_, gasRemaining, _, err := vmenv.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Regular: 500_000}, uint256.Int{}, false)
+	require.ErrorIs(t, err, backendErr)
+	require.Zero(t, gasRemaining.Regular)
+}
+
+func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		config *chain.Config
+	}{
+		{name: "Amsterdam", config: chain.AllProtocolChanges},
+		{name: "pre-Amsterdam", config: chain.TestChainOsakaConfig},
+	} {
+		t.Run(
+			tt.name,
+			func(t *testing.T) {
+				tx, sd := testTemporalTxSD(t)
+				txNum, _, err := sd.SeekCommitment(t.Context(), tx)
+				require.NoError(t, err)
+				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+				s := state.New(r)
+				defer s.Release(false)
+				initCode := program.New().Push(0xaa).Push(0).Op(vm.MSTORE8).Return(0, 1).Bytes()
+				replacementCreationCode := []byte{byte(vm.STOP)}
+				salt := uint256.NewInt(0)
+				factoryAddress := common.HexToAddress("0xfac0")
+				factory := accounts.InternAddress(factoryAddress)
+				target := accounts.InternAddress(types.CreateAddress2(factoryAddress, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initCode))))
+				factoryCode := program.New().Create2(initCode, salt).Push(0).Op(vm.MSTORE).Return(0, 32).Bytes()
+				s.CreateAccount(factory, true)
+				s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+				vmctx := evmtypes.BlockContext{
+					CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
+					Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+						return nil
+					},
+				}
+				_ = s.CommitBlock(vmctx.Rules(tt.config), w)
+				var evmRef *vm.EVM
+				var overlayErr error
+				capturing := false
+				hooks := &tracing.Hooks{
+					OnEnter: func(_ int, typ byte, from, to accounts.Address, _ bool, _ []byte, _ uint64, value uint256.Int, _ []byte) {
+						if capturing || vm.OpCode(typ) != vm.CREATE2 || to != target {
+							return
+						}
+						capturing = true
+						_, _, _, _, overlayErr = evmRef.OverlayCreate(
+							from,
+							vm.NewCodeAndHash(replacementCreationCode),
+							mdgas.MdGas{Regular: 400_000},
+							value,
+							to,
+							vm.CREATE2,
+							true,
+						)
+					},
+				}
+				evmRef = vm.NewEVM(
+					vmctx,
+					evmtypes.TxContext{},
+					s,
+					tt.config,
+					vm.Config{Tracer: hooks},
+				)
+				ret, _, _, err := evmRef.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Regular: 1_000_000}, uint256.Int{}, false)
+				require.NoError(t, err)
+				require.NoError(t, overlayErr)
+				require.True(t, capturing)
+				require.Equal(t, common.Address{}, common.BytesToAddress(ret))
+				code, err := evmRef.IntraBlockState().GetCode(target)
+				require.NoError(t, err)
+				require.Empty(t, code)
+			},
+		)
 	}
 }
 
