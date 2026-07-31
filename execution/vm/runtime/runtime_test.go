@@ -136,6 +136,92 @@ func TestCall(t *testing.T) {
 	}
 }
 
+func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Release(false)
+	const gasLimit = uint64(500_000)
+	_, _, gasRemaining, err := Create(
+		[]byte{byte(vm.STOP)},
+		&Config{
+			GasLimit: gasLimit,
+			Value:    *uint256.NewInt(1),
+			State:    statedb,
+		},
+		0,
+	)
+	require.ErrorIs(t, err, vm.ErrInsufficientBalance)
+	require.Equal(t, mdgas.MdGas{Execution: gasLimit}, gasRemaining)
+}
+
+func TestCreateInsufficientBalancePreservesPreAmsterdamTrace(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Release(false)
+	var entered []byte
+	exited := 0
+	hooks := &tracing.Hooks{
+		OnEnter: func(_ int, typ byte, _, _ accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
+			entered = append(entered, typ)
+		},
+		OnExit: func(_ int, _ []byte, _ uint64, _ error, _ bool) {
+			exited++
+		},
+	}
+	_, _, _, err := Create(
+		[]byte{byte(vm.STOP)},
+		&Config{
+			ChainConfig: chain.TestChainOsakaConfig,
+			EVMConfig:   vm.Config{Tracer: hooks},
+			GasLimit:    500_000,
+			Value:       *uint256.NewInt(1),
+			State:       statedb,
+		},
+		0,
+	)
+	require.ErrorIs(t, err, vm.ErrInsufficientBalance)
+	require.Equal(t, []byte{byte(vm.CREATE)}, entered)
+	require.Equal(t, 1, exited)
+}
+
+func TestCreateRuntimeOutOfGasEmitsCallGasChanges(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Release(false)
+	type gasChange struct {
+		old    uint64
+		new    uint64
+		reason tracing.GasChangeReason
+	}
+	var gasChanges []gasChange
+	hooks := &tracing.Hooks{
+		OnGasChange: func(old, newGas uint64, reason tracing.GasChangeReason) {
+			if reason == tracing.GasChangeCallInitialBalance || reason == tracing.GasChangeCallFailedExecution {
+				gasChanges = append(gasChanges, gasChange{old: old, new: newGas, reason: reason})
+			}
+		},
+	}
+	gasLimit := uint64(params.StateGasNewAccount - 1)
+	_, _, _, err := Create(
+		[]byte{byte(vm.STOP)},
+		&Config{
+			EVMConfig: vm.Config{Tracer: hooks},
+			GasLimit:  gasLimit,
+			State:     statedb,
+		},
+		0,
+	)
+	require.ErrorIs(t, err, vm.ErrRuntimeOutOfGas)
+	require.Equal(
+		t,
+		[]gasChange{
+			{old: 0, new: gasLimit, reason: tracing.GasChangeCallInitialBalance},
+			{old: gasLimit, new: 0, reason: tracing.GasChangeCallFailedExecution},
+		},
+		gasChanges,
+	)
+}
+
 func TestCallChargesAmsterdamNewAccountStateGas(t *testing.T) {
 	t.Parallel()
 
@@ -158,7 +244,7 @@ func TestCallChargesAmsterdamNewAccountStateGas(t *testing.T) {
 		State:       statedb,
 	})
 	require.NoError(t, err)
-	require.Equal(t, mdgas.MdGas{Regular: gasLimit - params.StateGasNewAccount}, gasRemaining)
+	require.Equal(t, mdgas.MdGas{Execution: gasLimit - params.StateGasNewAccount}, gasRemaining)
 }
 
 func TestCallChargesAmsterdamDelegationTargetAccess(t *testing.T) {
@@ -181,7 +267,7 @@ func TestCallChargesAmsterdamDelegationTargetAccess(t *testing.T) {
 		State:       statedb,
 	})
 	require.NoError(t, err)
-	require.Equal(t, mdgas.MdGas{Regular: gasLimit - params.ColdAccountAccessCostEIP8038}, gasRemaining)
+	require.Equal(t, mdgas.MdGas{Execution: gasLimit - params.ColdAccountAccessCostEIP8038}, gasRemaining)
 	require.True(t, statedb.AddressInAccessList(delegatedTo))
 }
 
@@ -511,7 +597,7 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 
 	cfg.State = state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	defer cfg.State.Release(false)
-	cfg.GasLimit = gas.Regular
+	cfg.GasLimit = gas.Execution
 	//
 	// TODO revise
 	//
@@ -626,14 +712,14 @@ func BenchmarkSimpleLoop(b *testing.B) {
 	//		Tracer: tracer,
 	//	}})
 	// 100M gas
-	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, staticCallIdentity, "staticcall-identity-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callIdentity, "call-identity-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, loopingCode, "loop-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, loopingCode2, "loop2-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, loopingCode3, "loop3-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callInexistant, "call-nonexist-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callEOA, "call-EOA-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callRevertingContractWithInput, "call-reverting-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, staticCallIdentity, "staticcall-identity-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, callIdentity, "call-identity-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, loopingCode, "loop-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, loopingCode2, "loop2-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, loopingCode3, "loop3-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, callInexistant, "call-nonexist-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, callEOA, "call-EOA-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, callRevertingContractWithInput, "call-reverting-100M", "", b)
 
 	//benchmarkNonModifyingCode(10000000, staticCallIdentity, "staticcall-identity-10M", b)
 	//benchmarkNonModifyingCode(10000000, loopingCode, "loop-10M", b)
@@ -918,9 +1004,9 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 // callback receives correct (non-underflowing) gas values when an opcode
 // charges state gas under EIP-8037 multi-dimensional gas (Amsterdam rules).
 //
-// The bug: the interpreter accumulated both regular and state dynamic gas into
+// The bug: the interpreter accumulated both execution and state dynamic gas into
 // a single `cost` variable, then computed `gasCopy - cost` for the tracer
-// callback. Because `gasCopy` only captured regular gas, the subtraction
+// callback. Because `gasCopy` only captured execution gas, the subtraction
 // underflowed when state gas was non-zero (e.g. SSTORE creating a new slot).
 func TestGasTracingNoUnderflowOnStateGas(t *testing.T) {
 	t.Parallel()
@@ -1061,7 +1147,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	// The call-level BAL must not include SYSTEM_ADDRESS when the syscall only
 	// performs the sender-side touch and no actual account access.
 	var io state.VersionedIO
-	statedb.MergeTxIOInto(&io)
+	statedb.MergeTxIOInto(&io, statedb.VersionedWrites())
 	bal := io.AsBlockAccessList()
 	for _, accountChanges := range bal {
 		require.NotEqual(t, systemAddr, accountChanges.Address,
