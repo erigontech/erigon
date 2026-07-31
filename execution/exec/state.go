@@ -344,9 +344,7 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 		case withTx:
 			typedWriter.SetTx(rw.chainTx)
 		default:
-			// Writers that don't implement withPutter or withTx (e.g.
-			// NoopWriter, LightCollector) don't need a DB transaction —
-			// they accumulate writes in memory only. This is not an error.
+			// Writers without a DB-backed sink do not need a transaction.
 		}
 
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
@@ -474,6 +472,9 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
+	if rw.ibs != nil {
+		rw.ibs.Release(true)
+	}
 	rw.ibs = state.New(rw.stateReader)
 
 	switch reader.(type) {
@@ -560,13 +561,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	if callTracer != nil {
 		result.TraceFroms = callTracer.Froms()
 		result.TraceTos = callTracer.Tos()
-	}
-
-	// Capture collector-format writes from LightCollector (parallel workers).
-	// MakeWriteSet already wrote to rw.stateWriter; extract the accumulated
-	// writes so finalize can use them directly without IBS reconstruction.
-	if lc, ok := rw.stateWriter.(*state.LightCollector); ok {
-		result.CollectorWrites = lc.TakeWrites()
 	}
 
 	return result

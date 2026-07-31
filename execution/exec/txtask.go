@@ -113,14 +113,6 @@ type TxResult struct {
 
 	TraceFroms map[accounts.Address]struct{}
 	TraceTos   map[accounts.Address]struct{}
-
-	// CollectorWrites holds collector-format writes (all 4 account fields per
-	// address) produced during worker execution, with fee-calc balance
-	// adjustments folded in during finalize. It is not the commit source — the
-	// parallel commit builds its write set from the versionMap — so this is
-	// vestigial and slated for removal once the last self-referential fee update
-	// is dropped.
-	CollectorWrites *state.WriteSet
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -619,7 +611,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		// write-set is not applied for it, so keep genesis on the MakeWriteSet path.
 		isGenesis := txTask.TxIndex == -1 && txTask.BlockNumber() == 0
 		if ibs.IsVersioned() && !isGenesis {
-			result.TxOut = ibs.FinalizedWrites()
+			result.TxOut = ibs.FinalizedWrites(rules)
 		} else {
 			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 				panic(err)
