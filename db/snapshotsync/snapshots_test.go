@@ -1016,6 +1016,48 @@ func TestSegmentsMaxDerivedFromVisible(t *testing.T) {
 	s.Close()
 }
 
+// TestSegmentsMax_AlignMin_EmptyTypeDoesNotCollapseOthers pins the
+// contract that a type with zero visible segments does NOT drag every
+// other type's visibility to zero.
+//
+// Under --prune.mode=minimal, snapshot trim explicitly leaves
+// transactions.seg absent for pre-horizon ranges while keeping
+// headers + bodies (see provider_unwind_snapshot_rebuild.go:273-277).
+// Repeated deep mode-B unwinds can leave the tx snapshot set entirely
+// empty even though headers + bodies remain. Pre-fix, alignMin's
+// `minMaxVisibleBlock == 0` branch collapsed visible[headers] to []
+// too, so SegmentsMax dropped to 0 and HeaderByNumber returned nil
+// for any block. Next deep mode-B unwind hit
+// "ensureCommitmentAtBlockCompute: no header for block N" — G3 leak.
+//
+// Contract: types with zero visible segments are skipped by the
+// alignMin ceiling computation. Types with visible segments still
+// align together. If all types are empty, SegmentsMax stays 0.
+func TestSegmentsMax_AlignMin_EmptyTypeDoesNotCollapseOthers(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64, name snaptype.Type) {
+		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
+	}
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+
+	// Headers + bodies exist for 3 chunks; transactions has zero files
+	// (simulates the post-trim minimal-mode state where tx got fully
+	// removed by cumulative snapshot trims).
+	for i := uint64(0); i < 3; i++ {
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Headers)
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Bodies)
+	}
+
+	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	// SegmentsMax must reflect headers + bodies max, not collapse to 0.
+	require.Equal(uint64(1_500_000-1), s.SegmentsMax(),
+		"empty transactions must not collapse headers + bodies visibility")
+}
+
 func TestViewPinsGeneration(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlCrit)
 	dir, require := t.TempDir(), require.New(t)

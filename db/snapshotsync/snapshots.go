@@ -948,24 +948,31 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 		if len(newVisibleSegments) > 0 {
 			to = newVisibleSegments[len(newVisibleSegments)-1].to - 1
 		}
-		if alignMin {
+		// Only types with visible segments participate in alignMin.
+		// A type with zero visible segments is a legitimate state under
+		// --prune.mode=minimal (transactions may be absent while
+		// headers + bodies are present; see
+		// node/components/storage/provider_unwind_snapshot_rebuild.go
+		// "Transactions is optional" note). Including its to=0 would
+		// collapse every other type's visibility to zero via the
+		// slices.Min below, which downstream surfaces as HeaderByNumber
+		// returning nil for any block (unwind soak G3).
+		if alignMin && to > 0 {
 			maxVisibleBlocks = append(maxVisibleBlocks, to)
 		}
 	}
 
-	if alignMin {
-		// all types must have the same height
+	if alignMin && len(maxVisibleBlocks) > 0 {
+		// Align the types that DO have visible segments to their common
+		// minimum. Types with zero visible segments stay empty (they
+		// were never added to maxVisibleBlocks).
 		minMaxVisibleBlock := slices.Min(maxVisibleBlocks)
 		for _, t := range s.enums {
-			if minMaxVisibleBlock == 0 {
-				visible[t] = []*VisibleSegment{}
-			} else {
-				visibleSegmentsOfType := visible[t]
-				for i, seg := range visibleSegmentsOfType {
-					if seg.to > minMaxVisibleBlock+1 {
-						visible[t] = visibleSegmentsOfType[:i]
-						break
-					}
+			visibleSegmentsOfType := visible[t]
+			for i, seg := range visibleSegmentsOfType {
+				if seg.to > minMaxVisibleBlock+1 {
+					visible[t] = visibleSegmentsOfType[:i]
+					break
 				}
 			}
 		}
