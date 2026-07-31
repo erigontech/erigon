@@ -721,7 +721,7 @@ func (c *Bor) Prepare(chain rules.ChainHeaderReader, header *types.Header, state
 
 			blockExtraDataBytes, err := rlp.EncodeToBytes(blockExtraData)
 			if err != nil {
-				log.Error("error while encoding block extra data: %v", err)
+				log.Error("[bor] encoding block extra data", "err", err)
 				return fmt.Errorf("error while encoding block extra data: %v", err)
 			}
 
@@ -739,7 +739,7 @@ func (c *Bor) Prepare(chain rules.ChainHeaderReader, header *types.Header, state
 
 		blockExtraDataBytes, err := rlp.EncodeToBytes(blockExtraData)
 		if err != nil {
-			log.Error("error while encoding block extra data: %v", err)
+			log.Error("[bor] encoding block extra data", "err", err)
 			return fmt.Errorf("error while encoding block extra data: %v", err)
 		}
 

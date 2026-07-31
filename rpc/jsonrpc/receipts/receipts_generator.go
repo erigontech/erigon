@@ -231,7 +231,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 				"blockNum", blockNum,
 				"firstLogIndex", firstLogIndex,
 				"logIdxAfterTx", logIdxAfterTx,
-				"nil receipt in db", receiptFromDB == nil,
+				"nilReceiptInDB", receiptFromDB == nil,
 				"err", err)
 		}
 	}()
@@ -275,6 +275,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	var evm *vm.EVM
 	var genEnv *ReceiptEnv
+	defer func() {
+		if genEnv != nil {
+			genEnv.ibs.Release(false)
+		}
+	}()
 
 	err = rpchelper.CheckBlockExecuted(g.filters.WithOverlay(tx), blockNum)
 	if err != nil {
@@ -462,7 +467,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if dbg.Enabled(ctx) {
 			log.Info("[dbg] ReceiptGenerator.GetReceipts",
 				"blockNum", blockNum,
-				"nil receipts in db", receiptsFromDB == nil)
+				"nilReceiptsInDB", receiptsFromDB == nil)
 		}
 	}()
 
@@ -506,6 +511,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	if err != nil {
 		return nil, err
 	}
+	defer genEnv.ibs.Release(false)
 
 	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 	defer cancel()

@@ -57,11 +57,12 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 // CallContext contains the things that are per-call, such as stack and memory,
 // but not transients like pc and gas
 type CallContext struct {
-	gas           uint64
-	stateGas      uint64
-	stateGasSpill uint64
-	input         []byte
-	Memory        Memory
+	gas               uint64
+	stateGas          uint64
+	stateGasSpill     uint64
+	newAccountCharged bool
+	input             []byte
+	Memory            Memory
 
 	// Opcode-scoped key/address intern cache. cacheGen is incremented once per
 	// opcode dispatch in the interpreter loop; cachedKeyGen/cachedAddrGen hold
@@ -85,15 +86,19 @@ type CallContext struct {
 
 // peekStorageKey returns the top-of-stack value as an interned StorageKey.
 // The result is cached for the lifetime of one opcode dispatch (gas phase +
-// execute phase share the same cacheGen), so unique.Make is called at most
+// execute phase share the same cacheGen), so the key is resolved at most
 // once per opcode. Callers must invoke this before any stack mutation
 // (pop/push/swap) within the same dispatch — the cache is keyed by generation
 // only and will not detect a changed stack top within the same opcode.
-func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
+func (ctx *CallContext) peekStorageKey(evm *EVM) accounts.StorageKey {
 	if ctx.cachedKeyGen == ctx.cacheGen {
 		return ctx.cachedKey
 	}
-	ctx.cachedKey = accounts.InternKey(ctx.Stack.peek().Bytes32())
+	return ctx.memoStorageKey(evm)
+}
+
+func (ctx *CallContext) memoStorageKey(evm *EVM) accounts.StorageKey {
+	ctx.cachedKey = evm.internStorageKey(ctx.Stack.peek())
 	ctx.cachedKeyGen = ctx.cacheGen
 	return ctx.cachedKey
 }
@@ -118,12 +123,13 @@ var contextPool = sync.Pool{
 func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallContext {
 	ctx, ok := contextPool.Get().(*CallContext)
 	if !ok {
-		log.Error("Type assertion failure", "err", "cannot get Stack pointer from stackPool")
+		log.Error("Type assertion failure", "err", "cannot get CallContext from contextPool")
 	}
 
 	ctx.gas = gas.Regular
 	ctx.stateGas = gas.State
 	ctx.stateGasSpill = 0
+	ctx.newAccountCharged = false
 	ctx.input = input
 	ctx.Contract = contract
 	return ctx
@@ -134,6 +140,7 @@ func (c *CallContext) put() {
 	c.Stack.Reset()
 	c.cacheGen = 0
 	c.stateGasSpill = 0
+	c.newAccountCharged = false
 	// Use sentinel values so that a peek call before the first cacheGen++ is
 	// always a miss rather than returning a stale handle from a prior use.
 	c.cachedKeyGen = ^uint64(0)
@@ -167,18 +174,13 @@ func (c *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Ho
 	return ok
 }
 
-// refillStateGas applies an inline state-gas refill per EIP-8037,
-// in last-in-first-out order: state-gas charges draw from the reservoir
-// first and spill to the regular pool last, so refills credit the regular
-// pool first (up to the spilled amount) and the reservoir with the
-// remainder. This restores the exact pools the charge drew from, so the
-// derived net state-gas usage drops by the full amount (going negative when
-// the matching charge sits in an ancestor or the tx-level intrinsic).
 func (c *CallContext) refillStateGas(amount uint64) {
-	fromGasLeft := min(amount, c.stateGasSpill)
-	c.gas += fromGasLeft
-	c.stateGasSpill -= fromGasLeft
-	c.stateGas += amount - fromGasLeft
+	remaining := c.Gas()
+	used := mdgas.MdGasUsage{State: int64(amount), StateSpill: c.stateGasSpill}
+	mdgas.Refill(&remaining, &used, amount, mdgas.StateGas)
+	c.gas = remaining.Regular
+	c.stateGas = remaining.State
+	c.stateGasSpill = used.StateSpill
 }
 
 func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) (remaining uint64, ok bool) {
@@ -193,31 +195,20 @@ func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.Ga
 	return initial - gas, true
 }
 
-// useMdGas charges gas in the requested dimension. State charges that
-// exceed the reservoir spill the deficit into the regular dimension. No
-// EVM-level tracker is touched here — spill accounting lives on
-// CallContext.stateGasSpill (for in-loop charges via CallContext.useMdGas)
-// or on the caller's local gasUsed accumulator (for code-deposit charges
-// in evm.create after Run returns).
 func useMdGas(initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (mdgas.MdGas, uint64, bool) {
-	var ok bool
-	switch t {
-	case mdgas.StateGas:
-		initial.State, ok = useGas(initial.State, gas, tracer, reason)
-		if ok {
-			return initial, 0, true
-		}
-		// otherwise use up all remaining state gas and spill the remainder into regular gas
-		spill := gas - initial.State
-		initial.State = 0
-		initial.Regular, ok = useGas(initial.Regular, spill, tracer, reason)
-		return initial, spill, ok
-	case mdgas.RegularGas:
-		initial.Regular, ok = useGas(initial.Regular, gas, tracer, reason)
-		return initial, 0, ok
-	default:
-		panic(fmt.Errorf("useMdGas: invalid gas type: %d", t))
+	remaining := initial
+	var used mdgas.MdGasUsage
+	if !mdgas.Consume(&remaining, &used, gas, t) {
+		return initial, 0, false
 	}
+	if tracer != nil && tracer.OnGasChange != nil && reason != tracing.GasChangeIgnored {
+		before, after := initial.Regular, remaining.Regular
+		if t == mdgas.StateGas && used.StateSpill == 0 {
+			before, after = initial.State, remaining.State
+		}
+		tracer.OnGasChange(before, after, reason)
+	}
+	return remaining, used.StateSpill, true
 }
 
 // RefundGas refunds gas to the contract
@@ -303,13 +294,7 @@ func (ctx *CallContext) callGas(evm *EVM) mdgas.MdGas {
 }
 
 func copyJumpTable(jt *JumpTable) *JumpTable {
-	var copy JumpTable
-	for i, op := range jt {
-		if op != nil {
-			opCopy := *op
-			copy[i] = &opCopy
-		}
-	}
+	copy := *jt
 	return &copy
 }
 
@@ -361,6 +346,14 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 	}
 
 	return jt
+}
+
+// stackBoundsErr reconstructs which bound the failed range check violated.
+func stackBoundsErr(sLen int, operation *operation) error {
+	if sLen < operation.numPop {
+		return &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
+	}
+	return &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 }
 
 // traceGas picks the figure the dev instruction trace should report: call
@@ -458,9 +451,8 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 	// Hoist to locals so the compiler sees them as loop-invariant.
 	anyTrace := dbg.TraceDynamicGas || debug || trace
-
+	stack := &callContext.Stack
 	jt := evm.jt
-	_ = jt[0] // nil-check the jump table out of the loop
 
 	for {
 		callContext.cacheGen++
@@ -471,13 +463,12 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(pc)
-		operation := jt[op]
+		operation := &jt[op]
 		cost = operation.constantGas // For tracing
-		// Validate stack
-		if sLen := callContext.Stack.len(); sLen < operation.numPop {
-			return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
-		} else if sLen > operation.maxStack {
-			return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
+		// a stack shallower than numPop wraps negative and fails the compare.
+		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+			return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 		}
 		// for tracing: this gas consumption event is emitted below in the debug section.
 		if callContext.gas < cost {

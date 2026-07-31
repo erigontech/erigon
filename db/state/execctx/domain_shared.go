@@ -1017,7 +1017,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 						if len(v) < 8 {
 							continue
 						}
-						m[string(bytes.Clone(k))] = bytes.Clone(v[8:])
+						m[string(k)] = bytes.Clone(v[8:])
 						if scanned += len(k) + len(v); scanned >= budget {
 							return
 						}
@@ -1435,8 +1435,8 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 		if len(h) == 32 {
 			copy(fixed[:], h)
 		}
-		// Always populate, including the zero-hash sentinel for misses —
-		// repeat lookups skip the whole resolve() chain. txNum is a
+		// Always offer the mapping, including the zero-hash sentinel for
+		// misses — repeat lookups skip the whole resolve() chain. txNum is a
 		// conservative upper bound (>= the resolved account's write txNum), so
 		// the mapping drops on any unwind that reverts that account.
 		sd.stateCache.PutAddrCodeHash(addr, fixed, txNum)

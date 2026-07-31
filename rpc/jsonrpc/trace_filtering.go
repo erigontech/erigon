@@ -837,8 +837,8 @@ func (api *TraceAPIImpl) callBlock(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
-	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, nil)
 	logger := log.New("trace_filtering")
+	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	if err != nil {
 		return nil, nil, nil, err
@@ -1176,8 +1176,8 @@ func (api *TraceAPIImpl) callTransaction(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
-	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, nil)
 	logger := log.New("trace_filtering")
+	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
 	if err != nil {
 		return nil, err
