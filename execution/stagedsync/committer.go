@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -653,7 +654,9 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockRe
 		cc.fail(ctx, r, fmt.Errorf("shadow incremental compute: %w", err))
 		return
 	}
-	if headerRootMismatch(rh, balRoot) {
+	// Both operands are roots this node computed, so the header-root toggle does
+	// not apply: this is the only thing validating the BAL-driven path.
+	if !bytes.Equal(rh, balRoot) {
 		cc.fail(ctx, r, fmt.Errorf("%w: shadow mismatch block %d incremental %x BAL-driven %x",
 			ErrWrongTrieRoot, r.BlockNum, rh, balRoot))
 		return

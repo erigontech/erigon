@@ -23,6 +23,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/empty"
 )
 
 // TestPBinChunkifyCodeVectors is the external check on chunk_code (eip:374-397):
@@ -229,6 +231,59 @@ func TestPBinShorteningRedeployKeepsStaleChunks(t *testing.T) {
 	}
 }
 
+// TestPBinClearedCodeKeepsChunks covers the other half of H8: clearing an
+// account's code — an EIP-7702 delegation reset is the common case — is a
+// shortening redeploy down to zero chunks. The header leaves follow the account,
+// the chunks stay behind, and nothing in the state records that they exist.
+func TestPBinClearedCodeKeepsChunks(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(19)
+	designator := pbinTestCode(23) // the size a 7702 designator occupies
+	deploy := new(pbinTestCorpus).accountWithCodeBytes(addr, 1, 10, designator)
+	cleared := new(pbinTestCorpus).account(addr, 2, 10, empty.CodeHash)
+
+	_, _, forward := pbinTestBatches(t, deploy, cleared)
+
+	want := cleared.entries(t)
+	for i, chunk := range pbinChunkifyCode(designator) {
+		want = append(want, pbinOracleEntry{key: pbinTreeKeyCodeChunk(addr, i), value: chunk[:]})
+	}
+	wantRoot := pbinOracleRoot(want)
+	require.Equal(t, wantRoot[:], forward, "clearing code leaves its chunks in the tree")
+
+	_, rebuilt := new(pbinTestCorpus).account(addr, 2, 10, empty.CodeHash).process(t)
+	require.NotEqual(t, rebuilt, forward, "the state a rebuild reads no longer names the chunks")
+}
+
+// TestPBinGrowingRedeployReplacesChunks is the case a rebuild does reproduce:
+// code that only grows overwrites every chunk it had and adds the rest, so the
+// forward tree and a rebuild from state agree. Both a redeploy inside the
+// account header and one spilling into the code zone.
+func TestPBinGrowingRedeployReplacesChunks(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct{ before, after int }{
+		{before: 31, after: 62}, // 1 chunk to 2, both in the header
+		{before: 62, after: pbinHeaderCodeChunks*pbinChunkDataLen + 62}, // header-only to header plus code zone
+	} {
+		t.Run(fmt.Sprintf("%d bytes up to %d", tc.before, tc.after), func(t *testing.T) {
+			t.Parallel()
+
+			addr := pbinOracleAddr(20)
+			short, long := pbinTestCode(tc.before), pbinTestCode(tc.after)
+			deploy := new(pbinTestCorpus).accountWithCodeBytes(addr, 1, 10, short)
+			redeploy := new(pbinTestCorpus).accountWithCodeBytes(addr, 2, 10, long)
+
+			_, _, forward := pbinTestBatches(t, deploy, redeploy)
+
+			_, rebuilt := new(pbinTestCorpus).accountWithCodeBytes(addr, 2, 10, long).process(t)
+			require.Equal(t, rebuilt, forward, "growth leaves no chunk of the old code behind")
+			require.Equal(t, redeploy.oracleRoot(t), forward)
+		})
+	}
+}
+
 // TestPBinCodelessContextRefusesCodeBearingAccount pins that the code read is
 // not optional: a context that cannot serve code cannot commit an account whose
 // chunks the tree needs.
@@ -266,7 +321,7 @@ func TestPBinCodeSizeMustMatchTheCodeBehindIt(t *testing.T) {
 
 	upd := WrapKeyUpdates(t, ModeDirect, pbinKeyHasher(), corpus.plainKeys, corpus.updates)
 	_, err := pph.Process(context.Background(), upd, "", nil, WarmupConfig{})
-	require.Error(t, err)
+	require.ErrorContains(t, err, "the code domain holds")
 }
 
 // TestPBinZoneKeyLengthIsExplicit pins that the code zone is recognised rather

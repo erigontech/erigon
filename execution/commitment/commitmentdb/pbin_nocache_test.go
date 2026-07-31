@@ -111,9 +111,7 @@ func pbinNewTestDb(tb testing.TB) kv.TemporalRwDB {
 
 // TestPBinSharedDomainsHasNoSharedBranchCache checks the execctx wiring: a
 // bin-variant SharedDomains over an aggregator whose AggTx provides the shared
-// BranchCache must reach the commitment-context ctor without it. While the bin
-// variant still lacks state save/restore the ctor refuses it outright — but it
-// must refuse for that reason, never because a shared cache got through.
+// BranchCache must reach the commitment-context ctor without it, and must open.
 func TestPBinSharedDomainsHasNoSharedBranchCache(t *testing.T) {
 	t.Parallel()
 
@@ -131,10 +129,7 @@ func TestPBinSharedDomainsHasNoSharedBranchCache(t *testing.T) {
 		sd, sdErr = execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg))
 		require.NoError(t, sdErr)
 	})
-	if msg != "" {
-		require.NotContains(t, msg, "branch cache")
-		return
-	}
+	require.Empty(t, msg)
 	defer sd.Close()
 	require.False(t, sd.HasSharedBranchCache())
 }

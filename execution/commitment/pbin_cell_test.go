@@ -58,6 +58,18 @@ func pbinTestLeafCell(pattern byte, bitLen int16) pbinCell {
 	return c
 }
 
+// pbinTestChunkLeafCell builds the one leaf shape that carries its value in the
+// record instead of a plain key: a code chunk.
+func pbinTestChunkLeafCell(pattern byte, bitLen int16) pbinCell {
+	c := pbinTestBranchCell(pattern, bitLen)
+	c.kind = pbinNodeLeaf
+	for i := range c.Storage {
+		c.Storage[i] = pattern ^ byte(i+1)
+	}
+	c.Flags, c.StorageLen = StorageUpdate, pbinValueLength
+	return c
+}
+
 // A prefix of any admissible bit length must survive a record round-trip: the
 // 66-byte storage path does not fit the shared codec's fields, and a silent
 // truncation would commit a wrong root (guards H4).
@@ -103,6 +115,8 @@ func TestPBinBranchCodecRoundTripCellShapes(t *testing.T) {
 		{"hashless account leaf", 0b11, 0b11, [2]pbinCell{accountLeaf, pbinTestLeafCell(0x05, 64)}},
 		{"only the right cell present", 0b10, 0b10, [2]pbinCell{pbinTestEmptyCell(), pbinTestBranchCell(0x07, 9)}},
 		{"deleted left cell", 0b11, 0b10, [2]pbinCell{pbinTestEmptyCell(), pbinTestBranchCell(0x08, 9)}},
+		{"record-resident chunk leaf", 0b11, 0b11, [2]pbinCell{pbinTestChunkLeafCell(0x09, 12), pbinTestBranchCell(0x0A, 21)}},
+		{"two chunk leaves", 0b11, 0b11, [2]pbinCell{pbinTestChunkLeafCell(0x0B, 0), pbinTestChunkLeafCell(0x0C, 528)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -126,20 +140,30 @@ func TestPBinBranchCodecRoundTripCellShapes(t *testing.T) {
 func TestPBinBranchCodecIsCanonical(t *testing.T) {
 	t.Parallel()
 
-	cells := [2]pbinCell{pbinTestLeafCell(0x7C, 33), pbinTestBranchCell(0x3E, 528)}
+	for _, tc := range []struct {
+		name  string
+		cells [2]pbinCell
+	}{
+		{"plain-key leaf and branch", [2]pbinCell{pbinTestLeafCell(0x7C, 33), pbinTestBranchCell(0x3E, 528)}},
+		{"chunk leaf and branch", [2]pbinCell{pbinTestChunkLeafCell(0x6D, 33), pbinTestBranchCell(0x3E, 528)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	var enc pbinBranchEncoder
-	rec, err := enc.encode(0b11, 0b11, &cells)
-	require.NoError(t, err)
-	want := bytes.Clone(rec)
+			var enc pbinBranchEncoder
+			rec, err := enc.encode(0b11, 0b11, &tc.cells)
+			require.NoError(t, err)
+			want := bytes.Clone(rec)
 
-	var got [2]pbinCell
-	_, _, err = pbinDecodeBranch(want, &got)
-	require.NoError(t, err)
+			var got [2]pbinCell
+			_, _, err = pbinDecodeBranch(want, &got)
+			require.NoError(t, err)
 
-	again, err := enc.encode(0b11, 0b11, &got)
-	require.NoError(t, err)
-	require.Equal(t, want, again)
+			again, err := enc.encode(0b11, 0b11, &got)
+			require.NoError(t, err)
+			require.Equal(t, want, again)
+		})
+	}
 }
 
 // pbinTestRecord assembles a record by hand so decode can be probed with bytes
@@ -201,6 +225,15 @@ func TestPBinBranchDecodeRejects(t *testing.T) {
 		{"leaf without a plain key", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldLeaf, 0, nil))},
 		{"leaf naming both plain keys", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldLeaf|pbinFieldAccountAddr|pbinFieldStorageAddr, 0, nil,
 			append(pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, length.Addr)), pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, length.Addr+length.Hash))...)...))},
+		// A record-resident value and a plain key are two answers to the same
+		// question; a branch has no value at all.
+		{"leaf naming a plain key and a record value", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldLeaf|pbinFieldAccountAddr|pbinFieldLeafValue, 0, nil,
+			append(pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, length.Addr)), pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, pbinValueLength))...)...))},
+		{"branch carrying a record value", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldBranch|pbinFieldLeafValue, 0, nil,
+			pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, pbinValueLength))...))},
+		{"record value shorter than a leaf value", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldLeaf|pbinFieldLeafValue, 0, nil,
+			pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, pbinValueLength-1))...))},
+		{"truncated record value", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldLeaf|pbinFieldLeafValue, 0, nil, pbinValueLength, 0xEE))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

@@ -109,7 +109,7 @@ func TestPBinVariantHexDatadirRefusesBinFlag(t *testing.T) {
 			dirs := datadir.New(t.TempDir())
 			pbinWriteToml(t, dirs, content)
 			_, err := ResolveErigonDBSettings(dirs, log.New(), false)
-			require.Error(t, err)
+			require.ErrorContains(t, err, "datadir was created with the hex commitment trie")
 		})
 	}
 }
@@ -122,14 +122,14 @@ func TestPBinVariantBinDatadirRefusesStreamingAndParallel(t *testing.T) {
 		dirs := datadir.New(t.TempDir())
 		pbinWriteToml(t, dirs, binToml)
 		_, err := ResolveErigonDBSettings(dirs, log.New(), false)
-		require.Error(t, err)
+		require.ErrorContains(t, err, "sequential-only")
 	})
 	t.Run("parallel", func(t *testing.T) {
 		pbinWithVariantFlags(t, false, false, true)
 		dirs := datadir.New(t.TempDir())
 		pbinWriteToml(t, dirs, binToml)
 		_, err := ResolveErigonDBSettings(dirs, log.New(), false)
-		require.Error(t, err)
+		require.ErrorContains(t, err, "sequential-only")
 	})
 }
 
@@ -139,14 +139,14 @@ func TestPBinVariantRefusesReferences(t *testing.T) {
 		dirs := datadir.New(t.TempDir())
 		pbinWriteToml(t, dirs, "step_size = 100\nsteps_in_frozen_file = 8\nreferences_in_commitment_branches = true\ntrie_variant = \"bin\"\n")
 		_, err := ResolveErigonDBSettings(dirs, log.New(), false)
-		require.Error(t, err)
+		require.ErrorContains(t, err, "references_in_commitment_branches")
 	})
 	t.Run("first_start", func(t *testing.T) {
 		pbinWithVariantFlags(t, true, false, false)
 		dirs := datadir.New(t.TempDir())
 		refs := true
 		_, err := ResolveErigonDBSettingsWithRefsDefault(dirs, log.New(), true, &refs)
-		require.Error(t, err)
+		require.ErrorContains(t, err, "references_in_commitment_branches")
 	})
 }
 
@@ -156,7 +156,7 @@ func TestPBinVariantLegacyDatadirRefusesBin(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), []byte(""), 0644))
 
 	_, err := ResolveErigonDBSettings(dirs, log.New(), false)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "already has hex commitment state")
 }
 
 func TestPBinVariantUnknownVariantRefused(t *testing.T) {
@@ -165,7 +165,7 @@ func TestPBinVariantUnknownVariantRefused(t *testing.T) {
 	pbinWriteToml(t, dirs, "step_size = 100\nsteps_in_frozen_file = 8\ntrie_variant = \"verkle\"\n")
 
 	_, err := ResolveErigonDBSettings(dirs, log.New(), false)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "unknown trie_variant")
 }
 
 func TestPBinVariantFreshWithDownloaderPersistsBin(t *testing.T) {
@@ -211,5 +211,5 @@ func TestPBinVariantFreshWithDownloaderRefusesDeliveredHexToml(t *testing.T) {
 	// resolve must refuse rather than silently adopt hex.
 	pbinWriteToml(t, dirs, "step_size = 100\nsteps_in_frozen_file = 8\n")
 	_, err = ResolveErigonDBSettings(dirs, log.New(), false)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "datadir was created with the hex commitment trie")
 }

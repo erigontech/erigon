@@ -34,16 +34,36 @@ var pbinFuzzSlots = []uint64{0, 1, 2, 63, 64, 65, 66, 127, 128, 255, 256, 257, 2
 // pbinFuzzAccountBit is the selector bit choosing an account write over a slot.
 const pbinFuzzAccountBit = 0x04
 
+// pbinFuzzCodeSizes is the code pool. The last entry is the only one that spills
+// past the account header into the code zone.
+var pbinFuzzCodeSizes = []int{0, 23, 31, 62, pbinHeaderCodeChunks*pbinChunkDataLen + 62}
+
+// pbinFuzzCode is the code an address carries for a whole run. Keying it on the
+// address is what keeps the oracle valid: a redeploy to shorter code leaves its
+// high chunks in the tree (H8), and the oracle only knows the final state.
+func pbinFuzzCode(addrSeed, salt byte) []byte {
+	n := pbinFuzzCodeSizes[int(addrSeed+salt)%len(pbinFuzzCodeSizes)]
+	if n == 0 {
+		return nil
+	}
+	return pbinTestCode(n)
+}
+
 // pbinFuzzCorpus reads the input three bytes at a time — what to write, where,
-// and with what value — drawing addresses and slots from small pools so keys
-// collide by construction.
-func pbinFuzzCorpus(data []byte) *pbinTestCorpus {
+// and with what value — drawing addresses, slots and code lengths from small
+// pools so keys collide by construction.
+func pbinFuzzCorpus(data []byte, codeSalt byte) *pbinTestCorpus {
 	c := new(pbinTestCorpus)
 	for i := 0; i+2 < len(data); i += 3 {
 		where, slot, value := data[i], data[i+1], data[i+2]
-		addr := pbinOracleAddr(uint64(where & 0x03))
+		addrSeed := where & 0x03
+		addr := pbinOracleAddr(uint64(addrSeed))
 		if where&pbinFuzzAccountBit != 0 {
-			c.account(addr, uint64(value), uint64(value)*1_000_000_007, common.Hash{value, 0xC0})
+			if code := pbinFuzzCode(addrSeed, codeSalt); code != nil {
+				c.accountWithCodeBytes(addr, uint64(value), uint64(value)*1_000_000_007, code)
+			} else {
+				c.account(addr, uint64(value), uint64(value)*1_000_000_007, common.Hash{value, 0xC0})
+			}
 			continue
 		}
 		c.storage(addr, pbinOracleSlot(pbinFuzzSlots[int(slot)%len(pbinFuzzSlots)]), value, value^0xFF)
@@ -53,16 +73,16 @@ func pbinFuzzCorpus(data []byte) *pbinTestCorpus {
 
 // pbinFuzzBatches cuts the corpus in two, so a run also covers what one Process
 // call leaves for the next to read back.
-func pbinFuzzBatches(data []byte, cut byte) []*pbinTestCorpus {
-	c := pbinFuzzCorpus(data)
+func pbinFuzzBatches(data []byte, cut, codeSalt byte) []*pbinTestCorpus {
+	c := pbinFuzzCorpus(data, codeSalt)
 	if len(c.plainKeys) == 0 {
 		return nil
 	}
 	at := int(cut) % (len(c.plainKeys) + 1)
 	batches := make([]*pbinTestCorpus, 0, 2)
 	for _, b := range []*pbinTestCorpus{
-		{plainKeys: c.plainKeys[:at], updates: c.updates[:at]},
-		{plainKeys: c.plainKeys[at:], updates: c.updates[at:]},
+		{plainKeys: c.plainKeys[:at], updates: c.updates[:at], codes: c.codes},
+		{plainKeys: c.plainKeys[at:], updates: c.updates[at:], codes: c.codes},
 	} {
 		if len(b.plainKeys) > 0 {
 			batches = append(batches, b)
@@ -80,14 +100,16 @@ func FuzzPBinProcessMatchesOracle(f *testing.F) {
 	// Seeds spell the generator's (selector, slot, value) triples: bit 2 of the
 	// selector asks for an account, its low bits pick the address, and the slot
 	// byte indexes the pool.
-	f.Add([]byte{0x04, 0, 1, 0x05, 0, 2}, byte(0))                            // two accounts
-	f.Add([]byte{0x00, 10, 1, 0x00, 11, 2, 0x00, 12, 3}, byte(2))             // three slots of one group
-	f.Add([]byte{0x00, 3, 1, 0x00, 4, 2, 0x04, 0, 3}, byte(1))                // the 63/64 zone boundary plus a header
-	f.Add([]byte{0x04, 0, 1, 0x00, 15, 2, 0x01, 15, 3, 0x02, 16, 4}, byte(3)) // one slot per address
-	f.Add([]byte{0x00, 10, 1, 0x00, 10, 2, 0x00, 10, 3}, byte(1))             // the same slot rewritten
+	f.Add([]byte{0x04, 0, 1, 0x05, 0, 2}, byte(0), byte(0))                            // two accounts, no code
+	f.Add([]byte{0x00, 10, 1, 0x00, 11, 2, 0x00, 12, 3}, byte(2), byte(0))             // three slots of one group
+	f.Add([]byte{0x00, 3, 1, 0x00, 4, 2, 0x04, 0, 3}, byte(1), byte(0))                // the 63/64 zone boundary plus a header
+	f.Add([]byte{0x04, 0, 1, 0x00, 15, 2, 0x01, 15, 3, 0x02, 16, 4}, byte(3), byte(0)) // one slot per address
+	f.Add([]byte{0x00, 10, 1, 0x00, 10, 2, 0x00, 10, 3}, byte(1), byte(0))             // the same slot rewritten
+	f.Add([]byte{0x04, 0, 1, 0x00, 5, 2, 0x04, 0, 3}, byte(1), byte(1))                // code interleaved with a header slot
+	f.Add([]byte{0x04, 0, 1, 0x05, 0, 2, 0x00, 17, 3}, byte(2), byte(4))               // code spilling into the code zone
 
-	f.Fuzz(func(t *testing.T, data []byte, cut byte) {
-		batches := pbinFuzzBatches(data, cut)
+	f.Fuzz(func(t *testing.T, data []byte, cut, codeSalt byte) {
+		batches := pbinFuzzBatches(data, cut, codeSalt)
 		if len(batches) == 0 {
 			return
 		}
@@ -95,7 +117,7 @@ func FuzzPBinProcessMatchesOracle(f *testing.F) {
 		pph, ms := pbinTestEngine(t)
 		var root []byte
 		for _, b := range batches {
-			require.NoError(t, ms.applyPlainUpdates(b.plainKeys, b.updates))
+			b.applyTo(t, ms)
 			root = pbinTestProcess(t, pph, b.plainKeys, b.updates)
 		}
 		require.Len(t, root, length.Hash)

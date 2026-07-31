@@ -127,7 +127,7 @@ func TestPBinSetStateRejectsForeignBlob(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			fresh := NewPBinPatriciaHashed(ms)
-			require.Error(t, fresh.SetState(blob), "blob %x must be refused", blob)
+			require.ErrorIs(t, fresh.SetState(blob), errPBinStateBlob, "blob %x must be refused", blob)
 		})
 	}
 }
@@ -142,6 +142,6 @@ func TestPBinStateRefusesOpenRows(t *testing.T) {
 	pph.grid.activeRows = 1
 
 	_, err := pph.EncodeCurrentState(nil)
-	require.Error(t, err)
-	require.Error(t, pph.SetState(nil))
+	require.ErrorIs(t, err, errPBinStateOpen)
+	require.ErrorIs(t, pph.SetState(nil), errPBinStateOpen)
 }

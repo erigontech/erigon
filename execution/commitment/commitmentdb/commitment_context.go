@@ -508,6 +508,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.patriciaTrie.SetTraceWriter(sdc.traceW)
 
 	if updateCount == 0 {
+		// The binary trie reads its stored root record here, so the trie has to be
+		// bound to this tx even on the path that touches nothing.
+		sdc.trieContext(tx, blockNum, txNum, ctx)
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err
 	}
@@ -727,11 +730,12 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 		wm := kvmetrics.NewDomainMetrics()
 		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
-			getter:   sdc.sharedDomains.AsGetter(roTx),
-			putter:   sdc.sharedDomains.AsPutDel(roTx),
-			stepSize: stepSize,
-			txNum:    txNum,
-			traceW:   sdc.traceW,
+			getter:       sdc.sharedDomains.AsGetter(roTx),
+			putter:       sdc.sharedDomains.AsPutDel(roTx),
+			stepSize:     stepSize,
+			txNum:        txNum,
+			traceW:       sdc.traceW,
+			readCodeSize: sdc.variant == commitment.VariantBinPatriciaTrie,
 		}
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
@@ -779,6 +783,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.Te
 			txNum:          txNum,
 			localCollector: collector,
 			traceW:         sdc.traceW,
+			readCodeSize:   sdc.variant == commitment.VariantBinPatriciaTrie,
 		}
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
