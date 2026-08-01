@@ -430,10 +430,10 @@ func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeP
 	return nil
 }
 
-func isProtectedV(V *uint256.Int) bool {
-	if V.BitLen() <= 8 {
-		v := V.Uint64()
-		return v != 27 && v != 28 && v != 1 && v != 0
+func isProtectedV(v *uint256.Int) bool {
+	if v.BitLen() <= 8 {
+		vVal := v.Uint64()
+		return vVal != 27 && vVal != 28 && vVal != 1 && vVal != 0
 	}
 	// anything not 27 or 28 is considered protected
 	return true
