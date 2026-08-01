@@ -30,9 +30,6 @@ import (
 // isn't silent.
 var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
 
-// The account fields Normalize fills in when a dirty address lacks them.
-var normalizeAccountPaths = [4]AccountPath{BalancePath, NoncePath, IncarnationPath, CodeHashPath}
-
 // Normalize produces a clean write set from the versionMap's WriteSet
 // for a given TX. It matches the serial IBS MakeWriteSet behaviour:
 //
@@ -331,7 +328,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		fallbackLoaded := false
 
 		// For each missing field, try versionMap then stateReader.
-		for _, path := range normalizeAccountPaths {
+		for _, path := range []AccountPath{BalancePath, NoncePath, IncarnationPath, CodeHashPath} {
 			if filtered.Has(WriteHeader{Address: addr, Path: path}) {
 				continue // already in output
 			}

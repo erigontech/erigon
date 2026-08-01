@@ -1001,8 +1001,6 @@ func (s *WriteSet) restoreCreateFields(addr accounts.Address, snap *createWriteS
 	}
 }
 
-// DeleteAccountFields removes the Balance/Nonce/Incarnation/CodeHash writes for
-// addr, leaving storage/code/self-destruct intact.
 // assertSelfDestructNormalized panics if a self-destructed address still carries
 // the account fields Normalize is required to drop. Any of them makes Apply
 // compute pureDelete=false and take the cleanup-before-recreate branch, which
@@ -1029,6 +1027,8 @@ func (s *WriteSet) assertSelfDestructNormalized() {
 	}
 }
 
+// DeleteAccountFields removes the Balance/Nonce/Incarnation/CodeHash writes for
+// addr, leaving storage/code/self-destruct intact.
 func (s *WriteSet) DeleteAccountFields(addr accounts.Address) {
 	delete(s.balance, addr)
 	delete(s.nonce, addr)
