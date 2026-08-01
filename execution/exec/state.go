@@ -580,36 +580,18 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
 	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *QueueWithRetry, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
 	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func(), err error) {
-	reconWorkers = make([]*Worker, workerCount)
+	// Grown by append, so a setup that fails part-way leaves only built workers
+	// behind and clear closes exactly those.
+	reconWorkers = make([]*Worker, 0, workerCount)
 
 	resultsSize := workerCount * 8
 	rws = NewResultsQueue(resultsSize, workerCount)
 
 	g, gctx := errgroup.WithContext(ctx)
-	for i := range workerCount {
-		reconWorkers[i] = NewWorker(gctx, background, metrics, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
+	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
 
-		if rs != nil {
-			reader := stateReader
-
-			if reader == nil {
-				reader = state.NewReaderV3(rs.Domains().AsGetterMetered(nil, reconWorkers[i].readMetrics))
-			}
-
-			if err = reconWorkers[i].ResetState(rs, nil, reader, stateWriter, accumulator); err != nil {
-				return
-			}
-		}
-	}
-	if background {
-		for i := range workerCount {
-			g.Go(func() error {
-				return reconWorkers[i].Run()
-			})
-		}
-		wait = func() { g.Wait() }
-	}
-
+	// Assigned before anything can fail, so every return path hands back a
+	// callable clear.
 	var clearDone bool
 	clear = func() {
 		if clearDone {
@@ -622,7 +604,31 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 			w.Close()
 		}
 	}
-	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
+
+	for range workerCount {
+		w := NewWorker(gctx, background, metrics, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
+		reconWorkers = append(reconWorkers, w)
+
+		if rs != nil {
+			reader := stateReader
+
+			if reader == nil {
+				reader = state.NewReaderV3(rs.Domains().AsGetterMetered(nil, w.readMetrics))
+			}
+
+			if err = w.ResetState(rs, nil, reader, stateWriter, accumulator); err != nil {
+				return
+			}
+		}
+	}
+	if background {
+		for i := range workerCount {
+			g.Go(func() error {
+				return reconWorkers[i].Run()
+			})
+		}
+		wait = func() { g.Wait() }
+	}
 
 	return reconWorkers, applyWorker, rws, clear, wait, err
 }
