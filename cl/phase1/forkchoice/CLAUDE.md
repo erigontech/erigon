@@ -55,6 +55,16 @@ verified against the Go code in this repository.
 | `optimistic/optimistic.go`, `optimistic/optimistic_impl.go` | Optimistic sync support for execution payload validity tracking; review with Bellatrix execution payload validity and fork-choice update semantics |
 | `public_keys_registry/interface.go`, `public_keys_registry/in_memory_public_keys_registry.go`, `public_keys_registry/db_public_keys_registry.go` | Signature verification support for `is_valid_indexed_attestation` and payload attestation validation |
 
+## Anchor State Invariant
+
+`NewForkChoiceStore` stores the anchor state's latest block root/epoch as *both* the
+justified and finalized checkpoint (`forkchoice.go:392-393`). The anchor is therefore
+assumed to be a finalized (FFG-final, reorg-immune) state, exactly as spec
+`get_forkchoice_store(anchor_state)` requires. Any code that produces the bootstrap
+anchor must honor this: a head state is reorg-eligible and must never be handed in. The
+local-restart resume path (`cl/phase1/core/checkpoint_sync`) depends on this — it resumes
+only from the persisted finalized state (`finalized.ssz_snappy`), never a head state.
+
 ## Fulu Review Notes
 
 - Fulu changes fork-choice data availability from Deneb blob-sidecar retrieval by

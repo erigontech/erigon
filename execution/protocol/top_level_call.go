@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
@@ -67,7 +68,7 @@ func PrepareTopLevelCall(evm *vm.EVM, destination accounts.Address, value uint25
 		if ibs.AddressInAccessList(delegatedTo) {
 			accessCost = params.WarmStorageReadCostEIP2929
 		}
-		if !mdgas.Consume(&gasRemaining, &gasUsed, accessCost, mdgas.RegularGas) {
+		if !mdgas.Consume(&gasRemaining, &gasUsed, accessCost, mdgas.ExecutionGas) {
 			return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
 		}
 	}
@@ -75,31 +76,48 @@ func PrepareTopLevelCall(evm *vm.EVM, destination accounts.Address, value uint25
 	return gasRemaining, gasUsed, nil
 }
 
-// RefillTopLevelCallGas reverses a new-account state-gas charge when the call
-// does not persist the account.
-func RefillTopLevelCallGas(gasRemaining *mdgas.MdGas, gasUsed *mdgas.MdGasUsage, restoreState bool, vmerr error) {
+func PrepareTopLevelCreate(evm *vm.EVM, destination accounts.Address, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
+	var gasUsed mdgas.MdGasUsage
+	if !evm.ChainRules().IsAmsterdam {
+		return gasRemaining, gasUsed, nil
+	}
+	ibs := evm.IntraBlockState()
+	ibs.MarkAddressAccess(destination, false)
+	empty, err := ibs.Empty(destination)
+	if err != nil {
+		return gasRemaining, gasUsed, fmt.Errorf("%w: %w", vm.ErrIntraBlockStateFailed, err)
+	}
+	if empty && !mdgas.Consume(&gasRemaining, &gasUsed, params.StateGasNewAccount, mdgas.StateGas) {
+		return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
+	}
+	return gasRemaining, gasUsed, nil
+}
+
+func RefillTopLevelGas(gasRemaining *mdgas.MdGas, gasUsed *mdgas.MdGasUsage, restoreState bool, vmerr error) {
 	if gasUsed.State <= 0 || vmerr == nil && !restoreState {
 		return
 	}
 	spill := gasUsed.StateSpill
 	mdgas.Refill(gasRemaining, gasUsed, uint64(gasUsed.State), mdgas.StateGas)
-	if !errors.Is(vmerr, vm.ErrExecutionReverted) && !mdgas.Consume(gasRemaining, gasUsed, spill, mdgas.RegularGas) {
-		panic("refilled state-gas spill exceeds regular gas")
+	if !errors.Is(vmerr, vm.ErrExecutionReverted) && !mdgas.Consume(gasRemaining, gasUsed, spill, mdgas.ExecutionGas) {
+		panic("refilled state-gas spill exceeds execution gas")
 	}
 }
 
-// TraceTopLevelCallFailure emits the root call frame when setup fails before
-// EVM.Call can emit it.
-func TraceTopLevelCallFailure(evm *vm.EVM, sender, recipient accounts.Address, input []byte, gas mdgas.MdGas, value uint256.Int, err error) {
+func TraceTopLevelFailure(evm *vm.EVM, typ vm.OpCode, sender, recipient accounts.Address, input []byte, startGas, gasRemaining mdgas.MdGas, value uint256.Int, err error) {
 	tracer := evm.Config().Tracer
 	if tracer == nil {
 		return
 	}
-	precompile := slices.Contains(vm.ActivePrecompiles(evm.ChainRules()), recipient)
+	precompile := typ == vm.CALL && slices.Contains(vm.ActivePrecompiles(evm.ChainRules()), recipient)
 	if tracer.OnEnter != nil {
-		tracer.OnEnter(0, byte(vm.CALL), sender, recipient, precompile, input, gas.Regular, value, nil)
+		tracer.OnEnter(0, byte(typ), sender, recipient, precompile, input, startGas.Execution, value, nil)
+	}
+	if tracer.OnGasChange != nil {
+		tracer.OnGasChange(0, startGas.Execution, tracing.GasChangeCallInitialBalance)
+		tracer.OnGasChange(startGas.Execution, gasRemaining.Execution, tracing.GasChangeCallFailedExecution)
 	}
 	if tracer.OnExit != nil {
-		tracer.OnExit(0, nil, gas.Regular, vm.VMErrorFromErr(err), true)
+		tracer.OnExit(0, nil, startGas.Execution-gasRemaining.Execution, vm.VMErrorFromErr(err), true)
 	}
 }

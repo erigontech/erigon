@@ -31,10 +31,9 @@ import (
 type ParallelPatriciaHashed struct {
 	template       *HexPatriciaHashed
 	trieCtxFactory TrieContextFactory
-	workerPool     sync.Pool
-	cfg            TrieConfig
 
 	accountKeyLen int16
+	cfg           TrieConfig
 	numWorkers    int
 
 	rootHash atomic.Pointer[[]byte]
@@ -51,21 +50,10 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 		template:       NewHexPatriciaHashed(accountKeyLen, nil, cfg),
 		trieCtxFactory: ctxFactory,
 		accountKeyLen:  accountKeyLen,
-		cfg:            cfg,
 		numWorkers:     runtime.NumCPU(),
+		cfg:            cfg,
 	}
-	p.resetPool()
 	return p
-}
-
-func (p *ParallelPatriciaHashed) resetPool() {
-	akl := p.accountKeyLen
-	cfg := p.cfg
-	p.workerPool = sync.Pool{
-		New: func() any {
-			return NewHexPatriciaHashed(akl, nil, cfg)
-		},
-	}
 }
 
 // SetNumWorkers overrides the worker count for the next Process call; n <= 0 falls back to runtime.NumCPU.
@@ -110,13 +98,13 @@ func (p *ParallelPatriciaHashed) RootTrie() *HexPatriciaHashed {
 	return p.template
 }
 
-// Reset clears the published root hash, drops pooled workers, and resets the template so the instance can be reused.
+// Reset clears the published root hash and resets the template so the instance
+// can be reused; pooled workers stay cached for the next Process call.
 func (p *ParallelPatriciaHashed) Reset() {
 	if p.template != nil {
 		p.template.Reset()
 	}
 	p.rootHash.Store(nil)
-	p.resetPool()
 	if p.streaming != nil {
 		p.streaming.Reset()
 	}
@@ -129,7 +117,6 @@ func (p *ParallelPatriciaHashed) Release() {
 		p.template = nil
 	}
 	p.rootHash.Store(nil)
-	p.resetPool()
 	if p.streaming != nil {
 		p.streaming.Release()
 		p.streaming = nil

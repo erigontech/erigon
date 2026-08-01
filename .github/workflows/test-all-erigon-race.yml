@@ -82,7 +82,6 @@ jobs:
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:
-          submodules: true
           cleanup-space: true
           # Go's test cache can't see ERIGON_EXEC3_PARALLEL (read at package
           # init), so serial and parallel results only stay mode-pure if each
