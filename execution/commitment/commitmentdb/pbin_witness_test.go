@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/trie"
 )
 
 // pbinWitnessState is the in-memory PatriciaContext both engines are driven
@@ -192,6 +193,45 @@ func TestPBinWitnessCaptureHexUnchanged(t *testing.T) {
 	require.Equal(t, wantKeys, provedKeys)
 	require.Equal(t, wantNodes[0], nodes[0], "root node must stay first")
 	require.ElementsMatch(t, wantNodes, nodes)
+}
+
+// TestPBinWitnessNodesPrunesPerVariant: the lean set is cut by the walker that
+// can read the capture — the MPT one cannot follow a binary preimage.
+func TestPBinWitnessNodesPrunesPerVariant(t *testing.T) {
+	t.Parallel()
+
+	for _, variant := range []commitment.TrieVariant{commitment.VariantHexPatriciaTrie, commitment.VariantBinPatriciaTrie} {
+		t.Run(string(variant), func(t *testing.T) {
+			t.Parallel()
+
+			state := newPBinWitnessState()
+			touches := pbinWitnessDBCorpus(state)
+			committedRoot := pbinWitnessCommit(t, variant, state, touches)
+
+			capture := pbinWitnessTrieCtx(t, variant, state)
+			pbinWitnessTouchAll(capture, touches)
+			full, provedKeys, root, err := capture.witnessCapture(t.Context(), false, "test")
+			require.NoError(t, err)
+
+			sdc := pbinWitnessTrieCtx(t, variant, state)
+			pbinWitnessTouchAll(sdc, touches)
+			lean, rootHash, err := sdc.WitnessNodes(t.Context(), false, "test")
+			require.NoError(t, err)
+			require.Equal(t, committedRoot, rootHash)
+			require.NotEmpty(t, lean)
+
+			want := trie.WitnessNodesForKeysFromNodes
+			if variant == commitment.VariantBinPatriciaTrie {
+				want = func(nodes, keys [][]byte) ([][]byte, error) {
+					return commitment.PBinWitnessNodesForKeys(nodes, root, keys)
+				}
+			}
+			wantNodes, err := want(full, provedKeys)
+			require.NoError(t, err)
+			require.Equal(t, wantNodes[0], lean[0], "root node must stay first")
+			require.ElementsMatch(t, wantNodes, lean)
+		})
+	}
 }
 
 // pbinWitnessCaptureLessTrie is a Trie that captures no witness, standing in for

@@ -370,17 +370,22 @@ func (sdc *SharedDomainsCommitmentContext) witnessCapture(ctx context.Context, p
 }
 
 // WitnessNodes builds the lean execution-witness node set: it prunes the captured
-// superset to the proof paths of the fold's keys, returning the RLP node bytes
-// (root first) and the root hash. This is the strict-verifier (reth) form.
+// superset to the proof paths of the fold's keys, returning the node bytes (root
+// first) and the root hash. This is the strict-verifier (reth) form.
 //
-// The pruner below is MPT-shaped and serves the hex capture only; the bin variant
-// reaches WitnessNodes once it has a pruner of its own.
+// Each variant prunes with its own walker: the hex one is MPT-shaped and cannot
+// read a bin preimage.
 func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, rootHash []byte, err error) {
 	full, provedKeys, rootHash, err := sdc.witnessCapture(ctx, produceExclusionProofs, logPrefix)
 	if err != nil {
 		return nil, nil, err
 	}
-	lean, err := trie.WitnessNodesForKeysFromNodes(full, provedKeys)
+	var lean [][]byte
+	if sdc.variant == commitment.VariantBinPatriciaTrie {
+		lean, err = commitment.PBinWitnessNodesForKeys(full, rootHash, provedKeys)
+	} else {
+		lean, err = trie.WitnessNodesForKeysFromNodes(full, provedKeys)
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("prune witness nodes: %w", err)
 	}

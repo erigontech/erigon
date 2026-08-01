@@ -304,16 +304,23 @@ leaf and code chunking instead of reimplementing all of it.
 - Create: `execution/commitment/pbin_witness_prune_test.go`
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
 
-- [ ] implement the bin analogue of `trie.WitnessNodesForKeysFromNodes`
+- [x] implement the bin analogue of `trie.WitnessNodesForKeysFromNodes`
       (`execution/commitment/trie/proof.go:216`): walk from the root along each proved key's bit path,
       keeping every node on the path
-- [ ] route `WitnessNodes`' pruning to the bin pruner under the bin variant; leave hex untouched
-- [ ] write tests: the pruned set still reconstructs the root and still satisfies Task 5's context for
+- [x] route `WitnessNodes`' pruning to the bin pruner under the bin variant; leave hex untouched
+- [x] ➕ the decoded node keeps its preimage, so the pruner emits the bytes it was given and orders
+      them by walk order (root first) instead of by map iteration
+- [x] ➕ a proved key of no zone errors instead of panicking in `pbinPathFromBytes`
+- [x] write tests: the pruned set still reconstructs the root and still satisfies Task 5's context for
       the proved keys
-- [ ] write tests: a proved key whose path hits a blinded child stops cleanly, no panic
-- [ ] write tests: nodes off every proved path are dropped and the result is a strict subset
-- [ ] write tests: code-chunk leaves survive pruning (they are proved keys per Task 2)
-- [ ] run tests - must pass before task 7
+- [x] write tests: a proved key whose path hits a blinded child stops cleanly, no panic — the key is
+      built from a path the witness is known to blind, so the case cannot stop being one
+- [x] write tests: nodes off every proved path are dropped and the result is a strict subset —
+      compared against on-path membership derived from arrival-path prefixes, not from a second
+      per-key descent
+- [x] write tests: code-chunk leaves survive pruning (they are proved keys per Task 2)
+- [x] ➕ write tests: `WitnessNodes` prunes with each variant's own walker (in `commitmentdb`)
+- [x] run tests - must pass before task 7
 
 ### Task 7: Skip the hex-only phases under bin, with guards
 

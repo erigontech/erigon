@@ -30,10 +30,11 @@ import (
 
 var errPBinWitnessNode = errors.New("pbin: malformed witness node")
 
-// pbinWitnessNode is one decoded preimage. key and value alias the preimage they
-// came from.
+// pbinWitnessNode is one decoded preimage. preimage, key and value all alias the
+// bytes the node was decoded from, so a consumer that outlives them must copy.
 type pbinWitnessNode struct {
 	tag      byte
+	preimage []byte
 	key      []byte // leaf: the whole tree key
 	value    []byte // leaf: pbinValueLength bytes
 	prefix   pbinBitpath
@@ -46,14 +47,23 @@ func pbinDecodeWitnessNode(preimage []byte) (pbinWitnessNode, error) {
 	if len(preimage) == 0 {
 		return pbinWitnessNode{}, fmt.Errorf("%w: empty preimage", errPBinWitnessNode)
 	}
+	var (
+		node pbinWitnessNode
+		err  error
+	)
 	switch preimage[0] {
 	case pbinLeafTag:
-		return pbinDecodeWitnessLeaf(preimage)
+		node, err = pbinDecodeWitnessLeaf(preimage)
 	case pbinBranchTag:
-		return pbinDecodeWitnessBranch(preimage)
+		node, err = pbinDecodeWitnessBranch(preimage)
 	default:
-		return pbinWitnessNode{}, fmt.Errorf("%w: unknown node tag %#x", errPBinWitnessNode, preimage[0])
+		err = fmt.Errorf("%w: unknown node tag %#x", errPBinWitnessNode, preimage[0])
 	}
+	if err != nil {
+		return pbinWitnessNode{}, err
+	}
+	node.preimage = preimage
+	return node, nil
 }
 
 func pbinDecodeWitnessLeaf(preimage []byte) (pbinWitnessNode, error) {
