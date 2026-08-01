@@ -423,9 +423,13 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.dep = UnknownDep
 }
 
+// Release Deprecated use Close
+func (sdb *IntraBlockState) Release(bool) { sdb.Close() }
+
 // Close returns pooled resources (like journal, stateObjects, versioned writes)
 // back to their pools. Call this when the IntraBlockState is no longer needed.
-// Idempotent, but not safe for concurrent callers.
+// Call Reset() to re-use IntraBlockState object
+// Idempotent, thread-unsafe
 func (sdb *IntraBlockState) Close() {
 	if sdb == nil || sdb.stateObjects == nil {
 		return
