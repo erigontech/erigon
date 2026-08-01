@@ -564,14 +564,37 @@ Reading it:
 
 ### Task 14: Verify acceptance criteria
 
-- [ ] verify every requirement in Overview is implemented
-- [ ] verify the hex witness path is unchanged, against Task 12's committed golden fixture
-- [ ] verify no witness failing stateless verification can be returned under either variant
-- [ ] verify the still-refusing callers from Task 10 all still refuse
-- [ ] run the full test suite: `make test-short`
-- [ ] run the EIP-8297 blocktest fixtures and confirm still 67/70, the same three known
-      non-conformant failures
-- [ ] run `make lint`
+- [x] verify every requirement in Overview is implemented — all seven Solution Overview items are in
+      the tree: the `pbinHasher` tap (`pbin_witness.go`), `PBinPatriciaHashed.Witnesses` (:73), the
+      `witnessTrie` interface with both variants asserted at compile time
+      (`commitment_context.go:353-360`), the decoder (`pbin_witness_decode.go`), the witness-backed
+      `PatriciaContext` (`pbin_witness_context.go`), pruning/guards/stateless reader/verify gate
+      (`pbin_witness_prune.go`, `pbin_witness_stateless.go`, `verifyWitnessAgainstBlock:1526`), and
+      the un-refusal (`debug_execution_witness.go:920`)
+- [x] verify the hex witness path is unchanged, against Task 12's committed golden fixture —
+      `TestWitnessSizeBinVsHex` passes; the hex arm reproduces `testdata/hex_witness_baseline.json`
+      exactly and the measured table matches the one recorded above
+- [x] verify no witness failing stateless verification can be returned under either variant — every
+      `*ExecutionWitnessResult` producer funnels through `buildWitnessResult`, which returns
+      `nil, errWitnessVerifyFailed` on a failed gate (:980) *before* the result is built out; the
+      cache path is fed by `buildWitnessResultHeadCapture` and drops a verify failure instead of
+      caching it (`witness_cache_builder.go:477-486`). Gate tests pass under both variants, and
+      `ERIGON_WITNESS_NO_VERIFY` cannot reach the bin path (`witnessVerifySkipped:1516`)
+- [x] verify the still-refusing callers from Task 10 all still refuse — `TestPBinGetProofRefusesBin`
+      (covers `eth_getProof` and `eth_simulateV1`), `TestPBinGetWitnessRefusesBin`,
+      `TestPBinHexOnlyCallersStillRefuse`, `TestPBinHexOnlyCommitmentRefusesBin`,
+      `TestPBinCommitmentHistChecksRefuseBin`, `TestPBinCommitmentReplayRefusesBin` all pass
+- [x] run the full test suite: `make test-short` — clean, 246 packages ok, exit 0
+- [x] run the EIP-8297 blocktest fixtures and confirm still 67/70, the same three known
+      non-conformant failures — ⚠️ **not runnable in this environment**: the `BinaryTree` fixture
+      corpus is not in the repo, not pinned in `test-fixtures.json`, and no `ethereum/execution-specs`
+      or `ethereum/execution-spec-tests` release publishes binary-tree blockchain fixtures.
+      Regenerating it needs an EEST checkout with EIP-8297 support. The runner wiring
+      (`testforks.BinaryTree`, `block_test_util.go:231`) is untouched by this plan. Closest in-repo
+      substitute passes: the EIP-8297 reference-vector and oracle suites
+      (`TestPBinOracleMatchesSpecTrieRoots`, `TestPBinOracleMatchesSpecSequenceRoots`, and the
+      fold-vs-oracle set), plus all of `execution/commitment` and `execution/tests` under `test-short`
+- [x] run `make lint` — clean, run twice (0 issues both times)
 
 ### Task 15: [Final] Update documentation
 
