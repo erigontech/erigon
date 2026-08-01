@@ -64,6 +64,29 @@ These flags cover the general behavior and configuration of the Erigon client.
 * `--keep.stored.chain.config`: Avoids overriding the chain configuration already stored in the database.
   * Default: `false`
 
+### Development, testing, and block-production helpers
+
+These flags are mainly for dev networks, testing, or specialized block-production setups.
+
+* `--allow-insecure-unlock`: Allows insecure account unlocking when account-related RPCs are exposed by HTTP. Use only on trusted networks.
+  * Default: `false`
+* `--dev-validator-seed value`: Deterministic BLS key seed for the embedded dev validator; enables PoS dev mode.
+  * Default: `devnet`
+* `--dev-validator-count value`: Number of validators for PoS dev mode.
+  * Default: `64`
+* `--dev.slot-time value`: Slot duration in seconds for PoS dev mode.
+  * Default: `6`
+* `--miner.gaslimit value`: Target gas limit for mined blocks.
+  * Default: `0`
+* `--miner.extradata value`: Block extra data set by the miner; defaults to the client version string.
+  * Default: client version string
+* `--experimental.bal`: Generates block access lists.
+  * Default: `false`
+* `--experimental.always-generate-changesets`: Overrides changeset generation logic.
+  * Default: `false`
+* `--chaos.monkey`: Testing-only flag that enables spontaneous network, consensus, and other failures.
+  * Default: `false`
+
 ### Database and Caching
 
 These flags control database performance and memory usage. See [Database](/fundamentals/database) for the on-disk layout.
@@ -80,6 +103,8 @@ These flags control database performance and memory usage. See [Database](/funda
   * Default: `2`
 * `--batchSize value`: Sets the batch size for the execution stage.
   * Default: `512M`
+* `--etl.bufferSize value`: Buffer size for ETL operations.
+  * Default: `256MB`
 * `--bodies.cache value`: Sets the size limit for the block bodies cache.
   * Default: `268435456`
 * `--state.cache value`: Sets the amount of data to store in the StateCache.
