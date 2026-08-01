@@ -89,8 +89,11 @@ type EVM struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
+	// Pointers before counters: interleaving pads EVM past Go's 480-byte size class.
 	internCache *storageKeyCache
+	addrCache   *addressCache
 	internOps   uint32
+	addrOps     uint32
 }
 
 // storageKeyCacheSize must comfortably exceed a contract's live slot count,
@@ -144,6 +147,59 @@ func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
 	}
 	i := slotIndex(word)
 	if h := c.handles[i]; h != accounts.NilKey && c.words[i] == *word {
+		return h
+	}
+	return c.fill(i, word)
+}
+
+// Address streams are far narrower than storage-key streams — a handful of
+// routers and tokens dominate — so the address table is a quarter of the size
+// and wins its zeroing back sooner.
+const (
+	addressCacheSize   = 256
+	addressCacheMinOps = 32
+)
+
+var _ [0]struct{} = [addressCacheSize & (addressCacheSize - 1)]struct{}{}
+
+// addressCache is storageKeyCache for InternAddress; see that type for why the
+// entries never go stale and why the words sit beside the handles.
+type addressCache struct {
+	handles [addressCacheSize]accounts.Address
+	words   [addressCacheSize]uint256.Int
+}
+
+// addrIndex skips word[3], which lies wholly above the 20 bytes Bytes20 keeps.
+// The remaining limbs still carry 4 bytes of slack, so a word with dirt there
+// buckets away from its clean twin — two entries for one address, never a wrong
+// one.
+func addrIndex(word *uint256.Int) uint64 {
+	return (word[0] ^ word[1] ^ word[2]) & (addressCacheSize - 1)
+}
+
+func (c *addressCache) fill(i uint64, word *uint256.Int) accounts.Address {
+	h := accounts.InternAddress(word.Bytes20())
+	c.words[i], c.handles[i] = *word, h
+	return h
+}
+
+// internAddress returns the low 20 bytes of word interned as an Address,
+// skipping unique.Make for words seen before. Entries are keyed by the whole
+// word, so a stack word carrying dirt above the address costs a miss, never a
+// wrong handle.
+func (evm *EVM) internAddress(word *uint256.Int) accounts.Address {
+	c := evm.addrCache
+	if c == nil {
+		if evm.addrOps < addressCacheMinOps {
+			evm.addrOps++
+			return accounts.InternAddress(word.Bytes20())
+		}
+		c = new(addressCache)
+		evm.addrCache = c
+		return c.fill(addrIndex(word), word)
+	}
+	i := addrIndex(word)
+	if h := c.handles[i]; h != accounts.NilAddress && c.words[i] == *word {
 		return h
 	}
 	return c.fill(i, word)
