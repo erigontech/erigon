@@ -8,6 +8,9 @@
 #   statetests-stable                          state tests vs. eest_stable
 #   statetests-devnet                          state tests vs. eest_devnet
 #   statetests-legacy                          complete legacy Cancun state tests
+#   rlptests-legacy-race                      complete legacy RLP tests
+#   transactiontests-legacy-race              complete legacy transaction tests
+#   difficultytests-legacy-race               complete legacy difficulty tests
 #   blocktests-stable-sequential               blockchain tests vs. eest_stable
 #   blocktests-devnet                          blockchain tests vs. eest_devnet
 #   blocktests-legacy-consensus-{sequential,parallel,race}
@@ -19,10 +22,11 @@
 #                                              Hive legacy suite
 #   blocktests-legacy-cancun-{sequential,parallel}
 #                                              Hive legacy-cancun suite
-#   blocktests-legacy-cancun-race-{berlin-shanghai-cancun,other-forks}
+#   blocktests-legacy-cancun-race-{berlin,shanghai,cancun,london,paris,other-forks}
 #                                              race-detector partition of the
 #                                              Hive legacy-cancun suite
-#   enginextests-stable-sequential             engine-x tests vs. eest_stable
+#   enginextests-stable-{sequential,parallel}  engine-x tests vs. eest_stable
+#   enginextests-devnet                        engine-x tests vs. eest_devnet
 #   enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}-sequential
 #                                              engine-x benchmark fixtures per
 #                                              gas-target subdir; each value
@@ -87,6 +91,9 @@ case "$shard" in
 	*-devnet*)                     fixture_sets=(eest_devnet) ;;
 	*-benchmark*)                  fixture_sets=(eest_benchmark) ;;
 	statetests-legacy)                       fixture_sets=(legacy_cancun) ;;
+	rlptests-legacy-* | \
+		transactiontests-legacy-* | \
+		difficultytests-legacy-*)           fixture_sets=(legacy_tests) ;;
 	blocktests-legacy-consensus-*)           fixture_sets=(legacy_tests) ;;
 	blocktests-legacy-constantinople-* | \
 		blocktests-legacy-cancun-*)          fixture_sets=(legacy_cancun) ;;
@@ -134,6 +141,12 @@ case "$shard_route" in
 		cmd=statetest;   paths=("$base/state_tests") ;;
 	statetests-legacy)
 		cmd=statetest;   paths=("$base/Cancun/GeneralStateTests") ;;
+	rlptests-legacy-*)
+		cmd=rlptest;   paths=("$base/RLPTests") ;;
+	transactiontests-legacy-*)
+		cmd=transactiontest;   paths=("$base/TransactionTests") ;;
+	difficultytests-legacy-*)
+		cmd=difficultytest;   paths=("$base/DifficultyTests") ;;
 	# race shards reuse this arm; each one's per-fork --run regex comes from the
 	# manifest `run` key (appended after this case), not from a per-shard arm.
 	blocktests-stable | blocktests-devnet | blocktests-stable-race-* | blocktests-devnet-race-*)
@@ -144,7 +157,7 @@ case "$shard_route" in
 		cmd=blocktest;   paths=("$base/Constantinople/BlockchainTests") ;;
 	blocktests-legacy-cancun | blocktests-legacy-cancun-*)
 		cmd=blocktest;   paths=("$base/Cancun/BlockchainTests") ;;
-	enginextests-stable)
+	enginextests-stable | enginextests-devnet)
 		cmd=enginextest
 		paths=("$base/blockchain_tests_engine_x")
 		extra=(--pre-alloc-dir "${paths[0]}/pre_alloc") ;;
@@ -172,6 +185,13 @@ workers="${EEST_SPEC_WORKERS:-$default_workers}"
 max="${EEST_SPEC_MAX_FAILURES:-$default_max}"
 evm_bin="${EVM_BIN:-build/bin/evm}"
 
+# Race-instrumented shards multiply RSS several-fold over the Go heap (TSAN
+# shadow + history). Bound the heap so allocation bursts trigger GC early
+# instead of growing the process into the CI runner's OOM range.
+if [[ "$shard" == *-race* ]]; then
+	export GOMEMLIMIT="${GOMEMLIMIT:-4GiB}"
+fi
+
 if [[ ! -x "$evm_bin" ]]; then
 	echo "$evm_bin not found or not executable; run 'make evm' first" >&2
 	exit 2
@@ -183,7 +203,7 @@ for fixture_set in "${fixture_sets[@]}"; do
 done
 
 for path in "${paths[@]}"; do
-	if [[ ! -d "$path" ]]; then
+	if [[ ! -e "$path" ]]; then
 		echo "fixture path $path does not exist" >&2
 		exit 2
 	fi

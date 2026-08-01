@@ -1,6 +1,35 @@
 package snaptype
 
-import "testing"
+import (
+	"io/fs"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+type vanishedDirEntry struct{ name string }
+
+func (e vanishedDirEntry) Name() string               { return e.name }
+func (e vanishedDirEntry) IsDir() bool                { return false }
+func (e vanishedDirEntry) Type() fs.FileMode          { return 0 }
+func (e vanishedDirEntry) Info() (fs.FileInfo, error) { return nil, fs.ErrNotExist }
+
+// A file may be deleted between ReadDir and the per-entry stat by concurrent
+// snapshot merge/prune; the scan must skip it instead of failing.
+func TestParseDirSkipsFileDeletedDuringScan(t *testing.T) {
+	d := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(d, "v1.0-047370-047380-beaconblocks.seg"), []byte("x"), 0o644))
+	entries, err := os.ReadDir(d)
+	require.NoError(t, err)
+	entries = append(entries, vanishedDirEntry{name: "v1.1-047370-047371-transactions.seg"})
+
+	res, err := parseDirEntries(d, entries)
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	require.Equal(t, "v1.0-047370-047380-beaconblocks.seg", res[0].Name())
+}
 
 func TestStateSeedable(t *testing.T) {
 	tests := []struct {

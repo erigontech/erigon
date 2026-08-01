@@ -406,7 +406,7 @@ var (
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
-		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot rather than error. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. A value below the parallel-exec worker count is raised to it (each worker holds a long-lived read tx, so a lower ceiling would deadlock); to actually reduce read concurrency, lower --exec.workers instead",
+		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. A value below the parallel-exec worker count is raised to it (each worker holds a long-lived read tx, so a lower ceiling would deadlock); to actually reduce read concurrency, lower --exec.workers instead",
 		Value: httpcfg.DefaultDBReadConcurrency(),
 	}
 	RpcMaxConcurrentRequestsFlag = cli.IntFlag{
@@ -454,7 +454,16 @@ var (
 	}
 	WitnessCacheBlocksFlag = cli.UintFlag{
 		Name:  "witness.cache.blocks",
-		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory, keyed by block hash in an LRU (embedded RPC only; requires --prune.experimental.include-commitment-history). 0 disables the cache; capped at 96. Each witness is stored as serialized JSON so a hit is served verbatim; memory use is roughly this count times the per-block witness size.",
+		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory, keyed by block hash in an LRU (embedded RPC only; requires either --prune.experimental.include-commitment-history for recompute-on-miss or --witness.cache.head-capture for cache-only serving on a minimal node). 0 disables the cache; capped at 96. Each witness is stored as serialized JSON so a hit is served verbatim; memory use is roughly this count times the per-block witness size.",
+		Value: 0,
+	}
+	WitnessCacheHeadCaptureFlag = cli.BoolFlag{
+		Name:  "witness.cache.head-capture",
+		Usage: "Serve recent-block debug_executionWitness on a minimal node without commitment-domain history: each head block's witness is built from a pinned parent commitment snapshot and the account/storage/code history the node keeps. Witnesses are served cache-only (out-of-window on miss, never a history recompute). Embedded RPC only.",
+	}
+	WitnessCacheMaxMBFlag = cli.UintFlag{
+		Name:  "witness.cache.maxmb",
+		Usage: "Resident-memory cap (in MB) for the witness cache; eviction triggers on whichever of the block count (--witness.cache.blocks, capped at 96) or this byte budget binds first. 0 = count-only (no byte cap).",
 		Value: 0,
 	}
 	RpcTxSyncDefaultTimeoutFlag = cli.DurationFlag{
@@ -1039,6 +1048,11 @@ var (
 		Name:  "caplin.checkpoint-sync.disable",
 		Usage: "disable checkpoint sync in caplin",
 		Value: false,
+	}
+	CaplinResumeMaxStalenessEpochsFlag = cli.Uint64Flag{
+		Name:  "caplin.resume-max-staleness-epochs",
+		Usage: "max epochs a locally-finalized state may be stale to resume from it on restart instead of remote checkpoint syncing (0 = default: the anchor fork's sidecar-retention window). Data-availability bound; larger values are clamped to the retention window",
+		Value: 0,
 	}
 
 	CaplinEnableSnapshotGeneration = cli.BoolFlag{
@@ -1873,6 +1887,7 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
 	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
+	cfg.CaplinConfig.ResumeMaxStalenessEpochs = ctx.Uint64(CaplinResumeMaxStalenessEpochsFlag.Name)
 	cfg.CaplinConfig.ColumnKeepSlots = ctx.Uint64(CaplinColumnKeepSlotsFlag.Name)
 	// bunch of extra stuff
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
@@ -2279,10 +2294,12 @@ func setDevnetEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logg
 	genesisTime := uint64(time.Now().Unix())
 	// Compute the EL genesis block hash so the beacon state's Eth1Data
 	// matches the actual chain genesis.
-	elGenesisBlock, _, err := genesiswrite.GenesisToBlock(nil, cfg.Genesis, cfg.Dirs, logger)
+	elGenesisBlock, ibs, err := genesiswrite.GenesisToBlock(nil, cfg.Genesis, cfg.Dirs, logger)
 	if err != nil {
 		Fatalf("Failed to compute dev EL genesis hash: %v", err)
 	}
+	defer ibs.Close()
+
 	elGenesisHash := elGenesisBlock.Hash()
 	beaconState, _, err := devgenesis.BuildGenesisState(seed, validatorCount, &beaconCfg, genesisTime, elGenesisHash)
 	if err != nil {

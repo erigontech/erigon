@@ -128,6 +128,17 @@ func TestAddNewSeedableFileConcurrentWithAllActiveSnapshots(t *testing.T) {
 	}
 }
 
+// Caplin beacon-state snapshots (e.g. NextSyncCommittee) have no registered global
+// snaptype, so ParseFileName returns a nil Type for them. They are still seedable by
+// name, so AddNewSeedableFile must not reject them as malformed.
+func TestAddNewSeedableFileCaplinStateType(t *testing.T) {
+	test := newDownloaderTest(t)
+	name := filepath.Join("caplin", "v1.1-000000-007150-NextSyncCommittee.seg")
+	require.NoError(t, os.MkdirAll(filepath.Join(test.dirs.Snap, "caplin"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(test.dirs.Snap, name), nil, 0o644))
+	require.NoError(t, test.downloader.AddNewSeedableFile(t.Context(), name))
+}
+
 func TestChangeInfoHashOfSameFile(t *testing.T) {
 	ctx := t.Context()
 	require := require.New(t)
