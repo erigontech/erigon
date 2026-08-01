@@ -428,21 +428,28 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.dep = UnknownDep
 }
 
-// Release returns pooled resources (like journal, stateObjects) back to their pools.
-// Call this when the IntraBlockState is no longer needed.
-// If parallel is true, cleanup happens in a goroutine for faster return.
-func (sdb *IntraBlockState) Release(parallel bool) {
-	stateObjects := sdb.stateObjects
-	journal := sdb.journal
-	sdb.stateObjects = nil
-	sdb.journal = nil
+// Release Deprecated use Close
+func (sdb *IntraBlockState) Release(bool) { sdb.Close() }
+
+// Close returns pooled resources (like journal, stateObjects, versioned writes)
+// back to their pools. Call this when the IntraBlockState is no longer needed.
+// Call Reset() to re-use IntraBlockState object
+// Idempotent, thread-unsafe
+func (sdb *IntraBlockState) Close() {
+	if sdb == nil || sdb.stateObjects == nil {
+		return
+	}
+
+	stateObjects, journal := sdb.stateObjects, sdb.journal
+	sdb.stateObjects, sdb.journal = nil, nil
 	sdb.logs = nil
 
-	if parallel {
-		go releaseResources(stateObjects, journal)
-	} else {
-		releaseResources(stateObjects, journal)
-	}
+	sdb.revisions.reset()
+	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
+	// set is unexported, so nothing outside holds a raw VersionedWrite.
+	sdb.versionedWrites.ReleaseAndReset()
+
+	releaseResources(stateObjects, journal)
 }
 
 func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *journal) {
