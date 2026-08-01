@@ -18,11 +18,14 @@ package state
 
 import (
 	"bytes"
+	"internal/race"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -89,6 +92,62 @@ func TestRevertKeepsNormalLogBufferForReuse(t *testing.T) {
 
 	lp := ibs.AllocLog(0, 2)
 	require.Same(t, first, lp)
+}
+
+// The OnLog hook is exported, so a tracer outside this repo may retain the
+// pointer it is handed. The value must stay valid after the emit buffer is
+// reused by a later block.
+func TestOnLogValueSurvivesBufferReuse(t *testing.T) {
+	t.Parallel()
+
+	var retained *types.Log
+	ibs := New(nil)
+	ibs.SetHooks(&tracing.Hooks{OnLog: func(l *types.Log) {
+		if retained == nil {
+			retained = l
+		}
+	}})
+
+	first := common.HexToAddress("0x1")
+	firstTopic := common.HexToHash("0xaa")
+	ibs.SetTxContext(1, 0)
+	ibs.AddLog(&types.Log{Address: first, Topics: []common.Hash{firstTopic}, Data: []byte{1, 2, 3}})
+	require.NotNil(t, retained)
+
+	ibs.Reset()
+	ibs.SetTxContext(2, 0)
+	ibs.AddLog(&types.Log{
+		Address: common.HexToAddress("0x2"),
+		Topics:  []common.Hash{common.HexToHash("0xbb")},
+		Data:    []byte{9, 9, 9},
+	})
+
+	require.Equal(t, first, retained.Address)
+	require.Equal(t, []common.Hash{firstTopic}, retained.Topics)
+	require.Equal(t, hexutil.Bytes{1, 2, 3}, retained.Data)
+}
+
+// The untraced LOG path stays allocation-free; only a configured hook pays for
+// the stable value.
+func TestUntracedAddLogDoesNotAllocate(t *testing.T) {
+	if race.Enabled {
+		t.Skip("sync.Pool and the race detector inflate AllocsPerRun")
+	}
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	log := &types.Log{
+		Address: common.HexToAddress("0x1"),
+		Topics:  []common.Hash{common.HexToHash("0xaa")},
+		Data:    []byte{1, 2, 3},
+	}
+	ibs.AddLog(log) // warm the buffer so steady-state reuse is measured
+
+	allocs := testing.AllocsPerRun(100, func() {
+		ibs.Reset()
+		ibs.SetTxContext(1, 0)
+		ibs.AddLog(log)
+	})
+	require.Zero(t, allocs)
 }
 
 func BenchmarkLogsRlpHash(b *testing.B) {
