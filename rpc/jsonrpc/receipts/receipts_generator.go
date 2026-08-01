@@ -277,7 +277,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	var genEnv *ReceiptEnv
 	defer func() {
 		if genEnv != nil {
-			genEnv.ibs.Release(false)
+			genEnv.ibs.Close()
 		}
 	}()
 
@@ -511,7 +511,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	if err != nil {
 		return nil, err
 	}
-	defer genEnv.ibs.Release(false)
+	defer genEnv.ibs.Close()
 
 	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 	defer cancel()
