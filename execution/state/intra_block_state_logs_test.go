@@ -56,6 +56,78 @@ func TestLogsRlpHash(t *testing.T) {
 	})
 }
 
+// A reused entry must not carry any field of the block that used it before.
+// Address is the sharpest one: it is a consensus field with no length the
+// caller has to honour, so AllocLog takes it rather than trusting the caller.
+func TestAllocLogClearsReusedEntry(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	lp := ibs.AllocLog(common.HexToAddress("0xaa"), 2, 4)
+	lp.Topics[0], lp.Topics[1] = common.HexToHash("0x11"), common.HexToHash("0x22")
+	copy(lp.Data, []byte{1, 2, 3, 4})
+	lp.TxHash, lp.BlockHash = common.HexToHash("0xde"), common.HexToHash("0xad")
+	lp.BlockNumber, lp.Removed = 7, true
+	ibs.NotifyLog(lp)
+
+	ibs.Reset()
+	ibs.SetTxContext(2, 0)
+	reused := ibs.AllocLog(common.HexToAddress("0xbb"), 1, 1)
+	require.Same(t, lp, reused, "entry is reused")
+	require.Equal(t, common.HexToAddress("0xbb"), reused.Address)
+	require.Equal(t, common.Hash{}, reused.TxHash)
+	require.Equal(t, common.Hash{}, reused.BlockHash)
+	require.Zero(t, reused.BlockNumber)
+	require.False(t, reused.Removed)
+}
+
+// Growing the outer buffer past its capacity must keep the groups already
+// filled: Logs and LogsRlpHash read every transaction of the block.
+func TestAllocLogKeepsEarlierTxsAcrossGrowth(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(nil)
+	for txIndex := range 64 {
+		ibs.SetTxContext(1, txIndex)
+		ibs.AddLog(&types.Log{Address: common.BytesToAddress([]byte{byte(txIndex)})})
+	}
+	for txIndex := range 64 {
+		logs := ibs.GetRawLogs(txIndex)
+		require.Len(t, logs, 1, "tx %d lost its logs", txIndex)
+		require.Equal(t, common.BytesToAddress([]byte{byte(txIndex)}), logs[0].Address)
+	}
+}
+
+func TestLogsIsNilWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(nil)
+	require.Nil(t, ibs.Logs())
+
+	ibs.SetTxContext(1, 0)
+	ibs.AddLog(&types.Log{Address: common.HexToAddress("0x1")})
+	ibs.Reset()
+	require.Nil(t, ibs.Logs(), "the reused buffer must not surface as an empty slice")
+}
+
+func TestAddLogKeepsCallerTxAndBlockHash(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	ibs.AddLog(&types.Log{
+		Address:   common.HexToAddress("0x1"),
+		TxHash:    common.HexToHash("0xde"),
+		BlockHash: common.HexToHash("0xad"),
+	})
+
+	logs := ibs.GetRawLogs(0)
+	require.Len(t, logs, 1)
+	require.Equal(t, common.HexToHash("0xde"), logs[0].TxHash)
+	require.Equal(t, common.HexToHash("0xad"), logs[0].BlockHash)
+}
+
 func TestRevertDropsOversizedLogBuffer(t *testing.T) {
 	t.Parallel()
 
@@ -71,7 +143,7 @@ func TestRevertDropsOversizedLogBuffer(t *testing.T) {
 
 	ibs.Reset()
 	ibs.SetTxContext(2, 0)
-	lp := ibs.AllocLog(0, 1)
+	lp := ibs.AllocLog(common.HexToAddress("0x2"), 0, 1)
 	require.LessOrEqual(t, cap(lp.Data), maxReusableLogDataCap)
 }
 
@@ -89,7 +161,7 @@ func TestRevertKeepsNormalLogBufferForReuse(t *testing.T) {
 	first := ibs.logs[1][0]
 	ibs.RevertToSnapshot(snap, nil)
 
-	lp := ibs.AllocLog(0, 2)
+	lp := ibs.AllocLog(common.HexToAddress("0x2"), 0, 2)
 	require.Same(t, first, lp)
 }
 

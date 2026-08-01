@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -462,18 +461,29 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 
 const maxReusableLogDataCap = 64 * 1024
 
+// growReusing extends s to n elements, keeping whatever the backing array holds
+// past len(s). That is what lets a log entry outlive the Reset that hid it.
+// slices.Grow promises only capacity, so spell the copy out.
+func growReusing[S ~[]E, E any](s S, n int) S {
+	if n <= cap(s) {
+		return s[:n]
+	}
+	return append(s[:cap(s)], make(S, n-cap(s))...)[:n]
+}
+
 // AllocLog reserves the next log slot of the current tx and returns it sized for
-// numTopics/dataSize. The caller must fill Address, Topics and Data and then call
-// NotifyLog. The entry is owned by the buffer and reused by later blocks, so it
-// must never be handed out without copying.
-func (sdb *IntraBlockState) AllocLog(numTopics, dataSize int) *types.Log {
+// numTopics/dataSize. The caller must write every topic and every data byte, then
+// call NotifyLog; whatever it leaves unwritten is the previous block's. The entry
+// is owned by the buffer and reused by later blocks, so it must never be handed
+// out without copying.
+func (sdb *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize int) *types.Log {
 	sdb.journal.addLogChange(sdb.txIndex)
 	ti := sdb.txIndex + 1
 	if len(sdb.logs) <= ti {
-		sdb.logs = slices.Grow(sdb.logs[:0], ti+1)[:ti+1]
+		sdb.logs = growReusing(sdb.logs, ti+1)
 	}
 	logIdx := len(sdb.logs[ti])
-	sdb.logs[ti] = slices.Grow(sdb.logs[ti][:0], logIdx+1)[:logIdx+1] // ensure enough capacity for 1 more log
+	sdb.logs[ti] = growReusing(sdb.logs[ti], logIdx+1)
 	logs := sdb.logs[ti]
 
 	lp := logs[logIdx] // a prior block's entry to reuse, or nil for a fresh slot
@@ -481,9 +491,10 @@ func (sdb *IntraBlockState) AllocLog(numTopics, dataSize int) *types.Log {
 		lp = &types.Log{}
 		logs[logIdx] = lp
 	}
-	lp.Topics = slices.Grow(lp.Topics[:0], numTopics)[:numTopics]
-	lp.Data = slices.Grow(lp.Data[:0], dataSize)[:dataSize]
-	lp.Removed = false // Address set by caller
+	lp.Address = addr
+	lp.Topics = growReusing(lp.Topics, numTopics)
+	lp.Data = growReusing(lp.Data, dataSize)
+	lp.Removed = false
 	lp.TxHash, lp.BlockHash = common.Hash{}, common.Hash{}
 	lp.TxIndex = hexutil.Uint(sdb.txIndex)
 	lp.BlockNumber = 0 // non-consensus field, assigned by the caller
@@ -504,7 +515,7 @@ func (sdb *IntraBlockState) NotifyLog(lp *types.Log) {
 		if topics == "" {
 			topics = "[]"
 		}
-		fmt.Printf("%d (%d.%d) Log: Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, lp.Address, topics, lp.Data)
+		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, lp.Index, lp.Address, topics, lp.Data)
 	}
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
 		// The hook may retain the value; the buffer entry is reused by later blocks.
@@ -512,13 +523,15 @@ func (sdb *IntraBlockState) NotifyLog(lp *types.Log) {
 	}
 }
 
+// AddLog copies log into the next slot. TxIndex and Index are assigned by the
+// state; every other field comes from the caller.
 func (sdb *IntraBlockState) AddLog(log *types.Log) {
-	lp := sdb.AllocLog(len(log.Topics), len(log.Data))
-	lp.Address = log.Address
+	lp := sdb.AllocLog(log.Address, len(log.Topics), len(log.Data))
 	copy(lp.Topics, log.Topics)
 	copy(lp.Data, log.Data)
 	lp.Removed = log.Removed
 	lp.BlockNumber = log.BlockNumber
+	lp.TxHash, lp.BlockHash = log.TxHash, log.BlockHash
 	sdb.NotifyLog(lp)
 }
 
@@ -547,11 +560,7 @@ func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 }
 
 func (sdb *IntraBlockState) Logs() types.Logs {
-	all := make(types.Logs, 0, sdb.logIndexInBlock)
-	for _, lgs := range sdb.logs {
-		all = append(all, lgs...)
-	}
-	return all.Copy()
+	return types.CopyLogGroups(sdb.logs)
 }
 
 // LogsRlpHash is rlpHash of Logs, without building the flattened slice.

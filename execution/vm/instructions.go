@@ -1517,8 +1517,7 @@ func makeLog(size int) executionFunc {
 		stack, ibs := &scope.Stack, evm.IntraBlockState()
 		mStart, mSize := stack.pop2Uint64()
 		mem := scope.Memory.GetPtr(mStart, mSize)
-		log := ibs.AllocLog(size, len(mem))
-		log.Address = scope.Contract.Address().Value()
+		log := ibs.AllocLog(scope.Contract.Address().Value(), size, len(mem))
 		// This is a non-consensus field, but assigned here because
 		// execution/state doesn't know the current block number.
 		log.BlockNumber = hexutil.Uint64(evm.Context.BlockNumber)
