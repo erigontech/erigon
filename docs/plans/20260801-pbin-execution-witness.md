@@ -550,11 +550,17 @@ Reading it:
 - Modify: `db/state/execctx/options.go`
 - Modify: `node/eth/backend.go`
 
-- [ ] update the `WithHexCommitmentOnly` doc comment (`options.go:66-69`), which lists witness first
-      among the hex-only callers
-- [ ] update the startup warning at `node/eth/backend.go:377`
-- [ ] grep for any other comment or doc still claiming the witness path refuses bin, and fix it
-- [ ] run tests - must pass before task 14
+- [x] update the `WithHexCommitmentOnly` doc comment (`options.go:66-69`), which lists witness first
+      among the hex-only callers — already landed in Task 10's commit: the caller list now names
+      `eth_getWitness`, which still refuses, in place of a bare "witness"
+- [x] update the startup warning at `node/eth/backend.go:377` — the unsupported list drops the bare
+      "witness" for `eth_getWitness`, and the warning now says `debug_executionWitness` is supported
+      and verifies each witness by stateless re-execution before returning it
+- [x] grep for any other comment or doc still claiming the witness path refuses bin, and fix it —
+      nothing else claims it: `docs/plans/witness-legacy-mode-spec.md` never mentions the bin
+      variant, and `errWitnessCanonicalHexOnly` (`debug_execution_witness.go:588-591`) is about the
+      canonical *mode*, which stays hex-only
+- [x] run tests - must pass before task 14
 
 ### Task 14: Verify acceptance criteria
 
