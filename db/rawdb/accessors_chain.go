@@ -31,7 +31,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/rawdb/utils"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -640,7 +640,10 @@ func ReadBlockAccessListBytes(db kv.Getter, hash common.Hash, number uint64) ([]
 	return data, nil
 }
 
-// WriteBlockAccessListBytes stores the RLP-encoded block access list sidecar for a block.
+// WriteBlockAccessListBytes stores the RLP-encoded block access list sidecar for
+// a block. This is secondary storage (serving, backfill, unwind); the primary
+// carry into execution is Block.BlockAccessList(), written via the block overlay
+// in InsertBlocks and flushed at commit.
 func WriteBlockAccessListBytes(db kv.Putter, hash common.Hash, number uint64, data []byte) error {
 	if err := db.Put(kv.BlockAccessList, dbutils.BlockBodyKey(number, hash), data); err != nil {
 		return fmt.Errorf("failed to store block access list: %w", err)
@@ -838,6 +841,13 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 		return nil
 	}
 	block := types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals)
+	// Carry the BAL sidecar (secondary storage) so a block reconstructed from the
+	// DB carries its BAL like its header/body. Only Amsterdam+ blocks have one.
+	if header.HasBAL() {
+		if bal, err := ReadBlockAccessListBytes(tx, hash, number); err == nil && len(bal) > 0 {
+			block.SetBlockAccessList(bal)
+		}
+	}
 	return block
 }
 
@@ -1284,7 +1294,7 @@ type RCacheV2Query struct {
 
 // doesn't do DeriveFieldsV4ForCachedReceipt
 func ReceiptCacheV2Stream(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (stream.Duo[uint64, *types.Receipt], error) {
-	it, err := tx.Debug().TraceKey(kv.RCacheDomain, receiptCacheKey, fromTxNum, toTxNum)
+	it, err := tx.Debug().TraceKey(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, fromTxNum, toTxNum)
 	if err != nil {
 		return nil, err
 	}
@@ -1307,7 +1317,7 @@ func ReceiptCacheV2Stream(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (stream.D
 }
 
 func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, bool, error) {
-	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, query.TxNum+1 /*history storing value BEFORE-change*/)
+	v, ok, err := tx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, query.TxNum+1 /*history storing value BEFORE-change*/)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1344,7 +1354,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 
 	receiptIdx := 0
 	for txNum := minTxNum; txNum < maxTxNum+1; txNum++ {
-		v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1)
+		v, ok, err := tx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, txNum+1)
 		if err != nil {
 			return nil, err
 		}
@@ -1380,45 +1390,6 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 }
 
 func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
-	var toWrite []byte
-
-	if receipt != nil {
-		if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
-			panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64()))
-		}
-
-		var err error
-		storageReceipt := (*types.ReceiptForStorage)(receipt)
-		toWrite, err = rlp.EncodeToBytes(storageReceipt)
-		if err != nil {
-			return fmt.Errorf("WriteReceiptCache: %w", err)
-		}
-		if dbg.AssertEnabled {
-			storageReceipt2 := &types.ReceiptForStorage{}
-			if err := rlp.DecodeBytes(toWrite, storageReceipt2); err != nil {
-				panic(fmt.Sprintf("assert: receipt encode/decode round-trip: %v", err))
-			}
-			if storageReceipt.ContractAddress != storageReceipt2.ContractAddress {
-				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.ContractAddress, storageReceipt2.ContractAddress))
-			}
-			if storageReceipt.FirstLogIndexWithinBlock != storageReceipt2.FirstLogIndexWithinBlock {
-				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.FirstLogIndexWithinBlock, storageReceipt2.FirstLogIndexWithinBlock))
-			}
-			if storageReceipt.TransactionIndex != storageReceipt2.TransactionIndex {
-				panic(fmt.Sprintf("assert: TransactionIndex mismatch: %d, %d\n", storageReceipt.TransactionIndex, storageReceipt2.TransactionIndex))
-			}
-		}
-	} else {
-		toWrite = []byte{}
-	}
-
-	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, toWrite, txNum, nil); err != nil {
-		return fmt.Errorf("WriteReceiptCache: %w", err)
-	}
-
-	return nil
+	var w rawtemporaldb.ReceiptWriter
+	return w.Append(tx, receipt, txNum)
 }
-
-var (
-	receiptCacheKey = []byte{0x0}
-)
