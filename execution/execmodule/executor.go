@@ -185,8 +185,16 @@ type RunLoopConfig struct {
 // RunLoop runs sync.Run → PruneFn → ShouldBreak → CommitCycle in a hasMore loop.
 // Exits when Run returns hasMore=false, ShouldBreak returns true, or on error.
 // Returns the final tx and operational SD, owned by the caller (commit if CommitCycle didn't, then close). Intermediate SDs are closed here.
+//
+// Watchdog: if hasMore keeps saying "more work" but stages.Execution isn't
+// advancing across runLoopStuckAbort iterations, aborts with an error. Prior
+// history: post-mode-B recovery where a stage returned ErrLoopExhausted every
+// iteration while exec applied zero blocks, silently starving concurrent
+// callers of the exec semaphore for 5.4h before the soak's own timeout fired.
 func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg RunLoopConfig) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
 	stop := false
+	var stuckIters uint64
+	lastExecProgress, _ := stages.GetStageProgress(tx, stages.Execution)
 	for hasMore := true; hasMore && !stop; {
 		var err error
 		hasMore, err = pe.sync.Run(sd, tx, cfg.InitialCycle, cfg.FirstCycle)
@@ -220,8 +228,58 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 			sd.Close()
 			sd = newSD
 		}
+
+		if hasMore && !stop {
+			curExecProgress, _ := stages.GetStageProgress(tx, stages.Execution)
+			var action watchdogAction
+			stuckIters, lastExecProgress, action = watchdogStep(stuckIters, lastExecProgress, curExecProgress)
+			switch action {
+			case watchdogWarn:
+				pe.logger.Warn("[PipelineExecutor] RunLoop hasMore=true with no exec progress",
+					"iterations", stuckIters, "stages.Execution", curExecProgress,
+					"initialCycle", cfg.InitialCycle, "firstCycle", cfg.FirstCycle)
+			case watchdogAbort:
+				return tx, sd, fmt.Errorf("PipelineExecutor.RunLoop: watchdog: %d iterations with hasMore=true and stages.Execution stalled at %d", stuckIters, curExecProgress)
+			}
+		}
 	}
 	return tx, sd, nil
+}
+
+// runLoopStuckWarn / runLoopStuckAbort bound the RunLoop watchdog. Cheap
+// stages take ~400µs, so 1000 iterations ≈ 400ms of stall (WARN) and 10000
+// ≈ 4s (ABORT). Real work that legitimately spans many iterations advances
+// stages.Execution and resets the counter.
+const (
+	runLoopStuckWarn  uint64 = 1000
+	runLoopStuckAbort uint64 = 10000
+)
+
+type watchdogAction int
+
+const (
+	watchdogContinue watchdogAction = iota
+	watchdogWarn
+	watchdogAbort
+)
+
+// watchdogStep advances the RunLoop stall counter and reports the action the
+// caller should take. Progress advance resets the counter; the WARN action
+// fires exactly once at runLoopStuckWarn, ABORT fires at every iteration
+// from runLoopStuckAbort on so the caller can't accidentally suppress it.
+func watchdogStep(stuckIters, lastExecProgress, curExecProgress uint64) (uint64, uint64, watchdogAction) {
+	if curExecProgress > lastExecProgress {
+		return 0, curExecProgress, watchdogContinue
+	}
+	stuckIters++
+	switch {
+	case stuckIters >= runLoopStuckAbort:
+		return stuckIters, lastExecProgress, watchdogAbort
+	case stuckIters == runLoopStuckWarn:
+		return stuckIters, lastExecProgress, watchdogWarn
+	default:
+		return stuckIters, lastExecProgress, watchdogContinue
+	}
 }
 
 // ProcessFrozenBlocks runs the pipeline over snapshot blocks at startup.

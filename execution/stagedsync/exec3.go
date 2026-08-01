@@ -140,10 +140,21 @@ func ExecV3(ctx context.Context,
 		"blockReader.frozenBlocks", frozenTip,
 		"maxBlockNum", maxBlockNum)
 	if latestBlockErr == nil && committedLatestBlock > frozenTip && frozenTip > 0 {
-		logger.Warn("[execution] state-tip past frozen-headers tip",
-			"latestCommittedBlock", committedLatestBlock,
-			"frozenBlocks", frozenTip,
-			"gap", committedLatestBlock-frozenTip)
+		// Post-mode-B unwind, seedLeftoverBlocks fills kv.HeaderCanonical for
+		// blocks in (frozenTip, committedLatestBlock]. If that canonical entry
+		// is present, exec can proceed via DB — the gap is DB-covered and this
+		// warning would be pure noise (previously fired at kHz rate during a
+		// RunLoop livelock, 49M lines in 5.4h).
+		gapCovered := false
+		if hash, hashErr := rawdb.ReadCanonicalHash(applyTx, committedLatestBlock); hashErr == nil && hash != (common.Hash{}) {
+			gapCovered = true
+		}
+		if !gapCovered {
+			logger.Warn("[execution] state-tip past frozen-headers tip",
+				"latestCommittedBlock", committedLatestBlock,
+				"frozenBlocks", frozenTip,
+				"gap", committedLatestBlock-frozenTip)
+		}
 	}
 	if latestBlockErr == nil && blockNum > 0 && committedLatestBlock > blockNum {
 		logger.Warn("[execution] SeekCommitment and LatestBlockNumWithCommitment disagree",
