@@ -1016,7 +1016,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, wdiffs, _, err := api.callBlock(ctx, tx, block, traceTypes, *gasBailOut, chainConfig, traceConfig)
+	traces, wdiffs, err := api.callBlock(ctx, tx, block, traceTypes, *gasBailOut, chainConfig, traceConfig, nil /* withSyscall */)
 	if err != nil {
 		return nil, err
 	}
@@ -1142,6 +1142,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 
 	ibs := state.New(stateReader)
+	defer ibs.Close()
 
 	_, storeEVM, cleanup := setupEVMTimeout(ctx, api.evmCallTimeout)
 	defer cleanup()
@@ -1240,6 +1241,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 		initialIbs := state.New(stateReader)
+		defer initialIbs.Close()
 		if err = sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}
@@ -1358,6 +1360,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
+	defer ibs.Close()
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
 		txns, msgs, callParams, parentNrOrHash, parentHeader, true /* gasBailout */, traceConfig)
@@ -1553,16 +1556,21 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		chainRules := blockCtx.Rules(chainConfig)
 		traceResult.Output = bytes.Clone(execResult.ReturnData)
 		if traceTypeStateDiff {
-			initialIbs := state.New(cloneReader)
-			if !txFinalized {
-				if err = ibs.FinalizeTx(chainRules, sd); err != nil {
-					return nil, nil, err
+			// Closure so the per-tx state is closed on every exit path.
+			if err = func() error {
+				initialIbs := state.New(cloneReader)
+				defer initialIbs.Close()
+				if !txFinalized {
+					if err := ibs.FinalizeTx(chainRules, sd); err != nil {
+						return err
+					}
 				}
-			}
-			if sd != nil {
-				if err = sd.CompareStates(initialIbs, ibs); err != nil {
-					return nil, nil, err
+				if sd != nil {
+					return sd.CompareStates(initialIbs, ibs)
 				}
+				return nil
+			}(); err != nil {
+				return nil, nil, err
 			}
 		} else if !txFinalized {
 			if err = ibs.FinalizeTx(chainRules, noop); err != nil {
@@ -1756,6 +1764,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	traceResult.Output = bytes.Clone(execResult.ReturnData)
 	if traceTypeStateDiff {
 		initialIbs := state.New(cloneReader)
+		defer initialIbs.Close()
 		if !txFinalized {
 			if err = ibs.FinalizeTx(chainRules, sd); err != nil {
 				return nil, err
@@ -1860,6 +1869,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 
 	ibs := state.New(stateReader)
+	defer ibs.Close()
 
 	var ot OeTracer
 	ot.config, err = parseOeTracerConfig(nil)
@@ -1921,6 +1931,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 			return nil, err
 		}
 		initialIbs := state.New(stateReader)
+		defer initialIbs.Close()
 		if err = sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}
