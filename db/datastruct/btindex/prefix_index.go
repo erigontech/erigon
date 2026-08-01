@@ -183,6 +183,38 @@ func (p *PrefixIndex) addNode(n prefixNode) {
 	}
 }
 
+// addNodesEvenlySpaced keeps up to maxNodesPerBucket nodes per bucket, spread over
+// the bucket instead of taking the first ones. Pre-built nodes sit M keys apart, so
+// a busy bucket holds far more than the cap; keeping the head of it would leave the
+// bucket's tail with no node to narrow against.
+func (p *PrefixIndex) addNodesEvenlySpaced(nodes []prefixNode) {
+	perBucket := make([]uint32, 65536)
+	for i := range nodes {
+		if len(nodes[i].key) < 2 {
+			continue
+		}
+		perBucket[keyPrefix(nodes[i].key)]++
+	}
+
+	seen := make([]uint32, 65536)
+	for i := range nodes {
+		if len(nodes[i].key) < 2 {
+			continue
+		}
+		prefix := keyPrefix(nodes[i].key)
+		c := perBucket[prefix]
+		pos := seen[prefix]
+		seen[prefix]++
+		if c > maxNodesPerBucket {
+			picked := uint32(len(p.buckets[prefix].nodes))
+			if pos != uint32(uint64(picked)*uint64(c-1)/(maxNodesPerBucket-1)) {
+				continue
+			}
+		}
+		p.addNode(nodes[i])
+	}
+}
+
 // initBuckets sets all bucket firstDI to sentinel value.
 func (p *PrefixIndex) initBuckets() {
 	for i := range p.buckets {
@@ -328,10 +360,7 @@ func NewPrefixIndexWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLo
 	counts := make([]uint32, 65536)
 	p.scanBucketRanges(kv, counts)
 
-	// Distribute pre-built nodes into prefix buckets.
-	for i := range nodes {
-		p.addNode(nodes[i])
-	}
+	p.addNodesEvenlySpaced(nodes)
 
 	// Pre-built nodes sit M keys apart, so most buckets get none. Give every
 	// bucket that missed out one node (its middle key) so narrowing stays even.
