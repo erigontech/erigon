@@ -28,11 +28,13 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -1517,6 +1519,9 @@ func makeLog(size int) executionFunc {
 		mem := scope.Memory.GetPtr(mStart, mSize)
 		log := ibs.AllocLog(size, len(mem))
 		log.Address = scope.Contract.Address().Value()
+		// This is a non-consensus field, but assigned here because
+		// execution/state doesn't know the current block number.
+		log.BlockNumber = hexutil.Uint64(evm.Context.BlockNumber)
 		for i := range size {
 			log.Topics[i] = stack.pop().Bytes32()
 		}

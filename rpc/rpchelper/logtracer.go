@@ -96,13 +96,7 @@ func (t *LogTracer) onEnd(reverted bool) {
 }
 
 func (t *LogTracer) onLog(log *types.Log) {
-	// make+copy instead of slices.Clone: Clone turns empty into nil, which
-	// marshals topics as null instead of [].
-	topics := make([]common.Hash, len(log.Topics))
-	copy(topics, log.Topics)
-	data := make([]byte, len(log.Data))
-	copy(data, log.Data)
-	t.captureLog(log.Address, topics, data)
+	t.captureLog(log.Address, log.Topics, log.Data)
 }
 
 func (t *LogTracer) captureLog(address common.Address, topics []common.Hash, data []byte) {

@@ -480,7 +480,7 @@ func (sdb *IntraBlockState) AllocLog(numTopics, dataSize int) *types.Log {
 	lp.Removed = false // Address set by caller
 	lp.TxHash, lp.BlockHash = common.Hash{}, common.Hash{}
 	lp.TxIndex = hexutil.Uint(sdb.txIndex)
-	lp.BlockNumber = hexutil.Uint64(sdb.blockNum)
+	lp.BlockNumber = 0 // non-consensus field, assigned by the caller
 	// Block-wide, not per-tx: receipts.DeriveFields reads Logs[0].Index to
 	// recover FirstLogIndexWithinBlock.
 	lp.Index = hexutil.Uint(sdb.logIndexInBlock)
@@ -501,9 +501,8 @@ func (sdb *IntraBlockState) NotifyLog(lp *types.Log) {
 		fmt.Printf("%d (%d.%d) Log: Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, lp.Address, topics, lp.Data)
 	}
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
-		// lp is a reused buffer entry; per the LogHook contract the hook must
-		// copy anything it retains and must not mutate the log.
-		sdb.tracingHooks.OnLog(lp)
+		// The hook may retain the value; the buffer entry is reused by later blocks.
+		sdb.tracingHooks.OnLog(lp.Copy())
 	}
 }
 
@@ -513,6 +512,7 @@ func (sdb *IntraBlockState) AddLog(log *types.Log) {
 	copy(lp.Topics, log.Topics)
 	copy(lp.Data, log.Data)
 	lp.Removed = log.Removed
+	lp.BlockNumber = log.BlockNumber
 	sdb.NotifyLog(lp)
 }
 
