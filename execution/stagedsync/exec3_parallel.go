@@ -885,11 +885,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	if (execErr == nil || errors.Is(execErr, &ErrLoopExhausted{})) && rwTx != nil {
 		overlay := pe.doms.BlockOverlay()
 		if overlay != nil {
-			if err = execStage.Update(overlay, pe.lastCommittedBlockNum.Load()); err != nil {
+			if err := execStage.Update(overlay, pe.lastCommittedBlockNum.Load()); err != nil {
 				return nil, rwTx, err
 			}
 		} else {
-			if err = execStage.Update(rwTx, pe.lastCommittedBlockNum.Load()); err != nil {
+			if err := execStage.Update(rwTx, pe.lastCommittedBlockNum.Load()); err != nil {
 				return nil, rwTx, err
 			}
 		}

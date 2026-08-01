@@ -851,7 +851,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		return fmt.Errorf("generate blocks: %w", err)
 	}
 
-	if err = m.InsertChain(chain); err != nil {
+	if err := m.InsertChain(chain); err != nil {
 		return err
 	}
 

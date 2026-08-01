@@ -348,11 +348,11 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	result.StateRoot = *root
 
 	// Persist the post-execution state so the alloc dumper (which reads tx) sees it.
-	if err = sd.Flush(context.Background(), tx); err != nil {
+	if err := sd.Flush(context.Background(), tx); err != nil {
 		return err
 	}
 	// Record the block→txNum mapping the dumper needs to read the post-state as-of.
-	if err = rawdbv3.TxNums.Append(tx, blockNum, txNum); err != nil {
+	if err := rawdbv3.TxNums.Append(tx, blockNum, txNum); err != nil {
 		return err
 	}
 

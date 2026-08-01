@@ -106,10 +106,10 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 		}
 	}()
 	// snappy of | length | ssz data |
-	if err = ssz_snappy.EncodeAndWrite(fh, columnData); err != nil {
+	if err := ssz_snappy.EncodeAndWrite(fh, columnData); err != nil {
 		return err
 	}
-	if err = fh.Sync(); err != nil {
+	if err := fh.Sync(); err != nil {
 		return err
 	}
 	s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(columnData))

@@ -314,7 +314,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			statecfg.ExperimentalStreamingCommitment = true
 		}
 
-		if err = stages.UpdateMetrics(tx); err != nil {
+		if err := stages.UpdateMetrics(tx); err != nil {
 			return err
 		}
 
@@ -1122,10 +1122,9 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	blockReader := s.blockReader
 	ctx := s.sentryCtx
 	chainKv := s.chainDB
-	var err error
 	emptyBadHash := config.BadBlockHash == common.Hash{}
 	if !emptyBadHash {
-		if err = chainKv.View(ctx, func(tx kv.Tx) error {
+		if err := chainKv.View(ctx, func(tx kv.Tx) error {
 			badBlockHeader, hErr := rawdb.ReadHeaderByHash(tx, config.BadBlockHash)
 			if badBlockHeader != nil {
 				unwindPoint := badBlockHeader.Number.Uint64() - 1

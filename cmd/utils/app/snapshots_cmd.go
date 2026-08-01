@@ -3099,7 +3099,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB)
 		blkFreezeCfg := ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}
 		res.CaplinStateSnaps = snapshotsync.NewCaplinStateSnapshots(blkFreezeCfg, beaconConfig, dirs, snTypes, logger)
-		if err = res.CaplinStateSnaps.OpenFolder(); err != nil {
+		if err := res.CaplinStateSnaps.OpenFolder(); err != nil {
 			return res, nil, err
 		}
 		res.CaplinStateSnaps.LogStat("caplin-state")
@@ -3344,7 +3344,7 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 		for g.HasNext() {
 			if blockFrom%1000 == 0 {
 				if compressor != nil {
-					if err = compressor.Compress(); err != nil {
+					if err := compressor.Compress(); err != nil {
 						return err
 					}
 					compressor.Close()
@@ -3405,7 +3405,7 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 				return fmt.Errorf("unexpected count %d", expectedCount)
 			}
 
-			if err = compressor.Compress(); err != nil {
+			if err := compressor.Compress(); err != nil {
 				return err
 			}
 			compressor.Close()
@@ -3529,7 +3529,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err = temporalDb.BuildMissedAccessors(ctx, indexWorkers); err != nil {
+	if err := temporalDb.BuildMissedAccessors(ctx, indexWorkers); err != nil {
 		return err
 	}
 
@@ -3544,7 +3544,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	}
 
 	logger.Info("Build state history snapshots")
-	if err = agg.BuildFiles(lastTxNum); err != nil {
+	if err := agg.BuildFiles(lastTxNum); err != nil {
 		return err
 	}
 
@@ -3561,10 +3561,10 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	logger.Info("waiting for background build/merge to drain")
 	agg.WaitForFiles()
 
-	if err = agg.MergeLoop(ctx); err != nil {
+	if err := agg.MergeLoop(ctx); err != nil {
 		return err
 	}
-	if err = agg.RemoveOverlapsAfterMerge(ctx); err != nil {
+	if err := agg.RemoveOverlapsAfterMerge(ctx); err != nil {
 		return err
 	}
 

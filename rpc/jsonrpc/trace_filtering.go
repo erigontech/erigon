@@ -843,7 +843,7 @@ func (api *TraceAPIImpl) callBlock(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if err = ibs.CommitBlock(rules, cachedWriter); err != nil {
+	if err := ibs.CommitBlock(rules, cachedWriter); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -1182,7 +1182,7 @@ func (api *TraceAPIImpl) callTransaction(
 	if err != nil {
 		return nil, err
 	}
-	if err = ibs.CommitBlock(rules, cachedWriter); err != nil {
+	if err := ibs.CommitBlock(rules, cachedWriter); err != nil {
 		return nil, err
 	}
 

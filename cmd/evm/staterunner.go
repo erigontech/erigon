@@ -185,7 +185,7 @@ func runStateTest(ctx *cli.Command, cfg vm.Config, fname string, filter testFilt
 		return nil, err
 	}
 	var stateTests map[string]testutil.StateTest
-	if err = json.Unmarshal(src, &stateTests); err != nil {
+	if err := json.Unmarshal(src, &stateTests); err != nil {
 		return nil, err
 	}
 

@@ -1237,12 +1237,12 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		sdMap := make(map[accounts.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd := &StateDiff{sdMap: sdMap}
-		if err = ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
+		if err := ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
 			return nil, err
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 		initialIbs := state.New(stateReader)
-		if err = sd.CompareStates(initialIbs, ibs); err != nil {
+		if err := sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}
 	}
@@ -1281,10 +1281,10 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		}
 		callParams = append(callParams, TraceCallParam{})
 		args := &callParams[len(callParams)-1]
-		if err = dec.Decode(args); err != nil {
+		if err := dec.Decode(args); err != nil {
 			return nil, err
 		}
-		if err = dec.Decode(&args.traceTypes); err != nil {
+		if err := dec.Decode(&args.traceTypes); err != nil {
 			return nil, err
 		}
 		tok, err = dec.Token()
@@ -1557,24 +1557,24 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		if traceTypeStateDiff {
 			initialIbs := state.New(cloneReader)
 			if !txFinalized {
-				if err = ibs.FinalizeTx(chainRules, sd); err != nil {
+				if err := ibs.FinalizeTx(chainRules, sd); err != nil {
 					return nil, nil, err
 				}
 			}
 			if sd != nil {
-				if err = sd.CompareStates(initialIbs, ibs); err != nil {
+				if err := sd.CompareStates(initialIbs, ibs); err != nil {
 					return nil, nil, err
 				}
 			}
 		} else if !txFinalized {
-			if err = ibs.FinalizeTx(chainRules, noop); err != nil {
+			if err := ibs.FinalizeTx(chainRules, noop); err != nil {
 				return nil, nil, err
 			}
 		}
 		if traceTypeStateDiff {
 			// CommitBlock after each tx to flush ibs changes into stateCache,
 			// so the next tx's cloneReader captures the correct "before" state
-			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
+			if err := ibs.CommitBlock(chainRules, cachedWriter); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -1759,27 +1759,27 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	if traceTypeStateDiff {
 		initialIbs := state.New(cloneReader)
 		if !txFinalized {
-			if err = ibs.FinalizeTx(chainRules, sd); err != nil {
+			if err := ibs.FinalizeTx(chainRules, sd); err != nil {
 				return nil, err
 			}
 		}
 
 		if sd != nil {
-			if err = sd.CompareStates(initialIbs, ibs); err != nil {
+			if err := sd.CompareStates(initialIbs, ibs); err != nil {
 				return nil, err
 			}
 		}
 
-		if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
+		if err := ibs.CommitBlock(chainRules, cachedWriter); err != nil {
 			return nil, err
 		}
 	} else {
 		if !txFinalized {
-			if err = ibs.FinalizeTx(chainRules, noop); err != nil {
+			if err := ibs.FinalizeTx(chainRules, noop); err != nil {
 				return nil, err
 			}
 		}
-		if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
+		if err := ibs.CommitBlock(chainRules, cachedWriter); err != nil {
 			return nil, err
 		}
 	}
@@ -1919,11 +1919,11 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		sdMap := make(map[accounts.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd := &StateDiff{sdMap: sdMap}
-		if err = ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
+		if err := ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
 			return nil, err
 		}
 		initialIbs := state.New(stateReader)
-		if err = sd.CompareStates(initialIbs, ibs); err != nil {
+		if err := sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}
 	}

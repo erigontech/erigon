@@ -345,7 +345,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	}
 	p.lastBlockTimestampMs.Store(nowMs)
 
-	if err = minedTxns.Valid(); err != nil {
+	if err := minedTxns.Valid(); err != nil {
 		return err
 	}
 
@@ -410,7 +410,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 			}
 		}
 	}
-	if err = p.senders.onNewBlock(stateChanges, unwindTxns, minedTxns, p.logger); err != nil {
+	if err := p.senders.onNewBlock(stateChanges, unwindTxns, minedTxns, p.logger); err != nil {
 		return err
 	}
 
@@ -432,11 +432,11 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		}
 	}
 
-	if err = p.processMinedFinalizedBlobs(minedTxns.Txns, stateChanges.FinalizedBlock); err != nil {
+	if err := p.processMinedFinalizedBlobs(minedTxns.Txns, stateChanges.FinalizedBlock); err != nil {
 		return err
 	}
 
-	if err = p.removeMined(p.all, minedTxns.Txns); err != nil {
+	if err := p.removeMined(p.all, minedTxns.Txns); err != nil {
 		return err
 	}
 
@@ -1459,7 +1459,7 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	if err = p.senders.registerNewSenders(&newTxns, p.logger); err != nil {
+	if err := p.senders.registerNewSenders(&newTxns, p.logger); err != nil {
 		return nil, err
 	}
 

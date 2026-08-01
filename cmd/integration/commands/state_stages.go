@@ -282,7 +282,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 				return err
 			}
 
-			if err = sd.Commit(ctx, tx); err != nil {
+			if err := sd.Commit(ctx, tx); err != nil {
 				return err
 			}
 			sd.Close()

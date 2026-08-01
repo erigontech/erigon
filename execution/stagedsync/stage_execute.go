@@ -347,7 +347,7 @@ func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgr
 			return prevStageProgress, err
 		}
 	} else {
-		if err = db.View(context.Background(), func(tx kv.Tx) error {
+		if err := db.View(context.Background(), func(tx kv.Tx) error {
 			prevStageProgress, err = stages.GetStageProgress(tx, stage)
 			if err != nil {
 				return err
@@ -455,7 +455,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return err
 	}
 
-	if err = u.Done(rwTx); err != nil {
+	if err := u.Done(rwTx); err != nil {
 		return err
 	}
 
@@ -600,7 +600,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 			"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
 		)
 	}
-	if err = s.Done(tx); err != nil {
+	if err := s.Done(tx); err != nil {
 		return err
 	}
 	return nil

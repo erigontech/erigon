@@ -426,7 +426,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 			}
 		})
 	}
-	if err = g.Wait(); err != nil {
+	if err := g.Wait(); err != nil {
 		return common.Big0, nil, nil, nil, nil, nil, err
 	}
 

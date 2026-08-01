@@ -410,10 +410,10 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 	// touched. Matches go-ethereum's state-test runner.
 	statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified)
 
-	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
+	if err := statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
 		return nil, root, gasUsed, err
 	}
-	if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
+	if err := statedb.CommitBlock(evm.ChainRules(), w); err != nil {
 		return nil, root, gasUsed, err
 	}
 

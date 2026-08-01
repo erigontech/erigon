@@ -946,7 +946,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			// if account key is empty, then we need to hash storage key from the key beginning
 			koffset = 0
 		}
-		if err = hashKey(hph.keccak, cell.storageAddr[koffset:cell.storageAddrLen], hashedKeyBuf[:], hashedKeyOffset, hph.cellHashBuf[:]); err != nil {
+		if err := hashKey(hph.keccak, cell.storageAddr[koffset:cell.storageAddrLen], hashedKeyBuf[:], hashedKeyOffset, hph.cellHashBuf[:]); err != nil {
 			return nil, storageRootHashIsSet, nil, err
 		}
 		hashedKeyBuf[64-hashedKeyOffset] = terminatorHexByte // Add terminator
@@ -1137,7 +1137,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 				// if account key is empty, then we need to hash storage key from the key beginning
 				koffset = 0
 			}
-			if err = cell.hashStorageKey(hph.keccak, koffset, 0, hashedKeyOffset, hph.cellHashBuf[:]); err != nil {
+			if err := cell.hashStorageKey(hph.keccak, koffset, 0, hashedKeyOffset, hph.cellHashBuf[:]); err != nil {
 				return nil, err
 			}
 			cell.hashedExtension[64-hashedKeyOffset] = terminatorHexByte // Add terminator
@@ -1398,7 +1398,7 @@ func (hph *HexPatriciaHashed) witnessMaterializeBranch(branchPrefix []byte, chil
 		if childDepth > 64 {
 			c.accountAddrLen = 0
 		}
-		if err = c.deriveHashedKeys(childDepth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
+		if err := c.deriveHashedKeys(childDepth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
 			return nil, err
 		}
 		cellHash, _, _, err := hph.witnessComputeCellHashWithStorage(&c, childDepth, nil)

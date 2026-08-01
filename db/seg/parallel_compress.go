@@ -406,7 +406,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	totalWords := uncompressedFile.count
 
 	ii := 0
-	if err = uncompressedFile.ForEach(func(v []byte, compression bool) error {
+	if err := uncompressedFile.ForEach(func(v []byte, compression bool) error {
 		ii++
 		if ii%1024 == 0 {
 			select {
@@ -539,7 +539,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			}
 		}
 	}
-	if err = intermediateW.Flush(); err != nil {
+	if err := intermediateW.Flush(); err != nil {
 		return err
 	}
 	wg.Wait()
@@ -706,12 +706,12 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	for l, e = binary.ReadUvarint(r); e == nil; l, e = binary.ReadUvarint(r) {
 		posCode := pos2codeAt(l + 1)
 		if posCode != nil {
-			if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
+			if e := hc.encode(posCode.code, posCode.codeBits); e != nil {
 				return e
 			}
 		}
 		if l == 0 {
-			if e = hc.flush(); e != nil {
+			if e := hc.flush(); e != nil {
 				return e
 			}
 		} else {
@@ -731,7 +731,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 				posCode = pos2codeAt(pos - lastPos + 1)
 				lastPos = pos
 				if posCode != nil {
-					if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
+					if e := hc.encode(posCode.code, posCode.codeBits); e != nil {
 						return e
 					}
 				}
@@ -745,7 +745,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 				}
 				lastUncovered = int(pos) + len(patternCode.word)
 				if patternCode != nil {
-					if e = hc.encode(patternCode.code, patternCode.codeBits); e != nil {
+					if e := hc.encode(patternCode.code, patternCode.codeBits); e != nil {
 						return e
 					}
 				}
@@ -755,15 +755,15 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			}
 			// Terminating position and flush
 			posCode = pos2codeAt(0)
-			if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
+			if e := hc.encode(posCode.code, posCode.codeBits); e != nil {
 				return e
 			}
-			if e = hc.flush(); e != nil {
+			if e := hc.flush(); e != nil {
 				return e
 			}
 			// Copy uncovered characters
 			if uncoveredCount > 0 {
-				if e = copyN(r, cw, uncoveredCount, copyNBuf); e != nil {
+				if e := copyN(r, cw, uncoveredCount, copyNBuf); e != nil {
 					return e
 				}
 			}
@@ -782,10 +782,10 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if !errors.Is(e, io.EOF) {
 		return e
 	}
-	if err = intermediateFile.Close(); err != nil {
+	if err := intermediateFile.Close(); err != nil {
 		return err
 	}
-	if err = cw.Flush(); err != nil {
+	if err := cw.Flush(); err != nil {
 		return err
 	}
 	return nil
@@ -1180,7 +1180,7 @@ func PersistDictionary(fileName string, db *DictionaryBuilder) error {
 	w := bufiopool.Writer(df)
 	defer bufiopool.PutWriter(w)
 	db.ForEach(func(score uint64, word []byte) { fmt.Fprintf(w, "%d %x\n", score, word) })
-	if err = w.Flush(); err != nil {
+	if err := w.Flush(); err != nil {
 		return err
 	}
 	if err := df.Sync(); err != nil {

@@ -356,7 +356,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 	if l == r {
 		// l can be Count() when seeking past the last key (insertion point);
 		// Reset then reports out-of-bounds and Seek's contract is (nil, nil).
-		if err = cur.Reset(l, g); err != nil {
+		if err := cur.Reset(l, g); err != nil {
 			return nil, err
 		}
 		return cur, nil

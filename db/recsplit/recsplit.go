@@ -1069,13 +1069,13 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("writing elias fano: %w", err)
 	}
 
-	if err = rs.indexW.Flush(); err != nil {
+	if err := rs.indexW.Flush(); err != nil {
 		return err
 	}
-	if err = rs.fsync(); err != nil {
+	if err := rs.fsync(); err != nil {
 		return err
 	}
-	if err = rs.indexF.Close(); err != nil {
+	if err := rs.indexF.Close(); err != nil {
 		return err
 	}
 

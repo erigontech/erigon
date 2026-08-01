@@ -145,7 +145,7 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	}
 	idx.data = idx.mmapHandle1[:idx.size]
 
-	if err = idx.init(); err != nil {
+	if err := idx.init(); err != nil {
 		return nil, err
 	}
 

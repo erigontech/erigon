@@ -739,7 +739,7 @@ func (s *KvServer) Range(_ context.Context, req *remoteproto.RangeReq) (*remotep
 
 	reply := &remoteproto.Pairs{}
 	var err error
-	if err = s.with(req.TxId, func(tx kv.TemporalTx) error {
+	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
 		var it stream.KV
 		it, err = tx.Range(req.Table, from, req.ToPrefix, order.FromBool(req.OrderAscend), limit)
 		if err != nil {
@@ -823,7 +823,7 @@ func unmarshalPagination(pageToken string, m proto.Message) error {
 	if err != nil {
 		return err
 	}
-	if err = proto.Unmarshal(token, m); err != nil {
+	if err := proto.Unmarshal(token, m); err != nil {
 		return err
 	}
 	return nil

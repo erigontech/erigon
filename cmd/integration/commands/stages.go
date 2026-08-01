@@ -473,10 +473,10 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 			}
 		}
 		// remove all canonical markers from this point
-		if err = rawdb.TruncateCanonicalHash(tx, progress+1, false /* markChainAsBad */); err != nil {
+		if err := rawdb.TruncateCanonicalHash(tx, progress+1, false /* markChainAsBad */); err != nil {
 			return err
 		}
-		if err = rawdb.TruncateTd(tx, progress+1); err != nil {
+		if err := rawdb.TruncateTd(tx, progress+1); err != nil {
 			return err
 		}
 		hash, ok, err := br.CanonicalHash(ctx, tx, progress-1)
@@ -486,7 +486,7 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 		if !ok {
 			return fmt.Errorf("canonical hash not found: %d", progress-1)
 		}
-		if err = rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
+		if err := rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
 			return err
 		}
 
@@ -615,14 +615,14 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 		}
 
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber, true, false)
-		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
+		if err := stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
 			return err
 		}
 	case pruneTo > 0:
 		//noop
 		return nil
 	default:
-		if err = stagedsync.SpawnRecoverSendersStage(cfg, s, sync, tx, block, ctx, logger); err != nil {
+		if err := stagedsync.SpawnRecoverSendersStage(cfg, s, sync, tx, block, ctx, logger); err != nil {
 			return err
 		}
 	}

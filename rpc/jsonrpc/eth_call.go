@@ -671,7 +671,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, errWitnessOutOfWindow
 	}
 
-	if err = api.checkPruneHistory(ctx, tx, blockNr); err != nil {
+	if err := api.checkPruneHistory(ctx, tx, blockNr); err != nil {
 		return nil, err
 	}
 

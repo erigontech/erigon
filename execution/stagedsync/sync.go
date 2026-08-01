@@ -541,7 +541,7 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, sd *execctx.SharedDo
 		return nil
 	}
 
-	if err = s.SetCurrentStage(stage.ID); err != nil {
+	if err := s.SetCurrentStage(stage.ID); err != nil {
 		return err
 	}
 
@@ -573,7 +573,7 @@ func (s *Sync) pruneStage(ctx context.Context, initialCycle bool, stage *Stage, 
 	if err != nil {
 		return err
 	}
-	if err = s.SetCurrentStage(stage.ID); err != nil {
+	if err := s.SetCurrentStage(stage.ID); err != nil {
 		return err
 	}
 
