@@ -580,8 +580,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
 	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *QueueWithRetry, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
 	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func(), err error) {
-	// Grown by append, so a setup that fails part-way leaves only built workers
-	// behind and clear closes exactly those.
+	// Appended, so a part-way failure leaves clear only the workers actually built.
 	reconWorkers = make([]*Worker, 0, workerCount)
 
 	resultsSize := workerCount * 8
