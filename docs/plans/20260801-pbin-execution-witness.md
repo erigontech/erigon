@@ -355,22 +355,37 @@ leaf and code chunking instead of reimplementing all of it.
 **Files:**
 - Create: `rpc/jsonrpc/pbin_witness_stateless.go`
 - Create: `rpc/jsonrpc/pbin_witness_stateless_test.go`
+- Create: `execution/commitment/pbin_witness_state.go`
+- Modify: `execution/commitment/pbin_witness_context.go`
 
-- [ ] implement a `StateReader`/`StateWriter` over a decoded bin witness, resolving accounts, storage
+- [x] implement a `StateReader`/`StateWriter` over a decoded bin witness, resolving accounts, storage
       and code by deriving the tree key and walking the node set
-- [ ] implement the post-state root via Task 5's context driving `PBinPatriciaHashed` — the analogue
+- [x] implement the post-state root via Task 5's context driving `PBinPatriciaHashed` — the analogue
       of hex's `witnessStateless.Finalize()` (`debug_execution_witness.go:1933-2033`)
-- [ ] make strict resolution the default and non-optional: a blinded node on a required path is an
+- [x] make strict resolution the default and non-optional: a blinded node on a required path is an
       error, never an empty read. Document the deliberate divergence from hex's opt-in
       `WITNESS_STRICT_VERIFY`
-- [ ] decide and document where code comes from under bin — `result.Codes` blobs or the CODE_ZONE
-      leaves that `processKey` already puts in the witness (`pbin_update_stream.go:118-124`). Both
-      carry the same bytes; pick one owner and say why
-- [ ] write tests: a complete witness resolves every accessed account, slot and code
-- [ ] write tests: a witness with a node removed errors on the read that needs it
-- [ ] write tests: an absent account and an absent slot both resolve correctly
-- [ ] write tests: applying a block's writes yields the expected post-state root
-- [ ] run tests - must pass before task 9
+- [x] decide and document where code comes from under bin — **the witness's own chunk leaves**, not
+      `result.Codes`. They are committed by the root and re-checked against the CODE_HASH leaf on
+      reassembly, and the fold re-chunks every account it touches, so pruning keeps a chunk leaf
+      wherever the post-state pass needs code. `Codes` is keyed by code *reads*, a strictly narrower
+      set — a contract credited without a call (contract coinbase, withdrawal recipient) has no blob
+      but does have leaves. Code a block deploys has no pre-state leaves and arrives through
+      `UpdateAccountCode`, as under hex
+- [x] ➕ the exported seam is `commitment.PBinWitnessState` (decode + leaf resolution by address/slot
+      + `Root`): the leaf walk, tree-key derivation and `Updates` construction all need
+      package-private pbin state, and the alternative was exporting them one by one
+- [x] ➕ `pbinWitnessContext.Code` falls back to the chunk leaves when no code was set explicitly, so
+      the code owner is decided in one place rather than at every call site
+- [x] write tests: a complete witness resolves every accessed account, slot and code
+- [x] write tests: a witness with a node removed errors on the read that needs it — asserted over
+      every single-node removal, since the pruned set holds only on-path nodes
+- [x] write tests: an absent account and an absent slot both resolve correctly
+- [x] write tests: applying a block's writes yields the expected post-state root — cross-checked
+      against the same writes applied over full state, and covering a deploy, a storage write, a
+      zeroed slot the witness holds and a zeroed slot it proves absent
+- [x] ➕ write tests: an on-tree account delete is refused; one the witness proves absent is not
+- [x] run tests - must pass before task 9
 
 ### Task 9: Wire the stateless verification gate
 

@@ -45,6 +45,7 @@ type pbinWitnessContext struct {
 	records map[string][]byte
 	leaves  map[string]Update
 	codes   map[string][]byte
+	keys    pbinDigestCache
 }
 
 var (
@@ -58,12 +59,12 @@ func pbinNewWitnessContext(tree *pbinWitnessTree) *pbinWitnessContext {
 		records: make(map[string][]byte),
 		leaves:  make(map[string]Update),
 		codes:   make(map[string][]byte),
+		keys:    pbinDigestCache{sum: pbinSelectedSum},
 	}
 }
 
-// setCode supplies the bytecode the update stream chunks. The witness carries
-// code as whole blobs, not as the account's own leaves, so it arrives from
-// outside the node set.
+// setCode supplies bytecode the node set cannot hold: code a block deploys has
+// no pre-state chunk leaves to reassemble.
 func (c *pbinWitnessContext) setCode(plainKey, code []byte) {
 	c.codes[string(plainKey)] = bytes.Clone(code)
 }
@@ -90,8 +91,14 @@ func (c *pbinWitnessContext) Account(plainKey []byte) (*Update, error) { return 
 func (c *pbinWitnessContext) Storage(plainKey []byte) (*Update, error) { return c.leafState(plainKey) }
 
 func (c *pbinWitnessContext) Code(plainKey []byte) ([]byte, error) {
-	code, ok := c.codes[string(plainKey)]
-	if !ok {
+	if code, ok := c.codes[string(plainKey)]; ok {
+		return code, nil
+	}
+	code, err := c.codeFromLeaves(plainKey)
+	if err != nil {
+		return nil, err
+	}
+	if code == nil {
 		return nil, fmt.Errorf("%w: no code for %x", errPBinWitnessNoState, plainKey)
 	}
 	return code, nil
