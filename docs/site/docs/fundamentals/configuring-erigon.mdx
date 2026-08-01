@@ -64,6 +64,29 @@ These flags cover the general behavior and configuration of the Erigon client.
 * `--keep.stored.chain.config`: Avoids overriding the chain configuration already stored in the database.
   * Default: `false`
 
+### Development, testing, and block-production helpers
+
+These flags are mainly for dev networks, testing, or specialized block-production setups.
+
+* `--allow-insecure-unlock`: Allows insecure account unlocking when account-related RPCs are exposed by HTTP. Use only on trusted networks.
+  * Default: `false`
+* `--dev-validator-seed value`: Deterministic BLS key seed for the embedded dev validator; enables PoS dev mode.
+  * Default: `devnet`
+* `--dev-validator-count value`: Number of validators for PoS dev mode.
+  * Default: `64`
+* `--dev.slot-time value`: Slot duration in seconds for PoS dev mode.
+  * Default: `6`
+* `--miner.gaslimit value`: Target gas limit for mined blocks.
+  * Default: `0`
+* `--miner.extradata value`: Block extra data set by the miner; defaults to the client version string.
+  * Default: client version string
+* `--experimental.bal`: Generates block access lists.
+  * Default: `false`
+* `--experimental.always-generate-changesets`: Overrides changeset generation logic.
+  * Default: `false`
+* `--chaos.monkey`: Testing-only flag that enables spontaneous network, consensus, and other failures.
+  * Default: `false`
+
 ### Database and Caching
 
 These flags control database performance and memory usage. See [Database](/fundamentals/database) for the on-disk layout.
@@ -80,6 +103,8 @@ These flags control database performance and memory usage. See [Database](/funda
   * Default: `2`
 * `--batchSize value`: Sets the batch size for the execution stage.
   * Default: `512M`
+* `--etl.bufferSize value`: Buffer size for ETL operations.
+  * Default: `256MB`
 * `--bodies.cache value`: Sets the size limit for the block bodies cache.
   * Default: `268435456`
 * `--state.cache value`: Sets the amount of data to store in the StateCache.
@@ -298,6 +323,10 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `false`
 * `--witness.cache.blocks value` *(New in v3.6)*: Number of recent blocks whose legacy `debug_executionWitness` result is eagerly cached in memory, keyed by block hash in an LRU. Each witness is held as serialized JSON and served verbatim on a hit, so memory use is roughly this count multiplied by the per-block witness size. Embedded RPC only, and requires `--prune.include-commitment-history` (runtime errors from `debug_executionWitness` and `eth_getWitness` name its `--prune.experimental.include-commitment-history` alias instead).
   * Default: `0` (cache disabled); values above the cap of `96` are clamped
+* `--witness.cache.head-capture`: Serves recent-block `debug_executionWitness` on a minimal node without commitment-history by building each head block from a pinned parent commitment snapshot and the account/storage/code history the node keeps. Cache-only serving: out-of-window requests miss, and no history recompute is attempted. Embedded RPC only.
+  * Default: `false`
+* `--witness.cache.maxmb value`: Resident-memory cap, in MB, for the witness cache; whichever limit binds first wins between the byte budget and `--witness.cache.blocks` (still capped at `96`). `0` means count-only (no byte cap).
+  * Default: `0`
 
 ### MCP Server
 
@@ -511,6 +540,8 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `131072` (~18 days)
 * `--caplin.checkpoint-sync.disable`: Disables checkpoint sync.
   * Default: `false`
+* `--caplin.resume-max-staleness-epochs value`: Max epochs a locally-finalized state may be stale for Caplin to resume from it on restart instead of remote checkpoint syncing. Data-availability bound; larger values are clamped to the anchor fork's sidecar-retention window.
+  * Default: `0` (resolves to the anchor fork's sidecar-retention window)
 * `--caplin.snapgen`: Enables snapshot generation.
   * Default: `false`
 * `--caplin.mev-relay-url value`: The MEV relay endpoint.
