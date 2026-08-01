@@ -255,9 +255,28 @@ func TestPBinWitnessDecodePermutationIndependence(t *testing.T) {
 	}
 }
 
+// TestPBinWitnessDecodeIgnoresNodeOrder: the witness an RPC consumer receives is
+// sorted by node bytes, so the decode may not require the root to lead the slice
+// — it is told the root and looks it up.
+func TestPBinWitnessDecodeIgnoresNodeOrder(t *testing.T) {
+	t.Parallel()
+
+	nodes, root := pbinWitnessCapture(t, pbinWitnessCorpus())
+	require.Greater(t, len(nodes), 1)
+
+	sorted := slices.Clone(nodes)
+	slices.SortFunc(sorted, bytes.Compare)
+	require.NotEqual(t, nodes[0], sorted[0], "the sort has to move the root off the front")
+	require.Equal(t, root, pbinWitnessMerkelized(t, sorted, root))
+
+	reversed := slices.Clone(nodes)
+	slices.Reverse(reversed)
+	require.Equal(t, root, pbinWitnessMerkelized(t, reversed, root))
+}
+
 // TestPBinWitnessDecodeSingleNodeRemoval: dropping a node blinds its subtree,
 // which leaves the root alone. The one drop that could change it — the root
-// node, after which another node leads the slice — has to be caught instead.
+// node's — has to be caught instead.
 func TestPBinWitnessDecodeSingleNodeRemoval(t *testing.T) {
 	t.Parallel()
 

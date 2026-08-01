@@ -114,10 +114,11 @@ type pbinWitnessTree struct {
 	hasher pbinHasher
 }
 
-// pbinDecodeWitness decodes a captured node set. preimages come root first per
-// the witnessNodeSet.nodes contract, and root is checked against the first one:
-// taking whatever leads the slice as the root would silently re-root the tree if
-// that entry went missing.
+// pbinDecodeWitness decodes a captured node set rooted at root. The root is
+// given rather than taken from the slice, so preimages may arrive in any order:
+// the witness an RPC consumer receives is sorted, and re-rooting the tree on
+// whatever leads the slice would turn a lost root node into a wrong answer
+// instead of an error.
 func pbinDecodeWitness(preimages [][]byte, root []byte) (*pbinWitnessTree, error) {
 	if len(root) != length.Hash {
 		return nil, fmt.Errorf("%w: witness root of %d bytes", errPBinWitnessNode, len(root))
@@ -140,8 +141,8 @@ func pbinDecodeWitness(preimages [][]byte, root []byte) (*pbinWitnessTree, error
 		}
 		w.nodes[w.hasher.hash(preimage)] = node
 	}
-	if w.hasher.hash(preimages[0]) != w.root {
-		return nil, fmt.Errorf("%w: first node is not root %x", errPBinWitnessNode, root)
+	if _, ok := w.nodes[w.root]; !ok {
+		return nil, fmt.Errorf("%w: no node for root %x", errPBinWitnessNode, root)
 	}
 	return w, nil
 }

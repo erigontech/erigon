@@ -28,7 +28,7 @@ import (
 // there is nothing to materialize alongside it.
 
 // PBinWitnessNodesForKeys keeps the nodes on the proof path of every proved key
-// and drops the rest, returning them root first as pbinDecodeWitness expects. A
+// and drops the rest, returning them in walk order so the root leads. A
 // path that runs into a leaf, a diverging branch prefix or a blinded child stops
 // there — what it walked through is the proof that the key is absent.
 func PBinWitnessNodesForKeys(nodes [][]byte, root []byte, provedKeys [][]byte) ([][]byte, error) {

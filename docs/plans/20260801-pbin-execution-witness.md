@@ -452,15 +452,27 @@ leaf and code chunking instead of reimplementing all of it.
 
 **Files:**
 - Create: `rpc/jsonrpc/pbin_witness_e2e_test.go`
+- Modify: `execution/commitment/pbin_witness_decode.go`
+- Modify: `execution/commitment/pbin_witness_decode_test.go`
+- Modify: `execution/commitment/pbin_witness_prune.go`
 
-- [ ] build a chain on `execmoduletester` under `ExperimentalBinCommitment` with BLAKE3, following
+- [x] build a chain on `execmoduletester` under `ExperimentalBinCommitment` with BLAKE3, following
       the working pattern at `execution/tests/testutil/block_test_util.go:231-241`
-- [ ] cover blocks exercising: a plain transfer, a contract deploy (header code chunks), a deploy
+- [x] cover blocks exercising: a plain transfer, a contract deploy (header code chunks), a deploy
       large enough to reach CODE_ZONE overflow, a storage write, and an SSTORE-to-zero
-- [ ] assert stateless re-execution reproduces the post-state root for every block
-- [ ] write tests: a block with no state change produces a well-formed witness
-- [ ] write tests: two consecutive blocks each verify independently
-- [ ] run tests - must pass before task 12
+- [x] assert stateless re-execution reproduces the post-state root for every block
+- [x] ➕ the decoder no longer requires the root node to lead the slice: `buildWitnessResult` sorts
+      `result.State` before returning, so no shipped witness can satisfy a root-first check and the
+      gate was the only caller that ever met it. The root is still given rather than derived, so a
+      dropped root node is an error instead of a re-rooted tree
+- [x] ➕ a further block calls the overflowing contract, so its code is read back from the witness —
+      reassembled across the header and code-zone chunk leaves, not just written by the deploy
+- [x] ➕ the corpus is read back from state (transfer balance, both code sizes against the header
+      capacity, both slot values), so a block that stops exercising its shape fails instead of
+      passing on a witness that still verifies
+- [x] write tests: a block with no state change produces a well-formed witness
+- [x] write tests: two consecutive blocks each verify independently
+- [x] run tests - must pass before task 12
 
 ### Task 12: Measure binary vs hex witness size
 
