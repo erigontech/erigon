@@ -328,20 +328,27 @@ leaf and code chunking instead of reimplementing all of it.
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 - Create: `rpc/jsonrpc/pbin_witness_phases_test.go`
 
-- [ ] skip `detectCollapseSiblings` entirely under bin — no deletion means no collapse trigger; never
+- [x] skip `detectCollapseSiblings` entirely under bin — no deletion means no collapse trigger; never
       call `SetCollapseTracer` (`commitment_context.go:436` **panics**) or `BranchChildCount` (:448)
-- [ ] guard `TouchHashedKey` so it cannot be reached under bin (hazard: an empty plain key reaches
-      `stateOf("")`, `pbin_update_stream.go:225`)
-- [ ] skip the legacy `0x80` empty-storage append (`:967-977`) under bin — an MPT artifact
-- [ ] reject only an **explicit** `"canonical"` mode under bin. Legacy is the default for a nil or
-      empty mode (`resolveWitnessMode:590-596`), so rejecting legacy would reject every request
-- [ ] check whether `serveFromWitnessCache` (`:770`, gated on `mode != witnessModeLegacy` at `:771`)
+- [x] guard `TouchHashedKey` so it cannot be reached under bin (hazard: an empty plain key reaches
+      `stateOf("")`, `pbin_update_stream.go:225`) — `buildWitnessTrie` errors on a non-empty
+      `siblingPaths` under bin before touching anything, so the loop is unreachable
+- [x] skip the legacy `0x80` empty-storage append (`:967-977`) under bin — an MPT artifact
+- [x] reject only an **explicit** `"canonical"` mode under bin. Legacy is the default for a nil or
+      empty mode (`resolveWitnessMode:590-596`), so rejecting legacy would reject every request.
+      ➕ an explicit `""` now resolves to legacy too (it previously errored under both variants),
+      so "no mode requested" has one meaning
+- [x] check whether `serveFromWitnessCache` (`:770`, gated on `mode != witnessModeLegacy` at `:771`)
       and `buildWitnessResultHeadCapture` (`:861`) interact with the above; both funnel into
-      `buildWitnessResult`, so state explicitly whether they are covered or out of scope
-- [ ] write tests: a bin witness build performs no collapse-detection work and does not panic
-- [ ] write tests: an explicit `"canonical"` request under bin errors; a nil/empty mode succeeds
-- [ ] write tests: bin witness output contains no `0x80` node
-- [ ] run tests - must pass before task 8
+      `buildWitnessResult`, so state explicitly whether they are covered or out of scope —
+      **both covered, no change needed**: the cache serve runs no pipeline phase and its
+      `mode != witnessModeLegacy` gate never fires under bin (legacy is the only reachable mode);
+      head-capture funnels into `buildWitnessResult`, which now branches on the variant, and both
+      cache-builder call sites already pass `witnessModeLegacy`
+- [x] write tests: a bin witness build performs no collapse-detection work and does not panic
+- [x] write tests: an explicit `"canonical"` request under bin errors; a nil/empty mode succeeds
+- [x] write tests: bin witness output contains no `0x80` node
+- [x] run tests - must pass before task 8
 
 ### Task 8: Stateless reader and writer over a decoded binary witness
 

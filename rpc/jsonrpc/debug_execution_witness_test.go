@@ -367,7 +367,7 @@ func TestResolveWitnessMode(t *testing.T) {
 	str := func(s string) *string { return &s }
 
 	t.Run("param selects mode", func(t *testing.T) {
-		got, err := resolveWitnessMode(str("legacy"))
+		got, err := resolveWitnessMode(str("legacy"), false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -375,7 +375,7 @@ func TestResolveWitnessMode(t *testing.T) {
 			t.Errorf("param legacy should resolve to legacy mode, got %v", got)
 		}
 
-		got, err = resolveWitnessMode(str("canonical"))
+		got, err = resolveWitnessMode(str("canonical"), false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -385,13 +385,13 @@ func TestResolveWitnessMode(t *testing.T) {
 	})
 
 	t.Run("unknown param rejected", func(t *testing.T) {
-		if _, err := resolveWitnessMode(str("bogus")); err == nil {
+		if _, err := resolveWitnessMode(str("bogus"), false); err == nil {
 			t.Error("expected error for unknown mode param")
 		}
 	})
 
 	t.Run("legacy default when param nil", func(t *testing.T) {
-		got, err := resolveWitnessMode(nil)
+		got, err := resolveWitnessMode(nil, false)
 		if err != nil {
 			t.Fatal(err)
 		}

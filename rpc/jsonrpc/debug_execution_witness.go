@@ -585,20 +585,35 @@ const (
 	witnessModeCanonical
 )
 
-// resolveWitnessMode resolves the witness mode from the request param; absent, defaults to legacy.
-// An explicit param value other than "legacy"/"canonical" is rejected.
-func resolveWitnessMode(modeParam *string) (witnessMode, error) {
+// errWitnessCanonicalHexOnly rejects an explicit canonical request under the binary
+// trie. The legacy/canonical split is an MPT distinction (empty nodes, minimum
+// siblings); bin has a single witness form, which the legacy default names.
+var errWitnessCanonicalHexOnly = errors.New("canonical witness mode is hex-only: the binary trie has a single witness form")
+
+// resolveWitnessMode resolves the witness mode from the request param; absent or empty,
+// it defaults to legacy. An explicit param value other than "legacy"/"canonical" is
+// rejected, as is canonical under the binary trie.
+func resolveWitnessMode(modeParam *string, binTrie bool) (witnessMode, error) {
 	if modeParam == nil {
 		return witnessModeLegacy, nil
 	}
 	switch *modeParam {
-	case "legacy":
+	case "", "legacy":
 		return witnessModeLegacy, nil
 	case "canonical":
+		if binTrie {
+			return witnessModeLegacy, errWitnessCanonicalHexOnly
+		}
 		return witnessModeCanonical, nil
 	default:
 		return witnessModeLegacy, fmt.Errorf("invalid witness mode %q: must be \"legacy\" or \"canonical\"", *modeParam)
 	}
+}
+
+// binCommitmentTrie reports whether the datadir runs the EIP-8297 binary commitment
+// trie, which skips the witness pipeline's MPT-shaped phases.
+func binCommitmentTrie() bool {
+	return execctx.PickTrieVariant() == commitment.VariantBinPatriciaTrie
 }
 
 // buildAccessedState re-executes a block against a recording historical-state reader
@@ -714,7 +729,7 @@ func (api *BaseAPI) buildAccessedState(
 // It executes a block using a historical state reader, records all state accesses
 // (accounts, storage, code), and builds merkle proofs for the accessed keys.
 func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode *string) (*ExecutionWitnessResult, error) {
-	resolvedMode, err := resolveWitnessMode(mode)
+	resolvedMode, err := resolveWitnessMode(mode, binCommitmentTrie())
 	if err != nil {
 		return nil, err
 	}
@@ -871,6 +886,7 @@ func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, comm
 // hc redirects only the commitment-domain reads to a pinned parent snapshot (head-capture);
 // nil is the durable-history path.
 func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalTx, hc *headCaptureSource, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
+	binTrie := binCommitmentTrie()
 	blockNum := info.BlockNum
 	block := info.Block
 	firstTxNumInBlock := info.FirstTxNumInBlock
@@ -936,14 +952,14 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, hc, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNum, parentNum,
-		block.Root(), accessed, mode)
+		block.Root(), accessed, mode, binTrie)
 	if err != nil {
 		return nil, err
 	}
 
 	// Materialize exclusion-proof branches for strict sparse-trie verifiers in legacy/default
 	// mode; canonical mode stays minimal to match the reference witness.
-	nodes, err := buildWitnessTrie(ctx, tx, hc, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, mode != witnessModeCanonical)
+	nodes, err := buildWitnessTrie(ctx, tx, hc, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, mode != witnessModeCanonical, binTrie)
 	if err != nil {
 		return nil, err
 	}
@@ -964,17 +980,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 		return nil, fmt.Errorf("%w: %w", errWitnessVerifyFailed, err)
 	}
 
-	// legacy carries the empty storage-trie node (0x80) once when some account has an
-	// empty storage root (EmptyRoot appears only as an account-leaf storage-root field);
-	// canonical omits it. Added after stateless verification, which rejects the bare node.
-	if mode == witnessModeLegacy {
-		for _, node := range result.State {
-			if bytes.Contains(node, trie.EmptyRoot[:]) {
-				result.State = append(result.State, hexutil.Bytes{0x80})
-				break
-			}
-		}
-	}
+	result.State = appendLegacyEmptyStorageNode(result.State, mode, binTrie)
 
 	// Sort after verifyWitnessStateless: RLPDecode treats result.State[0] as the trie root.
 	slices.SortFunc(result.State, func(a, b hexutil.Bytes) int {
@@ -982,6 +988,22 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	})
 
 	return result, nil
+}
+
+// appendLegacyEmptyStorageNode appends the empty storage-trie node (0x80) once when some
+// account leaf carries an empty storage root (EmptyRoot appears only as an account-leaf
+// storage-root field). It is an MPT artifact: canonical mode omits it and the binary trie
+// has no such node. Called after stateless verification, which rejects the bare node.
+func appendLegacyEmptyStorageNode(nodes []hexutil.Bytes, mode witnessMode, binTrie bool) []hexutil.Bytes {
+	if mode != witnessModeLegacy || binTrie {
+		return nodes
+	}
+	for _, node := range nodes {
+		if bytes.Contains(node, trie.EmptyRoot[:]) {
+			return append(nodes, hexutil.Bytes{0x80})
+		}
+	}
+	return nodes
 }
 
 // accessedState summarizes everything the witness needs from a recorded execution:
@@ -1222,6 +1244,10 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 // (commitment from parent state, plain state from block end) and returns the sibling
 // paths the trie collapses through. The witness build must touch them, else collapsed-
 // sibling data is missing and stateless re-execution diverges from the root.
+//
+// The whole phase is hex-only: the binary trie never deletes a leaf, so no branch ever
+// collapses, and both tools this phase uses refuse bin — SetCollapseTracer panics and
+// BranchChildCount is keyed by a hex nibble prefix.
 func detectCollapseSiblings(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -1232,7 +1258,12 @@ func detectCollapseSiblings(
 	expectedBlockRoot common.Hash,
 	accessed *accessedState,
 	mode witnessMode,
+	binTrie bool,
 ) (siblingPaths [][]byte, err error) {
+	if binTrie {
+		return nil, nil
+	}
+
 	// Set up split reader: commitment from block beginning (durable) or the pinned
 	// parent snapshot (head-capture), plain state from block end. withHistory=false
 	// so branch updates are written using PutBranch().
@@ -1313,7 +1344,15 @@ func buildWitnessTrie(
 	siblingPaths [][]byte,
 	accessed *accessedState,
 	produceExclusionProofs bool,
+	binTrie bool,
 ) (encodedNodes []hexutil.Bytes, err error) {
+	// TouchHashedKey records a hashed path with an empty plain key, which the bin update
+	// stream cannot resolve. Bin produces no collapse siblings at all, so one arriving here
+	// is a bug to surface, not a case to serve.
+	if binTrie && len(siblingPaths) > 0 {
+		return nil, fmt.Errorf("binary trie witness got %d collapse sibling paths; the binary trie never collapses a branch", len(siblingPaths))
+	}
+
 	encodedNodes = []hexutil.Bytes{}
 
 	sdCtx.SetCustomHistoryStateReader(trieReaderFor(hc, tx, firstTxNumInBlock))
