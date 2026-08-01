@@ -35,7 +35,7 @@ func TestEdgeLookup(t *testing.T) {
 		var labels []byte
 		var children []int32
 		bounds := make([][2]int32, 0, 3)
-		for run := 0; run < 3; run++ {
+		for range 3 {
 			perm := r.Perm(256)[:fanout]
 			ls := make([]byte, fanout)
 			for i, v := range perm {
@@ -53,7 +53,7 @@ func TestEdgeLookup(t *testing.T) {
 
 		for run, lohi := range bounds {
 			lo, hi := lohi[0], lohi[1]
-			for b := 0; b < 256; b++ {
+			for b := range 256 {
 				want := int32(-1)
 				for i := lo; i < hi; i++ {
 					if labels[i] == byte(b) {
@@ -81,14 +81,11 @@ func TestWideFanout(t *testing.T) {
 			ac := NewAhoCorasick()
 			// "a" + <one of fanout distinct bytes> + "z" gives a depth-1 state
 			// with exactly `fanout` edges
-			want := map[string]int{}
-			for i := 0; i < fanout; i++ {
-				p := []byte{'a', byte(i), 'z'}
-				ac.Insert(p, i)
-				want[string(p)] = i
+			for i := range fanout {
+				ac.Insert([]byte{'a', byte(i), 'z'}, i)
 			}
 			m := NewACMatcher(ac)
-			for i := 0; i < fanout; i++ {
+			for i := range fanout {
 				data := []byte{'x', 'a', byte(i), 'z', 'x'}
 				got := m.FindLongestMatches(data)
 				if len(got) != 1 {
