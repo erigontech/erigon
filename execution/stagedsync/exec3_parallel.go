@@ -1248,7 +1248,9 @@ func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
 	pe.abortCount.Add(int64(be.cntAbort))
 	pe.invalidCount.Add(int64(be.cntValidationFail))
 	pe.readCount.Add(be.blockIO.ReadCount())
-	pe.writeCount.Add(be.ioWriteCount)
+	// Runs before sendResult, so the apply loop has not released the write-set
+	// maps yet - see blockExecutor.completeBlock.
+	pe.writeCount.Add(be.blockIO.WriteCount())
 	if !be.execStarted.IsZero() {
 		pe.blockExecMetrics.Duration.Add(time.Since(be.execStarted))
 		pe.blockExecMetrics.BlockCount.Add(1)
@@ -2277,10 +2279,10 @@ type blockExecutor struct {
 	tasks   []*execTask
 	results []*execResult
 
-	// ioWriteCount snapshots blockIO.WriteCount at blockResult build: the apply
-	// loop releases the write-set maps after the BAL is processed, so metrics
-	// must not iterate them later.
-	ioWriteCount int64
+	// feeMergeTemp[tx] is the write set the fee merge created and recorded for
+	// tx. The finalize merge may release that one; every other recorded set is
+	// some execResult's TxOut, which stays live.
+	feeMergeTemp map[int]*state.WriteSet
 
 	// settledInput[tx]==true marks a task that was dispatched when every
 	// preceding task had already validated — so it executed against fully
@@ -2419,6 +2421,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		begin:            time.Now(),
 		stats:            map[int]ExecutionStat{},
 		finalizedResults: map[int]*execResult{},
+		feeMergeTemp:     map[int]*state.WriteSet{},
 		settledInput:     map[int]bool{},
 		estimateDeps:     map[int][]int{},
 		preValidated:     map[int]bool{},
@@ -2683,7 +2686,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 			if !tipWrites.IsEmpty() {
 				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-				be.blockIO.RecordWrites(txVersion, existingWrites.MergeInto(tipWrites))
+				merged := existingWrites.MergeInto(tipWrites)
+				be.blockIO.RecordWrites(txVersion, merged)
+				// Only a set this merge created may later be released: the
+				// recorded slot is otherwise some execResult's TxOut.
+				be.feeMergeTemp[tx] = merged
 			}
 		}
 
@@ -2801,10 +2808,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 					merged := existingWrites.MergeInto(addWrites)
 					be.blockIO.RecordWrites(txVersion, merged)
-					if merged != existingWrites && existingWrites != txResult.TxOut {
-						// The replaced slot was the fee-merge temporary; TxOut
-						// stays live for finalize and must keep its maps.
-						existingWrites.ReleaseMaps()
+					if temp := be.feeMergeTemp[tx]; temp != nil && temp == existingWrites && merged != temp {
+						delete(be.feeMergeTemp, tx)
+						temp.ReleaseMaps()
 					}
 
 					// Flush the merged writes (including fee calc changes)
@@ -3150,7 +3156,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			return nil, err
 		}
 
-		be.ioWriteCount = be.blockIO.WriteCount()
 		be.result = &blockResult{
 			BlockNum:         be.blockNum,
 			BlockTime:        txTask.BlockTime(),

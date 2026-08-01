@@ -273,15 +273,22 @@ func buildMergeBenchSets(addrs, slots int) (*WriteSet, *WriteSet) {
 	return prev, next
 }
 
+// Both variants build their inputs inside the timed loop, since MergeInto
+// consumes next and cannot reuse one pair across iterations. That dilutes the
+// delta with the build cost, but it is the same cost on both sides - timing one
+// variant with a warm pair and the other with a fresh one measures the harness.
+func benchWriteSetMerge(b *testing.B, addrs, slots int, merge func(prev, next *WriteSet) *WriteSet) {
+	b.ReportAllocs()
+	for b.Loop() {
+		prev, next := buildMergeBenchSets(addrs, slots)
+		sinkWS = merge(prev, next)
+	}
+}
+
 func BenchmarkWriteSetMerge(b *testing.B) {
 	for _, size := range []struct{ addrs, slots int }{{4, 2}, {16, 8}} {
 		b.Run(fmt.Sprintf("addrs=%d/slots=%d", size.addrs, size.slots), func(b *testing.B) {
-			prev, next := buildMergeBenchSets(size.addrs, size.slots)
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				sinkWS = prev.Merge(next)
-			}
+			benchWriteSetMerge(b, size.addrs, size.slots, (*WriteSet).Merge)
 		})
 	}
 }
@@ -289,13 +296,7 @@ func BenchmarkWriteSetMerge(b *testing.B) {
 func BenchmarkWriteSetMergeInto(b *testing.B) {
 	for _, size := range []struct{ addrs, slots int }{{4, 2}, {16, 8}} {
 		b.Run(fmt.Sprintf("addrs=%d/slots=%d", size.addrs, size.slots), func(b *testing.B) {
-			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
-				b.StopTimer()
-				prev, next := buildMergeBenchSets(size.addrs, size.slots)
-				b.StartTimer()
-				sinkWS = prev.MergeInto(next)
-			}
+			benchWriteSetMerge(b, size.addrs, size.slots, (*WriteSet).MergeInto)
 		})
 	}
 }
@@ -338,8 +339,12 @@ func TestVersionedIOReleaseOutputMaps(t *testing.T) {
 
 	require.NotZero(t, io.WriteCount())
 	io.ReleaseOutputMaps()
-	assert.Zero(t, io.WriteCount(), "slots must be empty after release")
-	assert.True(t, io.WriteSet(0).IsEmpty())
+
+	// Read the slots directly: the accessors panic under assertions once the
+	// outputs are released, which is the point of the guard.
+	for _, output := range io.outputs {
+		assert.True(t, output.IsEmpty(), "slots must be empty after release")
+	}
 
 	// Empty and already-released IO must not panic.
 	io.ReleaseOutputMaps()
@@ -356,8 +361,7 @@ func benchVersionedFeeMerge(b *testing.B, addrs, slots int, merge func(prev, nex
 	vm := NewVersionMap(nil)
 	version := Version{TxIndex: 0, Incarnation: 1}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		txOut, tip := buildMergeBenchSets(addrs, slots)
 		io.RecordWrites(version, txOut)
 		merged := merge(txOut, tip)

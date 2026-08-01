@@ -14,6 +14,7 @@ import (
 	"github.com/heimdalr/dag"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -2227,6 +2228,11 @@ func (writes *WriteSet) StripBalanceWrite(addr accounts.Address, readSet ReadSet
 type VersionedIO struct {
 	inputs  []versionedReadSet
 	outputs []*WriteSet // write sets that should be checked during validation
+
+	// outputsReleased marks ReleaseOutputMaps having run. A read after that
+	// point sees emptied sets rather than failing, so under assertions the
+	// accessors panic instead. Only written when dbg.AssertEnabled.
+	outputsReleased bool
 }
 
 func NewVersionedIO(numTx int) *VersionedIO {
@@ -2269,6 +2275,7 @@ func (io *VersionedIO) ReadSetIncarnation(txnIdx int) int {
 }
 
 func (io *VersionedIO) WriteSet(txnIdx int) *WriteSet {
+	io.assertOutputsLive("WriteSet")
 	if len(io.outputs) <= txnIdx+1 {
 		return nil
 	}
@@ -2276,11 +2283,18 @@ func (io *VersionedIO) WriteSet(txnIdx int) *WriteSet {
 }
 
 func (io *VersionedIO) WriteCount() (count int64) {
+	io.assertOutputsLive("WriteCount")
 	for _, output := range io.outputs {
 		count += int64(output.Count())
 	}
 
 	return count
+}
+
+func (io *VersionedIO) assertOutputsLive(op string) {
+	if dbg.AssertEnabled && io != nil && io.outputsReleased {
+		panic("VersionedIO." + op + " after ReleaseOutputMaps: the write sets are emptied, so this read silently sees nothing")
+	}
 }
 
 // ReleaseOutputMaps returns every recorded write set's map containers to their
@@ -2289,6 +2303,9 @@ func (io *VersionedIO) WriteCount() (count int64) {
 func (io *VersionedIO) ReleaseOutputMaps() {
 	for _, output := range io.outputs {
 		output.ReleaseMaps()
+	}
+	if dbg.AssertEnabled {
+		io.outputsReleased = true
 	}
 }
 
