@@ -961,7 +961,7 @@ func TestTxnHashFromRLPErrors(t *testing.T) {
 		input   []byte
 		wantErr error // nil means any error will do
 	}{
-		{"empty", nil, io.EOF},
+		{"empty", nil, errShortTxnRLP},
 		{"bare byte", []byte{0x01}, errShortTxnRLP},
 		{"truncated string", []byte{0x84, 0x01}, nil},
 		{"empty string", []byte{0x80}, errShortTxnRLP},
@@ -1096,14 +1096,50 @@ func TestTxnHashFromRLPMirrorsTypeByteCheck(t *testing.T) {
 	}
 }
 
-// TestTxnHashFromRLPNeverReportsEOL pins that malformed input is turned down with a
-// real error. checkErrListEnd reads a bare rlp.EOL as a clean end of list, so
-// reporting one here would let a caller drop the element instead of rejecting it.
-func TestTxnHashFromRLPNeverReportsEOL(t *testing.T) {
+// FuzzTxnHashFromRLP pins the whole contract at once: whatever DecodeTransaction
+// accepts, TxnHashFromRLP must accept and hash to the same value. The tests above feed
+// encodings this package produced, so they cannot reach the bytes that arrive over p2p
+// and are stored by WriteRawTransactions without a re-encode.
+func FuzzTxnHashFromRLP(f *testing.F) {
+	tr := &TRand{rnd: rand.New(rand.NewSource(1))}
+	var buf bytes.Buffer
+	for range 40 {
+		txn := tr.RandTransaction(-1)
+		for _, encode := range txnFramings {
+			buf.Reset()
+			if err := encode.encode(txn, &buf); err == nil {
+				f.Add(bytes.Clone(buf.Bytes()))
+			}
+		}
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		decoded, decErr := DecodeTransaction(data)
+		if decErr != nil {
+			return
+		}
+		got, err := TxnHashFromRLP(data)
+		if err != nil {
+			t.Fatalf("input %x (type %d): DecodeTransaction accepts it, TxnHashFromRLP does not: %v", data, decoded.Type(), err)
+		}
+		if want := decoded.Hash(); got != want {
+			t.Fatalf("input %x (type %d): got %x, want %x", data, decoded.Type(), got, want)
+		}
+	})
+}
+
+// TestTxnHashFromRLPNeverReportsStreamEnd pins that malformed input is turned down
+// with a real error rather than an end-of-input sentinel. checkErrListEnd reads a bare
+// rlp.EOL as a clean end of list, and io.EOF reads as a clean end of input, so
+// reporting either would let a caller drop the element instead of rejecting it.
+func TestTxnHashFromRLPNeverReportsStreamEnd(t *testing.T) {
 	t.Parallel()
 	for _, input := range [][]byte{nil, {0x01}, {0x80}, {0xC0}, {0x81, 0x80}, {0x84, 0x01}} {
-		if _, err := TxnHashFromRLP(input); err == rlp.EOL { //nolint:errorlint // a bare EOL is what checkErrListEnd matches
+		_, err := TxnHashFromRLP(input)
+		if err == rlp.EOL { //nolint:errorlint // a bare EOL is what checkErrListEnd matches
 			t.Errorf("TxnHashFromRLP(%x) reported a bare rlp.EOL", input)
+		}
+		if errors.Is(err, io.EOF) {
+			t.Errorf("TxnHashFromRLP(%x) reported io.EOF", input)
 		}
 	}
 }

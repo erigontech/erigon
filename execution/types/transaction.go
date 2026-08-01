@@ -44,9 +44,9 @@ var (
 	ErrInvalidTxType        = errors.New("transaction type not valid in this context")
 	ErrTxTypeNotSupported   = errors.New("transaction type not supported")
 	errTrailingBytes        = errors.New("trailing bytes after rlp encoded transaction")
-	// errShortTxnRLP is the sentinel form of the "short input" that
-	// UnmarshalTransactionFromBinary reports: well-formed RLP that is too small to
-	// hold a transaction. Neither package has an error for it.
+	// errShortTxnRLP reports RLP too small to hold a transaction. DecodeTransaction
+	// reports the empty case as a bare io.EOF, which reads as a clean end of input,
+	// so this package keeps its own sentinel.
 	errShortTxnRLP    = errors.New("short rlp encoded transaction")
 	errWrappedBlobTxn = errors.New("blob transaction wrapped with blobs")
 )
@@ -282,7 +282,8 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 
 // txnTypeHashesItsEncoding reports whether type b hashes keccak of its own canonical
 // encoding. Registered types are deliberately absent: TxTypeSpec puts no constraint on
-// what a type's Hash returns, so only the types defined here can be hashed in place.
+// what a type's Hash returns. RegisterTxType panics on a built-in id, so this set stays
+// closed - a registered type can never reach the true branch.
 func txnTypeHashesItsEncoding(b byte) bool {
 	switch b {
 	case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType, AccountAbstractionTxType:
@@ -301,7 +302,7 @@ func txnTypeHashesItsEncoding(b byte) bool {
 // transaction carrying a malformed body hashes here where the decode would turn it down.
 func TxnHashFromRLP(txnRlp []byte) (common.Hash, error) {
 	if len(txnRlp) == 0 {
-		return common.Hash{}, io.EOF
+		return common.Hash{}, errShortTxnRLP
 	}
 	if txnRlp[0] < rlp.SingleByteThreshold { // canonical form, not RLP framed
 		return typedTxnHash(txnRlp)

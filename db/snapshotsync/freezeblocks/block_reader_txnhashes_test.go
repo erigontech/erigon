@@ -24,11 +24,13 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapshotsync"
@@ -165,9 +167,40 @@ func openTxnHashesTestSegment(t *testing.T, baseTxnID uint64, txns []types.Trans
 	return NewBlockReader(snapshots, nil), seg, view.Close
 }
 
+// TestTxnHashesFromDB covers TxnHashes' dispatch rather than either reader: with no
+// block files, every block resolves through the db, and a block absent from the db
+// falls through to files that hold nothing and comes back as the not-found sentinel.
+func TestTxnHashesFromDB(t *testing.T) {
+	t.Parallel()
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
+	require.NoError(t, snapshots.OpenFolder())
+	require.Zero(t, snapshots.BlocksAvailable())
+	r := NewBlockReader(snapshots, nil)
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	txns := txnHashesTestTxns(t, 3)
+	header := &types.Header{Number: *common.Num1}
+	require.NoError(t, rawdb.WriteBody(tx, header.Hash(), 1, &types.Body{Transactions: txns}))
+
+	hashes, err := r.TxnHashes(t.Context(), tx, header.Hash(), 1)
+	require.NoError(t, err)
+	require.Len(t, hashes, len(txns))
+	for i, txn := range txns {
+		require.Equal(t, txn.Hash(), hashes[i], "txn %d (type %d)", i, txn.Type())
+	}
+
+	missing, err := r.TxnHashes(t.Context(), tx, common.Hash{0xaa}, 1)
+	require.NoError(t, err)
+	require.Nil(t, missing)
+}
+
 // TestTxnHashesFromSnapshotTruncatedSegment pins that a segment holding fewer txns
-// than the body claims is reported as an error. Returning the not-found sentinel
-// instead would drop the block from the txn lookup index without failing the stage.
+// than the body claims is an error, where txsFromSnapshot returns the not-found sentinel.
 func TestTxnHashesFromSnapshotTruncatedSegment(t *testing.T) {
 	t.Parallel()
 	const baseTxnID = 0

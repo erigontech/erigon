@@ -93,8 +93,7 @@ func TestCanonicalTransactionHashesEmpty(t *testing.T) {
 }
 
 // TestCanonicalTransactionHashesShortRead pins that asking for more than the db holds
-// is an error, matching txnHashesFromSnapshot. Returning what was found instead would
-// drop the missing txns from the lookup index without failing the stage.
+// is an error, where CanonicalTransactions returns what it found.
 func TestCanonicalTransactionHashesShortRead(t *testing.T) {
 	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
@@ -109,8 +108,7 @@ func TestCanonicalTransactionHashesShortRead(t *testing.T) {
 }
 
 // TestCanonicalTransactionHashesGap pins that txns missing from the middle of the
-// requested range are an error. The cursor walks past a gap into the next block's
-// txns, so counting the records read finds nothing wrong - only their ids do.
+// requested range are an error, which counting the records read would not catch.
 func TestCanonicalTransactionHashesGap(t *testing.T) {
 	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
