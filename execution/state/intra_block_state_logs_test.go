@@ -23,6 +23,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -90,6 +92,65 @@ func TestRevertKeepsNormalLogBufferForReuse(t *testing.T) {
 	lp := ibs.AllocLog(0, 2)
 	require.Same(t, first, lp)
 }
+
+// The OnLog hook is exported, so a tracer outside this repo may retain the
+// pointer it is handed. The value must stay valid after the emit buffer is
+// reused by a later block.
+func TestOnLogValueSurvivesBufferReuse(t *testing.T) {
+	t.Parallel()
+
+	var retained *types.Log
+	ibs := New(nil)
+	ibs.SetHooks(&tracing.Hooks{OnLog: func(l *types.Log) {
+		if retained == nil {
+			retained = l
+		}
+	}})
+
+	first := common.HexToAddress("0x1")
+	firstTopic := common.HexToHash("0xaa")
+	ibs.SetTxContext(1, 0)
+	ibs.AddLog(&types.Log{Address: first, Topics: []common.Hash{firstTopic}, Data: []byte{1, 2, 3}})
+	require.NotNil(t, retained)
+
+	ibs.Reset()
+	ibs.SetTxContext(2, 0)
+	ibs.AddLog(&types.Log{
+		Address: common.HexToAddress("0x2"),
+		Topics:  []common.Hash{common.HexToHash("0xbb")},
+		Data:    []byte{9, 9, 9},
+	})
+
+	require.Equal(t, first, retained.Address)
+	require.Equal(t, []common.Hash{firstTopic}, retained.Topics)
+	require.Equal(t, hexutil.Bytes{1, 2, 3}, retained.Data)
+}
+
+// Splits the cost of the stable OnLog value: the untraced path keeps reusing
+// the buffer entry, only a configured hook pays for the copy.
+func BenchmarkAddLog(b *testing.B) {
+	log := &types.Log{
+		Address: common.HexToAddress("0x1"),
+		Topics:  []common.Hash{common.HexToHash("0xaa"), common.HexToHash("0xbb")},
+		Data:    bytes.Repeat([]byte{0x11}, 96),
+	}
+	run := func(b *testing.B, hooks *tracing.Hooks) {
+		ibs := New(nil)
+		ibs.SetHooks(hooks)
+		b.ReportAllocs()
+		for range b.N {
+			ibs.Reset()
+			ibs.SetTxContext(1, 0)
+			ibs.AddLog(log)
+		}
+	}
+	b.Run("untraced", func(b *testing.B) { run(b, nil) })
+	b.Run("traced", func(b *testing.B) {
+		run(b, &tracing.Hooks{OnLog: func(l *types.Log) { sinkLog = l }})
+	})
+}
+
+var sinkLog *types.Log
 
 func BenchmarkLogsRlpHash(b *testing.B) {
 	ibs := New(nil)

@@ -1082,21 +1082,16 @@ func TestAddLogOnLogHookCopyContract(t *testing.T) {
 	require.Equal(t, []byte{0x01}, []byte(copied[0].Data))
 }
 
-// TestNotifyLogHookSeesLiveEntry pins the OnLog contract on the AllocLog path
-// the EVM's makeLog uses: the hook receives the live buffer entry (no defensive
-// copy), so it must copy anything it retains — the entry is rewritten once a
-// later block reuses it.
-func TestNotifyLogHookSeesLiveEntry(t *testing.T) {
+// TestNotifyLogHookGetsStableCopy pins the OnLog contract on the AllocLog path
+// the EVM's makeLog uses: the hook owns what it receives, so retaining it is
+// safe even though the buffer entry behind it is reused by a later block.
+func TestNotifyLogHookGetsStableCopy(t *testing.T) {
 	t.Parallel()
 
 	ibs := New(NewNoopReader())
-	var live *types.Log
-	var copied []*types.Log
+	var handed []*types.Log
 	ibs.SetHooks(&tracing.Hooks{
-		OnLog: func(l *types.Log) {
-			live = l
-			copied = append(copied, l.Copy())
-		},
+		OnLog: func(l *types.Log) { handed = append(handed, l) },
 	})
 
 	emit := func(addr common.Address, topic common.Hash, data []byte) *types.Log {
@@ -1110,16 +1105,33 @@ func TestNotifyLogHookSeesLiveEntry(t *testing.T) {
 
 	ibs.SetTxContext(1, 0)
 	lp := emit(common.Address{0xaa}, common.Hash{0x01}, []byte{0x11, 0x22})
-	require.Same(t, lp, live)
+	require.NotSame(t, lp, handed[0])
 
 	ibs.Reset()
 	ibs.SetTxContext(2, 0)
-	emit(common.Address{0xbb}, common.Hash{0x99}, []byte{0xde, 0xad})
+	require.Same(t, lp, emit(common.Address{0xbb}, common.Hash{0x99}, []byte{0xde, 0xad}))
 
-	require.Equal(t, common.Hash{0x01}, copied[0].Topics[0])
-	require.Equal(t, []byte{0x11, 0x22}, []byte(copied[0].Data))
-	require.Equal(t, common.Hash{0x99}, copied[1].Topics[0])
-	require.Equal(t, []byte{0xde, 0xad}, []byte(copied[1].Data))
+	require.Equal(t, common.Hash{0x01}, handed[0].Topics[0])
+	require.Equal(t, []byte{0x11, 0x22}, []byte(handed[0].Data))
+	require.Equal(t, common.Hash{0x99}, handed[1].Topics[0])
+	require.Equal(t, []byte{0xde, 0xad}, []byte(handed[1].Data))
+}
+
+// TestAddLogKeepsCallerBlockNumber pins that BlockNumber stays a caller-assigned
+// field: execution/state does not know the block number, so a reused entry must
+// not carry the previous caller's value either.
+func TestAddLogKeepsCallerBlockNumber(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	ibs.SetTxContext(7, 0)
+	ibs.AddLog(&types.Log{Address: common.Address{0x01}, BlockNumber: 42})
+	ibs.AddLog(&types.Log{Address: common.Address{0x02}})
+
+	logs := ibs.GetRawLogs(0)
+	require.Len(t, logs, 2)
+	require.Equal(t, hexutil.Uint64(42), logs[0].BlockNumber)
+	require.Zero(t, logs[1].BlockNumber, "an unset BlockNumber must not inherit the previous log's")
 }
 
 // TestAllocLogPreservesCapacityAcrossRevert pins that fully reverting a tx's

@@ -33,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
@@ -1157,4 +1158,23 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	// No balance-change events should have fired for SYSTEM_ADDRESS
 	// from the zero-value call path.
 	require.Empty(t, balChanges, "no balance-change events expected for SYSTEM_ADDRESS on zero-value syscall, got %v", balChanges)
+}
+
+// LOG's BlockNumber comes from the EVM context. Entry points that do not go
+// through SetTxContext leave the state's block number at zero, so the opcode
+// must not source it from there.
+func TestLogBlockNumberFromEVMContext(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{BlockNumber: 42}
+	_, ibs, err := Execute([]byte{
+		byte(vm.PUSH1), 0,
+		byte(vm.PUSH1), 0,
+		byte(vm.LOG0),
+	}, nil, cfg, t.TempDir())
+	require.NoError(t, err)
+
+	logs := ibs.GetRawLogs(0)
+	require.Len(t, logs, 1)
+	require.Equal(t, hexutil.Uint64(42), logs[0].BlockNumber)
 }
