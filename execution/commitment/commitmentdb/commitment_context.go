@@ -348,19 +348,33 @@ func (sdc *SharedDomainsCommitmentContext) TouchHashedKey(hashedKey []byte) {
 	sdc.updates.TouchHashedKey(hashedKey)
 }
 
+// witnessTrie is the capture seam: each engine walks its own tree and returns the
+// nodes it hashed. Both variants implement it, so the capture names no concrete trie.
+type witnessTrie interface {
+	Witnesses(ctx context.Context, updates *commitment.Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error)
+}
+
+var (
+	_ witnessTrie = (*commitment.HexPatriciaHashed)(nil)
+	_ witnessTrie = (*commitment.PBinPatriciaHashed)(nil)
+)
+
 // witnessCapture runs the on-the-fly fold and returns the captured superset node
 // set (root first), the fold's hashed keys, and the root hash.
 func (sdc *SharedDomainsCommitmentContext) witnessCapture(ctx context.Context, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
-	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
+	capturer, ok := sdc.Trie().(witnessTrie)
 	if !ok {
-		return nil, nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
+		return nil, nil, nil, fmt.Errorf("commitment trie %T captures no witness", sdc.Trie())
 	}
-	return hexPatriciaHashed.Witnesses(ctx, sdc.updates, produceExclusionProofs, logPrefix)
+	return capturer.Witnesses(ctx, sdc.updates, produceExclusionProofs, logPrefix)
 }
 
 // WitnessNodes builds the lean execution-witness node set: it prunes the captured
 // superset to the proof paths of the fold's keys, returning the RLP node bytes
 // (root first) and the root hash. This is the strict-verifier (reth) form.
+//
+// The pruner below is MPT-shaped and serves the hex capture only; the bin variant
+// reaches WitnessNodes once it has a pruner of its own.
 func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, rootHash []byte, err error) {
 	full, provedKeys, rootHash, err := sdc.witnessCapture(ctx, produceExclusionProofs, logPrefix)
 	if err != nil {

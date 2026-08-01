@@ -229,16 +229,17 @@ leaf and code chunking instead of reimplementing all of it.
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
 - Create: `execution/commitment/commitmentdb/pbin_witness_test.go`
 
-- [ ] define an interface for the `Witnesses` method and assert at compile time that both
+- [x] define an interface for the `Witnesses` method and assert at compile time that both
       `*HexPatriciaHashed` and `*PBinPatriciaHashed` satisfy it
-- [ ] replace the type assertion at `commitment_context.go:353-359`, keeping a clear error for a trie
+- [x] replace the type assertion at `commitment_context.go:353-359`, keeping a clear error for a trie
       satisfying neither
-- [ ] note in a comment that `WitnessNodes` (:364) still routes to the hex pruner until Task 6; no
+- [x] note in a comment that `WitnessNodes` (:364) still routes to the hex pruner until Task 6; no
       bin caller reaches it before Task 10
-- [ ] write tests: `witnessCapture` succeeds under bin instead of erroring
-- [ ] write tests: hex output is unchanged
-- [ ] write tests: a trie implementing neither produces a clear error
-- [ ] run tests - must pass before task 4
+- [x] write tests: `witnessCapture` succeeds under bin instead of erroring
+- [x] write tests: hex output is unchanged — capture output pinned against `HexPatriciaHashed.Witnesses`
+      called directly over the same corpus
+- [x] write tests: a trie implementing neither produces a clear error
+- [x] run tests - must pass before task 4
 
 ### Task 4: Binary witness node decoder
 
