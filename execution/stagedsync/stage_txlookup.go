@@ -318,18 +318,17 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
 	err = etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
-		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
+		txnHashes, err := cfg.blockReader.TxnHashes(ctx, tx, blockHash, blocknum)
 		if err != nil {
-			return err
+			return fmt.Errorf("TxnHashes: block %d, hash %x: %w", blocknum, blockHash, err)
 		}
-		if body == nil {
+		if txnHashes == nil {
 			log.Debug("TxLookup pruning, empty block body", "height", blocknum)
 			return nil
 		}
 
-		for _, txn := range body.Transactions {
-			txHash := txn.Hash()
-			if err := next(k, txHash[:], nil); err != nil {
+		for _, txnHash := range txnHashes {
+			if err := next(k, txnHash[:], nil); err != nil {
 				return err
 			}
 		}

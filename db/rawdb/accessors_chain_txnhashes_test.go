@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -58,11 +57,6 @@ func txnHashesTestTxns(t *testing.T, n int) []types.Transaction {
 	return txns
 }
 
-func writeTxnHashesTestTxns(t *testing.T, tx kv.RwTx, baseTxnID uint64, txns []types.Transaction) {
-	t.Helper()
-	require.NoError(t, rawdb.WriteTransactions(tx, txns, types.BaseTxnID(baseTxnID)))
-}
-
 // TestCanonicalTransactionHashesMatchesDecode pins the hash-without-decoding path
 // to the decode-then-Hash path it replaces, over the stored bytes rather than an
 // in-memory encoding, so a change in what WriteTransactions persists breaks it.
@@ -70,15 +64,15 @@ func TestCanonicalTransactionHashesMatchesDecode(t *testing.T) {
 	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 
-	const baseTxnID = 7
+	const baseTxnID = types.BaseTxnID(7)
 	txns := txnHashesTestTxns(t, 6)
-	writeTxnHashesTestTxns(t, tx, baseTxnID, txns)
+	require.NoError(t, rawdb.WriteTransactions(tx, txns, baseTxnID))
 
-	want, err := rawdb.CanonicalTransactions(tx, baseTxnID, uint32(len(txns)))
+	want, err := rawdb.CanonicalTransactions(tx, baseTxnID.First(), uint32(len(txns)))
 	require.NoError(t, err)
 	require.Len(t, want, len(txns))
 
-	got, err := rawdb.CanonicalTransactionHashes(tx, baseTxnID, uint32(len(txns)))
+	got, err := rawdb.CanonicalTransactionHashes(tx, baseTxnID.First(), uint32(len(txns)))
 	require.NoError(t, err)
 	require.Len(t, got, len(txns))
 
@@ -98,19 +92,37 @@ func TestCanonicalTransactionHashesEmpty(t *testing.T) {
 	require.Empty(t, got)
 }
 
-// TestCanonicalTransactionHashesShortRead pins the truncation CanonicalTransactions
-// also does: asking for more than the db holds returns what was found, not an error.
+// TestCanonicalTransactionHashesShortRead pins that asking for more than the db holds
+// is an error, matching txnHashesFromSnapshot. Returning what was found instead would
+// drop the missing txns from the lookup index without failing the stage.
 func TestCanonicalTransactionHashesShortRead(t *testing.T) {
 	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 
-	const baseTxnID = 1
+	const baseTxnID = types.BaseTxnID(1)
 	txns := txnHashesTestTxns(t, 2)
-	writeTxnHashesTestTxns(t, tx, baseTxnID, txns)
+	require.NoError(t, rawdb.WriteTransactions(tx, txns, baseTxnID))
 
-	got, err := rawdb.CanonicalTransactionHashes(tx, baseTxnID, 5)
-	require.NoError(t, err)
-	require.Len(t, got, len(txns))
+	_, err := rawdb.CanonicalTransactionHashes(tx, baseTxnID.First(), 5)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "holds 2 of 5")
+}
+
+// TestCanonicalTransactionHashesGap pins that txns missing from the middle of the
+// requested range are an error. The cursor walks past a gap into the next block's
+// txns, so counting the records read finds nothing wrong - only their ids do.
+func TestCanonicalTransactionHashesGap(t *testing.T) {
+	t.Parallel()
+	_, tx := memdb.NewTestTx(t)
+
+	const baseTxnID = types.BaseTxnID(1)
+	txns := txnHashesTestTxns(t, 4)
+	require.NoError(t, rawdb.WriteTransactions(tx, txns[:2], baseTxnID))
+	require.NoError(t, rawdb.WriteTransactions(tx, txns[2:], types.BaseTxnID(9)))
+
+	_, err := rawdb.CanonicalTransactionHashes(tx, baseTxnID.First(), 4)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing txnID 4")
 }
 
 // TestReadBodyTxnHashesNilVsEmpty pins the contract the txn lookup stage branches
