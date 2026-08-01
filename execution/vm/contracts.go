@@ -701,6 +701,9 @@ func runBn254ScalarMul(input []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if x.IsInfinity() {
+		return make([]byte, 64), nil
+	}
 	return libbn254.MarshalCurvePointG1(x.ScalarMultiplication(&x, new(big.Int).SetBytes(getData(input, 64, 32)))), nil
 }
 
