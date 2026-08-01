@@ -395,12 +395,11 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 			fmt.Printf("[%d %d] cmp: %d\n", l, r, cmp)
 		}
 
-		switch {
-		case cmp == 0:
+		if cmp == 0 { //nolint:gocritic
 			break
-		case cmp < 0:
+		} else if cmp < 0 {
 			r = m
-		default:
+		} else {
 			l = m + 1
 		}
 	}
