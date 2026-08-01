@@ -380,6 +380,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		defer migrationsDB.Close()
 
 		migrator := migrations.NewMigrator(label)
+		migrator.ReopenDB = func() (kv.RwDB, error) { return openFunc(true) }
 		if err := migrator.VerifyVersion(db, dbPath); err != nil {
 			return nil, err
 		}
@@ -394,7 +395,13 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			if err != nil {
 				return nil, err
 			}
-			if err = migrator.Apply(db, migrationsDB, config.Dirs.DataDir, dbPath, logger); err != nil {
+			db, err = migrator.Apply(db, migrationsDB, config.Dirs.DataDir, dbPath, logger)
+			if err != nil {
+				// Apply may hand back a live handle alongside the error, or none at
+				// all when a wipe migration fails to reopen.
+				if db != nil {
+					db.Close()
+				}
 				return nil, err
 			}
 			db.Close()

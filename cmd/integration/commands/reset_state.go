@@ -202,7 +202,9 @@ func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots, borSn 
 	}
 
 	fmt.Fprintf(w, "--\n\n\n")
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		return err
+	}
 
 	w.Init(os.Stdout, 8, 8, 0, '\t', 0)
 	fmt.Fprintf(w, "domain and ii progress\n\n")
@@ -228,6 +230,9 @@ func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots, borSn 
 		fmt.Fprintf(w, "%s \t\t - \t\t %d \t\t %d \t\t db_steps=%.02f\n", ii.String(), txNum, step, keysSteps)
 	}
 	fmt.Fprintf(w, "--\n")
+	if err := w.Flush(); err != nil {
+		return err
+	}
 
 	//fmt.Printf("==== state =====\n")
 	//db.ForEach(kv.PlainState, nil, func(k, v []byte) error {

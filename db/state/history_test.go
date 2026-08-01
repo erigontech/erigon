@@ -715,7 +715,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 		require.True(t, canHist)
 
 		// unforced prune only reaches the file boundary (txTo)
-		stat, err := hc.Prune(t.Context(), rwTx, 0, txTo, 50, false, logEvery)
+		stat, err := hc.Prune(t.Context(), rwTx, 0, txTo, math.MaxUint64, false, logEvery)
 		require.NoError(t, err)
 		require.NotNil(t, stat)
 		t.Logf("stat=%v", stat)
@@ -726,7 +726,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 		require.Nil(t, stat)
 
 		// forced prune removes the whole requested range, past the file boundary
-		stat, err = hc.Prune(t.Context(), rwTx, 0, 600, 10, true, logEvery)
+		stat, err = hc.Prune(t.Context(), rwTx, 0, 600, math.MaxUint64, true, logEvery)
 		require.NoError(t, err)
 		require.NotNil(t, stat)
 		t.Logf("stat=%v", stat)
