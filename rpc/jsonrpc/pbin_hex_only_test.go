@@ -33,8 +33,8 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
-// eth_getProof rebuilds proofs with the hex trie, so it must refuse a bin datadir
-// instead of reading bit-path branch records as hex ones.
+// Proof and simulation both recompute state with the hex trie, so they must refuse a
+// bin datadir instead of reading its bit-path branch records as hex ones.
 func TestPBinGetProofRefusesBin(t *testing.T) {
 	// No t.Parallel: mutates process-global statecfg flags.
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)

@@ -11,26 +11,18 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// Root vectors exported from the EIP-8297 reference implementation in
-// ethereum/execution-specs (branch projects/binary-trie), which hashes with
-// BLAKE3. Replaying them under BLAKE3 checks this package's oracle against an
-// implementation that was written independently and, more importantly, builds
-// the tree by a different algorithm: the reference rebuilds canonically, the
-// oracle inserts incrementally as the EIP's pseudocode does. Agreement across
-// that difference is what rules out a shared misreading of the spec.
-//
-// The engine itself is tied to this oracle by the differential tests, so the
-// chain reaches the engine even though the engine hashes with Keccak-256.
+// Replays the reference's root vectors (see pbinSpecVectors) against the oracle
+// under BLAKE3. The reference rebuilds the tree canonically while the oracle
+// inserts incrementally as the EIP's pseudocode does, so agreement across the
+// two algorithms is what rules out a shared misreading of the spec.
 
 func pbinBlake3Sum(b []byte) [32]byte { return blake3.Sum256(b) }
 
-// pbinBlake3Hash adapts pbinBlake3Sum to the engine's injectable hash seam.
 var pbinBlake3Hash pbinHashFn = func(b []byte) common.Hash { return common.Hash(blake3.Sum256(b)) }
 
-// pbinOracleRootOf builds the oracle trie from a whole key set and merkelizes it
-// under BLAKE3. Building from the surviving set is also how a delete is applied:
-// the EIP's insert has no removal, and the reference's removal semantics are
-// still open, so nothing here depends on a delete algorithm.
+// pbinOracleRootOf rebuilds the oracle trie from the whole key set. A delete is
+// applied the same way — the EIP's insert has no removal — so nothing here
+// depends on a delete algorithm.
 func pbinOracleRootOf(t *testing.T, entries map[string][]byte) [32]byte {
 	t.Helper()
 	keys := make([]string, 0, len(entries))
@@ -67,9 +59,8 @@ func TestPBinOracleMatchesSpecTrieRoots(t *testing.T) {
 	}
 }
 
-// TestPBinOracleMatchesSpecSequenceRoots replays the reference's op sequences,
-// checking the root after every operation rather than only at the end, so a
-// divergence is pinned to the op that caused it.
+// Checks the root after every op in a reference sequence, not only at the end,
+// so a divergence pins to the op that caused it.
 func TestPBinOracleMatchesSpecSequenceRoots(t *testing.T) {
 	t.Parallel()
 	v := pbinLoadSpecVectors(t)

@@ -12,9 +12,8 @@ import (
 
 // Vectors exported from the EIP-8297 reference implementation in
 // ethereum/execution-specs (branch projects/binary-trie), which hashes with
-// BLAKE3. The BASIC_DATA packing involves no hash and is compared as-is; key
-// derivation is replayed under BLAKE3 through the injectable seam, so the
-// tree-key bodies compare in full.
+// BLAKE3. Comparisons against them either involve no hash (BASIC_DATA packing)
+// or replay derivation under BLAKE3 through the injectable seam.
 type pbinSpecVectors struct {
 	Meta      map[string]string `json:"meta"`
 	BasicData []struct {
@@ -78,8 +77,8 @@ func pbinMustHex(t *testing.T, s string) []byte {
 	return b
 }
 
-// TestPBinSpecBasicDataVectors is the one fully external check available under a
-// different hash: BASIC_DATA packing is pure byte layout.
+// BASIC_DATA packing is pure byte layout, so it compares against the reference
+// directly despite the differing hash.
 func TestPBinSpecBasicDataVectors(t *testing.T) {
 	t.Parallel()
 	v := pbinLoadSpecVectors(t)
@@ -96,11 +95,10 @@ func TestPBinSpecBasicDataVectors(t *testing.T) {
 	}
 }
 
-// TestPBinSpecKeyRouting compares full tree keys against the reference under
-// the BLAKE3 the vectors were generated with — zone, digest bodies and
-// sub-index alike. Full equality through the production keyHasher seam is what
-// proves no derivation step hashes outside it: a hardcoded Keccak site would
-// diverge here (guards H3).
+// Compares full tree keys — zone, digest body and sub-index — against the
+// reference under BLAKE3. Going through the production key hasher is what
+// catches a derivation step that hashes outside the seam: a hardcoded Keccak
+// site would diverge here.
 func TestPBinSpecKeyRouting(t *testing.T) {
 	t.Parallel()
 	v := pbinLoadSpecVectors(t)

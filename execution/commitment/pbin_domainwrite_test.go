@@ -29,8 +29,7 @@ import (
 
 // pbinStrictWriteContext mirrors the domain's write contract: SharedDomains
 // refuses a nil value outright, so a PutBranch handing one over fails here the
-// way it would over a real datadir. Accepted writes are recorded in order with
-// the prevData the engine claimed.
+// way it would over a real datadir.
 type pbinStrictWriteContext struct {
 	*MockState
 	puts []pbinRecordedPut
@@ -55,8 +54,8 @@ func pbinTestStrictEngine(t *testing.T) (*PBinPatriciaHashed, *pbinStrictWriteCo
 	return NewPBinPatriciaHashed(ctx), ctx, ms
 }
 
-// TestPBinStoreRootEmptiedTreeWritesNonNil pins the empty-root storeRoot path:
-// an emptied tree deletes its record by writing a zero-length value, never nil.
+// An emptied tree deletes its root record by writing a zero-length value, never
+// nil.
 func TestPBinStoreRootEmptiedTreeWritesNonNil(t *testing.T) {
 	t.Parallel()
 
@@ -73,10 +72,8 @@ func TestPBinStoreRootEmptiedTreeWritesNonNil(t *testing.T) {
 	require.NotNil(t, put.prev)
 }
 
-// TestPBinFoldDeleteWritesNonNilWithRealPrev drives a stored record through the
-// touched-but-gone unfold into foldDelete: the deletion write must carry a
-// zero-length value, and prevData must be the record bytes the row unfolded
-// from — likewise for the root record storeRoot then empties.
+// A deletion write carries a zero-length value and, as prevData, the record
+// bytes the row unfolded from — likewise for the root record storeRoot empties.
 func TestPBinFoldDeleteWritesNonNilWithRealPrev(t *testing.T) {
 	t.Parallel()
 
@@ -109,9 +106,8 @@ func TestPBinFoldDeleteWritesNonNilWithRealPrev(t *testing.T) {
 	require.Equal(t, storedRoot, root.prev)
 }
 
-// TestPBinZeroLengthBranchRoundTripsAsDeletion checks the deletion writes all
-// the way back around: after the engine empties a stored tree, the zero-length
-// records still sitting in the store must read back as no tree at all.
+// After the engine empties a stored tree, the zero-length records still sitting
+// in the store must read back as no tree at all.
 func TestPBinZeroLengthBranchRoundTripsAsDeletion(t *testing.T) {
 	t.Parallel()
 
@@ -139,10 +135,9 @@ func TestPBinZeroLengthBranchRoundTripsAsDeletion(t *testing.T) {
 	require.Equal(t, make([]byte, length.Hash), root)
 }
 
-// pbinRequirePutsMatchStore walks recorded writes in order against what the
-// store held before the run, requiring each prevData to be exactly the value
-// the write replaces — and non-nil, so the domain never falls back to its own
-// read. Returns how many writes replaced an existing record.
+// pbinRequirePutsMatchStore replays the recorded writes against the store,
+// requiring each prevData to be exactly the value that write replaces — and
+// non-nil, so the domain never falls back to its own read.
 func pbinRequirePutsMatchStore(t *testing.T, puts []pbinRecordedPut, store map[string][]byte) (overwrites int) {
 	t.Helper()
 	for _, put := range puts {
@@ -157,9 +152,8 @@ func pbinRequirePutsMatchStore(t *testing.T, puts []pbinRecordedPut, store map[s
 	return overwrites
 }
 
-// TestPBinProcessPutBranchCarriesRealPrev runs a second batch over a stored
-// tree and requires every branch write to carry the previous record it
-// replaces: empty on a fresh store, the stored bytes on a rewrite.
+// Every branch write carries the record it replaces: empty on a fresh store, the
+// stored bytes on a rewrite.
 func TestPBinProcessPutBranchCarriesRealPrev(t *testing.T) {
 	t.Parallel()
 

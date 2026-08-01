@@ -33,23 +33,20 @@ const (
 	pbinLeafTag   = 0x00
 	pbinBranchTag = 0x01
 
-	// pbinHashBufLen holds the longest preimage either node shape produces: the
-	// branch tag, the two-byte prefix bit count, the longest encodable prefix and
-	// both child hashes.
+	// pbinHashBufLen is the longest preimage either shape produces: tag, bit count,
+	// packed prefix, both child hashes.
 	pbinHashBufLen = 1 + 2 + (pbinMaxPathBits+7)/8 + 2*length.Hash
 )
 
 // pbinEmptyTreeHash is the hash of an absent subtree: 32 zero bytes (eip:208).
-// It is not empty.RootHash — that constant is the RLP empty-string MPT root and
-// substituting it here would silently produce a different tree.
+// Not empty.RootHash — the RLP empty-string MPT root would build a different tree.
 var pbinEmptyTreeHash common.Hash
 
 var errPBinCellHash = errors.New("pbin: cell cannot be hashed")
 
-// pbinHashFn is H. EIP-8297 leaves the hash open and names Keccak-256 among the
-// candidates (eip:511-513); the execution-specs reference hashes with BLAKE3.
-// Key derivation hashes too, so a suite is only fully swapped when
-// pbinDigestCache is swapped with it.
+// pbinHashFn is H, which EIP-8297 leaves open (eip:511-513). Tree-key derivation
+// hashes with H too, so a suite is only fully swapped when pbinDigestCache is
+// swapped with it.
 type pbinHashFn func([]byte) common.Hash
 
 // Names for H, as the --experimental.bin-commitment.hash flag spells them.
@@ -59,14 +56,11 @@ const (
 )
 
 // pbinSelectedSum is H for every binary-trie engine this process builds; nil is
-// Keccak-256. Roots are not comparable across a change, so the datadir persists
-// the choice and refuses to reopen under a different one.
+// Keccak-256.
 var pbinSelectedSum pbinHashFn
 
-// SetPBinHashSuite selects H by name. Keccak-256 is the default because the EIP
-// names it first, but the clients sharing a binary-trie testnet follow the
-// execution-specs reference, which hashes BLAKE3 — interoperating means asking
-// for it. Call before the first engine is built.
+// SetPBinHashSuite selects H by name. Call it before the first engine is built:
+// roots already computed under the previous suite do not match.
 func SetPBinHashSuite(name string) error {
 	switch name {
 	case "", PBinHashKeccak:
@@ -79,8 +73,6 @@ func SetPBinHashSuite(name string) error {
 	return nil
 }
 
-// PBinHashSuiteName reports the selected suite, for logging and for the value
-// the datadir persists.
 func PBinHashSuiteName() string {
 	if pbinSelectedSum == nil {
 		return PBinHashKeccak
@@ -88,9 +80,8 @@ func PBinHashSuiteName() string {
 	return PBinHashBlake3
 }
 
-// pbinHasher applies H to node preimages. Every preimage fits its single scratch
-// buffer, so each node costs one hash call and no allocation. Its zero value is
-// ready and hashes with Keccak-256.
+// pbinHasher applies H to node preimages. Its zero value is ready and hashes with
+// Keccak-256.
 type pbinHasher struct {
 	buf [pbinHashBufLen]byte
 	sum pbinHashFn
@@ -103,15 +94,14 @@ func (h *pbinHasher) hash(preimage []byte) common.Hash {
 	return keccak.Sum256(preimage)
 }
 
-// pbinAppendBitPrefix is the spec's encode_bit_prefix (eip:196-201): a two-byte
-// big-endian bit count, then the bits MSB-first zero-padded to a byte boundary.
-// The count is what keeps a 7-bit prefix distinct from an 8-bit one that agrees
+// pbinAppendBitPrefix is the spec's encode_bit_prefix (eip:196-201). The leading
+// bit count is what keeps a 7-bit prefix distinct from an 8-bit one that agrees
 // with it on the pad bit.
 func pbinAppendBitPrefix(dst []byte, p *pbinBitpath) []byte {
 	return p.appendPackedBits(binary.BigEndian.AppendUint16(dst, uint16(p.bitLen)))
 }
 
-// branchHash is H(0x01 || encode_bit_prefix(prefix) || left || right). An absent
+// branchHash is H(0x01 || encode_bit_prefix(prefix) || left || right); an absent
 // child passes pbinEmptyTreeHash rather than being omitted.
 func (h *pbinHasher) branchHash(prefix *pbinBitpath, left, right *common.Hash) common.Hash {
 	buf := pbinAppendBitPrefix(append(h.buf[:0], pbinBranchTag), prefix)
@@ -120,11 +110,8 @@ func (h *pbinHasher) branchHash(prefix *pbinBitpath, left, right *common.Hash) c
 	return h.hash(buf)
 }
 
-// cellHash is the only way a cell becomes a hash. Keeping it single is what
-// stops a second hasher drifting from this one.
-//
-// path is the descent to the cell; a leaf's complete key is path followed by the
-// cell's own prefix, which is also what tells the leaf value apart.
+// cellHash hashes the cell reached by path; a leaf's complete key is path
+// followed by the cell's own prefix.
 func (h *pbinHasher) cellHash(c *pbinCell, path *pbinBitpath) (common.Hash, error) {
 	switch c.kind {
 	case pbinNodeEmpty:
@@ -156,8 +143,8 @@ func (h *pbinHasher) leafCellHash(c *pbinCell, path *pbinBitpath) (common.Hash, 
 
 	buf := full.appendPackedBits(append(h.buf[:0], pbinLeafTag))
 	key := buf[1:]
-	// The length is fixed per zone, which is what keeps keys prefix-free: a key of
-	// another zone's length is not a key at all (eip:284-288).
+	// Key length is fixed per zone, which is what keeps the key space prefix-free
+	// (eip:284-288).
 	if want, known := pbinZoneKeyLength(key[0]); !known || len(key) != want {
 		return common.Hash{}, fmt.Errorf("%w: leaf key %x is no key of zone %#x", errPBinCellHash, key, key[0])
 	}
@@ -168,10 +155,6 @@ func (h *pbinHasher) leafCellHash(c *pbinCell, path *pbinBitpath) (common.Hash, 
 	return h.hash(append(buf, value[:]...)), nil
 }
 
-// pbinLeafValue picks the encoding the key's own position names: the zone byte
-// separates storage and code from the account header, and within the header the
-// sub-index selects between BASIC_DATA, CODE_HASH and a header-resident slot.
-// Every other position holds a value the record already carries whole.
 func pbinLeafValue(key []byte, u *Update) ([pbinValueLength]byte, error) {
 	switch key[0] {
 	case pbinStorageZone:
@@ -190,9 +173,9 @@ func pbinLeafValue(key []byte, u *Update) ([pbinValueLength]byte, error) {
 	case subIndex >= pbinHeaderStorageOffset && subIndex < pbinCodeOffset:
 		return pbinEncodeStorageValue(u.Storage[:u.StorageLen]), nil
 	default:
-		// Code chunks from CODE_OFFSET on, and the sub-indices below
-		// HEADER_STORAGE_OFFSET the embedding reserves (eip:255-257): neither is
-		// packed from state, so the value has to be a full 32 bytes already.
+		// Code chunks from CODE_OFFSET on, plus the sub-indices the embedding
+		// reserves below HEADER_STORAGE_OFFSET (eip:255-257): neither is packed from
+		// state, so the value must already be 32 whole bytes.
 		return pbinRecordLeafValue(u)
 	}
 }

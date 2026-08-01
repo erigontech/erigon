@@ -28,8 +28,8 @@ import (
 )
 
 // pbinTestKeccak is an independent Keccak-256 (x/crypto, not the fastkeccak the
-// engine uses) so the vectors below are pinned against the spec rather than
-// against the helper under test.
+// engine uses), so the vectors below are pinned against the spec rather than
+// against the code under test.
 func pbinTestKeccak(t *testing.T, parts ...[]byte) []byte {
 	t.Helper()
 	h := sha3.NewLegacyKeccak256()
@@ -71,8 +71,7 @@ func pbinTestConcat(parts ...[]byte) []byte {
 	return out
 }
 
-// TestPBinTreeKeyEIPVectors pins the derivation against the spec's test cases
-// (eip:583-630).
+// Pins the derivation against the spec's test cases (eip:583-630).
 func TestPBinTreeKeyEIPVectors(t *testing.T) {
 	t.Parallel()
 
@@ -106,9 +105,8 @@ func TestPBinTreeKeyEIPVectors(t *testing.T) {
 	})
 }
 
-// TestPBinStorageZoneRouting walks the header/storage-zone boundary and the
-// group boundary, where a mis-route stays internally consistent and so is
-// invisible to a root-equality test (guards H8).
+// Walks the header/storage-zone boundary and the group boundary. A mis-route
+// there stays internally consistent, so a root-equality test cannot see it.
 func TestPBinStorageZoneRouting(t *testing.T) {
 	t.Parallel()
 
@@ -144,8 +142,6 @@ func TestPBinStorageZoneRouting(t *testing.T) {
 	}
 }
 
-// TestPBinStorageZoneKeysAreDistinct guards against a routing bug that maps two
-// slots onto one key, which a root-equality test cannot see either.
 func TestPBinStorageZoneKeysAreDistinct(t *testing.T) {
 	t.Parallel()
 
@@ -160,8 +156,8 @@ func TestPBinStorageZoneKeysAreDistinct(t *testing.T) {
 	}
 }
 
-// TestPBinHighSlotRouting covers slot numbers that do not fit a uint64, where
-// the tree index is a 31-byte shift of the slot rather than arithmetic.
+// For slots too large for a uint64 the tree index is a 31-byte shift of the
+// slot, not arithmetic on it.
 func TestPBinHighSlotRouting(t *testing.T) {
 	t.Parallel()
 
@@ -181,8 +177,7 @@ func TestPBinHighSlotRouting(t *testing.T) {
 	require.Equal(t, pbinTestConcat([]byte{0xFF}, stem, suffix, []byte{slot[31]}), got)
 }
 
-// TestPBinAddr32Padding pins that the stem digest covers the 32-byte address,
-// not the 20-byte one (guards H8).
+// The stem digest covers the 32-byte address, not the 20-byte one.
 func TestPBinAddr32Padding(t *testing.T) {
 	t.Parallel()
 
@@ -196,8 +191,7 @@ func TestPBinAddr32Padding(t *testing.T) {
 	require.NotEqual(t, pbinTestKeccak(t, addr), key[1:33])
 }
 
-// TestPBinKeyHasherPrimaryLeaf pins the keyHasher contract: the primary leaf's
-// tree key, sized 34 or 66 by zone.
+// The keyHasher contract: the primary leaf's tree key, sized 34 or 66 by zone.
 func TestPBinKeyHasherPrimaryLeaf(t *testing.T) {
 	t.Parallel()
 
@@ -221,9 +215,8 @@ func TestPBinKeyHasherRejectsMalformedPlainKey(t *testing.T) {
 	require.Panics(t, func() { hasher(nil) })
 }
 
-// TestPBinKeyHasherSharedAcrossBuffers hashes through two Updates buffers that
-// share one hasher value (Updates.NewEmpty copies it) from two goroutines. Run
-// under -race this fails if the hasher keeps a cache the copies can both write.
+// Two Updates buffers share one hasher value, since Updates.NewEmpty copies it.
+// Under -race this fails if the hasher keeps a cache both copies can write.
 func TestPBinKeyHasherSharedAcrossBuffers(t *testing.T) {
 	t.Parallel()
 
@@ -254,9 +247,8 @@ func TestPBinKeyHasherSharedAcrossBuffers(t *testing.T) {
 	wg.Wait()
 }
 
-// TestPBinDigestCacheMatchesFreshDerivation drives one hasher across interleaved
-// addresses and slot groups: a cache entry kept past its address or tree index
-// would silently place a leaf under the wrong stem.
+// Interleaves addresses and slot groups through one hasher: a cache entry kept
+// past its address or tree index would place a leaf under the wrong stem.
 func TestPBinDigestCacheMatchesFreshDerivation(t *testing.T) {
 	t.Parallel()
 

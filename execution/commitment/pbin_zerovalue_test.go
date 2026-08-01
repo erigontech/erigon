@@ -27,16 +27,11 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// Zero-vs-absent. The domain has one encoding for both — an absent read — while
-// EIP-8297 has no removal and commits a zero value as a present leaf (the
-// reference's zero_value_present vector). The engine holds the presence bit the
-// domain lacks: a zeroed slot under a live leaf keeps the leaf and commits 32
-// zero bytes, an absent key with no leaf contributes nothing, and an absent
-// account over a live leaf is a removal the EIP does not describe (Q1) and stays
-// refused.
-//
-// The expected roots come from the oracle, which the reference's own root
-// vectors — zero_value_present among them — pin in pbin_specroots_test.go.
+// Zero-vs-absent. The domain encodes both as an absent read, while EIP-8297 has
+// no removal and commits a zero value as a present leaf. The engine supplies the
+// presence bit the domain lacks: a zeroed slot under a live leaf keeps the leaf
+// and commits 32 zero bytes, an absent key with no leaf of its own contributes
+// nothing, and an absent account over a live leaf stays refused.
 
 // TestPBinStorageDeleteKeepsLeafAsPresentZero covers the update-stream side: the
 // zeroed slot is touched, so its leaf is in the grid when the absent read lands.
@@ -111,9 +106,6 @@ func TestPBinStorageDeleteOnUntouchedSiblingIsPresentZero(t *testing.T) {
 	require.Equal(t, want.oracleRoot(t), root)
 }
 
-// TestPBinLoadCellStateAbsentRead pins the two arms apart at the site they share:
-// an absent storage read fills the leaf with 32 zero bytes, an absent account
-// read refuses.
 func TestPBinLoadCellStateAbsentRead(t *testing.T) {
 	t.Parallel()
 
@@ -146,9 +138,10 @@ func TestPBinLoadCellStateAbsentRead(t *testing.T) {
 	})
 }
 
-// TestPBinAccountRemovalStillRefused holds Q1 open: turning an absent account
-// into a zero-valued BASIC_DATA leaf is consistent with eip:345-347 but is not
-// verified against the reference, and it would silently change the root.
+// TestPBinAccountRemovalStillRefused keeps the refusal in place: turning an
+// absent account into a zero-valued BASIC_DATA leaf would be consistent with
+// eip:345-347, but it is not verified against the reference and would silently
+// change the root.
 func TestPBinAccountRemovalStillRefused(t *testing.T) {
 	t.Parallel()
 
@@ -166,11 +159,11 @@ func TestPBinAccountRemovalStillRefused(t *testing.T) {
 	require.ErrorIs(t, err, errPBinDeleteUnsupported)
 }
 
-// TestPBinFoldDeleteUnreachableFromProcess guards H12: foldDelete collapses
-// nodes the reference leaves in place, and nothing on the Process path may
-// reach it. Its only observable is the zero-length record it writes at a
-// bit-path key — storeRoot is the sole other zero-length write, and only at the
-// root key — so a run that zeroes every leaf it stored must produce none.
+// TestPBinFoldDeleteUnreachableFromProcess pins that foldDelete stays off the
+// Process path, since it collapses nodes the reference leaves in place. Its only
+// observable is the zero-length record it writes at a bit-path key — storeRoot
+// makes the sole other zero-length write, and only at the root key — so a run
+// that zeroes every leaf it stored must produce none.
 func TestPBinFoldDeleteUnreachableFromProcess(t *testing.T) {
 	t.Parallel()
 
@@ -191,8 +184,8 @@ func TestPBinFoldDeleteUnreachableFromProcess(t *testing.T) {
 		zeroed.storage(addr, pbinOracleSlot(slot))
 		want.storage(addr, pbinOracleSlot(slot))
 	}
-	// An absent key with no leaf of its own is the case a zero write must not be
-	// confused with: it contributes nothing and leaves no empty row behind.
+	// An absent key with no leaf of its own contributes nothing and leaves no
+	// empty row behind — the case a zero write must not be confused with.
 	zeroed.storage(addr, pbinOracleSlot(1<<20))
 	want.account(pbinOracleAddr(47), 1, 2, common.Hash{0x47})
 

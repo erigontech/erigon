@@ -27,9 +27,8 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 )
 
-// TestPBinChunkifyCodeVectors is the external check on chunk_code (eip:374-397):
-// the reference's own chunkings, hash-independent because chunking is pure byte
-// layout.
+// TestPBinChunkifyCodeVectors checks chunking against the reference's own
+// chunkings of chunk_code (eip:374-397).
 func TestPBinChunkifyCodeVectors(t *testing.T) {
 	t.Parallel()
 	v := pbinLoadSpecVectors(t)
@@ -47,15 +46,13 @@ func TestPBinChunkifyCodeVectors(t *testing.T) {
 	}
 }
 
-// TestPBinChunkifyCodePushdataStraddlesBoundary pins the part of the scan a
-// per-chunk implementation gets wrong: PUSHDATA that begins in one chunk and
-// runs into the next, so the later chunk's byte 0 counts bytes pushed by an
-// opcode it does not contain.
+// TestPBinChunkifyCodePushdataStraddlesBoundary covers PUSHDATA that begins in
+// one chunk and runs into the next: the later chunk's byte 0 counts bytes pushed
+// by an opcode it does not contain, which is what a per-chunk scan gets wrong.
 func TestPBinChunkifyCodePushdataStraddlesBoundary(t *testing.T) {
 	t.Parallel()
 
-	// PUSH32 at offset 30 is the last byte of chunk 0, so all 32 of its data
-	// bytes land in chunk 1 and 31 of them are still PUSHDATA at chunk 2.
+	// PUSH32 at offset 30 is the last byte of chunk 0, so its data spans chunks 1 and 2.
 	code := append(make([]byte, 30), pbinPush32)
 	code = append(code, bytes.Repeat([]byte{0xEE}, 32)...)
 
@@ -66,9 +63,8 @@ func TestPBinChunkifyCodePushdataStraddlesBoundary(t *testing.T) {
 	require.EqualValues(t, 1, chunks[2][0], "one PUSHDATA byte carries into chunk 2")
 }
 
-// TestPBinChunkifyCode7702Designator covers the shortest code the tree holds:
-// an EIP-7702 designator is 23 bytes, one padded chunk whose first byte is the
-// 0xEF marker rather than PUSHDATA.
+// TestPBinChunkifyCode7702Designator covers the shortest code the tree holds: a
+// 23-byte EIP-7702 designator is one chunk, zero-padded to the full data length.
 func TestPBinChunkifyCode7702Designator(t *testing.T) {
 	t.Parallel()
 
@@ -90,8 +86,8 @@ func TestPBinChunkifyCodeEmpty(t *testing.T) {
 }
 
 // TestPBinChunkifyCodeChunkCount pins the sizing the header/overflow split rests
-// on: chunks are ceil(len/31), and MaxCodeSize needs more than the 128 the
-// account header holds.
+// on: chunks are ceil(len/31), and MaxCodeSize needs more of them than the 128
+// the account header holds.
 func TestPBinChunkifyCodeChunkCount(t *testing.T) {
 	t.Parallel()
 
@@ -108,9 +104,8 @@ func TestPBinChunkifyCodeChunkCount(t *testing.T) {
 }
 
 // pbinTestCode is deterministic filler of a given length. Every byte is below
-// PUSH1, so no chunk carries PUSHDATA and a root mismatch cannot be blamed on
-// the scan the vector tests already pin. The fill depends on the length, so two
-// different lengths never share a chunk.
+// PUSH1, so no chunk carries PUSHDATA, and the fill depends on the length, so
+// two different lengths never share a chunk.
 func pbinTestCode(n int) []byte {
 	code := make([]byte, n)
 	for i := range code {
@@ -119,9 +114,8 @@ func pbinTestCode(n int) []byte {
 	return code
 }
 
-// TestPBinEngineEmitsHeaderCodeChunks is the first half of code in the tree: a
-// code-bearing account's chunks have to reach the leaf set the reference tree
-// builds for it, at the header sub-indices CODE_OFFSET.. .
+// TestPBinEngineEmitsHeaderCodeChunks covers the first half of code in the tree:
+// chunks reaching the reference leaf set at header sub-indices CODE_OFFSET and up.
 func TestPBinEngineEmitsHeaderCodeChunks(t *testing.T) {
 	t.Parallel()
 
@@ -136,10 +130,10 @@ func TestPBinEngineEmitsHeaderCodeChunks(t *testing.T) {
 	require.Equal(t, corpus.oracleRoot(t), root)
 }
 
-// TestPBinCodeChunksFollowHeaderSlots guards H5: chunks sit at the top
-// sub-indices of the stem, so emitting them at the account's own visit descends
-// past a header storage slot the stream has not delivered yet, and the fold that
-// comes back for it rewrites a record it had already written.
+// TestPBinCodeChunksFollowHeaderSlots pins the emit order inside a stem: chunks
+// sit at the top sub-indices, so emitting them at the account's own visit
+// descends past header storage slots the stream has not delivered yet, and the
+// fold that comes back for them rewrites a record it already wrote.
 func TestPBinCodeChunksFollowHeaderSlots(t *testing.T) {
 	t.Parallel()
 
@@ -154,9 +148,9 @@ func TestPBinCodeChunksFollowHeaderSlots(t *testing.T) {
 	require.Equal(t, corpus.oracleRoot(t), root)
 }
 
-// TestPBinVisitOrderIsMonotonic is the structural assert behind H5: the grid only
-// walks forward, so a visit that revisits a key already left behind is a bug in
-// the caller's ordering, not something the fold can absorb.
+// TestPBinVisitOrderIsMonotonic pins the rule behind the emit order: the grid
+// only walks forward, so revisiting a key already left behind is a bug in the
+// caller's ordering, not something the fold can absorb.
 func TestPBinVisitOrderIsMonotonic(t *testing.T) {
 	t.Parallel()
 
@@ -170,14 +164,13 @@ func TestPBinVisitOrderIsMonotonic(t *testing.T) {
 }
 
 // TestPBinCodeChunksSurviveAsRecordSiblings pins that a chunk leaf carries its
-// own value: an untouched chunk sibling of a touched one has to hash from the
-// branch record, and no state domain holds a chunk.
+// own value: no state domain holds a chunk, so an untouched chunk sibling of a
+// touched one has to hash from the branch record.
 func TestPBinCodeChunksSurviveAsRecordSiblings(t *testing.T) {
 	t.Parallel()
 
 	addr := pbinOracleAddr(14)
-	// Two chunks, then a shorter code touching only chunk 0: chunk 1 stays behind
-	// as a direct leaf sibling, which is the one shape that must reload its value.
+	// 62 bytes is two chunks; the redeploy to 31 touches only chunk 0.
 	deploy := new(pbinTestCorpus).accountWithCodeBytes(addr, 1, 10, pbinTestCode(62))
 	stale := pbinChunkifyCode(pbinTestCode(62))[1]
 	redeploy := new(pbinTestCorpus).accountWithCodeBytes(addr, 2, 10, pbinTestCode(31))
@@ -192,11 +185,10 @@ func TestPBinCodeChunksSurviveAsRecordSiblings(t *testing.T) {
 	require.Equal(t, wantRoot[:], root, "the untouched chunk keeps the value the record holds")
 }
 
-// TestPBinShorteningRedeployKeepsStaleChunks records the answer to Q2 as a test
-// (guards H8). EIP-8297 has no removal, so a redeploy to shorter code leaves the
-// chunks above the new length in place: a forward run commits them, a recompute
-// from the state domains cannot know they exist. The two roots are each
-// internally consistent and different, which is what makes recompute-from-domains
+// TestPBinShorteningRedeployKeepsStaleChunks pins the residue a shorter redeploy
+// leaves: EIP-8297 has no removal, so a forward run commits the chunks above the
+// new length while a recompute from the state domains cannot know they exist.
+// Both roots are internally consistent, which is what makes recompute-from-domains
 // invalid as an oracle for a code-bearing account.
 func TestPBinShorteningRedeployKeepsStaleChunks(t *testing.T) {
 	t.Parallel()
@@ -219,7 +211,6 @@ func TestPBinShorteningRedeployKeepsStaleChunks(t *testing.T) {
 			require.NotEqual(t, rebuilt, forward,
 				"a rebuild from state cannot reproduce the stale chunks the forward run kept")
 
-			// The residue is exactly the chunks the old code had and the new one does not.
 			want := redeploy.entries(t)
 			oldChunks := pbinChunkifyCode(long)
 			for i := len(pbinChunkifyCode(short)); i < len(oldChunks); i++ {
@@ -231,10 +222,9 @@ func TestPBinShorteningRedeployKeepsStaleChunks(t *testing.T) {
 	}
 }
 
-// TestPBinClearedCodeKeepsChunks covers the other half of H8: clearing an
-// account's code — an EIP-7702 delegation reset is the common case — is a
-// shortening redeploy down to zero chunks. The header leaves follow the account,
-// the chunks stay behind, and nothing in the state records that they exist.
+// TestPBinClearedCodeKeepsChunks takes the same residue down to zero chunks:
+// clearing an account's code, as an EIP-7702 delegation reset does, moves the
+// header leaves and leaves every chunk behind.
 func TestPBinClearedCodeKeepsChunks(t *testing.T) {
 	t.Parallel()
 
@@ -257,9 +247,8 @@ func TestPBinClearedCodeKeepsChunks(t *testing.T) {
 }
 
 // TestPBinGrowingRedeployReplacesChunks is the case a rebuild does reproduce:
-// code that only grows overwrites every chunk it had and adds the rest, so the
-// forward tree and a rebuild from state agree. Both a redeploy inside the
-// account header and one spilling into the code zone.
+// growing code overwrites every chunk it had and adds the rest, leaving no
+// residue for the forward tree and a rebuild from state to disagree over.
 func TestPBinGrowingRedeployReplacesChunks(t *testing.T) {
 	t.Parallel()
 
@@ -284,9 +273,6 @@ func TestPBinGrowingRedeployReplacesChunks(t *testing.T) {
 	}
 }
 
-// TestPBinCodelessContextRefusesCodeBearingAccount pins that the code read is
-// not optional: a context that cannot serve code cannot commit an account whose
-// chunks the tree needs.
 func TestPBinCodelessContextRefusesCodeBearingAccount(t *testing.T) {
 	t.Parallel()
 
@@ -302,12 +288,13 @@ func TestPBinCodelessContextRefusesCodeBearingAccount(t *testing.T) {
 	require.ErrorIs(t, err, ErrPBinUnsupported)
 }
 
-// pbinCodelessContext is a PatriciaContext with no code read, which embedding the
-// interface rather than the concrete state is what produces.
+// pbinCodelessContext hides the concrete state's code read: code is served
+// through an optional interface, so embedding PatriciaContext rather than the
+// state makes that assertion fail.
 type pbinCodelessContext struct{ PatriciaContext }
 
 // TestPBinCodeSizeMustMatchTheCodeBehindIt pins that the two reads agree: the
-// BASIC_DATA size and the chunks come from separate reads, and a size that
+// BASIC_DATA size and the chunks come from separate reads, so a size that
 // disagrees with the code would commit a leaf set no reference tree holds.
 func TestPBinCodeSizeMustMatchTheCodeBehindIt(t *testing.T) {
 	t.Parallel()
@@ -324,9 +311,9 @@ func TestPBinCodeSizeMustMatchTheCodeBehindIt(t *testing.T) {
 	require.ErrorContains(t, err, "the code domain holds")
 }
 
-// TestPBinZoneKeyLengthIsExplicit pins that the code zone is recognised rather
-// than passing as an account key because both are 34 bytes, and that the zones
-// the embedding has not allocated are refused.
+// TestPBinZoneKeyLengthIsExplicit pins that the zone byte decides the key
+// length: an account key and a code key are both 34 bytes, so a code key would
+// otherwise pass as an account one. Unallocated zones are refused.
 func TestPBinZoneKeyLengthIsExplicit(t *testing.T) {
 	t.Parallel()
 
@@ -349,9 +336,9 @@ func TestPBinZoneKeyLengthIsExplicit(t *testing.T) {
 	require.Len(t, pbinTreeKey(pbinCodeZone, make([]byte, 32), 0), pbinCodeKeyLength)
 }
 
-// TestPBinLeafValueRoutesByZone pins the second place a code key used to pass by
-// accident: the leaf value is picked by the key's zone, so a code-zone key must
-// not be read as an account header sub-index.
+// TestPBinLeafValueRoutesByZone covers the same rule at the value encoder: the
+// leaf value is picked by the key's zone, so a code-zone key must not be read as
+// an account header sub-index.
 func TestPBinLeafValueRoutesByZone(t *testing.T) {
 	t.Parallel()
 
@@ -364,8 +351,8 @@ func TestPBinLeafValueRoutesByZone(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, chunk[:], got[:])
 
-	// The same is true inside the account zone: sub-indices at CODE_OFFSET and
-	// above are chunks, not storage.
+	// Inside the account zone, sub-indices at CODE_OFFSET and above are chunks,
+	// not storage.
 	addr := pbinOracleAddr(19)
 	got, err = pbinLeafValue(pbinTreeKeyCodeChunk(addr, 0), &u)
 	require.NoError(t, err)
@@ -378,9 +365,8 @@ func TestPBinLeafValueRoutesByZone(t *testing.T) {
 	require.ErrorIs(t, err, errPBinCellHash)
 }
 
-// TestPBinLeafCellHashChecksZoneLength pins the third site: a leaf's key length
-// has to match its own zone, so a 34-byte storage key or a 66-byte code key is
-// rejected instead of hashing.
+// TestPBinLeafCellHashChecksZoneLength covers the same rule at the leaf hash: a
+// 34-byte storage key or a 66-byte code key is rejected instead of hashed.
 func TestPBinLeafCellHashChecksZoneLength(t *testing.T) {
 	t.Parallel()
 

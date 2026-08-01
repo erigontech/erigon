@@ -26,9 +26,9 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// The expectations here are hand-written hex, never the encoder's own output:
-// the Task 4 oracle consumes this same encoder, so a differential root test
-// cannot see a value-encoding bug.
+// The expectations are hand-written hex, never the encoder's own output: the
+// oracle consumes this same encoder, so a differential root test would not see
+// a value-encoding bug.
 func TestPBinEncodeBasicData(t *testing.T) {
 	t.Parallel()
 

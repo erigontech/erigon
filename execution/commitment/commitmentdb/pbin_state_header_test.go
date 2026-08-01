@@ -45,10 +45,8 @@ func pbinStateTestCtx(t *testing.T, variant commitment.TrieVariant) *SharedDomai
 	return sdc
 }
 
-// TestPBinCommitmentStateHeaderMatchesHex pins the commitment-state record
-// layout across variants: the 16-byte txNum‖blockNum header is read raw and
-// variant-blind (DecodeTxBlockNums, LatestBlockNumWithCommitment), so the bin
-// variant must produce it byte-identically to hex.
+// DecodeTxBlockNums and LatestBlockNumWithCommitment read the 16-byte
+// txNum‖blockNum header raw and variant-blind.
 func TestPBinCommitmentStateHeaderMatchesHex(t *testing.T) {
 	t.Parallel()
 

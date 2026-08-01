@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
+// Mutates a process-global flag, so no test using it may run in parallel.
 func withBinCommitmentFlag(t *testing.T, on bool) {
 	t.Helper()
 	orig := statecfg.ExperimentalBinCommitment
@@ -34,11 +35,9 @@ func withBinCommitmentFlag(t *testing.T, on bool) {
 	statecfg.ExperimentalBinCommitment = on
 }
 
-// The genesis-style option demotes only the experimental parallel/streaming tries;
-// bin is a persisted datadir property, so demoting it would compute a hex block-0
-// root over a datadir the executor then reads as bin.
+// Bin is a persisted datadir property, so WithoutParallelCommitment demotes only the
+// experimental parallel/streaming tries: demoting bin would give a hex block-0 root.
 func TestPBinWithoutParallelCommitmentKeepsBin(t *testing.T) {
-	// No t.Parallel: mutates process-global statecfg flags.
 	for _, tc := range []struct {
 		name string
 		flag commitment.TrieVariant
@@ -67,10 +66,9 @@ func TestPBinWithoutParallelCommitmentKeepsBin(t *testing.T) {
 	}
 }
 
-// Paths that can only read hex branch records must fail loudly on a bin datadir
-// instead of reinterpreting bit-path records as hex ones.
+// WithHexCommitmentOnly callers can only read hex branch records, so a bin datadir
+// must fail loudly instead of having its bit-path records read as hex ones.
 func TestPBinHexOnlyCommitmentRefusesBin(t *testing.T) {
-	// No t.Parallel: mutates process-global statecfg flags.
 	withBinCommitmentFlag(t, true)
 
 	db := newTestDb(t, 16)
@@ -84,7 +82,6 @@ func TestPBinHexOnlyCommitmentRefusesBin(t *testing.T) {
 }
 
 func TestPBinHexOnlyCommitmentDemotesParallel(t *testing.T) {
-	// No t.Parallel: mutates process-global statecfg flags.
 	withBinCommitmentFlag(t, false)
 	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
 

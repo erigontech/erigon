@@ -31,8 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-// The tests below mutate process-wide statecfg flags, so none of them may run
-// in parallel; save/restore keeps the rest of the package unaffected.
+// Mutates process-wide statecfg flags, so no test in this file may run in parallel.
 func pbinWithVariantFlags(t *testing.T, bin, streaming, parallel bool) {
 	t.Helper()
 	origBin := statecfg.ExperimentalBinCommitment
@@ -88,8 +87,7 @@ func TestPBinVariantFlaglessRestartStaysBin(t *testing.T) {
 	_, err := ResolveErigonDBSettings(dirs, log.New(), true)
 	require.NoError(t, err)
 
-	// Flagless restart: the persisted trie_variant wins over the CLI default
-	// and is adopted process-wide.
+	// Flagless restart: the persisted trie_variant wins over the CLI default, process-wide.
 	statecfg.ExperimentalBinCommitment = false
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), true)
 	require.NoError(t, err)
@@ -182,10 +180,9 @@ func TestPBinVariantFreshWithDownloaderPersistsBin(t *testing.T) {
 	require.Equal(t, uint64(config3.DefaultStepSize), written.StepSize)
 }
 
-// A chain with no published snapshot hashes gets an empty preverified.toml
-// committed by the snapshots stage. Without a persisted variant that reads as a
-// legacy datadir at the next resolve, and the bin run is refused on its own
-// fresh datadir.
+// The snapshots stage writes an empty preverified.toml for a chain with no published
+// snapshot hashes. Without a persisted variant that reads as a legacy datadir at the
+// next resolve, and the bin run gets refused on its own fresh datadir.
 func TestPBinVariantSurvivesEmptyPreverifiedFromSnapshotsStage(t *testing.T) {
 	pbinWithVariantFlags(t, true, false, false)
 	dirs := datadir.New(t.TempDir())

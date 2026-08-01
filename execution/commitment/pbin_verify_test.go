@@ -28,12 +28,11 @@ import (
 )
 
 // pbinVerifier rebuilds the tree from the records the engine wrote, reading
-// nothing out of the engine's own cells. The Task 4 oracle answers "is this the
-// right root for these leaves"; this answers the other half — "is what landed in
-// the database the tree that root came from". It walks records top down, resolves
-// every child, and hashes back up with the independent Keccak the tests use.
+// nothing out of the engine's own cells. Where the oracle answers "is this the
+// right root for these leaves", this answers "is what landed in the database the
+// tree that root came from".
 //
-// It reports errors rather than failing the test directly, so a test can also
+// It returns errors rather than failing the test directly, so a test can also
 // pin that a corrupted record is caught.
 type pbinVerifier struct {
 	t  *testing.T
@@ -45,8 +44,8 @@ var (
 	errPBinVerifyPosition  = errors.New("pbin verify: leaf sits where its key does not")
 )
 
-// recordPaths decodes the key of every live node record. A record put with no
-// data is a deletion and names no node; the root cell record is keyed outside the
+// recordPaths decodes the key of every live node record. A record with no data
+// is a deletion and names no node; the root cell record is keyed outside the
 // bit-path space and is read through rootCell.
 func (v *pbinVerifier) recordPaths() ([]pbinBitpath, error) {
 	paths := make([]pbinBitpath, 0, len(v.ms.cm))
@@ -93,8 +92,6 @@ func (v *pbinVerifier) rootPath() (pbinBitpath, error) {
 	return roots[0], nil
 }
 
-// rootCell decodes the record holding the root cell, the entry point the rest of
-// the record set hangs off.
 func (v *pbinVerifier) rootCell() (pbinCell, error) {
 	var c pbinCell
 	data, _, err := v.ms.Branch(pbinRootKey)
@@ -114,8 +111,8 @@ func (v *pbinVerifier) rootCell() (pbinCell, error) {
 	return c, nil
 }
 
-// recomputeRoot hashes the whole record set bottom up, entering at the stored
-// root cell rather than guessing which record has no ancestor.
+// recomputeRoot hashes the record set bottom up, entering at the stored root
+// cell rather than guessing which record has no ancestor.
 func (v *pbinVerifier) recomputeRoot() ([]byte, error) {
 	c, err := v.rootCell()
 	if err != nil {
@@ -218,7 +215,7 @@ func (v *pbinVerifier) recordAt(nodePath *pbinBitpath) ([2]pbinCell, error) {
 // checkPlainKeys asserts every stored leaf sits where its own key derivation puts
 // it: the record's path, the child bit and the cell's prefix must spell exactly
 // treeKey(plainKey). A slot routed into the wrong zone still builds a tree that
-// hashes consistently, so position against derivation is what catches it (H8).
+// hashes consistently, so position against derivation is what catches it.
 func (v *pbinVerifier) checkPlainKeys() (int, error) {
 	root, err := v.rootCell()
 	if err != nil {
@@ -293,7 +290,7 @@ func pbinVerifyDerivedKey(c *pbinCell, key []byte) ([]byte, error) {
 		// A record-resident leaf holds no plain key to re-derive from, so what is
 		// checked is where it may sit: only a code chunk carries its own value, and
 		// a chunk is either at the top of an account stem or in the code zone —
-		// never in the storage zone (guards H7).
+		// never in the storage zone.
 		switch {
 		case len(key) == pbinCodeKeyLength && key[0] == pbinCodeZone:
 		case len(key) == pbinAccountKeyLength && key[0] == pbinAccountZone && key[pbinAccountKeyLength-1] >= pbinCodeOffset:
@@ -322,9 +319,8 @@ func pbinVerifyPackBits(bits []byte) []byte {
 	return out
 }
 
-// pbinTestVerifyRecords is the check every multi-leaf corpus gets: the records
-// rebuild the root the engine returned, and every leaf they hold sits at its own
-// key.
+// pbinTestVerifyRecords requires the records to rebuild the root the engine
+// returned, with every leaf they hold sitting at its own key.
 func pbinTestVerifyRecords(t *testing.T, ms *MockState, root []byte, wantLeaves int) {
 	t.Helper()
 	v := &pbinVerifier{t: t, ms: ms}
@@ -338,8 +334,8 @@ func pbinTestVerifyRecords(t *testing.T, ms *MockState, root []byte, wantLeaves 
 	require.Equal(t, wantLeaves, leaves)
 }
 
-// TestPBinVerifyRootRecordIsUnique pins the shape the recompute relies on: one
-// record has no ancestor, and its path is the root node's prefix.
+// The recompute relies on this shape: one record has no ancestor, and its path
+// is the root node's prefix.
 func TestPBinVerifyRootRecordIsUnique(t *testing.T) {
 	t.Parallel()
 
@@ -357,9 +353,8 @@ func TestPBinVerifyRootRecordIsUnique(t *testing.T) {
 	require.Equal(t, pph.grid.root.prefix, root, "the root record's path is the root node's prefix")
 }
 
-// TestPBinVerifySingleLeafRoot checks the one shape that writes no node record:
-// a root that is a bare leaf is still recoverable, because the root cell record
-// carries it.
+// A bare-leaf root writes no node record and is still recoverable, because the
+// root cell record carries it.
 func TestPBinVerifySingleLeafRoot(t *testing.T) {
 	t.Parallel()
 
@@ -376,8 +371,6 @@ func TestPBinVerifySingleLeafRoot(t *testing.T) {
 	pbinTestVerifyRecords(t, ms, root, 1)
 }
 
-// TestPBinVerifyEmptyStateHasNoRecords checks the recompute refuses to invent a
-// tree out of a state nothing was ever written to.
 func TestPBinVerifyEmptyStateHasNoRecords(t *testing.T) {
 	t.Parallel()
 
@@ -386,9 +379,9 @@ func TestPBinVerifyEmptyStateHasNoRecords(t *testing.T) {
 	require.ErrorIs(t, err, errPBinVerifyNoRecords)
 }
 
-// TestPBinVerifyCatchesSwappedCells gives both checks teeth: swapping a record's
-// two children moves each leaf to a position its key does not spell, which the
-// plain-key check must reject and the recompute must no longer reproduce.
+// Swapping a record's two children moves each leaf to a position its key does
+// not spell, which the plain-key check must reject and the recompute must no
+// longer reproduce. Without it both checks could be vacuous.
 func TestPBinVerifyCatchesSwappedCells(t *testing.T) {
 	t.Parallel()
 

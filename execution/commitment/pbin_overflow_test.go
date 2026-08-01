@@ -26,10 +26,9 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// pbinTestSpecCodeChunkKey is get_tree_key_for_code_chunk (eip:355-367)
-// transcribed from the spec's Python, hashing with the independent Keccak the
-// tests use. It is the ground truth the cache-backed derivation is diffed
-// against.
+// pbinTestSpecCodeChunkKey transcribes get_tree_key_for_code_chunk
+// (eip:355-367) from the spec's Python, hashing with the independent Keccak the
+// tests use. It is the ground truth for the cache-backed derivation.
 func pbinTestSpecCodeChunkKey(t *testing.T, addr []byte, codeHash common.Hash, chunkID int) []byte {
 	t.Helper()
 	if chunkID < pbinStemSubtreeWidth-pbinCodeOffset {
@@ -43,9 +42,9 @@ func pbinTestSpecCodeChunkKey(t *testing.T, addr []byte, codeHash common.Hash, c
 	return key
 }
 
-// TestPBinCodeOverflowKeyMatchesSpec pins the second half of the code
-// embedding: past the account header a chunk is content-addressed by code hash,
-// with the overflow index split into a 32-byte tree index and a sub-index.
+// TestPBinCodeOverflowKeyMatchesSpec pins the second half of the code embedding:
+// past the account header a chunk is content-addressed by code hash, with the
+// overflow index split into a 32-byte tree index and a sub-index.
 func TestPBinCodeOverflowKeyMatchesSpec(t *testing.T) {
 	t.Parallel()
 
@@ -72,11 +71,10 @@ func TestPBinCodeOverflowKeyMatchesSpec(t *testing.T) {
 		"a header chunk has no code-zone key")
 }
 
-// TestPBinCodeKeyNeverRoutesToTheStorageZone guards H7. An overflow key is
-// derived from code_hash ‖ tree_index, a 64-byte preimage that is not a plain
-// key at all: the stream's key hasher only ever sees the two plain-key shapes
-// and refuses anything else, so no length can carry a code key into the storage
-// zone.
+// TestPBinCodeKeyNeverRoutesToTheStorageZone pins that a code key cannot reach
+// the storage zone. An overflow key derives from code_hash ‖ tree_index, a
+// 64-byte preimage that is not a plain key at all, and the stream's key hasher
+// accepts only the two plain-key shapes.
 func TestPBinCodeKeyNeverRoutesToTheStorageZone(t *testing.T) {
 	t.Parallel()
 
@@ -98,10 +96,9 @@ func TestPBinCodeKeyNeverRoutesToTheStorageZone(t *testing.T) {
 	}
 }
 
-// TestPBinEngineCommitsOverflowCodeChunks is the code zone end to end: a
-// contract whose code outgrows the account header keeps its first 128 chunks on
-// the account stem and puts the rest in the code zone, and the whole leaf set
-// has to match the reference tree.
+// TestPBinEngineCommitsOverflowCodeChunks is the code zone end to end: code
+// outgrowing the account header keeps its first 128 chunks on the account stem
+// and puts the rest in the code zone.
 func TestPBinEngineCommitsOverflowCodeChunks(t *testing.T) {
 	t.Parallel()
 
@@ -132,8 +129,7 @@ func TestPBinEngineCommitsOverflowCodeChunks(t *testing.T) {
 
 // TestPBinOverflowChunksAreSharedByIdenticalCode pins the point of
 // content-addressing (eip:352-354): two accounts running the same bytecode name
-// the same code-zone leaves, so the zone holds one copy however many accounts
-// reach it.
+// the same code-zone leaves, so the zone holds one copy of them.
 func TestPBinOverflowChunksAreSharedByIdenticalCode(t *testing.T) {
 	t.Parallel()
 
@@ -161,9 +157,7 @@ func TestPBinOverflowChunksAreSharedByIdenticalCode(t *testing.T) {
 // TestPBinOverflowChunksFollowEveryAccountZoneKey pins where the code-zone block
 // sits in the visit order: the zone byte puts it after every account-header key
 // and before every storage-zone one, so the chunks of an account visited early
-// have to wait for the last account of the run. The grid only walks forward, so
-// a block emitted at the wrong point fails loudly rather than rewriting a folded
-// row.
+// have to wait for the last account of the run.
 func TestPBinOverflowChunksFollowEveryAccountZoneKey(t *testing.T) {
 	t.Parallel()
 

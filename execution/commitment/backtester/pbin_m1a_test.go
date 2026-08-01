@@ -15,10 +15,9 @@
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // These tests drive the bin commitment trie over a real MDBX datadir with no
-// consensus layer, so no header validates the roots from outside. The only
-// cross-check available is determinism: a forward run and a rebuild that has only
-// the account and storage domains to work from must agree. A green run therefore
-// says the engine is self-consistent, not that it is correct.
+// external oracle for the roots. The cross-check is determinism: a forward run
+// and a rebuild that has only the account and storage domains to work from must
+// agree.
 package backtester_test
 
 import (
@@ -54,8 +53,8 @@ const (
 	pbinM1ASlots    = 4
 )
 
-// pbinM1ABinVariant makes PickTrieVariant() resolve to the bin trie. The flag is
-// process-wide, so these tests never run in parallel.
+// Makes PickTrieVariant() resolve to the bin trie. The flag is process-wide, so
+// these tests never run in parallel.
 func pbinM1ABinVariant(t *testing.T) {
 	t.Helper()
 	orig := statecfg.ExperimentalBinCommitment
@@ -68,8 +67,7 @@ func pbinM1ANewAgg(t *testing.T, rawDB kv.RwDB, dirs datadir.Dirs, stepSize uint
 	agg := state.NewTest(dirs).StepSize(stepSize).Logger(log.New()).MustOpen(t.Context(), rawDB)
 	t.Cleanup(agg.Close)
 	// Referenced branches rewrite bytes at hex cell offsets during merge. Production
-	// refuses the combination when resolving settings, which a test aggregator built
-	// straight from NewTest does not go through.
+	// refuses that combination when resolving settings; NewTest bypasses it.
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	require.NoError(t, agg.OpenFolder())
 	return agg
@@ -89,8 +87,8 @@ func pbinM1ANewDatadir(t *testing.T, stepSize uint64) (kv.TemporalRwDB, *state.A
 	return db, agg, dirs
 }
 
-// pbinM1AReopen closes the aggregator and reopens it over the same folder — the
-// file-visibility half of a node restart.
+// Reopens the aggregator over the same folder — the file-visibility half of a
+// node restart.
 func pbinM1AReopen(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, dirs datadir.Dirs, stepSize uint64) (kv.TemporalRwDB, *state.Aggregator) {
 	t.Helper()
 	agg.Close()
@@ -116,8 +114,8 @@ func pbinM1ASlotKey(addr []byte, j int) []byte {
 	return k
 }
 
-// pbinM1ABinSharedDomains opens a SharedDomains and pins that it really runs the
-// bin trie — a hex fallback would make every assertion below vacuous.
+// Pins that the bin trie is really in play — a hex fallback would make every
+// assertion below vacuous.
 func pbinM1ABinSharedDomains(t *testing.T, tx kv.TemporalTx) *execctx.SharedDomains {
 	t.Helper()
 	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
@@ -126,9 +124,9 @@ func pbinM1ABinSharedDomains(t *testing.T, tx kv.TemporalTx) *execctx.SharedDoma
 	return sd
 }
 
-// pbinM1AForwardRun writes accounts and storage for txNums [fromTx, toTx), saving
-// the commitment state at every step boundary. It returns the root at each of those
-// boundaries keyed by the boundary txNum, plus the last root.
+// Writes accounts and storage for txNums [fromTx, toTx), saving the commitment
+// state at every step boundary. Returns the root at each boundary keyed by the
+// boundary txNum, plus the last root.
 func pbinM1AForwardRun(t *testing.T, db kv.TemporalRwDB, stepSize, fromTx, toTx uint64) (map[uint64][]byte, []byte) {
 	t.Helper()
 	rwTx, err := db.BeginTemporalRw(t.Context())
@@ -172,8 +170,8 @@ func pbinM1AForwardRun(t *testing.T, db kv.TemporalRwDB, stepSize, fromTx, toTx 
 	return roots, last
 }
 
-// pbinM1ARecomputeRoot re-folds the whole tree from the account and storage
-// domains: every leaf is touched, so no leaf value comes from a branch record.
+// Re-folds the whole tree with every leaf touched, so no leaf value comes from
+// a branch record.
 func pbinM1ARecomputeRoot(t *testing.T, db kv.TemporalRwDB) []byte {
 	t.Helper()
 	rwTx, err := db.BeginTemporalRw(t.Context())
@@ -198,8 +196,8 @@ func pbinM1ARecomputeRoot(t *testing.T, db kv.TemporalRwDB) []byte {
 	return root
 }
 
-// pbinM1ARestoredRoot returns the root a freshly opened SharedDomains restores
-// from the saved commitment state, without folding anything.
+// The root a freshly opened SharedDomains restores from the saved commitment
+// state, without folding anything.
 func pbinM1ARestoredRoot(t *testing.T, db kv.TemporalRwDB) []byte {
 	t.Helper()
 	tx, err := db.BeginTemporalRw(t.Context())
@@ -213,9 +211,9 @@ func pbinM1ARestoredRoot(t *testing.T, db kv.TemporalRwDB) []byte {
 	return root
 }
 
-// pbinM1ACollatedTxNum returns the first txNum not yet in the account and storage
-// files. Collation always leaves the newest step in the db, so a files-only rebuild
-// reproduces the root as of this boundary, not the last one the forward run computed.
+// The first txNum not yet in the account and storage files. Collation always
+// leaves the newest step in the db, so a files-only rebuild reproduces the root
+// as of this boundary, not the last one the forward run computed.
 func pbinM1ACollatedTxNum(t *testing.T, db kv.TemporalRwDB) uint64 {
 	t.Helper()
 	tx, err := db.BeginTemporalRo(t.Context())
@@ -228,8 +226,6 @@ func pbinM1ACollatedTxNum(t *testing.T, db kv.TemporalRwDB) uint64 {
 	return accTxNum
 }
 
-// pbinM1ABranchRecords reads the latest commitment branch records, skipping the
-// commitment-state record.
 func pbinM1ABranchRecords(t *testing.T, db kv.TemporalRwDB) map[string][]byte {
 	t.Helper()
 	tx, err := db.BeginTemporalRo(t.Context())
@@ -251,8 +247,8 @@ func pbinM1ABranchRecords(t *testing.T, db kv.TemporalRwDB) map[string][]byte {
 	return out
 }
 
-// pbinM1AFileServedRecords counts the branch records that are gone from the db
-// table, so a latest read of them can only come from the collated files.
+// Counts branch records gone from the db table, so a latest read of them can
+// only come from the collated files.
 func pbinM1AFileServedRecords(t *testing.T, db kv.TemporalRwDB, records map[string][]byte) int {
 	t.Helper()
 	tx, err := db.BeginTemporalRo(t.Context())
@@ -270,9 +266,8 @@ func pbinM1AFileServedRecords(t *testing.T, db kv.TemporalRwDB, records map[stri
 	return fromFiles
 }
 
-// pbinM1AWipeCommitment removes every commitment record from the db tables and
-// every commitment file from the snapshot dir, so a rebuild has to derive the tree
-// from the account and storage domains alone.
+// Wipes commitment from the db tables and the snapshot dir, so a rebuild has to
+// derive the tree from the account and storage domains alone.
 func pbinM1AWipeCommitment(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, dirs datadir.Dirs, stepSize uint64) (kv.TemporalRwDB, *state.Aggregator) {
 	t.Helper()
 	rwTx, err := db.BeginRw(t.Context())
@@ -299,7 +294,7 @@ func pbinM1AWipeCommitment(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregat
 		require.NoError(t, dir.RemoveFile(p))
 		base := strings.TrimSuffix(p, ".kv")
 		for _, ext := range []string{".kvi", ".kvei", ".bt"} {
-			_ = dir.RemoveFile(base + ext) // best-effort, may not exist
+			_ = dir.RemoveFile(base + ext) // accessors may not exist
 		}
 	}
 
@@ -309,9 +304,6 @@ func pbinM1AWipeCommitment(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregat
 	return newDB, newAgg
 }
 
-// TestPBinM1AForwardRunMatchesRebuildFromDomains is the M1a gate: over the same
-// state the incremental forward fold and a rebuild that starts from wiped
-// commitment must produce the same root.
 func TestPBinM1AForwardRunMatchesRebuildFromDomains(t *testing.T) {
 	pbinM1ABinVariant(t)
 	txCount := 4 * pbinM1AStepSize
@@ -343,9 +335,8 @@ func TestPBinM1AForwardRunMatchesRebuildFromDomains(t *testing.T) {
 		"the rebuilt commitment records must fold back to the forward root")
 }
 
-// TestPBinM1ARestartResumesToSameRoot restarts between two halves of the same
-// input. The second half touches only its own keys, so the root can only come out
-// right if the saved trie state and the persisted branch records both round-trip.
+// The second half touches only its own keys, so the root can only come out right
+// if the saved trie state and the persisted branch records both round-trip.
 func TestPBinM1ARestartResumesToSameRoot(t *testing.T) {
 	pbinM1ABinVariant(t)
 	half := 2 * pbinM1AStepSize
@@ -365,9 +356,6 @@ func TestPBinM1ARestartResumesToSameRoot(t *testing.T) {
 	require.Equal(t, wantRoot, resumedRoot, "a restart mid-run must resume to the uninterrupted root")
 }
 
-// TestPBinM1ABranchRecordsSurviveCollationAndMerge pins that collation and merge
-// are byte-transparent for bin branch records. The db is pruned after collation, so
-// the post-merge reads come from the files.
 func TestPBinM1ABranchRecordsSurviveCollationAndMerge(t *testing.T) {
 	pbinM1ABinVariant(t)
 	txCount := 4 * pbinM1AStepSize

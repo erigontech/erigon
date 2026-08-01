@@ -26,9 +26,9 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// TestInitializeTrieAndUpdates_BinVariant pins the registration. M0 runs the
-// binary engine in ModeDirect whatever mode the caller asks for: ModeParallel's
-// prefix trie is a hex-nibble structure with no meaning at arity 2.
+// The binary engine runs in ModeDirect whatever mode the caller asks for:
+// ModeParallel's prefix trie is a hex-nibble structure with no meaning at
+// arity 2.
 func TestInitializeTrieAndUpdates_BinVariant(t *testing.T) {
 	t.Parallel()
 
@@ -53,9 +53,9 @@ func TestParseTrieVariantBin(t *testing.T) {
 	require.Equal(t, VariantParallelHexPatricia, ParseTrieVariant("parallel"))
 }
 
-// TestPBinResetReuse checks that a run over a populated state depends only on
-// what the context holds: an engine that dropped its in-memory root, and one
-// that never had it, must both reproduce the root of the run that built it.
+// A run over a populated state depends only on what the context holds: an engine
+// that dropped its in-memory root and one that never had it must both reproduce
+// the root of the run that built it.
 func TestPBinResetReuse(t *testing.T) {
 	t.Parallel()
 
@@ -73,10 +73,10 @@ func TestPBinResetReuse(t *testing.T) {
 	require.Equal(t, want, pbinTestProcess(t, fresh, corpus.plainKeys, corpus.updates), "fresh engine over the same state agrees")
 }
 
-// TestPBinResetReuseTouchingOneKey is the reuse case a re-run of the whole
-// corpus hides: after Reset the engine must find the leaves it is not told about
-// again. A tree confined to one zone has a non-empty root prefix, so its top
-// record is not at the zero-bit key and only the root cell record names it.
+// Re-running the whole corpus hides this case: after Reset the engine must find
+// the leaves it is not told about again. A tree confined to one zone has a
+// non-empty root prefix, so its top record is not at the zero-bit key and only
+// the root cell record names it.
 func TestPBinResetReuseTouchingOneKey(t *testing.T) {
 	t.Parallel()
 
@@ -100,8 +100,8 @@ func TestPBinResetReuseTouchingOneKey(t *testing.T) {
 	require.Equal(t, want, pbinTestProcess(t, fresh, touchOne.plainKeys, touchOne.updates))
 }
 
-// TestPBinResetReuseSingleLeaf covers the shape that writes no node record at
-// all: a one-leaf tree lives entirely in the root cell record.
+// A one-leaf tree writes no node record at all: it lives entirely in the root
+// cell record.
 func TestPBinResetReuseSingleLeaf(t *testing.T) {
 	t.Parallel()
 
@@ -123,7 +123,6 @@ func TestPBinResetReuseSingleLeaf(t *testing.T) {
 		"the leaf that was the whole tree must survive a reset")
 }
 
-// TestPBinResetClearsTrieState is the state-level half of the reuse contract:
 // Reset leaves the engine indistinguishable from a new one but keeps the
 // context, which the Trie interface hands over separately.
 func TestPBinResetClearsTrieState(t *testing.T) {
@@ -148,9 +147,8 @@ func TestPBinResetClearsTrieState(t *testing.T) {
 	require.Same(t, ms, pph.ctx)
 }
 
-// TestPBinRootHashAfterResetLoadsStoredRoot pins the zero-update path the domain
-// layer takes: it asks for the root without processing anything, so RootHash has
-// to reach the stored tree rather than report the empty-tree hash.
+// The domain layer asks for the root without processing anything, so RootHash
+// has to reach the stored tree rather than report the empty-tree hash.
 func TestPBinRootHashAfterResetLoadsStoredRoot(t *testing.T) {
 	t.Parallel()
 
@@ -174,7 +172,6 @@ func TestPBinRootHashAfterResetLoadsStoredRoot(t *testing.T) {
 	require.Equal(t, want, empty, "a run with no updates must not shrink the tree to empty")
 }
 
-// TestPBinResetContext swaps the state under a released-and-reused engine.
 func TestPBinResetContext(t *testing.T) {
 	t.Parallel()
 
@@ -189,8 +186,8 @@ func TestPBinResetContext(t *testing.T) {
 	require.Equal(t, corpus.oracleRoot(t), pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates))
 }
 
-// TestPBinReleaseReuse guards the pool: a released engine carries no state into
-// its next life, so the next run over a different context matches a fresh one.
+// A released engine goes back to the pool, so it must carry no state into the
+// next run over a different context.
 func TestPBinReleaseReuse(t *testing.T) {
 	t.Parallel()
 
@@ -206,8 +203,6 @@ func TestPBinReleaseReuse(t *testing.T) {
 	require.Equal(t, corpus.oracleRoot(t), pbinTestProcess(t, reused, corpus.plainKeys, corpus.updates))
 }
 
-// TestPBinSetTraceWriter pins what the engine traces: the two counters the
-// split-rehash decision is waiting on.
 func TestPBinSetTraceWriter(t *testing.T) {
 	t.Parallel()
 

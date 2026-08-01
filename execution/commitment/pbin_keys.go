@@ -44,9 +44,9 @@ const (
 	pbinStorageKeyLength = 66
 )
 
-// pbinZoneKeyLength is the one key length a zone admits, which is what keeps its
-// keys prefix-free (eip:284-288). An unknown zone has no length: the embedding
-// allocates 0x02..0xFE to nothing yet.
+// pbinZoneKeyLength gives the single key length a zone admits, which is what
+// keeps that zone's keys prefix-free (eip:284-288). Zones 0x02..0xFE are
+// unallocated and have no length.
 func pbinZoneKeyLength(zone byte) (int, bool) {
 	switch zone {
 	case pbinAccountZone:
@@ -60,8 +60,7 @@ func pbinZoneKeyLength(zone byte) (int, bool) {
 	}
 }
 
-// pbinAddr32 widens a legacy address to the spec's Address32 by left-padding
-// with zero bytes (eip:291-296).
+// pbinAddr32 widens a legacy address to the spec's Address32 (eip:291-296).
 func pbinAddr32(addr []byte) [32]byte {
 	if len(addr) > 32 {
 		panic(fmt.Sprintf("pbin: address of %d bytes exceeds 32", len(addr)))
@@ -71,9 +70,8 @@ func pbinAddr32(addr []byte) [32]byte {
 	return a32
 }
 
-// pbinTreeKey assembles zone || treePosition || subIndex and asserts the length
-// fixed for that zone. The assert is load-bearing: one length per zone is what
-// keeps keys prefix-free within a zone (eip:283-288).
+// pbinTreeKey assembles zone || treePosition || subIndex. The length assert is
+// what enforces the prefix-free invariant (see pbinZoneKeyLength).
 func pbinTreeKey(zone byte, treePosition []byte, subIndex byte) []byte {
 	key := make([]byte, 0, len(treePosition)+2)
 	key = append(key, zone)
@@ -96,26 +94,26 @@ func pbinTreeKeyAccount(addr []byte, subIndex byte) []byte {
 	return c.accountKey(addr, subIndex)
 }
 
-// pbinTreeKeyStorage returns the key for a storage slot, routing slots below 64
-// into the account header and the rest into the storage zone (eip:415-437).
-// slot is big-endian and at most 32 bytes.
+// pbinTreeKeyStorage returns the key for a storage slot: slots below 64 live in
+// the account header, the rest in the storage zone (eip:415-437). slot is
+// big-endian and at most 32 bytes.
 func pbinTreeKeyStorage(addr, slot []byte) []byte {
 	var c pbinDigestCache
 	return c.storageKey(addr, slot)
 }
 
-// pbinTreeKeyCodeChunk returns the key for a code chunk the account header holds
-// (eip:355-367). Those chunks share the account's own stem; higher ones go
-// through pbinTreeKeyCodeOverflow.
+// pbinTreeKeyCodeChunk returns the key for a code chunk the account header holds,
+// sharing the account's own stem (eip:355-367). Higher chunks go through
+// pbinTreeKeyCodeOverflow.
 func pbinTreeKeyCodeChunk(addr []byte, chunkID int) []byte {
 	var c pbinDigestCache
 	return c.codeChunkKey(addr, chunkID)
 }
 
 // pbinTreeKeyCodeOverflow returns the code-zone key for a chunk past the account
-// header (eip:355-367). Those chunks are content-addressed by code hash, so
-// accounts running the same bytecode name the same leaves and the key cannot be
-// derived from an address at all.
+// header (eip:355-367). These chunks are content-addressed by code hash, so
+// accounts running the same bytecode share the leaves and no address can derive
+// the key.
 func pbinTreeKeyCodeOverflow(codeHash common.Hash, chunkID int) []byte {
 	var c pbinDigestCache
 	return c.codeOverflowKey(codeHash, chunkID)
@@ -123,17 +121,17 @@ func pbinTreeKeyCodeOverflow(codeHash common.Hash, chunkID int) []byte {
 
 // pbinKeyHasher returns a keyHasher deriving the primary leaf's tree key:
 // BASIC_DATA for an account, the slot's own leaf for storage. The CODE_HASH
-// sibling shares the stem and is written by the engine during the same visit,
-// so it needs no key of its own here.
-//
-// The digest cache is borrowed per call rather than captured: Updates.NewEmpty
-// copies the hasher value, so a captured cache would be written by two buffers
-// hashing concurrently. Every hit is validated against the address it was built
-// from, so borrowing another goroutine's cache stays correct.
+// sibling shares the stem and is written by the engine during the same visit, so
+// it needs no key of its own here.
 func pbinKeyHasher() keyHasher { return pbinKeyHasherWith(nil) }
 
 // pbinKeyHasherWith derives keys under sum, nil meaning Keccak-256. Callers swap
 // the hash here and on node hashing together through setHashSuite.
+//
+// The digest cache is pooled rather than captured because Updates.NewEmpty copies
+// the hasher value: a captured cache would be written by two buffers hashing
+// concurrently. Every hit is validated against the address it was built from, so
+// borrowing another goroutine's cache stays correct.
 func pbinKeyHasherWith(sum pbinHashFn) keyHasher {
 	var pool sync.Pool
 	return func(plainKey []byte) []byte {
@@ -147,11 +145,10 @@ func pbinKeyHasherWith(sum pbinHashFn) keyHasher {
 	}
 }
 
-// pbinDigestCache memoizes the two hash-derived key components across a run of
-// keys: key_hash(addr32) per address and key_hash(addr32||tree_index) per
-// 256-slot storage group. Both digests are immutable, so a hit is always
-// correct; changing address invalidates the group entry, which is bound to the
-// address as well as the index (eip:411-414).
+// pbinDigestCache memoizes the two hash-derived key components: key_hash(addr32)
+// per address and key_hash(addr32||tree_index) per 256-slot storage group
+// (eip:411-414). The group entry is bound to the address as well as the index, so
+// a changed address cannot yield a stale hit.
 type pbinDigestCache struct {
 	sum pbinHashFn
 
@@ -212,11 +209,9 @@ func (c *pbinDigestCache) codeChunkKey(addr []byte, chunkID int) []byte {
 	return c.accountKey(addr, byte(pbinCodeOffset+chunkID))
 }
 
-// codeOverflowKey splits the chunk's overflow index into a tree index and a
-// sub-index, hashing code_hash ‖ tree_index into the code-zone stem the chunk
-// sits under. The digest is not memoized: one contract spans at most a handful
-// of tree indexes, and the cache's entries are bound to an address these keys do
-// not have.
+// codeOverflowKey derives the code-zone key of an overflow chunk. The digest is
+// not memoized: one contract spans at most a handful of tree indexes, and the
+// cache's entries are bound to an address these keys do not have.
 func (c *pbinDigestCache) codeOverflowKey(codeHash common.Hash, chunkID int) []byte {
 	if chunkID < pbinHeaderCodeChunks {
 		panic(fmt.Sprintf("pbin: code chunk %d is a header chunk, not a code-zone one", chunkID))

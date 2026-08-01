@@ -35,8 +35,8 @@ func withBinCommitment(t *testing.T, on bool) {
 	statecfg.ExperimentalBinCommitment = on
 }
 
-// The history checks recompute roots with the hex trie, so on a bin datadir they
-// must refuse rather than report a mismatch against correct bin records.
+// The history checks recompute roots with the hex trie: on a bin datadir they must
+// refuse, not report a mismatch against correct bin records.
 func TestPBinCommitmentHistChecksRefuseBin(t *testing.T) {
 	// No t.Parallel: mutates process-global statecfg flags.
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))

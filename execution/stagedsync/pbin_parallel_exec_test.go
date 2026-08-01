@@ -24,10 +24,8 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-// TestPBinExecuteInParallelExcludesBin pins the executor choice. The parallel
-// executor's normalized write set roots differently under the bin trie than the
-// state the same block produces serially, so bin runs the serial executor
-// whatever the parallel toggles say; every other variant is left alone.
+// The parallel executor's normalized write set roots differently under the bin trie
+// than the serial path, so bin must run serially whatever the parallel toggles say.
 func TestPBinExecuteInParallelExcludesBin(t *testing.T) {
 	t.Parallel()
 

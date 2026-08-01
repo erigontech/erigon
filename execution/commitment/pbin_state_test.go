@@ -24,11 +24,9 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// TestPBinRestartRoundTripDeepPath guards H6: two same-group storage slots share
-// the first 520 bits of their tree keys, so the tree's one branch sits deeper
-// than any depth a single byte can hold. The engine must encode its state after
-// a full fold, restore it in a fresh engine, and keep folding correctly past
-// the restart.
+// Two same-group storage slots share the first 520 bits of their tree keys, so
+// the tree's one branch sits deeper than any depth a single byte can hold. The
+// encoded state has to carry that depth across a restart.
 func TestPBinRestartRoundTripDeepPath(t *testing.T) {
 	t.Parallel()
 
@@ -64,9 +62,8 @@ func TestPBinRestartRoundTripDeepPath(t *testing.T) {
 	require.Equal(t, full.oracleRoot(t), rootContinued, "the restored engine must keep folding correctly")
 }
 
-// TestPBinStateBlobRoundTripsFlags checks the three root flags survive the blob:
-// they are the only engine state beside the root cell, so losing one changes how
-// the next run treats the stored tree.
+// The three root flags are the only engine state beside the root cell, so losing
+// one to the blob changes how the next run treats the stored tree.
 func TestPBinStateBlobRoundTripsFlags(t *testing.T) {
 	t.Parallel()
 
@@ -88,9 +85,8 @@ func TestPBinStateBlobRoundTripsFlags(t *testing.T) {
 	require.Equal(t, storedRoot, root)
 }
 
-// TestPBinSetStateEmptyResetsToStored pins the hex convention: no state blob
-// resets the engine, and the tree is then found again through the stored root
-// record rather than being lost.
+// Following the hex convention, no state blob resets the engine; the tree is
+// then found again through the stored root record rather than lost.
 func TestPBinSetStateEmptyResetsToStored(t *testing.T) {
 	t.Parallel()
 
@@ -104,9 +100,9 @@ func TestPBinSetStateEmptyResetsToStored(t *testing.T) {
 	require.Equal(t, storedRoot, root)
 }
 
-// TestPBinSetStateRejectsForeignBlob: the blob is read back by whatever engine
-// the datadir opens with, so a pbin engine handed a hex blob (or a damaged pbin
-// one) must refuse it instead of decoding garbage into the root cell.
+// The blob is read back by whatever engine the datadir opens with, so a pbin
+// engine handed a hex blob (or a damaged pbin one) must refuse it instead of
+// decoding garbage into the root cell.
 func TestPBinSetStateRejectsForeignBlob(t *testing.T) {
 	t.Parallel()
 
@@ -132,8 +128,7 @@ func TestPBinSetStateRejectsForeignBlob(t *testing.T) {
 	}
 }
 
-// TestPBinStateRefusesOpenRows pins the precondition the root-cell blob rests
-// on: with a row still open, part of the tree lives in the grid arrays and a
+// With a row still open, part of the tree lives in the grid arrays and a
 // root-cell snapshot would silently drop it.
 func TestPBinStateRefusesOpenRows(t *testing.T) {
 	t.Parallel()

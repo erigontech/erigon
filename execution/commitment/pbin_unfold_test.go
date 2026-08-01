@@ -33,8 +33,8 @@ func pbinTestEngine(t *testing.T) (*PBinPatriciaHashed, *MockState) {
 	return NewPBinPatriciaHashed(ms), ms
 }
 
-// pbinTestSpecCell builds a cell whose prefix is spelled out bit by bit, so a
-// test can name a divergence point instead of deriving one.
+// pbinTestSpecCell spells a cell prefix out bit by bit, so a test can name a
+// divergence point instead of deriving one.
 func pbinTestSpecCell(t *testing.T, kind pbinNodeKind, spec string) pbinCell {
 	t.Helper()
 	c := pbinTestEmptyCell()
@@ -67,16 +67,14 @@ func pbinTestPutRootCell(t *testing.T, ms *MockState, c pbinCell) {
 	require.NoError(t, ms.PutBranch(pbinRootKey, rec, nil))
 }
 
-// pbinTestPutTopRecord seeds a node record at the empty path together with the
-// root cell that names it — the pair a stored tree always writes.
+// pbinTestPutTopRecord seeds a node record at the empty path plus the root cell
+// naming it — the pair a stored tree always writes.
 func pbinTestPutTopRecord(t *testing.T, ms *MockState, cells [2]pbinCell) {
 	t.Helper()
 	pbinTestPutRecord(t, ms, pbinBitpath{}, cells)
 	pbinTestPutRootCell(t, ms, pbinTestSpecCell(t, pbinNodeBranch, ""))
 }
 
-// pbinTestUnfoldStep opens one more row, loading the root cell first when the
-// grid is still empty.
 func pbinTestUnfoldStep(t *testing.T, pph *PBinPatriciaHashed, probe *pbinBitpath) {
 	t.Helper()
 	u := pph.needUnfolding(probe)
@@ -87,11 +85,10 @@ func pbinTestUnfoldStep(t *testing.T, pph *PBinPatriciaHashed, probe *pbinBitpat
 	require.NoError(t, pph.unfold(probe, u))
 }
 
-// TestPBinNeedUnfolding guards H9: the hex engine's cpl+1 hides a terminator
-// nibble, so the binary engine states each outcome instead. What matters is that
-// "the probe agrees with the whole prefix" and "the probe leaves the prefix
-// partway" are different answers — only the second shortens a stored prefix,
-// which is inside that node's hash.
+// "The probe agrees with the whole prefix" and "the probe leaves the prefix
+// partway" must be different answers: only the second shortens a stored prefix,
+// which is inside that node's hash. The hex engine's cpl+1 conflates them
+// because it has a terminator nibble to hide behind.
 func TestPBinNeedUnfolding(t *testing.T) {
 	t.Parallel()
 
@@ -165,9 +162,6 @@ func TestPBinNeedUnfolding(t *testing.T) {
 	}
 }
 
-// TestPBinNeedUnfoldingSelectsCellByBranchBit checks the row case picks the cell
-// with the bit the row branches on, the arity-2 stand-in for the hex engine's
-// nibble.
 func TestPBinNeedUnfoldingSelectsCellByBranchBit(t *testing.T) {
 	t.Parallel()
 
@@ -199,9 +193,9 @@ func TestPBinNeedUnfoldingSelectsCellByBranchBit(t *testing.T) {
 	}
 }
 
-// TestPBinUnfoldEmptyPrefixBranchRecord guards H7: EIP-8297 admits a branch node
-// with no prefix, so a zero-length prefix cannot double as "this cell is not a
-// stored branch". The engine must read the record below and descend into it.
+// EIP-8297 admits a branch node with no prefix, so a zero-length prefix cannot
+// double as "this cell is not a stored branch". The engine must read the record
+// below and descend into it.
 func TestPBinUnfoldEmptyPrefixBranchRecord(t *testing.T) {
 	t.Parallel()
 
@@ -237,8 +231,7 @@ func TestPBinUnfoldEmptyPrefixBranchRecord(t *testing.T) {
 	require.Equal(t, uint16(0), pph.grid.touchMap[1])
 }
 
-// A missing record below such a cell is an inconsistency, not an empty subtree —
-// the other half of H7's failure mode.
+// A missing record below such a cell is an inconsistency, not an empty subtree.
 func TestPBinUnfoldEmptyPrefixBranchRecordMissing(t *testing.T) {
 	t.Parallel()
 
@@ -268,10 +261,9 @@ func TestPBinUnfoldEmptyRoot(t *testing.T) {
 	require.Equal(t, pbinUnfolding{}, pph.needUnfolding(&probe), "a checked empty root does not unfold again")
 }
 
-// TestPBinUnfoldSplitsInsidePrefix walks the divergence bit across both word
-// boundaries of the [9]uint64 path and both zone lengths. A split moves the node
-// below one level down and re-cuts its prefix, dropping the bit the new row
-// branches on (eip:174-176).
+// The divergence bit walks both word boundaries of the [9]uint64 path. A split
+// moves the node below one level down and re-cuts its prefix, dropping the bit
+// the new row branches on (eip:174-176).
 func TestPBinUnfoldSplitsInsidePrefix(t *testing.T) {
 	t.Parallel()
 
@@ -312,9 +304,9 @@ func TestPBinUnfoldSplitsInsidePrefix(t *testing.T) {
 	}
 }
 
-// TestPBinUnfoldDescendsThroughPrefix pins the two-step descent: consuming a
-// branch cell's prefix leaves a row whose cell has none, and only then is the
-// record read — at a key the parent's stored prefix is what reconstructs.
+// The descent takes two steps: consuming a branch cell's prefix leaves a row
+// whose cell has none, and only then is the record read — at a key the parent's
+// stored prefix is what reconstructs.
 func TestPBinUnfoldDescendsThroughPrefix(t *testing.T) {
 	t.Parallel()
 

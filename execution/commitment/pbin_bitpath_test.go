@@ -71,9 +71,8 @@ func TestPBinCommonPrefixBits(t *testing.T) {
 	}
 }
 
-// A 272-bit account key that is a bitwise prefix of a 528-bit storage key must
-// report exactly 272 shared bits: without clamping by min(aLen, bLen) the words
-// keep agreeing past the shorter path's end (guards H10).
+// Without clamping by min(aLen, bLen) the words keep agreeing past the shorter
+// path's end, so an account key that prefixes a storage key over-reports.
 func TestPBinCommonPrefixBits_ShorterPathIsPrefix(t *testing.T) {
 	t.Parallel()
 
@@ -84,8 +83,7 @@ func TestPBinCommonPrefixBits_ShorterPathIsPrefix(t *testing.T) {
 	require.Equal(t, int16(272), pbinCommonPrefixBitsAt(&long, 0, &short))
 }
 
-// Words carrying set bits beyond bitLen must not be read as real path bits
-// (guards H10).
+// Words carrying set bits beyond bitLen must not be read as real path bits.
 func TestPBinCommonPrefixBits_IgnoresBitsBeyondBitLen(t *testing.T) {
 	t.Parallel()
 
@@ -202,7 +200,7 @@ func TestPBinBitPathCodecRejects(t *testing.T) {
 }
 
 // The commitment domain stores its state blob under the literal key "state", so
-// no encoded bit path may collide with it (guards H5).
+// no encoded bit path may collide with it.
 func TestPBinBitPathNeverEncodesToStateKey(t *testing.T) {
 	t.Parallel()
 
@@ -240,8 +238,8 @@ func FuzzPBinBitPathCodec(f *testing.F) {
 	})
 }
 
-// The word-at-a-time divergence scan must agree with a bit-by-bit walk at every
-// offset, including the ones that straddle a word boundary.
+// The word-at-a-time scan must agree with a bit-by-bit walk at every offset,
+// including the ones that straddle a word boundary.
 func TestPBinCommonPrefixBitsAt_MatchesNaiveScan(t *testing.T) {
 	t.Parallel()
 

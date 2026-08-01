@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// pbinCellBits are the only child slots a binary node has.
+// pbinCellBits masks the only child slots a binary node has.
 const pbinCellBits = 0b11
 
 type pbinCellFields uint8
@@ -52,14 +52,13 @@ var (
 	errPBinCellMaps        = errors.New("pbin: branch maps address more than two cells")
 )
 
-// pbinBranchEncoder serialises a binary node. The payload is deliberately not
-// BranchData: a 66-byte tree-key prefix does not fit the shared codec's cell
-// fields, and PatriciaContext moves branch payloads as opaque bytes.
+// pbinBranchEncoder serialises a binary node. The payload is not BranchData: a
+// 66-byte tree-key prefix does not fit the shared codec's cell fields, and
+// PatriciaContext moves branch payloads as opaque bytes.
 //
 // Every record carries both child cells, so a record read back replaces its
-// predecessor outright and no merge-with-previous path exists — at arity 2 the
-// untouched sibling is the whole other half of the subtree, and merging is what
-// loses it.
+// predecessor outright and there is no merge-with-previous path: at arity 2 the
+// untouched sibling is the whole other half of the subtree, and merging loses it.
 type pbinBranchEncoder struct {
 	buf []byte
 }
@@ -132,8 +131,8 @@ func pbinAppendLenAndVal(dst, val []byte) []byte {
 	return append(binary.AppendUvarint(dst, uint64(len(val))), val...)
 }
 
-// pbinDecodeBranch fills both cells from a record, rejecting every spelling the
-// encoder would not produce so a record has one canonical form.
+// pbinDecodeBranch fills both cells from a record. It rejects every spelling the
+// encoder would not produce, so a record has one canonical form.
 func pbinDecodeBranch(data []byte, cells *[2]pbinCell) (touchMap, afterMap uint16, err error) {
 	cells[0].reset()
 	cells[1].reset()
@@ -172,8 +171,8 @@ func pbinDecodeCell(data []byte, pos int, c *pbinCell) (int, error) {
 	switch fields & pbinFieldKind {
 	case pbinFieldLeaf:
 		c.kind = pbinNodeLeaf
-		// A leaf whose value has no source hashes a zero-valued state instead of
-		// failing, so the shape is rejected here rather than reaching the hasher.
+		// A leaf whose value has no source would hash a zero-valued state instead of
+		// failing, so reject the shape here rather than let it reach the hasher.
 		switch fields & pbinFieldValue {
 		case pbinFieldAccountAddr, pbinFieldStorageAddr, pbinFieldLeafValue:
 		default:
@@ -219,9 +218,9 @@ func pbinDecodeCell(data []byte, pos int, c *pbinCell) (int, error) {
 	return pos, nil
 }
 
-// pbinDecodePrefix reads the explicit bit count and exactly the bytes it
-// implies. The count is the authority: a byte length left to speak for itself
-// would carry up to seven pad bits into the branch hash.
+// pbinDecodePrefix trusts the explicit bit count, not the byte length: pad bits
+// left to speak for themselves would carry up to seven extra bits into the
+// branch hash.
 func pbinDecodePrefix(data []byte, pos int, c *pbinCell) (int, error) {
 	bitLen, n := binary.Uvarint(data[pos:])
 	if n <= 0 {
@@ -258,8 +257,6 @@ func pbinDecodeFixedVal(data []byte, pos int, dst []byte, want int) (int, error)
 	return pos + want, nil
 }
 
-// pbinCheckCellMaps enforces the arity: a binary node has cells 0 and 1 and
-// nothing else, in either map.
 func pbinCheckCellMaps(touchMap, afterMap uint16) error {
 	if (touchMap|afterMap)&^pbinCellBits != 0 {
 		return fmt.Errorf("%w: touch %016b after %016b", errPBinCellMaps, touchMap, afterMap)

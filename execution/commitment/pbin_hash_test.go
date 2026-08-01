@@ -30,8 +30,8 @@ import (
 )
 
 // leafHash is H(0x00 || key || value) over the complete tree key. The engine
-// builds this preimage from a cell in leafCellHash; spelling it out from a key
-// and a value is what lets a test state the expected hash directly.
+// builds the same preimage from a cell; taking the key and value directly is
+// what lets a test state the expected hash.
 func (h *pbinHasher) leafHash(key, value []byte) common.Hash {
 	if len(key) != pbinAccountKeyLength && len(key) != pbinStorageKeyLength {
 		panic(fmt.Sprintf("pbin: leaf key of %d bytes is neither zone length", len(key)))
@@ -56,8 +56,7 @@ func pbinTestPathFromBits(t *testing.T, bits []byte) pbinBitpath {
 	return p
 }
 
-// pbinTestBitSpec reads a "1011" style literal into the oracle's one-bit-per-byte
-// form, so a test can name a short prefix by writing it out.
+// pbinTestBitSpec reads a "1011" literal into the oracle's one-bit-per-byte form.
 func pbinTestBitSpec(t *testing.T, spec string) []byte {
 	t.Helper()
 	bits := make([]byte, 0, len(spec))
@@ -89,8 +88,8 @@ func pbinTestOracleLeaf(addr, slot uint64) *pbinOracleLeaf {
 	}
 }
 
-// TestPBinEmptyTreeHash guards H11: EIP-8297's empty subtree is 32 zero bytes
-// (eip:208), not the empty-MPT root the rest of erigon reaches for.
+// EIP-8297's empty subtree is 32 zero bytes (eip:208), not the empty-MPT root
+// the rest of erigon reaches for.
 func TestPBinEmptyTreeHash(t *testing.T) {
 	t.Parallel()
 
@@ -106,8 +105,7 @@ func TestPBinEmptyTreeHash(t *testing.T) {
 	require.NotEqual(t, empty.RootHash, got)
 }
 
-// TestPBinAppendBitPrefixMatchesOracle checks the engine's encode_bit_prefix
-// against the spec transcription at every length where padding can go wrong.
+// The lengths below are the ones where bit-prefix padding can go wrong.
 func TestPBinAppendBitPrefixMatchesOracle(t *testing.T) {
 	t.Parallel()
 
@@ -174,9 +172,7 @@ func TestPBinBranchHashMatchesOracle(t *testing.T) {
 	}
 }
 
-// TestPBinNestedBranchHashMatchesOracle folds a two-level shape bottom-up the
-// way the engine will, so a branch hash feeding another branch is covered and
-// not just a branch over two leaves.
+// Covers a branch hash feeding another branch, not just a branch over leaves.
 func TestPBinNestedBranchHashMatchesOracle(t *testing.T) {
 	t.Parallel()
 
@@ -199,8 +195,8 @@ func TestPBinNestedBranchHashMatchesOracle(t *testing.T) {
 	require.Equal(t, common.Hash(want), h.branchHash(&outerPath, &innerHash, &cHash))
 }
 
-// TestPBinBranchHashEmptyChild pins that an absent child contributes the
-// empty-subtree constant rather than being skipped.
+// An absent child contributes the empty-subtree constant rather than being
+// skipped.
 func TestPBinBranchHashEmptyChild(t *testing.T) {
 	t.Parallel()
 
@@ -319,9 +315,8 @@ func TestPBinCellHashRejectsMalformedLeaf(t *testing.T) {
 	})
 }
 
-// TestPBinCellHashBuildsCorpusRoots folds each oracle corpus of two keys by hand
-// through the cell hasher, checking the primitives compose into the same root
-// the reference tree produces.
+// Folds each two-key corpus by hand through the cell hasher, checking the
+// primitives compose into the root the reference tree produces.
 func TestPBinCellHashBuildsCorpusRoots(t *testing.T) {
 	t.Parallel()
 

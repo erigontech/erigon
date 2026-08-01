@@ -29,7 +29,7 @@ import (
 )
 
 // pbinTestStoredTree runs a small corpus through the engine and returns the
-// backing state with every record the run persisted, plus the root it computed.
+// state it persisted plus the root it computed.
 func pbinTestStoredTree(t *testing.T) (*MockState, []byte) {
 	t.Helper()
 	corpus := new(pbinTestCorpus).
@@ -40,11 +40,11 @@ func pbinTestStoredTree(t *testing.T) (*MockState, []byte) {
 	return ms, pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates)
 }
 
-// TestPBinRootRecordRealTableIteration guards H2: every record a Process run
-// writes, the root record included, must survive a round-trip through the real
-// TblCommitmentVals table. Domain iteration treats a zero-length key as
-// end-of-stream, and the empty key sorts first — a root record stored under it
-// truncates the whole iteration and the datadir reads back as fresh.
+// Every record a Process run writes, the root record included, must survive a
+// round-trip through the real TblCommitmentVals table. Domain iteration treats a
+// zero-length key as end-of-stream and the empty key sorts first, so a root
+// record stored under it truncates the iteration and the datadir reads back as
+// fresh.
 func TestPBinRootRecordRealTableIteration(t *testing.T) {
 	t.Parallel()
 
@@ -76,10 +76,9 @@ func TestPBinRootRecordRealTableIteration(t *testing.T) {
 	require.Equal(t, rootRecord, gotRoot, "root record lost or damaged by the table round-trip")
 }
 
-// TestPBinRootKeySentinelNotABitPath pins the root key to a shape no bit-path
-// key can take. Every pbinAppendBitPath encoding ends in a trailing bit-count
-// byte ≤ 7, so a single byte ≥ 0x08 cannot collide with any encoded path, and
-// pbinDecodeBitPath must reject it outright.
+// Every pbinAppendBitPath encoding ends in a trailing bit-count byte ≤ 7, so a
+// single byte ≥ 0x08 cannot collide with any encoded path, and pbinDecodeBitPath
+// must reject it outright.
 func TestPBinRootKeySentinelNotABitPath(t *testing.T) {
 	t.Parallel()
 
@@ -99,9 +98,8 @@ func TestPBinRootKeySentinelNotABitPath(t *testing.T) {
 	}
 }
 
-// TestPBinLoadRootNoRecordVersusStoredTree asserts loadRoot tells a fresh
-// datadir from a persisted tree: no record reads back as the empty tree, while
-// a stored record must reproduce the stored root, never a fresh one.
+// loadRoot must tell a fresh datadir from a persisted tree: no record reads back
+// as the empty tree, a stored record as the root it was built with.
 func TestPBinLoadRootNoRecordVersusStoredTree(t *testing.T) {
 	t.Parallel()
 

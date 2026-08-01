@@ -41,7 +41,6 @@ func withBinCommitment(t *testing.T, on bool) {
 	statecfg.ExperimentalBinCommitment = on
 }
 
-// Code-free alloc: code chunking into the tree is not part of this task.
 func pbinTestGenesis() *types.Genesis {
 	return &types.Genesis{
 		Config: chain.AllProtocolChanges,
@@ -52,8 +51,8 @@ func pbinTestGenesis() *types.Genesis {
 	}
 }
 
-// Genesis is the block-0 state root the executor is later checked against, so it
-// must be computed on the variant the datadir uses, not always on the hex trie.
+// Genesis produces the block-0 root the executor is later checked against, so it must
+// use the variant the datadir uses, not always the hex trie.
 func TestPBinGenesisComputesBinaryRoot(t *testing.T) {
 	// No t.Parallel: mutates process-global statecfg flags.
 	logger := log.New()
@@ -71,8 +70,7 @@ func TestPBinGenesisComputesBinaryRoot(t *testing.T) {
 	require.Equal(t, common.BytesToHash(pbinGenesisRoot(t, g)), binBlock.Root())
 }
 
-// pbinGenesisRoot computes the genesis root over a SharedDomains explicitly
-// running the bin trie, as an oracle for what GenesisToBlock must return.
+// Oracle for GenesisToBlock: the same root computed through SharedDomains on bin.
 func pbinGenesisRoot(t *testing.T, g *types.Genesis) []byte {
 	t.Helper()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))

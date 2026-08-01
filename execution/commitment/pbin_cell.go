@@ -31,14 +31,9 @@ const (
 	pbinNodeBranch
 )
 
-// pbinCell is one of the two child slots of a binary node.
-//
-// It carries a single prefix, unlike the hex engine's cell: HPH keeps hashed and
-// plain key spaces apart because it navigates in one and stores plain keys in
-// the other, whereas PBin derives the tree key from the plain key on demand, so
-// the one prefix is always tree-key-space bits. There is no memoized leaf hash
-// either — H(0x00||key||value) commits the complete key and has nothing worth
-// caching.
+// pbinCell is one of the two child slots of a binary node. Its prefix is always
+// tree-key-space bits: unlike the hex engine's cell it needs no second key
+// space, because PBin derives the tree key from the plain key on demand.
 //
 // A branch cell's prefix is inside its hash, so re-cutting the prefix
 // invalidates it. Two invariants keep that from going unnoticed: a non-zero
@@ -86,9 +81,8 @@ type pbinGrid struct {
 	activeRows   int
 }
 
-// resetForReuse clears only the rows the finished run left live. Rows above
-// activeRows keep stale cells, which is safe because unfold initializes a row
-// before anything reads it.
+// resetForReuse clears only the rows below activeRows. The stale cells above
+// are safe because unfold initializes a row before anything reads it.
 func (g *pbinGrid) resetForReuse() {
 	g.root.reset()
 	for row := range g.activeRows {
@@ -103,9 +97,9 @@ func (g *pbinGrid) resetForReuse() {
 	g.activeRows = 0
 }
 
-// prevRecordFor is what the store holds at a row's record key: the bytes the
-// row unfolded from, or zero-length when it had no record. Never nil, so the
-// write layer takes it as the known previous value instead of reading its own.
+// prevRecordFor returns the bytes the row unfolded from, zero-length when it had
+// no record. Never nil, so the write layer takes it as the known previous value
+// instead of reading the store itself.
 func (g *pbinGrid) prevRecordFor(row int) []byte {
 	if g.prevRecord[row] == nil {
 		return []byte{}

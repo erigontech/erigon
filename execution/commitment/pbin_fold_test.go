@@ -28,8 +28,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-// pbinTestCountingCtx counts branch reads, so a test can pin how many records a
-// fold needed beyond the ones the descent itself read.
 type pbinTestCountingCtx struct {
 	PatriciaContext
 	branchReads int
@@ -40,9 +38,9 @@ func (c *pbinTestCountingCtx) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	return c.PatriciaContext.Branch(prefix)
 }
 
-// pbinTestLeaf is one storage entry in every form a fold needs it: the plain key
-// its state is read by, the tree key its path is cut from, and the encoded value
-// both the engine and the oracle hash.
+// pbinTestLeaf is one storage entry in the three forms a fold needs: the plain
+// key state is read by, the tree key the path is cut from, and the encoded value
+// the engine and the oracle hash.
 type pbinTestLeaf struct {
 	plainKey []byte
 	treeKey  []byte
@@ -95,8 +93,7 @@ func pbinTestPutState(t *testing.T, ms *MockState, leaves ...pbinTestLeaf) {
 	require.NoError(t, ms.applyPlainUpdates(keys, updates))
 }
 
-// pbinTestTreeKeyFlipped derives a key diverging from the original at exactly
-// one named bit. The zone byte is off limits: it selects the value encoding.
+// The zone byte is off limits: it selects the value encoding.
 func pbinTestTreeKeyFlipped(t *testing.T, key []byte, d int16) []byte {
 	t.Helper()
 	require.GreaterOrEqual(t, d, int16(8), "bit %d is inside the zone byte", d)
@@ -110,8 +107,6 @@ func pbinTestBaseStorageKey() []byte {
 	return pbinTreeKeyStorage(pbinOracleAddr(7), pbinOracleSlot(1000))
 }
 
-// pbinTestKeyPrefix is the first bitLen bits of a tree key, the shape both a
-// descent key and a node prefix take.
 func pbinTestKeyPrefix(key []byte, bitLen int16) pbinBitpath {
 	full := pbinPathFromBytes(key)
 	return full.slice(0, bitLen)
@@ -125,8 +120,7 @@ func pbinTestSeedRow(pph *PBinPatriciaHashed, currentKey pbinBitpath, depth int1
 	pph.grid.activeRows = 1
 }
 
-// pbinTestFillCell drops a cell into a live row the way updateCell will, marking
-// it both touched and present.
+// pbinTestFillCell fills a row cell the way updateCell does: touched and present.
 func pbinTestFillCell(pph *PBinPatriciaHashed, row int, bit uint64, c pbinCell) {
 	pph.grid.rows[row][bit] = c
 	pph.grid.touchMap[row] |= uint16(1) << bit
@@ -142,10 +136,9 @@ func pbinTestBranchOrder(t *testing.T, a, b pbinTestLeaf, divergence int16) (lef
 	return a, b
 }
 
-// TestPBinFoldBranchMatchesOracle folds a hand-built row and checks the node it
-// emits against the reference tree, at divergence points spanning both word
-// boundaries of the path. The record it writes must also survive a decode and
-// re-encode unchanged, since nothing merges it with a predecessor.
+// Divergence points span both word boundaries of the path. Nothing merges the
+// record a branch fold writes with a predecessor, so it must also survive a
+// decode and re-encode unchanged.
 func TestPBinFoldBranchMatchesOracle(t *testing.T) {
 	t.Parallel()
 
@@ -198,9 +191,8 @@ func TestPBinFoldBranchMatchesOracle(t *testing.T) {
 	}
 }
 
-// A binary node has two children. Folding a row as a branch with any other count
-// is a lost or duplicated sibling, which at arity 2 is half the subtree
-// (guards H12).
+// Folding a row as a branch with anything but two children is a lost or
+// duplicated sibling, which at arity 2 is half the subtree.
 func TestPBinFoldBranchRejectsWrongArity(t *testing.T) {
 	t.Parallel()
 
@@ -236,10 +228,9 @@ func TestPBinFoldRejectsInconsistentGrid(t *testing.T) {
 	})
 }
 
-// TestPBinFoldPropagateRestoresDescendedNode is the round trip a shared prefix
-// forces: unfold consumes the prefix into the descent key, so the branch fold
-// below sees none of it, and the propagate that follows has to hand the node
-// back its full prefix — which is inside its hash.
+// Unfold consumes a shared prefix into the descent key, so the branch fold below
+// sees none of it. The propagate that follows has to hand the node back its full
+// prefix, which is inside its hash.
 func TestPBinFoldPropagateRestoresDescendedNode(t *testing.T) {
 	t.Parallel()
 
@@ -256,8 +247,8 @@ func TestPBinFoldPropagateRestoresDescendedNode(t *testing.T) {
 			ms := NewMockState(t)
 			pbinTestPutState(t, ms, a, b)
 
-			// Store the node the descent will walk into, then meet it again through a
-			// cell that only knows its prefix and hash, as a reloaded one would.
+			// Build the node once, then meet it again through a cell that knows only
+			// its prefix and hash, the way a reload would.
 			builder := NewPBinPatriciaHashed(ms)
 			cells := [2]pbinCell{left.cell(t, divergence+1), right.cell(t, divergence+1)}
 			pbinTestSeedRow(builder, prefix, divergence+1, cells, 0b11, 0b11)
@@ -301,9 +292,8 @@ func TestPBinFoldPropagateRestoresDescendedNode(t *testing.T) {
 	}
 }
 
-// TestPBinFoldSplitLeafSurvivorReadsNoBranch pins the short circuit: a leaf
-// commits its complete key, so shortening the prefix it sits behind cannot
-// invalidate anything and no record has to be read to rebuild it.
+// A leaf commits its complete key, so shortening the prefix it sits behind
+// invalidates nothing and no record has to be read to rebuild it.
 func TestPBinFoldSplitLeafSurvivorReadsNoBranch(t *testing.T) {
 	t.Parallel()
 
@@ -339,10 +329,9 @@ func TestPBinFoldSplitLeafSurvivorReadsNoBranch(t *testing.T) {
 	}
 }
 
-// TestPBinFoldSplitInsidePrefixMatchesOracle guards H1: the survivor of a split
-// keeps prefix[matched+1:], and the prefix is inside its hash, so the cached one
-// is stale. The engine has to rebuild it from the survivor's own children before
-// the fold above can use it.
+// The survivor of a split keeps prefix[matched+1:], and the prefix is inside its
+// hash, so the cached hash is stale. The engine has to rebuild it from the
+// survivor's own children before the fold above can use it.
 func TestPBinFoldSplitInsidePrefixMatchesOracle(t *testing.T) {
 	t.Parallel()
 
@@ -429,9 +418,8 @@ func TestPBinFoldSplitInsidePrefixMissingRecord(t *testing.T) {
 	require.ErrorIs(t, pph.fold(), errPBinMissingBranch)
 }
 
-// TestPBinFoldLoadsSiblingState covers the untouched half of a branch: a record
-// carries plain keys, not values, so a sibling that nothing in this run touched
-// has to be read back from state before it can be hashed.
+// A record carries plain keys, not values, so a sibling that nothing in this run
+// touched has to be read back from state before it can be hashed.
 func TestPBinFoldLoadsSiblingState(t *testing.T) {
 	t.Parallel()
 
@@ -459,8 +447,8 @@ func TestPBinFoldLoadsSiblingState(t *testing.T) {
 	require.Equal(t, common.Hash(want), pph.grid.root.hash)
 }
 
-// TestPBinFoldDeleteDropsRecord pins the third dispatch arm: a row that keeps
-// nothing takes its stored record with it and reports the absence upwards.
+// A row that keeps nothing takes its stored record with it and reports the
+// absence upwards.
 func TestPBinFoldDeleteDropsRecord(t *testing.T) {
 	t.Parallel()
 

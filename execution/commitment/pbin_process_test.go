@@ -31,9 +31,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-// pbinTestCorpus collects plain-key updates in the two shapes the engine
-// accepts and derives the leaf set they must produce, so a Process run can be
-// diffed against the reference tree over the same entries.
+// pbinTestCorpus holds plain-key updates and derives the leaf set they must
+// produce, so a Process run can be diffed against the reference tree.
 type pbinTestCorpus struct {
 	plainKeys [][]byte
 	updates   []Update
@@ -52,8 +51,6 @@ func (c *pbinTestCorpus) accountWithCode(addr []byte, nonce, balance uint64, cod
 	return c
 }
 
-// accountWithCodeBytes is the code-bearing account with its code behind it: the
-// hash and size come from the code, and the tree gains one leaf per chunk.
 func (c *pbinTestCorpus) accountWithCodeBytes(addr []byte, nonce, balance uint64, code []byte) *pbinTestCorpus {
 	c.accountWithCode(addr, nonce, balance, keccak.Sum256(code), uint64(len(code)))
 	if c.codes == nil {
@@ -71,8 +68,8 @@ func (c *pbinTestCorpus) storage(addr, slot []byte, value ...byte) *pbinTestCorp
 	return c
 }
 
-// entries is the leaf set the corpus stands for. An account is two leaves, so
-// this is also where the fan-out is stated independently of the engine.
+// entries is the leaf set the corpus stands for. An account is two leaves —
+// stated here independently of the engine.
 func (c *pbinTestCorpus) entries(t *testing.T) []pbinOracleEntry {
 	t.Helper()
 	entries := make([]pbinOracleEntry, 0, len(c.plainKeys))
@@ -105,8 +102,8 @@ func (c *pbinTestCorpus) entries(t *testing.T) []pbinOracleEntry {
 	return entries
 }
 
-// pbinTestChunkKey is where chunk chunkID of addr's code lives: the account's
-// own stem while the header holds it, the content-addressed code zone after.
+// pbinTestChunkKey: header chunks live in the account's own stem, the rest in
+// the content-addressed code zone.
 func pbinTestChunkKey(addr []byte, codeHash common.Hash, chunkID int) []byte {
 	if chunkID < pbinHeaderCodeChunks {
 		return pbinTreeKeyCodeChunk(addr, chunkID)
@@ -120,9 +117,8 @@ func (c *pbinTestCorpus) oracleRoot(t *testing.T) []byte {
 	return root[:]
 }
 
-// process applies the corpus to state, then runs it through the engine the way
-// the domain layer would: ModeDirect, so every value comes back through the
-// context rather than the update stream.
+// process runs the corpus the way the domain layer would: ModeDirect, so every
+// value comes back through the context rather than the update stream.
 func (c *pbinTestCorpus) process(t *testing.T) (*PBinPatriciaHashed, []byte) {
 	t.Helper()
 	pph, ms := pbinTestEngine(t)
@@ -131,8 +127,8 @@ func (c *pbinTestCorpus) process(t *testing.T) (*PBinPatriciaHashed, []byte) {
 }
 
 // applyTo writes the corpus into state, code included: the engine reads code
-// through the context, so a code-bearing account with no code behind it is a
-// state the corpus must not produce.
+// through the context, so a code-bearing account with no code behind it is an
+// invalid corpus.
 func (c *pbinTestCorpus) applyTo(t *testing.T, ms *MockState) {
 	t.Helper()
 	require.NoError(t, ms.applyPlainUpdates(c.plainKeys, c.updates))
@@ -149,9 +145,8 @@ func pbinTestProcess(t *testing.T, pph *PBinPatriciaHashed, plainKeys [][]byte, 
 	return root
 }
 
-// TestPBinRootHashEmptyEngine guards H11 at the engine boundary: an empty
-// EIP-8297 tree is 32 zero bytes (eip:208), not the empty-MPT root the rest of
-// erigon reaches for.
+// TestPBinRootHashEmptyEngine: an empty EIP-8297 tree is 32 zero bytes
+// (eip:208), not the empty-MPT root the rest of erigon reaches for.
 func TestPBinRootHashEmptyEngine(t *testing.T) {
 	t.Parallel()
 
@@ -179,8 +174,6 @@ func TestPBinProcessSingleKeyRootIsLeaf(t *testing.T) {
 	require.Equal(t, corpus.oracleRoot(t), root)
 }
 
-// TestPBinProcessTwoKeysRootIsBranch is the other half: a second entry turns the
-// root into a branch over the two leaf hashes.
 func TestPBinProcessTwoKeysRootIsBranch(t *testing.T) {
 	t.Parallel()
 
@@ -192,7 +185,7 @@ func TestPBinProcessTwoKeysRootIsBranch(t *testing.T) {
 	require.Equal(t, pbinNodeBranch, pph.grid.root.kind)
 
 	// The two sub-indices differ only in their low bit, so the branch prefix is
-	// every bit of the key but the last and slot 256 takes the left side.
+	// every bit of the key but the last, and slot 256 takes the left side.
 	left := pbinEncodeStorageValue([]byte{0xAA})
 	right := pbinEncodeStorageValue([]byte{0xBB})
 	leftHash := pbinTestKeccak(t, []byte{0x00}, pbinTreeKeyStorage(addr, a), left[:])
@@ -204,8 +197,6 @@ func TestPBinProcessTwoKeysRootIsBranch(t *testing.T) {
 	require.Equal(t, corpus.oracleRoot(t), root)
 }
 
-// TestPBinProcessMatchesOracle is the M0 gate: for every corpus shape the engine
-// must reproduce the reference tree's root.
 func TestPBinProcessMatchesOracle(t *testing.T) {
 	t.Parallel()
 
@@ -278,8 +269,8 @@ func pbinTestMixedCorpus() *pbinTestCorpus {
 	return c
 }
 
-// pbinTestDeepSharedPrefixCorpus reuses the mined cluster, so the descent walks
-// far past the root before diverging (guards H1's corpus side).
+// pbinTestDeepSharedPrefixCorpus uses mined addresses, so the descent walks far
+// past the root before diverging.
 func pbinTestDeepSharedPrefixCorpus() *pbinTestCorpus {
 	c := new(pbinTestCorpus)
 	for i, addr := range pbinOracleMinedAddrs() {
@@ -288,9 +279,9 @@ func pbinTestDeepSharedPrefixCorpus() *pbinTestCorpus {
 	return c
 }
 
-// TestPBinProcessAccountFansOutToCodeHash pins the sibling leaf: one account
-// update produces both BASIC_DATA and CODE_HASH, written during the same stem
-// visit so the shared keyHasher stays a one-key function.
+// TestPBinProcessAccountFansOutToCodeHash: one account update produces both
+// BASIC_DATA and CODE_HASH, written during the same stem visit so the shared
+// keyHasher stays a one-key function.
 func TestPBinProcessAccountFansOutToCodeHash(t *testing.T) {
 	t.Parallel()
 
@@ -313,9 +304,9 @@ func TestPBinProcessAccountFansOutToCodeHash(t *testing.T) {
 	require.Equal(t, codeHash[:], code[:])
 }
 
-// TestPBinProcessRejectsStreamDelete guards H13: EIP-8297 never removes an
-// entry, so a delete arriving on the update stream is an error rather than a
-// silently applied removal.
+// TestPBinProcessRejectsStreamDelete: EIP-8297 never removes an entry, so a
+// delete arriving on the update stream is an error rather than a silently
+// applied removal.
 func TestPBinProcessRejectsStreamDelete(t *testing.T) {
 	t.Parallel()
 
@@ -329,9 +320,9 @@ func TestPBinProcessRejectsStreamDelete(t *testing.T) {
 	require.ErrorIs(t, err, errPBinDeleteUnsupported)
 }
 
-// TestPBinProcessMissingStateIsAbsent is H13's other half: a context read for a
-// key with no state reports DeleteUpdate, which means "no leaf here" and must
-// not be mistaken for a removal.
+// TestPBinProcessMissingStateIsAbsent: a context read for a key with no state
+// reports DeleteUpdate, which means "no leaf here" and must not be mistaken for
+// a removal.
 func TestPBinProcessMissingStateIsAbsent(t *testing.T) {
 	t.Parallel()
 
@@ -353,12 +344,11 @@ func TestPBinProcessMissingStateIsAbsent(t *testing.T) {
 	require.Equal(t, present.oracleRoot(t), root, "keys with no state contribute no leaf")
 }
 
-// The absent read over a live leaf — the case this one must not be confused
-// with — is pbin_zerovalue_test.go's: storage keeps the leaf at a zero value,
-// an account removal stays refused.
+// The neighbouring case — an absent read over a live leaf — is in
+// pbin_zerovalue_test.go.
 
-// TestPBinProcessRepeatedKeyKeepsOneLeaf checks a stem touched twice in one run
-// still holds a single leaf, so the second visit updates rather than splits.
+// TestPBinProcessRepeatedKeyKeepsOneLeaf: a key rewritten by a later batch
+// updates its leaf instead of splitting the stem.
 func TestPBinProcessRepeatedKeyKeepsOneLeaf(t *testing.T) {
 	t.Parallel()
 
@@ -377,8 +367,6 @@ func TestPBinProcessRepeatedKeyKeepsOneLeaf(t *testing.T) {
 	require.Equal(t, second.oracleRoot(t), root)
 }
 
-// TestPBinProcessEmptyUpdatesKeepsEmptyRoot checks the drive loop over nothing:
-// the root stays the empty-tree constant instead of picking up a shape.
 func TestPBinProcessEmptyUpdatesKeepsEmptyRoot(t *testing.T) {
 	t.Parallel()
 
@@ -389,9 +377,9 @@ func TestPBinProcessEmptyUpdatesKeepsEmptyRoot(t *testing.T) {
 
 var errPBinTestContext = errors.New("pbin test: context failure")
 
-// pbinFailingContext fails one context call, letting a chosen number through
-// first, so each read and write the engine makes can be checked to reach the
-// caller instead of being swallowed.
+// pbinFailingContext fails one context call after letting skip of them through,
+// so a single read or write can be checked to reach the caller instead of being
+// swallowed.
 type pbinFailingContext struct {
 	PatriciaContext
 	method string
@@ -438,9 +426,9 @@ func (c *pbinFailingContext) Storage(plainKey []byte) (*Update, error) {
 	return c.PatriciaContext.Storage(plainKey)
 }
 
-// TestPBinProcessSurfacesContextErrors runs a second batch over a stored tree —
-// the path that reads the root cell, a node record, a leaf's state and a branch
-// it has to rebuild — and fails one call at a time.
+// TestPBinProcessSurfacesContextErrors runs a second batch over a stored tree,
+// because only that path reads the root cell, a node record and a leaf's state,
+// and fails one call at a time.
 func TestPBinProcessSurfacesContextErrors(t *testing.T) {
 	t.Parallel()
 

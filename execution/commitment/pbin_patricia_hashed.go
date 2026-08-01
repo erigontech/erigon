@@ -16,26 +16,14 @@
 
 // PBinPatriciaHashed — commitment over EIP-8297's partitioned binary tree.
 //
-// The EIP leaves its hash function open and names Keccak-256 as a candidate,
-// which is this engine's default for both node hashing and tree-key derivation.
-// BLAKE3 is the alternative, selected by SetPBinHashSuite and applied to both
-// seams at once. It is what the execution-specs reference and the other clients
-// on the shared binary-trie testnets hash with, so a node that has to agree with
-// them runs on BLAKE3; a Keccak-keyed tree agrees with no other client.
+// The EIP leaves its hash function open; this engine defaults to Keccak-256 for
+// both node hashing and tree-key derivation. Interop runs on BLAKE3
+// (SetPBinHashSuite) — what the execution-specs reference and the other clients
+// on the shared binary-trie testnets hash with; a Keccak-keyed tree agrees with
+// no other client.
 //
-// Scope: Process over all three zones, ModeDirect only. Code is chunked into the
-// account header's chunk leaves, overflowing into the code zone where chunks are
-// content-addressed by code hash and shared between accounts. Parallel and
-// streaming mounting are structurally out — their prefix trie is nibble-shaped
-// and the binary key space has no nibbles. The paths that reinterpret commitment
-// records outside block execution — witness, eth_getProof, eth_simulateV1,
-// receipt regeneration — refuse this variant rather than read bit-path records
-// as hex ones.
-//
-// EIP-8297 has no removal: a zeroed storage slot keeps its leaf at 32 zero
-// bytes, an account removal is refused rather than guessed at, and code chunks
-// above a shortened redeploy's length stay in the tree — the tree is a function
-// of history there, not of current state.
+// Parallel and streaming mounting are structurally out: their prefix trie is
+// nibble-shaped and the binary key space has no nibbles.
 
 package commitment
 
@@ -68,26 +56,25 @@ type PBinPatriciaHashed struct {
 	lastKey    [pbinStorageKeyLength]byte // the deepest key visited so far, which the next one must exceed
 	lastKeyLen int16
 
-	traceW io.Writer // nil = disabled
+	traceW io.Writer
 
-	rootChecked bool // whether the root record is known to be absent
+	rootChecked bool
 	rootTouched bool
 	rootPresent bool
 	rootPrev    []byte // root record as last read or written; nil = never read
 }
 
-// pbinCounters measures what keeping a single hash per branch cell costs. A
+// pbinCounters measures what keeping a single hash per branch cell costs: a
 // probe diverging inside a stored prefix invalidates that hash, and rebuilding
-// it needs a branch read the descent itself would not have made. Storing both
-// child hashes per cell instead is a wire-format change, so it waits on these
-// numbers.
+// it needs a branch read the descent itself would not have made. The
+// alternative, storing both child hashes per cell, is a wire-format change.
 type pbinCounters struct {
 	splitsInsidePrefix uint64
 	materializeReads   uint64
 }
 
-// pbinPool recycles engines: the grid is the better part of a megabyte, and
-// Release leaves a pooled engine in the state a fresh one starts in.
+// pbinPool recycles engines: the grid is the better part of a megabyte. Release
+// must leave a pooled engine in the state a fresh one starts in.
 var pbinPool sync.Pool
 
 func NewPBinPatriciaHashed(ctx PatriciaContext) *PBinPatriciaHashed {
@@ -103,15 +90,12 @@ func (pph *PBinPatriciaHashed) Variant() TrieVariant { return VariantBinPatricia
 
 func (pph *PBinPatriciaHashed) ResetContext(ctx PatriciaContext) { pph.ctx = ctx }
 
-// SetTraceWriter enables tracing. M0 traces one line per run: the counters the
-// split-rehash decision is waiting on.
 func (pph *PBinPatriciaHashed) SetTraceWriter(w io.Writer) { pph.traceW = w }
 
-// EnableCsvMetrics is a no-op: the binary engine collects no metrics in M0.
+// EnableCsvMetrics is a no-op: the binary engine collects no metrics.
 func (pph *PBinPatriciaHashed) EnableCsvMetrics(string) {}
 
-// Reset drops the in-memory tree, keeping the context. The next run rebuilds
-// what it descends into from stored records, starting at the root cell record.
+// Reset drops the in-memory tree, keeping the context.
 func (pph *PBinPatriciaHashed) Reset() {
 	pph.grid.resetForReuse()
 	pph.currentKey = pbinBitpath{}
@@ -121,8 +105,8 @@ func (pph *PBinPatriciaHashed) Reset() {
 	pph.lastKeyLen = 0
 }
 
-// setHashSuite swaps H on both seams at once — node hashing on this engine and
-// the returned key-derivation hasher — so neither can be configured without the
+// setHashSuite swaps the hash on both seams at once — node hashing here and the
+// returned key-derivation hasher — so neither can be configured without the
 // other. nil is Keccak-256 on both.
 func (pph *PBinPatriciaHashed) setHashSuite(sum pbinHashFn) keyHasher {
 	pph.hasher.sum = sum
@@ -149,22 +133,21 @@ var (
 )
 
 // ErrPBinUnsupported marks a code path only the hex trie implements. Callers
-// wrap it with the path name so the bin variant refuses instead of no-opping.
+// wrap it with the path name, so the bin variant refuses instead of no-opping.
 var ErrPBinUnsupported = errors.New("pbin: unsupported under the bin commitment variant")
 
 // pbinRootKey names the record holding the root cell — the one node no descent
-// can name: every other node is found by the path that reaches it, while the
-// root's own prefix is stored nowhere else. The sentinel cannot collide with a
-// node record: every pbinAppendBitPath key ends in a trailing bit-count byte
-// ≤ 7. The empty key would not do — domain iteration reads a zero-length key as
-// end-of-stream, and the empty key sorts first, truncating the whole table.
+// can name, since every other node is found by the path that reaches it. It
+// cannot collide with a node record: every pbinAppendBitPath key ends in a
+// trailing bit-count byte ≤ 7. The empty key would not do — domain iteration
+// reads a zero-length key as end-of-stream, and it sorts first, truncating the
+// whole table.
 var pbinRootKey = []byte{0x08}
 
 // Process folds the update stream into the tree and returns the new root.
 // HashSort hands keys over in tree-key order, which is descent order, so the
-// grid only ever walks the path between two consecutive keys.
-//
-// warmup is ignored: the engine has no parallel read path to pre-warm for.
+// grid only ever walks the path between two consecutive keys. warmup is
+// ignored: there is no parallel read path to pre-warm.
 func (pph *PBinPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) ([]byte, error) {
 	pph.lastKeyLen = 0
 	processed, err := pph.updateStream.process(ctx, updates, pph.ctx, pph.followAndUpdate)
@@ -190,11 +173,9 @@ func (pph *PBinPatriciaHashed) Process(ctx context.Context, updates *Updates, lo
 }
 
 // followAndUpdate moves the grid onto treeKey and writes the update into the
-// cell that lands there.
-//
-// Visits must ascend. The grid only walks forward: a fold writes the row's record
-// outright, so returning to a folded row rewrites it under a touch map that no
-// longer names what the first write touched.
+// cell that lands there. Visits must ascend: a fold writes the row's record
+// outright, so returning to a folded row would rewrite it under a touch map
+// that no longer names what the first write touched.
 func (pph *PBinPatriciaHashed) followAndUpdate(treeKey, plainKey []byte, update *Update) error {
 	if pph.lastKeyLen > 0 && bytes.Compare(treeKey, pph.lastKey[:pph.lastKeyLen]) <= 0 {
 		return fmt.Errorf("%w: %x after %x", errPBinVisitOrder, treeKey, pph.lastKey[:pph.lastKeyLen])
@@ -217,7 +198,7 @@ func (pph *PBinPatriciaHashed) followAndUpdate(treeKey, plainKey []byte, update 
 
 // updateCell writes one leaf into the deepest open row. Unfolding has already
 // made the target either empty — a new leaf, whose prefix is the rest of the
-// key — or the same leaf touched again.
+// key — or the same leaf touched again, never a branch.
 func (pph *PBinPatriciaHashed) updateCell(plainKey []byte, probe *pbinBitpath, update *Update) error {
 	g := &pph.grid
 	var c *pbinCell
@@ -236,9 +217,8 @@ func (pph *PBinPatriciaHashed) updateCell(plainKey []byte, probe *pbinBitpath, u
 		c = &g.rows[row][bit]
 	}
 
-	// A key with no state reads back as a delete. Landing on an empty slot means
-	// there simply is no leaf here; landing on one means the leaf keeps its place
-	// at a zero value, or the removal is one EIP-8297 does not define.
+	// A key with no state reads back as a delete. With no leaf here there is
+	// nothing to remove; over a live one see pbinZeroedLeafUpdate.
 	if update.Deleted() {
 		if c.kind != pbinNodeLeaf {
 			return nil
@@ -269,7 +249,7 @@ func (pph *PBinPatriciaHashed) updateCell(plainKey []byte, probe *pbinBitpath, u
 	switch len(plainKey) {
 	case 0:
 		// A code chunk has no plain key: no state domain holds one, so the leaf
-		// carries its own value and the branch record persists it.
+		// carries its own value.
 		if _, err := pbinRecordLeafValue(update); err != nil {
 			return err
 		}
@@ -291,9 +271,8 @@ func (pph *PBinPatriciaHashed) updateCell(plainKey []byte, probe *pbinBitpath, u
 // pbinZeroedLeafUpdate reinterprets an absent read over a live leaf. The domain
 // encodes zero and absent the same way, while EIP-8297 has no removal and holds
 // a zero value as a present leaf, so a zeroed storage slot keeps its leaf at 32
-// zero bytes. An absent account is a removal the EIP does not describe — its
-// encoding is unverified against the reference and would silently change the
-// root — so it stays refused.
+// zero bytes. An absent account would be a removal the EIP does not define, so
+// it stays refused rather than guessed at.
 func pbinZeroedLeafUpdate(plainKey []byte) (Update, error) {
 	if len(plainKey) != length.Addr+length.Hash {
 		return Update{}, fmt.Errorf("%w: %x", errPBinDeleteUnsupported, plainKey)
@@ -301,15 +280,15 @@ func pbinZeroedLeafUpdate(plainKey []byte) (Update, error) {
 	return Update{Flags: StorageUpdate}, nil
 }
 
-// RootHash hashes whatever the root cell holds. A one-key tree's root is the
-// leaf itself (eip:133-135) and an empty tree is 32 zero bytes (eip:208), both
-// of which fall out of hashing the cell rather than special-casing the shape.
+// RootHash hashes whatever the root cell holds: a one-key tree's root is the
+// leaf itself (eip:133-135) and an empty tree is 32 zero bytes (eip:208), so
+// neither shape needs a special case.
 func (pph *PBinPatriciaHashed) RootHash() ([]byte, error) {
 	if pph.grid.activeRows != 0 {
 		return nil, fmt.Errorf("pbin: root hash requested with %d rows still open", pph.grid.activeRows)
 	}
-	// A run that touches no key never descends, so nothing has pulled the stored
-	// root in yet and an untouched grid would report the empty tree.
+	// A run that touches no key never descends, so without this the untouched
+	// grid would report the empty tree.
 	if !pph.rootChecked {
 		if err := pph.loadRoot(); err != nil {
 			return nil, err
@@ -323,10 +302,9 @@ func (pph *PBinPatriciaHashed) RootHash() ([]byte, error) {
 	return hash[:], nil
 }
 
-// storeRoot persists the root cell so a later engine can find the tree. Without
-// it a root sitting under a non-empty prefix — every tree confined to one zone —
-// is unreachable, and a run that finds nothing rebuilds from the touched keys
-// alone.
+// storeRoot persists the root cell so a later engine can find the tree: a root
+// sitting under a non-empty prefix — every tree confined to one zone — is
+// reachable no other way.
 func (pph *PBinPatriciaHashed) storeRoot() error {
 	if !pph.rootTouched {
 		return nil
@@ -347,8 +325,8 @@ func (pph *PBinPatriciaHashed) storeRoot() error {
 	return nil
 }
 
-// loadRoot reads the stored root cell into the grid. An absent record means the
-// tree is empty; anything below the root is reached from the root's own prefix.
+// loadRoot reads the stored root cell into the grid; an absent record is the
+// empty tree.
 func (pph *PBinPatriciaHashed) loadRoot() error {
 	pph.rootChecked = true
 	data, _, err := pph.ctx.Branch(pbinRootKey)
@@ -368,8 +346,8 @@ func (pph *PBinPatriciaHashed) loadRoot() error {
 	if pos != len(data) {
 		return fmt.Errorf("%w: %d trailing bytes after the root cell", errPBinMalformedBranch, len(data)-pos)
 	}
-	// Present but untouched: unfold reads these to decide whether the row it opens
-	// survives, and a loaded root that reads absent takes the tree with it.
+	// Present though untouched: unfold reads a touched-but-absent cell as a
+	// deleted subtree (see unfoldBranchNode).
 	pph.rootPresent = true
 	return nil
 }
@@ -404,7 +382,7 @@ type pbinUnfolding struct {
 
 // needUnfolding reports what the grid still needs before probe's slot is in it.
 // Unlike the hex engine there is no terminator to discount and no account
-// boundary to clamp to — one key space, one bit per level.
+// boundary to clamp to: one key space, one bit per level.
 func (pph *PBinPatriciaHashed) needUnfolding(probe *pbinBitpath) pbinUnfolding {
 	var cell *pbinCell
 	var depth int16
@@ -446,8 +424,6 @@ func (pph *PBinPatriciaHashed) needUnfolding(probe *pbinBitpath) pbinUnfolding {
 	return pbinUnfolding{action: pbinUnfoldDescend, matched: matched}
 }
 
-// unfold opens one more level of the grid along probe, per the plan needUnfolding
-// produced.
 func (pph *PBinPatriciaHashed) unfold(probe *pbinBitpath, u pbinUnfolding) error {
 	if u.action == pbinUnfoldNone {
 		return nil
@@ -511,8 +487,8 @@ func (pph *PBinPatriciaHashed) unfold(probe *pbinBitpath, u pbinUnfolding) error
 }
 
 // pbinUnfoldConsumed is how many of the cell's prefix bits this unfold takes:
-// all of them when the probe key matched, and one past the divergence when it
-// did not — that extra bit is what the new row branches on.
+// all of them when the probe key matched, one past the divergence when it did
+// not — that extra bit is what the new row branches on.
 func pbinUnfoldConsumed(u pbinUnfolding, prefix *pbinBitpath) (int16, error) {
 	switch u.action {
 	case pbinUnfoldDescend:
@@ -528,8 +504,9 @@ func pbinUnfoldConsumed(u pbinUnfolding, prefix *pbinBitpath) (int16, error) {
 }
 
 // unfoldBranchNode loads the record at the current descent key into a row. The
-// key is reconstructed from the parent cell's stored prefix, which is the only
-// place the bits between the two nodes exist.
+// key is reconstructed from the parent cell's stored prefix, the only place the
+// bits between the two nodes exist. deleted marks a parent cell that was touched
+// and is now gone, which takes the whole subtree below it with it.
 func (pph *PBinPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
 	g := &pph.grid
 	key := pbinEncodeBitPath(&pph.currentKey)
@@ -548,8 +525,7 @@ func (pph *PBinPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bo
 	}
 	g.prevRecord[row] = data
 	// The record's own touch map is write-time bookkeeping; nothing in this run
-	// has touched the row yet. A parent cell that is touched but gone takes the
-	// whole subtree with it.
+	// has touched the row yet.
 	if deleted {
 		g.touchMap[row], g.afterMap[row] = afterMap, 0
 	} else {
@@ -562,8 +538,8 @@ func (pph *PBinPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bo
 }
 
 // fillFromUpperCell moves a cell one level down, dropping the prefix bits the
-// descent has taken over. skip counts those bits and includes the one the new
-// row branches on. It re-cuts the prefix, so the caller owes the cell a
+// descent has taken over; skip counts those and includes the bit the new row
+// branches on. The prefix is re-cut, so the caller owes the cell a
 // rehashAfterPrefixChange.
 func (c *pbinCell) fillFromUpperCell(up *pbinCell, skip int16) {
 	c.reset()
@@ -589,7 +565,7 @@ func (c *pbinCell) fillFromUpperCell(up *pbinCell, skip int16) {
 }
 
 // fillFromLowerCell moves the sole survivor of a collapsed row into the cell
-// above, prepending the bits the row consumed: the ones the parent already
+// above, prepending the bits the row consumed: those the parent already
 // descended plus the one the row branched on.
 func (c *pbinCell) fillFromLowerCell(low *pbinCell, head *pbinBitpath, bit uint64) {
 	prefix := *head
@@ -600,8 +576,8 @@ func (c *pbinCell) fillFromLowerCell(low *pbinCell, head *pbinBitpath, bit uint6
 }
 
 // rehashAfterPrefixChange restores the invariant that a set hashLen means the
-// hash covers the prefix the cell holds now. A cell that knows its children
-// re-derives; one that does not is marked stale for materializeBranch.
+// hash covers the prefix the cell holds now. A cell that cannot re-derive is
+// left stale for materializeBranch.
 func (pph *PBinPatriciaHashed) rehashAfterPrefixChange(c *pbinCell) {
 	if c.kind != pbinNodeBranch {
 		return
@@ -659,8 +635,8 @@ func (pph *PBinPatriciaHashed) fold() error {
 	return nil
 }
 
-// foldBranch hashes a row that keeps both cells and stores it as one record,
-// keyed by the bit path down to the branch bit.
+// foldBranch stores a row that keeps both cells as one record, keyed by the bit
+// path down to the branch bit.
 func (pph *PBinPatriciaHashed) foldBranch(row int, bit uint64, upDepth, depth int16, upCell *pbinCell) error {
 	g := &pph.grid
 	if n := bits.OnesCount16(g.afterMap[row]); n != 2 {
@@ -700,7 +676,7 @@ func (pph *PBinPatriciaHashed) foldBranch(row int, bit uint64, upDepth, depth in
 }
 
 // foldPropagate collapses a row down to its sole survivor. The node moves up
-// rather than being rewritten, so no record is written and the bits the row
+// rather than being rewritten: no record is written, and the bits the row
 // consumed are prepended to the survivor's own prefix.
 func (pph *PBinPatriciaHashed) foldPropagate(row int, bit uint64, upDepth, depth int16, upCell *pbinCell) error {
 	g := &pph.grid
@@ -711,8 +687,8 @@ func (pph *PBinPatriciaHashed) foldPropagate(row int, bit uint64, upDepth, depth
 
 	head := pph.currentKey.slice(upDepth, depth-1)
 	upCell.fillFromLowerCell(child, &head, uint64(childBit))
-	// The row's own bit is part of what moves up: dropping it still hashes, and
-	// still gives the wrong root.
+	// The row's own branch bit is part of what moves up: dropping it still hashes,
+	// and still gives the wrong root.
 	if want := depth - upDepth + child.prefix.bitLen; upCell.prefix.bitLen != want {
 		return fmt.Errorf("pbin: propagate at row %d formed a %d-bit prefix, want %d", row, upCell.prefix.bitLen, want)
 	}
@@ -743,9 +719,9 @@ func (pph *PBinPatriciaHashed) foldDelete(row int, bit uint64, upCell *pbinCell)
 	return nil
 }
 
-// propagateTouch carries a modification to the row above. A fold that leaves a
-// node behind also marks the root present: without it the next unfold reads
-// touched and absent, and drops the whole subtree.
+// propagateTouch carries a modification to the row above. A fold at row 0 that
+// leaves a node behind must also mark the root present, or the next unfold reads
+// it as a deleted subtree.
 func (pph *PBinPatriciaHashed) propagateTouch(row int, bit uint64) {
 	if pph.grid.touchMap[row] == 0 {
 		return
@@ -758,7 +734,7 @@ func (pph *PBinPatriciaHashed) propagateTouch(row int, bit uint64) {
 }
 
 // hashRowCell hashes one cell of a folding row and writes the result back, so
-// the record the row produces carries every child hash a later read needs.
+// the row's record carries every child hash a later read needs.
 func (pph *PBinPatriciaHashed) hashRowCell(c *pbinCell, path *pbinBitpath) (common.Hash, error) {
 	h, err := pph.cellHash(c, path)
 	if err != nil {
@@ -770,8 +746,6 @@ func (pph *PBinPatriciaHashed) hashRowCell(c *pbinCell, path *pbinBitpath) (comm
 	return h, nil
 }
 
-// cellHash resolves whatever a cell is missing — a leaf's state, a branch's
-// stale hash — and hands it to the one hasher.
 func (pph *PBinPatriciaHashed) cellHash(c *pbinCell, path *pbinBitpath) (common.Hash, error) {
 	switch c.kind {
 	case pbinNodeLeaf:
@@ -790,8 +764,7 @@ func (pph *PBinPatriciaHashed) cellHash(c *pbinCell, path *pbinBitpath) (common.
 
 // loadCellState fills a leaf cell whose plain key arrived from a record and
 // whose value therefore did not. The leaf is already in the tree, so an absent
-// read is pbinZeroedLeafUpdate's case: a zero value for storage, a refusal for
-// an account.
+// read is pbinZeroedLeafUpdate's case.
 func (pph *PBinPatriciaHashed) loadCellState(c *pbinCell) error {
 	if c.accountAddrLen > 0 && !c.loaded.account() {
 		plainKey := c.accountAddr[:c.accountAddrLen]
@@ -826,7 +799,7 @@ func (pph *PBinPatriciaHashed) loadCellState(c *pbinCell) error {
 
 // materializeBranch rebuilds a branch cell's hash under the prefix it holds now
 // by reading its own record. A split shortens a survivor's prefix without moving
-// its record, so the key is the cell's path followed by that prefix.
+// its record, so the record key is the cell's path followed by that prefix.
 func (pph *PBinPatriciaHashed) materializeBranch(c *pbinCell, path *pbinBitpath) error {
 	nodeKey := *path
 	nodeKey.append(&c.prefix)

@@ -27,9 +27,8 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// TestPBinBasicDataLeafCarriesCodeSize checks the BASIC_DATA leaf the engine
-// builds for a code-bearing account against the reference's own packings: the
-// code size has to reach the leaf value, not be forced to zero.
+// TestPBinBasicDataLeafCarriesCodeSize checks the BASIC_DATA packing against the
+// reference's own vectors: the code size has to reach the leaf value.
 func TestPBinBasicDataLeafCarriesCodeSize(t *testing.T) {
 	t.Parallel()
 	v := pbinLoadSpecVectors(t)
@@ -52,7 +51,7 @@ func TestPBinBasicDataLeafCarriesCodeSize(t *testing.T) {
 
 // TestPBinEngineRootCarriesCodeSize drives a code-bearing account through the
 // whole engine, so the size has to survive the context read, the cell merge and
-// the leaf hash — not just the value encoder.
+// the leaf hash, not just the value encoder.
 func TestPBinEngineRootCarriesCodeSize(t *testing.T) {
 	t.Parallel()
 
@@ -63,8 +62,8 @@ func TestPBinEngineRootCarriesCodeSize(t *testing.T) {
 	_, root := withCode.process(t)
 	require.Equal(t, withCode.oracleRoot(t), root)
 
-	// The same leaf set with BASIC_DATA packed at code_size 0 isolates the size:
-	// every other leaf, the chunks included, stays where it was.
+	// Repacking BASIC_DATA at code_size 0 isolates the size: every other leaf,
+	// the chunks included, stays where it was.
 	sizeless, err := pbinEncodeBasicData(4, uint256.NewInt(500), 0)
 	require.NoError(t, err)
 	entries := withCode.entries(t)
@@ -81,9 +80,8 @@ func TestPBinEngineRootCarriesCodeSize(t *testing.T) {
 	require.NotEqual(t, want[:], root, "code_size must reach the root")
 }
 
-// TestPBinUpdateCodeSizeSurvivesCopyAndReset pins the two Update lifecycle
-// hooks the engine relies on: a copied update keeps the size, a reset one drops
-// it so a pooled cell cannot inherit a stale code size.
+// TestPBinUpdateCodeSizeSurvivesCopyAndReset pins the Update lifecycle: Copy
+// keeps the size, Reset drops it so a pooled cell cannot inherit a stale one.
 func TestPBinUpdateCodeSizeSurvivesCopyAndReset(t *testing.T) {
 	t.Parallel()
 
@@ -94,9 +92,9 @@ func TestPBinUpdateCodeSizeSurvivesCopyAndReset(t *testing.T) {
 	require.Zero(t, u.CodeSize)
 }
 
-// TestPBinUpdateCodeSizeMergesWithCodeHash pins that the size travels with the
-// hash: they describe the same code, so a merge must never leave one of them
-// from the old account and the other from the new.
+// TestPBinUpdateCodeSizeMergesWithCodeHash pins that size and hash travel
+// together: they describe the same code, so a merge must never take one from the
+// old account and the other from the new.
 func TestPBinUpdateCodeSizeMergesWithCodeHash(t *testing.T) {
 	t.Parallel()
 
@@ -107,9 +105,9 @@ func TestPBinUpdateCodeSizeMergesWithCodeHash(t *testing.T) {
 }
 
 // TestPBinPushSideNeverDeliversCode pins that Updates.TouchCode cannot feed the
-// bin trie: the variant is hardwired to ModeDirect, which interns plain keys
-// only and hands the trie a nil update. Everything the tree hashes comes from
-// the read side, so patching the push side to carry code would be dead code.
+// bin trie: the variant is hardwired to ModeDirect, which interns plain keys only
+// and hands the trie a nil update. Everything the tree hashes comes from the read
+// side, so teaching the push side to carry code would add dead code.
 func TestPBinPushSideNeverDeliversCode(t *testing.T) {
 	t.Parallel()
 

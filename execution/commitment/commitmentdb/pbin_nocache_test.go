@@ -57,9 +57,7 @@ func pbinRecoverMessage(t *testing.T, fn func()) (msg string) {
 	return ""
 }
 
-// TestPBinCtorRefusesSharedBranchCache pins the structural assert for H1: a
-// bin-variant commitment context over a SharedDomains that shares the branch
-// cache must be refused at construction, by name, before anything else runs.
+// Why bin must not share the cache: TestPBinBranchCacheTrunkSlotCollision.
 func TestPBinCtorRefusesSharedBranchCache(t *testing.T) {
 	t.Parallel()
 
@@ -71,12 +69,11 @@ func TestPBinCtorRefusesSharedBranchCache(t *testing.T) {
 	require.Contains(t, msg, "branch cache")
 }
 
-// TestPBinBranchCacheTrunkSlotCollision demonstrates H1, the reason the bin
-// variant must not share the BranchCache. The trunk-slot index reads a prefix
-// as a hex compact path, which is injective for hex keys; a pbin bit-path key
-// is packed MSB-first bits plus a trailing bitLen%8 byte, so distinct short
-// paths land on one slot and the cache serves another node's record as a
-// well-formed hit.
+// The reason the bin variant must not share the BranchCache: the trunk-slot
+// index reads a prefix as a hex compact path, injective only for hex keys. A
+// pbin bit-path key is packed MSB-first bits plus a trailing bitLen%8 byte, so
+// distinct short paths land on one slot and the cache serves another node's
+// record as a well-formed hit.
 func TestPBinBranchCacheTrunkSlotCollision(t *testing.T) {
 	t.Parallel()
 
@@ -109,9 +106,8 @@ func pbinNewTestDb(tb testing.TB) kv.TemporalRwDB {
 	return tdb
 }
 
-// TestPBinSharedDomainsHasNoSharedBranchCache checks the execctx wiring: a
-// bin-variant SharedDomains over an aggregator whose AggTx provides the shared
-// BranchCache must reach the commitment-context ctor without it, and must open.
+// execctx must strip the AggTx's shared BranchCache before the bin commitment
+// context is constructed, and still open.
 func TestPBinSharedDomainsHasNoSharedBranchCache(t *testing.T) {
 	t.Parallel()
 

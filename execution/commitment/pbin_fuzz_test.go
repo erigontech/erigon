@@ -25,22 +25,22 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// pbinFuzzSlots is the slot pool the generator draws from. Entropy is the enemy
-// here: 32-byte slots picked at random essentially never share a stem, so a
-// fuzzer free to choose them would only ever build shallow trees and would never
-// reach sub-index sharing, group boundaries or the account/storage zone split.
+// pbinFuzzSlots is the slot pool the generator draws from. Slots picked at
+// random essentially never share a stem, so a fuzzer free to choose all 32 bytes
+// would only build shallow trees, never reaching sub-index sharing, group
+// boundaries or the account/storage zone split.
 var pbinFuzzSlots = []uint64{0, 1, 2, 63, 64, 65, 66, 127, 128, 255, 256, 257, 258, 511, 512, 1000, 1 << 20, 1<<20 + 1}
 
 // pbinFuzzAccountBit is the selector bit choosing an account write over a slot.
 const pbinFuzzAccountBit = 0x04
 
-// pbinFuzzCodeSizes is the code pool. The last entry is the only one that spills
-// past the account header into the code zone.
+// pbinFuzzCodeSizes: the last entry is the only size that spills past the
+// account header into the code zone.
 var pbinFuzzCodeSizes = []int{0, 23, 31, 62, pbinHeaderCodeChunks*pbinChunkDataLen + 62}
 
-// pbinFuzzCode is the code an address carries for a whole run. Keying it on the
-// address is what keeps the oracle valid: a redeploy to shorter code leaves its
-// high chunks in the tree (H8), and the oracle only knows the final state.
+// pbinFuzzCode keys the code on the address so it stays fixed for a whole run,
+// which is what keeps the oracle valid: a redeploy to shorter code leaves its
+// high chunks in the tree, and the oracle only knows the final state.
 func pbinFuzzCode(addrSeed, salt byte) []byte {
 	n := pbinFuzzCodeSizes[int(addrSeed+salt)%len(pbinFuzzCodeSizes)]
 	if n == 0 {
@@ -49,9 +49,8 @@ func pbinFuzzCode(addrSeed, salt byte) []byte {
 	return pbinTestCode(n)
 }
 
-// pbinFuzzCorpus reads the input three bytes at a time — what to write, where,
-// and with what value — drawing addresses, slots and code lengths from small
-// pools so keys collide by construction.
+// pbinFuzzCorpus reads the input three bytes at a time: what to write, where,
+// and with what value.
 func pbinFuzzCorpus(data []byte, codeSalt byte) *pbinTestCorpus {
 	c := new(pbinTestCorpus)
 	for i := 0; i+2 < len(data); i += 3 {
@@ -91,15 +90,14 @@ func pbinFuzzBatches(data []byte, cut, codeSalt byte) []*pbinTestCorpus {
 	return batches
 }
 
-// FuzzPBinProcessMatchesOracle is the differential gate: whatever the generator
-// produces, the engine's root must equal the reference tree's over the same
-// leaves, and the records it left behind must rebuild that root on their own.
+// FuzzPBinProcessMatchesOracle: whatever the generator produces, the engine's
+// root must equal the reference tree's over the same leaves, and the records it
+// left behind must rebuild that root on their own.
 //
 // go test ./execution/commitment/ -run=Fuzz -fuzz=FuzzPBinProcessMatchesOracle -fuzztime=60s
 func FuzzPBinProcessMatchesOracle(f *testing.F) {
-	// Seeds spell the generator's (selector, slot, value) triples: bit 2 of the
-	// selector asks for an account, its low bits pick the address, and the slot
-	// byte indexes the pool.
+	// Seeds are (selector, slot, value) triples: bit 2 of the selector asks for an
+	// account, its low bits pick the address, and the slot byte indexes the pool.
 	f.Add([]byte{0x04, 0, 1, 0x05, 0, 2}, byte(0), byte(0))                            // two accounts, no code
 	f.Add([]byte{0x00, 10, 1, 0x00, 11, 2, 0x00, 12, 3}, byte(2), byte(0))             // three slots of one group
 	f.Add([]byte{0x00, 3, 1, 0x00, 4, 2, 0x04, 0, 3}, byte(1), byte(0))                // the 63/64 zone boundary plus a header

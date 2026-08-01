@@ -34,11 +34,11 @@ import (
 )
 
 // The reference implementation of EIP-8297's binary tree (eip:112-222),
-// transcribed from the spec's Python with no optimisation: no memoised hashes,
-// no shared buffers, one bit per byte. It is the ground truth the engine is
-// diffed against, so it is written to be recognisably the same algorithm rather
-// than a fast one. Its Keccak comes from x/crypto, not the fastkeccak the
-// engine uses, so a hasher bug cannot cancel out on both sides.
+// transcribed from the spec's Python with no optimisation — no memoised hashes,
+// no shared buffers, one bit per byte — because it is the ground truth the
+// engine is diffed against and has to stay recognisably the same algorithm. Its
+// Keccak comes from x/crypto, not the fastkeccak the engine uses, so a hasher
+// bug cannot cancel out on both sides.
 
 const (
 	pbinOracleMaxKeyLength = 8192
@@ -168,8 +168,7 @@ func pbinOracleMerkelize(node pbinOracleNode) [32]byte {
 }
 
 // pbinOracleMerkelizeWith merkelizes under an explicit H. A nil sum means
-// Keccak-256; the execution-specs reference uses BLAKE3, so its vectors are
-// replayed by passing blake3 here.
+// Keccak-256; the reference's vectors are replayed by passing BLAKE3.
 func pbinOracleMerkelizeWith(node pbinOracleNode, sum func([]byte) [32]byte) [32]byte {
 	var out [32]byte
 	if node == nil {
@@ -308,9 +307,9 @@ func pbinOracleCorpusSplitAtLastBit() pbinOracleCorpus {
 	}
 }
 
-// pbinOracleCorpusSplitInsidePrefix uses synthetic account-zone keys so the
-// divergence bit is exact: the first two share 15 bits, the third leaves at bit
-// 9, forcing _insert down the survivor path with a non-empty remainder.
+// pbinOracleCorpusSplitInsidePrefix uses synthetic account-zone keys, not
+// digests, so the divergence bit is exact: the third key leaves the prefix the
+// first two share, forcing insert down the survivor path.
 func pbinOracleCorpusSplitInsidePrefix() pbinOracleCorpus {
 	return pbinOracleCorpus{
 		name: "split inside prefix",
@@ -328,8 +327,8 @@ func pbinOracleSyntheticAccountKey(stemByte byte) []byte {
 	return key
 }
 
-// pbinOracleCorpusOneAccount is the realistic shape: header leaves, header-zone
-// slots and storage-zone slots for a single address, all sharing a stem.
+// pbinOracleCorpusOneAccount is the realistic shape: header leaves plus header-
+// and storage-zone slots for one address, all sharing a stem.
 func pbinOracleCorpusOneAccount() pbinOracleCorpus {
 	addr := pbinOracleAddr(4)
 	entries := []pbinOracleEntry{
@@ -365,9 +364,8 @@ var pbinOracleMinedAddrs = sync.OnceValue(func() [][]byte {
 	return pbinOracleMineSharedStems(pbinOracleMinedPrefixBits, pbinOracleMinedCluster)
 })
 
-// pbinOracleMineSharedStems searches for addresses whose account keys agree on
-// shared leading bits. The stem is a digest, so a deep shared prefix cannot be
-// constructed and has to be found by trial.
+// pbinOracleMineSharedStems finds addresses whose account keys agree on the
+// leading bits by trial: the stem is a digest, so it cannot be constructed.
 func pbinOracleMineSharedStems(shared, n int) [][]byte {
 	const limit = 1 << 24
 	var target []byte
@@ -389,8 +387,6 @@ func pbinOracleMineSharedStems(shared, n int) [][]byte {
 	return found
 }
 
-// TestPBinOracleEncodeBitPrefix pins encode_bit_prefix (eip:196-201) against
-// hand-written bytes, since every branch hash the oracle produces depends on it.
 func TestPBinOracleEncodeBitPrefix(t *testing.T) {
 	t.Parallel()
 
@@ -425,8 +421,8 @@ func TestPBinOracleEncodeBitPrefixLongRun(t *testing.T) {
 	require.Equal(t, bytes.Repeat([]byte{0xFF}, 66), got[2:])
 }
 
-// TestPBinOracleEmptyTreeHash guards H11 at the oracle: the empty tree is 32
-// zero bytes (eip:208), not the empty-MPT root the rest of erigon uses.
+// The empty tree is 32 zero bytes (eip:208), not the empty-MPT root the rest of
+// erigon uses.
 func TestPBinOracleEmptyTreeHash(t *testing.T) {
 	t.Parallel()
 
@@ -476,8 +472,6 @@ func TestPBinOracleTwoKeyRootIsBranchHash(t *testing.T) {
 	require.Equal(t, want, got[:])
 }
 
-// TestPBinOracleSplitAtLastBit exercises the deepest split two 528-bit keys can
-// have: they agree on all but the final bit.
 func TestPBinOracleSplitAtLastBit(t *testing.T) {
 	t.Parallel()
 
@@ -502,9 +496,8 @@ func TestPBinOracleSplitAtLastBit(t *testing.T) {
 	require.Equal(t, want, got[:])
 }
 
-// TestPBinOracleSplitInsidePrefix pins the shape the split-inside-prefix branch
-// of _insert produces (eip:171-182): the survivor keeps prefix[matched+1:], so
-// the bit consumed by the new branch must not reappear below it.
+// Pins the shape of the split-inside-prefix branch (eip:171-182): the bit the
+// new branch consumes must not reappear in the survivor below it.
 func TestPBinOracleSplitInsidePrefix(t *testing.T) {
 	t.Parallel()
 
@@ -591,9 +584,8 @@ func TestPBinOracleRejectsInvalidInsert(t *testing.T) {
 	})
 }
 
-// TestPBinOracleCorporaArePrefixFree checks every corpus satisfies the
-// invariant _insert asserts, so a later differential failure is a tree bug and
-// not a malformed corpus.
+// Every corpus must satisfy the prefix-freedom insert asserts, so that a later
+// differential failure is a tree bug and not a malformed corpus.
 func TestPBinOracleCorporaArePrefixFree(t *testing.T) {
 	t.Parallel()
 
@@ -616,9 +608,8 @@ func TestPBinOracleCorporaArePrefixFree(t *testing.T) {
 	}
 }
 
-// TestPBinOraclePermutationIndependence is the property that makes the oracle
-// usable as ground truth: the root depends on the key/value set, not on the
-// order entries arrive in.
+// The property that makes the oracle usable as ground truth: the root depends
+// on the key/value set, not on the order entries arrive in.
 func TestPBinOraclePermutationIndependence(t *testing.T) {
 	t.Parallel()
 
@@ -633,9 +624,8 @@ func TestPBinOraclePermutationIndependence(t *testing.T) {
 	}
 }
 
-// TestPBinOracleDeepSharedPrefixCorpus checks the mined cluster really does
-// share a deep prefix — without that, the corpus never exercises a split far
-// from the root.
+// The mined cluster has to really share a deep prefix — otherwise the corpus
+// never exercises a split far from the root.
 func TestPBinOracleDeepSharedPrefixCorpus(t *testing.T) {
 	t.Parallel()
 
@@ -656,8 +646,8 @@ func TestPBinOracleDeepSharedPrefixCorpus(t *testing.T) {
 	require.GreaterOrEqual(t, len(root.prefix), pbinOracleMinedPrefixBits-1)
 }
 
-// TestPBinOracleStemSharedCorpus pins that one account's keys land under a
-// shared stem: the storage-zone keys agree on the 264 zone+stem bits.
+// One account's storage-zone keys must land under a shared stem: they agree on
+// the 8+256 zone+stem bits.
 func TestPBinOracleStemSharedCorpus(t *testing.T) {
 	t.Parallel()
 

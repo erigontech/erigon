@@ -126,9 +126,7 @@ func (p *pbinBitpath) hasPrefix(o *pbinBitpath) bool {
 }
 
 // pbinCommonPrefixBitsAt reports how many leading bits of prefix agree with key
-// read from bit `from`, never past the end of either operand. It is the one
-// divergence primitive: bits past a path's length are masked to zero, so a whole
-// word can be compared at a time and the answer clamped to what both hold.
+// read from bit `from`, clamped to what both operands hold.
 func pbinCommonPrefixBitsAt(key *pbinBitpath, from int16, prefix *pbinBitpath) int16 {
 	limit := min(key.bitLen-from, prefix.bitLen)
 	if limit <= 0 {
@@ -150,7 +148,7 @@ func pbinCommonPrefixBitsAt(key *pbinBitpath, from int16, prefix *pbinBitpath) i
 	return min(n, limit)
 }
 
-// pbinAppendPackedBits appends the path's bits MSB-first, zero-padded to a byte
+// appendPackedBits appends the path's bits MSB-first, zero-padded to a byte
 // boundary.
 func (p *pbinBitpath) appendPackedBits(dst []byte) []byte {
 	for i := range (int(p.bitLen) + 7) / 8 {
@@ -167,11 +165,11 @@ var (
 	errPBinNonCanonicalPad = errors.New("pbin: non-canonical padding in bit-path key")
 )
 
-// pbinAppendBitPath appends the DB key for p: packed bits followed by a single
-// byte holding bitLen mod 8. The trailing count is a suffix on purpose — a
-// leading length field would scatter one subtree's records across the keyspace,
-// whereas this layout keeps a subtree contiguous. It does not order ancestors
-// before descendants, and callers must not assume it does.
+// pbinAppendBitPath appends the DB key for p: packed bits followed by one byte
+// holding bitLen mod 8. The count is a suffix so that a subtree stays
+// contiguous; a leading length field would scatter its records across the
+// keyspace. The order is not ancestors-before-descendants, and callers must not
+// assume it is.
 func pbinAppendBitPath(dst []byte, p *pbinBitpath) []byte {
 	return append(p.appendPackedBits(dst), byte(p.bitLen%8))
 }
@@ -180,8 +178,8 @@ func pbinEncodeBitPath(p *pbinBitpath) []byte {
 	return pbinAppendBitPath(make([]byte, 0, (int(p.bitLen)+7)/8+1), p)
 }
 
-// pbinDecodeBitPath is the inverse of pbinAppendBitPath and rejects every
-// non-canonical spelling, so one path has exactly one DB key.
+// pbinDecodeBitPath inverts pbinAppendBitPath, rejecting non-canonical
+// spellings so that one path has exactly one DB key.
 func pbinDecodeBitPath(buf []byte) (pbinBitpath, error) {
 	var p pbinBitpath
 	if len(buf) == 0 {

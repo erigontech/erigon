@@ -33,8 +33,6 @@ func pbinTestEmptyCell() pbinCell {
 	return c
 }
 
-// pbinTestBranchCell builds a branch-pointing cell with a prefix of the given
-// bit length and a distinguishable hash.
 func pbinTestBranchCell(pattern byte, bitLen int16) pbinCell {
 	c := pbinTestEmptyCell()
 	c.kind = pbinNodeBranch
@@ -46,8 +44,7 @@ func pbinTestBranchCell(pattern byte, bitLen int16) pbinCell {
 	return c
 }
 
-// pbinTestLeafCell builds a leaf cell carrying a storage plain key, the widest
-// plain key a cell holds.
+// pbinTestLeafCell carries a storage plain key — the widest a cell holds.
 func pbinTestLeafCell(pattern byte, bitLen int16) pbinCell {
 	c := pbinTestBranchCell(pattern, bitLen)
 	c.kind = pbinNodeLeaf
@@ -58,8 +55,8 @@ func pbinTestLeafCell(pattern byte, bitLen int16) pbinCell {
 	return c
 }
 
-// pbinTestChunkLeafCell builds the one leaf shape that carries its value in the
-// record instead of a plain key: a code chunk.
+// pbinTestChunkLeafCell is the one leaf shape carrying its value in the record
+// instead of a plain key: a code chunk.
 func pbinTestChunkLeafCell(pattern byte, bitLen int16) pbinCell {
 	c := pbinTestBranchCell(pattern, bitLen)
 	c.kind = pbinNodeLeaf
@@ -70,9 +67,8 @@ func pbinTestChunkLeafCell(pattern byte, bitLen int16) pbinCell {
 	return c
 }
 
-// A prefix of any admissible bit length must survive a record round-trip: the
-// 66-byte storage path does not fit the shared codec's fields, and a silent
-// truncation would commit a wrong root (guards H4).
+// The 66-byte storage path does not fit the shared codec's fields, so every
+// admissible bit length is checked: a silent truncation commits a wrong root.
 func TestPBinBranchCodecRoundTripPrefixBitLengths(t *testing.T) {
 	t.Parallel()
 
@@ -167,7 +163,7 @@ func TestPBinBranchCodecIsCanonical(t *testing.T) {
 }
 
 // pbinTestRecord assembles a record by hand so decode can be probed with bytes
-// the encoder would never produce.
+// the encoder would never emit.
 func pbinTestRecord(touchMap, afterMap uint16, bodies ...[]byte) []byte {
 	rec := make([]byte, 4)
 	binary.BigEndian.PutUint16(rec, touchMap)
@@ -178,8 +174,8 @@ func pbinTestRecord(touchMap, afterMap uint16, bodies ...[]byte) []byte {
 	return rec
 }
 
-// pbinTestCellBody spells one cell body: fields, uvarint bit count, then the
-// caller's raw prefix bytes — deliberately not derived from the bit count.
+// pbinTestCellBody takes the prefix bytes raw, deliberately not derived from the
+// bit count, so a test can make the two disagree.
 func pbinTestCellBody(fields pbinCellFields, prefixBitLen uint64, prefix []byte, tail ...byte) []byte {
 	body := []byte{byte(fields)}
 	body = binary.AppendUvarint(body, prefixBitLen)
@@ -191,9 +187,9 @@ func pbinTestLenAndVal(val []byte) []byte {
 	return append(binary.AppendUvarint(nil, uint64(len(val))), val...)
 }
 
-// A declared bit count that disagrees with the bytes behind it must be
-// rejected rather than read as a shorter or longer prefix: the prefix is inside
-// the branch hash, so spurious pad bits silently change the root (guards H3).
+// A declared bit count that disagrees with the bytes behind it must be rejected,
+// not read as a shorter or longer prefix: the prefix is inside the branch hash,
+// so spurious pad bits silently change the root.
 func TestPBinBranchDecodeRejects(t *testing.T) {
 	t.Parallel()
 

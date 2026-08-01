@@ -40,10 +40,8 @@ func pbinRecoveredError(t *testing.T, fn func()) (err error) {
 	return nil
 }
 
-// TestPBinRefusesDeferredCommitmentUpdates pins the enabling side of the
-// deferred-update path: hex and parallel take the request, bin refuses it by
-// name. Silently accepting it would leave the flag set with no trie honouring
-// it, so Process would apply inline while the caller waited for a flush.
+// Silently accepting the request would leave the flag set with no trie
+// honouring it: Process would apply inline while the caller waited for a flush.
 func TestPBinRefusesDeferredCommitmentUpdates(t *testing.T) {
 	t.Parallel()
 
@@ -59,9 +57,8 @@ func TestPBinRefusesDeferredCommitmentUpdates(t *testing.T) {
 	require.NoError(t, pbinRecoveredError(t, func() { binCtx.SetDeferCommitmentUpdates(false) }))
 }
 
-// TestPBinComputeCommitmentRefusesDeferredTake covers the taking side: were the
-// flag ever set under bin, the post-Process type switch would find no trie
-// carrying deferred updates and hand back an empty pendingUpdate.
+// Were the flag ever set under bin, the post-Process type switch would find no
+// trie carrying deferred updates and hand back an empty pendingUpdate.
 func TestPBinComputeCommitmentRefusesDeferredTake(t *testing.T) {
 	t.Parallel()
 
@@ -72,9 +69,8 @@ func TestPBinComputeCommitmentRefusesDeferredTake(t *testing.T) {
 	require.ErrorIs(t, err, commitment.ErrPBinUnsupported)
 }
 
-// TestPBinComputeCommitmentRefusesTrieTrace: the trace records branch records
-// and replays them through the hex trie, so a bin trace would replay as a
-// different tree. The trace is env-gated, so refusing costs a normal run nothing.
+// The trace replays recorded branch records through the hex trie, so a bin
+// trace would replay as a different tree.
 func TestPBinComputeCommitmentRefusesTrieTrace(t *testing.T) {
 	prev := dbg.TrieTraceFile
 	dbg.TrieTraceFile = t.TempDir() + "/trie-trace.toml"
@@ -89,9 +85,8 @@ func TestPBinComputeCommitmentRefusesTrieTrace(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestPBinRefusesCollapseTracer guards the witness path: the tracer only ever
-// reaches a HexPatriciaHashed, so under bin it was installed nowhere and the
-// caller collected no collapse paths.
+// The tracer only ever reaches a HexPatriciaHashed, so under bin it would be
+// installed nowhere and the caller would collect no collapse paths.
 func TestPBinRefusesCollapseTracer(t *testing.T) {
 	t.Parallel()
 
@@ -107,9 +102,8 @@ func TestPBinRefusesCollapseTracer(t *testing.T) {
 	require.NoError(t, pbinRecoveredError(t, func() { binCtx.SetCollapseTracer(nil) }), "clearing must stay allowed")
 }
 
-// TestPBinBranchChildCountRefusesBin: the prefix is a hex nibble path compacted
-// into a commitment key, which addresses no bin record — the read used to miss
-// and report a child count of zero.
+// The prefix is a hex nibble path compacted into a commitment key, which
+// addresses no bin record — the read would miss and report a child count of zero.
 func TestPBinBranchChildCountRefusesBin(t *testing.T) {
 	t.Parallel()
 

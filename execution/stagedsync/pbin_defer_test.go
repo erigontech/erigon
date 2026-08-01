@@ -24,10 +24,8 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-// TestPBinDeferCommitmentUpdatesExcludesBin pins the exec3 side of the deferral
-// decision. The commitment context panics on a deferral request under the bin
-// variant, so ExecV3 must never make one — while every hex-family variant keeps
-// deferring for fork validation and the parallel apply path.
+// The commitment context panics on a deferral request under the bin variant, so
+// ExecV3 must never make one.
 func TestPBinDeferCommitmentUpdatesExcludesBin(t *testing.T) {
 	t.Parallel()
 

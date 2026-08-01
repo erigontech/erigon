@@ -38,7 +38,7 @@ func (s pbinEngineShape) depthStats() (maxD, p50, mean int) {
 }
 
 // pbinHexPathBits converts a HexToCompact-encoded branch key to a path length in
-// key bits so the two radices are comparable: one nibble is four bits.
+// key bits, so the two radices are comparable.
 func pbinHexPathBits(compact string) int {
 	if len(compact) == 0 {
 		return 0
@@ -100,9 +100,9 @@ func pbinRunBin(t *testing.T, plainKeys [][]byte, updates []Update) (pbinEngineS
 	return s, pph.counters
 }
 
-// pbinClusteredCorpus gives every contract slots that share a storage group, which
-// is what EIP-8297's raw sub-index co-locates. pbinScatteredCorpus spreads slots so
-// no two share a group — the mapping-style access random corpora produce.
+// pbinClusteredCorpus gives every contract slots that share a storage group,
+// which is what EIP-8297's raw sub-index co-locates. pbinScatteredCorpus spreads
+// them so no two share a group — the mapping-style access random corpora produce.
 func pbinClusteredCorpus(contracts, slotsPer int) ([][]byte, []Update) {
 	ub := NewUpdateBuilder()
 	for c := range contracts {
@@ -164,10 +164,9 @@ func TestPBinVsHexStructure(t *testing.T) {
 	}
 }
 
-// TestPBinStemCoLocation pins the storage behaviour that distinguishes
-// EIP-8297: slots sharing a tree_index differ only in the last key byte, so
-// they hang off one stem. Random 32-byte slots never collide in a group, so
-// without a deliberate corpus this path goes untested.
+// Slots sharing a tree_index differ only in the last key byte, so they hang off
+// one stem. Random 32-byte slots never collide in a group, so without a
+// deliberate corpus this path goes untested.
 func TestPBinStemCoLocation(t *testing.T) {
 	t.Parallel()
 
@@ -193,11 +192,9 @@ func TestPBinStemCoLocation(t *testing.T) {
 		require.Equal(t, byte(n%256), k[pbinStorageKeyLength-1], "sub-index is the raw low byte")
 	}
 
-	// crossing into the next group must change the second digest
 	next := c.storageKey(addr, slotOf(512))
 	require.NotEqual(t, base[33:65], next[33:65], "a new tree_index must move the group digest")
 
-	// a co-located pair shares a long prefix; a cross-group pair does not
 	sharedBits := pbinCommonPrefixBitsOfKeys(base, c.storageKey(addr, slotOf(257)))
 	crossBits := pbinCommonPrefixBitsOfKeys(base, next)
 	require.Greater(t, sharedBits, crossBits,

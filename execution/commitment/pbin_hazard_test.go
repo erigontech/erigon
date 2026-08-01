@@ -27,8 +27,8 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// pbinTestBatches runs each corpus through one engine and one state in order,
-// the way consecutive blocks reach the trie, and returns the root after the last.
+// pbinTestBatches runs the corpora through one engine and one state in order,
+// the way consecutive blocks reach the trie.
 func pbinTestBatches(t *testing.T, batches ...*pbinTestCorpus) (*PBinPatriciaHashed, *MockState, []byte) {
 	t.Helper()
 	pph, ms := pbinTestEngine(t)
@@ -41,8 +41,8 @@ func pbinTestBatches(t *testing.T, batches ...*pbinTestCorpus) (*PBinPatriciaHas
 }
 
 // pbinTestUnion is the leaf set the batches leave behind. A key touched twice
-// keeps its last value, which is what the oracle's duplicate-key insert does and
-// what MockState's update merge does.
+// keeps its last value — the same last-write-wins as the oracle's duplicate-key
+// insert and MockState's update merge.
 func pbinTestUnion(batches ...*pbinTestCorpus) *pbinTestCorpus {
 	u := new(pbinTestCorpus)
 	for _, b := range batches {
@@ -58,7 +58,6 @@ func pbinTestUnion(batches ...*pbinTestCorpus) *pbinTestCorpus {
 	return u
 }
 
-// leafCount is how many leaves the corpus stands for once repeated keys collapse.
 func (c *pbinTestCorpus) leafCount(t *testing.T) int {
 	t.Helper()
 	seen := make(map[string]struct{})
@@ -77,8 +76,8 @@ func (c *pbinTestCorpus) permute(order []int) *pbinTestCorpus {
 	return out
 }
 
-// TestPBinUntouchedSiblingSurvivesBatch guards H2. At arity 2 a cell's sibling is
-// the whole other half of the subtree, so a batch that rewrites a node from the
+// TestPBinUntouchedSiblingSurvivesBatch: at arity 2 a cell's sibling is the
+// whole other half of the subtree, so a batch that rewrites a node from the
 // touched child alone loses everything under the other one.
 func TestPBinUntouchedSiblingSurvivesBatch(t *testing.T) {
 	t.Parallel()
@@ -140,10 +139,10 @@ func TestPBinUntouchedSiblingSurvivesBatch(t *testing.T) {
 	}
 }
 
-// TestPBinSplitInsideStoredPrefix guards H1. A probe diverging inside a stored
-// branch's prefix shortens that prefix, and the prefix is inside the node's hash,
-// so a hash carried over from the record is stale. The counters are what pin that
-// this run actually took that path rather than passing by luck.
+// TestPBinSplitInsideStoredPrefix: a probe diverging inside a stored branch's
+// prefix shortens that prefix, and the prefix is inside the node's hash, so a
+// hash carried over from the record is stale. The counter assertions pin that
+// the run took that path rather than passing by luck.
 func TestPBinSplitInsideStoredPrefix(t *testing.T) {
 	t.Parallel()
 
@@ -173,9 +172,9 @@ func TestPBinSplitInsideStoredPrefix(t *testing.T) {
 	pbinTestVerifyRecords(t, ms, root, union.leafCount(t))
 }
 
-// TestPBinDeepSharedPrefixCorpus is H1's other half: a mined cluster whose keys
-// agree far past the root, so the splits happen deep instead of at the first
-// bits, spread over batches so the survivors come back from records.
+// TestPBinDeepSharedPrefixCorpus uses mined keys that agree far past the root,
+// so the splits happen deep instead of at the first bits, spread over batches so
+// the survivors come back from records.
 func TestPBinDeepSharedPrefixCorpus(t *testing.T) {
 	t.Parallel()
 
@@ -196,8 +195,6 @@ func TestPBinDeepSharedPrefixCorpus(t *testing.T) {
 	pbinTestVerifyRecords(t, ms, root, union.leafCount(t))
 }
 
-// pbinTestOrderings returns the corpus in every arrival order worth trying: as
-// written, reversed, both tree-key directions, and one shuffle.
 func pbinTestOrderings(t *testing.T, c *pbinTestCorpus) map[string]*pbinTestCorpus {
 	t.Helper()
 
@@ -229,8 +226,8 @@ func pbinTestOrderings(t *testing.T, c *pbinTestCorpus) map[string]*pbinTestCorp
 	}
 }
 
-// pbinTestProcessSeq feeds the corpus one key per Process call, the way
-// per-block processing arrives, and returns the root after the last key.
+// pbinTestProcessSeq feeds the corpus one key per Process call, where
+// pbinTestBatches makes a single call per corpus.
 func pbinTestProcessSeq(t *testing.T, c *pbinTestCorpus) (*MockState, []byte) {
 	t.Helper()
 	pph, ms := pbinTestEngine(t)
@@ -273,9 +270,9 @@ func pbinTestUniqueReprCorpora() []struct {
 	}
 }
 
-// TestPBinUniqueRepresentation ports Test_HexPatriciaHashed_UniqueRepresentation
-// and its variants: the root follows the state the keys leave behind, not the
-// order they arrive in nor how many Process calls they are split across.
+// TestPBinUniqueRepresentation ports Test_HexPatriciaHashed_UniqueRepresentation:
+// the root follows the state the keys leave behind, not the order they arrive in
+// nor how many Process calls they are split across.
 func TestPBinUniqueRepresentation(t *testing.T) {
 	t.Parallel()
 

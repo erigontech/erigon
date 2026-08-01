@@ -47,9 +47,8 @@ func TestPBinSetHashSuite(t *testing.T) {
 	require.Equal(t, PBinHashKeccak, PBinHashSuiteName(), "a rejected name must not change the suite")
 }
 
-// TestPBinInitializeTrieAppliesHashSuite pins that the selection reaches both
-// seams through the production constructor: an engine whose node hashing and
-// key derivation disagreed would build a tree no one can reproduce.
+// The selection has to reach both seams: an engine whose node hashing and key
+// derivation disagreed would build a tree no one can reproduce.
 func TestPBinInitializeTrieAppliesHashSuite(t *testing.T) {
 	pbinRestoreHashSuite(t)
 
@@ -78,10 +77,10 @@ func TestPBinInitializeTrieAppliesHashSuite(t *testing.T) {
 	}
 }
 
-// TestPBinBlake3SuiteMatchesSpecRoots is the interop check: with BLAKE3 selected
-// the way a node selects it, the engine reproduces the reference implementation's
-// roots. Under the Keccak default the same vectors must NOT match — otherwise the
-// selection is not reaching the engine and the test proves nothing.
+// With BLAKE3 selected the way a node selects it, the engine reproduces the
+// reference implementation's roots. The Keccak default must NOT match the same
+// vectors — otherwise the selection never reached the engine and the positive
+// half proves nothing.
 func TestPBinBlake3SuiteMatchesSpecRoots(t *testing.T) {
 	pbinRestoreHashSuite(t)
 	v := pbinLoadSpecVectors(t)

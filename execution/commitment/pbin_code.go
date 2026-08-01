@@ -24,8 +24,8 @@ const (
 	// value carries the PUSHDATA count instead.
 	pbinChunkDataLen = pbinValueLength - 1
 
-	// pbinHeaderCodeChunks are the chunks the account header holds, at
-	// sub-indices CODE_OFFSET..255. Higher chunks live in the code zone.
+	// pbinHeaderCodeChunks are the chunks the account header holds, at sub-indices
+	// CODE_OFFSET..255. Higher chunks live in the code zone.
 	pbinHeaderCodeChunks = pbinStemSubtreeWidth - pbinCodeOffset
 
 	pbinPushOffset = 95
@@ -33,11 +33,10 @@ const (
 	pbinPush32     = pbinPushOffset + 32
 )
 
-// pbinChunkifyCode splits code into the tree's chunk values (eip:374-397). Byte
-// 0 of a chunk counts how many of its leading bytes are PUSHDATA, so the scan
-// runs over the whole code and residual PUSHDATA carries across chunk
-// boundaries. Padding to a multiple of 31 happens before the scan, which is what
-// makes a PUSH whose data runs off the end count against the padded tail.
+// pbinChunkifyCode splits code into the tree's chunk values (eip:374-397). The
+// PUSHDATA scan runs over the whole code, so residual PUSHDATA carries across
+// chunk boundaries. Padding to a multiple of 31 happens before the scan, which
+// is what makes a PUSH whose data runs off the end count against the padded tail.
 func pbinChunkifyCode(code []byte) [][pbinValueLength]byte {
 	if len(code) == 0 {
 		return nil
@@ -48,8 +47,8 @@ func pbinChunkifyCode(code []byte) [][pbinValueLength]byte {
 		copy(padded, code)
 	}
 
-	// pushdataAt[i] is how many bytes from i on are still PUSHDATA. The spec sizes
-	// it a whole chunk past the code so a PUSH32 on the last byte has room.
+	// pushdataAt[i] is how many bytes from i on are still PUSHDATA. It runs a whole
+	// chunk past the code so a PUSH32 on the last byte has room.
 	pushdataAt := make([]byte, len(padded)+pbinValueLength)
 	for pos := 0; pos < len(padded); {
 		var pushdata int
@@ -74,10 +73,9 @@ func pbinChunkifyCode(code []byte) [][pbinValueLength]byte {
 }
 
 // pbinRecordLeafValue is the value a leaf carries itself rather than deriving
-// from state — a code chunk, or a sub-index the embedding reserves and defines
-// no packing for. Unlike a storage value it is not left-padded into place: a
-// chunk is positional, byte 0 being the PUSHDATA count, so a short value is an
-// error.
+// from state — a code chunk, or a sub-index the embedding reserves. Unlike a
+// storage value it is not left-padded into place: a chunk is positional, so a
+// short value is an error.
 func pbinRecordLeafValue(u *Update) ([pbinValueLength]byte, error) {
 	if u.StorageLen != pbinValueLength {
 		return [pbinValueLength]byte{}, fmt.Errorf("%w: record-resident leaf holds %d value bytes, want %d",

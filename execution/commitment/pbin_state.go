@@ -23,10 +23,8 @@ import (
 )
 
 // The pbin state blob is the root cell plus the three root flags — nothing per
-// row. State is only encoded with every row folded, and unfold fully
-// initializes a row before anything reads it, so the grid arrays restore as
-// zero. Depths in particular are never serialized, and no depth ever meets a
-// one-byte encoding.
+// row. State is only encoded with every row folded, and unfold fully initializes
+// a row before anything reads it, so the grid arrays restore as zero.
 const (
 	// pbinStateMarker opens every pbin blob. A hex blob opens with a root-flags
 	// byte ≤ 0x07, so the marker also refuses a cross-variant restore outright.
@@ -72,8 +70,7 @@ func (pph *PBinPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 	return buf, nil
 }
 
-// SetState is the inverse of EncodeCurrentState; nil or empty resets the engine,
-// and the tree is then found again through the stored root record.
+// SetState is the inverse of EncodeCurrentState; an empty blob resets the engine.
 func (pph *PBinPatriciaHashed) SetState(buf []byte) error {
 	if pph.grid.activeRows != 0 {
 		return fmt.Errorf("%w: cannot restore over %d rows", errPBinStateOpen, pph.grid.activeRows)

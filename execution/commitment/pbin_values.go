@@ -31,8 +31,8 @@ import (
 // pbinValueLength is the one leaf value size EIP-8297 admits (eip:132).
 const pbinValueLength = 32
 
-// BASIC_DATA field offsets within the leaf value (eip:332-339). Bytes 1..3 are
-// reserved and version is always zero, since writing any header field resets it.
+// BASIC_DATA field offsets within the leaf value (eip:332-339). Byte 0 (version)
+// and the reserved bytes 1..3 stay zero.
 const (
 	pbinBasicDataCodeSizeOffset = 4
 	pbinBasicDataNonceOffset    = 8
@@ -44,9 +44,9 @@ var (
 	errPBinCodeSizeOverflow = errors.New("pbin: code size does not fit the 4-byte BASIC_DATA field")
 )
 
-// pbinEncodeBasicData packs version, code_size, nonce and balance big-endian
-// into the BASIC_DATA leaf value. A balance the 16-byte field cannot hold is an
-// error rather than a silent truncation, which would commit a wrong root.
+// pbinEncodeBasicData packs code_size, nonce and balance big-endian into the
+// BASIC_DATA leaf value. A value the field cannot hold is an error rather than a
+// silent truncation, which would commit a wrong root.
 func pbinEncodeBasicData(nonce uint64, balance *uint256.Int, codeSize uint64) ([pbinValueLength]byte, error) {
 	var v [pbinValueLength]byte
 	if balance.BitLen() > 128 {
@@ -63,7 +63,7 @@ func pbinEncodeBasicData(nonce uint64, balance *uint256.Int, codeSize uint64) ([
 }
 
 // pbinCodeHashValue returns the CODE_HASH leaf value, mapping an unset hash to
-// the hash of empty bytecode as the spec requires for a codeless account
+// the empty-bytecode hash as the spec requires for a codeless account
 // (eip:345-347).
 func pbinCodeHashValue(codeHash common.Hash) [pbinValueLength]byte {
 	if codeHash == (common.Hash{}) {
@@ -72,7 +72,6 @@ func pbinCodeHashValue(codeHash common.Hash) [pbinValueLength]byte {
 	return codeHash
 }
 
-// pbinEncodeStorageValue left-pads a storage value to the fixed leaf width.
 func pbinEncodeStorageValue(value []byte) [pbinValueLength]byte {
 	if len(value) > length.Hash {
 		panic(fmt.Sprintf("pbin: storage value of %d bytes exceeds %d", len(value), length.Hash))

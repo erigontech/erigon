@@ -34,9 +34,8 @@ func pbinTestCode(n int) []byte {
 	return code
 }
 
-// TestPBinTrieContextCodeReadsCodeDomain pins the read the binary trie's code
-// chunking rests on. Chunk leaves hold bytecode, which no other trie needs and
-// no account read returns.
+// Code chunk leaves hold raw bytecode, which no account read returns and no
+// other trie needs.
 func TestPBinTrieContextCodeReadsCodeDomain(t *testing.T) {
 	t.Parallel()
 
@@ -53,11 +52,10 @@ func TestPBinTrieContextCodeReadsCodeDomain(t *testing.T) {
 	require.Empty(t, absent)
 }
 
-// TestPBinSharedDomainsCommitsCodeBearingAccount is the wiring end to end: the
-// engine chunks code it reads through the trie context, and cross-checks the
-// chunk count against the code_size it hashes, so a context that cannot serve
-// code fails the commit rather than committing a code-less tree. Chunk values
-// themselves are pinned against the reference tree in the commitment package.
+// The engine cross-checks the chunk count against the code_size it hashes, so a
+// context that cannot serve code fails the commit instead of committing a
+// code-less tree. Chunk values are pinned against the reference tree in the
+// commitment package.
 func TestPBinSharedDomainsCommitsCodeBearingAccount(t *testing.T) {
 	t.Parallel()
 
@@ -74,8 +72,7 @@ func TestPBinSharedDomainsCommitsCodeBearingAccount(t *testing.T) {
 	withCode, err := sd.ComputeCommitment(t.Context(), tx, false, 0, 0, "pbin-code", nil)
 	require.NoError(t, err)
 
-	// The same account with one byte of code roots differently: the chunk leaves
-	// are part of what is committed, not a side table.
+	// Chunk leaves are part of what is committed, not a side table.
 	short := pbinTestCode(1)
 	shortSd, shortTx := pbinCodeSizeSharedDomains(t,
 		[]execctx.SharedDomainOption{execctx.WithTrieConfig(cfg)}, addr, pbinCodeSizeAccount(crypto.Keccak256Hash(short)), short)
@@ -84,9 +81,8 @@ func TestPBinSharedDomainsCommitsCodeBearingAccount(t *testing.T) {
 	require.NotEqual(t, withShortCode, withCode)
 }
 
-// TestPBinSharedDomainsCommitsCodeBeyondHeader is the domain-layer half of the
-// code zone: a contract whose code outgrows the account header commits, and the
-// chunks past the header are part of what it commits.
+// The account header holds the first 128 code chunks; this code is one byte
+// past that, so it spills into the code zone.
 func TestPBinSharedDomainsCommitsCodeBeyondHeader(t *testing.T) {
 	t.Parallel()
 
@@ -101,8 +97,8 @@ func TestPBinSharedDomainsCommitsCodeBeyondHeader(t *testing.T) {
 	overflowing, err := sd.ComputeCommitment(t.Context(), tx, false, 0, 0, "pbin-code-overflow", nil)
 	require.NoError(t, err)
 
-	// Dropping the one byte that spills into the code zone must change the root:
-	// the overflow chunk is committed, not silently left out.
+	// Dropping the spilling byte must change the root: the overflow chunk is
+	// committed, not silently left out.
 	header := code[:len(code)-1]
 	headerSd, headerTx := pbinCodeSizeSharedDomains(t,
 		[]execctx.SharedDomainOption{execctx.WithTrieConfig(cfg)}, addr, pbinCodeSizeAccount(crypto.Keccak256Hash(header)), header)

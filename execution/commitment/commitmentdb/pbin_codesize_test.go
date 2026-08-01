@@ -40,8 +40,6 @@ func pbinCodeSizeAddr(i byte) []byte {
 	return a
 }
 
-// pbinCodeSizeSharedDomains opens a SharedDomains over a fresh datadir holding
-// one account and, when non-nil, one CodeDomain entry for it.
 func pbinCodeSizeSharedDomains(t *testing.T, opts []execctx.SharedDomainOption, addr []byte, acc *accounts.Account, code []byte) (*execctx.SharedDomains, kv.TemporalTx) {
 	t.Helper()
 	db := pbinNewTestDb(t)
@@ -60,8 +58,6 @@ func pbinCodeSizeSharedDomains(t *testing.T, opts []execctx.SharedDomainOption, 
 	return sd, tx
 }
 
-// pbinCodeSizeTrieContext builds a read context over that state, with the code
-// size read switched the way the named variant would switch it.
 func pbinCodeSizeTrieContext(t *testing.T, readCodeSize bool, addr []byte, acc *accounts.Account, code []byte) *commitmentdb.TrieContext {
 	t.Helper()
 	sd, tx := pbinCodeSizeSharedDomains(t, nil, addr, acc, code)
@@ -74,8 +70,7 @@ func pbinCodeSizeAccount(codeHash common.Hash) *accounts.Account {
 	return &accounts.Account{Nonce: 3, Balance: *uint256.NewInt(77), CodeHash: accounts.InternCodeHash(codeHash)}
 }
 
-// TestPBinTrieContextAccountReadsCodeSize is where BASIC_DATA's code_size comes
-// from: the length of the account's code in the CodeDomain.
+// BASIC_DATA's code_size is the length of the account's code in the CodeDomain.
 func TestPBinTrieContextAccountReadsCodeSize(t *testing.T) {
 	t.Parallel()
 
@@ -89,8 +84,8 @@ func TestPBinTrieContextAccountReadsCodeSize(t *testing.T) {
 	require.NotZero(t, u.Flags&commitment.CodeUpdate)
 }
 
-// TestPBinTrieContextLeavesCodeSizeZeroForHex pins the gate: the hex trie does
-// not hash code_size, so it must not pay for the extra CodeDomain read.
+// The hex trie does not hash code_size, so it must not pay for the extra
+// CodeDomain read.
 func TestPBinTrieContextLeavesCodeSizeZeroForHex(t *testing.T) {
 	t.Parallel()
 
@@ -103,10 +98,9 @@ func TestPBinTrieContextLeavesCodeSizeZeroForHex(t *testing.T) {
 	require.Zero(t, u.CodeSize)
 }
 
-// TestPBinTrieContextIgnoresClearedDelegationResidue decides H9: a cleared
-// EIP-7702 delegation leaves code in the CodeDomain that no longer belongs to
-// the account. code_size follows the account's own code hash, so the residue
-// changes nothing — otherwise a tolerated inconsistency would move the root.
+// A cleared EIP-7702 delegation leaves code in the CodeDomain that no longer
+// belongs to the account. code_size follows the account's own code hash, so the
+// residue must not move the root.
 func TestPBinTrieContextIgnoresClearedDelegationResidue(t *testing.T) {
 	t.Parallel()
 
@@ -120,8 +114,7 @@ func TestPBinTrieContextIgnoresClearedDelegationResidue(t *testing.T) {
 	require.Equal(t, empty.CodeHash, u.CodeHash)
 }
 
-// TestPBinTrieContextRefusesCodeBearingAccountWithoutCode is H9's other half: a
-// code hash with no code behind it (an eth_simulateV1 overlay, a truncated
+// A code hash with no code behind it (an eth_simulateV1 overlay, a truncated
 // datadir) would hash as code_size 0 and silently produce a wrong root.
 func TestPBinTrieContextRefusesCodeBearingAccountWithoutCode(t *testing.T) {
 	t.Parallel()
@@ -133,9 +126,7 @@ func TestPBinTrieContextRefusesCodeBearingAccountWithoutCode(t *testing.T) {
 	require.ErrorContains(t, err, "code missing")
 }
 
-// TestPBinSharedDomainsReadsCodeSizeUnderBin ties the variant to the read: only
-// the bin trie needs code_size, so only a bin SharedDomains must insist the code
-// is there.
+// Only a bin SharedDomains must insist the code is there.
 func TestPBinSharedDomainsReadsCodeSizeUnderBin(t *testing.T) {
 	t.Parallel()
 

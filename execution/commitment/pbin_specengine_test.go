@@ -13,14 +13,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// Drives the engine itself over the reference's root vectors, rather than the
-// oracle. The vectors carry raw tree keys and raw 32-byte values, while the
-// engine rebuilds a leaf's value from an Update according to where the key sits,
-// so each value has to be mapped back onto the field the engine will read.
-//
-// Every position the embedding defines is expressible, so the exclusion list is
-// asserted empty: a vector the mapping cannot express fails this test rather
-// than being skipped.
+// Drives the engine itself over the reference's root vectors, rather than the oracle.
 
 type pbinEngineLeaf struct {
 	treeKey  []byte
@@ -28,8 +21,9 @@ type pbinEngineLeaf struct {
 	update   Update
 }
 
-// pbinLeafFromVector maps a raw (key, value) pair onto the Update the engine
-// reads for that key's position.
+// pbinLeafFromVector maps a raw (key, value) vector onto the Update the engine
+// reads for that key's position: the engine rebuilds a leaf's value from Update
+// fields, so a raw 32-byte value has to land on the field it will be read from.
 func pbinLeafFromVector(key, value []byte, seq int) pbinEngineLeaf {
 	var l pbinEngineLeaf
 	l.treeKey = key
@@ -47,7 +41,7 @@ func pbinLeafFromVector(key, value []byte, seq int) pbinEngineLeaf {
 		l.update.StorageLen = int8(copy(l.update.Storage[:], value))
 	}
 	// A leaf carrying its own 32 bytes has no plain key: a code chunk, or a
-	// sub-index the embedding has reserved and defined no packing for.
+	// reserved sub-index with no defined packing.
 	recordLeaf := func() {
 		l.plainKey = nil
 		l.update.Flags = StorageUpdate
@@ -107,9 +101,7 @@ func pbinSpecEngineRoot(t *testing.T, pph *PBinPatriciaHashed, tc pbinSpecTrieVe
 	return hex.EncodeToString(got)
 }
 
-// TestPBinReleaseClearsHashSuite pins pooling hygiene: a released engine must
-// come back on the Keccak default, not carrying a previous user's BLAKE3.
-// Not parallel — it inspects a pooled object.
+// Not parallel: it inspects engines coming out of the shared pool.
 func TestPBinReleaseClearsHashSuite(t *testing.T) {
 	pph := NewPBinPatriciaHashed(NewMockState(t))
 	pph.setHashSuite(pbinBlake3Hash)
