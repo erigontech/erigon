@@ -103,6 +103,7 @@ func (pph *PBinPatriciaHashed) Reset() {
 	pph.rootPrev = nil
 	pph.updateStream.reset()
 	pph.lastKeyLen = 0
+	pph.hasher.tracer = nil
 }
 
 // setHashSuite swaps the hash on both seams at once — node hashing here and the

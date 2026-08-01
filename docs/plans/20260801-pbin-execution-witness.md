@@ -175,19 +175,24 @@ leaf and code chunking instead of reimplementing all of it.
 - Modify: `execution/commitment/pbin_hash.go`
 - Modify: `execution/commitment/pbin_patricia_hashed.go`
 
-- [ ] add a tracer field to `pbinHasher` (`pbin_hash.go`), reusing the existing `witnessTracer`
+- [x] add a tracer field to `pbinHasher` (`pbin_hash.go`), reusing the existing `witnessTracer`
       interface at `hex_patricia_hashed.go:60-63` — do not define a second interface
-- [ ] emit from inside `branchHash` (`pbin_hash.go:106-111`) and `leafCellHash` (`:134-158`), where
+- [x] emit from inside `branchHash` (`pbin_hash.go:106-111`) and `leafCellHash` (`:134-158`), where
       the preimage buffer already exists; emit the buffer as-is, do not rebuild it
-- [ ] confirm by test that the tap also covers nodes hashed outside `foldBranch` — sibling cells via
+- [x] confirm by test that the tap also covers nodes hashed outside `foldBranch` — sibling cells via
       `hashRowCell`→`cellHash` (`pbin_patricia_hashed.go:738-763`) and the root cell via `RootHash()`
       (`:299`)
-- [ ] ensure `Reset()` and `Release()` detach the tracer so a pooled engine never carries one
-- [ ] write tests: tracer nil = zero emissions and an unchanged root
-- [ ] write tests: tracer set = every node emitted once, `hash == H(preimage)` for both tags
-- [ ] write tests: a tree whose root is a leaf (single-key corpus) still emits its root node
-- [ ] write tests: pooled reuse after `Release()` starts with no tracer
-- [ ] run tests - must pass before task 2
+- [x] ensure `Reset()` and `Release()` detach the tracer so a pooled engine never carries one
+      (`Release` calls `Reset`, which now clears it)
+- [x] write tests: tracer nil = zero emissions and an unchanged root
+- [x] write tests: tracer set = every node emitted once, `hash == H(preimage)` for both tags —
+      asserted as: one hash never carries two preimages, every emission hashes to its own preimage,
+      and the whole reference-tree node set is covered. The engine emits a **superset**: a branch
+      folded under a short prefix is re-hashed with the canonical prefix when its parent row
+      propagates, so the earlier emission survives in the set.
+- [x] write tests: a tree whose root is a leaf (single-key corpus) still emits its root node
+- [x] write tests: pooled reuse after `Release()` starts with no tracer
+- [x] run tests - must pass before task 2
 
 ### Task 2: Witnesses method returning the parent root
 

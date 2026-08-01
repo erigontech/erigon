@@ -83,8 +83,9 @@ func PBinHashSuiteName() string {
 // pbinHasher applies H to node preimages. Its zero value is ready and hashes with
 // Keccak-256.
 type pbinHasher struct {
-	buf [pbinHashBufLen]byte
-	sum pbinHashFn
+	buf    [pbinHashBufLen]byte
+	sum    pbinHashFn
+	tracer witnessTracer // nil on the normal commitment path; see pbin_witness.go
 }
 
 func (h *pbinHasher) hash(preimage []byte) common.Hash {
@@ -107,7 +108,9 @@ func (h *pbinHasher) branchHash(prefix *pbinBitpath, left, right *common.Hash) c
 	buf := pbinAppendBitPrefix(append(h.buf[:0], pbinBranchTag), prefix)
 	buf = append(buf, left[:]...)
 	buf = append(buf, right[:]...)
-	return h.hash(buf)
+	hash := h.hash(buf)
+	h.emitNode(buf, &hash)
+	return hash
 }
 
 // cellHash hashes the cell reached by path; a leaf's complete key is path
@@ -152,7 +155,10 @@ func (h *pbinHasher) leafCellHash(c *pbinCell, path *pbinBitpath) (common.Hash, 
 	if err != nil {
 		return common.Hash{}, err
 	}
-	return h.hash(append(buf, value[:]...)), nil
+	buf = append(buf, value[:]...)
+	hash := h.hash(buf)
+	h.emitNode(buf, &hash)
+	return hash, nil
 }
 
 func pbinLeafValue(key []byte, u *Update) ([pbinValueLength]byte, error) {
