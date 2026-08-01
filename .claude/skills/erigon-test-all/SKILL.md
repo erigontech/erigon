@@ -21,6 +21,7 @@ make eest-spec-enginextests-stable-sequential # engine-x tests vs eest_stable (E
 make eest-spec-enginextests-stable-parallel  # same, but with ERIGON_EXEC3_PARALLEL=true
 make eest-spec-statetests-devnet             # …vs eest_devnet fixtures
 make eest-spec-blocktests-devnet             # devnet blocktests (always parallel exec3)
+make eest-spec-enginextests-devnet           # devnet engine-x tests (always parallel exec3)
 make eest-spec-statetests-legacy             # pinned legacy Cancun state-test archive
 make eest-spec-rlptests-legacy-race          # complete pinned legacy RLP suite
 make eest-spec-transactiontests-legacy-race  # complete pinned legacy transaction suite
