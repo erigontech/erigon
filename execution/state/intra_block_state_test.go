@@ -1095,8 +1095,7 @@ func TestNotifyLogHookGetsStableCopy(t *testing.T) {
 	})
 
 	emit := func(addr common.Address, topic common.Hash, data []byte) *types.Log {
-		lp := ibs.AllocLog(1, len(data))
-		lp.Address = addr
+		lp := ibs.AllocLog(addr, 1, len(data))
 		lp.Topics[0] = topic
 		copy(lp.Data, data)
 		ibs.NotifyLog(lp)
@@ -1164,13 +1163,13 @@ func TestResetDropsOversizedLogDataBuffers(t *testing.T) {
 
 	ibs := New(NewNoopReader())
 	ibs.SetTxContext(1, 0)
-	small := ibs.AllocLog(1, 8)
-	big := ibs.AllocLog(1, maxReusableLogDataCap+1)
+	small := ibs.AllocLog(common.Address{0x01}, 1, 8)
+	big := ibs.AllocLog(common.Address{0x02}, 1, maxReusableLogDataCap+1)
 
 	ibs.Reset()
 	ibs.SetTxContext(2, 0)
-	require.Same(t, small, ibs.AllocLog(1, 8), "normal-size entry is reused")
-	relog := ibs.AllocLog(1, 8)
+	require.Same(t, small, ibs.AllocLog(common.Address{0x03}, 1, 8), "normal-size entry is reused")
+	relog := ibs.AllocLog(common.Address{0x04}, 1, 8)
 	require.NotSame(t, big, relog, "oversized entry must not survive Reset")
 	require.LessOrEqual(t, cap(relog.Data), maxReusableLogDataCap)
 }

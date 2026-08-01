@@ -251,37 +251,56 @@ func (l *RPCLog) UnmarshalJSON(input []byte) error {
 
 type RPCLogs []*RPCLog
 
+// CopyLogGroups flattens the groups into one slice of deep copies backed by
+// shared arrays. Nil entries stay nil; an empty result is nil.
+func CopyLogGroups(groups []Logs) Logs {
+	var total, totalTopics, totalData int
+	for _, g := range groups {
+		total += len(g)
+		for _, l := range g {
+			if l == nil {
+				continue
+			}
+			totalTopics += len(l.Topics)
+			totalData += len(l.Data)
+		}
+	}
+	if total == 0 {
+		return nil
+	}
+	topics := make([]common.Hash, totalTopics)
+	data := make([]byte, totalData)
+	backing := make([]Log, total)
+	out := make(Logs, total)
+	i := 0
+	for _, g := range groups {
+		for _, l := range g {
+			if l != nil {
+				dst := &backing[i]
+				nt, nd := len(l.Topics), len(l.Data)
+				// Capped so a later append to one copied log cannot bleed into the next.
+				dst.Topics, dst.Data = topics[:nt:nt], data[:nd:nd]
+				topics, data = topics[nt:], data[nd:]
+				l.copyTo(dst)
+				out[i] = dst
+			}
+			i++
+		}
+	}
+	return out
+}
+
 // Copy deep-copies the logs into freshly allocated shared backing arrays.
 // Nil entries stay nil.
 func (logs Logs) Copy() Logs {
 	if logs == nil {
 		return nil
 	}
-	var totalTopics, totalData int
-	for _, l := range logs {
-		if l == nil {
-			continue
-		}
-		totalTopics += len(l.Topics)
-		totalData += len(l.Data)
+	group := [1]Logs{logs}
+	if out := CopyLogGroups(group[:]); out != nil {
+		return out
 	}
-	topics := make([]common.Hash, totalTopics)
-	data := make([]byte, totalData)
-	backing := make([]Log, len(logs))
-	out := make(Logs, len(logs))
-	for i, l := range logs {
-		if l == nil {
-			continue
-		}
-		dst := &backing[i]
-		nt, nd := len(l.Topics), len(l.Data)
-		// Capped so a later append to one copied log cannot bleed into the next.
-		dst.Topics, dst.Data = topics[:nt:nt], data[:nd:nd]
-		topics, data = topics[nt:], data[nd:]
-		l.CopyTo(dst)
-		out[i] = dst
-	}
-	return out
+	return Logs{}
 }
 
 // ToRPCTransactionLog converts types.Log in a RPCLog.
@@ -472,11 +491,13 @@ func (l *Log) Copy() *Log {
 		Topics: make([]common.Hash, len(l.Topics)),
 		Data:   make(hexutil.Bytes, len(l.Data)),
 	}
-	l.CopyTo(dst)
+	l.copyTo(dst)
 	return dst
 }
 
-func (l *Log) CopyTo(dst *Log) {
+// copyTo overwrites dst, reusing its Topics/Data buffers. They must already be
+// long enough — anything beyond their length is dropped.
+func (l *Log) copyTo(dst *Log) {
 	t, d := dst.Topics, dst.Data
 	*dst = *l
 	dst.Topics = t[:copy(t, l.Topics)]
