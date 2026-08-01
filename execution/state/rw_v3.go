@@ -493,7 +493,7 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 				blockLogIndex += uint32(len(receipt.Logs))
 			}
 			putter = domains.AsPutDel(tx)
-			if err := rs.receiptsWriter.WriteMetadata(putter, blockLogIndex, receipt.CumulativeGasUsed, cummulativeBlobGas, txNum); err != nil {
+			if err := rs.receiptsWriter.AppendMetadata(putter, blockLogIndex, receipt.CumulativeGasUsed, cummulativeBlobGas, txNum); err != nil {
 				return err
 			}
 		}
@@ -503,7 +503,7 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 		if putter == nil {
 			putter = domains.AsPutDel(tx)
 		}
-		if err := rs.receiptsWriter.Write(putter, receipt, txNum); err != nil {
+		if err := rs.receiptsWriter.Append(putter, receipt, txNum); err != nil {
 			return err
 		}
 	}

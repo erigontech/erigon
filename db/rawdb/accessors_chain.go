@@ -1360,9 +1360,5 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 
 func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
 	var w rawtemporaldb.ReceiptWriter
-	return w.Write(tx, receipt, txNum)
+	return w.Append(tx, receipt, txNum)
 }
-
-var (
-	receiptCacheKey = rawtemporaldb.ReceiptCacheKey
-)

@@ -301,6 +301,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 
 	var cumulativeBlobGasUsedInBlock uint64
 	// The reduce side runs on a single goroutine, so one writer serves the whole batch.
+	var receipts rawtemporaldb.ReceiptWriter
 
 	txNumsReader := cfg.BlockReader.TxnumReader()
 	fromTxNum, _ := txNumsReader.Min(ctx, tx, fromBlock)
@@ -348,7 +349,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 					}
 				}
 
-				if err := receiptWriter.WriteMetadata(putter, logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
+				if err := receipts.AppendMetadata(putter, logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 					return err
 				}
 
@@ -368,7 +369,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 						return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
 					}
 				}
-				if err := receiptWriter.Write(putter, receipt, txTask.TxNum); err != nil {
+				if err := receipts.Append(putter, receipt, txTask.TxNum); err != nil {
 					return err
 				}
 			}
