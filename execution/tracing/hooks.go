@@ -168,7 +168,7 @@ type (
 	StorageChangeHook = func(addr accounts.Address, slot accounts.StorageKey, prev, new uint256.Int)
 
 	// LogHook is called when a log is emitted. The log and its Topics/Data are
-	// only valid during the call.
+	// only valid during the call. Means receiver must not hold pointers to `log` object, must not mutate `log` object
 	LogHook = func(log *types.Log)
 )
 
@@ -196,7 +196,7 @@ type Hooks struct {
 	OnCodeChange    CodeChangeHook
 	OnCodeChangeV2  CodeChangeHookV2
 	OnStorageChange StorageChangeHook
-	OnLog           LogHook // must not mutate object or hold pointers to `log` object
+	OnLog           LogHook
 	Flush           func(tx types.Transaction)
 }
 

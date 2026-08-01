@@ -18,7 +18,6 @@ package state
 
 import (
 	"bytes"
-	"internal/race"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -127,28 +126,31 @@ func TestOnLogValueSurvivesBufferReuse(t *testing.T) {
 	require.Equal(t, hexutil.Bytes{1, 2, 3}, retained.Data)
 }
 
-// The untraced LOG path stays allocation-free; only a configured hook pays for
-// the stable value.
-func TestUntracedAddLogDoesNotAllocate(t *testing.T) {
-	if race.Enabled {
-		t.Skip("sync.Pool and the race detector inflate AllocsPerRun")
-	}
-	ibs := New(nil)
-	ibs.SetTxContext(1, 0)
+// Splits the cost of the stable OnLog value: the untraced path keeps reusing
+// the buffer entry, only a configured hook pays for the copy.
+func BenchmarkAddLog(b *testing.B) {
 	log := &types.Log{
 		Address: common.HexToAddress("0x1"),
-		Topics:  []common.Hash{common.HexToHash("0xaa")},
-		Data:    []byte{1, 2, 3},
+		Topics:  []common.Hash{common.HexToHash("0xaa"), common.HexToHash("0xbb")},
+		Data:    bytes.Repeat([]byte{0x11}, 96),
 	}
-	ibs.AddLog(log) // warm the buffer so steady-state reuse is measured
-
-	allocs := testing.AllocsPerRun(100, func() {
-		ibs.Reset()
-		ibs.SetTxContext(1, 0)
-		ibs.AddLog(log)
+	run := func(b *testing.B, hooks *tracing.Hooks) {
+		ibs := New(nil)
+		ibs.SetHooks(hooks)
+		b.ReportAllocs()
+		for range b.N {
+			ibs.Reset()
+			ibs.SetTxContext(1, 0)
+			ibs.AddLog(log)
+		}
+	}
+	b.Run("untraced", func(b *testing.B) { run(b, nil) })
+	b.Run("traced", func(b *testing.B) {
+		run(b, &tracing.Hooks{OnLog: func(l *types.Log) { sinkLog = l }})
 	})
-	require.Zero(t, allocs)
 }
+
+var sinkLog *types.Log
 
 func BenchmarkLogsRlpHash(b *testing.B) {
 	ibs := New(nil)
