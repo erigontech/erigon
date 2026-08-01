@@ -1228,7 +1228,8 @@ func BodyForStorageFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegm
 }
 
 // txnHashesFromSnapshot mirrors txsFromSnapshot but hashes each record's raw RLP
-// instead of decoding it.
+// instead of decoding it. Unlike txsFromSnapshot a segment ending early is an error,
+// not a nil result - see rawdb.CanonicalTransactionHashes.
 func (r *BlockReader) txnHashesFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *snapshotsync.VisibleSegment, buf []byte) (hashes []common.Hash, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -1245,13 +1246,13 @@ func (r *BlockReader) txnHashesFromSnapshot(baseTxnID uint64, txCount uint32, tx
 	}
 
 	hashes = make([]common.Hash, txCount)
+	if txCount == 0 { // OrdinalLookup below is unchecked, and its ordinal may not exist
+		return hashes, nil
+	}
 	txnOffset := idxTxnHash.OrdinalLookup(baseTxnID - idxTxnHash.BaseDataID())
 	gg := txsSeg.Src().MakeGetter()
 	gg.Reset(txnOffset)
 	for i := range txCount {
-		// txCount comes from the body, so a segment that ends early is corruption,
-		// not absence. Reporting absence here would drop the block from the index
-		// without failing the stage that builds it.
 		if !gg.HasNext() {
 			return nil, fmt.Errorf("segment %s ended after %d of %d txns, txnID %d", txsSeg.Src().FileName(), i, txCount, baseTxnID+uint64(i))
 		}

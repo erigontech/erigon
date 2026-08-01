@@ -531,11 +531,10 @@ func ReadBodyTxnHashes(db kv.Getter, hash common.Hash, number uint64) ([]common.
 }
 
 // CanonicalTransactionHashes hashes each stored txn RLP in place of decoding it.
-// Unlike CanonicalTransactions a missing txn is an error, not a truncated result:
-// "amount" comes from the block body and a body is never pruned apart from its txns,
-// so anything missing is corruption, and tolerating it writes an index with holes.
-// The cursor walks past a gap into the next block's txns, so every record's id is
-// checked rather than only their count.
+// Unlike CanonicalTransactions a missing txn is an error, not a truncated result: a
+// body is never pruned apart from its txns, so anything missing is corruption, and
+// tolerating it writes an index with holes. ForAmount walks past a gap into the next
+// block's txns, so every record's id is checked, not just their count.
 func CanonicalTransactionHashes(db kv.Getter, txnID uint64, amount uint32) ([]common.Hash, error) {
 	if amount == 0 {
 		return []common.Hash{}, nil
