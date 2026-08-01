@@ -77,3 +77,22 @@ func TestVerifyTorrentFilesValidPairs(t *testing.T) {
 	err := VerifyTorrentFiles(context.Background(), dir, true, log.New())
 	require.NoError(t, err)
 }
+
+// Without failFast a corrupt file is only warned about, so the remaining files still get verified.
+func TestVerifyTorrentFilesWithoutFailFast(t *testing.T) {
+	dir := t.TempDir()
+	writeTorrentPair(t, dir, "corrupt.seg", true)
+	writeTorrentPair(t, dir, filepath.Join("caplin", "valid.seg"), false)
+
+	err := VerifyTorrentFiles(context.Background(), dir, false, log.New())
+	require.NoError(t, err)
+}
+
+// An unreadable root must not be reported as a successful verification.
+func TestVerifyTorrentFilesUnreadableRoot(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "missing")
+
+	err := VerifyTorrentFiles(context.Background(), dir, false, log.New())
+	require.Error(t, err)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}

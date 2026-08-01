@@ -43,6 +43,10 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 	var torrentFiles []string
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
+			// An unreadable root means nothing was verified, so it must not report success.
+			if path == dir {
+				return walkErr
+			}
 			logger.Warn("[verify] skipping unreadable path", "path", path, "err", walkErr)
 			return nil
 		}

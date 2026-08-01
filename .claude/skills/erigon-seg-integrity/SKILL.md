@@ -27,6 +27,8 @@ Replace `<path>` with the actual path to your Erigon data directory.
 - `--check` — Comma-separated list of specific checks to run (default: all default checks)
 - `--skip-check` — Comma-separated list of checks to exclude from the run
 - `--failFast` — Stop after the first problem is found (default: `true`). Set to `false` to continue and collect all warnings
+- `--file-integrity-cache` — Path to a cache file that speeds up repeated runs. Setting it also enables a torrent piece-hash verification pass before the checks
+- `--skip-torrent-verify` — Skip that torrent verification pass
 
 ## Discovering Available Checks
 
@@ -78,4 +80,5 @@ First discover available checks via `--help`, then:
 
 - **File Lock**: If Erigon is running, the command will fail due to file lock
 - **Long running**: Integrity checks can take significant time on large datadirs, especially mainnet
+- **Torrent verification scope**: With `--file-integrity-cache` set, the pre-pass scans `<datadir>/snapshots` recursively — top-level block segments plus `caplin/`, `domain/`, `history/`, `idx/`, `accessor/`. On a mainnet archive datadir that is roughly 2.6x the files of the top-level set; use `--skip-torrent-verify` to skip it
 - **Discover checks dynamically**: Always use `--help` to find the current list of available checks rather than assuming fixed names

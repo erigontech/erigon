@@ -759,6 +759,7 @@ func TestLoopReturnsOnContextCancellation(t *testing.T) {
 		blocks:     true,
 		cfg:        &clparams.MainnetBeaconConfig,
 		downloader: noopDownloaderClient{},
+		logger:     log.New(),
 		backfilled: &atomic.Bool{},
 	}
 
@@ -772,5 +773,32 @@ func TestLoopReturnsOnContextCancellation(t *testing.T) {
 		require.NoError(t, err)
 	case <-time.After(10 * time.Second):
 		t.Fatal("Loop did not return after context cancellation")
+	}
+}
+
+// The retirement loop runs for the process lifetime, so a cancelled context must end it
+// rather than leave the select spinning on an always-ready ctx.Done.
+func TestRetirementLoopReturnsOnContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	a := &Antiquary{
+		ctx:            ctx,
+		cfg:            &clparams.MainnetBeaconConfig,
+		logger:         log.New(),
+		backfilled:     &atomic.Bool{},
+		blobBackfilled: &atomic.Bool{},
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- a.retirementLoop(nil)
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("retirementLoop did not return after context cancellation")
 	}
 }

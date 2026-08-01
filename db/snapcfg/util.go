@@ -121,6 +121,18 @@ type Preverified struct {
 	Items PreverifiedItems
 }
 
+// keepNewest stores item under key unless an entry with an equal or newer version is already there.
+func keepNewest(best *btree.Map[string, PreverifiedItem], key string, item PreverifiedItem, v snaptype.Version) {
+	if current, ok := best.Get(key); ok {
+		cv, _, _ := strings.Cut(current.Name, "-")
+		currentVersion, _ := ver.ParseVersion(strings.TrimPrefix(cv, "caplin/"))
+		if !currentVersion.Less(v) {
+			return
+		}
+	}
+	best.Set(key, item)
+}
+
 func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	var bestVersions btree.Map[string, PreverifiedItem]
 
@@ -148,16 +160,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			if caplinVersion.Less(versions.MinSupported) || versions.Current.Less(caplinVersion) {
 				continue
 			}
-			key := "caplin/" + name
-			if current, ok := bestVersions.Get(key); ok {
-				cv, _, _ := strings.Cut(current.Name, "-")
-				currentVersion, _ := ver.ParseVersion(strings.TrimPrefix(cv, "caplin/"))
-				if currentVersion.Less(caplinVersion) {
-					bestVersions.Set(key, p)
-				}
-			} else {
-				bestVersions.Set(key, p)
-			}
+			keepNewest(&bestVersions, "caplin/"+name, p, caplinVersion)
 			continue
 		}
 
@@ -227,16 +230,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			continue
 		}
 
-		if current, ok := bestVersions.Get(name); ok {
-			v, _, _ := strings.Cut(current.Name, "-")
-			cv, _ := ver.ParseVersion(v)
-
-			if cv.Less(version) {
-				bestVersions.Set(name, p)
-			}
-		} else {
-			bestVersions.Set(name, p)
-		}
+		keepNewest(&bestVersions, name, p, version)
 	}
 
 	var versioned []PreverifiedItem

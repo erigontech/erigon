@@ -272,8 +272,10 @@ glob to a recursive `filepath.WalkDir` collecting `*.torrent`.
 ### Task 8: [Final] Update documentation
 
 - [x] no README/CLAUDE.md changes expected; confirm and skip if so
-  (confirmed: all six fixes are internal code paths — no flags, commands,
-  or build steps changed)
+  (no new flags or build steps. Two behaviour notes did land in docs:
+  `seg integrity`'s torrent pre-pass now scans recursively — recorded in the
+  `erigon-seg-integrity` skill — and the caplin preverified version window is
+  a publisher constraint, recorded in `db/agents.md`)
 - [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion

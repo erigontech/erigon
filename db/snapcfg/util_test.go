@@ -40,6 +40,25 @@ func TestTypedCaplinKeepsNewestPerName(t *testing.T) {
 	}, names)
 }
 
+// Accessors under caplin/ share the data-type version window, unlike the typed path
+// which picks the index version.
+func TestTypedCaplinAppliesWindowToIndexes(t *testing.T) {
+	names := typedNames(t, PreverifiedItems{
+		{Name: "caplin/v0.5-000000-000100-BlockRoot.idx", Hash: "below-min"},
+		{Name: "caplin/v1.1-000000-000100-BlockRoot.idx", Hash: "in-window"},
+		{Name: "caplin/v9.9-000000-000100-BlockRoot.idx", Hash: "above-preferred"},
+	})
+	require.Equal(t, []string{"caplin/v1.1-000000-000100-BlockRoot.idx"}, names)
+}
+
+func TestTypedCaplinDropsUnparseableVersion(t *testing.T) {
+	names := typedNames(t, PreverifiedItems{
+		{Name: "caplin/salt-blocks.txt", Hash: "no-version"},
+		{Name: "caplin/v1.1-000000-000100-BlockRoot.seg", Hash: "in-window"},
+	})
+	require.Equal(t, []string{"caplin/v1.1-000000-000100-BlockRoot.seg"}, names)
+}
+
 func TestTypedKeepsCaplinTypedEntries(t *testing.T) {
 	items := PreverifiedItems{
 		{Name: "v1.1-000000-000100-beaconblocks.idx", Hash: "a"},

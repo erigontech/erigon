@@ -18,7 +18,8 @@ datadir/
     ├── domain/    # Latest state values
     ├── history/   # Historical value changes
     ├── idx/       # Inverted indices for search
-    └── accessor/  # Additional lookup indices
+    ├── accessor/  # Additional lookup indices
+    └── caplin/    # Consensus-layer block, blob and state snapshots
 ```
 
 ## Key Components
@@ -66,6 +67,7 @@ Sorts data before database insertion to reduce write amplification:
 - Downloaded via BitTorrent with WebSeed fallback
 - Piece size: 2MB default
 - Verification on download
+- `Preverified.Typed` (`snapcfg/util.go`) filters preverified entries to the binary's supported version window for their type and keeps the newest version per name. `caplin/`-prefixed entries — blocks, blobs and the state tables that borrow it — use `snaptype.BeaconBlocks`' window, so publishing a newer caplin file version requires bumping that type first, or existing binaries silently ignore the new files
 
 ## Runtime settings (`snapshots/erigondb.toml`)
 

@@ -225,12 +225,15 @@ func (a *Antiquary) Loop() error {
 	if a.states {
 		go a.loopStates(a.ctx)
 	}
-	// Check for snapshots retirement every 3 minutes
 	retirementTicker := time.NewTicker(12 * time.Second)
 	defer retirementTicker.Stop()
+	return a.retirementLoop(retirementTicker.C)
+}
+
+func (a *Antiquary) retirementLoop(tick <-chan time.Time) error {
 	for {
 		select {
-		case <-retirementTicker.C:
+		case <-tick:
 			if !a.backfilled.Load() {
 				continue
 			}
@@ -518,6 +521,10 @@ func (a *Antiquary) antiquateBlobs() error {
 			return err
 		}
 		if err := a.blobStorage.RemoveBlobSidecars(a.ctx, i, blockRoot); err != nil {
+			// Every remaining slot would fail the same way; warning per slot would flood the log.
+			if a.ctx.Err() != nil {
+				return a.ctx.Err()
+			}
 			a.logger.Warn("[Antiquary] Failed to remove blob sidecars", "slot", i, "err", err)
 		}
 	}
