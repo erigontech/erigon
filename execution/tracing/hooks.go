@@ -196,7 +196,7 @@ type Hooks struct {
 	OnCodeChange    CodeChangeHook
 	OnCodeChangeV2  CodeChangeHookV2
 	OnStorageChange StorageChangeHook
-	OnLog           LogHook
+	OnLog           LogHook // must not mutate object or hold pointers to `log` object
 	Flush           func(tx types.Transaction)
 }
 
