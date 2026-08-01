@@ -80,7 +80,7 @@ func TestInterpEquivBinaryVarLen(t *testing.T) {
 	kvPath := generateVarLenKV(t, t.TempDir(), keyCount, log.New(), compress)
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, compress, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress, false)
 	require.NoError(t, err)
 	defer bt.Close()
 	defer kv.Close()

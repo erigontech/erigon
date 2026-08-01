@@ -218,3 +218,47 @@ func TestMaxBlobsPerBlockUpperBound(t *testing.T) {
 	noSchedule := &BeaconChainConfig{MaxBlobsPerBlock: 6, MaxBlobsPerBlockElectra: 9}
 	require.EqualValues(t, 9, noSchedule.MaxBlobsPerBlockUpperBound())
 }
+
+func TestForkSchemaMatchesSlot(t *testing.T) {
+	cfg := MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 1
+	cfg.GloasForkEpoch = 2
+	cfg.InitializeForkSchedule()
+	spe := cfg.SlotsPerEpoch
+
+	for _, tc := range []struct {
+		name           string
+		slot           uint64
+		decodedVersion StateVersion
+		want           bool
+	}{
+		// Schemas diverge only across the Gloas boundary, so a disagreement
+		// below it is not a mismatch.
+		{"both pre-Gloas", spe, DenebVersion, true},
+		{"both Gloas", 2 * spe, GloasVersion, true},
+		{"Gloas schema at a pre-Gloas slot", spe, GloasVersion, false},
+		{"pre-Gloas schema at a Gloas slot", 2 * spe, FuluVersion, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, cfg.ForkSchemaMatchesSlot(tc.slot, tc.decodedVersion))
+		})
+	}
+}
+
+// Mainnet keeps Gloas at FAR_FUTURE_EPOCH, so no slot maps to it and every
+// Gloas-schema object is inconsistent whatever slot it claims.
+func TestForkSchemaMatchesSlotFarFutureGloas(t *testing.T) {
+	cfg := MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	require.Equal(t, uint64(math.MaxUint64), cfg.GloasForkEpoch)
+
+	fuluSlot := cfg.FuluForkEpoch * cfg.SlotsPerEpoch
+	require.True(t, cfg.ForkSchemaMatchesSlot(fuluSlot, FuluVersion))
+	require.False(t, cfg.ForkSchemaMatchesSlot(fuluSlot, GloasVersion))
+	require.False(t, cfg.ForkSchemaMatchesSlot(math.MaxUint64/cfg.SlotsPerEpoch, GloasVersion))
+}

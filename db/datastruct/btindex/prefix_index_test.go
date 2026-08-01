@@ -396,7 +396,7 @@ func TestPrefixIndexBackwardCompat(t *testing.T) {
 
 	// Also build using OpenBtreeIndexAndDataFile for BpsTree comparison.
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
-	kv2, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, compressFlags, false)
+	kv2, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compressFlags, false)
 	require.NoError(t, err)
 	defer bt.Close()
 	defer kv2.Close()
@@ -1320,7 +1320,7 @@ func TestPrefixIndexEquivalenceExhaustive(t *testing.T) {
 
 	// Build BtIndex (wraps BpsTree).
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
-	kv2, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, compressFlags, false)
+	kv2, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compressFlags, false)
 	require.NoError(t, err)
 	defer bt.Close()
 	defer kv2.Close()

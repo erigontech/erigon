@@ -88,10 +88,6 @@ Usage:
 Flags:
       --datadir string                     Data directory for the databases (default "/home/user/.local/share/erigon")
       --db.writemap                        Enable WRITE_MAP feature for fast database writes and fast commit times (default true)
-      --diagnostics.disabled               Disable diagnostics
-      --diagnostics.endpoint.addr string   Diagnostics HTTP server listening interface (default "127.0.0.1")
-      --diagnostics.endpoint.port uint     Diagnostics HTTP server listening port (default 6062)
-      --diagnostics.speedtest              Enable speed test
   -h, --help                               help for txpool
       --log.console.json                   Format console logs with JSON
       --log.console.verbosity string       Set the log level for console logs (default "info")

@@ -19,9 +19,7 @@ permissions:
 jobs:
   # Matrix entries (shard / workers / max-allowed-failures) come from
   # tools/eest-spec-shards.yml so this workflow and tools/run-eest-spec-test.sh
-  # share a single source of truth. enginextests-devnet is intentionally absent
-  # from the manifest (the devnet tarball doesn't yet ship
-  # blockchain_tests_engine_x/); re-add it there when the fixture lands.
+  # share a single source of truth.
   load-matrix:
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -76,7 +74,6 @@ jobs:
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:
-          submodules: false
           cleanup-space: ${{ !inputs.cache-warming-only }}
           # matrix.no-ramdisk is absent (null, falsy) for shards without the key.
           ramdisk: ${{ !inputs.cache-warming-only && !matrix.no-ramdisk }}
@@ -91,7 +88,7 @@ jobs:
       # readable from every PR. A miss here self-heals (tools/test-fixtures.sh
       # re-downloads), and the warmer repopulates main.
       - name: Restore EEST tarballs
-        if: '!inputs.cache-warming-only'
+        if: ${{ !inputs.cache-warming-only && !contains(matrix.shard, 'legacy') }}
         uses: actions/cache/restore@v6
         with:
           # Only the .tar.gz files are cached; each shard re-extracts just the
@@ -106,6 +103,17 @@ jobs:
           key: test-fixtures-eest-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
           restore-keys: |
             test-fixtures-eest-${{ runner.os }}-
+
+      - name: Restore legacy fixture tarballs
+        if: ${{ !inputs.cache-warming-only && contains(matrix.shard, 'legacy') }}
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            test-fixtures-cache/legacy_tests.tar.gz
+            test-fixtures-cache/legacy_cancun.tar.gz
+          key: test-fixtures-legacy-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          restore-keys: |
+            test-fixtures-legacy-${{ runner.os }}-
 
       - name: Run eest-spec-${{ matrix.shard }}
         if: '!inputs.cache-warming-only'
@@ -136,9 +144,9 @@ jobs:
           gh run cancel ${{ github.run_id }} || true
 
   # Fast guard (no fixture execution): catches coverage regressions a normal test
-  # run does NOT surface — the stable race / hive-consume-engine fork partitions
-  # (a fork silently unmatched by any shard) and glamsterdam-devnet EIP-filter
-  # liveness+completeness. Reads live config + corpus .meta/index.json. Part of
+  # run does NOT surface — the stable race and stable/devnet hive-consume-enginex
+  # fork partitions (a fork silently unmatched by any shard). Reads live config
+  # + corpus .meta/index.json. Part of
   # this reusable workflow, so ci-gate's eest-spec-tests dependency fails when
   # coverage regresses.
   eest-shard-coverage:

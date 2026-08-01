@@ -17,16 +17,23 @@
 package protocol
 
 import (
+	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
+	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -59,6 +66,44 @@ func newSimpleTransferMsg(from, to accounts.Address, gas uint64, checkGas bool) 
 	)
 }
 
+func eip2780TestAuthorization() (types.Authorization, accounts.Address) {
+	auth := types.Authorization{
+		ChainID: *uint256.NewInt(7088110746),
+		Address: common.Address{180, 125, 156, 99, 77, 80, 241, 96, 13, 77, 247, 103, 233, 71, 76, 37, 160, 48, 52, 40},
+		Nonce:   1,
+		YParity: 1,
+		R:       uint256.Int{11238962557009670571, 14017651393191758745, 18358999445216475025, 5549385460848219779},
+		S:       uint256.Int{6390522493159340108, 17630603794136184458, 14442462445950880280, 846710983706847255},
+	}
+	return auth, accounts.InternAddress(common.HexToAddress("0x8ED5ABe9DE62dB2F266b06b86203f71e4C1e357f"))
+}
+
+func eip2780TestConfig(t *testing.T) *chain.Config {
+	t.Helper()
+	cfg := new(chain.Config)
+	require.NoError(t, copier.CopyWithOption(cfg, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	cfg.ChainID = uint256.NewInt(7088110746)
+	return cfg
+}
+
+type codeAccessRecordingReader struct {
+	state.StateReader
+	accesses []accounts.Address
+}
+
+func (r *codeAccessRecordingReader) OnCodeAccess(addr accounts.Address, _ []byte) {
+	r.accesses = append(r.accesses, addr)
+}
+
+type accountErrorReader struct {
+	state.StateReader
+	err error
+}
+
+func (r *accountErrorReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	return nil, r.err
+}
+
 // TestEIP7825_GasPoolPreservedOnReject verifies that when a transaction is
 // rejected by the EIP-7825 gas limit cap, the block gas pool is NOT depleted.
 //
@@ -77,7 +122,7 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 
 	t.Run("rejected tx preserves gas pool", func(t *testing.T) {
 		ibs := state.New(state.NewNoopReader())
-		defer ibs.Release(false)
+		defer ibs.Close()
 		evm := newTestEVM(ibs, cfg, blockGasLimit)
 		msg := newSimpleTransferMsg(sender, recipient, params.MaxTxnGasLimit+1, true)
 		gp := new(GasPool).AddGas(blockGasLimit)
@@ -92,7 +137,7 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 
 	t.Run("valid tx debits gas pool normally", func(t *testing.T) {
 		ibs := state.New(state.NewNoopReader())
-		defer ibs.Release(false)
+		defer ibs.Close()
 		evm := newTestEVM(ibs, cfg, blockGasLimit)
 		msg := newSimpleTransferMsg(sender, recipient, params.MaxTxnGasLimit, true)
 		gp := new(GasPool).AddGas(blockGasLimit)
@@ -110,7 +155,7 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 		// Simulate the original bug scenario: a rejected tx should not prevent
 		// a subsequent valid tx from succeeding due to pool exhaustion.
 		ibs := state.New(state.NewNoopReader())
-		defer ibs.Release(false)
+		defer ibs.Close()
 		gp := new(GasPool).AddGas(blockGasLimit)
 
 		// First: a tx that exceeds the cap — must be rejected without touching pool.
@@ -137,15 +182,15 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 	})
 }
 
-// TestEIP8037_GasPoolTracksRegularAndStateIndependently verifies that the
-// EIP-8037 two-dimensional gas pool decrements regular and state budgets
-// independently — neither is conflated with max(regular, state).
+// TestEIP8037_GasPoolTracksExecutionAndStateIndependently verifies that the
+// EIP-8037 two-dimensional gas pool decrements execution and state budgets
+// independently — neither is conflated with max(execution, state).
 //
 // Regression test for the bug where per-tx deduction used
-// max(blockRegularGasUsed, blockStateGasUsed) against a single-dimension
+// max(blockExecutionGasUsed, blockStateGasUsed) against a single-dimension
 // pool, giving Σ max(r_i, s_i) ≥ max(Σ r_i, Σ s_i) and rejecting valid
 // blocks whose per-dimension sums fit (bal-devnet-3, block 193).
-func TestEIP8037_GasPoolTracksRegularAndStateIndependently(t *testing.T) {
+func TestEIP8037_GasPoolTracksExecutionAndStateIndependently(t *testing.T) {
 	t.Parallel()
 
 	const blockGasLimit = 60_000_000
@@ -154,7 +199,7 @@ func TestEIP8037_GasPoolTracksRegularAndStateIndependently(t *testing.T) {
 	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
 
 	ibs := state.New(state.NewNoopReader())
-	defer ibs.Release(false)
+	defer ibs.Close()
 	gp := NewGasPool(blockGasLimit, 0)
 	blockCtx := evmtypes.BlockContext{
 		CanTransfer: CanTransfer,
@@ -163,7 +208,7 @@ func TestEIP8037_GasPoolTracksRegularAndStateIndependently(t *testing.T) {
 	}
 
 	// TX 1: Contract creation — state gas dominates (intrinsic NEW_ACCOUNT
-	// state >> regular). Initcode = STOP (0x00): creates account, deploys no code.
+	// state >> execution). Initcode = STOP (0x00): creates account, deploys no code.
 	evm1 := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{NoBaseFee: true})
 	msg1 := types.NewMessage(
 		sender, accounts.NilAddress, 0, uint256.NewInt(0), 300_000,
@@ -180,18 +225,18 @@ func TestEIP8037_GasPoolTracksRegularAndStateIndependently(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result1)
 
-	r1 := result1.BlockRegularGasUsed
+	r1 := result1.BlockExecutionGasUsed
 	s1 := result1.BlockStateGasUsed
-	t.Logf("TX1 (create): regular=%d, state=%d", r1, s1)
-	require.Greater(t, s1, r1, "contract creation must have state gas > regular gas")
+	t.Logf("TX1 (create): execution=%d, state=%d", r1, s1)
+	require.Greater(t, s1, r1, "contract creation must have state gas > execution gas")
 
 	// After TX1: each dimension drops by its own per-tx usage.
-	require.Equal(t, blockGasLimit-r1, gp.RegularGasAvailable(),
-		"regular pool must drop by blockRegularGasUsed only")
+	require.Equal(t, blockGasLimit-r1, gp.ExecutionGasAvailable(),
+		"execution pool must drop by blockExecutionGasUsed only")
 	require.Equal(t, blockGasLimit-s1, gp.StateGasAvailable(),
 		"state pool must drop by blockStateGasUsed only")
 
-	// TX 2: 0-value transfer — regular gas only, no state gas.
+	// TX 2: 0-value transfer — execution gas only, no state gas.
 	evm2 := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{NoBaseFee: true})
 	msg2 := newSimpleTransferMsg(sender, recipient, 100_000, true)
 	st2 := NewTxnExecutor(evm2, msg2, gp)
@@ -199,24 +244,589 @@ func TestEIP8037_GasPoolTracksRegularAndStateIndependently(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result2)
 
-	r2 := result2.BlockRegularGasUsed
+	r2 := result2.BlockExecutionGasUsed
 	s2 := result2.BlockStateGasUsed
-	t.Logf("TX2 (transfer): regular=%d, state=%d", r2, s2)
+	t.Logf("TX2 (transfer): execution=%d, state=%d", r2, s2)
 	require.Zero(t, s2, "0-value transfer must not produce state gas")
 
 	// After both TXs: each dimension's remaining budget equals
 	// blockGasLimit − Σ (per-tx usage in that dimension), independently.
-	totalRegular := r1 + r2
+	totalExecution := r1 + r2
 	totalState := s1 + s2
-	require.Equal(t, blockGasLimit-totalRegular, gp.RegularGasAvailable(),
-		"regular pool deduction must equal Σ blockRegularGasUsed")
+	require.Equal(t, blockGasLimit-totalExecution, gp.ExecutionGasAvailable(),
+		"execution pool deduction must equal Σ blockExecutionGasUsed")
 	require.Equal(t, blockGasLimit-totalState, gp.StateGasAvailable(),
 		"state pool deduction must equal Σ blockStateGasUsed")
 
-	// Neither dimension may be charged max(r, s): if regular were charged
-	// max(r1, s1) + max(r2, s2), it would overshoot totalRegular.
-	require.NotEqual(t, blockGasLimit-(max(r1, s1)+max(r2, s2)), gp.RegularGasAvailable(),
-		"regular pool must not be charged Σ max(r_i, s_i) — that is the pre-378d07cb bug")
+	// Neither dimension may be charged max(r, s): if execution were charged
+	// max(r1, s1) + max(r2, s2), it would overshoot totalExecution.
+	require.NotEqual(t, blockGasLimit-(max(r1, s1)+max(r2, s2)), gp.ExecutionGasAvailable(),
+		"execution pool must not be charged Σ max(r_i, s_i) — that is the pre-378d07cb bug")
+}
+
+func TestEIP2780AuthorizationChargesAtRuntime(t *testing.T) {
+	const blockGasLimit = 1_000_000
+
+	auth, authority := eip2780TestAuthorization()
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	ibs := state.New(state.NewNoopReader())
+	require.NoError(t, ibs.SetNonce(authority, auth.Nonce, tracing.NonceChangeUnspecified))
+	evm := newTestEVM(ibs, eip2780TestConfig(t), blockGasLimit)
+	msg := newSimpleTransferMsg(sender, recipient, 100_000, true)
+	msg.SetAuthorizations([]types.Authorization{auth})
+
+	result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	require.Equal(t, params.TxBaseEIP2780+params.ColdAccountAccessEIP2780+params.ExecutionPerAuthBaseCostEIP8038+params.AccountWriteCostEIP8038, result.BlockExecutionGasUsed)
+	require.Equal(t, uint64(params.StateGasAuthBase), result.BlockStateGasUsed)
+	require.Equal(t, result.BlockExecutionGasUsed+result.BlockStateGasUsed, result.ReceiptGasUsed)
+
+	nonce, err := ibs.GetNonce(authority)
+	require.NoError(t, err)
+	require.Equal(t, auth.Nonce+1, nonce)
+	delegatedTo, ok, err := ibs.GetDelegatedDesignation(authority)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, accounts.InternAddress(auth.Address), delegatedTo)
+}
+
+func TestEIP2780AuthorizationOutOfGasRollsBack(t *testing.T) {
+	const blockGasLimit = 1_000_000
+
+	auth, authority := eip2780TestAuthorization()
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	gasLimit := params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780 + params.ExecutionPerAuthBaseCostEIP8038 + params.AccountWriteCostEIP8038 + params.StateGasAuthBase - 1
+
+	ibs := state.New(state.NewNoopReader())
+	require.NoError(t, ibs.SetNonce(authority, auth.Nonce, tracing.NonceChangeUnspecified))
+	evm := newTestEVM(ibs, eip2780TestConfig(t), blockGasLimit)
+	msg := newSimpleTransferMsg(sender, recipient, gasLimit, true)
+	msg.SetAuthorizations([]types.Authorization{auth})
+
+	result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
+	require.NoError(t, err)
+	require.ErrorIs(t, result.Err, vm.ErrRuntimeOutOfGas)
+	require.Equal(t, gasLimit, result.ReceiptGasUsed)
+	require.Equal(t, gasLimit, result.BlockExecutionGasUsed)
+	require.Zero(t, result.BlockStateGasUsed)
+
+	nonce, err := ibs.GetNonce(authority)
+	require.NoError(t, err)
+	require.Equal(t, auth.Nonce, nonce)
+	_, ok, err := ibs.GetDelegatedDesignation(authority)
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+func TestEIP2780AuthorizationOutOfGasProducesCallTrace(t *testing.T) {
+	const blockGasLimit = 1_000_000
+
+	auth, authority := eip2780TestAuthorization()
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	gasLimit := params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780 + params.ExecutionPerAuthBaseCostEIP8038 + params.AccountWriteCostEIP8038 + params.StateGasAuthBase - 1
+
+	for _, tracerName := range []string{"callTracer", "flatCallTracer"} {
+		t.Run(tracerName, func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			require.NoError(t, ibs.SetNonce(authority, auth.Nonce, tracing.NonceChangeUnspecified))
+
+			tracer, err := tracers.New(tracerName, &tracers.Context{}, json.RawMessage("{}"))
+			require.NoError(t, err)
+			ibs.SetHooks(tracer.Hooks)
+			blockCtx := evmtypes.BlockContext{
+				CanTransfer: CanTransfer,
+				Transfer:    misc.Transfer,
+				GasLimit:    blockGasLimit,
+			}
+			evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, eip2780TestConfig(t), vm.Config{
+				NoBaseFee: true,
+				Tracer:    tracer.Hooks,
+			})
+			msg := newSimpleTransferMsg(sender, recipient, gasLimit, true)
+			msg.SetAuthorizations([]types.Authorization{auth})
+			tx := types.NewTransaction(0, recipient.Value(), uint256.NewInt(0), gasLimit, uint256.NewInt(0), nil)
+
+			tracer.OnTxStart(evm.GetVMContext(), tx, sender)
+			result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
+			require.NoError(t, err)
+			require.ErrorIs(t, result.Err, vm.ErrRuntimeOutOfGas)
+			tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
+
+			trace, err := tracer.GetResult()
+			require.NoError(t, err)
+			require.Contains(t, string(trace), `"error":"runtime: out of gas"`)
+		})
+	}
+}
+
+func TestEIP2780TopLevelCallTraceStartsBeforeStateChanges(t *testing.T) {
+	const blockGasLimit = 1_000_000
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	for _, tc := range []struct {
+		name       string
+		value      uint64
+		tracerCfg  string
+		wantTxLogs bool
+	}{
+		{name: "zero value", tracerCfg: "{}"},
+		{name: "value transfer log", value: 1, tracerCfg: `{"withLog":true}`, wantTxLogs: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			require.NoError(t, ibs.SetBalance(sender, *uint256.NewInt(tc.value), tracing.BalanceChangeUnspecified))
+
+			tracer, err := tracers.New("callTracer", &tracers.Context{}, json.RawMessage(tc.tracerCfg))
+			require.NoError(t, err)
+			ibs.SetHooks(tracer.Hooks)
+			blockCtx := evmtypes.BlockContext{
+				CanTransfer: CanTransfer,
+				Transfer:    misc.Transfer,
+				GasLimit:    blockGasLimit,
+			}
+			evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{
+				NoBaseFee: true,
+				Tracer:    tracer.Hooks,
+			})
+			value := uint256.NewInt(tc.value)
+			msg := types.NewMessage(
+				sender, recipient, 0, value, blockGasLimit,
+				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+				nil, nil, false, false, true, false, nil,
+			)
+			tx := types.NewTransaction(0, recipient.Value(), value, blockGasLimit, uint256.NewInt(0), nil)
+
+			tracer.OnTxStart(evm.GetVMContext(), tx, sender)
+			var result *evmtypes.ExecutionResult
+			require.NotPanics(t, func() {
+				result, err = NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
+			})
+			require.NoError(t, err)
+			require.NoError(t, result.Err)
+			tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
+
+			trace, err := tracer.GetResult()
+			require.NoError(t, err)
+			if tc.wantTxLogs {
+				require.Contains(t, string(trace), `"logs"`)
+			}
+		})
+	}
+}
+
+func TestEIP2780RecipientStartsWarm(t *testing.T) {
+	const blockGasLimit = 1_000_000
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	require.NoError(t, ibs.SetCode(recipient, []byte{byte(vm.ADDRESS), byte(vm.BALANCE), byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+
+	evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
+	msg := newSimpleTransferMsg(sender, recipient, 100_000, true)
+	result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	require.Equal(t,
+		params.TxBaseEIP2780+params.ColdAccountAccessEIP2780+vm.GasQuickStep+params.WarmStorageReadCostEIP2929,
+		result.BlockExecutionGasUsed,
+	)
+}
+
+func TestEIP2780DelegationTargetAccessUsesWarmCost(t *testing.T) {
+	const blockGasLimit = 1_000_000
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	delegatedTo := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
+	accessList := types.AccessList{{Address: delegatedTo.Value()}}
+
+	ibs := state.New(state.NewNoopReader())
+	require.NoError(t, ibs.SetCode(recipient, types.AddressToDelegation(delegatedTo), tracing.CodeChangeUnspecified))
+	evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
+	msg := types.NewMessage(
+		sender, recipient, 0, uint256.NewInt(0), 100_000,
+		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+		nil, accessList, false, false, true, false, nil,
+	)
+
+	intrinsic, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+		AccessListLen: 1,
+		IsEIP2:        true,
+		IsEIP2028:     true,
+		IsEIP7623:     true,
+		IsEIP7976:     true,
+		IsEIP7981:     true,
+		IsEIP2780:     true,
+	})
+	require.False(t, overflow)
+
+	result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	require.Equal(t, intrinsic.ExecutionGas+params.WarmStorageReadCostEIP2929, result.BlockExecutionGasUsed)
+	require.Zero(t, result.BlockStateGasUsed)
+}
+
+func TestEIP2780DelegationTargetIsNotReadWhenAccessChargeRunsOutOfGas(t *testing.T) {
+	const blockGasLimit = 1_000_000
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	delegatedTo := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
+	reader := &codeAccessRecordingReader{StateReader: state.NewNoopReader()}
+	ibs := state.New(reader)
+	require.NoError(t, ibs.SetCode(recipient, types.AddressToDelegation(delegatedTo), tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetCode(delegatedTo, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+
+	intrinsic, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+		IsEIP2:    true,
+		IsEIP2028: true,
+		IsEIP7623: true,
+		IsEIP7976: true,
+		IsEIP7981: true,
+		IsEIP2780: true,
+	})
+	require.False(t, overflow)
+	gasLimit := intrinsic.ExecutionGas + params.ColdAccountAccessEIP2780 - 1
+	evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
+	msg := newSimpleTransferMsg(sender, recipient, gasLimit, true)
+
+	result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
+	require.NoError(t, err)
+	require.ErrorIs(t, result.Err, vm.ErrRuntimeOutOfGas)
+	require.Contains(t, reader.accesses, recipient)
+	require.NotContains(t, reader.accesses, delegatedTo)
+}
+
+func TestEIP2780RecipientRuntimeOutOfGasPrecedesTransfer(t *testing.T) {
+	const blockGasLimit = 1_000_000
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	value := uint256.NewInt(1)
+	intrinsic := params.TxBaseEIP2780 +
+		params.ColdAccountAccessEIP2780 +
+		params.TransferLogCostEIP2780 +
+		params.TxValueCostEIP2780
+	gasLimit := intrinsic + params.StateGasNewAccount - 1
+
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	require.NoError(t, ibs.SetBalance(sender, *value, tracing.BalanceChangeUnspecified))
+
+	var logs int
+	ibs.SetHooks(&tracing.Hooks{
+		OnLog: func(*types.Log) {
+			logs++
+		},
+	})
+	evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
+	msg := types.NewMessage(
+		sender, recipient, 0, value, gasLimit,
+		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+		nil, nil, false, false, true, false, nil,
+	)
+
+	result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
+	require.NoError(t, err)
+	require.ErrorIs(t, result.Err, vm.ErrRuntimeOutOfGas)
+	require.Zero(t, logs)
+}
+
+func TestEIP2780CalldataFloorBindsBlockExecutionGas(t *testing.T) {
+	const blockGasLimit = 1_000_000
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	data := make([]byte, 128)
+	intrinsic, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+		Data:      data,
+		IsEIP2:    true,
+		IsEIP2028: true,
+		IsEIP7623: true,
+		IsEIP7976: true,
+		IsEIP7981: true,
+		IsEIP2780: true,
+	})
+	require.False(t, overflow)
+	require.Greater(t, intrinsic.FloorGasCost, intrinsic.ExecutionGas)
+
+	ibs := state.New(state.NewNoopReader())
+	evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
+	msg := types.NewMessage(
+		sender, recipient, 0, uint256.NewInt(0), 100_000,
+		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+		data, nil, false, false, true, false, nil,
+	)
+
+	result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	require.Equal(t, intrinsic.FloorGasCost, result.ReceiptGasUsed)
+	require.Equal(t, intrinsic.FloorGasCost, result.BlockExecutionGasUsed)
+	require.Zero(t, result.BlockStateGasUsed)
+}
+
+func TestEIP2780ContractCreationRuntimeOutOfGasKeepsSenderNonce(t *testing.T) {
+	const blockGasLimit = 1_000_000
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	intrinsic, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+		Data:               []byte{0x00},
+		IsContractCreation: true,
+		IsEIP2:             true,
+		IsEIP2028:          true,
+		IsEIP3860:          true,
+		IsEIP7623:          true,
+		IsEIP7976:          true,
+		IsEIP7981:          true,
+		IsEIP2780:          true,
+	})
+	require.False(t, overflow)
+	gasLimit := intrinsic.ExecutionGas + params.StateGasNewAccount - 1
+
+	ibs := state.New(state.NewNoopReader())
+	evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
+	msg := types.NewMessage(
+		sender, accounts.NilAddress, 0, uint256.NewInt(0), gasLimit,
+		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+		[]byte{0x00}, nil, false, false, true, false, nil,
+	)
+
+	result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
+	require.NoError(t, err)
+	require.ErrorIs(t, result.Err, vm.ErrRuntimeOutOfGas)
+	require.Equal(t, gasLimit, result.ReceiptGasUsed)
+	require.Equal(t, gasLimit, result.BlockExecutionGasUsed)
+	require.Zero(t, result.BlockStateGasUsed)
+
+	nonce, err := ibs.GetNonce(sender)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), nonce)
+	created := accounts.InternAddress(types.CreateAddress(sender.Value(), 0))
+	exists, err := ibs.Exist(created)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
+func TestEIP2780ContractCreationNonceReadErrorIsExecutionFailure(t *testing.T) {
+	t.Parallel()
+	const blockGasLimit = 1_000_000
+	const gasLimit = 100_000
+	backendErr := errors.New("nonce read failed")
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	versionMap := state.NewVersionMap(nil)
+	versionMap.WriteBalance(sender, state.Version{TxIndex: 0}, *uint256.NewInt(1), true)
+	statedb := state.NewWithVersionMap(
+		&accountErrorReader{StateReader: state.NewNoopReader(), err: backendErr},
+		versionMap,
+	)
+	defer statedb.Close()
+	statedb.SetTxContext(1, 1)
+	evm := newTestEVM(statedb, chain.AllProtocolChanges, blockGasLimit)
+	msg := types.NewMessage(
+		sender,
+		accounts.NilAddress,
+		0,
+		uint256.NewInt(0),
+		gasLimit,
+		uint256.NewInt(0),
+		uint256.NewInt(0),
+		uint256.NewInt(0),
+		[]byte{byte(vm.STOP)},
+		nil,
+		false,
+		false,
+		true,
+		false,
+		nil,
+	)
+	executor := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0))
+	executor.noFeeBurnAndTip = true
+	result, err := executor.Execute(true, false)
+	require.Nil(t, result)
+	require.ErrorIs(t, err, backendErr)
+	require.ErrorIs(t, err, ErrTxnExecutionFailed)
+}
+
+func TestEIP2780ContractCreationFrameStartsAfterRuntimeCharge(t *testing.T) {
+	t.Parallel()
+	const blockGasLimit = 1_000_000
+	const frameGas = 1_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	initCode := []byte{byte(vm.STOP)}
+	intrinsic, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+		Data:               initCode,
+		IsContractCreation: true,
+		IsEIP2:             true,
+		IsEIP2028:          true,
+		IsEIP3860:          true,
+		IsEIP7623:          true,
+		IsEIP7976:          true,
+		IsEIP7981:          true,
+		IsEIP2780:          true,
+	})
+	require.False(t, overflow)
+	gasLimit := intrinsic.ExecutionGas + params.StateGasNewAccount + frameGas
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	var enteredGas uint64
+	hooks := &tracing.Hooks{
+		OnEnter: func(depth int, typ byte, _ accounts.Address, _ accounts.Address, _ bool, _ []byte, gas uint64, _ uint256.Int, _ []byte) {
+			if depth == 0 && vm.OpCode(typ) == vm.CREATE {
+				enteredGas = gas
+			}
+		},
+	}
+	blockCtx := evmtypes.BlockContext{
+		CanTransfer: CanTransfer,
+		Transfer:    misc.Transfer,
+		GasLimit:    blockGasLimit,
+	}
+	evm := vm.NewEVM(
+		blockCtx,
+		evmtypes.TxContext{},
+		ibs,
+		chain.AllProtocolChanges,
+		vm.Config{
+			NoBaseFee: true,
+			Tracer:    hooks,
+		},
+	)
+	msg := types.NewMessage(
+		sender,
+		accounts.NilAddress,
+		0,
+		uint256.NewInt(0),
+		gasLimit,
+		uint256.NewInt(0),
+		uint256.NewInt(0),
+		uint256.NewInt(0),
+		initCode,
+		nil,
+		false,
+		false,
+		true,
+		false,
+		nil,
+	)
+	result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	require.Equal(t, uint64(frameGas), enteredGas)
+}
+
+func TestEIP2780ContractCreationOntoStorageOnlyAccountChargesBeforeCollision(t *testing.T) {
+	t.Parallel()
+	const blockGasLimit = 30_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0xcafe"))
+	target := accounts.InternAddress(types.CreateAddress(sender.Value(), 0))
+	initCode := []byte{byte(vm.STOP)}
+	intrinsic, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+		Data:               initCode,
+		IsContractCreation: true,
+		IsEIP2:             true,
+		IsEIP2028:          true,
+		IsEIP3860:          true,
+		IsEIP7623:          true,
+		IsEIP7976:          true,
+		IsEIP7981:          true,
+		IsEIP2780:          true,
+	})
+	require.False(t, overflow)
+	for _, tt := range []struct {
+		name           string
+		gasLimit       uint64
+		wantErr        error
+		wantReceiptGas uint64
+	}{
+		{
+			name:           "insufficient gas",
+			gasLimit:       intrinsic.ExecutionGas + params.StateGasNewAccount - 1,
+			wantErr:        vm.ErrRuntimeOutOfGas,
+			wantReceiptGas: intrinsic.ExecutionGas + params.StateGasNewAccount - 1,
+		},
+		{
+			name:           "collision refills charge",
+			gasLimit:       params.MaxTxnGasLimit + params.StateGasNewAccount,
+			wantErr:        vm.ErrContractAddressCollision,
+			wantReceiptGas: params.MaxTxnGasLimit,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			ibs.CreateAccount(sender, false)
+			ibs.CreateAccount(target, true)
+			require.NoError(t, ibs.SetState(target, accounts.ZeroKey, *uint256.NewInt(1)))
+			empty, err := ibs.Empty(target)
+			require.NoError(t, err)
+			require.True(t, empty)
+			hasStorage, err := ibs.HasStorage(target)
+			require.NoError(t, err)
+			require.True(t, hasStorage)
+			evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
+			msg := types.NewMessage(
+				sender,
+				accounts.NilAddress,
+				0,
+				uint256.NewInt(0),
+				tt.gasLimit,
+				uint256.NewInt(0),
+				uint256.NewInt(0),
+				uint256.NewInt(0),
+				initCode,
+				nil,
+				false,
+				false,
+				true,
+				false,
+				nil,
+			)
+			result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
+			require.NoError(t, err)
+			require.ErrorIs(t, result.Err, tt.wantErr)
+			require.Equal(t, tt.wantReceiptGas, result.ReceiptGasUsed)
+			require.Zero(t, result.BlockStateGasUsed)
+			nonce, err := ibs.GetNonce(sender)
+			require.NoError(t, err)
+			require.Equal(t, uint64(1), nonce)
+		})
+	}
+}
+
+func TestContractCreationDoesNotWarmZeroAddressDelegationTarget(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = uint64(1_000_000)
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	delegatedTo := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
+
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	require.NoError(t, ibs.SetCode(accounts.ZeroAddress, types.AddressToDelegation(delegatedTo), tracing.CodeChangeUnspecified))
+
+	evm := newTestEVM(ibs, chain.TestChainOsakaConfig, blockGasLimit)
+	msg := types.NewMessage(
+		sender, accounts.NilAddress, 0, uint256.NewInt(0), 100_000,
+		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+		[]byte{byte(vm.STOP)}, nil, false, false, true, false, nil,
+	)
+	result, err := NewTxnExecutor(evm, msg, new(GasPool).AddGas(blockGasLimit)).Execute(true, false)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	require.False(t, ibs.AddressInAccessList(delegatedTo))
 }
 
 // TestPreCheckErrorOrdering_GasBeforeFeeCap asserts the geth-aligned
@@ -243,7 +853,7 @@ func TestPreCheckErrorOrdering_GasBeforeFeeCap(t *testing.T) {
 
 	t.Run("tx-gas > block-gas-limit AND fee-cap < baseFee returns ErrGasLimitReached", func(t *testing.T) {
 		ibs := state.New(state.NewNoopReader())
-		defer ibs.Release(false)
+		defer ibs.Close()
 		blockCtx := evmtypes.BlockContext{
 			CanTransfer: CanTransfer,
 			Transfer:    misc.Transfer,
@@ -271,7 +881,7 @@ func TestPreCheckErrorOrdering_GasBeforeFeeCap(t *testing.T) {
 			"fee-cap error must not leak past the gas-pool reject")
 	})
 
-	t.Run("CheckBlockGasInclusion rejects regular contribution > regular pool", func(t *testing.T) {
+	t.Run("CheckBlockGasInclusion rejects execution contribution > execution pool", func(t *testing.T) {
 		gp := new(GasPool).AddGas(blockGasLimit)
 		require.ErrorIs(t, CheckBlockGasInclusion(gp, blockGasLimit+1, 0), ErrGasLimitReached)
 	})
@@ -291,7 +901,7 @@ func TestPreCheckErrorOrdering_GasBeforeFeeCap(t *testing.T) {
 		require.ErrorIs(t, CheckBlockGasInclusion(gp, 50_000, 200_000), ErrGasLimitReached)
 	})
 
-	t.Run("CheckBlockGasInclusion rejects regular contribution > regular pool (Amsterdam shape)", func(t *testing.T) {
+	t.Run("CheckBlockGasInclusion rejects execution contribution > execution pool (Amsterdam shape)", func(t *testing.T) {
 		gp := NewGasPool(100_000, 0)
 		require.ErrorIs(t, CheckBlockGasInclusion(gp, 200_000, 50_000), ErrGasLimitReached)
 	})

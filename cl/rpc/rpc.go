@@ -46,6 +46,8 @@ import (
 
 const maxMessageLength = 18 * datasize.MB
 
+var errBlockForkSchemaSlotMismatch = errors.New("block schema fork disagrees with the fork implied by its slot")
+
 // blobSidecarRawBytes is the fixed SSZ size of a BlobSidecar (the blob dominates; fork-independent).
 func blobSidecarRawBytes() int { return (&cltypes.BlobSidecar{}).EncodingSizeSSZ() }
 
@@ -104,6 +106,10 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 		if err := responseChunk.DecodeSSZ(data.raw, int(data.version)); err != nil {
 			return nil, pid, err
 		}
+		if !b.beaconConfig.ForkSchemaMatchesSlot(responseChunk.Block.Slot, responseChunk.Version()) {
+			b.BanPeer(pid)
+			return nil, pid, fmt.Errorf("%w: slot %d, decoded version %s", errBlockForkSchemaSlotMismatch, responseChunk.Block.Slot, responseChunk.Version())
+		}
 		responsePacket = append(responsePacket, responseChunk)
 	}
 
@@ -158,40 +164,6 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 		ColumnSidecars = append(ColumnSidecars, columnSidecar)
 	}
 
-	return ColumnSidecars, pid, nil
-}
-
-func (b *BeaconRpcP2P) SendColumnSidecarsByRangeReqV1(
-	ctx context.Context,
-	start, count uint64,
-	columns []uint64,
-) ([]*cltypes.DataColumnSidecar, string, error) {
-	req := &cltypes.ColumnSidecarsByRangeRequest{
-		StartSlot: start,
-		Count:     count,
-		Columns:   solid.NewUint64ListSSZ(int(b.beaconConfig.NumberOfColumns)),
-	}
-	for _, column := range columns {
-		req.Columns.Append(column)
-	}
-	var buffer buffer.Buffer
-	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
-		return nil, "", err
-	}
-
-	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRangeProtocolV1, buffer.Bytes(), communication.MaxWireResponseBytes(b.columnSidecarRawBytes(), count*uint64(len(columns))))
-	if err != nil {
-		return nil, pid, err
-	}
-
-	ColumnSidecars := []*cltypes.DataColumnSidecar{}
-	for _, data := range responsePacket {
-		columnSidecar := &cltypes.DataColumnSidecar{}
-		if err := columnSidecar.DecodeSSZ(data.raw, int(data.version)); err != nil {
-			return nil, pid, err
-		}
-		ColumnSidecars = append(ColumnSidecars, columnSidecar)
-	}
 	return ColumnSidecars, pid, nil
 }
 
