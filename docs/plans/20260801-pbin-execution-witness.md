@@ -274,21 +274,28 @@ leaf and code chunking instead of reimplementing all of it.
 - Create: `execution/commitment/pbin_witness_context.go`
 - Create: `execution/commitment/pbin_witness_context_test.go`
 
-- [ ] implement a `PatriciaContext` (`Branch`, `PutBranch`, `Account`, `Storage` —
+- [x] implement a `PatriciaContext` (`Branch`, `PutBranch`, `Account`, `Storage` —
       `commitment.go:134-144`) plus the unexported `pbinCodeContext.Code`
       (`pbin_update_stream.go:51`) backed by a decoded witness node set
-- [ ] convert decoded branch preimages into the record format `pbinBranchEncoder` produces, so
+- [x] convert decoded branch preimages into the record format `pbinBranchEncoder` produces, so
       `PBinPatriciaHashed` can unfold into them unmodified
-- [ ] return a clear "blinded" error when a `Branch` read needs a node absent from the witness —
+- [x] return a clear "blinded" error when a `Branch` read needs a node absent from the witness —
       never an empty record, which would silently build a wrong subtree
-- [ ] confirm the existing engine can then apply updates and produce a post-state root over this
+- [x] confirm the existing engine can then apply updates and produce a post-state root over this
       context, so no second mutable binary trie is written
-- [ ] write tests: applying a known update set over the witness context yields the same root as
+- [x] ➕ a record cannot carry a BASIC_DATA or CODE_HASH value verbatim — both are packed from
+      account fields at hash time. Those cells carry a handle (the leaf's node hash, truncated to
+      plain-key width) that `Account` resolves to the state the value unpacks to; every other leaf
+      round-trips as a record-resident value. Which one applies is decided by re-encoding through
+      `pbinLeafValue`, so it cannot drift from the hasher
+- [x] ➕ code arrives from outside the node set (`setCode`): the witness carries code as blobs, and
+      the update stream reads it by plain key to chunk it. Task 8 picks the owner
+- [x] write tests: applying a known update set over the witness context yields the same root as
       applying it over `MockState` with full state
-- [ ] write tests: a read of a blinded branch errors and names the path
-- [ ] write tests: a witness sufficient for the touched keys but missing untouched subtrees still
+- [x] write tests: a read of a blinded branch errors and names the path
+- [x] write tests: a witness sufficient for the touched keys but missing untouched subtrees still
       produces the correct root
-- [ ] run tests - must pass before task 6
+- [x] run tests - must pass before task 6
 
 ### Task 6: Proof-path pruning for binary witnesses
 
