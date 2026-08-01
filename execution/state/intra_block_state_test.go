@@ -253,7 +253,7 @@ func (test *snapshotTest) run(t *testing.T) bool {
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
 	)
-	defer state.Release(false)
+	defer state.Close()
 	for i, action := range test.actions {
 		if len(test.snapshots) > sindex && i == test.snapshots[sindex] {
 			snapshotRevs[sindex] = state.PushSnapshot()
@@ -271,7 +271,7 @@ func (test *snapshotTest) run(t *testing.T) bool {
 		state.RevertToSnapshot(snapshotRevs[sindex], nil)
 		state.PopSnapshot(snapshotRevs[sindex])
 		err := test.checkEqual(state, checkstate)
-		checkstate.Release(false)
+		checkstate.Close()
 		if err != nil {
 			test.err = fmt.Errorf("state mismatch after revert to snapshot %d\n%w", sindex, err)
 			return false
@@ -405,7 +405,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 func TestTransientStorage(t *testing.T) {
 	t.Parallel()
 	state := New(nil)
-	defer state.Release(false)
+	defer state.Close()
 
 	key := accounts.InternKey(common.Hash{0x01})
 	value := uint256.NewInt(2)
@@ -428,6 +428,45 @@ func TestTransientStorage(t *testing.T) {
 	}
 }
 
+func TestCloseResetsRevisions(t *testing.T) {
+	t.Parallel()
+	state := New(nil)
+	t.Cleanup(state.Close)
+
+	state.PushSnapshot()
+	require.NotEmpty(t, state.revisions.valid)
+
+	state.Close()
+	require.Empty(t, state.revisions.valid)
+	require.Zero(t, state.revisions.nextId)
+}
+
+func TestCloseReleasesVersionedWrites(t *testing.T) {
+	t.Parallel()
+	state := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
+	t.Cleanup(state.Close)
+	state.SetNoMaterialize(true)
+	state.SetTxContext(1, 0)
+
+	require.NoError(t, state.TouchAccount(accounts.InternAddress([20]byte{0xe1})))
+	require.NotZero(t, state.versionedWrites.Count())
+
+	handedOut := state.VersionedWrites()
+	state.Close()
+
+	require.Zero(t, state.versionedWrites.Count())
+	require.NotZero(t, handedOut.Count(), "the clone handed to callers must survive Close")
+}
+
+func TestCloseIsIdempotent(t *testing.T) {
+	t.Parallel()
+	state := New(nil)
+
+	state.PushSnapshot()
+	state.Close()
+	require.NotPanics(t, state.Close)
+}
+
 func TestVersionMapReadWriteDelete(t *testing.T) {
 	t.Parallel()
 
@@ -437,14 +476,14 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	reader := NewReaderV3(domains.AsGetter(tx))
 
 	s := NewWithVersionMap(reader, mvhm)
-	defer s.Release(false)
+	defer s.Close()
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Release(false)
+		defer sCopy.Close()
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -518,14 +557,14 @@ func TestVersionMapRevert(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
-	defer s.Release(false)
+	defer s.Close()
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Release(false)
+		defer sCopy.Close()
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -582,13 +621,13 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
-	defer s.Release(false)
+	defer s.Close()
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Release(false)
+		defer sCopy.Close()
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -663,14 +702,14 @@ func TestVersionMapOverwrite(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
-	defer s.Release(false)
+	defer s.Close()
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Release(false)
+		defer sCopy.Close()
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -754,14 +793,14 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
-	defer s.Release(false)
+	defer s.Close()
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Release(false)
+		defer sCopy.Close()
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -896,19 +935,19 @@ func TestApplyVersionedWrites(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
-	defer s.Release(false)
+	defer s.Close()
 
 	sClean := New(reader)
-	defer sClean.Release(false)
+	defer sClean.Close()
 	sSingleProcess := New(reader)
-	defer sSingleProcess.Release(false)
+	defer sSingleProcess.Close()
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Release(false)
+		defer sCopy.Close()
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -995,7 +1034,7 @@ func TestMakeWriteSetClearsCodeDomainOnEmptyOverride(t *testing.T) {
 	code := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
 
 	deploy := New(NewReaderV3(domains.AsGetter(tx)))
-	defer deploy.Release(false)
+	defer deploy.Close()
 	require.NoError(t, deploy.CreateAccount(addr, true))
 	require.NoError(t, deploy.SetNonce(addr, 1, tracing.NonceChangeUnspecified))
 	require.NoError(t, deploy.SetCode(addr, code, tracing.CodeChangeUnspecified))
@@ -1006,7 +1045,7 @@ func TestMakeWriteSetClearsCodeDomainOnEmptyOverride(t *testing.T) {
 	require.Equal(t, code, got)
 
 	clear := New(NewReaderV3(domains.AsGetter(tx)))
-	defer clear.Release(false)
+	defer clear.Close()
 	require.NoError(t, clear.SetCode(addr, []byte{}, tracing.CodeChangeUnspecified))
 	require.NoError(t, clear.MakeWriteSet(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 1)))
 
