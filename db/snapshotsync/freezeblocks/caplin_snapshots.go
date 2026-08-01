@@ -160,10 +160,11 @@ func (s *CaplinSnapshots) Close() {
 
 // OpenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *CaplinSnapshots) OpenList(fileNames []string, optimistic bool) error {
-	defer s.recalcVisibleFiles()
-
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
+	// dirtyLock still held: the dirty mutation above and this publish must be one
+	// atomic step, else a concurrent OpenList can publish a segment it just closed.
+	defer s.recalcVisibleFiles()
 
 	s.closeWhatNotInList(fileNames)
 

@@ -1570,6 +1570,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 	fromStep := cliCtx.Uint64("fromStep")
 
 	var cache *integrity.IntegrityCache
+	var torrentVerifyErr error
 	if cachePath := cliCtx.String("file-integrity-cache"); cachePath != "" {
 		var err error
 		cache, err = integrity.LoadIntegrityCache(cachePath)
@@ -1587,7 +1588,14 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 			dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 			logger.Info("[integrity] verifying torrent piece hashes before integrity checks")
 			if err := integrity.VerifyTorrentFiles(ctx, dirs.Snap, failFast, logger); err != nil {
-				return fmt.Errorf("torrent verification failed: %w", err)
+				err = fmt.Errorf("torrent verification failed: %w", err)
+				if failFast {
+					return err
+				}
+				// failFast=false means "warn and keep checking", so the run still has to
+				// produce its check results; the error is reported at the end instead.
+				logger.Warn("[integrity] continuing after torrent verification failure", "err", err)
+				torrentVerifyErr = err
 			}
 		}
 	}
@@ -1764,10 +1772,10 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 			logger.Info("[integrity] budget exhausted, moving on", "check", chk, "elapsed", elapsed)
 			continue
 		}
-		return fmt.Errorf("%s: %w", chk, err)
+		return errors.Join(torrentVerifyErr, fmt.Errorf("%s: %w", chk, err))
 	}
 
-	return nil
+	return torrentVerifyErr
 }
 
 // stateFilesProgress returns the latest block fully covered by state-history files.

@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
@@ -174,4 +175,41 @@ func TestFrozenBlobsVisibleLockRace(t *testing.T) {
 	}
 	<-done
 	require.NoError(t, err)
+}
+
+// The antiquary and the history-download stage both call OpenFolder on the same
+// CaplinSnapshots, so publishing must happen while dirtyLock is still held —
+// recalcVisibleFiles walks the dirty btree a concurrent OpenList is mutating.
+// Meaningful under -race.
+func TestOpenListDirtyLockRace(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	writeEmptyBlobSidecarsSegment(t, dirs, 0, snaptype.CaplinMergeLimit)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	files, _, err := snapshotsync.SegmentsCaplin(dirs.Snap)
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	list := make([]string, 0, len(files))
+	for i := range files {
+		_, fName := filepath.Split(files[i].Path)
+		list = append(list, fName)
+	}
+
+	// One caller sees the segment, the other does not — the same divergence two
+	// concurrent folder scans hit while the antiquary is dumping a new file.
+	var eg errgroup.Group
+	for _, l := range [][]string{list, nil} {
+		eg.Go(func() error {
+			for range 50 {
+				if err := sn.OpenList(l, true); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+	require.NoError(t, eg.Wait())
 }
