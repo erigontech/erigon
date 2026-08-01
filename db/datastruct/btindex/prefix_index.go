@@ -56,13 +56,22 @@ type PrefixIndex struct {
 	trace bool
 }
 
-// record updates the bucket for the given key's 2-byte prefix with the key's DI.
-func (p *PrefixIndex) record(key []byte, di uint64) {
+// keyPrefix maps a key to its bucket. A 1-byte key is zero-padded, which puts it
+// in the same bucket as the keys it sorts just before, keeping every bucket a
+// contiguous DI range. Callers must reject empty keys.
+func keyPrefix(key []byte) uint16 {
 	if len(key) < 2 {
+		return uint16(key[0]) << 8
+	}
+	return uint16(key[0])<<8 | uint16(key[1])
+}
+
+// record updates the bucket for the given key's prefix with the key's DI.
+func (p *PrefixIndex) record(key []byte, di uint64) {
+	if len(key) == 0 {
 		return
 	}
-	prefix := uint16(key[0])<<8 | uint16(key[1])
-	bucket := &p.buckets[prefix]
+	bucket := &p.buckets[keyPrefix(key)]
 	if bucket.firstDI > di {
 		bucket.firstDI = di
 	}
@@ -108,8 +117,7 @@ func (p *PrefixIndex) lookup(key []byte) (l, r uint64) {
 		return p.l1First[b0], p.l1End[b0]
 	}
 
-	prefix := uint16(b0)<<8 | uint16(key[1])
-	bucket := &p.buckets[prefix]
+	bucket := &p.buckets[keyPrefix(key)]
 	if bucket.firstDI != math.MaxUint64 {
 		return bucket.firstDI, bucket.endDI
 	}
@@ -127,7 +135,7 @@ func (p *PrefixIndex) narrowWithNodes(key []byte, l, r uint64) (nl, nr, exactDI 
 	if len(key) < 2 {
 		return l, r, 0, false
 	}
-	prefix := uint16(key[0])<<8 | uint16(key[1])
+	prefix := keyPrefix(key)
 	bucket := &p.buckets[prefix]
 	if len(bucket.nodes) == 0 {
 		return l, r, 0, false
@@ -167,7 +175,7 @@ func (p *PrefixIndex) addNode(n prefixNode) {
 	if len(n.key) < 2 {
 		return
 	}
-	prefix := uint16(n.key[0])<<8 | uint16(n.key[1])
+	prefix := keyPrefix(n.key)
 	bucket := &p.buckets[prefix]
 	if len(bucket.nodes) < maxNodesPerBucket {
 		n.key = bytes.Clone(n.key)
@@ -205,7 +213,7 @@ func (p *PrefixIndex) scanBucketRanges(kv *seg.Reader, counts []uint32) {
 		kv.Skip()
 		p.record(key, di)
 		if counts != nil && len(key) >= 2 {
-			prefix := uint16(key[0])<<8 | uint16(key[1])
+			prefix := keyPrefix(key)
 			counts[prefix]++
 		}
 	}
@@ -262,19 +270,19 @@ func NewPrefixIndex(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLookup data
 		if len(key) < 2 {
 			continue
 		}
-		prefix := uint16(key[0])<<8 | uint16(key[1])
+		prefix := keyPrefix(key)
 		s := &scanState[prefix]
 
 		if s.curPick < s.nPicks {
 			c := counts[prefix]
 			var targetPos uint32
 			if c <= maxNodesPerBucket {
-				targetPos = uint32(s.seen)
+				targetPos = s.seen
 			} else {
-				targetPos = uint32(uint64(s.curPick) * uint64(c-1) / 7)
+				targetPos = uint32(uint64(s.curPick) * uint64(c-1) / (maxNodesPerBucket - 1))
 			}
 
-			if uint32(s.seen) == targetPos {
+			if s.seen == targetPos {
 				p.buckets[prefix].nodes = append(p.buckets[prefix].nodes, prefixNode{
 					key: bytes.Clone(key),
 					di:  di,
@@ -316,17 +324,17 @@ func NewPrefixIndexWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLo
 		return p
 	}
 
-	// Sequential scan to record bucket ranges.
-	p.scanBucketRanges(kv, nil)
+	// Sequential scan to record bucket ranges and per-prefix key counts.
+	counts := make([]uint32, 65536)
+	p.scanBucketRanges(kv, counts)
 
 	// Distribute pre-built nodes into prefix buckets.
 	for i := range nodes {
 		p.addNode(nodes[i])
 	}
 
-	// Adaptive: if pre-built nodes are too sparse for good narrowing,
-	// do a supplementary scan to ensure each non-empty bucket gets at least 1 node.
-	// With M=256 and 65K buckets, pre-built nodes cover <6% of buckets.
+	// Pre-built nodes sit M keys apart, so most buckets get none. Give every
+	// bucket that missed out one node (its middle key) so narrowing stays even.
 	emptyNodeBuckets := 0
 	for i := range 65536 {
 		if p.buckets[i].firstDI != math.MaxUint64 && len(p.buckets[i].nodes) == 0 {
@@ -334,9 +342,6 @@ func NewPrefixIndexWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLo
 		}
 	}
 	if emptyNodeBuckets > 0 {
-		// Supplementary pass: pick 1 node per empty bucket (middle key)
-		counts := make([]uint32, 65536)
-		p.scanBucketRanges(kv, counts) // re-scan to get counts
 		var key []byte
 		kv.Reset(0)
 		seen := make([]uint32, 65536)
@@ -346,19 +351,13 @@ func NewPrefixIndexWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, dataLo
 			if len(key) < 2 {
 				continue
 			}
-			prefix := uint16(key[0])<<8 | uint16(key[1])
+			prefix := keyPrefix(key)
+			seen[prefix]++
 			if len(p.buckets[prefix].nodes) > 0 {
-				seen[prefix]++
 				continue // already has nodes
 			}
-			seen[prefix]++
-			// Pick middle key of bucket
-			mid := counts[prefix] / 2
-			if seen[prefix]-1 == mid {
-				p.addNode(prefixNode{
-					key: bytes.Clone(key),
-					di:  di,
-				})
+			if seen[prefix]-1 == counts[prefix]/2 { // middle key of the bucket
+				p.addNode(prefixNode{key: key, di: di})
 			}
 		}
 	}
@@ -475,7 +474,7 @@ func (p *PrefixIndex) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset 
 
 	// Quick check: if the exact 2-byte prefix bucket is empty, key can't exist.
 	if len(key) >= 2 {
-		prefix := uint16(key[0])<<8 | uint16(key[1])
+		prefix := keyPrefix(key)
 		if p.buckets[prefix].firstDI == math.MaxUint64 {
 			return nil, false, 0, nil
 		}

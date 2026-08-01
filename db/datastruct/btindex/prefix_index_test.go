@@ -277,7 +277,6 @@ func TestPrefixIndexSeekBeyond(t *testing.T) {
 	c, err := pi.Seek(g, common.FromHex("0xffffffffffffff"))
 	require.NoError(t, err)
 	require.Nil(t, c)
-	c.Close()
 }
 
 func TestPrefixIndexGet(t *testing.T) {

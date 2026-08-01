@@ -2,13 +2,12 @@ package btindex
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	randOld "math/rand"
 	"math/rand/v2"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 
@@ -155,9 +154,7 @@ func generateControlledKV(tb testing.TB, tmp string, prefixes [][]byte, keysPerP
 			pairs = append(pairs, kv{key: key, val: val})
 		}
 	}
-	sort.Slice(pairs, func(i, j int) bool {
-		return string(pairs[i].key) < string(pairs[j].key)
-	})
+	slices.SortFunc(pairs, func(a, b kv) int { return bytes.Compare(a.key, b.key) })
 
 	// Deduplicate keys
 	deduped := pairs[:0]
@@ -170,7 +167,7 @@ func generateControlledKV(tb testing.TB, tmp string, prefixes [][]byte, keysPerP
 	pairs = deduped
 
 	dataPath := filepath.Join(tmp, fmt.Sprintf("controlled_%d.kv", len(pairs)))
-	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
+	comp, err := seg.NewCompressor(tb.Context(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
 	writer := seg.NewWriter(comp, compressFlags)
@@ -211,7 +208,7 @@ func generateMinimalKV(tb testing.TB, tmp string, keys, values [][]byte, compres
 	logger := log.New()
 
 	dataPath := filepath.Join(tmp, fmt.Sprintf("minimal_%d.kv", len(keys)))
-	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
+	comp, err := seg.NewCompressor(tb.Context(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
 	writer := seg.NewWriter(comp, compressFlags)
