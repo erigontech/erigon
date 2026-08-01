@@ -1,0 +1,72 @@
+[
+  {
+    "block": 1,
+    "shape": "plain transfer",
+    "nodes": 2,
+    "stateBytes": 118,
+    "codes": 1,
+    "codeBytes": 0,
+    "headers": 1,
+    "headerBytes": 502
+  },
+  {
+    "block": 2,
+    "shape": "deploy held by the account header",
+    "nodes": 4,
+    "stateBytes": 347,
+    "codes": 2,
+    "codeBytes": 8,
+    "headers": 1,
+    "headerBytes": 504
+  },
+  {
+    "block": 3,
+    "shape": "deploy overflowing into the code zone",
+    "nodes": 4,
+    "stateBytes": 379,
+    "codes": 2,
+    "codeBytes": 4216,
+    "headers": 1,
+    "headerBytes": 504
+  },
+  {
+    "block": 4,
+    "shape": "storage write",
+    "nodes": 5,
+    "stateBytes": 518,
+    "codes": 2,
+    "codeBytes": 8,
+    "headers": 1,
+    "headerBytes": 505
+  },
+  {
+    "block": 5,
+    "shape": "SSTORE to zero",
+    "nodes": 6,
+    "stateBytes": 554,
+    "codes": 2,
+    "codeBytes": 8,
+    "headers": 1,
+    "headerBytes": 504
+  },
+  {
+    "block": 6,
+    "shape": "code read across the code-zone boundary",
+    "nodes": 5,
+    "stateBytes": 518,
+    "codes": 2,
+    "codeBytes": 4216,
+    "headers": 1,
+    "headerBytes": 504
+  },
+  {
+    "block": 7,
+    "shape": "no transactions",
+    "nodes": 3,
+    "stateBytes": 295,
+    "codes": 1,
+    "codeBytes": 0,
+    "headers": 1,
+    "headerBytes": 504
+  }
+]

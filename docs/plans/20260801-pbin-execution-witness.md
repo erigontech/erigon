@@ -481,21 +481,68 @@ leaf and code chunking instead of reimplementing all of it.
 - Create: `rpc/jsonrpc/testdata/hex_witness_baseline.json`
 - Modify: `docs/plans/20260801-pbin-execution-witness.md`
 
-- [ ] build the same block sequence twice — once hex, once bin — from identical genesis and identical
+- [x] build the same block sequence twice — once hex, once bin — from identical genesis and identical
       transactions
-- [ ] the two arms mutate process-global state (`statecfg.ExperimentalBinCommitment`,
+- [x] the two arms mutate process-global state (`statecfg.ExperimentalBinCommitment`,
       `commitment.SetPBinHashSuite`); sequence them explicitly with save/restore and no `t.Parallel`,
       matching the note at `block_test_util.go:231-241`
-- [ ] commit the hex arm's per-block node count and byte totals as a golden fixture, so Task 13 can
-      check hex is unchanged without checking out another branch
-- [ ] measure per block: witness node count, total bytes, and codes/headers separately so the
+- [x] commit the hex arm's per-block node count and byte totals as a golden fixture, so Task 13 can
+      check hex is unchanged without checking out another branch — regenerate deliberately with
+      `ERIGON_UPDATE_HEX_WITNESS_BASELINE=true`
+- [x] measure per block: witness node count, total bytes, and codes/headers separately so the
       trie-node contribution is isolated
-- [ ] apply Task 8's code-ownership decision consistently, or the comparison counts code twice on one
-      side and the table is meaningless
-- [ ] record the measured table in this plan under a "Measured witness sizes" heading, stating the
+- [x] apply Task 8's code-ownership decision consistently, or the comparison counts code twice on one
+      side and the table is meaningless — `witnessSizes.totalBytes` drops `codes` under bin, where the
+      reader reassembles code from the chunk leaves already counted in the state bytes
+- [x] record the measured table in this plan under a "Measured witness sizes" heading, stating the
       corpus (block count, account count, storage density) — sizes without a corpus mean nothing
-- [ ] write tests: both arms produce a verifying witness
-- [ ] run tests - must pass before task 13
+- [x] write tests: both arms produce a verifying witness — the gate is pinned on for both arms
+      (`ERIGON_WITNESS_NO_VERIFY=false`, non-skippable under bin), so a measured witness is a verified one
+- [x] run tests - must pass before task 13
+
+#### Measured witness sizes
+
+Corpus: the Task 11 chain — 7 blocks on `TestChainBerlinConfig`, genesis funding one account. Five
+accounts are touched across it (bank, transfer recipient, two deployed contracts, the zero-address
+coinbase) and two storage slots (one written then zeroed on the small contract, one written on the
+large one), so storage density is about one slot per contract. Both arms run the same genesis and the
+same transactions; only the commitment trie differs.
+
+| block | shape | hex nodes | hex state B | bin nodes | bin state B | bin/hex state |
+|---|---|---:|---:|---:|---:|---:|
+| 1 | plain transfer | 2 | 118 | 3 | 235 | 1.99x |
+| 2 | deploy held by the account header | 4 | 347 | 9 | 704 | 2.03x |
+| 3 | deploy overflowing into the code zone | 4 | 379 | 8 | 604 | 1.59x |
+| 4 | storage write | 5 | 518 | 16 | 1173 | 2.26x |
+| 5 | SSTORE to zero | 6 | 554 | 18 | 1307 | 2.36x |
+| 6 | code read across the code-zone boundary | 5 | 518 | 284 | 19162 | 36.99x |
+| 7 | no transactions | 3 | 295 | 7 | 504 | 1.71x |
+
+| block | hex codes | hex code B | bin codes | bin code B | hex headers B | bin headers B |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 | 1 | 0 | 1 | 0 | 502 | 502 |
+| 2 | 2 | 8 | 2 | 8 | 504 | 504 |
+| 3 | 2 | 4216 | 2 | 4216 | 504 | 504 |
+| 4 | 2 | 8 | 2 | 8 | 505 | 505 |
+| 5 | 2 | 8 | 2 | 8 | 504 | 504 |
+| 6 | 2 | 4216 | 2 | 4216 | 504 | 504 |
+| 7 | 1 | 0 | 1 | 0 | 504 | 504 |
+
+Corpus total handed to a verifier — state + headers under bin, state + codes + headers under hex:
+hex 14712 B, bin 27216 B (1.85x).
+
+Reading it:
+
+- Without a code read, bin costs roughly 1.6-2.4x hex per block. A binary trie is deeper than a
+  hex one over the same key set, so a proof path carries more nodes, each smaller (~67 B: a tag,
+  a bit prefix and two 32-byte children) than an MPT branch.
+- Block 6 is the outlier and the real result: reading a 4216-byte contract's code costs 284 nodes
+  and 19 KB, because EIP-8297 commits code as 31-byte chunk leaves and reading it proves all 137 of
+  them. Hex ships the same code as one 4216-byte blob next to a 5-node proof.
+- Block 3 shows the asymmetry: *deploying* that same code is cheap (8 nodes) because the chunk
+  leaves have no pre-state to prove — only reading it back pays.
+- The bin `codes` column is a duplicate of bytes already in its state column and is excluded from
+  the bin total; it stays in the response for format compatibility.
 
 ### Task 13: Update the stale "witness is hex-only" documentation
 
