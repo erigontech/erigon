@@ -423,20 +423,26 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.dep = UnknownDep
 }
 
-// Release returns pooled resources (like journal, stateObjects) back to their pools.
-// Call this when the IntraBlockState is no longer needed.
-// If parallel is true, cleanup happens in a goroutine for faster return.
-func (sdb *IntraBlockState) Release(parallel bool) {
-	stateObjects := sdb.stateObjects
-	journal := sdb.journal
-	sdb.stateObjects = nil
-	sdb.journal = nil
+// Release Deprecated use Close
+func (sdb *IntraBlockState) Release(bool) { sdb.Close() }
 
-	if parallel {
-		go releaseResources(stateObjects, journal)
-	} else {
-		releaseResources(stateObjects, journal)
+// Close returns pooled resources (like journal, stateObjects, versioned writes)
+// back to their pools. Call this when the IntraBlockState is no longer needed.
+// Call Reset() to re-use IntraBlockState object
+// Idempotent, thread-unsafe
+func (sdb *IntraBlockState) Close() {
+	if sdb == nil || sdb.stateObjects == nil {
+		return
 	}
+
+	stateObjects, journal := sdb.stateObjects, sdb.journal
+	sdb.stateObjects, sdb.journal = nil, nil
+	sdb.revisions.reset()
+	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
+	// set is unexported, so nothing outside holds a raw VersionedWrite.
+	sdb.versionedWrites.ReleaseAndReset()
+
+	releaseResources(stateObjects, journal)
 }
 
 func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *journal) {
@@ -2593,48 +2599,47 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	return nil
 }
 
-// FinalizedWrites returns the tx's committable write-set on the parallel
-// (versionMap) path: WriteSet.Finalize applies the EIP-6780 wipe and snapshots
-// the recorded IO. No journal reset here — Reset() does that before the next tx.
-func (sdb *IntraBlockState) FinalizedWrites() *WriteSet {
-	return sdb.versionedWrites.Finalize()
+// FinalizedWrites applies EIP-6780 normalization and EIP-161 filtering, then
+// returns a detached committable snapshot.
+func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) *WriteSet {
+	writes := sdb.versionedWrites.Finalize()
+	sdb.withholdCreatedEmptyAccounts(chainRules, writes)
+	return writes
 }
 
-// MergeTxIOInto folds the current transaction's recorded reads, writes and
-// accesses into io at the current tx index, without building an intermediate
-// VersionedIO.
-func (sdb *IntraBlockState) MergeTxIOInto(io *VersionedIO) {
+// withholdCreatedEmptyAccounts drops writes for accounts the tx observed as
+// absent and left empty (EIP-161): such an account is absent both before and
+// after the tx, so omitting its writes is exact and no deletion marker is
+// needed. An account that existed before is kept even when it ends empty —
+// clearing it needs an explicit delete, which commit-time normalization emits.
+func (sdb *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules, writes *WriteSet) {
+	if sdb.blockNum == 0 || chainRules == nil {
+		return
+	}
+	for addr := range writes.address {
+		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
+			continue
+		}
+		read, ok := sdb.versionedReads.GetAddress(addr)
+		if !ok || (read.Val != nil && !read.Val.IsNil()) || !writes.createdEmpty(addr) {
+			continue
+		}
+		writes.deleteAddr(addr)
+	}
+}
+
+// MergeTxIOInto folds the current transaction's reads and supplied writes into io.
+func (sdb *IntraBlockState) MergeTxIOInto(io *VersionedIO, writes *WriteSet) {
 	version := Version{BlockNum: sdb.blockNum, TxIndex: sdb.txIndex, Incarnation: sdb.version}
-	io.mergeTx(version, sdb.versionedReads, sdb.VersionedWrites())
+	io.mergeTx(version, sdb.versionedReads, writes)
 }
 
-// FlushWritesToVersionMap publishes the current tx's writes into this IBS's own
-// versionMap, positioned by each write's (txIndex, incarnation). The single-IBS
-// block assembler resets the per-tx versionedWrites between txs (for per-tx BAL
-// recording), so without this a later tx would not observe an earlier tx's state
-// — the versionMap is the cross-tx carrier, matching how the parallel executor
-// persists each committed tx before the next reads it.
-// FlushWritesToVersionMap publishes this tx's writes to the version map on the
-// block-builder path. It flushes the RAW versionedWrites, not the SD-filtered
-// FinalizedWrites() the parallel worker flushes — so a builder map may carry a
-// same-index AddressPath + SelfDestruct=true pair the executor never produces.
-// Safe under the strict-`>` gate in versionedReadCore and the committed
-// fallback; a consumer leaning on the AccountLifecycle `>=` arm must account for
-// it (or this should be unified onto FinalizedWrites()).
-func (sdb *IntraBlockState) FlushWritesToVersionMap() {
+// FlushWritesToVersionMap publishes the supplied writes to this state's version map.
+func (sdb *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 	if sdb.versionMap == nil {
 		return
 	}
-	sdb.versionMap.FlushVersionedWrites(&sdb.versionedWrites, true, "")
-}
-
-// ApplyEIP6780StorageWipe zeroes the current tx's storage writes for any account
-// it both created and self-destructed (EIP-6780/EIP-7928), so the BAL records the
-// slots as reads (net-zero) rather than changes. On the noMaterialize builder path
-// this replaces the stateObject-driven wipe MakeWriteSet performs; it is derived
-// purely from the CreateContract/SelfDestruct write cells.
-func (sdb *IntraBlockState) ApplyEIP6780StorageWipe() {
-	sdb.versionedWrites.zeroSameTxCreateDestructStorage()
+	sdb.versionMap.FlushVersionedWrites(writes, true, "")
 }
 
 func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
@@ -2765,7 +2770,7 @@ func (sdb *IntraBlockState) SlotInAccessList(addr accounts.Address, slot account
 // is warm; false means unknown — callers must fall back to AddSlotToAccessList.
 // It stays cheap enough to inline at every SLOAD/SSTORE gas-charge site.
 func (sdb *IntraBlockState) SlotKnownWarm(addr accounts.Address, slot accounts.StorageKey) bool {
-	return sdb.accessList.lastAddr == addr && slot == sdb.accessList.lastWarmSlot
+	return sdb.accessList.lastSlots != nil && sdb.accessList.lastAddr == addr && slot == sdb.accessList.lastWarmSlot
 }
 
 func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable bool) {
@@ -2783,6 +2788,15 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 	} else {
 		sdb.versionedReads.access[addr] = accessOptions{revertable: revertable}
 	}
+}
+
+// StartAccessRecording enables versioned access tracking until ResetVersionedIO.
+// Block finalization re-enables it (Prepare only runs for user txs) so that an
+// address touched but left absent — e.g. a zero-amount withdrawal recipient —
+// still reaches the BAL as an access-only entry: its reads are validation-only
+// and FinalizedWrites withholds its created-empty writes.
+func (sdb *IntraBlockState) StartAccessRecording() {
+	sdb.recordAccess = true
 }
 
 // MarkReadsInternal marks all versioned reads for addr as internal.

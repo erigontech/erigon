@@ -36,7 +36,8 @@ type accessList struct {
 	// Memo of the last resolved (address -> slot set) and the last slot known
 	// warm within it: repeated AddSlot on the same addr skips the addresses
 	// lookup, and on the same (addr, slot) skips both map lookups.
-	// lastAddr == NilAddress means no memo.
+	// lastSlots == nil means no memo — lastAddr alone can't say, since its
+	// zero value NilAddress is a legal argument.
 	lastAddr     accounts.Address
 	lastSlots    map[accounts.StorageKey]struct{}
 	lastWarmSlot accounts.StorageKey
@@ -76,7 +77,7 @@ func (al *accessList) ContainsAddress(address accounts.Address) bool {
 // Contains checks if a slot within an account is present in the access list, returning
 // separate flags for the presence of the account and the slot respectively.
 func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKey) (addressPresent bool, slotPresent bool) {
-	if al.lastAddr == address {
+	if al.lastSlots != nil && al.lastAddr == address {
 		if slot == al.lastWarmSlot {
 			return true, true
 		}
@@ -122,7 +123,7 @@ func (al *accessList) AddAddress(address accounts.Address) bool {
 // - slot added
 // For any 'true' value returned, a corresponding journal entry must be made.
 func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
-	if al.lastAddr == address {
+	if al.lastSlots != nil && al.lastAddr == address {
 		if slot == al.lastWarmSlot {
 			return false, false
 		}

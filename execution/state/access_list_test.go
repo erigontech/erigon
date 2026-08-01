@@ -94,7 +94,7 @@ func TestAccessList(t *testing.T) {
 	require.NoError(t, err)
 
 	state := New(NewReaderV3(domains.AsGetter(tx)))
-	defer state.Release(false)
+	defer state.Close()
 
 	state.accessList.Reset()
 
@@ -368,4 +368,57 @@ func TestAccessListWarmSlotMemoDroppedOnDelete(t *testing.T) {
 
 	_, slotChange := al.AddSlot(addrA, slot2)
 	require.True(t, slotChange, "re-adding a reverted slot must report a change for the journal")
+}
+
+// TestAccessListMemoOnEmptyList pins the empty and reset states: NilAddress is
+// the zero value of the memo's address field, so matching on the address alone
+// would let a list with no memo answer as if it had one.
+func TestAccessListMemoOnEmptyList(t *testing.T) {
+	t.Parallel()
+	addrA := accounts.InternAddress(common.HexToAddress("0xaa"))
+	slot1 := accounts.InternKey(common.HexToHash("0x01"))
+
+	for _, tc := range []struct {
+		name string
+		al   func() *accessList
+	}{
+		{"fresh", newAccessList},
+		{"reset", func() *accessList {
+			al := newAccessList()
+			al.AddSlot(addrA, slot1)
+			al.Reset()
+			return al
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			al := tc.al()
+
+			addrPresent, slotPresent := al.Contains(accounts.NilAddress, accounts.ZeroKey)
+			require.False(t, addrPresent)
+			require.False(t, slotPresent)
+
+			addrPresent, slotPresent = al.Contains(accounts.NilAddress, accounts.NilKey)
+			require.False(t, addrPresent)
+			require.False(t, slotPresent)
+
+			addrChange, slotChange := al.AddSlot(accounts.NilAddress, accounts.ZeroKey)
+			require.True(t, addrChange)
+			require.True(t, slotChange)
+		})
+	}
+}
+
+// TestSlotKnownWarmOnEmptyAccessList pins the same invariant at the gas-charge
+// entry point: nothing is warm before anything is added.
+func TestSlotKnownWarmOnEmptyAccessList(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 1))
+
+	state := New(NewReaderV3(domains.AsGetter(tx)))
+	defer state.Close()
+
+	require.False(t, state.SlotKnownWarm(accounts.NilAddress, accounts.NilKey))
+	require.False(t, state.SlotKnownWarm(accounts.NilAddress, accounts.ZeroKey))
 }
