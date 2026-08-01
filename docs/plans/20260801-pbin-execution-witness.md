@@ -247,20 +247,26 @@ leaf and code chunking instead of reimplementing all of it.
 - Create: `execution/commitment/pbin_witness_decode.go`
 - Create: `execution/commitment/pbin_witness_decode_test.go`
 
-- [ ] decode a node preimage: tag `0x00` = leaf (key + 32-byte value), `0x01` = branch (bit prefix +
+- [x] decode a node preimage: tag `0x00` = leaf (key + 32-byte value), `0x01` = branch (bit prefix +
       two 32-byte child hashes)
-- [ ] reject malformed input explicitly: unknown tag, truncated prefix, bit count exceeding the
-      encodable path, a leaf key matching no zone's length
-- [ ] build a set keyed by `H(preimage)`, root first per the `witnessNodeSet.nodes` contract
-- [ ] re-merkelize from the root, treating a child hash absent from the set as opaque, returning the
+- [x] reject malformed input explicitly: unknown tag, truncated prefix, bit count exceeding the
+      encodable path, a leaf key matching no zone's length — plus non-canonical prefix padding, so
+      one prefix has exactly one preimage
+- [x] build a set keyed by `H(preimage)`, root first per the `witnessNodeSet.nodes` contract
+- [x] re-merkelize from the root, treating a child hash absent from the set as opaque, returning the
       computed root
-- [ ] write tests: round-trip — capture from a real fold (Task 1), decode, re-merkelize, root matches
-- [ ] write tests: each malformed-input case errors rather than yielding a wrong root
-- [ ] write tests: a blinded child is preserved and does not change the root
-- [ ] write tests: permutation independence — the same corpus inserted in a different order gives the
+- [x] ➕ `pbinDecodeWitness` takes the capture's root rather than deriving it from the first entry:
+      deriving it would silently re-root the tree if that entry went missing. Recursion is bounded by
+      the 528-bit path, so a cyclic set errors instead of hanging
+- [x] write tests: round-trip — capture from a real fold (Task 1), decode, re-merkelize, root matches
+- [x] write tests: each malformed-input case errors rather than yielding a wrong root
+- [x] write tests: a blinded child is preserved and does not change the root
+- [x] write tests: permutation independence — the same corpus inserted in a different order gives the
       same root, cross-checked against `pbinOracleMerkelizeWith` (`pbin_oracle_test.go:172`)
-- [ ] write tests: removing one node makes re-merkelize fail rather than silently differ
-- [ ] run tests - must pass before task 5
+- [x] write tests: removing one node makes re-merkelize fail rather than silently differ — asserted
+      over every single-node removal: each one either errors or reproduces the same root, and exactly
+      one (the root node's) errors
+- [x] run tests - must pass before task 5
 
 ### Task 5: Witness-backed PatriciaContext for the mutable trie
 
