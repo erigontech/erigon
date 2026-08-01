@@ -143,13 +143,14 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody, be
 		beaconCfg:     beaconCfg,
 	}
 
-	if header.BlobGasUsed != nil && header.ExcessBlobGas != nil {
+	switch {
+	case header.BlobGasUsed != nil && header.ExcessBlobGas != nil:
 		block.BlobGasUsed = *header.BlobGasUsed
 		block.ExcessBlobGas = *header.ExcessBlobGas
 		block.version = clparams.DenebVersion
-	} else if header.WithdrawalsHash != nil {
+	case header.WithdrawalsHash != nil:
 		block.version = clparams.CapellaVersion
-	} else {
+	default:
 		block.version = clparams.BellatrixVersion
 	}
 

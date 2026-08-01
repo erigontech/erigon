@@ -71,11 +71,12 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	// For Fulu: slot is in SignedBlockHeader.Header.Slot
 	// For GLOAS: slot is directly in Slot field
 	var slot uint64
-	if columnData.Version() >= clparams.GloasVersion {
+	switch {
+	case columnData.Version() >= clparams.GloasVersion:
 		slot = columnData.Slot
-	} else if columnData.SignedBlockHeader != nil {
+	case columnData.SignedBlockHeader != nil:
 		slot = columnData.SignedBlockHeader.Header.Slot
-	} else {
+	default:
 		slot = columnData.Slot // fallback
 	}
 

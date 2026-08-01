@@ -132,7 +132,8 @@ func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.ACMatcher, outp
 			// optimStart > f.End, i.e. the largest physical index with that property).
 			if cell.compression+flen4 < maxCompression {
 				scannedAll = false
-				if cells[cellStart].optimStart > f.End {
+				switch {
+				case cells[cellStart].optimStart > f.End:
 					lo, hi := cellStart, e
 					for lo < hi {
 						mid := (lo + hi + 1) / 2
@@ -144,9 +145,9 @@ func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.ACMatcher, outp
 					}
 					cellStart = lo + 1
 					virtLo, virtHi = 1, 0 // virtual region is logically beyond the trigger
-				} else if virtLo > f.End {
+				case virtLo > f.End:
 					virtLo, virtHi = 1, 0
-				} else if virtHi > f.End {
+				case virtHi > f.End:
 					virtHi = f.End
 				}
 				break
@@ -174,7 +175,8 @@ func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.ACMatcher, outp
 			// single virtual candidate: compression 0, coverStart len(input) >= f.End
 			comp := flen4
 			score := p.score
-			if comp > maxCompression || (comp == maxCompression && score > maxScore) {
+			switch {
+			case comp > maxCompression || (comp == maxCompression && score > maxScore):
 				maxCompression = comp
 				maxScore = score
 				maxInclude = true
@@ -182,9 +184,9 @@ func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.ACMatcher, outp
 				if virtHi > f.End {
 					virtHi = max(virtLo, f.End)
 				}
-			} else if virtLo > f.End {
+			case virtLo > f.End:
 				virtLo, virtHi = 1, 0
-			} else if virtHi > f.End {
+			case virtHi > f.End:
 				virtHi = f.End
 			}
 		}
@@ -452,16 +454,17 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 				compW = &CompressionWord{}
 			}
 			compW.order = inCount
-			if len(v) == 0 {
+			switch {
+			case len(v) == 0:
 				// Empty word, cannot be compressed
 				compW.word = append(compW.word[:0], 0)
 				uncompPosMap.add(1)
 				uncompPosMap.add(0)
 				heap.Push(&compressionQueue, compW) // Push to the queue directly, bypassing compression
-			} else if compression {
+			case compression:
 				compW.word = append(compW.word[:0], v...)
 				ch <- compW // Send for compression
-			} else {
+			default:
 				// Prepend word with encoding of length + zero byte, which indicates no patterns to be found in this word
 				wordLen := uint64(len(v))
 				n := binary.PutUvarint(numBuf[:], wordLen)

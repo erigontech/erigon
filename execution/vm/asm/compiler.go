@@ -176,7 +176,8 @@ func (c *Compiler) compileNumber(element token) (int, error) {
 func (c *Compiler) compileElement(element token) error {
 	// check for a jump. jumps must be read and compiled
 	// from right to left.
-	if isJump(element.text) {
+	switch {
+	case isJump(element.text):
 		rvalue := c.next()
 		switch rvalue.typ {
 		case number:
@@ -198,7 +199,7 @@ func (c *Compiler) compileElement(element token) error {
 		// push the operation
 		c.pushBin(toBinary(element.text))
 		return nil
-	} else if isPush(element.text) {
+	case isPush(element.text):
 		// handle pushes. pushes are read from left to right.
 		var value []byte
 
@@ -224,7 +225,7 @@ func (c *Compiler) compileElement(element token) error {
 
 		c.pushBin(vm.OpCode(int(vm.PUSH1) - 1 + len(value)))
 		c.pushBin(value)
-	} else {
+	default:
 		c.pushBin(toBinary(element.text))
 	}
 

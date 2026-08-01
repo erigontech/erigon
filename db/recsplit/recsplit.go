@@ -358,11 +358,12 @@ func (sc *recsplitScratch) preAlloc(n int) {
 func (sc *recsplitScratch) golombParam(m uint16) int {
 	for s := uint16(len(sc.golombRice)); m >= s; s++ {
 		sc.golombRice = append(sc.golombRice, 0)
-		if s == 0 {
+		switch {
+		case s == 0:
 			sc.golombRice[0] = (bijMemo[0] << 27) | bijMemo[0]
-		} else if s <= sc.leafSize {
+		case s <= sc.leafSize:
 			sc.golombRice[s] = (bijMemo[s] << 27) | (uint32(1) << 16) | bijMemo[s]
-		} else {
+		default:
 			computeGolombRice(s, sc.golombRice, sc.leafSize, sc.primaryAggrBound, sc.secondaryAggrBound)
 		}
 	}
@@ -459,13 +460,14 @@ func (rs *RecSplit) ResetNextSalt() {
 }
 
 func splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound uint16) (fanout, unit uint16) {
-	if m > secondaryAggrBound { // High-level aggregation (fanout 2)
+	switch {
+	case m > secondaryAggrBound: // High-level aggregation (fanout 2)
 		unit = secondaryAggrBound * (((m+1)/2 + secondaryAggrBound - 1) / secondaryAggrBound)
 		fanout = 2
-	} else if m > primaryAggrBound { // Second-level aggregation
+	case m > primaryAggrBound: // Second-level aggregation
 		unit = primaryAggrBound
 		fanout = (m + primaryAggrBound - 1) / primaryAggrBound
-	} else { // First-level aggregation
+	default: // First-level aggregation
 		unit = leafSize
 		fanout = (m + leafSize - 1) / leafSize
 	}

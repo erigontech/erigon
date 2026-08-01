@@ -1018,7 +1018,8 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		}
 		hashedKeyBuf[64-depth] = terminatorHexByte // Add terminator
 		if !storageRootHashIsSet {
-			if cell.extLen > 0 { // Extension
+			switch {
+			case cell.extLen > 0: // Extension
 				if cell.hashLen == 0 {
 					return nil, storageRootHashIsSet, nil, errors.New("computeCellHash extension without hash")
 				}
@@ -1034,10 +1035,10 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 				cell.stateHashLen = 0
 				hadToReset.Add(1)
 				storageRootHashIsSet = true
-			} else if cell.hashLen > 0 {
+			case cell.hashLen > 0:
 				storageRootHash = cell.hash
 				storageRootHashIsSet = true
-			} else {
+			default:
 				storageRootHash = empty.RootHash
 			}
 		}
@@ -1079,7 +1080,8 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 	}
 
 	buf = append(buf, 0x80+32)
-	if cell.extLen > 0 { // Extension
+	switch {
+	case cell.extLen > 0: // Extension
 		if cell.hashLen > 0 {
 			if hph.traceW != nil {
 				fmt.Fprintf(hph.traceW, "extensionHash for [%x]=>[%x]\n", cell.extension[:cell.extLen], cell.hash[:cell.hashLen])
@@ -1092,13 +1094,13 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		} else {
 			return nil, storageRootHashIsSet, storageRootHash[:], errors.New("computeCellHash extension without hash")
 		}
-	} else if cell.hashLen > 0 {
+	case cell.hashLen > 0:
 		buf = append(buf, cell.hash[:cell.hashLen]...)
-	} else if storageRootHashIsSet {
+	case storageRootHashIsSet:
 		buf = append(buf, storageRootHash[:]...)
 		copy(cell.hash[:], storageRootHash[:])
 		cell.hashLen = int16(len(storageRootHash))
-	} else {
+	default:
 		buf = append(buf, emptyRootHashBytes...)
 	}
 	return buf, storageRootHashIsSet, storageRootHash[:], nil
@@ -1173,7 +1175,8 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 		}
 		cell.hashedExtension[64-depth] = terminatorHexByte // Add terminator
 		if !storageRootHashIsSet {
-			if cell.extLen > 0 { // Extension
+			switch {
+			case cell.extLen > 0: // Extension
 				if cell.hashLen == 0 {
 					return nil, errors.New("computeCellHash extension without hash")
 				}
@@ -1188,9 +1191,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 				}
 				cell.stateHashLen = 0
 				hadToReset.Add(1)
-			} else if cell.hashLen > 0 {
+			case cell.hashLen > 0:
 				storageRootHash = cell.hash
-			} else {
+			default:
 				storageRootHash = empty.RootHash
 			}
 		}
@@ -1227,7 +1230,8 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 	}
 
 	buf = append(buf, 0x80+32)
-	if cell.extLen > 0 { // Extension
+	switch {
+	case cell.extLen > 0: // Extension
 		if cell.hashLen > 0 {
 			if hph.traceW != nil {
 				fmt.Fprintf(hph.traceW, "extensionHash for [%x]=>[%x]\n", cell.extension[:cell.extLen], cell.hash[:cell.hashLen])
@@ -1239,13 +1243,13 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 		} else {
 			return nil, errors.New("computeCellHash extension without hash")
 		}
-	} else if cell.hashLen > 0 {
+	case cell.hashLen > 0:
 		buf = append(buf, cell.hash[:cell.hashLen]...)
-	} else if storageRootHashIsSet {
+	case storageRootHashIsSet:
 		buf = append(buf, storageRootHash[:]...)
 		copy(cell.hash[:], storageRootHash[:])
 		cell.hashLen = int16(len(storageRootHash))
-	} else {
+	default:
 		buf = append(buf, emptyRootHashBytes...)
 	}
 	return buf, nil
@@ -1955,15 +1959,16 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 // foldDelete handles the updateKindDelete case: everything at this row was deleted.
 func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell *cell, updateKey []byte) error {
 	if hph.touchMap[row] != 0 {
-		if row == 0 {
+		switch {
+		case row == 0:
 			// Root is deleted because the tree is empty
 			hph.rootTouched = true
 			hph.rootPresent = false
-		} else if upDepth == 64 {
+		case upDepth == 64:
 			// Special case - all storage items of an account have been deleted, but it does not automatically delete the account, just makes it empty storage
 			// Therefore we are not propagating deletion upwards, but turn it into a modification
 			hph.touchMap[row-1] |= uint16(1) << nibble
-		} else {
+		default:
 			// Deletion is propagated upwards
 			hph.touchMap[row-1] |= uint16(1) << nibble
 			hph.afterMap[row-1] &^= uint16(1) << nibble

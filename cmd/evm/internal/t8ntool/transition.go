@@ -423,7 +423,8 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 	chainId := deref(txJson.ChainID)
 	v, r, s := deref(txJson.V), deref(txJson.R), deref(txJson.S)
 
-	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
+	switch {
+	case txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType:
 		if txJson.Type == types.LegacyTxType {
 			return &types.LegacyTx{
 				CommonTx: types.CommonTx{
@@ -457,7 +458,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			ChainID:    chainId,
 			AccessList: *txJson.Accesses,
 		}, nil
-	} else if txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType {
+	case txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType:
 		tipCap := deref(txJson.MaxPriorityFeePerGas)
 		feeCap := deref(txJson.MaxFeePerGas)
 
@@ -510,7 +511,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			},
 			Authorizations: auths,
 		}, nil
-	} else {
+	default:
 		return nil, nil
 	}
 }

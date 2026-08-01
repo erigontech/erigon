@@ -2133,9 +2133,10 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	p.all.ascend(senderID, func(mt *metaTxn) bool {
 		deleteAndContinueReasonLog := ""
 		discardReason := txpoolcfg.NonceTooLow
-		if senderNonce > mt.TxnSlot.Nonce {
+		switch {
+		case senderNonce > mt.TxnSlot.Nonce:
 			deleteAndContinueReasonLog = "low nonce"
-		} else if p.cfg.MaxNonceGap > 0 && mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce-noGapsNonce > p.cfg.MaxNonceGap {
+		case p.cfg.MaxNonceGap > 0 && mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce-noGapsNonce > p.cfg.MaxNonceGap:
 			// Evict "zombie" queued transactions whose nonce is so far ahead of the sender's
 			// on-chain nonce (accounting for any consecutive txns already in the pool) that they
 			// can practically never become pending. This prevents unbounded pool bloat from accounts
@@ -2143,7 +2144,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			// on-chain nonce is 6398). The gap threshold is configurable via MaxNonceGap (default 64).
 			deleteAndContinueReasonLog = "nonce gap too large"
 			discardReason = txpoolcfg.NonceTooDistant
-		} else if mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.TxType() == BlobTxnType { // Discard nonce-gapped blob txns
+		case mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.TxType() == BlobTxnType: // Discard nonce-gapped blob txns
 			deleteAndContinueReasonLog = "nonce-gapped blob txn"
 		}
 		if deleteAndContinueReasonLog != "" {

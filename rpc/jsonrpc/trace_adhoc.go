@@ -442,7 +442,8 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 	}
 	trace.TraceAddress = make([]int, len(ot.traceAddr))
 	copy(trace.TraceAddress, ot.traceAddr)
-	if create {
+	switch {
+	case create:
 		action := CreateTraceAction{}
 		action.From = from.Value()
 		action.CreationMethod = strings.ToLower(typ.String())
@@ -450,7 +451,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		action.Init = bytes.Clone(input)
 		action.Value.ToInt().Set(value.ToBig())
 		trace.Action = &action
-	} else if typ == vm.SELFDESTRUCT {
+	case typ == vm.SELFDESTRUCT:
 		trace.Type = SUICIDE
 		trace.Result = nil
 		action := &SuicideTraceAction{}
@@ -458,7 +459,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		action.RefundAddress = to.Value()
 		action.Balance.ToInt().Set(value.ToBig())
 		trace.Action = action
-	} else {
+	default:
 		action := CallTraceAction{}
 		switch typ {
 		case vm.CALL:
@@ -768,7 +769,8 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 		if err != nil {
 			return err
 		}
-		if initialExist {
+		switch {
+		case initialExist:
 			if exist {
 				var allEqual = len(accountDiff.Storage) == 0
 				ifromBalance, err := initialIbs.GetBalance(addr)
@@ -853,7 +855,7 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 					accountDiff.Nonce = m
 				}
 			}
-		} else if exist {
+		case exist:
 			{
 				balance, err := ibs.GetBalance(addr)
 				if err != nil {
@@ -887,7 +889,7 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 				delete(sm, "*")
 				sm["+"] = &str.To
 			}
-		} else {
+		default:
 			toRemove = append(toRemove, addr)
 		}
 	}

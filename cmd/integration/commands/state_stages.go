@@ -198,14 +198,15 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 	var stopAt = senderAtBlock
 	onlyOneUnwind := block == 0 && unwindEvery == 0 && unwind > 0
 	backward := unwindEvery < unwind
-	if onlyOneUnwind {
+	switch {
+	case onlyOneUnwind:
 		if unwind > execAtBlock {
 			return errors.New("cannot unwind past 0")
 		}
 		stopAt = progress(tx, stages.Execution) - unwind
-	} else if block > 0 && block < senderAtBlock {
+	case block > 0 && block < senderAtBlock:
 		stopAt = block
-	} else if backward {
+	case backward:
 		stopAt = 1
 	}
 

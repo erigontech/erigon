@@ -283,11 +283,12 @@ func (idx *Index) init() (err error) {
 	offset += 4
 	idx.golombRice = make([]uint32, golombParamSize)
 	for i := range golombParamSize {
-		if i == 0 {
+		switch {
+		case i == 0:
 			idx.golombRice[i] = (bijMemo[i] << 27) | bijMemo[i]
-		} else if i <= idx.leafSize {
+		case i <= idx.leafSize:
 			idx.golombRice[i] = (bijMemo[i] << 27) | (uint32(1) << 16) | bijMemo[i]
-		} else {
+		default:
 			computeGolombRice(i, idx.golombRice, idx.leafSize, idx.primaryAggrBound, idx.secondaryAggrBound)
 		}
 	}

@@ -322,14 +322,15 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		// SortableOldestAppearedBuffer must guarantee that only 1 oldest value of key will appear
 		// but because size of buffer is limited - each flushed file does guarantee "oldest appeared"
 		// property, but files may overlap. files are sorted, just skip repeated keys here
-		if args.BufferType == SortableOldestAppearedBuffer {
+		switch args.BufferType {
+		case SortableOldestAppearedBuffer:
 			if !bytes.Equal(prevK, element.Key) {
 				if err = loadFunc(element.Key, element.Value); err != nil {
 					return err
 				}
 				prevK = element.Key
 			}
-		} else if args.BufferType == SortableAppendBuffer {
+		case SortableAppendBuffer:
 			if !bytes.Equal(prevK, element.Key) {
 				if prevK != nil {
 					if err = loadFunc(prevK, prevV); err != nil {
@@ -341,7 +342,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 			} else {
 				prevV = append(prevV, element.Value...)
 			}
-		} else {
+		default:
 			if err = loadFunc(element.Key, element.Value); err != nil {
 				return err
 			}
@@ -367,13 +368,14 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 
 func makeCurrentKeyStr(k []byte) string {
 	var currentKeyStr string
-	if k == nil {
+	switch {
+	case k == nil:
 		currentKeyStr = "final"
-	} else if len(k) < 4 {
+	case len(k) < 4:
 		currentKeyStr = hex.EncodeToString(k)
-	} else if k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 && len(k) >= 8 { // if key has leading zeroes, show a bit more info
+	case k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 && len(k) >= 8: // if key has leading zeroes, show a bit more info
 		currentKeyStr = hex.EncodeToString(k)
-	} else {
+	default:
 		currentKeyStr = hex.EncodeToString(k[:4])
 	}
 	return currentKeyStr

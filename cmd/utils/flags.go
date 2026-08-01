@@ -1770,11 +1770,12 @@ func setBorConfig(ctx *cli.Command, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 func setBuilder(ctx *cli.Command, cfg *buildercfg.BuilderConfig) {
 	cfg.EnabledPOS = !ctx.IsSet(ProposingDisableFlag.Name)
 
-	if ctx.IsSet(MinerExtraDataFlag.Name) {
+	switch {
+	case ctx.IsSet(MinerExtraDataFlag.Name):
 		cfg.ExtraData = []byte(ctx.String(MinerExtraDataFlag.Name))
-	} else if len(version.GitCommit) > 0 {
+	case len(version.GitCommit) > 0:
 		cfg.ExtraData = []byte(ctx.Root().Name + "-" + version.VersionWithCommit(version.GitCommit))
-	} else {
+	default:
 		cfg.ExtraData = []byte(ctx.Root().Name + "-" + ctx.Root().Version)
 	}
 	maxExtra := min(int(params.MaximumExtraDataSize), types.ExtraVanityLength)

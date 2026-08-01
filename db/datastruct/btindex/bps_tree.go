@@ -395,11 +395,12 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 			fmt.Printf("[%d %d] cmp: %d\n", l, r, cmp)
 		}
 
-		if cmp == 0 {
+		switch {
+		case cmp == 0:
 			break
-		} else if cmp < 0 {
+		case cmp < 0:
 			r = m
-		} else {
+		default:
 			l = m + 1
 		}
 	}
@@ -455,13 +456,14 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 			g.Reset(off)
 			km, _ = g.Next(km[:0])
 			cmp = bytes.Compare(key, km)
-			if cmp == 0 {
+			switch {
+			case cmp == 0:
 				v, _ = g.Next(nil)
 				return v, true, off, nil
-			} else if cmp < 0 {
+			case cmp < 0:
 				r = m
 				khi = append(khiArr[:0], km...)
-			} else {
+			default:
 				l = m + 1
 				klo = append(kloArr[:0], km...)
 			}
@@ -490,15 +492,16 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		}
 
 		cmp = b.compareKey(g, key, m)
-		if cmp == 0 {
+		switch {
+		case cmp == 0:
 			if !g.HasNext() {
 				return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", m, b.offt.Count(), g.FileName())
 			}
 			v, _ = g.Next(nil)
 			return v, true, b.offt.Get(m), nil
-		} else if cmp < 0 {
+		case cmp < 0:
 			r = m
-		} else {
+		default:
 			l = m + 1
 		}
 		if b.trace {
