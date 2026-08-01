@@ -213,6 +213,9 @@ func init() {
 		&engineXTestCommand,
 		&zkevmTestCommand,
 		&stateTestCommand,
+		&rlpTestCommand,
+		&transactionTestCommand,
+		&difficultyTestCommand,
 		&stateTransitionCommand,
 	}
 }

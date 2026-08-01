@@ -103,10 +103,16 @@ type fileResult struct {
 }
 
 func runBlockTestsParallel(ctx *cli.Command, files []string, workers uint64, filter testFilter) ([]testResult, error) {
+	return runTestFilesParallel(files, workers, func(path string) ([]testResult, error) {
+		return runBlockTest(ctx, path, filter)
+	})
+}
+
+func runTestFilesParallel(files []string, workers uint64, runner func(string) ([]testResult, error)) ([]testResult, error) {
 	if workers == 1 {
-		results := make([]testResult, 0, len(files)*4) // pre-allocate: most files have a few tests
-		for _, fname := range files {
-			r, err := runBlockTest(ctx, fname, filter)
+		results := make([]testResult, 0, len(files))
+		for _, path := range files {
+			r, err := runner(path)
 			if err != nil {
 				return nil, err
 			}
@@ -118,22 +124,22 @@ func runBlockTestsParallel(ctx *cli.Command, files []string, workers uint64, fil
 		wg     sync.WaitGroup
 		fileCh = make(chan struct {
 			index int
-			fname string
+			path  string
 		}, len(files))
 		resultCh = make(chan fileResult, len(files))
 	)
-	for i, fname := range files {
+	for i, path := range files {
 		fileCh <- struct {
 			index int
-			fname string
-		}{i, fname}
+			path  string
+		}{i, path}
 	}
 	close(fileCh)
 
 	for range workers {
 		wg.Go(func() {
 			for item := range fileCh {
-				r, err := runBlockTest(ctx, item.fname, filter)
+				r, err := runner(item.path)
 				resultCh <- fileResult{index: item.index, results: r, err: err}
 			}
 		})

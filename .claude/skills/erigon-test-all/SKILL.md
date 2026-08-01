@@ -9,7 +9,7 @@ Runs the complete test suite with 60-minute timeout and coverage output. Takes ~
 
 ## Prerequisite: Test fixtures
 
-`make test-all` no longer downloads any fixture tarballs. EEST spec tests (state/blockchain/engine-x) moved out of `go test ./...` and into the dedicated `eest-spec-*` Makefile targets driven by the **EEST spec tests** workflow (`test-eest-spec.yml`); the consensus spec test (`cl/spectest`) is skipped here via `ERIGON_SKIP_CL_SPECTEST=true` (set automatically by the Makefile) and runs only in `test-integration-caplin.yml`.
+`make test-all` no longer downloads any fixture tarballs. Execution spec tests moved out of `go test ./...` and into the dedicated `eest-spec-*` Makefile targets driven by the **EEST spec tests** workflow (`test-eest-spec.yml`); the consensus spec test (`cl/spectest`) is skipped here via `ERIGON_SKIP_CL_SPECTEST=true` (set automatically by the Makefile) and runs only in `test-integration-caplin.yml`.
 
 To exercise the EEST suites locally, see `erigon-eest-spec` (or run a specific shard directly):
 
@@ -21,7 +21,11 @@ make eest-spec-enginextests-stable-sequential # engine-x tests vs eest_stable (E
 make eest-spec-enginextests-stable-parallel  # same, but with ERIGON_EXEC3_PARALLEL=true
 make eest-spec-statetests-devnet             # …vs eest_devnet fixtures
 make eest-spec-blocktests-devnet             # devnet blocktests (always parallel exec3)
+make eest-spec-enginextests-devnet           # devnet engine-x tests (always parallel exec3)
 make eest-spec-statetests-legacy             # pinned legacy Cancun state-test archive
+make eest-spec-rlptests-legacy-race          # complete pinned legacy RLP suite
+make eest-spec-transactiontests-legacy-race  # complete pinned legacy transaction suite
+make eest-spec-difficultytests-legacy-race   # complete pinned legacy difficulty suite
 make eest-spec-blocktests-legacy-consensus-sequential
                                              # Hive consensus fixture selection;
                                              # -parallel and -race variants too
@@ -33,9 +37,9 @@ make eest-spec-blocktests-legacy-constantinople-sequential
                                              # ...-race-other-forks
 make eest-spec-blocktests-legacy-cancun-sequential
                                              # Hive legacy-cancun selection;
-                                             # -parallel plus two race partitions:
-                                             # ...-race-berlin-shanghai-cancun and
-                                             # ...-race-other-forks
+                                             # -parallel plus six race partitions:
+                                             # ...-race-{berlin,shanghai,cancun,
+                                             # london,paris,other-forks}
 make eest-spec-enginextests-benchmark-1m-sequential
                                              # engine-x benchmark fixtures @ 1M gas target
                                              # (with per-test --time stats);
@@ -53,14 +57,6 @@ make eest-spec-blocktests-stable-race-cancun-sequential
 The shard list / failure budgets / `exec3-parallel` flags live in `tools/eest-spec-shards.yml` (single source of truth for both this workflow and `tools/run-eest-spec-test.sh`). See `EEST_SPEC_SHARDS` / `EEST_SPEC_RACE_SHARDS` in the root `Makefile` for the partition into race vs non-race targets.
 
 **Pitfall: stale `evm` / `evm.race` binary.** Always invoke shards via `make eest-spec-<shard>` — the Makefile lists `evm` (or `evm.race`) as a prereq and `go build` is cache-aware, so a stale binary gets rebuilt automatically. Calling `bash tools/run-eest-spec-test.sh <shard>` directly **bypasses** the rebuild and silently exercises whatever `build/bin/evm{,.race}` happens to be on disk against current fixtures, inflating failures or hiding regressions. After pulling code, switching branches, or any time you suspect the binary is older than HEAD: `rm -f build/bin/evm build/bin/evm.race && make evm evm.race` before re-running.
-
-One side prerequisite still applies for tests `make test-all` does run:
-
-```bash
-git submodule update --init --recursive --force            # legacy RLP, transaction, and difficulty fixtures
-```
-
-The CI workflow handles this in `setup-erigon`; locally you must do it yourself.
 
 ## Prerequisite: Create RAM Disk
 
@@ -121,7 +117,7 @@ Tests skipped via `-short` in `test-short` run fully here. If a test passes in `
 
 - Before marking a PR ready for review
 - After significant logic changes to verify no edge cases break
-- Full gate: `git submodule update --init --recursive --force && path=$(bash tools/create-ramdisk) && make lint && make erigon integration && ERIGON_EXECUTION_TESTS_TMPDIR=$path GOGC=80 make test-all`
+- Full gate: `path=$(bash tools/create-ramdisk) && make lint && make erigon integration && ERIGON_EXECUTION_TESTS_TMPDIR=$path GOGC=80 make test-all`
 
 ## CI Equivalent
 
