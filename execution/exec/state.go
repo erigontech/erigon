@@ -589,8 +589,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 	g, gctx := errgroup.WithContext(ctx)
 	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
 
-	// Assigned before anything can fail, so every return path hands back a
-	// callable clear.
+	// Assigned before anything can fail: every return path must hand back a callable clear.
 	var clearDone bool
 	clear = func() {
 		if clearDone {
