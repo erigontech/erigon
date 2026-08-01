@@ -140,8 +140,14 @@ func TestSetCodeClearDelegationPurgesCodeDomain(t *testing.T) {
 							return err
 						}
 					}
-					code, _, err = tx.GetLatest(kv.CodeDomain, authority[:])
-					return err
+					codeVal, _, err := tx.GetLatest(kv.CodeDomain, authority[:])
+					if err != nil {
+						return err
+					}
+					// GetLatest can hand back tx-owned bytes, and the tx is closed
+					// before the assertions run.
+					code = bytes.Clone(codeVal)
+					return nil
 				}))
 				return acc, code
 			}
