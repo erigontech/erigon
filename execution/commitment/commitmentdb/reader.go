@@ -125,6 +125,9 @@ func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64)
 	return enc, kv.Step(r.limitReadAsOfTxNum / stepSize), nil
 }
 
+// AsOf reports the history txNum this reader resolves state at.
+func (r *HistoryStateReader) AsOf() uint64 { return r.limitReadAsOfTxNum }
+
 func (r *HistoryStateReader) Clone(tx kv.TemporalTx) StateReader {
 	return NewHistoryStateReader(tx, r.limitReadAsOfTxNum)
 }
@@ -201,6 +204,15 @@ func (r *SplitStateReader) WithHistory() bool {
 	return r.withHistory
 }
 
+// PlainStateAsOf reports the history txNum the plain-state (account/storage/code)
+// reader resolves at, when that reader is history-backed (ok=false otherwise).
+func (r *SplitStateReader) PlainStateAsOf() (uint64, bool) {
+	if h, ok := r.plainStateReader.(*HistoryStateReader); ok {
+		return h.limitReadAsOfTxNum, true
+	}
+	return 0, false
+}
+
 func (r *SplitStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error {
 	return nil
 }
@@ -241,6 +253,65 @@ func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd sd, plainStateAsO
 	}
 }
 
+// txLatestReader reads a domain's latest state straight from a pinned RO tx via
+// tx.GetLatest, bypassing any SharedDomains in-memory batch or aggregator-shared
+// branch cache. The head-capture build's own commitment fold mutates that shared
+// cache, so a SharedDomains-backed latest reader would observe post-state branches;
+// reading the pinned snapshot directly keeps the parent(B) commitment plane clean.
+type txLatestReader struct {
+	tx kv.TemporalTx
+}
+
+func (r *txLatestReader) WithHistory() bool                           { return false }
+func (r *txLatestReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
+
+func (r *txLatestReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	enc, step, err := r.tx.GetLatest(d, plainKey)
+	if err != nil {
+		return nil, 0, fmt.Errorf("txLatestReader(GetLatest) %q: %w", d, err)
+	}
+	return enc, step, nil
+}
+
+// Clone/CloneForWorker keep reading the pinned snapshot: the tx passed by
+// warmup callers targets a different (compute) database and would read empty
+// parent commitment. The witness build runs sequential commitment, so these
+// are not exercised on the hot path, but preserving the pinned tx is correct.
+func (r *txLatestReader) Clone(kv.TemporalTx) StateReader { return &txLatestReader{tx: r.tx} }
+func (r *txLatestReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader {
+	return &txLatestReader{tx: r.tx}
+}
+
+// NewHeadCaptureStateReader composes the dual-tx reader used by minimal-node
+// witness head-capture collapse detection. The CommitmentDomain resolves from
+// pinnedParentTx's latest state read directly (the parent(B) commitment plane held
+// by a pinned RO snapshot, the only source a minimal node has for parent commitment)
+// while account/storage/code resolve from committedTx's history at plainStateAsOf.
+// withHistory=false so the collapse-detection fold's PutBranch calls accumulate
+// branches in the build's own in-memory batch (discarded on Close, never flushed).
+func NewHeadCaptureStateReader(pinnedParentTx kv.TemporalTx, committedTx kv.TemporalTx, plainStateAsOf uint64) *CommitmentReplayStateReader {
+	return newHeadCaptureStateReader(pinnedParentTx, committedTx, plainStateAsOf, false)
+}
+
+// NewHeadCaptureTrieStateReader is the head-capture reader for the witness-trie phase:
+// it reads identically to NewHeadCaptureStateReader but reports WithHistory()==true so
+// the read-only witness-capture fold's PutBranch calls no-op, matching the durable path
+// (whose trie phase uses a history reader). Writing branches during capture would corrupt
+// the captured node set.
+func NewHeadCaptureTrieStateReader(pinnedParentTx kv.TemporalTx, committedTx kv.TemporalTx, plainStateAsOf uint64) *CommitmentReplayStateReader {
+	return newHeadCaptureStateReader(pinnedParentTx, committedTx, plainStateAsOf, true)
+}
+
+func newHeadCaptureStateReader(pinnedParentTx kv.TemporalTx, committedTx kv.TemporalTx, plainStateAsOf uint64, withHistory bool) *CommitmentReplayStateReader {
+	return &CommitmentReplayStateReader{
+		NewCommitmentSplitStateReader(
+			&txLatestReader{tx: pinnedParentTx},
+			NewHistoryStateReader(committedTx, plainStateAsOf),
+			withHistory,
+		),
+	}
+}
+
 func (crsr *CommitmentReplayStateReader) Clone(tx kv.TemporalTx) StateReader {
 	// commitmentReader (LatestStateReader) gets the new tx so warmup goroutines
 	// use a fresh read-only transaction on the temp DB.
@@ -252,7 +323,7 @@ func (crsr *CommitmentReplayStateReader) Clone(tx kv.TemporalTx) StateReader {
 		SplitStateReader: NewCommitmentSplitStateReader(
 			crsr.commitmentReader.Clone(tx),
 			crsr.plainStateReader,
-			false,
+			crsr.withHistory,
 		),
 	}
 }
@@ -264,7 +335,7 @@ func (crsr *CommitmentReplayStateReader) CloneForWorker(workerCtx context.Contex
 		SplitStateReader: NewCommitmentSplitStateReader(
 			crsr.commitmentReader.CloneForWorker(workerCtx, tx),
 			crsr.plainStateReader,
-			false,
+			crsr.withHistory,
 		),
 	}
 }

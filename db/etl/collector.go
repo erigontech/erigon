@@ -103,8 +103,12 @@ type Collector struct {
 	allocator *Allocator
 }
 
+// NewCollectorWithAllocator builds a collector that draws its buffer from the
+// allocator's pool lazily, on the first Collect — a collector that never
+// receives a write never takes a buffer. Batch writers built upfront for every
+// domain rely on this to make unused writers cost nothing.
 func NewCollectorWithAllocator(logPrefix, tmpdir string, allocator *Allocator, logger log.Logger) *Collector {
-	c := NewCollector(logPrefix, tmpdir, allocator.Get(), logger)
+	c := &Collector{logPrefix: logPrefix, tmpdir: tmpdir, logLvl: log.LvlInfo, logger: logger}
 	c.Allocator(allocator)
 	return c
 }
@@ -120,6 +124,7 @@ func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
+		c.bufType = getTypeByBuffer(c.buf)
 	}
 	c.buf.Put(k, v)
 	if !c.buf.CheckFlushSize() {
@@ -149,7 +154,7 @@ func runBoundaries(buf Buffer) sortedRun {
 }
 
 func (c *Collector) flushBuffer(canStoreInRam bool) error {
-	if c.buf.Len() == 0 {
+	if c.buf == nil || c.buf.Len() == 0 {
 		return nil
 	}
 	run := &sortedRun{}
@@ -179,7 +184,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 
 	fullBuf := c.buf // can't `.Reset()` because this `buf` will move to another goroutine
 	if c.allocator != nil {
-		c.buf = c.allocator.Get()
+		c.buf = nil // drawn again lazily on the next Collect; a flush is often the collector's last write event
 	} else {
 		prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
 		c.buf = getBufferByType(c.bufType, datasize.ByteSize(fullBuf.SizeLimit()))
@@ -207,9 +212,6 @@ func (c *Collector) Flush() error {
 }
 
 func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
-	if c.buf == nil && c.allocator != nil {
-		c.buf = c.allocator.Get()
-	}
 	args.BufferType = c.bufType
 
 	if !c.allFlushed {
