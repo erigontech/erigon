@@ -359,11 +359,11 @@ func (n *Notifications) SetSnapshotDownloadProgress(done, total, targetBlock uin
 	n.snapDownload.Store(&snapDownloadProgress{done: done, total: total, targetBlock: targetBlock})
 }
 
-func NewNotifications(StateChangesConsumer StateChangeConsumer) *Notifications {
+func NewNotifications(stateChangesConsumer StateChangeConsumer) *Notifications {
 	return &Notifications{
 		Events:               NewEvents(),
 		Accumulator:          NewAccumulator(),
 		RecentReceipts:       NewRecentReceipts(512),
-		StateChangesConsumer: StateChangesConsumer,
+		StateChangesConsumer: stateChangesConsumer,
 	}
 }

@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -301,6 +300,8 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 	defer logEvery.Stop()
 
 	var cumulativeBlobGasUsedInBlock uint64
+	// The reduce side runs on a single goroutine, so one writer serves the whole batch.
+	var receipts rawtemporaldb.ReceiptWriter
 
 	txNumsReader := cfg.BlockReader.TxnumReader()
 	fromTxNum, _ := txNumsReader.Min(ctx, tx, fromBlock)
@@ -347,7 +348,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 					}
 				}
 
-				if err := rawtemporaldb.AppendReceipt(putter, logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
+				if err := receipts.AppendMetadata(putter, logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 					return err
 				}
 
@@ -367,7 +368,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 						return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
 					}
 				}
-				if err := rawdb.WriteReceiptCacheV2(putter, receipt, txTask.TxNum); err != nil {
+				if err := receipts.Append(putter, receipt, txTask.TxNum); err != nil {
 					return err
 				}
 			}
@@ -410,7 +411,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 				if prevTxNumLog > 0 {
 					dbg.ReadMemStats(&m)
 					txsPerSec := (txTask.TxNum - prevTxNumLog) / uint64(logPeriod.Seconds())
-					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", fmt.Sprintf("%.3fm", float64(txTask.BlockNumber())/1_000_000), "tx/s", fmt.Sprintf("%.1fK", float64(txsPerSec)/1_000.0), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", common.PrettyExact(txTask.BlockNumber()), "tx/s", common.PrettyCounter(txsPerSec), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				}
 				prevTxNumLog = txTask.TxNum
 			default:

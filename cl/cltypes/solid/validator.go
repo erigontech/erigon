@@ -53,24 +53,24 @@ func NewValidator() Validator {
 // NewValidatorFromParameters creates a new Validator object from the provided parameters.
 // It is represented as a flat buffer.
 func NewValidatorFromParameters(
-	PublicKey [48]byte,
-	WithdrawalCredentials [32]byte,
-	EffectiveBalance uint64,
-	Slashed bool,
-	ActivationEligibilityEpoch uint64,
-	ActivationEpoch uint64,
-	ExitEpoch uint64,
-	WithdrawableEpoch uint64,
+	publicKey [48]byte,
+	withdrawalCredentials [32]byte,
+	effectiveBalance uint64,
+	slashed bool,
+	activationEligibilityEpoch uint64,
+	activationEpoch uint64,
+	exitEpoch uint64,
+	withdrawableEpoch uint64,
 ) Validator {
 	v := NewValidator()
-	v.SetPublicKey(PublicKey)
-	v.SetWithdrawalCredentials(WithdrawalCredentials)
-	v.SetEffectiveBalance(EffectiveBalance)
-	v.SetSlashed(Slashed)
-	v.SetActivationEligibilityEpoch(ActivationEligibilityEpoch)
-	v.SetActivationEpoch(ActivationEpoch)
-	v.SetExitEpoch(ExitEpoch)
-	v.SetWithdrawableEpoch(WithdrawableEpoch)
+	v.SetPublicKey(publicKey)
+	v.SetWithdrawalCredentials(withdrawalCredentials)
+	v.SetEffectiveBalance(effectiveBalance)
+	v.SetSlashed(slashed)
+	v.SetActivationEligibilityEpoch(activationEligibilityEpoch)
+	v.SetActivationEpoch(activationEpoch)
+	v.SetExitEpoch(exitEpoch)
+	v.SetWithdrawableEpoch(withdrawableEpoch)
 	return v
 }
 

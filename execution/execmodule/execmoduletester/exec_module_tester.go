@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
@@ -140,6 +141,7 @@ type ExecModuleTester struct {
 	HistoryV3      bool
 	cfg            ethconfig.Config
 	BlockSnapshots *blocksnapshots.RoSnapshots
+	borSnapshots   *heimdall.RoSnapshots
 	blockRetire    dbservices.BlockRetire
 	BlockReader    dbservices.FullBlockReader
 	ReceiptsReader *receipts.Generator
@@ -160,6 +162,9 @@ func (emt *ExecModuleTester) Close() {
 	}
 	if emt.BlockSnapshots != nil {
 		emt.BlockSnapshots.Close()
+	}
+	if emt.borSnapshots != nil {
+		emt.borSnapshots.Close()
 	}
 	if emt.DB != nil {
 		emt.DB.Close()
@@ -557,6 +562,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		stateChangesClient: direct.NewStateDiffClientDirect(erigonGrpcServer),
 		PeerId:             gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots:     allSnapshots,
+		borSnapshots:       allBorSnapshots,
 		BlockReader:        br,
 		ReceiptsReader:     receipts.NewGenerator(dirs, br, engine, nil, 5*time.Second),
 		HistoryV3:          true,
@@ -667,11 +673,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	snapDownloader := mockDownloader(ctrl, mock.Dirs.Snap)
 
-	miningCancel := make(chan struct{})
-	go func() {
-		<-mock.Ctx.Done()
-		close(miningCancel)
-	}()
+	// Never closed: finishBlock sends to it concurrently to abort an in-flight seal.
+	sealCancel := make(chan struct{})
 
 	readAheader := exec.NewBlockReadAheader()
 	blkBuilder := builder.NewBuilder(
@@ -702,7 +705,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		&vm.Config{},
 		dirs.Tmp,
 		mock.TxPool,
-		miningCancel,
+		sealCancel,
 		latestBlockBuiltStore,
 		nil, /*sdProvider*/
 		logger,
@@ -849,7 +852,7 @@ func (emt *ExecModuleTester) EnableLogs() {
 
 func (emt *ExecModuleTester) Cfg() ethconfig.Config { return emt.cfg }
 
-func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
+func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 	wr := chainreader.NewChainReaderEth1(emt.ChainConfig, emt.ExecModule, time.Hour)
 
 	streamCtx, cancel := context.WithCancel(emt.Ctx)
@@ -895,7 +898,7 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		req, err := stream.Recv()
 		if err != nil {
 			if emt.Ctx.Err() != nil {
-				return nil
+				break
 			}
 			if streamCtx.Err() != nil {
 				return fmt.Errorf("block insert recv timed out: %d remaining", len(insertedBlocks))
@@ -914,13 +917,6 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		}
 	}
 
-	return nil
-}
-
-func (emt *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
-	if err := emt.insertPoSBlocks(chain); err != nil {
-		return err
-	}
 	roTx, err := emt.DB.BeginRo(emt.Ctx)
 	if err != nil {
 		return err
@@ -941,6 +937,65 @@ func (emt *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
 		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	return nil
+}
+
+func (emt *ExecModuleTester) insertChainPoW(chain *blockgen.ChainPack) error {
+	tip := chain.TopBlock
+	currentHeader, err := emt.ExecModule.CurrentHeader(emt.Ctx)
+	if err != nil {
+		return err
+	}
+	currentHash := currentHeader.Hash()
+	currentNumber := currentHeader.Number.Uint64()
+	currentTd, err := emt.ExecModule.GetTD(emt.Ctx, &currentHash, &currentNumber)
+	if err != nil {
+		return err
+	}
+	if currentTd == nil {
+		return fmt.Errorf("total difficulty not found for current head %d %x", currentNumber, currentHash)
+	}
+	firstBlock := chain.Blocks[0]
+	firstNumber := firstBlock.NumberU64()
+	if firstNumber == 0 {
+		return emt.insertChain(chain)
+	}
+	parentHash := firstBlock.ParentHash()
+	parentNumber := firstNumber - 1
+	parentTd, err := emt.ExecModule.GetTD(emt.Ctx, &parentHash, &parentNumber)
+	if err != nil {
+		return err
+	}
+	if parentTd == nil {
+		return fmt.Errorf("total difficulty not found for parent %d %x", parentNumber, parentHash)
+	}
+	candidateTd := new(uint256.Int).Set(parentTd)
+	for _, block := range chain.Blocks {
+		difficulty := block.Difficulty()
+		if _, overflow := candidateTd.AddOverflow(candidateTd, &difficulty); overflow {
+			return fmt.Errorf("total difficulty overflows for block %d %x", block.NumberU64(), block.Hash())
+		}
+	}
+	if !ethash.ShouldReorg(currentTd, currentNumber, currentHash, candidateTd, tip.NumberU64(), tip.Hash()) {
+		wr := chainreader.NewChainReaderEth1(emt.ChainConfig, emt.ExecModule, time.Hour)
+		for _, block := range chain.Blocks {
+			if err := block.HashCheck(false); err != nil {
+				return err
+			}
+		}
+		return wr.InsertBlocks(emt.Ctx, chain.Blocks, chain.BlockAccessLists)
+	}
+	return emt.insertChain(chain)
+}
+
+func (emt *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
+	if chain.Length() == 0 {
+		return nil
+	}
+	tipDifficulty := chain.TopBlock.Difficulty()
+	if !tipDifficulty.IsZero() {
+		return emt.insertChainPoW(chain)
+	}
+	return emt.insertChain(chain)
 }
 
 func (emt *ExecModuleTester) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) state.StateReader {

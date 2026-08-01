@@ -166,7 +166,7 @@ type Ethereum struct {
 	rpcDaemonStateCache kvcache.Cache
 	mcpRPC              *mcp.ErigonMCPServer
 
-	miningSealingQuit   chan struct{}
+	sealCancel          chan struct{}
 	pendingBlocks       chan *types.Block
 	minedBlocks         chan *types.Block
 	minedBlockObservers *event.Observers[*types.Block]
@@ -189,7 +189,8 @@ type Ethereum struct {
 
 	notifications *shards.Notifications
 
-	unsubscribeEthstat func()
+	unsubscribeEthstat      func()
+	unsubscribeWitnessCache func()
 
 	txPool                    *txpool.TxPool
 	txPoolGrpcServer          txpoolproto.TxpoolServer
@@ -337,7 +338,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		networkID:                 config.NetworkID,
 		etherbase:                 config.Builder.Etherbase,
 		blockBuilderNotifyNewTxns: make(chan struct{}, 1),
-		miningSealingQuit:         make(chan struct{}),
+		sealCancel:                make(chan struct{}),
 		minedBlocks:               make(chan *types.Block, 1),
 		minedBlockObservers:       event.NewObservers[*types.Block](),
 		logger:                    logger,
@@ -835,7 +836,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		&vm.Config{},
 		tmpdir,
 		txnProvider,
-		backend.miningSealingQuit,
+		backend.sealCancel,
 		latestBlockBuiltStore,
 		backend.notifications.Events.LatestSD,
 		logger,
@@ -1152,6 +1153,39 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		entry := engineapi.NewTestingRPCEntry(s.engineBackendRPC, s.logger, s.chainDB)
 		testingEntry = &entry
 	}
+	// Eager witness cache (embedded RPC only). A datadir built with commitment history
+	// recomputes on miss (durable path); a minimal node without it can still serve recent
+	// witnesses cache-only when --witness.cache.head-capture is set, building each head from
+	// a pinned parent snapshot. Without either, no witness can be built, so the cache stays off.
+	enableWitnessCache := httpRpcCfg.WitnessCacheBlocks > 0
+	headCaptureMode := false
+	if enableWitnessCache {
+		var commitmentHistory bool
+		if err := chainKv.View(ctx, func(tx kv.Tx) error {
+			var rerr error
+			commitmentHistory, _, rerr = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+			return rerr
+		}); err != nil {
+			s.logger.Warn("[witness-cache] could not read commitment-history flag; cache disabled", "err", err)
+			enableWitnessCache = false
+		} else {
+			enableWitnessCache, headCaptureMode = jsonrpc.WitnessCacheMode(httpRpcCfg.WitnessCacheBlocks, commitmentHistory, httpRpcCfg.WitnessCacheHeadCapture)
+			if !enableWitnessCache {
+				s.logger.Warn("[witness-cache] --witness.cache.blocks set but commitment history is disabled and --witness.cache.head-capture is off; cache disabled (restart with --prune.experimental.include-commitment-history or --witness.cache.head-capture)")
+			}
+		}
+	}
+	witnessCache, witnessBuilder := jsonrpc.NewWitnessCacheBuilderAPI(enableWitnessCache, headCaptureMode, chainKv, s.ethRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.polygonBridge)
+	if witnessBuilder != nil {
+		var headCh chan [][]byte
+		headCh, s.unsubscribeWitnessCache = s.notifications.Events.AddHeaderSubscription()
+		s.bgComponentsEg.Go(func() error {
+			jsonrpc.RunWitnessCacheBuilder(ctx, witnessBuilder, headCh)
+			return nil
+		})
+		s.logger.Info("[witness-cache] eager witness cache enabled", "blocks", jsonrpc.WitnessCacheCapacity(httpRpcCfg.WitnessCacheBlocks), "headCapture", headCaptureMode)
+	}
+
 	mcpNamespaces := []string{"eth", "erigon", "ots", "txpool", "net", "admin", "debug", "trace"}
 	apiCfg := httpRpcCfg
 	if config.MCPAddress != "" {
@@ -1165,7 +1199,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	// One APIList call even when MCP widens the namespace set, so the HTTP
 	// RPC server and MCP share the BaseApi block/receipt caches instead of
 	// each holding their own.
-	allAPIs := jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &apiCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService, testingEntry)
+	allAPIs := jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &apiCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService, testingEntry, witnessCache)
 	s.apiList = apisForNamespaces(allAPIs, append(slices.Clone(httpRpcCfg.API), "graphql"))
 
 	if config.MCPAddress != "" {
@@ -1246,7 +1280,7 @@ func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
 func (s *Ethereum) NetPeerCount() (uint64, error) {
 	var sentryPc uint64 = 0
 
-	s.logger.Trace("sentry", "peer count", sentryPc)
+	s.logger.Trace("sentry", "peerCount", sentryPc)
 	for _, sc := range s.sentryProvider.Client.Sentries() {
 		ctx := context.Background()
 		reply, err := sc.PeerCount(ctx, &sentryproto.PeerCountRequest{})
@@ -1520,6 +1554,9 @@ func (s *Ethereum) Stop() error {
 	s.sentryCancel()
 	if s.unsubscribeEthstat != nil {
 		s.unsubscribeEthstat()
+	}
+	if s.unsubscribeWitnessCache != nil {
+		s.unsubscribeWitnessCache()
 	}
 	if s.components != nil && s.components.Downloader != nil {
 		s.components.Downloader.Close()
