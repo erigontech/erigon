@@ -108,6 +108,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		}
 	}
 	ibs := state.New(stateReader)
+	defer ibs.Close()
 
 	parent, _ := api.headerByNumber(ctx, rpc.BlockNumber(stateBlockNumber), tx)
 	if parent == nil {
