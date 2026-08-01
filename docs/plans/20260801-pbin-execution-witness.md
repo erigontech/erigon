@@ -393,18 +393,29 @@ leaf and code chunking instead of reimplementing all of it.
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 - Modify: `rpc/jsonrpc/pbin_witness_stateless_test.go`
 
-- [ ] route `verifyWitnessStateless` (`:963`, body `:1452`) to the bin verifier under bin;
+- [x] route `verifyWitnessStateless` (`:963`, body `:1452`) to the bin verifier under bin;
       `trie.RLPDecode` cannot consume bin nodes
-- [ ] re-execute from the witness alone and assert the post-state root equals `block.Root()`; on
+- [x] re-execute from the witness alone and assert the post-state root equals `block.Root()`; on
       failure return `errWitnessVerifyFailed` and never return the witness
-- [ ] make the bin path ignore `ERIGON_WITNESS_NO_VERIFY` (`:1459`) — under bin the gate is the only
+- [x] make the bin path ignore `ERIGON_WITNESS_NO_VERIFY` (`:1459`) — under bin the gate is the only
       correctness evidence that exists
-- [ ] keep `checkWitnessKeysComplete` behaviour
-- [ ] write tests: a good witness verifies and is returned
-- [ ] write tests: a truncated witness fails and no witness is returned
-- [ ] write tests: `ERIGON_WITNESS_NO_VERIFY=true` does not disable verification under bin, and still
+- [x] keep `checkWitnessKeysComplete` behaviour
+- [x] ➕ the replay is shared, not forked: `replayBlockOverWitness` drives the block through the EVM
+      against either variant's reader/writer, and only the leaf resolution and the post-state
+      merkelization differ. A second copy of the block-execution loop would have to be kept in sync
+      by hand
+- [x] ➕ the root check and the keys check moved into `verifyWitnessAgainstBlock`, so the gate is
+      testable without a database; `verifyWitnessStateless` is left as the env gate plus the chain
+      config lookup
+- [x] write tests: a good witness verifies and is returned
+- [x] write tests: a truncated witness fails and no witness is returned — asserted over every
+      single-node removal, since the gate's witness is pruned to one account and every node in it is
+      on that account's path
+- [x] ➕ write tests: a witness replaying to another root is refused, and one whose `keys[]` omits a
+      resolved leaf is too
+- [x] write tests: `ERIGON_WITNESS_NO_VERIFY=true` does not disable verification under bin, and still
       does under hex
-- [ ] run tests - must pass before task 10
+- [x] run tests - must pass before task 10
 
 ### Task 10: Un-refuse the witness path under the bin variant
 

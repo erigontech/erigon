@@ -25,8 +25,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -49,6 +52,42 @@ import (
 // UpdateAccountCode, as it does under hex.
 
 var errPBinWitnessNoRemoval = errors.New("binary trie defines no removal")
+
+// pbinExecBlockStatelessly re-executes the block against the binary witness alone
+// and returns the post-state root it reaches. It is the bin arm of the gate
+// debug_executionWitness applies before returning a witness; the replay itself is
+// shared with hex. parentRoot roots the decode: the node set is not self-rooting.
+func pbinExecBlockStatelessly(
+	ctx context.Context,
+	result *ExecutionWitnessResult,
+	block *types.Block,
+	parentRoot common.Hash,
+	chainConfig *chain.Config,
+	engine rules.Engine,
+) (postStateRoot common.Hash, stateless *pbinWitnessStateless, err error) {
+	// Genesis has no transactions but does have pre-allocated accounts, which no
+	// witness covers.
+	if block.NumberU64() == 0 {
+		return block.Root(), nil, nil
+	}
+	if len(result.State) == 0 {
+		return common.Hash{}, nil, errors.New("empty State field in witness")
+	}
+
+	stateless, err = newPBinWitnessStateless(result, parentRoot)
+	if err != nil {
+		return common.Hash{}, nil, err
+	}
+	if err = replayBlockOverWitness(result, block, chainConfig, engine, stateless); err != nil {
+		return common.Hash{}, stateless, err
+	}
+
+	root, err := stateless.Finalize(ctx)
+	if err != nil {
+		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] pbin post-state root failed: %w", err)
+	}
+	return root, stateless, nil
+}
 
 type pbinWitnessStateless struct {
 	state *commitment.PBinWitnessState

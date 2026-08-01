@@ -976,7 +976,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	if !ok {
 		return nil, fmt.Errorf("engine does not support full rules.Engine interface")
 	}
-	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine); err != nil {
+	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine, binTrie, expectedParentRoot); err != nil {
 		return nil, fmt.Errorf("%w: %w", errWitnessVerifyFailed, err)
 	}
 
@@ -1485,17 +1485,18 @@ func (api *BaseAPI) collectAccessedHeaders(
 	return headers, byNumber, nil
 }
 
-// verifyWitnessStateless optionally re-executes the block statelessly against the
-// generated witness and asserts the resulting state root matches. Verification is
-// a no-op when ERIGON_WITNESS_NO_VERIFY=true (it roughly doubles execution cost).
+// verifyWitnessStateless re-executes the block statelessly against the generated
+// witness and asserts the resulting state root matches.
 func (api *DebugAPIImpl) verifyWitnessStateless(
 	ctx context.Context,
 	tx kv.TemporalTx,
 	result *ExecutionWitnessResult,
 	block *types.Block,
 	fullEngine rules.Engine,
+	binTrie bool,
+	parentRoot common.Hash,
 ) error {
-	if dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false) {
+	if witnessVerifySkipped(binTrie) {
 		return nil
 	}
 
@@ -1504,7 +1505,51 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 		return fmt.Errorf("failed to get chain config: %w", err)
 	}
 
-	newStateRoot, stateless, err := execBlockStatelessly(result, block, chainCfg, fullEngine)
+	return verifyWitnessAgainstBlock(ctx, result, block, parentRoot, chainCfg, fullEngine, binTrie)
+}
+
+// witnessVerifySkipped reports whether ERIGON_WITNESS_NO_VERIFY may turn the
+// stateless gate off. Under bin it never may: binary witnesses have no external
+// conformance oracle, so re-execution is the only correctness evidence there is,
+// while hex's opt-out exists only to save the roughly doubled execution cost.
+func witnessVerifySkipped(binTrie bool) bool {
+	return !binTrie && dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false)
+}
+
+// verifyWitnessAgainstBlock re-executes the block from the witness alone and
+// asserts it reaches the header's post-state root, then that keys[] carries a
+// preimage for every leaf the re-execution resolved. The two variants share the
+// replay and differ only in how a leaf resolves and how the root is merkelized;
+// bin needs parentRoot because its decoder is told its root rather than deriving
+// it from the node set.
+func verifyWitnessAgainstBlock(
+	ctx context.Context,
+	result *ExecutionWitnessResult,
+	block *types.Block,
+	parentRoot common.Hash,
+	chainCfg *chain.Config,
+	fullEngine rules.Engine,
+	binTrie bool,
+) error {
+	var (
+		newStateRoot common.Hash
+		usedAddrs    map[common.Address]struct{}
+		usedSlots    map[common.Hash]struct{}
+		err          error
+	)
+	if binTrie {
+		var stateless *pbinWitnessStateless
+		newStateRoot, stateless, err = pbinExecBlockStatelessly(ctx, result, block, parentRoot, chainCfg, fullEngine)
+		if stateless != nil {
+			usedAddrs, usedSlots = stateless.usedTrieAddrs, stateless.usedTrieSlots
+		}
+	} else {
+		var stateless *witnessStateless
+		newStateRoot, stateless, err = execBlockStatelessly(result, block, chainCfg, fullEngine)
+		if stateless != nil {
+			usedAddrs, usedSlots = stateless.usedTrieAddrs, stateless.usedTrieSlots
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)
 	}
@@ -1514,8 +1559,8 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 		return fmt.Errorf("[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x", newStateRoot, expectedRoot)
 	}
 
-	if stateless != nil {
-		if err := checkWitnessKeysComplete(stateless.usedTrieAddrs, stateless.usedTrieSlots, result.Keys); err != nil {
+	if usedAddrs != nil || usedSlots != nil {
+		if err := checkWitnessKeysComplete(usedAddrs, usedSlots, result.Keys); err != nil {
 			return fmt.Errorf("[debug_executionWitness] %w", err)
 		}
 	}
@@ -2095,6 +2140,30 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		// common.HexToAddress("0x8863786beBE8eB9659DF00b49f8f1eeEc7e2C8c1"),
 	})
 
+	if err = replayBlockOverWitness(result, block, chainConfig, engine, stateless); err != nil {
+		return common.Hash{}, stateless, err
+	}
+
+	// Finalize and compute the resulting state root
+	newStateRoot, err := stateless.Finalize()
+	if err != nil {
+		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] stateless.Finalize() failed: %w", err)
+	}
+	return newStateRoot, stateless, nil
+}
+
+// statelessWitnessState is the reader/writer seam a witness re-execution runs
+// against. Hex and bin resolve a leaf and merkelize differently but replay a
+// block identically, so the replay itself is shared.
+type statelessWitnessState interface {
+	state.StateReader
+	state.StateWriter
+}
+
+// replayBlockOverWitness drives the block through the EVM against a witness-backed
+// reader/writer. It stops short of the post-state root, which each variant computes
+// its own way.
+func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.Engine, stateless statelessWitnessState) error {
 	// Create the in-block state with the witness stateless as reader
 	ibs := state.New(stateless)
 	defer ibs.Close()
@@ -2112,18 +2181,18 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
 	}
-	if err = engine.Initialize(chainConfig, nil /* chainReader */, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("verification: failed to initialize block: %w", err)
+	if err := engine.Initialize(chainConfig, nil /* chainReader */, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
+		return fmt.Errorf("verification: failed to initialize block: %w", err)
 	}
-	if err = ibs.FinalizeTx(blockRules, stateless); err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("verification: failed to finalize engine.Initialize tx: %w", err)
+	if err := ibs.FinalizeTx(blockRules, stateless); err != nil {
+		return fmt.Errorf("verification: failed to finalize engine.Initialize tx: %w", err)
 	}
 
 	// Execute all transactions in the block
 	for txIndex, txn := range block.Transactions() {
 		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
 		if err != nil {
-			return common.Hash{}, stateless, fmt.Errorf("[statelessExec] failed to convert tx %d to message: %w", txIndex, err)
+			return fmt.Errorf("[statelessExec] failed to convert tx %d to message: %w", txIndex, err)
 		}
 
 		txCtx := protocol.NewEVMTxContext(msg)
@@ -2133,14 +2202,13 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		ibs.SetTxContext(blockNum, txIndex)
 
 		// Apply the message - gasBailout must be false to properly deduct gas from sender
-		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
-		if err != nil {
-			return common.Hash{}, stateless, fmt.Errorf("[statelessExec] failed to apply tx %d: %w", txIndex, err)
+		if _, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine); err != nil {
+			return fmt.Errorf("[statelessExec] failed to apply tx %d: %w", txIndex, err)
 		}
 
 		// Finalize tx - state changes go to the witness stateless
 		if err = ibs.FinalizeTx(blockRules, stateless); err != nil {
-			return common.Hash{}, stateless, fmt.Errorf("[statelessExec] failed to finalize tx %d: %w", txIndex, err)
+			return fmt.Errorf("[statelessExec] failed to finalize tx %d: %w", txIndex, err)
 		}
 	}
 
@@ -2155,20 +2223,13 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	// only Bor and AuRa engine use ChainReader. And the ChainReader is only used to read headers. This means their
 	// witness may need to be augmented with headers accessed during their engine.Finalize(). This is something that
 	// can be implemented later. For now use ChainReader = nil, as this is sufficient for Ethereum.
-	_, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), statelessReceipts, block.Withdrawals(), nil /* chainReader */, syscall, false /*skipReceiptsEval*/, log.Root())
-	if err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)
+	if _, err := engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), statelessReceipts, block.Withdrawals(), nil /* chainReader */, syscall, false /*skipReceiptsEval*/, log.Root()); err != nil {
+		return fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)
 	}
 
-	err = ibs.CommitBlock(blockRules, stateless)
-	if err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
+	if err := ibs.CommitBlock(blockRules, stateless); err != nil {
+		return fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
 	}
 
-	// Finalize and compute the resulting state root
-	newStateRoot, err := stateless.Finalize()
-	if err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] stateless.Finalize() failed: %w", err)
-	}
-	return newStateRoot, stateless, nil
+	return nil
 }

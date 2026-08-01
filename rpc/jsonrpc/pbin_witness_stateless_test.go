@@ -29,7 +29,12 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -432,4 +437,155 @@ func TestPBinWitnessStatelessRefusesRemoval(t *testing.T) {
 	// An account the witness proves absent was created and dropped inside the
 	// block, so it leaves no leaf to remove.
 	require.NoError(t, stateless.DeleteAccount(accounts.InternAddress(c.fresh), nil))
+}
+
+// pbinVerifyWithdrawalGwei is the only state the gate's test block moves. A
+// withdrawal keeps the expected post-state root arithmetic instead of gas
+// accounting, while still running the full replay.
+const pbinVerifyWithdrawalGwei = 3
+
+// pbinVerifyChainConfig is post-merge Shanghai: a PoS header pays no block
+// reward, and neither the Cancun beacon-root contract nor the Prague blockhash
+// contract exists to be called out of a witness that does not carry it.
+func pbinVerifyChainConfig() *chain.Config {
+	return &chain.Config{
+		ChainID:                       uint256.NewInt(1337),
+		Rules:                         chain.EtHashRules,
+		HomesteadBlock:                common.NewUint64(0),
+		TangerineWhistleBlock:         common.NewUint64(0),
+		SpuriousDragonBlock:           common.NewUint64(0),
+		ByzantiumBlock:                common.NewUint64(0),
+		ConstantinopleBlock:           common.NewUint64(0),
+		PetersburgBlock:               common.NewUint64(0),
+		IstanbulBlock:                 common.NewUint64(0),
+		BerlinBlock:                   common.NewUint64(0),
+		LondonBlock:                   common.NewUint64(0),
+		TerminalTotalDifficulty:       uint256.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		ShanghaiTime:                  common.NewUint64(0),
+		Ethash:                        new(chain.EthashConfig),
+	}
+}
+
+func pbinVerifyEngine() rules.Engine { return merge.New(ethash.NewFaker()) }
+
+func pbinVerifyBlock(t *testing.T, postRoot common.Hash, to common.Address) *types.Block {
+	t.Helper()
+	header := &types.Header{
+		Root:       postRoot,
+		Number:     *uint256.NewInt(1),
+		Difficulty: uint256.Int{}, // PoS: no block reward
+		GasLimit:   30_000_000,
+		Time:       1,
+		BaseFee:    uint256.NewInt(7),
+	}
+	withdrawals := []*types.Withdrawal{{Index: 0, Validator: 0, Address: to, Amount: pbinVerifyWithdrawalGwei}}
+	return types.NewBlock(header, nil, nil, nil, withdrawals)
+}
+
+// pbinVerifyGateCase is the corpus of the gate tests: the witness is pruned to
+// the one account the block credits, so every node in it is on that account's
+// path and no removal can go unnoticed.
+type pbinVerifyGateCase struct {
+	corpus     *pbinStatelessCorpus
+	nodes      [][]byte
+	parentRoot common.Hash
+	block      *types.Block
+}
+
+func pbinVerifyNewGateCase(t *testing.T) *pbinVerifyGateCase {
+	t.Helper()
+	c := pbinStatelessNewCorpus()
+	pbinStatelessProcess(t, c.state, c.accessed())
+	nodes, parentRoot := pbinStatelessWitness(t, c.state, [][]byte{c.eoa[:]})
+
+	credited := c.state.clone()
+	credited.setAccount(c.eoa, 7, 1_000_000+pbinVerifyWithdrawalGwei*uint64(common.GWei), nil)
+	postRoot := pbinStatelessProcess(t, credited, [][]byte{c.eoa[:]})
+	require.NotEqual(t, parentRoot, postRoot, "the withdrawal does not move the root, so the gate proves nothing")
+
+	return &pbinVerifyGateCase{
+		corpus:     c,
+		nodes:      nodes,
+		parentRoot: common.BytesToHash(parentRoot),
+		block:      pbinVerifyBlock(t, common.BytesToHash(postRoot), c.eoa),
+	}
+}
+
+func (g *pbinVerifyGateCase) result(nodes [][]byte) *ExecutionWitnessResult {
+	result := &ExecutionWitnessResult{
+		State: make([]hexutil.Bytes, len(nodes)),
+		Keys:  []hexutil.Bytes{g.corpus.eoa[:]},
+	}
+	for i, node := range nodes {
+		result.State[i] = node
+	}
+	return result
+}
+
+func (g *pbinVerifyGateCase) verify(result *ExecutionWitnessResult, block *types.Block) error {
+	return verifyWitnessAgainstBlock(context.Background(), result, block, g.parentRoot,
+		pbinVerifyChainConfig(), pbinVerifyEngine(), true /* binTrie */)
+}
+
+// TestPBinWitnessVerifyGateAcceptsGoodWitness: the block replayed from the
+// witness alone reaches the header's post-state root, so the gate lets it
+// through.
+func TestPBinWitnessVerifyGateAcceptsGoodWitness(t *testing.T) {
+	t.Parallel()
+
+	g := pbinVerifyNewGateCase(t)
+	require.NoError(t, g.verify(g.result(g.nodes), g.block))
+}
+
+// TestPBinWitnessVerifyGateRejectsWrongRoot: a witness that replays to another
+// root is refused, which is what stops it from being returned.
+func TestPBinWitnessVerifyGateRejectsWrongRoot(t *testing.T) {
+	t.Parallel()
+
+	g := pbinVerifyNewGateCase(t)
+	wrongRoot := pbinVerifyBlock(t, common.HexToHash("0xdead"), g.corpus.eoa)
+	require.ErrorContains(t, g.verify(g.result(g.nodes), wrongRoot), "state root mismatch")
+}
+
+// TestPBinWitnessVerifyGateRejectsTruncatedWitness: every node of a proof-path
+// witness is load-bearing, so dropping any one of them has to fail the gate
+// rather than replay to a root that happens to match.
+func TestPBinWitnessVerifyGateRejectsTruncatedWitness(t *testing.T) {
+	t.Parallel()
+
+	g := pbinVerifyNewGateCase(t)
+	require.NotEmpty(t, g.nodes)
+	for drop := range g.nodes {
+		trimmed := make([][]byte, 0, len(g.nodes)-1)
+		for i, node := range g.nodes {
+			if i != drop {
+				trimmed = append(trimmed, node)
+			}
+		}
+		require.Error(t, g.verify(g.result(trimmed), g.block), "dropping node %d passes the gate", drop)
+	}
+}
+
+// TestPBinWitnessVerifyGateChecksKeys: the gate still refuses a witness whose
+// keys[] omits a leaf the re-execution resolved.
+func TestPBinWitnessVerifyGateChecksKeys(t *testing.T) {
+	t.Parallel()
+
+	g := pbinVerifyNewGateCase(t)
+	result := g.result(g.nodes)
+	result.Keys = nil
+	require.ErrorContains(t, g.verify(result, g.block), g.corpus.eoa.Hex())
+}
+
+// TestWitnessVerifySkippedOnlyUnderHex: ERIGON_WITNESS_NO_VERIFY buys back hex's
+// doubled execution cost. Under bin the gate is the only correctness evidence
+// there is, so the same variable must not turn it off.
+func TestWitnessVerifySkippedOnlyUnderHex(t *testing.T) {
+	require.False(t, witnessVerifySkipped(false /* binTrie */), "hex verification is off by default")
+	require.False(t, witnessVerifySkipped(true /* binTrie */), "bin verification is off by default")
+
+	t.Setenv("ERIGON_WITNESS_NO_VERIFY", "true")
+	require.True(t, witnessVerifySkipped(false /* binTrie */))
+	require.False(t, witnessVerifySkipped(true /* binTrie */))
 }
