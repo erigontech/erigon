@@ -26,7 +26,7 @@ func TestVersionedRead_A1_LegacyWithStorage(t *testing.T) {
 
 	// IBS without versionMap → legacy/serial path
 	ibs := New(&emptyReader{})
-	defer ibs.Release(false)
+	defer ibs.Close()
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	// emptyReader returns nil account → zero balance, no error
@@ -41,7 +41,7 @@ func TestVersionedRead_A2_LegacyGetCodeReturnsEmpty(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xa2})
 
 	ibs := New(&emptyReader{})
-	defer ibs.Release(false)
+	defer ibs.Close()
 	code, err := ibs.GetCode(addr)
 	require.NoError(t, err)
 	assert.Empty(t, code, "empty reader => empty code")
@@ -60,7 +60,7 @@ func TestVersionedRead_B_DeletedStateObjectReturnsDefault(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 0)
 
 	addr := accounts.InternAddress(common.HexToAddress("0xdead"))
@@ -89,7 +89,7 @@ func TestVersionedRead_C5_DestructedCommittedReturnsZero(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xc5})
@@ -114,7 +114,7 @@ func TestVersionedRead_C6_DestructedRecordsDepAndReturnsZero(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xc6})
@@ -138,7 +138,7 @@ func TestVersionedRead_C4_CodePathBypassesSelfDestruct(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xc4})
@@ -162,7 +162,7 @@ func TestVersionedRead_C1_RevivalViaBalance(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 10)
 
 	addr := accounts.InternAddress([20]byte{0xc1})
@@ -196,7 +196,7 @@ func TestVersionedRead_C7_RefreshReturnsZeroPastSelfDestruct(t *testing.T) {
 	}
 	mvhm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(r, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xc7})
@@ -230,7 +230,7 @@ func TestVersionedRead_D2_WriteSetHit(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 0)
 
 	addr := accounts.InternAddress([20]byte{0xd2})
@@ -255,7 +255,7 @@ func TestVersionedRead_E1_MapHitThenReadSetSameVersion(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xe1})
@@ -281,7 +281,7 @@ func TestVersionedRead_E3a_CodePathTrumpedBySelfDestruct(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 10)
 
 	addr := accounts.InternAddress([20]byte{0xe3})
@@ -307,7 +307,7 @@ func TestVersionedRead_G1_ReadSetReadOnSecondCall(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0x91})
@@ -338,7 +338,7 @@ func TestVersionedRead_G6_StorageZeroOnIncarnationWritten(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0x96})
@@ -363,7 +363,7 @@ func TestVersionedRead_G7_BalanceViaResolvedAddressPath(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0x97})
@@ -382,7 +382,7 @@ func TestVersionedRead_G8_StorageFallbackEmptyReader(t *testing.T) {
 	t.Parallel()
 	mvhm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(&emptyReader{}, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0x98})
@@ -423,7 +423,7 @@ func TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet(t *testing.T) {
 	}
 	mvhm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(r, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xa4})
@@ -481,7 +481,7 @@ func TestVersionedRead_C2_RevivalViaNonce(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 10)
 
 	addr := accounts.InternAddress([20]byte{0xc2})
@@ -500,7 +500,7 @@ func TestVersionedRead_C3_RevivalViaCodeHash(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 10)
 
 	addr := accounts.InternAddress([20]byte{0xc3})
@@ -522,7 +522,7 @@ func TestVersionedRead_E2_StaleMapReadCaughtAtCommit(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 10)
 
 	addr := accounts.InternAddress([20]byte{0xe2})
@@ -545,7 +545,7 @@ func TestVersionedRead_E2_StaleMapReadCaughtAtCommit(t *testing.T) {
 	assert.Equal(t, *uint256.NewInt(99), got, "read-once returns the recorded value")
 
 	var io VersionedIO
-	ibs.MergeTxIOInto(&io)
+	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
 	valid := mvhm.ValidateVersion(10, &io, func(rv, wv Version) VersionValidity {
 		if rv == wv {
 			return VersionValid
@@ -565,7 +565,7 @@ func TestVersionedRead_F_MVReadResultDependencyPanics(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xf0})
@@ -592,7 +592,7 @@ func TestVersionedRead_D1_WriteSetHitWithStaleReadSetPanics(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xd1})
