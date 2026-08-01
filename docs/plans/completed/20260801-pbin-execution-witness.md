@@ -598,9 +598,17 @@ Reading it:
 
 ### Task 15: [Final] Update documentation
 
-- [ ] update `README.md` if needed
-- [ ] update `CLAUDE.md` if new patterns were discovered
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update `README.md` if needed — **not needed**: `README.md` is an operations document (getting
+      started, datadir layout, ports, rpcdaemon) and documents no commitment variant, no experimental
+      flag and no `debug_*` endpoint. The bin variant stays flag-gated and undocumented there; a
+      witness note would be the only such content in the file
+- [x] update `CLAUDE.md` if new patterns were discovered — added the process-global bin-selection rule
+      to the Conventions section (`AGENTS.md`, which `CLAUDE.md` symlinks to): set
+      `statecfg.ExperimentalBinCommitment` **and** `statecfg.BinCommitmentHash` before
+      `commitment.SetPBinHashSuite`, restore in `t.Cleanup`, never `t.Parallel`. The suite-only call
+      being undone by the settings resolver (`block_test_util.go:231-241`) cost time in Tasks 11-12 and
+      is not visible from any single call site. The `pbin` naming convention was already recorded
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
