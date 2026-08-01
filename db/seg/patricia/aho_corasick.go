@@ -17,6 +17,8 @@
 package patricia
 
 import (
+	"encoding/binary"
+	"math/bits"
 	"slices"
 )
 
@@ -212,6 +214,11 @@ func (ac *AhoCorasick) Build() {
 
 // compile packs the CSR scaffolding into the runtime node array, spilling the
 // rare fanout>=2 states into wideByte/wideChild.
+//
+// State ids keep their insertion order on purpose. That order lays each
+// pattern's chain out consecutively, so walking a pattern streams the node
+// array; renumbering into BFS order splits every chain across depth bands and
+// costs roughly 7x.
 func (ac *AhoCorasick) compile(n int, firstEdge []int32, edgeByte []byte, edgeChild, fail, matchLen []int32) {
 	ac.nodes = make([]acNode, n)
 	wide := int32(0)
@@ -220,7 +227,7 @@ func (ac *AhoCorasick) compile(n int, firstEdge []int32, edgeByte []byte, edgeCh
 			wide += d
 		}
 	}
-	ac.wideByte = make([]byte, 0, wide)
+	ac.wideByte = make([]byte, 0, wide+swarPad)
 	ac.wideChild = make([]int32, 0, wide)
 	for node := range n {
 		start, end := firstEdge[node], firstEdge[node+1]
@@ -239,6 +246,7 @@ func (ac *AhoCorasick) compile(n int, firstEdge []int32, edgeByte []byte, edgeCh
 		}
 		ac.nodes[node] = nd
 	}
+	ac.wideByte = append(ac.wideByte, make([]byte, swarPad)...)
 }
 
 // bsearchEdge finds byte b in the sorted labels[lo:hi] and returns the parallel
@@ -259,8 +267,34 @@ func bsearchEdge(labels []byte, children []int32, lo, hi int32, b byte) int32 {
 	return -1
 }
 
-// linear scan beats binary search over a wide state's edges up to this fanout
-const wideLinearScanMax = 16
+const (
+	swarOnes  = 0x0101010101010101
+	swarHighs = 0x8080808080808080
+	swarPad   = 8 // tail slack in wideByte so the last word load stays in bounds
+)
+
+// swarEdge finds b in labels[lo:hi] and returns the parallel children entry, or
+// -1. It tests eight labels per word, so a wide state costs a couple of
+// predictable iterations instead of one data-dependent branch per label.
+// labels carries eight bytes of tail padding to keep the last word in bounds;
+// a hit in that padding, or in the next state's labels, lands at k >= hi.
+func swarEdge(labels []byte, children []int32, lo, hi int32, b byte) int32 {
+	bcast := uint64(b) * swarOnes
+	for i := lo; i < hi; i += 8 {
+		v := binary.LittleEndian.Uint64(labels[i:]) ^ bcast
+		if z := (v - swarOnes) &^ v & swarHighs; z != 0 {
+			// borrows only propagate up, so the lowest flagged byte is a real hit
+			if k := i + int32(bits.TrailingZeros64(z)>>3); k < hi {
+				return children[k]
+			}
+			return -1
+		}
+	}
+	return -1
+}
+
+// measured crossover: word-at-a-time wins to fanout 64, binary search past 128
+const wideBsearchMin = 64
 
 // ACMatcher is a per-goroutine matcher over a shared AhoCorasick automaton.
 // It caches per-position automaton states of the previous word: the state
@@ -341,19 +375,11 @@ func (m *ACMatcher) FindLongestMatches(data []byte) []Match {
 			}
 			if c < noEdge { // fanout >= 2
 				lo, hi := wideStart(c), nd.label
-				found := int32(-1)
-				if hi-lo > wideLinearScanMax {
+				var found int32
+				if hi-lo > wideBsearchMin {
 					found = bsearchEdge(wideByte, wideChild, lo, hi, b)
 				} else {
-					for i := lo; i < hi; i++ {
-						if wideByte[i] == b {
-							found = wideChild[i]
-							break
-						}
-						if wideByte[i] > b {
-							break
-						}
-					}
+					found = swarEdge(wideByte, wideChild, lo, hi, b)
 				}
 				if found >= 0 {
 					cur = found

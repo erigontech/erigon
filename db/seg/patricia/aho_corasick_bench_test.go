@@ -18,7 +18,9 @@ package patricia
 
 import (
 	"bytes"
+	"fmt"
 	"math/rand"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -143,5 +145,42 @@ func BenchmarkBuild(b *testing.B) {
 			ac.Insert(p, j)
 		}
 		ac.Build()
+	}
+}
+
+// BenchmarkEdgeLookup pins the fanout at which binary search starts to beat
+// scanning eight labels a word, which is what wideBsearchMin encodes.
+func BenchmarkEdgeLookup(b *testing.B) {
+	r := rand.New(rand.NewSource(3))
+	for _, fanout := range []int32{2, 4, 8, 12, 16, 24, 32, 48, 64, 128, 256} {
+		perm := r.Perm(256)[:fanout]
+		labels := make([]byte, fanout)
+		for i, v := range perm {
+			labels[i] = byte(v)
+		}
+		slices.Sort(labels)
+		children := make([]int32, fanout)
+		for i := range children {
+			children[i] = int32(i)
+		}
+		padded := append(slices.Clone(labels), make([]byte, swarPad)...)
+		probes := make([]byte, 256)
+		for i := range probes {
+			probes[i] = byte(r.Intn(256))
+		}
+		b.Run(fmt.Sprintf("swar/fanout=%d", fanout), func(b *testing.B) {
+			var sink int32
+			for i := 0; i < b.N; i++ {
+				sink += swarEdge(padded, children, 0, fanout, probes[i&255])
+			}
+			runtime.KeepAlive(sink)
+		})
+		b.Run(fmt.Sprintf("bsearch/fanout=%d", fanout), func(b *testing.B) {
+			var sink int32
+			for i := 0; i < b.N; i++ {
+				sink += bsearchEdge(padded, children, 0, fanout, probes[i&255])
+			}
+			runtime.KeepAlive(sink)
+		})
 	}
 }
