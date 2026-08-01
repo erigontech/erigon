@@ -792,7 +792,7 @@ func TestRetirementLoopReturnsOnContextCancellation(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- a.retirementLoop(nil)
+		done <- a.retirementLoop()
 	}()
 
 	select {

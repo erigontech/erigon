@@ -112,7 +112,7 @@ design choice: `caplin/` entries go through the same window logic as typed
 entries, keyed for dedup on `"caplin/" + <version-stripped remainder>` (the
 prefix keeps the key disjoint from typed keys; keying on the FULL name would
 give zero dedup since the version is embedded in it). Fix 5 switches the flat
-glob to a recursive `filepath.WalkDir` collecting `*.torrent`.
+glob to a recursive scan collecting `*.torrent`.
 
 ## Technical Details
 
@@ -145,11 +145,17 @@ glob to a recursive `filepath.WalkDir` collecting `*.torrent`.
   EMPTY `t.TempDir()` — `OpenList`'s deferred `recalcVisibleFiles` (`:164`)
   unconditionally reassigns `s.visible` (`:242`), so no fixture .seg files
   are needed. Run under `-race`.
-- Fix 5: `filepath.WalkDir(dir, ...)` collecting `.torrent`; keep the
-  failFast branch (`torrent_verify.go:96-108`) untouched. Walk-error policy:
-  log-and-skip unreadable entries (Glob never failed on those; propagating
-  would abort the whole verify on one bad subdir). State the EL-state-torrent
-  scope expansion in the commit body.
+- Fix 5: recursive scan collecting `.torrent`. `filepath.WalkDir` was the
+  first choice but does not descend a symlinked root or symlinked subtree,
+  and putting `snapshots/` (or one of its subdirs) on another disk via a
+  symlink is a supported layout — hence the custom `os.ReadDir` recursion
+  resolving each directory with `filepath.EvalSymlinks`, using the resolved
+  path as the cycle guard. Walk-error policy: unreadable entries are logged
+  and skipped so the rest still gets verified, but they are reported in the
+  final error — a partial scan may hide any number of torrents and must not
+  pass as a complete verification. `failFast` decides only whether the run
+  stops at the first mismatch. State the EL-state-torrent scope expansion in
+  the commit body.
 - Fix 6: in `Preverified.Typed`, replace the unconditional keep at
   `util.go:142-145`: strip the `caplin/` prefix, `strings.Cut` the version
   prefix, `ver.ParseVersion`, window = `snaptype.BeaconBlocks.Versions()`
@@ -233,8 +239,8 @@ glob to a recursive `filepath.WalkDir` collecting `*.torrent`.
 - [x] write red test: temp dir with `caplin/` subdir containing a torrent
   fixture — unfixed code never visits it
 - [x] replace `filepath.Glob(dir/*.torrent)` (`torrent_verify.go:41`) with a
-  recursive `filepath.WalkDir` collecting `*.torrent`; walk errors are
-  logged and skipped; failFast branch (`:96-108`) unchanged
+  recursive symlink-following scan collecting `*.torrent`; unreadable paths
+  are logged, skipped, and folded into the final error
 - [x] write test for the flat case (top-level torrents still found)
 - [x] run `go test ./db/integrity/...` — green
 - [x] commit: `db/integrity: verify torrents recursively (caplin/ and state
@@ -286,6 +292,16 @@ glob to a recursive `filepath.WalkDir` collecting `*.torrent`.
   pragmatism exemptions (logging fix; sleep deletion backed by the
   compressor fsync evidence) and that the untested `:249` return is
   review-covered. No Summary heading, no Testing section.
+
+**Review-pass additions beyond the six items** (list them in the PR body so
+they are not read as part of the recursive-walk / cancellation fixes):
+- `VerifyTorrentFiles` now reports piece-hash mismatches, unreachable paths
+  and cancellation through its return value. Previously `--failFast=false`
+  logged warnings and exited 0, so a corrupt datadir passed verification.
+- `antiquate`/`antiquateBlobs` failures are no longer logged when the context
+  is already cancelled (shutdown, not failure), and blob-sidecar removal
+  failures are aggregated into one warning instead of one per slot over a
+  ≥10k-slot range.
 
 **Backport candidacy**: the FrozenBlobs race fix and the antiquary
 cancellation fix are release-branch material (`release/3.5`/`3.6`) if a

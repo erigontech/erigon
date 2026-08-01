@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -116,6 +118,38 @@ func TestFrozenBlobsZeroBeforeDeneb(t *testing.T) {
 	t.Cleanup(sn.Close)
 
 	require.Equal(t, uint64(0), sn.FrozenBlobs())
+}
+
+// FrozenBlobs is the blob-antiquation watermark, so it must report the end of the
+// visible blob segments rather than a constant.
+func TestFrozenBlobsReportsVisibleSegmentEnd(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	writeEmptyBlobSidecarsSegment(t, dirs, 0, snaptype.CaplinMergeLimit)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	require.Equal(t, uint64(snaptype.CaplinMergeLimit), sn.FrozenBlobs())
+}
+
+// A blob segment with one empty word per slot: enough for OpenFolder to make it
+// visible, without needing a populated blob store.
+func writeEmptyBlobSidecarsSegment(t *testing.T, dirs datadir.Dirs, from, to uint64) {
+	t.Helper()
+	segName := snaptype.BlobSidecars.FileName(version.ZeroVersion, from, to)
+	f, _, ok := snaptype.ParseFileName(dirs.Snap, segName)
+	require.True(t, ok)
+
+	c, err := seg.NewCompressor(t.Context(), "test blobs", f.Path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	defer c.Close()
+	for range to - from {
+		require.NoError(t, c.AddWord(nil))
+	}
+	require.NoError(t, c.Compress())
+
+	require.NoError(t, snapshotsync.BeaconSimpleIdx(t.Context(), f, 1, dirs.Tmp, &background.Progress{}, log.LvlDebug, log.New()))
 }
 
 // FrozenBlobs must take visibleLock: recalcVisibleFiles (via OpenFolder)

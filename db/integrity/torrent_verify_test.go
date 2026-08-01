@@ -78,14 +78,18 @@ func TestVerifyTorrentFilesValidPairs(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// Without failFast a corrupt file is only warned about, so the remaining files still get verified.
+// Without failFast every file is still verified, but the run must report the
+// failures it collected instead of exiting as a clean verification.
 func TestVerifyTorrentFilesWithoutFailFast(t *testing.T) {
 	dir := t.TempDir()
 	writeTorrentPair(t, dir, "corrupt.seg", true)
+	writeTorrentPair(t, dir, "alsoCorrupt.seg", true)
 	writeTorrentPair(t, dir, filepath.Join("caplin", "valid.seg"), false)
 
 	err := VerifyTorrentFiles(context.Background(), dir, false, log.New())
-	require.NoError(t, err)
+	require.Error(t, err)
+	// Both corrupt files counted: the run went past the first failure.
+	require.ErrorContains(t, err, "2 file(s) failed verification")
 }
 
 // An interrupted run must not be reported as a successful verification: without
@@ -140,12 +144,27 @@ func TestVerifyTorrentFilesSymlinkedSubdir(t *testing.T) {
 }
 
 // A path the scan cannot resolve may hide any number of torrents, so the run
-// must fail rather than report a complete verification over what it did reach.
+// must fail rather than report a complete verification over what it did reach —
+// while still verifying the files it could reach.
 func TestVerifyTorrentFilesUnresolvableSubdir(t *testing.T) {
 	dir := t.TempDir()
-	writeTorrentPair(t, dir, "test.seg", false)
+	writeTorrentPair(t, dir, "corrupt.seg", true)
 	require.NoError(t, os.Symlink(filepath.Join(dir, "gone"), filepath.Join(dir, "caplin")))
 
 	err := VerifyTorrentFiles(context.Background(), dir, false, log.New())
 	require.Error(t, err)
+	require.ErrorContains(t, err, "1 unreadable path(s)")
+	require.ErrorContains(t, err, "1 file(s) failed verification")
+}
+
+// A symlink pointing back at an ancestor must not send the scan into unbounded
+// recursion; the resolved-path guard stops it and the reachable files still verify.
+func TestVerifyTorrentFilesSymlinkCycle(t *testing.T) {
+	dir := t.TempDir()
+	writeTorrentPair(t, dir, "test.seg", true)
+	require.NoError(t, os.Symlink(dir, filepath.Join(dir, "loop")))
+
+	err := VerifyTorrentFiles(context.Background(), dir, true, log.New())
+	require.Error(t, err)
+	require.ErrorContains(t, err, "hash mismatch")
 }

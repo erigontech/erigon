@@ -225,15 +225,15 @@ func (a *Antiquary) Loop() error {
 	if a.states {
 		go a.loopStates(a.ctx)
 	}
-	retirementTicker := time.NewTicker(12 * time.Second)
-	defer retirementTicker.Stop()
-	return a.retirementLoop(retirementTicker.C)
+	return a.retirementLoop()
 }
 
-func (a *Antiquary) retirementLoop(tick <-chan time.Time) error {
+func (a *Antiquary) retirementLoop() error {
+	retirementTicker := time.NewTicker(12 * time.Second)
+	defer retirementTicker.Stop()
 	for {
 		select {
-		case <-tick:
+		case <-retirementTicker.C:
 			if !a.backfilled.Load() {
 				continue
 			}
@@ -516,18 +516,28 @@ func (a *Antiquary) antiquateBlobs() error {
 	}
 	defer roTx.Rollback()
 	// now prune blobs from the database
+	var removeFailures uint64
+	var firstFailedSlot uint64
+	var firstRemoveErr error
 	for i := currentBlobsProgress; i < to; i++ {
 		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(roTx, i)
 		if err != nil {
 			return err
 		}
 		if err := a.blobStorage.RemoveBlobSidecars(a.ctx, i, blockRoot); err != nil {
-			// Every remaining slot would fail the same way; warning per slot would flood the log.
 			if a.ctx.Err() != nil {
 				return a.ctx.Err()
 			}
-			a.logger.Warn("[Antiquary] Failed to remove blob sidecars", "slot", i, "err", err)
+			removeFailures++
+			if firstRemoveErr == nil {
+				firstFailedSlot, firstRemoveErr = i, err
+			}
 		}
+	}
+	if removeFailures > 0 {
+		// The loop spans at least CaplinMergeLimit slots and a storage fault hits every
+		// one of them, so the failures are aggregated rather than warned per slot.
+		a.logger.Warn("[Antiquary] Failed to remove blob sidecars", "slots", removeFailures, "firstSlot", firstFailedSlot, "err", firstRemoveErr)
 	}
 	return nil
 }
