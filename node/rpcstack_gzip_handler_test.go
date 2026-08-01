@@ -157,7 +157,7 @@ func TestGzipHandlerStatusStreaming(t *testing.T) {
 // shared buffer-pool cap (1 MiB) is compressed correctly. This exercises the
 // pool-cap path: the oversized buffer must not be returned to the pool.
 func TestGzipHandlerLargeBody(t *testing.T) {
-	body := bytes.Repeat([]byte("x"), 1<<20+1)
+	body := bytes.Repeat([]byte("x"), (1<<20)+1)
 	handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(body)
 	}))
@@ -187,7 +187,7 @@ func TestGzipResponseWriterFlushActivatesStreaming(t *testing.T) {
 	// Write more data in streaming mode, then close.
 	_, _ = grw.Write([]byte(" post-flush"))
 	require.NoError(t, grw.gzw.Close())
-	gzStreamPool.Put(grw.gzw)
+	putStreamGzip(grw.gzw)
 
 	got := decompressGzip(t, rec.Body)
 	assert.Equal(t, []byte("pre-flush post-flush"), got)

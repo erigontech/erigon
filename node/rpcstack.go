@@ -184,8 +184,9 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // smaller than this are sent as-is: gzip framing overhead would exceed savings.
 const minGzipBodySize = 1024
 
-// Both paths compress at BestSpeed: RPC responses are latency-sensitive and
-// the ratio gain from higher levels does not pay for the extra CPU.
+// bufferedGzipLevel controls fully buffered (one-shot) responses; streaming
+// responses always use BestSpeed (see gzStreamPool), since bytes leave as they
+// are produced and per-flush latency matters more than ratio.
 const bufferedGzipLevel = gzip.BestSpeed
 
 var gzStreamPool = sync.Pool{

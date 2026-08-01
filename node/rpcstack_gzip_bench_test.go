@@ -49,9 +49,12 @@ var historicalBlocks = []struct {
 
 // --- stdlib gzip handler (reference implementation) ---
 
+// The stdlib writer runs at BestSpeed to match the production Klauspost level,
+// so the benchmark isolates the library difference rather than mixing in a
+// compression-level difference.
 var stdlibGzPool = sync.Pool{
 	New: func() any {
-		w, _ := gzip.NewWriterLevel(io.Discard, gzip.DefaultCompression)
+		w, _ := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed)
 		return w
 	},
 }
@@ -365,10 +368,10 @@ func getBenchPayload(b *testing.B) []byte {
 	return benchPayload
 }
 
-func BenchmarkKlauspostGzip(b *testing.B) {
+func BenchmarkKlauspostGzipBestSpeed(b *testing.B) {
 	benchmarkGzipHandler(b, getBenchPayload(b), newGzipHandler)
 }
 
-func BenchmarkStdlibGzip(b *testing.B) {
+func BenchmarkStdlibGzipBestSpeed(b *testing.B) {
 	benchmarkGzipHandler(b, getBenchPayload(b), newStdlibGzipHandler)
 }
