@@ -185,6 +185,13 @@ workers="${EEST_SPEC_WORKERS:-$default_workers}"
 max="${EEST_SPEC_MAX_FAILURES:-$default_max}"
 evm_bin="${EVM_BIN:-build/bin/evm}"
 
+# Race-instrumented shards multiply RSS several-fold over the Go heap (TSAN
+# shadow + history). Bound the heap so allocation bursts trigger GC early
+# instead of growing the process into the CI runner's OOM range.
+if [[ "$shard" == *-race* ]]; then
+	export GOMEMLIMIT="${GOMEMLIMIT:-4GiB}"
+fi
+
 if [[ ! -x "$evm_bin" ]]; then
 	echo "$evm_bin not found or not executable; run 'make evm' first" >&2
 	exit 2
