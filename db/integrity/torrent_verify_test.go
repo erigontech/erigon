@@ -27,6 +27,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/stretchr/testify/require"
 
+	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -167,6 +168,42 @@ func TestVerifyTorrentFilesUnresolvableSubdirFailFast(t *testing.T) {
 	err := VerifyTorrentFiles(context.Background(), dir, true, log.New())
 	require.Error(t, err)
 	require.ErrorContains(t, err, "hash mismatch")
+}
+
+// A data file that exists but cannot be stat'ed must be accounted for like an
+// unreadable path — skipped and reported — instead of aborting the run before a
+// single piece hash is checked.
+func TestVerifyTorrentFilesUnreadableDataFile(t *testing.T) {
+	dir := t.TempDir()
+	writeTorrentPair(t, dir, "corrupt.seg", true)
+
+	// Self-referential data file: its .torrent is intact, but stat fails with
+	// ELOOP rather than NotExist.
+	writeTorrentPair(t, dir, "loop.seg", false)
+	loop := filepath.Join(dir, "loop.seg")
+	require.NoError(t, dir2.RemoveFile(loop))
+	require.NoError(t, os.Symlink(loop, loop))
+
+	err := VerifyTorrentFiles(context.Background(), dir, false, log.New())
+	require.Error(t, err)
+	require.ErrorContains(t, err, "unreadable data file(s)")
+	// The reachable file was still verified rather than skipped by the abort.
+	require.ErrorContains(t, err, "1 file(s) failed verification")
+}
+
+// An interrupted run must report what the scan and the workers already found,
+// not collapse to the bare cancellation.
+func TestVerifyTorrentFilesCancelledKeepsScanError(t *testing.T) {
+	dir := t.TempDir()
+	writeTorrentPair(t, dir, "test.seg", false)
+	require.NoError(t, os.Symlink(filepath.Join(dir, "gone"), filepath.Join(dir, "caplin")))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := VerifyTorrentFiles(ctx, dir, false, log.New())
+	require.ErrorIs(t, err, context.Canceled)
+	require.ErrorContains(t, err, "1 unreadable path(s)")
 }
 
 // A symlink pointing back at an ancestor must not send the scan into unbounded

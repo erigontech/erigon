@@ -165,7 +165,7 @@ func (s *CaplinSnapshots) Close() {
 func (s *CaplinSnapshots) OpenList(fileNames []string, optimistic bool) error {
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
-	// dirtyLock still held: the dirty mutation above and this publish must be one
+	// dirtyLock still held: the dirty mutation below and this publish must be one
 	// atomic step, else a concurrent OpenList can publish a segment it just closed.
 	defer s.recalcVisibleFiles()
 

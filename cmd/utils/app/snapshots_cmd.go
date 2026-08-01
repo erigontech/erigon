@@ -1522,7 +1522,7 @@ func doDebugKey(ctx context.Context, cliCtx *cli.Command) error {
 	return nil
 }
 
-func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
+func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 	logger := log.Root()
 
 	checkStr := cliCtx.String("check")
@@ -1570,7 +1570,14 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 	fromStep := cliCtx.Uint64("fromStep")
 
 	var cache *integrity.IntegrityCache
+	// A torrent-verification failure must survive whatever the checks below return,
+	// including an early error or a cancellation on their way out.
 	var torrentVerifyErr error
+	defer func() {
+		if torrentVerifyErr != nil {
+			retErr = errors.Join(torrentVerifyErr, retErr)
+		}
+	}()
 	if cachePath := cliCtx.String("file-integrity-cache"); cachePath != "" {
 		var err error
 		cache, err = integrity.LoadIntegrityCache(cachePath)
@@ -1772,10 +1779,10 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 			logger.Info("[integrity] budget exhausted, moving on", "check", chk, "elapsed", elapsed)
 			continue
 		}
-		return errors.Join(torrentVerifyErr, fmt.Errorf("%s: %w", chk, err))
+		return fmt.Errorf("%s: %w", chk, err)
 	}
 
-	return torrentVerifyErr
+	return nil
 }
 
 // stateFilesProgress returns the latest block fully covered by state-history files.

@@ -55,6 +55,8 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 	}
 
 	var totalBytes int64
+	var unreadable int
+	var firstUnreadable error
 	toVerify := make([]string, 0, len(torrentFiles))
 	for _, tf := range torrentFiles {
 		dataFile := strings.TrimSuffix(tf, ".torrent")
@@ -63,10 +65,18 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 			continue // no data file, skip
 		}
 		if err != nil {
-			return errors.Join(scanErr, fmt.Errorf("stat %s: %w", dataFile, err))
+			logger.Warn("[verify] skipping unreadable data file", "path", dataFile, "err", err)
+			unreadable++
+			if firstUnreadable == nil {
+				firstUnreadable = fmt.Errorf("stat %s: %w", dataFile, err)
+			}
+			continue
 		}
 		toVerify = append(toVerify, tf)
 		totalBytes += info.Size()
+	}
+	if unreadable > 0 {
+		scanErr = errors.Join(scanErr, fmt.Errorf("%d unreadable data file(s), first: %w", unreadable, firstUnreadable))
 	}
 
 	if len(toVerify) == 0 {
@@ -127,16 +137,15 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 	if err := g.Wait(); err != nil {
 		return errors.Join(scanErr, err)
 	}
+	var verifyErr error
+	if failed > 0 {
+		verifyErr = fmt.Errorf("%d file(s) failed verification, first: %w", failed, firstFailure)
+	}
 	// Without failFast the workers only warn, so an interrupted run would
 	// otherwise be indistinguishable from a complete one. The errgroup's own
 	// ctx is always cancelled by now, hence the parent.
 	if err := parent.Err(); err != nil {
-		return err
-	}
-
-	var verifyErr error
-	if failed > 0 {
-		verifyErr = fmt.Errorf("%d file(s) failed verification, first: %w", failed, firstFailure)
+		return errors.Join(scanErr, verifyErr, err)
 	}
 	if err := errors.Join(scanErr, verifyErr); err != nil {
 		return err
