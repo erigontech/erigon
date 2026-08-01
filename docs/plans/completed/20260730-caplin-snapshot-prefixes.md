@@ -302,6 +302,16 @@ they are not read as part of the recursive-walk / cancellation fixes):
   is already cancelled (shutdown, not failure), and blob-sidecar removal
   failures are aggregated into one warning instead of one per slot over a
   ≥10k-slot range.
+- `CaplinSnapshots.OpenList` now publishes the visible generation while
+  `dirtyLock` is still held (the deferred `recalcVisibleFiles` used to run
+  after the unlock), and `Close` publishes the empty generation like
+  `BaseRoSnapshots.Close` does. Both are lock-ordering fixes inside the
+  existing mechanism, not the lifecycle refactor deferred to PR-1/PR-2 —
+  `CaplinStateSnapshots` keeps the same publish-after-unlock shape and is
+  left to that program.
+- `seg integrity --failFast` governs the mismatch behaviour only: an
+  unreadable path no longer skips verification of everything the scan did
+  reach, and it no longer aborts the run before any integrity check executes.
 
 **Backport candidacy**: the FrozenBlobs race fix and the antiquary
 cancellation fix are release-branch material (`release/3.5`/`3.6`) if a

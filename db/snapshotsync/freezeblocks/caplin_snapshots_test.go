@@ -177,6 +177,24 @@ func TestFrozenBlobsVisibleLockRace(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// Close unmaps every dirty segment, so the visible generation has to be dropped
+// with it — a View() taken afterwards would hand out closed decompressors.
+func TestCloseClearsVisibleSegments(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	writeEmptyBlobSidecarsSegment(t, dirs, 0, snaptype.CaplinMergeLimit)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	require.Equal(t, uint64(snaptype.CaplinMergeLimit), sn.FrozenBlobs())
+
+	sn.Close()
+
+	view := sn.View()
+	defer view.Close()
+	require.Empty(t, view.BlobSidecarRotx.Segments)
+}
+
 // The antiquary and the history-download stage both call OpenFolder on the same
 // CaplinSnapshots, so publishing must happen while dirtyLock is still held —
 // recalcVisibleFiles walks the dirty btree a concurrent OpenList is mutating.

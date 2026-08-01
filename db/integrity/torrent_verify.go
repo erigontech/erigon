@@ -47,9 +47,6 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 	torrentFiles, scanErr := collectTorrentFiles(dir, logger)
 	if scanErr != nil {
 		scanErr = fmt.Errorf("listing torrent files: %w", scanErr)
-		if failFast {
-			return scanErr
-		}
 	}
 
 	if len(torrentFiles) == 0 {
@@ -66,7 +63,7 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 			continue // no data file, skip
 		}
 		if err != nil {
-			return fmt.Errorf("stat %s: %w", dataFile, err)
+			return errors.Join(scanErr, fmt.Errorf("stat %s: %w", dataFile, err))
 		}
 		toVerify = append(toVerify, tf)
 		totalBytes += info.Size()
@@ -128,7 +125,7 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 	}
 
 	if err := g.Wait(); err != nil {
-		return err
+		return errors.Join(scanErr, err)
 	}
 	// Without failFast the workers only warn, so an interrupted run would
 	// otherwise be indistinguishable from a complete one. The errgroup's own

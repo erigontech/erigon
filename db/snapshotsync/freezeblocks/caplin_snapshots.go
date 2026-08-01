@@ -154,6 +154,9 @@ func (s *CaplinSnapshots) Close() {
 	}
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
+	// Publish the empty generation too, else a View() taken after Close hands out
+	// segments whose decompressor is already unmapped.
+	defer s.recalcVisibleFiles()
 
 	s.closeWhatNotInList(nil)
 }

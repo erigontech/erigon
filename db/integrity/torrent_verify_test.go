@@ -157,6 +157,18 @@ func TestVerifyTorrentFilesUnresolvableSubdir(t *testing.T) {
 	require.ErrorContains(t, err, "1 file(s) failed verification")
 }
 
+// failFast governs the mismatch behaviour only, so an unresolvable path must
+// still leave everything the scan did reach verified.
+func TestVerifyTorrentFilesUnresolvableSubdirFailFast(t *testing.T) {
+	dir := t.TempDir()
+	writeTorrentPair(t, dir, "corrupt.seg", true)
+	require.NoError(t, os.Symlink(filepath.Join(dir, "gone"), filepath.Join(dir, "caplin")))
+
+	err := VerifyTorrentFiles(context.Background(), dir, true, log.New())
+	require.Error(t, err)
+	require.ErrorContains(t, err, "hash mismatch")
+}
+
 // A symlink pointing back at an ancestor must not send the scan into unbounded
 // recursion; the resolved-path guard stops it and the reachable files still verify.
 func TestVerifyTorrentFilesSymlinkCycle(t *testing.T) {
