@@ -167,8 +167,7 @@ type (
 	// StorageChangeHook is called when the storage of an account changes.
 	StorageChangeHook = func(addr accounts.Address, slot accounts.StorageKey, prev, new uint256.Int)
 
-	// LogHook is called when a log is emitted. The log and its Topics/Data are
-	// only valid during the call. Means receiver must not hold pointers to `log` object, must not mutate `log` object
+	// LogHook is called when a log is emitted.
 	LogHook = func(log *types.Log)
 )
 

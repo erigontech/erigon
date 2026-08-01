@@ -502,7 +502,7 @@ func (t *Tracer) OnLog(log *types.Log) {
 
 	t.traces.Append(Trace{
 		OnLog: &OnLogTrace{
-			Log: log.Copy(),
+			Log: log,
 		},
 	})
 }
