@@ -70,14 +70,14 @@ type fakeOpContext struct {
 	addr  accounts.Address
 }
 
-func (c *fakeOpContext) MemoryData() []byte            { return nil }
-func (c *fakeOpContext) StackData() []uint256.Int      { return c.stack }
-func (c *fakeOpContext) Caller() accounts.Address      { return c.addr }
-func (c *fakeOpContext) Address() accounts.Address     { return c.addr }
-func (c *fakeOpContext) CallValue() uint256.Int        { return uint256.Int{} }
-func (c *fakeOpContext) CallInput() []byte             { return nil }
-func (c *fakeOpContext) Code() []byte                  { return nil }
-func (c *fakeOpContext) CodeHash() accounts.CodeHash   { return accounts.EmptyCodeHash }
+func (c *fakeOpContext) MemoryData() []byte          { return nil }
+func (c *fakeOpContext) StackData() []uint256.Int    { return c.stack }
+func (c *fakeOpContext) Caller() accounts.Address    { return c.addr }
+func (c *fakeOpContext) Address() accounts.Address   { return c.addr }
+func (c *fakeOpContext) CallValue() uint256.Int      { return uint256.Int{} }
+func (c *fakeOpContext) CallInput() []byte           { return nil }
+func (c *fakeOpContext) Code() []byte                { return nil }
+func (c *fakeOpContext) CodeHash() accounts.CodeHash { return accounts.EmptyCodeHash }
 
 // TestPrestateTracerOnOpcodeFaultedSkipsLookup verifies that an opcode invoked
 // with a non-nil err (fault path, e.g. out-of-gas at the opcode itself) does not
