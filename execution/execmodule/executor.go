@@ -19,6 +19,7 @@ package execmodule
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -235,13 +236,16 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 			stuckIters, lastExecProgress, action = watchdogStep(stuckIters, lastExecProgress, curExecProgress)
 			switch action {
 			case watchdogWarn:
+				snapshot := snapshotStageProgress(tx)
 				pe.logger.Warn("[PipelineExecutor] RunLoop hasMore=true with no exec progress",
 					"iterations", stuckIters, "stages.Execution", curExecProgress,
 					"lastMoreStage", pe.sync.LastMoreStage(),
+					"stageProgress", snapshot,
 					"initialCycle", cfg.InitialCycle, "firstCycle", cfg.FirstCycle)
 			case watchdogAbort:
-				return tx, sd, fmt.Errorf("PipelineExecutor.RunLoop: watchdog: %d iterations with hasMore=true and stages.Execution stalled at %d, lastMoreStage=%s",
-					stuckIters, curExecProgress, pe.sync.LastMoreStage())
+				snapshot := snapshotStageProgress(tx)
+				return tx, sd, fmt.Errorf("PipelineExecutor.RunLoop: watchdog: %d iterations with hasMore=true and stages.Execution stalled at %d, lastMoreStage=%s, stageProgress=%s",
+					stuckIters, curExecProgress, pe.sync.LastMoreStage(), snapshot)
 			}
 		}
 	}
@@ -282,6 +286,27 @@ func watchdogStep(stuckIters, lastExecProgress, curExecProgress uint64) (uint64,
 	default:
 		return stuckIters, lastExecProgress, watchdogContinue
 	}
+}
+
+// snapshotStageProgress returns a compact "stage=N stage=N ..." string of
+// every AllStages entry's current progress. Diagnostic-only, used by the
+// RunLoop watchdog to show which stages advanced vs stalled.
+func snapshotStageProgress(tx kv.Tx) string {
+	var b strings.Builder
+	for i, id := range stages.AllStages {
+		p, err := stages.GetStageProgress(tx, id)
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(string(id))
+		b.WriteByte('=')
+		if err != nil {
+			b.WriteString("err")
+			continue
+		}
+		fmt.Fprintf(&b, "%d", p)
+	}
+	return b.String()
 }
 
 // ProcessFrozenBlocks runs the pipeline over snapshot blocks at startup.
