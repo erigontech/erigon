@@ -301,7 +301,6 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 
 	var cumulativeBlobGasUsedInBlock uint64
 	// The reduce side runs on a single goroutine, so one writer serves the whole batch.
-	var receipts rawtemporaldb.ReceiptWriter
 
 	txNumsReader := cfg.BlockReader.TxnumReader()
 	fromTxNum, _ := txNumsReader.Min(ctx, tx, fromBlock)
@@ -320,7 +319,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 			}
 
 			putter := doms.AsPutDel(tx)
-			var receiptWriter rawtemporaldb.ReceiptWriter
+			var receipts rawtemporaldb.ReceiptWriter
 
 			if produce.ReceiptDomain {
 				var logIndexAfterTx uint32
