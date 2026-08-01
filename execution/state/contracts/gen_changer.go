@@ -32,7 +32,7 @@ var (
 const ChangerABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"change\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]"
 
 // ChangerBin is the compiled bytecode used for deploying new contracts.
-var ChangerBin = "0x6080604052348015600f57600080fd5b50607e8061001e6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c80632ee79ded14602d575b600080fd5b60336035565b005b600160008190556002908190556003905556fea264697066735822122055759a7d66bd94e58f9e8393e991422147044bd5fddc39451c4ef60edbcfa29264736f6c63430007020033"
+var ChangerBin = "0x6080604052348015600f57600080fd5b50607a80601d6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c80632ee79ded14602d575b600080fd5b60426001600081905560029081905560039055565b00fea2646970667358221220b1150bb0032c27697aa99617100515736d9c59fc59d97cf2c7855f45fcba51f964736f6c63430008240033"
 
 // DeployChanger deploys a new Ethereum contract, binding an instance of Changer to it.
 func DeployChanger(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Changer, error) {

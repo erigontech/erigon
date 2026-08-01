@@ -31,7 +31,7 @@ func TestGetContractCreator(t *testing.T) {
 
 	addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
 	expectCreator := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	expectCredByTx := common.HexToHash("0x6e25f89e24254ba3eb460291393a4715fd3c33d805334cbd05c1b2efe1080f18")
+	expectCredByTx := common.HexToHash("0xdba09f6832198527f973481387dd0d98adfff7b86f6fd8809f0e406d24663fe0")
 	t.Run("valid inputs", func(t *testing.T) {
 		require := require.New(t)
 		results, err := api.GetContractCreator(m.Ctx, addr)

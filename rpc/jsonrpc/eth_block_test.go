@@ -181,7 +181,7 @@ func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	b, err := api.GetBlockByNumber(context.Background(), rpc.LatestBlockNumber, false)
-	expected := common.HexToHash("0x9c47d5780744fa24ccdb1543a9b715e53431d5560b9e460b8b7a68f7c58310ae")
+	expected := common.HexToHash("0x4138db6850859cad91a7493fc4ccbb4147823628eeb3436467dd2d8a1e308f55")
 	if err != nil {
 		t.Errorf("error getting block number with latest tag: %s", err)
 	}
@@ -195,7 +195,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	latestBlockHash := common.HexToHash("0xf164e47db6a1077e96ea986bc070af2ef8c8a0f7f8291a52e0715127b20a1ee2")
 	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
@@ -269,7 +269,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	latestBlockHash := common.HexToHash("0xf164e47db6a1077e96ea986bc070af2ef8c8a0f7f8291a52e0715127b20a1ee2")
 	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
@@ -313,7 +313,7 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	latestBlockHash := common.HexToHash("0xf164e47db6a1077e96ea986bc070af2ef8c8a0f7f8291a52e0715127b20a1ee2")
 	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
@@ -341,7 +341,7 @@ func TestGetBlockTransactionCountByHash(t *testing.T) {
 	ctx := context.Background()
 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	blockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	blockHash := common.HexToHash("0xf164e47db6a1077e96ea986bc070af2ef8c8a0f7f8291a52e0715127b20a1ee2")
 
 	tx, err := m.DB.BeginRw(ctx)
 	require.NoError(t, err)
@@ -373,7 +373,7 @@ func TestGetBlockTransactionCountByHash_ZeroTx(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	blockHash := common.HexToHash("0x5883164d4100b95e1d8e931b8b9574586a1dea7507941e6ad3c1e3a2591485fd")
+	blockHash := common.HexToHash("0x51b6de2158c72fd2113110eb2c64bd16ae03bd3474ddab428fde00c6c268cb75")
 
 	tx, err := m.DB.BeginRw(ctx)
 	require.NoError(t, err)
@@ -405,7 +405,7 @@ func TestGetBlockTransactionCountByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	blockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	blockHash := common.HexToHash("0xf164e47db6a1077e96ea986bc070af2ef8c8a0f7f8291a52e0715127b20a1ee2")
 
 	tx, err := m.DB.BeginRw(ctx)
 	require.NoError(t, err)
@@ -438,7 +438,7 @@ func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
 	ctx := context.Background()
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
-	blockHash := common.HexToHash("0x5883164d4100b95e1d8e931b8b9574586a1dea7507941e6ad3c1e3a2591485fd")
+	blockHash := common.HexToHash("0x51b6de2158c72fd2113110eb2c64bd16ae03bd3474ddab428fde00c6c268cb75")
 
 	tx, err := m.DB.BeginRw(ctx)
 	require.NoError(t, err)
