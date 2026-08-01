@@ -25,7 +25,8 @@
 #   blocktests-legacy-cancun-race-{berlin,shanghai,cancun,london,paris,other-forks}
 #                                              race-detector partition of the
 #                                              Hive legacy-cancun suite
-#   enginextests-stable-sequential             engine-x tests vs. eest_stable
+#   enginextests-stable-{sequential,parallel}  engine-x tests vs. eest_stable
+#   enginextests-devnet                        engine-x tests vs. eest_devnet
 #   enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}-sequential
 #                                              engine-x benchmark fixtures per
 #                                              gas-target subdir; each value
@@ -156,7 +157,7 @@ case "$shard_route" in
 		cmd=blocktest;   paths=("$base/Constantinople/BlockchainTests") ;;
 	blocktests-legacy-cancun | blocktests-legacy-cancun-*)
 		cmd=blocktest;   paths=("$base/Cancun/BlockchainTests") ;;
-	enginextests-stable)
+	enginextests-stable | enginextests-devnet)
 		cmd=enginextest
 		paths=("$base/blockchain_tests_engine_x")
 		extra=(--pre-alloc-dir "${paths[0]}/pre_alloc") ;;

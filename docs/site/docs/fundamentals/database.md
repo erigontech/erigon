@@ -66,21 +66,27 @@ Snapshots are organised into several subdirectories. The main ones are:
 
 ## What does it cost on disk?
 
-Real numbers from a Nov 2024 mainnet archive node:
+Real numbers from Erigon 3.6 archive nodes (`--prune.mode=archive`, default pruning options), July 2026:
 
-```sh
-# eth-mainnet — archive — prune.mode=archive
-chaindata           15 GB
-snapshots/accessor 120 GB
-snapshots/domain   300 GB
-snapshots/history  280 GB
-snapshots/idx      430 GB
-snapshots TOTAL    2.3 TB
-```
+|                              | eth-mainnet | gnosis        | sepolia     | hoodi         | chiado       |
+|------------------------------|-------------|---------------|-------------|---------------|--------------|
+| `chaindata`                  | 22.75 GB    | 9.63 GB       | 12.87 GB    | 6.78 GB       | 2.40 GB      |
+| `snapshots` (block segments) | 996.40 GB   | 284.82 GB     | 614.90 GB   | 33.38 GB      | 12.91 GB     |
+| `snapshots/domain`           | 417.66 GB   | 227.03 GB     | 237.26 GB   | 52.39 GB      | 7.17 GB      |
+| `snapshots/idx`              | 332.72 GB   | 136.67 GB     | 115.95 GB   | 25.47 GB      | 3.44 GB      |
+| `snapshots/history`          | 255.60 GB   | 39.28 GB      | 68.93 GB    | 8.00 GB       | 2.33 GB      |
+| `snapshots/accessor`         | 141.61 GB   | 33.73 GB      | 45.85 GB    | 7.70 GB       | 1.39 GB      |
+| **total**                    | **2.17 TB** | **731.16 GB** | **1.10 TB** | **133.73 GB** | **29.64 GB** |
 
-The breakdown above lists the state/history snapshot subdirectories. The remaining ~1.2 TB is mostly block/transaction `.seg` data, which is not broken out separately here.
+Block segments — headers, bodies and transactions — sit directly in `snapshots/` rather than in a sub-folder, and on
+mainnet they are the single largest item.
 
-For up-to-date totals across all networks and pruning modes, see [Hardware Requirements](../get-started/hardware-requirements).
+Data that is off by default is excluded above. On the same mainnet node it would add 441 GB for the receipts cache
+(`--prune.include-receipts`), 4.4 TB for commitment history (`--prune.include-commitment-history`), and 2.5 TB for the
+Caplin block, blob and state archive.
+
+Each column is one node, so totals differ slightly from the headline figures
+on [Hardware Requirements](../get-started/hardware-requirements), which are measured on freshly synced nodes.
 
 ## Why `chaindata/` stays so small
 
@@ -90,7 +96,8 @@ In Erigon 3, `chaindata/` only holds:
 - Recent blocks not yet folded into snapshots
 - Live txpool, peer state, sync stage progress
 
-Most of the bulk that other clients keep in the active database — historical state, ancient blocks, receipt logs — is in immutable snapshot files instead. This is why `chaindata/` rarely exceeds 20 GB even on archive nodes.
+Most of the bulk that other clients keep in the active database — historical state, ancient blocks, receipt logs — is in
+immutable snapshot files instead. This is why `chaindata/` rarely exceeds ~25 GB even on archive nodes.
 
 Deleting `chaindata/` is **recoverable but not free**: it discards the latest mutable state and any recent blocks not yet folded into snapshots. On restart Erigon re-derives state from the immutable snapshots (re-downloading them if needed) and resyncs the post-snapshot tip forward from the consensus layer over the Engine API — blocks are no longer pulled from peers over devp2p. Treat it as a resync of the chain tip, not a quick rebuild, and keep a backup if fast recovery matters.
 
