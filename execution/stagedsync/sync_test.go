@@ -606,3 +606,107 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 func unwindOf(s stages.SyncStage) stages.SyncStage {
 	return stages.SyncStage(append([]byte(s), 0xF0))
 }
+
+func TestLastMoreStage_EmptyWhenNoStageExhausts(t *testing.T) {
+	s := []*Stage{
+		{
+			ID:          stages.Headers,
+			Description: "H",
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return nil
+			},
+		},
+	}
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ModeApplyingBlocks)
+	_, tx := temporaltest.NewTestTx(t)
+	more, err := state.Run(nil, tx, true, false)
+	require.NoError(t, err)
+	assert.False(t, more)
+	assert.Equal(t, stages.SyncStage(""), state.LastMoreStage())
+}
+
+func TestLastMoreStage_RecordsExhaustingStage(t *testing.T) {
+	s := []*Stage{
+		{
+			ID:          stages.Headers,
+			Description: "H",
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return nil
+			},
+		},
+		{
+			ID:          stages.Bodies,
+			Description: "B",
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return &ErrLoopExhausted{From: 0, To: 10, Reason: "test"}
+			},
+		},
+		{
+			ID:          stages.Senders,
+			Description: "S",
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return nil
+			},
+		},
+	}
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ModeApplyingBlocks)
+	_, tx := temporaltest.NewTestTx(t)
+	more, err := state.Run(nil, tx, true, false)
+	require.NoError(t, err)
+	assert.True(t, more)
+	assert.Equal(t, stages.Bodies, state.LastMoreStage())
+}
+
+func TestLastMoreStage_LatestWinsWhenMultipleExhaust(t *testing.T) {
+	s := []*Stage{
+		{
+			ID: stages.Headers,
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return &ErrLoopExhausted{Reason: "headers"}
+			},
+		},
+		{
+			ID: stages.Bodies,
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return nil
+			},
+		},
+		{
+			ID: stages.Senders,
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return &ErrLoopExhausted{Reason: "senders"}
+			},
+		},
+	}
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ModeApplyingBlocks)
+	_, tx := temporaltest.NewTestTx(t)
+	_, err := state.Run(nil, tx, true, false)
+	require.NoError(t, err)
+	assert.Equal(t, stages.Senders, state.LastMoreStage(), "later stage should win when multiple return ErrLoopExhausted")
+}
+
+func TestLastMoreStage_ResetsAcrossRuns(t *testing.T) {
+	exhaust := true
+	s := []*Stage{
+		{
+			ID: stages.Headers,
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				if exhaust {
+					return &ErrLoopExhausted{Reason: "first-run-only"}
+				}
+				return nil
+			},
+		},
+	}
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ModeApplyingBlocks)
+	_, tx := temporaltest.NewTestTx(t)
+
+	_, err := state.Run(nil, tx, true, false)
+	require.NoError(t, err)
+	assert.Equal(t, stages.Headers, state.LastMoreStage())
+
+	exhaust = false
+	_, err = state.Run(nil, tx, true, false)
+	require.NoError(t, err)
+	assert.Equal(t, stages.SyncStage(""), state.LastMoreStage(), "second Run without exhaust must reset the field")
+}

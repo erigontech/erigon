@@ -237,9 +237,11 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 			case watchdogWarn:
 				pe.logger.Warn("[PipelineExecutor] RunLoop hasMore=true with no exec progress",
 					"iterations", stuckIters, "stages.Execution", curExecProgress,
+					"lastMoreStage", pe.sync.LastMoreStage(),
 					"initialCycle", cfg.InitialCycle, "firstCycle", cfg.FirstCycle)
 			case watchdogAbort:
-				return tx, sd, fmt.Errorf("PipelineExecutor.RunLoop: watchdog: %d iterations with hasMore=true and stages.Execution stalled at %d", stuckIters, curExecProgress)
+				return tx, sd, fmt.Errorf("PipelineExecutor.RunLoop: watchdog: %d iterations with hasMore=true and stages.Execution stalled at %d, lastMoreStage=%s",
+					stuckIters, curExecProgress, pe.sync.LastMoreStage())
 			}
 		}
 	}

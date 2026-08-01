@@ -50,6 +50,13 @@ type Sync struct {
 	stagesIdsList []string
 	mode          stages.Mode
 	metricsCache  metricsCache
+
+	// lastMoreStage records the ID of the last stage whose Forward
+	// returned ErrLoopExhausted this Run. Zero when the last Run
+	// completed without any stage requesting more. Diagnostic-only —
+	// read by RunLoop's stall watchdog to name the stage that keeps
+	// returning hasMore=true.
+	lastMoreStage stages.SyncStage
 }
 
 type Timing struct {
@@ -376,6 +383,7 @@ func (e *ErrLoopExhausted) Is(err error) bool {
 func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (more bool, err error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
+	s.lastMoreStage = ""
 
 	// Reset currentStage on every exit so the next invocation starts at
 	// stages[0]. Sync.Run is contracted to run a full pipeline per call;
@@ -504,6 +512,7 @@ func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.Tempo
 		if errors.As(err, &errExhausted) {
 			s.logger.Debug(fmt.Sprintf("[%s] loop exhausted", s.LogPrefix()), "msg", err.Error())
 			s.logRunStageDone(stageState, start)
+			s.lastMoreStage = stage.ID
 			return true, nil
 		}
 		s.logger.Debug(fmt.Sprintf("[%s] error while executing stage", s.LogPrefix()), "err", err)
@@ -512,6 +521,14 @@ func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.Tempo
 
 	s.logRunStageDone(stageState, start)
 	return false, nil
+}
+
+// LastMoreStage returns the ID of the last stage whose Forward returned
+// ErrLoopExhausted (the "more work" signal that drives PipelineExecutor.RunLoop
+// to iterate). Zero when the last Run completed without any stage requesting
+// more. Diagnostic-only; used by the RunLoop watchdog to name a stuck stage.
+func (s *Sync) LastMoreStage() stages.SyncStage {
+	return s.lastMoreStage
 }
 
 func (s *Sync) logRunStageDone(stageState *StageState, start time.Time) {
