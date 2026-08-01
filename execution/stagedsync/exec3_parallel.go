@@ -596,9 +596,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					}
 					// Fallback for exit paths that publish no cause: a single-block
 					// fork-validation batch exits via execLoopExitCheck (no cause), and
-					// real shutdown cancels with context.Canceled. A fully-applied
-					// requested range is a clean end; otherwise there is more work.
-					if lastBlockResult.BlockNum >= pe.maxBlockNum {
+					// real shutdown cancels with context.Canceled. A fully-applied range
+					// — or an empty loop that executed nothing because the range was
+					// already applied (async background commit advanced progress) — is a
+					// clean end; otherwise there is more work.
+					if applyLoopCloseIsClean(lastBlockResult.BlockNum, pe.maxBlockNum, len(txResultBlocks)) {
 						return nil
 					}
 					return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
@@ -1261,13 +1263,11 @@ func (pe *parallelExecutor) decideStop(blockResult *blockResult, sizeCutPending 
 	if blockResult.Err != nil {
 		return false, false
 	}
-	// AfterCommitment estimate (2x) in per-block mode since commitment
-	// is already computed; BeforeCommitment (4x) in batch mode.
 	var sizeEst uint64
 	if dbg.BatchCommitments {
-		sizeEst = pe.rs.SizeEstimateBeforeCommitment()
+		sizeEst = pe.rs.SizeEstimateBeforeCommitment() // 2x
 	} else {
-		sizeEst = pe.rs.SizeEstimateAfterCommitment()
+		sizeEst = pe.rs.SizeEstimateAfterCommitment() // 1x
 	}
 	switch execLoopShouldExit(blockResult, sizeEst, pe.cfg.batchSize.Bytes(), pe.maxBlockNum, dbg.StopAfterBlock) {
 	case execLoopExitMaxReached, execLoopExitExhausted, execLoopExitStopAfter:
@@ -1503,6 +1503,18 @@ func execLoopShouldExit(blockResult *blockResult, sizeEst, batchLimit, maxBlockN
 		return execLoopExitStopAfter
 	}
 	return execLoopContinue
+}
+
+// applyLoopCloseIsClean reports whether an apply-loop close with no published
+// stop cause is a clean end rather than a partial batch to resume. It is clean
+// when the requested range was fully applied (lastBlockNum >= maxBlockNum) or
+// when the loop executed nothing at all (no tx-results and no blockResult) —
+// the range was already applied before this call, so there is no pending work.
+func applyLoopCloseIsClean(lastBlockNum, maxBlockNum uint64, txResultCount int) bool {
+	if lastBlockNum >= maxBlockNum {
+		return true
+	}
+	return txResultCount == 0 && lastBlockNum == 0
 }
 
 // closeApplyChannels closes the apply-loop-bound channels in the order
@@ -1887,7 +1899,7 @@ func (result *execResult) finalizeSystemTx(
 	// TXs completed — cached reads would return pre-block values instead
 	// of the post-block state needed by syscalls (withdrawal/consolidation).
 	ibs := state.New(state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader))
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(blockNum, txIndex)
 	ibs.SetVersion(txIncarnation)
 	// Use the block's versionMap so the IBS's versionedRead (used by
@@ -1900,7 +1912,7 @@ func (result *execResult) finalizeSystemTx(
 	}
 	ibs.SetTrace(txTask.Trace)
 
-	writes := ibs.FinalizedWrites()
+	writes := ibs.FinalizedWrites(txTask.Rules())
 	return nil, ibs.VersionedReads(), writes, nil
 }
 
@@ -2142,7 +2154,7 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 		return err
 	}
 	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(blockNum, txIndex)
 	postApplyMessageFunc(ibs, message.From(), result.Coinbase, &execResult, chainRules)
 	result.Logs = append(result.Logs, ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), blockNum, txTask.BlockHash())...)
@@ -2317,15 +2329,15 @@ type blockExecutor struct {
 	finalizedResults map[int]*execResult
 
 	// cumulative gas for this block.
-	// blockRegularGasUsed and blockStateGasUsed are tracked separately so the
-	// final blockGasUsed = max(regular, state) matches EIP-8037 / EIP-7778
+	// blockExecutionGasUsed and blockStateGasUsed are tracked separately so the
+	// final blockGasUsed = max(execution, state) matches EIP-8037 / EIP-7778
 	// block-level accounting and equals what the builder set in header.GasUsed
-	// via protocol.SetGasUsed (= max(cumRegular, cumState)).
-	blockRegularGasUsed uint64
-	blockStateGasUsed   uint64
-	blockGasUsed        uint64
-	blobGasUsed         uint64
-	gasPool             *protocol.GasPool
+	// via protocol.SetGasUsed (= max(cumExecution, cumState)).
+	blockExecutionGasUsed uint64
+	blockStateGasUsed     uint64
+	blockGasUsed          uint64
+	blobGasUsed           uint64
+	gasPool               *protocol.GasPool
 
 	execFailed, execAborted []int
 
@@ -2361,43 +2373,34 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 			panic(rec)
 		}
 	}()
-	// mustDeliver (the terminal stop): the coordination ctx is already cancelled
-	// by the stopCause published just before this send, but blockResult(M) MUST
-	// still reach the apply loop (validation + progress) and the calculator — a
-	// dropped M surfaces as a spurious ErrInvalidBlock. Both consumers are alive
-	// and draining, so block unconditionally rather than honour ctx.Done; a
-	// closed channel (batch shutdown) is caught by the recover above.
-	if mustDeliver {
-		be.applyResults <- r
-		if be.commitResults != nil {
-			be.commitResults <- r
-		}
+	if err := be.deliver(ctx, be.applyResults, r, mustDeliver); err != nil {
+		return err
+	}
+	return be.deliver(ctx, be.commitResults, r, mustDeliver)
+}
+
+// deliver sends r to ch using a two-phase select: first try a non-blocking send
+// (even if ctx is cancelled), then if the buffer is full wait for room or ctx.Done.
+// If mustDeliver is true, ctx is ignored and the send blocks until it succeeds.
+func (be *blockExecutor) deliver(ctx context.Context, ch chan<- applyResult, r applyResult, mustDeliver bool) error {
+	if ch == nil {
 		return nil
 	}
-	// Data-arm-first on both channels: deliver while the buffer has room; only
-	// honour ctx.Done if the buffer is full (avoids a deadlock when the consumer
-	// is truly gone).
-	select {
-	case be.applyResults <- r:
+	if mustDeliver {
+		ch <- r
+		return nil
+	}
+	select { // data-arm-first: take a free send even under cancellation
+	case ch <- r:
+		return nil
 	default:
-		select {
-		case be.applyResults <- r:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
 	}
-	if be.commitResults != nil {
-		select {
-		case be.commitResults <- r:
-		default:
-			select {
-			case be.commitResults <- r:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
+	select { // buffer full: wait for room, or bail if the consumer is gone
+	case ch <- r:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	return nil
 }
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, commitResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
@@ -2739,14 +2742,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				if txn := txTask.Tx(); txn != nil {
-					regularContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txTask.Rules().IsAmsterdam)
-					if err := protocol.CheckBlockGasInclusion(be.gasPool, regularContribution, stateContribution); err != nil {
+					executionContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txTask.Rules().IsAmsterdam)
+					if err := protocol.CheckBlockGasInclusion(be.gasPool, executionContribution, stateContribution); err != nil {
 						return be.invalidBlockResult(fmt.Errorf("%w: block gas used overflow at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
 					}
 				}
 
-				if err := be.gasPool.ConsumeRegular(txResult.ExecutionResult.BlockRegularGasUsed); err != nil {
-					return be.invalidBlockResult(fmt.Errorf("%w, block=%d: block regular gas overflow", rules.ErrInvalidBlock, be.blockNum)), nil
+				if err := be.gasPool.ConsumeExecution(txResult.ExecutionResult.BlockExecutionGasUsed); err != nil {
+					return be.invalidBlockResult(fmt.Errorf("%w, block=%d: block execution gas overflow", rules.ErrInvalidBlock, be.blockNum)), nil
 				}
 				if err := be.gasPool.ConsumeState(txResult.ExecutionResult.BlockStateGasUsed); err != nil {
 					return be.invalidBlockResult(fmt.Errorf("%w, block=%d: block state gas overflow", rules.ErrInvalidBlock, be.blockNum)), nil
@@ -2896,15 +2899,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			if result.Receipt != nil {
-				// EIP-8037 / EIP-7778: block-level gas is max(cum regular,
+				// EIP-8037 / EIP-7778: block-level gas is max(cum execution,
 				// cum state) — NOT sum of per-tx receipt gas. Receipt gas
 				// accounts for refunds and (post-Amsterdam) carries the
 				// FloorGasCost floor; summing it bears no fixed relationship
 				// to header.GasUsed, which the builder sets via
-				// protocol.SetGasUsed = max(cumBlockRegular, cumBlockState).
-				be.blockRegularGasUsed += result.ExecutionResult.BlockRegularGasUsed
+				// protocol.SetGasUsed = max(cumBlockExecution, cumBlockState).
+				be.blockExecutionGasUsed += result.ExecutionResult.BlockExecutionGasUsed
 				be.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
-				be.blockGasUsed = max(be.blockRegularGasUsed, be.blockStateGasUsed)
+				be.blockGasUsed = max(be.blockExecutionGasUsed, be.blockStateGasUsed)
 				// applyResult.blockGasUsed is the per-tx contribution used for
 				// progress / uncommittedGas tracking; receipt gas is fine here.
 				applyResult.blockGasUsed = int64(result.Receipt.GasUsed)
@@ -3021,11 +3024,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			pe.RUnlock()
 
 			ibs := state.New(reader)
-			defer ibs.Release(false)
+			defer ibs.Close()
 			ibs.SetVersion(finalVersion.Incarnation)
 			localVersionMap := state.NewVersionMap(nil)
 			ibs.SetVersionMap(localVersionMap)
 			ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
+			ibs.StartAccessRecording()
 
 			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
 				// Syscalls share the main ibs so their writes (EIP-7002/7251
@@ -3060,19 +3064,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.blockNum, err)), nil
 				}
 
-				// syscallIBS == ibs unconditionally now; no separate write
-				// propagation needed — syscall writes flow through
-				// ibs.VersionedWrites() + Normalize into finalizeWrites below.
-
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
 
-				ivw := ibs.VersionedWrites()
-				if !ivw.IsEmpty() {
-					be.blockIO.RecordWrites(finalVersion, ivw)
-					be.versionMap.FlushVersionedWrites(ivw, true, "")
+				writes := ibs.FinalizedWrites(lastResult.Rules())
+				if !writes.IsEmpty() {
+					be.blockIO.RecordWrites(finalVersion, writes)
+					be.versionMap.FlushVersionedWrites(writes, true, "")
 				}
 
-				// Commit finalize writes from the versionMap write-set (ivw), the
+				// Commit finalize writes from the versionMap write-set, the
 				// same Normalize path regular txs use, rather than from
 				// so.data via MakeWriteSet. This keeps the parallel commit sourced
 				// solely from versionedWrites so the write-path stateObject is
@@ -3095,7 +3095,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 				emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
 				var normErr error
-				finalizeWrites, normErr = ivw.Normalize(be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
+				finalizeWrites, normErr = writes.Normalize(be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
 				if domainKeysErr != nil {
 					return nil, fmt.Errorf("[parallel] finalize iterate storage prefix for block write normalization: %w", domainKeysErr)
 				}

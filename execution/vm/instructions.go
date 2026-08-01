@@ -763,7 +763,7 @@ func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err error) {
 	loc := scope.Stack.peek()
-	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey())
+	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey(evm))
 	return pc, nil, err
 }
 
@@ -776,7 +776,7 @@ func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
 	}
-	key := scope.peekStorageKey()
+	key := scope.peekStorageKey(evm)
 	scope.Stack.drop()
 	val := scope.Stack.popCopy()
 	return pc, nil, evm.IntraBlockState().SetState(scope.Contract.Address(), key, val)
@@ -1021,13 +1021,13 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		}
 		gas = scope.Gas()
 		if evm.chainRules.IsTangerineWhistle {
-			gas.Regular -= gas.Regular / 64
+			gas.Execution -= gas.Execution / 64
 		}
 		gasChangeReason := tracing.GasChangeCallContractCreation
 		if typ == CREATE2 {
 			gasChangeReason = tracing.GasChangeCallContractCreation2
 		}
-		scope.useGas(gas.Regular, evm.Config().Tracer, gasChangeReason)
+		scope.useGas(gas.Execution, evm.Config().Tracer, gasChangeReason)
 		scope.stateGas = 0
 		returnGas = gas
 		forwarded = true
@@ -1114,7 +1114,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 			evm.intraBlockState.MarkReadsInternal(toAddr)
 			return pc, nil, ErrWriteProtection
 		}
-		gas.Regular += params.CallStipend
+		gas.Execution += params.CallStipend
 	}
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
@@ -1167,7 +1167,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
 	if !value.IsZero() {
-		gas.Regular += params.CallStipend
+		gas.Execution += params.CallStipend
 	}
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it

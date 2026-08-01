@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -47,6 +46,11 @@ type StateV3 struct {
 	persistReceiptsCacheV2 bool
 	txNum                  uint64
 	trace                  atomic.Bool
+
+	// Scratch for the per-transaction index writes; the apply goroutine alone
+	// touches them.
+	receiptsWriter rawtemporaldb.ReceiptWriter
+	traceAddr      common.Address
 }
 
 func NewStateV3(domains *execctx.SharedDomains, persistReceiptsCacheV2 bool, logger log.Logger) *StateV3 {
@@ -443,15 +447,15 @@ func (rs *StateV3) CommitStepBoundary(ctx context.Context, roTx kv.TemporalTx, b
 func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, cummulativeBlobGas uint64, logs types.Logs, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}, historyExecution bool, skipReceiptCache bool) error {
 	domains := rs.domains
 	for addr := range traceFroms {
-		addrValue := addr.Value()
-		if err := domains.IndexAdd(kv.TracesFromIdx, addrValue[:], txNum); err != nil {
+		rs.traceAddr = addr.Value()
+		if err := domains.IndexAdd(kv.TracesFromIdx, rs.traceAddr[:], txNum); err != nil {
 			return err
 		}
 	}
 
 	for addr := range traceTos {
-		addrValue := addr.Value()
-		if err := domains.IndexAdd(kv.TracesToIdx, addrValue[:], txNum); err != nil {
+		rs.traceAddr = addr.Value()
+		if err := domains.IndexAdd(kv.TracesToIdx, rs.traceAddr[:], txNum); err != nil {
 			return err
 		}
 	}
@@ -468,20 +472,26 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 		}
 	}
 
+	var putter kv.TemporalPutDel
+
 	if receipt != nil {
 		if !historyExecution {
 			blockLogIndex := receipt.FirstLogIndexWithinBlock
 			if !rawtemporaldb.ReceiptStoresFirstLogIdx(tx) {
 				blockLogIndex += uint32(len(receipt.Logs))
 			}
-			if err := rawtemporaldb.AppendReceipt(rs.domains.AsPutDel(tx), blockLogIndex, receipt.CumulativeGasUsed, cummulativeBlobGas, txNum); err != nil {
+			putter = domains.AsPutDel(tx)
+			if err := rs.receiptsWriter.AppendMetadata(putter, blockLogIndex, receipt.CumulativeGasUsed, cummulativeBlobGas, txNum); err != nil {
 				return err
 			}
 		}
 	}
 
 	if rs.persistReceiptsCacheV2 && !skipReceiptCache {
-		if err := rawdb.WriteReceiptCacheV2(rs.domains.AsPutDel(tx), receipt, txNum); err != nil {
+		if putter == nil {
+			putter = domains.AsPutDel(tx)
+		}
+		if err := rs.receiptsWriter.Append(putter, receipt, txNum); err != nil {
 			return err
 		}
 	}

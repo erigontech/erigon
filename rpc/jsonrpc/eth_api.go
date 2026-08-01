@@ -166,6 +166,12 @@ type BaseAPI struct {
 	receiptsGenerator   *receipts.Generator
 	borReceiptGenerator *receipts.BorGenerator
 	balRegenerator      *bal.Regenerator
+
+	// witnessCache serves recent legacy-mode debug_executionWitness results from
+	// memory, keyed by block hash; nil disables it (only the embedded node wires one).
+	// It is the single source of truth for head-capture/cache-only serving mode, read
+	// by both the debug and eth_getWitness serve paths.
+	witnessCache *witnessResultCache
 }
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, bridgeReader bridgeReader, conf *rpccfg.BaseApiConfig) *BaseAPI {

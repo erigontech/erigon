@@ -143,7 +143,7 @@ func (b *SimulatedBackend) Close() {
 		b.pendingReaderTx = nil
 	}
 	if b.pendingState != nil {
-		b.pendingState.Release(false)
+		b.pendingState.Close()
 		b.pendingState = nil
 	}
 	b.m.Close()
@@ -190,7 +190,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 		b.pendingReaderTx.Rollback()
 	}
 	if b.pendingState != nil {
-		b.pendingState.Release(false)
+		b.pendingState.Close()
 	}
 	tx, err := b.m.DB.BeginTemporalRo(context.Background()) //nolint:gocritic
 	if err != nil {

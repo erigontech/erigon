@@ -1154,6 +1154,40 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.Nil(entry)
 }
 
+func TestReadBlockLoadsEmptyBlockAccessList(t *testing.T) {
+	t.Parallel()
+	_, tx := memdb.NewTestTx(t)
+	defer tx.Rollback()
+
+	emptyBALHash := empty.BlockAccessListHash
+	withdrawalsHash := empty.RootHash
+	blobGas := uint64(0)
+	parentBeaconBlockRoot := common.Hash{}
+	requestsHash := common.Hash{}
+	block := types.NewBlockWithHeader(&types.Header{
+		Number:                *uint256.NewInt(1),
+		Extra:                 []byte("test block"),
+		UncleHash:             empty.UncleHash,
+		TxHash:                empty.RootHash,
+		ReceiptHash:           empty.RootHash,
+		BaseFee:               uint256.NewInt(1),
+		WithdrawalsHash:       &withdrawalsHash,
+		BlobGasUsed:           &blobGas,
+		ExcessBlobGas:         &blobGas,
+		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		RequestsHash:          &requestsHash,
+		BlockAccessListHash:   &emptyBALHash,
+	})
+	require.NoError(t, rawdb.WriteBlock(tx, block))
+	emptyBALBytes, err := types.EncodeBlockAccessListBytes(nil)
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), emptyBALBytes))
+
+	readBlock := rawdb.ReadBlock(tx, block.Hash(), block.NumberU64())
+	require.NotNil(t, readBlock)
+	require.Equal(t, emptyBALBytes, readBlock.BlockAccessList())
+}
+
 func TestBlockAccessListStorage(t *testing.T) {
 	t.Parallel()
 	_, tx := memdb.NewTestTx(t)

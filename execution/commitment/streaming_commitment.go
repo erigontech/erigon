@@ -69,7 +69,6 @@ type StreamingCommitter struct {
 	accountKeyLen  int16
 	numWorkers     int
 
-	workerPool sync.Pool
 	trie       *prefixTrie
 	splits     map[byte]*splitState
 	eagerFloor uint64
@@ -123,16 +122,7 @@ func NewStreamingCommitter(ctxFactory TrieContextFactory, accountKeyLen int16, c
 		splits:         make(map[byte]*splitState),
 		eagerFloor:     defaultEagerFold,
 	}
-	sc.resetPool()
 	return sc
-}
-
-func (sc *StreamingCommitter) resetPool() {
-	akl := sc.accountKeyLen
-	cfg := sc.cfg
-	sc.workerPool = sync.Pool{
-		New: func() any { return NewHexPatriciaHashed(akl, nil, cfg) },
-	}
 }
 
 // SetNumWorkers overrides the worker count for the next Process call. Values
@@ -566,7 +556,7 @@ func (sc *StreamingCommitter) markQueued(s *splitState, nib byte) {
 // foldKeys folds a snapshotted split's keys on a pooled worker whose overlay ctx
 // discards branch writes; the returned flushed flag reports a mid-fold self-flush.
 func (sc *StreamingCommitter) foldKeys(nib byte, keys []touchedKey) (cell, []*DeferredBranchUpdate, bool, error) {
-	w := sc.workerPool.Get().(*HexPatriciaHashed)
+	w := NewHexPatriciaHashed(sc.accountKeyLen, nil, sc.cfg)
 	w.mountTo(sc.base, int(nib))
 	if sc.traceW != nil {
 		w.SetTraceWriter(tracePrefix(sc.traceW, fmt.Sprintf("[fold %x] ", nib)))
@@ -593,8 +583,7 @@ func (sc *StreamingCommitter) foldKeys(nib byte, keys []touchedKey) (cell, []*De
 		c, err = w.foldMounted(sc.bgCtx, int(nib))
 	}
 	deferred := w.TakeDeferredUpdates()
-	w.resetForReuse()
-	sc.workerPool.Put(w)
+	w.Release()
 	return c, deferred, ov.flushed, err
 }
 
@@ -746,7 +735,7 @@ func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]boo
 // deferred set.
 func (sc *StreamingCommitter) foldSplit(ctx context.Context, foldSem *semaphore.Weighted, base *HexPatriciaHashed, s *splitState, child *prefixNode) error {
 	ni := s.prefix[0]
-	w := sc.workerPool.Get().(*HexPatriciaHashed)
+	w := NewHexPatriciaHashed(sc.accountKeyLen, nil, sc.cfg)
 	w.mountTo(base, int(ni))
 	if sc.traceW != nil {
 		w.SetTraceWriter(tracePrefix(sc.traceW, fmt.Sprintf("[split %x] ", ni)))
@@ -773,8 +762,7 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, foldSem *semaphore.
 		return sr, err
 	}
 	if err := dfsSubtreeDeep(w, child, path, deepStorageRoot); err != nil {
-		w.resetForReuse()
-		sc.workerPool.Put(w)
+		w.Release()
 		for _, upd := range pu.deferredCombined {
 			putDeferredUpdate(upd)
 		}
@@ -782,8 +770,7 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, foldSem *semaphore.
 	}
 	c, err := w.foldMounted(ctx, int(ni))
 	if err != nil {
-		w.resetForReuse()
-		sc.workerPool.Put(w)
+		w.Release()
 		for _, upd := range pu.deferredCombined {
 			putDeferredUpdate(upd)
 		}
@@ -794,8 +781,7 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, foldSem *semaphore.
 	if d := w.TakeDeferredUpdates(); len(d) > 0 {
 		newDeferred = append(newDeferred, d...)
 	}
-	w.resetForReuse()
-	sc.workerPool.Put(w)
+	w.Release()
 
 	s.mu.Lock()
 	for _, upd := range s.deferred {
@@ -814,7 +800,7 @@ func (sc *StreamingCommitter) DeepLocalFolds() uint64 { return sc.deepLocalFolds
 // newStorageWorker sources a concurrent-storage-fold worker; disjoint subtree
 // prefixes keep a mid-fold self-flush from racing another fold's writes.
 func (sc *StreamingCommitter) newStorageWorker(ctx context.Context) (*HexPatriciaHashed, func()) {
-	return newDeferredStorageWorker(ctx, &sc.workerPool, sc.trieCtxFactory, sc.traceW)
+	return newDeferredStorageWorker(ctx, sc.accountKeyLen, sc.cfg, sc.trieCtxFactory, sc.traceW)
 }
 
 // dropSplitDeferred returns every split's staged deferred branch updates to the pool.
@@ -942,7 +928,6 @@ func (sc *StreamingCommitter) Reset() {
 	}
 	sc.deferredForCaller = nil
 	sc.rootValid, sc.rootSeeded = false, false
-	sc.resetPool()
 }
 
 // releaseBase drops the scheduler's persistent base and its context.
@@ -967,5 +952,4 @@ func (sc *StreamingCommitter) Release() {
 	}
 	sc.deferredForCaller = nil
 	sc.rootValid, sc.rootSeeded = false, false
-	sc.resetPool()
 }
