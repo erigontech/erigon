@@ -238,7 +238,8 @@ func (a *Antiquary) retirementLoop(tick <-chan time.Time) error {
 				continue
 			}
 
-			if err := a.antiquate(); err != nil {
+			// A cancelled context is a shutdown, not a failure.
+			if err := a.antiquate(); err != nil && a.ctx.Err() == nil {
 				log.Warn("[Antiquary] Failed to antiquate", "err", err)
 			}
 			if a.cfg.DenebForkEpoch == math.MaxUint64 {
@@ -247,7 +248,6 @@ func (a *Antiquary) retirementLoop(tick <-chan time.Time) error {
 			if !a.blobBackfilled.Load() {
 				continue
 			}
-			// A cancelled context is a shutdown, not a failure.
 			if err := a.antiquateBlobs(); err != nil && a.ctx.Err() == nil {
 				log.Error("[Antiquary] Failed to antiquate blobs", "err", err)
 			}

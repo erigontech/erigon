@@ -110,3 +110,42 @@ func TestVerifyTorrentFilesUnreadableRoot(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
+
+// Putting the snapshots dir on another disk via a symlink is a supported
+// layout, so the scan must resolve it instead of reporting an empty run.
+func TestVerifyTorrentFilesSymlinkedRoot(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "target")
+	writeTorrentPair(t, target, "test.seg", true)
+
+	link := filepath.Join(tmp, "snapshots")
+	require.NoError(t, os.Symlink(target, link))
+
+	err := VerifyTorrentFiles(context.Background(), link, true, log.New())
+	require.Error(t, err)
+}
+
+// Same for an individual subtree: a symlinked caplin/ must still be descended into.
+func TestVerifyTorrentFilesSymlinkedSubdir(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "target")
+	writeTorrentPair(t, target, "test.seg", true)
+
+	dir := filepath.Join(tmp, "snapshots")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.Symlink(target, filepath.Join(dir, "caplin")))
+
+	err := VerifyTorrentFiles(context.Background(), dir, true, log.New())
+	require.Error(t, err)
+}
+
+// A path the scan cannot resolve may hide any number of torrents, so the run
+// must fail rather than report a complete verification over what it did reach.
+func TestVerifyTorrentFilesUnresolvableSubdir(t *testing.T) {
+	dir := t.TempDir()
+	writeTorrentPair(t, dir, "test.seg", false)
+	require.NoError(t, os.Symlink(filepath.Join(dir, "gone"), filepath.Join(dir, "caplin")))
+
+	err := VerifyTorrentFiles(context.Background(), dir, false, log.New())
+	require.Error(t, err)
+}

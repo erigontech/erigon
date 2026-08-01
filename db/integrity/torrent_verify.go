@@ -40,23 +40,14 @@ import (
 // corresponding data file. If failFast is true, stops on first error. Otherwise
 // logs warnings and continues.
 func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger log.Logger) error {
-	var torrentFiles []string
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			// An unreadable root means nothing was verified, so it must not report success.
-			if path == dir {
-				return walkErr
-			}
-			logger.Warn("[verify] skipping unreadable path", "path", path, "err", walkErr)
-			return nil
-		}
-		if !d.IsDir() && strings.HasSuffix(d.Name(), ".torrent") {
-			torrentFiles = append(torrentFiles, path)
-		}
-		return nil
-	})
+	torrentFiles, skipped, err := collectTorrentFiles(dir, logger)
 	if err != nil {
 		return fmt.Errorf("listing torrent files: %w", err)
+	}
+	// A path that could not be resolved may hide any number of torrents, so a
+	// partial scan must not pass as a complete verification.
+	if len(skipped) > 0 {
+		return fmt.Errorf("listing torrent files: %d unreadable path(s), first: %s", len(skipped), skipped[0])
 	}
 
 	if len(torrentFiles) == 0 {
@@ -136,6 +127,61 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 
 	logger.Info("[verify] complete", "files", len(toVerify))
 	return nil
+}
+
+// collectTorrentFiles lists .torrent files under dir recursively. Symlinked
+// directories are followed — a snapshots dir or one of its subtrees living on
+// another disk is a supported layout — and the resolved path doubles as the
+// cycle guard. An unreadable root is fatal; deeper failures are returned as
+// skipped paths so the caller can decide.
+func collectTorrentFiles(dir string, logger log.Logger) (files, skipped []string, err error) {
+	visited := map[string]struct{}{}
+
+	var walk func(string) error
+	walk = func(path string) error {
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return err
+		}
+		if _, seen := visited[resolved]; seen {
+			return nil
+		}
+		visited[resolved] = struct{}{}
+
+		entries, err := os.ReadDir(resolved)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			child := filepath.Join(resolved, e.Name())
+			isDir := e.IsDir()
+			if e.Type()&fs.ModeSymlink != 0 {
+				info, err := os.Stat(child)
+				if err != nil {
+					logger.Warn("[verify] skipping unresolvable path", "path", child, "err", err)
+					skipped = append(skipped, child)
+					continue
+				}
+				isDir = info.IsDir()
+			}
+			if isDir {
+				if err := walk(child); err != nil {
+					logger.Warn("[verify] skipping unreadable path", "path", child, "err", err)
+					skipped = append(skipped, child)
+				}
+				continue
+			}
+			if strings.HasSuffix(e.Name(), ".torrent") {
+				files = append(files, child)
+			}
+		}
+		return nil
+	}
+
+	if err := walk(dir); err != nil {
+		return nil, nil, err
+	}
+	return files, skipped, nil
 }
 
 // verifyFileFromTorrent verifies a single data file against its .torrent piece hashes.
