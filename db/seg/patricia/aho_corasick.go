@@ -302,7 +302,7 @@ func (m *ACMatcher) FindLongestMatches(data []byte) []Match {
 	wideByte := ac.wideByte
 	wideChild := ac.wideChild
 	matchVal := ac.matchVal
-	states := m.states
+	states := m.states[:n]
 	out := m.matches[:0]
 
 	// Match emission is fused into the scan below rather than run as a second
