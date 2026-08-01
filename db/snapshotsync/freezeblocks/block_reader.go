@@ -1217,18 +1217,15 @@ func (r *BlockReader) txnHashesFromSnapshot(baseTxnID uint64, txCount uint32, tx
 	}
 
 	hashes = make([]common.Hash, txCount)
-	if txCount == 0 {
-		return hashes, nil
-	}
 	txnOffset := idxTxnHash.OrdinalLookup(baseTxnID - idxTxnHash.BaseDataID())
-	if txsSeg.Src() == nil {
-		return nil, nil
-	}
 	gg := txsSeg.Src().MakeGetter()
 	gg.Reset(txnOffset)
 	for i := range txCount {
+		// txCount comes from the body, so a segment that ends early is corruption,
+		// not absence. Reporting absence here would drop the block from the index
+		// without failing the stage that builds it.
 		if !gg.HasNext() {
-			return nil, nil
+			return nil, fmt.Errorf("segment %s ended after %d of %d txns, txnID %d", txsSeg.Src().FileName(), i, txCount, baseTxnID+uint64(i))
 		}
 		buf, _ = gg.Next(buf[:0])
 		if len(buf) < 1+20 {
