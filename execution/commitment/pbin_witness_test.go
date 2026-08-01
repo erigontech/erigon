@@ -18,8 +18,11 @@ package commitment
 
 import (
 	"bytes"
+	"context"
+	"maps"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -221,6 +224,147 @@ func TestPBinWitnessTracerDetachedOnReset(t *testing.T) {
 	require.Nil(t, pph.hasher.tracer)
 
 	require.Equal(t, corpus.oracleRoot(t), pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates))
+}
+
+// pbinWitnessCommitted commits the corpus and hands back the state it left
+// behind, so a later engine sees a stored tree rather than an empty one.
+func pbinWitnessCommitted(t *testing.T, corpus *pbinTestCorpus) (*MockState, []byte) {
+	t.Helper()
+	pph, ms := pbinTestEngine(t)
+	corpus.applyTo(t, ms)
+	return ms, bytes.Clone(pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates))
+}
+
+func pbinWitnessesOf(t *testing.T, ms *MockState, upd *Updates, produceExclusionProofs bool) (nodes, provedKeys [][]byte, root []byte) {
+	t.Helper()
+	nodes, provedKeys, root, err := NewPBinPatriciaHashed(ms).Witnesses(context.Background(), upd, produceExclusionProofs, "")
+	require.NoError(t, err)
+	return nodes, provedKeys, root
+}
+
+// pbinWitnessPending is a corpus of updates against pbinWitnessCorpus that no
+// state read can produce: applying them moves the root, so a witness pass that
+// applied anything would be caught.
+func pbinWitnessPending() *pbinTestCorpus {
+	c := new(pbinTestCorpus)
+	c.account(pbinOracleAddr(22), 77, 7777, common.Hash{0x99})
+	c.account(pbinOracleAddr(23), 3, 300, common.Hash{0x23})
+	c.storage(pbinOracleAddr(21), pbinOracleSlot(64), 0xEE)
+	c.storage(pbinOracleAddr(23), pbinOracleSlot(5), 0x55)
+	return c
+}
+
+// TestPBinWitnessesReturnsParentRoot: the pass proves the tree as it stands.
+// buildWitnessTrie checks the returned root against the parent block's, so an
+// applied update would fail there.
+func TestPBinWitnessesReturnsParentRoot(t *testing.T) {
+	t.Parallel()
+
+	ms, parentRoot := pbinWitnessCommitted(t, pbinWitnessCorpus())
+	pending := pbinWitnessPending()
+
+	upd := WrapKeyUpdates(t, ModeUpdate, pbinKeyHasher(), pending.plainKeys, pending.updates)
+	nodes, _, root := pbinWitnessesOf(t, ms, upd, false)
+	require.Equal(t, parentRoot, root)
+	require.NotEmpty(t, nodes)
+	require.Equal(t, nodes[0], pbinWitnessNodeFor(t, nodes, root), "root node is not first")
+
+	applied := WrapKeyUpdates(t, ModeUpdate, pbinKeyHasher(), pending.plainKeys, pending.updates)
+	postRoot, err := NewPBinPatriciaHashed(ms).Process(context.Background(), applied, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	require.NotEqual(t, parentRoot, postRoot, "the pending updates do not move the root, so the test proves nothing")
+}
+
+func pbinWitnessNodeFor(t *testing.T, nodes [][]byte, hash []byte) []byte {
+	t.Helper()
+	for _, node := range nodes {
+		if bytes.Equal(pbinTestKeccak(t, node), hash) {
+			return node
+		}
+	}
+	t.Fatalf("no captured node hashes to %x", hash)
+	return nil
+}
+
+// TestPBinWitnessesLeavesStateUntouched: the fold writes each branch row back as
+// it goes, and this pass folds rows it never modified.
+func TestPBinWitnessesLeavesStateUntouched(t *testing.T) {
+	t.Parallel()
+
+	ms, _ := pbinWitnessCommitted(t, pbinWitnessCorpus())
+	before := maps.Clone(ms.cm)
+
+	pending := pbinWitnessPending()
+	upd := WrapKeyUpdates(t, ModeUpdate, pbinKeyHasher(), pending.plainKeys, pending.updates)
+	pbinWitnessesOf(t, ms, upd, false)
+
+	require.Equal(t, before, ms.cm)
+}
+
+// TestPBinWitnessesProvesCodeLeaves: one account touch expands into leaves that
+// never reach HashSort. Collecting the proved keys there instead of at the emit
+// sink would drop every code leaf from the pruned witness.
+func TestPBinWitnessesProvesCodeLeaves(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(21)
+	code := bytes.Repeat([]byte{0x60}, 200)
+	corpus := pbinWitnessCorpus()
+	ms, _ := pbinWitnessCommitted(t, corpus)
+
+	upd := WrapKeyUpdates(t, ModeDirect, pbinKeyHasher(), [][]byte{addr}, []Update{{}})
+	_, provedKeys, _ := pbinWitnessesOf(t, ms, upd, false)
+
+	proved := make(map[string]struct{}, len(provedKeys))
+	for _, key := range provedKeys {
+		proved[string(key)] = struct{}{}
+	}
+	require.Contains(t, proved, string(pbinTreeKeyAccount(addr, pbinBasicDataLeafKey)))
+	require.Contains(t, proved, string(pbinTreeKeyAccount(addr, pbinCodeHashLeafKey)))
+
+	chunks := pbinChunkifyCode(code)
+	require.Greater(t, len(chunks), 1)
+	for i := range chunks {
+		require.Contains(t, proved, string(pbinTestChunkKey(addr, keccak.Sum256(code), i)), "code chunk %d is not proved", i)
+	}
+	require.Len(t, provedKeys, 2+len(chunks))
+}
+
+// TestPBinWitnessesExclusionProofsIgnored: the flag materializes the branch an
+// extension node hides, and EIP-8297 has none. Node order is the capture map's,
+// so the sets are compared rather than the slices.
+func TestPBinWitnessesExclusionProofsIgnored(t *testing.T) {
+	t.Parallel()
+
+	corpus := pbinWitnessCorpus()
+	pending := pbinWitnessPending()
+
+	msOff, _ := pbinWitnessCommitted(t, corpus)
+	off := WrapKeyUpdates(t, ModeUpdate, pbinKeyHasher(), pending.plainKeys, pending.updates)
+	offNodes, offKeys, offRoot := pbinWitnessesOf(t, msOff, off, false)
+
+	msOn, _ := pbinWitnessCommitted(t, corpus)
+	on := WrapKeyUpdates(t, ModeUpdate, pbinKeyHasher(), pending.plainKeys, pending.updates)
+	onNodes, onKeys, onRoot := pbinWitnessesOf(t, msOn, on, true)
+
+	require.Equal(t, offRoot, onRoot)
+	require.Equal(t, offKeys, onKeys)
+	require.Equal(t, offNodes[0], onNodes[0])
+	require.ElementsMatch(t, offNodes, onNodes)
+}
+
+// TestPBinWitnessesEmptyUpdates: nothing is proved, so nothing is captured, and
+// the root still has to come back.
+func TestPBinWitnessesEmptyUpdates(t *testing.T) {
+	t.Parallel()
+
+	ms, parentRoot := pbinWitnessCommitted(t, pbinWitnessCorpus())
+
+	upd := WrapKeyUpdates(t, ModeDirect, pbinKeyHasher(), nil, nil)
+	nodes, provedKeys, root := pbinWitnessesOf(t, ms, upd, false)
+	require.Equal(t, parentRoot, root)
+	require.Empty(t, nodes)
+	require.Empty(t, provedKeys)
 }
 
 // TestPBinWitnessTracerDetachedOnRelease: a pooled engine that kept its tracer

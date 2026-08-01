@@ -174,27 +174,37 @@ func (pph *PBinPatriciaHashed) Process(ctx context.Context, updates *Updates, lo
 }
 
 // followAndUpdate moves the grid onto treeKey and writes the update into the
-// cell that lands there. Visits must ascend: a fold writes the row's record
-// outright, so returning to a folded row would rewrite it under a touch map
-// that no longer names what the first write touched.
+// cell that lands there.
 func (pph *PBinPatriciaHashed) followAndUpdate(treeKey, plainKey []byte, update *Update) error {
+	probe, err := pph.seek(treeKey)
+	if err != nil {
+		return err
+	}
+	return pph.updateCell(plainKey, &probe, update)
+}
+
+// seek moves the grid onto treeKey and returns the path to it. Visits must
+// ascend: a fold writes the row's record outright, so returning to a folded row
+// would rewrite it under a touch map that no longer names what the first write
+// touched.
+func (pph *PBinPatriciaHashed) seek(treeKey []byte) (pbinBitpath, error) {
 	if pph.lastKeyLen > 0 && bytes.Compare(treeKey, pph.lastKey[:pph.lastKeyLen]) <= 0 {
-		return fmt.Errorf("%w: %x after %x", errPBinVisitOrder, treeKey, pph.lastKey[:pph.lastKeyLen])
+		return pbinBitpath{}, fmt.Errorf("%w: %x after %x", errPBinVisitOrder, treeKey, pph.lastKey[:pph.lastKeyLen])
 	}
 	pph.lastKeyLen = int16(copy(pph.lastKey[:], treeKey))
 
 	probe := pbinPathFromBytes(treeKey)
 	for !probe.hasPrefix(&pph.currentKey) {
 		if err := pph.fold(); err != nil {
-			return err
+			return probe, err
 		}
 	}
 	for u := pph.needUnfolding(&probe); u.action != pbinUnfoldNone; u = pph.needUnfolding(&probe) {
 		if err := pph.unfold(&probe, u); err != nil {
-			return err
+			return probe, err
 		}
 	}
-	return pph.updateCell(plainKey, &probe, update)
+	return probe, nil
 }
 
 // updateCell writes one leaf into the deepest open row. Unfolding has already

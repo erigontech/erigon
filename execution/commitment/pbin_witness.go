@@ -16,7 +16,13 @@
 
 package commitment
 
-import "github.com/erigontech/erigon/common"
+import (
+	"bytes"
+	"context"
+	"fmt"
+
+	"github.com/erigontech/erigon/common"
+)
 
 // Witness capture for the binary trie. The tap sits in pbinHasher, not in the
 // fold: sibling cells (hashRowCell) and the root cell (RootHash) are hashed
@@ -36,4 +42,66 @@ func (h *pbinHasher) emitNode(preimage []byte, hash *common.Hash) {
 // must be called after any reset and never survives into a pooled reuse.
 func (pph *PBinPatriciaHashed) setWitnessTracer(tracer witnessTracer) {
 	pph.hasher.tracer = tracer
+}
+
+// pbinWitnessReadOnly drops the branch writes a fold makes on its way up. The
+// witness pass folds rows it never modified, so writing them back would rewrite
+// stored records under this pass's empty touch map.
+type pbinWitnessReadOnly struct{ PatriciaContext }
+
+func (pbinWitnessReadOnly) PutBranch(prefix, data, prevData []byte) error { return nil }
+
+// Code forwards the code seam the update stream reaches for by type assertion;
+// without it the wrapper would hide the wrapped context's own Code.
+func (c pbinWitnessReadOnly) Code(plainKey []byte) ([]byte, error) {
+	inner, ok := c.PatriciaContext.(pbinCodeContext)
+	if !ok {
+		return nil, fmt.Errorf("%w: %T serves no code", ErrPBinUnsupported, c.PatriciaContext)
+	}
+	return inner.Code(plainKey)
+}
+
+// Witnesses walks the tree along every key the update stream expands to, taps
+// each node as it is hashed, and returns the captured superset (root first), the
+// keys walked, and the root hash. Callers prune to the lean set.
+//
+// No update is applied: the caller checks the returned root against the parent
+// block's, so it must be the pre-state one.
+//
+// produceExclusionProofs is accepted and ignored. It materializes the branch an
+// extension node hides, and EIP-8297 has no extension node.
+func (pph *PBinPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
+	set := newWitnessNodeSet()
+	pph.setWitnessTracer(set)
+	defer pph.setWitnessTracer(nil)
+
+	stateCtx := pph.ctx
+	pph.ctx = pbinWitnessReadOnly{PatriciaContext: stateCtx}
+	defer func() { pph.ctx = stateCtx }()
+
+	pph.lastKeyLen = 0
+	provedKeys = make([][]byte, 0, updates.Size())
+	// The proved keys are the stream's, not HashSort's: one account touch expands
+	// into a BASIC_DATA leaf, a CODE_HASH leaf and one leaf per code chunk, and
+	// only the sink sees all of them.
+	_, err = pph.updateStream.process(ctx, updates, pph.ctx, func(treeKey, _ []byte, _ *Update) error {
+		provedKeys = append(provedKeys, bytes.Clone(treeKey))
+		_, err := pph.seek(treeKey)
+		return err
+	})
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("pbin: witness %s: %w", logPrefix, err)
+	}
+	for pph.grid.activeRows > 0 {
+		if err = pph.fold(); err != nil {
+			return nil, nil, nil, fmt.Errorf("pbin: witness final fold: %w", err)
+		}
+	}
+	if rootHash, err = pph.RootHash(); err != nil {
+		return nil, nil, nil, err
+	}
+	if nodes, err = set.nodes(rootHash); err != nil {
+		return nil, nil, nil, err
+	}
+	return nodes, provedKeys, rootHash, nil
 }

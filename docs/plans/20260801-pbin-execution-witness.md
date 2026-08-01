@@ -201,22 +201,27 @@ leaf and code chunking instead of reimplementing all of it.
 - Modify: `execution/commitment/pbin_update_stream.go`
 - Modify: `execution/commitment/pbin_witness_test.go`
 
-- [ ] implement `Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool,
+- [x] implement `Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool,
       logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error)` mirroring
       `hex_patricia_hashed.go:2414`
-- [ ] collect provedKeys at the `pbinUpdateStream` **emit sink**, not from `HashSort`: one account
+- [x] collect provedKeys at the `pbinUpdateStream` **emit sink**, not from `HashSort`: one account
       touch expands into BASIC_DATA + CODE_HASH + N code-chunk leaves (`pbin_update_stream.go:93-124`)
       and only the sink sees all of them
-- [ ] the returned root MUST be the **parent / pre-state** root — `buildWitnessTrie:1339` compares it
-      against `expectedParentRoot`. Driving the normal update-application path would yield the
-      post-state root and fail there
-- [ ] accept and ignore `produceExclusionProofs`, with a comment naming the reason (no extension node)
-- [ ] write tests: the returned root equals the pre-state root for a corpus with pending updates
-- [ ] write tests: provedKeys include the code-chunk and CODE_HASH leaves of a touched contract,
+- [x] the returned root MUST be the **parent / pre-state** root — `buildWitnessTrie:1339` compares it
+      against `expectedParentRoot`. The pass drives `seek` (fold + unfold, extracted from
+      `followAndUpdate`) and never `updateCell`, so nothing is applied
+- [x] accept and ignore `produceExclusionProofs`, with a comment naming the reason (no extension node)
+- [x] ➕ wrap the context in `pbinWitnessReadOnly` for the pass: `foldBranch` writes a row's record
+      back as it folds, and this pass folds rows it never modified. The wrapper also has to forward
+      the unexported `pbinCodeContext.Code`, or code chunking breaks behind it
+- [x] write tests: the returned root equals the pre-state root for a corpus with pending updates
+- [x] write tests: provedKeys include the code-chunk and CODE_HASH leaves of a touched contract,
       not just its BASIC_DATA key
-- [ ] write tests: `produceExclusionProofs` true vs false give byte-identical output
-- [ ] write tests: an empty update set returns no nodes and no error
-- [ ] run tests - must pass before task 3
+- [x] write tests: `produceExclusionProofs` true vs false give byte-identical output — compared as
+      sets plus root-first, since `witnessNodeSet.nodes` orders the tail by map iteration
+- [x] ➕ write tests: the pass leaves the commitment records untouched
+- [x] write tests: an empty update set returns no nodes and no error
+- [x] run tests - must pass before task 3
 
 ### Task 3: Replace the HexPatriciaHashed type assertion with an interface
 
