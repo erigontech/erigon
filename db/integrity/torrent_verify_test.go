@@ -88,6 +88,20 @@ func TestVerifyTorrentFilesWithoutFailFast(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// An interrupted run must not be reported as a successful verification: without
+// failFast the per-piece cancellation error is only warned about, so the
+// cancellation has to be re-checked after the workers finish.
+func TestVerifyTorrentFilesCancelled(t *testing.T) {
+	dir := t.TempDir()
+	writeTorrentPair(t, dir, "test.seg", false)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := VerifyTorrentFiles(ctx, dir, false, log.New())
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 // An unreadable root must not be reported as a successful verification.
 func TestVerifyTorrentFilesUnreadableRoot(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "missing")

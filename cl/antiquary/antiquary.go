@@ -247,7 +247,8 @@ func (a *Antiquary) retirementLoop(tick <-chan time.Time) error {
 			if !a.blobBackfilled.Load() {
 				continue
 			}
-			if err := a.antiquateBlobs(); err != nil {
+			// A cancelled context is a shutdown, not a failure.
+			if err := a.antiquateBlobs(); err != nil && a.ctx.Err() == nil {
 				log.Error("[Antiquary] Failed to antiquate blobs", "err", err)
 			}
 		case <-a.ctx.Done():

@@ -89,6 +89,7 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 	var completedBytes atomic.Uint64
 	var completedFiles atomic.Uint64
 
+	parent := ctx
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
 
@@ -124,6 +125,12 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 	}
 
 	if err := g.Wait(); err != nil {
+		return err
+	}
+	// Without failFast the workers only warn, so an interrupted run would
+	// otherwise be indistinguishable from a complete one. The errgroup's own
+	// ctx is always cancelled by now, hence the parent.
+	if err := parent.Err(); err != nil {
 		return err
 	}
 
