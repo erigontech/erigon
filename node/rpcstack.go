@@ -184,13 +184,39 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // smaller than this are sent as-is: gzip framing overhead would exceed savings.
 const minGzipBodySize = 1024
 
-// bufferedGzipLevel controls fully buffered (one-shot) responses; streaming
-// responses always use BestSpeed (see gzStreamPool), since bytes leave as they
-// are produced and per-flush latency matters more than ratio.
+// streamGzipLevel is pinned to BestSpeed: bytes leave as they are produced,
+// so per-flush latency matters more than ratio.
+const streamGzipLevel = gzip.BestSpeed
+
+// bufferedGzipLevel controls fully buffered (one-shot) responses. It may
+// diverge from streamGzipLevel in the future (e.g. become configurable): the
+// writer pools are kept separate because a pooled writer's level is fixed at
+// creation.
 const bufferedGzipLevel = gzip.BestSpeed
 
+// Raw and compressed byte counters per gzip path: out/in gives the live
+// compression ratio, the out rate tracks RPC egress.
+var (
+	gzipBufferedInBytes   = metrics.GetOrCreateCounter(`rpc_gzip_in_bytes_total{path="buffered"}`)
+	gzipBufferedOutBytes  = metrics.GetOrCreateCounter(`rpc_gzip_out_bytes_total{path="buffered"}`)
+	gzipStreamingInBytes  = metrics.GetOrCreateCounter(`rpc_gzip_in_bytes_total{path="streaming"}`)
+	gzipStreamingOutBytes = metrics.GetOrCreateCounter(`rpc_gzip_out_bytes_total{path="streaming"}`)
+)
+
+// countingWriter forwards to w and adds the written byte count to c.
+type countingWriter struct {
+	w io.Writer
+	c metrics.Counter
+}
+
+func (cw countingWriter) Write(p []byte) (int, error) {
+	n, err := cw.w.Write(p)
+	cw.c.AddInt(n)
+	return n, err
+}
+
 var gzStreamPool = sync.Pool{
-	New: func() any { w, _ := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed); return w },
+	New: func() any { w, _ := gzip.NewWriterLevel(io.Discard, streamGzipLevel); return w },
 }
 
 var gzBufferedPool = sync.Pool{
@@ -224,6 +250,7 @@ func (w *gzipResponseWriter) WriteHeader(status int) {
 
 func (w *gzipResponseWriter) Write(b []byte) (int, error) {
 	if w.gzw != nil {
+		gzipStreamingInBytes.AddInt(len(b))
 		return w.gzw.Write(b)
 	}
 	return w.buf.Write(b)
@@ -238,8 +265,9 @@ func (w *gzipResponseWriter) Flush() {
 			w.ResponseWriter.WriteHeader(w.status)
 		}
 		w.gzw = gzStreamPool.Get().(*gzip.Writer)
-		w.gzw.Reset(w.ResponseWriter)
+		w.gzw.Reset(countingWriter{w: w.ResponseWriter, c: gzipStreamingOutBytes})
 		if w.buf.Len() > 0 {
+			gzipStreamingInBytes.AddInt(w.buf.Len())
 			_, _ = w.gzw.Write(w.buf.Bytes())
 			w.buf.Reset()
 		}
@@ -253,14 +281,35 @@ func (w *gzipResponseWriter) Flush() {
 // writeBufferedGzip compresses src fully before writing, so the response
 // carries an exact Content-Length instead of chunked encoding.
 func writeBufferedGzip(w http.ResponseWriter, src []byte, status int) {
+	buf := pool.GetBuffer()
+	defer pool.PutBuffer(buf)
+
+	// LIFO: the writer is reset to io.Discard before buf goes back to its pool,
+	// so a pooled writer never retains a pooled buffer.
 	gz := gzBufferedPool.Get().(*gzip.Writer)
 	defer putBufferedGzip(gz)
 
-	buf := pool.GetBuffer()
-	defer pool.PutBuffer(buf)
+	// Pre-size for the expected ~8x JSON compression ratio: bytes.Buffer would
+	// otherwise re-grow through a chain of realloc+copy on large responses.
+	buf.Grow(len(src) / 8)
 	gz.Reset(buf)
-	_, _ = gz.Write(src)
-	_ = gz.Close()
+	_, err := gz.Write(src)
+	if err == nil {
+		err = gz.Close()
+	}
+	if err != nil {
+		// Writing to a bytes.Buffer cannot fail in practice, but src is still
+		// intact here, so keep the uncompressed fallback the libdeflate path had.
+		w.Header().Set("Content-Length", strconv.Itoa(len(src)))
+		if status != 0 {
+			w.WriteHeader(status)
+		}
+		w.Write(src) //nolint:errcheck
+		return
+	}
+
+	gzipBufferedInBytes.AddInt(len(src))
+	gzipBufferedOutBytes.AddInt(buf.Len())
 
 	w.Header().Set("Content-Encoding", "gzip")
 	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
