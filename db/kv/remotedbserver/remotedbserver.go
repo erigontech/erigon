@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -310,8 +309,8 @@ func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 		switch in.Op {
 		case remoteproto.Op_OPEN:
 			CursorID++
-			var err error
 			if err := s.with(id, func(tx kv.TemporalTx) error {
+				var err error
 				c, err = tx.Cursor(in.BucketName) //nolint:gocritic
 				if err != nil {
 					return err
@@ -330,8 +329,8 @@ func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 			continue
 		case remoteproto.Op_OPEN_DUP_SORT:
 			CursorID++
-			var err error
 			if err := s.with(id, func(tx kv.TemporalTx) error {
+				var err error
 				c, err = tx.CursorDupSort(in.BucketName) //nolint:gocritic
 				if err != nil {
 					return err
@@ -345,7 +344,7 @@ func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 				c:      c,
 			}
 			if err := stream.Send(&remoteproto.Pair{CursorId: CursorID}); err != nil {
-				return fmt.Errorf("server-side error: %w", err)
+				return fmt.Errorf("kvserver: %w", err)
 			}
 			continue
 		case remoteproto.Op_CLOSE:
@@ -738,10 +737,8 @@ func (s *KvServer) Range(_ context.Context, req *remoteproto.RangeReq) (*remotep
 	}
 
 	reply := &remoteproto.Pairs{}
-	var err error
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
-		var it stream.KV
-		it, err = tx.Range(req.Table, from, req.ToPrefix, order.FromBool(req.OrderAscend), limit)
+		it, err := tx.Range(req.Table, from, req.ToPrefix, order.FromBool(req.OrderAscend), limit)
 		if err != nil {
 			return err
 		}
