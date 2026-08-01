@@ -64,8 +64,8 @@ func WithoutParallelCommitment() SharedDomainOption {
 }
 
 // WithHexCommitmentOnly is WithoutParallelCommitment for callers that can only read
-// hex branch records — witness, eth_getProof, eth_simulateV1, receipt regeneration,
-// commitment integrity. Under the bin variant NewSharedDomains returns
+// hex branch records — eth_getProof, eth_getWitness, eth_simulateV1, receipt
+// regeneration, commitment integrity. Under the bin variant NewSharedDomains returns
 // ErrBinCommitmentUnsupported instead of reading bit-path records as hex ones.
 func WithHexCommitmentOnly() SharedDomainOption {
 	return func(o *sharedDomainOptions) {

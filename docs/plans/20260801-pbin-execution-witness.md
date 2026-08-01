@@ -424,19 +424,29 @@ leaf and code chunking instead of reimplementing all of it.
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 - Create: `rpc/jsonrpc/pbin_witness_reachable_test.go`
 
-- [ ] on the witness path (`debug_execution_witness.go:903`), replace `WithHexCommitmentOnly()` with
+- [x] on the witness path (`debug_execution_witness.go:903`), replace `WithHexCommitmentOnly()` with
       `WithoutParallelCommitment()` plus a bin allowance. A plain removal re-admits
-      `VariantParallelHexPatricia`, which `witnessCapture` cannot serve (`:900-902`)
-- [ ] leave `WithHexCommitmentOnly` itself unchanged — every other caller still needs it
-- [ ] verify these still refuse: `eth_getProof` (`eth_call.go:482`), `eth_getWitness` (:781),
+      `VariantParallelHexPatricia`, which `witnessCapture` cannot serve (`:900-902`).
+      ➕ `WithoutParallelCommitment` **is** the bin allowance: it already demotes only the
+      experimental parallel/streaming tries and leaves bin alone, so no second option was added
+- [x] leave `WithHexCommitmentOnly` itself unchanged — every other caller still needs it (only its
+      doc comment lost "witness" from the caller list, which Task 13 would otherwise leave stale
+      through Tasks 11-12)
+- [x] verify these still refuse: `eth_getProof` (`eth_call.go:482`), `eth_getWitness` (:781),
       `eth_simulateV1` (`eth_simulation.go:167`), receipts (`receipts_generator.go:333,553`),
       `rpchelper/commitment.go:97`, `db/integrity` (215, 1112, 1180, 1194)
-- [ ] do NOT modify `rpc/jsonrpc/pbin_hex_only_test.go` or `db/state/execctx/pbin_options_test.go` —
+- [x] do NOT modify `rpc/jsonrpc/pbin_hex_only_test.go` or `db/state/execctx/pbin_options_test.go` —
       both assert refusals that remain correct
-- [ ] write tests: `debug_executionWitness` is reachable and returns a verifying witness under bin
-- [ ] write tests: the hex witness path still refuses the parallel variant
-- [ ] write tests: each still-refusing caller listed above continues to refuse under bin
-- [ ] run tests - must pass before task 11
+- [x] write tests: `debug_executionWitness` is reachable and returns a verifying witness under bin —
+      a bin-committed chain (deploy, contract call, 200 new accounts) built through
+      `chainWithDeployedContract`; the gate is not skippable under bin, so a returned witness is a
+      verified one. Red before the change with `ErrBinCommitmentUnsupported`, green after
+- [x] write tests: the hex witness path still refuses the parallel variant — the parallel flag is
+      flipped between two builds of the same block and the witness must stay byte-identical
+- [x] write tests: each still-refusing caller listed above continues to refuse under bin —
+      `eth_getWitness` behaviourally (the one caller with no existing refusal test); the rest keep
+      passing `WithHexCommitmentOnly`, whose bin refusal `TestPBinHexOnlyCommitmentRefusesBin` pins
+- [x] run tests - must pass before task 11
 
 ### Task 11: End-to-end witness over a bin chain
 
