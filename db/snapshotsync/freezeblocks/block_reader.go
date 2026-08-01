@@ -732,9 +732,18 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 // Both the snapshot and the db hold each txn as the RLP that rawdb.WriteTransactions
 // wrote, and a txn hash is a pure function of it - see types.TxnHashFromRLP.
 func (r *BlockReader) TxnHashes(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) ([]common.Hash, error) {
+	var dbgPrefix string
+	dbgLogs := dbg.Enabled(ctx)
+	if dbgLogs {
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).TxnHashes(hash=%x,blk=%d) -> ", r.sn.IndicesMax(), r.sn.SegmentsMax(), hash, blockHeight)
+	}
+
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		if tx == nil {
+			if dbgLogs {
+				log.Info(dbgPrefix + "RoTx is nil")
+			}
 			return nil, nil
 		}
 		hashes, err := rawdb.ReadBodyTxnHashes(tx, hash, blockHeight)
@@ -743,6 +752,9 @@ func (r *BlockReader) TxnHashes(ctx context.Context, tx kv.Getter, hash common.H
 		}
 		if hashes != nil {
 			return hashes, nil
+		}
+		if dbgLogs {
+			log.Info(dbgPrefix + "found in db=false")
 		}
 		// not in the db, so fall through to the files, as BodyWithTransactions does
 	}
@@ -754,6 +766,9 @@ func (r *BlockReader) TxnHashes(ctx context.Context, tx kv.Getter, hash common.H
 
 	seg, ok := view.Segment(snaptype2.Bodies, blockHeight)
 	if !ok {
+		if dbgLogs {
+			log.Info(dbgPrefix + "no bodies file for this block num")
+		}
 		return nil, nil
 	}
 	body, baseTxnID, txCount, buf, err := r.bodyFromSnapshot(blockHeight, seg, nil)
@@ -761,6 +776,9 @@ func (r *BlockReader) TxnHashes(ctx context.Context, tx kv.Getter, hash common.H
 		return nil, err
 	}
 	if body == nil {
+		if dbgLogs {
+			log.Info(dbgPrefix + "got nil body from file")
+		}
 		return nil, nil
 	}
 	if txCount == 0 { // nothing to hash, so the transactions segment is not needed
@@ -769,9 +787,19 @@ func (r *BlockReader) TxnHashes(ctx context.Context, tx kv.Getter, hash common.H
 
 	txnSeg, ok := view.Segment(snaptype2.Transactions, blockHeight)
 	if !ok {
+		if dbgLogs {
+			log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable(), "r.sn.idxMax", r.sn.IndicesMax(), "r.sn.segmetntsMax", r.sn.SegmentsMax())
+		}
 		return nil, nil
 	}
-	return r.txnHashesFromSnapshot(baseTxnID, txCount, txnSeg, buf)
+	hashes, err := r.txnHashesFromSnapshot(baseTxnID, txCount, txnSeg, buf)
+	if err != nil {
+		return nil, err
+	}
+	if hashes == nil && dbgLogs {
+		log.Info(dbgPrefix + "no transactions index for this block num")
+	}
+	return hashes, nil
 }
 
 func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {

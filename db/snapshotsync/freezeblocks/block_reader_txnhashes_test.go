@@ -65,8 +65,8 @@ func txnHashesTestTxns(t *testing.T, n int) []types.Transaction {
 }
 
 // createTxnSegmentFile writes a transactions segment holding real txn records in
-// the layout the dumper produces - type byte, sender, canonical RLP - plus the
-// TxnHash index baseTxnID is resolved through.
+// the layout DumpTxs produces - hash[0], sender, stored RLP - plus the TxnHash index
+// baseTxnID is resolved through.
 func createTxnSegmentFile(t *testing.T, from, to, baseTxnID uint64, txns []types.Transaction, dir string, ver snaptype.Version, logger log.Logger) {
 	t.Helper()
 	segPath := filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, snaptype2.Enums.Transactions))
@@ -79,12 +79,15 @@ func createTxnSegmentFile(t *testing.T, from, to, baseTxnID uint64, txns []types
 	c.DisableFsync()
 
 	var sender [20]byte
+	var buf bytes.Buffer
 	for _, txn := range txns {
-		rlpBytes := storedTxnBytes(t, txn)
-		word := make([]byte, 0, 1+20+len(rlpBytes))
-		word = append(word, txn.Type())
+		buf.Reset()
+		require.NoError(t, txn.EncodeRLP(&buf))
+		hash := txn.Hash()
+		word := make([]byte, 0, 1+20+buf.Len())
+		word = append(word, hash[0])
 		word = append(word, sender[:]...)
-		word = append(word, rlpBytes...)
+		word = append(word, buf.Bytes()...)
 		require.NoError(t, c.AddWord(word))
 	}
 	require.NoError(t, c.Compress())
@@ -120,6 +123,8 @@ func createTxnSegmentFile(t *testing.T, from, to, baseTxnID uint64, txns []types
 	}
 	require.NoError(t, idx.Build(t.Context()))
 
+	// Unread by these tests, but a transactions segment stays invisible to OpenFolder
+	// until every index of its type is on disk.
 	blockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   len(txns),
 		BucketSize: 10,
@@ -135,13 +140,6 @@ func createTxnSegmentFile(t *testing.T, from, to, baseTxnID uint64, txns []types
 		require.NoError(t, blockNumIdx.AddKey(h[:], uint64(i)))
 	}
 	require.NoError(t, blockNumIdx.Build(t.Context()))
-}
-
-func storedTxnBytes(t *testing.T, txn types.Transaction) []byte {
-	t.Helper()
-	var buf bytes.Buffer
-	require.NoError(t, txn.EncodeRLP(&buf))
-	return buf.Bytes()
 }
 
 // openTxnHashesTestSegment builds a snapshot dir holding one transactions segment
@@ -171,6 +169,7 @@ func openTxnHashesTestSegment(t *testing.T, baseTxnID uint64, txns []types.Trans
 // than the body claims is reported as an error. Returning the not-found sentinel
 // instead would drop the block from the txn lookup index without failing the stage.
 func TestTxnHashesFromSnapshotTruncatedSegment(t *testing.T) {
+	t.Parallel()
 	const baseTxnID = 0
 	txns := txnHashesTestTxns(t, 2)
 	r, seg, closeView := openTxnHashesTestSegment(t, baseTxnID, txns)
@@ -184,6 +183,7 @@ func TestTxnHashesFromSnapshotTruncatedSegment(t *testing.T) {
 // TestTxnHashesFromSnapshotMatchesTxsFromSnapshot pins the hash-only reader to the
 // decoding one it mirrors, over the same segment records.
 func TestTxnHashesFromSnapshotMatchesTxsFromSnapshot(t *testing.T) {
+	t.Parallel()
 	const baseTxnID = 0
 	txns := txnHashesTestTxns(t, 4)
 	r, seg, closeView := openTxnHashesTestSegment(t, baseTxnID, txns)
