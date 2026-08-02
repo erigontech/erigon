@@ -213,6 +213,11 @@ type IntraBlockState struct {
 	// via FinalizeTx→so.data.
 	noMaterialize bool
 
+	// arena backs the stateObjects the noMaterialize path hands out. Those are
+	// never cached, so they die with the transaction and Reset can recycle the
+	// whole arena at once.
+	arena stateObjectArena
+
 	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
 	// the balance burn). Set per-tx from the block rules in Prepare; under it a
 	// SelfDestructPath=true account must read as a live, balance-preserving,
@@ -382,6 +387,7 @@ func (sdb *IntraBlockState) Reset() {
 	for _, so := range sdb.stateObjects {
 		so.release()
 	}
+	sdb.arena.rewind()
 	clear(sdb.stateObjects)
 	clear(sdb.stateObjectsDirty)
 	for i := range sdb.logs {
@@ -437,12 +443,22 @@ func (sdb *IntraBlockState) Close() {
 
 	stateObjects, journal := sdb.stateObjects, sdb.journal
 	sdb.stateObjects, sdb.journal = nil, nil
+	sdb.arena.free()
 	sdb.revisions.reset()
 	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
 	// set is unexported, so nothing outside holds a raw VersionedWrite.
 	sdb.versionedWrites.ReleaseAndReset()
 
 	releaseResources(stateObjects, journal)
+}
+
+func (sdb *IntraBlockState) allocStateObject() *stateObject {
+	if sdb.noMaterialize {
+		if so := sdb.arena.alloc(); so != nil {
+			return so
+		}
+	}
+	return stateObjectPool.Get().(*stateObject)
 }
 
 func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *journal) {
