@@ -19,7 +19,7 @@ package state
 import "github.com/erigontech/erigon/common/log/v3"
 
 const (
-	arenaSlabSize   = 64
+	arenaSlabSize   = 16
 	arenaMaxSlabs   = 128
 	arenaMaxObjects = arenaSlabSize * arenaMaxSlabs
 )
