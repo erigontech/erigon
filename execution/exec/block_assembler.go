@@ -101,6 +101,7 @@ type BlockAssembler struct {
 	*AssembledBlock
 	cfg         AssemblerCfg
 	balIO       *state.VersionedIO
+	blockRules  *chain.Rules
 	stateWriter state.StateWriter // optional: if set, domain writes go here instead of NoopWriter
 	gasUsed     protocol.GasUsed  // EIP-8037: cumulative per-dimension gas across AddTransactions calls
 }
@@ -108,16 +109,15 @@ type BlockAssembler struct {
 func (ba *BlockAssembler) CumulativeGasUsed() protocol.GasUsed { return ba.gasUsed }
 
 func NewBlockAssembler(cfg AssemblerCfg, block *AssembledBlock) *BlockAssembler {
-	var balIO *state.VersionedIO
-
+	ba := &BlockAssembler{AssembledBlock: block, cfg: cfg}
 	if cfg.ChainConfig.IsAmsterdam(block.Header.Time) || cfg.ExperimentalBAL {
-		balIO = &state.VersionedIO{}
+		ba.balIO = &state.VersionedIO{}
+		blockContext := protocol.NewEVMBlockContext(
+			block.Header, protocol.GetHashFn(block.Header, nil), cfg.Engine, accounts.NilAddress, cfg.ChainConfig,
+		)
+		ba.blockRules = blockContext.Rules(cfg.ChainConfig)
 	}
-	return &BlockAssembler{
-		AssembledBlock: block,
-		cfg:            cfg,
-		balIO:          balIO,
-	}
+	return ba
 }
 
 func (ba *BlockAssembler) HasBAL() bool {
@@ -155,10 +155,11 @@ func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalT
 		return err
 	}
 	if ba.HasBAL() {
-		ibs.MergeTxIOInto(ba.balIO)
+		writes := ibs.FinalizedWrites(ba.blockRules)
+		ibs.MergeTxIOInto(ba.balIO, writes)
 		// Publish block-init writes (EIP-4788, etc.) to the versionMap so the
 		// first tx observes them across the ResetVersionedIO below.
-		ibs.FlushWritesToVersionMap()
+		ibs.FlushWritesToVersionMap(writes)
 		ibs.ResetVersionedIO()
 	}
 	return nil
@@ -185,17 +186,17 @@ func (ba *BlockAssembler) AddTransactions(
 	// based on position in the block's transaction list).
 	txnIdx := len(ba.Txns)
 	header := ba.AssembledBlock.Header
-	// EIP-8037: regular and state gas pools deplete independently. The
+	// EIP-8037: execution and state gas pools deplete independently. The
 	// builder calls AddTransactions repeatedly with batches from the txpool,
 	// so each call must initialise both dimensions from their own cumulative
-	// usage. Seeding both from BlockRegular only would over-inflate the
-	// state pool whenever state gas has run ahead of regular gas.
+	// usage. Seeding both from BlockExecution only would over-inflate the
+	// state pool whenever state gas has run ahead of execution gas.
 	blobBudget := uint64(0)
 	if header.BlobGasUsed != nil {
 		blobBudget = ba.cfg.ChainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed
 	}
 	gasPool := protocol.NewBlockGasPool(
-		header.GasLimit-ba.gasUsed.BlockRegular,
+		header.GasLimit-ba.gasUsed.BlockExecution,
 		header.GasLimit-ba.gasUsed.BlockState,
 		blobBudget,
 	)
@@ -208,16 +209,13 @@ func (ba *BlockAssembler) AddTransactions(
 	// CommitBlock in AssembleBlock writes all final state correctly.
 	writer := state.NewNoopWriter()
 	recordTxIO := func() {
-		// EIP-6780: zero storage of an account created+destructed in this tx so
-		// the BAL records net-zero reads (the stateObject-based wipe no longer
-		// runs on the cache-free builder path).
-		ibs.ApplyEIP6780StorageWipe()
 		if ba.HasBAL() {
-			ibs.MergeTxIOInto(ba.balIO)
+			writes := ibs.FinalizedWrites(ba.blockRules)
+			ibs.MergeTxIOInto(ba.balIO, writes)
+			// Publish this tx's writes to the versionMap so the next tx observes them;
+			// ResetVersionedIO below clears the per-tx write set used for BAL recording.
+			ibs.FlushWritesToVersionMap(writes)
 		}
-		// Publish this tx's writes to the versionMap so the next tx observes them;
-		// ResetVersionedIO below clears the per-tx write set used for BAL recording.
-		ibs.FlushWritesToVersionMap()
 		ibs.ResetVersionedIO()
 	}
 	clearTxIO := func() {
@@ -231,12 +229,12 @@ func (ba *BlockAssembler) AddTransactions(
 
 	var commitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *AssembledBlock) ([]*types.Log, error) {
 		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
-		// EIP-8037: regular and state gas pool dimensions can deplete
+		// EIP-8037: execution and state gas pool dimensions can deplete
 		// independently — execution-time state-gas (e.g. CREATE code deposit)
 		// is not visible to the txpool's intrinsic-state-gas filter and may
-		// drain the state pool faster than the regular pool. Snapshot both
+		// drain the state pool faster than the execution pool. Snapshot both
 		// dimensions so a failed-inclusion restore puts each one back.
-		regularGasSnap := gasPool.RegularGasAvailable()
+		executionGasSnap := gasPool.ExecutionGasAvailable()
 		stateGasSnap := gasPool.StateGasAvailable()
 		blobGasSnap := gasPool.BlobGas()
 		snap := ibs.PushSnapshot()
@@ -249,21 +247,21 @@ func (ba *BlockAssembler) AddTransactions(
 			paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, header, evm, chainConfig)
 			if err != nil {
 				ibs.RevertToSnapshot(snap, err)
-				gasPool = protocol.NewBlockGasPool(regularGasSnap, stateGasSnap, blobGasSnap)
+				gasPool = protocol.NewBlockGasPool(executionGasSnap, stateGasSnap, blobGasSnap)
 				return nil, err
 			}
 
 			status, aaGasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gasPool, evm, header, ibs)
 			if err != nil {
 				ibs.RevertToSnapshot(snap, err)
-				gasPool = protocol.NewBlockGasPool(regularGasSnap, stateGasSnap, blobGasSnap)
+				gasPool = protocol.NewBlockGasPool(executionGasSnap, stateGasSnap, blobGasSnap)
 				return nil, err
 			}
 
 			// EIP-8037: AA txns don't go through protocol.ApplyTransaction, so
 			// update cumulative gas manually. We attribute aaGasUsed entirely to
-			// regular gas (AA has no state-gas dimension yet).
-			gasUsed.BlockRegular += aaGasUsed
+			// execution gas (AA has no state-gas dimension yet).
+			gasUsed.BlockExecution += aaGasUsed
 			gasUsed.Blob += txn.GetBlobGas()
 			protocol.SetGasUsed(header, gasUsed)
 			logs := ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
@@ -283,7 +281,7 @@ func (ba *BlockAssembler) AddTransactions(
 			// Restore cumulative gas to pre-tx values.
 			*gasUsed = gasSnapshot
 			ibs.RevertToSnapshot(snap, err)
-			gasPool = protocol.NewBlockGasPool(regularGasSnap, stateGasSnap, blobGasSnap)
+			gasPool = protocol.NewBlockGasPool(executionGasSnap, stateGasSnap, blobGasSnap)
 			return nil, err
 		}
 		protocol.SetGasUsed(header, gasUsed)
@@ -406,14 +404,15 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 	// so we must modify the block's header directly, not ba.Header.
 	header := block.HeaderNoCopy()
 	if ba.HasBAL() {
+		writes := ibs.FinalizedWrites(ba.blockRules)
 		// Record finalize system call I/O (EIP-7002, EIP-7251, etc.)
-		ibs.MergeTxIOInto(ba.balIO)
+		ibs.MergeTxIOInto(ba.balIO, writes)
 		// Publish finalize-phase writes to the versionMap, mirroring the init and
 		// per-tx phases: the versioned commit loop normalizes each phase against the
 		// map and prefers the map value, so a finalize update to an address already
 		// written earlier in the block (fee recipient, withdrawal target) must be
 		// visible there or the commit reuses the stale pre-finalize value.
-		ibs.FlushWritesToVersionMap()
+		ibs.FlushWritesToVersionMap(writes)
 		ibs.ResetVersionedIO()
 		ba.BlockAccessList = ba.balIO.AsBlockAccessList()
 		// Only embed the BAL hash in the header for Amsterdam+ chains.

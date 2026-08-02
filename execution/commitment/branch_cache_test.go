@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -164,6 +165,81 @@ func TestBranchCache_Clear(t *testing.T) {
 	require.False(t, ok)
 	_, _, ok = c.Get(deepKey)
 	require.False(t, ok)
+}
+
+func TestBranchCache_ClearRacingPut_EpochAlias(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+	c.Unwind(300)
+
+	key := []byte{0x00}
+	preClearEpoch := c.coh.Epoch()
+	c.Clear()
+	// Model a writer that sampled the epoch before Clear and published after
+	// its target tier was emptied.
+	c.store(key, &branchCacheEntry{data: []byte("dead-fork-branch"), txN: 200, epoch: preClearEpoch})
+	c.Unwind(150)
+
+	_, _, ok := c.Get(key)
+	require.False(t, ok, "pre-Clear epoch must not alias the live epoch after a later unwind")
+}
+
+func clearDuringBlockedBranchCacheWrite(c *BranchCache, block *sync.Mutex, write func()) {
+	// Limit Go execution to one logical processor. Each runtime.Gosched call
+	// yields to the queued goroutine, which runs until it reaches the blocked lock.
+	previousProcs := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previousProcs)
+
+	block.Lock()
+	writerStarted := make(chan struct{})
+	writerDone := make(chan struct{})
+	go func() {
+		close(writerStarted)
+		write()
+		close(writerDone)
+	}()
+	<-writerStarted
+	runtime.Gosched()
+
+	clearDone := make(chan struct{})
+	go func() {
+		c.Clear()
+		close(clearDone)
+	}()
+	runtime.Gosched()
+
+	block.Unlock()
+	<-writerDone
+	<-clearDone
+}
+
+func TestBranchCache_ClearFencesStartedPut(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+	c.Unwind(300)
+
+	key := []byte{0x12, 0x34, 0x56}
+	clearDuringBlockedBranchCacheWrite(c, &c.tailMu, func() {
+		c.Put(key, []byte("dead-fork-branch"), 0, 200)
+	})
+
+	_, _, ok := c.Get(key)
+	require.False(t, ok, "Clear must remove a Put that started in the retiring generation")
+}
+
+func TestBranchCache_ClearFencesStartedPinEntry(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+	c.Unwind(300)
+
+	key := make([]byte, 33)
+	key[32] = 1
+	clearDuringBlockedBranchCacheWrite(c, &c.pinnedMu, func() {
+		c.PinEntry(key, []byte("dead-fork-branch"), 0, 200)
+	})
+
+	_, _, ok := c.Get(key)
+	require.False(t, ok, "Clear must remove a PinEntry that started in the retiring generation")
 }
 
 // TestBranchCache_Stats verifies the format of the stats string is
