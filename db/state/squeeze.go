@@ -493,6 +493,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 	defer rwDb.Debug().EnableReadAhead().DisableReadAhead()
 	a.DisableInterDomainDependencies()
+	defer a.Unalign(kv.CommitmentDomain)()
 
 	// Capture the resolved flag before we temporarily flip it off for the rebuild loop;
 	// the squeeze gate below uses the captured value, not process-global schema state.
@@ -879,6 +880,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	// disable hard alignment; allowing commitment and storage/account to have
 	// different visibleFiles
 	a.DisableAllDependencies()
+	defer a.Unalign(kv.CommitmentDomain)()
 
 	// Capture the resolved flag before we temporarily flip it off for the rebuild loop;
 	// the squeeze gate below uses the captured value, not process-global schema state.
