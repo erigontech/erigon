@@ -96,7 +96,9 @@ func TestPrestateTracerOnOpcodeFaultedSkipsLookup(t *testing.T) {
 	// EXTCODESIZE faulting with the target address as operand
 	// (real-world case: mainnet tx 0x84357b59..., block 25634962, OOG at EXTCODESIZE).
 	targetAddr := target.Value()
-	stack := []uint256.Int{*new(uint256.Int).SetBytes(targetAddr[:])}
+	var operand uint256.Int
+	operand.SetBytes(targetAddr[:])
+	stack := []uint256.Int{operand}
 	tr.OnOpcode(0, byte(vm.EXTCODESIZE), 1724, 2600, &fakeOpContext{stack: stack, addr: caller}, nil, 2, vm.ErrOutOfGas)
 
 	_, ok := tr.pre[target]
@@ -105,7 +107,8 @@ func TestPrestateTracerOnOpcodeFaultedSkipsLookup(t *testing.T) {
 	// SLOAD faulting with the slot key as operand
 	// (real-world case: mainnet tx 0xa4b924b4..., block 25638021, OOG at SLOAD).
 	slot := common.HexToHash("0xbaaed5f3d2bc4b0bc4f1758fde25c1522c4254f5b2fbfa513449670cff246a98")
-	stack = []uint256.Int{*new(uint256.Int).SetBytes(slot[:])}
+	operand.SetBytes(slot[:])
+	stack = []uint256.Int{operand}
 	tr.OnOpcode(0, byte(vm.SLOAD), 1577, 2100, &fakeOpContext{stack: stack, addr: caller}, nil, 1, vm.ErrOutOfGas)
 
 	require.NotContains(t, tr.pre[caller].Storage, slot,
