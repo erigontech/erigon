@@ -16,6 +16,8 @@
 
 package state
 
+import "github.com/erigontech/erigon/common/log/v3"
+
 const (
 	arenaSlabSize   = 64
 	arenaMaxSlabs   = 128
@@ -30,6 +32,8 @@ type stateObjectArena struct {
 	slabs []*[arenaSlabSize]stateObject
 	slab  int
 	idx   int
+
+	miss int
 }
 
 func (a *stateObjectArena) alloc() *stateObject {
@@ -47,6 +51,10 @@ func (a *stateObjectArena) alloc() *stateObject {
 
 func (a *stateObjectArena) grow() bool {
 	if a.slab == arenaMaxSlabs {
+		a.miss++
+		if a.miss%1_000 == 0 {
+			log.Warn("[dbg] stateObjectArena", "requested_over_limit", a.miss)
+		}
 		return false
 	}
 	slab := new([arenaSlabSize]stateObject)
