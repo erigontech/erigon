@@ -461,29 +461,14 @@ func unwindOnExecError(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s 
 		return execErr
 	}
 
-	if errors.Is(execErr, ErrWrongTrieRoot) && !s.CurrentSyncCycle.IsInitialCycle {
+	if errors.Is(execErr, ErrWrongTrieRoot) {
 		return handleIncorrectRootHashError(out.failedBlock, out.failedHash, out.applyTx, cfg, s, logger, u)
 	}
 
-	// Unwind the block that actually failed, not the last good one. out.lastHeader
-	// points at the last successfully validated block, so unwinding from it would
-	// unwind one block too far and mark the valid predecessor bad — and would
-	// schedule no unwind at all when the first block in the batch fails.
-	if out.failedBlock > 0 {
-		if err := u.UnwindTo(out.failedBlock-1, BadBlock(out.failedHash, execErr), out.applyTx); err != nil {
-			return err
-		}
-	} else if out.lastHeader != nil {
-		// Fallback for failure paths that don't record the failed block.
-		unwindTo := uint64(0)
-		if out.lastHeader.Number.Uint64() > 0 {
-			unwindTo = out.lastHeader.Number.Uint64() - 1
-		}
-		if err := u.UnwindTo(unwindTo, BadBlock(out.lastHeader.Hash(), execErr), out.applyTx); err != nil {
-			return err
-		}
-	}
-
+	// A plain invalid block propagates the error without setting a stage unwind
+	// point — the caller owns the unwind. Setting one here would leave a stale
+	// bad-block verdict that blocks a fresh canonical block at the same height
+	// from being re-executed on the next fork-choice.
 	return execErr
 }
 
