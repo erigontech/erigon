@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   constrained-tip-tracking-test:
+    name: tip-tracking-test-${{ matrix.chain }}-${{ matrix.cgroup_name }}-${{ matrix.prune_mode }}
     strategy:
       fail-fast: false
       matrix:

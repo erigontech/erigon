@@ -111,10 +111,10 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, sc)
 	ibs := state.New(cachedReader)
-	defer ibs.Release(false)
+	defer ibs.Close()
 
-	consensusHeaderReader := consensuschain.NewReader(cfg, tx, api._blockReader, nil)
 	logger := log.New("trace_filtering_test")
+	consensusHeaderReader := consensuschain.NewReader(cfg, tx, api._blockReader, logger)
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader,
 		block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	require.NoError(t, err)
@@ -146,9 +146,9 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 
 // TestCallTransactionNilTxnReturnsError reproduces
 // https://github.com/erigontech/erigon/issues/22643: at the live chain tip,
-// TxnByIdxInBlock can resolve a txIndex whose body hasn't materialized yet and
-// return (nil, nil) rather than an error. callTransaction must turn that into
-// a JSON-RPC error instead of dereferencing the nil transaction.
+// TxnByIdxInBlock can report a txIndex as not found because the body hasn't
+// materialized yet. callTransaction must turn that into a JSON-RPC error
+// instead of dereferencing the missing transaction.
 func TestCallTransactionNilTxnReturnsError(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
@@ -168,7 +168,7 @@ func TestCallTransactionNilTxnReturnsError(t *testing.T) {
 	require.NoError(t, err)
 
 	// Far past the last real transaction in the block, so TxnByIdxInBlock
-	// finds the body but no matching entry in kv.EthTx and returns (nil, nil).
+	// finds the body but no matching entry in kv.EthTx and returns ok=false.
 	unresolvedTxIndex := len(block.Transactions()) + 1_000_000
 
 	_, err = api.callTransaction(ctx, tx, block.Header(), []string{TraceTypeTrace}, unresolvedTxIndex, false, chainConfig, nil)
@@ -187,7 +187,8 @@ func traceConfigWithWithdrawals() *config.TraceConfig {
 
 func assertNoWithdrawalTraces(t *testing.T, traces ParityTraces) {
 	t.Helper()
-	for _, tr := range traces {
+	for i := range traces {
+		tr := &traces[i]
 		action, ok := tr.Action.(*RewardTraceAction)
 		require.False(t, ok && action.RewardType == rewardTypeWithdrawal,
 			"unexpected withdrawal trace entry")

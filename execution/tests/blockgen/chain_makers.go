@@ -20,6 +20,7 @@
 package blockgen
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -147,7 +148,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	}
 
 	if b.ibs.IsVersioned() {
-		writes := b.ibs.VersionedWrites()
+		writes := b.ibs.FinalizedWrites(b.blockRules())
 		if b.blockIO != nil {
 			b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
 			b.blockIO.RecordWrites(txVersion, writes)
@@ -158,6 +159,13 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 
 	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
+}
+
+func (b *BlockGen) blockRules() *chain.Rules {
+	blockContext := protocol.NewEVMBlockContext(
+		b.header, protocol.GetHashFn(b.header, nil), b.engine, accounts.NilAddress, b.config,
+	)
+	return blockContext.Rules(b.config)
 }
 
 func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number uint64) (*types.Header, error), engine rules.Engine, txn types.Transaction) {
@@ -362,14 +370,6 @@ var withdrawalRequestCodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(wit
 var consolidationRequestCode = common.Hex2Bytes("3373fffffffffffffffffffffffffffffffffffffffe1460d35760115f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff1461019a57600182026001905f5b5f82111560685781019083028483029004916001019190604d565b9093900492505050366060146088573661019a573461019a575f5260205ff35b341061019a57600154600101600155600354806004026004013381556001015f358155600101602035815560010160403590553360601b5f5260605f60143760745fa0600101600355005b6003546002548082038060021160e7575060025b5f5b8181146101295782810160040260040181607402815460601b815260140181600101548152602001816002015481526020019060030154905260010160e9565b910180921461013b5790600255610146565b90505f6002555f6003555b5f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff141561017357505f5b6001546001828201116101885750505f61018e565b01600190035b5f555f6001556074025ff35b5f5ffd")
 var consolidationRequestCodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(consolidationRequestCode))
 
-// EIP-8282 builder deposit contract runtime bytecode
-var builderDepositRequestCode = misc.BuilderDepositRequestCode
-var builderDepositRequestCodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(builderDepositRequestCode))
-
-// EIP-8282 builder exit contract runtime bytecode
-var builderExitRequestCode = misc.BuilderExitRequestCode
-var builderExitRequestCodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(builderExitRequestCode))
-
 func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.Logger) error {
 	ctx := context.Background()
 	withdrawalAddr := config.GetWithdrawalRequestContract()
@@ -410,55 +410,6 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 		return err
 	}
 	err = stateWriter.UpdateAccountCode(consolidationAddr, 0, consolidationRequestCodeHash, consolidationRequestCode)
-	if err != nil {
-		return err
-	}
-
-	return domains.Commit(ctx, tx)
-}
-
-// InitAmsterdamPreDeploys deploys the EIP-8282 builder deposit and exit
-// system contracts into the state database for test chains with Amsterdam active.
-func InitAmsterdamPreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.Logger) error {
-	ctx := context.Background()
-	builderDepositAddr := config.GetBuilderDepositContract()
-	builderExitAddr := config.GetBuilderExitContract()
-	tx, err := db.BeginTemporalRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
-	if err != nil {
-		return err
-	}
-	defer domains.Close()
-	latestTxNum, _, err := domains.SeekCommitment(ctx, tx)
-	if err != nil {
-		return err
-	}
-	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
-
-	err = stateWriter.UpdateAccountData(builderDepositAddr, &accounts.Account{}, &accounts.Account{
-		CodeHash: builderDepositRequestCodeHash,
-		Nonce:    1,
-	})
-	if err != nil {
-		return err
-	}
-	err = stateWriter.UpdateAccountCode(builderDepositAddr, 0, builderDepositRequestCodeHash, builderDepositRequestCode)
-	if err != nil {
-		return err
-	}
-	err = stateWriter.UpdateAccountData(builderExitAddr, &accounts.Account{}, &accounts.Account{
-		CodeHash: builderExitRequestCodeHash,
-		Nonce:    1,
-	})
-	if err != nil {
-		return err
-	}
-	err = stateWriter.UpdateAccountCode(builderExitAddr, 0, builderExitRequestCodeHash, builderExitRequestCode)
 	if err != nil {
 		return err
 	}
@@ -554,7 +505,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			if b.header.Number.Uint64() >= *daoBlock && b.header.Number.Uint64() < *daoBlock+misc.DAOForkExtraRange {
-				b.header.Extra = common.Copy(misc.DAOForkBlockExtra)
+				b.header.Extra = bytes.Clone(misc.DAOForkBlockExtra)
 			}
 		}
 		// Set ParentBeaconBlockRoot for Cancun+ blocks before InitializeBlockExecution
@@ -579,7 +530,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// Record system call I/O into blockIO for BAL computation
 			if ibs.IsVersioned() && b.blockIO != nil {
 				initVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: -1}
-				writes := ibs.VersionedWrites()
+				writes := ibs.FinalizedWrites(b.blockRules())
 				b.blockIO.RecordReads(initVersion, ibs.VersionedReads())
 				b.blockIO.RecordWrites(initVersion, writes)
 				if b.versionMap != nil {
@@ -605,6 +556,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// Reset versioned I/O before finalize to capture system call I/O cleanly
 			if ibs.IsVersioned() {
 				ibs.ResetVersionedIO()
+				ibs.StartAccessRecording()
 			}
 			// Finalize and seal the block
 			syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
@@ -618,7 +570,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// Record finalize system call I/O into blockIO for BAL computation
 			if ibs.IsVersioned() && b.blockIO != nil {
 				finalizeVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
-				writes := ibs.VersionedWrites()
+				writes := ibs.FinalizedWrites(b.blockRules())
 				b.blockIO.RecordReads(finalizeVersion, ibs.VersionedReads())
 				b.blockIO.RecordWrites(finalizeVersion, writes)
 				if b.versionMap != nil {

@@ -166,8 +166,8 @@ func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
-	for _, blob := range blobs {
-		if err := rlp.EncodeString(blob[:], w, b); err != nil {
+	for i := range blobs {
+		if err := rlp.EncodeString(blobs[i][:], w, b); err != nil {
 			return err
 		}
 	}

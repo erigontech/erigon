@@ -97,7 +97,7 @@ func (evm *EVM) runGoInline(cc *CallContext, contract *Contract, pc uint64) (uin
 				return pc, false, ErrOutOfGas
 			}
 			cc.gas -= GasFastestStep
-			stack.dup(n)
+			stack.dup(n - 1)
 			pc++
 
 		case op >= SWAP1 && op <= SWAP16:

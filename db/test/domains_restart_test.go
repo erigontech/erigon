@@ -17,6 +17,7 @@
 package test
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io/fs"
@@ -476,7 +477,7 @@ func TestCommit(t *testing.T) {
 		require.NoError(t, err)
 		loc[0] = byte(i)
 
-		err = domains.DomainPut(kv.StorageDomain, tx, append(common.Copy(addr), loc...), []byte("0401"), txNum, nil)
+		err = domains.DomainPut(kv.StorageDomain, tx, append(bytes.Clone(addr), loc...), []byte("0401"), txNum, nil)
 		require.NoError(t, err)
 	}
 
@@ -507,7 +508,7 @@ func TestCommitmentContextTraceWriter(t *testing.T) {
 	addr := common.Hex2Bytes("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e")
 	for i := 1; i < 12; i++ { // diverging first nibbles force a branch node
 		addr[0] = byte(i * 16)
-		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, common.Copy(addr), val, 0, nil))
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, bytes.Clone(addr), val, 0, nil))
 	}
 
 	var trace strings.Builder

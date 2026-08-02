@@ -329,6 +329,33 @@ func TestWriteRawTransactions_UniqueKeys(t *testing.T) {
 	}
 }
 
+func TestTxnByIdxInBlock(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+	defer tx.Rollback()
+
+	const blockNum = uint64(1)
+	blockHash := common.HexToHash("0xb10c")
+
+	txn := types.NewTransaction(0, common.HexToAddress("0x1234"), uint256.NewInt(100), 21000, uint256.NewInt(1000000000), nil)
+	err := rawdb.WriteBody(tx, blockHash, blockNum, &types.Body{Transactions: []types.Transaction{txn}})
+	require.NoError(t, err)
+
+	got, ok, err := rawdb.TxnByIdxInBlock(tx, blockHash, blockNum, 0)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, txn.Hash(), got.Hash())
+
+	got, ok, err = rawdb.TxnByIdxInBlock(tx, blockHash, blockNum, 1_000_000)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Nil(t, got)
+
+	got, ok, err = rawdb.TxnByIdxInBlock(tx, common.HexToHash("0xdead"), blockNum, 0)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Nil(t, got)
+}
+
 // Tests block header storage and retrieval operations.
 func TestHeaderStorage(t *testing.T) {
 	if testing.Short() {
@@ -1125,6 +1152,40 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.Equal(1, deleted)
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.Nil(entry)
+}
+
+func TestReadBlockLoadsEmptyBlockAccessList(t *testing.T) {
+	t.Parallel()
+	_, tx := memdb.NewTestTx(t)
+	defer tx.Rollback()
+
+	emptyBALHash := empty.BlockAccessListHash
+	withdrawalsHash := empty.RootHash
+	blobGas := uint64(0)
+	parentBeaconBlockRoot := common.Hash{}
+	requestsHash := common.Hash{}
+	block := types.NewBlockWithHeader(&types.Header{
+		Number:                *uint256.NewInt(1),
+		Extra:                 []byte("test block"),
+		UncleHash:             empty.UncleHash,
+		TxHash:                empty.RootHash,
+		ReceiptHash:           empty.RootHash,
+		BaseFee:               uint256.NewInt(1),
+		WithdrawalsHash:       &withdrawalsHash,
+		BlobGasUsed:           &blobGas,
+		ExcessBlobGas:         &blobGas,
+		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		RequestsHash:          &requestsHash,
+		BlockAccessListHash:   &emptyBALHash,
+	})
+	require.NoError(t, rawdb.WriteBlock(tx, block))
+	emptyBALBytes, err := types.EncodeBlockAccessListBytes(nil)
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), emptyBALBytes))
+
+	readBlock := rawdb.ReadBlock(tx, block.Hash(), block.NumberU64())
+	require.NotNil(t, readBlock)
+	require.Equal(t, emptyBALBytes, readBlock.BlockAccessList())
 }
 
 func TestBlockAccessListStorage(t *testing.T) {

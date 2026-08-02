@@ -58,7 +58,7 @@ func runVersioned(t *testing.T, self accounts.Address, code []byte, lib accounts
 		},
 	}
 	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{})
-	pool := mdgas.MdGas{Regular: 10_000_000, State: 10_000_000}
+	pool := mdgas.MdGas{Execution: 10_000_000, State: 10_000_000}
 	ret, _, _, err := vmenv.Call(accounts.ZeroAddress, self, nil, pool, uint256.Int{}, false)
 	require.NoError(t, err)
 	require.Len(t, ret, 32)
@@ -95,7 +95,7 @@ func runVersionedFunded(t *testing.T, self accounts.Address, code []byte, fund u
 		},
 	}
 	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{})
-	pool := mdgas.MdGas{Regular: 10_000_000, State: 10_000_000}
+	pool := mdgas.MdGas{Execution: 10_000_000, State: 10_000_000}
 	ret, _, _, err := vmenv.Call(accounts.ZeroAddress, self, nil, pool, uint256.Int{}, false)
 	require.NoError(t, err)
 	require.Len(t, ret, 32)
@@ -129,7 +129,7 @@ func benchRunVersioned(b *testing.B, self accounts.Address, code []byte) func() 
 	}
 	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{})
 	return func() {
-		pool := mdgas.MdGas{Regular: 100_000_000, State: 100_000_000}
+		pool := mdgas.MdGas{Execution: 100_000_000, State: 100_000_000}
 		_, _, _, _ = vmenv.Call(accounts.ZeroAddress, self, nil, pool, uint256.Int{}, false)
 	}
 }

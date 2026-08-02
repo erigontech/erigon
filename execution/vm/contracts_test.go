@@ -327,7 +327,20 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 // Tests the sample inputs from the elliptic curve scalar multiplication EIP 213.
 func TestPrecompiledBn254ScalarMul(t *testing.T)      { testJson("bn254ScalarMul", "07", t) }
 func BenchmarkPrecompiledBn254ScalarMul(b *testing.B) { benchJson("bn254ScalarMul", "07", b) }
-func TestPrecompiledBn254ScalarMulFail(t *testing.T)  { testJsonFail("bn254ScalarMul", "07", t) }
+
+func BenchmarkPrecompiledBn254ScalarMulInfinity(b *testing.B) {
+	input := make([]byte, 96)
+	copy(input[64:], bytes.Repeat([]byte{0xff}, 32))
+	benchmarkPrecompiled(b, "07", precompiledTest{
+		Input:    common.Bytes2Hex(input),
+		Expected: common.Bytes2Hex(make([]byte, 64)),
+		Name:     "infinity-large-scalar",
+	})
+}
+
+func TestPrecompiledBn254ScalarMulFail(t *testing.T) {
+	testJsonFail("bn254ScalarMul", "07", t)
+}
 
 // Tests the sample inputs from the elliptic curve pairing check EIP 197.
 func TestPrecompiledBn254Pairing(t *testing.T)      { testJson("bn254Pairing", "08", t) }
@@ -435,7 +448,7 @@ func BenchmarkPrecompiledBLS12381G1MultiExpWorstCase(b *testing.B) {
 		"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
 	input := task
 	for range 4787 {
-		input = input + task
+		input += task
 	}
 	testcase := precompiledTest{
 		Input:       input,
@@ -455,7 +468,7 @@ func BenchmarkPrecompiledBLS12381G2MultiExpWorstCase(b *testing.B) {
 		"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
 	input := task
 	for range 1040 {
-		input = input + task
+		input += task
 	}
 
 	testcase := precompiledTest{

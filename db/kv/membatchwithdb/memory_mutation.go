@@ -26,7 +26,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -835,8 +834,8 @@ func (m *MemoryMutation) Diff() (*MemoryDiff, error) {
 					return nil, err
 				}
 				memDiff.diff[t] = append(memDiff.diff[t], entry{
-					k: common.Copy(k),
-					v: common.Copy(v),
+					k: bytes.Clone(k),
+					v: bytes.Clone(v),
 				})
 			}
 		} else {
@@ -854,8 +853,8 @@ func (m *MemoryMutation) Diff() (*MemoryDiff, error) {
 					return nil, err
 				}
 				memDiff.diff[t] = append(memDiff.diff[t], entry{
-					k: common.Copy(k),
-					v: common.Copy(v),
+					k: bytes.Clone(k),
+					v: bytes.Clone(v),
 				})
 			}
 		}
@@ -953,8 +952,12 @@ func (m *MemoryMutation) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.
 
 func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	if m.DomainReader != nil {
-		if val, ok, err := m.DomainReader.GetAsOf(name, k, ts); err == nil && ok {
-			return val, ok, nil
+		val, ok, err := m.DomainReader.GetAsOf(name, k, ts)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			return val, true, nil
 		}
 	}
 	if m.db == nil {
@@ -986,8 +989,12 @@ func (m *MemoryMutation) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uin
 
 func (m *MemoryMutation) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	if m.DomainReader != nil {
-		if val, ok, err := m.DomainReader.HistorySeek(name, k, ts); err == nil && ok {
-			return val, ok, nil
+		val, ok, err := m.DomainReader.HistorySeek(name, k, ts)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			return val, true, nil
 		}
 	}
 	if m.db == nil {
@@ -1152,8 +1159,12 @@ func (v *OverlayTemporalReadView) GetAsOf(name kv.Domain, k []byte, ts uint64) (
 	// Check DomainReader independently — this method shadows MemoryMutation.GetAsOf
 	// and falls through to v.temporalTx (not m.db), so the embedded check never fires.
 	if v.MemoryMutation != nil && v.MemoryMutation.DomainReader != nil {
-		if val, ok, err := v.MemoryMutation.DomainReader.GetAsOf(name, k, ts); err == nil && ok {
-			return val, ok, nil
+		val, ok, err := v.MemoryMutation.DomainReader.GetAsOf(name, k, ts)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			return val, true, nil
 		}
 	}
 	return v.temporalTx.GetAsOf(name, k, ts)
@@ -1171,8 +1182,12 @@ func (v *OverlayTemporalReadView) HistorySeek(name kv.Domain, k []byte, ts uint6
 	// Check DomainReader independently — this method shadows MemoryMutation.HistorySeek
 	// and falls through to v.temporalTx (not m.db), so the embedded check never fires.
 	if v.MemoryMutation != nil && v.MemoryMutation.DomainReader != nil {
-		if val, ok, err := v.MemoryMutation.DomainReader.HistorySeek(name, k, ts); err == nil && ok {
-			return val, ok, nil
+		val, ok, err := v.MemoryMutation.DomainReader.HistorySeek(name, k, ts)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			return val, true, nil
 		}
 	}
 	return v.temporalTx.HistorySeek(name, k, ts)

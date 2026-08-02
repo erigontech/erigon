@@ -998,7 +998,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePathIn(dstDir, stepFrom, stepTo)
 		kveiPath := d.kvExistenceIdxNewFilePathIn(dstDir, stepFrom, stepTo)
-		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, btindex.DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
+		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.FilenameBase, err)
 		}
@@ -1101,7 +1101,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePath(step, step+1)
 		kveiPath := d.kvExistenceIdxNewFilePath(step, step+1)
-		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, btindex.DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
+		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.FilenameBase, err)
 		}
@@ -1454,10 +1454,8 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dt.d.FilenameBase, k, f.src.existence.FileName)
 					}
 					continue
-				} else {
-					if traceGetLatest == dt.name {
-						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> true\n", dt.d.FilenameBase, k, f.src.existence.FileName)
-					}
+				} else if traceGetLatest == dt.name {
+					fmt.Printf("GetLatest(%s, %x) -> existence index %s -> true\n", dt.d.FilenameBase, k, f.src.existence.FileName)
 				}
 			} else {
 				if traceGetLatest == dt.name {

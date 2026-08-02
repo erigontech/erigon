@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -82,7 +83,7 @@ func init() {
 	rootCmd.Flags().StringSliceVar(&sentryAddr, "sentry.api.addr", []string{"localhost:9091"}, "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
 	rootCmd.Flags().StringVar(&privateApiAddr, "private.api.addr", "localhost:9090", "execution service <host>:<port>")
 	rootCmd.Flags().StringVar(&txpoolApiAddr, "txpool.api.addr", "localhost:9094", "txpool service <host>:<port>")
-	rootCmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	flags.DirVar(rootCmd.Flags(), &datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	if err := rootCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)
 	}
@@ -216,11 +217,14 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 }
 
 func main() {
-	ctx, cancel := common.RootContext()
-	defer cancel()
-
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
+	if err := run(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+}
+
+func run() error {
+	ctx, cancel := common.RootContext()
+	defer cancel()
+	return rootCmd.ExecuteContext(ctx)
 }

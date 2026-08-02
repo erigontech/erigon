@@ -136,8 +136,15 @@ func (b *SimulatedBackend) BlockReader() dbservices.FullBlockReader { return b.m
 
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
+		b.pendingReaderTx = nil
+	}
+	if b.pendingState != nil {
+		b.pendingState.Close()
+		b.pendingState = nil
 	}
 	b.m.Close()
 }
@@ -181,6 +188,9 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingGasUsed = new(protocol.GasUsed)
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
+	}
+	if b.pendingState != nil {
+		b.pendingState.Close()
 	}
 	tx, err := b.m.DB.BeginTemporalRo(context.Background()) //nolint:gocritic
 	if err != nil {
@@ -712,7 +722,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call bind.CallMsg) (
 			return 0, err
 		}
 		if failed {
-			if result != nil && result.Err != vm.ErrOutOfGas {
+			if result != nil && !errors.Is(result.Err, vm.ErrOutOfGas) {
 				if len(result.Revert()) > 0 {
 					return 0, newRevertError(result)
 				}

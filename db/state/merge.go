@@ -555,11 +555,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := dt.d.kvBtAccessorNewFilePath(fromStep, toStep)
 		kveiPath := dt.d.kvExistenceIdxNewFilePath(fromStep, toStep)
-		btM := btindex.DefaultBtreeM
-		if toStep == 0 && dt.d.FilenameBase == "commitment" {
-			btM = 128
-		}
-		valuesIn.bindex, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, btM, dt.dataReader(valuesIn.decompressor), *dt.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
+		valuesIn.bindex, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, dt.dataReader(valuesIn.decompressor), *dt.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 		}
@@ -1077,7 +1073,8 @@ func NewRanges(domain [kv.DomainLen]DomainRanges, invertedIndex [kv.StandaloneId
 
 func (r Ranges) String() string {
 	ss := []string{}
-	for _, d := range &r.domain {
+	for i := range r.domain {
+		d := &r.domain[i]
 		if d.any() {
 			ss = append(ss, fmt.Sprintf("%s(%s)", d.name, d.String()))
 		}
@@ -1093,7 +1090,8 @@ func (r Ranges) String() string {
 }
 
 func (r Ranges) any() bool {
-	for _, d := range &r.domain {
+	for i := range r.domain {
+		d := &r.domain[i]
 		if d.any() {
 			return true
 		}
@@ -1107,7 +1105,8 @@ func (r Ranges) any() bool {
 }
 
 func (r Ranges) anyDomainValues() bool {
-	for _, d := range &r.domain {
+	for i := range r.domain {
+		d := &r.domain[i]
 		if d.values.needMerge {
 			return true
 		}

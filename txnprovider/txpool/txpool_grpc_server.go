@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"math"
@@ -134,7 +135,7 @@ func (s *GrpcServer) All(ctx context.Context, _ *txpoolproto.AllRequest) (*txpoo
 		reply.Txs = append(reply.Txs, &txpoolproto.AllReply_Tx{
 			Sender:  gointerfaces.ConvertAddressToH160(sender),
 			TxnType: convertSubPoolType(t),
-			RlpTx:   common.Copy(rlp),
+			RlpTx:   bytes.Clone(rlp),
 		})
 	}, tx)
 	return reply, nil
@@ -250,7 +251,7 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpoolproto.ImportR
 	case txpoolcfg.InvalidSender, txpoolcfg.NegativeValue, txpoolcfg.OversizedData, txpoolcfg.InitCodeTooLarge,
 		txpoolcfg.RLPTooLong, txpoolcfg.InvalidCreateTxn, txpoolcfg.NoBlobs, txpoolcfg.TooManyBlobs,
 		txpoolcfg.TypeNotActivated, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail,
-		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NoAuthorizations:
+		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NoAuthorizations, txpoolcfg.TipAboveFeeCap:
 		// TODO(EIP-7702) TypeNotActivated may be transient (e.g. a set code transaction is submitted 1 sec prior to the Pectra activation)
 		return txpoolproto.ImportResult_INVALID
 	default:

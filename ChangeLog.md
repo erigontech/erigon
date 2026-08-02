@@ -105,6 +105,47 @@ Filters created with `eth_newFilter`, `eth_newBlockFilter`, and `eth_newPendingT
 
 - `--prune.distance.blocks` now accepts readable policy names — `keep-post-merge` and `keep-all` — instead of the raw `MaxUint64`-based magic numbers (`18446744073709551615` / `18446744073709551614`); `--prune.distance` likewise accepts `keep-all`. Numeric values still work (#22119) — by @yperbasis
 - `--rpc.subscription.filters.timeout` — deadline for evicting idle RPC polling filters (default 5m; 0 disables). New `subscriptions_active` gauge and `subscriptions_created_total` / `subscriptions_unsubscribed_total` / `subscriptions_reaped_total` counters track the filter lifecycle (#22261) — by @onelapahead
+- `--witness.cache.blocks`, `--witness.cache.head-capture`, and `--witness.cache.maxmb` enable an eager in-memory cache of recent-block legacy `debug_executionWitness` results, keyed by block hash. Head-capture mode lets a minimal node (no commitment-domain history) serve witnesses for the last N head blocks cache-only — a miss returns out-of-window rather than recomputing from history. New `witness_cache_*` metrics track hits, misses, builds, and resident entries. Embedded RPC only — by @awskii
+
+---
+
+# Erigon v3.5.4 — Tidal Tails — 2026-07-28
+
+v3.5.4 is a bugfix release recommended for all users, and especially for operators running the RPC daemon with response compression enabled — archive nodes and high-traffic RPC endpoints — where a native-memory leak in the gzip path could grow by ~9-15 GiB/day (#22700). It is a drop-in upgrade from 3.5.3 — no re-sync required.
+
+**Bugfixes**
+
+- node: fix a native (C-allocated) memory leak in the RPC gzip path (#22700) by @AskAlexSharov — the `libdeflate.Compressor` was pooled in a `sync.Pool` whose GC-evicted entries never had `Close()` called, leaking the C context (~9-15 GiB/day on an archive node). Replaced with a bounded channel pool that closes compressors on overflow. Fixes #22672.
+- cmd: expand a leading `~/` (or `~\` on Windows) and `$VAR` in `--datadir` for the cobra-based binaries (#22785) by @lystopad — rpcdaemon and the other cobra commands previously used the raw path, so a tilde/env-prefixed `--datadir` was not resolved the way the main erigon binary resolves it. Fixes #14629.
+
+**Improvements**
+
+- build: update `google.golang.org/grpc` to v1.82.1 (#22690) by @AskAlexSharov — brings `release/3.5` in line with `release/3.6` and `main`.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.5.3...v3.5.4
+
+---
+
+# Erigon v3.5.3 — Tidal Tails — 2026-07-23
+
+v3.5.3 is a bugfix release recommended for all users. It is a drop-in upgrade from 3.5.2 — no re-sync required.
+
+**Bugfixes**
+
+- execution/stagedsync: restore log/receipt notifications for mid-block resumed blocks (#22648) by @lupin012 — backports the notification-completeness half of #22235. After the earlier `ReceiptDomain` fix, both executors still gated `RecentReceipts.Add` on a stale `isPartial`/`startTxIndex==0` flag, so a block resumed mid-block never emitted a correct receipt/log notification over `eth_subscribe("logs"/"newReceipts")`. Both executors now reconstruct the resumed block's prefix receipts and gate on a `receiptsComplete` field.
+- rpc: return a JSON-RPC error instead of panicking on a null transaction in the trace path (#22668) by @AskAlexSharov — `trace_transaction` / `trace_filter` could dereference a nil txn when `TxnByIdxInBlock` resolves a txIndex whose body hasn't materialized yet at the chain tip. Fixes #22643.
+- rpc: fix the `handleBatch` deadlock (#22459) by @yperbasis — a filtered JSON-RPC batch could wedge on `wg.Wait()` and time the request out. Fixes #22424.
+- types: reject legacy transactions wrapped in a typed (EIP-2718) envelope (#22525) by @taratorio.
+- types: reject an empty-string element in RLP transaction-list decoding (#22524) by @taratorio.
+- cl/phase1/stages: fix `uint64` underflow in the "Downloading Execution History" progress log (#22462) by @lystopad — once the live EL head advanced past the frozen initial progress, the `toprocess` subtraction wrapped to ~2⁶⁴ and produced a garbage ETA. Fixes #22455.
+- cl/phase1/stages: guard the "[Caplin] Forward Sync" progress log against slot under/overflow (#22465) by @lystopad — the same unguarded-subtraction / `time.Duration`-overflow pattern on the forward-sync line.
+
+**Improvements**
+
+- rpc: make the `eth_getLogs` per-position address/topic limit configurable via `--rpc.logs.querylimit` (#22477) by @lupin012 — replaces the hardcoded 1000-entry limit; default 1000 preserves current behaviour, 0 = unlimited.
+- cl/phase1/stages: route the history-download and forward-sync progress ETAs through the shared, overflow-safe `utils.ETA` helper (#22493, #22512) by @lystopad.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.5.2...v3.5.3
 
 ---
 

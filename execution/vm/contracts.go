@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -432,7 +433,7 @@ func (c *dataCopy) RequiredGas(input []byte) uint64 {
 	return ToWordSize(uint64(len(input)))*params.IdentityPerWordGas + params.IdentityBaseGas
 }
 func (c *dataCopy) Run(in []byte) ([]byte, error) {
-	return common.Copy(in), nil
+	return bytes.Clone(in), nil
 }
 
 func (c *dataCopy) Name() string {
@@ -722,6 +723,9 @@ func runBn254ScalarMul(input []byte) ([]byte, error) {
 	err := libbn254.UnmarshalCurvePointG1(getData(input, 0, 64), &x)
 	if err != nil {
 		return nil, err
+	}
+	if x.IsInfinity() {
+		return make([]byte, 64), nil
 	}
 	return libbn254.MarshalCurvePointG1(x.ScalarMultiplication(&x, new(big.Int).SetBytes(getData(input, 64, 32)))), nil
 }

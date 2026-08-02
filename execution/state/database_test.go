@@ -130,7 +130,7 @@ func TestCreate2Revive(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -152,7 +152,7 @@ func TestCreate2Revive(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -171,7 +171,7 @@ func TestCreate2Revive(t *testing.T) {
 	var check2 uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -194,7 +194,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if exist {
@@ -210,7 +210,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -355,7 +355,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -377,7 +377,7 @@ func TestCreate2Polymorth(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -394,7 +394,7 @@ func TestCreate2Polymorth(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -426,7 +426,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if exist {
@@ -442,7 +442,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -474,7 +474,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -579,8 +579,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	longerChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
-		switch i {
-		case 0:
+		if i == 0 {
 			_, txn, _, err = contracts.DeploySelfdestruct(transactOptsLonger, contractBackendLonger)
 			if err != nil {
 				t.Fatal(err)
@@ -596,7 +595,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -619,7 +618,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	var correctValueX uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -641,7 +640,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if exist {
@@ -656,7 +655,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -740,8 +739,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	longerChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
-		switch i {
-		case 0:
+		if i == 0 {
 			_, txn, _, err = contracts.DeploySelfdestruct(transactOptsLonger, contractBackendLonger)
 			if err != nil {
 				t.Fatal(err)
@@ -756,7 +754,7 @@ func TestReorgOverStateChange(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -781,7 +779,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	var correctValueX uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -807,7 +805,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -885,8 +883,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
-		switch i {
-		case 0:
+		if i == 0 {
 			contractAddress, txn, _, err = contracts.DeployRevive(transactOpts, contractBackend)
 			if err != nil {
 				t.Fatal(err)
@@ -901,7 +898,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -923,7 +920,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	var check0 uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -962,7 +959,7 @@ func TestReproduceCrash(t *testing.T) {
 	tsr := state.NewReaderV3(sd.AsGetter(tx))
 
 	intraBlockState := state.New(tsr)
-	defer intraBlockState.Release(false)
+	defer intraBlockState.Close()
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
@@ -1030,8 +1027,7 @@ func TestEip2200Gas(t *testing.T) {
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
-		switch i {
-		case 0:
+		if i == 0 {
 			contractAddress, txn, selfDestruct, err = contracts.DeploySelfdestruct(transactOpts, contractBackend)
 			if err != nil {
 				t.Fatal(err)
@@ -1054,7 +1050,7 @@ func TestEip2200Gas(t *testing.T) {
 	var balanceBefore uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1077,7 +1073,7 @@ func TestEip2200Gas(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1156,7 +1152,7 @@ func TestWrongIncarnation(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1191,7 +1187,7 @@ func TestWrongIncarnation(t *testing.T) {
 		}
 
 		st := state.New(stateReader)
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1298,8 +1294,7 @@ func TestWrongIncarnation2(t *testing.T) {
 	longerChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
-		switch i {
-		case 0:
+		if i == 0 {
 			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address.Value()), knownContractAddress, uint256.NewInt(1000), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
@@ -1318,7 +1313,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1340,7 +1335,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1394,7 +1389,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 
 	r, tsw := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	intraBlockState := state.New(r)
-	defer intraBlockState.Release(false)
+	defer intraBlockState.Close()
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 
@@ -1442,7 +1437,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
 	intraBlockState := state.New(r)
-	defer intraBlockState.Release(false)
+	defer intraBlockState.Close()
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 
@@ -1480,7 +1475,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
 	intraBlockState := state.New(r)
-	defer intraBlockState.Release(false)
+	defer intraBlockState.Close()
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 
@@ -1660,7 +1655,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	var check0 uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(phoenixAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1682,7 +1677,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(phoenixAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1704,7 +1699,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(phoenixAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1751,8 +1746,7 @@ func TestTxLookupUnwind(t *testing.T) {
 	chain1, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 		var e error
-		switch i {
-		case 1:
+		if i == 1 {
 			txn, e = types.SignTx(types.NewTransaction(block.TxNonce(address.Value()), address.Value(), uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
 			if e != nil {
 				t.Fatal(e)

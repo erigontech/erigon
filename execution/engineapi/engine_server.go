@@ -487,6 +487,10 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals)
+	// Carry the payload's BAL on the block so execution consumes it from the
+	// in-memory payload; InsertBlocks still stores it in the overlay (flushed at
+	// commit) as secondary storage.
+	block.SetBlockAccessList(blockAccessListBytes)
 	npBeforeHandle := time.Now()
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes, blockAccessListBytes)
 	if logNpPhasesHandler {
@@ -1211,7 +1215,10 @@ func (e *EngineServer) HandleForkChoice(
 	if status == execmodule.ExecutionStatusReorgTooDeep {
 		return nil, &engine_helpers.ReorgTooDeepErr
 	}
-	if status == execmodule.ExecutionStatusBusy {
+	// engine_forkchoiceUpdated restricts payload statuses to VALID, INVALID, and SYNCING — never ACCEPTED.
+	if status == execmodule.ExecutionStatusBusy ||
+		status == execmodule.ExecutionStatusMissingSegment ||
+		status == execmodule.ExecutionStatusTooFarAway {
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
 	if status == execmodule.ExecutionStatusBadBlock {

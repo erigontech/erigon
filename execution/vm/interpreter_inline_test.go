@@ -45,9 +45,9 @@ func runInlineOracle(t *testing.T, self accounts.Address, code []byte, noInline 
 		},
 	}
 	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{NoInlineDispatch: noInline})
-	pool := mdgas.MdGas{Regular: 1_000_000, State: 1_000_000}
+	pool := mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}
 	ret, remaining, _, err := vmenv.Call(accounts.ZeroAddress, self, nil, pool, uint256.Int{}, false)
-	return ret, remaining.Regular, err
+	return ret, remaining.Execution, err
 }
 
 // TestInlineDispatch_EquivalenceOracle pins the inline fast loop to the
@@ -107,7 +107,7 @@ func benchRunVersionedCfg(b *testing.B, self accounts.Address, code []byte, cfg 
 	}
 	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, cfg)
 	return func() {
-		pool := mdgas.MdGas{Regular: 100_000_000, State: 100_000_000}
+		pool := mdgas.MdGas{Execution: 100_000_000, State: 100_000_000}
 		_, _, _, _ = vmenv.Call(accounts.ZeroAddress, self, nil, pool, uint256.Int{}, false)
 	}
 }

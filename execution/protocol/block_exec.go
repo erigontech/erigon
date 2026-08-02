@@ -88,7 +88,7 @@ func ExecuteBlockEphemerally(
 ) (res *EphemeralExecResult, executeBlockErr error) {
 	defer blockExecutionTimer.ObserveDuration(time.Now())
 	ibs := state.New(stateReader)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetHooks(vmConfig.Tracer)
 	header := block.Header()
 
@@ -188,14 +188,13 @@ func ExecuteBlockEphemerally(
 			return nil, err
 		}
 	}
-	blockLogs := ibs.Logs()
 	newRoot := newBlock.Root()
 	execRs := &EphemeralExecResult{
 		StateRoot:   newRoot,
 		TxRoot:      types.DeriveSha(includedTxs),
 		ReceiptRoot: receiptSha,
 		Bloom:       bloom,
-		LogsHash:    rlpHash(blockLogs),
+		LogsHash:    ibs.LogsRlpHash(),
 		Receipts:    receipts,
 		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty.ToBig()),
 		GasUsed:     math.HexOrDecimal64(blockGasUsed),
@@ -203,6 +202,7 @@ func ExecuteBlockEphemerally(
 	}
 
 	if chainConfig.Bor != nil {
+		blockLogs := ibs.Logs()
 		var logs []*types.Log
 		for _, receipt := range receipts {
 			logs = append(logs, receipt.Logs...)
@@ -226,8 +226,6 @@ func ExecuteBlockEphemerally(
 
 	return execRs, nil
 }
-
-var rlpHash = types.RlpHash
 
 func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	isBor := chainConfig.Bor != nil
@@ -270,11 +268,11 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	}
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	mdGas := mdgas.MdGas{
-		Regular: msg.Gas(),
-		State:   0, // pre-Amsterdam: state-gas reservoir not used; spills into regular gas
+		Execution: msg.Gas(),
+		State:     0, // pre-Amsterdam: state-gas reservoir not used; spills into execution gas
 	}
 	if evm.ChainRules().IsAmsterdam {
-		// EIP-8037: extra state-gas reservoir on top of the 30M regular budget
+		// EIP-8037: extra state-gas reservoir on top of the 30M execution budget
 		// so system calls keep their pre-EIP-8037 execution margin.
 		mdGas.State = params.StateGasSystemMaxSstores
 	}
@@ -316,8 +314,8 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	mdGas := mdgas.MdGas{
-		Regular: msg.Gas(),
-		State:   0, // state gas reservoir will consume from regular gas for sys calls
+		Execution: msg.Gas(),
+		State:     0, // state gas reservoir will consume from execution gas for sys calls
 	}
 	ret, _, err := evm.SysCreate(
 		msg.From(),
@@ -342,6 +340,10 @@ func FinalizeBlockExecution(
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		ret, err := SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, vm.Config{})
 		return ret, err
+	}
+
+	if ibs.IsVersioned() {
+		ibs.StartAccessRecording()
 	}
 
 	if isMining {

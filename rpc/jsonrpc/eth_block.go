@@ -79,11 +79,11 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		if err != nil {
 			return nil, err
 		}
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNumber, txnIndex)
+		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNumber, txnIndex)
 		if err != nil {
 			return nil, err
 		}
-		if txn == nil {
+		if !ok {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 		}
 		txs = append(txs, txn)
@@ -108,6 +108,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		}
 	}
 	ibs := state.New(stateReader)
+	defer ibs.Close()
 
 	parent, _ := api.headerByNumber(ctx, rpc.BlockNumber(stateBlockNumber), tx)
 	if parent == nil {

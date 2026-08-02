@@ -408,7 +408,7 @@ func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, dom
 		// error to propagate for in-memory validation.
 		if cfg.badBlockHalt && dbg.BadBlockHalt {
 			logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", logPrefix), "err", execErr)
-			os.Exit(1)
+			os.Exit(1) //nolint:gocritic // exitAfterDefer: intentional process halt without running deferred rollback to preserve state
 		}
 		return execErr
 	}
@@ -529,7 +529,7 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 // receipts are absent (block then left not receipts-complete).
 func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.TemporalTx, header *types.Header, txs types.Transactions, startTxIndex int, blockStartTxNum uint64) (types.Receipts, error) {
 	priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
-	defer priorIbs.Release(true)
+	defer priorIbs.Close()
 	priorGp := protocol.NewGasPool(header.GasLimit, te.cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 		return te.cfg.blockReader.Header(ctx, applyTx, hash, number)
@@ -544,7 +544,7 @@ func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.T
 func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHash common.Hash) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			te.logger.Warn("hook paniced: %s", rec, "stack", dbg.Stack())
+			te.logger.Warn("hook panicked", "panic", rec, "stack", dbg.Stack())
 		}
 	}()
 
@@ -597,6 +597,14 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 			})
 		}
 	}
+}
+
+func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64) ([]byte, error) {
+	data := block.BlockAccessList()
+	if len(data) == 0 && block.HeaderNoCopy().HasNonEmptyBAL() {
+		return rawdb.ReadBlockAccessListBytes(blockTx, block.Hash(), blockNum)
+	}
+	return data, nil
 }
 
 func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, consumers *resultStream, blockRequests chan *blockRequest) error {
