@@ -458,7 +458,7 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 // receipts are absent (block then left not receipts-complete).
 func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.TemporalTx, header *types.Header, txs types.Transactions, startTxIndex int, blockStartTxNum uint64) (types.Receipts, error) {
 	priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
-	defer priorIbs.Release(true)
+	defer priorIbs.Close()
 	priorGp := protocol.NewGasPool(header.GasLimit, te.cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 		return te.cfg.blockReader.Header(ctx, applyTx, hash, number)
@@ -526,6 +526,14 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 			})
 		}
 	}
+}
+
+func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64) ([]byte, error) {
+	data := block.BlockAccessList()
+	if len(data) == 0 && block.HeaderNoCopy().HasNonEmptyBAL() {
+		return rawdb.ReadBlockAccessListBytes(blockTx, block.Hash(), blockNum)
+	}
+	return data, nil
 }
 
 func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults chan applyResult) error {
@@ -619,12 +627,9 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			// db.View() as it can deadlock with the stageloop's RW transaction when
 			// BlockOverlay is active. ProcessBAL still computes+validates the BAL
 			// from the write-set as the ultimate fallback.
-			data := b.BlockAccessList()
-			if len(data) == 0 {
-				data, err = rawdb.ReadBlockAccessListBytes(blockTx, b.Hash(), blockNum)
-				if err != nil {
-					return err
-				}
+			data, err := blockAccessListBytes(blockTx, b, blockNum)
+			if err != nil {
+				return err
 			}
 			if len(data) > 0 && !dbg.IgnoreBAL {
 				dbBAL, err = types.DecodeBlockAccessListBytes(data)
