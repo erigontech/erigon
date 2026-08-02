@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/vm/runtime"
 )
 
 //go:embed testdata/snailtracer.hex
@@ -23,20 +24,37 @@ func BenchmarkSnailtracer(b *testing.B) {
 	code := common.FromHex(strings.TrimSpace(snailtracerHex))
 	input := common.FromHex(snailtracerSelector)
 
-	cfg, statedb := benchConfig(b, 1_000_000_000)
+	vmenv := benchConfig(b, 1_000_000_000)
+	statedb := vmenv.IntraBlockState()
 	deployContract(statedb, addrContract, code)
 
-	// A reverting or out-of-gas run would still produce timings, so pin down
-	// that the call actually completes before measuring it.
-	ret, _, err := prepareAndCall(cfg, addrContract, input)
+	// callComplete checks the call did work; only this benchmark also has a
+	// rendered frame to check.
+	ret, _, err := prepareAndCall(vmenv, addrContract, input)
 	require.NoError(b, err)
 	require.NotEmpty(b, ret)
 
 	b.ReportAllocs()
-	b.ResetTimer()
 	for b.Loop() {
-		if _, _, err := prepareAndCall(cfg, addrContract, input); err != nil {
-			b.Fatal(err)
-		}
+		callComplete(b, vmenv, addrContract, input)
 	}
+}
+
+// TestSnailtracerPathsAgree pins that the parallel path the benchmark measures
+// renders the same frame as the materializing path, so a timing comparison
+// between the two is comparing the same work.
+func TestSnailtracerPathsAgree(t *testing.T) {
+	code := common.FromHex(strings.TrimSpace(snailtracerHex))
+	input := common.FromHex(snailtracerSelector)
+
+	render := func(noMaterialize bool) []byte {
+		cfg, statedb := newBenchConfig(t, 1_000_000_000, noMaterialize)
+		deployContract(statedb, addrContract, code)
+		ret, _, err := prepareAndCall(runtime.NewEnv(cfg), addrContract, input)
+		require.NoError(t, err)
+		require.NotEmpty(t, ret)
+		return ret
+	}
+
+	require.Equal(t, render(false), render(true))
 }
