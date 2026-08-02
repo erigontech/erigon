@@ -34,14 +34,16 @@ type Matches []Match
 
 // acNode is the compiled per-state record. The scan is memory-latency bound: for
 // each input byte it needs this state's fail link, its match and its edge, all
-// indexed by the same jumpy state id. Packing them into one 16-byte record (four
-// per 64-byte cache line) turns four random array loads into one.
+// indexed by the same jumpy state id. Packing them into one 12-byte record turns
+// three random array loads into one.
 //
-// child tags the fanout in three disjoint ranges, so the single field both
-// discriminates and carries its payload: noEdge means none; >=0 is the single
-// edge to that state on byte(label); a wideTag value means the edges live in
-// wideByte/wideChild[wideStart(child) : label]. label is dual-purpose too: the
-// edge byte for a single edge, the end of the edge range for a wide state.
+// edge tags the fanout in three disjoint ranges, so one field both discriminates
+// and carries its payload: noEdge means none; >=0 is a lone edge on byte(edge) to
+// the *next* state, which insertion order already makes the common case; a
+// wideTag value means the edges are spilled to wideByte/wideChild, run-length
+// prefixed at wideStart(edge)-1. A lone edge whose child is not the next state
+// spills too, as a one-edge run, so no state id has to be packed into a field
+// narrower than int32.
 //
 // match indexes patLen/patVal rather than holding the length and value inline:
 // those are per-pattern, not per-state, so a dictionary of p patterns needs p
@@ -49,8 +51,7 @@ type Matches []Match
 type acNode struct {
 	fail  int32
 	match int32 // longest pattern ending at this state, noMatch for none
-	child int32
-	label int32
+	edge  int32
 }
 
 const (
@@ -58,11 +59,11 @@ const (
 	noMatch = int32(-1)
 )
 
-// wideTag encodes a wide state's edge-range start into child, biased past noEdge
-// so the single-edge (>=0), no-edge (-1) and wide (<=-2) ranges stay disjoint;
+// wideTag encodes a spilled run's start into edge, biased past noEdge so the
+// lone-edge (>=0), no-edge (-1) and spilled (<=-2) ranges stay disjoint;
 // wideStart inverts it.
-func wideTag(start int32) int32   { return -start - 2 }
-func wideStart(child int32) int32 { return -child - 2 }
+func wideTag(start int32) int32  { return -start - 2 }
+func wideStart(edge int32) int32 { return -edge - 2 }
 
 // AhoCorasick is a byte-level multi-pattern automaton. Build it once from a
 // pattern dictionary, then share it read-only across any number of ACMatcher
@@ -77,7 +78,7 @@ type AhoCorasick struct {
 	// compiled automaton
 	rootNext  [256]int32 // dense transitions from root (-1 = none)
 	nodes     []acNode
-	wideByte  []byte  // sorted edge labels of fanout>=2 states, concatenated
+	wideByte  []byte  // spilled runs: a fanout-1 prefix byte then sorted labels
 	wideChild []int32 // child states, parallel to wideByte
 	patLen    []int32 // pattern lengths, indexed by acNode.match
 	patVal    []any   // pattern values, parallel to patLen
@@ -224,36 +225,45 @@ func (ac *AhoCorasick) Build() {
 }
 
 // compile packs the CSR scaffolding into the runtime node array, spilling the
-// rare fanout>=2 states into wideByte/wideChild.
+// states whose edges do not fit acNode.edge into wideByte/wideChild.
 //
 // State ids keep their insertion order on purpose. That order lays each
 // pattern's chain out consecutively, so walking a pattern streams the node
 // array; renumbering into BFS order splits every chain across depth bands and
 // costs roughly 7x.
 func (ac *AhoCorasick) compile(n int, firstEdge []int32, edgeByte []byte, edgeChild, fail, match []int32) {
-	ac.nodes = make([]acNode, n)
-	wide := int32(0)
+	spills := func(node int) bool {
+		d := firstEdge[node+1] - firstEdge[node]
+		return d >= 2 || (d == 1 && edgeChild[firstEdge[node]] != int32(node)+1)
+	}
+	wideBytes, wideKids := int32(0), int32(0)
 	for node := range n {
-		if d := firstEdge[node+1] - firstEdge[node]; d >= 2 {
-			wide += d
+		if spills(node) {
+			d := firstEdge[node+1] - firstEdge[node]
+			wideBytes += d + 1 // run-length prefix
+			wideKids += d + 1
 		}
 	}
-	ac.wideByte = make([]byte, 0, wide+swarPad)
-	ac.wideChild = make([]int32, 0, wide)
+
+	ac.nodes = make([]acNode, n)
+	ac.wideByte = make([]byte, 0, wideBytes+swarPad)
+	ac.wideChild = make([]int32, 0, wideKids)
 	for node := range n {
 		start, end := firstEdge[node], firstEdge[node+1]
-		nd := acNode{fail: fail[node], match: match[node], child: noEdge}
-		switch end - start {
-		case 0: // no edge
-		case 1: // single edge
-			nd.child = edgeChild[start]
-			nd.label = int32(edgeByte[start])
-		default: // fanout >= 2: spill to the wide arrays
+		nd := acNode{fail: fail[node], match: match[node], edge: noEdge}
+		switch {
+		case end == start: // no edge
+		case !spills(node): // lone edge to the next state
+			nd.edge = int32(edgeByte[start])
+		default:
+			// the run-length prefix occupies a slot in both arrays so that a
+			// label index is directly a child index
+			ac.wideByte = append(ac.wideByte, byte(end-start-1))
+			ac.wideChild = append(ac.wideChild, 0)
 			ws := int32(len(ac.wideByte))
 			ac.wideByte = append(ac.wideByte, edgeByte[start:end]...)
 			ac.wideChild = append(ac.wideChild, edgeChild[start:end]...)
-			nd.child = wideTag(ws)
-			nd.label = int32(len(ac.wideByte))
+			nd.edge = wideTag(ws)
 		}
 		ac.nodes[node] = nd
 	}
@@ -376,17 +386,18 @@ func (m *ACMatcher) FindLongestMatches(data []byte) []Match {
 				break
 			}
 			nd := &nodes[cur]
-			c := nd.child
-			if c >= 0 { // single edge
-				if byte(nd.label) == b {
-					cur = c
+			e := nd.edge
+			if e >= 0 { // lone edge to the next state
+				if byte(e) == b {
+					cur++
 					break
 				}
 				cur = nd.fail
 				continue
 			}
-			if c < noEdge { // fanout >= 2
-				lo, hi := wideStart(c), nd.label
+			if e < noEdge { // spilled run
+				lo := wideStart(e)
+				hi := lo + int32(wideByte[lo-1]) + 1
 				var found int32
 				if hi-lo > wideBsearchMin {
 					found = bsearchEdge(wideByte, wideChild, lo, hi, b)

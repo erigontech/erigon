@@ -104,3 +104,46 @@ func TestWideFanout(t *testing.T) {
 		})
 	}
 }
+
+// TestLoneEdgeSpill covers a state with exactly one edge whose child is not the
+// next state id, which happens when one pattern is a strict prefix of another
+// and the two are not inserted back to back. Such a state cannot use the
+// implicit next-state child and has to spill into the run arrays.
+func TestLoneEdgeSpill(t *testing.T) {
+	ac := NewAhoCorasick()
+	ac.Insert([]byte("ab"), "ab")
+	ac.Insert([]byte("xy"), "xy") // pushes "abc"'s node away from "ab"+1
+	ac.Insert([]byte("abc"), "abc")
+	NewACMatcher(ac) // compiles the automaton
+
+	spilled := 0
+	for i := range ac.nodes {
+		if e := ac.nodes[i].edge; e < noEdge && wideStart(e)-1 >= 0 && ac.wideByte[wideStart(e)-1] == 0 {
+			spilled++ // a one-edge run
+		}
+	}
+	if spilled == 0 {
+		t.Fatal("expected a one-edge spilled run; test no longer covers the path")
+	}
+
+	for _, tc := range []struct {
+		data string
+		want []Match
+	}{
+		{"zabz", []Match{{Val: "ab", Start: 1, End: 3}}},
+		{"zabcz", []Match{{Val: "abc", Start: 1, End: 4}}},
+		{"abcab", []Match{{Val: "abc", Start: 0, End: 3}, {Val: "ab", Start: 3, End: 5}}},
+		{"xyab", []Match{{Val: "xy", Start: 0, End: 2}, {Val: "ab", Start: 2, End: 4}}},
+		{"azc", nil},
+	} {
+		got := NewACMatcher(ac).FindLongestMatches([]byte(tc.data))
+		if len(got) != len(tc.want) {
+			t.Fatalf("%q: got %+v, want %+v", tc.data, got, tc.want)
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Fatalf("%q at %d: got %+v, want %+v", tc.data, i, got[i], tc.want[i])
+			}
+		}
+	}
+}
