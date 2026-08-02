@@ -52,9 +52,6 @@ func (a *stateObjectArena) grow() bool {
 	slab := new([arenaSlabSize]stateObject)
 	for i := range slab {
 		slab[i].arena = true
-		slab[i].originStorage = make(Storage)
-		slab[i].blockOriginStorage = make(Storage)
-		slab[i].dirtyStorage = make(Storage)
 	}
 	a.slabs = append(a.slabs, slab)
 	return true
