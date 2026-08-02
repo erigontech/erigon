@@ -96,6 +96,11 @@ type CallContext struct {
 	codeSizeCache map[accounts.Address]uint64
 	codeHashCache map[accounts.Address]uint256.Int
 
+	// cachesOff disables the frame-local read caches for this frame. Set when a
+	// tracer/instruction trace is active so traced execution takes the canonical
+	// per-read path — the same reason inline dispatch is disabled under tracing.
+	cachesOff bool
+
 	// Contract carries pointers, so it must precede the pointer-free Stack:
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
 	// Stack.data is 32 KB it can skip entirely.
@@ -489,8 +494,16 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	// The inline fast loop runs the hottest ops with constant-folded prologues;
 	// tracing must stay on the generic per-op path that drives the hooks.
 	inlineDispatch := !anyTrace && !evm.config.NoInlineDispatch
+	// Under tracing, disable the frame-local read caches so every state read
+	// takes the canonical accessor path (fully observable).
+	callContext.cachesOff = anyTrace
 	if inlineDispatch {
 		inlineConstsOnce.Do(func() { assertInlineConsts(evm.jt) })
+	}
+
+	if !anyTrace && optimizedFlow {
+		res, err = evm.runOptimized(callContext, &contract)
+		return res, callContext.Gas(), mdgas.MdGasUsage{}, err
 	}
 
 	for {
@@ -630,4 +643,89 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	}
 
 	return res, callContext.Gas(), mdgas.MdGasUsage{}, err
+}
+
+// optimizedFlow routes the trace-free case through runOptimized. A/B gate.
+var optimizedFlow = dbg.EnvBool("OPT_FLOW", false)
+
+// runOptimized is the interpreter loop for the trace-free case (no tracer,
+// no instruction trace). It drops everything that exists only to feed the
+// tracer — the pcCopy/gasCopy/callGas/cost snapshots, the per-op OnOpcode/
+// OnGasChange/OnFault and instruction-print branches — so the gas charge is a
+// single clean deduct (constant, then dynamic regular, then state) with no
+// tracing-driven ordering or bookkeeping. Dispatched from Run only when
+// !anyTrace, so it is never reached with a tracer active.
+func (evm *EVM) runOptimized(callContext *CallContext, contract *Contract) (res []byte, err error) {
+	pc := uint64(0)
+	inline := !evm.config.NoInlineDispatch
+	for {
+		callContext.cacheGen++
+		if inline {
+			var halt bool
+			pc, halt, err = evm.runGoInline(callContext, contract, pc)
+			if err != nil {
+				break
+			}
+			if halt {
+				return nil, nil
+			}
+		}
+		op := contract.GetOp(pc)
+		operation := evm.jt[op]
+		if sLen := callContext.Stack.len(); sLen < operation.numPop {
+			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
+		} else if sLen > operation.maxStack {
+			return nil, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+		}
+		if callContext.gas < operation.constantGas {
+			return nil, ErrOutOfGas
+		}
+		callContext.gas -= operation.constantGas
+
+		var memorySize uint64
+		if operation.dynamicGas != nil {
+			if operation.memorySize != nil {
+				memSize, overflow := operation.memorySize(callContext)
+				if overflow {
+					return nil, ErrGasUintOverflow
+				}
+				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
+					return nil, ErrGasUintOverflow
+				}
+			}
+			evm.callGasTemp = 0
+			var dynamicCost mdgas.MdGas
+			dynamicCost, err = operation.dynamicGas(evm, callContext, callContext.Gas(), memorySize)
+			if err != nil {
+				if !errors.Is(err, ErrOutOfGas) {
+					err = fmt.Errorf("%w: %w", ErrOutOfGas, err)
+				}
+				return nil, err
+			}
+			if callContext.gas < dynamicCost.Regular {
+				return nil, ErrOutOfGas
+			}
+			callContext.gas -= dynamicCost.Regular
+			if dynamicCost.State > 0 {
+				if !callContext.useMdGas(dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored) {
+					return nil, ErrOutOfGas
+				}
+			}
+		}
+
+		if memorySize > 0 {
+			callContext.Memory.Resize(memorySize)
+		}
+
+		pc, res, err = operation.execute(pc, evm, callContext)
+		if err != nil {
+			break
+		}
+		pc++
+	}
+
+	if errors.Is(err, errStopToken) {
+		err = nil
+	}
+	return res, err
 }

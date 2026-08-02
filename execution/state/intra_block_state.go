@@ -117,7 +117,7 @@ func (r *revisions) revertToSnapshot(revid int) int {
 
 var revisionsPool = sync.Pool{
 	New: func() any {
-		return &revisions{0, make([]revision, 0, 2048)}
+		return &revisions{0, make([]revision, 0, 32)}
 	},
 }
 
@@ -185,7 +185,12 @@ type IntraBlockState struct {
 	// at the block level.  Per-path typed maps give single-level lookups for
 	// non-storage paths; the AccountKey{Path,Key} struct allocation is gone
 	// from the probe hot path.
-	versionMap      *VersionMap
+	versionMap *VersionMap
+	// waitCommit, when set (self-loop mid-flow dep-pause), blocks a read that
+	// observes an in-flight (estimate) predecessor write until that predecessor
+	// commits, then the read retries and sees the final value — so execution pauses
+	// in place instead of aborting via ErrDependency. Returns false on shutdown.
+	waitCommit      func(depTxIndex int) bool
 	versionedWrites WriteSet
 	versionedReads  ReadSet
 	// committedBase memoizes the per-tx committed (pre-block) account fallback
@@ -293,6 +298,17 @@ func (sdb *IntraBlockState) CodeReadCount() int64 {
 
 func (sdb *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 	sdb.versionMap = versionMap
+}
+
+// StateReader returns the committed-base reader. The parallel executor uses it to
+// retune a per-task overlay (OverlayStateReader.SetBlock) without rebuilding the IBS.
+func (sdb *IntraBlockState) StateReader() StateReader {
+	return sdb.stateReader
+}
+
+// SetWaitCommit installs the mid-flow dep-pause hook (self-loop). See waitCommit.
+func (sdb *IntraBlockState) SetWaitCommit(f func(depTxIndex int) bool) {
+	sdb.waitCommit = f
 }
 
 func (sdb *IntraBlockState) VersionMap() *VersionMap {
@@ -2036,6 +2052,12 @@ func (sdb *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	// invalidated.  newObject normalises the zero-value CodeHash to
 	// EmptyCodeHash, so this records keccak256("") for a fresh account.
 	sdb.recordWriteCodeHash(addr, newobj.data.CodeHash)
+	// Write NoncePath for the same reason: a recreate over a self-destructed
+	// account resets the nonce to zero, but without an explicit NoncePath write
+	// the version-map floor keeps the prior incarnation's nonce, which a
+	// write-set view then resurrects (a fresh account read back with a stale
+	// nonce). A contract CREATE overwrites this with nonce=1 immediately after.
+	sdb.recordWriteNonce(addr, newobj.data.Nonce, tracing.NonceChangeNewContract)
 	return newobj
 }
 

@@ -121,6 +121,25 @@ type TxResult struct {
 	// vestigial and slated for removal once the last self-referential fee update
 	// is dropped.
 	CollectorWrites *state.WriteSet
+
+	// WorkerValidated: the worker walked TxIn against the versionMap right after
+	// executing and recorded the verdict here (dep-order fast path). WorkerBlocker
+	// is the highest mismatched writer's TxIndex when the verdict is invalid, so
+	// the exec loop can register it as the true dependency without re-walking.
+	// WorkerVerdictSet distinguishes a real verdict from the zero value
+	// (VersionValid == iota 0), so an unvalidated result is not trusted as valid.
+	WorkerValidated  state.VersionValidity
+	WorkerBlocker    int
+	WorkerVerdictSet bool
+
+	// Dep is the highest predecessor TxIndex this tx read as an in-flight or
+	// mid-execution-changed value (state.IntraBlockState.dep). >= 0 means the
+	// tx's reads were not against a single settled snapshot — an intra-tx
+	// read-consistency failure the version-set validator can't express — so the
+	// tx must re-execute once that predecessor commits. It is a validation
+	// verdict (a blocker to wait for), not an execution error. UnknownDep (< 0)
+	// means every read was settled.
+	Dep int
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -572,7 +591,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			message, err := txTask.TxMessage()
 
 			if err != nil {
-				return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
+				return evmtypes.ExecutionResult{}, err
 			}
 
 			// Apply the transaction to the current state (included in the env).
@@ -586,15 +605,11 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			}
 
 			if applyErr != nil {
-				if _, ok := applyErr.(protocol.ErrExecAbortError); !ok {
-					return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: applyErr}
-				}
-
 				return evmtypes.ExecutionResult{}, applyErr
 			}
 
 			if applyRes == nil {
-				return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex()}
+				return evmtypes.ExecutionResult{}, errors.New("apply returned nil execution result")
 			}
 
 			return *applyRes, err

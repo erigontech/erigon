@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -547,10 +546,9 @@ func TestApplyLoopPartialBatchReturnsErrLoopExhausted(t *testing.T) {
 func TestApplyLoopChannelCloseOrder(t *testing.T) {
 	commit := make(chan applyResult)
 	apply := make(chan applyResult)
-	pe := &parallelExecutor{
-		commitResultsCh: commit,
-		applyResultsCh:  apply,
-	}
+	pe := &parallelExecutor{consumers: newResultStream()}
+	pe.consumers.register("applyResults", apply, true)
+	pe.consumers.register("commitResults", commit, false)
 
 	// closeApplyChannels' return value records the close sequence
 	// inline as each close() succeeds — no goroutine wakeup races.
@@ -570,44 +568,35 @@ func TestApplyLoopChannelCloseOrder(t *testing.T) {
 		t.Error("apply channel not actually closed")
 	}
 
-	// pe.commitResultsCh and pe.applyResultsCh must be nil-ed by the
-	// helper so subsequent calls are no-ops rather than double-closes.
-	if pe.commitResultsCh != nil {
-		t.Error("closeApplyChannels must nil commitResultsCh after closing")
-	}
-	if pe.applyResultsCh != nil {
-		t.Error("closeApplyChannels must nil applyResultsCh after closing")
-	}
-
-	// Calling the helper again with already-nil fields must be a no-op,
-	// not a panic, and the returned order must be empty.
+	// Calling the helper again must be a no-op, not a double-close, and
+	// return an empty order.
 	if order := pe.closeApplyChannels(); len(order) != 0 {
-		t.Errorf("closeApplyChannels on already-nil channels must return empty order, got %v", order)
+		t.Errorf("closeApplyChannels on already-closed channels must return empty order, got %v", order)
 	}
 }
 
 // TestCloseApplyChannelsDoubleCloseRecovers ensures the safety-net
-// recover in closeApplyChannels actually catches the
-// "close of closed channel" panic when, e.g., a parallel shutdown path
-// closes the channels before the deferred close fires. After the
-// recover, the closed-order slice should NOT include the channel name
-// (since the close() didn't succeed) but the field should still be
-// nilled so subsequent calls are clean no-ops.
+// recover in the registry actually catches the "close of closed channel"
+// panic when, e.g., a parallel shutdown path closes the channels before
+// the deferred close fires. After the recover, the closed-order slice
+// should NOT include the channel name (since close() didn't succeed) and
+// subsequent calls must be clean no-ops.
 func TestCloseApplyChannelsDoubleCloseRecovers(t *testing.T) {
-	pe := &parallelExecutor{
-		commitResultsCh: make(chan applyResult),
-		applyResultsCh:  make(chan applyResult),
-	}
-	close(pe.commitResultsCh) // pre-closed by the racing path
-	close(pe.applyResultsCh)
+	commit := make(chan applyResult)
+	apply := make(chan applyResult)
+	pe := &parallelExecutor{consumers: newResultStream()}
+	pe.consumers.register("applyResults", apply, true)
+	pe.consumers.register("commitResults", commit, false)
+	close(commit) // pre-closed by the racing path
+	close(apply)
 
-	// Must not panic — the helper's recover catches "close of closed channel".
+	// Must not panic — the registry's recover catches "close of closed channel".
 	order := pe.closeApplyChannels()
 	if len(order) != 0 {
 		t.Errorf("closeApplyChannels on already-closed channels must NOT count them as freshly closed; got order=%v", order)
 	}
-	if pe.commitResultsCh != nil || pe.applyResultsCh != nil {
-		t.Fatal("closeApplyChannels must nil the fields even on double-close")
+	if order := pe.closeApplyChannels(); len(order) != 0 {
+		t.Fatal("second closeApplyChannels must be a clean no-op")
 	}
 }
 
@@ -1103,64 +1092,4 @@ func TestStopCausePropagation(t *testing.T) {
 		_, ok := stopCauseOf(ctx)
 		require.False(t, ok, "a plain cancel cause must not read as a stopCause")
 	})
-}
-
-// Pins wrapAsExecAbort: a real underlying err must survive as OriginError
-// (or remain a true nil interface), never be substituted by a zero
-// ErrExecAbortError whose Error() reads "execution aborted due to dependency 0".
-func TestWrapAsExecAbort_PreservesOriginError(t *testing.T) {
-	realErr := errors.New("engine.Initialize: validator set call reverted")
-	tests := []struct {
-		name       string
-		origErr    error
-		depTxIndex int
-		check      func(t *testing.T, got error)
-	}{
-		{
-			name:       "nil err is wrapped with nil OriginError (no bogus dep-0 string)",
-			origErr:    nil,
-			depTxIndex: 5,
-			check: func(t *testing.T, got error) {
-				abort, ok := got.(protocol.ErrExecAbortError)
-				require.True(t, ok)
-				require.Equal(t, 5, abort.DependencyTxIndex)
-				require.Nil(t, abort.OriginError,
-					"OriginError must be a true nil interface so IsError() reports false")
-				require.False(t, abort.IsError(),
-					"a wrapped nil err must NOT classify as a genuine execution error")
-			},
-		},
-		{
-			name:       "non-abort err survives as OriginError",
-			origErr:    realErr,
-			depTxIndex: 0,
-			check: func(t *testing.T, got error) {
-				abort, ok := got.(protocol.ErrExecAbortError)
-				require.True(t, ok)
-				require.Equal(t, 0, abort.DependencyTxIndex)
-				require.True(t, abort.IsError())
-				require.Equal(t, realErr.Error(), abort.OriginError.Error(),
-					"real err must reach OriginError verbatim, not be replaced by "+
-						"a zero ErrExecAbortError whose Error() reads as "+
-						"\"execution aborted due to dependency 0\"")
-			},
-		},
-		{
-			name:       "already-wrapped err is returned unchanged",
-			origErr:    protocol.ErrExecAbortError{DependencyTxIndex: 7, OriginError: nil},
-			depTxIndex: 99,
-			check: func(t *testing.T, got error) {
-				abort, ok := got.(protocol.ErrExecAbortError)
-				require.True(t, ok)
-				require.Equal(t, 7, abort.DependencyTxIndex,
-					"depTxIndex of the passed-through err must not be overwritten")
-				require.Nil(t, abort.OriginError)
-			},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			tc.check(t, wrapAsExecAbort(tc.origErr, tc.depTxIndex))
-		})
-	}
 }

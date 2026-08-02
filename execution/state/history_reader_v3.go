@@ -57,7 +57,7 @@ var PrunedError = errors.New("old data not available due to pruning")
 // constructor.
 type HistoryReaderV3 struct {
 	ttx         kv.TemporalTx
-	sd          *execctx.SharedDomains
+	sd          execctx.DomainReader
 	blockCache  *BlockStateCache
 	tracePrefix string
 	txNum       uint64
@@ -74,7 +74,7 @@ func NewHistoryReaderV3(ttx kv.TemporalTx, txNum uint64) *HistoryReaderV3 {
 // parallel executor. Reads chain sd.GetAsOf (in-memory batch state) then
 // fall back to ttx.GetAsOf so a tx can see prior-tx writes from the same
 // batch that have not yet been flushed to the history index.
-func NewHistoryReaderV3WithSharedDomains(ttx kv.TemporalTx, sd *execctx.SharedDomains, txNum uint64) *HistoryReaderV3 {
+func NewHistoryReaderV3WithSharedDomains(ttx kv.TemporalTx, sd execctx.DomainReader, txNum uint64) *HistoryReaderV3 {
 	return &HistoryReaderV3{ttx: ttx, sd: sd, txNum: txNum}
 }
 
@@ -84,7 +84,7 @@ func NewHistoryReaderV3WithSharedDomains(ttx kv.TemporalTx, sd *execctx.SharedDo
 // first so the block-finalize IBS (withdrawals, EIP-7002/7251 system calls)
 // sees every prior-tx write recorded in the current block, not just the
 // pre-block committed state.
-func NewHistoryReaderV3WithBlockCache(ttx kv.TemporalTx, sd *execctx.SharedDomains, blockCache *BlockStateCache, txNum uint64) *HistoryReaderV3 {
+func NewHistoryReaderV3WithBlockCache(ttx kv.TemporalTx, sd execctx.DomainReader, blockCache *BlockStateCache, txNum uint64) *HistoryReaderV3 {
 	return &HistoryReaderV3{ttx: ttx, sd: sd, blockCache: blockCache, txNum: txNum}
 }
 

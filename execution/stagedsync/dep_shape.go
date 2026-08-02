@@ -66,6 +66,9 @@ func buildDepSample(txIdx int, wallNanos int64, readSet state.ReadSet) depSample
 type depMetrics struct {
 	criticalPathNanos int64
 	criticalPathTxs   int64
+	criticalPathTx    int
+	maxTxNanos        int64
+	maxTxIdx          int
 	totalExecNanos    int64
 	depEdges          int64
 	dependentTxs      int64
@@ -107,6 +110,10 @@ func buildDeps(deps []depSample) depMetrics {
 			critPath = finish[d.txIdx]
 			critTx = d.txIdx
 		}
+		if d.wallNanos > m.maxTxNanos {
+			m.maxTxNanos = d.wallNanos
+			m.maxTxIdx = d.txIdx
+		}
 		m.totalExecNanos += d.wallNanos
 		edges := int64(len(d.preds))
 		m.depEdges += edges
@@ -123,6 +130,7 @@ func buildDeps(deps []depSample) depMetrics {
 		}
 	}
 	m.criticalPathNanos = critPath
+	m.criticalPathTx = critTx
 	if critTx >= 0 {
 		m.criticalPathTxs = cpLen[critTx]
 	}
@@ -147,6 +155,11 @@ type serialSplit struct {
 	flushNanos       int64
 	finalizeNanos    int64
 	normalizeNanos   int64
+	revalNanos       int64
+	revalCalls       int64
+	revalScanned     int64
+	revalReValidated int64
+	fixpointIters    int64
 }
 
 func (be *blockExecutor) serialTiming() serialSplit {
@@ -170,6 +183,11 @@ func (be *blockExecutor) serialTiming() serialSplit {
 		flushNanos:       be.flushNanos,
 		finalizeNanos:    be.finalizeNanos,
 		normalizeNanos:   be.normalizeNanos,
+		revalNanos:       be.revalNanos,
+		revalCalls:       be.revalCalls,
+		revalScanned:     be.revalScanned,
+		revalReValidated: be.revalReValidated,
+		fixpointIters:    be.fixpointIters,
 	}
 }
 
@@ -196,6 +214,30 @@ func logDepShape(logger log.Logger, blockNum uint64, blockIO *state.VersionedIO,
 		return
 	}
 	m := buildDeps(deps)
+
+	// Locate the heaviest tx within the worker-active window: t0 = earliest task
+	// start. maxTxStartMs/maxTxEndMs show whether the block's dominant tx runs
+	// early (overlaps the bulk) or late (a serial tail nothing overlaps).
+	var t0 int64
+	for _, d := range deps {
+		if s := stats[d.txIdx].StartNanos; s > 0 && (t0 == 0 || s < t0) {
+			t0 = s
+		}
+	}
+	var maxTxStartMs, maxTxEndMs, winEndMs float64
+	if t0 > 0 {
+		if st := stats[m.maxTxIdx]; st.StartNanos > 0 {
+			maxTxStartMs = float64(st.StartNanos-t0) / 1e6
+			maxTxEndMs = float64(st.EndNanos-t0) / 1e6
+		}
+		for _, d := range deps {
+			if e := stats[d.txIdx].EndNanos; e > 0 {
+				if ems := float64(e-t0) / 1e6; ems > winEndMs {
+					winEndMs = ems
+				}
+			}
+		}
+	}
 
 	var ideal, achieved float64
 	if m.criticalPathNanos > 0 {
@@ -238,6 +280,14 @@ func logDepShape(logger log.Logger, blockNum uint64, blockIO *state.VersionedIO,
 		}()),
 		"workerWinMs", fmt.Sprintf("%.1f", float64(windowNanos)/1e6),
 		"critPathTxs", m.criticalPathTxs,
+		"critPathMs", fmt.Sprintf("%.1f", float64(m.criticalPathNanos)/1e6),
+		"critTx", m.criticalPathTx,
+		"totalExecMs", fmt.Sprintf("%.1f", float64(m.totalExecNanos)/1e6),
+		"maxTxMs", fmt.Sprintf("%.2f", float64(m.maxTxNanos)/1e6),
+		"maxTxIdx", m.maxTxIdx,
+		"maxTxStartMs", fmt.Sprintf("%.1f", maxTxStartMs),
+		"maxTxEndMs", fmt.Sprintf("%.1f", maxTxEndMs),
+		"winEndMs", fmt.Sprintf("%.1f", winEndMs),
 		"depEdges", m.depEdges,
 		"dependent", m.dependentTxs,
 		"independent", m.independentTxs,
@@ -257,6 +307,11 @@ func logDepShape(logger log.Logger, blockNum uint64, blockIO *state.VersionedIO,
 		"flushMs", fmt.Sprintf("%.1f", float64(serial.flushNanos)/1e6),
 		"finalizeMs", fmt.Sprintf("%.1f", float64(serial.finalizeNanos)/1e6),
 		"normalizeMs", fmt.Sprintf("%.1f", float64(serial.normalizeNanos)/1e6),
+		"revalMs", fmt.Sprintf("%.1f", float64(serial.revalNanos)/1e6),
+		"revalCalls", serial.revalCalls,
+		"revalScanned", serial.revalScanned,
+		"revalReVal", serial.revalReValidated,
+		"fixIters", serial.fixpointIters,
 		"perDim", perDimString(m.perPath),
 	)
 }

@@ -140,9 +140,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 			if i == 0 {
 				if vm := ibs.VersionMap(); vm != nil {
 					if nonce, _, ok := vm.ReadNonce(k.addr, version.TxIndex); ok && int(nonce) != t.nonce {
-						return &exec.TxResult{Err: protocol.ErrExecAbortError{
-							DependencyTxIndex: -1,
-							OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce)}}
+						return &exec.TxResult{Err: fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce)}
 					}
 				}
 			}
@@ -174,7 +172,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	}
 
 	if dep != -1 {
-		return &exec.TxResult{Err: protocol.ErrExecAbortError{DependencyTxIndex: dep, OriginError: fmt.Errorf("Dependency error")}}
+		return &exec.TxResult{Err: fmt.Errorf("dependency error")}
 	}
 
 	return &exec.TxResult{}
@@ -560,6 +558,15 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 	return duration
 }
 
+// discardConsumers builds a fan-out registry with a single buffered apply sink
+// nobody drains — for tests that exercise blockExecutor internals without
+// consuming the result stream.
+func discardConsumers(buf int) *resultStream {
+	s := newResultStream()
+	s.register("applyResults", make(chan applyResult, buf), true)
+	return s
+}
+
 type propertyCheck func(*parallelExecutor) error
 
 func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.Task, profile bool, check propertyCheck, metadata bool) (result *blockResult, err error) {
@@ -570,8 +577,10 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 	ctx, cancel := context.WithCancel(context.Background())
 
 	applyResults := make(chan applyResult, 1000)
+	consumers := newResultStream()
+	consumers.register("applyResults", applyResults, true)
 
-	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, applyResults, nil, profile, nil}
+	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, consumers, profile, nil}
 
 	// TODO get results back
 
@@ -1435,7 +1444,7 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(0, common.Hash{}, gasPool, nil, make(chan applyResult, 1), nil, false, nil)
+	be := newBlockExec(0, common.Hash{}, gasPool, nil, discardConsumers(1), false, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1518,7 +1527,7 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(1, common.Hash{}, gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	be := newBlockExec(1, common.Hash{}, gasPool, nil, discardConsumers(4), false, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1591,7 +1600,7 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(1, common.Hash{}, gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	be := newBlockExec(1, common.Hash{}, gasPool, nil, discardConsumers(4), false, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1666,7 +1675,7 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(0, common.Hash{}, gasPool, nil, make(chan applyResult, 1), nil, false, nil)
+	be := newBlockExec(0, common.Hash{}, gasPool, nil, discardConsumers(1), false, nil)
 	be.tasks = []*execTask{eTask0, eTask1}
 	be.results = []*execResult{nil, nil}
 	// tx 0 was "finalized" without a receipt — the invariant nextResult

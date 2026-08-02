@@ -57,33 +57,6 @@ TxnExecutor applies a single transaction to the current world state.
 
 var ErrTxnExecutionFailed = errors.New("txn execution failed")
 
-type ErrExecAbortError struct {
-	DependencyTxIndex int
-	OriginError       error
-}
-
-func (e ErrExecAbortError) Error() string {
-	if e.DependencyTxIndex >= 0 {
-		return fmt.Sprintf("execution aborted due to dependency %d", e.DependencyTxIndex)
-	} else {
-		if e.OriginError != nil {
-			return e.OriginError.Error()
-		}
-		return "execution aborted"
-	}
-}
-
-// IsError reports whether the abort carries a genuine, non-dependency
-// execution error. A dependency abort (DependencyTxIndex >= 0, raised by the
-// ErrDependency panic when a versioned read observes an unsettled predecessor)
-// carries no OriginError and is resolved by re-execution. An IsError abort, by
-// contrast, must be validated before it can be attributed to genuinely invalid
-// block data rather than stale speculative input — the two are mutually
-// exclusive, since Execute's recover sets OriginError only when DepTxIndex < 0.
-func (e ErrExecAbortError) IsError() bool {
-	return e.OriginError != nil
-}
-
 type TxnExecutor struct {
 	gp                  *GasPool
 	msg                 Message
@@ -474,17 +447,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	if st.evm.IntraBlockState().IsVersioned() {
 		defer func() {
 			if r := recover(); r != nil {
-				// Recover from dependency panic and retry the execution.
-				if r != state.ErrDependency {
-					log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", dbg.Stack())
-				}
-				depTxIndex := st.evm.IntraBlockState().DepTxIndex()
-				if depTxIndex < 0 {
-					err = fmt.Errorf("transition exec failure: %s at: %s", r, dbg.Stack())
-				}
-				err = ErrExecAbortError{
-					DependencyTxIndex: depTxIndex,
-					OriginError:       err}
+				// Versioned execution no longer panics for control flow — an
+				// in-flight dependency pauses and re-reads (see waitCommit), it does
+				// not abort. Any panic here is therefore a genuine failure.
+				err = fmt.Errorf("transition exec failure: %s at: %s", r, dbg.Stack())
 			}
 		}()
 	}

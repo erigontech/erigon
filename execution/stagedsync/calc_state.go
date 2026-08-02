@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"fmt"
+
 	"math"
 	"slices"
 
@@ -249,6 +250,12 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 			acc.Nonce = 0
 			acc.CodeHash = empty.CodeHash
 			acc.Incarnation = 0
+			// Storage writes are applied after the self-destruct above, so a
+			// same-block SSTORE-then-SELFDESTRUCT (with no revival) leaves the
+			// stored value in storageState; zero it here so the destroyed account
+			// does not re-emit its pre-SD slots as live storage updates. A revived
+			// account is not Deleted and correctly keeps this block's slots.
+			cs.zeroTouchedStorage(addr)
 		}
 	}
 }

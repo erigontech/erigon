@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -20,12 +22,14 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockreplay"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -167,7 +171,7 @@ func (r *ephemeralReplay) verify(tx kv.TemporalRwTx, doms *execctx.SharedDomains
 		return err
 	}
 	if diffs := expected.Diff(got); len(diffs) > 0 {
-		return fmt.Errorf("post-state mismatch (%d differences), first: %s", len(diffs), diffs[0])
+		return fmt.Errorf("post-state mismatch (%d differences): %s", len(diffs), strings.Join(diffs, " | "))
 	}
 	return nil
 }
@@ -198,7 +202,9 @@ func BenchmarkEphemeralParallelReplay(b *testing.B) {
 
 		b.StopTimer()
 		require.NoError(b, execErr)
-		require.NoError(b, r.verify(tx, doms, expected))
+		if !dbg.EnvBool("DISCARD_APPLY", false) {
+			require.NoError(b, r.verify(tx, doms, expected))
+		}
 		doms.Close()
 		tx.Rollback()
 	}
@@ -242,4 +248,44 @@ func BenchmarkEphemeralBALRoundTrip(b *testing.B) {
 	balOut2 := derive(balOut) // run 2: pre-seed from run 1's BAL
 	require.Equal(b, balOut.Hash(), balOut2.Hash(),
 		"pre-seed != post-output: derived BAL changed when the versionMap was seeded from it")
+}
+
+// TestSelfLoopEvaluateBlockerTaskSpaceOnPartialBlock pins that selfLoopEvaluate
+// returns a park target in dense task-list-index space, not versionMap
+// (block-TxIndex) space. For a resumed (partial) block whose leading committed
+// txs were skipped, task 0 starts at a non-zero block TxIndex, so the two spaces
+// diverge; a dependency's block-TxIndex maps to a much larger number than any
+// task-list index. Before the taskIndexOf fix the blocker was `wv.TxIndex+1`
+// (block-TxIndex space, here 250) — beyond the commit frontier's reach, so the
+// self-loop worker parked forever and the whole block deadlocked. It must instead
+// be `wv.TxIndex - startTxIndex` (task-list space, here 49). Full blocks keep the
+// two aligned (startTxIndex -1 → +1), which is why only resumed blocks hit this.
+func TestSelfLoopEvaluateBlockerTaskSpaceOnPartialBlock(t *testing.T) {
+	const startTxIndex = 200 // resumed/partial block: task 0 is not the block-init sys tx
+	const writerTxIndex = 249
+	const readerTxIndex = 250
+	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000deadbeef"))
+
+	vm := state.NewVersionMap(nil)
+	// A committed write below the reader, at a high block-TxIndex.
+	vm.WriteBalance(addr, state.Version{TxIndex: writerTxIndex}, *uint256.NewInt(7), true)
+
+	// The read recorded a stale value, so revalidating it against the current
+	// versionMap write is invalid — driving the blocker branch.
+	var rs state.ReadSet
+	rs.SetBalance(addr, state.VersionedRead[uint256.Int]{
+		ReadHeader: state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 205}},
+		Val:        *uint256.NewInt(3),
+	})
+
+	be := &blockExecutor{
+		versionMap: vm,
+		tasks:      []*execTask{{Task: &exec.TxTask{TxIndex: startTxIndex}, index: 0}},
+	}
+	tv := &taskVersion{version: state.Version{TxIndex: readerTxIndex}}
+
+	valid, _, blocker := be.selfLoopEvaluate(tv, &exec.TxResult{TxIn: rs})
+	require.False(t, valid, "a stale read must revalidate as invalid")
+	require.Equal(t, writerTxIndex-startTxIndex, blocker,
+		"blocker must be in dense task-list space, not versionMap block-TxIndex space")
 }

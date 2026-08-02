@@ -466,6 +466,21 @@ func (gt *temporalGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return gt.tx.StepsInFiles(entitySet...)
 }
 
+// DomainReader is the read-only view of the shared domain used by the parallel
+// executor's exec flow. Holding the domain as this interface — rather than the
+// full *SharedDomains — keeps exec's state access read-only: the mutators
+// (DomainPut, ApplyStateWrites, SetChangesetAccumulator, Flush, …) are not in the
+// method set, so an exec-side write does not compile. State writes are the apply
+// loop's job. It extends membatchwithdb.DomainReader (the memory-batch fallback
+// reader) with the getter/iterate methods the exec finalize readers need, so the
+// lineage from the base reader is explicit. *SharedDomains is its sole implementer.
+type DomainReader interface {
+	membatchwithdb.DomainReader
+	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
+	AsGetterNoMetrics(tx kv.TemporalTx) kv.TemporalGetter
+	IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error
+}
+
 func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
 	return &temporalGetter{sd: sd, tx: tx}
 }

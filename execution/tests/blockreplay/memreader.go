@@ -21,9 +21,10 @@ import (
 // FrozenBlocks. Everything else is a zero-value stub — nothing on the
 // single-block replay path calls it.
 type memBlockReader struct {
-	block     *types.Block
-	senders   []common.Address
-	num       uint64
+	blocks    map[uint64]*types.Block
+	senders   map[uint64][]common.Address
+	byHash    map[common.Hash]*types.Block
+	lo, hi    uint64 // contiguous block range [lo..hi]
 	parent    *types.Header
 	parentN   uint64
 	ancestors map[uint64]common.Hash // block number -> hash (BLOCKHASH range)
@@ -44,14 +45,52 @@ func NewMemBlockReader(fx *Fixture) (dbservices.FullBlockReader, error) {
 	for n, h := range fx.Ancestors {
 		ancestors[n] = common.Hash(h)
 	}
-	return &memBlockReader{
-		block:     block,
-		senders:   fx.SendersList(),
-		num:       block.NumberU64(),
+	return newMemBlockReader([]*types.Block{block}, [][]common.Address{fx.SendersList()}, parent, ancestors)
+}
+
+// NewMemBlockReaderRange serves a contiguous ascending run of blocks (the
+// multi-block replay path). parent is the parent header of blocks[0].
+func NewMemBlockReaderRange(fx *RangeFixture) (dbservices.FullBlockReader, error) {
+	blocks := make([]*types.Block, len(fx.Blocks))
+	senders := make([][]common.Address, len(fx.Blocks))
+	for i, b := range fx.Blocks {
+		blk, err := b.Block()
+		if err != nil {
+			return nil, err
+		}
+		blocks[i] = blk
+		senders[i] = b.SendersList()
+	}
+	parent, err := fx.Blocks[0].ParentHeader()
+	if err != nil {
+		return nil, err
+	}
+	ancestors := make(map[uint64]common.Hash, len(fx.Blocks[0].Ancestors))
+	for _, b := range fx.Blocks {
+		for n, h := range b.Ancestors {
+			ancestors[n] = common.Hash(h)
+		}
+	}
+	return newMemBlockReader(blocks, senders, parent, ancestors)
+}
+
+func newMemBlockReader(blocks []*types.Block, senders [][]common.Address, parent *types.Header, ancestors map[uint64]common.Hash) (dbservices.FullBlockReader, error) {
+	r := &memBlockReader{
+		blocks:    make(map[uint64]*types.Block, len(blocks)),
+		senders:   make(map[uint64][]common.Address, len(blocks)),
+		byHash:    make(map[common.Hash]*types.Block, len(blocks)),
 		parent:    parent,
-		parentN:   block.NumberU64() - 1,
+		parentN:   blocks[0].NumberU64() - 1,
 		ancestors: ancestors,
-	}, nil
+	}
+	r.lo, r.hi = blocks[0].NumberU64(), blocks[len(blocks)-1].NumberU64()
+	for i, b := range blocks {
+		n := b.NumberU64()
+		r.blocks[n] = b
+		r.senders[n] = senders[i]
+		r.byHash[b.Hash()] = b
+	}
+	return r, nil
 }
 
 // headerAt serves headers the BLOCKHASH walk (GetHashFn) needs. It must NOT
@@ -63,8 +102,8 @@ func NewMemBlockReader(fx *Fixture) (dbservices.FullBlockReader, error) {
 // fixture's real ancestor hash.
 func (r *memBlockReader) headerAt(number uint64) *types.Header {
 	switch {
-	case number == r.num:
-		return r.block.HeaderNoCopy()
+	case number >= r.lo && number <= r.hi:
+		return r.blocks[number].HeaderNoCopy()
 	case number == r.parentN:
 		return r.parent
 	case number < r.parentN:
@@ -78,6 +117,8 @@ func (r *memBlockReader) headerAt(number uint64) *types.Header {
 	}
 }
 
+func (r *memBlockReader) has(number uint64) bool { return number >= r.lo && number <= r.hi }
+
 // --- HeaderReader ---
 
 func (r *memBlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, error) {
@@ -87,8 +128,8 @@ func (r *memBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, block
 	return r.headerAt(blockNum), nil
 }
 func (r *memBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
-	if r.block.Hash() == hash {
-		return r.block.HeaderNoCopy(), nil
+	if b, ok := r.byHash[hash]; ok {
+		return b.HeaderNoCopy(), nil
 	}
 	if r.parent.Hash() == hash {
 		return r.parent, nil
@@ -96,8 +137,8 @@ func (r *memBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash co
 	return nil, nil
 }
 func (r *memBlockReader) HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
-	if r.block.Hash() == hash {
-		n := r.num
+	if b, ok := r.byHash[hash]; ok {
+		n := b.NumberU64()
 		return &n, nil
 	}
 	if r.parent.Hash() == hash {
@@ -117,24 +158,24 @@ func (r *memBlockReader) Integrity(ctx context.Context, tx kv.Getter) error { re
 // --- BlockReader ---
 
 func (r *memBlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Block, []common.Address, error) {
-	if blockNum == r.num {
-		return r.block, r.senders, nil
+	if r.has(blockNum) {
+		return r.blocks[blockNum], r.senders[blockNum], nil
 	}
 	return nil, nil, nil
 }
 func (r *memBlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
-	if number == r.num {
-		return r.block, nil
+	if r.has(number) {
+		return r.blocks[number], nil
 	}
 	return nil, nil
 }
 func (r *memBlockReader) BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error) {
-	if r.block.Hash() == hash {
-		return r.block, nil
+	if b, ok := r.byHash[hash]; ok {
+		return b, nil
 	}
 	return nil, nil
 }
-func (r *memBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) { return r.block, nil }
+func (r *memBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) { return r.blocks[r.hi], nil }
 func (r *memBlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxNum, txCount uint64) error) error {
 	return nil
 }
@@ -145,8 +186,8 @@ func (r *memBlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (u
 // --- BodyReader ---
 
 func (r *memBlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Body, error) {
-	if blockNum == r.num {
-		return r.block.Body(), nil
+	if r.has(blockNum) {
+		return r.blocks[blockNum].Body(), nil
 	}
 	return nil, nil
 }
@@ -154,8 +195,8 @@ func (r *memBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.
 	return nil, nil
 }
 func (r *memBlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Body, uint32, error) {
-	if blockNum == r.num {
-		b := r.block.Body()
+	if r.has(blockNum) {
+		b := r.blocks[blockNum].Body()
 		return b, uint32(len(b.Transactions)), nil
 	}
 	return nil, 0, nil
@@ -164,7 +205,7 @@ func (r *memBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Gett
 	return nil, nil
 }
 func (r *memBlockReader) HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error) {
-	return blockNum == r.num, nil
+	return r.has(blockNum), nil
 }
 func (r *memBlockReader) BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error) {
 	return 0, false, nil
@@ -176,8 +217,8 @@ func (r *memBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash co
 	return 0, 0, false, nil
 }
 func (r *memBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, error) {
-	if blockNum == r.num && i >= 0 && i < len(r.block.Transactions()) {
-		return r.block.Transactions()[i], nil
+	if r.has(blockNum) && i >= 0 && i < len(r.blocks[blockNum].Transactions()) {
+		return r.blocks[blockNum].Transactions()[i], nil
 	}
 	return nil, nil
 }
@@ -189,10 +230,10 @@ func (r *memBlockReader) FirstTxnNumNotInSnapshots(tx kv.Getter) uint64 { return
 // --- CanonicalReader ---
 
 func (r *memBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, bool, error) {
-	switch blockNum {
-	case r.num:
-		return r.block.Hash(), true, nil
-	case r.parentN:
+	if r.has(blockNum) {
+		return r.blocks[blockNum].Hash(), true, nil
+	}
+	if blockNum == r.parentN {
 		return r.parent.Hash(), true, nil
 	}
 	return common.Hash{}, false, nil

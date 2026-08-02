@@ -386,10 +386,12 @@ func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	if err != nil {
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	if scope.balanceCache == nil {
-		scope.balanceCache = make(map[accounts.Address]uint256.Int)
+	if !scope.cachesOff {
+		if scope.balanceCache == nil {
+			scope.balanceCache = make(map[accounts.Address]uint256.Int)
+		}
+		scope.balanceCache[address] = balance
 	}
-	scope.balanceCache[address] = balance
 	slot.Set(&balance)
 	return pc, nil, nil
 }
@@ -554,10 +556,12 @@ func opExtCodeSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	if err != nil {
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	if scope.codeSizeCache == nil {
-		scope.codeSizeCache = make(map[accounts.Address]uint64)
+	if !scope.cachesOff {
+		if scope.codeSizeCache == nil {
+			scope.codeSizeCache = make(map[accounts.Address]uint64)
+		}
+		scope.codeSizeCache[addr] = uint64(codeSize)
 	}
-	scope.codeSizeCache[addr] = uint64(codeSize)
 	slot.SetUint64(uint64(codeSize))
 	return pc, nil, nil
 }
@@ -673,10 +677,12 @@ func opExtCodeHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 		codeHashValue := codeHash.Value()
 		slot.SetBytes(codeHashValue[:])
 	}
-	if scope.codeHashCache == nil {
-		scope.codeHashCache = make(map[accounts.Address]uint256.Int)
+	if !scope.cachesOff {
+		if scope.codeHashCache == nil {
+			scope.codeHashCache = make(map[accounts.Address]uint256.Int)
+		}
+		scope.codeHashCache[address] = *slot
 	}
-	scope.codeHashCache[address] = *slot
 	return pc, nil, nil
 }
 
@@ -811,7 +817,7 @@ func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err e
 		return pc, nil, nil
 	}
 	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), key)
-	if err == nil {
+	if err == nil && !scope.cachesOff {
 		if scope.slotCache == nil {
 			scope.slotCache = make(map[accounts.StorageKey]uint256.Int)
 		}
@@ -832,10 +838,12 @@ func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	key := scope.peekStorageKey()
 	scope.Stack.pop()
 	val := scope.Stack.pop()
-	if scope.slotCache == nil {
-		scope.slotCache = make(map[accounts.StorageKey]uint256.Int)
+	if !scope.cachesOff {
+		if scope.slotCache == nil {
+			scope.slotCache = make(map[accounts.StorageKey]uint256.Int)
+		}
+		scope.slotCache[key] = val
 	}
-	scope.slotCache[key] = val
 	return pc, nil, evm.IntraBlockState().SetState(scope.Contract.Address(), key, val)
 }
 

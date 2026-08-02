@@ -1148,23 +1148,34 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 				// cell.setFromUpdate(update)
 			}
 
-			leafHash, err := hph.leafHashWithKeyVal(buf, cell.hashedExtension[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], singleton)
-			if err != nil {
-				return nil, err
+			// A storage slot read as zero is absent from the trie — never a leaf.
+			// A single persisted slot can be left behind by a self-destruct whose
+			// subtree deletion could not drop it (deleteStorageSubtreeBranches only
+			// removes branch records, not a lone leaf); folding its now-zero value
+			// as a leaf would give the recreated account a non-empty storage root.
+			if cell.StorageLen == 0 && singleton {
+				storageRootHash = empty.RootHash
+				storageRootHashIsSet = true
+				cell.stateHashLen = 0
+			} else {
+				leafHash, err := hph.leafHashWithKeyVal(buf, cell.hashedExtension[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], singleton)
+				if err != nil {
+					return nil, err
+				}
+				if hph.traceW != nil {
+					fmt.Fprintf(hph.traceW, "leafHashWithKeyVal(singleton=%t) {%x} for [%x]=>[%x] %v\n",
+						singleton, leafHash, cell.hashedExtension[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], cell.String())
+				}
+				if !singleton {
+					copy(cell.stateHash[:], leafHash[1:])
+					cell.stateHashLen = int16(len(leafHash) - 1)
+					return leafHash, nil
+				}
+				storageRootHash = *(*common.Hash)(leafHash[1:])
+				storageRootHashIsSet = true
+				cell.stateHashLen = 0
+				hadToReset.Add(1)
 			}
-			if hph.traceW != nil {
-				fmt.Fprintf(hph.traceW, "leafHashWithKeyVal(singleton=%t) {%x} for [%x]=>[%x] %v\n",
-					singleton, leafHash, cell.hashedExtension[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], cell.String())
-			}
-			if !singleton {
-				copy(cell.stateHash[:], leafHash[1:])
-				cell.stateHashLen = int16(len(leafHash) - 1)
-				return leafHash, nil
-			}
-			storageRootHash = *(*common.Hash)(leafHash[1:])
-			storageRootHashIsSet = true
-			cell.stateHashLen = 0
-			hadToReset.Add(1)
 		}
 	}
 	if cell.accountAddrLen > 0 {

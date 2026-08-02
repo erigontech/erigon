@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
@@ -117,13 +118,22 @@ type AddressEntry struct {
 // passing it costs no allocation. The write path uses pool-supplied cells
 // instead of `&WriteCell[T]{...}` literals — Delete/DeleteAll return them
 // to the same pool for reuse across blocks.
-func putCell[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, txIdx, incarnation int, flag statusFlag, value T, getCell func() *WriteCell[T]) *btree.Map[int, *WriteCell[T]] {
+func putCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, txIdx, incarnation int, flag statusFlag, value T, getCell func() *WriteCell[T], eq func(a, b T) bool) *btree.Map[int, *WriteCell[T]] {
+	vm.assertUnsealed(txIdx, addr, path, accounts.NilKey)
 	if cells == nil {
 		cells = &btree.Map[int, *WriteCell[T]]{}
 	}
 	if ci, ok := cells.Get(txIdx); ok {
 		if ci.incarnation > incarnation {
 			panic(fmt.Errorf("existing transaction value does not have lower incarnation: %x %s, %v", addr, path, txIdx))
+		}
+		// A cell's value may change only while it is an Estimate (no reader commits
+		// against an estimate — it reads back as a dependency). Once published Done,
+		// the value is immutable at that version; a different value here is a
+		// post-publish mutation that version-based OCC validation cannot detect.
+		if oneValPerVer && ci.incarnation == incarnation && ci.flag == FlagDone && eq != nil && !eq(ci.Value, value) {
+			panic(fmt.Sprintf("versionMap: value changed on a published Done cell: tx=%d inc=%d addr=%x path=%s",
+				txIdx, incarnation, addr.Value(), path))
 		}
 		ci.flag = flag
 		ci.incarnation = incarnation
@@ -162,6 +172,41 @@ type VersionMap struct {
 	s      sync.Map // accounts.Address -> *AddressEntry
 	trace  bool
 	HasBAL bool // When true, all significant writes are pre-populated from BAL
+
+	// sealed/sealedArmed enforce the invariant that a finalized tx's cells are
+	// immutable: once tx T is sealed (finalized), no write/delete may touch a cell
+	// at TxIndex <= T. sealedArmed defaults false so a zero-value VersionMap never
+	// fires; sealed then holds the highest sealed TxIndex (system txs use negative
+	// indices, so an armed flag is cleaner than a numeric sentinel). A violation is
+	// a scheduling bug — a stale speculative incarnation flushing after its tx
+	// finalized — that would corrupt the committed prefix; see assertUnsealed.
+	// SealUpTo has a single writer (the in-order finalize sweep); assertUnsealed
+	// has many (workers), coordinated by the atomics.
+	sealed      atomic.Int64
+	sealedArmed atomic.Bool
+}
+
+// SealUpTo marks every tx at TxIndex <= txIndex as finalized/immutable. Monotonic:
+// the frontier never regresses. Called from the single-threaded finalize sweep.
+func (vm *VersionMap) SealUpTo(txIndex int) {
+	if vm.sealedArmed.Load() && int64(txIndex) <= vm.sealed.Load() {
+		return
+	}
+	vm.sealed.Store(int64(txIndex))
+	vm.sealedArmed.Store(true)
+}
+
+// assertUnsealed panics if a mutation targets a cell whose tx is already sealed.
+// A cheap always-on invariant (armed-load short-circuits on the pre-seal path);
+// never fires on correct code.
+func (vm *VersionMap) assertUnsealed(txIdx int, addr accounts.Address, path AccountPath, key accounts.StorageKey) {
+	// Negative TxIndex is the pre-block system-call / block-init domain (EIP-4788,
+	// EIP-2935), written during setup and outside the OCC-validated regular-tx
+	// prefix the seal frontier tracks. The invariant applies to regular txs only.
+	if txIdx >= 0 && vm.sealedArmed.Load() && int64(txIdx) <= vm.sealed.Load() {
+		panic(fmt.Sprintf("versionMap: write to sealed cell tx=%d sealedUpTo=%d addr=%x path=%s key=%x",
+			txIdx, vm.sealed.Load(), addr.Value(), path, key.Value()))
+	}
 }
 
 func NewVersionMap(changes []*types.AccountChanges) *VersionMap {
@@ -237,63 +282,63 @@ func (vm *VersionMap) WriteAddress(addr accounts.Address, v Version, value *acco
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.Address = putCell(e.Address, addr, AddressPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellAccount)
+	e.Address = putCell(vm, e.Address, addr, AddressPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellAccount, nil)
 }
 
 func (vm *VersionMap) WriteSelfDestruct(addr accounts.Address, v Version, value bool, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.SelfDestruct = putCell(e.SelfDestruct, addr, SelfDestructPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellSelfDestruct)
+	e.SelfDestruct = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellSelfDestruct, nil)
 }
 
 func (vm *VersionMap) WriteBalance(addr accounts.Address, v Version, value uint256.Int, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.Balance = putCell(e.Balance, addr, BalancePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellBalance)
+	e.Balance = putCell(vm, e.Balance, addr, BalancePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellBalance, eqUint256)
 }
 
 func (vm *VersionMap) WriteNonce(addr accounts.Address, v Version, value uint64, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.Nonce = putCell(e.Nonce, addr, NoncePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellNonce)
+	e.Nonce = putCell(vm, e.Nonce, addr, NoncePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellNonce, eqUint64)
 }
 
 func (vm *VersionMap) WriteIncarnation(addr accounts.Address, v Version, value uint64, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.Incarnation = putCell(e.Incarnation, addr, IncarnationPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellIncarnation)
+	e.Incarnation = putCell(vm, e.Incarnation, addr, IncarnationPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellIncarnation, eqUint64)
 }
 
 func (vm *VersionMap) WriteCode(addr accounts.Address, v Version, value accounts.Code, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.Code = putCell(e.Code, addr, CodePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCode)
+	e.Code = putCell(vm, e.Code, addr, CodePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCode, nil)
 }
 
 func (vm *VersionMap) WriteCodeHash(addr accounts.Address, v Version, value accounts.CodeHash, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.CodeHash = putCell(e.CodeHash, addr, CodeHashPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCodeHash)
+	e.CodeHash = putCell(vm, e.CodeHash, addr, CodeHashPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCodeHash, eqCodeHash)
 }
 
 func (vm *VersionMap) WriteCodeSize(addr accounts.Address, v Version, value int, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.CodeSize = putCell(e.CodeSize, addr, CodeSizePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCodeSize)
+	e.CodeSize = putCell(vm, e.CodeSize, addr, CodeSizePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCodeSize, eqInt)
 }
 
 func (vm *VersionMap) WriteCreateContract(addr accounts.Address, v Version, value bool, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.CreateContract = putCell(e.CreateContract, addr, CreateContractPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCreateContract)
+	e.CreateContract = putCell(vm, e.CreateContract, addr, CreateContractPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCreateContract, nil)
 }
 
 func (vm *VersionMap) WriteStorage(addr accounts.Address, key accounts.StorageKey, v Version, value uint256.Int, complete bool) {
@@ -303,7 +348,7 @@ func (vm *VersionMap) WriteStorage(addr accounts.Address, key accounts.StorageKe
 	if e.Storage == nil {
 		e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
 	}
-	e.Storage[key] = putCell(e.Storage[key], addr, StoragePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellStorage)
+	e.Storage[key] = putCell(vm, e.Storage[key], addr, StoragePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellStorage, eqUint256)
 }
 
 // entryOrCreate returns the AddressEntry for addr, creating it if absent. The
@@ -618,6 +663,22 @@ func (vm *VersionMap) FindDoneSelfDestructInRange(addr accounts.Address, lo, hi 
 // map. Each cell is positioned by the write's (txIndex, incarnation), so the
 // per-path loop order does not affect the result.
 func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, tracePrefix string) {
+	vm.flushVersionedWrites(writes, complete, tracePrefix, nil)
+}
+
+// FlushVersionedWritesFeeEstimate flushes writes, but for any address where
+// feeEstimate returns true the Address and Balance cells are published as
+// ESTIMATE regardless of `complete`. A fee recipient (coinbase / burnt) has no
+// final balance until the postponed fee calc, so its balance must stay an
+// in-flight dependency — even when the tx itself validates — so a downstream
+// reader hits MVReadResultDependency (Dep) and pauses/re-executes rather than
+// reading a committed-looking pre-tip value. calcFees is the sole writer that
+// turns it Done (Estimate -> Done, the one transition allowed to change a value).
+func (vm *VersionMap) FlushVersionedWritesFeeEstimate(writes *WriteSet, complete bool, tracePrefix string, feeEstimate func(accounts.Address) bool) {
+	vm.flushVersionedWrites(writes, complete, tracePrefix, feeEstimate)
+}
+
+func (vm *VersionMap) flushVersionedWrites(writes *WriteSet, complete bool, tracePrefix string, feeEstimate func(accounts.Address) bool) {
 	if writes == nil {
 		return
 	}
@@ -633,41 +694,47 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, trac
 			return
 		}
 		seen[addr] = struct{}{}
+		// A fee recipient's Address/Balance is provisional until calcFees — keep it
+		// an Estimate so readers depend on the finalized (tip-inclusive) value.
+		feeBalFlag := flag
+		if feeEstimate != nil && feeEstimate(addr) {
+			feeBalFlag = FlagEstimate
+		}
 		e := vm.entryOrCreate(addr)
 		e.mu.Lock()
 		if vw, ok := writes.address[addr]; ok {
-			e.Address = putCell(e.Address, addr, AddressPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellAccount)
+			e.Address = putCell(vm, e.Address, addr, AddressPath, vw.Version.TxIndex, vw.Version.Incarnation, feeBalFlag, vw.Val, getCellAccount, nil)
 		}
 		if vw, ok := writes.selfDestruct[addr]; ok {
-			e.SelfDestruct = putCell(e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellSelfDestruct)
+			e.SelfDestruct = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellSelfDestruct, nil)
 		}
 		if vw, ok := writes.balance[addr]; ok {
-			e.Balance = putCell(e.Balance, addr, BalancePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellBalance)
+			e.Balance = putCell(vm, e.Balance, addr, BalancePath, vw.Version.TxIndex, vw.Version.Incarnation, feeBalFlag, vw.Val, getCellBalance, eqUint256)
 		}
 		if vw, ok := writes.nonce[addr]; ok {
-			e.Nonce = putCell(e.Nonce, addr, NoncePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellNonce)
+			e.Nonce = putCell(vm, e.Nonce, addr, NoncePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellNonce, eqUint64)
 		}
 		if vw, ok := writes.incarnation[addr]; ok {
-			e.Incarnation = putCell(e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellIncarnation)
+			e.Incarnation = putCell(vm, e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellIncarnation, eqUint64)
 		}
 		if vw, ok := writes.code[addr]; ok {
-			e.Code = putCell(e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCode)
+			e.Code = putCell(vm, e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCode, nil)
 		}
 		if vw, ok := writes.codeHash[addr]; ok {
-			e.CodeHash = putCell(e.CodeHash, addr, CodeHashPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCodeHash)
+			e.CodeHash = putCell(vm, e.CodeHash, addr, CodeHashPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCodeHash, eqCodeHash)
 		}
 		if vw, ok := writes.codeSize[addr]; ok {
-			e.CodeSize = putCell(e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCodeSize)
+			e.CodeSize = putCell(vm, e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCodeSize, eqInt)
 		}
 		if vw, ok := writes.createContract[addr]; ok {
-			e.CreateContract = putCell(e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCreateContract)
+			e.CreateContract = putCell(vm, e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCreateContract, nil)
 		}
 		if inner, ok := writes.storage[addr]; ok {
 			if e.Storage == nil {
 				e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
 			}
 			for key, vw := range inner {
-				e.Storage[key] = putCell(e.Storage[key], addr, StoragePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellStorage)
+				e.Storage[key] = putCell(vm, e.Storage[key], addr, StoragePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellStorage, eqUint256)
 			}
 		}
 		e.mu.Unlock()
@@ -675,6 +742,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, trac
 }
 
 func (vm *VersionMap) MarkEstimate(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) {
+	vm.assertUnsealed(txIdx, addr, path, key)
 	e := vm.load(addr)
 	if e == nil {
 		panic(fmt.Errorf("markFlag: no entry for addr %x, path %s, txIdx %d", addr, path, txIdx))
@@ -716,6 +784,7 @@ func markFlag(e *AddressEntry, addr accounts.Address, path AccountPath, key acco
 }
 
 func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int, checkExists bool) {
+	vm.assertUnsealed(txIdx, addr, path, key)
 	e := vm.load(addr)
 	if e == nil {
 		if !checkExists {
@@ -806,6 +875,7 @@ func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accoun
 }
 
 func (vm *VersionMap) DeleteAll(addr accounts.Address, txIdx int) {
+	vm.assertUnsealed(txIdx, addr, AddressPath, accounts.NilKey)
 	e := vm.load(addr)
 	if e == nil {
 		return
@@ -928,6 +998,7 @@ func liveStorage(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx i
 
 func eqUint256(a, b uint256.Int) bool { return a.Eq(&b) }
 func eqUint64(a, b uint64) bool       { return a == b }
+func eqInt(a, b int) bool             { return a == b }
 func eqCodeHash(a, b accounts.CodeHash) bool {
 	return a == b
 }
@@ -979,6 +1050,9 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
+			if valid == VersionValid && valueAwareMapRead && matchesLive != nil && !matchesLive() {
+				valid = VersionInvalid
+			}
 			// An AddressPath read resolved to the seeded origin (-1) is the committed
 			// baseline, equivalent to a storage read of a non-existent cell; re-run the
 			// create/destruct cross-checks the storage-read path does so a concurrent
@@ -1089,7 +1163,13 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 
 // ValidateVersion check if transaction's readSet is still valid based on the current multi-versioned memory
 func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersion func(readVersion, writeVersion Version) VersionValidity, traceInvalid bool, tracePrefix string) (valid VersionValidity) {
-	rs := lastIO.ReadSet(txIdx)
+	return vm.ValidateReadSet(txIdx, lastIO.ReadSet(txIdx), checkVersion, traceInvalid, tracePrefix)
+}
+
+// ValidateReadSet validates rs (a tx's read-set) against the current versionMap
+// at txIdx. Split out of ValidateVersion so a worker can validate its own
+// freshly-produced read-set in parallel, before the exec loop commits.
+func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(readVersion, writeVersion Version) VersionValidity, traceInvalid bool, tracePrefix string) (valid VersionValidity) {
 	valid = VersionValid
 	// ok checks one validity result, latching valid; ok==false stops the scan.
 	ok := func(v VersionValidity) bool { valid = v; return v == VersionValid }

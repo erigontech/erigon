@@ -106,6 +106,43 @@ func Capture(
 	return fx, nil
 }
 
+// MergeRangeOutputs computes the range-FINAL post-state: the union of every key
+// written by any block in the range, read at lastBlock's post-txNum from
+// canonical history. This is a correct oracle for the whole range independent of
+// the per-block captured Outputs (which are each as-of their own block's end).
+func MergeRangeOutputs(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, blocks []*Fixture, lastBlock uint64) (*Outputs, error) {
+	want := newOutputs()
+	for _, b := range blocks {
+		if b.Outputs == nil {
+			continue
+		}
+		for a := range b.Outputs.Accounts {
+			want.Accounts[a] = acctData{}
+		}
+		for a := range b.Outputs.Deleted {
+			want.Accounts[a] = acctData{}
+		}
+		for a, slots := range b.Outputs.Storage {
+			m := want.Storage[a]
+			if m == nil {
+				m = map[[32]byte][32]byte{}
+				want.Storage[a] = m
+			}
+			for k := range slots {
+				m[k] = [32]byte{}
+			}
+		}
+		for a := range b.Outputs.Code {
+			want.Code[a] = nil
+		}
+	}
+	postTxNum, err := blockReader.TxnumReader().Max(ctx, tx, lastBlock)
+	if err != nil {
+		return nil, fmt.Errorf("max txNum %d: %w", lastBlock, err)
+	}
+	return CollectOutputs(state.NewHistoryReaderV3(tx, postTxNum+1), want)
+}
+
 // captureAncestors records the last 256 ancestor hashes (BLOCKHASH range) so
 // replay can answer the BLOCKHASH opcode without a DB.
 func captureAncestors(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, header *types.Header, fx *Fixture) {

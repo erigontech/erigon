@@ -26,6 +26,21 @@ import (
 // Removed once proven.
 var vmapAddrOrigin = dbg.EnvBool("VMAP_ADDR_ORIGIN", false)
 
+// valueAwareMapRead (A/B gate, temporary): also compare the recorded read VALUE
+// against the current cell value for MapRead-sourced Done reads, not just the
+// version. Closes the coinbase-tip aliasing gap where a delayed fee tip write
+// updates the coinbase Balance cell VALUE at the same (TxIndex,Incarnation) as
+// the sender==coinbase worker write, so a downstream reader recorded at that
+// version passes the version-only check despite reading the stale pre-tip value.
+var valueAwareMapRead = dbg.EnvBool("VALUE_AWARE_MAPREAD", false)
+
+// oneValPerVer enforces the versionMap invariant that a cell holds ONE value per
+// version: overwriting a cell at the same (TxIndex, Incarnation) with a DIFFERENT
+// value is a bug (a post-execution mutation of an already-published cell), which
+// version-based OCC validation cannot detect. Re-flushing the same value is
+// idempotent and allowed; a higher incarnation is a new version and allowed.
+var oneValPerVer = dbg.EnvBool("ONE_VAL_PER_VER", false)
+
 // originTxIndex is the versionMap index of the pre-block committed base ("origin"
 // = all account fields read at once, the old stateObject.original). It is the
 // highest slot below every real task index: the lowest task is the block-begin
@@ -425,6 +440,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	// generic Read does is a heap alloc per non-storage read. On a miss ReadX
 	// returns a pre-seeded (UnknownDep, -1) result, so res is always valid.
 	var res ReadResult
+reread:
 	switch path {
 	case AddressPath:
 		r.mapAddressVal, res, _ = s.versionMap.ReadAddress(addr, s.txIndex)
@@ -470,7 +486,10 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 								addr, AccountKey{path, key})
 						}
 						s.versionedReads.SetHeader(addr, path, key, hdr)
-						panic(ErrDependency)
+						if s.waitCommit != nil && s.waitCommit(hdr.Version.TxIndex) {
+							goto reread
+						}
+						// Shutdown / no pause hook: fall through to the tx's own write.
 					}
 				}
 			}
@@ -512,7 +531,10 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 					addr, AccountKey{path, key})
 			}
 			s.versionedReads.SetHeader(addr, path, key, hdr)
-			panic(ErrDependency)
+			if s.waitCommit != nil && s.waitCommit(hdr.Version.TxIndex) {
+				goto reread
+			}
+			// Shutdown / no pause hook: fall through to return the current value.
 		}
 		// CodePath trumped by SelfDestruct at >= DepIdx
 		if path == CodePath {
@@ -562,7 +584,21 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		}
 		hdr.Source = MapRead
 		s.versionedReads.SetHeader(addr, path, key, hdr)
-		panic(ErrDependency)
+		// Mid-flow dep-pause: the predecessor write is in flight (estimate). Wait
+		// for it to commit, then re-read — the cell is now the committed value. No
+		// abort/re-execute. waitCommit returns false only on shutdown (context
+		// cancelled), and callers with no pause hook (serial/historical) never
+		// observe an estimate; in those cases fall back to the in-flight value —
+		// a self-loop shutdown result is discarded.
+		if s.waitCommit != nil && s.waitCommit(res.DepIdx()) {
+			goto reread
+		}
+		r.outcome = outcomeMapDone
+		r.hdr = hdr
+		r.recordVR = true
+		r.source = MapRead
+		r.version = hdr.Version
+		return
 
 	case MVReadResultNone:
 		if !commited {
@@ -686,7 +722,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// without materializing a stateObject. A stateObject exists here only
 		// when a write this tx materialized one (created contract / fakeStorage /
 		// dirty slots live on that object), so reuse it when present.
-		if path == StoragePath && so == nil {
+		if path == StoragePath {
 			hdr.Source = StorageRead
 			if cached, ok := s.stateObjects[addr]; ok {
 				so = cached

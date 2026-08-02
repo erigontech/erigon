@@ -488,6 +488,13 @@ func (te *txExecutor) domains() *execctx.SharedDomains {
 	return te.doms
 }
 
+// domainsRead returns the shared domain as a read-only view. The parallel
+// executor's exec flow reads state through this (never the writable *SharedDomains)
+// so exec-side state writes do not compile — state writes are the apply loop's job.
+func (te *txExecutor) domainsRead() execctx.DomainReader {
+	return te.doms
+}
+
 func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header, err error) {
 	if te.applyTx != nil {
 		err := te.applyTx.Apply(ctx, func(tx kv.Tx) (err error) {
@@ -592,16 +599,15 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
-func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults ...chan applyResult) error {
+func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, consumers *resultStream, blockRequests chan *blockRequest) error {
 	if te.execLoopGroup == nil {
 		return errors.New("no exec group")
 	}
 
 	te.execLoopGroup.Go(func() (err error) {
-		// Do NOT close channels here. The exec loop closes them
-		// after processing all blocks (via pe.commitResultsCh/applyResultsCh
-		// deferred close, or via the ctx.Done drain path).
-		// Closing here would race with the exec loop sending results.
+		// Do NOT close channels here. The exec loop closes them after processing
+		// all blocks (via pe.consumers' deferred close, or the ctx.Done drain
+		// path). Closing here would race with the exec loop sending results.
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("exec blocks panic: %s", rec)
@@ -728,10 +734,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, dbg.DiscardCommitment(), blockLimit, blockNum, startBlockNum, maxBlockNum) {
 				exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 			}
-			var commitCh chan applyResult
-			if len(commitResults) > 0 {
-				commitCh = commitResults[0]
-			}
 			// Heads-up to the commitment calculator, ahead of the block's
 			// txResult/blockResult stream and on its own channel. inputTxNum
 			// has been advanced past this block's tasks by the loop above,
@@ -754,7 +756,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			select {
 			case te.execRequests <- &execRequest{b.NumberU64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				dbBAL, txTasks, applyResults, commitCh, false, exhausted}:
+				dbBAL, txTasks, consumers, false, exhausted}:
 			case <-ctx.Done():
 				return ctx.Err()
 			}

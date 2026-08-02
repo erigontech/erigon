@@ -88,8 +88,8 @@ func TestWorker_ChainReader_SeesOverlayHeader(t *testing.T) {
 	// nil blockReader → consensuschain.Reader uses rawdb.ReadHeader directly,
 	// keeping the test focused on the tx + overlay path without any
 	// snapshot-file plumbing.
-	rw := NewWorker(t.Context(), true, nil, db, nil, nil,
-		&chain.Config{ChainID: uint256.NewInt(1)}, nil, nil, nil, dirs, logger)
+	rw := NewWorkerContext(t.Context(), true, nil, db, nil,
+		&chain.Config{ChainID: uint256.NewInt(1)}, nil, nil, dirs, logger)
 	rw.rs = rs
 
 	// workerRoTx ownership transfers to rw on ResetTx; rolling it back
@@ -159,8 +159,8 @@ func TestWorker_ChainReader_NoOverlayStillWorks(t *testing.T) {
 	// nil blockReader → consensuschain.Reader uses rawdb.ReadHeader directly,
 	// keeping the test focused on the tx + overlay path without any
 	// snapshot-file plumbing.
-	rw := NewWorker(t.Context(), true, nil, db, nil, nil,
-		&chain.Config{ChainID: uint256.NewInt(1)}, nil, nil, nil, dirs, logger)
+	rw := NewWorkerContext(t.Context(), true, nil, db, nil,
+		&chain.Config{ChainID: uint256.NewInt(1)}, nil, nil, dirs, logger)
 	rw.rs = rs
 
 	// workerRoTx ownership transfers to rw on ResetTx; rolling it back

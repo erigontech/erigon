@@ -3,7 +3,6 @@ package state
 import (
 	"bytes"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"iter"
 	"maps"
@@ -1622,8 +1621,6 @@ func valueString(path AccountPath, value any) string {
 
 	return fmt.Sprint(value)
 }
-
-var ErrDependency = errors.New("found dependency")
 
 type versionedStateReader struct {
 	txIndex     int

@@ -556,10 +556,11 @@ func TestVersionedRead_E2_StaleMapReadCaughtAtCommit(t *testing.T) {
 }
 
 // F: MVReadResultDependency status (versionMap saw an in-progress dep at a
-// higher TxIdx than the current tx) → panic ErrDependency. Triggered by
-// writing at our own txIndex's Done-but-Estimate state. Simplest reliable
-// trigger: an Estimate-status entry (complete=false) at a TxIdx <= ours.
-func TestVersionedRead_F_MVReadResultDependencyPanics(t *testing.T) {
+// higher TxIdx than the current tx) records the dependency as a validation
+// verdict (HadInvalidRead) rather than panicking. With no pause hook the read
+// falls through to the in-flight value. Trigger: an Estimate-status entry
+// (complete=false) at a TxIdx <= ours.
+func TestVersionedRead_F_MVReadResultDependencyRecordsDep(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
@@ -572,21 +573,18 @@ func TestVersionedRead_F_MVReadResultDependencyPanics(t *testing.T) {
 	// Estimate entry (complete=false) at txIndex 2 < 5 → Dependency.
 	mvhm.WriteBalance(addr, Version{TxIndex: 2, Incarnation: 0}, *uint256.NewInt(50), false)
 
-	defer func() {
-		r := recover()
-		require.NotNil(t, r, "must panic on Dependency status")
-		err, ok := r.(error)
-		require.True(t, ok)
-		assert.ErrorIs(t, err, ErrDependency)
-	}()
-	_, _ = ibs.GetBalance(addr)
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	assert.True(t, ibs.HadInvalidRead(), "dependency read must set the invalid-read verdict")
+	assert.Equal(t, 2, ibs.DepTxIndex(), "verdict names the in-flight predecessor")
+	assert.Equal(t, uint256.NewInt(50), &bal, "no pause hook: falls through to the in-flight value")
 }
 
-// writeSet hit at MVReadResultDone, but readSet has a stale version
-// → panic ErrDependency (a write was based on a stale read). The current
-// tx wrote, but the readSet for the same path holds a version older than
-// the versionMap's Done entry.
-func TestVersionedRead_D1_WriteSetHitWithStaleReadSetPanics(t *testing.T) {
+// writeSet hit at MVReadResultDone, but readSet has a stale version:
+// records the dependency verdict (a write was based on a stale read) rather
+// than panicking. The current tx wrote, but the readSet for the same path
+// holds a version older than the versionMap's Done entry.
+func TestVersionedRead_D1_WriteSetHitWithStaleReadSetRecordsDep(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
@@ -609,12 +607,9 @@ func TestVersionedRead_D1_WriteSetHitWithStaleReadSetPanics(t *testing.T) {
 	err := ibs.SetBalance(addr, *uint256.NewInt(77), 0)
 	require.NoError(t, err)
 
-	defer func() {
-		r := recover()
-		require.NotNil(t, r, "must panic when writeSet hit conflicts with stale readSet at versionMap Done")
-		err, ok := r.(error)
-		require.True(t, ok)
-		assert.ErrorIs(t, err, ErrDependency)
-	}()
-	_, _ = ibs.GetBalance(addr)
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	assert.True(t, ibs.HadInvalidRead(), "stale-read writeSet hit must set the invalid-read verdict")
+	assert.Equal(t, 3, ibs.DepTxIndex(), "verdict names the versionMap Done predecessor")
+	assert.Equal(t, uint256.NewInt(77), &bal, "no pause hook: returns the tx's own intra-tx write")
 }

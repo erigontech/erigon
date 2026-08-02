@@ -37,7 +37,7 @@ type serialExecutor struct {
 	blockStateGasUsed uint64 // EIP-8037: accumulated state gas
 	blobGasUsed       uint64
 	lastBlockResult   *blockResult
-	worker            *exec.Worker
+	worker            *exec.WorkerContext
 
 	// accumulator for the current block; set at StartChange and used by the
 	// block-end stateWriter so that AuRa system-call nonce changes are
@@ -294,8 +294,8 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 
 	if se.worker == nil {
 		se.taskExecMetrics = exec.NewWorkerMetrics()
-		se.worker = exec.NewWorker(context.Background(), false, se.taskExecMetrics,
-			se.cfg.db.(kv.TemporalRoDB), nil, se.cfg.blockReader, se.cfg.chainConfig, se.cfg.genesis, nil, se.cfg.engine, se.cfg.dirs, se.logger)
+		se.worker = exec.NewWorkerContext(context.Background(), false, se.taskExecMetrics,
+			se.cfg.db.(kv.TemporalRoDB), se.cfg.blockReader, se.cfg.chainConfig, se.cfg.genesis, se.cfg.engine, se.cfg.dirs, se.logger)
 	}
 
 	if se.applyTx != applyTx {

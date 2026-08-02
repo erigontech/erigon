@@ -134,6 +134,7 @@ var (
 	cmdStageExec        = makeStageCmd("stage_exec", stageExec, true, true, false)
 	cmdStageExecReplay  = makeStageCmd("stage_exec_replay", stageExecReplay, true, true, false)
 	cmdCaptureBlock     = makeStageCmd("capture_block", captureBlock, false, true, false)
+	cmdCaptureBlocks    = makeStageCmd("capture_blocks", captureBlocks, false, true, false)
 	cmdStageCustomTrace = makeStageCmd("stage_custom_trace", stageCustomTrace, true, true, false)
 	cmdStageTxLookup    = makeStageCmd("stage_tx_lookup", stageTxLookup, true, false, false)
 	cmdPrintStages      = makeStageCmd("print_stages", printAllStages, false, false, true)
@@ -324,6 +325,10 @@ func init() {
 	withStageBase(cmdCaptureBlock)
 	withBlock(cmdCaptureBlock)
 	rootCmd.AddCommand(cmdCaptureBlock)
+
+	withStageBase(cmdCaptureBlocks)
+	withBlock(cmdCaptureBlocks)
+	rootCmd.AddCommand(cmdCaptureBlocks)
 
 	withStageBase(cmdStageExec)
 	withReset(cmdStageExec)
@@ -906,6 +911,52 @@ func captureBlock(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 	logger.Info("[capture_block] fixture written", "block", block, "path", out,
 		"accounts", len(fx.Accounts), "storageAccts", len(fx.Storage), "code", len(fx.Code),
 		"outAccounts", len(fx.Outputs.Accounts), "outStorage", len(fx.Outputs.Storage))
+	return nil
+}
+
+func captureBlocks(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	if block == 0 || unwind == 0 {
+		return fmt.Errorf("capture_blocks requires --block=<from> and --unwind=<count>")
+	}
+	from, to := block, block+unwind-1
+	dirs := datadir.New(datadirCli)
+	_, clean, engine, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer clean()
+	defer engine.Close()
+
+	chainConfig := fromdb.ChainConfig(db)
+	blockReader, _ := blocksIO(db, logger)
+
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	rf := &blockreplay.RangeFixture{}
+	for n := from; n <= to; n++ {
+		fx, err := blockreplay.Capture(ctx, tx, blockReader, chainConfig, engine, n, logger)
+		if err != nil {
+			return fmt.Errorf("capture block %d: %w", n, err)
+		}
+		rf.Blocks = append(rf.Blocks, fx)
+	}
+	rf.Outputs, err = blockreplay.MergeRangeOutputs(ctx, tx, blockReader, rf.Blocks, to)
+	if err != nil {
+		return err
+	}
+	// Per-block Outputs are redundant once the range-final Outputs is captured;
+	// drop them so the fixture stays small.
+	for _, b := range rf.Blocks {
+		b.Outputs = nil
+	}
+
+	out := filepath.Join(dirs.DataDir, fmt.Sprintf("range-%d-%d.gob", from, to))
+	if err := rf.Save(out); err != nil {
+		return err
+	}
+	logger.Info("[capture_blocks] range fixture written", "from", from, "to", to, "path", out,
+		"blocks", len(rf.Blocks), "outAccounts", len(rf.Outputs.Accounts), "outStorage", len(rf.Outputs.Storage))
 	return nil
 }
 
