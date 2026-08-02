@@ -452,11 +452,15 @@ func (sdb *IntraBlockState) Close() {
 	releaseResources(stateObjects, journal)
 }
 
+// allocStateObject keeps the noMaterialize path off the shared pool entirely:
+// objects it hands out are never released, so taking one would be a one-way
+// drain that costs the materializing paths their pooled objects.
 func (sdb *IntraBlockState) allocStateObject() *stateObject {
 	if sdb.noMaterialize {
 		if so := sdb.arena.alloc(); so != nil {
 			return so
 		}
+		return newHeapObject()
 	}
 	return stateObjectPool.Get().(*stateObject)
 }

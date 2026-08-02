@@ -103,6 +103,25 @@ func TestNoMaterializeAllocStateObjectUsesArena(t *testing.T) {
 	assert.True(t, ibs.allocStateObject().arena, "parallel path must use the arena")
 }
 
+// TestNoMaterializeOverflowSkipsPool pins that once the arena is full the
+// parallel path allocates rather than draining the shared pool, since objects it
+// hands out are never released back.
+func TestNoMaterializeOverflowSkipsPool(t *testing.T) {
+	ibs, _ := newNoMaterializeIBS(&emptyReader{})
+	defer ibs.Close()
+	ibs.SetNoMaterialize(true)
+
+	for range arenaMaxObjects {
+		require.True(t, ibs.allocStateObject().arena)
+	}
+
+	overflow := ibs.allocStateObject()
+	require.False(t, overflow.arena, "overflow object is not an arena slot")
+	require.NotNil(t, overflow.originStorage, "overflow object must be usable")
+	require.NotNil(t, overflow.blockOriginStorage)
+	require.NotNil(t, overflow.dirtyStorage)
+}
+
 // TestNoMaterializeAccountReadAllocs guards against the stateObject allocation
 // coming back. The residual allocations belong to the per-transaction ReadSet,
 // not to the stateObject.
