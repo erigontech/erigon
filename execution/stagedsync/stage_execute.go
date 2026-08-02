@@ -467,20 +467,14 @@ func unwindOnExecError(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s 
 		return execErr
 	}
 
-	if errors.Is(execErr, ErrWrongTrieRoot) && !s.CurrentSyncCycle.IsInitialCycle {
+	if errors.Is(execErr, ErrWrongTrieRoot) {
 		return handleIncorrectRootHashError(out.failedBlock, out.failedHash, out.applyTx, cfg, s, logger, u)
 	}
 
-	if out.lastHeader != nil {
-		unwindTo := uint64(0)
-		if out.lastHeader.Number.Uint64() > 0 {
-			unwindTo = out.lastHeader.Number.Uint64() - 1
-		}
-		if err := u.UnwindTo(unwindTo, BadBlock(out.lastHeader.Hash(), execErr), out.applyTx); err != nil {
-			return err
-		}
-	}
-
+	// A plain invalid block propagates the error without setting a stage unwind
+	// point — the caller owns the unwind. Setting one here would leave a stale
+	// bad-block verdict that blocks a fresh canonical block at the same height
+	// from being re-executed on the next fork-choice.
 	return execErr
 }
 
