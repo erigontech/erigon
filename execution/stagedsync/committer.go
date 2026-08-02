@@ -766,18 +766,33 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		cc.hasComputed = true
 	}
 
+	if r, ok := rootCheckResult(ctx, t, m, rh); ok {
+		cc.publish(ctx, r)
+	}
+}
+
+// rootCheckResult classifies a computed root, reporting whether there is
+// anything to publish.
+func rootCheckResult(ctx context.Context, t commitTarget, m computeMode, rh []byte) (commitmentResult, bool) {
 	if !m.checkRoot {
-		return
+		return commitmentResult{}, false
 	}
 	mismatch := !bytes.Equal(rh, t.stateRoot[:])
 	if !m.publishRoot && !mismatch {
-		return
+		return commitmentResult{}, false
+	}
+	// The calculator runs on the outer context, so a cancelled one means the
+	// node is shutting down: the result stream feeding this compute can be
+	// truncated, and the batch is discarded anyway. Reporting a mismatch here
+	// would fail a block that the next start simply re-executes.
+	if mismatch && ctx.Err() != nil {
+		return commitmentResult{}, false
 	}
 	r := commitmentResult{blockNum: t.blockNum, blockHash: t.blockHash, txNum: t.lastTxNum, rootHash: rh}
 	if mismatch {
 		r.err = fmt.Errorf("%w: block %d root %x expected %x", ErrWrongTrieRoot, t.blockNum, rh, t.stateRoot)
 	}
-	cc.publish(ctx, r)
+	return r, true
 }
 
 // computeIsolated computes and flushes its own deferred updates under a nil
