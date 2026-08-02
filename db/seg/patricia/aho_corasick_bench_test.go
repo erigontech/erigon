@@ -101,8 +101,8 @@ var (
 	// ~64k patterns -> millions of nodes, the cache-bound regime real seg
 	// compression runs in (MaxDictPatterns default is 64*1024).
 	corpusBigDict = corpus(corpusCfg{numPatterns: 64 * 1024, patMin: 8, patMax: 96, numWords: 4096, wordLen: 128, alpha: 16, sorted: true})
-	// full byte alphabet: the only corpus whose root layer fans out past
-	// wideLinearScanMax, so the binary-search edge lookup is actually measured.
+	// full byte alphabet: the only corpus whose states fan out past
+	// wideBsearchMin, so the binary-search edge lookup is actually measured.
 	corpusByteAlphabet = corpus(corpusCfg{numPatterns: 64 * 1024, patMin: 8, patMax: 96, numWords: 4096, wordLen: 128, alpha: 256, sorted: true})
 )
 

@@ -32,22 +32,17 @@ type Match struct {
 
 type Matches []Match
 
-// acNode is the compiled per-state record. The scan is memory-latency bound: for
-// each input byte it needs this state's fail link, its match and its edge, all
-// indexed by the same jumpy state id. Packing them into one 12-byte record turns
-// three random array loads into one.
+// acNode is the compiled per-state record. The scan needs a state's fail link,
+// match and edge together on every input byte, all at the same jumpy state id,
+// so they share one record; record size is worth guarding, as padding this to 32
+// bytes costs 21%.
 //
 // edge tags the fanout in three disjoint ranges, so one field both discriminates
-// and carries its payload: noEdge means none; >=0 is a lone edge on byte(edge) to
-// the *next* state, which insertion order already makes the common case; a
-// wideTag value means the edges are spilled to wideByte/wideChild, run-length
-// prefixed at wideStart(edge)-1. A lone edge whose child is not the next state
-// spills too, as a one-edge run, so no state id has to be packed into a field
-// narrower than int32.
-//
-// match indexes patLen/patVal rather than holding the length and value inline:
-// those are per-pattern, not per-state, so a dictionary of p patterns needs p
-// entries and not one per state.
+// and carries its payload: noEdge means none; >=0 is a lone edge on byte(edge)
+// to the next state; a wideTag value means the edges are spilled to
+// wideByte/wideChild as a run length-prefixed at wideStart(edge)-1. A lone edge
+// whose child is not the next state spills as a one-edge run, so no state id
+// ever has to fit in a field narrower than int32.
 type acNode struct {
 	fail  int32
 	match int32 // longest pattern ending at this state, noMatch for none
@@ -80,9 +75,10 @@ type AhoCorasick struct {
 	nodes     []acNode
 	wideByte  []byte  // spilled runs: a fanout-1 prefix byte then sorted labels
 	wideChild []int32 // child states, parallel to wideByte
-	patLen    []int32 // pattern lengths, indexed by acNode.match
-	patVal    []any   // pattern values, parallel to patLen
-	built     bool
+	// per-pattern, not per-state: p patterns need p entries, not one per state
+	patLen []int32 // pattern lengths, indexed by acNode.match
+	patVal []any   // pattern values, parallel to patLen
+	built  bool
 }
 
 func NewAhoCorasick() *AhoCorasick {
@@ -361,10 +357,8 @@ func (m *ACMatcher) FindLongestMatches(data []byte) []Match {
 	states := m.states[:n]
 	out := m.matches[:0]
 
-	// Match emission is fused into the scan below rather than run as a second
-	// pass over states: it reuses the just-loaded nodes[cur] line and skips a
-	// re-read of states. The prefix region [0,k) has no fresh scan (states
-	// carried over from the previous word) so it emits on its own here.
+	// Emission is fused into the scan below, reusing the just-loaded nodes[cur]
+	// line. The prefix region [0,k) gets no fresh scan, so it emits here.
 	for j := range k {
 		st := states[j]
 		if mi := nodes[st].match; mi >= 0 {
