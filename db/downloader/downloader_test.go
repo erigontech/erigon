@@ -25,6 +25,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -98,7 +99,17 @@ func TestAllActiveSnapshotsConcurrentWithWrites(t *testing.T) {
 // torrentsByName mutation holds d.lock, so it does not race allActiveSnapshots' iteration.
 // Without the lock the map write and the RLock'd read report a data race under -race — an
 // RLock cannot exclude a writer that holds no lock.
+//
+// Fail-fast deadline: without the fix that removed AddNewSeedableFile's outer d.lock.Lock,
+// each AddNewSeedableFile call self-deadlocks because addCompleteTorrent tries to reacquire
+// a non-reentrant sync.Mutex. Hanging tests are invisible to CI up to the package timeout;
+// a per-test deadline surfaces the regression as a clear failure.
 func TestAddNewSeedableFileConcurrentWithAllActiveSnapshots(t *testing.T) {
+	deadline := time.AfterFunc(10*time.Second, func() {
+		panic("TestAddNewSeedableFileConcurrentWithAllActiveSnapshots deadlocked — likely a recursive-lock regression in AddNewSeedableFile/addCompleteTorrent")
+	})
+	defer deadline.Stop()
+
 	test := newDownloaderTest(t)
 	d := test.downloader
 	ctx := t.Context()

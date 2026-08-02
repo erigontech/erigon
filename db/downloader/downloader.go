@@ -1352,9 +1352,9 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if err != nil {
 		return fmt.Errorf("building metainfo for new seedable file: %w", err)
 	}
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	// The above BuildTorrentIfNeed should put the metainfo in the right place for name.
+	// Do NOT hold d.lock here — addCompleteTorrent takes it itself and
+	// sync.Mutex is not reentrant. See the invariant comment on
+	// addCompleteTorrent.
 	_, _, err = d.addCompleteTorrent(name)
 	if err != nil {
 		return fmt.Errorf("adding torrent: %w", err)
