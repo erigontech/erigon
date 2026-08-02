@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -762,7 +763,7 @@ func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err error) {
 	loc := scope.Stack.peek()
-	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey())
+	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey(evm))
 	return pc, nil, err
 }
 
@@ -775,7 +776,7 @@ func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
 	}
-	key := scope.peekStorageKey()
+	key := scope.peekStorageKey(evm)
 	scope.Stack.drop()
 	val := scope.Stack.popCopy()
 	return pc, nil, evm.IntraBlockState().SetState(scope.Contract.Address(), key, val)
@@ -990,21 +991,71 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 // execCreate is the shared implementation for opCreate (salt == nil) and opCreate2 (salt != nil).
 func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, input []byte, salt *uint256.Int) (uint64, []byte, error) {
-	gas := scope.Gas()
-	if evm.ChainRules().IsTangerineWhistle {
-		gas.Regular -= gas.Regular / 64
-	}
-
-	gasChangeReason := tracing.GasChangeCallContractCreation
+	codeAndHash := &codeAndHash{code: input}
+	typ := CREATE
+	var address accounts.Address
 	if salt != nil {
-		gasChangeReason = tracing.GasChangeCallContractCreation2
+		typ = CREATE2
+		address = accounts.InternAddress(types.CreateAddress2(scope.Contract.Address().Value(), salt.Bytes32(), codeAndHash.Hash()))
+	} else {
+		nonce, err := evm.intraBlockState.GetNonce(scope.Contract.Address())
+		if err != nil {
+			return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
+		address = accounts.InternAddress(types.CreateAddress(scope.Contract.Address().Value(), nonce))
 	}
-	scope.useGas(gas.Regular, evm.Config().Tracer, gasChangeReason)
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
-
-	res, addr, returnGas, childGasUsage, wasBalanceOnly, suberr := evm.Create(scope.Contract.Address(), input, gas, value, salt, false)
+	gas := scope.Gas()
+	returnGas := gas
+	var preparation createPreparation
+	var suberr error
+	if evm.chainRules.IsAmsterdam {
+		preparation, suberr = evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
+		if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow {
+			return pc, nil, suberr
+		}
+	}
+	forwarded := false
+	if suberr == nil {
+		if preparation.chargeNewAccount && !scope.useMdGas(params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
+			return pc, nil, ErrOutOfGas
+		}
+		gas = scope.Gas()
+		if evm.chainRules.IsTangerineWhistle {
+			gas.Execution -= gas.Execution / 64
+		}
+		gasChangeReason := tracing.GasChangeCallContractCreation
+		if typ == CREATE2 {
+			gasChangeReason = tracing.GasChangeCallContractCreation2
+		}
+		scope.useGas(gas.Execution, evm.Config().Tracer, gasChangeReason)
+		scope.stateGas = 0
+		returnGas = gas
+		forwarded = true
+		if !evm.chainRules.IsAmsterdam {
+			preparation, suberr = evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
+			if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow {
+				returnGas = mdgas.MdGas{}
+			}
+		}
+	}
+	var res []byte
+	var addr accounts.Address
+	var childGasUsed mdgas.MdGasUsage
+	if suberr == nil {
+		res, addr, returnGas, childGasUsed, suberr = evm.createPrepared(scope.Contract.Address(), codeAndHash, gas, value, address, typ, preparation)
+	} else if forwarded && evm.Config().Tracer != nil {
+		evm.captureBegin(evm.depth, typ, scope.Contract.Address(), address, false, codeAndHash.code, gas, value, nil)
+		evm.captureEnd(evm.depth, typ, gas, returnGas, nil, suberr)
+	}
 	scope.Contract.selfBalanceCached = false
-
+	if forwarded {
+		scope.restoreChildGas(returnGas, evm.config.Tracer)
+		if suberr != nil && preparation.chargeNewAccount {
+			scope.refillStateGas(params.StateGasNewAccount)
+		} else if suberr == nil {
+			scope.stateGasSpill += childGasUsed.StateSpill
+		}
+	}
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
 	// rule) and treat as an error, if the ruleset is frontier we must
@@ -1020,29 +1071,6 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		result.SetBytes(addrVal[:])
 	}
 	scope.Stack.push(result)
-
-	scope.restoreChildGas(returnGas, evm.config.Tracer)
-
-	if evm.chainRules.IsAmsterdam {
-		if suberr != nil {
-			// EIP-8037: child CREATE failed, so no account was created — refill
-			// the NEW_ACCOUNT the parent charged at CREATE entry. The child's
-			// own reservoir was already merged back via restoreChildGas above.
-			scope.refillStateGas(params.StateGasNewAccount)
-		} else {
-			// EIP-8037: child success — its net state-gas usage is already
-			// captured via the leftover reservoir merged by restoreChildGas
-			// above; fold in only its spilled portion so an ancestor revert
-			// refills from the right pool.
-			scope.stateGasSpill += childGasUsage.StateSpill
-			if wasBalanceOnly {
-				// Target already existed and was non-empty: no new account
-				// leaf created, so refill the unconditional NEW_ACCOUNT charge.
-				scope.refillStateGas(params.StateGasNewAccount)
-			}
-		}
-	}
-
 	if suberr == ErrExecutionReverted {
 		evm.returnData = res // set REVERT data to return data buffer
 		return pc, res, nil
@@ -1086,11 +1114,10 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 			evm.intraBlockState.MarkReadsInternal(toAddr)
 			return pc, nil, ErrWriteProtection
 		}
-		gas.Regular += params.CallStipend
+		gas.Execution += params.CallStipend
 	}
 
-	scope.stateGas = 0                             // pass reservoir to child via callGas; restoreChildGas returns it
-	newAccountCharged := evm.callNewAccountCharged // Captured before the call: nested CALL gas phases overwrite the flag.
+	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 	ret, returnGas, childGasUsage, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, *value, false /* bailout */)
 	res := stack.pushRef()
 	if err != nil {
@@ -1107,9 +1134,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.chainRules.IsAmsterdam {
 		if err == nil {
 			scope.stateGasSpill += childGasUsage.StateSpill
-		} else if newAccountCharged {
-			// EIP-8037: the value CALL charged NEW_ACCOUNT but failed, so no
-			// account was created — refill it source-based.
+		} else if scope.newAccountCharged {
 			scope.refillStateGas(params.StateGasNewAccount)
 		}
 	}
@@ -1142,7 +1167,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
 	if !value.IsZero() {
-		gas.Regular += params.CallStipend
+		gas.Execution += params.CallStipend
 	}
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
