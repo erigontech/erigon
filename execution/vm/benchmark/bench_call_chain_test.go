@@ -41,9 +41,9 @@ func BenchmarkNestedStaticCalls(b *testing.B) {
 				Jump(lbl).Bytes()
 			deployContract(statedb, addrContract, entryCode)
 
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+			callOOG(b, cfg, statedb, addrContract)
 			for b.Loop() {
-				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+				callOOG(b, cfg, statedb, addrContract)
 			}
 		})
 	}
@@ -67,9 +67,9 @@ func BenchmarkDelegateCallProxy(b *testing.B) {
 				Jump(lbl).Bytes()
 			deployContract(statedb, addrContract, entryCode)
 
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+			callOOG(b, cfg, statedb, addrContract)
 			for b.Loop() {
-				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+				callOOG(b, cfg, statedb, addrContract)
 			}
 		})
 	}
@@ -90,9 +90,9 @@ func BenchmarkCallWithValue(b *testing.B) {
 		code := p.Call(nil, rawPair, 0, 0, 0, 0, 0).Op(vm.POP).Jump(lbl).Bytes()
 		deployContract(statedb, addrContract, code)
 
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+		callOOG(b, cfg, statedb, addrContract)
 		for b.Loop() {
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			callOOG(b, cfg, statedb, addrContract)
 		}
 	})
 
@@ -106,9 +106,9 @@ func BenchmarkCallWithValue(b *testing.B) {
 		code := p.Call(nil, rawPair, 1, 0, 0, 0, 0).Op(vm.POP).Jump(lbl).Bytes()
 		deployContractWithBalance(statedb, addrContract, code, uint256.NewInt(1_000_000_000))
 
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+		callOOG(b, cfg, statedb, addrContract)
 		for b.Loop() {
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			callOOG(b, cfg, statedb, addrContract)
 		}
 	})
 }
@@ -130,9 +130,9 @@ func BenchmarkDeFiSwapChain(b *testing.B) {
 			Jump(lbl).Bytes()
 		deployContract(statedb, addrContract, entryCode)
 
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+		callOOG(b, cfg, statedb, addrContract)
 		for b.Loop() {
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			callOOG(b, cfg, statedb, addrContract)
 		}
 	})
 }

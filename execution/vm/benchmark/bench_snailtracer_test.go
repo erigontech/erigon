@@ -26,17 +26,14 @@ func BenchmarkSnailtracer(b *testing.B) {
 	cfg, statedb := benchConfig(b, 1_000_000_000)
 	deployContract(statedb, addrContract, code)
 
-	// A reverting or out-of-gas run would still produce timings, so pin down
-	// that the call actually completes before measuring it.
+	// callComplete checks the call did work; only this benchmark also has a
+	// rendered frame to check.
 	ret, _, err := prepareAndCall(cfg, addrContract, input)
 	require.NoError(b, err)
 	require.NotEmpty(b, ret)
 
 	b.ReportAllocs()
-	b.ResetTimer()
 	for b.Loop() {
-		if _, _, err := prepareAndCall(cfg, addrContract, input); err != nil {
-			b.Fatal(err)
-		}
+		callComplete(b, cfg, statedb, addrContract, input)
 	}
 }

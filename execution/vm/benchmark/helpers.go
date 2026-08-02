@@ -3,6 +3,7 @@
 package benchmark
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -117,4 +118,34 @@ func prepareAndCall(cfg *runtime.Config, addr accounts.Address, input []byte) ([
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, addr, vm.ActivePrecompiles(rules), nil)
 	ret, left, _, err := vmenv.Call(cfg.Origin, addr, input, mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules), cfg.Value, false)
 	return ret, left, err
+}
+
+// callOOG runs one iteration of a benchmark whose program loops until the gas
+// budget is gone, and requires that it did. A call reaching an address with no
+// code returns no error and burns nothing, so the gas assertion — not the error
+// — is what catches a fixture that stopped working.
+func callOOG(b *testing.B, cfg *runtime.Config, statedb *state.IntraBlockState, addr accounts.Address) {
+	snap := statedb.PushSnapshot()
+	_, left, err := prepareAndCall(cfg, addr, nil)
+	if !errors.Is(err, vm.ErrOutOfGas) || left.Total() != 0 {
+		b.Fatalf("expected gas exhaustion, got gasLeft=%d err=%v", left.Total(), err)
+	}
+	statedb.RevertToSnapshot(snap, nil)
+	statedb.PopSnapshot(snap)
+}
+
+// callComplete runs one iteration of a benchmark whose program returns on its
+// own, and requires that it finished and did work. See callOOG on why the gas
+// check carries the weight.
+func callComplete(b *testing.B, cfg *runtime.Config, statedb *state.IntraBlockState, addr accounts.Address, input []byte) {
+	snap := statedb.PushSnapshot()
+	_, left, err := prepareAndCall(cfg, addr, input)
+	if err != nil {
+		b.Fatal(err)
+	}
+	if left.Total() >= cfg.GasLimit {
+		b.Fatalf("call consumed no gas (gasLeft=%d, limit=%d)", left.Total(), cfg.GasLimit)
+	}
+	statedb.RevertToSnapshot(snap, nil)
+	statedb.PopSnapshot(snap)
 }

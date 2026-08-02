@@ -32,11 +32,9 @@ func BenchmarkSLOADCold(b *testing.B) {
 			cfg, statedb := benchConfig(b, uint64(n)*2200+100_000)
 			deployContract(statedb, addrContract, code)
 			setStorage(statedb, addrContract, slots)
+			callComplete(b, cfg, statedb, addrContract, nil)
 			for b.Loop() {
-				snap := statedb.PushSnapshot()
-				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
-				statedb.RevertToSnapshot(snap, nil)
-				statedb.PopSnapshot(snap)
+				callComplete(b, cfg, statedb, addrContract, nil)
 			}
 		})
 	}
@@ -61,9 +59,9 @@ func BenchmarkSLOADWarm(b *testing.B) {
 			cfg, statedb := benchConfig(b, 100_000_000)
 			deployContract(statedb, addrContract, code)
 			setStorage(statedb, addrContract, slots)
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+			callOOG(b, cfg, statedb, addrContract)
 			for b.Loop() {
-				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+				callOOG(b, cfg, statedb, addrContract)
 			}
 		})
 	}
@@ -86,11 +84,9 @@ func BenchmarkSSTORE(b *testing.B) {
 		b.ReportAllocs()
 		cfg, statedb := benchConfig(b, uint64(n)*22_100+100_000)
 		deployContract(statedb, addrContract, code)
+		callComplete(b, cfg, statedb, addrContract, nil)
 		for b.Loop() {
-			snap := statedb.PushSnapshot()
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
-			statedb.RevertToSnapshot(snap, nil)
-			statedb.PopSnapshot(snap)
+			callComplete(b, cfg, statedb, addrContract, nil)
 		}
 	})
 
@@ -110,11 +106,9 @@ func BenchmarkSSTORE(b *testing.B) {
 		cfg, statedb := benchConfig(b, uint64(n)*5200+100_000)
 		deployContract(statedb, addrContract, code)
 		setStorage(statedb, addrContract, slots)
+		callComplete(b, cfg, statedb, addrContract, nil)
 		for b.Loop() {
-			snap := statedb.PushSnapshot()
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
-			statedb.RevertToSnapshot(snap, nil)
-			statedb.PopSnapshot(snap)
+			callComplete(b, cfg, statedb, addrContract, nil)
 		}
 	})
 
@@ -134,11 +128,9 @@ func BenchmarkSSTORE(b *testing.B) {
 		cfg, statedb := benchConfig(b, uint64(n)*5200+100_000)
 		deployContract(statedb, addrContract, code)
 		setStorage(statedb, addrContract, slots)
+		callComplete(b, cfg, statedb, addrContract, nil)
 		for b.Loop() {
-			snap := statedb.PushSnapshot()
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
-			statedb.RevertToSnapshot(snap, nil)
-			statedb.PopSnapshot(snap)
+			callComplete(b, cfg, statedb, addrContract, nil)
 		}
 	})
 }
@@ -160,9 +152,9 @@ func BenchmarkTransientStorage(b *testing.B) {
 			b.ReportAllocs()
 			cfg, statedb := benchConfig(b, 100_000_000)
 			deployContract(statedb, addrContract, code)
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+			callOOG(b, cfg, statedb, addrContract)
 			for b.Loop() {
-				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+				callOOG(b, cfg, statedb, addrContract)
 			}
 		})
 	}
@@ -187,11 +179,9 @@ func BenchmarkStorageDiversity(b *testing.B) {
 			cfg, statedb := benchConfig(b, uint64(n)*2200+100_000)
 			deployContract(statedb, addrContract, code)
 			setStorage(statedb, addrContract, slots)
+			callComplete(b, cfg, statedb, addrContract, nil)
 			for b.Loop() {
-				snap := statedb.PushSnapshot()
-				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
-				statedb.RevertToSnapshot(snap, nil)
-				statedb.PopSnapshot(snap)
+				callComplete(b, cfg, statedb, addrContract, nil)
 			}
 		})
 	}

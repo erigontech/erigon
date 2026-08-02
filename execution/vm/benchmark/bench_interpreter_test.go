@@ -23,9 +23,9 @@ func BenchmarkPureArithmetic(b *testing.B) {
 			cfg, statedb := benchConfig(b, gas)
 			deployContract(statedb, addrContract, code)
 			// Warmup
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+			callOOG(b, cfg, statedb, addrContract)
 			for b.Loop() {
-				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+				callOOG(b, cfg, statedb, addrContract)
 			}
 		})
 	}
@@ -37,9 +37,9 @@ func BenchmarkPureArithmetic(b *testing.B) {
 		b.ReportAllocs()
 		cfg, statedb := benchConfig(b, 100_000_000)
 		deployContract(statedb, addrContract, mulCode)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+		callOOG(b, cfg, statedb, addrContract)
 		for b.Loop() {
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			callOOG(b, cfg, statedb, addrContract)
 		}
 	})
 }
@@ -58,9 +58,9 @@ func BenchmarkStackOps(b *testing.B) {
 		b.ReportAllocs()
 		cfg, statedb := benchConfig(b, 100_000_000)
 		deployContract(statedb, addrContract, code)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+		callOOG(b, cfg, statedb, addrContract)
 		for b.Loop() {
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			callOOG(b, cfg, statedb, addrContract)
 		}
 	})
 }
@@ -77,9 +77,9 @@ func BenchmarkMemoryOps(b *testing.B) {
 		b.ReportAllocs()
 		cfg, statedb := benchConfig(b, 100_000_000)
 		deployContract(statedb, addrContract, code)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+		callOOG(b, cfg, statedb, addrContract)
 		for b.Loop() {
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			callOOG(b, cfg, statedb, addrContract)
 		}
 	})
 
@@ -100,9 +100,9 @@ func BenchmarkMemoryOps(b *testing.B) {
 		b.ReportAllocs()
 		cfg, statedb := benchConfig(b, 10_000_000)
 		deployContract(statedb, addrContract, growCode)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+		callOOG(b, cfg, statedb, addrContract)
 		for b.Loop() {
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			callOOG(b, cfg, statedb, addrContract)
 		}
 	})
 }
@@ -118,9 +118,9 @@ func BenchmarkKeccak256(b *testing.B) {
 			b.ReportAllocs()
 			cfg, statedb := benchConfig(b, 100_000_000)
 			deployContract(statedb, addrContract, code)
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+			callOOG(b, cfg, statedb, addrContract)
 			for b.Loop() {
-				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+				callOOG(b, cfg, statedb, addrContract)
 			}
 		})
 	}
@@ -147,9 +147,9 @@ func BenchmarkMixedCompute(b *testing.B) {
 		b.ReportAllocs()
 		cfg, statedb := benchConfig(b, 100_000_000)
 		deployContract(statedb, addrContract, code)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+		callOOG(b, cfg, statedb, addrContract)
 		for b.Loop() {
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			callOOG(b, cfg, statedb, addrContract)
 		}
 	})
 }
