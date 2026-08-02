@@ -27,7 +27,7 @@ func BenchmarkNestedStaticCalls(b *testing.B) {
 	for _, depth := range []int{2, 4, 8, 16} {
 		b.Run(fmt.Sprintf("depth-%d", depth), func(b *testing.B) {
 			b.ReportAllocs()
-			cfg, statedb := benchConfig(b, 100_000_000)
+			cfg, statedb, vmenv := benchConfig(b, 100_000_000)
 
 			// Deploy depth chain: addr[0] → addr[1] → ... → addr[depth-1]
 			addrs := makeAddrs(depth)
@@ -41,9 +41,9 @@ func BenchmarkNestedStaticCalls(b *testing.B) {
 				Jump(lbl).Bytes()
 			deployContract(statedb, addrContract, entryCode)
 
-			callOOG(b, cfg, statedb, addrContract)
+			callOOG(b, vmenv, cfg, statedb, addrContract)
 			for b.Loop() {
-				callOOG(b, cfg, statedb, addrContract)
+				callOOG(b, vmenv, cfg, statedb, addrContract)
 			}
 		})
 	}
@@ -54,7 +54,7 @@ func BenchmarkDelegateCallProxy(b *testing.B) {
 	for _, layers := range []int{1, 2, 4} {
 		b.Run(fmt.Sprintf("%d-layers", layers), func(b *testing.B) {
 			b.ReportAllocs()
-			cfg, statedb := benchConfig(b, 100_000_000)
+			cfg, statedb, vmenv := benchConfig(b, 100_000_000)
 
 			addrs := makeAddrs(layers)
 			deployDelegateChain(statedb, addrs)
@@ -67,9 +67,9 @@ func BenchmarkDelegateCallProxy(b *testing.B) {
 				Jump(lbl).Bytes()
 			deployContract(statedb, addrContract, entryCode)
 
-			callOOG(b, cfg, statedb, addrContract)
+			callOOG(b, vmenv, cfg, statedb, addrContract)
 			for b.Loop() {
-				callOOG(b, cfg, statedb, addrContract)
+				callOOG(b, vmenv, cfg, statedb, addrContract)
 			}
 		})
 	}
@@ -82,7 +82,7 @@ func BenchmarkCallWithValue(b *testing.B) {
 
 	b.Run("no-value", func(b *testing.B) {
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, 100_000_000)
+		cfg, statedb, vmenv := benchConfig(b, 100_000_000)
 
 		deployContract(statedb, addrPair, targetCode)
 		// Caller loops: CALL with value=0
@@ -90,15 +90,15 @@ func BenchmarkCallWithValue(b *testing.B) {
 		code := p.Call(nil, rawPair, 0, 0, 0, 0, 0).Op(vm.POP).Jump(lbl).Bytes()
 		deployContract(statedb, addrContract, code)
 
-		callOOG(b, cfg, statedb, addrContract)
+		callOOG(b, vmenv, cfg, statedb, addrContract)
 		for b.Loop() {
-			callOOG(b, cfg, statedb, addrContract)
+			callOOG(b, vmenv, cfg, statedb, addrContract)
 		}
 	})
 
 	b.Run("with-value", func(b *testing.B) {
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, 100_000_000)
+		cfg, statedb, vmenv := benchConfig(b, 100_000_000)
 
 		deployContract(statedb, addrPair, targetCode)
 		// Caller loops: CALL with value=1 wei
@@ -106,9 +106,9 @@ func BenchmarkCallWithValue(b *testing.B) {
 		code := p.Call(nil, rawPair, 1, 0, 0, 0, 0).Op(vm.POP).Jump(lbl).Bytes()
 		deployContractWithBalance(statedb, addrContract, code, uint256.NewInt(1_000_000_000))
 
-		callOOG(b, cfg, statedb, addrContract)
+		callOOG(b, vmenv, cfg, statedb, addrContract)
 		for b.Loop() {
-			callOOG(b, cfg, statedb, addrContract)
+			callOOG(b, vmenv, cfg, statedb, addrContract)
 		}
 	})
 }
@@ -118,7 +118,7 @@ func BenchmarkCallWithValue(b *testing.B) {
 func BenchmarkDeFiSwapChain(b *testing.B) {
 	b.Run("swap/100M", func(b *testing.B) {
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, 100_000_000)
+		cfg, statedb, vmenv := benchConfig(b, 100_000_000)
 
 		deployDeFiContracts(statedb)
 
@@ -130,9 +130,9 @@ func BenchmarkDeFiSwapChain(b *testing.B) {
 			Jump(lbl).Bytes()
 		deployContract(statedb, addrContract, entryCode)
 
-		callOOG(b, cfg, statedb, addrContract)
+		callOOG(b, vmenv, cfg, statedb, addrContract)
 		for b.Loop() {
-			callOOG(b, cfg, statedb, addrContract)
+			callOOG(b, vmenv, cfg, statedb, addrContract)
 		}
 	})
 }

@@ -687,7 +687,8 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 	//cfg.State.CreateAccount(cfg.Origin)
 	// set the receiver's (the executing contract) code for execution.
 	cfg.State.SetCode(destination, code, tracing.CodeChangeUnspecified)
-	vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */) // nolint:errcheck
+	_, warmLeft, _, warmErr := vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */)
+	mustOOG(b, warmLeft, warmErr)
 
 	b.Run(name, func(b *testing.B) {
 		b.ReportAllocs()

@@ -20,12 +20,12 @@ func BenchmarkPureArithmetic(b *testing.B) {
 
 		b.Run("add/"+name, func(b *testing.B) {
 			b.ReportAllocs()
-			cfg, statedb := benchConfig(b, gas)
+			cfg, statedb, vmenv := benchConfig(b, gas)
 			deployContract(statedb, addrContract, code)
 			// Warmup
-			callOOG(b, cfg, statedb, addrContract)
+			callOOG(b, vmenv, cfg, statedb, addrContract)
 			for b.Loop() {
-				callOOG(b, cfg, statedb, addrContract)
+				callOOG(b, vmenv, cfg, statedb, addrContract)
 			}
 		})
 	}
@@ -35,11 +35,11 @@ func BenchmarkPureArithmetic(b *testing.B) {
 	mulCode := p.Push(3).Push(7).Op(vm.MUL, vm.POP).Jump(lbl).Bytes()
 	b.Run("mul/100M", func(b *testing.B) {
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, 100_000_000)
+		cfg, statedb, vmenv := benchConfig(b, 100_000_000)
 		deployContract(statedb, addrContract, mulCode)
-		callOOG(b, cfg, statedb, addrContract)
+		callOOG(b, vmenv, cfg, statedb, addrContract)
 		for b.Loop() {
-			callOOG(b, cfg, statedb, addrContract)
+			callOOG(b, vmenv, cfg, statedb, addrContract)
 		}
 	})
 }
@@ -56,11 +56,11 @@ func BenchmarkStackOps(b *testing.B) {
 
 	b.Run("dup-swap/100M", func(b *testing.B) {
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, 100_000_000)
+		cfg, statedb, vmenv := benchConfig(b, 100_000_000)
 		deployContract(statedb, addrContract, code)
-		callOOG(b, cfg, statedb, addrContract)
+		callOOG(b, vmenv, cfg, statedb, addrContract)
 		for b.Loop() {
-			callOOG(b, cfg, statedb, addrContract)
+			callOOG(b, vmenv, cfg, statedb, addrContract)
 		}
 	})
 }
@@ -75,11 +75,11 @@ func BenchmarkMemoryOps(b *testing.B) {
 
 	b.Run("mstore-mload/100M", func(b *testing.B) {
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, 100_000_000)
+		cfg, statedb, vmenv := benchConfig(b, 100_000_000)
 		deployContract(statedb, addrContract, code)
-		callOOG(b, cfg, statedb, addrContract)
+		callOOG(b, vmenv, cfg, statedb, addrContract)
 		for b.Loop() {
-			callOOG(b, cfg, statedb, addrContract)
+			callOOG(b, vmenv, cfg, statedb, addrContract)
 		}
 	})
 
@@ -98,11 +98,11 @@ func BenchmarkMemoryOps(b *testing.B) {
 
 	b.Run("mstore-growing/10M", func(b *testing.B) {
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, 10_000_000)
+		cfg, statedb, vmenv := benchConfig(b, 10_000_000)
 		deployContract(statedb, addrContract, growCode)
-		callOOG(b, cfg, statedb, addrContract)
+		callOOG(b, vmenv, cfg, statedb, addrContract)
 		for b.Loop() {
-			callOOG(b, cfg, statedb, addrContract)
+			callOOG(b, vmenv, cfg, statedb, addrContract)
 		}
 	})
 }
@@ -116,11 +116,11 @@ func BenchmarkKeccak256(b *testing.B) {
 
 		b.Run(formatSize(size)+"/100M", func(b *testing.B) {
 			b.ReportAllocs()
-			cfg, statedb := benchConfig(b, 100_000_000)
+			cfg, statedb, vmenv := benchConfig(b, 100_000_000)
 			deployContract(statedb, addrContract, code)
-			callOOG(b, cfg, statedb, addrContract)
+			callOOG(b, vmenv, cfg, statedb, addrContract)
 			for b.Loop() {
-				callOOG(b, cfg, statedb, addrContract)
+				callOOG(b, vmenv, cfg, statedb, addrContract)
 			}
 		})
 	}
@@ -145,11 +145,11 @@ func BenchmarkMixedCompute(b *testing.B) {
 
 	b.Run("mixed/100M", func(b *testing.B) {
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, 100_000_000)
+		cfg, statedb, vmenv := benchConfig(b, 100_000_000)
 		deployContract(statedb, addrContract, code)
-		callOOG(b, cfg, statedb, addrContract)
+		callOOG(b, vmenv, cfg, statedb, addrContract)
 		for b.Loop() {
-			callOOG(b, cfg, statedb, addrContract)
+			callOOG(b, vmenv, cfg, statedb, addrContract)
 		}
 	})
 }
