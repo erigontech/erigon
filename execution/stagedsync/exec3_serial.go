@@ -201,7 +201,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			se.doms.SetChangesetAccumulator(nil)
 
 			if !bytes.Equal(rh, header.Root[:]) {
-				se.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", se.logPrefix, header.Number.Uint64(), rh, header.Root[:], header.Hash()))
+				se.logWrongTrieRoot(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", se.logPrefix, header.Number.Uint64(), rh, header.Root[:], header.Hash()))
 				return b.HeaderNoCopy(), rwTx, fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNum)
 			}
 		}
