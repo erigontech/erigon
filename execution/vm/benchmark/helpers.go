@@ -53,16 +53,9 @@ func cancunConfig() *chain.Config {
 
 // benchConfig creates a runtime.Config for benchmarks with high gas limit
 // and Cancun chain rules (EIP-2929 access lists, EIP-1153 transient storage).
-// State materializes stateObjects, as the block builder and RPC do.
+// State runs the parallel-execution path: the stateObject cache is off and
+// reads resolve from the version map, as staged sync does.
 func benchConfig(b *testing.B, gasLimit uint64) (*runtime.Config, *state.IntraBlockState) {
-	b.Helper()
-	return newBenchConfig(b, gasLimit, false)
-}
-
-// benchConfigParallel is benchConfig on the parallel-execution path, where the
-// stateObject cache is off and reads resolve from the version map. That is the
-// path staged sync runs, so it is the one worth measuring.
-func benchConfigParallel(b *testing.B, gasLimit uint64) (*runtime.Config, *state.IntraBlockState) {
 	b.Helper()
 	return newBenchConfig(b, gasLimit, true)
 }

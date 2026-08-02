@@ -18,13 +18,12 @@ const snailtracerSelector = "30627b7c"
 
 // BenchmarkSnailtracer renders with the Snailtracer ray tracer, the standard
 // compute-heavy EVM benchmark: a long single-frame run dominated by arithmetic,
-// memory and jumps rather than by state access. It runs on the parallel path,
-// the one staged sync uses.
+// memory and jumps rather than by state access.
 func BenchmarkSnailtracer(b *testing.B) {
 	code := common.FromHex(strings.TrimSpace(snailtracerHex))
 	input := common.FromHex(snailtracerSelector)
 
-	cfg, statedb := benchConfigParallel(b, 1_000_000_000)
+	cfg, statedb := benchConfig(b, 1_000_000_000)
 	deployContract(statedb, addrContract, code)
 
 	// A reverting or out-of-gas run would still produce timings, so pin down
