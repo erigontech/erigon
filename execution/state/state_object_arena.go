@@ -18,7 +18,7 @@ package state
 
 const (
 	arenaSlabSize   = 64
-	arenaMaxSlabs   = 64
+	arenaMaxSlabs   = 128
 	arenaMaxObjects = arenaSlabSize * arenaMaxSlabs
 )
 
