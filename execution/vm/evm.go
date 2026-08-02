@@ -89,8 +89,7 @@ type EVM struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
-	// Both pointers before both counters: interleaving them pads EVM past
-	// Go's 480-byte size class and costs 32 bytes on every allocation.
+	// Pointers before counters: interleaving pads EVM past Go's 480-byte size class.
 	internCache *storageKeyCache
 	addrCache   *addressCache
 	internOps   uint32
@@ -153,8 +152,9 @@ func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
 	return c.fill(i, word)
 }
 
-// A contract reaches far fewer distinct accounts than storage slots, so the
-// address table is a quarter of the size and wins its zeroing back sooner.
+// Address streams are far narrower than storage-key streams — a handful of
+// routers and tokens dominate — so the address table is a quarter of the size
+// and wins its zeroing back sooner.
 const (
 	addressCacheSize   = 256
 	addressCacheMinOps = 32
@@ -169,7 +169,10 @@ type addressCache struct {
 	words   [addressCacheSize]uint256.Int
 }
 
-// addrIndex skips the top limb: it sits above the 20 bytes Bytes20 keeps.
+// addrIndex skips word[3], which lies wholly above the 20 bytes Bytes20 keeps.
+// The remaining limbs still carry 4 bytes of slack, so a word with dirt there
+// buckets away from its clean twin — two entries for one address, never a wrong
+// one.
 func addrIndex(word *uint256.Int) uint64 {
 	return (word[0] ^ word[1] ^ word[2]) & (addressCacheSize - 1)
 }
