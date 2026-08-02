@@ -23,17 +23,18 @@ func BenchmarkSnailtracer(b *testing.B) {
 	code := common.FromHex(strings.TrimSpace(snailtracerHex))
 	input := common.FromHex(snailtracerSelector)
 
-	cfg, statedb, vmenv := benchConfig(b, 1_000_000_000)
+	vmenv := benchConfig(b, 1_000_000_000)
+	statedb := vmenv.IntraBlockState()
 	deployContract(statedb, addrContract, code)
 
 	// callComplete checks the call did work; only this benchmark also has a
 	// rendered frame to check.
-	ret, _, err := prepareAndCall(vmenv, cfg, addrContract, input)
+	ret, _, err := prepareAndCall(vmenv, addrContract, input)
 	require.NoError(b, err)
 	require.NotEmpty(b, ret)
 
 	b.ReportAllocs()
 	for b.Loop() {
-		callComplete(b, vmenv, cfg, statedb, addrContract, input)
+		callComplete(b, vmenv, addrContract, input)
 	}
 }

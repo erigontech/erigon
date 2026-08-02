@@ -20,7 +20,7 @@ func TestSnailtracerPathsAgree(t *testing.T) {
 	render := func(noMaterialize bool) []byte {
 		cfg, statedb := newBenchConfig(t, 1_000_000_000, noMaterialize)
 		deployContract(statedb, addrContract, code)
-		ret, _, err := prepareAndCall(runtime.NewEnv(cfg), cfg, addrContract, input)
+		ret, _, err := prepareAndCall(runtime.NewEnv(cfg), addrContract, input)
 		require.NoError(t, err)
 		require.NotEmpty(t, ret)
 		return ret

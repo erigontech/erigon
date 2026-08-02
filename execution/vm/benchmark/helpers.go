@@ -60,10 +60,10 @@ func cancunConfig() *chain.Config {
 // and resets it between transactions. Building it per iteration dominates the
 // allocation count of the cheap benchmarks and discards the EVM-resident
 // interning caches that production keeps warm.
-func benchConfig(b *testing.B, gasLimit uint64) (*runtime.Config, *state.IntraBlockState, *vm.EVM) {
+func benchConfig(b *testing.B, gasLimit uint64) *vm.EVM {
 	b.Helper()
-	cfg, statedb := newBenchConfig(b, gasLimit, true)
-	return cfg, statedb, runtime.NewEnv(cfg)
+	cfg, _ := newBenchConfig(b, gasLimit, true)
+	return runtime.NewEnv(cfg)
 }
 
 func newBenchConfig(t testing.TB, gasLimit uint64, noMaterialize bool) (*runtime.Config, *state.IntraBlockState) {
@@ -117,10 +117,11 @@ func setStorage(statedb *state.IntraBlockState, addr accounts.Address, slots map
 }
 
 // prepareAndCall sets up EVM access lists and calls the contract.
-func prepareAndCall(vmenv *vm.EVM, cfg *runtime.Config, addr accounts.Address, input []byte) ([]byte, mdgas.MdGas, error) {
+func prepareAndCall(vmenv *vm.EVM, addr accounts.Address, input []byte) ([]byte, mdgas.MdGas, error) {
 	rules := vmenv.ChainRules()
-	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, addr, vm.ActivePrecompiles(rules), nil)
-	ret, left, _, err := vmenv.Call(cfg.Origin, addr, input, mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules), cfg.Value, false)
+	vmenv.IntraBlockState().Prepare(rules, vmenv.Origin, vmenv.Context.Coinbase, addr, vm.ActivePrecompiles(rules), nil)
+	gas := mdgas.SplitTxnGasLimit(vmenv.Context.GasLimit, 0, rules)
+	ret, left, _, err := vmenv.Call(vmenv.Origin, addr, input, gas, uint256.Int{}, false)
 	return ret, left, err
 }
 
@@ -128,9 +129,10 @@ func prepareAndCall(vmenv *vm.EVM, cfg *runtime.Config, addr accounts.Address, i
 // budget is gone, and requires that it did. A call reaching an address with no
 // code returns no error and burns nothing, so the gas assertion — not the error
 // — is what catches a fixture that stopped working.
-func callOOG(b *testing.B, vmenv *vm.EVM, cfg *runtime.Config, statedb *state.IntraBlockState, addr accounts.Address) {
+func callOOG(b *testing.B, vmenv *vm.EVM, addr accounts.Address) {
+	statedb := vmenv.IntraBlockState()
 	snap := statedb.PushSnapshot()
-	_, left, err := prepareAndCall(vmenv, cfg, addr, nil)
+	_, left, err := prepareAndCall(vmenv, addr, nil)
 	if !errors.Is(err, vm.ErrOutOfGas) || left.Total() != 0 {
 		b.Fatalf("expected gas exhaustion, got gasLeft=%d err=%v", left.Total(), err)
 	}
@@ -141,14 +143,15 @@ func callOOG(b *testing.B, vmenv *vm.EVM, cfg *runtime.Config, statedb *state.In
 // callComplete runs one iteration of a benchmark whose program returns on its
 // own, and requires that it finished and did work. See callOOG on why the gas
 // check carries the weight.
-func callComplete(b *testing.B, vmenv *vm.EVM, cfg *runtime.Config, statedb *state.IntraBlockState, addr accounts.Address, input []byte) {
+func callComplete(b *testing.B, vmenv *vm.EVM, addr accounts.Address, input []byte) {
+	statedb := vmenv.IntraBlockState()
 	snap := statedb.PushSnapshot()
-	_, left, err := prepareAndCall(vmenv, cfg, addr, input)
+	_, left, err := prepareAndCall(vmenv, addr, input)
 	if err != nil {
 		b.Fatal(err)
 	}
-	if left.Total() >= cfg.GasLimit {
-		b.Fatalf("call consumed no gas (gasLeft=%d, limit=%d)", left.Total(), cfg.GasLimit)
+	if limit := vmenv.Context.GasLimit; left.Total() >= limit {
+		b.Fatalf("call consumed no gas (gasLeft=%d, limit=%d)", left.Total(), limit)
 	}
 	statedb.RevertToSnapshot(snap, nil)
 	statedb.PopSnapshot(snap)
