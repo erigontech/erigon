@@ -360,16 +360,18 @@ func BenchmarkCall(b *testing.B) {
 
 	tmpdir := b.TempDir()
 
+	// Execute runs the deployed runtime code, so the constructor never initialises
+	// seller/value and every entry point hits the contract's pre-REVERT throw.
+	// Pinned so the benchmark cannot degrade further without failing; making it
+	// execute the purchase flow needs a new fixture.
+	inputs := [][]byte{cpurchase, creceived, refund}
 	for b.Loop() {
 		snap := cfg.State.PushSnapshot()
 		for range 400 {
-			for _, input := range [][]byte{cpurchase, creceived, refund} {
-				// Execute runs the deployed runtime code, so the constructor never
-				// initialises seller/value and every entry point hits the contract's
-				// pre-REVERT throw. Pinned so the benchmark cannot silently degrade
-				// further; making it execute the purchase flow needs a new fixture.
-				_, _, err := Execute(code, input, cfg, tmpdir)
-				require.ErrorIs(b, err, vm.ErrInvalidJump)
+			for _, input := range inputs {
+				if _, _, err := Execute(code, input, cfg, tmpdir); !errors.Is(err, vm.ErrInvalidJump) {
+					b.Fatalf("expected the contract throw, got %v", err)
+				}
 			}
 		}
 		cfg.State.RevertToSnapshot(snap, nil)
