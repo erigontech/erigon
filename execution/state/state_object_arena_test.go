@@ -117,9 +117,8 @@ func TestNoMaterializeOverflowSkipsPool(t *testing.T) {
 
 	overflow := ibs.allocStateObject()
 	require.False(t, overflow.arena, "overflow object is not an arena slot")
-	require.NotNil(t, overflow.originStorage, "overflow object must be usable")
-	require.NotNil(t, overflow.blockOriginStorage)
-	require.NotNil(t, overflow.dirtyStorage)
+	overflow.setState(accounts.InternKey([32]byte{0x01}), *uint256.NewInt(1))
+	require.Len(t, overflow.dirtyStorage, 1, "overflow object must be usable")
 }
 
 // TestNoMaterializeAccountReadAllocs guards against the stateObject allocation
@@ -159,7 +158,7 @@ func TestStateObjectArenaRecyclesSlots(t *testing.T) {
 	first.dirtyCode = true
 	first.data.Nonce = 9
 	first.code = accounts.Code{Bytes: []byte{0x60}}
-	first.originStorage[accounts.InternKey([32]byte{0x01})] = *uint256.NewInt(5)
+	first.setState(accounts.InternKey([32]byte{0x01}), *uint256.NewInt(5))
 
 	second := a.alloc()
 	require.NotNil(t, second)
@@ -174,8 +173,8 @@ func TestStateObjectArenaRecyclesSlots(t *testing.T) {
 	assert.False(t, reused.dirtyCode)
 	assert.Zero(t, reused.data.Nonce)
 	assert.Nil(t, reused.code.Bytes)
-	assert.Empty(t, reused.originStorage)
-	assert.NotNil(t, reused.originStorage, "storage maps stay allocated across rewind")
+	assert.Empty(t, reused.dirtyStorage)
+	assert.NotNil(t, reused.dirtyStorage, "a map, once made, is kept and cleared rather than dropped")
 	assert.True(t, reused.arena, "slot identity survives reset")
 }
 
@@ -260,7 +259,7 @@ func TestStateObjectArenaRewindCoversVaryingHighWater(t *testing.T) {
 			require.NotNil(t, so)
 			so.data.Nonce = 1
 			so.selfdestructed = true
-			so.originStorage[accounts.InternKey([32]byte{0x01})] = *uint256.NewInt(1)
+			so.setState(accounts.InternKey([32]byte{0x01}), *uint256.NewInt(1))
 		}
 		a.rewind()
 	}
@@ -274,6 +273,6 @@ func TestStateObjectArenaRewindCoversVaryingHighWater(t *testing.T) {
 		require.NotNil(t, so)
 		require.Zero(t, so.data.Nonce, "slot %d handed out dirty", i)
 		require.False(t, so.selfdestructed, "slot %d handed out dirty", i)
-		require.Empty(t, so.originStorage, "slot %d handed out dirty", i)
+		require.Empty(t, so.dirtyStorage, "slot %d handed out dirty", i)
 	}
 }

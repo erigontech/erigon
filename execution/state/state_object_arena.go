@@ -19,7 +19,7 @@ package state
 import "github.com/erigontech/erigon/common/log/v3"
 
 const (
-	arenaSlabSize   = 16
+	arenaSlabSize   = 64
 	arenaMaxSlabs   = 128
 	arenaMaxObjects = arenaSlabSize * arenaMaxSlabs
 )
@@ -60,9 +60,6 @@ func (a *stateObjectArena) grow() bool {
 	slab := new([arenaSlabSize]stateObject)
 	for i := range slab {
 		slab[i].arena = true
-		slab[i].originStorage = make(Storage)
-		slab[i].blockOriginStorage = make(Storage)
-		slab[i].dirtyStorage = make(Storage)
 	}
 	a.slabs = append(a.slabs, slab)
 	return true
