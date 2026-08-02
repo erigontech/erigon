@@ -24,8 +24,8 @@ const (
 
 // stateObjectArena is a slab allocator for stateObjects that are never cached
 // and so die with the transaction that created them. Slabs are append-only, so
-// a pointer stays valid until rewind; alloc returns nil past the cap and the
-// caller falls back to the pool.
+// a pointer stays valid until rewind; past the cap alloc returns nil and leaves
+// the caller to allocate.
 type stateObjectArena struct {
 	slabs [][]stateObject
 	slab  int

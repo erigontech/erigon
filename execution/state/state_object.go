@@ -40,13 +40,15 @@ import (
 )
 
 var stateObjectPool = sync.Pool{
-	New: func() any {
-		return &stateObject{
-			originStorage:      make(Storage),
-			blockOriginStorage: make(Storage),
-			dirtyStorage:       make(Storage),
-		}
-	},
+	New: func() any { return newHeapObject() },
+}
+
+func newHeapObject() *stateObject {
+	return &stateObject{
+		originStorage:      make(Storage),
+		blockOriginStorage: make(Storage),
+		dirtyStorage:       make(Storage),
+	}
 }
 
 type Storage map[accounts.StorageKey]uint256.Int
