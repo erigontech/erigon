@@ -40,13 +40,15 @@ import (
 )
 
 var stateObjectPool = sync.Pool{
-	New: func() any {
-		return &stateObject{
-			originStorage:      make(Storage),
-			blockOriginStorage: make(Storage),
-			dirtyStorage:       make(Storage),
-		}
-	},
+	New: func() any { return newHeapObject() },
+}
+
+func newHeapObject() *stateObject {
+	return &stateObject{
+		originStorage:      make(Storage),
+		blockOriginStorage: make(Storage),
+		dirtyStorage:       make(Storage),
+	}
 }
 
 type Storage map[accounts.StorageKey]uint256.Int
@@ -95,11 +97,15 @@ type stateObject struct {
 	deleted         bool // true if account was deleted during the lifetime of this object
 	newlyCreated    bool // true if this object was created in the current transaction
 	createdContract bool // true if this object represents a newly created contract
+
+	// arena marks a slot owned by stateObjectArena. It is slot identity, not
+	// per-use state, so reset leaves it alone.
+	arena bool
 }
 
-// newObject creates a state object from the pool.
+// newObject creates a state object from the arena or the pool.
 func newObject(db *IntraBlockState, address accounts.Address, data, original *accounts.Account) *stateObject {
-	so := stateObjectPool.Get().(*stateObject)
+	so := db.allocStateObject()
 	so.db = db
 	so.address = address
 	so.data.Copy(data)
@@ -114,8 +120,8 @@ func newObject(db *IntraBlockState, address accounts.Address, data, original *ac
 	return so
 }
 
-// release returns the stateObject to the pool after resetting it.
-func (so *stateObject) release() {
+// reset clears every per-use field, leaving the storage maps allocated.
+func (so *stateObject) reset() {
 	so.db = nil
 	so.address = accounts.NilAddress
 	so.data = accounts.Account{}
@@ -130,6 +136,15 @@ func (so *stateObject) release() {
 	so.deleted = false
 	so.newlyCreated = false
 	so.createdContract = false
+}
+
+// release returns the stateObject to the pool after resetting it. Arena slots
+// are owned by their arena and are recycled by rewind instead.
+func (so *stateObject) release() {
+	so.reset()
+	if so.arena {
+		return
+	}
 	stateObjectPool.Put(so)
 }
 

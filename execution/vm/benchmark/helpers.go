@@ -53,19 +53,27 @@ func cancunConfig() *chain.Config {
 
 // benchConfig creates a runtime.Config for benchmarks with high gas limit
 // and Cancun chain rules (EIP-2929 access lists, EIP-1153 transient storage).
+// State runs the parallel-execution path: the stateObject cache is off and
+// reads resolve from the version map, as staged sync does.
 func benchConfig(b *testing.B, gasLimit uint64) (*runtime.Config, *state.IntraBlockState) {
 	b.Helper()
+	return newBenchConfig(b, gasLimit, true)
+}
 
-	db := testutil.TemporalDB(b)
-	tx, domains := testutil.TemporalTxSD(b, db)
+func newBenchConfig(t testing.TB, gasLimit uint64, noMaterialize bool) (*runtime.Config, *state.IntraBlockState) {
+	t.Helper()
+
+	db := testutil.TemporalDB(t)
+	tx, domains := testutil.TemporalTxSD(t, db)
 
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
-	require.NoError(b, err)
+	require.NoError(t, err)
 
 	statedb := state.NewWithVersionMap(
 		state.NewReaderV3(domains.AsGetter(tx)),
 		state.NewVersionMap(nil),
 	)
+	statedb.SetNoMaterialize(noMaterialize)
 
 	cfg := &runtime.Config{
 		ChainConfig: cancunConfig(),

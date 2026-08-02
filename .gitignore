@@ -119,6 +119,8 @@ mdbx.lck
 .my
 
 *.prof
+*.pprof
+
 
 .claude/projects/
 */**/*.local.json
