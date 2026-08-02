@@ -745,7 +745,7 @@ func (s *Stream) ViewBytes() ([]byte, error) {
 	}
 }
 
-// ReadBytes is like Bytes, but reads into a pre-allocated slice.
+// ReadBytes reads an RLP string into b, which must match the exact decoded value size.
 func (s *Stream) ReadBytes(b []byte) error {
 	kind, size, err := s.Kind()
 	if err != nil {
