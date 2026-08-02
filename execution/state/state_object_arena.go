@@ -33,18 +33,8 @@ type stateObjectArena struct {
 }
 
 func (a *stateObjectArena) alloc() *stateObject {
-	if a.slab == len(a.slabs) {
-		if a.slab == arenaMaxSlabs {
-			return nil
-		}
-		slab := make([]stateObject, arenaSlabSize)
-		for i := range slab {
-			slab[i].arena = true
-			slab[i].originStorage = make(Storage)
-			slab[i].blockOriginStorage = make(Storage)
-			slab[i].dirtyStorage = make(Storage)
-		}
-		a.slabs = append(a.slabs, slab)
+	if a.slab == len(a.slabs) && !a.grow() {
+		return nil
 	}
 	so := &a.slabs[a.slab][a.idx]
 	a.idx++
@@ -53,6 +43,21 @@ func (a *stateObjectArena) alloc() *stateObject {
 		a.idx = 0
 	}
 	return so
+}
+
+func (a *stateObjectArena) grow() bool {
+	if a.slab == arenaMaxSlabs {
+		return false
+	}
+	slab := make([]stateObject, arenaSlabSize)
+	for i := range slab {
+		slab[i].arena = true
+		slab[i].originStorage = make(Storage)
+		slab[i].blockOriginStorage = make(Storage)
+		slab[i].dirtyStorage = make(Storage)
+	}
+	a.slabs = append(a.slabs, slab)
+	return true
 }
 
 // rewind makes every slot handed out since the last rewind available again.

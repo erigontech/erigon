@@ -228,3 +228,33 @@ func BenchmarkNoMaterializeTx(b *testing.B) {
 		}
 	}
 }
+
+// TestStateObjectArenaRewindCoversVaryingHighWater pins that a slot is clean on
+// hand-out even when transactions consume different numbers of slots: a slot is
+// reset by the rewind of every generation that handed it out.
+func TestStateObjectArenaRewindCoversVaryingHighWater(t *testing.T) {
+	var a stateObjectArena
+
+	dirty := func(n int) {
+		for range n {
+			so := a.alloc()
+			require.NotNil(t, so)
+			so.data.Nonce = 1
+			so.selfdestructed = true
+			so.originStorage[accounts.InternKey([32]byte{0x01})] = *uint256.NewInt(1)
+		}
+		a.rewind()
+	}
+
+	for _, n := range []int{200, 50, 200, 1, 130} {
+		dirty(n)
+	}
+
+	for i := range 200 {
+		so := a.alloc()
+		require.NotNil(t, so)
+		require.Zero(t, so.data.Nonce, "slot %d handed out dirty", i)
+		require.False(t, so.selfdestructed, "slot %d handed out dirty", i)
+		require.Empty(t, so.originStorage, "slot %d handed out dirty", i)
+	}
+}
