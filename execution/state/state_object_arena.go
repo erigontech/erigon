@@ -27,7 +27,7 @@ const (
 // a pointer stays valid until rewind; past the cap alloc returns nil and leaves
 // the caller to allocate.
 type stateObjectArena struct {
-	slabs [][]stateObject
+	slabs []*[arenaSlabSize]stateObject
 	slab  int
 	idx   int
 }
@@ -49,7 +49,7 @@ func (a *stateObjectArena) grow() bool {
 	if a.slab == arenaMaxSlabs {
 		return false
 	}
-	slab := make([]stateObject, arenaSlabSize)
+	slab := new([arenaSlabSize]stateObject)
 	for i := range slab {
 		slab[i].arena = true
 		slab[i].originStorage = make(Storage)
@@ -65,12 +65,12 @@ func (a *stateObjectArena) grow() bool {
 // stops retaining the account and code it last held.
 func (a *stateObjectArena) rewind() {
 	for s := 0; s <= a.slab && s < len(a.slabs); s++ {
-		slab := a.slabs[s]
+		used := a.slabs[s][:]
 		if s == a.slab {
-			slab = slab[:a.idx]
+			used = used[:a.idx]
 		}
-		for i := range slab {
-			slab[i].reset()
+		for i := range used {
+			used[i].reset()
 		}
 	}
 	a.slab, a.idx = 0, 0
