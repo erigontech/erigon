@@ -33,23 +33,30 @@ type Match struct {
 type Matches []Match
 
 // acNode is the compiled per-state record. The scan is memory-latency bound: for
-// each input byte it needs this state's fail link, its match length and its edge,
-// all indexed by the same jumpy state id. Packing them into one 16-byte record
-// (four per 64-byte cache line) turns four random array loads into one.
+// each input byte it needs this state's fail link, its match and its edge, all
+// indexed by the same jumpy state id. Packing them into one 16-byte record (four
+// per 64-byte cache line) turns four random array loads into one.
 //
 // child tags the fanout in three disjoint ranges, so the single field both
 // discriminates and carries its payload: noEdge means none; >=0 is the single
 // edge to that state on byte(label); a wideTag value means the edges live in
-// wideByte/wideChild[wideStart(child) : label]. label is dual-purpose to match:
-// the edge byte for a single edge, the end of the edge range for a wide state.
+// wideByte/wideChild[wideStart(child) : label]. label is dual-purpose too: the
+// edge byte for a single edge, the end of the edge range for a wide state.
+//
+// match indexes patLen/patVal rather than holding the length and value inline:
+// those are per-pattern, not per-state, so a dictionary of p patterns needs p
+// entries and not one per state.
 type acNode struct {
-	fail     int32
-	matchLen int32 // longest pattern ending at this state (0 = none)
-	child    int32
-	label    int32
+	fail  int32
+	match int32 // longest pattern ending at this state, noMatch for none
+	child int32
+	label int32
 }
 
-const noEdge = int32(-1)
+const (
+	noEdge  = int32(-1)
+	noMatch = int32(-1)
+)
 
 // wideTag encodes a wide state's edge-range start into child, biased past noEdge
 // so the single-edge (>=0), no-edge (-1) and wide (<=-2) ranges stay disjoint;
@@ -72,7 +79,8 @@ type AhoCorasick struct {
 	nodes     []acNode
 	wideByte  []byte  // sorted edge labels of fanout>=2 states, concatenated
 	wideChild []int32 // child states, parallel to wideByte
-	matchVal  []any
+	patLen    []int32 // pattern lengths, indexed by acNode.match
+	patVal    []any   // pattern values, parallel to patLen
 	built     bool
 }
 
@@ -125,8 +133,10 @@ func (ac *AhoCorasick) Build() {
 	}
 	n := len(ac.children)
 	fail := make([]int32, n)
-	matchLen := make([]int32, n)
-	ac.matchVal = make([]any, n)
+	match := make([]int32, n)
+	for i := range match {
+		match[i] = noMatch
+	}
 	for i := range ac.rootNext {
 		ac.rootNext[i] = -1
 	}
@@ -180,12 +190,13 @@ func (ac *AhoCorasick) Build() {
 		// longest pattern ending at this state: own pattern wins (it is the
 		// full path, longer than any proper suffix from the fail chain)
 		if ac.hasVal[node] {
-			matchLen[node] = ac.depth[node]
-			ac.matchVal[node] = ac.val[node]
+			match[node] = int32(len(ac.patLen))
+			ac.patLen = append(ac.patLen, ac.depth[node])
+			ac.patVal = append(ac.patVal, ac.val[node])
 		} else {
-			f := fail[node]
-			matchLen[node] = matchLen[f]
-			ac.matchVal[node] = ac.matchVal[f]
+			// BFS is depth-ordered and fail always points shallower, so the
+			// fail state's match is already final here
+			match[node] = match[fail[node]]
 		}
 		for e := firstEdge[node]; e < firstEdge[node+1]; e++ {
 			b := edgeByte[e]
@@ -206,7 +217,7 @@ func (ac *AhoCorasick) Build() {
 		}
 	}
 
-	ac.compile(n, firstEdge, edgeByte, edgeChild, fail, matchLen)
+	ac.compile(n, firstEdge, edgeByte, edgeChild, fail, match)
 	ac.children = nil
 	ac.depth, ac.val, ac.hasVal = nil, nil, nil
 	ac.built = true
@@ -219,7 +230,7 @@ func (ac *AhoCorasick) Build() {
 // pattern's chain out consecutively, so walking a pattern streams the node
 // array; renumbering into BFS order splits every chain across depth bands and
 // costs roughly 7x.
-func (ac *AhoCorasick) compile(n int, firstEdge []int32, edgeByte []byte, edgeChild, fail, matchLen []int32) {
+func (ac *AhoCorasick) compile(n int, firstEdge []int32, edgeByte []byte, edgeChild, fail, match []int32) {
 	ac.nodes = make([]acNode, n)
 	wide := int32(0)
 	for node := range n {
@@ -231,7 +242,7 @@ func (ac *AhoCorasick) compile(n int, firstEdge []int32, edgeByte []byte, edgeCh
 	ac.wideChild = make([]int32, 0, wide)
 	for node := range n {
 		start, end := firstEdge[node], firstEdge[node+1]
-		nd := acNode{fail: fail[node], matchLen: matchLen[node], child: noEdge}
+		nd := acNode{fail: fail[node], match: match[node], child: noEdge}
 		switch end - start {
 		case 0: // no edge
 		case 1: // single edge
@@ -335,7 +346,8 @@ func (m *ACMatcher) FindLongestMatches(data []byte) []Match {
 	rootNext := &ac.rootNext
 	wideByte := ac.wideByte
 	wideChild := ac.wideChild
-	matchVal := ac.matchVal
+	patLen := ac.patLen
+	patVal := ac.patVal
 	states := m.states[:n]
 	out := m.matches[:0]
 
@@ -345,8 +357,8 @@ func (m *ACMatcher) FindLongestMatches(data []byte) []Match {
 	// carried over from the previous word) so it emits on its own here.
 	for j := range k {
 		st := states[j]
-		if ml := nodes[st].matchLen; ml != 0 {
-			out = appendLongest(out, j+1-int(ml), j+1, matchVal[st])
+		if mi := nodes[st].match; mi >= 0 {
+			out = appendLongest(out, j+1-int(patLen[mi]), j+1, patVal[mi])
 		}
 	}
 
@@ -389,8 +401,8 @@ func (m *ACMatcher) FindLongestMatches(data []byte) []Match {
 			cur = nd.fail
 		}
 		states[j] = cur
-		if ml := nodes[cur].matchLen; ml != 0 {
-			out = appendLongest(out, j+1-int(ml), j+1, matchVal[cur])
+		if mi := nodes[cur].match; mi >= 0 {
+			out = appendLongest(out, j+1-int(patLen[mi]), j+1, patVal[mi])
 		}
 	}
 	m.prev = append(m.prev[:0], data...)
