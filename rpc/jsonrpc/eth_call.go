@@ -256,6 +256,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if state == nil {
 			return 0, errors.New("can't get the current state")
 		}
+		defer state.Close()
 
 		balance, err := state.GetBalance(accounts.InternAddress(*args.From)) // from can't be nil
 		if err != nil {
@@ -293,6 +294,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	if err != nil {
 		return 0, err
 	}
+	defer caller.Close()
 
 	// If the transaction is a plain value transfer, short circuit estimation and
 	// directly try 21000. Returning 21000 without any execution is dangerous as
@@ -304,6 +306,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if state == nil {
 			return 0, errors.New("can't get the current state")
 		}
+		defer state.Close()
 		codeSize, err := state.GetCodeSize(accounts.InternAddress(*args.To))
 		if err != nil {
 			return 0, errors.New("getCodeSize failed")
@@ -663,6 +666,13 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return emptyWitnessBytes()
 	}
 
+	// A head-capture minimal node keeps no commitment history and cannot build this
+	// RLP/uncached witness on demand; report out-of-window for any block rather than a
+	// prune-history or hard-gate error, so the caller sees one typed signal.
+	if api.witnessCache != nil && api.witnessCache.HeadCapture() {
+		return nil, errWitnessOutOfWindow
+	}
+
 	if err = api.checkPruneHistory(ctx, tx, blockNr); err != nil {
 		return nil, err
 	}
@@ -775,7 +785,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
 
-	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
+	siblingPaths, err := detectCollapseSiblings(ctx, tx, nil, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNr, parentNum,
 		block.Root(), accessed, witnessModeLegacy)
 	if err != nil {
@@ -1018,15 +1028,16 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		prevTracer = logger.NewAccessListTracer(*args.AccessList, excl, nil)
 	}
 
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
+	// One convergence iteration: a non-nil result means the access list converged,
+	// otherwise the returned tracer seeds the next iteration.
+	step := func(prevTracer *logger.AccessListTracer) (*accessListResult, *logger.AccessListTracer, error) {
 		ibs := state.New(stateReader)
+		defer ibs.Close()
+
 		// Override the fields of specified contracts before execution.
 		if stateOverrides != nil {
 			if err := stateOverrides.Override(ibs, nil, blockCtx.Rules(chainConfig)); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 
@@ -1045,11 +1056,12 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 		msg, err := args.ToMessage(api.GasCap, header.BaseFee)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, excl, ibs)
+		defer tracer.Close()
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
 		txCtx := protocol.NewEVMTxContext(msg)
 
@@ -1057,26 +1069,41 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		if tracer.Equal(prevTracer) {
-			var errString string
-			if res.Err != nil {
-				errString = res.Err.Error()
-			}
-			accessList := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.ReceiptGasUsed)}
-			if args.To != nil {
-				optimizeWarmAddrAndAdjustGas(accessList, to)
-			}
-			if optimizeGas != nil && *optimizeGas {
-				optimizeWarmAddrInAccessList(accessList, header.Coinbase)
-				for addr := range tracer.CreatedContracts() {
-					if !tracer.UsedBeforeCreation(addr) {
-						optimizeWarmAddrInAccessList(accessList, addr)
-					}
+		if !tracer.Equal(prevTracer) {
+			return nil, tracer, nil
+		}
+
+		var errString string
+		if res.Err != nil {
+			errString = res.Err.Error()
+		}
+		result := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.ReceiptGasUsed)}
+		if args.To != nil {
+			optimizeWarmAddrAndAdjustGas(result, to)
+		}
+		if optimizeGas != nil && *optimizeGas {
+			optimizeWarmAddrInAccessList(result, header.Coinbase)
+			for addr := range tracer.CreatedContracts() {
+				if !tracer.UsedBeforeCreation(addr) {
+					optimizeWarmAddrInAccessList(result, addr)
 				}
 			}
-			return accessList, nil
+		}
+		return result, nil, nil
+	}
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		result, tracer, err := step(prevTracer)
+		if err != nil {
+			return nil, err
+		}
+		if result != nil {
+			return result, nil
 		}
 		prevTracer = tracer
 	}

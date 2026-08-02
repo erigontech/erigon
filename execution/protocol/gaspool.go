@@ -31,26 +31,26 @@ import (
 // dimensions, plus the EIP-4844 blob-gas budget.
 //
 // Each field is the remaining budget for its dimension, decremented as
-// transactions execute: regular and state start at the block gas limit, blob
+// transactions execute: execution and state start at the block gas limit, blob
 // at the block blob-gas budget. A transaction is includable iff its EIP-8037
 // contribution fits in the remaining budget: min(TX_MAX_GAS_LIMIT, tx.gas) for
-// regular and tx.gas for state. Pre-Amsterdam only the regular dimension is
+// execution and tx.gas for state. Pre-Amsterdam only the execution dimension is
 // exercised.
 type GasPool struct {
-	mu         sync.RWMutex
-	regularGas uint64
-	stateGas   uint64
-	blobGas    uint64
+	mu           sync.RWMutex
+	executionGas uint64
+	stateGas     uint64
+	blobGas      uint64
 }
 
 // NewGasPool constructs a pool with the given block gas limit and blob budget.
-// Both regular and state dimensions start at gasLimit.
+// Both execution and state dimensions start at gasLimit.
 func NewGasPool(gasLimit, blobGas uint64) *GasPool {
-	return &GasPool{regularGas: gasLimit, stateGas: gasLimit, blobGas: blobGas}
+	return &GasPool{executionGas: gasLimit, stateGas: gasLimit, blobGas: blobGas}
 }
 
-func NewBlockGasPool(regularGas, stateGas, blobGas uint64) *GasPool {
-	return &GasPool{regularGas: regularGas, stateGas: stateGas, blobGas: blobGas}
+func NewBlockGasPool(executionGas, stateGas, blobGas uint64) *GasPool {
+	return &GasPool{executionGas: executionGas, stateGas: stateGas, blobGas: blobGas}
 }
 
 // Reset reinitialises the pool: both gas dimensions return to gasLimit and
@@ -61,19 +61,19 @@ func (gp *GasPool) Reset(gasLimit, blobGas uint64) {
 	}
 	gp.mu.Lock()
 	defer gp.mu.Unlock()
-	gp.regularGas = gasLimit
+	gp.executionGas = gasLimit
 	gp.stateGas = gasLimit
 	gp.blobGas = blobGas
 }
 
-// RegularGasAvailable returns the remaining regular-dimension gas.
-func (gp *GasPool) RegularGasAvailable() uint64 {
+// ExecutionGasAvailable returns the remaining execution-dimension gas.
+func (gp *GasPool) ExecutionGasAvailable() uint64 {
 	if gp == nil {
 		return 0
 	}
 	gp.mu.RLock()
 	defer gp.mu.RUnlock()
-	return gp.regularGas
+	return gp.executionGas
 }
 
 // StateGasAvailable returns the remaining state-dimension gas. Pre-Amsterdam
@@ -87,18 +87,18 @@ func (gp *GasPool) StateGasAvailable() uint64 {
 	return gp.stateGas
 }
 
-// ConsumeRegular deducts amount from the regular dimension, failing if the
+// ConsumeExecution deducts amount from the execution dimension, failing if the
 // remainder would go negative.
-func (gp *GasPool) ConsumeRegular(amount uint64) error {
+func (gp *GasPool) ConsumeExecution(amount uint64) error {
 	if gp == nil {
 		return nil
 	}
 	gp.mu.Lock()
 	defer gp.mu.Unlock()
-	if gp.regularGas < amount {
+	if gp.executionGas < amount {
 		return ErrGasLimitReached
 	}
-	gp.regularGas -= amount
+	gp.executionGas -= amount
 	return nil
 }
 
@@ -126,22 +126,22 @@ func (gp *GasPool) AddGas(amount uint64) *GasPool {
 	}
 	gp.mu.Lock()
 	defer gp.mu.Unlock()
-	if gp.regularGas > math.MaxUint64-amount {
+	if gp.executionGas > math.MaxUint64-amount {
 		panic("gas pool pushed above uint64")
 	}
-	gp.regularGas += amount
+	gp.executionGas += amount
 	gp.stateGas += amount
 	return gp
 }
 
-// SubGas is a legacy alias for ConsumeRegular.
+// SubGas is a legacy alias for ConsumeExecution.
 func (gp *GasPool) SubGas(amount uint64) error {
-	return gp.ConsumeRegular(amount)
+	return gp.ConsumeExecution(amount)
 }
 
-// Gas is a legacy alias for RegularGasAvailable.
+// Gas is a legacy alias for ExecutionGasAvailable.
 func (gp *GasPool) Gas() uint64 {
-	return gp.RegularGasAvailable()
+	return gp.ExecutionGasAvailable()
 }
 
 // AddBlobGas extends the blob-gas budget.
@@ -173,16 +173,16 @@ func (gp *GasPool) SubBlobGas(amount uint64) error {
 }
 
 // CheckBlockGasInclusion verifies that the supplied gas fits in the block's
-// remaining budgets: regular and state in the EIP-8037 reservoirs, and blob in
-// the EIP-4844 blob-gas pool. Callers obtain the regular and state contributions
+// remaining budgets: execution and state in the EIP-8037 reservoirs, and blob in
+// the EIP-4844 blob-gas pool. Callers obtain the execution and state contributions
 // from InclusionContributions; blobGas is the transaction's blob gas.
-func CheckBlockGasInclusion(gp *GasPool, regularGas, stateGas, blobGas uint64) error {
+func CheckBlockGasInclusion(gp *GasPool, executionGas, stateGas, blobGas uint64) error {
 	if gp == nil {
 		return nil
 	}
 	gp.mu.RLock()
 	defer gp.mu.RUnlock()
-	if regularGas > gp.regularGas {
+	if executionGas > gp.executionGas {
 		return ErrGasLimitReached
 	}
 	if stateGas > gp.stateGas {
@@ -198,13 +198,13 @@ func CheckBlockGasInclusion(gp *GasPool, regularGas, stateGas, blobGas uint64) e
 // inclusion check must reserve for a tx with the given declared gas_limit.
 // Callers feed the result to CheckBlockGasInclusion.
 //
-// Pre-Amsterdam: only the regular dimension is exercised; state is 0.
+// Pre-Amsterdam: only the execution dimension is exercised; state is 0.
 // Amsterdam onwards, the full gas_limit must fit in each remaining reservoir
-// (EIP-8037 check_transaction), with the regular side bounded by the EIP-7825
+// (EIP-8037 check_transaction), with the execution side bounded by the EIP-7825
 // per-tx gas cap:
 //
-//	regular = min(MaxTxnGasLimit, tx.gas)
-//	state   = tx.gas
+//	execution = min(MaxTxnGasLimit, tx.gas)
+//	state     = tx.gas
 func InclusionContributions(gas uint64, isAmsterdam bool) (uint64, uint64) {
 	if !isAmsterdam {
 		return gas, 0
@@ -224,9 +224,9 @@ func (gp *GasPool) BlobGas() uint64 {
 
 func (gp *GasPool) String() string {
 	if gp == nil {
-		return "regularGas: 0, stateGas: 0, blobGas: 0"
+		return "executionGas: 0, stateGas: 0, blobGas: 0"
 	}
 	gp.mu.RLock()
 	defer gp.mu.RUnlock()
-	return fmt.Sprintf("regularGas: %d, stateGas: %d, blobGas: %d", gp.regularGas, gp.stateGas, gp.blobGas)
+	return fmt.Sprintf("executionGas: %d, stateGas: %d, blobGas: %d", gp.executionGas, gp.stateGas, gp.blobGas)
 }

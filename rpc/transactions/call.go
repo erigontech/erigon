@@ -64,6 +64,7 @@ func DoCall(
 	*/
 
 	state := state.New(stateReader)
+	defer state.Close()
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -188,6 +189,14 @@ type ReusableCaller struct {
 	message        *types.Message
 }
 
+// Close returns the state built by the last DoCallWithNewGas to its pools.
+// r.evm is never cleared: the timeout watcher goroutine reads it and is never awaited.
+func (r *ReusableCaller) Close() {
+	if ibs := r.evm.IntraBlockState(); ibs != nil {
+		ibs.Close()
+	}
+}
+
 func (r *ReusableCaller) DoCallWithNewGas(
 	ctx context.Context,
 	newGas uint64,
@@ -211,27 +220,32 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	if r.stateOverrides != nil {
 		precompiles := vm.ActivePrecompiledContracts(r.rules)
 		if err := r.stateOverrides.Override(ibs, precompiles, r.rules); err != nil {
+			ibs.Close()
 			return nil, err
 		}
 		r.evm.SetPrecompiles(precompiles)
 	}
 	if prev := r.evm.IntraBlockState(); prev != nil {
-		prev.Release(false)
+		prev.Close()
 	}
 	r.evm.Reset(txCtx, ibs)
 
-	// done is closed on return to stop the watcher goroutine before it can
-	// cancel the shared EVM for a subsequent call.
-	done := make(chan struct{})
-	defer close(done) // runs before cancel() (LIFO), so goroutine exits cleanly on success
-
+	// Cancel the EVM if the context is done while the call is running. The
+	// deferred stop() runs before cancel() (LIFO), so on normal return the
+	// callback can never fire and cancel the shared EVM during a later call.
 	var timedOut atomic.Bool
-	go func() {
-		select {
-		case <-ctx.Done():
-			timedOut.Store(true)
-			r.evm.Cancel()
-		case <-done:
+	cancelled := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(cancelled)
+		timedOut.Store(true)
+		r.evm.Cancel()
+	})
+	// stop() does not wait for a callback that already started, so join it: a
+	// Cancel() landing after the next probe's Reset() aborts that probe, and an
+	// aborted frame reports err == nil.
+	defer func() {
+		if !stop() {
+			<-cancelled
 		}
 	}()
 
@@ -265,8 +279,6 @@ func NewReusableCaller(
 	callTimeout time.Duration,
 ) (*ReusableCaller, error) {
 
-	ibs := state.New(stateReader)
-
 	baseFee := header.BaseFee
 
 	msg, err := initialArgs.ToMessage(gasCap, baseFee)
@@ -283,7 +295,7 @@ func NewReusableCaller(
 	}
 	txCtx := protocol.NewEVMTxContext(msg)
 
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
+	evm := vm.NewEVM(blockCtx, txCtx, state.New(stateReader), chainConfig, vm.Config{NoBaseFee: true})
 
 	return &ReusableCaller{
 		evm:            evm,

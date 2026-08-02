@@ -83,6 +83,24 @@ _Current Disk Usage measured as of 2026-07-19; usage grows over time as the chai
 
 _Current Disk Usage measured as of 2026-07-21; usage grows over time as the chain grows._
 
+| **Pruning Mode** | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | 1.10 TB |
+
+_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network._
+
+| **Pruning Mode** | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | 133.73 GB |
+
+_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network._
+
+| **Pruning Mode** | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | 29.64 GB |
+
+_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network._
+
 :::warning
 The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases). Disk usage figures below are from September 2025 and are no longer automatically updated.
 :::
@@ -1488,7 +1506,7 @@ Erigon stores everything under a single **datadir**. Two kinds of files live the
 
 This split is what enables Erigon's small disk footprint relative to other archive nodes:
 
-- **`chaindata/` is small (~15 GB on Ethereum mainnet)** because it only holds latest state and recently-updated values.
+- **`chaindata/` is small (~22 GB on Ethereum mainnet, rarely more than 25 GB)** because it only holds latest state and recently-updated values.
 - **`snapshots/` is large but content-addressed.** Once a `.seg` file is finalised it is the *same file* on every Erigon node in the world — meaning it can be distributed via BitTorrent and verified by hash. There is no rewrite-amplification penalty for keeping history.
 
 For the exact directory layout, file sizes on mainnet, and how to split storage across fast/slow disks, see [Database](database) and [Optimizing Storage](optimizing-storage).
@@ -1596,21 +1614,23 @@ Snapshots are organised into several subdirectories. The main ones are:
 
 ## What does it cost on disk?
 
-Real numbers from a Nov 2024 mainnet archive node:
+Real numbers from Erigon 3.6 archive nodes (`--prune.mode=archive`, default pruning options), July 2026:
 
-```sh
-# eth-mainnet — archive — prune.mode=archive
-chaindata           15 GB
-snapshots/accessor 120 GB
-snapshots/domain   300 GB
-snapshots/history  280 GB
-snapshots/idx      430 GB
-snapshots TOTAL    2.3 TB
-```
+| | eth-mainnet | gnosis | sepolia | hoodi | chiado |
+| --- | --- | --- | --- | --- | --- |
+| `chaindata` | 22.75 GB | 9.63 GB | 12.87 GB | 6.78 GB | 2.40 GB |
+| `snapshots` (block segments) | 996.40 GB | 284.82 GB | 614.90 GB | 33.38 GB | 12.91 GB |
+| `snapshots/domain` | 417.66 GB | 227.03 GB | 237.26 GB | 52.39 GB | 7.17 GB |
+| `snapshots/idx` | 332.72 GB | 136.67 GB | 115.95 GB | 25.47 GB | 3.44 GB |
+| `snapshots/history` | 255.60 GB | 39.28 GB | 68.93 GB | 8.00 GB | 2.33 GB |
+| `snapshots/accessor` | 141.61 GB | 33.73 GB | 45.85 GB | 7.70 GB | 1.39 GB |
+| **total** | **2.17 TB** | **731.16 GB** | **1.10 TB** | **133.73 GB** | **29.64 GB** |
 
-The breakdown above lists the state/history snapshot subdirectories. The remaining ~1.2 TB is mostly block/transaction `.seg` data, which is not broken out separately here.
+Block segments — headers, bodies and transactions — sit directly in `snapshots/` rather than in a sub-folder, and on mainnet they are the single largest item.
 
-For up-to-date totals across all networks and pruning modes, see [Hardware Requirements](../get-started/hardware-requirements).
+Data that is off by default is excluded above. On the same mainnet node it would add 441 GB for the receipts cache (`--prune.include-receipts`), 4.4 TB for commitment history (`--prune.include-commitment-history`), and 2.5 TB for the Caplin block, blob and state archive.
+
+Each column is one node, so totals differ slightly from the headline figures on [Hardware Requirements](../get-started/hardware-requirements), which are measured on freshly synced nodes.
 
 ## Why `chaindata/` stays so small
 
@@ -1620,7 +1640,7 @@ In Erigon 3, `chaindata/` only holds:
 - Recent blocks not yet folded into snapshots
 - Live txpool, peer state, sync stage progress
 
-Most of the bulk that other clients keep in the active database — historical state, ancient blocks, receipt logs — is in immutable snapshot files instead. This is why `chaindata/` rarely exceeds 20 GB even on archive nodes.
+Most of the bulk that other clients keep in the active database — historical state, ancient blocks, receipt logs — is in immutable snapshot files instead. This is why `chaindata/` rarely exceeds ~25 GB even on archive nodes.
 
 Deleting `chaindata/` is **recoverable but not free**: it discards the latest mutable state and any recent blocks not yet folded into snapshots. On restart Erigon re-derives state from the immutable snapshots (re-downloading them if needed) and resyncs the post-snapshot tip forward from the consensus layer over the Engine API — blocks are no longer pulled from peers over devp2p. Treat it as a resync of the chain tip, not a quick rebuild, and keep a backup if fast recovery matters.
 
@@ -1967,6 +1987,29 @@ These flags cover the general behavior and configuration of the Erigon client.
 * `--keep.stored.chain.config`: Avoids overriding the chain configuration already stored in the database.
   * Default: `false`
 
+### Development, testing, and block-production helpers
+
+These flags are mainly for dev networks, testing, or specialized block-production setups.
+
+* `--allow-insecure-unlock`: Allows insecure account unlocking when account-related RPCs are exposed by HTTP. Use only on trusted networks.
+  * Default: `false`
+* `--dev-validator-seed value`: Deterministic BLS key seed for the embedded dev validator; enables PoS dev mode.
+  * Default: `devnet`
+* `--dev-validator-count value`: Number of validators for PoS dev mode.
+  * Default: `64`
+* `--dev.slot-time value`: Slot duration in seconds for PoS dev mode.
+  * Default: `6`
+* `--miner.gaslimit value`: Target gas limit for mined blocks.
+  * Default: `0`
+* `--miner.extradata value`: Block extra data set by the miner; defaults to the client version string.
+  * Default: client version string
+* `--experimental.bal`: Generates block access lists.
+  * Default: `false`
+* `--experimental.always-generate-changesets`: Overrides changeset generation logic.
+  * Default: `false`
+* `--chaos.monkey`: Testing-only flag that enables spontaneous network, consensus, and other failures.
+  * Default: `false`
+
 ### Database and Caching
 
 These flags control database performance and memory usage. See [Database](/fundamentals/database) for the on-disk layout.
@@ -1983,6 +2026,8 @@ These flags control database performance and memory usage. See [Database](/funda
   * Default: `2`
 * `--batchSize value`: Sets the batch size for the execution stage.
   * Default: `512M`
+* `--etl.bufferSize value`: Buffer size for ETL operations.
+  * Default: `256MB`
 * `--bodies.cache value`: Sets the size limit for the block bodies cache.
   * Default: `268435456`
 * `--state.cache value`: Sets the amount of data to store in the StateCache.
@@ -2201,6 +2246,10 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `false`
 * `--witness.cache.blocks value` *(New in v3.6)*: Number of recent blocks whose legacy `debug_executionWitness` result is eagerly cached in memory, keyed by block hash in an LRU. Each witness is held as serialized JSON and served verbatim on a hit, so memory use is roughly this count multiplied by the per-block witness size. Embedded RPC only, and requires `--prune.include-commitment-history` (runtime errors from `debug_executionWitness` and `eth_getWitness` name its `--prune.experimental.include-commitment-history` alias instead).
   * Default: `0` (cache disabled); values above the cap of `96` are clamped
+* `--witness.cache.head-capture`: Serves recent-block `debug_executionWitness` on a minimal node without commitment-history by building each head block from a pinned parent commitment snapshot and the account/storage/code history the node keeps. Cache-only serving: out-of-window requests miss, and no history recompute is attempted. Embedded RPC only.
+  * Default: `false`
+* `--witness.cache.maxmb value`: Resident-memory cap, in MB, for the witness cache; whichever limit binds first wins between the byte budget and `--witness.cache.blocks` (still capped at `96`). `0` means count-only (no byte cap).
+  * Default: `0`
 
 ### MCP Server
 
@@ -2414,6 +2463,8 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `131072` (~18 days)
 * `--caplin.checkpoint-sync.disable`: Disables checkpoint sync.
   * Default: `false`
+* `--caplin.resume-max-staleness-epochs value`: Max epochs a locally-finalized state may be stale for Caplin to resume from it on restart instead of remote checkpoint syncing. Data-availability bound; larger values are clamped to the anchor fork's sidecar-retention window.
+  * Default: `0` (resolves to the anchor fork's sidecar-retention window)
 * `--caplin.snapgen`: Enables snapshot generation.
   * Default: `false`
 * `--caplin.mev-relay-url value`: The MEV relay endpoint.

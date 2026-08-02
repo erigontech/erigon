@@ -72,14 +72,18 @@ runs:
         fi
         df -h
 
-    - name: "Use D: drive for temp files on Windows"
+    - name: "Use D: drive for caches and temp files on Windows"
       if: ${{ runner.os == 'Windows' }}
       shell: bash
       run: |
-        mkdir -p D:/tmp
-        echo "TEMP=D:/tmp" >> "$GITHUB_ENV"
-        echo "TMP=D:/tmp" >> "$GITHUB_ENV"
-        echo "TMPDIR=D:/tmp" >> "$GITHUB_ENV"
+        mkdir -p D:/tmp D:/go-build D:/go/pkg/mod
+        {
+          echo "TEMP=D:/tmp"
+          echo "TMP=D:/tmp"
+          echo "TMPDIR=D:/tmp"
+          echo "GOCACHE=D:/go-build"
+          echo "GOMODCACHE=D:/go/pkg/mod"
+        } >> "$GITHUB_ENV"
 
     - name: Enable long paths on Windows
       if: ${{ runner.os == 'Windows' }}
