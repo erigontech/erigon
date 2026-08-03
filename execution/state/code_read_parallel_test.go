@@ -124,7 +124,6 @@ func BenchmarkGetStateObjectAfterCodeRead(b *testing.B) {
 		b.Run(fmt.Sprintf("code=%dB", codeLen), func(b *testing.B) {
 			ibs, addr := committedCodeIBS(b, codeLen, nil)
 			b.ReportAllocs()
-			b.ResetTimer()
 			for b.Loop() {
 				if _, err := ibs.getStateObject(addr, false); err != nil {
 					b.Fatal(err)
@@ -165,4 +164,35 @@ func TestCommittedCodeHashComesFromAccountRecord(t *testing.T) {
 		require.Equal(t, stale, so.code.Hash)
 		require.Equal(t, stale, so.original.CodeHash)
 	})
+}
+
+// TestPriorTxCodeWriteHashComesFromTheCell pins that a code cell written by an
+// earlier tx hands its own hash to the rebuilt state object. The cell is the
+// authority for a prior-tx write, and deriving the hash from its bytes instead
+// would both re-hash the contract and mask a cell whose two halves disagree.
+func TestPriorTxCodeWriteHashComesFromTheCell(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
+	priorCode := []byte{0xef, 0x01, 0x00, 0x11, 0x22, 0x33}
+	cellHash := accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0xBE, 0xEF}))
+
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Incarnation = 1
+	acc.CodeHash = accounts.EmptyCodeHash
+
+	vm := NewVersionMap(nil)
+	vm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, accounts.Code{Hash: cellHash, Bytes: priorCode}, true)
+
+	ibs := NewWithVersionMap(&codeReader{addr: addr, account: &acc, code: nil}, vm)
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(100, 7)
+	ibs.SetVersion(0)
+
+	so, err := ibs.getStateObject(addr, false)
+	require.NoError(t, err)
+	require.NotNil(t, so)
+
+	require.Equal(t, priorCode, so.code.Bytes)
+	require.Equal(t, cellHash, so.code.Hash, "the cell's hash must win, not keccak(bytes)")
+	require.Equal(t, cellHash, so.data.CodeHash)
 }
