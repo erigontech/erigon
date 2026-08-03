@@ -31,22 +31,33 @@ import (
 // commitmentRecomputeResult is the in-memory output of mode B's
 // compute phase: the recomputed root + encoded trie state at
 // lastTxNum, plus the branch collector the trie's Process emitted.
-// Drained by ensureCommitmentAtBlockApply after the boundary-step
-// shadow wipe.
+// Apply drains `branches` into the writable shadow AND, in the same
+// pass, mirrors every (k, v) into `regenBranches` so the boundary-
+// step v4 emit (mode C) can iterate the identical set without
+// touching the OLD file. See node/components/storage/provider_unwind_state_regen_wire.go
+// for the commitment-v4 emit that consumes regenBranches.
 type commitmentRecomputeResult struct {
 	lastTxNum        uint64
 	encodedTrieState []byte
-	branches         *etl.Collector // caller must Close
+	branches         *etl.Collector // consumed by Apply
+	regenBranches    *etl.Collector // consumed by regen (v4 commitment emit)
 }
 
-// Close drains/releases the underlying collector. Safe to call when
-// branches is nil (e.g. on the error path of Compute).
+// Close releases both collectors. Safe to call on a nil receiver and
+// idempotent — each collector is nilled after Close so a second call
+// is a no-op.
 func (r *commitmentRecomputeResult) Close() {
-	if r == nil || r.branches == nil {
+	if r == nil {
 		return
 	}
-	r.branches.Close()
-	r.branches = nil
+	if r.branches != nil {
+		r.branches.Close()
+		r.branches = nil
+	}
+	if r.regenBranches != nil {
+		r.regenBranches.Close()
+		r.regenBranches = nil
+	}
 }
 
 // ensureCommitmentAtBlock is mode-B sub-op #3 — anchor the commitment
@@ -161,7 +172,6 @@ func (p *Provider) ensureCommitmentAtBlockApply(ctx context.Context, tx kv.Tempo
 	if result == nil {
 		return fmt.Errorf("ensureCommitmentAtBlockApply: nil result")
 	}
-	defer result.Close()
 
 	metrics := &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}}
 	mem := tx.Debug().NewMemBatch(metrics)
@@ -171,14 +181,31 @@ func (p *Provider) ensureCommitmentAtBlockApply(ctx context.Context, tx kv.Tempo
 	// branch is written at txnum=lastTxNum (step=stepContaining).
 	// The preceding boundary-step wipe removed any stale forward-
 	// exec branches at the same step, so these go in clean.
+	//
+	// Same pass mirrors each (k, v) into result.regenBranches — the
+	// v4 commitment file emit needs the identical set and etl.Collector
+	// Load is single-use. Ownership transfer: regenBranches survives
+	// past this function; result.Close (invoked by the caller at the
+	// end of Unwind) reclaims it.
 	branchCount := 0
 	if result.branches != nil {
+		result.regenBranches = etl.NewCollectorWithAllocator(
+			"mode-C commitment v4 regen",
+			p.snapDir,
+			etl.SmallSortableBuffers,
+			p.logger,
+		)
 		if err := result.branches.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 			branchCount++
+			if err := result.regenBranches.Collect(k, v); err != nil {
+				return fmt.Errorf("mirror branch into regenBranches: %w", err)
+			}
 			return mem.DomainPut(kv.CommitmentDomain, string(k), v, result.lastTxNum, nil)
 		}, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("drain branches collector: %w", err)
 		}
+		result.branches.Close()
+		result.branches = nil
 	}
 
 	// Write the new commitment-state record (the full encoded trie

@@ -106,13 +106,16 @@ func (p *Provider) regenerateBoundaryStepFiles(
 	ctx context.Context,
 	tx kv.TemporalRwTx,
 	toBlock, lastTxNum uint64,
-	encodedTrieState []byte,
+	recompute *commitmentRecomputeResult,
 ) (*pendingRegenState, error) {
 	if p.Aggregator == nil {
 		return nil, nil // tests / tools without an Aggregator skip cleanly
 	}
 	if p.Inventory == nil {
 		return nil, nil
+	}
+	if recompute == nil {
+		return nil, fmt.Errorf("regenerateBoundaryStepFiles: nil recompute")
 	}
 	stepSize := p.Aggregator.StepSize()
 	if stepSize == 0 {
@@ -122,7 +125,7 @@ func (p *Provider) regenerateBoundaryStepFiles(
 
 	// Encode the commitment anchor once — every regen of the
 	// commitment domain plants the same blob.
-	commitmentState := commitmentdb.NewCommitmentState(lastTxNum, toBlock, encodedTrieState)
+	commitmentState := commitmentdb.NewCommitmentState(lastTxNum, toBlock, recompute.encodedTrieState)
 	commitmentAnchor, err := commitmentState.Encode()
 	if err != nil {
 		return nil, fmt.Errorf("encode commitment anchor: %w", err)
@@ -230,11 +233,29 @@ func (p *Provider) regenerateBoundaryStepFiles(
 			}
 			regenPath := finalPath + ".regen"
 
-			if err := RegenerateBoundaryStepFile(
-				ctx, kvDomain, oldPath, regenPath, lookup, lastTxNum,
-				compression, anchor, p.snapTmpDir, p.logger,
-			); err != nil {
-				return nil, fmt.Errorf("regen %s boundary-step file %s: %w", sd, fileEntry.Name, err)
+			// Commitment mode-C: emit the v4 file directly from the
+			// mode-C compute's captured branches rather than iterating
+			// the OLD file. Iterating the OLD file replays its stale
+			// post-lastTxN branch set (the 2026-06-03 subversion); the
+			// compute's branches are the authoritative trie state at
+			// lastTxNum, freshly folded from accounts/storage/code.
+			if kvDomain == kv.CommitmentDomain && action == actionRegenTruncate {
+				if recompute.regenBranches == nil {
+					return nil, fmt.Errorf("regenerateBoundaryStepFiles: commitment truncate needs recompute.regenBranches (Apply must run first)")
+				}
+				if err := WriteCommitmentBoundaryFileV4(
+					ctx, recompute.regenBranches, anchor, regenPath,
+					p.snapTmpDir, compression, p.logger,
+				); err != nil {
+					return nil, fmt.Errorf("emit v4 commitment file %s: %w", regenPath, err)
+				}
+			} else {
+				if err := RegenerateBoundaryStepFile(
+					ctx, kvDomain, oldPath, regenPath, lookup, lastTxNum,
+					compression, anchor, p.snapTmpDir, p.logger,
+				); err != nil {
+					return nil, fmt.Errorf("regen %s boundary-step file %s: %w", sd, fileEntry.Name, err)
+				}
 			}
 			pairs = append(pairs, regenPair{
 				regenPath:    regenPath,
