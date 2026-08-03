@@ -124,7 +124,7 @@ func (a *ApiHandler) triggerELClientVersionFetch() {
 	if a.engine == nil || a.elClientVersion.Load() != nil {
 		return
 	}
-	if !a.elClientVersionFetching.CompareAndSwap(false, true) {
+	if a.elClientVersionFetching.Swap(true) {
 		return
 	}
 	// The fetch this call raced against may have cached the version and released the
