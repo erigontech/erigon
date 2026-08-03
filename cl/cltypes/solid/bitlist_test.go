@@ -41,6 +41,21 @@ func TestBitListClear(t *testing.T) {
 	require.Zero(BitList.Length(), "BitList Clear did not reset the length to zero")
 }
 
+func TestBitListProgressiveHashIgnoresBackingBytesPastLength(t *testing.T) {
+	bitlist := solid.NewBitList(1, 2048)
+	bitlist.Set(0, 0b00000010)
+	bitlist.Set(32, 1)
+	want, err := solid.BitlistFromBytes([]byte{0b00000010}, 2048).HashSSZProgressive()
+	require.NoError(t, err)
+
+	var got [32]byte
+	require.NotPanics(t, func() {
+		got, err = bitlist.HashSSZProgressive()
+	})
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
 func TestBitListCopyTo(t *testing.T) {
 	require := require.New(t)
 

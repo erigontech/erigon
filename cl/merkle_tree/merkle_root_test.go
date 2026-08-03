@@ -44,6 +44,20 @@ func TestHashTreeRootEmptySchema(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestProgressiveContainerRootUnsupportedTypeMessage(t *testing.T) {
+	require.PanicsWithValue(t, "Can't create TreeRoot: unsupported type string at index 0", func() {
+		_, _ = merkle_tree.ProgressiveContainerRootAll("bad")
+	})
+}
+
+func TestProgressiveContainerRootInactiveFieldVector(t *testing.T) {
+	first := common.Hash{1}
+	third := common.Hash{2}
+	root, err := merkle_tree.ProgressiveContainerRoot([]bool{true, false, true}, first[:], third[:])
+	require.NoError(t, err)
+	require.Equal(t, common.HexToHash("0x3a6584864e28437da67deac288c46c9b60cee55880b19b12cfe68a7d1d5bc491"), common.Hash(root))
+}
+
 func TestHashTreeRootTxs(t *testing.T) {
 	txs := [][]byte{
 		{1, 2, 3},

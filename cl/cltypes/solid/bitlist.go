@@ -190,8 +190,9 @@ func (u *BitList) HashSSZ() ([32]byte, error) {
 }
 
 func (u *BitList) HashSSZProgressive() ([32]byte, error) {
-	bitLength := u.Bits()
-	packed := append([]byte(nil), u.Bytes()...)
+	bytes := u.Bytes()
+	bitLength := bitlistBits(bytes)
+	packed := append([]byte(nil), bytes...)
 	if bitLength < len(packed)*8 {
 		packed[bitLength/8] &^= 1 << uint(bitLength%8)
 	}
@@ -235,13 +236,17 @@ func (u *BitList) Clone() clonable.Clonable {
 
 // getBitlistLength return the amount of bits in given bitlist.
 func (u *BitList) Bits() int {
-	if len(u.u) == 0 {
+	return bitlistBits(u.u)
+}
+
+func bitlistBits(data []byte) int {
+	if len(data) == 0 {
 		return 0
 	}
 	// The most significant bit is present in the last byte in the array.
 	var last byte
 	var byteLen int
-	for i, b := range slices.Backward(u.u) {
+	for i, b := range slices.Backward(data) {
 		if b != 0 {
 			last = b
 			byteLen = i + 1

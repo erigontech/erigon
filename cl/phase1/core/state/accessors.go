@@ -208,9 +208,16 @@ func ValidateIndexedAttestationIndices(cfg *clparams.BeaconChainConfig, version 
 	if inds == nil || inds.Length() == 0 {
 		return errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
 	}
+	if cfg == nil {
+		return errors.New("isValidIndexedAttestation: beacon config is nil")
+	}
 	limit := cfg.MaxValidatorsPerCommittee
 	if version >= clparams.ElectraVersion {
-		limit *= cfg.MaxCommitteesPerSlot
+		if cfg.MaxCommitteesPerSlot != 0 && limit > ^uint64(0)/cfg.MaxCommitteesPerSlot {
+			limit = ^uint64(0)
+		} else {
+			limit *= cfg.MaxCommitteesPerSlot
+		}
 	}
 	if uint64(inds.Length()) > limit {
 		return fmt.Errorf("isValidIndexedAttestation: too many attesting indices: %d > %d", inds.Length(), limit)

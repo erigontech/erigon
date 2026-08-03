@@ -698,6 +698,7 @@ func (b *BeaconBody) ExecutionBlockHashMerkleProof() ([][32]byte, error) {
 	if b.Version < clparams.GloasVersion || b.SignedExecutionPayloadBid == nil || b.SignedExecutionPayloadBid.Message == nil {
 		return nil, errors.New("execution block hash merkle proof requires a GLOAS execution payload bid")
 	}
+	// The Gloas execution proof targets ParentBlockHash through bid, signed-bid, and body layers.
 	bidProof, err := b.SignedExecutionPayloadBid.Message.ParentBlockHashMerkleProof()
 	if err != nil {
 		return nil, err
