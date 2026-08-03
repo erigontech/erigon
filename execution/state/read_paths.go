@@ -1129,7 +1129,9 @@ func refreshCode(s *IntraBlockState, addr accounts.Address) (refreshedCode, Read
 		return refreshedCode{r.vwCode.Val.Bytes, r.vwCode.Val.Hash}, r.source, r.version, nil
 	case outcomeReadSetHit:
 		tr, _ := s.versionedReads.GetCode(addr)
-		return refreshedCode{Bytes: tr.Val}, r.source, r.version, nil
+		// The recorded read and the probed cell share a version, so they are the
+		// same cell and its hash pairs with tr.Val. Nil when no probe ran.
+		return refreshedCode{tr.Val, r.hashOfMapCodeVal}, r.source, r.version, nil
 	case outcomeMapDone:
 		return refreshedCode{r.mapCodeVal, r.hashOfMapCodeVal}, r.source, r.version, nil
 	case outcomeReturnZero, outcomeReturnDefault:
