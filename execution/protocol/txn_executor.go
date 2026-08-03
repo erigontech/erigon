@@ -382,10 +382,10 @@ func (st *TxnExecutor) preCheck() error {
 	return nil
 }
 
-// checkGasCap applies the EIP-7825 transaction gas cap and buys gas. Split from
-// preCheck so the cap still runs before buyGas consumes pool gas, while the
-// intrinsic-gas calculation it needs stays off the rejection paths above.
-func (st *TxnExecutor) checkGasCap(gasBailout bool, intrinsicGasResult mdgas.IntrinsicGasCalcResult) error {
+// preCheckGasCap applies the EIP-7825 gas cap and buys gas. Split from preCheck
+// so the cap still runs before buyGas takes pool gas, while the intrinsic-gas
+// calculation it needs stays off the rejection paths above.
+func (st *TxnExecutor) preCheckGasCap(gasBailout bool, intrinsicGasResult mdgas.IntrinsicGasCalcResult) error {
 	rules := st.evm.ChainRules()
 	if st.msg.CheckGas() && rules.IsOsaka {
 		if rules.IsAmsterdam {
@@ -571,7 +571,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	// Check clause 2, buy gas if everything is correct.
-	if err := st.checkGasCap(gasBailout, intrinsicGasResult); err != nil {
+	if err := st.preCheckGasCap(gasBailout, intrinsicGasResult); err != nil {
 		return nil, err
 	}
 
