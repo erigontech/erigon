@@ -362,16 +362,39 @@ Landed as:
 
 ### Task 5: Verify acceptance criteria
 
-- [ ] watermark fixture passes with only the declared `IndicesMax` shift — no
+- [x] watermark fixture passes with only the declared `IndicesMax` shift — no
   other number moved
-- [ ] no caplin-owned dirty/visible lifecycle remains (grep the deleted
+- [x] no caplin-owned dirty/visible lifecycle remains (grep the deleted
   symbols); views pin generations
-- [ ] confirm the Non-goals held: no `.tmp`-sweep change, no semaphore change,
+- [x] confirm the Non-goals held: no `.tmp`-sweep change, no semaphore change,
   no watermark convention normalized
-- [ ] `make lint` — repeat until clean
-- [ ] `make erigon integration` — both build
-- [ ] `go test -race ./db/snapshotsync/... ./cl/antiquary/... ./cl/phase1/...
+- [x] `make lint` — repeat until clean
+- [x] `make erigon integration` — both build
+- [x] `go test -race ./db/snapshotsync/... ./cl/antiquary/... ./cl/phase1/...
   ./polygon/heimdall/...`
+
+**Verified.**
+
+- `TestCaplinWatermarks` moved exactly two assertions since it landed:
+  `IndicesMax` and `BlocksAvailable`, both `2L` → `2L-1`. `SegmentsMax = 3L-1`
+  and `FrozenBlobs = L` are byte-identical to the pre-embed fixture.
+- `recalcVisibleFiles`, `closeWhatNotInList`, `idxAvailability`,
+  `BeaconBlockRotx`/`BlobSidecarRotx` are gone from `freezeblocks`, `cl` and
+  `capcli` (only a test comment names one). `CaplinView` wraps
+  `snapshotsync.View`; `TestViewSurvivesConcurrentSegmentRemoval` pins that a
+  view keeps its files mapped across a concurrent removal.
+- Non-goals: the branch's own commits touch four Go files
+  (`caplin_snapshots.go`, `caplin_snapshots_test.go`, `snapshots.go`,
+  `snapshots_test.go`). `RemoveOverlaps` has no hunk, `cl/antiquary` is
+  untouched so the semaphore stays commented out, and both divergent
+  conventions still read as before.
+- `make lint` clean on two runs; `make erigon integration` both build; the
+  `-race` suite exits 0.
+- Log-noise note, not a defect: on a datadir with no `salt-blocks.txt`,
+  `GetIndexSalt` logs at ERROR before returning the error the zero-value
+  fallback swallows. The node path is unaffected — `SetUpBlockReader`
+  (`node/eth/backend.go:414`) loads the salt before caplin starts
+  (`:1026`) — and standalone capcli already triggers the same line.
 
 ### Task 6: [Final] Update documentation
 
