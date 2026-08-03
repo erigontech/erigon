@@ -370,9 +370,8 @@ func retire(reason mvcc.RetireReason, dirtyFiles *DirtyFiles, outs []*FilesItem,
 	}
 }
 
-// openDirtyDataFile opens item's data file matched by mask in dirPath.
-// Returns false when the file is missing or can't be opened; the caller must
-// then treat item as invalid and skip opening its accessors.
+// openDirtyDataFile opens the matching data file and records its version.
+// A false result means the item is unusable and its accessors must not be opened.
 func openDirtyDataFile(item *FilesItem, mask string, dirEntries []string, dirPath string, ver version.Versions, tag string, logger log.Logger) bool {
 	fPath, fileVer, found, err := version.MatchVersionedFile(mask, dirEntries, dirPath)
 	if err != nil {
@@ -380,7 +379,7 @@ func openDirtyDataFile(item *FilesItem, mask string, dirEntries []string, dirPat
 		return false
 	}
 	if !found {
-		logger.Debug("[agg] "+tag+": file does not exists", "f", mask)
+		logger.Debug("[agg] "+tag+": file does not exist", "f", mask)
 		return false
 	}
 
@@ -391,21 +390,20 @@ func openDirtyDataFile(item *FilesItem, mask string, dirEntries []string, dirPat
 	if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 		if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
 			logger.Debug("[agg] "+tag, "err", err, "f", fName)
-		} else {
-			logger.Warn("[agg] "+tag, "err", err, "f", fName)
 		}
 		return false
 	}
 	return true
 }
 
-// openDirtyAccessor opens an accessor file matched by mask in dirPath via open.
-// Failures are logged but don't invalidate the item: a missing or broken
-// accessor can be rebuilt from the data file.
+// openDirtyAccessor opens a matching, supported accessor.
+// Missing accessors do not invalidate the item, and matching or opening failures
+// are tolerated because accessors can be rebuilt from the data file.
 func openDirtyAccessor(mask string, dirEntries []string, dirPath string, ver version.Versions, open func(fPath string) error, tag string, logger log.Logger) {
 	fPath, fileVer, found, err := version.MatchVersionedFile(mask, dirEntries, dirPath)
 	if err != nil {
-		logger.Warn("[agg] "+tag, "err", err, "f", mask)
+		logger.Debug("[agg] "+tag, "err", err, "f", mask)
+		return
 	}
 	if !found {
 		return
@@ -415,7 +413,7 @@ func openDirtyAccessor(mask string, dirEntries []string, dirPath string, ver ver
 	ver.MustSupport(fileVer, fName)
 
 	if err := open(fPath); err != nil {
-		logger.Warn("[agg] "+tag, "err", err, "f", fName)
+		logger.Debug("[agg] "+tag, "err", err, "f", fName)
 	}
 }
 
