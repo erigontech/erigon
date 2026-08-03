@@ -398,8 +398,14 @@ Landed as:
 
 ### Task 6: [Final] Update documentation
 
-- [ ] update `db/agents.md` if the caplin snapshot description drifts
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update `db/agents.md` if the caplin snapshot description drifts — no
+  drift, no edit. `db/agents.md` covers the datadir layout and
+  `Preverified.Typed` filtering; its only caplin lines (:22, :70-71) describe
+  the `caplin/` state-table dir and that beacon blocks / blob sidecars sit at
+  the snapshots root on the ordinary typed path — all still true. Neither it
+  nor `cl/agents.md` (:46, `CaplinStateSnapshots.ContiguousCoverageEnd`,
+  PR-2's target) documents the dirty/visible lifecycle this PR replaced.
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
