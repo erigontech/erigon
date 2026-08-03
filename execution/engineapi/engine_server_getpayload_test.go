@@ -30,8 +30,10 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc"
 )
 
 func TestGetPayloadV4RejectsNilRequests(t *testing.T) {
@@ -115,6 +117,40 @@ func TestGetPayloadRejectsInvalidAmsterdamBlobsBundle(t *testing.T) {
 	require.Nil(t, resp)
 }
 
+func TestGetPayloadRejectsParisShanghaiMismatch(t *testing.T) {
+	t.Parallel()
+
+	const payloadID uint64 = 44
+	for _, tc := range []struct {
+		name      string
+		timestamp uint64
+		version   clparams.StateVersion
+	}{
+		{"Shanghai payload with Paris schema", 100, clparams.BellatrixVersion},
+		{"Paris payload with Shanghai schema", 99, clparams.CapellaVersion},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			stub := &getPayloadStubModule{
+				getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+					require.Equal(t, payloadID, id)
+					return execmodule.AssembledBlockResult{
+						Block:      minimalPragueBlock(tc.timestamp, nil),
+						BlockValue: uint256.NewInt(0),
+					}, nil
+				},
+			}
+			srv := newProposingEngineServerWithConfig(parisShanghaiChainConfig(), stub)
+
+			resp, err := srv.getPayload(context.Background(), payloadID, tc.version)
+
+			require.Nil(t, resp)
+			var unsupported *rpc.UnsupportedForkError
+			require.ErrorAs(t, err, &unsupported)
+		})
+	}
+}
+
 func TestAssembledBlockToPayloadResponseIncludesCanonicalEmptyBAL(t *testing.T) {
 	t.Parallel()
 
@@ -145,6 +181,10 @@ func newProposingEngineServerForGetPayloadTests(stub execmodule.ExecutionModule)
 	cfg.OsakaTime = nil
 	cfg.AmsterdamTime = nil
 
+	return newProposingEngineServerWithConfig(cfg, stub)
+}
+
+func newProposingEngineServerWithConfig(cfg *chain.Config, stub execmodule.ExecutionModule) *EngineServer {
 	return NewEngineServer(
 		log.New(),
 		cfg,
@@ -159,6 +199,16 @@ func newProposingEngineServerForGetPayloadTests(stub execmodule.ExecutionModule)
 		0,     // fcuTimeout
 		0,     // maxReorgDepth
 	)
+}
+
+func parisShanghaiChainConfig() *chain.Config {
+	cfg := allForksChainConfig()
+	cfg.ShanghaiTime = common.NewUint64(100)
+	cfg.CancunTime = nil
+	cfg.PragueTime = nil
+	cfg.OsakaTime = nil
+	cfg.AmsterdamTime = nil
+	return cfg
 }
 
 // minimalPragueBlock builds the smallest possible BlockWithReceipts for Prague
