@@ -33,7 +33,7 @@ type serialExecutor struct {
 	txExecutor
 	// outputs
 	txCount           uint64
-	blockGasUsed      uint64 // accumulated regular gas (pre-Amsterdam: same as block gas)
+	blockGasUsed      uint64 // accumulated execution gas (pre-Amsterdam: same as block gas)
 	blockStateGasUsed uint64 // EIP-8037: accumulated state gas
 	blobGasUsed       uint64
 	lastBlockResult   *blockResult
@@ -180,19 +180,22 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 
 		if !dbg.BatchCommitments || shouldGenerateChangesets || se.cfg.syncCfg.KeepExecutionProofs {
-			if dbg.TraceBlock(blockNum) {
+			traceBlk := dbg.TraceBlock(blockNum)
+			if traceBlk {
 				fmt.Println(blockNum, "Commitment")
-				se.doms.SetTrace(true, false)
+				se.doms.GetCommitmentCtx().SetTraceWriter(os.Stderr)
 			}
 			// Warmup is enabled via EnableTrieWarmup at executor init
 			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
-			se.doms.SetTrace(false, false)
+			if traceBlk {
+				se.doms.GetCommitmentCtx().SetTraceWriter(nil)
+			}
 
 			if err != nil {
 				return nil, rwTx, err
 			}
 
-			if shouldGenerateChangesets {
+			if shouldGenerateChangesets && blockNum > 0 {
 				se.doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
 			}
 			se.doms.SetChangesetAccumulator(nil)
@@ -265,12 +268,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		lastExecutedStep := kv.Step(uint64(se.lastExecutedTxNum.Load()) / se.doms.StepSize())
 
-		// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
-		// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost
-		if !initialCycle || lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !dbg.DiscardCommitment() {
-			if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit && blockNum != maxBlockNum {
-				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
-			}
+		if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, dbg.DiscardCommitment(), blockLimit, blockNum, startBlockNum, maxBlockNum) {
+			return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 		}
 	}
 	se.doms.PrintCacheStats()
@@ -364,7 +363,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 
 			se.txCount++
-			se.blockGasUsed += result.ExecutionResult.BlockRegularGasUsed
+			se.blockGasUsed += result.ExecutionResult.BlockExecutionGasUsed
 			se.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
 			mxExecTransactions.Add(1)
 			if txTask.Tx() != nil {
@@ -374,7 +373,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
-				defer ibs.Release(true)
+				defer ibs.Close()
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 					ret, err := protocol.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
@@ -387,27 +386,24 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				chainReader := consensuschain.NewReader(se.cfg.chainConfig, se.applyTx, se.cfg.blockReader, se.logger)
 
-				// For partial blocks (resuming from snapshot boundary), reconstruct
-				// prior receipts so Finalize receives the full receipt set for requests
-				// hash computation (deposit extraction from logs). See #20452.
 				finalizeReceipts := blockReceipts
+				priorComplete := startTxIndex == 0
 				if startTxIndex > 0 && len(txTask.Txs) > 0 {
 					firstTask := tasks[0].(*exec.TxTask)
 					blockStartTxNum := firstTask.TxNum - uint64(firstTask.TxIndex)
-					reader := state.NewHistoryReaderV3(se.applyTx, blockStartTxNum)
-					priorIbs := state.New(reader)
-					defer priorIbs.Release(true)
-					priorGp := protocol.NewGasPool(txTask.Header.GasLimit, se.cfg.chainConfig.GetMaxBlobGasPerBlock(txTask.Header.Time))
-					getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
-						return se.cfg.blockReader.Header(ctx, se.applyTx, hash, number)
-					}
-					priorReceipts, priorErr := receipts.DerivePriorReceipts(ctx, se.cfg.chainConfig, se.cfg.engine, txTask.Header, txTask.Txs, startTxIndex, blockStartTxNum, se.applyTx, priorIbs, priorGp, getHeader)
+					priorReceipts, priorErr := se.reconstructPriorReceipts(ctx, se.applyTx, txTask.Header, txTask.Txs, startTxIndex, blockStartTxNum)
 					if priorErr != nil {
 						se.logger.Warn(fmt.Sprintf("[%s] failed to reconstruct prior receipts for partial block", se.logPrefix),
 							"block", txTask.BlockNumber(), "startTxIndex", startTxIndex, "err", priorErr)
 					} else {
-						finalizeReceipts = append(priorReceipts, blockReceipts...)
+						finalizeReceipts = priorReceipts
+						finalizeReceipts = append(finalizeReceipts, blockReceipts...)
+						priorComplete = true
 					}
+					// The post-exec validator, which fills receipt blooms for full
+					// blocks, skips partial ones — do it here, even when prior
+					// receipts couldn't be reconstructed (suffix still needs blooms).
+					receipts.DeriveFields(finalizeReceipts, txTask.BlockHash())
 				}
 
 				_, err = se.cfg.engine.Finalize(
@@ -418,15 +414,15 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}
 
-				if startTxIndex == 0 && !isInitialCycle {
-					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
+				if priorComplete && !isInitialCycle {
+					se.cfg.notifications.RecentReceipts.Add(finalizeReceipts, txTask.Txs, txTask.Header)
 				}
 				checkBloom := !se.cfg.vmConfig.StatelessExec && !se.cfg.vmConfig.NoReceipts
 				checkReceipts := checkBloom && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber())
 
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
+					// Block gas = max(execution, state). Pre-Amsterdam: blockStateGasUsed is 0.
 					blockGasUsed := max(se.blockGasUsed, se.blockStateGasUsed)
 					if err := validateBlockPostExecution(se.cfg.engine, se.cfg.chainConfig, txTask.Header, blockGasUsed, se.blobGasUsed, checkReceipts, checkBloom, blockReceipts, txTask.Txs, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
@@ -451,10 +447,13 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					}
 				} else if txTask.TxIndex > 0 {
 					// reconstruct receipt from previous receipt values
-					cumGasUsed, _, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum)
+					cumGasUsed, cumBlobGasUsed, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum)
 					if err != nil {
 						return err
 					}
+					// This tx's own blob gas was accumulated above; fold in the
+					// pre-resume cumulative so ApplyTxIndexes persists correct values.
+					se.blobGasUsed += cumBlobGasUsed
 					receipt, err = result.CreateReceipt(txTask.TxIndex, cumGasUsed+result.ExecutionResult.ReceiptGasUsed, logIndexAfterTx)
 					if err != nil {
 						return err

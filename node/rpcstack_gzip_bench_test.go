@@ -49,9 +49,12 @@ var historicalBlocks = []struct {
 
 // --- stdlib gzip handler (reference implementation) ---
 
+// The stdlib writer runs at BestSpeed to match the production Klauspost level,
+// so the benchmark isolates the library difference rather than mixing in a
+// compression-level difference.
 var stdlibGzPool = sync.Pool{
 	New: func() any {
-		w, _ := gzip.NewWriterLevel(io.Discard, gzip.DefaultCompression)
+		w, _ := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed)
 		return w
 	},
 }
@@ -130,7 +133,7 @@ func measureHandlerLatency(t testing.TB, payload []byte, wrap func(http.Handler)
 
 	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(payload))
 		req.Header.Set("Accept-Encoding", "gzip")
 		resp, _ := client.Do(req)
@@ -141,7 +144,7 @@ func measureHandlerLatency(t testing.TB, payload []byte, wrap func(http.Handler)
 	}
 
 	latencies := make([]time.Duration, 0, requests)
-	for i := 0; i < requests; i++ {
+	for range requests {
 		req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(payload))
 		req.Header.Set("Accept-Encoding", "gzip")
 		start := time.Now()
@@ -170,7 +173,7 @@ func measureRPCLatency(t testing.TB, endpoint, blockTag string) latencyStats {
 
 	// Warmup + fetch payload size
 	var payloadKB int
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		req, _ := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept-Encoding", "gzip")
@@ -187,7 +190,7 @@ func measureRPCLatency(t testing.TB, endpoint, blockTag string) latencyStats {
 	}
 
 	latencies := make([]time.Duration, 0, requests)
-	for i := 0; i < requests; i++ {
+	for range requests {
 		req, _ := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept-Encoding", "gzip")
@@ -262,21 +265,20 @@ func fetchPayload(t testing.TB, blockTag string) []byte {
 	return data
 }
 
-// --- Test: handler-level compression (libdeflate vs stdlib, payload from node) ---
+// --- Test: handler-level compression (klauspost vs stdlib, payload from node) ---
 
 func TestGzipHandlerLatency(t *testing.T) {
 	for _, blk := range historicalBlocks {
-		blk := blk
 		t.Run(blk.desc, func(t *testing.T) {
 			payload := fetchPayload(t, blk.tag)
 			if payload == nil {
 				return
 			}
-			lib := measureHandlerLatency(t, payload, newGzipHandler)
+			kp := measureHandlerLatency(t, payload, newGzipHandler)
 			std := measureHandlerLatency(t, payload, newStdlibGzipHandler)
-			t.Logf("libdeflate  %s", lib)
-			t.Logf("stdlib      %s", std)
-			t.Logf("speedup p50=%.2fx  p99=%.2fx", float64(std.p50)/float64(lib.p50), float64(std.p99)/float64(lib.p99))
+			t.Logf("klauspost  %s", kp)
+			t.Logf("stdlib     %s", std)
+			t.Logf("speedup p50=%.2fx  p99=%.2fx", float64(std.p50)/float64(kp.p50), float64(std.p99)/float64(kp.p99))
 		})
 	}
 }
@@ -290,7 +292,6 @@ func TestRPCDaemonLatency(t *testing.T) {
 	var sb strings.Builder
 
 	for _, blk := range historicalBlocks {
-		blk := blk
 		t.Run(blk.desc, func(t *testing.T) {
 			stat := measureRPCLatency(t, rpcEndpoint, blk.tag)
 			line := fmt.Sprintf("%-52s  %s\n", blk.desc, stat)
@@ -324,7 +325,7 @@ func benchmarkGzipHandler(b *testing.B, payload []byte, wrap func(http.Handler) 
 
 	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(payload))
 		req.Header.Set("Accept-Encoding", "gzip")
 		resp, _ := client.Do(req)
@@ -367,10 +368,10 @@ func getBenchPayload(b *testing.B) []byte {
 	return benchPayload
 }
 
-func BenchmarkLibdeflateGzip(b *testing.B) {
+func BenchmarkKlauspostGzipBestSpeed(b *testing.B) {
 	benchmarkGzipHandler(b, getBenchPayload(b), newGzipHandler)
 }
 
-func BenchmarkStdlibGzip(b *testing.B) {
+func BenchmarkStdlibGzipBestSpeed(b *testing.B) {
 	benchmarkGzipHandler(b, getBenchPayload(b), newStdlibGzipHandler)
 }

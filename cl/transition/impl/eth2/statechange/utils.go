@@ -9,12 +9,14 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func IsValidDepositSignature(
 	depositData *cltypes.DepositData,
-	cfg *clparams.BeaconChainConfig) (bool, error) {
+	cfg *clparams.BeaconChainConfig,
+) (bool, error) {
 	// Agnostic domain.
 	domain, err := fork.ComputeDomain(
 		cfg.DomainDeposit[:],
@@ -28,7 +30,7 @@ func IsValidDepositSignature(
 	if err != nil {
 		return false, err
 	}
-	signedRoot := utils.Sha256(depositMessageRoot[:], domain)
+	signedRoot := crypto.Sha256(depositMessageRoot[:], domain)
 	// Perform BLS verification and if successful noice.
 	valid, err := bls.Verify(depositData.Signature[:], signedRoot[:], depositData.PubKey[:])
 	if err != nil || !valid {

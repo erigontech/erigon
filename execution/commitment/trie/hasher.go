@@ -32,12 +32,13 @@ import (
 )
 
 type hasher struct {
-	sha                  keccak.KeccakState
+	sha      keccak.KeccakState
+	bw       *ByteArrayWriter
+	callback func(common.Hash, Node)
+
 	valueNodesRlpEncoded bool
-	buffers              [1024 * 1024]byte
 	prefixBuf            [8]byte
-	bw                   *ByteArrayWriter
-	callback             func(common.Hash, Node)
+	buffers              [1024 * 1024]byte
 }
 
 const rlpPrefixLength = 4
@@ -206,7 +207,7 @@ func (h *hasher) hashChildren(original Node, bufOffset int) ([]byte, error) {
 
 	case *DuoNode:
 		i1, i2 := n.childrenIdx()
-		for i := 0; i < 17; i++ {
+		for i := range 17 {
 			var child Node
 
 			if i == int(i1) {

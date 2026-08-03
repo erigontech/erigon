@@ -30,7 +30,6 @@ import (
 )
 
 var ForksFork = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
-
 	preState, err := spectest.ReadBeaconState(root, c.Version()-1, spectest.PreSsz)
 	require.NoError(t, err)
 

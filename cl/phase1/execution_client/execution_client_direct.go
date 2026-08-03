@@ -82,8 +82,13 @@ func (cc *ExecutionClientDirect) NewPayload(
 		return PayloadStatusInvalidated, err
 	}
 
+	var bal []byte
+	if payload.Version() >= clparams.GloasVersion && payload.BlockAccessList != nil {
+		bal = payload.BlockAccessList.Bytes()
+	}
+
 	startInsertBlock := time.Now()
-	if err := cc.chainRW.InsertBlock(ctx, types.NewBlockFromStorageWithBinaryTxs(payload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals), nil); err != nil {
+	if err := cc.chainRW.InsertBlock(ctx, types.NewBlockFromStorageWithBinaryTxs(payload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals), bal); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return PayloadStatusInvalidated, err
 		}
@@ -140,7 +145,7 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	// where the CL and EL share the same process.
 	idBytes := make([]byte, 8)
 	var id uint64
-	for attempt := 0; attempt < 30; attempt++ {
+	for range 30 {
 		id, err = cc.chainRW.AssembleBlock(head, attr)
 		if err == nil {
 			break
@@ -230,4 +235,9 @@ func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes [
 		proofs[i] = bwp.Proofs
 	}
 	return blobs, proofs, nil
+}
+
+// In direct mode the execution layer is the in-process Erigon node, so report it directly.
+func (cc *ExecutionClientDirect) GetClientVersionV1(_ context.Context, _ *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+	return []engine_types.ClientVersionV1{engine_types.LocalClientVersionV1()}, nil
 }

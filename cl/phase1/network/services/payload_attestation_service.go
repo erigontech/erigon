@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -31,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // seenPayloadAttestationKey tracks seen attestations per (slot, validatorIndex).
@@ -45,6 +46,7 @@ type seenPayloadAttestationKey struct {
 type pendingPayloadAttestationKey struct {
 	blockRoot      common.Hash
 	validatorIndex uint64
+	messageRoot    common.Hash
 }
 
 const (
@@ -156,7 +158,7 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 		log.Trace("Queued payload attestation for later processing",
 			"blockRoot", blockRoot,
 			"validatorIndex", validatorIndex)
-		return nil
+		return fmt.Errorf("%w: %w: block not available", ErrIgnore, ErrAttestationQueued)
 	}
 	// [IGNORE] The block referenced by data.beacon_block_root is at data.slot.
 	if blockHeader.Slot != slot {
@@ -194,10 +196,18 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 
 // queuePendingAttestation adds an attestation to the pending queue for later processing.
 func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) {
-	s.pending.enqueue(pendingPayloadAttestationKey{
+	_ = s.pending.enqueueLazy(msg, func() (pendingPayloadAttestationKey, error) {
+		return pendingPayloadAttestationKeyFor(blockRoot, msg), nil
+	})
+}
+
+func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) pendingPayloadAttestationKey {
+	root, _ := msg.HashSSZ()
+	return pendingPayloadAttestationKey{
 		blockRoot:      blockRoot,
 		validatorIndex: msg.ValidatorIndex,
-	}, msg)
+		messageRoot:    common.Hash(root),
+	}
 }
 
 // tryProcessPendingAttestation re-runs validation via ProcessMessage once the block has arrived,

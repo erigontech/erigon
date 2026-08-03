@@ -50,7 +50,7 @@ func Test_DeleteLatestStateSnaps(t *testing.T) {
 	b := bundle{}
 	for _, dc := range []statecfg.DomainCfg{statecfg.Schema.AccountsDomain, statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain, statecfg.Schema.ReceiptDomain} {
 		b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			createFiles(t, dirs, i*10, (i+1)*10, &b)
 		}
 	}
@@ -79,7 +79,7 @@ func Test_DeleteLatestStateSnaps_DomainWithLargeRange(t *testing.T) {
 	dc := statecfg.Schema.ReceiptDomain
 	b.domain, b.history, _ = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
 
-	for i := 0; i < 9; i++ {
+	for i := range 9 {
 		createSchemaFiles(t, b.history, i*10, (i+1)*10)
 	}
 	createSchemaFiles(t, b.domain, 0, 100)
@@ -98,7 +98,7 @@ func Test_DeleteLatestStateSnaps_DomainAndHistorySameEnd(t *testing.T) {
 	dc := statecfg.Schema.ReceiptDomain
 	b.domain, b.history, _ = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
 
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		createSchemaFiles(t, b.history, i*10, (i+1)*10)
 	}
 	createSchemaFiles(t, b.domain, 0, 40)
@@ -171,7 +171,7 @@ func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
 	b := bundle{}
 	dc := statecfg.Schema.ReceiptDomain
 	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		createFiles(t, dirs, i*10, (i+1)*10, &b)
 	}
 
@@ -181,9 +181,6 @@ func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
 		f.Close()
 	}
 
-	// SnapForkable is not auto-created by datadir.New, so create it manually
-	require.NoError(t, os.MkdirAll(dirs.SnapForkable, 0755))
-
 	// Create .tmp files in all snapshot directories (matching patterns from issue #18789)
 	tmpFiles := []string{
 		filepath.Join(dirs.Snap, "v1.1-headers.0-500.seg.123456.tmp"),
@@ -192,7 +189,6 @@ func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
 		filepath.Join(dirs.SnapIdx, "v1.1-storage.8256-8288.bt.209594880.tmp"),
 		filepath.Join(dirs.SnapAccessors, "v2.0-commitment.8256-8272.kvi.3646922560.existence.tmp"),
 		filepath.Join(dirs.SnapCaplin, "v1.0-beaconblocks.0-100.seg.999999.tmp"),
-		filepath.Join(dirs.SnapForkable, "v1.0-forkable.0-100.kv.111111.tmp"),
 	}
 	for _, tf := range tmpFiles {
 		touchFile(tf)
@@ -216,7 +212,7 @@ func Test_DeleteStateSnaps_DryRunKeepsTmpFiles(t *testing.T) {
 	b := bundle{}
 	dc := statecfg.Schema.ReceiptDomain
 	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		createFiles(t, dirs, i*10, (i+1)*10, &b)
 	}
 
@@ -632,6 +628,13 @@ func TestDUClassifyFile(t *testing.T) {
 		{"snapshots", "v1.0-0-500-bodies.seg", duCatBlocks},
 		{"snapshots", "v1.0-0-500-transactions.idx", duCatBlocks},
 
+		// consensus-layer segments also live in the top-level snapshots dir,
+		// but their retention follows the caplin flags, not --prune.mode
+		{"snapshots", "v1.1-000000-000100-beaconblocks.seg", duCatCaplin},
+		{"snapshots", "v1.1-000000-000100-beaconblocks.idx", duCatCaplin},
+		{"snapshots", "v1.1-000000-000100-blobsidecars.seg", duCatCaplin},
+		{"snapshots", "v1.1-000000-000100-blocksidecars.seg", duCatCaplin},
+
 		// case insensitivity
 		{"Domain", "v1.0-accounts.0-16.kv", duCatDomains},
 		{"HISTORY", "v1.0-RCACHE.0-16.v", duCatRcache},
@@ -820,7 +823,8 @@ func TestDUComputeEstimates(t *testing.T) {
 		// New block segment (To=20M above both block cutoffs) — kept in all
 		{Name: "15000-20000-headers.seg", Size: 6000, Category: duCatBlocks, IsState: false, From: 15_000_000, To: 20_000_000},
 
-		// Caplin — always kept
+		// Caplin — excluded from every mode: its retention follows the caplin
+		// flags, not --prune.mode, so it would distort each estimate equally.
 		{Name: "beaconblocks.0-100.seg", Size: 700, Category: duCatCaplin, IsState: false, From: 0, To: 100},
 	}
 
@@ -830,8 +834,8 @@ func TestDUComputeEstimates(t *testing.T) {
 	estimates := duComputeEstimates(files, maxBlock, maxStep)
 	require.Len(t, estimates, 4)
 
-	// Archive: sum everything
-	archiveTotal := int64(1000 + 2000 + 500 + 3000 + 4000 + 1500 + 2500 + 1234 + 800 + 400 + 200 + 350 + 5000 + 5678 + 3000 + 6000 + 700)
+	// Archive: sum every execution-layer file (caplin's 700 is not included)
+	archiveTotal := int64(1000 + 2000 + 500 + 3000 + 4000 + 1500 + 2500 + 1234 + 800 + 400 + 200 + 350 + 5000 + 5678 + 3000 + 6000)
 	require.Equal(t, "archive", estimates[0].Mode)
 	require.Equal(t, archiveTotal, estimates[0].TotalBytes)
 	require.Equal(t, int64(0), estimates[0].Delta)
@@ -895,6 +899,24 @@ func TestDUComputeEstimates_EmptyFiles(t *testing.T) {
 	for _, e := range estimates {
 		require.Equal(t, int64(0), e.TotalBytes)
 	}
+}
+
+func TestDUComputeEstimates_ExcludesCaplin(t *testing.T) {
+	// A blob-archive node carries far more consensus-layer data than execution-layer
+	// data. --prune.mode does not govern it, so leaving it in would inflate every
+	// mode by the same amount and make the per-mode numbers useless.
+	files := []duFileInfo{
+		{Name: "v1.0-accounts.0-10.kv", Size: 100, Category: duCatDomains, IsState: true, From: 0, To: 10},
+		{Name: "v1.1-000000-000100-blobsidecars.seg", Size: 9000, Category: duCatCaplin, IsState: false, From: 0, To: 100},
+		{Name: "v1.1-000000-000100-BalancesDump.seg", Size: 500, Category: duCatCaplin, IsState: false, From: 0, To: 100},
+	}
+
+	estimates := duComputeEstimates(files, 50000, 10)
+	require.Len(t, estimates, 4)
+	for _, e := range estimates {
+		require.Equal(t, int64(100), e.TotalBytes, "mode %q must exclude caplin data", e.Mode)
+	}
+	require.Equal(t, int64(9500), duCaplinBytes(files))
 }
 
 func TestDUDetectNodeType(t *testing.T) {
@@ -1172,7 +1194,7 @@ func TestDUFormatJSON_EmptyResult(t *testing.T) {
 	err := duFormatJSON(&buf, result)
 	require.NoError(t, err)
 
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	err = json.Unmarshal(buf.Bytes(), &decoded)
 	require.NoError(t, err)
 	require.Equal(t, "unknown", decoded["chain"])

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/bits"
 	"runtime"
 	"sync"
@@ -30,10 +31,9 @@ import (
 type ParallelPatriciaHashed struct {
 	template       *HexPatriciaHashed
 	trieCtxFactory TrieContextFactory
-	workerPool     sync.Pool
-	cfg            TrieConfig
 
 	accountKeyLen int16
+	cfg           TrieConfig
 	numWorkers    int
 
 	rootHash atomic.Pointer[[]byte]
@@ -50,21 +50,10 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 		template:       NewHexPatriciaHashed(accountKeyLen, nil, cfg),
 		trieCtxFactory: ctxFactory,
 		accountKeyLen:  accountKeyLen,
-		cfg:            cfg,
 		numWorkers:     runtime.NumCPU(),
+		cfg:            cfg,
 	}
-	p.resetPool()
 	return p
-}
-
-func (p *ParallelPatriciaHashed) resetPool() {
-	akl := p.accountKeyLen
-	cfg := p.cfg
-	p.workerPool = sync.Pool{
-		New: func() any {
-			return NewHexPatriciaHashed(akl, nil, cfg)
-		},
-	}
 }
 
 // SetNumWorkers overrides the worker count for the next Process call; n <= 0 falls back to runtime.NumCPU.
@@ -98,18 +87,24 @@ func (p *ParallelPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
 	return d
 }
 
-// RootTrie exposes the configuration template only; it must not be used as live root state.
+// AdoptRootTrie replaces the template with a trie that already carries state
+// (e.g. restored before the variant upgrade); the previous trie must not be used after.
+func (p *ParallelPatriciaHashed) AdoptRootTrie(root *HexPatriciaHashed) {
+	p.template = root
+}
+
+// RootTrie returns the template trie, which carries the live root state.
 func (p *ParallelPatriciaHashed) RootTrie() *HexPatriciaHashed {
 	return p.template
 }
 
-// Reset clears the published root hash, drops pooled workers, and resets the template so the instance can be reused.
+// Reset clears the published root hash and resets the template so the instance
+// can be reused; pooled workers stay cached for the next Process call.
 func (p *ParallelPatriciaHashed) Reset() {
 	if p.template != nil {
 		p.template.Reset()
 	}
 	p.rootHash.Store(nil)
-	p.resetPool()
 	if p.streaming != nil {
 		p.streaming.Reset()
 	}
@@ -122,7 +117,6 @@ func (p *ParallelPatriciaHashed) Release() {
 		p.template = nil
 	}
 	p.rootHash.Store(nil)
-	p.resetPool()
 	if p.streaming != nil {
 		p.streaming.Release()
 		p.streaming = nil
@@ -152,31 +146,80 @@ func (p *ParallelPatriciaHashed) SetStreamingCommitter(sc *StreamingCommitter) {
 	}
 }
 
-func (p *ParallelPatriciaHashed) SetTrace(b bool) {
-	if p.template != nil {
-		p.template.SetTrace(b)
-	}
-	if p.streaming != nil {
-		p.streaming.SetTrace(b)
-	}
+// syncWriter serializes concurrent trace writes from the root template and the
+// streaming/mount fold workers onto one underlying io.Writer.
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
 }
 
-func (p *ParallelPatriciaHashed) SetTraceDomain(b bool) {
-	if p.template != nil {
-		p.template.SetTraceDomain(b)
-	}
-}
-
-func (p *ParallelPatriciaHashed) GetCapture(truncate bool) []string {
-	if p.template == nil {
+// NewSyncWriter wraps w so concurrent trace writes are serialized. It is
+// idempotent (a *syncWriter is returned unchanged) and returns nil for nil,
+// so the same guarded writer can be shared across the template and streaming
+// committer without stacking mutexes.
+func NewSyncWriter(w io.Writer) io.Writer {
+	if w == nil {
 		return nil
 	}
-	return p.template.GetCapture(truncate)
+	if _, ok := w.(*syncWriter); ok {
+		return w
+	}
+	return &syncWriter{w: w}
 }
 
-func (p *ParallelPatriciaHashed) SetCapture(capture []string) {
+func (sw *syncWriter) Write(p []byte) (int, error) {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	return sw.w.Write(p)
+}
+
+// prefixWriter tags each line with a fixed prefix and forwards the whole tagged
+// chunk to w in one Write, so a worker's trace lines stay attributable and never
+// interleave mid-line when multiplexed onto a shared writer.
+type prefixWriter struct {
+	w      io.Writer
+	prefix []byte
+}
+
+func (pw *prefixWriter) Write(p []byte) (int, error) {
+	buf := make([]byte, 0, len(p)+len(pw.prefix)*2)
+	buf = append(buf, pw.prefix...)
+	for i := range p {
+		buf = append(buf, p[i])
+		if p[i] == '\n' && i != len(p)-1 { // re-tag interior lines, not a trailing newline
+			buf = append(buf, pw.prefix...)
+		}
+	}
+	n, err := pw.w.Write(buf)
+	if err != nil {
+		return 0, err
+	}
+	if n < len(buf) {
+		return 0, io.ErrShortWrite
+	}
+	return len(p), nil
+}
+
+// tracePrefix wraps w so a fold worker's trace lines are tagged with prefix.
+// Returns nil (tracing disabled) when w is nil, so callers keep the cheap
+// `traceW != nil` guard. w should be the shared syncWriter.
+func tracePrefix(w io.Writer, prefix string) io.Writer {
+	if w == nil {
+		return nil
+	}
+	return &prefixWriter{w: w, prefix: []byte(prefix)}
+}
+
+// SetTraceWriter routes trace output to w (nil disables tracing). The writer is
+// wrapped once in a mutex-guarded syncWriter shared with the template and the
+// streaming committer, whose fold workers fan it out to their per-goroutine tries.
+func (p *ParallelPatriciaHashed) SetTraceWriter(w io.Writer) {
+	tw := NewSyncWriter(w)
 	if p.template != nil {
-		p.template.SetCapture(capture)
+		p.template.SetTraceWriter(tw)
+	}
+	if p.streaming != nil {
+		p.streaming.SetTraceWriter(tw)
 	}
 }
 
@@ -209,6 +252,9 @@ func (p *ParallelPatriciaHashed) RootHash() ([]byte, error) {
 
 // processStreaming delegates Process to the attached StreamingCommitter and republishes the root.
 func (p *ParallelPatriciaHashed) processStreaming(ctx context.Context) ([]byte, error) {
+	// The template root is the restore target of SetState, so it seeds the committer's base;
+	// PromoteRootInto below keeps the two in sync after every fold.
+	p.streaming.SeedRootFrom(p.template)
 	rh, err := p.streaming.Process(ctx)
 	if err != nil {
 		return nil, err
@@ -244,17 +290,23 @@ func (p *ParallelPatriciaHashed) Process(
 
 	p.rootHash.Store(nil)
 
-	if p.streaming != nil {
-		return p.processStreaming(ctx)
-	}
-
 	pu := updates.parallel
 	if pu.trie == nil || pu.trie.root == nil || pu.trie.root.subtreeCount == 0 {
+		// A consumed (or never-touched) collection must return the carried root; folding
+		// an empty streaming base would publish the empty-trie root instead.
 		rh, rerr := p.template.RootHash()
 		if rerr != nil {
 			return nil, rerr
 		}
 		return rh, nil
+	}
+
+	if p.streaming != nil {
+		rh, sErr := p.processStreaming(ctx)
+		if sErr == nil {
+			updates.consumeParallel()
+		}
+		return rh, sErr
 	}
 
 	rh, mErr := p.processMounted(ctx, updates)
@@ -273,9 +325,11 @@ func (p *ParallelPatriciaHashed) Process(
 		p.deferredForCaller = pu.deferredCombined
 		pu.deferredCombined = nil
 		pu.deferredMu.Unlock()
-	} else if aErr := p.applyDeferredUpdates(pu); aErr != nil {
+	} else if aErr := p.applyDeferredUpdates(ctx, pu); aErr != nil {
 		return nil, aErr
 	}
+
+	updates.consumeParallel()
 
 	out := make([]byte, len(rh))
 	copy(out, rh)
@@ -314,7 +368,7 @@ func dfsSubtree(node *prefixNode, path []byte, fn func(hashedKey, plainKey []byt
 }
 
 // applyDeferredUpdates applies the merged deferred branch updates, returning every entry to the pool on success or failure.
-func (p *ParallelPatriciaHashed) applyDeferredUpdates(pu *parallelUpdate) error {
+func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *parallelUpdate) error {
 	pu.deferredMu.Lock()
 	deferred := pu.deferredCombined
 	pu.deferredCombined = nil
@@ -329,7 +383,7 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(pu *parallelUpdate) error 
 		}
 	}()
 
-	applyCtx, cleanup := p.trieCtxFactory()
+	applyCtx, cleanup := p.trieCtxFactory(ctx)
 	if cleanup != nil {
 		defer cleanup()
 	}

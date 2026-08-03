@@ -105,9 +105,12 @@ func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) {
 	}
 }
 
-func (q *pendingJobQueue[K, M]) remove(key K) {
-	q.jobs.Delete(key)
+func (q *pendingJobQueue[K, M]) remove(key K, job *pendingJob[M]) bool {
+	if !q.jobs.CompareAndDelete(key, job) {
+		return false
+	}
 	q.count.Add(-1)
+	return true
 }
 
 // loop is the background goroutine that retries pending jobs.
@@ -155,8 +158,9 @@ func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 		job := value.(*pendingJob[M])
 
 		if time.Since(job.creationTime) > q.expiry {
-			q.remove(k)
-			q.onExpired(k)
+			if q.remove(k, job) {
+				q.onExpired(k)
+			}
 			return true
 		}
 
@@ -164,7 +168,9 @@ func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 		if !done {
 			return true
 		}
-		q.remove(k)
+		if !q.remove(k, job) {
+			return true
+		}
 		if process != nil {
 			process()
 		}

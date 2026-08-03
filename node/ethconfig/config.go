@@ -286,11 +286,25 @@ type Config struct {
 	// directly as the cap in steps.
 	ErigondbDomainStepsInFrozenFile *uint64 `toml:",omitempty"`
 
+	// CommitmentPlainValues overrides the references_in_commitment_branches value written into a
+	// freshly created erigondb.toml (true => plain keys => references=false); nil = unset.
+	CommitmentPlainValues *bool `toml:",omitempty"`
+
 	// WarmupKzgCtxOnInit, when true, eagerly initialises the KZG trusted setup
 	// in the background on startup so the first block doesn't pay the ~2s init
 	// cost. Tests that don't need the trusted setup loaded leave this false
 	// to avoid the extra work.
 	WarmupKzgCtxOnInit bool
+}
+
+// CommitmentRefsFirstStart maps CommitmentPlainValues to a first-start
+// references_in_commitment_branches override (nil = use the config default).
+func (c *Config) CommitmentRefsFirstStart() *bool {
+	if c.CommitmentPlainValues == nil {
+		return nil
+	}
+	refs := !*c.CommitmentPlainValues
+	return &refs
 }
 
 type Sync struct {

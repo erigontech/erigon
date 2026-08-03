@@ -188,7 +188,9 @@ func TestUnpackIndexedFuncTyLogIntoMap(t *testing.T) {
 	addrBytes := mockAddress[:]
 	hash := crypto.Keccak256Hash([]byte("mockFunction(address,uint)"))
 	functionSelector := hash[:4]
-	functionTyBytes := append(addrBytes, functionSelector...)
+	functionTyBytes := make([]byte, 0, len(addrBytes)+len(functionSelector))
+	functionTyBytes = append(functionTyBytes, addrBytes...)
+	functionTyBytes = append(functionTyBytes, functionSelector...)
 	var functionTy [24]byte
 	copy(functionTy[:], functionTyBytes[0:24])
 	topics := []common.Hash{

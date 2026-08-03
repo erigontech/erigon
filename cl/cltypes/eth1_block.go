@@ -114,12 +114,8 @@ func NewEth1BlockFromExecutionHeader(header *Eth1Header, version clparams.StateV
 
 // NewEth1BlockFromHeaderAndBody with given header/body.
 func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody, beaconCfg *clparams.BeaconChainConfig) *Eth1Block {
-	baseFeeBytes := header.BaseFee.Bytes()
-	for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
-		baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
-	}
 	var baseFee32 [32]byte
-	copy(baseFee32[:], baseFeeBytes)
+	_, _ = header.BaseFee.MarshalSSZAppend(baseFee32[:0])
 
 	extra := solid.NewExtraData()
 	extra.SetBytes(header.Extra)
@@ -170,8 +166,8 @@ func (*Eth1Block) Static() bool {
 }
 
 func (b *Eth1Block) MarshalJSON() ([]byte, error) {
-	baseFeePerGas := uint256.NewInt(0).SetBytes32(b.BaseFeePerGas[:])
-	baseFeePerGas.ReverseBytes(baseFeePerGas)
+	baseFeePerGas := new(uint256.Int)
+	_ = baseFeePerGas.UnmarshalSSZ(b.BaseFeePerGas[:])
 
 	// Ensure withdrawals is never nil for Capella+ (spec requires empty array, not absent)
 	withdrawals := b.Withdrawals
@@ -298,8 +294,7 @@ func (b *Eth1Block) UnmarshalJSON(data []byte) error {
 	if err := tmp.SetFromDecimal(aux.BaseFeePerGas); err != nil {
 		return err
 	}
-	tmp.ReverseBytes(tmp)
-	tmp.WriteToArray32((*[32]byte)(&b.BaseFeePerGas))
+	_, _ = tmp.MarshalSSZAppend(b.BaseFeePerGas[:0])
 	b.BlockHash = aux.BlockHash
 	b.Transactions = aux.Transactions
 	b.Withdrawals = aux.Withdrawals
@@ -443,8 +438,10 @@ func (b *Eth1Block) ensureSSZFields() {
 }
 
 func (b *Eth1Block) getSchema() []any {
-	s := []any{b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
-		b.PrevRandao[:], &b.BlockNumber, &b.GasLimit, &b.GasUsed, &b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions}
+	s := []any{
+		b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
+		b.PrevRandao[:], &b.BlockNumber, &b.GasLimit, &b.GasUsed, &b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions,
+	}
 	if b.version >= clparams.CapellaVersion {
 		s = append(s, b.Withdrawals)
 	}
@@ -459,12 +456,8 @@ func (b *Eth1Block) getSchema() []any {
 
 // RlpHeader returns the equivalent types.Header struct with RLP-based fields.
 func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.Hash) (*types.Header, error) {
-	// Reverse the order of the bytes in the BaseFeePerGas array and convert it to a big integer.
-	reversedBaseFeePerGas := common.Copy(b.BaseFeePerGas[:])
-	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
-		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
-	}
-	baseFee := new(uint256.Int).SetBytes(reversedBaseFeePerGas)
+	baseFee := new(uint256.Int)
+	_ = baseFee.UnmarshalSSZ(b.BaseFeePerGas[:])
 	// If the block version is Capella or later, calculate the withdrawals hash.
 	var withdrawalsHash *common.Hash
 	if b.version >= clparams.CapellaVersion {
@@ -521,7 +514,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 		if b.BlockAccessList == nil || b.BlockAccessList.EncodingSizeSSZ() == 0 {
 			*blockAccessListHash = empty.BlockAccessListHash
 		} else {
-			*blockAccessListHash = crypto.HashData(b.BlockAccessList.Bytes())
+			*blockAccessListHash = crypto.Keccak256Hash(b.BlockAccessList.Bytes())
 		}
 		header.BlockAccessListHash = blockAccessListHash
 		slotNumber := b.SlotNumber

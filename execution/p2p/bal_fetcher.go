@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -50,22 +49,24 @@ type BALRequest struct {
 // BALFetcher fetches EIP-7928 block access lists over eth/71 (EIP-8159). Results
 // are best-effort: a block whose BAL no peer holds is simply absent from the map.
 type BALFetcher interface {
-	// Fetch queries peerId and fallbackPeers concurrently (up to balFetchParallelism at
-	// a time), taking the first BAL per block that validates against its header
-	// commitment; misses are absent. A hash mismatch or protocol violation penalises
-	// that peer.
-	Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, timeout time.Duration) map[common.Hash][]byte
+	// Fetch queries peerId and fallbackPeers (up to balFetchParallelism concurrently,
+	// disjoint shards per round), taking the first BAL per block that validates
+	// against its header commitment; misses are absent. A hash mismatch or protocol
+	// violation penalises that peer. batchTimeout bounds the whole call across all
+	// rounds; requestTimeout bounds each single request.
+	Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, batchTimeout time.Duration, requestTimeout time.Duration) map[common.Hash][]byte
 }
 
 // balFetchParallelism bounds how many peers Fetch queries concurrently for a batch's BALs.
-const balFetchParallelism = 4
+const balFetchParallelism = 8
 
-func NewBALFetcher(logger log.Logger, ml *MessageListener, ms *MessageSender, penalizer *PeerPenalizer) BALFetcher {
+func NewBALFetcher(logger log.Logger, ml *MessageListener, ms *MessageSender, penalizer *PeerPenalizer, peerTracker *PeerTracker) BALFetcher {
 	return &balFetcher{
 		logger:          logger,
 		messageListener: ml,
 		messageSender:   ms,
 		peerPenalizer:   penalizer,
+		peerTracker:     peerTracker,
 	}
 }
 
@@ -74,68 +75,103 @@ type balFetcher struct {
 	messageListener *MessageListener
 	messageSender   *MessageSender
 	peerPenalizer   *PeerPenalizer
+	peerTracker     *PeerTracker
 }
 
-func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, timeout time.Duration) map[common.Hash][]byte {
+func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, batchTimeout time.Duration, requestTimeout time.Duration) map[common.Hash][]byte {
 	if len(reqs) == 0 {
 		return nil
 	}
-	// Bound the whole fetch to one timeout.
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, batchTimeout)
 	defer cancel()
 	fetch := func(ctx context.Context, rs []BALRequest, p *PeerId) map[common.Hash][]byte {
-		got, err := f.fetchFromPeer(ctx, rs, p, timeout)
+		got, err := f.fetchFromPeer(ctx, rs, p, requestTimeout)
 		if err != nil {
 			f.logger.Debug("[p2p.bal] peer did not serve BALs", "peerId", p, "err", err)
-			return nil
 		}
 		return got
 	}
 	allPeers := append([]PeerId{*peerId}, fallbackPeers...)
-	return fetchAcrossPeers(ctx, reqs, allPeers, balFetchParallelism, fetch)
+	var maxNum uint64
+	for _, r := range reqs {
+		maxNum = max(maxNum, r.Number)
+	}
+	plausible := make([]PeerId, 0, len(allPeers))
+	for _, p := range allPeers {
+		if f.peerTracker.PeerMayHaveBALNum(&p, maxNum) {
+			plausible = append(plausible, p)
+		}
+	}
+	if len(plausible) == 0 {
+		plausible = allPeers
+	}
+	return fetchAcrossPeers(ctx, reqs, plausible, balFetchParallelism, fetch)
 }
 
 // peerFetchFunc fetches BALs from a single peer, injected so fetchAcrossPeers is
 // unit-testable without the network.
 type peerFetchFunc func(ctx context.Context, reqs []BALRequest, peerId *PeerId) map[common.Hash][]byte
 
-// fetchAcrossPeers fetches reqs from up to maxParallel peers concurrently and merges
-// their validated results, keeping the first correct BAL per block and cancelling the
-// remaining peers once every req is covered.
+// balFetchShardingThreshold is the request-set size above which the first
+// round shards; at or below it the dedup savings are negligible and coverage
+// matters more, so every peer is asked for everything from the start.
+const balFetchShardingThreshold = 16
+
+// fetchAcrossPeers fetches reqs in rounds using two request shapes. The first
+// round partitions a large request set into disjoint per-peer shards: peers
+// truncate responses to the eth softResponseLimit, so asking every peer the
+// same thing serializes on duplicate prefixes, while disjoint shards make
+// throughput additive across peers. Whatever survives that round is straggler
+// territory — blocks held by few peers — so every later round asks all peers
+// for the full remainder: union coverage, a block is found if any single peer
+// has it. The loop stops once covered or when a full-remainder round makes no
+// progress, which proves no connected peer can serve the rest.
 func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, maxParallel int, fetch peerFetchFunc) map[common.Hash][]byte {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var (
-		mu  sync.Mutex
-		out = make(map[common.Hash][]byte, len(reqs))
-	)
-	var eg errgroup.Group
-	eg.SetLimit(maxParallel)
-	for i := range peerIds {
-		peerId := &peerIds[i]
-		eg.Go(func() error {
-			if ctx.Err() != nil {
-				return nil
+	out := make(map[common.Hash][]byte, len(reqs))
+	if len(peerIds) == 0 {
+		return out
+	}
+	remaining := reqs
+	for round := 0; len(remaining) > 0 && ctx.Err() == nil; round++ {
+		shardedFetch := round == 0 && len(remaining) > balFetchShardingThreshold
+		shards := min(len(peerIds), maxParallel, len(remaining))
+		workers := len(peerIds)
+		if shardedFetch {
+			workers = shards
+		}
+		results := make([]map[common.Hash][]byte, workers)
+		var eg errgroup.Group
+		eg.SetLimit(maxParallel)
+		for i := 0; i < workers; i++ {
+			slice := remaining
+			if shardedFetch {
+				slice = remaining[i*len(remaining)/shards : (i+1)*len(remaining)/shards]
 			}
-			got := fetch(ctx, reqs, peerId)
-			if len(got) == 0 {
+			peerId := peerIds[(i+round)%len(peerIds)]
+			eg.Go(func() error {
+				results[i] = fetch(ctx, slice, &peerId)
 				return nil
-			}
-			mu.Lock()
+			})
+		}
+		_ = eg.Wait()
+		for _, got := range results {
 			for hash, bal := range got {
 				if _, ok := out[hash]; !ok {
 					out[hash] = bal
 				}
 			}
-			covered := len(out) == len(reqs)
-			mu.Unlock()
-			if covered {
-				cancel()
+		}
+		next := make([]BALRequest, 0, len(remaining))
+		for _, r := range remaining {
+			if _, ok := out[r.Hash]; !ok {
+				next = append(next, r)
 			}
-			return nil
-		})
+		}
+		if len(next) == len(remaining) && !shardedFetch {
+			break
+		}
+		remaining = next
 	}
-	_ = eg.Wait()
 	return out
 }
 
@@ -152,6 +188,14 @@ func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerI
 		f.logger.Debug("[p2p.bal] penalizing peer for bad BAL response", "peerId", peerId, "err", err)
 		f.penalize(ctx, peerId)
 	}
+	// An answered-but-undelivered entry (explicit 0x80 or a skipped violation)
+	// means the peer does not have that BAL; entries beyond the response length
+	// are only truncation and say nothing.
+	for i := 0; i < len(response) && i < len(reqs); i++ {
+		if _, ok := out[reqs[i].Hash]; !ok {
+			f.peerTracker.BALNumMissing(peerId, reqs[i].Number)
+		}
+	}
 	return out, err
 }
 
@@ -159,10 +203,14 @@ func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerI
 // a hash-keyed result. badPeer is true when the peer must be penalised: an
 // over-long response, a 0xc0 "empty" claim for a block whose header commits to a
 // non-empty BAL, or a payload whose keccak256 does not match the committed hash.
+// A violating entry is skipped while the remaining valid entries are kept —
+// pruned peers answering 0xc0 must not cost the rest of the response.
 func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common.Hash][]byte, bool, error) {
 	if len(response) > len(reqs) {
 		return nil, true, fmt.Errorf("%w: peer returned %d entries for %d requests", ErrBadBALResponse, len(response), len(reqs))
 	}
+	var badPeer bool
+	var err error
 	out := make(map[common.Hash][]byte, len(reqs))
 	for i := range response {
 		entry := response[i]
@@ -174,17 +222,21 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 		}
 		if len(entry) == 1 && entry[0] == 0xc0 {
 			if expected != empty.BlockAccessListHash {
-				return nil, true, fmt.Errorf("%w: req %d wanted non-empty BAL %x, peer returned empty", ErrBadBALResponse, i, expected)
+				badPeer = true
+				err = fmt.Errorf("%w: req %d wanted non-empty BAL %x, peer returned empty", ErrBadBALResponse, i, expected)
+				continue
 			}
 			out[reqs[i].Hash] = []byte{0xc0}
 			continue
 		}
 		if crypto.Keccak256Hash(entry) != expected {
-			return nil, true, fmt.Errorf("%w: req %d wanted %x got %x", ErrBadBALResponse, i, expected, crypto.Keccak256Hash(entry))
+			badPeer = true
+			err = fmt.Errorf("%w: req %d wanted %x got %x", ErrBadBALResponse, i, expected, crypto.Keccak256Hash(entry))
+			continue
 		}
 		out[reqs[i].Hash] = entry
 	}
-	return out, false, nil
+	return out, badPeer, err
 }
 
 func (f *balFetcher) fetchOnce(ctx context.Context, reqs []BALRequest, peerId *PeerId, timeout time.Duration) ([]rlp.RawValue, error) {

@@ -156,7 +156,7 @@ func bindSequencer(address common.Address, caller bind.ContractCaller, transacto
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Sequencer *SequencerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Sequencer *SequencerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Sequencer.Contract.SequencerCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -167,7 +167,7 @@ func (_Sequencer *SequencerRaw) Transfer(opts *bind.TransactOpts) (types.Transac
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Sequencer *SequencerRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Sequencer *SequencerRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Sequencer.Contract.SequencerTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -175,7 +175,7 @@ func (_Sequencer *SequencerRaw) Transact(opts *bind.TransactOpts, method string,
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Sequencer *SequencerCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Sequencer *SequencerCallerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Sequencer.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -186,7 +186,7 @@ func (_Sequencer *SequencerTransactorRaw) Transfer(opts *bind.TransactOpts) (typ
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Sequencer *SequencerTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Sequencer *SequencerTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Sequencer.Contract.contract.Transact(opts, method, params...)
 }
 
@@ -194,7 +194,7 @@ func (_Sequencer *SequencerTransactorRaw) Transact(opts *bind.TransactOpts, meth
 //
 // Solidity: function getTxCountForEon(uint64 eon) view returns(uint64)
 func (_Sequencer *SequencerCaller) GetTxCountForEon(opts *bind.CallOpts, eon uint64) (uint64, error) {
-	var out []interface{}
+	var out []any
 	err := _Sequencer.contract.Call(opts, &out, "getTxCountForEon", eon)
 
 	if err != nil {

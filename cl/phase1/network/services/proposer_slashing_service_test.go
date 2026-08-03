@@ -46,6 +46,7 @@ type proposerSlashingTestSuite struct {
 }
 
 func (t *proposerSlashingTestSuite) SetupTest() {
+	saveSignatureGlobals(t.T())
 	t.gomockCtrl = gomock.NewController(t.T())
 	t.operationsPool = &pool.OperationsPool{
 		ProposerSlashingsPool: pool.NewOperationPool[common.Bytes96, *cltypes.ProposerSlashing](10, "proposerSlashingsPool"),

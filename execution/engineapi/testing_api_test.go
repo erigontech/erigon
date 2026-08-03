@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,16 +46,22 @@ import (
 
 // ---------------------------------------------------------------------------
 // Minimal stub implementing execmodule.ExecutionModule for unit tests.
-// Only the methods called by BuildBlockV1 (GetHeader, AssembleBlock,
-// GetAssembledBlock) are wired to configurable closures; everything else
-// is a no-op that satisfies the interface.
+// The methods called by BuildBlockV1 and CommitBlockV1 (GetHeader,
+// AssembleBlock, GetAssembledBlock, CurrentHeader, InsertBlocks,
+// ValidateChain, UpdateForkChoice, GetForkChoice) are wired to configurable
+// closures; everything else is a no-op that satisfies the interface.
 // ---------------------------------------------------------------------------
 
 type stubExecutionModule struct {
 	getHeaderFunc         func(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error)
+	headerNumberFunc      func(ctx context.Context, hash common.Hash) (*uint64, error)
 	assembleBlockFunc     func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error)
 	getAssembledBlockFunc func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
 	getForkChoiceFunc     func(ctx context.Context) (execmodule.ForkChoiceState, error)
+	currentHeaderFunc     func(ctx context.Context) (*types.Header, error)
+	insertBlocksFunc      func(ctx context.Context, blocks []*types.RawBlock) (execmodule.ExecutionStatus, error)
+	validateChainFunc     func(ctx context.Context, blockHash common.Hash, blockNumber uint64) (execmodule.ValidationResult, error)
+	updateForkChoiceFunc  func(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error)
 }
 
 var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
@@ -81,13 +89,22 @@ func (s *stubExecutionModule) GetAssembledBlock(ctx context.Context, payloadID u
 
 // --- No-op implementations for the rest of the interface ---
 
-func (s *stubExecutionModule) InsertBlocks(_ context.Context, _ []*types.RawBlock) (execmodule.ExecutionStatus, error) {
+func (s *stubExecutionModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock) (execmodule.ExecutionStatus, error) {
+	if s.insertBlocksFunc != nil {
+		return s.insertBlocksFunc(ctx, blocks)
+	}
 	return execmodule.ExecutionStatusSuccess, nil
 }
-func (s *stubExecutionModule) ValidateChain(_ context.Context, _ common.Hash, _ uint64) (execmodule.ValidationResult, error) {
+func (s *stubExecutionModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (execmodule.ValidationResult, error) {
+	if s.validateChainFunc != nil {
+		return s.validateChainFunc(ctx, blockHash, blockNumber)
+	}
 	return execmodule.ValidationResult{}, nil
 }
-func (s *stubExecutionModule) UpdateForkChoice(_ context.Context, _, _, _ common.Hash) (execmodule.ForkChoiceResult, error) {
+func (s *stubExecutionModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error) {
+	if s.updateForkChoiceFunc != nil {
+		return s.updateForkChoiceFunc(ctx, headHash, safeHash, finalizedHash)
+	}
 	return execmodule.ForkChoiceResult{}, nil
 }
 func (s *stubExecutionModule) GetForkChoice(ctx context.Context) (execmodule.ForkChoiceState, error) {
@@ -96,7 +113,10 @@ func (s *stubExecutionModule) GetForkChoice(ctx context.Context) (execmodule.For
 	}
 	return execmodule.ForkChoiceState{}, nil
 }
-func (s *stubExecutionModule) CurrentHeader(_ context.Context) (*types.Header, error) {
+func (s *stubExecutionModule) CurrentHeader(ctx context.Context) (*types.Header, error) {
+	if s.currentHeaderFunc != nil {
+		return s.currentHeaderFunc(ctx)
+	}
 	return nil, nil
 }
 func (s *stubExecutionModule) GetBody(_ context.Context, _ *common.Hash, _ *uint64) (*types.RawBody, error) {
@@ -120,7 +140,10 @@ func (s *stubExecutionModule) GetPayloadBodiesByRange(_ context.Context, _, _ ui
 func (s *stubExecutionModule) IsCanonicalHash(_ context.Context, _ common.Hash) (bool, error) {
 	return false, nil
 }
-func (s *stubExecutionModule) GetHeaderHashNumber(_ context.Context, _ common.Hash) (*uint64, error) {
+func (s *stubExecutionModule) GetHeaderHashNumber(ctx context.Context, hash common.Hash) (*uint64, error) {
+	if s.headerNumberFunc != nil {
+		return s.headerNumberFunc(ctx, hash)
+	}
 	return nil, nil
 }
 func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
@@ -417,6 +440,21 @@ func TestBuildBlockV1(t *testing.T) {
 		assert.Contains(t, rpcErr.Message, "payload timestamp must be greater than parent")
 	})
 
+	t.Run("extraData longer than 32 bytes", func(t *testing.T) {
+		t.Parallel()
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		tooLong := hexutil.Bytes(make([]byte, 33))
+		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, &tooLong)
+		require.Nil(t, resp)
+		require.Error(t, err)
+		var rpcErr *rpc.InvalidParamsError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Contains(t, rpcErr.Message, "extraData")
+	})
+
 	t.Run("missing parentBeaconBlockRoot for Cancun+", func(t *testing.T) {
 		t.Parallel()
 		stub := &stubExecutionModule{
@@ -615,15 +653,17 @@ func TestBuildBlockV1(t *testing.T) {
 		assert.Equal(t, "12345", resp.BlockValue.ToInt().String())
 	})
 
-	t.Run("happy path with extraData override", func(t *testing.T) {
+	t.Run("extraData forwarded to the block builder", func(t *testing.T) {
 		t.Parallel()
+		var captured *builder.Parameters
 		stub := &stubExecutionModule{
 			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
-			assembleBlockFunc: func(_ context.Context, _ *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+			assembleBlockFunc: func(_ context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+				captured = params
 				return execmodule.AssembleBlockResult{PayloadID: 1, Busy: false}, nil
 			},
 			getAssembledBlockFunc: func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
-				blk := makeAssembledBlock(common.Hash{0x01}, parentHash, common.Hash{}, 101, parentTimestamp+1, []byte("original"), 30_000_000, 0, 0, 0)
+				blk := makeAssembledBlock(common.Hash{0x01}, parentHash, common.Hash{}, 101, parentTimestamp+1, []byte("overridden-extra"), 30_000_000, 0, 0, 0)
 				return execmodule.AssembledBlockResult{
 					Block:      blk,
 					BlockValue: uint256.NewInt(0),
@@ -636,7 +676,31 @@ func TestBuildBlockV1(t *testing.T) {
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, &overrideData)
 		require.NoError(t, err)
 		require.NotNil(t, resp)
+		require.NotNil(t, captured)
+		assert.Equal(t, []byte("overridden-extra"), captured.ExtraData)
 		assert.Equal(t, hexutil.Bytes("overridden-extra"), resp.ExecutionPayload.ExtraData)
+	})
+
+	t.Run("nil extraData builds with empty extra data", func(t *testing.T) {
+		t.Parallel()
+		var captured *builder.Parameters
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+			assembleBlockFunc: func(_ context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+				captured = params
+				return execmodule.AssembleBlockResult{PayloadID: 1, Busy: false}, nil
+			},
+			getAssembledBlockFunc: func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
+				blk := makeAssembledBlock(common.Hash{0x01}, parentHash, common.Hash{}, 101, parentTimestamp+1, []byte{}, 30_000_000, 0, 0, 0)
+				return execmodule.AssembledBlockResult{Block: blk, BlockValue: uint256.NewInt(0), Busy: false}, nil
+			},
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		_, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
+		require.NoError(t, err)
+		require.NotNil(t, captured)
+		require.NotNil(t, captured.ExtraData, "nil extraData must force empty extra data, not the builder's configured default")
+		assert.Empty(t, captured.ExtraData)
 	})
 
 	t.Run("missing withdrawals for Shanghai", func(t *testing.T) {
@@ -803,6 +867,30 @@ func TestStaticTxnProvider(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, txns)
 	})
+
+	t.Run("concurrent callers: exactly one consumes the transactions", func(t *testing.T) {
+		t.Parallel()
+		p := &staticTxnProvider{txns: []types.Transaction{stubTx}}
+		const goroutines = 32
+		var nonEmpty atomic.Int32
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		wg.Add(goroutines)
+		for range goroutines {
+			go func() {
+				defer wg.Done()
+				<-start
+				txns, err := p.ProvideTxns(context.Background())
+				assert.NoError(t, err)
+				if len(txns) > 0 {
+					nonEmpty.Add(1)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		assert.Equal(t, int32(1), nonEmpty.Load(), "exactly one concurrent caller must consume the transactions")
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -899,6 +987,44 @@ func TestBuildBlockV1AssembleParamsVersion(t *testing.T) {
 		assert.Nil(t, captured.ParentBeaconBlockRoot, "ParentBeaconBlockRoot must NOT be set pre-Cancun")
 		require.NotNil(t, captured.Withdrawals, "Withdrawals must be set for Shanghai/Capella")
 		assert.Equal(t, withdrawals, captured.Withdrawals)
+	})
+
+	t.Run("Glamsterdam: SlotNumber and TargetGasLimit propagated", func(t *testing.T) {
+		t.Parallel()
+		attrs := validPayloadAttrs(parentTimestamp)
+		*attrs.SlotNumber = 7
+		*attrs.TargetGasLimit = 45_000_000
+		var captured *builder.Parameters
+		stub := &stubExecutionModule{
+			getHeaderFunc:         getHeaderReturning(parentHash, parentHdr),
+			assembleBlockFunc:     captureAssembleParams(&captured),
+			getAssembledBlockFunc: nilGetAssembledBlock,
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		_, _ = api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
+		require.NotNil(t, captured)
+		require.NotNil(t, captured.SlotNumber, "SlotNumber must be forwarded for Glamsterdam+")
+		assert.Equal(t, uint64(7), *captured.SlotNumber)
+		require.NotNil(t, captured.TargetGasLimit, "TargetGasLimit must be forwarded for Glamsterdam+")
+		assert.Equal(t, uint64(45_000_000), *captured.TargetGasLimit)
+	})
+
+	t.Run("pre-Glamsterdam: SlotNumber and TargetGasLimit not set", func(t *testing.T) {
+		t.Parallel()
+		attrs := validPayloadAttrs(parentTimestamp)
+		attrs.SlotNumber = nil
+		attrs.TargetGasLimit = nil
+		var captured *builder.Parameters
+		stub := &stubExecutionModule{
+			getHeaderFunc:         getHeaderReturning(parentHash, parentHdr),
+			assembleBlockFunc:     captureAssembleParams(&captured),
+			getAssembledBlockFunc: nilGetAssembledBlock,
+		}
+		api := newTestingAPI(preAmsterdamChainConfig(), stub)
+		_, _ = api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
+		require.NotNil(t, captured)
+		assert.Nil(t, captured.SlotNumber, "SlotNumber must NOT be set pre-Glamsterdam")
+		assert.Nil(t, captured.TargetGasLimit, "TargetGasLimit must NOT be set pre-Glamsterdam")
 	})
 }
 
@@ -1290,6 +1416,49 @@ func TestValidatePayloadAttributesPostFCU_AmsterdamGate(t *testing.T) {
 		err := srv.validatePayloadAttributesPostFCU(clparams.FuluVersion, attrs)
 		require.NoError(t, err)
 	})
+}
+
+func TestForkchoiceUpdatedReturnsSyncingForIncompleteExecution(t *testing.T) {
+	t.Parallel()
+
+	headHash := common.Hash{0x1}
+	headNumber := uint64(1)
+	header := &types.Header{}
+	header.Number.SetUint64(headNumber)
+
+	for _, executionStatus := range []execmodule.ExecutionStatus{
+		execmodule.ExecutionStatusMissingSegment,
+		execmodule.ExecutionStatusTooFarAway,
+	} {
+		t.Run(executionStatus.String(), func(t *testing.T) {
+			t.Parallel()
+
+			stub := &stubExecutionModule{
+				getHeaderFunc: getHeaderReturning(headHash, header),
+				headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
+					return &headNumber, nil
+				},
+				updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+					return execmodule.ForkChoiceResult{
+						Status:          executionStatus,
+						LatestValidHash: common.Hash{0x2},
+						ValidationError: "not validated",
+					}, nil
+				},
+			}
+			cfg := preCancunChainConfig()
+			ctx := context.Background()
+			downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+
+			resp, err := srv.ForkchoiceUpdatedV1(ctx, &engine_types.ForkChoiceState{HeadHash: headHash}, nil)
+			require.NoError(t, err)
+			require.Equal(t, engine_types.SyncingStatus, resp.PayloadStatus.Status)
+			require.Nil(t, resp.PayloadStatus.LatestValidHash)
+			require.Nil(t, resp.PayloadStatus.ValidationError)
+			require.Nil(t, resp.PayloadId)
+		})
+	}
 }
 
 func ptrUint64(v uint64) *uint64 {
