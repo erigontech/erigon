@@ -722,7 +722,6 @@ func (d *Decompressor) OpenSequentialView(separateReadahead bool) (*SequentialVi
 		return nil, nil
 	}
 	if !separateReadahead {
-		_ = mmap.MadviseNormal(d.mmapHandle1)
 		return &SequentialView{d: d, data: d.data[d.wordsStart:]}, nil
 	}
 	h1, h2, err := mmap.Mmap(d.f, int(d.size))
