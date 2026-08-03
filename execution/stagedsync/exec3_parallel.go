@@ -587,12 +587,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 							return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
 						}
 					}
-					// Fallback for exit paths that publish no cause: a single-block
-					// fork-validation batch exits via execLoopExitCheck (no cause), and
-					// real shutdown cancels with context.Canceled. A fully-applied range
-					// — or an empty loop that executed nothing because the range was
-					// already applied (async background commit advanced progress) — is a
-					// clean end; otherwise there is more work.
+					// Without a published stop cause, derive the outcome from observed
+					// progress. A fully applied range or a run with no observed work is
+					// clean; a partially applied range has more work.
 					if applyLoopCloseIsClean(lastBlockResult.BlockNum, pe.maxBlockNum, len(txResultBlocks)) {
 						return nil
 					}
@@ -1418,19 +1415,13 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	return nil
 }
 
-// applyLoopMissingBlocks returns the blockNums in txResultBlocks that
-// did not produce a corresponding blockResult — meaning the per-block
-// validator never fired for them and an invalid block could become
-// canonical. Returns nil if every block whose tx-results arrived also
-// produced a blockResult.
+// applyLoopMissingBlocks returns blocks that produced transaction results but
+// no terminal block result. Such blocks never reached apply-loop validation,
+// so the executor run is incomplete.
 //
-// Does NOT flag a short maxBlockNum: a partial batch
-// (size-limit hit) legitimately stops short of maxBlockNum, and the
-// stage loop's ErrLoopExhausted handling resumes from the next block
-// in a follow-up call. Flagging maxBlockNum here turns that legitimate
-// path into a spurious InvalidBlock error — the BenchmarkFeeHistory
-// 200-block fixture exhausts the 5MB batch budget at block 114 and
-// previously errored despite blocks 1..114 being applied cleanly.
+// The requested maximum is not part of this check. A partial batch may stop
+// before maxBlockNum and resume normally; completeness applies only to blocks
+// whose transaction results already reached the apply loop.
 func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) []uint64 {
 	var missing []uint64
 	for n := range txResultBlocks {
@@ -1441,6 +1432,8 @@ func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) [
 	return missing
 }
 
+// applyLoopMissingBlocksError preserves a parent cancellation cause because
+// cancellation may close the result stream before terminal block results arrive.
 func applyLoopMissingBlocksError(ctx context.Context, lastBlockResult, maxBlockNum uint64, txResultBlocks, appliedBlocks map[uint64]struct{}) error {
 	missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks)
 	if len(missing) == 0 {
