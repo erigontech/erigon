@@ -542,40 +542,42 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}
 	}
 	// First check this message satisfies all consensus rules before
-	// applying the message. The rules include these clauses
+	// applying the message. The rules are listed in the order they run:
 	//
-	// 1. there is no overflow when calculating intrinsic gas
-	// 2. the transaction gas limit does not exceed the EIP-7825 cap (Osaka+)
-	// 3. the nonce of the message caller is correct
-	// 4. caller has enough balance to cover transaction fee(gaslimit * gasprice)
-	// 5. the amount of gas required is available in the block
-	// 6. caller has enough balance to cover asset transfer for **topmost** call
-	// 7. the purchased gas is enough to cover intrinsic usage
+	// 1. the nonce of the message caller is correct
+	// 2. the amount of gas required is available in the block
+	// 3. there is no overflow when calculating intrinsic gas
+	// 4. the transaction gas limit does not exceed the EIP-7825 cap (Osaka+)
+	// 5. caller has enough balance to cover transaction fee(gaslimit * gasprice)
+	// 6. the purchased gas is enough to cover intrinsic usage
+	// 7. caller has enough balance to cover asset transfer for **topmost** call
 
 	msg := st.msg
 	sender := msg.From()
 	contractCreation := msg.To().IsNil()
 	auths := msg.Authorizations()
 
-	// Check clauses 3-6. These reject without touching intrinsic gas, so a tx
-	// they reject -- routinely, a speculative parallel attempt on a stale nonce
-	// -- never pays for the calculation or the access-list copy below.
+	// Clauses 1-2. These reject without touching intrinsic gas, so a tx they
+	// reject -- routinely, a speculative parallel attempt on a stale nonce --
+	// never pays for the calculation or the access-list copy below.
 	if err := st.preCheck(); err != nil {
 		return nil, err
 	}
 
-	// Check clause 1.
-	intrinsicGasResult, overflow := st.calcIntrinsicGas(contractCreation, auths, msg.AccessList())
+	accessList := msg.AccessList()
+
+	// Clause 3.
+	intrinsicGasResult, overflow := st.calcIntrinsicGas(contractCreation, auths, accessList)
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
 
-	// Check clause 2, buy gas if everything is correct.
+	// Clauses 4-5.
 	if err := st.preCheckGasCap(gasBailout, intrinsicGasResult); err != nil {
 		return nil, err
 	}
 
-	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
+	accessTuples := slices.Clone(accessList)
 
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
@@ -590,7 +592,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		st.state.SetNonce(msg.From(), nonce+1, tracing.NonceChangeEoACall)
 	}
 
-	// Check clause 7, subtract intrinsic gas if everything is correct.
+	// Clause 6: subtract intrinsic gas if everything is correct.
 	intrinsicGas := intrinsicGasResult.ExecutionGas
 	if st.msg.Gas() < intrinsicGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), intrinsicGas)
