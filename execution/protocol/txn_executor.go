@@ -84,6 +84,21 @@ func (e ErrExecAbortError) IsError() bool {
 	return e.OriginError != nil
 }
 
+// nonceError formats lazily: under parallel execution a nonce mismatch is a
+// routine re-execution signal whose text is discarded.
+type nonceError struct {
+	err        error // ErrNonceTooHigh or ErrNonceTooLow
+	from       accounts.Address
+	txNonce    uint64
+	stateNonce uint64
+}
+
+func (e *nonceError) Error() string {
+	return fmt.Sprintf("%s: address %v, tx: %d state: %d", e.err, e.from, e.txNonce, e.stateNonce)
+}
+
+func (e *nonceError) Unwrap() error { return e.err }
+
 type TxnExecutor struct {
 	gp                  *GasPool
 	msg                 Message
@@ -290,11 +305,9 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 			return fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 		if msgNonce := st.msg.Nonce(); stNonce < msgNonce {
-			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooHigh,
-				from, msgNonce, stNonce)
+			return &nonceError{err: ErrNonceTooHigh, from: from, txNonce: msgNonce, stateNonce: stNonce}
 		} else if stNonce > msgNonce {
-			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooLow,
-				from, msgNonce, stNonce)
+			return &nonceError{err: ErrNonceTooLow, from: from, txNonce: msgNonce, stateNonce: stNonce}
 		} else if stNonce+1 < stNonce {
 			return fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
 				from, stNonce)
@@ -391,7 +404,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 
 	// set code tx
 	auths := msg.Authorizations()
-	verifiedAuthorities, stateIgasRefill, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
+	verifiedAuthorities, stateIgasRefill, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID)
 	if err != nil {
 		return nil, err
 	}
@@ -555,7 +568,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), intrinsicGas)
 	}
 
-	verifiedAuthorities, stateIgasRefill, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
+	verifiedAuthorities, stateIgasRefill, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID)
 	if err != nil {
 		return nil, err
 	}
@@ -726,7 +739,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	return result, nil
 }
 
-func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string) ([]accounts.Address, uint64, error) {
+func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID *uint256.Int) ([]accounts.Address, uint64, error) {
 	var stateIgasRefill uint64
 	verifiedAuthorities := make([]accounts.Address, 0)
 	if auths != nil {
@@ -753,7 +766,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			data.Reset()
 
 			// 1. chainId check
-			if !auth.ChainID.IsZero() && chainID != auth.ChainID.String() {
+			if !auth.ChainID.IsZero() && !auth.ChainID.Eq(chainID) {
 				log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
 				refundSkippedAuth()
 				continue
