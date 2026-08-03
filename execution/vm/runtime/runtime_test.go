@@ -21,6 +21,7 @@ package runtime
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -114,7 +115,7 @@ func TestCall(t *testing.T) {
 	tx, domains := testutil.TemporalTxSD(t, db)
 
 	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	defer state.Release(false)
+	defer state.Close()
 	address := accounts.InternAddress(common.HexToAddress("0xaa"))
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
@@ -139,7 +140,7 @@ func TestCall(t *testing.T) {
 func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
 	t.Parallel()
 	statedb := state.New(state.NewNoopReader())
-	defer statedb.Release(false)
+	defer statedb.Close()
 	const gasLimit = uint64(500_000)
 	_, _, gasRemaining, err := Create(
 		[]byte{byte(vm.STOP)},
@@ -157,7 +158,7 @@ func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
 func TestCreateInsufficientBalancePreservesPreAmsterdamTrace(t *testing.T) {
 	t.Parallel()
 	statedb := state.New(state.NewNoopReader())
-	defer statedb.Release(false)
+	defer statedb.Close()
 	var entered []byte
 	exited := 0
 	hooks := &tracing.Hooks{
@@ -187,7 +188,7 @@ func TestCreateInsufficientBalancePreservesPreAmsterdamTrace(t *testing.T) {
 func TestCreateRuntimeOutOfGasEmitsCallGasChanges(t *testing.T) {
 	t.Parallel()
 	statedb := state.New(state.NewNoopReader())
-	defer statedb.Release(false)
+	defer statedb.Close()
 	type gasChange struct {
 		old    uint64
 		new    uint64
@@ -228,7 +229,7 @@ func TestCallChargesAmsterdamNewAccountStateGas(t *testing.T) {
 	db := testutil.TemporalDB(t)
 	tx, domains := testutil.TemporalTxSD(t, db)
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	defer statedb.Release(false)
+	defer statedb.Close()
 
 	sender := accounts.InternAddress(common.HexToAddress("0x1000"))
 	recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
@@ -253,7 +254,7 @@ func TestCallChargesAmsterdamDelegationTargetAccess(t *testing.T) {
 	db := testutil.TemporalDB(t)
 	tx, domains := testutil.TemporalTxSD(t, db)
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	defer statedb.Release(false)
+	defer statedb.Close()
 
 	recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
 	delegatedTo := accounts.InternAddress(common.HexToAddress("0x3000"))
@@ -277,7 +278,7 @@ func TestCallWarmsPragueDelegationTarget(t *testing.T) {
 	db := testutil.TemporalDB(t)
 	tx, domains := testutil.TemporalTxSD(t, db)
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	defer statedb.Release(false)
+	defer statedb.Close()
 
 	recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
 	delegatedTo := accounts.InternAddress(common.HexToAddress("0x3000"))
@@ -291,6 +292,36 @@ func TestCallWarmsPragueDelegationTarget(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, statedb.AddressInAccessList(delegatedTo))
+}
+
+// benchState builds state on the parallel-execution path, the one staged sync
+// runs: the stateObject cache is off and reads resolve from the version map.
+func benchState(b *testing.B, reader state.StateReader) *state.IntraBlockState {
+	b.Helper()
+	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	statedb.SetNoMaterialize(true)
+	return statedb
+}
+
+// mustOOG requires a program that loops until its gas budget is gone to have
+// done so. A call reaching an address with no code returns no error and burns
+// nothing, so the gas assertion - not the error - catches a broken fixture.
+func mustOOG(b *testing.B, left mdgas.MdGas, err error) {
+	b.Helper()
+	if !errors.Is(err, vm.ErrOutOfGas) || left.Total() != 0 {
+		b.Fatalf("expected gas exhaustion, got gasLeft=%d err=%v", left.Total(), err)
+	}
+}
+
+// mustComplete requires a bounded call to have finished and done work.
+func mustComplete(b *testing.B, gasLimit uint64, left mdgas.MdGas, err error) {
+	b.Helper()
+	if err != nil {
+		b.Fatal(err)
+	}
+	if left.Total() >= gasLimit {
+		b.Fatalf("call consumed no gas (gasLeft=%d, limit=%d)", left.Total(), gasLimit)
+	}
 }
 
 func BenchmarkCall(b *testing.B) {
@@ -319,18 +350,32 @@ func BenchmarkCall(b *testing.B) {
 	db := testutil.TemporalDB(b)
 	tx, sd := testutil.TemporalTxSD(b, db)
 	//cfg.w = state.NewWriter(execctx, nil)
-	cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
-	defer cfg.State.Release(false)
+	cfg.State = benchState(b, state.NewReaderV3(sd.AsGetter(tx)))
+	defer cfg.State.Close()
+	// cfg carries a non-zero Value, so the origin has to be able to pay it or
+	// every call fails the balance check before reaching the interpreter.
+	cfg.Origin = accounts.ZeroAddress
+	require.NoError(b, cfg.State.SetBalance(cfg.Origin, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified))
 	//cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
 
 	tmpdir := b.TempDir()
 
+	// Execute runs the deployed runtime code, so the constructor never initialises
+	// seller/value and every entry point hits the contract's pre-REVERT throw.
+	// Pinned so the benchmark cannot degrade further without failing; making it
+	// execute the purchase flow needs a new fixture.
+	inputs := [][]byte{cpurchase, creceived, refund}
 	for b.Loop() {
+		snap := cfg.State.PushSnapshot()
 		for range 400 {
-			_, _, _ = Execute(code, cpurchase, cfg, tmpdir)
-			_, _, _ = Execute(code, creceived, cfg, tmpdir)
-			_, _, _ = Execute(code, refund, cfg, tmpdir)
+			for _, input := range inputs {
+				if _, _, err := Execute(code, input, cfg, tmpdir); !errors.Is(err, vm.ErrInvalidJump) {
+					b.Fatalf("expected the contract throw, got %v", err)
+				}
+			}
 		}
+		cfg.State.RevertToSnapshot(snap, nil)
+		cfg.State.PopSnapshot(snap)
 	}
 }
 
@@ -342,11 +387,11 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	require.NoError(b, err)
 
 	var (
-		statedb  = state.New(state.NewReaderV3(domains.AsGetter(tx)))
+		statedb  = benchState(b, state.NewReaderV3(domains.AsGetter(tx)))
 		sender   = accounts.InternAddress(common.BytesToAddress([]byte("sender")))
 		receiver = accounts.InternAddress(common.BytesToAddress([]byte("receiver")))
 	)
-	defer statedb.Release(false)
+	defer statedb.Close()
 
 	statedb.CreateAccount(sender, true)
 	statedb.SetCode(receiver, common.FromHex(code), tracing.CodeChangeUnspecified)
@@ -373,7 +418,11 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	}
 	// Warm up the intpools and stuff
 	for b.Loop() {
-		_, _, _ = Call(receiver, []byte{}, &runtimeConfig)
+		snap := statedb.PushSnapshot()
+		_, left, err := Call(receiver, []byte{}, &runtimeConfig)
+		mustOOG(b, left, err)
+		statedb.RevertToSnapshot(snap, nil)
+		statedb.PopSnapshot(snap)
 	}
 	b.StopTimer()
 }
@@ -410,8 +459,8 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 	db := testutil.TemporalDB(b)
 	tx, domains := testutil.TemporalTxSD(b, db)
 
-	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	defer statedb.Release(false)
+	statedb := benchState(b, state.NewReaderV3(domains.AsGetter(tx)))
+	defer statedb.Close()
 	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 
 	for _, n := range []uint64{1_000, 10_000, 100_000, 1_000_000} {
@@ -421,14 +470,18 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 			contractCode := returnContract(n)
 			statedb.SetCode(contractAddr, contractCode, tracing.CodeChangeUnspecified)
 
+			cfg := Config{State: statedb}
+			setDefaults(&cfg)
+
 			for b.Loop() {
-				ret, _, err := Call(contractAddr, []byte{}, &Config{State: statedb})
-				if err != nil {
-					b.Fatal(err)
-				}
+				snap := statedb.PushSnapshot()
+				ret, left, err := Call(contractAddr, []byte{}, &cfg)
+				mustComplete(b, cfg.GasLimit, left, err)
 				if uint64(len(ret)) != n {
 					b.Fatalf("expected return size %d, got %d", n, len(ret))
 				}
+				statedb.RevertToSnapshot(snap, nil)
+				statedb.PopSnapshot(snap)
 			}
 		})
 	}
@@ -595,8 +648,8 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
-	cfg.State = state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	defer cfg.State.Release(false)
+	cfg.State = benchState(b, state.NewReaderV3(domains.AsGetter(tx)))
+	defer cfg.State.Close()
 	cfg.GasLimit = gas.Execution
 	//
 	// TODO revise
@@ -636,12 +689,17 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 	//cfg.State.CreateAccount(cfg.Origin)
 	// set the receiver's (the executing contract) code for execution.
 	cfg.State.SetCode(destination, code, tracing.CodeChangeUnspecified)
-	vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */) // nolint:errcheck
+	_, warmLeft, _, warmErr := vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */)
+	mustOOG(b, warmLeft, warmErr)
 
 	b.Run(name, func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */) // nolint:errcheck
+			snap := cfg.State.PushSnapshot()
+			_, left, _, err := vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */)
+			mustOOG(b, left, err)
+			cfg.State.RevertToSnapshot(snap, nil)
+			cfg.State.PopSnapshot(snap)
 		}
 	})
 }
@@ -855,19 +913,23 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 
 	db := testutil.TemporalDB(b)
 	tx, domains := testutil.TemporalTxSD(b, db)
-	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	defer state.Release(false)
+	state := benchState(b, state.NewReaderV3(domains.AsGetter(tx)))
+	defer state.Close()
 	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 
 	b.Run("10k", func(b *testing.B) {
 		contractCode := swapContract(10_000)
 		state.SetCode(contractAddr, contractCode, tracing.CodeChangeUnspecified)
 
+		cfg := Config{State: state}
+		setDefaults(&cfg)
+
 		for b.Loop() {
-			_, _, err := Call(contractAddr, []byte{}, &Config{State: state})
-			if err != nil {
-				b.Fatal(err)
-			}
+			snap := state.PushSnapshot()
+			_, left, err := Call(contractAddr, []byte{}, &cfg)
+			mustComplete(b, cfg.GasLimit, left, err)
+			state.RevertToSnapshot(snap, nil)
+			state.PopSnapshot(snap)
 		}
 	})
 }
@@ -883,7 +945,7 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 	db := testutil.TemporalDB(t)
 	tx, domains := testutil.TemporalTxSD(t, db)
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	defer statedb.Release(false)
+	defer statedb.Close()
 
 	sender := accounts.InternAddress(common.HexToAddress("0x1234"))
 	statedb.CreateAccount(sender, true)
@@ -942,7 +1004,7 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 	db := testutil.TemporalDB(t)
 	tx, domains := testutil.TemporalTxSD(t, db)
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	defer statedb.Release(false)
+	defer statedb.Close()
 
 	sender := accounts.InternAddress(common.HexToAddress("0x1234"))
 	statedb.CreateAccount(sender, true)
@@ -1075,7 +1137,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	db := testutil.TemporalDB(t)
 	tx, domains := testutil.TemporalTxSD(t, db)
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	defer statedb.Release(false)
+	defer statedb.Close()
 
 	systemAddr := params.SystemAddress
 	target := accounts.InternAddress(common.HexToAddress("0xbeef"))

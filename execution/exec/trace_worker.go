@@ -85,7 +85,7 @@ func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine rules.EngineReade
 }
 
 func (e *TraceWorker) Close() {
-	e.ibs.Release(false)
+	e.ibs.Close()
 }
 
 func (e *TraceWorker) ChangeBlock(header *types.Header) {

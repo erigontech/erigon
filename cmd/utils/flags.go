@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/iouring"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -2052,6 +2053,14 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		dbg.SetExec3Workers(1)
 		cfg.ExecWorkerCount = 1
 	}
+	// If FILES_ASYNC_IO is set but io_uring is unavailable (old kernel, or blocked
+	// by a seccomp sandbox such as Docker's default profile), disable the gate at
+	// startup so it doesn't pay the per-read residency-probe cost for warms that
+	// would never run. Warming is an optimization; reads just use ordinary faults.
+	if dbg.FilesAsyncIO && runtime.GOOS == "linux" && !iouring.Available() {
+		log.Warn("FILES_ASYNC_IO is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); disabling it — reads will use ordinary blocking faults")
+		dbg.FilesAsyncIO = false
+	}
 	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
 		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount); int64(c) < limit {
 			logger.Warn("db.read.concurrency below the exec read-tx floor; raising to avoid a parallel-exec deadlock",
@@ -2257,10 +2266,12 @@ func setDevnetEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logg
 	genesisTime := uint64(time.Now().Unix())
 	// Compute the EL genesis block hash so the beacon state's Eth1Data
 	// matches the actual chain genesis.
-	elGenesisBlock, _, err := genesiswrite.GenesisToBlock(nil, cfg.Genesis, cfg.Dirs, logger)
+	elGenesisBlock, ibs, err := genesiswrite.GenesisToBlock(nil, cfg.Genesis, cfg.Dirs, logger)
 	if err != nil {
 		Fatalf("Failed to compute dev EL genesis hash: %v", err)
 	}
+	defer ibs.Close()
+
 	elGenesisHash := elGenesisBlock.Hash()
 	beaconState, _, err := devgenesis.BuildGenesisState(seed, validatorCount, &beaconCfg, genesisTime, elGenesisHash)
 	if err != nil {
