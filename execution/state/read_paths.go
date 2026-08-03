@@ -237,7 +237,7 @@ type readPathResult struct {
 	mapSelfDestructVal   bool
 	mapCreateContractVal bool
 	mapCodeVal           []byte
-	mapCodeKnownHash     accounts.CodeHash // CodePath map read only; NilCodeHash when unknown
+	mapCodeKnownHash     accounts.CodeHash // must be assigned with mapCodeVal; NilCodeHash when the source stored bytes only
 	mapCodeHashVal       accounts.CodeHash
 	mapCodeSizeVal       int
 	mapStorageVal        uint256.Int
@@ -705,7 +705,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 						r.version = UnknownVersion
 						return
 					}
-					r.mapCodeVal = code
+					r.mapCodeVal, r.mapCodeKnownHash = code, accounts.NilCodeHash
 				} else {
 					size, err := s.committedCodeSizeDirect(addr)
 					if err != nil {

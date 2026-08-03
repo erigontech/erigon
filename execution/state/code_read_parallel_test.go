@@ -80,10 +80,12 @@ func TestCodeReadParallel_EmptyCodeHashIgnoresStaleCode(t *testing.T) {
 	assert.False(t, ok, "an empty-codehash account must not read as 7702-delegated")
 }
 
-// benchContractIBS builds a noMaterialize IBS over one committed contract and
+// committedCodeIBS builds a noMaterialize IBS over one committed contract and
 // warms the CodePath read set the way an EVM call does, so the account-field
-// reads that follow take the getStateObject fall-through.
-func benchContractIBS(tb testing.TB, codeLen int) (*IntraBlockState, accounts.Address) {
+// reads that follow take the getStateObject fall-through. accountHash overrides
+// the account record's CodeHash when non-nil, to model a CodeDomain entry that
+// disagrees with it.
+func committedCodeIBS(tb testing.TB, codeLen int, accountHash *accounts.CodeHash) (*IntraBlockState, accounts.Address) {
 	tb.Helper()
 
 	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
@@ -97,6 +99,9 @@ func benchContractIBS(tb testing.TB, codeLen int) (*IntraBlockState, accounts.Ad
 	acc.Incarnation = 1
 	acc.Balance.SetUint64(1000)
 	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	if accountHash != nil {
+		acc.CodeHash = *accountHash
+	}
 
 	ibs := NewWithVersionMap(&codeReader{addr: addr, account: &acc, code: code}, NewVersionMap(nil))
 	ibs.SetNoMaterialize(true)
@@ -117,10 +122,10 @@ func benchContractIBS(tb testing.TB, codeLen int) (*IntraBlockState, accounts.Ad
 func BenchmarkGetStateObjectAfterCodeRead(b *testing.B) {
 	for _, codeLen := range []int{32, 1024, 24576} {
 		b.Run(fmt.Sprintf("code=%dB", codeLen), func(b *testing.B) {
-			ibs, addr := benchContractIBS(b, codeLen)
+			ibs, addr := committedCodeIBS(b, codeLen, nil)
 			b.ReportAllocs()
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				if _, err := ibs.getStateObject(addr, false); err != nil {
 					b.Fatal(err)
 				}
@@ -129,17 +134,35 @@ func BenchmarkGetStateObjectAfterCodeRead(b *testing.B) {
 	}
 }
 
-// TestCommittedCodeHashMatchesAccountRecord pins that a state object rebuilt
-// for a contract whose code came from committed state carries the account
-// record's code hash on both obj.data and obj.code.
-func TestCommittedCodeHashMatchesAccountRecord(t *testing.T) {
-	ibs, addr := benchContractIBS(t, 4096)
+// TestCommittedCodeHashComesFromAccountRecord pins that a state object rebuilt
+// for a contract whose code came from committed state takes its CodeHash from
+// the account record rather than from the bytes. The account record is
+// authoritative there: the CodeDomain is keyed by address, so it can hold bytes
+// that no longer belong to the account (a cleared 7702 delegation leaves them
+// behind), and deriving the hash from those bytes would let them win.
+func TestCommittedCodeHashComesFromAccountRecord(t *testing.T) {
+	t.Run("account hash agrees with the bytes", func(t *testing.T) {
+		ibs, addr := committedCodeIBS(t, 4096, nil)
 
-	so, err := ibs.getStateObject(addr, false)
-	require.NoError(t, err)
-	require.NotNil(t, so)
+		so, err := ibs.getStateObject(addr, false)
+		require.NoError(t, err)
+		require.NotNil(t, so)
 
-	expected := accounts.InternCodeHash(crypto.Keccak256Hash(so.code.Bytes))
-	require.Equal(t, expected, so.data.CodeHash, "committed code and account hash must agree")
-	require.Equal(t, expected, so.code.Hash)
+		expected := accounts.InternCodeHash(crypto.Keccak256Hash(so.code.Bytes))
+		require.Equal(t, expected, so.data.CodeHash)
+		require.Equal(t, expected, so.code.Hash)
+	})
+
+	t.Run("stale CodeDomain bytes do not override the account hash", func(t *testing.T) {
+		stale := accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0xDE, 0xAD}))
+		ibs, addr := committedCodeIBS(t, 4096, &stale)
+
+		so, err := ibs.getStateObject(addr, false)
+		require.NoError(t, err)
+		require.NotNil(t, so)
+
+		require.Equal(t, stale, so.data.CodeHash, "account record must stay authoritative")
+		require.Equal(t, stale, so.code.Hash)
+		require.Equal(t, stale, so.original.CodeHash)
+	})
 }
