@@ -1604,7 +1604,8 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 
 // checkBlocksDrained reports scheduled blocks that never reached apply-loop
 // validation. This is an executor failure, not proof that a block is invalid.
-// Stops that deliberately cancel follow-on blocks are exempt.
+// Shutdown (a canceled parent context) and stops that deliberately cancel
+// follow-on blocks are exempt.
 func (pe *parallelExecutor) checkBlocksDrained(ctx, executorCtx context.Context, execErr error) error {
 	if ctx.Err() != nil {
 		return reconcileExecErrors(execErr, context.Cause(ctx))
