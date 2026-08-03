@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -215,6 +216,30 @@ func TestFindBijectionSmallBuckets(t *testing.T) {
 	}
 }
 
+// findSplit masks partition indexes with maxFanout-1 instead of bounds-checking them.
+// That is only correct while every reachable (leafSize, m) keeps fanout - and the
+// largest index a key can land in - below maxFanout.
+func TestSplitParamsFanoutBound(t *testing.T) {
+	for leafSize := uint16(1); leafSize <= MaxLeafSize; leafSize++ {
+		primaryAggrBound := leafSize * uint16(math.Max(2, math.Ceil(0.35*float64(leafSize)+1./2.)))
+		secondaryAggrBound := primaryAggrBound * 2
+		if leafSize >= 7 {
+			secondaryAggrBound = primaryAggrBound * uint16(math.Ceil(0.21*float64(leafSize)+9./10.))
+		}
+		// m == MaxUint16 is excluded: splitParams computes m+1, which wraps to 0 and
+		// yields unit 0. Unreachable for real bucket sizes and unrelated to the mask.
+		for m := leafSize + 1; m < math.MaxUint16; m++ {
+			fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
+			if fanout > maxFanout {
+				t.Fatalf("fanout %d > maxFanout %d at leafSize=%d m=%d", fanout, maxFanout, leafSize, m)
+			}
+			if j := (m - 1) / unit; j >= fanout {
+				t.Fatalf("index %d >= fanout %d at leafSize=%d m=%d unit=%d", j, fanout, leafSize, m, unit)
+			}
+		}
+	}
+}
+
 func TestFindSplit(t *testing.T) {
 	const (
 		leafSize           = uint16(8)
@@ -232,9 +257,8 @@ func TestFindSplit(t *testing.T) {
 	}
 
 	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
-	count := make([]uint16, secondaryAggrBound)
 
-	salt := findSplit(bucket, 0, fanout, unit, count)
+	salt := findSplit(bucket, 0, fanout, unit)
 
 	// Verify: each partition gets exactly 'unit' keys (except possibly the last)
 	partitionCounts := make([]uint16, fanout)
@@ -267,9 +291,8 @@ func TestFindSplitSecondaryAggr(t *testing.T) {
 	}
 
 	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
-	count := make([]uint16, secondaryAggrBound)
 
-	salt := findSplit(bucket, 0, fanout, unit, count)
+	salt := findSplit(bucket, 0, fanout, unit)
 
 	partitionCounts := make([]uint16, fanout)
 	for _, key := range bucket {
@@ -308,11 +331,10 @@ func BenchmarkFindSplit(b *testing.B) {
 	}
 	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
 	salt := uint64(0x6453cec3f7376937) // startSeed[1]
-	count := make([]uint16, secondaryAggrBound)
 
 	for b.Loop() {
 		for i := range buckets {
-			findSplit(buckets[i][:], salt, fanout, unit, count)
+			findSplit(buckets[i][:], salt, fanout, unit)
 		}
 	}
 }
